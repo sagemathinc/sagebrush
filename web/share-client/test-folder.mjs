@@ -4,6 +4,7 @@
 // share record, this device's upload records and the server.
 //   bun web/share-client/test-folder.mjs
 import { folderPlan, sharePathOk, chapterLink, linksText, goneChapters, shareFolderUpload } from "./folder.ts";
+import { SHARE_OPEN } from "./folder-dialog.ts";
 
 let checks = 0;
 const fails = [];
@@ -12,6 +13,9 @@ const ok = (cond, what) => {
   console.log((cond ? "ok   " : "FAIL ") + what);
   if (!cond) fails.push(what);
 };
+
+// (the dialog's promise about search engines: what a share's answers set (noindex), a request, not a guarantee)
+ok(/Shared pages ask search engines not to list them\./.test(SHARE_OPEN) && !/Nothing shared is listed/.test(SHARE_OPEN), "the share dialog says shared pages ask search engines not to list them, no more");
 const J = JSON.stringify;
 
 // ---- the plan

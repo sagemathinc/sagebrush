@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  MATRIX_MAX,
   SHARD_MAX,
   census,
   committedOutputs,
@@ -88,8 +89,9 @@ test("select: each row of the trigger table", () => {
   );
 });
 
-test("shards: every selected id exactly once, at most 16 per shard, at every boundary; over the matrix limit refused", () => {
-  for (const n of [0, 1, 16, 17, 192, 193, 320, 4096]) {
+test("shards: every selected id exactly once, at most SHARD_MAX per shard, at every boundary; over the matrix limit refused", () => {
+  // (at each boundary of SHARD_MAX, 64 since the CI capacity ruling, Nov 22 2026, and at the matrix limit)
+  for (const n of [0, 1, SHARD_MAX, SHARD_MAX + 1, 12 * SHARD_MAX, 12 * SHARD_MAX + 1, 20 * SHARD_MAX, SHARD_MAX * MATRIX_MAX]) {
     const all = Array.from(
       { length: n },
       (_, i) => `notebook/e${String(i).padStart(5, "0")}`,
@@ -103,15 +105,15 @@ test("shards: every selected id exactly once, at most 16 per shard, at every bou
       `n=${n}: each shard 1 to ${SHARD_MAX}`,
     );
   }
-  assert.throws(() => shardCount(4097), /GitHub's matrix limit/);
+  assert.throws(() => shardCount(SHARD_MAX * MATRIX_MAX + 1), /GitHub's matrix limit/);
 });
 
 test("census: missing, repeated, unselected and oversized shards", () => {
   assert.deepEqual(census(["a", "b"], [["a"]]), ["b: selected but never ran"]);
   assert.deepEqual(census(["a"], [["a"], ["a"]]), ["a: ran 2 times"]);
   assert.deepEqual(census(["a"], [["a", "z"]]), ["z: ran but wasn't selected"]);
-  const big = Array.from({ length: 17 }, (_, i) => `x${i}`);
-  assert.match(census(big, [big]).join(), /more than 16/);
+  const big = Array.from({ length: SHARD_MAX + 1 }, (_, i) => `x${i}`);
+  assert.match(census(big, [big]).join(), new RegExp(`more than ${SHARD_MAX}`));
 });
 
 test("paths (A1): only strict relative paths", () => {

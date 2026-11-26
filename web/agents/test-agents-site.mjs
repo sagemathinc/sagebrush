@@ -12,13 +12,16 @@ const web = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const fails = [];
 const ok = (c, what) => (console.log(`${c ? "ok  " : "FAIL"} ${what}`), c || fails.push(what));
 
-const FILES = ["agents.js", "connect.md", "connect/copy.js", "connect/index.html", "index.html"];
+const FILES = ["agents.js", "connect.md", "connect/copy.js", "connect/index.html", "fleet/fleet.js", "fleet/index.html", "index.html"];
 // (a directory's files, as paths under it, sorted)
 const walk = (dir, rel = "") => existsSync(join(dir, rel)) ? readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(dir, rel + e.name + "/") : [rel + e.name]).sort() : [];
 const dist = join(web, "dist", "agents");
 ok(existsSync(dist) && FILES.every((f) => existsSync(join(dist, f)) && statSync(join(dist, f)).size > 0), "the default build (no flags) built the Agents page: dist/agents/index.html and agents.js, and connect/index.html");
 const html = existsSync(join(dist, "index.html")) ? readFileSync(join(dist, "index.html"), "utf8") : "";
 ok(/<script[^>]+src="\/agents\/agents\.js"/.test(html), "its page loads its own script, /agents/agents.js");
+// (and the fleet pages, /agents/fleet/: a page and a script of their own, so none of the fleet code loads elsewhere)
+const fleetHtml = existsSync(join(dist, "fleet", "index.html")) ? readFileSync(join(dist, "fleet", "index.html"), "utf8") : "";
+ok(/<script[^>]+src="\/agents\/fleet\/fleet\.js"/.test(fleetHtml) && !/agents\.js"/.test(fleetHtml.replace(/fleet\.js"/g, "")), "the fleet page loads its own script, /agents/fleet/fleet.js, and not the Agents page's");
 ok(/<a href="\/agents\/connect\/">/.test(html), "its help box links to \"How to connect your agent\", /agents/connect/ (a directory's index: served without .html on every host)");
 // (the help box and the connect page name one sagebrush-agent release, the same one, with the same sha256: a new
 // release changes the URL, the sha and every "sagebrush-agent X.Y.Z" mention together, in both pages)
@@ -48,6 +51,10 @@ const RELEASE_SHA256 = {
   "0.8.8": "30f3bc2a87d46925bb5adf062b7a17c8ead923da9663e1d25fae1eb4bda59dc5",
   "0.8.9": "ad534c4501d54a96206adc36419a905c86b0e60fee951fa417aa01819a230cb1",
   "0.8.12": "3e7fe8d17ef8ff1080b1354bb5130af332d9adb349c044e6f39c6a8efcab7dfb",
+  "0.8.14": "73052fd1620bef59120c997327e8876461d719d5b2cad6651db8bd5a603301dd",
+  "0.8.16": "6a5bf14a119388d7806dcbc63891b6974ef786e1eded429cd65d6d176f727613",
+  "0.8.17": "d6915a5228fae4355281c748947ea782a730e0851530e1142edf5700eb2bc742",
+  "0.8.18": "4a4b055092df1c3cafb1907473872595dc7d1c324923b0494a19c9afeace3237",
 };
 const tgzVersions = [...new Set([...(html + conn0).matchAll(/sagebrush-agent-([^/"<\s]*)\.tgz/g)].map((m) => m[1]))];
 ok(tgzVersions.length === 1 && JSON.stringify(tgzVersions) === JSON.stringify(rc.v), `every .tgz link on both pages names the same one version, the one the pages name: ${JSON.stringify(tgzVersions)}`);

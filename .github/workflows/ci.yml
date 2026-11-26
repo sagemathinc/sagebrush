@@ -41,11 +41,23 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.event_name }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/track/') }}
 
+# The runners (William, Nov 22 2026: self-hosted runners labelled sagebrush-ci; @sagebrush's ruling on astra4's review
+# of the runner plan): with the repository variable SB_CI_RUNNER set (their label), the jobs named in
+# scripts/ci-runner-jobs.json run there, and only for trusted events: a merge-queue group and a push to master or a
+# track (reviewed code).  Every pull request, the schedule and a dispatch stay on GitHub's runners, as do the jobs
+# not named (wasm-publish, which holds a secret; macOS and Windows) and wasm-modules on master's push, whose modules
+# wasm-publish publishes.  Unset, nothing changes.  The runners' own admission hook checks the same list from the
+# image's configuration; scripts/test-ci-runners.mjs pins every job's rule.
 jobs:
   changes:
     if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (actions: read, only to find this commit's merge_group run: scripts/ci-queue-tested.mjs)
+    permissions:
+      contents: read
+      actions: read
     outputs:
+      queue_tested: ${{ steps.paths.outputs.queue_tested }}
       full: ${{ steps.paths.outputs.full }}
       docs_only: ${{ steps.paths.outputs.docs_only }}
       app_only: ${{ steps.paths.outputs.app_only }}
@@ -71,6 +83,7 @@ jobs:
       slow_tests: ${{ steps.paths.outputs.slow_tests }}
       slow_scope: ${{ steps.paths.outputs.slow_scope }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
+      latex_budget: ${{ steps.paths.outputs.latex_budget }}
       examples_ids: ${{ steps.paths.outputs.examples_ids }}
       examples_matrix: ${{ steps.paths.outputs.examples_matrix }}
     steps:
@@ -83,6 +96,8 @@ jobs:
         with:
           node-version: 24
       - run: git diff --check
+      - name: public text adds no reviewer handles or local paths
+        run: node scripts/test-public-text.mjs && node scripts/public-text.mjs
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -96,21 +111,32 @@ jobs:
       # workflow runs, fails here, in the job every run has)
       - name: test discovery (scripts/web-tests.mjs check)
         run: node scripts/web-tests.mjs check
+      # (a master push of the very commit the merge queue's run already tested and passed: its tests aren't run again,
+      # only what a push alone does; any doubt is a full run.  The CI capacity ruling's second cut, Nov 22 2026)
+      - id: queue
+        name: was this exact commit tested by the merge queue?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-queue-tested.mjs >> "$GITHUB_OUTPUT"
       - id: paths
         name: classify changed paths and select the tier
         env:
+          CI_QUEUE_TESTED: ${{ steps.queue.outputs.queue_tested }}
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
           CI_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           # (a dispatch's long input: the long tier, scripts/ci-paths.mjs)
           CI_LONG: ${{ inputs.long }}
-        run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
+        # (PR CI light: the checked-in switch .github/pr-ci-light, its first line without spaces, off unless exactly
+        # "true"; a file in the checkout, not a repository variable, so a pull request from a fork reads it too.
+        # William, Nov 23 2026; scripts/ci-paths.mjs prLight)
+        run: CI_PR_LIGHT="$(head -n 1 .github/pr-ci-light 2>/dev/null | tr -d ' \t\r')" node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
 
   # (the limits census alone, in seconds and with no build: it must run on an
   # engine-only pull request too, whose node suites are path-skipped)
   census:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.census == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -141,9 +167,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 18
+        # (2 shards, the CI capacity ruling, Nov 22 2026: the org's 60 concurrent jobs; setup is most of a short shard)
+        shard: [1, 2]
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -155,7 +182,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -172,7 +199,7 @@ jobs:
       - run: python3 -m pip install -r .github/requirements-ci.txt
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - name: Node tests, shard ${{ matrix.shard }}/8
+      - name: Node tests, shard ${{ matrix.shard }}/2
         # CI 44540774555: slowest ordinary test 169 s. Default 300 s per
         # test; seven long sweeps observed at 205-432 s in 44487308167
         # explicitly request 900 s in their test definitions.
@@ -185,7 +212,7 @@ jobs:
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/2 "${files[@]}"
       # (read-only memory telemetry: the cgroup this step runs in, which is the whole job so far, its
       # install, build and every test of the shard, not the parity test alone; printed even when a step before failed;
       # a file that is missing or unreadable is printed as unavailable, never as 0)
@@ -205,7 +232,7 @@ jobs:
   sprig:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.engine_full == 'true')) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -218,7 +245,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -247,9 +274,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+        # (2 shards: the CI capacity ruling, Nov 22 2026, took 4 to 1, but one shard took 28 min, the merge queue's
+        # longest job; its second cut, the same day, made it 2.  test-name-shard K/2 selects each case exactly once)
+        shard: [1, 2]
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -261,7 +290,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -272,18 +301,18 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build
-      - name: Magma and MATLAB Node tests, case shard ${{ matrix.shard }}/6
+      - name: Magma and MATLAB Node tests, case shard ${{ matrix.shard }}/2
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/6
-          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/6
+          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/2
+          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/2
 
   checks:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -299,7 +328,7 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -395,15 +424,17 @@ jobs:
   size-base:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # Resolve 2 + install 5 + build 16 + npm metrics 2 + setup/cleanup 15.
-    timeout-minutes: 40
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # Resolve 2 + install 5 + build 16 + npm metrics 2 + setup/cleanup 15; a master merge into a track builds its
+    # master side too (install 5 + build 16).
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: read
     outputs:
       mode: ${{ steps.resolve.outputs.mode }}
-      # (a dispatch: origin/master as this job saw it, for the gate job's check of the same base)
+      # (a dispatch, or a master merge into a track: origin/master as this job saw it, for the gate job's check of the
+      # same base and master side)
       master: ${{ steps.resolve.outputs.master }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -464,10 +495,31 @@ jobs:
         continue-on-error: true
         timeout-minutes: 2
         run: node scripts/npm-pack-metrics.mjs --base --records "$RUNNER_TEMP/size-records" --root "$RUNNER_TEMP/size-base"
+      # (a change into a track that merges master in: the master commit it merges, its "side", is measured the same
+      # way, so a bundle fails only when it grows over the limit against both parents; design/size-gate.md)
+      - name: the master side's worktree
+        if: steps.resolve.outputs.side != ''
+        run: git worktree add --detach "$RUNNER_TEMP/size-side" "${{ steps.resolve.outputs.side }}"
+      - name: install (the master side)
+        if: steps.resolve.outputs.side != ''
+        timeout-minutes: 5
+        working-directory: ${{ runner.temp }}/size-side
+        run: pnpm install --frozen-lockfile
+      - name: build (the master side)
+        if: steps.resolve.outputs.side != ''
+        timeout-minutes: 16
+        working-directory: ${{ runner.temp }}/size-side
+        run: |
+          if [ -f wasm/pins.json ]; then timeout 8m node "$GITHUB_WORKSPACE/scripts/wasm-fetch-or-build.mjs" --root "$RUNNER_TEMP/size-side"; fi
+          timeout 8m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
+      - name: record (the master side)
+        if: steps.resolve.outputs.side != ''
+        run: |
+          node scripts/size-measure.mjs --record --root "$RUNNER_TEMP/size-side" --out "$RUNNER_TEMP/size-records/side-record.json"
       - name: remove the worktrees
         if: always()
         run: |
-          for w in size-base; do
+          for w in size-base size-side; do
             [ -d "$RUNNER_TEMP/$w" ] && git worktree remove --force "$RUNNER_TEMP/$w" || true
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -482,9 +534,9 @@ jobs:
   size-gate:
     needs: [changes, checks, size-base]
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
-    # (pull-requests: read, only to read the track-pull label of a queued pull request)
+    # (pull-requests: read, only to read the track-pull or size-accepted label of a queued pull request)
     permissions:
       contents: read
       pull-requests: read
@@ -510,20 +562,24 @@ jobs:
       # the track already passed this backstop against the track, and the pull sums them. With
       # the track-pull label the table is still measured and reported, but growth over the
       # backstop doesn't fail it; the merger reads every row. Missing records still fail closed.
+      # The size-accepted label is the same excuse for any pull request whose growth @sagebrush accepted after the
+      # size checklist (@sagebrush's ruling, Nov 23 2026, #1697); only he applies it.
       - name: a track pull?
         id: track
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # (the names as a JSON array, matched element by element: a label named "x,size-accepted" is not size-accepted)
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           pull=false
+          excused='(. // []) | any(.[]; . == "track-pull" or . == "size-accepted")'
           if [ "$EVENT" = pull_request ]; then
-            case ",$LABELS," in *,track-pull,*) pull=true ;; esac
+            if printf '%s' "$LABELS" | jq -e "$excused" > /dev/null; then pull=true; fi
           elif [ "$EVENT" = merge_group ]; then
             n=$(printf '%s' "$QUEUE_REF" | sed -n 's#^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*#\1#p')
-            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '.[].name' | grep -qx track-pull; then pull=true; fi
+            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '[.[].name]' | jq -e "$excused" > /dev/null; then pull=true; fi
           fi
           echo "track pull: $pull"
           echo "pull=$pull" >> "$GITHUB_OUTPUT"
@@ -537,9 +593,15 @@ jobs:
           SIZE_GATE_WEB: ${{ needs.changes.outputs.web }}
           SIZE_INPUTS: ${{ needs.changes.outputs.size_inputs }}
           SIZE_DISPATCH_MASTER: ${{ needs.size-base.outputs.master }}
+          # (a master push of the commit whose merge_group run passed: that run measured this exact commit and its gate
+          # passed, scripts/ci-queue-tested.mjs; measuring nothing here, the docs-only gate would see inputs it can't
+          # account for and fail closed, as 74aee607's push did, Nov 23 2026)
+          QUEUE_TESTED: ${{ needs.changes.outputs.queue_tested }}
         run: |
           mkdir -p "$RUNNER_TEMP/size-records"
-          if [ "$CHANGES" = success ] && [ "$CHECKS" = skipped ] && [ "$BASE" = skipped ] && [ "$SIZE_GATE_NODE" != true ] && [ "$SIZE_GATE_WEB" != true ] && [ "$SIZE_INPUTS" != true ]; then
+          if [ "$CHANGES" = success ] && [ "$QUEUE_TESTED" = true ]; then
+            echo "size gate: this exact commit passed it in its merge_group run (scripts/ci-queue-tested.mjs)" | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ "$CHANGES" = success ] && [ "$CHECKS" = skipped ] && [ "$BASE" = skipped ] && [ "$SIZE_GATE_NODE" != true ] && [ "$SIZE_GATE_WEB" != true ] && [ "$SIZE_INPUTS" != true ]; then
             node scripts/size-measure.mjs --gate --docs-only --out "$RUNNER_TEMP/size-records/size-gate.json"
           elif [ "$CHECKS" != success ] || [ "$BASE" != success ]; then
             echo "size-gate fails closed: changes $CHANGES, checks $CHECKS, size-base $BASE"
@@ -550,7 +612,7 @@ jobs:
               # (only growth is excused: a record, recipe or toolchain problem still fails)
               if [ "$TRACK_PULL" = true ] && node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit(r.rows.length > 0 && r.problems.length > 0 && r.problems.every((p) => /: growth \+\d+ exceeds \d+ bytes/.test(p)) ? 0 : 1)' "$RUNNER_TEMP/size-records/size-gate.json"; then
                 echo "::warning::a track pull: growth over the backstop is reported, not enforced; the merger reads every row"
-                echo "**A track pull (track-pull label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
+                echo "**A track pull or accepted size (track-pull or size-accepted label): the rows above are reported, not enforced. The merger reads every row.**" >> "$GITHUB_STEP_SUMMARY"
               else
                 exit 1
               fi
@@ -576,11 +638,12 @@ jobs:
     needs: [changes, wasm-modules]
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
-    # (five parallel shards, the CI-time plan, Nov 9: one after another its suites took 25 min, past
-    # "PR CI <= 10 min"; each shard about 5 min, the share dialog 8.5. Each shard builds the site itself; the suites
-    # are separate processes with their own Miniflare and Chromium, so no shard depends on another's state)
+    # (three parallel shards since the CI capacity ruling, Nov 22 2026, the org's 60 concurrent jobs: core (web-sync.1
+    # and .6), client (web-sync.5, and .3 when sharing changed) and pwa (web-sync.2, the try-it flow and .4), about
+    # 8-14 min each; five before, the CI-time plan, Nov 9. Each shard builds the site itself; the suites are separate
+    # processes with their own Miniflare and Chromium, so no shard depends on another's state)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -598,7 +661,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -608,10 +671,11 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-      # (the share-dialog shard on a pull request that doesn't change sharing: nothing to build or run, ci-paths web_share)
-      - if: (matrix.shard != 'share-dialog' && matrix.shard != 'share-dialog-2') || needs.changes.outputs.web_share == 'true'
+      # (the share dialog's part-2 shard, in the long tier, on a run that doesn't change sharing: nothing to build or run,
+      # ci-paths web_share)
+      - if: matrix.shard != 'share-dialog-2' || needs.changes.outputs.web_share == 'true'
         run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - if: (matrix.shard != 'share-dialog' && matrix.shard != 'share-dialog-2') || needs.changes.outputs.web_share == 'true'
+      - if: matrix.shard != 'share-dialog-2' || needs.changes.outputs.web_share == 'true'
         name: the site and the test workers
         run: |
           (cd web/site && npm ci --silent)
@@ -625,8 +689,9 @@ jobs:
         if: matrix.shard == 'client'
         run: node scripts/web-tests.mjs run web-sync.5
       # (the view, and D11's large moves in chunks: their 100,000-entry moves take minutes)
+      # (in the core shard since the CI capacity ruling, Nov 22 2026; it runs even when web-sync.1 failed)
       - name: sync's view and D11's large moves (web-sync.6, about 5 min)
-        if: matrix.shard == 'moves'
+        if: ${{ !cancelled() && matrix.shard == 'core' }}
         run: node scripts/web-tests.mjs run web-sync.6
       # (offline: the kept page's headers, its framing among them, security audit G-1; about 30 s)
       # (G-10: the runner's fetch broker on the share client, the page that mounts files: G1s, G4, G10)
@@ -655,11 +720,12 @@ jobs:
       - name: previews, dependencies, the share client and the builds (web-sync.4, about 40 s)
         if: matrix.shard == 'pwa'
         run: node scripts/web-tests.mjs run web-sync.4
-      # (the share dialog, alone in its shard: about 8.5 min here (13 on a slow runner since the share registry's cases), 20
-      # its bound. On a pull request only when it changes sharing or has the full-ci label (ci-paths web_share); master,
-      # the schedule and a dispatch always run it)
+      # (the share dialog: about 8.5 min here (13 on a slow runner since the share registry's cases), 20 its bound. On a
+      # pull request only when it changes sharing or has the full-ci label (ci-paths web_share); master, the schedule
+      # and a dispatch always run it.  In the client shard since the CI capacity ruling, Nov 22 2026; it runs even when
+      # web-sync.5 failed)
       - name: share dialog, its own cases (web-sync.3, about 5 min)
-        if: matrix.shard == 'share-dialog' && needs.changes.outputs.web_share == 'true'
+        if: ${{ !cancelled() && matrix.shard == 'client' && needs.changes.outputs.web_share == 'true' }}
         timeout-minutes: 20
         run: node scripts/web-tests.mjs run web-sync.3
       # (the share dialog's second half, SHARE_DIALOG_PART=2: the large listing and the upload-leak cases, about 7 min; its
@@ -668,6 +734,16 @@ jobs:
         if: matrix.shard == 'share-dialog-2' && needs.changes.outputs.web_share == 'true'
         timeout-minutes: 20
         run: node scripts/web-tests.mjs run web-sync.7
+      # (the hosted LTI tool, MS-RSL, in two shards of about 5 min each, as its two jobs were in the cloud repository's CI:
+      # the tool and checkpoints part 1; checkpoints part 2 and grading)
+      - name: the LTI tool and its content, part 1 (web-sync.8)
+        if: matrix.shard == 'lti'
+        timeout-minutes: 20
+        run: node scripts/web-tests.mjs run web-sync.8
+      - name: the LTI tool's content, part 2, and grading (web-sync.9)
+        if: matrix.shard == 'lti-b'
+        timeout-minutes: 20
+        run: node scripts/web-tests.mjs run web-sync.9
 
   # "Export all current files (.zip)" (E1): its browser test.  The scale test's CI pass, the controls (each rule
   # undone in a copy of the chunk, its named check failing) and the campaign check run in the long tier (export-controls).
@@ -675,7 +751,7 @@ jobs:
     needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_export == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (test-export alone: about 4.5 min)
     timeout-minutes: 20
     steps:
@@ -689,7 +765,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -718,16 +794,12 @@ jobs:
           node scripts/web-tests.mjs run web-export
 
   web-runner:
-    name: web-runner (${{ matrix.shard }}-of-3)
     needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_runner == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 20
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (one job, the CI capacity ruling, Nov 22 2026: its three shards were about 4-6 min each, mostly setup)
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -739,7 +811,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -774,7 +846,7 @@ jobs:
           # static census of every readwrite site.  The workspace suites re-run under the guard are nightly-ready only:
           # scripts/nightly-history-guard.sh, not wired (the CI-speed ruling, Nov 2))
           # (the board journal's store, Workspace.journalWrite and the kind)
-          node scripts/web-tests.mjs run web-runner --shard "${{ matrix.shard }}/3"
+          node scripts/web-tests.mjs run web-runner
 
   # (the Storage panel's lookalike report, split from web-runner; its controls, which rebuild the site once
   # each, run in the long tier (lookalike-controls); the same setup and server)
@@ -782,7 +854,7 @@ jobs:
     needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_lookalike == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (the report alone: 25 s on run 41470481644)
     timeout-minutes: 15
     steps:
@@ -796,7 +868,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -828,7 +900,7 @@ jobs:
     needs: [changes, wasm-modules]
     # (the full tier only, as web-sync: scripts/ci-paths.mjs fullTierPaths)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (about 4 min of tests in the project, 240 s on Nov 2)
     timeout-minutes: 15
     steps:
@@ -842,7 +914,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -878,7 +950,7 @@ jobs:
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -891,7 +963,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -926,9 +998,10 @@ jobs:
   web-artifacts:
     needs: [changes, wasm-modules]
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
-    # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
-    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths; and a pull request changing the
+    # LaTeX group's inputs even under PR CI light, latex_budget: the group's caps are checked only here)
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && ((needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') || needs.changes.outputs.latex_budget == 'true')) }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (the long tier adds two more builds and test sets, about 13 minutes on a spot runner)
     timeout-minutes: ${{ needs.changes.outputs.long == 'true' && 40 || 20 }}
     steps:
@@ -942,7 +1015,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -982,7 +1055,7 @@ jobs:
   interrupt-matrix:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.web == 'true' || needs.changes.outputs.engine_smoke == 'true')) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -995,7 +1068,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1042,7 +1115,7 @@ jobs:
   webkit:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.webkit == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (from the runs: build 14-26 s, install 28-64 s, test 32-58 s; one
     # install stalled on the apt mirror past the old 15-minute job limit,
     # so the install and the test each have their own, and a stall names
@@ -1061,7 +1134,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1162,12 +1235,14 @@ jobs:
       fail-fast: false
       matrix:
         # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, preload, latex, board-a, board-b, board-c,
-        # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
+        # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change; packed into at
+        # most four jobs, ci-paths WEB_BUCKETS, since the CI capacity ruling, Nov 22 2026: board, notebook, remote-terminal
+        # and latex)
         include: ${{ fromJSON(needs.changes.outputs.web_matrix) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25; remote
-    # compute's preview page test, about 8 min in the project (483 s at 8ccc970a): its own group, 25)
-    timeout-minutes: ${{ (matrix.group == 'terminal' || matrix.group == 'remote-preview') && 25 || 15 }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (each job about 11 min or less since notebook and remote-preview are apart: notebook about 10 and space under 1,
+    # remote compute's preview and the terminal about 8 and 3, board and latex less)
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1179,7 +1254,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1187,7 +1262,7 @@ jobs:
         with:
           bun-version: "1.4.4"
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        if: matrix.group == 'board-unit'
+        if: contains(matrix.groups, 'board-unit')
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
@@ -1195,11 +1270,12 @@ jobs:
       # every other group the site's build)
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
         env:
-          SAGEBRUSH_LATEX_PREVIEW: ${{ matrix.group == 'latex' && 'test' || '' }}
-      - name: browser group ${{ matrix.group }}
+          SAGEBRUSH_LATEX_PREVIEW: ${{ matrix.name == 'latex' && 'test' || '' }}
+      - name: browser groups ${{ matrix.groups }}
         env:
           CHROME: google-chrome
-          GROUP: ${{ matrix.group }}
+          # (not GROUPS: that is a Bash special name, the user's group ids; avoided, though the environment does set it)
+          WEB_GROUPS: ${{ matrix.groups }}
         run: |
           python3 web/serve.py 8765 &
           server_pid=$!
@@ -1212,16 +1288,31 @@ jobs:
           trap 'exit 143' TERM
           node scripts/wait-for-port.mjs 8765
           kill -0 "$server_pid"
+          # (every group of this job runs, in order, even after one failed; the step fails if any did.  The terminal
+          # group rebuilds web/dist with the bash set, so it is last in its job: ci-paths WEB_BUCKETS)
+          failed=""
+          [ -n "$WEB_GROUPS" ] || { echo "::error::no browser groups"; exit 1; }
+          for GROUP in $WEB_GROUPS; do
+          echo "::group::$GROUP"
+          # (set -e holds inside the subshell only if the subshell isn't itself tested, as `( ... ) || rc=$?` would
+          # be: so errexit is off around it, and each group stops at its first failing command)
+          set +e
+          (
+          set -e
           case "$GROUP" in
             notebook)
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               # (ShellHost, the mediator, over a real workspace: step 2)
-              node scripts/web-tests.mjs run web-browser/notebook --shard "${{ matrix.shard }}/${{ matrix.total }}"
+              node scripts/web-tests.mjs run web-browser/notebook
               ;;
             preload)
               # (background loading on the notebook page, web/preload.ts: its own group, about 2 min, so notebook's
               # stays inside PR CI's 10 min; selected exactly as notebook is, scripts/ci-paths.mjs webGroups)
               node scripts/web-tests.mjs run web-browser/preload
+              ;;
+            space)
+              # (a space in 3D, /space/: the ground and walking, in headless Chromium against the built site)
+              node scripts/web-tests.mjs run web-browser/space
               ;;
             terminal)
               # (the terminal panel, plan-bash-shell r8c step 6: a group of its own, since its page test needs a flagged
@@ -1252,7 +1343,7 @@ jobs:
             remote-preview)
               # (remote compute's preview, end to end in the page: the picker, the Connect sheet, a Run through the
               # simulated gateway, Stop with Runs queued (14(c)), Restart, another tab; it serves web/dist itself)
-              node scripts/web-tests.mjs run web-browser/remote-preview --shard "${{ matrix.shard }}/${{ matrix.total }}"
+              node scripts/web-tests.mjs run web-browser/remote-preview
               ;;
             latex)
               # (the LaTeX editor's page and its agent tools, end to end against the build above: a top
@@ -1265,17 +1356,25 @@ jobs:
               bun web/board/gen-merge3-board-vectors.mjs --check
               node scripts/web-tests.mjs run web-browser/board-unit.2
               ;;
+            *)
+              echo "unknown browser group $GROUP"
+              exit 1
+              ;;
           esac
+          )
+          rc=$?
+          set -e
+          echo "::endgroup::"
+          [ "$rc" = 0 ] || failed="$failed $GROUP"
+          done
+          [ -z "$failed" ] || { echo "::error::failed groups:$failed"; exit 1; }
 
   conformance:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        runtime: [node, deno, bun]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 12
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (one job for node, deno and bun, the CI capacity ruling, Nov 22 2026: each runtime's was about a minute)
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1287,7 +1386,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1299,24 +1398,30 @@ jobs:
         with:
           python-version: "3.14"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - run: python3 conformance/run.py --runtime ${{ matrix.runtime }} --show 20
-      - name: catalog examples and coverage
+      - name: conformance, then the catalog examples and coverage, on node, deno and bun
         run: |
-          if [ "${{ matrix.runtime }}" = node ]; then
-            node dist/src/cli.js -m _catalog --coverage
-          else
-            python3 scripts/catalog-run.py --runtime "${{ matrix.runtime }}"
-          fi
+          failed=""
+          for runtime in node deno bun; do
+            echo "::group::$runtime"
+            rc=0
+            python3 conformance/run.py --runtime "$runtime" --show 20 || rc=$?
+            if [ "$runtime" = node ]; then
+              node dist/src/cli.js -m _catalog --coverage || rc=$?
+            else
+              python3 scripts/catalog-run.py --runtime "$runtime" || rc=$?
+            fi
+            echo "::endgroup::"
+            [ "$rc" = 0 ] || failed="$failed $runtime"
+          done
+          [ -z "$failed" ] || { echo "::error::failed on:$failed"; exit 1; }
+
 
   modes:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [sage, magma-matlab, numeric, aux]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (one job for its four groups, the CI capacity ruling, Nov 22 2026: each was about 1-5 min, mostly setup)
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1328,7 +1433,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1342,32 +1447,37 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1 mpmath==1.3.0
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: mode group ${{ matrix.group }}
+      - name: mode groups sage, magma-matlab, numeric and aux
         env:
-          GROUP: ${{ matrix.group }}
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          case "$GROUP" in
-            sage) python3 sage-tests/run.py -v ;;
-            magma-matlab)
-              python3 magma-tests/run.py -v
-              python3 matlab-tests/run.py -v
-              ;;
-            numeric)
-              python3 numpy-tests/run.py -v
-              python3 scipy-tests/run.py -v
-              python3 bench/mpmath/compare.py -j "$SAGEBRUSH_CPUS"
-              ;;
-            aux)
-              python3 pypi-tests/run.py
-              python3 sage-tests/run_calculus.py
-              ;;
-          esac
+          failed=""
+          # (its own status, local: the caller's rc must keep an earlier command's failure)
+          group() { local status=0; echo "::group::$1"; shift; "$@" || status=$?; echo "::endgroup::"; return $status; }
+          for GROUP in sage magma-matlab numeric aux; do
+            rc=0
+            case "$GROUP" in
+              sage) group sage python3 sage-tests/run.py -v || rc=$? ;;
+              magma-matlab)
+                group magma python3 magma-tests/run.py -v || rc=$?
+                group matlab python3 matlab-tests/run.py -v || rc=$?
+                ;;
+              numeric)
+                group numpy python3 numpy-tests/run.py -v || rc=$?
+                group scipy python3 scipy-tests/run.py -v || rc=$?
+                group mpmath-compare python3 bench/mpmath/compare.py -j "$SAGEBRUSH_CPUS" || rc=$?
+                ;;
+              aux)
+                group pypi python3 pypi-tests/run.py || rc=$?
+                group calculus python3 sage-tests/run_calculus.py || rc=$?
+                ;;
+              *) echo "unknown mode group $GROUP"; rc=1 ;;
+            esac
+            [ "$rc" = 0 ] || failed="$failed $GROUP"
+          done
+          [ -z "$failed" ] || { echo "::error::failed groups:$failed"; exit 1; }
 
-  # mpmath's own suite on each backend: the core (the default) and the rollback, SAGEBRUSH_MPMATH_BACKEND=python, so
-  # the rollback never rots (design/mpmath-core.md 6.1, point 2); two shards each, by measured seconds
-  # (bench/mpmath/suite.py). The core's shard 1 also runs the fuzzer's fixed-seed subset against CPython's python
-  # backend (point 3: 10^4 cases, about a minute)
+
   mpmath-suite:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true') }}
@@ -1376,9 +1486,9 @@ jobs:
       matrix:
         # (the Python backend, a rollback path: the long tier's, ci-paths mpmath_backends)
         backend: ${{ fromJSON(needs.changes.outputs.mpmath_backends) }}
-        shard: [1, 2]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (one job a backend, the CI capacity ruling, Nov 22 2026: its two shards were about a minute each)
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1390,7 +1500,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1401,10 +1511,10 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install mpmath==1.3.0
       - run: pnpm install --frozen-lockfile && pnpm run build
-      - name: mpmath's suite, backend ${{ matrix.backend }}, shard ${{ matrix.shard }}/2
-        run: python3 bench/mpmath/suite.py --backend ${{ matrix.backend }} --shard ${{ matrix.shard }}/2 -j "$SAGEBRUSH_CPUS"
+      - name: mpmath's suite, backend ${{ matrix.backend }}
+        run: python3 bench/mpmath/suite.py --backend ${{ matrix.backend }} --shard 1/1 -j "$SAGEBRUSH_CPUS"
       - name: the fuzzer's fixed-seed subset, the core against CPython
-        if: matrix.backend == 'sagebrush' && matrix.shard == 1
+        if: ${{ !cancelled() && matrix.backend == 'sagebrush' }}
         working-directory: bench/mpmath
         run: |
           MPMATH_NOGMPY=1 python3 fuzz.py gen --seed 1 --n 10000 > "$RUNNER_TEMP/ref.txt"
@@ -1414,7 +1524,7 @@ jobs:
   engine-rust:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1506,7 +1616,7 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1537,7 +1647,7 @@ jobs:
   engine-unsafe-sweep:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.unsafe_sweep == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     env:
       RUSTFLAGS: "--force-warn unsafe-code"
@@ -1560,14 +1670,15 @@ jobs:
           if grep -q ' rc=[1-9]' "$RUNNER_TEMP/sweep/timings.txt"; then tail -20 "$RUNNER_TEMP"/sweep/*.err; exit 1; fi
           node scripts/unsafe-inventory.mjs --check --compiler "$RUNNER_TEMP"/sweep/host-default.json "$RUNNER_TEMP"/sweep/host-features.json "$RUNNER_TEMP"/sweep/wasm.json "$RUNNER_TEMP"/sweep/windows.json --metadata "$RUNNER_TEMP/sweep/metadata.json"
 
-  # The four WebAssembly modules, built once for the jobs that read wasm/ (design/wasm-artifacts.md section 4): on a
+  # The five WebAssembly modules, built once for the jobs that read wasm/ (design/wasm-artifacts.md section 4): on a
   # pull request that changes what they're built from or how they're handled (scripts/ci-paths.mjs, wasm_build), and
   # on every other event.  Uploaded with their manifest (this run, this commit) as wasm-modules-<sha>; the readers
   # check it and the pin policy (scripts/wasm-artifact.mjs) before installing.
   wasm-modules:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.wasm_build == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (not on master's push: then its modules are what wasm-publish publishes, built on GitHub's runners)
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/track/'))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1583,7 +1694,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-      - name: build the four modules, and the pins they need
+      - name: build the five modules, and the pins they need
         run: |
           node scripts/build-engine.mjs
           node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
@@ -1623,7 +1734,7 @@ jobs:
         with:
           name: wasm-modules-${{ github.sha }}
           path: ${{ runner.temp }}/wasm-modules
-      - name: publish the four modules, each read back
+      - name: publish the five modules, each read back
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -1635,7 +1746,7 @@ jobs:
   engine-wasm:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1655,7 +1766,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the producer's four modules, checked, when it ran: built once per run; labelled fresh on a pull request whose
+      # (the producer's five modules, checked, when it ran: built once per run; labelled fresh on a pull request whose
       # pins are stale, so this job still smoke-tests the change)
       - if: needs.wasm-modules.result == 'success'
         uses: ./.github/actions/wasm-modules
@@ -1678,7 +1789,7 @@ jobs:
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          # (the four modules: this run's wasm-modules build when it ran, installed by the step above; else built here)
+          # (the five modules: this run's wasm-modules build when it ran, installed by the step above; else built here)
           [ "$PRODUCED" = true ] || node scripts/build-engine.mjs
           # (no-cliffs C r16 section 3.2: no start section, every active segment within the initial memory and table)
           node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
@@ -1700,9 +1811,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 18
+        # (2 shards: the CI capacity ruling, Nov 22 2026)
+        shard: [1, 2]
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1714,7 +1826,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1731,13 +1843,13 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install -r .github/requirements-ci.txt
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: Node tests on the fresh engine, shard ${{ matrix.shard }}/8
+      - name: Node tests on the fresh engine, shard ${{ matrix.shard }}/2
         env:
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
-          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+          node --test --test-timeout=300000 --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/2 "${files[@]}"
 
   engine-language:
     needs: [changes, engine-wasm, wasm-modules]
@@ -1745,9 +1857,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 18
+        # (2 shards: the CI capacity ruling, Nov 22 2026)
+        shard: [1, 2]
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1759,7 +1872,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1774,18 +1887,18 @@ jobs:
           cache-dependency-path: .github/requirements-ci.txt
       - run: python3 -m pip install scipy==1.18.1 numpy==2.5.1
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs
-      - name: Magma and MATLAB Node tests on the fresh engine, case shard ${{ matrix.shard }}/6
+      - name: Magma and MATLAB Node tests on the fresh engine, case shard ${{ matrix.shard }}/2
         env:
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/6
-          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/6
+          node scripts/test-name-shard.mjs test/magma.test.ts dist/test/magma.test.js ${{ matrix.shard }}/2
+          node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/2
 
   engine-modes:
     needs: [changes, engine-wasm, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.engine-wasm.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1798,7 +1911,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1826,7 +1939,7 @@ jobs:
   engine-cpython:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_cpython == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1887,7 +2000,7 @@ jobs:
   engine-clippy:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_cpython == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1948,7 +2061,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.changes.outputs.examples_matrix) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1962,7 +2075,7 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -1984,7 +2097,7 @@ jobs:
   examples-census:
     needs: [changes, examples]
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.examples_matrix != '[]'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -2006,7 +2119,7 @@ jobs:
   export-controls:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.long == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (57 controls at about 30 s each, plus the scale harness: about 33 min in ci.yml's web-export, E1)
     timeout-minutes: 60
     steps:
@@ -2020,7 +2133,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -2051,7 +2164,7 @@ jobs:
   lookalike-controls:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.long == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (each control rebuilds the site: about 21 min for all of them on a local 8-CPU run)
     timeout-minutes: 45
     steps:
@@ -2065,7 +2178,7 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
-      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      # (the five modules: this run's wasm-modules artifact when it built them, else the published pins)
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
@@ -2129,7 +2242,7 @@ jobs:
       - examples-census
       - export-controls
       - lookalike-controls
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     steps:
       - name: require every selected job to pass
         env:

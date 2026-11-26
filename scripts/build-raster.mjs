@@ -18,7 +18,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // (its own target directory: its profile settings differ from the engine's, and sharing one would rebuild both
 // each time.  The module's panic messages name the registry crates' source files, so the cargo home is written
-// as CI's, /home/runner/.cargo, as scripts/build-all.sh does for the engine: a build here and CI's are the
+// as CI's, /home/runner/.cargo, as scripts/build-engine.mjs does for the engine: a build here and CI's are the
 // same bytes)
 export function buildRaster(target = join(process.env.CARGO_TARGET_DIR ?? join(root, "engine", "target"), "raster")) {
   const cargoHome = process.env.CARGO_HOME ?? join(homedir(), ".cargo");

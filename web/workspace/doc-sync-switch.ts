@@ -11,7 +11,7 @@
 //      allowlist: SYNC_ACCOUNTS, on each site its own);
 //   3. this page's sync client runs (signed in, sync on for this account).
 // Only then does the notebook page (index.html) turn the journal on (durable for this browser's workspace: a storage
-// upgrade, not a setting, so the Sync panel's note, DOC_SYNC_NOTE, doesn't speak of it; a page that can't go on with it
+// upgrade, not a setting, so the Sync panel doesn't speak of it; a page that can't go on with it
 // says DOC_SYNC_RELOAD), set DOC_SYNC.on and hand a DocSync to the sync owner (enableDocSync); and a
 // board page, once the journal is active, hands one to its own owner, so whichever tab holds the account connection
 // carries notebooks (followDocSync).  The allowed origins are a frozen constant; tests pass their own list to these
@@ -131,22 +131,6 @@ export function untilAllowed(o: {
     void ask();
   });
 }
-
-/** What the Sync panel says of notebooks while the switch is on (DEV and PROD), each sentence as the code does it
- * (William's M9, Nov 3; the facts, with file:line, in the PR): the account's own devices and Sagebrush's server, never
- * peer-to-peer or another account; no cell outputs on any synced path (journal.js versionedOf, sync-outbox.ts wireOf,
- * gitpush/rules.ts stripOutputs), while data files sync with their bytes (sync-client.ts); concurrent edits merged (history.js, db-merge3.ts); a later device pulls the history
- * from its start (doc-sync.ts pull); no clear sent (journal/core.js NO_CLEAR_SYNCED); what stops a notebook
- * (doc-sync.ts refused, its 1 MiB bound); boards' contents not synced (board/journal.ts sync.on false). */
-export const DOC_SYNC_NOTE = [
-  "Your notebooks sync between your own browsers and devices, through Sagebrush's server, signed in with your account. Not peer-to-peer, and not shared with other people.",
-  "Cells' code and text, and pictures attached to text cells, sync; their outputs don't. Outputs aren't kept in TimeTravel or included in a push to GitHub either. Data files sync with their contents.",
-  "If the same cell is edited on two devices before they sync, the edits are merged, as in CoCalc. Both are kept.",
-  "TimeTravel shows every version since the notebook first synced, on every device, including ones added later.",
-  "Clearing TimeTravel isn't available yet for a synced notebook.",
-  "If a notebook can't sync (the server refuses its changes, or a change is too large), the Sync panel says so, and its changes stay in this browser.",
-  "Boards don't sync yet. A board made on another device is listed here, but can't be opened until boards sync.",
-] as const;
 
 /** The Turn on sync confirmation's sentence on notebooks and boards (sync-panel.ts enable), said before sync is on:
  * where notebooks' contents sync (docSyncOrigin, or a self-hosted site docSyncSelfHosted admits), their code and text
