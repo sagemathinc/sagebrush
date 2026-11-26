@@ -48,6 +48,8 @@ for n in [4, 6, 8, 9, 12, 30, 36, 72, 2**20, 2**64, 3 * 2**64 + 6, 10**30]:
             print(M.det(), M.is_invertible())
             show(lambda: M.inverse())
 
+# Z/1 (these rows follow Sage 10.9: Sage 10.10 fails internally on a
+# nonempty matrix over Z/1, ValueError from its own code, not a refusal)
 # Z/1: every determinant is 0, which is a unit there, yet Sage refuses the
 # inverse of a nonempty matrix (and gives the empty one)
 M = matrix(Zmod(1), [[0]])

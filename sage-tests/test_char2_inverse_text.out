@@ -1,0 +1,96 @@
+Finite Field of size 2
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+Full MatrixSpace of 0 by 0 dense matrices over Finite Field of size 2
+[]
+Ring of integers modulo 2
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+Full MatrixSpace of 0 by 0 dense matrices over Ring of integers modulo 2
+[]
+Finite Field in a of size 2^2
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+Full MatrixSpace of 0 by 0 dense matrices over Finite Field in a of size 2^2
+[]
+Finite Field in a of size 2^3
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+Full MatrixSpace of 0 by 0 dense matrices over Finite Field in a of size 2^3
+[]
+Finite Field in a of size 2^16
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+ZeroDivisionError: Matrix does not have full rank.
+Full MatrixSpace of 0 by 0 dense matrices over Finite Field in a of size 2^16
+[]
+Finite Field in a of size 2^17
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+Full MatrixSpace of 0 by 0 dense matrices over Finite Field in a of size 2^17
+[]
+Finite Field of size 3
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 3
+[2 1 2]
+[1 2 2]
+[2 2 1]
+Full MatrixSpace of 0 by 0 dense matrices over Finite Field of size 3
+[]
+Finite Field of size 7
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+Full MatrixSpace of 3 by 3 dense matrices over Finite Field of size 7
+[4 3 4]
+[3 4 4]
+[4 4 3]
+Full MatrixSpace of 0 by 0 dense matrices over Finite Field of size 7
+[]
+Ring of integers modulo 4
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+Full MatrixSpace of 0 by 0 dense matrices over Ring of integers modulo 4
+[]
+Ring of integers modulo 6
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+Full MatrixSpace of 0 by 0 dense matrices over Ring of integers modulo 6
+[]

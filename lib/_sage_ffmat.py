@@ -2190,14 +2190,14 @@ class FFMatrix:
             piv = box[0]
             del box
             if piv[:n] != list(range(n)) if len(piv) >= n else True:
-                raise ZeroDivisionError("input matrix must be nonsingular")
+                raise ZeroDivisionError(_singular_text(base))
             x = B._ech_rows(rd, base, n, 2 * n, n, 2 * n)
             del rd
             return FFMatrix(base, x, n)
         aug = [r + [one if i == j else zero for j in range(n)] for i, r in enumerate(self._rows)]
         m, piv, d = _echelon(aug, self._base, 2 * n)
         if piv[:n] != list(range(n)) if len(piv) >= n else True:
-            raise ZeroDivisionError("input matrix must be nonsingular")
+            raise ZeroDivisionError(_singular_text(base))
         return FFMatrix(self._base, [r[n:] for r in m], n)
 
     def _kernel_basis(self):
@@ -2872,6 +2872,16 @@ def _det_mod(rows, n):
         if not d:
             return 0
     return d
+
+
+def _singular_text(base):
+    """The text of Sage's ZeroDivisionError for the inverse of a singular
+    matrix over base: its own for the fields of characteristic 2 with at
+    most 2^16 elements (GF(2), Z/2, GF(4), ..., GF(2^16)), the generic one
+    otherwise (observed in Sage 10.10)."""
+    if isinstance(base, (_ff.IntegerModRing_, _ff.FiniteField_ext)) and base.characteristic() == 2 and base.order() <= 1 << 16:
+        return "Matrix does not have full rank."
+    return "input matrix must be nonsingular"
 
 
 def _inverse_mod(rows, n):
