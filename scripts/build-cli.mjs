@@ -12,13 +12,14 @@
 // lib/ become globalThis.__PYJS_LIB__ (see libDir() in src/compile.ts).
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { gzipSync } from "node:zlib";
 import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 import { sandboxEntry } from "./sandbox-env.mjs";
 import { assertNoCloudInputs } from "./check-no-server-imports.mjs";
+import { fileURLToPath } from "node:url";
 
 // deno compile embeds node_modules when it finds a package.json above the
 // entry point; compile a copy of the bundle from an empty directory.  With
@@ -39,7 +40,7 @@ function denoCompile(flags, exe, launcher = false, entryText = null) {
   return existsSync(exe) ? exe : exe + ".exe";
 }
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const out = join(root, "build", "cli");
 mkdirSync(out, { recursive: true });
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
@@ -103,7 +104,8 @@ writeFileSync(join(out, "packages.gen.js"), packagesGenSource(packages));
 // wasm/sagebrush-mp.wasm, at mpmath's first call into it: src/runtime/mpcore.ts;
 // and engine/nd's numerics
 // module, wasm/sagebrush-nd.wasm, at np.linalg.cholesky's first call:
-// src/runtime/nd.ts)
+// src/runtime/nd.ts; and the decision-tree kernel, wasm/sagebrush-skltree.wasm, at the
+// first sagebrush.skltree.dataset: src/runtime/skltree.ts)
 // (and nd's thread-pool helper, src/runtime/nd-helper.ts: the code each helper thread of nd.ts's pool runs, as a
 // worker_threads Worker; one copy)
 const ndHelper = execFileSync("bun", ["build", join(root, "src", "runtime", "nd-helper.ts"), "--target=node", "--format=esm", "--minify"], { cwd: root, encoding: "utf8" });
@@ -111,6 +113,7 @@ writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${J
   `globalThis.__SAGEBRUSH_RASTER__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-raster.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_MP__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-mp.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_ND__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-nd.wasm")).toString("base64"))};\n` +
+  `globalThis.__SAGEBRUSH_SKLTREE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-skltree.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_ND_HELPER__ = ${JSON.stringify(ndHelper)};\n`);
 // The notebook page for `sagebrush notebook` (src/notebook.ts), from web/dist
 // (`bun web/build.ts`, which needs lib.gen.js: so on a fresh checkout run this
@@ -118,7 +121,7 @@ writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${J
 // there, so the page's worker and the wasm engines are not needed.
 const web = {};
 const webDir = join(root, "web", "dist");
-for (const f of ["index.html", "sagebrush-app.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-gradescope.js", "sagebrush-code.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
+for (const f of ["index.html", "sagebrush-app.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-viewer3d-xr.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-gradescope.js", "sagebrush-code.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-export.js", "sagebrush-export-worker.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt"]) {
   if (existsSync(join(webDir, f))) web[f] = readFileSync(join(webDir, f)).toString("base64");
 }
 // (the site's early-alpha notice is for sagebrush.space, not the page `sagebrush notebook` serves on this
@@ -139,7 +142,8 @@ const walkKatex = (dir) => {
   for (const f of existsSync(dir) ? readdirSync(dir) : []) {
     const p = join(dir, f);
     if (statSync(p).isDirectory()) walkKatex(p);
-    else web[relative(webDir, p)] = readFileSync(p).toString("base64");
+    // (keyed with "/" on every system, as the page asks for them)
+    else web[relative(webDir, p).split(sep).join("/")] = readFileSync(p).toString("base64");
   }
 };
 walkKatex(katexDir);

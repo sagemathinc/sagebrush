@@ -6,7 +6,7 @@
 //   bun web/workspace/test-agent-pair.mjs
 import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
-import { AgentPairing, AgentError, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
+import { AgentPairing, AgentError, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RETURN_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -25,6 +25,7 @@ function server(answerHello) {
         const m = JSON.parse(String(data));
         S.got.push(m);
         if (m.method === "hello") return void answerHello(ws, m);
+        if (typeof m.method === "string" && m.method.startsWith("tasks.") && S.onTask) return void S.onTask(ws, m);
         if (m.id && S.pending.has(m.id)) { S.pending.get(m.id)(m); S.pending.delete(m.id); }
       },
       close(ws, code, reason) { S.closed = { code, reason }; },
@@ -54,7 +55,7 @@ function fakeWs() {
     const v = {
       list: async (f) => [...files.keys()].filter((p) => p.startsWith(f + "/")).map(entry),
       stat: async (p) => (files.has(p) ? entry(p) : null),
-      read: async (p) => { if (W.hang) await new Promise(() => {}); W.reads = (W.reads ?? 0) + 1; if (W.readHold) await W.readHold; if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: 1 }; },
+      read: async (p) => { if (W.hang) await new Promise(() => {}); W.reads = (W.reads ?? 0) + 1; if (W.readHold) await W.readHold; if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: W.rev ?? 1 }; },
       write: async (p, c) => { if (W.conflictOn.has(p)) throw Object.assign(new Error("changed elsewhere"), { code: "conflict" }); files.set(p, c); return { entry: entry(p), rev: 2 }; },
       create: async (p) => { files.set(p, ""); return entry(p); }, mkdir: async (p) => ({ path: p, kind: "folder" }),
       rename: async (a, b) => { files.set(b, files.get(a)); files.delete(a); return entry(b); }, duplicate: async (p) => entry(p),
@@ -328,6 +329,108 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(e8.error?.data?.code === "limit" && /as a message/.test(e8.error.data.message), "an answer whose message would pass 12 MiB (escaping) is refused, not sent");
   S.srv.stop(true);
 }
+// ---- an image read (workspace.image): exactly {entry, rev, image: {base64}}, by the file's bytes, to an agent that said so
+{
+  const withImage = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code" }, wants: { write: true }, features: ["workspace.image", "no.such"] } }));
+  const bytes = (head, n = 64) => { const u = new Uint8Array(n).fill(7); u.set(head); return u; };
+  const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+  const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const kinds = { "/A/a.png": PNG, "/A/b.jpg": [0xff, 0xd8, 0xff, 0xe0], "/A/c.gif": ascii("GIF87a"), "/A/d.gif": ascii("GIF89a"), "/A/e.webp": [...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WEBP")] };
+  const fill = (W) => {
+    for (const [p, h] of Object.entries(kinds)) W.files.set(p, bytes(h));
+    W.files.set("/A/png-named.txt", bytes(PNG));
+    W.files.set("/A/text.png", "not an image");
+    W.files.set("/A/wave.webp", bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WAVE")]));
+    W.files.set("/A/half.png", bytes(PNG.slice(0, 7)));
+    W.files.set("/A/half.jpg", bytes([0xff, 0xd8]));
+    W.files.set("/A/half.gif", bytes(ascii("GIF89")));
+    W.files.set("/A/half.webp", bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WEB")]));
+    W.files.set("/A/buf.png", bytes(PNG).buffer);
+    W.files.set("/A/exact.png", bytes(PNG, 3_750_000));
+    W.files.set("/A/over.png", bytes(PNG, 3_750_001));
+  };
+  const S = server(withImage), W = fakeWs(), P = mk(S, W);
+  fill(W);
+  await P.paired();
+  ok(P.hello.features.join() === "workspace.image", "a hello that lists workspace.image keeps it (FEATURES); an unknown feature is dropped");
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  const w = { wait: 8000 };
+  let all = true;
+  for (const [p, h] of Object.entries(kinds)) {
+    const r = await S.request("workspace.read", { path: p }, w);
+    const got = r.result?.image?.base64 ? Uint8Array.from(atob(r.result.image.base64), (c) => c.charCodeAt(0)) : null;
+    const exact = r.result && Object.keys(r.result).sort().join() === "entry,image,rev" && Object.keys(r.result.image).join() === "base64" && r.result.rev === 1 && r.result.entry?.path === p;
+    if (!exact || !got || got.length !== 64 || !h.every((b, i) => got[i] === b)) { all = false; console.log("  ", p, r.result ? Object.keys(r.result).join() : r.error?.data?.code, r.result?.rev, r.result?.image?.base64?.length); }
+  }
+  ok(all, "PNG, JPEG, GIF87a, GIF89a and WebP: exactly {entry, rev, image: {base64}}, the file's bytes, no type or size");
+  const n1 = await S.request("workspace.read", { path: "/A/png-named.txt" }, w);
+  const n2 = await S.request("workspace.read", { path: "/A/text.png" }, w);
+  ok(typeof n1.result?.image?.base64 === "string" && n2.result?.content?.text === "not an image" && !("image" in n2.result), "judged by the bytes, not the name: a PNG named .txt is an image, text named .png is text");
+  const n3 = await S.request("workspace.read", { path: "/A/wave.webp" }, w);
+  const n4 = await S.request("workspace.read", { path: "/A/half.png" }, w);
+  ok(n3.result?.content !== undefined && !("image" in n3.result) && typeof n4.result?.content?.base64 === "string" && !("image" in n4.result), "RIFF that isn't WEBP, and a cut PNG signature: read as before ({content})");
+  const cut = [];
+  for (const p of ["/A/half.jpg", "/A/half.gif", "/A/half.webp"]) cut.push(await S.request("workspace.read", { path: p }, w));
+  ok(cut.every((r) => r.result?.content !== undefined && !("image" in r.result)), "a cut JPEG, GIF or WebP signature: not an image");
+  const ab = await S.request("workspace.read", { path: "/A/buf.png" }, w);
+  ok(ab.result?.image?.base64?.length === 88, "an image held as an ArrayBuffer: sent as an image too");
+  const n5 = await S.request("workspace.read", { path: "/A/x.txt" }, w);
+  const n6 = await S.request("workspace.read", { path: "/A/doc.ipynb" }, w);
+  ok(n5.result?.content?.text === "hello" && n6.result?.content?.json?.cells !== undefined, "text and documents are read as before");
+  const x1 = await S.request("workspace.read", { path: "/A/exact.png" }, w);
+  ok(x1.result?.image?.base64?.length === 5_000_000, "an image of exactly 3,750,000 bytes is sent: 5,000,000 base64 characters");
+  const x2 = await S.request("workspace.read", { path: "/A/over.png" }, w);
+  const said = JSON.stringify(x2);
+  ok(x2.error?.data?.code === "limit" && /3750001 bytes/.test(x2.error.data.message) && /3750000/.test(x2.error.data.message) && !said.includes("iVBORw0KGgo") && said.length < 600, "one byte over: refused with its size, and none of its bytes in the error");
+  W.rev = -1;
+  const v1 = await S.request("workspace.read", { path: "/A/a.png" }, w);
+  W.rev = 2 ** 53;
+  const v2 = await S.request("workspace.read", { path: "/A/a.png" }, w);
+  delete W.rev;
+  ok(v1.error?.data?.code === "storage" && v2.error?.data?.code === "storage" && !JSON.stringify([v1, v2]).includes("iVBORw0KGgo"), "a revision that isn't a safe whole number from 0: refused, no image sent");
+  W.files.set("/B/b.png", bytes(PNG));
+  const reads = W.calls.filter((c) => c === "read").length;
+  const g1 = await S.request("workspace.read", { path: "/B/b.png" }, w);
+  ok(g1.error?.data?.code === "invalid" && W.calls.filter((c) => c === "read").length === reads && !JSON.stringify(g1).includes("iVBORw0KGgo"), "an image outside the grant: refused before the workspace, as any read");
+  W.conflictOn.add("/A/a.png");
+  const c1 = await S.request("workspace.write", { path: "/A/a.png", content: { text: "x" }, base: 1 }, w);
+  ok(c1.error?.data?.code === "conflict" && !("current" in c1.error.data) && c1.error.data.currentOmitted === "its current contents are an image: read it" && !JSON.stringify(c1).includes("iVBORw0KGgo"), "a conflict on an image: said without its contents (read it as an image), none of its bytes");
+  W.conflictOn.add("/A/x.txt");
+  const c2 = await S.request("workspace.write", { path: "/A/x.txt", content: { text: "x" }, base: 1 }, w);
+  ok(c2.error?.data?.current?.content?.text === "hello", "a conflict on text still carries its current contents");
+  W.versionBytes = bytes(PNG);
+  const vv = await S.request("workspace.version", { path: "/A/a.png", index: 0 }, w);
+  ok(typeof vv.result?.content?.base64 === "string" && Object.keys(vv.result).join() === "content", "workspace.version is as before (only workspace.read gives images)");
+  S.srv.stop(true);
+  // (the grant checked after the read's wait: one that expired meanwhile gets no image)
+  {
+    let t = 7_000_000;
+    const S3 = server(withImage), W3 = fakeWs(), P3 = mk(S3, W3, { code: "x" }, () => t);
+    fill(W3);
+    await P3.paired();
+    await P3.allow({ folders: ["/A"], write: true, expires: t + 60_000 }, false);
+    const go = W3.holdReads();
+    const pending = S3.request("workspace.read", { path: "/A/a.png" }, { wait: 5000 });
+    await until(() => W3.reads === 1);
+    t += 61_000;
+    go();
+    const late = await pending;
+    ok(late.error?.data?.code === "invalid" && !("result" in late) && !JSON.stringify(late).includes("iVBORw0KGgo"), "an image read whose grant expired while it read: refused, none of its bytes");
+    S3.srv.stop(true);
+  }
+  // (an agent that didn't say workspace.image gets the bytes as before: it would pass {image} on as text)
+  const S2 = server(pairOk), W2 = fakeWs(), P2 = mk(S2, W2);
+  fill(W2);
+  await P2.paired();
+  await P2.allow({ folders: ["/A"], write: true, expires: null }, false);
+  const o1 = await S2.request("workspace.read", { path: "/A/a.png" }, w);
+  const o2 = await S2.request("workspace.read", { path: "/A/over.png" }, w);
+  ok(typeof o1.result?.content?.base64 === "string" && !("image" in o1.result) && typeof o2.result?.content?.base64 === "string", "without workspace.image: an image is {content: {base64}} as before, and the image cap doesn't apply");
+  W2.conflictOn.add("/A/a.png");
+  const o3 = await S2.request("workspace.write", { path: "/A/a.png", content: { text: "x" }, base: 1 }, w);
+  ok(typeof o3.error?.data?.current?.content?.base64 === "string", "without workspace.image: a conflict on an image carries its contents as before");
+  S2.srv.stop(true);
+}
 // ---- after the LAST wait, before anything is said: the same grant, in force now
 {
   const S = server(pairOk), W = fakeWs();
@@ -429,10 +532,16 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   for (const [id, raw] of Object.entries(bad)) ok(parseReloadRecord(raw) === null, `U-3.${id}: malformed, so no record`);
   ok(parseReloadRecord(null) === null, "U-3.null: no stored value, no record");
   const d = (r, navType, now) => reloadDecision(r, { scope, navType, now });
-  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS) === "silent", "U-7.silent: a reload, fresh (age = 30 s), same scope: silent");
-  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS + 1) === "click", "U-7.stale: older than 30 s: kept for one click");
-  ok(d(good, "reload", 999) === "click", "U-7.future: a leftAt in the future fails freshness: kept for one click");
-  ok(d(good, "navigate", 1500) === "discard", "U-7.nav: not a reload: discarded, nothing kept for a click (a new Allow, unless remembered)");
+  ok(RETURN_MS === 10 * 60 * 1000, "U-7.window: one constant, 10 minutes, for a grant with no end (A5 item 2; kept by the Nov 22 2026 ruling)");
+  ok(d(good, "reload", 1000 + RETURN_MS) === "silent", "U-7.silent: a reload, fresh (age = 10 min), same scope: silent");
+  ok(d(good, "reload", 1000 + RETURN_MS + 1) === "click", "U-7.stale: a grant with no end, older than 10 min: kept for one click");
+  ok(d(good, "reload", 999) === "discard", "U-7.future: a leftAt in the future: discarded, nothing kept for a click (SEC, Nov 22 2026)");
+  ok(d(good, "navigate", 1500) === "silent" && d(good, "back_forward", 1000 + RETURN_MS) === "silent", "U-7.return: a navigation back (Files and back, or Back) within 10 min, same scope: silent (A5 item 2)");
+  ok(d(good, "navigate", 1000 + RETURN_MS + 1) === "discard" && d(good, "back_forward", 1000 + RETURN_MS + 1) === "discard", "U-7.return-stale: a grant with no end, a navigation back older than 10 min: discarded, nothing kept for a click");
+  ok(d(good, "navigate", 999) === "discard", "U-7.return-future: a navigation with a leftAt in the future: discarded");
+  ok(d(good, "prerender", 1500) === "discard" && d(good, "", 1500) === "discard", "U-7.other-nav: any other navigation type: discarded");
+  ok(d(noLeft, "navigate", 1500) === "discard", "U-7.return-noleft: a navigation with no leftAt: discarded");
+  ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "navigate", 1500) === "discard", "U-7.return-scope: a navigation to another page: discarded");
   ok(d(noLeft, "reload", 1500) === "discard", "U-7.noleft: no leftAt (a copy taken while the original lived, as a new tab's): discarded");
   ok(d({ ...good, workspace: "other" }, "reload", 1500) === "discard", "U-7.scope-ws: another workspace: discarded, nothing kept for a click (R1-d)");
   ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "reload", 1500) === "discard", "U-7.scope-page: another page: discarded (R1-d)");
@@ -441,17 +550,51 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5000) === "discard", "U-8.at: now = expires: discarded (R1-e)");
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5001) === "discard", "U-8.after: now = expires + 1: discarded");
   ok(d({ ...timed, leftAt: 4990 }, "navigate", 5000) === "discard", "U-8.click: an expired record is never kept for a click");
+  // (a grant with an end: a return is silent for as long as it lasts, however long ago the page left (#1620))
+  const long = { ...good, grant: { ...good.grant, expires: 1000 + 3 * RETURN_MS } };
+  ok(d(long, "navigate", 1000 + 2 * RETURN_MS) === "silent" && d(long, "back_forward", 1000 + 2 * RETURN_MS) === "silent" && d(long, "reload", 1000 + 2 * RETURN_MS) === "silent", "U-8.grant-window: a grant with an end, a return 20 min after leaving and before it ends: silent (#1620)");
+  ok(d(long, "navigate", 1000 + 3 * RETURN_MS) === "discard" && d(long, "reload", 1000 + 3 * RETURN_MS) === "discard", "U-8.grant-over: the same return as the grant ends (never extended): discarded");
+  ok(d({ ...long, leftAt: 1000 + RETURN_MS }, "navigate", 1000 + RETURN_MS - 1) === "discard" && d({ ...long, leftAt: 1000 + RETURN_MS }, "reload", 1000 + RETURN_MS - 1) === "discard", "U-8.grant-future: a grant with an end, a leftAt in the future: discarded, a reload too");
+  // take with this page's scope (A5): another page's record is left where it is; this page's own, or one that can't be
+  // read, is taken as before
+  {
+    const m = new Map();
+    const st = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) };
+    m.set(RELOAD_KEY, js(good));
+    const other = takeReloadRecord(st, { workspace: scope.workspace, page: "http://127.0.0.1:1/" });
+    ok(other.kind === "none" && m.has(RELOAD_KEY), "U-9.other-page: another page's record, taken with this page's scope: left where it is", other);
+    const mine = takeReloadRecord(st, scope);
+    ok(mine.kind === "ok" && !m.has(RELOAD_KEY), "U-9.own: this page's record: taken and removed");
+    m.set(RELOAD_KEY, "{not json");
+    const bad = takeReloadRecord(st, scope);
+    ok(bad.kind === "bad" && !m.has(RELOAD_KEY), "U-9.bad: a record that can't be read: taken (removed), as before");
+    m.set(RELOAD_KEY, js({ ...good, workspace: "other" }));
+    const ws2 = takeReloadRecord(st, scope);
+    ok(ws2.kind === "ok" && !m.has(RELOAD_KEY), "U-9.workspace: this page's address, another workspace: taken (the decision discards it)");
+  }
   // take/put/markLeft over a Storage-like map; and storage that throws
   const store = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
-  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777);
+  const own = { workspace: noLeft.workspace, page: noLeft.page };
+  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777, own);
   ok(parseReloadRecord(s1.getItem(RELOAD_KEY))?.leftAt === 777, "U-1.leftAt: pagehide writes leftAt onto the held record");
+  // (A5: another page's pagehide (a board passed through on the way) leaves the record byte for byte; so does this
+  //  page's address in another workspace)
+  {
+    const sx = store(); putReloadRecord(sx, { ...noLeft, leftAt: 5 }); const raw0 = sx.getItem(RELOAD_KEY);
+    markReloadLeft(sx, 999, { ...own, page: own.page + "board/" });
+    ok(sx.getItem(RELOAD_KEY) === raw0, "U-1.other-page: another page's pagehide leaves the record byte for byte (its leftAt never renewed)");
+    markReloadLeft(sx, 999, { ...own, workspace: own.workspace + "-other" });
+    ok(sx.getItem(RELOAD_KEY) === raw0, "U-1.other-workspace: the same page in another workspace leaves it byte for byte too");
+    markReloadLeft(sx, 999, own);
+    ok(parseReloadRecord(sx.getItem(RELOAD_KEY))?.leftAt === 999, "U-1.own-again: its own page's pagehide renews it");
+  }
   const taken = takeReloadRecord(s1);
   ok(taken.kind === "ok" && taken.record.leftAt === 777 && s1.getItem(RELOAD_KEY) === null, "R1-c: take returns the record and removes it before any attempt");
   ok(takeReloadRecord(s1).kind === "none", "R1-c: a second take finds nothing (this page's next reload makes no attempt)");
   const s2 = store(); s2.setItem(RELOAD_KEY, "{bad"); ok(takeReloadRecord(s2).kind === "bad" && s2.getItem(RELOAD_KEY) === null, "U-3.take-bad: a malformed stored record is removed and is \"bad\" (not absent: no silent fallback)");
   const thrower = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
   ok(takeReloadRecord(thrower).kind === "bad" && takeReloadRecord(null).kind === "none", "U-3.storage: storage that throws on read is \"bad\"; no storage is \"none\"");
-  putReloadRecord(thrower, good); markReloadLeft(thrower, 1); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
+  putReloadRecord(thrower, good); markReloadLeft(thrower, 1, own); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
   // S1: a record that reads but can't be removed is never used (consumed before any attempt, or not at all)
   const s3 = store(); s3.setItem(RELOAD_KEY, JSON.stringify(good)); s3.removeItem = () => { throw new Error("denied"); };
   const t3 = takeReloadRecord(s3);
@@ -1082,4 +1225,128 @@ for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], wri
   S.srv.stop(true);
 }
 console.log(failures ? `${failures} failed` : "all passed");
+// ---- Delegate's requests (tasks-client.ts, pair-delegate-plan-r3.3 §2.5, over AgentPairing.own): the page asks, the
+// agent answers by id; only with a negotiated hello that lists delegate.1 (the agent's hello over the wire, never set by
+// hand), once granted, only tasks.*; at most TASK_REQUESTS.pending; each request, and each answer's raw frame, at most
+// TASK_REQUESTS.frameBytes; each within its timeout; all ended with the pairing
+{
+  const { TASK_REQUESTS, DELEGATE_FEATURE, TaskClient } = await import("./tasks-client.ts");
+  // (an agent whose hello offers Delegate, and one whose hello doesn't)
+  const pairDelegate = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session: "SECRET", features: [DELEGATE_FEATURE, "chat.resume"] } }));
+  const why = async (p) => { try { await p; return "resolved"; } catch (e) { return e?.code ?? String(e); } };
+  {
+    const S = server(pairOk), W = fakeWs();
+    const heard = [];
+    S.onTask = (ws, m) => heard.push(m);
+    const P = mk(S, W);
+    await P.paired();
+    await P.allow({ folders: ["/"], write: true, expires: null }, false);
+    ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0 && !(P.hello.features ?? []).includes(DELEGATE_FEATURE), "an agent whose negotiated hello doesn't list delegate.1: refused (forbidden), nothing sent");
+    const grants = S.got.filter((m) => m.method === "grant.changed").length;
+    ok(P.setDelegate(true) === false && !P.grant.delegate && S.got.filter((m) => m.method === "grant.changed").length === grants, "the Delegate switch for an agent that doesn't offer delegate.1: not turned on, nothing sent");
+    await P.revoke();
+    S.srv.stop(true);
+  }
+  const S = server(pairDelegate), W = fakeWs();
+  const heard = [];
+  let answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [], echo: m.method } }));
+  S.onTask = (ws, m) => { heard.push(m); answer(ws, m); };
+  const P = mk(S, W);
+  await P.paired();
+  ok(P.hello.features.includes(DELEGATE_FEATURE) && TaskClient.of(P).offered(), "a hello that lists delegate.1 keeps it through the page's negotiation (FEATURES), and the client sees it offered", P.hello.features);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "closed" && heard.length === 0, "before the grant: refused (closed), nothing sent");
+  await P.allow({ folders: ["/"], write: true, run: true, expires: Date.now() + 3600_000 }, true);
+  // (the Delegate switch, AgentPairing.setDelegate: off until the person turns it on, apart from Pair's grant)
+  const grantsSent = () => S.got.filter((m) => m.method === "grant.changed").map((m) => m.params);
+  await until(() => grantsSent().length > 0);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0 && !("delegate" in grantsSent().at(-1)), "granted, the switch off: refused (forbidden), nothing sent; the grant sent has no delegate");
+  ok(P.setDelegate(true) === true && P.grant.delegate === true, "the switch turned on");
+  await until(() => grantsSent().at(-1)?.delegate === true);
+  ok(grantsSent().at(-1).delegate === true && grantsSent().at(-1).folders.join() === "/" && grantsSent().at(-1).run === true, "on: the server told at once, the same grant with delegate: true", grantsSent().at(-1));
+  ok(P.setDelegate(true) === false, "turning it on again: nothing sent");
+  await P.allow({ folders: ["/A"], write: true, run: true, expires: Date.now() + 3600_000 }, true);
+  await until(() => grantsSent().at(-1)?.folders?.join() === "/A");
+  ok(grantsSent().at(-1).delegate === true && P.grant.delegate === true, "a new Pair grant from the person keeps the switch as it was", grantsSent().at(-1));
+  await P.noRun();
+  await until(() => grantsSent().at(-1)?.run === false);
+  ok(grantsSent().at(-1).delegate === true, "May run code turned off: the switch kept", grantsSent().at(-1));
+  const kept = [...W.store.values()].at(-1);
+  ok(kept && kept.grant.folders.join() === "/A" && !("delegate" in kept.grant), "a remembered grant is kept without the switch: a new pairing starts with it off", kept?.grant);
+  const r1 = await TaskClient.of(P).request("tasks.list", {});
+  const r2 = await TaskClient.of(P).request("tasks.get", { task: "a".repeat(32), after: 0 });
+  ok(r1?.echo === "tasks.list" && r2?.echo === "tasks.get" && heard.map((m) => m.id).join() === "p2,p3", "negotiated delegate.1, granted: answered by id, the page's ids p2, p3, ... (the hello was p1)", heard.map((m) => m.id));
+  ok(heard.every((m) => m.jsonrpc === "2.0" && typeof m.params === "object"), "each a JSON-RPC 2.0 request with its params");
+  ok((await why(TaskClient.of(P).request("workspace.read", { path: "/A/x.txt" }))) === "bad_request" && heard.length === 2, "a method not in TASK_METHODS: refused (bad_request), nothing sent");
+  answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "the task moved on", data: { code: "stale" } } }));
+  ok((await why(TaskClient.of(P).request("tasks.close", { task: "a".repeat(32), proposal: null, seq: 1 }))) === "stale", "an error answer: rejected with the agent's code (data.code)");
+  // (an outgoing request over TASK_REQUESTS.frameBytes: refused before sending)
+  const big = await why(TaskClient.of(P).request("tasks.start", { title: "t", prompt: "x".repeat(TASK_REQUESTS.frameBytes), target: "local", run: false, docs: [] }));
+  ok(big === "too_large" && heard.length === 3, "a request over TASK_REQUESTS.frameBytes (4 MiB, under the connection's own 12 MiB): refused (too_large), nothing sent");
+  // (an incoming answer: its raw frame, as received, at most TASK_REQUESTS.frameBytes, else refused before its result or
+  //  error reaches the caller; the envelope, whitespace and multibyte characters all counted)
+  const L = TASK_REQUESTS.frameBytes, enc = new TextEncoder();
+  const frameOf = (id, n, { error = false, ch = "x", pad = 0 } = {}) => {
+    const shell = (fill) => JSON.stringify(error ? { jsonrpc: "2.0", id, error: { code: -32000, message: fill, data: { code: "stale" } } } : { jsonrpc: "2.0", id, result: { tasks: [], fill } });
+    const base = enc.encode(shell("")).length + pad;
+    const per = enc.encode(ch).length, k = Math.floor((n - base) / per);
+    let t = shell(ch.repeat(k)) + " ".repeat(pad);
+    const got = enc.encode(t).length;
+    return got < n ? t + " ".repeat(n - got) : t;
+  };
+  const sizes = [];
+  const sendSized = (n, o) => { answer = (ws, m) => { const t = frameOf(m.id, n, o); sizes.push(enc.encode(t).length); ws.send(t); }; };
+  sendSized(L);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "resolved" && sizes.at(-1) === L, "an answer whose raw frame is exactly 4 MiB (all of it JSON): taken", sizes.at(-1));
+  // (the JSON itself exactly 4 MiB, then one space: only the raw frame as received is over, not the message re-encoded)
+  sendSized(L + 1, { pad: 1 });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large" && sizes.at(-1) === L + 1, "an answer whose JSON is exactly 4 MiB, plus one space after it: refused (too_large), the raw frame is what counts", sizes.at(-1));
+  sendSized(L + 40, { ch: "漢" });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "a result over 4 MiB in UTF-8 but under it in characters (漢): refused (too_large)");
+  sendSized(L + 40, { error: true });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB (ASCII): refused (too_large), its code not handed on");
+  sendSized(L + 40, { error: true, ch: "é" });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB in UTF-8 (é): refused (too_large)");
+  ok(P.state === "granted", "after the over-limit answers the pairing is still up (its own 12 MiB frames unchanged)");
+  // (the switch turned off: the server told at once, the grant without delegate; every request refused, nothing sent)
+  {
+    const n = heard.length;
+    ok(P.setDelegate(false) === true && !("delegate" in P.grant), "the switch turned off");
+    await until(() => !("delegate" in grantsSent().at(-1)));
+    ok(!("delegate" in grantsSent().at(-1)) && grantsSent().at(-1).folders.join() === "/A", "off: the server told at once, the same grant without delegate", grantsSent().at(-1));
+    ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === n, "off: a request is refused (forbidden), nothing sent");
+    ok(P.setDelegate(true) === true, "and on again");
+  }
+  // (the limit: at most TASK_REQUESTS.pending at once; unanswered ones end with the pairing)
+  answer = () => {};
+  const before = heard.length;
+  const held = Array.from({ length: TASK_REQUESTS.pending }, () => why(TaskClient.of(P).request("tasks.list", {})));
+  await until(() => heard.length === before + TASK_REQUESTS.pending);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "busy" && heard.length === before + TASK_REQUESTS.pending, `at most ${TASK_REQUESTS.pending} pending: the next is refused (busy), not sent`);
+  // (an answer to an id the page never used, or no longer waits for: dropped, the connection kept)
+  S.sock.send(JSON.stringify({ jsonrpc: "2.0", id: "p999", result: { tasks: [] } }));
+  await sleep(100);
+  ok(P.state === "granted" && S.closed === null, "an answer to an unknown id: dropped, the connection kept");
+  await P.revoke();
+  const ended = await Promise.all(held);
+  ok(ended.every((c) => c === "closed"), "the pairing ended: every pending request rejected (closed)", ended);
+  S.srv.stop(true);
+  {
+    // (a timeout: rejected; its late answer dropped)
+    const S2 = server(pairDelegate), W2 = fakeWs();
+    let late = null;
+    S2.onTask = (ws, m) => { late = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [] } })); };
+    const P2 = mk(S2, W2);
+    await P2.paired();
+    await P2.allow({ folders: ["/"], write: true, expires: null }, false);
+    P2.setDelegate(true);
+    let code = null;
+    try { await TaskClient.of(P2).request("tasks.list", {}, { timeoutMs: 150 }); } catch (e) { code = e.code; }
+    late?.();
+    await sleep(100);
+    ok(code === "timeout" && P2.state === "granted", "no answer in time: rejected (timeout); its late answer is dropped, the connection kept", { code, state: P2.state });
+    await P2.revoke();
+    S2.srv.stop(true);
+  }
+}
+
 process.exit(failures ? 1 : 0);

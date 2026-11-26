@@ -32,6 +32,7 @@ const STOP_MESSAGE = "\nStopped: it did not stop when interrupted, so the interp
 // (web/notebook/highlight.js, which the board's editor uses too)
 import { esc, highlight, highlightMarkdown } from "./highlight.js";
 import { highlightMatlab } from "./highlight-matlab.js";
+import { highlightMagma } from "./highlight-magma.js";
 import { armStop, disarmStop, stopIgnored } from "./stop-guard.js";
 export { esc, highlight, highlightMarkdown };
 
@@ -158,12 +159,12 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 <tr><td>${k("D")} ${k("D")}</td><td>delete the cell</td></tr>
 <tr><td>${k("Z")}</td><td>undo the cell deletion</td></tr>
 <tr><td>${k("X")} ${k("C")} ${k("V")}</td><td>cut, copy, paste below (${k("Shift", "V")}: above)</td></tr>
-<tr><td>${k("M")} ${k("Y")}</td><td>to Markdown, to code</td></tr>
+<tr><td>${k("M")} ${k("Y")} ${k("R")}</td><td>to Markdown, to code, to raw</td></tr>
 <tr><td>${k("Shift", "M")}</td><td>merge with the cell below</td></tr>
 <tr><td>${k("I")} ${k("I")}</td><td>interrupt</td></tr>
 <tr><td>${k("0")} ${k("0")}</td><td>restart the interpreter</td></tr>
 <tr><td>${k("H")}</td><td>this list</td></tr></table></div></div>
-<p>Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, ${k("Cmd")} works where ${k("Ctrl")} is shown.</p>`;
+<p>Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, ${k("Cmd")} works where ${k("Ctrl")} is shown, except in ${k("Ctrl", "M")}.</p>`;
 
 /**
  * A notebook in `root`.
@@ -223,7 +224,7 @@ export function createNotebook(root, opts = {}) {
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
   function paint(cell) {
-    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
     // (a Markdown cell's blocks: its text changed elsewhere, merged, undone, an agent's)
     if (cell.blocks && cell.ta.value !== cell.blocksText) { cell.blocksText = cell.ta.value; cell.blocks.value = cell.ta.value; }
   }
@@ -239,7 +240,14 @@ export function createNotebook(root, opts = {}) {
   // use) over the SVG, which stays for saving, agents and when WebGL fails.
   let viewer3d = null;
   function mount3d(fig, sceneText) {
-    viewer3d ??= import(asset("sagebrush-viewer3d.js")).then(() => window.SagebrushViewer3d);
+    viewer3d ??= import(asset("sagebrush-viewer3d.js")).then(() => {
+      // (its headset mode, web/viewer3d-xr.js, where this page has it: a host that maps its own assets (a downloaded
+      //  board's) offers it only if it maps that file too; the viewer shows "Enter VR" only with it)
+      const v = window.SagebrushViewer3d;
+      const xr = opts.assetUrl ? opts.assetUrl("sagebrush-viewer3d-xr.js") : asset("sagebrush-viewer3d-xr.js");
+      if (v && xr && !v.xrModule) v.xrModule = xr;
+      return v;
+    });
     viewer3d.then((v) => v?.mount(fig, JSON.parse(sceneText))).catch(() => {});
   }
   // A graph's picture (Graph.plot): a canvas whose vertices can be dragged
@@ -1036,7 +1044,7 @@ export function createNotebook(root, opts = {}) {
     let waited = 0, waitFrom = null;
     const k = kernel;
     const send = viaWave ?? ((c, o, sink) => k.execute(c, o, sink));
-    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
+    return cellSeed(cell).then((seed) => new Promise((resolve) => send(code, { mode, cell: cell.id, forget, mangle: reactive(), ...(reactive() ? { above: cellsAbove(cell) } : {}), figures: figures(), ...(seed ? { seed } : {}), ...(scoped ? { scoped } : {}), ...(extra ?? {}) }, {
       start() {
         clear();
         cell.el.classList.replace("queued", "running");
@@ -1074,7 +1082,7 @@ export function createNotebook(root, opts = {}) {
             const n = ++k.execCount;
             k.ran?.add(cell.id);
             (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, interrupted: !!info?.interrupted });
-            return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+            return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}), ...(typeof info?.shown === "boolean" ? { shown: info.shown } : {}) });
           }
           if (!live) return resolve({ ok: false, ms, stopped: true });
           forgetInteracts(live.out);
@@ -1090,7 +1098,7 @@ export function createNotebook(root, opts = {}) {
         if (!info?.interrupted) rememberTime(cell, ms);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);
-        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+        resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}), ...(typeof info?.shown === "boolean" ? { shown: info.shown } : {}) });
       },
       stopped(message) {
         // (a running cell whose interpreter was ended, Stop's last resort:
@@ -1123,6 +1131,13 @@ export function createNotebook(root, opts = {}) {
       },
     })));
   }
+  // (a reactive cell's `above`: the keys of the code cells above it, nearest first, as the worker keys each cell's
+  // shown value; _, __ and ___ in it are the values shown by the nearest of them that showed one)
+  function cellsAbove(cell) {
+    const code = cells().filter((c) => c.type === "code");
+    const i = code.findIndex((c) => c.id === cell.id);
+    return i < 0 ? [] : code.slice(0, i).reverse().map((c) => String(c.id).replace(/[^A-Za-z0-9]/g, ""));
+  }
   // The reactive notebook's per-cell seed: SHA-256 of the notebook's seed (made
   // once, kept in the document) and the cell's id, so a cell draws the same
   // random numbers however often and in whatever order it runs, and verify()
@@ -1146,7 +1161,7 @@ export function createNotebook(root, opts = {}) {
   // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
   // the analysis a worker's: opts.analyzer.analyze(code, mode))
   let reactiveOn = !!opts.reactive;
-  let budget = opts.budget ?? 2000;
+  let budget = opts.budget ?? 10000;
   const reactive = () => reactiveOn && !!kernel && !!opts.analyzer;
   const analyses = new Map(); // mode + code -> Promise<analysis>
   const cellById = (id) => cells().find((c) => c.id === id);
@@ -1170,7 +1185,7 @@ export function createNotebook(root, opts = {}) {
             analyses.set(key, opts.analyzer.analyze(code, mode).then((a) => {
               // (the analyzer failed, not the code: not kept, so that the next run asks again)
               if (a.error?.kind === "analyzer") analyses.delete(key);
-              return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []) };
+              return a.error ? a : { defs: new Set(a.defs), refs: new Set(a.refs), deleted: new Set(a.deleted), mutations: new Set(a.mutations ?? []), imports: new Map(a.imports ?? []), outputs: new Set(a.outputs ?? []) };
             }));
           }
           return analyses.get(key);
@@ -1868,6 +1883,7 @@ export function createNotebook(root, opts = {}) {
   }
   // Highlight fenced Python/Sage code in Markdown as in code cells.
   const mdHighlight = (code, lang) => (/^(matlab|m)$/i.test(lang ?? "") || (!lang && isMatlab()) ? highlightMatlab(code).replace(/\n$/, "")
+    : /^(magma|mag)$/i.test(lang ?? "") || (!lang && isMagma()) ? highlightMagma(code).replace(/\n$/, "")
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
@@ -1897,7 +1913,9 @@ export function createNotebook(root, opts = {}) {
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
       tabIndents: true,
-      onChange: (v) => { cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
+      // (the person's own edit: the block editor's paste, a block split or joined, has no input event of its own, so it
+      // counts as typed here, for the leave prompt)
+      onChange: (v) => { typed = true; cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
       onKey: (e) => mdKey(cell, e),
       onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },
     });
@@ -2032,7 +2050,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, guarded = false, typed = false;
   // The document shown, from when it is loaded until another is (or it is
   // detached): what is known of it, which its saves keep to, even one still
   // waiting its turn when another document is shown (CORR-989-1).
@@ -2143,8 +2161,10 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     emit("dirty");
     timer = setTimeout(flush, 500);
+    guard();
   }
-  function flush() {
+  function flush() { try { return flushNow(); } finally { guard(); } }
+  function flushNow() {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
@@ -2239,7 +2259,7 @@ export function createNotebook(root, opts = {}) {
         if (e?.busy) { busy.set(mine, { st, sent, json, seq }); mine.busyError = e; mine.busySeq = seq; }
         saveFailed(mine, st, sent, json, seq, e ?? new Error("not saved"));
         emit("saved", "not saved: " + (e?.message ?? e));
-      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
+      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); guard(); });
     }
   }
   // Every change so far saved: resolves once the saves asked for (this one
@@ -2287,6 +2307,38 @@ export function createNotebook(root, opts = {}) {
   observer.observe(cellsEl, { childList: true, subtree: true, characterData: true });
   const onHidden = () => { if (document.visibilityState === "hidden" && timer) flush(); };
   addEventListener("visibilitychange", onHidden);
+  // (the page going away (a reload, a closed tab) with an edit not yet saved: a waiting save flushed, and the browser's
+  // leave prompt requested, since a save can't finish once the page is gone; if the person leaves anyway, the last
+  // edit may not be kept)
+  // (unsaved: a save running, the last one failed or was busy (kept to send again), or a change waiting that differs
+  // from what was last saved (typed and undone before its save asks nothing); a notebook left, with its saves still
+  // to make, is the page's to ask about (its "left" listener))
+  // (and only once the person has typed here since everything was last saved (`typed`: a trusted input event, or a
+  // Markdown cell's block editor's change); while this notebook's saves fail or are busy, any of the person's own
+  // keys, clicks, pastes or drops too, as a cell moved, deleted or retyped then can't be saved either. A run's output,
+  // a change from elsewhere or one a script made do not arm it by themselves; once `typed` is set, though, any work
+  // still to save keeps it armed. So a script that hasn't set `typed` (a test, an automation) isn't held by the
+  // prompt; one that sends trusted input (CDP Input.*, as a person types) sets it, and must answer the prompt or let
+  // its saves finish first. Notebooks left are the page's own prompt's, as before)
+  const unsaved = (dirty) => typed && !!store && !store.readOnly && !!(savesPending || failed.has(shown) || busy.size || dirty());
+  root.addEventListener("input", (e) => { if (e.isTrusted) typed = true; }, true);
+  // (armed at once: such a key or click may change nothing that schedules a save, so nothing else would call guard())
+  for (const t of ["keydown", "pointerdown", "paste", "drop"]) root.addEventListener(t, (e) => { if (e.isTrusted && store && (failed.has(shown) || busy.size)) { typed = true; guard(); } }, true);
+  function onBeforeUnload(ev) {
+    if (!unsaved(() => timer && JSON.stringify(snapshot()) !== lastJson)) return;
+    if (timer) flush();
+    ev.preventDefault();
+    ev.returnValue = "";
+  }
+  // (the listener there only while something may be unsaved, and taken away once nothing is: a page with any
+  // beforeunload listener is navigated away from more slowly, so a clean notebook's page reloads exactly as before)
+  function guard() {
+    if (!(savesPending || failed.has(shown) || busy.size || timer)) typed = false; // (all saved: the person's typing kept)
+    const want = unsaved(() => timer);
+    if (want === guarded) return;
+    guarded = want;
+    (want ? addEventListener : removeEventListener)("beforeunload", onBeforeUnload);
+  }
 
   function fill(cell, c) {
     cell.metadata = c.metadata ?? null;
@@ -2324,6 +2376,8 @@ export function createNotebook(root, opts = {}) {
     shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
     Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
+    typed = false; // (another document shown: nothing typed in it yet; one left with saves to make is the page's to ask)
+    guard(); // (its own failed save, or none)
   }
   // (the runs of this notebook that ended while it wasn't shown (execCell's done): their output, prompt number and
   // time put in their cells, once loaded, as a change of the document, so it is saved)
@@ -2351,7 +2405,7 @@ export function createNotebook(root, opts = {}) {
   function reactiveLoad() {
     if (!reactive()) return;
     const a = meta.autorun;
-    budget = a === "always" ? Infinity : a === "never" ? 0 : typeof a === "number" && a >= 0 ? a : opts.budget ?? 2000;
+    budget = a === "always" ? Infinity : a === "never" ? 0 : typeof a === "number" && a >= 0 ? a : opts.budget ?? 10000;
     for (const c of cells()) if (c.type === "code") showManual(c);
     if (kernel.reactive) reactiveSync();
     else engine().load({ fresh: kernel.ran ?? new Set() });
@@ -2790,6 +2844,7 @@ export function createNotebook(root, opts = {}) {
       const doc = await s.load();
       load(doc);
       store = s;
+      guard();
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       // (2c-3: another device's changes reached this notebook's history: merged with the record by the store, then with
       // what this page shows, its unsaved edits merged cell by cell (applyRemote), and saved.  Every edit is kept, as in
@@ -2832,11 +2887,11 @@ export function createNotebook(root, opts = {}) {
     /** Saves of documents no longer shown that met a change made elsewhere and couldn't be kept: only in this page. */
     get unkeptCount() { return unkept.size; },
     onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
-    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); },
+    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); guard(); },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
-    setReadOnly(ro) { opts.readOnly = !!ro; root.classList.toggle("readonly", !!ro); for (const c of cells()) c.ta.readOnly = !!ro; },
+    setReadOnly(ro) { opts.readOnly = !!ro; root.classList.toggle("readonly", !!ro); for (const c of cells()) c.ta.readOnly = !!ro; guard(); },
     // outputs, for other places (a console's picture panel) and agents
     output: { text: appendText, display: appendDisplay, interact: renderInteract, forget: forgetInteracts, sink: areaSink },
     outputText, pictures, interacts, setInteract, saveOutputs, loadOutputs,
@@ -2846,6 +2901,8 @@ export function createNotebook(root, opts = {}) {
       sizeObserver?.disconnect();
       removeEventListener("resize", resizeAll);
       removeEventListener("visibilitychange", onHidden);
+      removeEventListener("beforeunload", onBeforeUnload);
+      guarded = false;
       document.removeEventListener("pointerdown", onPointerDown);
       for (const el of [completer, menu, dropline, keysDlg]) el.remove();
       root.replaceChildren();

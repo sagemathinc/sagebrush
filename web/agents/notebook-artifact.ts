@@ -8,6 +8,7 @@
 import { writerHandover } from "../page/handover";
 import type { Workspace } from "../workspace/api";
 import { canonical, cellForm, preflight, type NotebookEdit } from "../workspace/notebook-edit";
+import { docValue, ENVELOPE } from "../workspace/notebook-form";
 import type { Kept, PageRun } from "../workspace/run-verbs";
 
 // (stores.js's FENCE, the workspace's record in the notebooks store; test-agents-artifacts checks they're equal)
@@ -152,19 +153,13 @@ export const TAKE_MS = 10_000;
 /** A read of an agent's run that the pane's letting go cut short. */
 const GONE = Symbol("gone");
 
-// What the store keeps beside a notebook's content, for itself (ART-C2a r4): left out when "is this what the store
-// has" is asked, and when content is kept as a copy. Everything else is the content: the mode, the document's
-// metadata (seed, autorun, ...) and each cell whole (its metadata, attachments, outputs, counts and times).
-const BOOKKEEPING = ["id", "rev", "updated", "baseRev", "name", "j", "hash", "unjournaled"];
-const contentOf = (doc: any) => Object.fromEntries(Object.entries(doc ?? {}).filter(([k]) => !BOOKKEEPING.includes(k)));
-// (a stable form to compare: keys sorted at every depth, so the store's key order and the snapshot's don't matter)
-const stable = (v: unknown): string =>
-  Array.isArray(v)
-    ? `[${v.map(stable).join(",")}]`
-    : v && typeof v === "object"
-      ? `{${Object.keys(v).filter((k) => (v as any)[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${stable((v as any)[k])}`).join(",")}}`
-      : JSON.stringify(v ?? null);
-const sameContent = (a: any, b: any) => stable(contentOf(a)) === stable(contentOf(b));
+// What the store keeps beside a notebook's content, for itself (ART-C2a r4: the workspace's own list, ENVELOPE, so a
+// field the store adds (sync's journal: the versions a record is) is never taken for an unsaved change): left out when
+// "is this what the store has" is asked, and when content is kept as a copy. Everything else is the content: the mode,
+// the document's metadata (seed, autorun, ...) and each cell whole (its metadata, attachments, outputs, counts and
+// times), compared in the form the notebook keeps it (docValue: its key order and a cell's stored form don't matter).
+const contentOf = (doc: any) => Object.fromEntries(Object.entries(doc ?? {}).filter(([k]) => !ENVELOPE.includes(k)));
+const sameContent = (a: any, b: any) => docValue(a) === docValue(b);
 
 /**
  * A notebook artifact, mounted into `box`. The handle is returned at once and owns everything the mount makes, so it
@@ -391,6 +386,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       //  and turn still the page's (`may`))
       const here = () => may() && alive && !!comp && nb === comp && attached && bound && !frozen && guard === "open" && docRef === ref && owns(comp);
       let told = false, reading = true, woke!: () => void;
+      // (the call ended (stop: Stop, run_stop, its deadline, a grant change, the page going): no cell of it starts after;
+      //  and whether one of its cells is in the kernel now, the only run its stop may interrupt)
+      let halted = false, inKernel = false;
       // (resolved when the pane lets the notebook go: the read below never waits past it, whatever it waits on)
       const released = new Promise<typeof GONE>((r) => (woke = () => r(GONE)));
       // (let go: the run is told, and ends; while its inputs are still being read, inputs() answers instead, at once
@@ -432,9 +430,17 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         current: here,
         cell: async (id: string, out: Kept) => {
           const images = { count: 0, bytes: 0 };
-          const c = here() ? comp.cells().find((x: any) => x.id === id && (x.type ?? "code") === "code") : null;
-          if (!c) return { status: "stopped" as const, images };
-          const ran = await comp.runCells([id], { budget: 0 });
+          const find = () => (here() ? comp.cells().find((x: any) => x.id === id && (x.type ?? "code") === "code") : null);
+          // (the cell already queued or running in another run (its run once by itself when the agent created it, or
+          //  the person's Run): a Run of it now would do nothing (notebook.js run), which this answered as "stopped" and
+          //  the agent was told "skipped", for a run nobody stopped; so it runs once that one is over. The wait ends
+          //  with the pane letting go or the call ending (stop), and then nothing of it runs)
+          const busy = (x: any) => x.el.classList.contains("queued") || x.el.classList.contains("running");
+          for (let x = find(); x && !told && !halted && busy(x); x = find()) await new Promise((go) => setTimeout(go, 50));
+          const c = told || halted ? null : find();
+          if (!c || told || halted) return { status: "stopped" as const, images };
+          inKernel = true;
+          const ran = await comp.runCells([id], { budget: 0 }).finally(() => { inKernel = false; });
           const r = Array.isArray(ran) ? ran[0] : ran;
           if (!here() || !r) return { status: "stopped" as const, images };
           for (const o of comp.snapshot().cells.find((x: any) => x.id === id)?.outputs ?? []) {
@@ -464,7 +470,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
           const e = r?.entry as any;
           return here() && e?.kind === "notebook" && e.ref === ref && outs(r!.content) === outs(comp.snapshot());
         },
-        stop: () => { if (comp && nb === comp) comp.interrupt(); },
+        // (the call ended: a cell still waiting never starts; only this call's own cell in the kernel is interrupted,
+        //  never the run it was waiting for)
+        stop: () => { halted = true; if (inKernel && comp && nb === comp) comp.interrupt(); },
         close: () => { told = true; pageRuns.delete(tell); },
       };
     },
@@ -509,6 +517,11 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       fieldFor: (k) => comp.cells().find((c: any) => c.id === k)?.ta ?? null,
       hasKey: (k) => comp.cells().some((c: any) => c.id === k),
       notApplied: (n) => ui.bar({ kind: "refused", text: `${n} input action${n === 1 ? "" : "s"} made here while it was taking over the notebook from another tab ${n === 1 ? "wasn't" : "weren't"} applied: enter that input again.` }),
+      // (a whole write of the notebook asked of this pane while it writes it (an agent's workspace_write, through any page
+      // of this browser): made as the notebook page makes it, a change made here, saved and recorded.  None while the
+      // pane can't save it (closing, let go, frozen): the write is left to the tab that writes it next)
+      shownDoc: () => (alive && nb === comp && attached && bound && !frozen && guard === "open" && comp.store === jstore ? comp.snapshot() : null),
+      replaceDoc: (doc) => comp.replace(doc),
     });
     handover.bind(jstore);
     const c = controlsOf(jstore);
@@ -676,6 +689,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       controlsOf = hist.pageControls;
       // (tests, loopback pages only: this pane's journal store, to put it in a hand-over's state, test-agents-artifacts.mjs J10)
       if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) (globalThis as any).__sbTestPaneJournal = () => jstore;
+      // (tests, loopback pages only: a close's first step alone (freeze), so the pane holds the writer lock while it can't
+      // save the notebook; test-agents-artifacts.mjs J15, J16)
+      if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) (globalThis as any).__sbTestPaneFreeze = () => { if (nb) freeze(nb); };
     }
     const inner = jstore ?? new mod.IdbStore(guarded, ref);
     stored = () => inner.loadRecord();
@@ -706,15 +722,35 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     const owned = () => alive && nb === comp && comp.store === mine;
     ui.saved("Saved");
     if (jstore) showWriter(comp);
-    comp.on("dirty", () => owned() && ui.saved("Editing…"));
+    // (Saving… from the first touch until its change is saved. "dirty" comes with any touch, a change or not, and
+    //  nothing follows one that changed nothing: with no "change" past the component's half second, the pane says
+    //  again what it said last (Saved, or why the last save was refused: that save is still to make). It said
+    //  "Editing…", for good, #1617. Never over Closing…)
+    let idle = 0, last = "Saved";
+    const say = (t: string) => owned() && !frozen && ui.saved(t);
+    comp.on("dirty", () => {
+      if (!owned() || frozen) return;
+      ui.saved("Saving…");
+      clearTimeout(idle);
+      idle = window.setTimeout(() => say(last), 900);
+    });
+    comp.on("change", () => {
+      clearTimeout(idle);
+      say("Saving…");
+    });
     // (a save the store refused: shown as it says; if the workspace's fence moved (a reset, sync), the pane lets go)
     comp.on("saved", (t: unknown) => {
       if (!owned()) return;
       const refused = typeof t === "string" && t.startsWith("not saved");
-      ui.saved(refused ? (t as string) : "Saved");
-      if (refused) void check();
+      last = refused ? (t as string) : "Saved";
+      say(last);
+      // (not while closing: the close says what became of it)
+      if (refused && !frozen) void check();
     });
-    comp.on("remote", () => owned() && ui.saved("Updated from elsewhere"));
+    comp.on("remote", () => {
+      last = "Saved";
+      say("Updated from elsewhere");
+    });
     // (a save of this notebook made after it was let go met a change made elsewhere: what it had is kept as a copy)
     // (or, `why`, a save refused or failed when sent again: said as that, not as a change made elsewhere)
     comp.onDetachedConflict(async (doc: any, _theirs: unknown, _key: unknown, why?: { refused: boolean; message: string } | null) => {

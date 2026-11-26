@@ -1775,8 +1775,12 @@ export async function scheduled(env: ShareEnv): Promise<void> {
     const r = await db.prepare(STATES_EXPIRED).bind(t - STATE_SKEW_S, 1000).run().catch(() => null);
     if (!r || Number(r.meta?.changes ?? 0) < 1000) break;
   }
-  // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4)
-  await db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY).run();
+  // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4): a view's targets with it, in
+  // one batch, the targets first (they reference the view)
+  await db.batch([
+    db.prepare("DELETE FROM admin_view_targets WHERE view_id IN (SELECT id FROM admin_views WHERE at < ?1)").bind(t - ADMIN_RECORD_DAYS * DAY),
+    db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY),
+  ]);
   // expired admin grants (r1h §1.8)
   await db.prepare("DELETE FROM admin_grants WHERE expires_at < ?1").bind(t).run();
   // records of finished deletions, after their time (HARD-SHARE-3, HARD-E55-2):
@@ -1904,7 +1908,10 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   const id = who?.id;
   if (!who || !id) return err(401, "sign in first");
   if (p === "/api/share/me" && m === "GET") {
-    const a = await env.SHARE_DB.prepare("SELECT email, name FROM accounts WHERE account_id = ?1").bind(id).first();
+    // (who you are, for the account menu: the account's own address where it has one (a DEV test session's), else the
+    //  newest verified address of one of its identities: WorkOS's own answer, stored at sign-in and each refresh, never
+    //  anything a page sent; none, and the menu says only "Your account")
+    const a = await env.SHARE_DB.prepare("SELECT name, COALESCE(email, (SELECT i.email FROM identities i WHERE i.account_id = accounts.account_id AND i.email IS NOT NULL ORDER BY i.email_at DESC LIMIT 1)) AS email FROM accounts WHERE account_id = ?1").bind(id).first();
     return json({ account_id: id, ...a, ...(await breakdown(env, id)), limits: await limits(env, who) });
   }
   if (p === "/api/share/mine" && m === "GET") return mine(env, id);

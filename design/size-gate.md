@@ -25,6 +25,67 @@ do not fail the backstop: extracting a lazy chunk must not count its entire
 size as growth. New bundles still require review in the merger's checklist.
 An existing bundle with zero bytes is still gated. Removed bundles use merge zero.
 
+### The examples gallery's content
+
+The backstop above is for code. The examples gallery's content has its own
+per-change limit: growth over **256,000 bytes** fails, whatever the base, and
+the exact boundary passes. That content is in three bundles:
+
+- `examples/corpus`, the corpus under `examples/`;
+- `site/examples`, what the site serves of it under `/examples/`;
+- `examples/index.json`, the catalog.
+
+The site fetches it only when someone opens the gallery
+(`web/examples/open.ts`). It's in neither of the service worker's lists, nor
+the CLI. Holding a gallery to a code allowance would only push it into split PRs.
+
+Two notes on the bundles:
+
+- **The first-visit notebooks are the exception.** `web/build.ts` inlines the
+  notebooks `web/examples/welcome.ts` names into every bundle, so they're in the
+  initial download. They're measured as their own bundle, `examples/welcome`, and
+  keep the code backstop. The measurement reads the list from `welcome.ts`, and
+  fails if it can't.
+- **The desktop app** builds the gallery into its installer
+  (`app/build-examples.ts`). This gate doesn't measure the installer, so the
+  content limit lets the installer grow by up to the same 256,000 bytes per change.
+  For an installer of tens of MB, that was accepted.
+
+### Track pulls
+
+A track's pull into master (`track/math`, `track/numeric`, ...) sums every pull
+request that landed on the track, and each of those already passed this
+backstop against the track. So a pull request with the **`track-pull`** label
+is measured and reported as usual, but growth over the backstop doesn't fail
+it: the step prints a warning, and the merger reads every row of the table
+before merging. Only growth is excused: missing or mismatched records, another
+recipe or toolchain still fail closed. In the merge
+queue the label is read from the queued pull request (`gh-readonly-queue/.../pr-N-...`),
+so a track pull goes into the queue alone. Only the merger applies the label,
+only to a track's pull into master (decided by William, Nov 22 2026).
+
+### Master merges into a track
+
+The other direction: a change into a track (a pull request, a queue entry or a
+push onto `track/*`) that merges master in brings every master pull request
+since the track's last sync, and each of those already passed this backstop on
+master. So such a change is also measured against the master commit it merges
+(its "side": the newest commit on `origin/master`'s first-parent line that the
+tested commit contains, when the track's base doesn't already contain it; track
+work that master merged in turn is never a side), and a bundle fails only when its
+growth is over the limit against **both** the track's base and that master
+commit. A byte present in either parent was gated where it landed. A bundle the
+master side doesn't have is the track's own, gated against the base alone.
+The size-base job builds and records the side (`side-record.json`) beside the
+base, under the same recipe and pins; a missing or mismatched side record fails
+closed, as a base record does. A change into a track that brings no new master
+commits has no side and is gated as before. When one bundle's growth is over the
+limit against both parents (the track's own growth and master's each too large
+for it), the sync fails: sync master in smaller steps, or ask the merger for a
+ruling. (Ruling by @sagebrush, Nov 26 2026,
+after a master sync into `track/numeric` carried 85 master pull requests' growth
+as one transition.)
+
 There are no stored budgets, growth markers, tightness rules, epochs, or
 old-toolchain migration builds. No allowance is carried forward or refilled.
 

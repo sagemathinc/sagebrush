@@ -9,8 +9,9 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync
 import { join, dirname } from "node:path";
 import { renderer, CSS } from "./build-articles";
 import { parsePost, imagePaths, postPage, indexPage, feed, type Post } from "./blog";
+import { fileURLToPath } from "node:url";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const { siteDir, hasSite } = await import("./site-dir.mts");
 if (!hasSite) throw new Error("build-blog: web/site is absent; build.ts imports this only when it is present");

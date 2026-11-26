@@ -124,7 +124,17 @@ try {
   const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (!r.result || r.result.exceptionDetails) throw new Error(JSON.stringify(r.result?.exceptionDetails ?? r.error ?? r).slice(0, 400)); return r.result.result?.value; };
   const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
   const go = async (q) => { await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("!window.__old && !!window.sagebrush?.workspace", 60000); };
+  // remembered() can asynchronously prepend another primary button (Use remembered access). Wait for the intended
+  // action, not the first primary button, which can silently restore an old grant instead of asking for a new one.
+  const connectButton = `[...document.querySelectorAll(".sbag-box button.primary")].find(b => b.textContent === "Connect" && b.closest(".sbag-box").querySelector("h2")?.textContent === "Connect an agent")`;
+  const clickConnect = async () => {
+    if (!(await until(`(${connectButton})?.disabled === false`))) throw new Error("the Connect action is not ready");
+    await ev(`((${connectButton}).click(), true)`);
+  };
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable", "Log.enable"]) await send(m);
+  // (the agent's notebook's writes it may not make are refused at once here, as where a run can't wait for the person's
+  // answer: the page's loopback switch (web/index.html ASK_WAIT); a run that waits on its prompt is test-run-bar's)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('sagebrush-ask', '0'); } catch {}" });
   const W = "window.sagebrush.workspace";
   const chunk = (u) => /sagebrush-agent\.js/.test(u);
   // (SHOT_DIR: screenshots for a review, at the moments below)
@@ -167,7 +177,7 @@ try {
   ok(await go(`?pair=${first.code}&port=${first.port}`), "the ?pair= link opens the page");
   ok(await ev(`!/pair=/.test(location.search)`), "the code is taken out of the address bar");
   ok(await until(`!!document.querySelector(".sbag-box button.primary")`), "the Connect dialog shows, its code filled in", console_.slice(-5));
-  await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+  await clickConnect();
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired: the grant dialog asks the person (the site's CSP admits the loopback socket)", { err: await ev(`document.querySelector(".sbag-box .err")?.textContent ?? ""`).catch(() => "") });
   const folder = path.slice(0, path.lastIndexOf("/")) || "/";
   await ev(`(() => {
@@ -429,7 +439,8 @@ try {
   ok(!!(await make("Reloaded first", [RELOAD])).ok && await until(`window.__held === "/Reloaded first.ipynb"`, 15000), "(another, held before its run, then the page reloads)");
   const RELOADED = true;
 
-  // a grant "until the page closes" ends with the page
+  // a grant "until the page closes": the page left and came back to (a navigation back, within 10 minutes) reconnects
+  // by itself (A5 item 2, ruled Nov 20 2026; it used to end with the page)
   ok(await go(""), "the page again");
   if (RELOADED) {
     // (directly: after the reload, no creation was announced to this page at all, whatever the grant)
@@ -439,14 +450,14 @@ try {
     ok(!(await ev(outOf(RELOAD))).includes("reloaded ran") && await ev(nOf(RELOAD)) === null, "nothing replays after a reload: it never ran");
   }
   const st = await drive({ op: "status" });
-  ok(st.ok?.paired === false || st.ok?.granted === false, "the grant ended with the page", st);
+  ok(st.ok?.paired === true && st.ok?.granted === true, "the page came back to within 10 minutes: the agent reconnected, its grant given again (A5)", st);
 
   // a reload of the same tab keeps the agent (decided Nov 19 2026): its reload record resumes the pairing, with no new
   // Allow, while the grant lasts, and the agent's next call works; a navigation to the page (above) doesn't
   {
     const cr = await drive({ op: "code" });
     ok(await go(`?pair=${cr.code}&port=${cr.port}`) && await until(`!!document.querySelector(".sbag-box button.primary")`), "(a ?pair= link: Connect)");
-    await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+    await clickConnect();
     ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "(paired: Allow this agent?)");
     await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
     ok(await until(`!!document.querySelector(".sbag-bar")`), "(allowed, with the dialog's defaults: not remembered)");
@@ -481,7 +492,7 @@ try {
   // a remembered grant: the next load of the notebook page fetches the chunk by itself and reconnects
   const c1 = await drive({ op: "code" });
   ok(await go(`?pair=${c1.code}&port=${c1.port}`) && await until(`!!document.querySelector(".sbag-box button.primary")`), "another ?pair= link: Connect");
-  await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+  await clickConnect();
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the grant dialog asks");
   await ev(`(() => {
     const b = document.querySelector(".sbag-box");
@@ -564,7 +575,7 @@ try {
   ok(await until(`!!document.querySelector(".sbag-box")`) && requests.slice(beforeC).some(chunk), "it fetches the page's chunk and opens Connect");
   const c3 = await drive({ op: "code" });
   ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${c3.code}&port=${c3.port}`) && await until(`[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(c3.code)})`), "a ?pair= link on the code page: Connect, its code filled in");
-  await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+  await clickConnect();
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the grant dialog asks");
   await ev(`(() => {
     const b = document.querySelector(".sbag-box");
@@ -630,7 +641,7 @@ try {
     const since = () => requests.slice(before);
     ok(since().some((u) => /sagebrush-latex-agent\.js/.test(u)) && !since().some(chunk), "only the LaTeX editor's agent chunk is fetched, not the notebook page's", since().filter((u) => /agent/.test(u)));
     ok(await ev(`document.querySelector("#agentbtn")?.hidden !== false`), "the notebook page's Agent isn't offered over the LaTeX editor");
-    await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+    await clickConnect();
     ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired from the LaTeX editor: the grant dialog asks");
     // (Everything, read and write, for 1 hour, remembered)
     await ev(`(() => {
@@ -681,7 +692,7 @@ try {
     await sleep(300);
     ok(await until(`!window.__old && location.pathname === "/" && [...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(links[0][1])})`, 60000), "the link opens Connect on the notebook page, its code filled in, no port to type", await ev(`document.querySelector(".sbag-box")?.textContent ?? location.href`).catch(() => ""));
     ok(await ev(`document.querySelectorAll(".sbag-box input").length`) === 1, "one field in Connect");
-    await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+    await clickConnect();
     ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired: the grant dialog asks", await ev(`document.querySelector(".sbag-box .err")?.textContent ?? ""`).catch(() => ""));
     await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
     ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed (the dialog's defaults): the bar shows the agent");
@@ -691,6 +702,35 @@ try {
     ok(!r4.isError && r4.structured?.result?.entry?.path === nb.path, "the agent's request goes on: the notebook is made", r4.text);
     ok(await until(`${shownPath}.then((p) => p === ${JSON.stringify(nb.path)})`, 20000), "the page shows it", await ev(shownPath).catch(() => ""));
     await shot("9-first-call-link");
+  }
+
+  // Force the legitimate asynchronous alternative to be present: a remembered grant, then a new code link on the
+  // code page. Choosing the earlier primary button would restore silently, so no Allow dialog would ever open.
+  {
+    const remembered = await drive({ op: "code" });
+    ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${remembered.code}&port=${remembered.port}`) && await until(`!!document.querySelector(".sbag-box input")`), "code-page selector control: Connect to remember an agent");
+    await clickConnect();
+    ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some(h => h.textContent === "Allow this agent?")`), "code-page selector control: the first grant asks");
+    await ev(`(() => {
+      const b = document.querySelector(".sbag-box");
+      const remember = [...b.querySelectorAll("label")].find(l => /Remember this agent/.test(l.textContent)).querySelector("input");
+      remember.checked = true;
+      b.querySelector("select").value = "3600000";
+      [...b.querySelectorAll("button")].find(b => b.textContent === "Allow").click();
+      return true;
+    })()`);
+    ok(await until(`!!document.querySelector(".sbag-bar")`), "code-page selector control: remembered access is in force");
+    const fresh = await drive({ op: "code" });
+    ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${fresh.code}&port=${fresh.port}`) && await until(`[...document.querySelectorAll(".sbag-box input")].some(i => i.value === ${JSON.stringify(fresh.code)})`), "code-page selector control: a fresh code's Connect");
+    // The old page's socket must be closed at the server before this new code is submitted, not just at the browser.
+    const t = Date.now();
+    let unpaired = false;
+    while (Date.now() - t < 10000) { if ((await drive({ op: "status" })).ok?.paired === false) { unpaired = true; break; } await sleep(50); }
+    ok(unpaired, "code-page selector control: the old socket is closed at the server");
+    ok(await until(`document.querySelector(".sbag-box button.primary")?.textContent === "Use remembered access"`), "code-page selector control: the asynchronous earlier primary action is present");
+    await clickConnect();
+    ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some(h => h.textContent === "Allow this agent?")`), "Connect still asks for the fresh code's grant, never Use remembered access");
+    ok((await drive({ op: "status" })).ok?.granted === false, "the fresh code has no grant before Allow");
   }
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));

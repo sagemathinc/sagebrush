@@ -33,7 +33,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 253962 && LATEX_CAPS.gzip === 84895, "the caps are 253,962 B raw and 84,895 B gzip (2026-11-19, the reload record with the run of a .tex the agent made, on master a3f1e30b: 253,898 / 84,831 measured + 64; 253,527 / 84,713 before, 2026-11-19, a .tex the agent made runs once by itself: its measurement + 64, 253,463 / 84,649; 252,759 / 84,399 before, 2026-11-19, the editor embedded in the Agents page's pane: its measurement + 64, 252,695 / 84,335; 252,349 / 84,230 before, 2026-11-19, the editor's Source | Both | PDF toggle: its measurement + 64, 250,418 / 83,700 -> 252,285 / 84,166; 250,482 / 83,764 before, 2026-11-19, a SageTeX code argument read from the file as its own source text: its measurement + 64, 249,786 / 83,499 -> 250,418 / 83,700; 249,795 / 83,533 before, 2026-11-17, an edit written before the page is left: its measurement + 64; 249,317 / 83,380 before, 2026-11-13, the LaTeX editor's bar in the notebook's colours and buttons with its Share button, and math typeset in the same step as its text: its measurement + 64; 246,769 / 82,596 before, 2026-11-12, the editor's File ▸ Share…: its measurement + 64; 246,659 / 82,543 before, 2026-11-12, a shared talk on the share page: its measurement + 64; 246,588 / 82,522 before, 2026-11-12, running code while presenting, renewed after its review fixes: its measurement + 64; 246,016 / 82,328 before, 2026-11-12, a Sage table() drawn as a table: its measurement + 64; 244,777 / 81,787 before, 2026-11-11, the view kept and put back: its landing measurement + 64; 244,388 / 81,635 for Magma in LaTeX; 242,382 B raw and 79.5 KiB gzip before: the preview keeping its place, and the 2026-11-04 gzip cap for the LaTeX fidelity queue)", LATEX_CAPS);
+check(LATEX_CAPS.raw === 311297 && LATEX_CAPS.gzip === 105855, "the caps are 311,297 B raw and 105,855 B gzip (2026-11-26, \\input and \\include in a shared or GitHub view, on its merge with master 9063c669: 311,233 / 105,791 measured + 64; 310,653 / 105,614 before, a render over 16 MiB shown up to there)");
 
 // (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
@@ -68,7 +68,8 @@ check(LATEX_CAPS.raw === 253962 && LATEX_CAPS.gzip === 84895, "the caps are 253,
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from a shared check's and the tools' changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [62408, 21455], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3853, 2021] };
+// (the examples' chunk, EXAMPLES, gone with the editor's own list of examples: the gallery's panel is the only one)
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [68867, 23606], TOOLS: [17874, 7471], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [4473, 2270], HL: [4474, 2419] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
@@ -157,6 +158,10 @@ else if (mode.ok) {
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
   latexReport = { group: { ...g, cap: LATEX_CAPS }, lazy: lazyRows };
+  // (KaTeX's layout tree, a private export the sizes of TikZ nodes' text are read from: a KaTeX without it would give
+  //  estimated sizes, silently)
+  const math = join(web, "dist", "sagebrush-math.js");
+  check(existsSync(math) && /__renderToHTMLTree/.test(readFileSync(math, "utf8")), "the LaTeX build's sagebrush-math.js exports KaTeX's layout tree (__renderToHTMLTree), which TikZ nodes' sizes are read from");
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
   //  one left off that list is a 404 on sagebrush.space only; as web/site-dir.mts decides the site)
   const site = join(web, "site", "public");
@@ -197,10 +202,14 @@ else {
     writeFileSync(join(dir, "files.txt"), f + "\n");
     const r = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
       env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" } });
-    return r.status !== 0 || !/^full=true$/m.test(r.stdout);
+    if (r.status !== 0 || !/^full=true$/m.test(r.stdout)) return true;
+    // (and under PR CI light, which turns the full tier off, it still keeps web-artifacts: latex_budget)
+    const light = spawnSync(process.execPath, [join(root, "scripts", "ci-paths.mjs")], { encoding: "utf8", cwd: root,
+      env: { ...process.env, CI_PATHS_FILES: join(dir, "files.txt"), GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "", CI_PR_LIGHT: "true" } });
+    return light.status !== 0 || !/^latex_budget=true$/m.test(light.stdout);
   });
   rmSync(dir, { recursive: true, force: true });
-  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier (scripts/ci-paths.mjs)`, { notFull });
+  check(inputs.length > 0 && notFull.length === 0, `each of the LaTeX bundles' ${inputs.length} inputs selects the full tier, and web-artifacts under PR CI light (scripts/ci-paths.mjs)`, { notFull });
 }
 
 const status = fails.length ? 1 : 0;

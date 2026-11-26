@@ -6,7 +6,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SELF = fileURLToPath(import.meta.url);
@@ -194,11 +194,33 @@ export function measureFiles(files, rootDir, values, extra = {}, expected = EXPE
 // examples/), what the site serves of it (every file web/build.ts writes under web/site/public/examples: the pages, the
 // LaTeX previews, files.json, the ZIPs, the catalog) and the catalog on its own. Read after the build, never built
 // here. An absent tree has no bundle; added bundles use a zero base.
+// The first-visit notebooks are the exception (examples/welcome): web/build.ts inlines the notebooks web/examples/
+// welcome.ts names into every bundle, the app's and so the CLI's included, so they are in the initial download, not
+// fetched on demand, and keep the code backstop.  The rest of the corpus is examples/corpus.
+export function welcomeDirs(rootDir) {
+  const f = join(rootDir, "web", "examples", "welcome.ts");
+  if (!existsSync(f)) return [];
+  const m = /^const WELCOME: Record<string, string> = \{([^}]*)\};$/m.exec(readFileSync(f, "utf8"));
+  // (every entry, whole, is exactly `Name: "slug"`: a literal string, never an expression such as "a" + "b", so the
+  // slug read is the slug the bundle uses; fail closed: a map that isn't exactly that grammar never lets its notebooks
+  // fall under the content limit)
+  const entries = m ? m[1].split(",").map((s) => s.trim()).filter((s, i, a) => s || i !== a.length - 1) : [];
+  const slugs = entries.map((e) => /^[A-Za-z_$][\w$]*\s*:\s*"([a-z0-9][a-z0-9-]*)"$/.exec(e)?.[1] ?? null);
+  if (!m || !slugs.length || slugs.includes(null)) throw new Error("web/examples/welcome.ts: its WELCOME map can't be read");
+  return slugs.map((s) => join(rootDir, "examples", "notebook", s));
+}
+
 export function examplesFiles(rootDir) {
   const walk = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
   const files = {};
   const site = join(rootDir, "web", "site", "public", "examples");
-  if (existsSync(join(rootDir, "examples"))) files["examples/corpus"] = walk(join(rootDir, "examples"));
+  if (existsSync(join(rootDir, "examples"))) {
+    const welcome = welcomeDirs(rootDir);
+    const inWelcome = (f) => welcome.some((d) => f === d || f.startsWith(d + sep));
+    const all = walk(join(rootDir, "examples"));
+    files["examples/corpus"] = all.filter((f) => !inWelcome(f));
+    if (welcome.length) files["examples/welcome"] = all.filter(inWelcome);
+  }
   if (existsSync(join(site, "index.json"))) {
     files["site/examples"] = walk(site);
     files["examples/index.json"] = [join(site, "index.json")];
@@ -270,18 +292,31 @@ export function recordProblems(rec, commit) {
 export const TOOLCHAIN = { bun: "1.4.4", node: "24.21.0" };
 export const ABSOLUTE_ALLOWANCE = 50_000; // decimal KB, not KiB
 export const growthLimit = (base) => Math.max(Math.floor(base / 50), ABSOLUTE_ALLOWANCE);
+// The examples gallery's content, fetched only when someone opens the gallery (web/examples/open.ts; never in the
+// service worker's lists or the CLI): its own per-change limit, still failing closed above it.  The first-visit
+// notebooks (examples/welcome) are in the initial download and keep the code backstop above.  The desktop app builds
+// the gallery into its installer (app/build-examples.ts), which this gate doesn't measure.
+export const CONTENT_BUNDLES = ["examples/corpus", "site/examples", "examples/index.json"];
+export const CONTENT_ALLOWANCE = 256_000; // decimal KB, not KiB
+export const limitOf = (bundle, base) => (CONTENT_BUNDLES.includes(bundle) ? CONTENT_ALLOWANCE : growthLimit(base));
 const fmt = (n) => n > 0 ? "+" + n : String(n);
 
-export function evaluate({ mode = "transition", merge, base }) {
+// side: a change into a track that merges master in (testedTransition's side) is also compared with that master
+// commit, measured too.  A bundle's growth fails only when it is over the limit against both: a byte that is in
+// either parent already passed this gate where it landed (master's own pull requests, or the track's).
+export function evaluate({ mode = "transition", merge, base, side }) {
   const problems = recordProblems(merge?.record);
   const notes = [], rows = [];
-  const M = merge?.record, N = base?.record;
+  const M = merge?.record, N = base?.record, S = side?.record;
   if (mode !== "absolute") problems.push(...recordProblems(N, base?.commit).map((p) => "base: " + p));
+  if (side) problems.push(...recordProblems(S, side.commit).map((p) => "master side: " + p));
   if (problems.length) return { ok: false, problems, notes, rows };
   if (M.key.bun !== TOOLCHAIN.bun || M.key.node !== TOOLCHAIN.node)
     problems.push("measurement must use pinned bun " + TOOLCHAIN.bun + " and node " + TOOLCHAIN.node);
   if (mode !== "absolute" && !sameKey(M.key, N.key)) problems.push("base and merge measurement keys differ: rebuild both with this run's recipe and pins");
+  if (side && !sameKey(M.key, S.key)) problems.push("master side and merge measurement keys differ: rebuild both with this run's recipe and pins");
   if (problems.length) return { ok: false, problems, notes, rows };
+  if (side) notes.push("A master merge into a track: each bundle is also compared with master " + side.commit + "; growth fails only when it is over the limit against both.");
   if (mode === "absolute") {
     for (const bundle of M.bundles.filter((s) => s !== "registry/packages")) rows.push({ bundle, merge: M.sizes[bundle] });
     notes.push("No base for this event: sizes reported without a growth comparison.");
@@ -291,10 +326,17 @@ export function evaluate({ mode = "transition", merge, base }) {
     for (const bundle of names) {
       const before = Object.hasOwn(N.sizes, bundle) ? N.sizes[bundle] : 0;
       const after = Object.hasOwn(M.sizes, bundle) ? M.sizes[bundle] : 0;
-      const delta = after - before, limit = growthLimit(before);
+      const delta = after - before, limit = limitOf(bundle, before);
       const note = !Object.hasOwn(N.sizes, bundle) ? "new" : !Object.hasOwn(M.sizes, bundle) ? "removed" : "";
       rows.push({ bundle, base: before, merge: after, delta, limit, note });
-      if (Object.hasOwn(N.sizes, bundle) && delta > limit) problems.push(bundle + ": growth " + fmt(delta) + " exceeds " + limit + " bytes (both 2% and 50,000 B)");
+      if (Object.hasOwn(N.sizes, bundle) && delta > limit && side && Object.hasOwn(S.sizes, bundle)) {
+        const sideDelta = after - S.sizes[bundle];
+        if (sideDelta <= limitOf(bundle, S.sizes[bundle])) {
+          notes.push(bundle + ": " + fmt(delta) + " over the track's base, but " + fmt(sideDelta) + " against master " + side.commit.slice(0, 12) + ": master's own growth, which passed this gate on master");
+          continue;
+        }
+      }
+      if (Object.hasOwn(N.sizes, bundle) && delta > limit) problems.push(bundle + ": growth " + fmt(delta) + " exceeds " + limit + " bytes " + (CONTENT_BUNDLES.includes(bundle) ? "(the examples content limit, 256,000 B)" : "(both 2% and 50,000 B)"));
     }
   }
   return { ok: problems.length === 0, problems, notes, rows };
@@ -312,9 +354,44 @@ const git = (...a) => execFileSync("git", a, { cwd: root, encoding: "utf8", maxB
 const arg = (name) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
 const event = () => process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")) : {};
 
+// The branch an event lands on: a pull request's or queue's base branch, a push's branch.
+export function targetBranch(name, ev, ref = process.env.GITHUB_REF) {
+  const strip = (r) => (typeof r === "string" ? r.replace(/^refs\/heads\//, "") : null);
+  if (name === "pull_request") return strip(ev.pull_request?.base?.ref);
+  if (name === "merge_group") return strip(ev.merge_group?.base_ref);
+  if (name === "push") return strip(ev.ref ?? ref);
+  return null;
+}
+
 // Bind to the tested event, never today's master tip. Dispatch compares with
 // the merge-base and does not require updating a branch just for size.
-export function testedTransition({ cwd = root, name = process.env.GITHUB_EVENT_NAME ?? "local", ev = event(), master = process.env.SIZE_DISPATCH_MASTER } = {}) {
+// A change into a track (track/*) that brings master commits in (master's merge-base with the tested commit isn't
+// in the track's base) is also measured against that master commit, its "side": evaluate's both-parents rule.
+export function testedTransition(opts = {}) {
+  const t = transitionOf(opts);
+  const { cwd = root, name = process.env.GITHUB_EVENT_NAME ?? "local", ev = event(), ref = process.env.GITHUB_REF } = opts;
+  if (t.mode !== "transition" || !t.base || name === "workflow_dispatch" || !(targetBranch(name, ev, ref) ?? "").startsWith("track/")) return t;
+  const g = (...a) => execFileSync("git", a, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim();
+  let tip = opts.master ?? process.env.SIZE_DISPATCH_MASTER;
+  if (!tip) {
+    const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/master"], { cwd, encoding: "utf8" });
+    if (r.status !== 0) throw new Error("a change into a track needs refs/remotes/origin/master (checkout fetch-depth: 0) to find the master it merges");
+    tip = r.stdout.trim();
+  }
+  // (the side is the newest commit on master's first-parent line that the tested commit contains: the master commit
+  // the change merges.  A mere common ancestor could be track work that master merged in turn, whose growth master's
+  // own merge may have resolved away; it is never a side)
+  // (only master's first-parent commits the change doesn't have are listed: the side is the first parent of the oldest,
+  // or the tip itself when there are none; a root commit has no first parent, so no side)
+  const newer = g("rev-list", "--first-parent", tip, "^" + t.merge).split("\n").filter(Boolean);
+  const side = !newer.length ? tip : spawnSync("git", ["rev-parse", "--verify", "--quiet", newer.at(-1) + "^1"], { cwd, encoding: "utf8" }).stdout.trim();
+  // (master as resolved, kept for every change into a track, so the gate job reaches the same answer as size-base)
+  if (!side) return { ...t, master: tip };
+  const inBase = spawnSync("git", ["merge-base", "--is-ancestor", side, t.base], { cwd }).status === 0;
+  return inBase ? { ...t, master: tip } : { ...t, side, master: tip };
+}
+
+function transitionOf({ cwd = root, name = process.env.GITHUB_EVENT_NAME ?? "local", ev = event(), master = process.env.SIZE_DISPATCH_MASTER } = {}) {
   const g = (...a) => execFileSync("git", a, { cwd, encoding: "utf8" }).trim();
   const merge = g("rev-parse", "HEAD");
   const parents = g("rev-list", "--parents", "-n", "1", merge).split(" ").slice(1);
@@ -323,8 +400,13 @@ export function testedTransition({ cwd = root, name = process.env.GITHUB_EVENT_N
     return { mode: "transition", merge, base: parents[0], head: parents[1] };
   }
   if (name === "merge_group") {
-    if (!parents[0] || ev.merge_group?.base_sha !== parents[0]) throw new Error("merge_group base is not HEAD^1");
-    return { mode: "transition", merge, base: parents[0], head: parents[1] ?? null };
+    // A cumulative queue head can contain earlier entries, so its base need not be HEAD^1:
+    // measure the whole group, from the queue's base to the tested commit, as one transition.
+    const { base_sha: base, head_sha: groupHead } = ev.merge_group ?? {};
+    if (!/^[0-9a-f]{40}$/.test(base ?? "") || groupHead !== merge) throw new Error("merge_group needs base_sha and a head_sha equal to the tested commit");
+    if (base === merge) throw new Error("merge_group base_sha is the tested commit");
+    g("merge-base", "--is-ancestor", base, merge);
+    return { mode: "transition", merge, base, head: merge };
   }
   if (name === "push" && ev.before && !/^0{40}$/.test(ev.before)) {
     g("merge-base", "--is-ancestor", ev.before, merge);
@@ -360,7 +442,7 @@ export function producerProblems(rec, commit, tree, job, env = process.env) {
 
 async function gate() {
   const t = testedTransition(), lines = ["## Per-change size comparison", "",
-    "Backstop: existing-bundle growth must exceed both 2% of the base and 50,000 bytes to fail. Equality passes. New bundles are reported, not gated.", ""];
+    "Backstop: existing-bundle growth must exceed both 2% of the base and 50,000 bytes to fail; the examples gallery's content (" + CONTENT_BUNDLES.join(", ") + "), fetched only when the gallery is opened, fails above 256,000 bytes. Equality passes. New bundles are reported, not gated.", ""];
   let result;
   try {
     if (process.argv.includes("--docs-only")) {
@@ -372,16 +454,18 @@ async function gate() {
     } else {
       const dir = arg("--records"), M = readRecord(dir, "merge-record.json");
       const N = t.base ? readRecord(dir, "base-record.json") : null;
+      const S = t.side ? readRecord(dir, "side-record.json") : null;
       const p = producerProblems(M, t.merge, git("rev-parse", t.merge + "^{tree}"), "checks");
       if (N) p.push(...producerProblems(N, t.base, git("rev-parse", t.base + "^{tree}"), "size-base"));
+      if (S) p.push(...producerProblems(S, t.side, git("rev-parse", t.side + "^{tree}"), "size-base"));
       if (M.key?.measure_sha256 !== sha256(readFileSync(SELF))) p.push("record measurement recipe is not this run's script");
       if (p.length) throw new Error(p.join("; "));
-      result = evaluate({ mode: t.mode, merge: { record: M }, base: N && { commit: t.base, record: N } });
+      result = evaluate({ mode: t.mode, merge: { record: M }, base: N && { commit: t.base, record: N }, side: S && { commit: t.side, record: S } });
     }
   } catch (e) { result = { ok: false, problems: [e.message], notes: [], rows: [] }; }
   result.tested = t;
   lines.push(result.ok ? "**PASS**" : "**FAIL**", "",
-    "tested merge " + t.merge + ", base " + (t.base ?? "-") + ", head " + (t.head ?? "-"), "",
+    "tested merge " + t.merge + ", base " + (t.base ?? "-") + ", head " + (t.head ?? "-") + (t.side ? ", master side " + t.side : ""), "",
     "| bundle | base | merge | delta | limit (B) | notes |", "|---|---:|---:|---:|---:|---|");
   const cell = (s) => String(s ?? "").replaceAll("|", "\\|").replace(/[\r\n]/g, " ");
   for (const r of result.rows) lines.push("| " + [r.bundle, r.base, r.merge, r.delta === undefined ? "" : fmt(r.delta), r.limit, r.note].map(cell).join(" | ") + " |");
@@ -417,6 +501,8 @@ async function cli() {
     out("mode", t.mode);
     if (t.master) out("master", t.master);
     if (t.base) out("base", t.base);
+    // (a master merge into a track: the master commit merged in is measured too)
+    out("side", t.side ?? "");
     // Rebuild once with this run's measurement recipe; no stored budgets,
     // cached baselines, old-key builds or epoch migration.
     out("need_new", String(!!t.base));

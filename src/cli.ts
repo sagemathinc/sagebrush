@@ -11,6 +11,7 @@ import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFile
 import { dirname, resolve, join } from "path";
 import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
+import { isatty } from "tty";
 import * as readline from "readline";
 import { PassThrough } from "stream";
 import { oneLine } from "./terminal-text";
@@ -435,8 +436,28 @@ function clearLine(rl: readline.Interface) {
   (rl as any).cursor = 0;
 }
 
+/** A disappearing terminal can report an I/O error before SIGHUP is delivered (in particular, readline writes
+ * its cursor after the visible prompt). Take the same exit path; other stream errors remain fatal. */
+function terminalHangup(hangup: () => void) {
+  const error = (e: NodeJS.ErrnoException) => {
+    if (e.code === "EIO" || e.code === "EPIPE" || e.code === "ECONNRESET") hangup();
+    else throw e;
+  };
+  process.stdin.on("error", error);
+  process.stdout.on("error", error);
+  return { error, dispose: () => {
+    process.stdin.off("error", error);
+    process.stdout.off("error", error);
+  } };
+}
+
 function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<number> {
   removeFiguresOnSignal();
+  const terminal = terminalHangup(() => {
+    removeFigures();
+    process.removeAllListeners("SIGHUP");
+    process.kill(process.pid, "SIGHUP");
+  });
   const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
   if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
   // (the session's step, shared with the Terminal's prompt: src/repl-step.ts; the language's library and
@@ -462,6 +483,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
   }
   // (completion in the prompt's language: src/interactive.ts completeIn)
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main, mode), history, historySize: 1000, terminal: process.stdin.isTTY });
+  rl.on("error", terminal.error); // (readline forwards input errors too)
   const ps1 = () => session.ps1();
   const ps2 = () => session.ps2();
   let buf: string[] = [];
@@ -474,6 +496,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
       done = true;
       R.stdout.flush();
       rl.close();
+      terminal.dispose();
       resolveExit(code);
     };
     rl.on("line", (line) => {
@@ -568,12 +591,19 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
   // (and out of it however this thread ends, an exception's end included)
   process.on("exit", () => raw(false));
   const removeFiguresHere = () => { if (figures !== null && !figures.kept) try { rmSync(figures.dir, { recursive: true, force: true }); } catch {} };
+  // Closing a pty does not invariably reach us as SIGHUP: a write to the
+  // vanished terminal can fail first and make Node exit with status 1.  The
+  // worker cannot then finish its own cleanup, so cover every ordinary exit
+  // in this front thread too (rmSync is deliberately safe to repeat).
+  process.on("exit", removeFiguresHere);
   const die = (sig: NodeJS.Signals) => {
     removeFiguresHere();
     raw(false);
+    void worker.terminate();
     process.removeAllListeners(sig);
     process.kill(process.pid, sig);
   };
+  const terminal = terminalHangup(() => die("SIGHUP"));
   // (Ctrl-C while an input runs, the key or a SIGINT: the flag, as the launcher sets it. Another while the first is
   // still unseen: within GRACE of it, the same press (a double tap lands both before any call could have polled);
   // from GRACE to 2 s, or one before the worker has handed over its flag: SIGINT's default action)
@@ -663,6 +693,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
       process.stdin.pause();
       raw(false);
       removeFiguresHere();
+      terminal.dispose();
       if (interrupted) return die("SIGINT");
       resolveExit(code);
     };
@@ -699,14 +730,23 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
         ask({ complete: line }).then((m) => cb(null, m.complete ?? [[], line]));
       };
       rl = readline.createInterface({ input: inp, output: process.stdout, completer, history, historySize: 1000, terminal: tty });
+      rl.on("error", terminal.error);
       let buf: string[] = [];
+      // (the next prompt; once readline has closed at the input's end, while its last line ran, the prompt is
+      // written as readline would have, and the close below ends the session)
+      let closed = false;
+      const promptWith = (p: string) => {
+        if (!closed) {
+          rl!.setPrompt(p);
+          rl!.prompt();
+        } else if (!tty) process.stdout.write(p);
+      };
       // (one line at a time, from feed: the next is given once this one is done)
       const take = async (line: string) => {
         buf.push(line);
         const src = buf.join("\n");
         if ((await ask({ incomplete: src })).incomplete) {
-          rl!.setPrompt(ps2);
-          rl!.prompt();
+          promptWith(ps2);
           return;
         }
         buf = [];
@@ -730,8 +770,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
             return close(st.end);
           }
         }
-        rl!.setPrompt(ps1);
-        rl!.prompt();
+        promptWith(ps1);
       };
       // (the line being taken: at the input's end, readline closes once it has its last line, which runs first)
       let taking: Promise<void> = Promise.resolve();
@@ -751,6 +790,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
         rl!.prompt();
       });
       rl.on("close", () => {
+        closed = true;
         taking.then(() => {
           if (done) return;
           if (tty) process.stdout.write("\n");
@@ -896,6 +936,12 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   }
   if (argv[0] === "--install-jupyter-kernel" || argv[0] === "--uninstall-jupyter-kernel") {
     process.exitCode = installKernel(argv.slice(1), argv[0] === "--uninstall-jupyter-kernel");
+    return;
+  }
+  // (sagebrush notebook run FILE.ipynb: src/notebook-run.ts; as `board`'s commands: `run` is the command unless a
+  // folder named run is here and nothing names a notebook, when it is still the server's folder)
+  if (argv[0] === "notebook" && argv[1] === "run" && argv.length > 2 && (argv.slice(2).some((a) => /\.ipynb$/i.test(a) || a === "-h" || a === "--help") || !existsSync("run"))) {
+    process.exitCode = await (await import("./notebook-run")).notebookRun(argv.slice(2));
     return;
   }
   if (argv[0] === "notebook" || argv[0] === "--notebook") {
@@ -1066,6 +1112,10 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     process.exitCode = await promptFront(given, lim);
     return;
   }
+  // (a program's stdin that is a pipe or a file: input() reads its lines, as CPython's does; a terminal's isn't read.
+  // isatty(0), never process.stdin: opening that stream puts a pipe in non-blocking mode, and stdin's readSync then
+  // spins on EAGAIN while a slow writer has nothing to send)
+  if (!interactive && !isatty(0)) R.stdinInput = true;
   const sys = R.importModule("sys");
   sys.argv.length = 0;
   sys.argv.push(cmd !== null ? "-c" : mod !== null ? mod : file ?? "", ...argv);
@@ -1086,23 +1136,26 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   if (!giveLimits(lim)) return;
   let code: number | null = null;
   let main: any = null;
-  if (cmd !== null && sprig) {
-    main = mainModule("<string>");
+  // (the __main__ of a -c program or of one on stdin, made first: with --sage, its `from sage_all import *` may
+  // raise, and that is reported as a program's own exception is, a traceback and exit status 1, never an
+  // unhandled rejection; nothing else runs then)
+  const named = cmd !== null ? "<string>" : mod === null && (file === null || file === "-") && !interactive ? "<stdin>" : null;
+  if (named !== null) code = guarded(() => void (main = mainModule(named)));
+  const started = code === null;
+  if (!started) {
+    // (the startup raised: reported, and the program doesn't run)
+  } else if (cmd !== null && sprig) {
     code = guarded(() => R.loader.exec(sprigSource(cmd!), main, "exec", "<string>", opts()));
   } else if (cmd !== null && rill) {
-    main = mainModule("<string>");
     code = guarded(() => R.loader.exec(rillSource(cmd!), main, "exec", "<string>", opts()));
   } else if (cmd !== null && isMatlab(null)) {
-    main = mainModule("<string>");
     const py = matlabSource(cmd, "<string>");
     // (a syntax error, reported: exit status 1)
     code = py === null ? 1 : guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
   } else if (cmd !== null && isMagma(null)) {
-    main = mainModule("<string>");
     const py = magmaSource(cmd, "<string>");
     if (py !== null) code = guarded(() => R.loader.exec(py, main, "exec", "<string>", opts()));
   } else if (cmd !== null) {
-    main = mainModule("<string>");
     code = guarded(() => R.loader.exec(helpSyntax(cmd!), main, "exec", "<string>", opts()));
   } else if (mod !== null) {
     code = guarded(() => {
@@ -1127,13 +1180,11 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   } else if (!interactive && isMatlab(null)) {
     // MATLAB on stdin (or `--matlab -`): a program, run as a file of it is, up to its first
     // error, which gives exit status 1, as `matlab -batch` does
-    main = mainModule("<stdin>");
     const src = readStdin();
     const py = src === null ? null : matlabSource(src, "<stdin>");
     code = py === null ? 1 : guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
   } else if (!interactive && isMagma(null)) {
     // Magma on stdin: a session, as `magma < file` is
-    main = mainModule("<stdin>");
     const src = readStdin();
     const py = src === null ? null : magmaSource(src, "<stdin>", "session");
     if (src === null) code = 1;
@@ -1141,17 +1192,19 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   } else if (!interactive) {
     // program on stdin
     const source = readStdin();
-    main = mainModule("<stdin>");
     code = source === null ? 1 : guarded(() => R.loader.exec(source, main, "exec", "<stdin>", opts()));
   }
   flushFiles();
   R.stdout.flush();
   R.stderr.flush();
-  if (interactive && (code === null || inspect)) {
-    main ??= mainModule("<stdin>");
-    // (the prompt speaks the program's language: --magma or --matlab, or that of the file -i ran)
-    const mode: ReplMode = isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python";
-    code = await (promptHost ? promptBack(main, quiet || inspect, mode) : repl(main, quiet || inspect, mode));
+  if (interactive && started && (code === null || inspect)) {
+    // (the prompt's __main__ if no program made one, made as a program's is: a --sage startup that raises ends here)
+    if (main === null) code = guarded(() => void (main = mainModule("<stdin>")));
+    if (main !== null) {
+      // (the prompt speaks the program's language: --magma or --matlab, or that of the file -i ran)
+      const mode: ReplMode = isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python";
+      code = await (promptHost ? promptBack(main, quiet || inspect, mode) : repl(main, quiet || inspect, mode));
+    }
   }
   flushFiles();
   R.stdout.flush();

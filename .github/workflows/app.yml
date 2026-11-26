@@ -6,14 +6,19 @@
 # environment's credentials) and checks it as a person's Mac will.
 name: app
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [master, "track/**"]
     # (a signed and notarized Mac app: mac-release below)
     tags: ["app-v*"]
     paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
+  # Required checks must also be reported for prose-only pull requests.
   pull_request:
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
     inputs:
       sign:
@@ -21,24 +26,24 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: read
-
 concurrency:
   group: app-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/track/') }}
 
 jobs:
-  # On a pull request or track ref, determine whether to build the four WebAssembly modules.  A pull request builds
-  # when it changes their inputs.  A track push or dispatch always builds (ci-paths.mjs's non-PR rule), so app.yml's
-  # integration run never depends on a deliberately unpublished track pin. Master keeps its existing published-module
-  # path and timing; tracks never receive the publishing credential.
+  # On a pull request, a queue group or a track ref, determine whether to build the four WebAssembly modules.  A pull
+  # request builds when it changes their inputs (scripts/ci-paths.mjs, wasm_build, the same rule as ci.yml's), since
+  # the modules its wasm/pins.json names aren't published until it merges.  A queue group, a track push and a
+  # dispatch always build (ci-paths.mjs's non-PR rule), so app.yml's integration and queue runs never depend on an
+  # unpublished pin.  Master keeps its existing published-module path and timing; tracks never receive the
+  # publishing credential.
   wasm-changes:
-    if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/track/'))
+    if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || startsWith(github.ref, 'refs/heads/track/'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       wasm_build: ${{ steps.paths.outputs.wasm_build }}
+      app_build: ${{ steps.paths.outputs.app_build }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -50,13 +55,15 @@ jobs:
         name: classify changed paths
         env:
           CI_PR_LABELS: ${{ github.event_name == 'pull_request' && join(github.event.pull_request.labels.*.name, ',') || '' }}
-        run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
+        # (PR CI light, the same checked-in switch as ci.yml's: a light pull request builds the app only when it changes
+        # it, scripts/ci-paths.mjs app_build)
+        run: CI_PR_LIGHT="$(head -n 1 .github/pr-ci-light 2>/dev/null | tr -d ' \t\r')" node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
 
   # (ci.yml's wasm-modules job, the same steps: the modules built, their pins checked, packed as wasm-modules-<sha>
   # for this run's page job, which checks the artifact and the pin policy as it installs it)
   wasm-modules:
     needs: wasm-changes
-    if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/track/')) && needs.wasm-changes.outputs.wasm_build == 'true'
+    if: github.repository == 'sagemathinc/sagebrush' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || startsWith(github.ref, 'refs/heads/track/')) && needs.wasm-changes.outputs.wasm_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -67,6 +74,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
@@ -85,8 +93,9 @@ jobs:
 
   page:
     needs: [wasm-changes, wasm-modules]
-    # (after them when they run, without them when they're skipped; never when either failed)
-    if: ${{ !cancelled() && github.repository == 'sagemathinc/sagebrush' && contains(fromJSON('["success", "skipped"]'), needs.wasm-changes.result) && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) }}
+    # (after them when they run, without them when they're skipped; never when either failed.  And not on a light pull
+    # request that doesn't change the app, app_build: then app-ci passes the skipped build, its merge group builds it)
+    if: ${{ !cancelled() && github.repository == 'sagemathinc/sagebrush' && contains(fromJSON('["success", "skipped"]'), needs.wasm-changes.result) && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && needs.wasm-changes.outputs.app_build != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -97,7 +106,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-          cache: pnpm
+          cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
       # (the four WebAssembly modules wasm/pins.json names: this run's build on a track ref or an engine-changing pull
       # request, else the published ones: design/wasm-artifacts.md sections 4 and 6)
       - uses: ./.github/actions/wasm-modules
@@ -145,6 +154,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: app/src-tauri
+          save-if: ${{ github.event_name != 'merge_group' }}
       # (`apt-get update` has hung silently: on Nov 1 and twice on Nov 10 it
       # printed nothing after "Get:5 ... jammy-security InRelease" until the
       # job's 40-minute timeout. On a passing run it takes 8-26 s (30 passes,
@@ -241,8 +251,15 @@ jobs:
           grep -q 'Bundling .*\.AppImage' /tmp/tauri-build.log || { echo "FAIL: no AppImage bundled"; exit 1; }
           cd "${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
           sha256sum -c --strict /tmp/appimage-tools-after.sha256
+      # (each self-test step bounded: the job's 40 min let a hung self-test hold its runner and the merge queue's entry
+      # 32 min, Nov 23 2026.  Linux: 25 green runs took at most 7.9 min and failing ones ended by themselves within 12.4
+      # (run.mjs bounds its main run at 6 min): 15.  macOS and Windows: at most 3.8 min green: 10)
+      # (the unstripped AppImage's self-test only on master and track pushes, a dispatch and the schedule: on a pull request
+      # and in the merge queue the stripped AppImage's below, which is what ships, is the one Linux self-test.  6.6 min
+      # each; CI job cuts, cut 2, William Nov 24 2026)
       - name: self-test (Linux, in a virtual display)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        timeout-minutes: 15
         run: xvfb-run -a node app/selftest/run.mjs ${{ matrix.exe }}
       # GTK's TIFF loader brings libtiff and libjbig (GPL-2+): removed, and
       # the stripped AppImage itself self-tested (DIST-F1)
@@ -256,15 +273,18 @@ jobs:
           APPIMAGETOOL=/tmp/appimagetool sh app/strip-appimage.sh app/src-tauri/target/release/bundle/appimage/*.AppImage
       - name: self-test the stripped AppImage
         if: runner.os == 'Linux'
+        timeout-minutes: 15
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: xvfb-run -a node app/selftest/run.mjs $(ls app/src-tauri/target/release/bundle/appimage/*.AppImage)
       - name: self-test
         if: runner.os != 'Linux'
+        timeout-minutes: 10
         run: node app/selftest/run.mjs ${{ matrix.exe }}
       # (and the built .app's own executable, so the engine it ships is the one that runs)
       - name: self-test the .app (the engine it ships)
         if: runner.os == 'macOS'
+        timeout-minutes: 10
         run: node app/selftest/run.mjs "$(ls -d app/src-tauri/target/release/bundle/macos/*.app)/Contents/MacOS/sagebrush-app"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
@@ -279,6 +299,33 @@ jobs:
             app/src-tauri/target/release/bundle/msi/*.msi
             app/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
+
+  app-ci:
+    if: always() && github.repository == 'sagemathinc/sagebrush'
+    needs: [wasm-changes, wasm-modules, page, app]
+    runs-on: ubuntu-latest
+    steps:
+      - name: require the page and every desktop platform to pass
+        env:
+          PAGE: ${{ needs.page.result }}
+          APP: ${{ needs.app.result }}
+          WASM_CHANGES: ${{ needs.wasm-changes.result }}
+          WASM: ${{ needs.wasm-modules.result }}
+          EVENT: ${{ github.event_name }}
+          APP_BUILD: ${{ needs.wasm-changes.outputs.app_build }}
+        run: |
+          # (a light pull request that changes no app file skips the build, scripts/ci-paths.mjs app_build: only then,
+          # and only both of its jobs, may be skipped)
+          if [ "$EVENT" = pull_request ] && [ "$APP_BUILD" = false ] && [ "$WASM_CHANGES" = success ]; then
+            [ "$PAGE" = skipped ] && [ "$APP" = skipped ] || exit 1
+            echo "app build: not run on this pull request (PR CI light, no app/ change); its merge group builds it"
+          else
+            [ "$PAGE" = success ] && [ "$APP" = success ] || exit 1
+          fi
+          case "$WASM" in success|skipped) ;; *) exit 1 ;; esac
+          case "$EVENT" in
+            pull_request|merge_group) [ "$WASM_CHANGES" = success ] || exit 1 ;;
+          esac
 
   mac-release:
     # (only on this repository, and only for a push of a tag app-v* or a dispatch that asks to sign: never on a pull
@@ -363,6 +410,17 @@ jobs:
           # (the identity must be in the keychain, by its exact name: a wrong SIGN_ID fails here, not at notarization)
           security find-identity -v -p codesigning "$keychain" | grep -qF "\"$SIGN_ID\"" || { echo "The signing identity is not in the imported certificates" >&2; exit 1; }
           echo "SAGEBRUSH_NOTARY_KEY=$api_key" >> "$GITHUB_ENV"
+      # (the Team ID the app is signed with, from the identity's exact name, compiled in by build.rs: the bundled
+      # agent's Node, which signing rewrites, is checked by its code signature and this team, src/agent_host.rs
+      # node_check; the self-test of the signed app below requires that check to pass. A Team ID isn't a secret)
+      - name: The signing Team ID
+        shell: bash
+        env:
+          SIGN_ID: ${{ secrets.SAGEBRUSH_MACOS_SIGN_ID }}
+        run: |
+          team=$(printf '%s' "$SIGN_ID" | sed -nE 's/^Developer ID Application: .+ \(([A-Z0-9]{10})\)$/\1/p')
+          [ -n "$team" ] || { echo "FAIL: the signing identity's name ends in no Team ID" >&2; exit 1; }
+          echo "SAGEBRUSH_MACOS_TEAM_ID=$team" >> "$GITHUB_ENV"
       # Tauri signs the app (hardened runtime, a secure timestamp), notarizes it with the API key and tries to staple it
       # (tauri-bundler's macOS signing: APPLE_SIGNING_IDENTITY, APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_PATH).
       # The app only: the disk image is made below, from the app once its ticket is stapled
@@ -460,7 +518,9 @@ jobs:
             app/src-tauri/target/release/bundle/dmg/*.dmg
             app/src-tauri/target/release/bundle/dmg/*.dmg.sha256
           if-no-files-found: error
-          retention-days: 14
+          # (a signed artifact is public in practice: any signed-in GitHub user can download it; one day is enough to move
+          #  it to the release)
+          retention-days: 1
       # (the keychain, the certificate file and the key file go, whatever happened above: their paths were fixed first)
       - name: Remove the credentials
         if: always()

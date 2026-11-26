@@ -19,6 +19,9 @@
 //      still arriving once its history is here; a notebook made in a second tab of the first reaches the other;
 //   9. the LaTeX page: an edit typed, and a notebook clicked in Files at once (within the editor's save delay): the
 //      edit is in the file on the first browser after the switch, and reaches the other.
+//  10. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell; a burst of
+//      notebooks made at once: the walks after them are given only those, and one opens in the other; one made while
+//      a data file is written every 300 ms, and one renamed at once, each opens in the other.
 // Before the reload (step 2a), a notebook made and typed in one browser reaches the other: each page's notebook sync
 // turns on by itself once sync is on and its client runs.  Every wait is bounded; a watchdog ends an overrunning run.
 //   bun web/build.ts, then CHROME=chromium bun web/workspace/test-dev-sync-tryit.mjs
@@ -89,7 +92,7 @@ const front = Bun.serve({
       const h = new Headers();
       // (content-length too: the reference server checks a blob's PUT against it, as the site's server does; a Request
       // made from an ArrayBuffer carries none, sync-docs' finding on run 3)
-      for (const k of ["cookie", "content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+      for (const k of ["cookie", "content-type", "content-length", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
       const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
       const r = await ref.fetch(new Request(ORIGIN + p + u.search, { method: req.method, headers: h, body }));
       const out = new Headers();
@@ -474,6 +477,69 @@ try {
     check(left && onA.includes("% A9tex"), `A: typed on the LaTeX page, a notebook clicked in Files at once: the notebook page is shown, and the edit is in the file (${J({ left, file: onA.slice(-40), dialogs: A.dialogs.splice(0) })})`);
     check(await B.until(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content).includes("% A9tex")).catch(() => false)`, 20_000), "…and B has it within 20 s");
   }
+  // ---- 10. a notebook made in A without being opened or typed in (Duplicate, as an upload or an agent's create makes
+  // one): A's page starts its synced history a moment after it is made, so B opens it with its cell
+  // (B's own walk, from here, by identity: the notebooks it hears of from the server aren't its to walk, step 10e)
+  await B.ev(`(window.__walkB10 = window.sagebrush?.startAll ?? null, 1)`);
+  const dup9 = await A.ev(`${W}.duplicate(${J(path7)}, "/dup9.ipynb").then((e) => e.path)`);
+  check(dup9 === "/dup9.ipynb", `A duplicates ${path7} without opening it (${J(dup9)})`);
+  check(await B.until(row("/dup9.ipynb"), 20_000), "B lists A's duplicate");
+  let reached9 = false;
+  for (let i = 0; i < 15 && !reached9; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/dup9.ipynb")?.click()`); reached9 = await B.until(B.has("w = 7"), 2000); }
+  check(reached9, `a notebook duplicated in A, never opened there, opens in B with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10b. a burst of notebooks made in A at once (an agent's creates), never opened there: each walk after them is
+  // given only notebooks just made (at most the five), never every notebook of A's again, and B opens one of them with its cell
+  const lib = await A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").length)`);
+  // (both of A's tabs hear the creates (A2 from step 8): the walks of either are sampled)
+  const tabs9b = [A, A2];
+  // (both of A's tabs quiet first: no walk of theirs ended for 3 s, so a walk still running from before (A2's load walk,
+  // step 10's duplicate) isn't taken for one after the burst)
+  for (let still = 0, last = null, t = Date.now(); still < 3 && Date.now() - t < 60_000; await sleep(1000)) {
+    const now = JSON.stringify(await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`))));
+    still = now === last ? still + 1 : 0;
+    last = now;
+  }
+  const before9b = await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)));
+  const burst = await A.ev(`(async () => { const out = []; for (let i = 1; i <= 5; i++) out.push((await ${W}.create("/burst" + i + ".ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "burst = " + i }] } })).path); return out; })()`);
+  check(Array.isArray(burst) && burst.length === 5, `A makes five notebooks at once (${J(burst)})`);
+  const walks = new Set();
+  for (let t = Date.now(); Date.now() - t < 10_000; ) { for (let i = 0; i < tabs9b.length; i++) { const r = await tabs9b[i].ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`); if (r !== before9b[i] && r !== "null") walks.add(i + ":" + r); } await sleep(200); }
+  // (listed: the candidate notebooks a walk was given, which the walk after a create is bounded by)
+  const listed = [...walks].map((x) => JSON.parse(x.slice(x.indexOf(":") + 1)).listed);
+  check(lib >= 10 && listed.length > 0 && listed.every((n) => n >= 1 && n < lib), `each walk after the burst was given only notebooks just made, never the whole library (listed ${J(listed)}; A has ${lib + 5} notebooks)`);
+  check(await B.until(row("/burst3.ipynb"), 20_000), "B lists A's burst");
+  let reachedB = false;
+  for (let i = 0; i < 15 && !reachedB; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/burst3.ipynb")?.click()`); reachedB = await B.until(B.has("burst = 3"), 2000); }
+  check(reachedB, `one of the burst opens in B with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10c. a notebook made in A while A keeps writing a data file every 300 ms (other changes): its walk isn't put off
+  // by them (the timer runs from the last create), and B opens it with its cell
+  const beforeQ = await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)));
+  await A.ev(`${W}.create("/noise.txt", { content: "0" }).then(() => 1, () => 1)`);
+  await A.ev(`${W}.create("/quiet.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "quiet = 1" }] } }).then((e) => e.path)`);
+  let walkedQ = false;
+  for (let i = 0; i < 20; i++) {
+    await A.ev(`${W}.write("/noise.txt", ${J("")} + Date.now()).then(() => 1, () => 1)`);
+    for (let k = 0; k < tabs9b.length && !walkedQ; k++) walkedQ = (await tabs9b[k].ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)) !== beforeQ[k];
+    await sleep(300);
+  }
+  check(walkedQ, "A writes a data file every 300 ms for 6 s after making a notebook: the notebook is walked meanwhile, not put off by the writes");
+  check(await B.until(row("/quiet.ipynb"), 20_000), "B lists /quiet.ipynb");
+  let reachedQ = false;
+  for (let i = 0; i < 15 && !reachedQ; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/quiet.ipynb")?.click()`); reachedQ = await B.until(B.has("quiet = 1"), 2000); }
+  check(reachedQ, `…and opens /quiet.ipynb with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10d. a notebook made in A and renamed at once (before the walk): followed by its id, it reaches B under its new
+  // name with its cell
+  const ren = await A.ev(`(async () => { const e = await ${W}.create("/ren.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "renamed = 1" }] } }); await ${W}.rename("/ren.ipynb", "/ren2.ipynb"); return (await ${W}.stat("/ren2.ipynb"))?.path ?? null; })()`);
+  check(ren === "/ren2.ipynb", `A makes /ren.ipynb and renames it to /ren2.ipynb at once (${J(ren)})`);
+  check(await B.until(row("/ren2.ipynb"), 20_000), "B lists /ren2.ipynb");
+  let reachedR = false;
+  for (let i = 0; i < 15 && !reachedR; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/ren2.ipynb")?.click()`); reachedR = await B.until(B.has("renamed = 1"), 2000); }
+  check(reachedR, `…and opens /ren2.ipynb, renamed before its walk, with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10e. B heard of all of those notebooks from the server (creates applied from it, each with its ref): B walks
+  // none of them (no walk at all since step 10: its result is the same object), so a device's first pull of a large
+  // library doesn't send its every notebook through a walk
+  await sleep(2500);
+  check(await B.ev(`window.sagebrush?.startAll === window.__walkB10`), "B, which only heard of A's new notebooks from the server, walks none of them");
   for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {
   fails.push("threw: " + String(e?.stack ?? e).slice(0, 600));

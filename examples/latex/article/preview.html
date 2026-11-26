@@ -47,7 +47,6 @@ body.sbft .tex-page:not(.tex-embed) .tex-home { display: inline; }
 .tex-page .tex-ed.nowrap .tex-src, .tex-page .tex-ed.nowrap .tex-hl { white-space: pre; overflow-wrap: normal; }
 .tex-page .tex-src { border: 0; outline: 0; resize: none; background: transparent; color: transparent; caret-color: #1d2330; z-index: 1; }
 .tex-page .tex-hl { color: #1d2330; pointer-events: none; overflow: hidden; }
-.tex-page .hl-line { min-height: 1.45em; }
 .tex-page .c-cmd { color: #2a4d9b; } .tex-page .c-cmt { color: #7a7a72; font-style: italic; } .tex-page .c-math { color: #8a3b12; } .tex-page .c-brace { color: #6b6b6b; } .tex-page .c-verb { color: #2b6b38; }
 .tex-page .tex-gone { margin: 40px auto; max-width: 40em; font-size: 15px; }
 .tex-page .tex-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; background: #fde7e3; border-bottom: 1px solid #e0a89c; font-size: 13px; }
@@ -265,6 +264,7 @@ body { margin: 0; background: #eef0f2; }
 .sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
 @media print {
   body { background: #fff; }
+  .sb-standalone .dmath { overflow: visible; }
   .sb-standalone .page.beamer { padding: 0; }
   .sb-standalone .page.beamer > .slide { margin: 0; border: none; box-shadow: none; break-after: page; break-inside: avoid; }
   .sb-standalone .page:not(.beamer) { box-shadow: none; margin: 0 auto; }

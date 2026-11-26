@@ -1675,7 +1675,7 @@ class Matrix:
             # 1 x 4096 has 2^24 entries)
             _shape(self.nrows(), other.ncols())
             if self._base is _sa().ZZ and other._base is _sa().ZZ and self.nrows() * self.ncols() * other.ncols() > 4096:
-                from sagebrush import linalg
+                from _sagebrush_lib import linalg
                 return Matrix(_sa().ZZ, linalg.matmul(self._rows, other._rows))
             cols = other._raw_columns()
             return Matrix(self._same(other), [[sum((a * b for a, b in zip(r, c)), 0) for c in cols] for r in self._rows], other.ncols())
@@ -1800,13 +1800,13 @@ class Matrix:
         if self._base is _sa().SR:
             import _sage_matrix_sr
             return _sage_matrix_sr.det(self)
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         return self._out(_norm(linalg.det(self._rows)))
 
     det = determinant
 
     def _rref(self):
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         return linalg.rref(self._rows)
 
     def rank(self):
@@ -1822,7 +1822,7 @@ class Matrix:
         if self._base is _sa().SR:
             import _sage_matrix_sr
             return _sage_matrix_sr.rank(self)
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         return linalg.rank(self._rows)
 
     def pivots(self):
@@ -1854,7 +1854,7 @@ class Matrix:
         if self._base is _sa().SR:
             import _sage_matrix_sr
             return _sage_matrix_sr.inverse(self)
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         return Matrix(_sa().QQ, linalg.inverse(self._rows))
 
     def charpoly(self, var="x", algorithm=None):
@@ -1867,7 +1867,7 @@ class Matrix:
         """
         if not self.is_square():
             raise ValueError("matrix must be square")
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         from _sage_poly import PolynomialRing
         return PolynomialRing(self._base, var)(linalg.charpoly(self._rows))
 
@@ -1935,7 +1935,7 @@ class Matrix:
         Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())], 1) if is_vec else B
         if Bm.nrows() != self.nrows():
             raise ValueError("number of rows of self must equal number of rows of right-hand side")
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         n = self.ncols()
         _shape(n, Bm.ncols())  # (the solution is n x k)
         if self.is_square() and n and self.rank() == n:
@@ -1966,7 +1966,7 @@ class Matrix:
 
     def echelon_form(self):
         """Over ZZ the Hermite form; over QQ the reduced row echelon form
-        (an empty matrix keeps its shape: astra's SAGE-940-2).
+        (an empty matrix keeps its shape: the review's SAGE-940-2).
 
         EXAMPLES::
 
@@ -1987,7 +1987,7 @@ class Matrix:
 
     def rref(self):
         """The reduced row echelon form over the fraction field: over ZZ
-        that is over QQ, not the Hermite form (astra's SAGE-940-3).
+        that is over QQ, not the Hermite form (the review's SAGE-940-3).
 
         EXAMPLES::
 
@@ -2142,7 +2142,7 @@ class Matrix:
             return (H, U) if transformation else H
         if transformation:
             raise NotImplementedError("hermite_form(transformation=True) is implemented over QQ only in sagebrush yet")
-        from sagebrush import nf
+        from _sagebrush_lib import nf
         h = nf.hermite_form(self._integer_rows())
         h += [[0] * self.ncols() for _ in range(self.nrows() - len(h))]
         return Matrix(_sa().ZZ, h, self._nc)
@@ -2206,7 +2206,7 @@ class Matrix:
                 return [self._rows[0][0]]
             k = self.rank()
             return [QQ(1)] * k + [QQ(0)] * (min(r, c) - k)
-        from sagebrush import nf
+        from _sagebrush_lib import nf
         d = nf.elementary_divisors(self._integer_rows())
         if self._base is ZZ and self.ncols() > 0:
             d = list(d) + [0] * (self.nrows() - len(d))
@@ -2261,7 +2261,7 @@ class Matrix:
 
     def _smith_field_reduce(self, K, m, n):
         # the reduced echelon form of [self | I]: (R, U) with U self = R
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         aug = [list(r) + [K(1) if i == j else K(0) for j in range(m)] for i, r in enumerate(self._rows)]
         rows, _ = linalg.rref(aug)
         return [list(r[:n]) for r in rows], [list(r[n:]) for r in rows]
@@ -2291,7 +2291,7 @@ class Matrix:
             NotImplementedError: LLL with delta > 99/100 is not implemented
         """
         from fractions import Fraction
-        from sagebrush import nf
+        from _sagebrush_lib import nf
         if delta is not None:
             d = Fraction(str(delta)) if isinstance(delta, float) else Fraction(delta)
             if not (Fraction(1, 4) < d <= 1):
@@ -2787,7 +2787,7 @@ class FreeModule_:
             [1 2 0]
             [0 0 1]
         """
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         rows = [[_F(x) for x in g] for g in _bounded_rows(gens)]
         if not rows:
             return FreeModule_(self._base, self._degree, [])
@@ -2808,7 +2808,7 @@ class FreeModule_:
             return False
         if not self._basis:
             return all(x == 0 for x in v)
-        from sagebrush import linalg
+        from _sagebrush_lib import linalg
         if linalg.rank(self._basis + [v]) != len(self._basis):
             return False
         if self._base is _sa().ZZ:
@@ -3078,7 +3078,7 @@ class _AmbientOther:
 
 def _kernel(a, base):
     """The right kernel of the matrix a over base."""
-    from sagebrush import linalg
+    from _sagebrush_lib import linalg
     n = a.ncols()
     if a.nrows() == 0:
         _shape(n, n)
@@ -3090,7 +3090,7 @@ def _kernel(a, base):
     if base is _sa().ZZ:
         # saturate: the rows of the Hermite form of [a^T | I] with zero
         # first part are the kernel's Hermite basis
-        from sagebrush import nf
+        from _sagebrush_lib import nf
         m = a.nrows()
         rows = [[int(a._rows[i][j]) for i in range(m)] + [int(j == t) for t in range(n)] for j in range(n)]
         h = nf.hermite_form(rows)
@@ -4667,7 +4667,7 @@ def numeric_roots(coeffs, ring):
     for c in coeffs:
         den = den * _F(c).denominator // math.gcd(den, _F(c).denominator)
     f = [int(_F(c) * den) for c in coeffs]
-    from sagebrush import nf
+    from _sagebrush_lib import nf
     # 25 digits, so that float() rounds the exact root correctly
     rts = nf.complex_roots(f, 25)
     RN = _sa().RealNumber

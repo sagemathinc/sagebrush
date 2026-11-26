@@ -13,6 +13,7 @@ import { openGallery } from "../examples/open";
 import { render as markdown } from "../markdown";
 import { loadRemotePicture } from "../safe-html";
 import { siteHref } from "../docs-link";
+import { desktopApp } from "../desktop-app";
 
 declare const __SB_LATEX_HOSTS__: string[];
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -21,41 +22,41 @@ declare const __SB_LATEX_TEST__: boolean | undefined;
 export function latexOn(host: string, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   return hosts.includes(host);
 }
-/** Whether this page is the desktop app's: app/src-tauri/src/lib.rs sets __SB_DESKTOP_APP__ there only (window.__TAURI__
- * is in the phone apps too; the CLI's page, on the same 127.0.0.1, has neither). */
-export const desktopApp = (w: any = globalThis) => !!w.__TAURI__ && w.__SB_DESKTOP_APP__ === true;
+// (whether this page is the desktop app's: its own module, ../desktop-app.ts, which every build has)
+export { desktopApp };
 /** Whether the editor is on here: on the build's hosts (latexOn), and in the desktop app. */
 export function latexHereFor(host: string, desktop: boolean, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   return desktop || latexOn(host, hosts);
 }
-/** Why Run doesn't run in the desktop app: its code would run in the app's interpreter, which has no sandbox. */
+/** Why Run doesn't run in the desktop app, where the page gives it no interpreter (the app's engine is its interpreter
+ * since #1540: index.html texSandbox; this is said only if that is missing). */
 export const APP_NO_RUN = "Run isn't available in the desktop app: to run this document's code, upload it, and the files it uses, to sagebrush.space and run it there in Chrome or Edge";
 
 // (the page module, from the site's root, where this page is: a variable, so the bundler leaves it to the browser)
 const PAGE = "/sagebrush-latex.js";
 const g: any = globalThis;
 const isTex = (e: Entry) => /\.tex$/i.test(e.path);
+// (to another page once the editor's edit is written: page.ts's leaveThen, once the editor is up)
+const leave = (url: string) => (g.__sbLeaveTo ? void g.__sbLeaveTo(url) : (g.__sbTexLeave ?? ((go: () => void) => go()))(() => location.assign(url)));
 /** New ▸ LaTeX document in `folder`: "Untitled.tex" (or "Untitled (2).tex", ...) there, opened in the editor. */
 export const texNew = (ws: Workspace, folder = "/") => import(PAGE).then((x) => x.newTex(ws, g.__sbTex, folder), (r) => alert(r));
-/** The LaTeX examples' list (the editor's "From an example…"; examples.ts). */
-export const texExamplesOpen = (ws: Workspace) => import(PAGE).then((x) => x.texExamples(ws, g.__sbTex), (r) => alert(r));
 /** The editor's File menu, drawn by the one File menu (filemenu.ts, as on the notebook and board pages: the same items
  * in the same order, U0) from this page's script, so the editor's chunk carries no copy of it: handed to the editor
  * at mount (its host's `fileMenu`). `print`: the editor's own Print or save as PDF; `close`: the menu closed. */
 function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close(): void; fid: string; text?(): string | null; save?(): Promise<void>; share?: TexShare | null }) {
   const go = (e: Entry, how: "here" | "tab" = "here") => {
     const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : e.kind === "notebook" ? "/?nb=" + encodeURIComponent(e.ref!) : isTex(e) && e.fid ? "/?tex=" + e.fid : null;
-    if (url) how === "tab" ? open(url, "_blank", "noopener") : location.assign(url);
+    if (url) how === "tab" ? open(url, "_blank", "noopener") : leave(url);
   };
   const top = async (base: string, ext: string) => { const at = new Set((await ws.list("/")).map((e) => e.path)); const p = freePath("/", base, ext, (x) => at.has(x)); if (!p) throw new Error("no free name"); return p; };
   const act: Record<string, () => unknown> = {
     texnb: async () => go(await ws.createByPerson(await top("Untitled", ".ipynb"), { mode: "python" })),
-    texboard: () => location.assign("/board/?new=python"),
+    texboard: () => leave("/board/?new=python"),
     texnew: () => texNew(ws),
     texfolder: async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
-    // (the examples gallery, LaTeX first, as the notebook and board pages have it (web/examples/open.ts); where the site
-    // has none, the LaTeX examples' own list)
-    texexamples: async () => { if (!(await openGallery(ws, go, "latex"))) await texExamplesOpen(ws); },
+    // (the examples gallery, LaTeX first, as the notebook and board pages have it (web/examples/open.ts), the only list
+    // of examples; where this page can't reach it, said)
+    texexamples: async () => { if (!(await openGallery(ws, go, "latex"))) alert("The examples aren't available here."); },
     texopen: () => openFilesDialog(ws, go),
     texprint: () => o.print(),
     // (Share…: the page's Share dialog for this .tex (latexBoot's `share`), its path as it is now; the dialog saves it
@@ -122,7 +123,10 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
     // (a fid is hex: nothing to encode)
     if (!isTex(e) || !e.fid) return false;
     const url = "/?tex=" + e.fid;
-    tab ? open(url, "_blank", "noopener") : location.assign(url);
+    // (in this tab by the page's way out: the notebook's save, the disk in the app, index.html leaveTo)
+    if (tab) open(url, "_blank", "noopener");
+    else if (g.__sbLeaveTo) void g.__sbLeaveTo(url);
+    else location.assign(url);
     return true;
   };
   // a .tex file's preview: the editor's button; disabled, saying why, for a file without a stable id
@@ -133,7 +137,7 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
     else { b.disabled = true; box.append(el("div", "This file can't open in the LaTeX editor yet: it hasn't been given a stable id.")); }
     box.append(b);
   };
-  // (a new LaTeX document and the LaTeX examples: texNew and texExamplesOpen above, which the page's File ▸ New, file
+  // (a new LaTeX document: texNew above, which the page's File ▸ New, file
   // panel and folder menus call (filemenu.ts NEW_ITEMS, browser.ts: U0); never a URL that makes a file)
   // a published document, read only (?tex-doc=/articles/<series>/<name>.tex; the page module's openDoc checks the path)
   const doc = p.get("tex-doc");
@@ -150,8 +154,8 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
 }
 
 /** The editor for file `fid` mounted in `root`, as /?tex=<fid> has it (latexBoot); the app's self-test mounts it the same
- * way (web/notebook/selftest-latex.js). In the desktop app (`app`): no Agent, as on its notebook page, and Run says why
- * it doesn't run (it has no sandbox: `sandbox` is null there, index.html's RUNNER). */
+ * way (web/notebook/selftest-latex.js). In the desktop app (`desktop`): no Agent, as on its notebook page; Run runs in
+ * the app's engine (`sandbox`, index.html texSandbox), and only without one says why it doesn't (`app`). */
 export async function mountTex(root: HTMLElement, ws: Workspace, fid: string, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null, share: TexShare | null | undefined, embed = false) {
-  await (await import(PAGE)).mount(root, { ws, fid, back: () => location.assign("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { app: APP_NO_RUN } : {}), ...(embed ? { embed: true } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
+  await (await import(PAGE)).mount(root, { ws, fid, back: () => leave("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { desktop: true, ...(sandbox ? {} : { app: APP_NO_RUN }) } : {}), ...(embed ? { embed: true } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
 }

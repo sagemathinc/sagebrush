@@ -6,6 +6,7 @@
 // Also in:  {files: [[path, bytes]]}   the page's saved files, as the worker starts
 //           {fsPut: path, data, tok?}  a file uploaded (data) or deleted (null) in the page (tok: its version's, the journal's)
 //           {fsWrite: {epoch, state, trees}}  what this document may change (confinement phase 2: below)
+//           {fsAskable: true}          the page answers a change a run waits on ({fsAsk} below); else refused at once
 //           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
 //                                       fetched when Python first reads them (web/shims/fs.ts)
 //           {init: {limits}}          the engine's limits (src/limits.ts), the
@@ -15,6 +16,7 @@
 //                                       or user code (plan-ff-limits r3)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
 //           {fsRefused: path, what, why}  a change refused (why: "refused", or "changed"; ready's `epoch`: its shared word)
+//           {fsAsk: {key, id, path, what, epoch}, buffer}  a change refused, asked while the run waits on buffer (below)
 //           {fsRename: {from, to, changes}}  a rename, every path it moves, as one change
 //           {id, target, input: {prompt, max, key}, buffer}  input() waits for a line
 //                                       (stdin below: the page answers in `buffer`)
@@ -61,6 +63,11 @@ declare const __SB_ND_HASH__: string;
 declare const __SB_MP_HASH__: string;
 (globalThis as any).__SAGEBRUSH_MP_URL__ = FILES ? FILES["sagebrush-mp.wasm"] : new URL("sagebrush-mp.wasm?h=" + __SB_MP_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_MP_SHA256__ = __SB_MP_HASH__;
+// the decision-tree kernel likewise, at the first sagebrush.skltree.dataset
+// (src/runtime/skltree.ts; the runner's broker may fetch it, web/runner-fetch.mts)
+declare const __SB_SKLTREE_HASH__: string;
+(globalThis as any).__SAGEBRUSH_SKLTREE_URL__ = FILES ? FILES["sagebrush-skltree.wasm"] : new URL("sagebrush-skltree.wasm?h=" + __SB_SKLTREE_HASH__.slice(0, 16), BASE).href;
+(globalThis as any).__SAGEBRUSH_SKLTREE_SHA256__ = __SB_SKLTREE_HASH__;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
@@ -139,6 +146,7 @@ const session = notebookSession((m) => postMessage(m), {
     begin: (m) => {
       adopt();
       running = true;
+      askRun = Number.isInteger(m.id) ? m.id : null;
       reads = new Set();
       writes = new Set();
       sources = new Set();
@@ -146,6 +154,7 @@ const session = notebookSession((m) => postMessage(m), {
     },
     end: () => {
       running = false;
+      askRun = null;
       adopt();
       return { ...(replayEnv.end() as any), ...(reads.size || writes.size || sources.size ? { files: { reads: [...reads], writes: [...writes], ...(sources.size ? { sources: [...sources] } : {}) } } : {}) };
     },
@@ -160,6 +169,41 @@ __hooks.changed = (path, data) => {
 };
 // (a change refused: the page shows its prompt for that path; `why` "changed": the permissions changed meanwhile)
 __hooks.refused = (path, what, why) => postMessage({ fsRefused: path, what, why });
+// A change outside what this document may change, asked of the person while the run waits (the write-wait design, SEC
+// ruling of Nov 22, 2026): {fsAsk: {key, id, path, what, epoch}, buffer}, and the run waits on its own buffer as input()
+// does (src/stdin-wait.ts: in slices, a Stop wins). A blocked worker takes no message, so the answer itself carries the
+// whole new policy: the buffer holds {key, policy: {epoch, state, trees}}, and its holder (the page, or the runner's
+// frame, or the engine) stores that epoch in the shared word BEFORE it writes the answer. It is adopted here, at once,
+// only if it names this request, is a policy, is newer than both the one held and the epoch the request was made at,
+// and the shared word holds exactly its epoch (a torn or stale answer: no). Anything else, end of input, or a Stop:
+// not allowed. One request at a time, and only from a run, whose id it carries (the page answers only a request of the
+// run in flight, never one of a run stopped or over); none without shared memory or outside a run (the refusal and the
+// prompt go on as before), nor before the holder says it answers them ({fsAskable: true}: the notebook page only).
+const ASK_MAX = 96 * 1024;
+const ASK_TAG = Math.random().toString(36).slice(2, 10);
+let askCount = 0, asking = false, askRun: number | null = null, askable = false;
+__hooks.ask = (path, what) => {
+  if (!askable || !epochWord || !policySet || asking || askRun === null || !(R.INTR.buffer instanceof SharedArrayBuffer)) return "unavailable";
+  asking = true;
+  try {
+    const buffer = new SharedArrayBuffer(8 + ASK_MAX);
+    const key = `${ASK_TAG}.${++askCount}`;
+    const from = Atomics.load(epochWord, 0);
+    postMessage({ fsAsk: { key, id: askRun, path, what, epoch: from }, buffer });
+    const got = waitForLine(buffer, R.INTR);
+    if (typeof got !== "string") return "denied";
+    let a: any = null;
+    try { a = JSON.parse(got); } catch {}
+    if (!a || typeof a !== "object" || a.key !== key) return "denied";
+    const pol = policyOf(a.policy);
+    if (!pol || pol.epoch <= from || pol.epoch <= (held?.epoch ?? 0) || Atomics.load(epochWord, 0) !== pol.epoch) return "denied";
+    held = pol;
+    pending = null;
+    return "allowed";
+  } finally {
+    asking = false;
+  }
+};
 // What this document may change (confinement phase 2, write trees; design: PACKET-r3, astra's and daybreak3's DESIGN
 // CLEAR): the page sends {fsWrite: {epoch, state, trees}} before anything runs, and again at every change of it.
 // - One word shared with whoever holds this worker (the page, or the runner's frame) holds only the epoch: the holder
@@ -321,6 +365,12 @@ self.onmessage = async (ev: MessageEvent) => {
   }
   // (the older form, {fsWritable: boolean}, still sent where nothing is scoped (the LaTeX editor's Run keeps its session
   // read-only with it): a policy of off or on, at the next epoch, taken as {fsWrite} is)
+  // (the page can answer a change a run waits on (the notebook page's prompt): asked only once it says so; any other
+  // holder (an agent's run, the LaTeX editor's) never answers one, and its refusals go on as before, at once)
+  if (m.fsAskable === true) {
+    askable = true;
+    return;
+  }
   if (typeof m.fsWritable === "boolean") {
     const next = Math.max(held?.epoch ?? 0, pending?.epoch ?? 0, epochWord ? Atomics.load(epochWord, 0) : delivered) + 1;
     m = { fsWrite: { epoch: next, state: m.fsWritable ? "on" : "off", trees: m.fsWritable ? ["/"] : [] } };

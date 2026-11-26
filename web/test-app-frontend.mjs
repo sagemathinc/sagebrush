@@ -85,9 +85,22 @@ try {
   ok(r.status === 1 && r.out.includes("lib/other: in app/dist but not the worker's"), "a directory in lib/ the worker does not name: refused");
   rmSync(join(copy, "lib", "other"), { recursive: true });
 
+  // the examples gallery (app/build-examples.ts), File > Examples…'s only list: its catalog and each example's
+  // files.json, each refused when the copy leaves it out
+  ok(/the examples gallery with [1-9]\d*\)/.test(check().out), "the examples gallery is in app/dist and checked");
+  renameSync(join(copy, "examples", "index.json"), join(dir, "index.json"));
+  r = check();
+  ok(r.status === 1 && r.out.includes("examples/index.json: missing from app/dist"), "the gallery's catalog left out: refused");
+  renameSync(join(dir, "index.json"), join(copy, "examples", "index.json"));
+  const ex0 = JSON.parse(readFileSync(join(copy, "examples", "index.json"), "utf8")).examples[0].id;
+  renameSync(join(copy, "examples", ex0, "files.json"), join(dir, "files.json"));
+  r = check();
+  ok(r.status === 1 && r.out.includes(`examples/${ex0}/files.json: missing from app/dist`), "an example's files.json left out: refused");
+  renameSync(join(dir, "files.json"), join(copy, "examples", ex0, "files.json"));
+
   // the Terminal (William, Oct 30: in the desktop and Android apps): the page's module, its worker and the bash set,
   // each refused when the copy leaves it out (#358 shipped the menu item without them)
-  ok(/checked, [1-9]\d* by a relative path; the Terminal's set with [1-9]\d* packages?\)/.test(check().out), "the Terminal's module, worker and set are in app/dist and checked");
+  ok(/checked, [1-9]\d* by a relative path; the Terminal's set with [1-9]\d* packages?[;)]/.test(check().out), "the Terminal's module, worker and set are in app/dist and checked");
   const page = join(copy, "index.html");
   const html = readFileSync(page, "utf8");
   // (the page's script is its own file, sagebrush-app.js (web/build.ts): the import is there, and the check reads it too)
@@ -106,7 +119,9 @@ try {
   r = check();
   ok(r.status === 1 && r.out.includes(`pkgset/${S}.json: missing from app/dist`), "the set's index left out: refused");
   back();
-  const pkg = readdirSync(join(copy, "pkg"))[0];
+  // (the package the Terminal's set pins: pkg/ holds other sets' packages too, so not merely its first file)
+  const shellSet = JSON.parse(readFileSync(join(copy, "pkgset", `${S}.json`), "utf8"));
+  const pkg = `${Object.values(shellSet.packages)[0].js.sha256}.json`;
   back = moveAway(`pkg/${pkg}`);
   r = check();
   ok(r.status === 1 && r.out.includes(`pkg/${pkg} (`) && r.out.includes("missing from app/dist"), "the set's package left out: refused");

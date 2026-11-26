@@ -219,3 +219,145 @@ An agent whose hello (or agent.ready) lists the feature `chat.resume` keeps each
 - **The page** has a fake-server harness: a loopback WebSocket that pairs and sends verbs.
 - **End to end,** in headless Chrome: a page pairs with the real server, and the tools act on its workspace.
 - **Conformance:** both sides validate against `schema.json`. A test fails when the package's copy of the schema differs from the generated one.
+
+## 6. Delegate tasks (`delegate.1`)
+
+*Agreed Nov 21, 2026, between the agent side (sagebrush-agent) and the page; the security review cleared the design. A Delegate task is the agent's own copy of some documents, worked on and run on this computer by the agent, and proposed back as a diff; the person merges, closes, or asks for changes. The person's documents change only through the page's Merge: no method below writes the workspace.*
+
+### 6.1 Requests, values and events
+Every method, field, bound and error below is closed: anything not listed is refused (`bad_request`). Both sides validate against it, on the wire and on disk.
+
+**Transport.** These are JSON-RPC 2.0 requests from the page to the agent; until now only the agent sent requests (§2, §4).
+- **Request:** `{jsonrpc: "2.0", id: "p<n>", method, params}`.
+  - `n` is a decimal counter, at most 2^53 − 1.
+  - The `p` prefix keeps the page's ids apart from the agent's own.
+- **Answer:** `{jsonrpc: "2.0", id, result}` or `{jsonrpc: "2.0", id, error: {code: -32000, message, data: {code: <one of the errors below>}}}`.
+- **Bounds and failures:**
+  - at most 8 pending page requests;
+  - each `tasks.*` request, and each answer's raw frame as sent or received (UTF-8 bytes, the envelope and whitespace included), at most 4 MiB (4,194,304 bytes); over it, the receiver refuses it `too_large` before any of it is used. The pairing's other frames keep their own bound;
+  - an answer to an unknown id is dropped;
+  - every pending request is rejected when the socket closes;
+  - the page's timeout is 30 s (120 s for `tasks.start` and `tasks.merged`).
+- **Allowed only when** the hello's features list `delegate.1` **and** the pairing's grant holds `delegate: true` (§6.2). Otherwise every `tasks.*` is refused `forbidden`.
+- `tasks.*` is refused on any transport but the loopback pairing in M1 (`unavailable`).
+- `task.event` stays a notification from the agent.
+
+**Values** (on the wire and on disk):
+
+| Value | Rule |
+|---|---|
+| `task` | 32 lowercase hex |
+| `commit` | 40 lowercase hex. A commit a request names (`tasks.diff`, `tasks.file`, `proposal` in a decision) must be this task's `base` or one of its stored proposal rounds (`refs/heads/base`, `refs/tags/round-<n>`), exactly: no other ref, no ancestor walk, no revision expression |
+| `blob` | 40 lowercase hex. **A stored blob** (`base_blob`, `proposal_blob`, and `tasks.file`'s answer) must be exactly the blob at that path in that named base or proposal commit of this task. **A fresh blob** (`mine.blob`, `merged.blob` in `tasks.merged`) needs no reachability at all: the host checks `content`'s bounds, recomputes the hash of its bytes, and refuses unless they are equal (`bad_request`). A fresh hash is a check on the bytes sent with it, never a way to name or read any stored object |
+| `path` | the path rules below; at most 2,000 per task |
+| `kind` | `"notebook"` (path ends `.ipynb`) or `"file"` |
+| `content` | a notebook: its `.ipynb` text (the page's `toIpynb`, with `metadata.sagebrush.seed`); a file: UTF-8 text, or `{base64}` for other bytes. A document is at most 4 MiB, all of a request's documents together at most 4 MiB. A document's `blob` is always the git blob id (SHA-1 of `blob <n>\0` + the bytes) of the UTF-8 bytes of `content`, or of the decoded bytes for `{base64}`; both sides check exactly that |
+| `seq`, `round`, `qid`, `revision` | safe integers ≥ 0 (seq) or ≥ 1 (the others), only increasing |
+| `merge_id`, `answer_id` | 32 lowercase hex, made by the page, kept across retries |
+| `title` | ≤ 200 chars |
+| `prompt`, `note` | ≤ 64 KB |
+| answer `text` | ≤ 16 KB |
+| `status` | `working`, `proposal`, `merged`, `closed`, `failed`, `interrupted` |
+
+**Paths** (incoming documents, the agent's tools, and on disk):
+- relative and normalized, with no `..` and no absolute paths;
+- no drive, UNC or `:` (ADS) forms, and no reserved names (`CON`, `NUL`, `COM1`…);
+- no component named `.git` (any case) or `.sagebrush`;
+- no case collisions within a task;
+- each component at most 255 bytes, each path at most 1,024.
+
+**Errors** (`data.code`):
+- `bad_request`
+- `forbidden`
+- `not_found`
+- `stale` (the task moved past what the request names)
+- `conflict` (a ref or state isn't as expected)
+- `too_large`
+- `busy` (a limit: running, queued, tasks kept, budget)
+- `unavailable` (transport, platform, runner)
+- `withdrawn`
+- `final` (the task is merged, closed or failed)
+
+**Requests:**
+
+| Method | params | result | Checks |
+|---|---|---|---|
+| `tasks.start` | `{title, prompt, target: "local", run: bool, docs: [{path, kind, content}]}` | `{task, base, seq}` | `run` is frozen into the grant (§6.2); `run: true` is refused as `unavailable` when the runner is unavailable |
+| `tasks.list` | `{}` | `{tasks: [{task, title, status, target, run, round, seq, proposal: commit\|null, question: bool, updated, reason?, reason_code?}]}` | at most 64 entries; `reason` and `reason_code` only for an `interrupted` task, and only to a page that announced `tasks.reason` |
+| `tasks.get` | `{task, after: seq}` | `{task: <list entry>, events: [{seq, event}], last: seq, reset: bool}` | events after `after`, at most 4 MiB per answer, so `last` may be short of the task's `seq`: a long log is read by repeating with `after = last` until `last` equals `task.seq`; `reset` when `after` is unknown |
+| `tasks.diff` | `{task, commit}` | `{task, base, commit, round, seq, files: [{path, kind, change: "added"\|"modified"\|"deleted", base_blob: blob\|null, blob: blob\|null}]}` | `commit` is a proposal commit of this task, pinned by the caller; never "the latest" |
+| `tasks.file` | `{task, commit, path}` | `{blob, content}` | the page checks that the git blob id of `content`'s bytes equals `blob` |
+| `tasks.merged` | `{task, proposal: commit, seq, merge_id, files: [{path, kind, proposal_blob: blob\|null, mine: {blob, content}\|{absent: true}\|null, merged: {blob, content}\|{absent: true}\|null}]}` | `{recorded: "merge"\|"receipt", commit: commit\|null}` | `proposal` and `seq` current, or `stale`; `files` names exactly the paths the proposal changed (`tasks.diff` of that commit), each `proposal_blob` as there: `null` exactly for a path the proposal deletes; idempotent by the exact request (below); the outcomes below |
+| `tasks.close` | `{task, proposal: commit\|null, seq}` | `{status}` | `stale` if moved |
+| `tasks.ask` | `{task, proposal: commit, seq, note, current: [{path, kind, content}]}` | `{status, round}` | `stale` if moved; `current` only the task's own paths |
+| `tasks.stop` | `{task}` | `{status}` | stops the turn and the run; the task becomes `interrupted` |
+| `tasks.revoke` | `{task}` | `{status}` | `closed`; the grant is void, and queued work is dropped |
+| `tasks.resume` | `{task, note?}` | `{status}` | only from `interrupted`, with the frozen grant; `note` (0.8.13): text of at most 64 KiB, for the resumed turn only |
+| `tasks.answer` (M2) | `{task, qid, revision, answer_id, text}` | `{accepted: bool, current: bool}` | §6.4 |
+
+**`tasks.merged`'s two outcomes:**
+- **Idempotency binds the exact request.** The host keeps, per `merge_id`, the SHA-256 of the request's canonical JSON (keys sorted) and the answer it gave.
+  - The same `merge_id` with the same bytes (a retry after a lost ack) gets the same answer, and nothing is recorded twice.
+  - The same `merge_id` with any other payload is refused `conflict`.
+  - A new `merge_id` for a task that already recorded a merge is refused `final`.
+- **`proposal_blob: null`** means the proposal deletes that path. Its `merged` is then `{absent: true}` if the person took the deletion, or `{blob, content}` if they kept their file, and its `mine` is what the page reports: bytes, `{absent: true}`, or `null`.
+- **`{absent: true}` is full information.** The file isn't on that side: the person deleted it since the base (`mine`), or the merge removes it (`merged`). The commit then simply leaves it out.
+- **`merge`:** every file's `mine` and `merged` is either its full bytes or `{absent: true}`. The host builds `mine-<n>` and the merge commit from exactly that, as reported.
+- **`receipt`:** when any `mine` or `merged` is `null` ("not sent"), or for remote targets. A metadata-only record (the hashes, and "content not sent"), **never** a commit labeled as the merge.
+
+**Events (`task.event {task, seq, event}`):**
+- the chat turn events (as `agent-chat/events.ts`), and:
+- `{type: "task_status", status, reason?, code?}`. `code` is present only when the status is `interrupted`, and only for a page that announced `tasks.reason` in `page.features`; the task log keeps it always. It is one of:
+  - `no_proposal`: the turn completed with no change in the copy;
+  - `unproposable`: it completed with changes the store refused;
+  - `stopped`: the person's Stop;
+  - `switched_off`: the Delegate switch turned off;
+  - `limit`: the transcript bound, the disk, or the 24-hour limit;
+  - `failed`: the turn ended in an error;
+  - `restarted`: the agent restarted while the task was working.
+  A page that doesn't know a code shows a plain interruption. A page without `tasks.reason` gets exactly the shapes it had before.
+- A turn whose result Claude Code marks as an error (`is_error`) sends Claude's text as an ordinary message, then `turn_error {code: "is_error", message: "Claude ended the turn with an error"}`;
+- `{type: "proposal", round, base, commit, files}`, with files as in `tasks.diff`;
+- **M2:**
+  - `{type: "question", qid, revision, text, blocking, choices?}`;
+  - `{type: "question_withdrawn", qid, revision}`;
+  - `{type: "question_answered", qid, revision, answer_id, current}`.
+
+### 6.2 Authority: the Delegate switch, a task's grant, and who may act
+- **Delegate is its own capability, granted explicitly.** A pairing doesn't get it by being a pairing.
+  - The page's grant gains `delegate: true` only when the person turns on "Allow Delegate tasks on this computer" in the pairing screen. The scope is that agent installation's tasks.
+  - **The switch is disclosed as what it is:** it lets this page read every existing Delegate task of this installation, and make the person's decisions on them (Merge recording, Close, Ask, Stop, Revoke, Resume).
+  - **It is checked on every `tasks.*` call.**
+  - **Turning it off** (a grant change without it, or a revoke of the pairing) does two things at once:
+    - **it revokes the pairing's Delegate capability immediately:** that pairing can't start, list, read or decide any task;
+    - **it stops every active and queued Delegate turn and run** of the installation that the switch had allowed, and they become `interrupted`, not closed.
+  - **Closing tasks for good is a separate, explicit choice:** `tasks.revoke` per task, or a "Close all tasks" action the page offers beside the switch. Closing tasks never leaves the authority to start new ones active, and turning the switch off never closes a task by itself.
+  - A pairing without it gets no `tasks.*` and sees no tasks.
+  - Pair grants are unchanged.
+- **A task's grant is frozen at `tasks.start`:** `{docs: [paths], run: bool, scope: <installation id>, created}`.
+  - The host validates it, and records it in its control state and in the task's first (base) commit, which is immutable; control state that disagrees with the base commit makes the task `failed`.
+  - Closing a tab doesn't revoke it, and no reconnect, resume or later Pair grant widens or changes it.
+  - `tasks.revoke` voids it.
+  - The agent's model can't write the control state, and nothing in the task's working copy is read as authority.
+- **Statuses and transitions:**
+  - `working -> proposal | failed | interrupted | closed`;
+  - `proposal -> working` (Ask) `| merged | closed`;
+  - `interrupted -> working` (resume) `| closed`;
+  - `question` is a flag on `working`, not a state.
+  - Each transition is checked and written atomically: the host records its intent first, and finishes or drops it after a crash.
+  - `merged`, `closed` and `failed` are final.
+- **Person-only decisions** (merged, close, ask, answer, resume, stop, revoke) are pairing requests, never model tools.
+
+### 6.3 What M1 offers
+- Target `local` only, over the loopback pairing only: every `tasks.*` is refused `unavailable` on any other transport.
+- `tasks.answer` and the question events are defined here (§6.4) and come in M2.
+
+### 6.4 Questions
+- `ask_person` returns a `qid`. Each question has a `revision`, from 1 and only increasing.
+  - `revise_question` adds a revision, keeping every earlier wording.
+  - `withdraw_question` sets `withdrawn`, which is final.
+- **An answer names `{task, qid, revision, answer_id}`.** The text is at most 16 KB, and it is accepted at most once per `answer_id`.
+  - An answer to the current revision satisfies it.
+  - An answer to an older revision is recorded, and the agent is told, labeled: "answered revision N; the question is now revision M". **It never satisfies a revised blocking question**, which keeps waiting.
+  - An answer to a withdrawn question is refused (`withdrawn`), and never reinstates it.
+- Questions and answers are content, never permission or execution approvals.

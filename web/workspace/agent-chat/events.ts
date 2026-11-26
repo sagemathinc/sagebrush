@@ -35,6 +35,8 @@ export type TurnEvent = { seq: number; turn_id: string } & (
   | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string; detail?: string; instance?: string }
   | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff" | "notebook" | "board"; title: string; lang?: string; body: string; path?: string }
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
+  // (W3: the model and thinking level the turn runs with, as the agent's backend reported them; either may be absent)
+  | { type: "turn_info"; model?: string; effort?: string }
   | { type: "turn_error"; code: string; message: string }
   | { type: "turn_finished"; outcome: TurnOutcome; code?: string }
 );
@@ -117,6 +119,9 @@ export interface Turn {
   outcome?: TurnOutcome;
   error?: { code: string; message: string };
   usage?: { input_tokens: number; output_tokens: number };
+  // (W3: the model and thinking level of this turn, from its turn_info events: each field as the last one that carried
+  //  it said; absent until one comes, and never carried from another turn)
+  info?: { model?: string; effort?: string };
   started: number;
   finished?: number;
   // set for a turn of an agent on the person's computer (else the scripted demo's)
@@ -136,6 +141,11 @@ export interface Thread {
   // came from; the page's applied_seq above is its own, separate from these
   agent_seq?: number;
   agent_instance?: string;
+  /** #1792: the artifacts whose tabs the person closed (their ids): kept with the chat; opening one again brings its tab
+   *  back */
+  closed?: string[];
+  /** a conversation read back from the account's mirror (M2): shown, read-only; nothing in it is ever sent to an agent */
+  source?: "mirror";
 }
 
 export function newThread(id: string, title: string): Thread {
@@ -173,6 +183,17 @@ export const langOf = (v: unknown): string | undefined => (typeof v === "string"
 export const count = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
 /** A record's own entry for `k`, never one inherited (an id like "__proto__" or "toString"). */
 export const own = <T,>(rec: Record<string, T> | undefined, k: string): T | undefined => (rec && Object.hasOwn(rec, k) ? rec[k] : undefined);
+
+// A Claude sign-in failure: the agent's closed reasons for it, said in the page's own words whatever text came with
+// them, so Claude Code's own text (with its advice about a long-lived token) is never what the page shows (#1804). The
+// one next step is `claude auth login`, on the computer running the agent (where Claude Code runs; this page may be
+// on another device).
+const SIGN_IN_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  claude_login_expired: "Your Claude sign-in expired. On the computer running your agent, run `claude auth login` in a terminal, then send your message again.",
+  claude_not_signed_in: "Claude Code isn't signed in on the computer running your agent. There, run `claude auth login` in a terminal, then send your message again.",
+});
+/** A turn's error as the page says it: a sign-in reason in the page's words alone, any other as "Error: " and its text. */
+export const errorLine = (code: string, message: string): string => own(SIGN_IN_WORDS, code) ?? `Error: ${message}`;
 const put = <T,>(rec: Record<string, T>, k: string, v: T) => { Object.defineProperty(rec, k, { value: v, writable: true, enumerable: true, configurable: true }); };
 /** A web card's own fields, each kept only in a form the view knows and within its bound (a stored thread's too). */
 function webCard(e: any): Partial<Attention> {
@@ -220,7 +241,8 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
     }
     case "thinking_delta":
       if (last?.kind === "thinking") last.text += e.text;
-      else turn.parts.push({ kind: "thinking", text: e.text });
+      // (a thinking block whose text isn't shown streams deltas with none: no part until some text comes, #1789)
+      else if (e.text.trim()) turn.parts.push({ kind: "thinking", text: e.text });
       break;
     case "tool_call_started":
       put(turn.tools, e.call, { call: e.call, tool: e.tool, name: e.name, summary: webSummary(e.name, e.summary), status: "running", output: "" });
@@ -262,6 +284,14 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       // (a fresh object of the two counts, each finite and not negative; without an output count, none)
       if (count(e.usage?.output_tokens) !== undefined) turn.usage = { input_tokens: count(e.usage.input_tokens) ?? 0, output_tokens: count(e.usage.output_tokens)! };
       break;
+    case "turn_info": {
+      if (turn.outcome) break; // (a finished turn's info is what it ran with: nothing said after its end)
+      // (only well-formed fields, as the agent bounds them: a model id as given, never mapped to a name)
+      const model = typeof e.model === "string" && /^[A-Za-z0-9._:\/@[\]-]{1,128}$/.test(e.model) ? e.model : undefined;
+      const effort = typeof e.effort === "string" && /^[a-z0-9]{1,16}$/.test(e.effort) ? e.effort : undefined;
+      if (model !== undefined || effort !== undefined) turn.info = { ...turn.info, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) };
+      break;
+    }
     case "turn_error":
       turn.error = { code: e.code, message: e.message };
       break;

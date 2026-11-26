@@ -385,7 +385,7 @@ compromises are unnecessary.
 6. **Automatic file tracking: adopted** (writer-to-reader edges from the
    filesystem layer).
 
-7. **Budget default: 2 s.**
+7. **Budget default: 10 s** (2 s at first: too short for research math).
 8. **Mutation tracking: adopted** (version counters in the runtime; a cell
    that mutates another cell's object becomes its updater). See "What owning
    the parser and the runtime buys", 3.
@@ -421,7 +421,7 @@ web/test-reactive.mjs (60 browser checks).
 | Widgets | lib/ipywidgets `_report` | the cells reading a moved widget's names rerun. (anywidget: not adopted.) |
 | Fix for redefinitions | src/rename.ts | "Rename the later definitions of x (x_2, …)", keeping a Jupyter notebook's meaning; scope-aware; Sage through the preparser. |
 | Agents | notebook.js applyEdits/graph/verify; WebMCP edit_notebook, notebook_graph, verify_notebook | |
-| UI | index.html | Auto-run (2 s, 10 s, always, never; per notebook), Run stale, manual cells (cell menu), edited marks, errors with fixes. |
+| UI | index.html | Auto-run (10 s, 2 s, always, never; per notebook), Run stale, manual cells (cell menu), edited marks, errors with fixes. |
 | marimo's format | web/notebook/marimo.js | File > Open reads marimo .py notebooks (identical to marimo's parser on its 198 example notebooks, 1,805 cells); File > Download as marimo writes them (marimo reads all 198 back identically). lib/marimo: mo.md (rendered Markdown output), mo.ui controls (as widgets: moving one reruns its readers), hstack/vstack, stop, state, so imported notebooks run. |
 | TimeTravel | index.html replayResumed | a reactive notebook resumes a version by recomputing it, with its files as they were: no "Cannot resume here". |
 
@@ -543,6 +543,42 @@ How (src/notebook-reactive.ts effectiveCodes, src/rename.ts):
     statement on the first statement's line, so tracebacks keep the cell's
     line numbers. Other hosts (the CPython differential driver, Jupyter
     kernels) run the line as written.
+- **MATLAB cells** (src/rename-matlab.ts, November 2026). They have the
+  same scoping, and William hit its absence in a notebook of MATLAB examples.
+  Each example set its own `x`, `y`, `nx` and `max_iter`; he split the
+  Mandelbrot cell into a setup cell and a loop cell. The loop cell then read
+  names three cells defined, and filled the setup cell's array with
+  `M(r, c) = iter`. Every one of them was an error.
+  - **Occurrences** are found in the MATLAB lexer's tokens, not in the
+    translation. They are names, not field names (`s.x`), function handles
+    (`@x`), strings, comments or command-syntax words. A function defined
+    in the cell has its own workspace, so its names are kept.
+  - **The new name** is `xʹ2`, the same as in Python, so the notebook's
+    machinery (`taken`, `scoped`, forget) is unchanged. The MATLAB lexer
+    accepts U+02B9 and digits only as such a suffix, which no MATLAB name
+    can have. The runtime shows such a name as written
+    (lib/_matlab.py `_written`), in a displayed value (`M =`) and in an
+    error message.
+  - **The previous value.** A first store that reads the previous value
+    (`M(r, c) = v`, `s.a = v`, `c{2} = v`) or may not run (in an `if`, a
+    loop or a `try`; a `for` loop's or a `catch`'s variable) starts the new
+    name from the previous value. It is a prefix of the cell's first line,
+    `if exist('M', 'var'), Mʹ2 = M; end; `, so line numbers are kept, and
+    every occurrence in the cell is renamed. An unbound previous name leaves
+    the new one unbound, as MATLAB's would be. Otherwise the statement that
+    first stores the name reads the previous one (`x = x + 1` becomes
+    `xʹ2 = x + 1`), as in Python.
+  - **Refused**, keeping marimo's error and its fix:
+    - a name used as a command (`x on`), named by an anonymous function's
+      parameter, or declared `global` or `persistent`;
+    - a cell using eval, evalin, evalc, assignin, exist, clear, clearvars,
+      save, load, who, whos, inputname or isvarname where a string or a
+      command's word names it, since these reach the workspace by name;
+    - a first line that opens a block comment, because nothing can go before
+      it.
+  - **Known limit:** `who`, `whos` and `save` without names list every
+    definition, the later ones as `xʹ2`.
+  - The "Rename the later definitions" fix works for MATLAB too, as `x_2`.
 - Names that cannot be renamed (Magma) keep marimo's error and its fix.
 - marimo's rule otherwise: a name nobody reads may be defined by several
   cells (#1477), and the same import in several cells is not a conflict.

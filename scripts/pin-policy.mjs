@@ -7,6 +7,9 @@
 //   pull request into master.
 // - On a track (onTrack): a push or dispatch on track/*, and a pull request into track/*.  Every reader there uses
 //   this run's fresh build, labelled fresh and never recorded as pinned; nothing is published.
+// - A merge queue group (merge_group) is what lands on its target branch, so it is strict like a push there: strict
+//   into master, on a track when the queue targets track/*.  The target comes from the queue's ref,
+//   gh-readonly-queue/<target>/pr-<n>-<sha>; a ref of any other shape is strict.
 // - Otherwise (another pull request into master, a local run): as before, a warning, and only a pull request's
 //   engine test jobs may run a fresh build.
 // check-fresh-wasm.mjs, wasm-artifact.mjs (and so wasm-publish.mjs), wasm-fetch-or-build.mjs and ci-paths.mjs all
@@ -28,14 +31,20 @@ export function runRefs(env = process.env) {
   };
 }
 
+// (a merge queue group's target branch, from its gh-readonly-queue/<target>/pr-<n>-<sha> ref, or null)
+const QUEUE_REF = /^gh-readonly-queue\/(.+)\/pr-\d+-[0-9a-f]{40}$/;
+export const queueTarget = (ref) => QUEUE_REF.exec(branchOf(ref))?.[1] ?? null;
+
 export function isStrict({ event, ref = "", baseRef = "", headRef = "" }) {
   if (RUN_EVENTS.has(event)) return !isTrack(branchOf(ref));
+  if (event === "merge_group") return !isTrack(queueTarget(ref));
   if (PULL_EVENTS.has(event)) return baseRef === "master" && isTrack(headRef);
   return false;
 }
 
 export function onTrack({ event, ref = "", baseRef = "" }) {
   if (event === "push" || event === "workflow_dispatch") return isTrack(branchOf(ref));
+  if (event === "merge_group") return isTrack(queueTarget(ref));
   if (PULL_EVENTS.has(event)) return isTrack(baseRef);
   return false;
 }

@@ -1,7 +1,7 @@
 """The Agents page's real agent leg (web/workspace/agent-relay.ts), its pairing and its permission cards, against a real
 runner, end to end (Chat here): the page runs under bun (remote_agent_page.mjs) with a real WebCrypto key and real DPoP
 proofs, its socket bridged over stdio to this test, which plays the relay (test_remote_relay's FakeRelay) in front of a
-RelayRunner whose agent is the vendored sagebrush-agent 0.7.6 (its fake model). Checked:
+RelayRunner whose agent is the vendored sagebrush-agent 0.8.18 (its fake model). Checked:
 - chat turns with the page's workspace verbs;
 - "search": the permission card, Allow with the page's digest, and the agent's "You allowed"; a wrong digest, and a
   right action's digest under another request_id, refused;
@@ -169,7 +169,7 @@ async def test_chat_search_digest_and_limits_with_the_vendored_agent():
     try:
         p = await paired_page(run)
         child = p.ev("paired")[0]["child"]
-        assert child and p.ev("paired")[0]["agent"]["version"] == "0.7.6", p.ev("paired")
+        assert child and p.ev("paired")[0]["agent"]["version"] == "0.8.18", p.ev("paired")
         # (a 7 MiB write: refused inside the agent as an error result; the leg kept; the next turn works)
         events = await turn(run, p, "big 7340032", "m0")
         done = [e for e in events if e["type"] == "tool_call_finished"]

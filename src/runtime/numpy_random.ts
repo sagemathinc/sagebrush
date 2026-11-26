@@ -9,7 +9,7 @@ import * as Obj from "./object";
 import * as O from "./ops";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype } from "./numpy";
-import { glibcLog as crlog, glibcExp, glibcLog1p, LOG_TABLES, EXP_TABLES } from "./libm";
+import { glibcLog as crlog, glibcExp, glibcLog1p, glibcPow, LOG_TABLES, EXP_TABLES } from "./libm";
 import { KI, WI, FI, KE, WE, FE, ZIGGURAT_NOR_R, ZIGGURAT_NOR_INV_R, ZIGGURAT_EXP_R } from "./ziggurat_data";
 import { wasmRandom } from "./kernels";
 
@@ -333,6 +333,40 @@ function loggam(x: number): number {
   }
   return gl;
 }
+// RandomState's gamma (NumPy's legacy_standard_gamma): Marsaglia and Tsang's method from the legacy gauss for a
+// shape of at least 1, the legacy rejection method below 1 (its pow and log glibc's), the exponential at 1
+function legacyStandardGamma(g: MT19937, shape: number): number {
+  if (shape === 1.0) return -crlog(1.0 - g.nextDouble());
+  if (shape === 0.0) return 0.0;
+  if (shape < 1.0) {
+    for (;;) {
+      const U = g.nextDouble();
+      const V = -crlog(1.0 - g.nextDouble());
+      if (U <= 1.0 - shape) {
+        const X = glibcPow(U, 1.0 / shape);
+        if (X <= V) return X;
+      } else {
+        const Y = -crlog((1 - U) / shape);
+        const X = glibcPow(1.0 - shape + shape * Y, 1.0 / shape);
+        if (X <= V + Y) return X;
+      }
+    }
+  }
+  const b = shape - 1.0 / 3.0;
+  const c = 1.0 / Math.sqrt(9 * b);
+  for (;;) {
+    let X: number, V: number;
+    do {
+      X = legacyGauss(g);
+      V = 1.0 + c * X;
+    } while (V <= 0.0);
+    V = V * V * V;
+    const U = g.nextDouble();
+    if (U < 1.0 - 0.0331 * (X * X) * (X * X)) return b * V;
+    if (crlog(U) < 0.5 * X * X + b * (1.0 - V + crlog(V))) return b * V;
+  }
+}
+
 function poisson(g: Gen, lam: number): number {
   if (lam >= 10) {
     const slam = Math.sqrt(lam), loglam = crlog(lam);
@@ -366,17 +400,30 @@ newBuiltinModule("_nprandom", (m) => {
   const wasm = (g: Gen, dist: number, a: NDArray, lo = 0, rng = 0): boolean => {
     if (!(a.data instanceof Float64Array)) return false;
     if (g instanceof MT19937) {
-      const meta = Float64Array.of(g.pos, g.hasGauss ? 1 : 0, g.gauss);
-      if (!wasmRandom("mt", g.key, meta, dist, a.data, lo, rng, RANDOM_TABLES)) return false;
+      // (the key a copy, as the PCG words are: the generator changes only when every chunk is made, so a fill that
+      //  falls back to JavaScript starts from the generator as it was)
+      const key = Uint32Array.from(g.key), meta = Float64Array.of(g.pos, g.hasGauss ? 1 : 0, g.gauss);
+      if (!inChunks(a.data, (out) => wasmRandom("mt", key, meta, dist, out, lo, rng, RANDOM_TABLES))) return false;
+      g.key.set(key);
       [g.pos, g.hasGauss, g.gauss] = [meta[0], meta[1] !== 0, meta[2]];
       return true;
     }
     const words = BigUint64Array.of(g.state & M64, g.state >> 64n, g.inc & M64, g.inc >> 64n);
     const meta = Float64Array.of(g.hasU32 ? 1 : 0, g.u32);
-    if (!wasmRandom("pcg", words, meta, dist, a.data, lo, rng, RANDOM_TABLES)) return false;
+    if (!inChunks(a.data, (out) => wasmRandom("pcg", words, meta, dist, out, lo, rng, RANDOM_TABLES))) return false;
     g.state = words[0] | (words[1] << 64n);
     [g.hasU32, g.u32] = [meta[0] !== 0, meta[1]];
     return true;
+  };
+  // (the module's memory holds one chunk of the output at a time, never all of it, so an array of more than 4 GiB of
+  //  draws is made where there is no array cap (numpy.ts ARRAY_LIMITS), past WebAssembly's 4 GiB: the same stream, the
+  //  generator's state carried from chunk to chunk in `state` and `meta`; the last part takes the rest, up to twice a
+  //  chunk, so none is below the kernel's least length. A chunk the kernel refuses makes the whole fill JavaScript's, from the start.)
+  const inChunks = (out: Float64Array, go: (part: Float64Array) => boolean): boolean => {
+    if (out.length <= 2 * randomChunk) return go(out);
+    let i = 0;
+    for (; out.length - i >= 2 * randomChunk; i += randomChunk) if (!go(out.subarray(i, i + randomChunk))) return false;
+    return go(out.subarray(i));
   };
   const fill = (size: any, dt: string, f: () => number, g?: Gen, dist = -1, lo = 0, rng = 0): any => {
     const sh = shape(size);
@@ -402,6 +449,7 @@ newBuiltinModule("_nprandom", (m) => {
   fn("doubles", (g: Gen, size: any) => fill(size, "float64", () => g.nextDouble(), g, 0));
   fn("legacy_gauss", (g: MT19937, size: any) => fill(size, "float64", () => legacyGauss(g), g, 1));
   fn("legacy_exponential", (g: MT19937, size: any) => fill(size, "float64", () => -crlog(1.0 - g.nextDouble()), g, 2));
+  fn("legacy_gamma", (g: MT19937, shape: any, size: any) => fill(size, "float64", () => legacyStandardGamma(g, O.fv(shape) ?? Number(shape))));
   fn("poisson", (g: Gen, lam: any, size: any) => fill(size, "int64", () => poisson(g, O.fv(lam) ?? Number(lam))));
   // integers in [low, high] (inclusive) by the legacy masked method or Lemire's
   fn("bounded", (g: Gen, low: any, high: any, size: any, lemire: any) => {
@@ -491,5 +539,14 @@ newBuiltinModule("_nprandom", (m) => {
   });
   fn("next32", (g: Gen) => g.next32());
 });
+
+// Draws made by the WebAssembly kernel a chunk at a time: 2**24 draws (128 MiB) a chunk, the last part up to 2**25 (256 MiB)
+let randomChunk = 2 ** 24;
+/** (tests only: a smaller chunk, so a chunked fill's stream can be compared with one call's) */
+export function setRandomChunk(n: number): number {
+  const was = randomChunk;
+  randomChunk = n;
+  return was;
+}
 
 export { NDArray };

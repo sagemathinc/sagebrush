@@ -1,0 +1,17 @@
+{
+ "title": "Arrays, numeric types and sparse matrices (MATLAB)",
+ "summary": "Logical indexing, N-dimensional arrays, integer and single precision arithmetic, and sparse matrices.",
+ "tags": [
+  "basics",
+  "programming",
+  "linear algebra"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

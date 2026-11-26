@@ -1,0 +1,213 @@
+{
+ "recorded": "2026-11-25, once, by hand, 3 s or more apart; first 512 bytes and headers only",
+ "user_agent": "Sagebrush test-fixture recorder (one-off, a handful of requests; arXiv proxy tests; https://sagebrush.space)",
+ "origin": "https://sagebrush.space",
+ "rows": [
+  {
+   "request": "GET https://export.arxiv.org/src/1612.00125v2",
+   "at": "2026-11-25T12:48:59Z",
+   "status": 404,
+   "headers": [
+    [
+     "Connection",
+     "close"
+    ],
+    [
+     "Content-Length",
+     "126"
+    ],
+    [
+     "Server",
+     "Varnish"
+    ],
+    [
+     "Retry-After",
+     "0"
+    ],
+    [
+     "Content-Type",
+     "text/html"
+    ],
+    [
+     "Accept-Ranges",
+     "bytes"
+    ],
+    [
+     "Date",
+     "Wed, 25 Nov 2026 12:48:59 GMT"
+    ],
+    [
+     "Via",
+     "1.1 varnish"
+    ],
+    [
+     "X-Served-By",
+     "cache-dfw-kdfw8210164-DFW"
+    ],
+    [
+     "X-Cache",
+     "MISS"
+    ],
+    [
+     "X-Cache-Hits",
+     "0"
+    ],
+    [
+     "X-Timer",
+     "S1795610939.468861,VS0,VE117"
+    ],
+    [
+     "Strict-Transport-Security",
+     "max-age=300"
+    ]
+   ],
+   "first_bytes_b64": "PCFET0NUWVBFIGh0bWw+CjxodG1sPgogIDxoZWFkPgogICAgPG1ldGEgY2hhcnNldD0iVVRGLTgiPgogICAgPHRpdGxlPjQwNDwvdGl0bGU+CiAgPC9oZWFkPgogIDxib2R5PgogICAgNDA0CiAgPC9ib2R5Pgo8L2h0bWw+",
+   "first_bytes_len": 126,
+   "case": "withdrawn"
+  },
+  {
+   "request": "HEAD https://export.arxiv.org/src/1612.00125v9",
+   "at": "2026-11-25T12:49:03Z",
+   "status": 404,
+   "headers": [
+    [
+     "Connection",
+     "close"
+    ],
+    [
+     "Content-Length",
+     "126"
+    ],
+    [
+     "Server",
+     "Varnish"
+    ],
+    [
+     "Retry-After",
+     "0"
+    ],
+    [
+     "Content-Type",
+     "text/html"
+    ],
+    [
+     "Accept-Ranges",
+     "bytes"
+    ],
+    [
+     "Date",
+     "Wed, 25 Nov 2026 12:49:03 GMT"
+    ],
+    [
+     "Via",
+     "1.1 varnish"
+    ],
+    [
+     "X-Served-By",
+     "cache-dfw-kdfw8210059-DFW"
+    ],
+    [
+     "X-Cache",
+     "MISS"
+    ],
+    [
+     "X-Cache-Hits",
+     "0"
+    ],
+    [
+     "X-Timer",
+     "S1795610943.111302,VS0,VE113"
+    ],
+    [
+     "Strict-Transport-Security",
+     "max-age=300"
+    ]
+   ],
+   "first_bytes_b64": "",
+   "first_bytes_len": 0,
+   "case": "missing-version"
+  },
+  {
+   "request": "GET https://export.arxiv.org/src/2504.00698v2",
+   "at": "2026-11-25T12:52:34Z",
+   "status": 200,
+   "headers": [
+    [
+     "Connection",
+     "close"
+    ],
+    [
+     "Content-Length",
+     "4801556"
+    ],
+    [
+     "via",
+     "1.1 varnish, 1.1 varnish, 1.1 varnish"
+    ],
+    [
+     "etag",
+     "\"sha256:6338fa646bed83af11b301b66a611066703bc9c0ae5dc0ad77ac07c44fa5ca37\""
+    ],
+    [
+     "x-cloud-trace-context",
+     "a26c173636d7d7a244a580adcf7995d7"
+    ],
+    [
+     "content-disposition",
+     "attachment; filename=\"arXiv-2504.00698v2.pdf\""
+    ],
+    [
+     "last-modified",
+     "Sun, 25 Oct 2026 12:30:25 GMT"
+    ],
+    [
+     "access-control-allow-origin",
+     "*"
+    ],
+    [
+     "content-type",
+     "application/pdf"
+    ],
+    [
+     "server",
+     "Google Frontend"
+    ],
+    [
+     "Accept-Ranges",
+     "bytes"
+    ],
+    [
+     "Age",
+     "0"
+    ],
+    [
+     "Date",
+     "Wed, 25 Nov 2026 12:52:35 GMT"
+    ],
+    [
+     "X-Served-By",
+     "cache-lga-kjfk8660063-LGA, cache-lga-kjfk8660063-LGA, cache-lga-kjfk8660063-LGA, cache-dfw-kdfw8210164-DFW"
+    ],
+    [
+     "X-Cache",
+     "MISS, MISS, MISS"
+    ],
+    [
+     "X-Cache-Hits",
+     "0, 0, 0"
+    ],
+    [
+     "X-Timer",
+     "S1795611155.136184,VS0,VE434"
+    ],
+    [
+     "Strict-Transport-Security",
+     "max-age=300"
+    ]
+   ],
+   "first_bytes_b64": "JVBERi0xLjUKJb/3ov4KMzUwMCAwIG9iago8PCAvTGluZWFyaXplZCAxIC9MIDQ4MDE1NTYgL0ggWyAzNjY0IDEyNjggXSAvTyAzNTA1IC9FIDIwMjIxMSAvTiA1NSAvVCA0NzgwMjc2ID4+CmVuZG9iagogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAKMzUwMSAwIG9iago8PCAvVHlwZSAvWFJlZiAvTGVuZ3RoIDEyMiAvRmlsdGVyIC9GbGF0ZURlY29kZSAvRGVjb2RlUGFybXMgPDwgL0NvbHVtbnMgNSAvUHJlZGljdG9yIDEyID4+IC9XIFsgMSAzIDEgXSAvSW5kZXggWyAzNTAwIDE5MSBdIC9JbmZvIDI0NjcgMCBSIC9Sb290IDM1MDIgMCBSIC9TaXplIDM2OTEgL1ByZXYgNDc4MDI3NyAgICAgICAgICAgICAgIC9JRCBbPGVhMDQ0NDc5NWZiZGUzOWUyN2E1ZmM1NmQ0YTgxMjMxPjxlODQ2MDQwM2I2YzM3ZTAyNjBlNGNlOGMyOWZhYWNkZT5dID4+CnN0cmVhbQp4nGNiZGA=",
+   "first_bytes_len": 512,
+   "case": "pdf-only"
+  }
+ ]
+}

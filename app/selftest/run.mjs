@@ -46,7 +46,7 @@
 //
 //   node app/selftest/run.mjs <the app's executable>
 import { spawn } from "node:child_process";
-import { mkdtempSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as httpCreateServer } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -104,7 +104,8 @@ if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(j
 // (web/workspace/persist-probe.ts).  The first makes a data file, a notebook, a board and a setting, waits until they
 // are on disk (and times a large notebook's, board's and data file's write-through), and exits; its file and its
 // setting must be in the data folder (settings.json).  Between the launches another program (this test) changes the
-// data file on disk; the second must find all four, the data file as changed, at its other origin, then deletes
+// data file on disk, and allows the notebook to change a folder (grants.json); the second must find all four, the data
+// file as changed and the notebook still allowed there (another id now), at its other origin, then deletes
 // them and finds them gone from disk, the setting gone from settings.json.  Each launch also checks the page has
 // cross-origin isolation and SharedArrayBuffer in the page and a worker (OPFS said only).  Then the controls: the
 // same with the first launch's write-through left out, and with the second's import left out: each must fail.
@@ -131,13 +132,17 @@ async function twoLaunches(control) {
   const settingKept = existsSync(settings) && JSON.parse(readFileSync(settings, "utf8"))["sagebrush-files-sort"] === "probe-" + token;
   if (!onDisk) console.log(`launch 1's data file isn't on disk as written: ${file}`);
   if (!settingKept) console.log(`launch 1's setting isn't in ${settings}`);
+  // (and the notebook's file permission, in grants.json by its path: web/workspace/grants-file.ts)
+  const grantsFile = join(data, "grants.json");
+  const grantKept = existsSync(grantsFile) && readFileSync(grantsFile, "utf8").includes(JSON.stringify(`ws:/sagebrush-persist-${token}.ipynb`));
+  if (!grantKept && one.code === 0) console.log(`launch 1's file permission isn't in ${grantsFile}`);
   if (onDisk) writeFileSync(file, token + "-edited");
   const two = one.code === 0 && onDisk && settingKept ? await launch({ SAGEBRUSH_APP_PERSIST: `check:${token}`, SAGEBRUSH_APP_PORT: String(b), SAGEBRUSH_APP_DATA_DIR: data, ...(control === "no-import" ? { SAGEBRUSH_APP_DISK_CONTROL: control } : {}) }) : null;
   console.log(`launch 2 (port ${b}${control === "no-import" ? ", no import" : ""}): ${two ? `${persistLine(two)} (exit ${two.code})` : "not run"}`);
   const differ = !!one.origin && !!two?.origin && one.origin !== two.origin;
   const settingGone = two?.code === 0 && existsSync(settings) && JSON.parse(readFileSync(settings, "utf8"))["sagebrush-files-sort"] === undefined;
   return {
-    kept: one.code === 0 && onDisk && settingKept && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ && settingGone,
+    kept: one.code === 0 && onDisk && settingKept && grantKept && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ && settingGone,
     // (the first launch's probe ran to its end, healthy: the files made, the page's capabilities there)
     firstHealthy: one.code === 0 && /^ok persist: made /m.test(one.out),
     onDisk,
@@ -216,6 +221,39 @@ if (passed) {
     const why = control === "open" ? c.topLoaded && !c.reached.length : c.topLoaded && topReached;
     console.log(why ? `the control ${control === "open" ? "showed the exact-origin grant holding on its own" : "failed, for its reason, as it must: the other origin's page reached the commands"}` : `FAIL the control didn't show its reason (${control === "open" ? "the other origin's page loaded, refused the commands" : "the other origin's page loaded and reached the commands"}): ${c.line}`);
     passed &&= why;
+  }
+}
+// Two windows (#1541: app/src-tauri/src/windows.rs; web/workspace/persist-probe.ts, "windows"): a launch with
+// SAGEBRUSH_APP_PERSIST=windows:<token>.  The first window leaves a marker in its localStorage, sessionStorage and
+// IndexedDB and opens a second, which must see none of them (each window its own storage: on Windows, its own WebView2
+// data folder), must find the first's file on disk, must be told the first window has that file open, and whose report,
+// a file it writes, must reach the first as another window's change.  A window's web view data folder
+// (<data>/webviews/<label>) goes when it closes, or at the next launch: after the app exits none may be left, but on
+// Windows, whose web view may still hold its folder then; and after the next launch (the control, the same data folder,
+// opening no second window) none at all.  The control ("windows:<token>:same"): the second window's reading done in the
+// first itself, which sees its own markers: the check must fail, for that reason.
+async function windowsLaunch(control, data) {
+  const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const res = await launch({ SAGEBRUSH_APP_PERSIST: `windows:${token}${control ? ":same" : ""}`, SAGEBRUSH_APP_DATA_DIR: data }, 120000);
+  const left = existsSync(join(data, "webviews")) ? readdirSync(join(data, "webviews")) : [];
+  const line = persistLine(res);
+  console.log(`launch${control ? " (the second window's reading done in the first)" : ""}: ${line} (exit ${res.code})${left.length ? `; web view data folders left: ${left.join(", ")}` : ""}`);
+  return { line, code: res.code, left };
+}
+if (passed) {
+  console.log("\ntwo windows: each its own storage, the same files");
+  const data = mkdtempSync(join(tmpdir(), "sagebrush-app-data-"));
+  const r = await windowsLaunch(false, data);
+  const good = r.code === 0 && /^ok persist: windows at /m.test(r.line) && (!r.left.length || process.platform === "win32");
+  console.log(good ? "the second window saw nothing of the first's storage, and the same files" : `FAIL ${r.left.length ? "a window's web view data folder was left after the app quit" : "the two-window check failed (above)"}`);
+  passed = good;
+  if (passed) {
+    console.log("\nthe control: the same, the second window's reading done in the first (must fail, for that reason)");
+    const c = await windowsLaunch(true, data);
+    const why = c.code === 1 && /^FAIL persist: windows at .*saw the first's marker in local, session, idb/m.test(c.line);
+    console.log(why ? "the control failed, for its reason, as it must" : `FAIL the control didn't fail for its reason (the markers seen): ${c.line}`);
+    if (c.left.length) console.log("FAIL the last launch's web view data folders weren't removed at this launch");
+    passed &&= why && !c.left.length;
   }
 }
 process.exit(passed ? 0 : 1);

@@ -10,6 +10,8 @@ export interface ComposerHooks {
   stop(): void;
   render(src: string): string;
   typeset(el: Element): void;
+  /** after every change of the text the person makes (not one set by the page) */
+  changed?(value: string): void;
 }
 
 // (whether the thread shown has a turn running, as last rendered: then the primary action steers it where its agent
@@ -24,7 +26,8 @@ export function mountComposer(h: ComposerHooks): BlockEditor {
   const editor = new BlockEditor("", {
     render: h.render,
     typeset: h.typeset,
-    placeholder: "Message Claude…  (Shift+Enter to send)",
+    placeholder: "Message Claude…",
+    onChange: (v) => { keysShown(v); h.changed?.(v); },
     onKey(e) {
       if (e.key !== "Enter") return false;
       if (e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return (e.preventDefault(), primary(), true);
@@ -34,6 +37,11 @@ export function mountComposer(h: ComposerHooks): BlockEditor {
     },
   });
   $("#editor").append(editor.el);
+  // (the keys row under the prompt shows once there's something to send, #1806: also when the page sets the text, a
+  //  draft brought back or the box cleared after a send)
+  const proto = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(editor), "value")!;
+  Object.defineProperty(editor, "value", { get: () => proto.get!.call(editor), set: (v: string) => { proto.set!.call(editor, v); keysShown(v); }, configurable: true });
+  keysShown(editor.value);
   $("#send").onclick = primary;
   // (beside Steer, the second button queues; beside Queue, it is Send now, which interrupts)
   $("#send-now").onclick = () => h.submit(steer ? "queued" : "sent");
@@ -57,6 +65,12 @@ export function renderComposerState(busy: boolean, queued: number, away = false,
   $("#stop").hidden = !busy;
   $("#keys").textContent = steer ? "steer" : busy || away ? "queue" : "send";
   $("#queued").textContent = queued ? `${queued} queued` : "";
+}
+
+/** The keys row under the prompt (Shift+Enter send · Alt+Enter queue · Ctrl+Enter note): shown only while the prompt
+ *  has text; the buttons' tooltips say the same keys (#1806). */
+function keysShown(v: string) {
+  document.querySelector(".composer")?.classList.toggle("has-text", v.trim() !== "");
 }
 
 /** The chat's Stop, named after the agent (the notebook has a Stop of its own). */

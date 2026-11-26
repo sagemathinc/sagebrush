@@ -5,7 +5,7 @@
 //   bun web/workspace/agent-chat/test-view.mjs
 const fakeEl = () => ({ className: "", innerHTML: "", querySelectorAll: () => [] });
 globalThis.document = { createElement: fakeEl };
-const { apply, newThread } = await import("./events.ts");
+const { apply, newThread, errorLine } = await import("./events.ts");
 const { turnNode, userNode, toolHtml, artifactLabel } = await import("./view.ts");
 
 const results = [];
@@ -169,6 +169,87 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   ge({ type: "turn_finished", outcome: "completed" });
   const gh = turnNode(g, gt, hooks).innerHTML;
   check(!/-0\.0 s|-5\.0 s|Infinity|NaN/.test(gh) && !bad(gh), "…and none of them is drawn (no -0.0 s, no Infinity s)", gh.slice(0, 300));
+}
+
+// ---- W3: turn_info, the model and thinking level under the agent's name: only as reported, each field as last said,
+// nothing before the first, nothing from another turn, every value checked again and escaped
+{
+  const th = newThread("ti", "T");
+  let n = 0;
+  const te = (turn_id, e) => apply(th, { seq: ++n, turn_id, ...e }, 1000);
+  te("i1", { type: "turn_started" });
+  const info = (id) => { const d = turnNode(th, th.entries.find((e) => e.kind === "turn" && e.turn_id === id), hooks).innerHTML; return /<div class="who-info">([^<]*)<\/div>/.exec(d)?.[1] ?? null; };
+  check(info("i1") === null, "W3: nothing shown before the first turn_info");
+  te("i1", { type: "turn_info", model: "claude-opus-5-5" });
+  check(info("i1") === "claude-opus-5-5", "W3: the model, as the agent gave it (no name mapping)", info("i1"));
+  te("i1", { type: "turn_info", effort: "high" });
+  check(info("i1") === "claude-opus-5-5 · thinking: high", "W3: an effort later in the turn joins the model", info("i1"));
+  te("i1", { type: "turn_info", effort: "low" });
+  check(info("i1") === "claude-opus-5-5 · thinking: low", "W3: a changed effort replaces it", info("i1"));
+  te("i1", { type: "turn_info", model: HOSTILE, effort: "Very High" });
+  check(info("i1") === "claude-opus-5-5 · thinking: low", "W3: malformed fields change nothing", info("i1"));
+  te("i2", { type: "turn_started" });
+  check(info("i2") === null, "W3: a new turn shows nothing until its own turn_info (nothing carried over)");
+  te("i2", { type: "turn_info", effort: "medium" });
+  check(info("i2") === "thinking: medium", "W3: an effort alone, without a model", info("i2"));
+  te("i2", { type: "turn_info", model: "claude-opus-5-5[1m]" });
+  check(info("i2") === "claude-opus-5-5[1m] · thinking: medium", "W3: a model id with a context suffix, as given", info("i2"));
+  te("i2", { type: "turn_finished", outcome: "completed" });
+  te("i2", { type: "turn_info", effort: "max" });
+  check(info("i2") === "claude-opus-5-5[1m] · thinking: medium", "W3: nothing said after the turn's end changes it", info("i2"));
+  // (a thread kept from before, with a hostile info in storage: escaped where drawn)
+  const kept = th.entries.find((e) => e.kind === "turn" && e.turn_id === "i2");
+  kept.info = { model: HOSTILE };
+  check(!bad(turnNode(th, kept, hooks).innerHTML) && info("i2") === null, "W3: a malformed stored info is checked again and not drawn");
+}
+
+// ---- a Claude sign-in failure (#1804): the agent's closed reasons in the page's own words, whatever text came with
+//      them; Claude Code's own text, with its advice about a long-lived token, never drawn. Any other error as before
+{
+  const RAW = "Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs";
+  const EXPIRED = "Your Claude sign-in expired. On the computer running your agent, run `claude auth login` in a terminal, then send your message again.";
+  const NOT_IN = "Claude Code isn't signed in on the computer running your agent. There, run `claude auth login` in a terminal, then send your message again.";
+  const drawn = (code, message) => {
+    const th = newThread("s-" + code, "S");
+    apply(th, { seq: 1, turn_id: "s1", type: "turn_started" }, 1000);
+    apply(th, { seq: 2, turn_id: "s1", type: "turn_error", code, message }, 1000);
+    apply(th, { seq: 3, turn_id: "s1", type: "turn_finished", outcome: "error", code }, 1000);
+    const m = /<div class="turn-error">([^<]*)<\/div>/.exec(turnNode(th, th.entries.find((e) => e.kind === "turn"), hooks).innerHTML);
+    return m ? m[1] : null;
+  };
+  const unesc = (s) => s?.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+  const expired = unesc(drawn("claude_login_expired", RAW));
+  check(expired === EXPIRED && !/setup-token|CLAUDE_CODE_OAUTH_TOKEN|Failed to authenticate/.test(expired), "SI-1: claude_login_expired is drawn in the page's words alone, even with Claude Code's own text beside it", expired);
+  const notIn = unesc(drawn("claude_not_signed_in", "Not logged in · Please run /login"));
+  check(notIn === NOT_IN, "SI-2: claude_not_signed_in is drawn in the page's words", notIn);
+  const other = unesc(drawn("authentication_failed", "Invalid API key · Fix external API key"));
+  check(other === "Error: Invalid API key · Fix external API key", "SI-3: any other error keeps its own text, after \"Error: \"", other);
+  const proto = ["constructor", "__proto__", "toString"].map((c) => errorLine(c, "m"));
+  check(proto.every((x) => x === "Error: m"), "SI-4: a code that is an Object property name is just another code", proto);
+  check(errorLine("claude_login_expired", "claude_login_expired") === EXPIRED && errorLine("is_error", "is_error") === "Error: is_error", "SI-5: a mirrored turn's error (its code only) says the same", null);
+}
+
+// ---- #1789: a thinking block whose text isn't shown streams deltas with none: no "Thinking" disclosure until some
+// text comes; one kept from before (an empty part) draws nothing either
+{
+  const th = newThread("t-th", "T");
+  let n = 0;
+  const e = (x) => apply(th, { seq: ++n, turn_id: "k1", ...x }, 1000);
+  e({ type: "turn_started" });
+  e({ type: "thinking_delta", text: "" });
+  e({ type: "thinking_delta", text: "" });
+  e({ type: "thinking_delta", text: "  " });
+  const turn = th.entries.find((x) => x.kind === "turn");
+  check(!turn.parts.some((p) => p.kind === "thinking") && !/Thinking/.test(turnNode(th, turn, hooks).innerHTML), "#1789: thinking deltas with no text make no part and no Thinking disclosure", turn.parts);
+  e({ type: "thinking_delta", text: "Let me look at the files." });
+  e({ type: "thinking_delta", text: " Then plot." });
+  const html = turnNode(th, turn, hooks).innerHTML;
+  check(/<details class="thinking"><summary>Thinking<\/summary><div>Let me look at the files\. Then plot\.<\/div><\/details>/.test(html), "#1789: once text comes, the disclosure shows it", html);
+  const kept = newThread("t-th2", "T");
+  apply(kept, { seq: 1, turn_id: "k2", type: "turn_started" }, 1000);
+  const kt = kept.entries.find((x) => x.kind === "turn");
+  kt.parts.push({ kind: "thinking", text: "" });
+  check(!/Thinking/.test(turnNode(kept, kt, hooks).innerHTML), "#1789: an empty thinking part kept from before draws nothing", turnNode(kept, kt, hooks).innerHTML);
 }
 
 const failed = results.filter(([ok]) => !ok);

@@ -412,6 +412,18 @@ const HOLD_MS = 5_000;
 export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "root-late" | "copy" | "copy-late" | "folder-late" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
 const sameSource = (e: Entry, s: BranchSource) =>
   e.kind === s.kind && e.created === s.created && e.fid === s.fid && (e.kind === "file" || e.kind === "folder" || e.ref === s.ref) && (e.kind !== "file" || (e.sha256 === s.sha256 && e.size === s.size));
+/** Whether `p` is a branch's root's place, `/Branches/<name>`. */
+const atBranchRoot = (p: string) => within(p, BRANCHES) && p !== BRANCHES && !p.slice(BRANCHES.length + 1).includes("/");
+/** Every record of the branch whose root folder is `fid`, deleted in `tx` (which has "meta"): its record, review
+ * state, runs and hash pages, as reconcileBranches deletes them.  Done in the transaction that puts the root in Trash,
+ * so nothing of the branch outlives its removal: a folder restored from Trash afterwards is a plain folder. */
+function dropBranch(tx: IDBTransaction, fid: string): void {
+  const st = tx.objectStore("meta");
+  st.delete(BRANCH_KEY + fid);
+  st.delete(BRANCH_REVIEW_KEY + fid);
+  st.delete(BRANCH_RUNS_KEY + fid);
+  st.delete(IDBKeyRange.bound(`${BRANCH_HASH_KEY}${fid}:`, `${BRANCH_HASH_KEY}${fid}:\uffff`));
+}
 async function branchRecordsIn(tx: IDBTransaction): Promise<Map<string, BranchRecord>> {
   const st = tx.objectStore("meta"), range = IDBKeyRange.bound(BRANCH_KEY, BRANCH_KEY + "\uffff");
   const [keys, values] = await Promise.all([req(st.getAllKeys(range)), req(st.getAll(range))]);
@@ -1467,6 +1479,14 @@ export class Workspace {
   async setLastExport(r: { at: number; partial: boolean; members: number; bytes: number }): Promise<void> {
     await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(r, "export:last"); });
   }
+  /** A Delegate Merge's record on this device, for one task (meta "delegate-merge:<task>": web/agents/delegate-merge.ts
+   * writes and checks it), or undefined; `null` clears it. */
+  async delegateMerge(task: string): Promise<unknown> {
+    return inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get("delegate-merge:" + task)));
+  }
+  async setDelegateMerge(task: string, rec: unknown): Promise<void> {
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { const st = tx.objectStore("meta"); if (rec === null) st.delete("delegate-merge:" + task); else st.put(rec, "delegate-merge:" + task); });
+  }
 
   /** One entry, or undefined.  `opts.admit` (the host's, AdmitCheck): asked in the same read, before it answers. */
   async stat(p: string, opts: Admitted = {}): Promise<Entry | undefined> {
@@ -2029,15 +2049,18 @@ export class Workspace {
 
   /** `p` (and what's in it) put in Trash, as `/Trash/<its name>` (or the
    * first free `name (2)`, …); nothing of its contents removed. */
-  /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved. */
+  /** `expect`: the entry asked for, by its identity (as rename's): another at `q` now, a WorkspaceError("conflict"), nothing moved.
+   * With `expect.rev`, also only at that revision (as write's `base`: a data file's, a notebook's or board's record's),
+   * checked holding the lock, which a page's own saves wait for: a change since, a conflict, nothing moved. */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything moves. */
-  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created">, signal?: AbortSignal, opts: Collect & Admitted & TrashGate = {}): Promise<Entry> {
+  async remove(p: string, expect?: Pick<Entry, "kind" | "ref" | "fid" | "created"> & { rev?: number }, signal?: AbortSignal, opts: Collect & Admitted & TrashGate = {}): Promise<Entry> {
     const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't put ${q} in Trash`);
     return this.lockedFor(q, async () => {
       await this.admitAt(admit, "remove", "target", q);
       const cur = await this.mustStat(q);
       if (expect && (cur.kind !== expect.kind || cur.created !== expect.created || cur.fid !== expect.fid || (cur.kind !== "file" && cur.ref !== expect.ref))) throw new WorkspaceError("conflict", `${q} was moved or replaced meanwhile`);
+      if (expect?.rev !== undefined && (cur.kind === "folder" || (await this.revNow(cur)) !== expect.rev)) throw new WorkspaceError("conflict", `${q} was changed meanwhile`);
       const taken = new Set((await this.list(TRASH)).map((x) => x.path));
       const [base, ext] = splitExt(nameOf(q));
       const dest = freePath(TRASH, base, ext, (x) => taken.has(x));
@@ -4076,7 +4099,9 @@ export class Workspace {
     if (stuck) throw new WorkspaceError("limit", tooLarge(stuck));
     await passGate(gate, "publishing:small");
     const ops: Op[] = [];
-    const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+    // (a branch's root put in Trash: the branch's records go in the same transaction)
+    const branch = op === "remove" && atBranchRoot(a);
+    const moved = await inTx(this.ws, withSync("entries", "ops", ...(branch ? ["meta"] : [])), "readwrite", async (tx) => {
       await fenceCheck(tx, [a, b]);
       const st = tx.objectStore("entries");
       if ((await req(st.getKey(b))) !== undefined || (await req(st.count(subtree(b)))) > 0) throw new WorkspaceError("exists", `${b} is there already`);
@@ -4101,6 +4126,7 @@ export class Workspace {
         out.push(n);
       }
       await this.log(tx, ops, { op, path: a, to: b, kind: old[0].kind }, out[0]);
+      if (branch && old[0].kind === "folder" && old[0].fid) dropBranch(tx, old[0].fid);
       return out;
     });
     this.tell({ ops });
@@ -4181,7 +4207,9 @@ export class Workspace {
       await passGate(gate, "publishing:large");
       // (the publication: the top moved, its op logged, the record published, one transaction (r4 §1))
       const ops: Op[] = [];
-      const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+      // (a branch's root put in Trash: the branch's records go in the same transaction)
+      const branch = op === "remove" && atBranchRoot(a);
+      const moved = await inTx(this.ws, withSync("entries", "ops", ...(branch ? ["meta"] : [])), "readwrite", async (tx) => {
         FENCE_READ.add(tx);
         const st = tx.objectStore("entries"), rec = (await req(st.get(RW))) as ERecord | undefined;
         if (!rec || rec.rid !== rid || rec.published) throw new WorkspaceError("conflict", `the move of ${a} was taken over`);
@@ -4198,6 +4226,7 @@ export class Workspace {
         st.put({ ...rec, published: true, rev: rec.rev + 1 } satisfies ERecord);
         dropView(tx);
         await this.log(tx, ops, { op, path: a, to: b, kind: top.kind }, n);
+        if (branch && top.kind === "folder" && top.fid) dropBranch(tx, top.fid);
         return n;
       });
       this.tell({ ops });

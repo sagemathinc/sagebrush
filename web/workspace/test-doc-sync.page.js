@@ -2,7 +2,7 @@
 // Locks): a workspace with the journal active and DEV's docsync on, a notebook store per notebook, and doc-sync.ts's
 // DocSync on a minimal account socket to the reference server (hello, welcome, then the document requests).  The
 // harness drives two of these, as two devices of one account.
-import { W, N, H, DS, P, NB, ST } from "./all.js";
+import { W, N, H, DS, P, NB, ST, E } from "./all.js";
 
 const J = JSON.stringify;
 const T = { stores: new Map(), pending: new Map(), req: 0, log: [], warns: [] };
@@ -33,6 +33,23 @@ T.updatedOf = async (id) => { const p = await T.w.pathOf("notebook", id); return
 T.pagesOf = (id) => T.pages.filter((p) => p.doc === id);
 T.touch = async (id, t) => { await T.w.touch(id, t); return T.updatedOf(id); };
 
+/** End-to-end encryption on the wire for this device (doc-seal.ts, opt-in): its DocSync made again, before it connects,
+ * with a fixture key provider over `gens` (each {cekId, keyEpoch, fill}: a content key of 32 bytes of `fill`), the
+ * one at `current` sealing new patches; `find` answers only a generation it lists. */
+T.useKeys = async (account, gens, current) => {
+  const keys = new Map(), at = (cekId, keyEpoch) => `${cekId}\u0000${keyEpoch}`;
+  for (const g of gens) keys.set(at(g.cekId, g.keyEpoch), await E.importCek(new Uint8Array(32).fill(g.fill)));
+  const cur = gens[current];
+  T.ds = new DS.DocSync({
+    retryMs: 200, askMs: 5000, onPage: (p) => { T.pages.push(p); void T.w.touch(p.doc, p.at); },
+    keys: {
+      account,
+      current: async () => ({ cekId: cur.cekId, keyEpoch: cur.keyEpoch, cek: keys.get(at(cur.cekId, cur.keyEpoch)) }),
+      find: async (doc, cekId, keyEpoch) => keys.get(at(cekId, keyEpoch)) ?? null,
+    },
+  });
+  return true;
+};
 /** The account socket (the front adds this device's session), hello, welcome, then DocSync connected on it. */
 T.connect = async (dev, account) => {
   const owner = await P.accountHash(account);
@@ -50,7 +67,7 @@ T.connect = async (dev, account) => {
     ws.onclose = () => { for (const [, f] of T.pending) f({ t: "error", code: "busy" }); T.pending.clear(); T.ds.disconnected(); };
   });
   await new Promise((ok) => { ws.onopen = ok; });
-  ws.send(J({ t: "hello", v: 2, device: `device-${dev}-0000`, name: dev, index_after: 0 }));
+  ws.send(J({ t: "hello", v: 3, device: `device-${dev}-0000`, name: dev, index_after: 0 }));
   await Promise.race([welcome, new Promise((_, no) => setTimeout(() => no(new Error("no welcome: " + J(T.log))), 10_000))]);
   await T.ds.connected({
     owner,
@@ -262,6 +279,9 @@ T.untyped = (how, cid) => {
   T.nb.flush();
   return true;
 };
+/** The same, then the save it caused finished (the notebook's own saved(): every queued save written), for a case
+ * that reads what that save kept, rather than racing it with a fixed wait. */
+T.untypedSaved = async (how, cid) => { T.untyped(how, cid); await T.nb.saved(); return true; };
 /** A stale save (made from a revision the record has passed, from that record's value): its T1 kept and sent like any
  * other, its T2 refused (a conflict): an orphan version, never the document. */
 T.editStale = async (id, cells) => {
@@ -334,6 +354,22 @@ T.edDelete = (cid) => { const c = cellsOf(T.edDiv).find((x) => x.id === cid); if
 /** A document from elsewhere pushed to the fake editor: its cells, with outputs where given. */
 T.edPush = (cells) => {
   T.edStore.push({ ...structuredClone(T.edStore.doc), cells: cells.map(([id, code, outputs]) => ({ id, code, ...(outputs ? { outputs } : {}) })) });
+  return true;
+};
+/** The page asked to go away the moment after typing (a simulated beforeunload, as a reload or a closed tab sends it):
+ * whether the page asked to stay (the browser's leave prompt); the person then declines, and the page stays. */
+T.leaveAsked = () => {
+  const e = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
+};
+/** A cell of the mounted notebook focused and its text selected, for the person's own typing (CDP Input.insertText,
+ * a trusted input: what the notebook's leave prompt waits for). */
+T.focus = (cid) => {
+  const cell = cellsOf(T.nbDiv).find((c) => c?.id === cid);
+  if (!cell) return false;
+  cell.ta.focus();
+  cell.ta.select();
   return true;
 };
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */

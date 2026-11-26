@@ -5,6 +5,7 @@
 // web/cloud/ (MS-RSL), while web/cloud/ may import MIT code.
 //   bun scripts/test-check-no-server-imports.mjs
 import { serverImports, cloudImports, cloudInputs, assertNoCloudInputs } from "./check-no-server-imports.mjs";
+import { fileURLToPath } from "node:url";
 
 let failures = 0;
 const found = (path, text) => serverImports([{ path, text }]).length > 0;
@@ -227,7 +228,7 @@ expectCloud("the listed text in another file", "web/workspace/other.mjs", `const
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { spawnSync, execFileSync } = await import("node:child_process");
-  const script = new URL("./check-no-server-imports.mjs", import.meta.url).pathname;
+  const script = fileURLToPath(new URL("./check-no-server-imports.mjs", import.meta.url));
   const repo = mkdtempSync(join(tmpdir(), "cloud-fence-"));
   const put = (p, t) => { mkdirSync(join(repo, p, ".."), { recursive: true }); writeFileSync(join(repo, p), t); };
   const git = (...a) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd: repo, stdio: "pipe" });

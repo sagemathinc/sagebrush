@@ -1,9 +1,10 @@
 // Sagebrush as an app (desktop, and Android/iOS from the same code): the sagebrush.space notebook (../dist, from
 // app/build-frontend.mjs) in the system's web view, where Python and the
 // engines run as WebAssembly, as on the site.  This shell adds what a page
-// cannot do: open and save files on the computer (the dialog and fs plugins,
-// used by the page in "app mode"), and open the files the system hands it
-// (double-clicked .ipynb files, or paths on the command line).
+// cannot do: open and save files on the computer (on the desktop, its own
+// dialogs and commands, by grants for the files the person picks, disk.rs;
+// on a phone, the dialog and fs plugins), and open the files the system hands
+// it (double-clicked .ipynb files, or paths on the command line).
 //
 // The page is served from http://127.0.0.1:<a free port> (serve_page, below,
 // on a listener the app holds before its window exists) with COOP/COEP
@@ -24,7 +25,19 @@ use std::sync::Mutex;
 mod disk;
 #[cfg(desktop)]
 mod engine;
+#[cfg(desktop)]
+mod windows;
+// (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
+//  comes next; until then only its tests and the self-test's bundle report call it)
+#[cfg(desktop)]
+#[allow(dead_code)]
+mod agent_host;
+// (the tools the app connects, chosen by the person: the checks, before the agents page offers them)
+#[cfg(desktop)]
+#[allow(dead_code)]
+mod tools;
 mod nav;
+mod version;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // the Terminal's shell worker's Content-Security-Policy (shell/worker-boot.js), the site's own
@@ -33,9 +46,25 @@ const SHELL_WORKER_CSP: &str = "default-src 'none'; script-src 'self' blob:; con
 // files to open, until the page asks for them
 struct Pending(Mutex<Vec<String>>);
 
+// (on the desktop, each granted (disk.rs grant): the page gets {grant, name, path}, never a path it can use; a file
+// that can't be granted is said and left out)
+#[cfg(desktop)]
+#[tauri::command]
+fn startup_files(app: tauri::AppHandle, state: tauri::State<Pending>) -> Vec<serde_json::Value> {
+    let files: Vec<String> = state.0.lock().unwrap().drain(..).collect();
+    files.iter().filter_map(|p| disk::grant(&app, std::path::Path::new(p)).map_err(|e| eprintln!("[app] {p}: {e}")).ok()).collect()
+}
+#[cfg(mobile)]
 #[tauri::command]
 fn startup_files(state: tauri::State<Pending>) -> Vec<String> {
     state.0.lock().unwrap().drain(..).collect()
+}
+
+/// The self-test's notebook (SAGEBRUSH_APP_SELFTEST), granted as a picked one would be.
+#[cfg(desktop)]
+#[tauri::command]
+fn selftest_open(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
+    selftest_file(app.clone()).map(|p| disk::grant(&app, std::path::Path::new(&p))).transpose()
 }
 
 #[tauri::command]
@@ -293,14 +322,69 @@ fn app_quit_now(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// A window of the app's page (the first, "main", and on the desktop those after it, windows.rs): it loads only this
+/// page's origin, the port just bound, and its own frames (nav.rs; `open`, a self-test's control, leaves that out).
+fn page_window<'a, M: Manager<tauri::Wry>>(app: &'a M, label: &str, url: tauri::Url, port: u16, open: bool) -> WebviewWindowBuilder<'a, tauri::Wry, M> {
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url)).on_navigation(move |u| {
+        let yes = open || nav::may_load(u, port);
+        if !yes {
+            eprintln!("[app] refused to load {}", u.origin().ascii_serialization());
+        }
+        yes
+    });
+    // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
+    // desktop app, before its own script runs, from __SB_DESKTOP_APP__: window.__TAURI__ is there on phones
+    // too, and what only the desktop app offers (the LaTeX editor, web/latex/boot.ts latexHereFor) asks this)
+    #[cfg(desktop)]
+    let window = window
+        .title("Sagebrush")
+        .inner_size(1100.0, 860.0)
+        .min_inner_size(480.0, 400.0)
+        .disable_drag_drop_handler()
+        // (nothing kept by the web view between launches: the workspace and the settings are files on disk,
+        // the page's IndexedDB a cache of them for one launch, disk.rs)
+        .incognito(true)
+        .initialization_script("window.__SB_DESKTOP_APP__ = true;")
+        .initialization_script(&version::page_script())
+        .initialization_script(&disk::settings_script(app.app_handle()));
+    // (a self-test's control of the workspace on disk: its import or its write-through left out, run.mjs)
+    #[cfg(desktop)]
+    let window = match std::env::var("SAGEBRUSH_APP_DISK_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).as_deref() {
+        Some(c @ ("no-import" | "no-write")) => window.initialization_script(&format!("window.__SB_DISK_CONTROL__ = {c:?};")),
+        _ => window,
+    };
+    window
+}
+
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log]
+}
+
+/// The agent bundle's check, on this app's own resources, Node and compiled-in values, as one log line for the
+/// self-test's judge: "[agent] bundle: ok ...", "[agent] bundle: not_bundled", or "[agent] bundle: refused <why>".
+#[cfg(desktop)]
+fn selftest_agent_bundle(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let check = agent_host::node_check();
+    let how = match check {
+        agent_host::NodeCheck::Bytes => "bytes",
+        agent_host::NodeCheck::TeamSignature(_) => "signature",
+    };
+    let r = match (app.path().resource_dir().ok(), agent_host::shipped_node()) {
+        (Some(res), Some(node)) => agent_host::verify_bundle(&res, &node, env!("SAGEBRUSH_AGENT_MANIFEST_SHA256"), check),
+        _ => Err(agent_host::BundleError::Missing),
+    };
+    match r {
+        Ok(v) => eprintln!("[agent] bundle: ok agent={} node={} claude_code={} node_check={how}", v.agent, v.node, v.claude_code.as_deref().unwrap_or("not_bundled")),
+        Err(agent_host::BundleError::NotBundled) => eprintln!("[agent] bundle: not_bundled"),
+        Err(e) => eprintln!("[agent] bundle: refused {e:?} node_check={how}"),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -316,14 +400,19 @@ pub fn run() {
     if std::env::var_os("JSC_useSharedArrayBuffer").is_none() {
         std::env::set_var("JSC_useSharedArrayBuffer", "1");
     }
-    let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .manage(Pending(Mutex::new(args)))
-        .invoke_handler(handlers());
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    // (the fs plugin on a phone only, whose pickers hand over what only it reads; the desktop page has none, disk.rs)
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_fs::init());
+    let builder = builder.manage(Pending(Mutex::new(args))).invoke_handler(handlers());
+    #[cfg(desktop)]
+    let builder = builder.manage(disk::Grants::default());
     // (the engine subprocess, on the desktop only: phones run the page's own worker, design/native-desktop.md §5)
     #[cfg(desktop)]
     let builder = builder.manage(engine::Engine::default());
+    // (the windows after the first, and which document each shows, windows.rs)
+    #[cfg(desktop)]
+    let builder = builder.manage(windows::Docs::default()).manage(windows::NextWindow::default());
     // (the paths of the app's own page files, as serve_page answers them: "/index.html", "/board/board.js")
     let context = tauri::generate_context!();
     let files: std::collections::HashSet<String> = context
@@ -331,8 +420,16 @@ pub fn run() {
         .iter()
         .map(|(k, _)| if k.starts_with('/') { k.into_owned() } else { format!("/{k}") })
         .collect();
+    // (macOS's menu bar: Tauri's default, with About naming the commit, version.rs)
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(version::menu);
     builder
         .setup(move |app| {
+            // (a self-test reports the agent bundle's check, as the launcher will run it: app/selftest/run-judge.mjs)
+            #[cfg(desktop)]
+            if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+                selftest_agent_bundle(app.handle());
+            }
             // (the page's server, listening before the window exists: the window never loads a page from a port
             // this app doesn't hold)
             // (a free port; in a self-test, SAGEBRUSH_APP_PORT, so two launches can be made to differ: the workspace
@@ -356,35 +453,15 @@ pub fn run() {
             let open = matches!(control.as_deref(), Some("open" | "wide"));
             // (the app's commands for this page's exact origin only, nav.rs page_capability; before the window exists)
             app.add_capability(if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) })?;
+            // (the web view data folders of the last launch's other windows, gone before any window opens, windows.rs)
+            #[cfg(desktop)]
+            if let Ok(d) = disk::data_dir(app.handle()) {
+                windows::clear_webview_dirs(&d);
+            }
+            #[cfg(desktop)]
+            app.manage(windows::PagePort(port));
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
-            // (the window loads only this page's origin, the port just bound, and its own frames: nav.rs)
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).on_navigation(move |u| {
-                let yes = open || nav::may_load(u, port);
-                if !yes {
-                    eprintln!("[app] refused to load {}", u.origin().ascii_serialization());
-                }
-                yes
-            });
-            // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
-            // desktop app, before its own script runs, from __SB_DESKTOP_APP__: window.__TAURI__ is there on phones
-            // too, and what only the desktop app offers (the LaTeX editor, web/latex/boot.ts latexHereFor) asks this)
-            #[cfg(desktop)]
-            let window = window
-                .title("Sagebrush")
-                .inner_size(1100.0, 860.0)
-                .min_inner_size(480.0, 400.0)
-                .disable_drag_drop_handler()
-                // (nothing kept by the web view between launches: the workspace and the settings are files on disk,
-                // the page's IndexedDB a cache of them for one launch, disk.rs)
-                .incognito(true)
-                .initialization_script("window.__SB_DESKTOP_APP__ = true;")
-                .initialization_script(&disk::settings_script(app.handle()));
-            // (a self-test's control of the workspace on disk: its import or its write-through left out, run.mjs)
-            #[cfg(desktop)]
-            let window = match std::env::var("SAGEBRUSH_APP_DISK_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).as_deref() {
-                Some(c @ ("no-import" | "no-write")) => window.initialization_script(&format!("window.__SB_DISK_CONTROL__ = {c:?};")),
-                _ => window,
-            };
+            let window = page_window(app, "main", url, port, open);
             window.build()?;
             Ok(())
         })
@@ -404,12 +481,24 @@ pub fn run() {
                 }
                 _ => {}
             }
-            // (the engine ends with the app)
+            // (a window's engine ends with its window (#1541), and every engine with the app)
+            #[cfg(desktop)]
+            if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } = &_event {
+                _app.state::<engine::Engine>().stop_window(label);
+                windows::closed(_app, label);
+            }
             #[cfg(desktop)]
             if let tauri::RunEvent::Exit = _event {
                 _app.state::<engine::Engine>().stop();
+                // (and the later windows' web view data folders: an exit (a quit, the self-test's) destroys no window
+                // one by one, so windows::closed never ran for them; what a web view still holds waits for the next
+                // launch's clear, windows.rs)
+                if let Ok(d) = disk::data_dir(_app) {
+                    windows::clear_webview_dirs(&d);
+                }
             }
-            // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event
+            // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, and
+            // sent to a page already there (granted, on macOS, as startup_files grants them)
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = _event {
                 let files: Vec<String> = urls
@@ -417,8 +506,26 @@ pub fn run() {
                     .filter_map(|u| u.to_file_path().ok())
                     .map(|p| p.to_string_lossy().into_owned())
                     .collect();
+                #[cfg(target_os = "macos")]
+                let sent: Vec<serde_json::Value> = files.iter().filter_map(|p| disk::grant(_app, std::path::Path::new(p)).ok()).collect();
+                #[cfg(target_os = "ios")]
+                let sent = files.clone();
                 _app.state::<Pending>().0.lock().unwrap().extend(files.iter().cloned());
-                let _ = _app.emit("open-files", files);
+                let _ = _app.emit("open-files", sent);
             }
         });
+}
+
+#[cfg(test)]
+mod entry_point_tests {
+    // (the mobile build's entry point is the attribute on run(): an item inserted between them would take it, and
+    // the phone apps would have no entry point while the desktop build stays green)
+    #[test]
+    fn the_mobile_entry_point_attribute_is_on_run() {
+        let src = include_str!("lib.rs");
+        let attr = concat!("#[cfg_attr(mobile, tauri::", "mobile_entry_point)]");
+        let at: Vec<usize> = src.lines().enumerate().filter(|(_, l)| l.trim() == attr).map(|(i, _)| i).collect();
+        assert_eq!(at.len(), 1, "the attribute appears once");
+        assert_eq!(src.lines().nth(at[0] + 1).map(str::trim), Some("pub fn run() {"), "the line after it is run()'s");
+    }
 }
