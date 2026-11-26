@@ -1687,6 +1687,26 @@ class RealNumberMP:
         """
         return self._special in ("+inf", "-inf")
 
+    def is_positive_infinity(self):
+        """Whether +infinity.
+
+        EXAMPLES::
+
+            sage: RealField(30)('inf').is_positive_infinity(), RealField(30)('-inf').is_positive_infinity()
+            (True, False)
+        """
+        return self._special == "+inf"
+
+    def is_negative_infinity(self):
+        """Whether -infinity.
+
+        EXAMPLES::
+
+            sage: RealField(30)('-inf').is_negative_infinity(), RealField(30)(1).is_negative_infinity()
+            (True, False)
+        """
+        return self._special == "-inf"
+
     def is_NaN(self):
         """Whether NaN.
 
@@ -4931,6 +4951,52 @@ class ComplexNumberMP:
             (True, False)
         """
         return self._im.is_zero()
+
+    def is_infinity(self):
+        """Whether a part is infinite, as Sage's.
+
+        EXAMPLES::
+
+            sage: C = ComplexField(30); i, n = float('inf'), float('nan')
+            sage: C(0, -i).is_infinity(), C(i, n).is_infinity(), C(1, 2).is_infinity()
+            (True, True, False)
+        """
+        return self._re.is_infinity() or self._im.is_infinity()
+
+    def is_positive_infinity(self):
+        """Whether self is +infinity: the real part +infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: C = ComplexField(30); i, n = float('inf'), float('nan')
+            sage: C(i, 0).is_positive_infinity(), C(i, n).is_positive_infinity(), C(0, i).is_positive_infinity()
+            (True, False, False)
+        """
+        return self._re.is_positive_infinity() and self._im.is_zero()
+
+    def is_negative_infinity(self):
+        """Whether self is -infinity: the real part -infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: C = ComplexField(30)
+            sage: C(float('-inf'), 0).is_negative_infinity(), C(float('inf'), 0).is_negative_infinity()
+            (True, False)
+        """
+        return self._re.is_negative_infinity() and self._im.is_zero()
+
+    def is_NaN(self):
+        """Whether a part is NaN, as Sage's.
+
+        EXAMPLES::
+
+            sage: C = ComplexField(30); n = float('nan')
+            sage: C(1, n).is_NaN(), C(float('inf'), n).is_NaN(), C(1, 2).is_NaN()
+            (True, True, False)
+        """
+        return self._re.is_NaN() or self._im.is_NaN()
 
 
 # ------------------------------------------------------------------ symbolic evaluation
