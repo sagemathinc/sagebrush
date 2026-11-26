@@ -245,6 +245,9 @@ if (desktopApp) {
   }
   void desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke, listen: (ev: string, f: () => void) => (window as any).__TAURI__.event.listen(ev, f), freeze: () => document.body.setAttribute("inert", ""), flushEditor: () => wsFlush() })).catch((e) => console.warn("quit:", e));
 }
+// (the desktop app: the folder its workspace is kept in, for the Storage panel to say (#1539))
+let boardWsFolder: string | undefined;
+if (desktopApp) (window as any).__TAURI__.core.invoke("disk_where").then((p: unknown) => { if (typeof p === "string") boardWsFolder = p; }, () => {});
 /** To `url`, once this page's changes are on disk (the desktop app; elsewhere at once). */
 async function leaveTo(url: string) {
   if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => wsFlush()))) return;
@@ -1110,6 +1113,12 @@ function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "board" && e.ref === source.slice(6)) return;
+  // (in the app, a notebook or board another window shows: that window to the front instead, app/src-tauri/src/windows.rs
+  // window_claim, #1541)
+  if (desktopApp && (e.kind === "notebook" || e.kind === "board")) {
+    void (window as any).__TAURI__.core.invoke("window_claim", { doc: e.path }).then((at: string | null) => { if (at == null) void leaveFor(url, nameOf(e.path)); }, () => void leaveFor(url, nameOf(e.path)));
+    return;
+  }
   void leaveFor(url, nameOf(e.path));
 }
 // Leaving this board for another page, whichever way (an open, an upload, the file browser): what
@@ -1778,6 +1787,8 @@ if (ws) {
       // (Agents…: the agents page, left as for any other page, this board's saves made first; not in the desktop app,
       // which has no agents page yet (#1542))
       ...(desktopApp ? {} : { agents: () => void leaveFor("/agents/", "Agents") }),
+      // (Show in folder, and where the files are: the desktop app's workspace is real files on the computer (#1539))
+      ...(desktopApp ? { reveal: (p: string) => (window as any).__TAURI__.core.invoke("disk_reveal", { path: p }), where: () => boardWsFolder } : {}),
       // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
       exportUrl: (f) => new URL("/" + f, location.href).href,
       // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:

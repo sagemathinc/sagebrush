@@ -285,8 +285,8 @@ def set_subreaper():
         return False
 
 
-# (the four modules engine-wasm's build-engine.mjs writes; wasm/pins.json pins each)
-MODULES = ["sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-mp.wasm", "sagebrush-nd.wasm"]
+# (the five modules engine-wasm's build-engine.mjs writes; wasm/pins.json pins each)
+MODULES = ["sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-mp.wasm", "sagebrush-nd.wasm", "sagebrush-skltree.wasm"]
 
 
 def module_shas():
@@ -314,7 +314,7 @@ def pin_shas():
 def fetch_pinned(names, seen):
     """The pinned bytes of `names` back into wasm/, and nothing else: fetched into a scratch root (through the usual
     cache) and checked against the pins, then staged beside their destinations (`<module>.ci-local.part`).  Only then,
-    immediately before the first rename, the four modules are read again: if any differs from `seen` (the four as the
+    immediately before the first rename, the five modules are read again: if any differs from `seen` (the five as the
     ownership check found them), or a pin changed, every staged file is removed and nothing is replaced.  Returns
     ("ok", []), ("changed", what differs), ("failed", names: nothing replaced) or ("partial", the modules replaced
     before a rename failed)."""
