@@ -389,3 +389,197 @@ fn the_echelon_reservation_is_its_stated_sum() {
     }
     assert_eq!(echelon_reservation(usize::MAX, 2, true), None);
 }
+
+// ---------------------------------------------------------------- product
+
+fn mul_args(p: u64, r: usize, k: usize, c: usize, a: &[u64], b: &[u64]) -> Vec<Vec<u8>> {
+    vec![u641(&[p]), mat1(r, k, a), mat1(k, c, b)]
+}
+
+fn mul_req(p: u64, r: usize, k: usize, c: usize, a: &[u64], b: &[u64]) -> Vec<u8> {
+    let q = frame(MAT_MUL, &mul_args(p, r, k, c, a, b));
+    assert_eq!(Some(q.len()), mat_mul_request_len(r, k, c), "the request's closed form");
+    q
+}
+
+#[test]
+fn the_product_agrees_with_the_classical_product() {
+    let mut s = 0x5eed_0f_ab_c0ffeeu64;
+    // thin both ways, non-square, square below and at the fast route's
+    // crossover (384 for the u64 kernel, 64 for the u128 kernel), odd
+    // sizes past it, and both kernel classes
+    let shapes = [
+        (1, 1, 1),
+        (1, 9, 1),
+        (9, 1, 9),
+        (1, 200, 300),
+        (300, 200, 1),
+        (5, 7, 3),
+        (40, 70, 30),
+        (70, 40, 90),
+        (64, 64, 64),
+        (130, 129, 131),
+        (385, 384, 386),
+    ];
+    for &p in &[2u64, 65537, 2147483647, P63] {
+        let m = Modulus::new(p);
+        for &(r, k, c) in &shapes {
+            let a: Vec<u64> = (0..r * k).map(|_| rng(&mut s) % p).collect();
+            let b: Vec<u64> = (0..k * c).map(|_| rng(&mut s) % p).collect();
+            let got = results(&call_bin(&mul_req(p, r, k, c, &a, &b))).unwrap();
+            let want = Mat { rows: r, cols: k, m, d: a.clone() }.mul_classical(&Mat { rows: k, cols: c, m, d: b.clone() });
+            assert_eq!(got.len(), 1);
+            assert_eq!(got[0], want.d, "p={p} {r}x{k}x{c}");
+        }
+    }
+    // all entries p - 1 (the sums' worst case), at a fast shape of each class
+    for &(p, n) in &[(65537u64, 400usize), (2147483647, 390), (P63, 140)] {
+        let a = vec![p - 1; n * n];
+        let got = results(&call_bin(&mul_req(p, n, n, n, &a, &a))).unwrap();
+        let m = Modulus::new(p);
+        let want = Mat { rows: n, cols: n, m, d: a.clone() }.mul_classical(&Mat { rows: n, cols: n, m, d: a.clone() });
+        assert_eq!(got[0], want.d, "p={p} n={n} all p - 1");
+    }
+}
+
+#[test]
+fn the_product_reply_has_its_closed_form_length() {
+    let mut s = 7u64;
+    for &(r, k, c) in &[(1usize, 1usize, 1usize), (4, 9, 2), (9, 4, 9), (20, 1, 20)] {
+        let a: Vec<u64> = (0..r * k).map(|_| rng(&mut s) % 101).collect();
+        let b: Vec<u64> = (0..k * c).map(|_| rng(&mut s) % 101).collect();
+        let out = call_bin(&mul_req(101, r, k, c, &a, &b));
+        assert_eq!(Some(out.len()), mat_mul_reply_len(r, c), "{r}x{k}x{c}");
+    }
+    assert_eq!(mat_mul_request_len(3, 5, 7), Some(104 + 8 * (15 + 35)));
+    assert_eq!(mat_mul_reply_len(3, 7), Some(26 + 8 * 21));
+    assert_eq!(mat_mul_request_len(usize::MAX, 2, 2), None);
+    assert_eq!(mat_mul_reservation(usize::MAX, 2, 2, 101), None);
+}
+
+#[test]
+fn product_refusals_have_their_codes_and_offsets() {
+    let a = vec![1u64, 2, 3, 4, 5, 6]; // 2 x 3
+    let b = vec![1u64, 0, 0, 1, 1, 1]; // 3 x 2
+    let check = |args: Vec<Vec<u8>>, code: Code, at: u64| {
+        let r = call_bin(&frame(MAT_MUL, &args));
+        assert_eq!(results(&r), Err((code as u16, at)), "{:?}", wire::parse_reply(&r));
+    };
+    // p: not prime, too large
+    for p in [0u64, 1, 4, 1 << 63, u64::MAX] {
+        let args = mul_args(p, 2, 3, 2, &a, &b);
+        let at = arg_at(MAT_MUL, &args, 0) + 12;
+        check(args, Code::Domain, at);
+    }
+    // an entry equal to p, in A and in B, at its own offset
+    let args = mul_args(5, 2, 3, 2, &[1, 2, 3, 4, 5, 0], &b);
+    let at = arg_at(MAT_MUL, &args, 1) + 4 + 4 + 4 + 12 + 8 * 4;
+    check(args, Code::Domain, at);
+    let args = mul_args(5, 2, 3, 2, &a[..6].iter().map(|x| x % 5).collect::<Vec<_>>(), &[1, 0, 0, 7, 1, 1]);
+    let at = arg_at(MAT_MUL, &args, 2) + 4 + 4 + 4 + 12 + 8 * 3;
+    check(args, Code::Domain, at);
+    // the inner dimensions differ (A 2 x 3, B 2 x 3): at B
+    let args = vec![u641(&[7]), mat1(2, 3, &a), mat1(2, 3, &a)];
+    let at = arg_at(MAT_MUL, &args, 2);
+    check(args, Code::Domain, at);
+    // empty shapes, in A and in B
+    for (r, c) in [(0usize, 3usize), (2, 0), (0, 0)] {
+        let args = vec![u641(&[7]), mat1(r, c, &[]), mat1(3, 2, &b)];
+        let at = arg_at(MAT_MUL, &args, 1) + 4;
+        check(args, Code::Count, at);
+        let args = vec![u641(&[7]), mat1(2, 3, &a), mat1(r, c, &[])];
+        let at = arg_at(MAT_MUL, &args, 2) + 4;
+        check(args, Code::Count, at);
+    }
+    // the argument count
+    let args = vec![u641(&[7]), mat1(2, 3, &a)];
+    check(args, Code::Count, (4 + 4 + MAT_MUL.len()) as u64);
+}
+
+#[test]
+fn the_product_frame_cap_is_exact() {
+    let mut s = 11u64;
+    let a: Vec<u64> = (0..6 * 11).map(|_| rng(&mut s) % 101).collect();
+    let b: Vec<u64> = (0..11 * 4).map(|_| rng(&mut s) % 101).collect();
+    let r = mul_req(101, 6, 11, 4, &a, &b);
+    assert!(run_with(&r, r.len()).is_ok(), "exactly at the cap");
+    let e = run_with(&r, r.len() - 1).unwrap_err();
+    assert_eq!((e.code, e.offset), (Code::Cap, 0), "one byte past the cap");
+}
+
+#[test]
+fn every_product_truncation_and_mangling_is_an_error_reply() {
+    let mut s = 37u64;
+    let a: Vec<u64> = (0..3 * 4).map(|_| rng(&mut s) % 101).collect();
+    let b: Vec<u64> = (0..4 * 2).map(|_| rng(&mut s) % 101).collect();
+    let r = mul_req(101, 3, 4, 2, &a, &b);
+    assert!(results(&call_bin(&r)).is_ok());
+    for cut in 0..r.len() {
+        let e = results(&call_bin(&r[..cut])).unwrap_err();
+        assert!(e.1 <= cut as u64, "{cut}: {e:?}");
+    }
+    for i in 0..r.len() {
+        for x in [0u8, 0xff, 0x80] {
+            let mut m = r.clone();
+            m[i] ^= x | 1;
+            let _ = results(&call_bin(&m));
+        }
+    }
+}
+
+#[test]
+fn the_product_reservation_is_its_stated_sum() {
+    for &(r, k, c, p) in &[(1usize, 4096usize, 1usize, 101u64), (64, 64, 64, P63), (300, 500, 200, 65537), (400, 400, 400, 65537), (3000, 3000, 3000, 65537)] {
+        let (peak, extra) = product_peak(r, k, c, &Modulus::new(p), MAT_MUL_FAST_ALLOWANCE).unwrap();
+        let want = 8 * (r * k + k * c) as u64 + 8 * peak + mat_mul_reply_len(r, c).unwrap() as u64 + ECH_SLACK;
+        assert_eq!(mat_mul_reservation(r, k, c, p), Some(want), "{r}x{k}x{c} p={p}");
+        assert!(extra <= MAT_MUL_FAST_ALLOWANCE);
+        match (r, p) {
+            // the fast route's extra words in the bound where it is taken; a
+            // product past the allowance runs classical (no extra)
+            (400, 65537) => assert!(extra > 0, "400^3 takes the fast route"),
+            (3000, _) => assert_eq!(extra, 0, "3000^3's extra words exceed the allowance"),
+            _ => {}
+        }
+    }
+}
+
+/// The hosts' bound on the fast route's extra words (lib/_sage_ffmat_bin.py
+/// _mul_engine_reservation): 2 (r k + k c + r c) + 8 (r + k + c) + 64, at
+/// most the allowance; it holds over a grid of shapes on both kernels, the
+/// allowance unbounded (the plan's own extra words).
+pub(crate) fn host_extra_bound(r: usize, k: usize, c: usize) -> u64 {
+    (2 * (r * k + k * c + r * c) + 8 * (r + k + c) + 64) as u64
+}
+
+#[test]
+fn the_hosts_bound_on_the_fast_routes_extra_words_holds() {
+    let mut s = 0xfeed_beefu64;
+    let mut shapes: Vec<(usize, usize, usize)> = vec![];
+    let dims = [1usize, 2, 63, 64, 65, 73, 74, 75, 97, 128, 129, 383, 384, 385, 500, 767, 768, 769, 1024, 1025];
+    for &r in &dims {
+        for &k in &dims {
+            for &c in &dims {
+                shapes.push((r, k, c));
+            }
+        }
+    }
+    for _ in 0..2000 {
+        let d = |s: &mut u64| 1 + (rng(s) % 3000) as usize;
+        shapes.push((d(&mut s), d(&mut s), d(&mut s)));
+    }
+    let mut worst = 0f64;
+    for &p in &[101u64, 65537, 2147483647, P63] {
+        let m = Modulus::new(p);
+        for &(r, k, c) in &shapes {
+            let (_, extra) = product_peak(r, k, c, &m, u64::MAX).unwrap();
+            let b = host_extra_bound(r, k, c);
+            assert!(extra <= b, "p={p} {r}x{k}x{c}: extra {extra} > bound {b}");
+            if extra > 0 {
+                worst = worst.max(extra as f64 / b as f64);
+            }
+        }
+    }
+    // (the bound is not loose by much: the largest ratio seen)
+    assert!(worst > 0.5, "worst {worst}");
+}

@@ -162,6 +162,60 @@ function KatsuraIdeal(k)
     return ideal<R|gens>;
 end function;
 
+// The class-group stream rows' discriminants (expected_inputs.py's
+// stream_disc: the same streams, a test checks): variant v is the v-th D.
+function StreamPrime(start, m, r, j)
+    p := start + ((r - start) mod m);
+    while true do
+        if IsPrime(p) then
+            if j eq 0 then return p; end if;
+            j -:= 1;
+        end if;
+        p +:= m;
+    end while;
+end function;
+
+function StreamLCG(s)
+    return (6364136223846793005*s + 1442695040888963407) mod 2^64;
+end function;
+
+function StreamDisc(kind, n, v)
+    if kind eq "prime" then return -StreamPrime(2*10^(n-1), 4, 3, v); end if;
+    if kind eq "composite" then
+        // (p from a pseudo-random point of its decade; q from one of the
+        // range that gives |D| exactly n digits, drawn again if the prime
+        // steps past it: no simple q / p)
+        h := (n - 1) div 2;
+        c := v mod 2 eq 0 select 1 else 4;
+        r := v mod 2 eq 0 select 3 else 1;
+        s1 := StreamLCG(1000003*n + 7919*v + 12345);
+        p := StreamPrime(10^h + (s1 mod (9*10^h)), 4, 1, 0);
+        lo := Ceiling(10^(n-1) / (c*p)); hi := (10^n - 1) div (c*p);
+        s2 := s1;
+        while true do
+            s2 := StreamLCG(s2);
+            q := StreamPrime(lo + (s2 mod (hi - lo + 1)), 4, r, 0);
+            if q eq p then q := StreamPrime(q + 1, 4, r, 0); end if;
+            if c*p*q lt 10^n then return -c*p*q; end if;
+        end while;
+    end if;
+    // large_h: p = 7 (mod 8) prime with (-p | q) = +1 for q = 3 .. 23
+    p := 2*10^(n-1) + ((7 - 2*10^(n-1)) mod 8); left := v;
+    while true do
+        if &and[LegendreSymbol((-p) mod q, q) eq 1 : q in [3, 5, 7, 11, 13, 17, 19, 23]] and IsPrime(p) then
+            if left eq 0 then return -p; end if;
+            left -:= 1;
+        end if;
+        p +:= 8;
+    end while;
+end function;
+
+function CGStream(case_id)
+    if case_id in {"class_group_prime", "class_group_proven", "class_group_generic"} then return "prime"; end if;
+    if case_id eq "class_group_composite" then return "composite"; end if;
+    return "large_h";
+end function;
+
 function ClassDisc(digits)
     if digits eq 12 then return -100000000003; end if;
     if digits eq 24 then return -1000000000000000000000003; end if;
@@ -197,10 +251,13 @@ function Build(case_id, n, v)
     elif case_id in {"mat_z_det","mat_z_rank","mat_z_hnf","mat_z_smith","mat_z_charpoly","mat_z_elementary_divisors","mat_z_smith_hard","mat_z_elementary_divisors_hard"} then
         A := case_id in {"mat_z_smith_hard","mat_z_elementary_divisors_hard"} select SmithHard(n,v) else ZMat(n,v);
         ops := Eltseq(A);
-    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly","mat_fp31_det","mat_fp31_rank","mat_fp31_solve","mat_fp31_charpoly"} then
+    elif case_id in {"mat_fp_det","mat_fp_rank","mat_fp_solve","mat_fp_charpoly","mat_fp_mul","mat_fp31_det","mat_fp31_rank","mat_fp31_solve","mat_fp31_charpoly","mat_fp31_mul"} then
         // (mat_fp31_*: the same rows modulo 2^31 - 1)
-        A:=FpMat(n,v : p := Substring(case_id, 1, 9) eq "mat_fp31_" select 2147483647 else 65537); ops := Eltseq(A);
+        q := Substring(case_id, 1, 9) eq "mat_fp31_" select 2147483647 else 65537;
+        A:=FpMat(n,v : p := q); ops := Eltseq(A);
         if case_id in {"mat_fp_solve","mat_fp31_solve"} then w:=Vector(BaseRing(A),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
+        // (the product's B: variant v + n, in the b slot)
+        if case_id in {"mat_fp_mul","mat_fp31_mul"} then b:=FpMat(n,v+n : p := q); ops := ops cat Eltseq(b); end if;
     elif case_id in {"mat_q_det","mat_q_rank","mat_q_solve","mat_q_charpoly"} then
         A:=QMat(n,v); ops := Eltseq(A);
         if case_id eq "mat_q_solve" then w:=Vector(Rationals(),[i:i in [1..n]]); ops := ops cat Eltseq(w); end if;
@@ -212,6 +269,14 @@ function Build(case_id, n, v)
         ops := &cat [[z div 100000, z mod 100000] : z in shape];
     elif case_id eq "class_group" then
         K:=QuadraticField(ClassDisc(n)); O:=MaximalOrder(K); ops := [ClassDisc(n)];
+    elif case_id in {"class_group_prime","class_group_composite","class_group_large_h","class_group_proven"} then
+        // (its quadratic route, which takes no proof option)
+        D := StreamDisc(CGStream(case_id), n, v);
+        K:=QuadraticField(D); O:=MaximalOrder(K); ops := [D];
+    elif case_id eq "class_group_generic" then
+        // (the generic number field route, informational)
+        D := StreamDisc("prime", n, v);
+        R<x>:=PolynomialRing(Rationals()); K:=NumberField(x^2 - D); O:=MaximalOrder(K); ops := [D];
     elif case_id eq "galois_group" then
         R<x>:=PolynomialRing(Rationals()); pf:=x^n-x-1; ops := Coefficients(pf);
     elif case_id eq "galois_group_small" then
@@ -247,8 +312,9 @@ function DoOp(case_id, S)
     elif case_id in {"mat_z_elementary_divisors","mat_z_elementary_divisors_hard"} then return ElementaryDivisors(A);
     elif case_id in {"mat_z_charpoly","mat_fp_charpoly","mat_fp31_charpoly","mat_q_charpoly"} then return CharacteristicPolynomial(A);
     elif case_id in {"mat_fp_solve","mat_fp31_solve","mat_q_solve"} then return Solution(Transpose(A),v);
+    elif case_id in {"mat_fp_mul","mat_fp31_mul"} then return A*b;
     elif case_id in {"groebner_cyclic","groebner_katsura"} then return GroebnerBasis(I);
-    elif case_id eq "class_group" then return ClassGroup(O);
+    elif case_id in {"class_group","class_group_prime","class_group_composite","class_group_large_h","class_group_proven","class_group_generic"} then return ClassGroup(O);
     elif case_id in {"galois_group","galois_group_small"} then return GaloisGroup(pf);
     elif case_id eq "modsym_charpoly" then return CharacteristicPolynomial(HeckeOperator(M,2));
     elif case_id eq "newforms" then return NewformDecomposition(M);
@@ -285,11 +351,11 @@ function Sig(case_id, n, answer)
         d := [Integers()| Abs(z) : z in answer] cat [Integers()| 0 : i in [1..n-#answer]];
         error if case_id eq "mat_z_elementary_divisors_hard" and d ne [1] cat [1000003 : i in [2..n]], "the hard elementary divisors are not [1, p, ..., p]";
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(d));
-    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_fp31_solve","mat_q_solve"} then
+    elif case_id in {"mat_z_hnf","mat_fp_solve","mat_fp31_solve","mat_q_solve","mat_fp_mul","mat_fp31_mul"} then
         return IntegerToString(n) cat ":" cat IntegerToString(SeqHash(Eltseq(answer)));
     elif case_id in {"groebner_cyclic","groebner_katsura"} then
         ds:=[TotalDegree(f):f in answer]; Sort(~ds); return IntegerToString(#answer) cat ":" cat IntegerToString(SeqHash(ds));
-    elif case_id eq "class_group" then
+    elif case_id in {"class_group","class_group_prime","class_group_composite","class_group_large_h","class_group_proven","class_group_generic"} then
         inv:=[Integers()!z:z in Invariants(answer)]; Sort(~inv); return IntegerToString(#answer) cat ":" cat Join([IntegerToString(z):z in inv],",");
     elif case_id eq "galois_group_small" then
         // (the order and the transitive number, as the Sage-mode driver)
@@ -366,6 +432,24 @@ elif mode eq "once" then
     answer := DoOp(case_id, S);
     seconds := Realtime(t);
     printf "RESULT|%.9o|%o\n", seconds, Sig(case_id, n, answer);
+elif mode eq "time-stream" then
+    // (the stream rows, common.py's time-stream: each variant's input built
+    // outside the timer and its operation timed once, in order; no warm
+    // pass, so no input is seen twice; variant 0 is the cold sample)
+    samples := []; sigs := [];
+    for v in [0..K-1] do
+        S, ops := Build(case_id, n, v);
+        t := Realtime();
+        answer := DoOp(case_id, S);
+        Append(~samples, Realtime(t));
+        Append(~sigs, Sig(case_id, n, answer));
+    end for;
+    g := Granularity();
+    printf "TIMING|{\"granularity\":%o,\"threshold\":%o,\"seed\":0,\"k\":%o,\"mode\":\"stream\",\"samples\":[%o]}\n",
+        Sprintf("%.12o", g), Sprintf("%.12o", Max(0.001, 1000*g)), K,
+        Join(["[" cat Sprintf("%.12o", x) cat "]" : x in samples], ",");
+    rest := Sort(samples[2..#samples]);
+    printf "TIME|%.9o|%o|%.9o|%.9o|1|%o\n", rest[(#rest div 2)+1], Combined(sigs), rest[1], rest[#rest], #rest;
 elif mode in {"time", "time-fresh"} then
     fresh := mode eq "time-fresh";
     Ss := [* *]; sigs := []; warm := 0.0;

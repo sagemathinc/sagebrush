@@ -255,6 +255,36 @@ def main(argv, prepare, signature, operands_hash):
         seconds = time.perf_counter() - t0
         print("RESULT|%.9f|%s" % (seconds, signature(answer)))
         return
+    if mode == "time-stream":
+        # (the stream rows: each variant's input built outside the timer and
+        # its operation timed once, in order, with no warm pass, so no input
+        # is seen twice; variant 0 is the cold sample, kept apart from the
+        # TIME line's statistics)
+        if k < 2:
+            raise SystemExit("time-stream needs K >= 2 (variant 0 is the cold sample)")
+        samples, sigs = [], []
+        for v in range(k):
+            op = prepare(v)
+            t0 = time.perf_counter()
+            answer = op()
+            samples.append([time.perf_counter() - t0])
+            sigs.append(signature(answer))
+        g = granularity()
+        record = {
+            "granularity": g,
+            "threshold": max(PER_OP_FLOOR, 1000 * g),
+            "seed": 0,
+            "k": k,
+            "mode": "stream",
+            "samples": samples,
+        }
+        print(timing_line(record))
+        rest = sorted(x[0] for x in samples[1:])
+        print(
+            "TIME|%.9g|%s|%.9g|%.9g|%d|%d"
+            % (rest[len(rest) // 2], combined_signature(sigs), rest[0], rest[-1], 1, len(rest))
+        )
+        return
     if mode not in ("time", "time-fresh"):
         raise SystemExit("unknown mode " + mode)
     import os

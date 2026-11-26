@@ -795,6 +795,11 @@
   "owner": "engine arithmetic (GF(p) matrices)",
   "reason": "test code: a shape whose counts overflow gets no fast-product plan (so the classical product); refuses nothing itself"
  },
+ "engine/arith/src/nmod_mat/fast.rs :: mul_runs_the_route_product_peak_reports :: for allowance in [0, wanted.saturating_sub(1), wanted, wanted + 1, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: allowances on both sides of a product's extra words, to compare the route Mat::mul runs with product_peak's report; refuses nothing itself"
+ },
  "engine/arith/src/nmod_mat/fast.rs :: units_of :: let mut meter = Meter::accounting(u64::MAX); #0": {
   "class": "none",
   "owner": "engine arithmetic (GF(p) matrices)",
@@ -8359,6 +8364,32 @@
   "owner": "engine web + finite-field linear algebra",
   "reason": "the binary echelon's plumbing: the ledger's refusal mapped to its reply code (Cap), as the poly ops do; the ledger decides"
  },
+ "engine/web/src/bin_ops.rs :: mat_mul :: if p >= MAX_P || !is_prime(p) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary product's admission: the modulus range (a prime below 2^63, as the echelon's) and the frame cap (its request cap); past the frame cap the library keeps its memory-admitted loop, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: mat_mul :: let len = mat_mul_reply_len(r, c).ok_or(fail(Code::Internal, 0, \"a result too large to frame\"))?; #0": {
+  "class": "none",
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary product's plumbing (the ledger's refusal mapped to its Cap code; the reply's exact length, an invariant if it fails); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: mat_mul :: let need = mat_mul_reservation(r, k, c, p).ok_or(fail(Code::Cap, 0, \"a memory bound too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary product's reservation bound overflowing its u64 (no shape the frame admits reaches it): refused as Cap, as the echelon's; past the frame cap the library keeps its memory-admitted loop"
+ },
+ "engine/web/src/bin_ops.rs :: mat_mul :: sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, \"the call's memory reservation was refused\"), #0": {
+  "class": "none",
+  "owner": "engine web + finite-field linear algebra",
+  "reason": "the binary product's plumbing (the ledger's refusal mapped to its Cap code; the reply's exact length, an invariant if it fails); refuses nothing itself"
+ },
  "engine/web/src/bin_ops.rs :: poly_view :: fn poly_view(a: wire::Arg<'_>, max: usize, p: u64) -> Result<U64s<'_>, WireError> { #0": {
   "class": "none",
   "owner": "engine web + finite-field polynomials",
@@ -8481,6 +8512,11 @@
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
  },
+ "engine/web/src/bin_ops/tests.rs :: product_refusals_have_their_codes_and_offsets :: for p in [0u64, 1, 4, 1 << 63, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
  "engine/web/src/bin_ops/tests.rs :: refusals_have_their_codes_and_offsets :: assert!(n > request_cap(2, MUL_MAX_LEN).unwrap()); #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
@@ -8525,6 +8561,31 @@
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_hosts_bound_on_the_fast_routes_extra_words_holds :: let (_, extra) = product_peak(r, k, c, &m, u64::MAX).unwrap(); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_product_frame_cap_is_exact :: assert!(run_with(&r, r.len()).is_ok(), \"exactly at the cap\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_product_frame_cap_is_exact :: assert_eq!((e.code, e.offset), (Code::Cap, 0), \"one byte past the cap\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_product_reply_has_its_closed_form_length :: assert_eq!(mat_mul_request_len(usize::MAX, 2, 2), None); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/src/bin_ops/tests.rs :: the_product_reply_has_its_closed_form_length :: assert_eq!(mat_mul_reservation(usize::MAX, 2, 2, 101), None); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
  },
  "engine/web/src/hmfq.rs ::  :: const MAX_DISC: i64 = 1 << 20; #0": {
   "class": "3",
@@ -9207,6 +9268,41 @@
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "test code: the binary transport's parser, op and allocation tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: assert!(matches!(wire::parse_reply(&out), Ok(Ok(_))), \"admitted at limit {limit}\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: assert_eq!((g, first), (wire::ERROR_REPLY_MAX, \"nmod_mat_mul\".len())); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: assert_eq!(wire::parse_reply(&out).unwrap(), Err((wire::Code::Cap as u16, 0)), \"refused one unit short\"); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: for limit in [1u64 << 40, exact] { #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: let mut classical = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: let mut meter = Meter::accounting(u64::MAX); #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: an accounting meter with no budget (Meter::accounting(u64::MAX)), to read a call's units; refuses nothing"
+ },
+ "engine/web/tests/bin_mat_mul_alloc.rs :: the_product_allocates_within_its_reservation_and_reads_no_free_memory :: sagebrush_ledger::hooks::set_fake_rows(Some(vec![(limit, 0, None)])); #0": {
+  "class": "none",
+  "owner": "engine binary transport (sagebrush-wire)",
+  "reason": "test code: the binary product's agreement, refusals, frame cap, reservation, allocation and ledger tests; refuses nothing itself"
  },
  "engine/web/tests/divrem_alloc.rs :: call :: fn call(a: &str, b: &str, limit: Option<u64>, work: Option<u64>) -> (Result<String, DivFault>, u64, u64, u64) { #0": {
   "class": "none",
@@ -12903,6 +12999,21 @@
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
  },
+ "lib/_sage_ffmat.py :: FFMatrix :: TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 1 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 6' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "doctest output: the refusal kept for an extension field with Z/n (their meeting is not modelled); not a cap"
+ },
+ "lib/_sage_ffmat.py :: FFMatrix :: TypeError: unsupported operand type(s) for *: 'FiniteFieldElement' and 'FFMatrix' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "doctest output: the refusal kept for an extension field with Z/n (their meeting is not modelled); not a cap"
+ },
+ "lib/_sage_ffmat.py :: FFMatrix :: TypeError: unsupported operand type(s) for *: 'complex' and 'FFMatrix' #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "doctest output: a Python complex keeps Python's refusal with a finite-field matrix; not a cap"
+ },
  "lib/_sage_ffmat.py :: FFMatrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
@@ -12912,6 +13023,16 @@
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_ffmat.py :: FFMatrix._from_qq :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (op, a.parent(), b.parent())) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a matrix over a finite field (or Z/n) with one over QQ or another ring that does not coerce into it, or of incompatible shapes (Sage's parent wording); the other was taken as a scalar entry by entry, a wrong answer; refuses nothing Sage computes"
+ },
+ "lib/_sage_ffmat.py :: FFMatrix._uncoerced :: raise TypeError(\"unsupported operand parent(s) for %s: '%r' and '%r'\" % ((op,) + pair)) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError text for a scalar over QQ or a coprime Z/m with a finite-field matrix, which Sage refuses too; not a cap"
  },
  "lib/_sage_ffmat.py :: FFVector.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%s' and '%s'\" % (self.parent(), _sa().parent(o))) #0": {
   "class": "none",
@@ -13170,7 +13291,7 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
  },
- "lib/_sage_ffmat_bin.py :: _ech_bin_route :: host's need (_ech_need) within its budget.  None for another field, an #0": {
+ "lib/_sage_ffmat_bin.py :: _ech_bin_route :: host's need (_ech_need) within its budget.  None for another field or #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -13178,7 +13299,17 @@
    }
   },
   "owner": "linear algebra/runtime memory",
-  "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_bin.py :: _ech_bin_route :: own admission). A request past the frame cap raises the fixed limit's #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
  },
  "lib/_sage_ffmat_bin.py :: _ech_bound :: return (_fm._echelon_transport_figure or _fm._heap_budget)() // _fm._HEAP_SHARE #0": {
   "class": "2",
@@ -13189,6 +13320,66 @@
   },
   "owner": "linear algebra/runtime memory",
   "reason": "the binary echelon's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+ },
+ "lib/_sage_ffmat_bin.py :: _frame_refuse :: \"\"\"The refusal of a request past the frame cap (a fixed-limit #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_bin.py :: _frame_refuse :: cap, and the largest n x n noun whose request fits.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_bin.py :: _mul_bin_call :: refused (Cap) is the memory error, a domain failure ValueError, a #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary product's host admission: its need against the one-matrix budget, refused through the memory guard; and the engine's ledger refusal raised as the same error"
+ },
+ "lib/_sage_ffmat_bin.py :: _mul_bin_route :: below the threshold (the loop, under its own admission). A request past #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_bin.py :: _mul_bin_route :: the frame cap raises the fixed limit's memory error (_frame_refuse), and #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_bin.py :: _mul_bin_route :: within the frame cap and the host's need (_mul_need) within its budget. #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
  },
  "lib/_sage_ffsub.py ::  :: CONWAY_MAX = 10 ** 7 #0": {
   "class": "3",
@@ -13409,6 +13600,11 @@
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
  },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 1.06443396562763e434 + 1.65775768045351e434*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #1": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
  "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 1.43171197843571e-393 - 1.04966814180736e-140*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
   "class": "coverage",
   "owner": "Sage kernel",
@@ -13439,6 +13635,11 @@
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
  },
+ "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 3.96352219093270e-348 - 6.17282007699970e-348*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
  "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 5.07595889754946e-435 in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
   "class": "coverage",
   "owner": "Sage kernel",
@@ -13465,6 +13666,11 @@
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
  },
  "lib/_sage_matrix.py :: ComplexNumber :: NotImplementedError: 7.52316384526264e-37 + 1.54395514325390e-325*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
+ },
+ "lib/_sage_matrix.py :: ComplexNumber.log :: NotImplementedError: 230.258509299405 + 1.00000000000000e-400*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "a docstring's words or a doctest's expected output for that refusal of a CC value past the doubles, not a cap"
@@ -13532,6 +13738,11 @@
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
+ },
+ "lib/_sage_matrix.py :: Matrix._finite :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (op, self.parent(), other.parent())) #0": {
+  "class": "none",
+  "owner": "Sage-mode matrices (shape and exponent checks)",
+  "reason": "Sage's TypeError for a matrix over a finite field (or Z/n) with one over QQ or another ring that does not coerce into it, or of incompatible shapes (Sage's parent wording); the other was taken as a scalar entry by entry, a wrong answer; refuses nothing Sage computes"
  },
  "lib/_sage_matrix.py :: Matrix._integral_exponent :: raise NotImplementedError(\"non-integral exponents not supported\") #0": {
   "class": "none",

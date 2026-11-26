@@ -1046,7 +1046,7 @@ class Files(unittest.TestCase):
             cal = sorted(k for k in r["sizes"] if k not in ("s", "m", "l"))
             self.assertEqual(sorted(set(r["sizes"]) - set(cal)), ["l", "m", "s"])
             self.assertIn(cal, ([], ["c0", "c1", "c2", "c3", "c4"]))
-        self.assertEqual(len(m["rows"]), 47)
+        self.assertEqual(len(m["rows"]), 58)
 
 
 class Units(unittest.TestCase):
@@ -1340,6 +1340,198 @@ class SweepSummary(unittest.TestCase):
         )
 
 
+class CoarseBounds(unittest.TestCase):
+    """coarse_bounds: a headline ratio whose terms are within COARSE_TICKS of
+    their timers' resolution becomes a bound (Magma's 10 ms clock against a
+    stream input timed once)."""
+
+    def stream(self, samples, g):
+        return {"status": "ok", "seconds": sorted(samples)[len(samples) // 2], "timing": {"granularity": g, "mode": "stream", "samples": [[x] for x in samples]}}
+
+    def timed(self, seconds, g, mode="per-op", reps=None):
+        tm = {"granularity": g, "mode": mode}
+        if reps:
+            tm["reps"] = reps
+        return {"status": "ok", "seconds": seconds, "timing": tm}
+
+    def rec(self, user, magma, **extra):
+        r = {"status": "ok", "backends": {"user": {"time": user}, "magma": {"time": magma}}, "best_ref": {"backend": "magma"}, "ratio_user": 1.0}
+        r.update(extra)
+        return r
+
+    def test_a_coarse_stream_reference_gives_a_lower_bound(self):
+        # (inputs 1..3 paired: 1.0/0.02, 1.2/0.01, 1.1/0.02; input 0 is the cold one)
+        r = self.rec(self.stream([9.0, 1.0, 1.2, 1.1], 1e-7), self.stream([0.5, 0.01, 0.0, 0.01], 0.01), ratio_user=117.0, ratio_user_of_medians=110.0)
+        run.coarse_bounds(r)
+        self.assertNotIn("ratio_user", r)
+        self.assertEqual(r["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(r["ratio_user_bound"]["value"], 55.0)
+        self.assertEqual(r["ratio_user_bound"]["ticks"]["magma"], 1.0)
+        self.assertEqual((r["ratio_user_quantized"], r["ratio_user_quantized_of_medians"]), (117.0, 110.0))
+
+    def test_coarse_ours_gives_an_upper_bound(self):
+        r = self.rec(self.timed(0.02, 0.01), self.timed(1.0, 0.01))
+        run.coarse_bounds(r)
+        self.assertEqual(r["ratio_user_bound"]["op"], "<")
+        self.assertAlmostEqual(r["ratio_user_bound"]["value"], 0.03)
+
+    def test_both_coarse_gives_no_bound(self):
+        r = self.rec(self.timed(0.02, 0.01), self.timed(0.03, 0.01))
+        run.coarse_bounds(r)
+        self.assertNotIn("ratio_user", r)
+        self.assertEqual((r["ratio_user_bound"]["op"], r["ratio_user_bound"]["value"]), (None, None))
+
+    def test_fine_terms_and_batched_repetitions_keep_the_number(self):
+        # (5 ticks exactly is fine; a batched median's resolution is g / reps:
+        # 0.002 s at 100 reps per batch of a 10 ms clock is 20 ticks)
+        for user, magma in (
+            (self.timed(1.0, 1e-7), self.timed(0.05, 0.01)),
+            (self.timed(1.0, 1e-7), self.timed(0.002, 0.01, "batched", 100)),
+        ):
+            r = self.rec(user, magma)
+            run.coarse_bounds(r)
+            self.assertEqual(r["ratio_user"], 1.0)
+            self.assertNotIn("ratio_user_bound", r)
+
+    def test_a_reference_that_read_zero_bounds_the_ratio(self):
+        # (no best_ref was formed: every reference sample read 0)
+        r = self.rec(self.stream([9.0, 0.5, 0.6, 0.5], 1e-7), self.stream([0.0, 0.0, 0.0, 0.0], 0.01))
+        del r["best_ref"], r["ratio_user"]
+        run.coarse_bounds(r)
+        self.assertEqual(r["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(r["ratio_user_bound"]["value"], 50.0)
+        self.assertNotIn("ratio_user_quantized", r)
+
+    def test_a_cold_rows_first_ops(self):
+        r = {
+            "status": "ok",
+            "ratio_basis": "cold",
+            "ratio_user": 100.0,
+            "backends": {
+                "user": {"check": {"seconds_cold": 0.5}, "time": self.timed(0.4, 1e-7)},
+                "magma": {"check": {"seconds_cold": 0.005}, "time": self.timed(0.2, 0.01)},
+            },
+        }
+        run.coarse_bounds(r)
+        self.assertEqual(r["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(r["ratio_user_bound"]["value"], round(0.5 / 0.015, 4))
+
+    def test_best_over_best(self):
+        r = self.rec(self.timed(1.0, 1e-7), self.timed(1.0, 0.01))
+        r["backends"]["native"] = {"time": self.timed(0.5, 1e-7)}
+        r["backends"]["magma"]["time"] = self.stream([0.0, 0.01, 0.01], 0.01)
+        r.update(best_ours={"backend": "native"}, best_theirs={"backend": "magma"}, ratio_best=50.0)
+        run.coarse_bounds(r)
+        self.assertEqual(r["ratio_best_bound"]["op"], ">")
+        self.assertAlmostEqual(r["ratio_best_bound"]["value"], 25.0)
+
+    def test_a_point_marks_it_and_the_summary_shows_it(self):
+        # (through point(): a stream row whose reference reads one tick)
+        row = dict(ROW, stream=True, variants=3)
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            smp = [[2.0], [1.0], [1.0]] if b == "user" else [[0.01], [0.01], [0.01]]
+            g = 1e-7 if b == "user" else 0.01
+            return {"status": "ok", "seconds": smp[1][0], "signature": "K:1", "steal": 0.0, "timing": {"granularity": g, "mode": "stream", "k": 3, "samples": smp}}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "EXPECTED", None),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+        self.assertEqual(rec["status"], "ok")
+        self.assertEqual(rec["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(rec["ratio_user_bound"]["value"], 50.0)
+        d = Path(tempfile.mkdtemp(prefix="bench-core-bound-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        rec.update(item="poly0", commit="c" * 40, machine={"label": "x86", "cpu": "Xeon", "arch": "x86_64", "nproc": 16, "flags": []}, engine_pin={"ok": False, "policy": "track", "sha256": "b" * 64})
+        (d / "rows/poly_fp_mul-s.json").write_text(json.dumps(rec))
+        run.summary(d, {})
+        self.assertIn("> 50.0 (timer)", (d / "summary.md").read_text())
+
+
+class InformationalColumns(unittest.TestCase):
+    """A user column limited to user_sizes is informational: no ratio of
+    any kind (measured, per-input, cold or a coarse-timer bound), whatever
+    the row's kind; the other columns keep theirs."""
+
+    def point(self, row, timed, cold=None):
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                r = {"status": "ok", "signature": "s"}
+                if cold:
+                    r["seconds_cold"] = cold[b]
+                return r
+            return dict(timed[b], status="ok", signature="K:1", steal=0.0)
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "EXPECTED", None),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            return run.point(row, "s", list(timed), {"artifacts": ARTS})
+
+    def per_op(self, seconds, g):
+        return {"seconds": seconds, "timing": {"granularity": g, "mode": "per-op"}}
+
+    def summary_line(self, rec):
+        d = Path(tempfile.mkdtemp(prefix="bench-core-info-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        rec = dict(rec, item="poly0", commit="c" * 40, machine={"label": "x86", "cpu": "Xeon", "arch": "x86_64", "nproc": 16, "flags": []}, engine_pin={"ok": False, "policy": "track", "sha256": "b" * 64})
+        (d / "rows/poly_fp_mul-s.json").write_text(json.dumps(rec))
+        run.summary(d, {})
+        lines = (d / "summary.md").read_text().splitlines()
+        head = [c.strip() for c in next(x for x in lines if x.startswith("| item | row |")).split("|")]
+        cells = [c.strip() for c in next(x for x in lines if x.startswith("| poly0 | poly_fp_mul | s |")).split("|")]
+        return dict(zip(head, cells))
+
+    def test_a_zero_reference_bounds_native_but_not_an_informational_user(self):
+        # (the reference read 0 below a 10 ms clock: native gets "> 100", the
+        # informational user column nothing, measured or bound)
+        row = dict(ROW, user_sizes=["s"])
+        rec = self.point(row, {"user": self.per_op(1.0, 0.01), "native": self.per_op(1.0, 1e-7), "magma": self.per_op(0.0, 0.01)})
+        self.assertEqual(rec["status"], "ok")
+        self.assertTrue(rec["user_informational"])
+        self.assertFalse([k for k in rec if k.startswith("ratio_user")])
+        self.assertEqual(rec["ratio_native_bound"]["op"], ">")
+        self.assertAlmostEqual(rec["ratio_native_bound"]["value"], 100.0)
+        cells = self.summary_line(rec)
+        self.assertEqual((cells["user ratio"], cells["native ratio"]), ("—", "> 100.0 (timer)"))
+        # (without user_sizes the user column gets its bound too)
+        rec = self.point(ROW, {"user": self.per_op(1.0, 1e-7), "native": self.per_op(1.0, 1e-7), "magma": self.per_op(0.0, 0.01)})
+        self.assertNotIn("user_informational", rec)
+        self.assertEqual(rec["ratio_user_bound"]["op"], ">")
+        self.assertAlmostEqual(rec["ratio_user_bound"]["value"], 100.0)
+        cells = self.summary_line(rec)
+        self.assertEqual((cells["user ratio"], cells["native ratio"]), ("> 100.0 (timer)", "> 100.0 (timer)"))
+
+    def test_a_cold_row_gives_an_informational_user_no_ratio(self):
+        row = dict(ROW, user_sizes=["s"], cold=True)
+        timed = {b: self.per_op(1.0, 1e-7) for b in ("user", "native", "magma")}
+        rec = self.point(row, timed, cold={"user": 2.0, "native": 1.0, "magma": 1.0})
+        self.assertEqual(rec["ratio_native"], 1.0)
+        self.assertFalse([k for k in rec if k.startswith("ratio_user")])
+
+    def test_a_stream_row_gives_an_informational_user_no_ratio(self):
+        row = dict(ROW, user_sizes=["s"], stream=True, variants=3)
+        smp = {"timing": {"granularity": 1e-7, "mode": "stream", "k": 3, "samples": [[2.0], [1.0], [1.0]]}, "seconds": 1.0}
+        rec = self.point(row, {"user": smp, "native": smp, "magma": smp})
+        self.assertEqual(rec["ratio_native"], 1.0)
+        self.assertIn("per_input_native", rec)
+        self.assertFalse([k for k in rec if k.startswith(("ratio_user", "per_input_user"))])
+
+
 class WorkingSet(unittest.TestCase):
     def test_every_rows_formula_at_every_size(self):
         rows = json.loads((Path(run.__file__).parent / "items.json").read_text())["rows"]
@@ -1468,14 +1660,14 @@ class WasmSkip(unittest.TestCase):
         with mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]):
             bs = ["user", "native", "wasm", "magma"]
             big = dict(row, working_set="5*2**30")
-            self.assertEqual(run.selected(big, "c0", bs), (["user", "native"], {"wasm": mock.ANY}))
+            self.assertEqual(run.selected(big, "c0", bs), (["user", "native"], {"wasm": mock.ANY, "magma": mock.ANY}))
             self.assertIn("2 GiB", run.selected(big, "c0", bs)[1]["wasm"])
             # (the margin: 3 GiB is skipped too)
             self.assertIn("wasm", run.selected(dict(row, working_set="3*2**30"), "c0", bs)[1])
             # (not at the regular sizes, nor under 4 GiB, nor without a formula)
             self.assertEqual(run.selected(big, "s", bs), (bs, {}))
-            self.assertEqual(run.selected(dict(row, working_set="2**30"), "c0", bs)[1], {})
-            self.assertEqual(run.selected(row, "c0", bs), (["user", "native", "wasm"], {}))
+            self.assertEqual(list(run.selected(dict(row, working_set="2**30"), "c0", bs)[1]), ["magma"])
+            self.assertEqual(run.selected(row, "c0", bs), (["user", "native", "wasm"], {"magma": mock.ANY}))
 
     def test_the_point_records_the_skip(self):
         row = dict(ROW, working_set="5*2**30", sizes={"c0": {"n": 10, "timeout": 30}})
@@ -1498,6 +1690,37 @@ class WasmSkip(unittest.TestCase):
         self.assertEqual(rec["backends"]["wasm"]["status"], "skipped")
         self.assertNotIn("wasm", calls)
 
+    def test_a_calibration_size_labels_the_references_skipped(self):
+        # (the references are not on host only when they are not; at a
+        # calibration size they are skipped by rule, and the point says so)
+        row = dict(ROW, sizes={"c0": {"n": 10, "timeout": 30}})
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return {"status": "ok", "seconds": 1.0, "signature": "K:1"}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(row, "c0", ["user", "native", "magma", "flint", "flint-n", "native-n"], {"artifacts": ARTS})
+        for b in ("magma", "flint", "flint-n", "native-n"):
+            self.assertEqual(rec["backends"][b]["status"], "skipped", b)
+            self.assertIn("calibrated targets only", rec["backends"][b]["detail"])
+        self.assertEqual(rec["backends"]["native"]["time"]["status"], "ok")
+        # (a backend absent from this host stays "not on host")
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: None if b == "magma" else ["x"]),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(row, "c0", ["user", "magma"], {"artifacts": ARTS})
+        self.assertEqual(rec["backends"]["magma"]["status"], "not on host")
+
 
 class DryRun(unittest.TestCase):
     def test_it_lists_every_point_with_its_working_set(self):
@@ -1513,8 +1736,9 @@ class DryRun(unittest.TestCase):
             [line.split()[:4] for line in lines],
             [["mat_fp_det", "s", "60", "ws=28800"], ["mat_fp_det", "c0", "122", "ws=119072"], ["groebner_cyclic", "s", "5", "ws=None"]],
         )
-        # (no reference at a calibration size)
-        self.assertNotIn("magma", lines[1])
+        # (no reference runs at a calibration size: it is listed skipped)
+        self.assertIn("magma:skipped", lines[1].split()[4:])
+        self.assertNotIn("magma", [w for w in lines[1].split()[4:] if not w.endswith(":skipped")])
 
 
 class RotationOrder(unittest.TestCase):
@@ -1671,6 +1895,313 @@ class RotationOrder(unittest.TestCase):
         self.assertEqual([int(x) for x in lines[w + 1 :]], wholes)
 
 
+class Stream(unittest.TestCase):
+    """The stream rows (class_group_prime and the others): each input new,
+    timed once, the systems paired input by input."""
+
+    def setUp(self):
+        sys.path.insert(0, str(Path(run.__file__).parent / "drivers"))
+        import common
+
+        self.common = common
+
+    def run_main(self, k, slow0=0.0):
+        import contextlib
+        import io
+
+        calls = []
+
+        def prepare(v):
+            calls.append(("prepare", v))
+
+            def op():
+                calls.append(("op", v))
+                if v == 0 and slow0:
+                    time.sleep(slow0)
+                return v
+
+            return op
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.common.main(["x", "case", "5", "time-stream", str(k)], prepare, lambda a: "s%d" % a, lambda: 0)
+        return calls, buf.getvalue()
+
+    def test_each_input_once_and_no_warm_pass(self):
+        calls, out = self.run_main(4, slow0=0.05)
+        self.assertEqual(calls, [(w, v) for v in range(4) for w in ("prepare", "op")])
+        t = run.parse_timing(out)
+        self.assertEqual((t["mode"], t["k"], len(t["samples"])), ("stream", 4, 4))
+        self.assertGreater(t["samples"][0][0], 0.04)
+        line = [x for x in out.splitlines() if x.startswith("TIME|")][0].split("|")
+        # (the cold input 0 is outside the TIME statistics: 3 samples, all fast)
+        self.assertEqual(line[6], "3")
+        self.assertLess(float(line[4]), 0.04)
+        self.assertEqual(line[2], self.common.combined_signature(["s0", "s1", "s2", "s3"]))
+
+    def test_needs_two_inputs(self):
+        with self.assertRaises(SystemExit):
+            self.run_main(1)
+
+    def test_parse_timing(self):
+        head = '"granularity":1e-7,"threshold":0.001,"seed":0'
+        good = 'TIMING|{%s,"k":3,"mode":"stream","samples":[[0.5],[0.1],[0.2]]}' % head
+        self.assertEqual(run.parse_timing(good)["mode"], "stream")
+        for bad in (
+            'TIMING|{%s,"k":3,"mode":"stream","samples":[[0.5],[0.1]]}' % head,
+            'TIMING|{%s,"k":2,"mode":"stream","samples":[[0.5,0.4],[0.1,0.2]]}' % head,
+            'TIMING|{%s,"k":1,"mode":"stream","samples":[[0.5]]}' % head,
+        ):
+            self.assertIsNone(run.parse_timing(bad), bad)
+
+    def point(self):
+        row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+        samples = {"user": [9, 2, 4, 6, 8], "magma": [1, 1, 2, 2, 4]}
+        modes = []
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            modes.append((b, mode))
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s", "seconds_cold": 1.0}
+            smp = samples[b]
+            t = {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "stream", "samples": [[x] for x in smp]}
+            rest = sorted(smp[1:])
+            return {"status": "ok", "seconds": rest[len(rest) // 2], "signature": "5:1", "timing": t}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+        ):
+            rec = run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+        return rec, modes
+
+    def test_point_pairs_the_inputs(self):
+        rec, modes = self.point()
+        self.assertEqual(rec["status"], "ok")
+        self.assertTrue(rec["stream"])
+        self.assertEqual({m for b, m in modes if m.startswith("time")}, {"time-stream"})
+        # (inputs 1..4: ratios 2, 2, 3, 2; the cold input 0 (9 / 1) is apart)
+        pi = rec["per_input_user"]
+        self.assertEqual((rec["ratio_user"], pi["min"], pi["max"], pi["cold"]), (2.0, 2.0, 3.0, 9.0))
+        self.assertEqual(pi["ratios"], [2.0, 2.0, 2.0, 3.0])
+        self.assertEqual(pi["against"], "magma")
+        self.assertEqual(rec["ratio_user_of_medians"], round(6 / 2, 4))
+        self.assertFalse(run.wants_vtime("user", {"stream": True}))
+
+    def test_calibration_json_keeps_stream_points(self):
+        rec, _ = self.point()
+        rec.update(protocol=run.PROTOCOL, machine={"label": "x86", "cpu": "c", "arch": "x86_64", "nproc": 16, "flags": []}, commit="c" * 40)
+        rec.setdefault("engine_pin", {"ok": False, "policy": "track", "sha256": "b" * 64})
+        d = Path(tempfile.mkdtemp(prefix="bench-core-stream-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "rows").mkdir()
+        (d / "rows" / "class_group_prime-s.json").write_text(json.dumps(rec))
+        run.summary(d, {})
+        pts = json.loads((d / "calibration.json").read_text())["points"]
+        self.assertEqual(len(pts), 1)
+        self.assertTrue(pts[0]["stream"])
+        # (the cold input 0 apart: the list starts at input 1)
+        self.assertEqual(pts[0]["backends"]["magma"]["seconds_per_input"], [1, 2, 2, 4])
+        self.assertEqual(pts[0]["backends"]["magma"]["seconds_cold"], 1)
+        self.assertEqual(pts[0]["backends"]["user"]["seconds_per_input"], [2, 4, 6, 8])
+        self.assertEqual(pts[0]["backends"]["user"]["seconds_cold"], 9)
+        self.assertIn("per_input_user", pts[0]["per_input"])
+        self.assertIn("per input [", (d / "summary.md").read_text())
+
+    def invoke_with(self, lines, k=5):
+        # (the real invoke and parser, on a stand-in driver printing lines)
+        cmd = [PY, "-c", "print(%r)" % "\n".join(lines)]
+        with (
+            mock.patch.object(run, "command", lambda b, row, n, mode, kk=1: cmd),
+            mock.patch.object(run, "CAP", None),
+        ):
+            return run.invoke("user", dict(ROW, stream=True), 18, "time-stream", 30, k)
+
+    HEAD = '"granularity":1e-7,"threshold":0.001,"seed":0'
+    TIME = "TIME|0.2|5:1|0.1|0.4|1|4"
+
+    def test_invoke_refuses_a_stream_run_without_its_record(self):
+        five = "[[0.9],[0.1],[0.2],[0.3],[0.4]]"
+        cases = {
+            "missing": [self.TIME],
+            "wrong K": ['TIMING|{%s,"k":4,"mode":"stream","samples":[[0.9],[0.1],[0.2],[0.3]]}' % self.HEAD, self.TIME],
+            "per-op mode": ['TIMING|{%s,"k":5,"mode":"per-op","samples":[[0.9,0.8],[0.1,0.1],[0.2,0.2],[0.3,0.3],[0.4,0.4]]}' % self.HEAD, self.TIME],
+            "malformed count": ['TIMING|{%s,"k":5,"mode":"stream","samples":[[0.9],[0.1],[0.2],[0.3]]}' % self.HEAD, self.TIME],
+        }
+        for name, lines in cases.items():
+            with self.subTest(name):
+                r = self.invoke_with(lines)
+                self.assertEqual(r["status"], "error")
+                self.assertIn("stream TIMING record of K = 5", r["detail"])
+                self.assertFalse({"seconds", "timing", "samples"} & set(r), r)
+        r = self.invoke_with(['TIMING|{%s,"k":5,"mode":"stream","samples":%s}' % (self.HEAD, five), self.TIME])
+        self.assertEqual((r["status"], r["timing"]["mode"], r["seconds"]), ("ok", "stream", 0.2))
+
+    def test_invoke_refuses_another_kind_of_answer(self):
+        # (a timing run answered by another recognized line, or none: an
+        # error, the wrong answer's fields dropped)
+        for lines in (["RESULT|1|s"], ["INPUTS|5"], ["no protocol line"]):
+            with self.subTest(lines[0]):
+                r = self.invoke_with(lines)
+                self.assertEqual(r["status"], "error")
+                self.assertFalse({"signature", "input_hash", "seconds_cold", "seconds"} & set(r), r)
+        # (the same for a plain timing run: its answer must be a TIME line)
+        cmd = [PY, "-c", "print('INPUTS|5')"]
+        with (
+            mock.patch.object(run, "command", lambda b, row, n, mode, kk=1: cmd),
+            mock.patch.object(run, "CAP", None),
+        ):
+            r = run.invoke("user", ROW, 10, "time", 30, 1)
+        self.assertEqual((r["status"], "input_hash" in r), ("error", False))
+        self.assertIn("needs a TIME line", r["detail"])
+
+    def test_point_is_an_error_when_a_stream_run_answers_with_another_kind(self):
+        # (the real invoke and point: a stand-in driver answering each mode,
+        # its time-stream run with a RESULT or an INPUTS line)
+        for wrong in ("RESULT|1|s", "INPUTS|5"):
+            with self.subTest(wrong):
+                d = Path(tempfile.mkdtemp(prefix="stream-kind-"))
+                self.addCleanup(shutil.rmtree, d, True)
+                drv = d / "drv.py"
+                drv.write_text(
+                    "import sys\n"
+                    "mode = sys.argv[1]\n"
+                    "print({'inputs': 'INPUTS|5', 'once': 'RESULT|0.1|s'}.get(mode, %r))\n" % wrong
+                )
+                row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+                with (
+                    mock.patch.object(run, "command", lambda b, row, n, mode, k=1: [PY, str(drv), mode]),
+                    mock.patch.object(run, "CAP", None),
+                ):
+                    rec = run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+                self.assertEqual(rec["status"], "error")
+                self.assertEqual(sorted(rec["stream_error"]), ["magma", "user"])
+                self.assertFalse([x for x in rec if x.startswith("ratio_") or x.startswith("per_input_")], rec)
+
+    def point_with(self, magma):
+        # (point on fake drivers: the user run a valid stream, the
+        # reference's as given)
+        row = dict(ROW, stream=True, fresh=True, sizes={"s": {"n": 18, "variants": 5, "timeout": 30}})
+        user = {"status": "ok", "seconds": 4, "signature": "5:1",
+                "timing": {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "stream", "samples": [[9], [2], [4], [6], [8]]}}
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return dict(user if b == "user" else magma)
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+        ):
+            return run.point(row, "s", ["user", "magma"], {"artifacts": ARTS})
+
+    def test_point_is_an_error_without_a_paired_reference(self):
+        # (the reference's stream run refused by invoke: the point is an
+        # error with no ratio, not an aggregate one)
+        rec = self.point_with({"status": "error", "detail": "time-stream needs a stream TIMING record of K = 5 (got none)"})
+        self.assertEqual(rec["status"], "error")
+        self.assertIn("magma", rec["stream_error"])
+        self.assertFalse([x for x in rec if x.startswith("ratio_") or x.startswith("per_input_")], rec)
+
+    def test_point_never_takes_a_non_stream_record_as_paired(self):
+        # (a record of another mode, had it got past invoke: no per-input
+        # pairing and no headline ratio, only the ratio of medians)
+        per_op = {"status": "ok", "seconds": 2, "signature": "5:1",
+                  "timing": {"granularity": 1e-7, "threshold": 1e-3, "seed": 0, "k": 5, "mode": "per-op", "samples": [[1, 1], [1, 1], [2, 2], [2, 2], [4, 4]]}}
+        rec = self.point_with(per_op)
+        self.assertNotIn("per_input_user", rec)
+        self.assertNotIn("ratio_user", rec)
+        self.assertEqual(rec["ratio_user_of_medians"], 2.0)
+
+    GRID = [(k, n, v) for k in ("prime", "composite", "large_h") for n in (12, 18) for v in range(5)]
+    GRID += [(k, 40, v) for k in ("prime", "composite", "large_h") for v in range(2)]
+
+    def test_every_input_has_its_points_size(self):
+        # (|D| exactly n digits, so a point's median and the fits against n
+        # don't mix sizes; every row's every size and input)
+        import expected_inputs
+
+        rows = json.loads((Path(run.__file__).parent / "items.json").read_text())["rows"]
+        for r in rows:
+            if r.get("stream"):
+                for key, size in r["sizes"].items():
+                    n = size["n"]
+                    ds = [expected_inputs.stream_disc(expected_inputs.CG_STREAM[r["id"]], n, v) for v in range(size["variants"])]
+                    self.assertEqual({len(str(-d)) for d in ds}, {n}, (r["id"], key))
+                    self.assertEqual(len(set(ds)), len(ds), (r["id"], key))
+
+    def test_the_drivers_build_the_same_streams(self):
+        import ast as ast_
+        import expected_inputs
+
+        want = [expected_inputs.stream_disc(k, n, v) for k, n, v in self.GRID]
+        # (the Sage-mode driver's copy, read from its source)
+        src = (Path(run.__file__).parent / "drivers/sagebrush_case.py").read_text()
+        ns = {}
+        for node in ast_.parse(src).body:
+            names = {t.id for t in getattr(node, "targets", []) if isinstance(t, ast_.Name)}
+            if getattr(node, "name", None) in ("_is_prime", "_nth_prime", "_lcg", "_legendre", "stream_disc") or "_STREAM_BASES" in names:
+                exec(compile(ast_.Module([node], []), "sagebrush_case.py", "exec"), ns)
+        self.assertEqual([ns["stream_disc"](k, n, v) for k, n, v in self.GRID], want)
+        # (the Magma driver's, run, when Magma is here: its IsPrime proves)
+        magma = Path("/usr/local/bin/magma")
+        if not magma.exists():
+            self.skipTest("no Magma")
+        msrc = (Path(run.__file__).parent / "drivers/magma_case.m").read_text()
+        fns = [re.search(r"^function %s\(.*?^end function;\n" % f, msrc, re.S | re.M) for f in ("StreamPrime", "StreamLCG", "StreamDisc")]
+        self.assertTrue(all(fns))
+        d = Path(tempfile.mkdtemp(prefix="stream-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        grid = ", ".join('<"%s", %d, %d>' % g for g in self.GRID)
+        (d / "t.m").write_text(
+            "".join(m.group(0) for m in fns)
+            + "for g in [%s] do print StreamDisc(g[1], g[2], g[3]); end for;\nquit;\n" % grid
+        )
+        r = subprocess.run([str(magma), "-b", str(d / "t.m")], capture_output=True, text=True, timeout=300)
+        got = [int(x) for x in r.stdout.split()]
+        self.assertEqual(got, want)
+
+
+class Reruns(unittest.TestCase):
+    """A complete point measured under the same identity is skipped on a
+    rerun: same_run, on a record point() really makes."""
+
+    def record(self, ident, backends):
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s", "seconds_cold": 1.0}
+            return {"status": "ok", "seconds": 1.0, "signature": "K:1", "steal": 0.0}
+
+        cmd = lambda b, row, n, mode, k=1: ["x"] if b in ("user", "magma") else None  # noqa: E731
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", cmd),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            return run.point(ROW, "s", backends, ident)
+
+    def test_a_point_of_this_run_is_the_same_run(self):
+        backends = ["user", "native", "magma", "flint"]
+        ident = {"commit": "c" * 40, "threads": 16, "backends": backends, "artifacts": ARTS}
+        rec = json.loads(json.dumps(self.record(ident, backends)))
+        self.assertTrue(rec["complete"])
+        # (the record's backends are results per backend, not the list)
+        self.assertIsInstance(rec["backends"], dict)
+        self.assertTrue(run.same_run(rec, ident))
+        # (another backend list, commit or thread count: measured again)
+        self.assertFalse(run.same_run(rec, dict(ident, backends=backends + ["wasm"])))
+        self.assertFalse(run.same_run(rec, dict(ident, commit="d" * 40)))
+        self.assertFalse(run.same_run(rec, dict(ident, threads=8)))
+        self.assertFalse(run.same_run(dict(rec, backends=backends), ident))
+
+
 class Host(unittest.TestCase):
     def test_the_host_record(self):
         h = run.host()
@@ -1697,6 +2228,163 @@ class Host(unittest.TestCase):
         self.assertEqual(h["logical_cpus"], os.cpu_count())
         for c in h["caches"]:
             self.assertEqual(sorted(c), ["level", "size", "type"])
+
+
+class Gemm(unittest.TestCase):
+    """The gemm rows' harness pieces: the blas reference, a row's own pyjs
+    script, a row without a user column or a Magma one, the user column kept
+    at a few sizes (user_sizes), and the 1-thread pin of threads_by_affinity
+    rows."""
+
+    GEMM = dict(
+        ROW,
+        id="mat_f64_gemm",
+        backends={"user": "pyjs", "native": False, "magma": False, "flint": None, "blas": True},
+        pyjs_driver="numpy_case.py",
+        parallel=True,
+        threads_by_affinity=True,
+    )
+    ARTS = dict(ARTS, **{"python-blas": "0" * 64, "numpy-installed": "0" * 64})
+
+    def test_the_blas_command_and_its_needs(self):
+        exe = Path(sys.executable)
+        with mock.patch.object(run, "BLAS_PY", exe):
+            want = [str(exe), str(run.HERE / "drivers/numpy_case.py"), "mat_f64_gemm", "256", "time", "3"]
+            self.assertEqual(run.command("blas", self.GEMM, 256, "time", 3), want)
+            self.assertEqual(run.command("blas-n", self.GEMM, 256, "time", 3), want)
+            # (a row without the blas column, and a host without the venv)
+            self.assertIsNone(run.command("blas", ROW, 256, "time", 3))
+        with mock.patch.object(run, "BLAS_PY", Path("/nonexistent/python")):
+            self.assertIsNone(run.command("blas", self.GEMM, 256, "time", 3))
+        self.assertEqual(run.needs("blas-n", self.GEMM), ("python-blas", "numpy-installed"))
+        self.assertIn("NumPy", run.adapter("blas", self.GEMM))
+
+    def test_a_rows_own_pyjs_script(self):
+        with mock.patch.object(run, "PYJS", Path(sys.executable)):
+            cmd = run.command("user", self.GEMM, 256, "once", 3)
+            self.assertEqual(cmd[2], str(run.HERE / "drivers/numpy_case.py"))
+            big = dict(ROW, id="bigint_mul", backends={"user": "pyjs", "native": False, "magma": True, "flint": "python"})
+            self.assertEqual(run.command("user", big, 256, "once", 3)[2], str(run.HERE / "drivers/sagebrush_bigint.py"))
+
+    def test_no_user_column_and_no_magma_column(self):
+        fast = dict(ROW, backends={"user": None, "native": True, "magma": False, "flint": None})
+        self.assertIsNone(run.command("user", fast, 10, "once"))
+        with mock.patch.object(run, "MAGMA", Path(sys.executable)):
+            self.assertIsNone(run.command("magma", fast, 10, "once"))
+            self.assertIsNotNone(run.command("magma", ROW, 10, "once"))
+        # (both "not applicable" in a point, not "not on host")
+        with (
+            mock.patch.object(run, "invoke", lambda b, row, n, mode, timeout, k=1, cpus=None: {"status": "ok", "input_hash": "5", "signature": "s", "seconds": 1.0}),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"] if b == "native" else None),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            rec = run.point(fast, "s", ["user", "native", "magma", "flint"], {"artifacts": ARTS})
+        self.assertEqual({b: rec["backends"][b]["status"] for b in ("user", "magma", "flint")}, dict.fromkeys(("user", "magma", "flint"), "not applicable"))
+
+    def point(self, row, key, inputs):
+        calls = []
+
+        def fake_invoke(b, row, n, mode, timeout, k=1, cpus=None):
+            calls.append((b, mode))
+            if mode == "inputs":
+                return {"status": "ok", "input_hash": "5"}
+            if mode == "once":
+                return {"status": "ok", "signature": "s"}
+            return {"status": "ok", "seconds": inputs[b], "signature": "K:1", "steal": 0.0}
+
+        with (
+            mock.patch.object(run, "invoke", fake_invoke),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+            mock.patch.object(run, "EXPECTED", None),
+            mock.patch.object(run, "units", lambda *a: ("unmetered", "")),
+        ):
+            return run.point(row, key, list(inputs), {"artifacts": self.ARTS}), calls
+
+    def test_the_user_column_at_its_sizes_only_and_informational(self):
+        row = dict(ROW, sizes={"s": {"n": 10, "timeout": 30}, "m": {"n": 20, "timeout": 30}}, user_sizes=["s"])
+        rec, calls = self.point(row, "m", {"user": 4.0, "native": 1.0, "magma": 2.0})
+        self.assertEqual(rec["backends"]["user"]["status"], "skipped")
+        self.assertIn("user_sizes", rec["backends"]["user"]["detail"])
+        self.assertNotIn("user", {c[0] for c in calls})
+        self.assertEqual((rec["status"], rec["ratio_native"]), ("ok", 0.5))
+        rec, calls = self.point(row, "s", {"user": 4.0, "native": 1.0, "magma": 2.0})
+        self.assertIn(("user", "time"), calls)
+        self.assertTrue(rec["user_informational"])
+        self.assertNotIn("ratio_user", rec)
+        self.assertEqual(rec["ratio_native"], 0.5)
+        # (a row without user_sizes: the user ratio as before)
+        rec, _ = self.point(dict(row, user_sizes=None), "m", {"user": 4.0, "magma": 2.0})
+        self.assertEqual(rec["ratio_user"], 2.0)
+        self.assertNotIn("user_informational", rec)
+
+    def test_blas_is_a_reference(self):
+        rec, _ = self.point(self.GEMM, "s", {"user": 3.0, "blas": 1.5, "blas-n": 0.5})
+        self.assertEqual((rec["best_ref"]["backend"], rec["ratio_user"]), ("blas", 2.0))
+
+    def test_the_pool_record(self):
+        # (a timed user run of a threads_by_affinity row: its POOL line
+        # recorded, required, and well-formed; the blas column has none)
+        time_line = "TIME|0.5|3:1|0.4|0.6|3|5"
+        pool = '{"products": {"9": 18}, "state": "ready", "threads": 9, "waited": 0.001, "want": 9}'
+
+        def go(backend, lines):
+            cmd = [PY, "-c", "print(%r)" % "\n".join(lines)]
+            with (
+                mock.patch.object(run, "command", lambda b, row, n, mode, k=1: cmd),
+                mock.patch.object(run, "CAP", None),
+            ):
+                return run.invoke(backend, self.GEMM, 256, "time", 30, 3, [0])
+
+        r = go("user-n", [time_line, "POOL|" + pool])
+        self.assertEqual((r["status"], r["pool"]["threads"], r["pool"]["want"]), ("ok", 9, 9))
+        r = go("user-n", [time_line])
+        self.assertEqual(r["status"], "error")
+        self.assertIn("no POOL record", r["detail"])
+        r = go("user", [time_line, "POOL|{not json"])
+        self.assertEqual(r["status"], "error")
+        self.assertIn("malformed POOL", r["detail"])
+        self.assertEqual(go("blas-n", [time_line])["status"], "ok")
+
+    def test_the_native_gf_p_product_uses_the_user_paths_allowance(self):
+        # (the native driver's USER_ALLOWANCE mirrors the engine's
+        # MAT_MUL_FAST_ALLOWANCE, which Sage mode's A * B runs under: equal,
+        # or the native column times another route than users get)
+        def const(path, name):
+            src = (Path(run.ROOT) / path).read_text()
+            m = re.search(r"const %s: u64 = (\d+)(?: << (\d+))?;" % name, src)
+            self.assertIsNotNone(m, (path, name))
+            return int(m.group(1)) << int(m.group(2) or 0)
+
+        user = const("engine/web/src/bin_ops.rs", "MAT_MUL_FAST_ALLOWANCE")
+        self.assertEqual(const("bench/core/native/src/main.rs", "USER_ALLOWANCE"), user)
+        self.assertLess(user, const("bench/core/native/src/main.rs", "FAST_ALLOWANCE"))
+        rows = {r["id"]: r for r in json.loads((Path(run.HERE) / "items.json").read_text())["rows"]}
+        for rid in ("mat_fp_mul", "mat_fp31_mul"):
+            self.assertNotIn("user_sizes", rows[rid])
+            self.assertEqual(rows[rid]["backends"]["user"], "sage-mode")
+
+    def test_threads_by_affinity_pins_the_one_thread_columns(self):
+        got = []
+
+        def fake_child(cmd, timeout, threads=1, cap=None, extra=None, cpus=None):
+            got.append((threads, cpus))
+            return {"status": "ok", "output": "INPUTS|5\n"}
+
+        first = min(os.sched_getaffinity(0))
+        with (
+            mock.patch.object(run, "run_child", fake_child),
+            mock.patch.object(run, "command", lambda b, row, n, mode, k=1: ["x"]),
+        ):
+            # (the pin is recorded with the run)
+            self.assertEqual(run.invoke("user", self.GEMM, 256, "inputs", 30)["cpus"], [first])
+            got.clear()
+            run.invoke("user", self.GEMM, 256, "inputs", 30)
+            run.invoke("blas", self.GEMM, 256, "inputs", 30)
+            run.invoke("user-n", self.GEMM, 256, "inputs", 30)
+            run.invoke("user", self.GEMM, 256, "inputs", 30, 1, [0, 1])
+            run.invoke("user", ROW, 256, "inputs", 30)
+        n_cpus = sorted(os.sched_getaffinity(0))[: run.THREADS]
+        self.assertEqual(got, [(1, [first]), (1, [first]), (len(n_cpus), n_cpus), (2, [0, 1]), (1, None)])
 
 
 if __name__ == "__main__":

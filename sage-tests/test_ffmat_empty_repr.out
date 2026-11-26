@@ -1,0 +1,75 @@
+0 0 Full MatrixSpace of 0 by 0 dense matrices over Finite Field of size 101
+[]
+[] []
+[[], []]
+0 0 (0, 0)
+0 2 Full MatrixSpace of 0 by 2 dense matrices over Finite Field of size 101
+[]
+[] []
+[[], []]
+0 2 (0, 2)
+2 0 Full MatrixSpace of 2 by 0 dense matrices over Finite Field of size 101
+[]
+[] []
+[[], []]
+2 0 (2, 0)
+1 0 Full MatrixSpace of 1 by 0 dense matrices over Finite Field of size 101
+[]
+[] []
+[[], []]
+1 0 (1, 0)
+0 1 Full MatrixSpace of 0 by 1 dense matrices over Finite Field of size 101
+[]
+[] []
+[[], []]
+0 1 (0, 1)
+0 0 Full MatrixSpace of 0 by 0 dense matrices over Finite Field of size 2
+[]
+[] []
+[[], []]
+0 0 (0, 0)
+0 2 Full MatrixSpace of 0 by 2 dense matrices over Finite Field of size 2
+[]
+[] []
+[[], []]
+0 2 (0, 2)
+2 0 Full MatrixSpace of 2 by 0 dense matrices over Finite Field of size 2
+[]
+[] []
+[[], []]
+2 0 (2, 0)
+1 0 Full MatrixSpace of 1 by 0 dense matrices over Finite Field of size 2
+[]
+[] []
+[[], []]
+1 0 (1, 0)
+0 1 Full MatrixSpace of 0 by 1 dense matrices over Finite Field of size 2
+[]
+[] []
+[[], []]
+0 1 (0, 1)
+0 0 Full MatrixSpace of 0 by 0 dense matrices over Ring of integers modulo 12
+[]
+[] []
+[[], []]
+0 0 (0, 0)
+0 2 Full MatrixSpace of 0 by 2 dense matrices over Ring of integers modulo 12
+[]
+[] []
+[[], []]
+0 2 (0, 2)
+2 0 Full MatrixSpace of 2 by 0 dense matrices over Ring of integers modulo 12
+[]
+[] []
+[[], []]
+2 0 (2, 0)
+1 0 Full MatrixSpace of 1 by 0 dense matrices over Ring of integers modulo 12
+[]
+[] []
+[[], []]
+1 0 (1, 0)
+0 1 Full MatrixSpace of 0 by 1 dense matrices over Ring of integers modulo 12
+[]
+[] []
+[[], []]
+0 1 (0, 1)

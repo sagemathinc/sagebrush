@@ -9,6 +9,7 @@ import itertools
 import json as _json
 import sys as _sys
 import random as _random
+from math import gcd as _gcd
 
 import _sage_ff as _ff
 from fractions import Fraction as _F
@@ -147,6 +148,46 @@ def _common_field(a, b):
         # either is; matrix(RDF)*matrix(CDF) is over CDF)
         return _num_pushout(a, b)
     return None
+
+
+def _never_meets(P, B):
+    """Whether Sage's coercion finds no common parent for a scalar over P
+    and a matrix over the finite ring B (GF(q) or Z/n), as observed in Sage
+    10.10: a Z/m coprime to B's order (Z/1 too), a real or complex
+    numerical field, the symbolic ring, and polynomials over QQ or over a
+    finite ring of order coprime to B's.  Integers, ZZ[x], and the rings
+    that do meet B are not among them."""
+    import _sage_poly
+    n = int(B.order())
+    if isinstance(P, _ff.IntegerModRing_):
+        return _gcd(P._n, n) == 1
+    if _ring_class(P) == "num" or P is _sa().SR:
+        return True
+    if type(P) is _sage_poly.PolynomialRing_:
+        return P.base_ring() is _sa().QQ
+    if isinstance(P, _ff.PolynomialRing_ff_):
+        return _gcd(int(P.base_ring().order()), n) == 1
+    return False
+
+
+def _mod_ring(R):
+    """Whether R is GF(p) or Z/nZ: the rings whose meeting matrix and
+    scalar arithmetic models (_meet, _pushout).  Extension fields GF(p^k),
+    k > 1, are not among them: their meeting with Z/nZ is not modelled, so
+    such pairs keep their refusal."""
+    return isinstance(R, _ff.IntegerModRing_)
+
+
+def _meet(a, b):
+    """Where matrices over a and b meet for arithmetic: _common_field, and
+    for two rings of GF(p) and Z/nZ their common ring as Sage's coercion
+    has it (_mod_pushout: Z/m and Z/n in Z/gcd(m, n), the smaller one when
+    one order divides the other, GF(p) over Z/p); None otherwise (FFMatrix's examples).
+    """
+    F = _common_field(a, b)
+    if F is None and _mod_ring(a) and _mod_ring(b):
+        F = _mod_pushout(a, b)
+    return F
 
 
 def _numerical_pair(a, b):
@@ -363,6 +404,17 @@ def _pushout(B, o):
     import _sage_qqbar as qb
     if isinstance(o, int):
         return None
+    if _mod_ring(B):
+        # (a scalar over another GF(p) or Z/m: the common ring, as Sage's
+        # coercion has it, _mod_pushout; GF(3)(2) * matrix(Zmod(12), ...) is
+        # over GF(3), Zmod(9)(2) * matrix(Zmod(12), ...) over Z/3)
+        # (but Sage refuses a scalar over Z/1 with a matrix over any other
+        # ring, though the matrices meet in Z/1: Zmod(1)(0) * matrix(Zmod(12),
+        # ...) is its TypeError, Zmod(12)(5) * matrix(Zmod(1), ...) is over Z/1)
+        P = _scalar_parent(o)
+        if P is None or P is B or not _mod_ring(P) or (isinstance(P, _ff.IntegerModRing_) and P._n == 1):
+            return None
+        return _mod_pushout(B, P)
     if B is not qb.QQbar and B is not qb.AA:
         # a real numerical field and a complex number: the complex field, a
         # double one when both are doubles (RDF with CDF or a Python complex
@@ -1491,6 +1543,31 @@ class FFMatrix:
         [5 1]
         [5 3], 5, x^2 + 2*x + 5, 48
         )
+
+    With an operand over another GF(p) or Z/n, where Sage's coercion meets
+    the two rings (_meet); an extension field GF(p^k), k > 1, with Z/n keeps
+    its refusal::
+
+        sage: matrix(Zmod(12), [[1, 2]]) * matrix(Zmod(9), [[1], [1]])
+        [0]
+        sage: (GF(3)(2) * matrix(Zmod(12), [[1, 2]])).parent()
+        Full MatrixSpace of 1 by 2 dense matrices over Finite Field of size 3
+        sage: GF(4, 'a')(1) * matrix(Zmod(6), [[1]])  # sagebrush only (Sage: [1], over GF(4))
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand type(s) for *: 'FiniteFieldElement' and 'FFMatrix'
+        sage: matrix(GF(4, 'a'), [[1]]) * matrix(Zmod(6), [[1]])  # sagebrush only (Sage: [1], over GF(4))
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 1 by 1 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 6'
+
+    A Python complex (or float) keeps Python's refusal, as Sage's names
+    types too, though Sage's names its own matrix class::
+
+        sage: complex(1, 2) * matrix(GF(5), [[1]])  # sagebrush only (Sage: ... 'complex' and 'sage.matrix.matrix_modn_dense_flint.Matrix_modn_dense_flint')
+        Traceback (most recent call last):
+        ...
+        TypeError: unsupported operand type(s) for *: 'complex' and 'FFMatrix'
     """
 
     __slots__ = ("_base", "_rows", "_ncols")
@@ -1574,8 +1651,8 @@ class FFMatrix:
         return self.nrows() == self.ncols()
 
     def __repr__(self):
-        if not self._rows:
-            return "%d x %d dense matrix over %r" % (0, self._ncols, self._base)
+        if not self._rows or not self._ncols:
+            return "[]"
         cells = [[repr(x) for x in r] for r in self._rows]
         # (one width for every entry, the widest, as Sage over every field:
         # matrix(GF(101), [[1, 100], [2, 3]]) printed its columns at their
@@ -1751,7 +1828,9 @@ class FFMatrix:
         n, m = len(self._rows), self._ncols
         _admit_size(F, n, m)  # (the result is over F, whose entries can cost more)
         if op in "+-":
-            if n != m and not c == zero:
+            # (a zero from another GF(p) or Z/m still needs a square matrix:
+            # Sage coerces it into the matrix space first)
+            if n != m and (not c == zero or _mod_ring(F)):
                 op_parent = o.parent() if callable(getattr(o, "parent", None)) else type(o)
                 pair = (op_parent, self.parent()) if left else (self.parent(), op_parent)
                 raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % ((op,) + pair))
@@ -1773,7 +1852,7 @@ class FFMatrix:
         non-overlapping or empty product of matrices over QQ(sqrt2) and
         QQ(sqrt3) was a zero matrix, and AA + QQbar was over AA, the left
         operand's field (astra's CORR-ABC-1/2)."""
-        F = _common_field(self._base, o._base)
+        F = _meet(self._base, o._base)
         if F is None:
             raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (op, self.parent(), o.parent()))
         return (self if self._base is F else FFMatrix(F, self._rows, self._ncols)), (o if o._base is F else FFMatrix(F, o._rows, o._ncols))
@@ -1789,20 +1868,33 @@ class FFMatrix:
         if F is not self._base:
             raise NotImplementedError("%s a matrix over %r with one over %r is not available in sagebrush yet" % (what, self._base, other._base))
 
-    def _from_qq(self, o):
-        """A QQ matrix o as a matrix over this (QQbar) field."""
+    def _from_qq(self, o, op=None, left=False):
+        """A QQ or ZZ matrix o as a matrix over this (QQbar) field; a ZZ
+        matrix as one over this finite field, as Sage coerces ZZ into every
+        ring (o was taken as a scalar, entry by entry: a matrix of
+        matrices).  With op (self op o, or o op self when left), Sage's
+        TypeError for operands of the wrong shapes, and, over a finite
+        field, for a matrix over QQ or another ring; o itself otherwise."""
         import _sage_matrix
-        if isinstance(o, _sage_matrix.Matrix) and getattr(self._base, "_is_generic_field", False):
+        if not isinstance(o, _sage_matrix.Matrix):
+            return o
+        generic = getattr(self._base, "_is_generic_field", False)
+        if op is not None:
+            a, b = (o, self) if left else (self, o)
+            bad = a.ncols() != b.nrows() if op == "*" else a.dimensions() != b.dimensions()
+            if bad or not (generic or o._base is _sa().ZZ):
+                raise TypeError("unsupported operand parent(s) for %s: '%s' and '%s'" % (op, a.parent(), b.parent()))
+        if generic or o._base is _sa().ZZ:
             return FFMatrix(self._base, o._rows, o.ncols())
         return o
 
     def __add__(self, o):
-        o = self._from_qq(o)
+        o = self._from_qq(o, "+")
         if not isinstance(o, FFMatrix):
             q = self._scalar_identity(o, "+", False)
             if q is None:
                 p = self._numeric_op(o, "+")
-                return NotImplemented if p is None else p
+                return self._uncoerced(o, "+", False) if p is None else p
             o = q
         A, o = self._coerced(o, "+")
         if o.dimensions() != A.dimensions():
@@ -1814,7 +1906,7 @@ class FFMatrix:
             q = self._scalar_identity(o, "+", True)
             if q is None:
                 p = self._numeric_op(o, "+", True)
-                return NotImplemented if p is None else p
+                return self._uncoerced(o, "+", True) if p is None else p
             o = q
         return self.__add__(o)
 
@@ -1822,12 +1914,12 @@ class FFMatrix:
         return FFMatrix(self._base, [[-a for a in r] for r in self._rows], self._ncols)
 
     def __sub__(self, o):
-        o = self._from_qq(o)
+        o = self._from_qq(o, "-")
         if not isinstance(o, FFMatrix):
             q = self._scalar_identity(o, "-", False)
             if q is None:
                 p = self._numeric_op(o, "-")
-                return NotImplemented if p is None else p
+                return self._uncoerced(o, "-", False) if p is None else p
             o = q
         A, o = self._coerced(o, "-")
         if o.dimensions() != A.dimensions():
@@ -1836,17 +1928,45 @@ class FFMatrix:
 
     def __rsub__(self, o):
         # o - A for a scalar o (a QQ matrix o goes through _from_qq)
-        q = self._from_qq(o)
+        q = self._from_qq(o, "-", True)
         if isinstance(q, FFMatrix):
             return q + (-self)
         q = self._scalar_identity(o, "-", True)
         if q is None:
             p = self._numeric_op(o, "-", True)
-            return NotImplemented if p is None else p
+            return self._uncoerced(o, "-", True) if p is None else p
         return q + (-self)
 
+    def _uncoerced(self, o, op, left):
+        """For self op o (o op self when left) that nothing above took:
+        Sage's TypeError when o is a scalar of QQ, or this ring is finite
+        (GF(q) or Z/n) and o's parent never meets it (_never_meets): the
+        two parents named, or, for a symbolic o times the matrix, Sage's
+        symbolic ring's own refusal.  NotImplemented for anything else
+        (Python's own refusal, or o's own operator): Z/m with a common
+        factor met this ring in _pushout over GF(p) and Z/n."""
+        P = _scalar_parent(o)
+        if P is None:
+            return NotImplemented
+        if P is not _sa().QQ:
+            # (a Python float or complex keeps Python's refusal: Sage's names
+            # their types, and its own matrix class, not parents)
+            if not callable(getattr(o, "parent", None)):
+                return NotImplemented
+            if not isinstance(self._base, (_ff.IntegerModRing_, _ff.FiniteField_ext)) or not _never_meets(P, self._base):
+                return NotImplemented
+            if P is _sa().SR and op == "*":
+                raise TypeError("positive characteristic not allowed in symbolic computations")
+        pair = (P, self.parent()) if left else (self.parent(), P)
+        raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % ((op,) + pair))
+
     def __mul__(self, o):
-        o = self._from_qq(o)
+        """self * o.  Over GF(p) and Z/n, an operand over another of these
+        rings meets this one where Sage's coercion meets them (_meet); an
+        extension field GF(p^k), k > 1, with Z/n keeps its refusal (FFMatrix's
+        examples).
+        """
+        o = self._from_qq(o, "*")
         if isinstance(o, FFMatrix):
             if self._ncols != o.nrows():
                 raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self.parent(), o.parent()))
@@ -1854,6 +1974,15 @@ class FFMatrix:
             # it cannot be what refuses incompatible fields)
             A, o = self._coerced(o, "*")
             _admit_size(A._base, A.nrows(), o.ncols())  # (the product's size before it is built)
+            # (over a prime field, from the product's shape alone: the
+            # engine's nmod_mat_mul, or its memory error, never this loop)
+            r, k, c = A.nrows(), A._ncols, o.ncols()
+            B = _mul_bin(A._base, r, k, c)
+            p = B._mul_bin_route(A._base, r, k, c) if B else None
+            if p:
+                rows = B._mul_bin_call(A._rows, o._rows, A._base, r, k, c, p)
+                if rows is not None:
+                    return FFMatrix(A._base, rows, c)
             cols = o.columns()
             z = A._base.zero()
             out = []
@@ -1875,14 +2004,14 @@ class FFMatrix:
         c = self._scalar(o)
         if c is None:
             p = self._numeric_op(o, "*")
-            return NotImplemented if p is None else p
+            return self._uncoerced(o, "*", False) if p is None else p
         return FFMatrix(self._base, [[a * c for a in r] for r in self._rows], self._ncols)
 
     def __rmul__(self, o):
         c = self._scalar(o)
         if c is None:
             p = self._numeric_op(o, "*")
-            return NotImplemented if p is None else p
+            return self._uncoerced(o, "*", True) if p is None else p
         return FFMatrix(self._base, [[c * a for a in r] for r in self._rows], self._ncols)
 
     def _vector_operand(self, v, left):
@@ -1899,7 +2028,7 @@ class FFMatrix:
         if P is not self._base:
             # (a matrix over AA meets a vector over QQbar in QQbar, as two
             # matrices do: _common_field; other larger rings are not modelled)
-            if _common_field(self._base, B) is not P:
+            if _meet(self._base, B) is not P:
                 raise NotImplementedError("a matrix over %r and a vector over %r are not available together in sagebrush yet" % (self._base, B))
             A = FFMatrix(P, self._rows, self._ncols)
         return A, (v if isinstance(v, FFVector) and B is P else FFVector(P, _in_ring(P, v, B)))
@@ -2090,6 +2219,8 @@ class FFMatrix:
         d = _mp(self, "det") if _mp_field(self._base) else None
         if d is not None:
             return d
+        if isinstance(self._base, _ff.IntegerModRing_) and not _field(self._base):
+            return _ff._elt(self._base, _det_mod(self._rows, self._base._n))
         m, piv, d = _echelon(self._rows, self._base, self._ncols, want_rows=False)
         return d if len(piv) == self.nrows() else self._base.zero()
 
@@ -2103,7 +2234,14 @@ class FFMatrix:
             sage: matrix(GF(7), [[1, 2], [3, 4]]).is_invertible(), matrix(GF(7), [[1, 2], [2, 4]]).is_invertible()
             (True, False)
         """
-        return self.is_square() and bool(self.det())
+        if not self.is_square():
+            return False
+        d = self.det()
+        # (over Z/n with zero divisors, a nonzero determinant need not be a
+        # unit: invertible exactly when it is coprime to n)
+        if isinstance(self._base, _ff.IntegerModRing_) and not _field(self._base):
+            return _gcd(int(d), self._base._n) == 1
+        return bool(d)
 
     is_unit = is_invertible
 
@@ -2128,6 +2266,11 @@ class FFMatrix:
             return x  # ([self | I] and its echelon form, n x 2n)
         one, zero = self._base.one(), self._base.zero()
         base = self._base
+        if isinstance(base, _ff.IntegerModRing_) and not _field(base):
+            x = _inverse_mod(self._rows, base._n)
+            if x is None:
+                raise ZeroDivisionError("input matrix must be nonsingular")
+            return FFMatrix(base, [[_ff._elt(base, v) for v in r] for r in x], n)
         B = _ech_bin(base, n, 2 * n)
         p = B._ech_bin_route(base, n, 2 * n, True, B._ech_out_cost(base, n, n), lambda m: B._ech_out_cost(base, m, m)) if B else None
         box = B._ech_bin_call((itertools.chain(r, (1 if i == j else 0 for j in range(n))) for i, r in enumerate(self._rows)), base, n, 2 * n, p, True) if p else None
@@ -2136,14 +2279,14 @@ class FFMatrix:
             piv = box[0]
             del box
             if piv[:n] != list(range(n)) if len(piv) >= n else True:
-                raise ZeroDivisionError("input matrix must be nonsingular")
+                raise ZeroDivisionError(_singular_text(base))
             x = B._ech_rows(rd, base, n, 2 * n, n, 2 * n)
             del rd
             return FFMatrix(base, x, n)
         aug = [r + [one if i == j else zero for j in range(n)] for i, r in enumerate(self._rows)]
         m, piv, d = _echelon(aug, self._base, 2 * n)
         if piv[:n] != list(range(n)) if len(piv) >= n else True:
-            raise ZeroDivisionError("input matrix must be nonsingular")
+            raise ZeroDivisionError(_singular_text(base))
         return FFMatrix(self._base, [r[n:] for r in m], n)
 
     def _kernel_basis(self):
@@ -2754,6 +2897,30 @@ def _engine_echelon(rows, base, ncols, p, want_rows):
 _ECH_BIN_ENABLED = True
 
 
+# (tests: False keeps every product on the loop)
+_MUL_BIN_ENABLED = True
+# the product's work threshold for the binary route, r k c multiply-adds,
+# fixed: the route's fixed cost (packing, the call, the rows built from the
+# reply) is below the loop's from about 27 multiply-adds in CPython and 64
+# in pyjs on square shapes; at 256 every shape measured, thin ones included
+# (256 x 1 x 1, 1 x 256 x 1, 1 x 1 x 256, 16 x 1 x 16), took less time on
+# the binary route in both runtimes
+_MUL_BIN_MIN = 256
+
+
+def _mul_bin(base, r, k, c):
+    """The binary route's module (lib/_sage_ffmat_bin.py) when the product
+    of an r x k and a k x c matrix over base may take nmod_mat_mul: a prime
+    field the engine takes, the binary entry point present, at least
+    _MUL_BIN_MIN multiply-adds; else None, without importing it."""
+    if not _MUL_BIN_ENABLED or not isinstance(base, _ff.IntegerModRing_) or min(r, k, c) < 1 or r * k * c < _MUL_BIN_MIN:
+        return None
+    if not _ff._SBW1_LE or not _engine_prime(base):
+        return None
+    import _sage_ffmat_bin
+    return _sage_ffmat_bin
+
+
 def _ech_bin(base, r, c):
     """The binary route's module (lib/_sage_ffmat_bin.py) when an r x c
     matrix over base may take it (the route's first checks: a prime field
@@ -2766,6 +2933,91 @@ def _ech_bin(base, r, c):
         return None
     import _sage_ffmat_bin
     return _sage_ffmat_bin
+
+
+def _det_mod(rows, n):
+    """The determinant of the square matrix rows over Z/n, as an int in
+    [0, n), without dividing (n may have zero divisors): each column is
+    cleared below the diagonal by 2 x 2 row operations of determinant 1,
+    [s t; -b/g a/g] on rows (a, b) with s a + t b = g = gcd(a, b), on
+    representatives in [0, n); the result is the product of the diagonal.
+    Row swaps are such operations too (a = 0), so no sign is kept."""
+    m = [[int(x) % n for x in r] for r in rows]
+    k = len(m)
+    d = 1 % n
+    for c in range(k):
+        rc = m[c]
+        for i in range(c + 1, k):
+            ri = m[i]
+            b = ri[c]
+            if not b:
+                continue
+            a = rc[c]
+            g, s, t = _xgcd(a, b)
+            u, v = a // g, b // g
+            rc, m[i] = [(s * x + t * y) % n for x, y in zip(rc, ri)], [(u * y - v * x) % n for x, y in zip(rc, ri)]
+        m[c] = rc
+        d = d * rc[c] % n
+        if not d:
+            return 0
+    return d
+
+
+def _singular_text(base):
+    """The text of Sage's ZeroDivisionError for the inverse of a singular
+    matrix over base: its own for the fields of characteristic 2 with at
+    most 2^16 elements (GF(2), Z/2, GF(4), ..., GF(2^16)), the generic one
+    otherwise (observed in Sage 10.10)."""
+    if isinstance(base, (_ff.IntegerModRing_, _ff.FiniteField_ext)) and base.characteristic() == 2 and base.order() <= 1 << 16:
+        return "Matrix does not have full rank."
+    return "input matrix must be nonsingular"
+
+
+def _inverse_mod(rows, n):
+    """The inverse of the square matrix rows over Z/n, as rows of ints in
+    [0, n), or None when it has none (its determinant not a unit), without
+    dividing by a non-unit: [rows | I] is brought to upper triangular form
+    by _det_mod's row operations of determinant 1, each pivot is then a
+    unit exactly when the determinant is; each pivot row is scaled by the
+    pivot's inverse and its column cleared from the rows above.  Over Z/1,
+    None for any nonempty matrix, as Sage refuses it there."""
+    k = len(rows)
+    if n == 1 and k:
+        return None
+    m = [[int(x) % n for x in r] + [1 % n if i == j else 0 for j in range(k)] for i, r in enumerate(rows)]
+    for c in range(k):
+        rc = m[c]
+        for i in range(c + 1, k):
+            ri = m[i]
+            b = ri[c]
+            if not b:
+                continue
+            a = rc[c]
+            g, s, t = _xgcd(a, b)
+            u, v = a // g, b // g
+            rc, m[i] = [(s * x + t * y) % n for x, y in zip(rc, ri)], [(u * y - v * x) % n for x, y in zip(rc, ri)]
+        if _gcd(rc[c], n) != 1:
+            return None
+        w = pow(rc[c], -1, n)
+        rc = [x * w % n for x in rc]
+        m[c] = rc
+        for i in range(c):
+            f = m[i][c]
+            if f:
+                m[i] = [(x - f * y) % n for x, y in zip(m[i], rc)]
+    return [r[k:] for r in m]
+
+
+def _xgcd(a, b):
+    """(g, s, t) with s a + t b = g = gcd(a, b) > 0, for integers a >= 0,
+    b > 0."""
+    s0, t0, s1, t1 = 1, 0, 0, 1
+    while b:
+        q = a // b
+        a, b = b, a - q * b
+        s0, s1 = s1, s0 - q * s1
+        t0, t1 = t1, t0 - q * t1
+    return a, s0, t0
 
 
 def _hessenberg(a, base):

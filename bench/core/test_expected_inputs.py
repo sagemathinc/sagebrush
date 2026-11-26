@@ -168,7 +168,7 @@ class Drivers(unittest.TestCase):
     def check(self, driver: str, module: str, rows: list[dict]):
         py = python_with(module)
         if py is None:
-            if CI and module != "flint":
+            if CI and module not in ("flint", "numpy"):
                 self.fail(
                     f"BENCH_CI=1 but no Python imports {module}: the engine wheel must be installed"
                 )
@@ -188,8 +188,45 @@ class Drivers(unittest.TestCase):
         self.check(
             "sagebrush_case.py",
             "sagebrush",
-            [r for r in ROWS if r["backends"]["user"] != "pyjs"],
+            [r for r in ROWS if r["backends"].get("user") == "sage-mode"],
         )
+
+    def test_numpy_driver(self):
+        # (its inputs mode under any NumPy: the CLI runs the same file)
+        self.check(
+            "numpy_case.py",
+            "numpy",
+            [r for r in ROWS if r.get("pyjs_driver") == "numpy_case.py"],
+        )
+
+    def test_the_numpy_drivers_hash_covers_every_entry(self):
+        # (a construction control: A with its columns reversed keeps every
+        # row sum, and so every operand a summary would hash, but not the
+        # product; the driver's input hash must change with it)
+        import shutil
+        import tempfile
+
+        py = python_with("numpy")
+        if py is None:
+            self.skipTest("no numpy")
+        n, k = 8, 3
+        a = expected_inputs.gemm_entries(n, 0, 12345)
+        self.assertEqual([sum(r) for r in a], [sum(r[::-1]) for r in a])
+        src = (HERE / "drivers/numpy_case.py").read_text()
+        old = "    a, b = base(n, v, 12345), base(n, v, 54321)\n"
+        self.assertEqual(src.count(old), 1)
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copy(HERE / "drivers/common.py", d)
+            Path(d, "numpy_case.py").write_text(src.replace(old, "    a, b = base(n, v, 12345)[:, ::-1], base(n, v, 54321)\n"))
+            for row in ("mat_f64_gemm", "mat_f64_gemm_bits"):
+                with self.subTest(row=row):
+                    r = subprocess.run(
+                        [py, str(Path(d, "numpy_case.py")), row, str(n), "inputs", str(k)],
+                        capture_output=True, text=True, timeout=120, env=dict(os.environ, **run.SINGLE_THREAD),
+                    )
+                    got = [x for x in r.stdout.splitlines() if x.startswith("INPUTS|")]
+                    self.assertEqual(r.returncode, 0, r.stderr[-800:])
+                    self.assertNotEqual(got[-1].split("|")[1], str(expected_inputs.input_hash(row, n, k)))
 
     def test_python_flint_driver(self):
         self.check(

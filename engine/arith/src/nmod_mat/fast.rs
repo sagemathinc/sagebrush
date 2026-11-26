@@ -277,6 +277,51 @@ thread_local! {
     static ALLOWANCE: Cell<Option<u64>> = const { Cell::new(None) };
 }
 
+/// The words [`Mat::mul`] allocates at once for an m x k by k x n product on
+/// a thread whose allowance is `allowance` words, and the part of them past
+/// the classical product's (0 on the classical route): the fast route's
+/// planned peak when its plan takes it and that excess fits the allowance,
+/// else the classical product's.  The same decision `Mat::mul` makes, from
+/// the shape, the prime and the allowance alone, for a caller's admission
+/// before it runs.  `None` if the classical peak overflows.
+pub fn product_peak(m: usize, k: usize, n: usize, md: &Modulus, allowance: u64) -> Option<(u64, u64)> {
+    let classical = classical_peak(m, k, n, md)?;
+    Some(match decide(m, k, n, md, allowance) {
+        Route::Fast { peak, extra, .. } => (peak, extra),
+        Route::Classical => (classical, 0),
+    })
+}
+
+/// The route of an m x k by k x n product with `allowance` words left.
+enum Route {
+    Classical,
+    /// The fast route with crossover `n0`: its planned peak, and the part
+    /// of it past the classical product's, held from the allowance.
+    Fast { n0: usize, peak: u64, extra: u64 },
+}
+
+/// The one decision [`Mat::mul`] runs and [`product_peak`] reports: the
+/// fast route where the smallest dimension is at least the crossover, the
+/// plan takes it, and its peak's excess over the classical product's fits
+/// the allowance; else classical (also when a count overflows).
+fn decide(m: usize, k: usize, n: usize, md: &Modulus, allowance: u64) -> Route {
+    let n0 = n0_for(md);
+    if m.min(k).min(n) < n0 {
+        return Route::Classical;
+    }
+    match (plan(m, k, n, md, n0), classical_peak(m, k, n, md)) {
+        (Some((Plan::Winograd, _, peak)), Some(classical)) => {
+            let extra = peak.saturating_sub(classical);
+            if extra <= allowance {
+                Route::Fast { n0, peak, extra }
+            } else {
+                Route::Classical
+            }
+        }
+        _ => Route::Classical,
+    }
+}
+
 /// Runs `f` with an allowance of `words` (u64 words) for the fast product's
 /// workspace on this thread: each product ([`Mat::mul`]) inside it whose
 /// plan takes the fast route and whose peak exceeds the classical one's by
@@ -351,18 +396,9 @@ pub(super) fn mul(a: &Mat, b: &Mat) -> Mat {
     let Some(left) = ALLOWANCE.with(|a| a.get()) else {
         return a.mul_classical(b);
     };
-    let (m, k, n) = (a.rows, a.cols, b.cols);
-    let n0 = n0_for(&a.m);
-    if m.min(k).min(n) < n0 {
+    let Route::Fast { n0, extra, .. } = decide(a.rows, a.cols, b.cols, &a.m, left) else {
         return a.mul_classical(b);
-    }
-    let extra = match (plan(m, k, n, &a.m, n0), classical_peak(m, k, n, &a.m)) {
-        (Some((Plan::Winograd, _, peak)), Some(classical)) => peak.saturating_sub(classical),
-        _ => return a.mul_classical(b),
     };
-    if extra > left {
-        return a.mul_classical(b);
-    }
     ALLOWANCE.with(|a| a.set(Some(left - extra)));
     let _held = Held(extra);
     winograd(a, b, n0)
@@ -698,6 +734,47 @@ mod tests {
             assert_eq!(plan(m, k, n, &md, 2).unwrap().0, Plan::Classical);
             assert_eq!(mul_planned(&a, &b, 2), a.mul(&b));
         }
+    }
+
+    /// The route `Mat::mul` runs is the one `product_peak` reports, over a
+    /// grid of shapes, primes, crossovers and allowances on both sides of
+    /// each product's extra words: the fast route (Winograd levels run)
+    /// exactly where it reports the plan's peak, else the classical peak
+    /// and no extra; the allowance restored afterwards.
+    #[test]
+    fn mul_runs_the_route_product_peak_reports() {
+        let mut s = 17u64;
+        let mut fast_seen = [0usize; 2];
+        for p in [2u64, 65537, (1 << 31) - 1, (1 << 62) - 57] {
+            let md = Modulus::new(p);
+            for n0 in [2usize, 4, 9] {
+                set_fast_n0(Some(n0));
+                for &(m, k, n) in &[(1usize, 1usize, 1usize), (3, 3, 3), (4, 4, 4), (8, 9, 10), (9, 8, 9), (16, 16, 16), (20, 3, 20), (33, 32, 31), (40, 40, 40), (64, 64, 64), (96, 80, 72)] {
+                    let classical = classical_peak(m, k, n, &md).unwrap();
+                    let planned = plan(m, k, n, &md, n0).unwrap();
+                    let wanted = planned.2.saturating_sub(classical);
+                    let (a, b) = (rand(m, k, md, &mut s), rand(k, n, md, &mut s));
+                    for allowance in [0, wanted.saturating_sub(1), wanted, wanted + 1, u64::MAX] {
+                        let at = format!("p {} n0 {} {}x{}x{} allowance {}", p, n0, m, k, n, allowance);
+                        test_hooks::reset_levels();
+                        let left = with_fast_product(allowance, || {
+                            a.mul(&b);
+                            fast_allowance_left()
+                        });
+                        assert_eq!(left, Some(allowance), "{}", at);
+                        let fast = test_hooks::levels() > 0;
+                        let reported = product_peak(m, k, n, &md, allowance).unwrap();
+                        let want = if fast { (planned.2, wanted) } else { (classical, 0) };
+                        assert_eq!(reported, want, "{}", at);
+                        assert_eq!(fast, planned.0 == Plan::Winograd && m.min(k).min(n) >= n0 && wanted <= allowance, "{}", at);
+                        fast_seen[fast as usize] += 1;
+                    }
+                }
+            }
+        }
+        set_fast_n0(None);
+        // (both routes occur in the grid)
+        assert!(fast_seen[0] > 0 && fast_seen[1] > 0, "{:?}", fast_seen);
     }
 
     /// NUMERIC's grid, the fast route forced at n0 = 8 (so every shape of
