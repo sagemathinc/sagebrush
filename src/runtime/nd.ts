@@ -26,7 +26,7 @@
 
 import { sha256Hex } from "./sha256";
 import { Crew, type WorkerLike } from "./nd-crew";
-import { growTo, memoryFailure, setupRefusal } from "./wasm_room";
+import { growTo, lowMemory, memoryFailure, setupRefusal } from "./wasm_room";
 
 interface Nd {
   nd_info(what: number): number;
@@ -44,6 +44,10 @@ let ndModule: WebAssembly.Module | null = null;
 let floor = 0;
 // (where each call's descriptor and arena start: the floor, 64-aligned, or above the thread pool's region)
 let base = 0;
+// (where the thread pool's region starts, the floor 64-aligned, and the helpers it is laid out for, 0 for none, -1
+// before the first call lays it out: live())
+let poolLo = 0;
+let planned = -1;
 let kernel = "";
 let why = "not used yet";
 // the warm-up: none asked; asked (numpy imported); warming; ready (compiled, for decide()); unused (the decision
@@ -110,7 +114,7 @@ function sharedMemory(): WebAssembly.Memory | null {
       if (!memoryFailure(e)) return null;
     }
   }
-  throw setupRefusal("engine/nd's shared memory");
+  throw setupRefusal("engine/nd's shared memory", true);
 }
 
 // (the engine's features: shared memory needs SharedArrayBuffer, which a page has only when cross-origin isolated)
@@ -130,6 +134,8 @@ function decide(): void {
   const pre = compiled;
   let why1: string;
   if (wasmOff()) why1 = "WebAssembly is off here";
+  // (the low-memory flag's route: no shared memory reserved, the TypeScript code for the session, wasm_room.ts)
+  else if (lowMemory()) why1 = "the low-memory flag is set (SAGEBRUSH_LOW_MEMORY=1): the TypeScript code, which reserves no shared memory";
   else if (!sharedOk()) why1 = "no shared WebAssembly memory here (the page is not cross-origin isolated)";
   else {
     const m = sharedMemory();
@@ -139,7 +145,7 @@ function decide(): void {
         instantiate(pre ?? new WebAssembly.Module(ndBytes() as any), m);
         why1 = "";
       } catch (err: any) {
-        if (memoryFailure(err)) throw setupRefusal("engine/nd");
+        if (memoryFailure(err)) throw setupRefusal("engine/nd", true);
         why1 = `the numerics module could not be loaded (${err?.message ?? err})`;
       }
     }
@@ -155,7 +161,13 @@ function instantiate(mod: WebAssembly.Module, m: WebAssembly.Memory): void {
   const e = new WebAssembly.Instance(mod, { env: { memory: m } }).exports as unknown as Nd;
   // (the host's part of memory starts at the module's __heap_base; the selected kernel's name)
   floor = e.nd_info(1);
-  base = Math.ceil(floor / 64) * 64;
+  // (the thread pool's region, for the pool this host will have, is set aside here, below every call's descriptor
+  // and arena, whether or not the pool ever starts: so a call's workspace, and whether it fits under the memory's
+  // maximum, never depends on whether a product has started the pool yet)
+  // (live() lays it out at the first call: the tests set the pool's size after setup)
+  poolLo = Math.ceil(floor / 64) * 64;
+  planned = -1;
+  base = poolLo;
   kernel = new TextDecoder().decode(new Uint8Array(m.buffer, e.nd_info(2), e.nd_info(3)).slice());
   ex = e;
   mem = m;
@@ -236,7 +248,7 @@ export function ndScratch(): number {
 // the computer refuses the grow (wasm_room.ts).
 function reserve(bytes: number): void {
   const m = mem!;
-  growTo(m, bytes, declaredMax.get(m));
+  growTo(m, bytes, declaredMax.get(m), "always");
 }
 
 /** The Cholesky factor of the n x n real symmetric A (row-major float64; only
@@ -353,7 +365,7 @@ export type NdTestHooks = {
   noTerminate?: boolean; memoryFault?: boolean; rebootstrap?: boolean; rebootstrapMidJob?: boolean;
   malformed?: true | "id16" | "ctl32" | "ctlEnd" | "unshared" | "fault"; badStack?: boolean;
 };
-const tst = { hooks: null as NdTestHooks | null, made: 0, terminated: 0, exited: 0, products: 0, teams: 0, failovers: 0, abandoned: [] as WebAssembly.Memory[], unstopped: [] as Crew[] };
+const tst = { layout: () => ({ base, poolLo, planned }), hooks: null as NdTestHooks | null, made: 0, terminated: 0, exited: 0, products: 0, teams: 0, failovers: 0, abandoned: [] as WebAssembly.Memory[], unstopped: [] as Crew[] };
 
 /** For the tests only: set the hooks (null: none), and see the counters (workers made, terminated and exited,
  *  products,
@@ -422,14 +434,20 @@ function counted(make: () => WorkerLike): () => WorkerLike {
 
 // Start the pool, if this host can have one: its region reserved and recorded, the caller moved onto stack slot 0,
 // and the helpers made and sent their bootstraps (they start in the background).
+// The helpers this host's pool has (0: no pool): fixed per host, decided at the module's setup (instantiate).
+function plannedHelpers(): number {
+  const helpers = helperCount();
+  return helpers >= 1 && helperMaker() ? helpers : 0;
+}
+
 function startPool(): void {
-  const make = helperMaker(), helpers = helperCount();
+  const make = helperMaker(), helpers = planned;
   if (!make || helpers < 1) {
     threads = "off";
     threadsWhy = make ? "one core" : "no worker threads here";
     return;
   }
-  const ctl = base, desc = ctl + 64, stacks = desc + 64, top = stacks + (helpers + 1) * SLOT;
+  const ctl = poolLo, desc = ctl + 64, stacks = desc + 64, top = stacks + (helpers + 1) * SLOT;
   // (the tests' bad stack: a spare slot past the pool's, which no participant uses)
   const spare = tst.hooks?.badStack ? SLOT : 0;
   reserve(top + spare + 64);
@@ -439,7 +457,6 @@ function startPool(): void {
     return;
   }
   ex!.__stack_pointer.value = stacks + SLOT;
-  base = top + spare;
   const h = tst.hooks;
   const p: Pool = { crew: null as any, c: new Int32Array(mem!.buffer, ctl, 16), helpers, desc, t0: now(), ready: false, failed: null };
   p.crew = new Crew(counted(make), (why) => {
@@ -471,9 +488,18 @@ function malform(boot: any, how: NonNullable<NdTestHooks["malformed"]>): void {
   else boot.fault = "x";
 }
 
+// The pool's region and the calls' base, for the pool this host has: at the first call, and again in a fresh memory
+// after a failover (the same, the host's pool size being fixed).
+function layOut(): void {
+  if (planned >= 0) return;
+  planned = plannedHelpers();
+  base = planned ? poolLo + 128 + (planned + 1) * SLOT + (tst.hooks?.badStack ? SLOT : 0) : poolLo;
+}
+
 // Before any call into the module: a failed or overdue pool is dropped (failover); a pool all of whose helpers
 // counted in becomes ready; and after a failure with no fresh memory, every call fails.
 function live(): void {
+  layOut();
   const p = pool;
   if (p) {
     if (p.failed !== null || Atomics.load(p.c, BROKEN)) failover(p.failed ?? "a helper refused a message");
@@ -504,6 +530,7 @@ function failover(why: string): void {
   if (m !== null) {
     try {
       instantiate(ndModule!, m);
+      layOut();
       return;
     } catch {}
   }
@@ -533,13 +560,14 @@ export function ndMatmul(A: Float64Array, B: Float64Array, n: number, m: number,
 function gemmOn(A: Float64Array, B: Float64Array, n: number, m: number, p: number, P: Pool | null): Float64Array | string {
   const T = P ? P.helpers + 1 : 1;
   const up = (x: number) => Math.ceil(x / 64) * 64;
-  const desc = P ? P.desc : base, lo = P ? base : base + 64;
+  // (the arena starts at base + 64 either way: on one thread the descriptor takes those 64 bytes, on the pool it sits
+  // in the pool's region and they stay unused; so the workspace is the same bytes, the pool up or not)
+  const desc = P ? P.desc : base, lo = base + 64;
   const stride = up(ex!.nd_info(0) * 8);
   const a = lo, b = up(a + 8 * m * p), c = up(b + 8 * n * m), scratch = up(c + 8 * n * p), hi = scratch + T * stride;
-  // (the scratch is one stride per participant, so a product within a few strides of the memory's maximum can fit
-  // on one thread and not on the pool: whether the pool is up yet is timing, never free memory; the bits are the
-  // same either way)
-  reserve(hi);
+  // (the scratch is one stride per participant; every product reserves the strides of all the pool's participants,
+  // the pool up or not, so whether a product fits under the memory's maximum never depends on the pool's timing)
+  reserve(scratch + (planned + 1) * stride);
   const f64 = new Float64Array(mem!.buffer), u32 = new Uint32Array(mem!.buffer);
   f64.set(B.subarray(0, m * p), a / 8);
   f64.set(A.subarray(0, n * m), b / 8);

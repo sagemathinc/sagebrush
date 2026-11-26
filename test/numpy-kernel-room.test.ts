@@ -43,8 +43,11 @@ step("small sort", lambda: np.sort(b[:1000])[:2].tolist())
 step("small matmul", lambda: float((np.ones((700, 700)) @ np.ones((700, 700)))[0, 0]))
 `], { encoding: "utf8" });
     const out = r.stdout.trim().split("\n");
-    const past = /^(\w+) EXC MemoryError WebAssembly kernel workspace: needs \d+ bytes, past its memory's maximum of 67108864 bytes; use the native app on a computer with more memory$/;
-    assert.deepEqual(out.map((l) => l.replace(past, "$1 REFUSED")), ["sort REFUSED", "sin REFUSED", "fft REFUSED", "matmul REFUSED", "nd engine/nd", "argsort REFUSED",
+    // (the low-memory flag would give sort, sin, fft and engine/nd's matmul a route, so their refusals name it;
+    // argsort has none)
+    const past = /^(\w+) EXC MemoryError WebAssembly kernel workspace: needs \d+ bytes, past its memory's maximum of 67108864 bytes; (?:to try reviewed lower-memory routes \(results may differ slightly from upstream\), start a new session with SAGEBRUSH_LOW_MEMORY=1; or )?use the native app on a computer with more memory$/;
+    const flag = (l: string) => (l.includes("SAGEBRUSH_LOW_MEMORY=1") ? " FLAG" : "");
+    assert.deepEqual(out.map((l) => l.replace(past, "$1 REFUSED") + (past.test(l) ? flag(l) : "")), ["sort REFUSED FLAG", "sin REFUSED FLAG", "fft REFUSED FLAG", "matmul REFUSED FLAG", "nd engine/nd", "argsort REFUSED",
       "small sort [19999000.0, 19999001.0]", "small matmul 700.0"], out.join("\n") + r.stderr);
     assert.match(r.stderr, /grows past the maximum: 0\n/);
   } finally {

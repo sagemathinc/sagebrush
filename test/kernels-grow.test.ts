@@ -56,6 +56,8 @@ def step(name, f):
 const EXP = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "-c", "import numpy as np\nprint(float(np.exp(np.arange(2000000.0) / 1e6).sum()))"],
   { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_WASM: "1" } }).stdout.trim();
 const REFUSED = /^first EXC MemoryError WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); use the native app on a computer with more memory$/;
+// (engine/nd's refusal also names the low-memory flag, which avoids engine/nd: wasm_room.ts)
+const REFUSED_ND = /^first EXC MemoryError WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); to try reviewed lower-memory routes \(results may differ slightly from upstream\), start a new session with SAGEBRUSH_LOW_MEMORY=1; or use the native app on a computer with more memory$/;
 
 test("a main kernel's grow refused: a MemoryError for that call, then the kernel answers the next", () => {
   const { out, err } = run("main", STEP + `
@@ -88,7 +90,7 @@ step("first", lambda: float((a @ a)[0, 0]))
 step("again", lambda: float((a @ a)[0, 0]))
 step("nd", lambda: np.linalg._kernels()["solve"]["path"])
 `);
-  assert.match(out[0], REFUSED, out.join("\n"));
+  assert.match(out[0], REFUSED_ND, out.join("\n"));
   assert.deepEqual(out.slice(1), ["again 700.0", "nd engine/nd"]);
   assert.match(err, /refused 1 grown \d+\n/);
 });

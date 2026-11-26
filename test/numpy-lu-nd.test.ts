@@ -107,7 +107,7 @@ test("np.linalg.solve from n = 256 on engine/nd: the loader's bits, the oracle; 
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
   // (the CLI asks for the warm-up at numpy's import but has no idle moment for it: the first call compiles)
-  const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n, warm: "unused", memory_max: 2 ** 32 });
+  const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n, warm: "unused", memory_max: 2 ** 32, low_memory: false });
   assert.deepEqual(kernels, { cholesky: k(48), solve: k(256), det: k(256), slogdet: k(256), inv: k(256) });
   // det is slogdet's sign times exp of its log (NumPy's own formula), and agrees with the older LU's
   const ts = seededCalls({ SAGEBRUSH_NO_WASM: "1" }).det;
@@ -121,8 +121,8 @@ test("without WebAssembly: the older LU, within the oracle, and _kernels() sayin
   const { X, inv, kernels } = seededCalls({ SAGEBRUSH_NO_WASM: "1" });
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
-  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused", memory_max: 0 });
-  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused", memory_max: 0 });
+  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused", memory_max: 0, low_memory: false });
+  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused", memory_max: 0, low_memory: false });
 });
 
 test("both paths: a singular matrix is NumPy's LinAlgError for solve and inv, det 0 and slogdet (0, -inf); P's sign", () => {
@@ -284,7 +284,7 @@ test("a module memory that can't grow: inv, det and solve each a MemoryError nam
   const v = (name: string) => Obj.callObj(Obj.getattr(main, "__getitem__"), [name]);
   const R = require("../src/runtime").R.toArray(v("R"));
   assert.equal(R.length, 3);
-  for (const r of R) assert.match(r, /^WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); use the native app on a computer with more memory$/);
+  for (const r of R) assert.match(r, /^WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); to try reviewed lower-memory routes \(results may differ slightly from upstream\), start a new session with SAGEBRUSH_LOW_MEMORY=1; or use the native app on a computer with more memory$/);
   assert.equal(v("OK"), 0.5);
 });
 

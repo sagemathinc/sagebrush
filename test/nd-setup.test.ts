@@ -82,7 +82,7 @@ step("max", lambda: k["memory_max"])
 const ND = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "-c", PROGRAM], { encoding: "utf8" }).stdout.trim().split("\n");
 
 const REFUSED = (what: string) =>
-  `first EXC MemoryError WebAssembly kernel workspace: ${what} could not be set up (more than the computer could give); use the native app on a computer with more memory`;
+  `first EXC MemoryError WebAssembly kernel workspace: ${what} could not be set up (more than the computer could give); to try reviewed lower-memory routes (results may differ slightly from upstream), start a new session with SAGEBRUSH_LOW_MEMORY=1; or use the native app on a computer with more memory`;
 
 test("(the ordinary session: engine/nd, 4 GiB)", () => {
   assert.equal(ND[2], "path engine/nd");
