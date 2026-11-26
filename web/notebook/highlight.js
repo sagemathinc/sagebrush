@@ -32,7 +32,7 @@ export function highlight(src, sage) {
 const MD = new RegExp([
   /^(```|~~~)([^\n]*)\n([\s\S]*?)(?:^(\1[ \t]*)$|$(?![\s\S]))/.source, // 1-4 fenced code
   /(\$\$[\s\S]*?(?:\$\$|$(?![\s\S]))|\\\[[\s\S]*?(?:\\\]|$(?![\s\S])))/.source, // 5 display math
-  /(`+)([\s\S]*?)\6/.source, // 6-7 inline code
+  "(`+)([\\s\\S]*?)\\6", // 6-7 inline code (a string: its \6 is the joined pattern's group, not this piece's)
   /((?<![\\$])\$(?![\s$])(?:\\.|[^$\\\n])*?(?<!\s)\$|\\\((?:[^\n]|\n(?!\n))*?\\\))/.source, // 8 inline math
   /(^#{1,6}[ \t].*$)/.source, // 9 heading
   /(^[ \t]*(?:[-*+]|\d+[.)])(?=[ \t])|^[ \t]*>)/.source, // 10 list item, quote

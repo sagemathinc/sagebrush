@@ -17,7 +17,8 @@ function report(t: ToolTarget): CheckResult | null {
   const c = t.lastCheck();
   if (!c) return null;
   const imgs = Object.entries(t.images).map(([name, v]) => (typeof v === "string" ? { name, found: true } : { name, found: false, why: v.why }));
-  return checkResult(t.file(), t.text(), c, imgs);
+  // (the page's file is its workspace path, as the engine's inputs name files: a problem in an \input file names it)
+  return checkResult(t.file(), t.text(), c, imgs, t.file());
 }
 
 export function latexCheck(t: ToolTarget, format?: string): { content: Content } {

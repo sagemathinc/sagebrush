@@ -32,7 +32,8 @@ Singular's 0.077 s.
 2. Yun's square-free decomposition, which reuses the gcd's cofactors.
 3. For each square-free part:
    - evaluate all variables but one;
-   - factor the univariate image (Zassenhaus, in `sagebrush-poly`);
+   - factor the univariate image (`sagebrush-poly`: Zassenhaus, or van
+     Hoeij's recombination for many modular factors);
    - impose the leading coefficients;
    - Hensel-lift one variable at a time, by multivariate diophantine
      equations.

@@ -47,7 +47,7 @@ interface TalkChunk {
   openShared(root: HTMLElement, o: {
     path: string; text: string; results: unknown | null;
     sandbox: { WorkerKernel: unknown; RunnerWorker: unknown; runnerUrl: string } | null;
-    mount: Mount; say(text: string): void; onRunning(on: boolean): void;
+    mount: Mount; read?(path: string): Promise<Uint8Array | null>; say(text: string): void; onRunning(on: boolean): void;
     onShape?(shape: { hasCode: boolean; hasSlides: boolean }): void;
   }): Promise<TalkView>;
 }
@@ -95,6 +95,9 @@ const el = (tag: string, text = "", attrs: Record<string, string> = {}) => {
 };
 const size = (n: number) => (n < 1e3 ? `${n} B` : n < 1e6 ? `${(n / 1e3).toFixed(1)} kB` : n < 1e9 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e9).toFixed(2)} GB`);
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+// (a talk's \input or \include file as listed, past the LaTeX editor's own limit (EDIT_MAX, web/latex/save.ts): refused
+//  unread)
+const INPUT_READ_MAX = 4 * 2 ** 20;
 const NOTEBOOK = /\.(ipynb|py|sage)$/i;
 const TALKS = __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname);
 const isTalk = (path: string) => TALKS && /\.tex$/i.test(path);
@@ -555,6 +558,14 @@ async function main() {
         sandbox: typeof Worker === "function" ? { WorkerKernel, RunnerWorker, runnerUrl: "/runner/" } : null,
         // (a snapshot of the collection's checked files, as the notebook's; the view keeps to the talk's folder)
         mount: mount.map(([p, x]) => [p, { ...x }]),
+        // (\input and \include: the collection's file at that path, checked as every file here is (fetchChecked); one
+        //  past the editor's limit (4 MiB) refused unread. openShared asks only for the talk's folder)
+        read: async (p: string) => {
+          const g = c.manifest.files.find((x) => x.path === p);
+          if (!g) return null;
+          if (g.size > INPUT_READ_MAX) throw new Error("too large");
+          return new Uint8Array(await fetchChecked(g));
+        },
         say,
         onRunning: (on) => { if (me === view) setRunning(on); },
         // (a .tex shared with its folder may be an article: Run only with code to run, Present only with slides, and the
