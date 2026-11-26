@@ -346,9 +346,19 @@ fn set_reply(v: Value) {
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes: f64) -> f64 {
     let what = if what_len == 0 { "host" } else { std::str::from_utf8(std::slice::from_raw_parts(what_ptr, what_len)).unwrap_or("host") };
+    let (handle, reply) = host_reserve(what, bytes);
+    if let Some(v) = reply {
+        set_reply(v);
+    }
+    handle
+}
+
+/// sb_reserve's body, shared with the native addon (engine/node): the
+/// handle (0 refused with a memory reply, -1 an error reply), and the reply
+/// to leave for the host.
+pub fn host_reserve(what: &str, bytes: f64) -> (f64, Option<Value>) {
     let Some(x) = host_bytes(bytes) else {
-        set_reply(json!({ "error": format!("sb_reserve: {} is not a byte count", bytes) }));
-        return -1.0;
+        return (-1.0, Some(json!({ "error": format!("sb_reserve: {} is not a byte count", bytes) })));
     };
     let placed = sagebrush_ledger::reserve(what, x).and_then(|r| {
         HOST.with(|h| {
@@ -381,15 +391,9 @@ pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes:
         })
     });
     match placed {
-        Ok(handle) => handle,
-        Err(sagebrush_ledger::EngineError::Memory(r)) => {
-            set_reply(json!({ "memory": memory_error_value(&r) }));
-            0.0
-        }
-        Err(e) => {
-            set_reply(json!({ "error": e.to_string() }));
-            -1.0
-        }
+        Ok(handle) => (handle, None),
+        Err(sagebrush_ledger::EngineError::Memory(r)) => (0.0, Some(json!({ "memory": memory_error_value(&r) }))),
+        Err(e) => (-1.0, Some(json!({ "error": e.to_string() }))),
     }
 }
 
@@ -401,26 +405,28 @@ pub unsafe extern "C" fn sb_reserve(what_ptr: *const u8, what_len: usize, bytes:
 // the symbol unique); no unsafe operation.
 #[allow(unsafe_code)]
 pub extern "C" fn sb_grow(handle: f64, bytes: f64) -> i32 {
+    let (code, reply) = host_grow(handle, bytes);
+    if let Some(v) = reply {
+        set_reply(v);
+    }
+    code
+}
+
+/// sb_grow's body, shared with the native addon: 0 grown, 1 refused (a
+/// memory reply), -1 an error reply.
+pub fn host_grow(handle: f64, bytes: f64) -> (i32, Option<Value>) {
     let Some(x) = host_bytes(bytes) else {
-        set_reply(json!({ "error": format!("sb_grow: {} is not a byte count", bytes) }));
-        return -1;
+        return (-1, Some(json!({ "error": format!("sb_grow: {} is not a byte count", bytes) })));
     };
     // (the reservation is taken out for the admission, so no borrow is held
     // across the ledger's lock, then put back in the same slot)
     let Some((i, mut r)) = slot_take(handle) else {
-        set_reply(json!({ "error": format!("sb_grow: no host handle {}", handle) }));
-        return -1;
+        return (-1, Some(json!({ "error": format!("sb_grow: no host handle {}", handle) })));
     };
     let out = match r.grow("host result", x) {
-        Ok(()) => 0,
-        Err(sagebrush_ledger::EngineError::Memory(m)) => {
-            set_reply(json!({ "memory": memory_error_value(&m) }));
-            1
-        }
-        Err(e) => {
-            set_reply(json!({ "error": e.to_string() }));
-            -1
-        }
+        Ok(()) => (0, None),
+        Err(sagebrush_ledger::EngineError::Memory(m)) => (1, Some(json!({ "memory": memory_error_value(&m) }))),
+        Err(e) => (-1, Some(json!({ "error": e.to_string() }))),
     };
     HOST.with(|h| h.borrow_mut()[i].r = Some(r));
     out
@@ -433,6 +439,11 @@ pub extern "C" fn sb_grow(handle: f64, bytes: f64) -> i32 {
 // the symbol unique); no unsafe operation.
 #[allow(unsafe_code)]
 pub extern "C" fn sb_release(handle: f64) -> i32 {
+    host_release(handle)
+}
+
+/// sb_release's body, shared with the native addon: 0 released, -1 no such handle.
+pub fn host_release(handle: f64) -> i32 {
     match slot_take(handle) {
         Some((i, r)) => {
             drop(r);
