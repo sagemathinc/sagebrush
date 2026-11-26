@@ -1252,10 +1252,7 @@
     "magma": true,
     "flint": "python"
    },
-   "user_sizes": [
-    "s"
-   ],
-   "route_note": "the engine's classical product (Mat::mul without an allowance, the default); the user column at size s only, informational (no ratio): the Sage-mode GF(p) product does not reach the engine yet (an entry loop in Python, https://github.com/sagemathinc/sagebrush/issues/2163), so the point shows when it does; native-n at the sweep's ends: no parallel product yet, a flat baseline against flint-n",
+   "route_note": "the product users get: Sage mode's A * B goes to the engine's nmod_mat_mul, which runs Mat::mul under a fixed allowance of 2^24 words for the fast route's workspace (engine/web bin_ops MAT_MUL_FAST_ALLOWANCE), so the route follows the shape and the prime alone; the native column runs Mat::mul under the same allowance; native-n at the sweep's ends: no parallel product yet, a flat baseline against flint-n",
    "sweep": "ends",
    "working_set": "24*n**2"
   },
@@ -1285,7 +1282,7 @@
     "magma": false,
     "flint": null
    },
-   "route_note": "the native driver's Mat::mul under with_fast_product with a fixed allowance large enough for any plan at these sizes (not the engine's admission): what the fast route would give; no user path runs it yet, so no ratio and no calibration",
+   "route_note": "the native driver's Mat::mul under a fixed allowance of 2^32 words, far beyond the user path's 2^24: the fast route wherever its plan takes it, whatever the workspace; at these sizes the user path's allowance already admits every plan, so this row times the same route as mat_fp_mul's native column (informational: no ratio, no calibration)",
    "compares": "the same products as mat_fp_mul; no ratio",
    "calibration": false,
    "ratio": false,
@@ -1530,10 +1527,7 @@
     "magma": true,
     "flint": "python"
    },
-   "user_sizes": [
-    "s"
-   ],
-   "route_note": "the engine's classical product (Mat::mul without an allowance, the default); the user column at size s only, informational (no ratio): the Sage-mode GF(p) product does not reach the engine yet (an entry loop in Python, https://github.com/sagemathinc/sagebrush/issues/2163), so the point shows when it does; native-n at the sweep's ends: no parallel product yet, a flat baseline against flint-n",
+   "route_note": "the product users get: Sage mode's A * B goes to the engine's nmod_mat_mul, which runs Mat::mul under a fixed allowance of 2^24 words for the fast route's workspace (engine/web bin_ops MAT_MUL_FAST_ALLOWANCE), so the route follows the shape and the prime alone; the native column runs Mat::mul under the same allowance; native-n at the sweep's ends: no parallel product yet, a flat baseline against flint-n",
    "sweep": "ends",
    "working_set": "24*n**2"
   },
@@ -1563,7 +1557,7 @@
     "magma": false,
     "flint": null
    },
-   "route_note": "the native driver's Mat::mul under with_fast_product with a fixed allowance large enough for any plan at these sizes (not the engine's admission): what the fast route would give; no user path runs it yet, so no ratio and no calibration",
+   "route_note": "the native driver's Mat::mul under a fixed allowance of 2^32 words, far beyond the user path's 2^24: the fast route wherever its plan takes it, whatever the workspace; at these sizes the user path's allowance already admits every plan, so this row times the same route as mat_fp_mul's native column (informational: no ratio, no calibration)",
    "compares": "the same products as mat_fp31_mul; no ratio",
    "calibration": false,
    "ratio": false,
