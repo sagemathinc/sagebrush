@@ -47,15 +47,18 @@ def fill_positions(col, fills):
     """col with the values `fills` (position -> value) set, as a new
     column: the dtype kept where every value fits it, else object (with
     pandas 3.1's Pandas4Warning for the first value that doesn't fit)."""
+    from . import _pd_category as CT
+    if isinstance(col, CT.CatColumn):
+        raise CT.refuse("filling a category column (fillna, fill_value)")
     if not fills:
         return col.copy()
     d = col.dtype
     vals = list(fills.values())
-    if d == "float64" and all(_number(v) for v in vals):
+    if (d == "float64" or d == "float32") and all(_number(v) for v in vals):
         v = col._pd_values.copy()
         for p, x in fills.items():
             v[p] = float(x)
-        return Column("float64", v)
+        return Column(d, v)
     if d is STR and all(isinstance(v, str) for v in vals):
         out = list(col._pd_values)
         for p, x in fills.items():
@@ -69,7 +72,7 @@ def fill_positions(col, fills):
             v[p] = as_us(x)
         return Column(DT, v)
     if d != "object":
-        bad = [v for v in vals if not ((d == "float64" and _number(v)) or (d is STR and isinstance(v, str)))]
+        bad = [v for v in vals if not ((d in ("float64", "float32") and _number(v)) or (d is STR and isinstance(v, str)))]
         _incompatible(bad[0], "str" if d is STR else d)
     out = col.tolist()
     for p, x in fills.items():
