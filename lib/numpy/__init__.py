@@ -984,7 +984,12 @@ class ufunc:
         if dtype is not None:
             dt = self._loop(dtype)
             if a.dtype != dt:
-                a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
+                # (accumulated in dtype, as NumPy's: the conversion is the reduction's, and its warning says so)
+                old = _np._cast_label("reduce")
+                try:
+                    a = a.astype(dt)
+                finally:
+                    _np._cast_label(old)
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
         masked = where is not True and self._op in ("add", "multiply", "maximum", "minimum")
@@ -1479,11 +1484,12 @@ def _root(r):
     # (std's root of the variance, as NumPy's: in place for an array (sqrt(r, out=r), refused for an integer one by
     # same_kind casting), a scalar's in its own type)
     if isinstance(r, ndarray):
-        s = sqrt(r)
-        if s.dtype != r.dtype and not can_cast(s.dtype, r.dtype, "same_kind"):
+        if r.dtype.kind in "biu":
+            # (refused before sqrt runs, naming sqrt's loop: float16 for 1-byte inputs, float32 for 2-byte, float64)
+            loop = {1: "float16", 2: "float32"}.get(r.dtype.itemsize, "float64")
             raise _UFuncTypeError("Cannot cast ufunc 'sqrt' output from dtype('%s') to dtype('%s') with casting rule "
-                                  "'same_kind'" % (s.dtype.name, r.dtype.name))
-        r[...] = s
+                                  "'same_kind'" % (loop, r.dtype.name))
+        r[...] = sqrt(r)
         return r
     return r.dtype.type(sqrt(r))
 
@@ -1571,7 +1577,8 @@ def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
         _store(out, true_divide(out, float64(n) if n else 0.0), "divide")
         return out
     s = _np.sum(a, axis, keepdims, dtype)
-    return s / n if n else s / 0.0
+    # (as NumPy's _mean: the quotient converted back to the sum's dtype, an integer dtype's included)
+    return _divided(s, n) if n else s / 0.0
 
 
 def _var(a, axis, dtype, out, ddof, keepdims, where, arrmean):
@@ -1616,7 +1623,10 @@ def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=Tru
     if where is not True or mean is not None:
         # (as NumPy's _std, #2088: the variance (into out if given), then its root there)
         return _root(var(a, axis, dtype, out, ddof, keepdims, where=where, mean=mean, correction=correction))
-    return _out(sqrt(var(a, axis, dtype, None, ddof, keepdims, correction=correction)), out, "reduce")
+    if out is not None:
+        # (as NumPy's _std: the variance into out, then its root there, refused for an integer out, #2250)
+        return _root(var(a, axis, dtype, out, ddof, keepdims, correction=correction))
+    return sqrt(var(a, axis, dtype, None, ddof, keepdims, correction=correction))
 
 
 def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
