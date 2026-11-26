@@ -2160,6 +2160,11 @@ class FFMatrix:
             return x  # ([self | I] and its echelon form, n x 2n)
         one, zero = self._base.one(), self._base.zero()
         base = self._base
+        if isinstance(base, _ff.IntegerModRing_) and not _field(base):
+            x = _inverse_mod(self._rows, base._n)
+            if x is None:
+                raise ZeroDivisionError("input matrix must be nonsingular")
+            return FFMatrix(base, [[_ff._elt(base, v) for v in r] for r in x], n)
         B = _ech_bin(base, n, 2 * n)
         p = B._ech_bin_route(base, n, 2 * n, True, B._ech_out_cost(base, n, n), lambda m: B._ech_out_cost(base, m, m)) if B else None
         box = B._ech_bin_call((itertools.chain(r, (1 if i == j else 0 for j in range(n))) for i, r in enumerate(self._rows)), base, n, 2 * n, p, True) if p else None
@@ -2850,6 +2855,41 @@ def _det_mod(rows, n):
         if not d:
             return 0
     return d
+
+
+def _inverse_mod(rows, n):
+    """The inverse of the square matrix rows over Z/n, as rows of ints in
+    [0, n), or None when it has none (its determinant not a unit), without
+    dividing by a non-unit: [rows | I] is brought to upper triangular form
+    by _det_mod's row operations of determinant 1, each pivot is then a
+    unit exactly when the determinant is; each pivot row is scaled by the
+    pivot's inverse and its column cleared from the rows above.  Over Z/1,
+    None for any nonempty matrix, as Sage refuses it there."""
+    k = len(rows)
+    if n == 1 and k:
+        return None
+    m = [[int(x) % n for x in r] + [1 % n if i == j else 0 for j in range(k)] for i, r in enumerate(rows)]
+    for c in range(k):
+        rc = m[c]
+        for i in range(c + 1, k):
+            ri = m[i]
+            b = ri[c]
+            if not b:
+                continue
+            a = rc[c]
+            g, s, t = _xgcd(a, b)
+            u, v = a // g, b // g
+            rc, m[i] = [(s * x + t * y) % n for x, y in zip(rc, ri)], [(u * y - v * x) % n for x, y in zip(rc, ri)]
+        if _gcd(rc[c], n) != 1:
+            return None
+        w = pow(rc[c], -1, n)
+        rc = [x * w % n for x in rc]
+        m[c] = rc
+        for i in range(c):
+            f = m[i][c]
+            if f:
+                m[i] = [(x - f * y) % n for x, y in zip(m[i], rc)]
+    return [r[k:] for r in m]
 
 
 def _xgcd(a, b):
