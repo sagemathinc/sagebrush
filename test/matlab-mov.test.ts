@@ -268,6 +268,10 @@ test("a window of equal values: variance and standard deviation exactly 0, as MA
     "fprintf('std|%s\\n', sprintf('%.17g ', movstd(x, [0 2])));",
     "fprintf('one|%s\\n', sprintf('%.17g ', movvar([0.1 0.1 0.1], 3, 'Endpoints', 0.1), movstd([0.1 0.1 0.1], 5, 1)));",
     "fprintf('neg|%d\\n', any(movvar(1e6 + 1e-3*sin(1:1000), 7) < 0));",
+    // (equal infinities: not equal values, the variance NaN, as MATLAB's)
+    "fprintf('inf|%s\\n', sprintf('%.17g ', movvar([Inf Inf Inf 1], 3), movvar([-Inf -Inf -Inf], 3), movstd([Inf Inf], 2)));",
+    "fprintf('infomit|%s\\n', sprintf('%.17g ', movvar([Inf Inf Inf NaN], 3, 'omitnan')));",
+    "fprintf('infbf|%s\\n', sprintf('%.17g ', movvar([-Inf -Inf 2], [0 1])));",
     // (a window far past the data, here one element: its fill values past both ends count too, equal to the data's or not)
     "fprintf('far|%s\\n', sprintf('%.17g ', movvar(0.1, 9, 'Endpoints', 0.1), movvar(0.1, 9, 'Endpoints', 0.2)));",
   ].join("\n") + "\n");
@@ -287,6 +291,13 @@ test("a window of equal values: variance and standard deviation exactly 0, as MA
   }
   assert.deepEqual(got.get("one"), [0, 0, 0, 0, 0, 0]);
   assert.deepEqual(got.get("neg"), [0]);
+  // (each window holding two or more infinities: NaN; movstd([Inf Inf], 2) starts with [Inf] alone, one value, 0 as
+  // before; [-Inf -Inf 2] with [0 1] ends on 2 alone, 0)
+  const inf = got.get("inf")!;
+  assert.ok(inf.slice(0, 7).every(Number.isNaN) && inf[7] === 0 && Number.isNaN(inf[8]), `inf: ${inf}`);
+  assert.ok(got.get("infomit")!.slice(0, 3).every(Number.isNaN), `infomit: ${got.get("infomit")}`);
+  const infbf = got.get("infbf")!;
+  assert.ok(Number.isNaN(infbf[0]) && Number.isNaN(infbf[1]) && infbf[2] === 0, `infbf: ${infbf}`);
   const far = got.get("far")!;
   assert.equal(far[0], 0);
   assert.ok(far[1] > 0, `far: ${far}`);
