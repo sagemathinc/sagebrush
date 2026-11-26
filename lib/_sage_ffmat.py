@@ -9,6 +9,7 @@ import itertools
 import json as _json
 import sys as _sys
 import random as _random
+from math import gcd as _gcd
 
 import _sage_ff as _ff
 from fractions import Fraction as _F
@@ -2112,6 +2113,8 @@ class FFMatrix:
         d = _mp(self, "det") if _mp_field(self._base) else None
         if d is not None:
             return d
+        if isinstance(self._base, _ff.IntegerModRing_) and not _field(self._base):
+            return _ff._elt(self._base, _det_mod(self._rows, self._base._n))
         m, piv, d = _echelon(self._rows, self._base, self._ncols, want_rows=False)
         return d if len(piv) == self.nrows() else self._base.zero()
 
@@ -2125,7 +2128,14 @@ class FFMatrix:
             sage: matrix(GF(7), [[1, 2], [3, 4]]).is_invertible(), matrix(GF(7), [[1, 2], [2, 4]]).is_invertible()
             (True, False)
         """
-        return self.is_square() and bool(self.det())
+        if not self.is_square():
+            return False
+        d = self.det()
+        # (over Z/n with zero divisors, a nonzero determinant need not be a
+        # unit: invertible exactly when it is coprime to n)
+        if isinstance(self._base, _ff.IntegerModRing_) and not _field(self._base):
+            return _gcd(int(d), self._base._n) == 1
+        return bool(d)
 
     is_unit = is_invertible
 
@@ -2812,6 +2822,46 @@ def _ech_bin(base, r, c):
         return None
     import _sage_ffmat_bin
     return _sage_ffmat_bin
+
+
+def _det_mod(rows, n):
+    """The determinant of the square matrix rows over Z/n, as an int in
+    [0, n), without dividing (n may have zero divisors): each column is
+    cleared below the diagonal by 2 x 2 row operations of determinant 1,
+    [s t; -b/g a/g] on rows (a, b) with s a + t b = g = gcd(a, b), on
+    representatives in [0, n); the result is the product of the diagonal.
+    Row swaps are such operations too (a = 0), so no sign is kept."""
+    m = [[int(x) % n for x in r] for r in rows]
+    k = len(m)
+    d = 1 % n
+    for c in range(k):
+        rc = m[c]
+        for i in range(c + 1, k):
+            ri = m[i]
+            b = ri[c]
+            if not b:
+                continue
+            a = rc[c]
+            g, s, t = _xgcd(a, b)
+            u, v = a // g, b // g
+            rc, m[i] = [(s * x + t * y) % n for x, y in zip(rc, ri)], [(u * y - v * x) % n for x, y in zip(rc, ri)]
+        m[c] = rc
+        d = d * rc[c] % n
+        if not d:
+            return 0
+    return d
+
+
+def _xgcd(a, b):
+    """(g, s, t) with s a + t b = g = gcd(a, b) > 0, for integers a >= 0,
+    b > 0."""
+    s0, t0, s1, t1 = 1, 0, 0, 1
+    while b:
+        q = a // b
+        a, b = b, a - q * b
+        s0, s1 = s1, s0 - q * s1
+        t0, t1 = t1, t0 - q * t1
+    return a, s0, t0
 
 
 def _hessenberg(a, base):
