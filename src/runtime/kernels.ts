@@ -9,7 +9,7 @@
 // SAGEBRUSH_NO_WASM=1) before first use to disable.
 
 import { KERNELS_WASM, KERNELS_RELAXED_WASM } from "./kernels_wasm";
-import { growTo } from "./wasm_room";
+import { growTo, USE_JS, type FlagRoute } from "./wasm_room";
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -85,10 +85,26 @@ let resident = "";
 //  computer refuses, is a MemoryError for that call, never the JavaScript path; engine/nd's, src/runtime/nd.ts, too)
 // Make room for `doubles` float64s at the scratch base; returns the views
 // (valid until the next reserve).
+// (the low-memory flag's bearing on the main module's grows: argsort sets "none" while it lays out, wasm_room.ts)
+let route: FlagRoute = "past-max";
+
+// A kernel's answer "use JavaScript" (null or false) where the low-memory flag sends a call whose workspace is past
+// its memory's fixed maximum there (wasm_room.ts USE_JS): decided by the input's size and the flag before any grow.
+function jsAbove<A extends any[], R, J>(f: (...a: A) => R, js: J): (...a: A) => R | J {
+  return (...a: A) => {
+    try {
+      return f(...a);
+    } catch (e) {
+      if (e === USE_JS) return js;
+      throw e;
+    }
+  };
+}
+
 function reserve(doubles: number): void {
   resident = "";
   const mem = K!.memory;
-  growTo(mem, base + doubles * 8);
+  growTo(mem, base + doubles * 8, undefined, route);
   if (f64.buffer !== mem.buffer) {
     f64 = new Float64Array(mem.buffer);
     i32 = new Int32Array(mem.buffer);
@@ -116,7 +132,7 @@ const view = (addr: number, len: number) => f64.subarray(addr / 8, addr / 8 + le
 
 // For matmul of an (m x k) by a (k x n) matrix: null when the JavaScript
 // loops should be used, otherwise views a, b, c into wasm memory and run().
-export function gemmBuffers(m: number, n: number, k: number):
+function gemmBuffersImpl(m: number, n: number, k: number):
   | { a: Float64Array; b: Float64Array; c: Float64Array; run(): void }
   | null {
   if (n < 4 || m * n * k < GEMM_MIN || !kernels()) return null;
@@ -131,9 +147,10 @@ export function gemmBuffers(m: number, n: number, k: number):
     run: () => K!.dgemm(b0 + pa * 8, b0 + pb * 8, b0 + pc * 8, m, n, k, b0 + pp * 8),
   };
 }
+export const gemmBuffers = jsAbove(gemmBuffersImpl, null);
 
 // LU with partial pivoting of the n x n row-major matrix A (not modified).
-export function wasmLU(A: Float64Array, n: number): { lu: Float64Array; piv: number[]; sign: number; singular: boolean } | null {
+function wasmLUImpl(A: Float64Array, n: number): { lu: Float64Array; piv: number[]; sign: number; singular: boolean } | null {
   if (n < LU_MIN || !kernels()) return null;
   const nn = n * n;
   reserve(nn + n);
@@ -143,9 +160,10 @@ export function wasmLU(A: Float64Array, n: number): { lu: Float64Array; piv: num
   const piv = Array.from(i32.subarray((base + nn * 8) / 4, (base + nn * 8) / 4 + n));
   return { lu, piv, sign: Math.sign(r), singular: Math.abs(r) === 2 };
 }
+export const wasmLU = jsAbove(wasmLUImpl, null);
 
 // Solve with LU factors: B (n x m, row-major) is permuted by piv and solved.
-export function wasmLuSolve(L: { lu: Float64Array; piv: number[] }, n: number, B: Float64Array, m: number): Float64Array | null {
+function wasmLuSolveImpl(L: { lu: Float64Array; piv: number[] }, n: number, B: Float64Array, m: number): Float64Array | null {
   if (n < LU_MIN || !kernels()) return null;
   const nn = n * n, o = base / 8;
   reserve(nn + n * m);
@@ -155,10 +173,11 @@ export function wasmLuSolve(L: { lu: Float64Array; piv: number[] }, n: number, B
   K!.dgetrs(base, n, base + nn * 8, m);
   return f64.slice(x, x + n * m);
 }
+export const wasmLuSolve = jsAbove(wasmLuSolveImpl, null);
 
 // Householder QR of the m x n matrix A (row-major), as qr() in
 // numpy_linalg.ts: [Q (m x qc), R, qc].
-export function wasmQR(A: Float64Array, m: number, n: number, complete: boolean): [Float64Array, Float64Array, number] | null {
+function wasmQRImpl(A: Float64Array, m: number, n: number, complete: boolean): [Float64Array, Float64Array, number] | null {
   if (m * n * Math.min(m, n) < WORK_MIN || !kernels()) return null;
   const k = Math.min(m, n), qc = complete ? m : k;
   const [a, c, v, beta, q, qt] = layout(m * n, m * n, k * m, k, qc * m, m * qc);
@@ -172,12 +191,13 @@ export function wasmQR(A: Float64Array, m: number, n: number, complete: boolean)
   for (let i = 0; i < Math.min(rr, m); i++) for (let col = i; col < n; col++) R[i * n + col] = C[col * m + i];
   return [Q, R, qc];
 }
+export const wasmQR = jsAbove(wasmQRImpl, null);
 
 // Q^T B of the m x n matrix A (row-major) without forming Q, as qrQtb() in
 // numpy_linalg.ts: B is m x nb (row-major); [C (rr x nb), R (rr x n)], rr = m
 // when complete, else min(m, n): dgeqr's factorization, then its reflectors
 // applied to B's columns in increasing order (dqtb).
-export function wasmQRQtb(A: Float64Array, m: number, n: number, B: Float64Array, nb: number, complete: boolean): [Float64Array, Float64Array] | null {
+function wasmQRQtbImpl(A: Float64Array, m: number, n: number, B: Float64Array, nb: number, complete: boolean): [Float64Array, Float64Array] | null {
   if (m * n * Math.min(m, n) < WORK_MIN || !kernels()) return null;
   const k = Math.min(m, n), rr = complete ? m : k;
   const [a, c, v, beta, bs, b] = layout(m * n, m * n, k * m, k, m * nb, m * nb);
@@ -194,10 +214,11 @@ export function wasmQRQtb(A: Float64Array, m: number, n: number, B: Float64Array
   for (let i = 0; i < Math.min(rr, m); i++) for (let col = i; col < n; col++) R[i * n + col] = C[col * m + i];
   return [out, R];
 }
+export const wasmQRQtb = jsAbove(wasmQRQtbImpl, null);
 
 // Symmetric eigenproblem: eigenvalues d (unsorted) and the eigenvector of
 // d[j] in W[j*n .. j*n+n]; "noconv" if QL did not converge.
-export function wasmSymEig(A: Float64Array, n: number): { d: Float64Array; W: Float64Array } | "noconv" | null {
+function wasmSymEigImpl(A: Float64Array, n: number): { d: Float64Array; W: Float64Array } | "noconv" | null {
   if (n < EIG_MIN || !kernels()) return null;
   const [w, d, e] = layout(n * n, n, n);
   const W = view(w, n * n);
@@ -205,20 +226,22 @@ export function wasmSymEig(A: Float64Array, n: number): { d: Float64Array; W: Fl
   if (K!.dsyev(w, n, d, e)) return "noconv";
   return { d: view(d, n).slice(), W: W.slice() };
 }
+export const wasmSymEig = jsAbove(wasmSymEigImpl, null);
 
 // General eigenproblem: eigenvalues d + i e and V^T (Schur vectors turned
 // eigenvectors, before normalization); "noconv" if QR did not converge.
-export function wasmGenEig(A: Float64Array, n: number): { d: Float64Array; e: Float64Array; W: Float64Array } | "noconv" | null {
+function wasmGenEigImpl(A: Float64Array, n: number): { d: Float64Array; e: Float64Array; W: Float64Array } | "noconv" | null {
   if (n < EIG_MIN || !kernels()) return null;
   const [h, w, d, e, ort, tmp] = layout(n * n, n * n, n, n, n, n);
   view(h, n * n).set(A);
   if (K!.dgeev(h, n, w, d, e, ort, tmp)) return "noconv";
   return { d: view(d, n).slice(), e: view(e, n).slice(), W: view(w, n * n).slice() };
 }
+export const wasmGenEig = jsAbove(wasmGenEigImpl, null);
 
 // SVD of the m x n (m >= n) matrix A: U's n columns, S (n), V's n columns,
 // as gkrSVD() in numpy_linalg.ts; "noconv" if it did not converge.
-export function wasmSVD(A: Float64Array, m: number, n: number): [Float64Array[], Float64Array, Float64Array[]] | "noconv" | null {
+function wasmSVDImpl(A: Float64Array, m: number, n: number): [Float64Array[], Float64Array, Float64Array[]] | "noconv" | null {
   if (m < n || m * n * n < WORK_MIN || n < 2 || !kernels()) return null;
   const [a0, a, u, v, s, e, work] = layout(m * n, m * n, m * n, n * n, n + 1, n, m);
   view(a0, m * n).set(A);
@@ -228,6 +251,7 @@ export function wasmSVD(A: Float64Array, m: number, n: number): [Float64Array[],
   const V = Array.from({ length: n }, (_, j) => view(v + j * n * 8, n).slice());
   return [U, view(s, n).slice(), V];
 }
+export const wasmSVD = jsAbove(wasmSVDImpl, null);
 
 // FFT twiddle tables cos/sin(2 pi k/n), k < n, and the radix-3/5 constants:
 // computed by numpy_fft.ts, which passes them in.
@@ -239,7 +263,7 @@ const FFT_MIN = 64;
 
 // The complex FFT (interleaved, length N, in place) by Stockham passes of
 // the given radices; false if the kernels are not used.
-export function wasmFFT(x: Float64Array, N: number, factors: number[], inverse: boolean, tw: Twiddles, consts: Float64Array): boolean {
+function wasmFFTImpl(x: Float64Array, N: number, factors: number[], inverse: boolean, tw: Twiddles, consts: Float64Array): boolean {
   if (N < FFT_MIN || !kernels()) return false;
   const key = `c${N}`, keep = resident === key;
   const [tc, ts, cs, f, xa, ya] = layout(N, N, 8, factors.length, 2 * N, 2 * N);
@@ -255,11 +279,12 @@ export function wasmFFT(x: Float64Array, N: number, factors: number[], inverse: 
   resident = key;
   return true;
 }
+export const wasmFFT = jsAbove(wasmFFTImpl, false);
 
 // rfft of `rows` contiguous real rows of even length n from data[off..]
 // into out (rows x (n/2+1) interleaved complex, from out[ooff..]); the
 // half-length transform uses `factors`.
-export function wasmRfftRows(data: Float64Array, off: number, rows: number, n: number, out: Float64Array, ooff: number,
+function wasmRfftRowsImpl(data: Float64Array, off: number, rows: number, n: number, out: Float64Array, ooff: number,
                              factors: number[], twh: Twiddles, twn: Twiddles, consts: Float64Array): boolean {
   const h = n / 2;
   if (h < FFT_MIN || !kernels()) return false;
@@ -279,6 +304,7 @@ export function wasmRfftRows(data: Float64Array, off: number, rows: number, n: n
   resident = key;
   return true;
 }
+export const wasmRfftRows = jsAbove(wasmRfftRowsImpl, false);
 
 // exp and log also come in a module built with relaxed SIMD
 // (kernels/relaxed), whose fused multiply-adds are the hardware's.  The
@@ -323,7 +349,7 @@ export function wasmFusedFMA(): boolean {
 
 // exp or log (glibc's, as libm.ts) of src[off..off+n] into dst[0..n].
 const UNARY_MIN = 64;
-export function wasmUnary(op: "vexp" | "vlog", tab: Float64Array, src: Float64Array, off: number, n: number, dst: Float64Array): boolean {
+function wasmUnaryImpl(op: "vexp" | "vlog", tab: Float64Array, src: Float64Array, off: number, n: number, dst: Float64Array): boolean {
   if (n < UNARY_MIN || !kernels()) return false;
   const R = relaxed();
   if (R) {
@@ -346,12 +372,13 @@ export function wasmUnary(op: "vexp" | "vlog", tab: Float64Array, src: Float64Ar
   resident = key;
   return true;
 }
+export const wasmUnary = jsAbove(wasmUnaryImpl, false);
 
 // sin or cos (correctly rounded, as crmath.ts) of src[off..off+n] into
 // dst[0..n]: the kernel (kernels/src/crsin.rs) computes crmath's fast path
 // and leaves the elements it cannot round, and those not finite or past
 // 2^20 pi/2, to slow (crmath's sin or cos itself).
-export function wasmSinCos(cos: boolean, tab: Float64Array, src: Float64Array, off: number, n: number, dst: Float64Array, slow: (x: number) => number): boolean {
+function wasmSinCosImpl(cos: boolean, tab: Float64Array, src: Float64Array, off: number, n: number, dst: Float64Array, slow: (x: number) => number): boolean {
   if (n < UNARY_MIN || !kernels()) return false;
   const R = relaxed();
   let left: number, mem: WebAssembly.Memory, ix: number;
@@ -377,11 +404,12 @@ export function wasmSinCos(cos: boolean, tab: Float64Array, src: Float64Array, o
   for (let k = 0; k < left; k++) dst[I[k]] = slow(src[off + I[k]]);
   return true;
 }
+export const wasmSinCos = jsAbove(wasmSinCosImpl, false);
 
 // Sorting doubles (kernels/src/sort.rs: a stable radix sort, in the order of
 // a typed array's sort: -0 before +0, NaN last).
 const SORT_MIN = 64, HIST = (6 * 2048) / 2; // the histograms, in doubles
-export function wasmSort(x: Float64Array): boolean {
+function wasmSortImpl(x: Float64Array): boolean {
   const n = x.length;
   if (n < SORT_MIN || !kernels()) return false;
   const [a, t, h] = layout(n, n, HIST);
@@ -390,12 +418,22 @@ export function wasmSort(x: Float64Array): boolean {
   x.set(view(a, n));
   return true;
 }
+export const wasmSort = jsAbove(wasmSortImpl, false);
 // The stable argsort of x into out[ooff..ooff+n] (as numbers).
 export function wasmArgsort(x: Float64Array, out: Float64Array | number[], ooff: number): boolean {
   const n = x.length;
   if (n < SORT_MIN || n >= 2 ** 32 || !kernels()) return false;
   const half = Math.ceil(n / 2);
-  const [a, idx, k1, k2, idx2, h] = layout(n, half, n, n, half, HIST);
+  // (past the memory's maximum: refused even with the low-memory flag, its JavaScript path keeping the indices in a
+  // JavaScript array, past V8's largest a crash rather than an error)
+  route = "none";
+  let at: number[];
+  try {
+    at = layout(n, half, n, n, half, HIST);
+  } finally {
+    route = "past-max";
+  }
+  const [a, idx, k1, k2, idx2, h] = at;
   view(a, n).set(x);
   K!.argsort_f64(a, n, idx, k1, k2, idx2, h);
   const r = new Uint32Array(f64.buffer, idx, n);
@@ -411,7 +449,7 @@ export function wasmArgsort(x: Float64Array, out: Float64Array | number[], ooff:
 // words [state lo, hi, inc lo, hi] and meta [has_u32, u32] for PCG64.
 const RANDOM_MIN = 256;
 // tabs: log's, exp's and the ziggurats' tables (RANDOM_TABLES)
-export function wasmRandom(gen: "mt" | "pcg", state: Uint32Array | BigUint64Array, meta: Float64Array, dist: number,
+function wasmRandomImpl(gen: "mt" | "pcg", state: Uint32Array | BigUint64Array, meta: Float64Array, dist: number,
                            out: Float64Array, lo: number, rng: number, logtab: Float64Array): boolean {
   const n = out.length;
   if (n < RANDOM_MIN || !kernels()) return false;
@@ -431,3 +469,4 @@ export function wasmRandom(gen: "mt" | "pcg", state: Uint32Array | BigUint64Arra
   if (R) R.tab = "";
   return true;
 }
+export const wasmRandom = jsAbove(wasmRandomImpl, false);

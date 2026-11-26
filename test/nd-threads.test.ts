@@ -433,3 +433,19 @@ test("the test hooks are out of production code's reach: only nd.ts defines ndTe
   assert.equal(nd.match(/tst\.hooks = /g)?.length, 1);
   assert.match(nd, /export function ndTest\(hooks\?: NdTestHooks \| null\): typeof tst \{\n  if \(hooks !== undefined\) tst\.hooks = hooks;/);
 });
+
+// (whether a call fits under the module memory's maximum never depends on the pool's timing: every product reserves
+// the scratch strides of all the pool's participants, the pool up or not, and the pool's region is set aside at the
+// first call, below every descriptor and arena, whether or not a product ever starts it)
+test("a product's workspace is the same before the pool is up and after; so is every call's base, before and after a first product", () => {
+  // (the big product first, on one thread while the pool starts; and after a small product and the pool ready)
+  const a = scenario(`nd.ndTest({ helpers: 3 }); product(); out.mem = nd.ndMemoryBytes();`);
+  const b = scenario(`nd.ndTest({ helpers: 3 }); nd.ndMatmul(...ops[3]); out.state = (await ready()).state; product(); out.mem = nd.ndMemoryBytes();`);
+  assert.equal(b.state, "ready", JSON.stringify(b));
+  assert.equal(a.mem, b.mem, JSON.stringify({ a, b }));
+  // (a Cholesky before any product, and the base after a product has started the pool)
+  const c = scenario(`nd.ndTest({ helpers: 3 }); const I = new Float64Array(16); for (let i = 0; i < 4; i++) I[i * 5] = 4;
+nd.ndCholesky(I, 4); out.before = T.layout().base; product(); await ready(); out.after = T.layout().base; out.planned = T.layout().planned;`);
+  assert.equal(c.planned, 3, JSON.stringify(c));
+  assert.equal(c.before, c.after, JSON.stringify(c));
+});
