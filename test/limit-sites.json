@@ -11771,6 +11771,26 @@
   "explained": true,
   "owner": "Magma compatibility/runtime memory"
  },
+ "lib/_magma_classes.py :: _engine_classes :: \"one computation\", fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_classes.py :: _engine_classes :: need, allow = order * _element_bytes(n), _m._COLLECT_MAX * _m._COLLECT_COST #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
  "lib/_magma_classes.py :: conjugacy_classes :: allow = _m._COLLECT_MAX * _m._COLLECT_COST #0": {
   "class": "2",
   "disposition": {
@@ -16910,6 +16930,36 @@
   "class": "coverage",
   "owner": "permutation groups (@sagebrush-sage2)",
   "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
+ "lib/sage_permgroup.py :: _admit_elements :: e = _memguard.memory_guard(\"Listing %s of a permutation group of order %d\" % (what, order), need, limit, \"one computation\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_elements :: if need > limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_elements :: need, limit = count * _element_bytes(n), _capacity.heap_figure() // 4 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
  },
  "lib/sage_plot.py :: Graphics._bound :: return ar[k] if k in ar else self.get_minmax_data()[k] #0": {
   "class": "none",

@@ -199,3 +199,33 @@ for ai in [[0,0,1,-1,0], [0,1,1,-2,0], [0,0,1,-7,6]]:
   // L'(37a,1), L''(389a,1), L'''(5077a,1), as Sage's analytic_rank(leading_coefficient=True)
   assert.deepEqual(out.trim().split("\n"), ["1 0.306 1 1", "2 1.51863 - 2", "3 10.3911 - 3"]);
 });
+
+test("conjugacy classes in Sage mode are admitted by the memory guard at their boundary, a class by what it holds (LIMIT-CLS-1)", () => {
+  // (a quarter of the heap is one computation's share; each permutation is
+  // charged only its certain 4n + 24 bytes)
+  const out = cli("--sage", "-c", `
+import _capacity, sage_permgroup as P
+def run(label, heap, f):
+    _capacity.heap_figure = lambda: heap
+    try:
+        print(label, 'admitted', f())
+    except MemoryError as e:
+        print(label, 'refused', str(e).splitlines()[1].split(' needs')[0])
+print('per element', P._element_bytes(4), P._element_bytes(10))
+need = 12 * P._element_bytes(4)
+run('Alt(4) at the bound', 4 * need, lambda: len(AlternatingGroup(4).conjugacy_classes()))
+run('Alt(4) one byte short', 4 * need - 4, lambda: len(AlternatingGroup(4).conjugacy_classes()))
+G = SymmetricGroup(10)
+# (the class of a transposition: 45 elements, not the group's 10! charged)
+run('transpositions', 4 * 45 * P._element_bytes(10), lambda: G.conjugacy_class(G('(1,2)')).cardinality())
+# (the class of a 10-cycle, 9! elements: refused once it holds 4096 of them)
+run('10-cycles', 4 * 4096 * P._element_bytes(10) - 4, lambda: G.conjugacy_class(G('(1,2,3,4,5,6,7,8,9,10)')).cardinality())
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "per element 40 64",
+    "Alt(4) at the bound admitted 4",
+    "Alt(4) one byte short refused Listing the conjugacy classes of a permutation group of order 12",
+    "transpositions admitted 45",
+    "10-cycles refused Listing a conjugacy class of a permutation group of order 3628800",
+  ]);
+});

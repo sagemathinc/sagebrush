@@ -252,6 +252,65 @@ def _classes_group(G):
     return G
 
 
+# what a group element certainly takes while the engine lists the classes by
+# enumerating the group, wherever Sagebrush runs (a 32-bit heap in the
+# browser): its images, 4 bytes a point, and at least 24 bytes of header and
+# index entry (LIMIT-CLS-1)
+def _element_bytes(n):
+    return 4 * n + 24
+
+
+def _engine_classes(G):
+    """The conjugacy classes of any other permutation group, from the group
+    engine: Sagebrush's canonical order and representatives (each class's
+    least element, by its sequence of images; the classes by the order of
+    their elements, then their length, then their representative), not
+    Magma's, whose representatives come from its own algorithm.  The
+    elements are enumerated, admitted first by the memory guard."""
+    import _magma_groups as gr
+    n, order = G.n, gr.order(G)
+    need, allow = order * _element_bytes(n), _m._COLLECT_MAX * _m._COLLECT_COST
+    if need > allow:
+        import _capacity
+        e = _m._memory_error(_m._memguard.memory_guard("The conjugacy classes of a permutation group of order %d" % order, need, allow,
+                                                       "one computation", fixed=_m._COLLECT_MAX == 10 ** 6))
+        e.capacity = _capacity.capacity()
+        raise e
+    rows = [MTuple([c["order"], c["length"], _MPerm(G, tuple(x + 1 for x in c["rep"]))])
+            for c in gr._engine_group(G, "conjugacy_classes")]
+    C = _MClasses(rows)
+    C._G, C._classes_table = G, True
+    return C
+
+
+def _partition_number(n):
+    """The number of partitions of n (Sym(n)'s classes), by Euler's
+    pentagonal number recurrence: about n^1.5 steps, exact for any n."""
+    p = [1] + [0] * n
+    for m in range(1, n + 1):
+        t, k = 0, 1
+        while True:
+            g1 = k * (3 * k - 1) // 2
+            if g1 > m:
+                break
+            sign = 1 if k % 2 else -1
+            t += sign * p[m - g1]
+            g2 = k * (3 * k + 1) // 2
+            if g2 <= m:
+                t += sign * p[m - g2]
+            k += 1
+        p[m] = t
+    return p[n]
+
+
+def number_of_classes(G):
+    """The number of conjugacy classes: Sym(n)'s, the partitions of n,
+    counted for any n; another group's, listed by the engine."""
+    if isinstance(G, _MSymGroup) or (isinstance(G, _MDihedralGroup) and G.n == 3):
+        return _partition_number(G.n)
+    return len(_engine_classes(G))
+
+
 def conjugacy_classes(G):
     """Sym(n)'s conjugacy classes, one for each cycle type, as Magma 2.18
     lists them: by the order of their elements, then by their length, then
@@ -261,8 +320,8 @@ def conjugacy_classes(G):
     for any n.)  A dihedral
     group's representatives are those of Magma's own algorithm, not
     modelled (DihedralGroup(3) is Sym(3))."""
-    if isinstance(G, _MDihedralGroup) and G.n != 3:
-        raise MagmaError("ConjugacyClasses of a dihedral group is not supported yet", "'ConjugacyClasses'")
+    if not (isinstance(G, _MSymGroup) or (isinstance(G, _MDihedralGroup) and G.n == 3)):
+        return _engine_classes(G)
     n = G.n
     # (the classes are one collection, admitted before any is made by their
     # peak while they are made: _CLASS_BYTES each against the collection

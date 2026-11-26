@@ -1190,6 +1190,13 @@ fn perm_group(v: &Value) -> Result<Value, String> {
                 let sub = Group::new(n, perms(n, v.get("sub"))?)?;
                 json!(g.contains_group(&sub))
             }
+            "conjugacy_classes" => {
+                // (each class's least element, its length and its elements'
+                // order, by (order, length, representative); the caller
+                // admits the group's order times its degree first)
+                let cs = sagebrush_group::classes::conjugacy_classes(&g);
+                json!(cs.iter().map(|c| json!({"rep": c.rep.0, "length": c.length, "order": c.order})).collect::<Vec<_>>())
+            }
             "base" => json!(g.chain.base()),
             "strong_gens" => perm_json(&g.chain.strong_gens()),
             other => return Err(format!("unknown permutation group property {}", other)),

@@ -438,6 +438,13 @@
    "owner": "polynomial factorization"
   },
   {
+   "id": "engineCall:conjugacy_classes",
+   "transport": "engineCall:conjugacy_classes",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
    "id": "engineCall:contains",
    "transport": "engineCall:contains",
    "status": "planned",
