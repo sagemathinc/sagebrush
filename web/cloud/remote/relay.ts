@@ -30,10 +30,22 @@
 //     to that very connection, once, cumulative), and a message that would put the receiver over its window, or find
 //     all 16 tokens outstanding, closes its sender (or whoever caused a control) 1013, unsent.
 //
+//
+// The engine channel (remote r3.3, step P1): a notebook's page for one kernel entry, bound to the account, the remote,
+// the account's sync namespace, the notebook, its entry, its session generation (per notebook, durable) and the
+// connection generation (per remote, durable), with a single-use attempt id (H1, H4).  The newer page for a notebook
+// replaces the older, whatever its entry (4009).  It is offered only to a runner that says it speaks engine/1 and only
+// while the account's sync is "active": read before each open, and every RELAY_SYNC.everyMs while an engine page is
+// attached (H5, the maximum sync-revocation window).  A definitive answer other than "active", or a change of the sync
+// generation, advances the connection generation: the engine pages end (4412) and a page presenting the old one is
+// refused (409); a failed read or "cocalc_unreachable" refuses new opens and leaves the open pages be.  So does a
+// disconnect (/disconnect: the workspace switched away from this remote, 4410).  Engine messages may be binary; the
+// generation prefix is then the same ASCII bytes.
+//
 // Account accounting (the day budget and its leases, connected slots, rate buckets, the deadline alarm) is step b2b.  Not bound in any deployment until step b4 (@sagebrush): until then this class is exported and unused.
 import { DurableObject } from "cloudflare:workers";
 
-import { RELAY_CAPS, PEER_WINDOW, capsFor, peerWindow, type Kind, type Chan } from "./relay-caps.ts";
+import { RELAY_CAPS, PEER_WINDOW, ENGINE_CAP, ENGINE_ENTRIES, ENGINE_PAGES, capsFor, peerWindow, type Kind, type Chan } from "./relay-caps.ts";
 export { RELAY_CAPS, PEER_WINDOW };
 export const RELAY_LIMITS = Object.freeze({
   control: 256, // a control message's bytes
@@ -56,20 +68,40 @@ export const CLOSE = Object.freeze({
   replaced: 4009, // a peer (or a page) replaced by a newer one
   forbidden: 4403, // revoked
   closedByPeer: 4000, // a page the peer ended (close {gen})
+  disconnected: 4410, // an engine page whose workspace was disconnected from this remote (H2)
+  syncOff: 4412, // an engine page whose account's sync stopped being active, or was reset (H5)
 });
+
+/** H5 (remote r3.3): how often the relay re-reads the account's sync status while an engine page is attached, which is
+ * the longest an engine page outlives sync's turning off; and how long an engine page's attempt id stays used. */
+export const RELAY_SYNC = Object.freeze({ everyMs: 5000, attemptSeconds: 120 });
+/** The account object's status (web/sync/account.ts), as the relay reads it. */
+export interface SyncStatus {
+  status(a: { account: string }): Promise<{ available: boolean; reason?: string; state: string; generation?: number; retry_after?: number }>;
+}
+type SyncRead = { active: true; generation: number } | { active: false; definitive: boolean; reason: string };
 
 /** A receiver connection's account of what it hasn't acknowledged (§5): bytes sent to it, the highest receipted
  * `upto` it acked, bytes since the last receipt, and its open tokens. */
 type Rx = { sent: number; acked: number; since: number; tokens: [string, number][] };
 // (ping: the time of the leg's last valid ping, or of its accept (r1.11); bucket: its rate tokens and their time)
 type Bucket = { t: number; at: number };
-type PeerAtt = { leg: "peer"; pg: number; account: string; kind: Kind; rx: Rx; ping: number; bucket: Bucket; ended?: boolean };
-type PageAtt = { leg: "page"; gen: number; conn: string; kind: Kind; chan: Chan; account: string; rx: Rx; ping: number; bucket: Bucket; ended?: boolean };
+type PeerAtt = { leg: "peer"; pg: number; account: string; kind: Kind; rx: Rx; ping: number; bucket: Bucket; ended?: boolean; caps?: string[] };
+// (an engine page's identity: its notebook, entry, session generation, connection generation and sync generation)
+type Engine = { nb: string; entry: string; sgen: number; cgen: number; sync: number };
+type PageAtt = { leg: "page"; gen: number; conn: string; kind: Kind; chan: Chan; account: string; rx: Rx; ping: number; bucket: Bucket; ended?: boolean; engine?: Engine };
 type Att = PeerAtt | PageAtt;
 
 const newRx = (): Rx => ({ sent: 0, acked: 0, since: 0, tokens: [] });
 const b64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const bytes = (s: string) => enc.encode(s).length;
+const bytes = (s: string | ArrayBuffer) => (typeof s === "string" ? enc.encode(s).length : s.byteLength);
+/** Bytes after an ASCII prefix: one ArrayBuffer. */
+const prefixed = (head: string, body: ArrayBuffer) => {
+  const out = new Uint8Array(head.length + body.byteLength);
+  for (let i = 0; i < head.length; i++) out[i] = head.charCodeAt(i);
+  out.set(new Uint8Array(body), head.length);
+  return out.buffer;
+};
 
 /**
  * A control message, strictly (§5, r1.8 R17-CONTROL), or null: <= 256 bytes, `relay` first, then exactly the op's
@@ -101,6 +133,14 @@ export function parseControl(text: string, ops: Record<string, string[]>): Recor
 }
 export const PEER_OPS: Record<string, string[]> = { close: ["gen"], ack: ["r"], ping: [] };
 
+/** A peer's binary message (engine/1 only): its generation, in the same ASCII prefix read from its first bytes, and the
+ * rest, unread; or null (1008).  Never a control: controls are text. */
+export function classifyPeerBinary(raw: ArrayBuffer): { gen: number; payload: ArrayBuffer } | null {
+  const head = String.fromCharCode(...new Uint8Array(raw, 0, Math.min(RELAY_LIMITS.prefix, raw.byteLength)));
+  const m = PREFIX.exec(head);
+  const gen = m ? Number(m[1]) : NaN;
+  return m && gen <= SAFE ? { gen, payload: raw.slice(m[0].length) } : null;
+}
 /** What a peer's text is: a control (strictly parsed), an application message for a generation, or neither (1008). */
 export function classifyPeer(text: string): { control: Record<string, unknown> } | { gen: number; payload: string } | null {
   if (text.startsWith(CONTROL)) {
@@ -116,6 +156,8 @@ export const PAGE_OPS: Record<string, string[]> = { ack: ["r"], ping: [] };
 export interface RelayEnv {
   REMOTE_RELAY?: DurableObjectNamespace;
   REMOTE_ACCOUNT?: DurableObjectNamespace;
+  /** the sync account objects (web/sync/account.ts); unbound (production today): sync unavailable, no engine page */
+  SYNC_ACCOUNT?: { idFromName(name: string): unknown; get(id: unknown): SyncStatus };
 }
 
 // (b2b, §5: the account's leases, the per-leg rate, and dead legs (r1.11))
@@ -440,13 +482,17 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     const pages = this.pages();
     if (!pages.length) return this.ctx.storage.deleteAlarm();
     const legs = [...this.peers(), ...pages];
-    await this.ctx.storage.setAlarm(Math.min(...legs.map((w) => this.att(w).ping)) + RELAY_ACCOUNTING.deadMs);
+    let at = Math.min(...legs.map((w) => this.att(w).ping)) + RELAY_ACCOUNTING.deadMs;
+    // (H5: while an engine page is attached, the next sync read too)
+    if (this.engines().length) at = Math.min(at, (await this.ctx.storage.get<number>("syncDue")) ?? this.now() + RELAY_SYNC.everyMs);
+    await this.ctx.storage.setAlarm(at);
   }
   /** The alarm: every leg rereads its own last ping now; one RELAY_ACCOUNTING.deadMs stale is closed (a peer 4001, a page
    * 1001), whatever the alarm was set for; then the next deadline, or none without a page.  An alarm that fires with
    * no page left (set before the last one went) closes nothing: it is only cancelled (astra's ALARM-1). */
   async alarm(): Promise<void> {
     if (!this.pages().length) return this.ctx.storage.deleteAlarm();
+    await this.syncCheck();
     const now = this.now();
     for (const w of [...this.peers(), ...this.pages()]) {
       const a = this.att(w);
@@ -475,12 +521,15 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
   private pages(): WebSocket[] {
     return this.ctx.getWebSockets("page").filter((w) => this.live(w));
   }
+  private engines(): WebSocket[] {
+    return this.ctx.getWebSockets("engine").filter((w) => this.live(w));
+  }
   private page(gen: number): WebSocket | undefined {
     return this.ctx.getWebSockets(`g:${gen}`).find((w) => this.live(w));
   }
   /** Send on a leg: true if the runtime took it (a local send failure, the leg already gone, is false: its close
    * handler does the rest). */
-  private send(ws: WebSocket | undefined, text: string): boolean {
+  private send(ws: WebSocket | undefined, text: string | ArrayBuffer): boolean {
     if (!ws) return false;
     try {
       ws.send(text);
@@ -530,7 +579,13 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     if (announce) this.pageClose(a);
   }
   private pageOpen(peer: WebSocket | undefined, a: PageAtt, kind: Kind): void {
-    if (peer) this.sendControl(peer, peer, this.att(peer), JSON.stringify({ relay: "page-open", conn: a.conn, kind, chan: a.chan, gen: a.gen }));
+    if (!peer) return;
+    // (an engine page names its identity too (H1, H4): the host keys its kernel by them, and refuses an older sgen or cgen)
+    const e = a.engine;
+    const open = e
+      ? { relay: "page-open", conn: a.conn, kind, chan: a.chan, gen: a.gen, nb: e.nb, entry: e.entry, sgen: e.sgen, cgen: e.cgen }
+      : { relay: "page-open", conn: a.conn, kind, chan: a.chan, gen: a.gen };
+    this.sendControl(peer, peer, this.att(peer), JSON.stringify(open));
   }
   private pageClose(a: PageAtt): void {
     for (const p of this.peers()) this.sendControl(p, p, this.att(p), JSON.stringify({ relay: "page-close", conn: a.conn, gen: a.gen }));
@@ -542,6 +597,7 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     const h = req.headers;
     const no = (status: number, error: string) => Response.json({ error }, { status });
     if (url.pathname === "/revoke") return this.revoke();
+    if (url.pathname === "/disconnect") return this.disconnect();
     if (h.get("upgrade")?.toLowerCase() !== "websocket") return no(426, "upgrade required");
     if (await this.ctx.storage.get("revoked")) return no(403, "revoked");
     const account = h.get("x-r-account") ?? "";
@@ -550,12 +606,13 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     const remote = h.get("x-r-remote") ?? "";
     if (!/^r[A-Za-z0-9_-]{20}$/.test(remote)) return no(400, "bad request");
     if ((await this.ctx.storage.get("remote")) !== remote) await this.ctx.storage.put("remote", remote);
-    if (url.pathname === "/peer") return this.acceptPeer(account, h.get("x-r-kind") as Kind, h.get("x-r-chal") ?? "", Number(h.get("x-r-exp")));
+    if (url.pathname === "/peer") return this.acceptPeer(account, h.get("x-r-kind") as Kind, h.get("x-r-chal") ?? "", Number(h.get("x-r-exp")), (h.get("x-r-caps") ?? "").split(",").filter((c) => c === ENGINE_CAP));
+    if (url.pathname === "/page" && h.get("x-r-chan") === "engine") return this.acceptEngine(account, h.get("x-r-kind") as Kind, h);
     if (url.pathname === "/page") return this.acceptPage(account, h.get("x-r-kind") as Kind, h.get("x-r-chan") as Chan);
     return no(404, "not found");
   }
 
-  private async acceptPeer(account: string, kind: Kind, chal: string, exp: number): Promise<Response> {
+  private async acceptPeer(account: string, kind: Kind, chal: string, exp: number, caps: string[] = []): Promise<Response> {
     const no = (status: number, error: string) => Response.json({ error }, { status });
     if (peerWindow(kind) === null || !/^[A-Za-z0-9_-]{22}$/.test(chal) || !Number.isFinite(exp)) return no(400, "bad request");
     // (the challenge, once: the used-set holds each id until its own expiry, at most `challenges` at a time; an
@@ -594,7 +651,7 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     const pair = new WebSocketPair();
     this.ctx.acceptWebSocket(pair[1], ["peer"]);
     const t0 = this.now();
-    pair[1].serializeAttachment({ leg: "peer", pg, account, kind, rx: newRx(), ping: t0, bucket: { t: this.rateOf(kind).burst, at: t0 } } satisfies PeerAtt);
+    pair[1].serializeAttachment({ leg: "peer", pg, account, kind, rx: newRx(), ping: t0, bucket: { t: this.rateOf(kind).burst, at: t0 }, caps } satisfies PeerAtt);
     // (the newer peer, authenticated, replaces the older; the pages, paired with the older, end too: they reconnect
     // and pair again with the new one (R1, R9))
     for (const o of old) this.endPeer(o, CLOSE.replaced, "replaced by a newer connection with this key");
@@ -607,7 +664,7 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
   private async acceptPage(account: string, kind: Kind, chan: Chan): Promise<Response> {
     const no = (status: number, error: string) => Response.json({ error }, { status });
     const caps = capsFor(kind, chan);
-    if (!caps) return no(400, "unknown channel");
+    if (!caps || chan === "engine") return no(400, "unknown channel");
     const gen = ((await this.ctx.storage.get<number>("gen")) ?? 0) + 1;
     await this.ctx.storage.put("gen", gen); // (never reused, across hibernation and eviction)
     if (await this.ctx.storage.get("revoked")) return no(403, "revoked");
@@ -629,6 +686,131 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     this.pageOpen(peer, a, kind);
     await this.arm();
     return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  /**
+   * An engine page (r3.3 H1, H4, H5): the Worker authenticated the session and the account's ownership of this remote
+   * and checked the identity's form; here, in order: the attempt id once; the connection generation the page presents
+   * (none on a first open) still the current one; the account's sync read now and "active" (a sync generation that
+   * changed since the open pages began ends them first); then, with nothing awaited from the last check to the accept,
+   * the runner connected and speaking engine/1, the remote's engine pages under ENGINE_PAGES, and the notebook's older
+   * page (of any entry) replaced (4009).  The page is told its identity's generations ({"relay":"engine"}), the runner
+   * the whole identity (page-open).
+   */
+  private async acceptEngine(account: string, kind: Kind, h: Headers): Promise<Response> {
+    const no = (status: number, error: string) => Response.json({ error }, { status });
+    const nb = h.get("x-r-nb") ?? "";
+    const entry = h.get("x-r-entry") ?? "";
+    const attempt = h.get("x-r-attempt") ?? "";
+    const presented = h.get("x-r-cgen");
+    const syncName = h.get("x-r-sync") ?? "";
+    if (!capsFor(kind, "engine") || !/^[A-Za-z0-9_-]{1,43}$/.test(nb) || !(ENGINE_ENTRIES as readonly string[]).includes(entry)
+      || !/^[A-Za-z0-9_-]{22}$/.test(attempt) || (presented !== null && !/^[1-9][0-9]{0,15}$/.test(presented)) || !/^acct:[0-9a-f]{64}$/.test(syncName)) {
+      return no(400, "bad request");
+    }
+    // (the attempt id, once: kept until its expiry; a reused one is refused whether or not its first open succeeded)
+    const t = Math.floor(this.now() / 1000);
+    const used = await this.ctx.storage.list<number>({ prefix: "att:" });
+    const stale = [...used].filter(([, e]) => e < t).map(([k]) => k);
+    if (stale.length) await this.ctx.storage.delete(stale);
+    if (used.has(`att:${attempt}`) && !stale.includes(`att:${attempt}`)) return no(403, "attempt used");
+    await this.ctx.storage.put({ [`att:${attempt}`]: t + RELAY_SYNC.attemptSeconds, syncName });
+    if (await this.ctx.storage.get("revoked")) return no(403, "revoked");
+    const st = await this.syncRead();
+    if (!st.active) return st.definitive ? no(403, st.reason) : no(503, st.reason);
+    await this.syncSeen(st.generation);
+    // (a stale generation is refused before it takes a session generation)
+    if (presented !== null && Number(presented) !== ((await this.ctx.storage.get<number>("cgen")) ?? 1)) return no(409, "stale connection: open the notebook again");
+    const sgen = ((await this.ctx.storage.get<number>(`sg:${nb}`)) ?? 0) + 1;
+    const gen = ((await this.ctx.storage.get<number>("gen")) ?? 0) + 1;
+    await this.ctx.storage.put({ [`sg:${nb}`]: sgen, gen }); // (both never reused, across hibernation and eviction)
+    if (!(await this.ctx.storage.get("syncDue"))) await this.ctx.storage.put("syncDue", this.now() + RELAY_SYNC.everyMs);
+    const cgen = (await this.ctx.storage.get<number>("cgen")) ?? 1;
+    if (await this.ctx.storage.get("revoked")) return no(403, "revoked");
+    // ---- from here to the accept, nothing awaits
+    if (presented !== null && Number(presented) !== cgen) return no(409, "stale connection: open the notebook again");
+    // (a sync read since this one that wasn't "active", or found another generation: this open's read is no longer current)
+    if (this.lastSync !== st.generation) return no(503, "sync changed: try again");
+    const peer = this.peers()[0];
+    if (!peer || (this.att(peer) as PeerAtt).kind !== kind) return no(503, "the remote isn't connected");
+    if (!((this.att(peer) as PeerAtt).caps ?? []).includes(ENGINE_CAP)) return no(503, "this computer runs an older sagebrush: update it to run notebooks there");
+    const open = this.engines();
+    const mine = open.filter((p) => (this.att(p) as PageAtt).engine?.nb === nb);
+    if (open.length - mine.length >= ENGINE_PAGES) return no(429, `this computer already has ${ENGINE_PAGES} notebooks open: close one first`);
+    const t0 = this.now();
+    const a: PageAtt = {
+      leg: "page", gen, conn: b64url(crypto.getRandomValues(new Uint8Array(12))), kind, chan: "engine", account, rx: newRx(), ping: t0,
+      bucket: { t: this.rateOf(kind).burst, at: t0 }, engine: { nb, entry, sgen, cgen, sync: st.generation },
+    };
+    const pair = new WebSocketPair();
+    this.ctx.acceptWebSocket(pair[1], ["page", `g:${gen}`, "engine"]);
+    pair[1].serializeAttachment(a);
+    // (the notebook's older page, whatever its entry, ends first, its page-close before the new page-open (H4))
+    for (const p of mine) this.endPage(p, CLOSE.replaced, "opened in another page", true);
+    this.pageOpen(peer, a, kind);
+    this.sendControl(pair[1], pair[1], a, JSON.stringify({ relay: "engine", sgen, cgen }));
+    await this.arm();
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  // ---- H5: the account's sync, read before each engine open and every RELAY_SYNC.everyMs while one is attached
+  private lastSync: number | undefined; // (the sync generation last read "active", in memory: the accept's final check)
+  /** The account's sync status: active with its generation; or not, definitively (off, readonly, registering, deleting,
+   * no binding, not allowed) or transiently (a failed or timed-out read, "cocalc_unreachable"). */
+  private async syncRead(): Promise<SyncRead> {
+    const ns = this.env.SYNC_ACCOUNT;
+    const name = await this.ctx.storage.get<string>("syncName");
+    const account = await this.ctx.storage.get<string>("account");
+    if (!ns) return { active: false, definitive: true, reason: "sync_unavailable" };
+    if (!name || !account) return { active: false, definitive: false, reason: "sync_unknown" };
+    try {
+      const s = await ns.get(ns.idFromName(name)).status({ account });
+      if (s.available && s.state === "active" && Number.isSafeInteger(s.generation)) return { active: true, generation: s.generation as number };
+      if (!s.available && s.reason === "cocalc_unreachable") return { active: false, definitive: false, reason: "sync_unreachable" };
+      return { active: false, definitive: true, reason: s.available ? `sync_${s.state}` : (s.reason ?? "sync_unavailable") };
+    } catch {
+      return { active: false, definitive: false, reason: "sync_unreachable" };
+    }
+  }
+  /** An "active" read's generation: a different one from the last (a sync reset) advances the connection generation,
+   * ending the engine pages of the old one. */
+  private async syncSeen(generation: number): Promise<void> {
+    const prev = await this.ctx.storage.get<number>("syncGen");
+    if (prev !== generation) await this.ctx.storage.put("syncGen", generation);
+    this.lastSync = generation;
+    if (prev !== undefined && prev !== generation) await this.advance(CLOSE.syncOff, "sync was reset for this account");
+  }
+  /** The alarm's sync read, when due and an engine page is attached: a definitive "not active" advances the connection
+   * generation (the engine pages end, 4412); a transient failure leaves them be (new opens read for themselves). */
+  private async syncCheck(): Promise<void> {
+    if (!this.engines().length) {
+      await this.ctx.storage.delete("syncDue");
+      return;
+    }
+    const due = (await this.ctx.storage.get<number>("syncDue")) ?? 0;
+    if (this.now() < due) return;
+    await this.ctx.storage.put("syncDue", this.now() + RELAY_SYNC.everyMs);
+    const st = await this.syncRead();
+    if (st.active) return this.syncSeen(st.generation);
+    if (st.definitive) {
+      this.lastSync = undefined;
+      return this.advance(CLOSE.syncOff, "sync isn't active for this account");
+    }
+  }
+  /** Advance the connection generation (H2, H5): the durable write first, then, in the same turn, every engine page
+   * ended (code), its page-close sent, and the runner told the new generation, so a late frame or reconnect of the old
+   * one is refused on both sides. */
+  private async advance(code: number, reason: string): Promise<void> {
+    const cgen = ((await this.ctx.storage.get<number>("cgen")) ?? 1) + 1;
+    await this.ctx.storage.put("cgen", cgen);
+    for (const p of this.engines()) this.endPage(p, code, reason, true);
+    for (const p of this.peers()) if (((this.att(p) as PeerAtt).caps ?? []).includes(ENGINE_CAP)) this.sendControl(p, p, this.att(p), JSON.stringify({ relay: "cgen", cgen }));
+    await this.arm();
+  }
+  /** The workspace disconnected from this remote (H2): the connection generation advances. */
+  private async disconnect(): Promise<Response> {
+    await this.advance(CLOSE.disconnected, "disconnected from this computer");
+    return Response.json({ ok: true, cgen: await this.ctx.storage.get<number>("cgen") });
   }
 
   /** The linearization point of a revoke (§3): the durable write, then, in the same turn, both legs closed. */
@@ -660,7 +842,8 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     const a = this.att(ws);
     // (a leg this relay ended (a replaced peer, a page closed or replaced): nothing it still sends is taken)
     if (!this.live(ws)) return;
-    if (typeof raw !== "string") return this.close(ws, 1003, "text messages only");
+    // (binary: an engine page's, or an engine/1 runner's (its pages' frames); everyone else's, 1003)
+    if (typeof raw !== "string" && !(a.leg === "page" ? a.chan === "engine" : (a.caps ?? []).includes(ENGINE_CAP))) return this.close(ws, 1003, "text messages only");
     // (the leg's rate, from its durable bucket (§5): over it, closed 4008; nothing is held back)
     const { rate, burst } = this.rateOf(a.kind);
     const now = this.now();
@@ -672,8 +855,8 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     return this.fromPage(ws, a, raw);
   }
 
-  private async fromPeer(ws: WebSocket, a: PeerAtt, text: string): Promise<void> {
-    const k = classifyPeer(text);
+  private async fromPeer(ws: WebSocket, a: PeerAtt, text: string | ArrayBuffer): Promise<void> {
+    const k = typeof text === "string" ? classifyPeer(text) : classifyPeerBinary(text);
     if (!k) return this.close(ws, 1008, "neither a control nor a prefixed application message");
     if ("control" in k) {
       const c = k.control;
@@ -701,6 +884,8 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
       return;
     }
     const pa = this.att(p) as PageAtt;
+    // (a binary message only for an engine page)
+    if (typeof payload !== "string" && pa.chan !== "engine") return this.close(ws, 1008, "a binary message for a page that isn't an engine page");
     const caps = capsFor(a.kind, pa.chan)!;
     if (n > caps.peerToPage) return this.close(ws, 1009, "a message over its channel's cap");
     // (charged against the peer's one allowance: the whole frame, its prefix too, and the per-frame overhead (b5))
@@ -717,7 +902,7 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
    * bytes plus this whole message must fit its window, and a token must be free for the receipt this may need (§5).
    * After the data, behind it on the same socket, a receipt once receiptEvery bytes (or a quarter of the window) went.
    */
-  private forward(from: WebSocket, to: WebSocket, ta: Att, text: string, n: number, window: number): boolean {
+  private forward(from: WebSocket, to: WebSocket, ta: Att, text: string | ArrayBuffer, n: number, window: number): boolean {
     const rx = ta.rx;
     // (every message is charged its bytes and a fixed overhead, so empty and small ones are bounded too (astra))
     const w = n + RELAY_LIMITS.overhead;
@@ -729,7 +914,7 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
   }
 
   /** Send, charge, and once receiptEvery (or a quarter of the window) has gone since the last, a receipt behind it. */
-  private push(to: WebSocket, ta: Att, text: string, w: number, window: number): boolean {
+  private push(to: WebSocket, ta: Att, text: string | ArrayBuffer, w: number, window: number): boolean {
     const rx = ta.rx;
     // (not sent: nothing of it is the receiver's, no bytes outstanding, no receipt (daybreak3's B5-SEND-ACCOUNT-1))
     if (!this.send(to, text)) return false;
@@ -767,8 +952,8 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     ws.serializeAttachment(a);
   }
 
-  private async fromPage(ws: WebSocket, a: PageAtt, text: string): Promise<void> {
-    if (text.startsWith(CONTROL)) {
+  private async fromPage(ws: WebSocket, a: PageAtt, text: string | ArrayBuffer): Promise<void> {
+    if (typeof text === "string" && text.startsWith(CONTROL)) {
       const c = parseControl(text, PAGE_OPS);
       if (!c) return this.close(ws, 1008, "a malformed control");
       if (c.relay === "ping") {
@@ -786,7 +971,8 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     const head = `${a.gen}\n`; // (ASCII: its bytes are its length)
     // (the receiver: the same peer (replaced or gone: nothing is sent); checked before the debit and again at the send)
     const there = () => this.peers()[0] === peer;
-    await this.charged(ws, a, head.length + n, head.length + n + RELAY_LIMITS.overhead, () => there() && this.forward(ws, peer, this.att(peer), head + text, head.length + n, peerWindow(kind)!), there);
+    const out = typeof text === "string" ? head + text : prefixed(head, text);
+    await this.charged(ws, a, head.length + n, head.length + n + RELAY_LIMITS.overhead, () => there() && this.forward(ws, peer, this.att(peer), out, head.length + n, peerWindow(kind)!), there);
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {

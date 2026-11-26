@@ -11,10 +11,28 @@
 import { handleShare, bindPurge, scheduled, authTier, type ShareEnv } from "../share/server.ts";
 import { handleRemote, verifyChallenge, purgeRemotes, remoteDeletes, body, type RemoteEnv } from "./server.ts";
 // (the relay's Durable Object, bound in test-relay.mjs's Miniflare only (test-remote.mjs runs without it: inert))
-import { RemoteRelay, type RelayEnv } from "./relay.ts";
+import { RemoteRelay, RELAY_SYNC, type RelayEnv } from "./relay.ts";
+import { ENGINE_PAGES, ENGINE_ENTRIES } from "./relay-caps.ts";
 import { RemoteAccount, leaseBytes } from "./account.ts";
 import type { Kind } from "./relay-caps.ts";
 export { RemoteRelay, RemoteAccount };
+import { DurableObject } from "cloudflare:workers";
+// (remote r3.3 P1: the sync account objects as the relay reads them (H5), bound as SYNC_ACCOUNT in
+// test-relay-engine.mjs only: one answer for every account, set by /__sync (?state=&gen= | ?reason= | ?throw=1),
+// and every read counted with the object's name and the account asked about (/__synccalls))
+let syncAnswer: { available: boolean; reason?: string; state: string; generation?: number } | "throw" = { available: true, state: "active", generation: 1 };
+const syncCalls: { name: string; account: string }[] = [];
+export class TestSyncAccount extends DurableObject {
+  async status(a: { account: string }) {
+    syncCalls.push({ name: (await this.ctx.storage.get<string>("name")) ?? "", account: a.account });
+    if (syncAnswer === "throw") throw new Error("the sync Worker is unreachable");
+    return syncAnswer;
+  }
+  async fetch(req: Request) {
+    await this.ctx.storage.put("name", new URL(req.url).searchParams.get("name") ?? "");
+    return Response.json({ ok: true });
+  }
+}
 // (both test objects run on one logical clock, ahead of the real one, so an alarm set from it never fires by itself:
 // the tests run alarms through /__alarm)
 let clock = Date.UTC(2030, 0, 15, 12, 0, 0);
@@ -188,6 +206,13 @@ export class TestRemoteRelay extends RemoteRelay {
       if (u.searchParams.get("on") === "1") { env.__saved ??= env.REMOTE_ACCOUNT; env.REMOTE_ACCOUNT = undefined; }
       else if (env.__saved) env.REMOTE_ACCOUNT = env.__saved;
       return Response.json({ bound: !!env.REMOTE_ACCOUNT });
+    }
+    if (u.pathname === "/__nosync") {
+      // (this relay without the sync binding, as production today: /__nosync?on=1, back with on=0)
+      const env = this.env as { SYNC_ACCOUNT?: unknown; __savedSync?: unknown };
+      if (u.searchParams.get("on") === "1") { env.__savedSync ??= env.SYNC_ACCOUNT; env.SYNC_ACCOUNT = undefined; }
+      else if (env.__savedSync) env.SYNC_ACCOUNT = env.__savedSync;
+      return Response.json({ bound: !!env.SYNC_ACCOUNT });
     }
     if (u.pathname === "/__alarm") {
       await this.alarm();
@@ -400,6 +425,21 @@ export default {
       } }) } as unknown as DurableObjectNamespace };
     }
     if (url.pathname === "/__held") return Response.json({ holding });
+    if (url.pathname === "/__sync") {
+      const q = url.searchParams;
+      syncAnswer = q.get("throw") === "1" ? "throw"
+        : q.has("reason") ? { available: false, reason: q.get("reason")!, state: "off" }
+        : { available: true, state: q.get("state") ?? "active", generation: Number(q.get("gen") ?? "1") };
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/__engine") return Response.json({ syncEvery: RELAY_SYNC.everyMs, pages: ENGINE_PAGES, entries: ENGINE_ENTRIES });
+    if (url.pathname === "/__synccalls") return Response.json({ calls: syncCalls.splice(0) });
+    if (url.pathname === "/__syncname" && (env as { SYNC_ACCOUNT?: DurableObjectNamespace }).SYNC_ACCOUNT) {
+      // (names an account object, so /__synccalls shows which one the relay asked)
+      const ns = (env as { SYNC_ACCOUNT?: DurableObjectNamespace }).SYNC_ACCOUNT!;
+      const name = url.searchParams.get("name")!;
+      return ns.get(ns.idFromName(name)).fetch(`https://sync/?name=${encodeURIComponent(name)}`);
+    }
     if (url.pathname === "/__relaycalls") {
       const n = relayCalls;
       relayCalls = 0;
