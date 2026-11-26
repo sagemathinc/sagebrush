@@ -33,7 +33,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 295044 && LATEX_CAPS.gzip === 99759, "the caps are 295,044 B raw and 99,759 B gzip (2026-11-26, a render over 16 MiB shown up to there and a note, on master 20030715: 294,980 / 99,695 measured + 64; 294,217 / 99,416 before, an element over PIECE_MAX split in turn)");
+check(LATEX_CAPS.raw === 310653 && LATEX_CAPS.gzip === 105614, "the caps are 310,653 B raw and 105,614 B gzip (2026-11-26, a render over 16 MiB shown up to there and a note, on its merge with master 1ed271fd: 310,589 / 105,550 measured + 64; 309,826 / 105,261 before, TikZ nodes drawn)");
 
 // (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
@@ -158,6 +158,10 @@ else if (mode.ok) {
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
   latexReport = { group: { ...g, cap: LATEX_CAPS }, lazy: lazyRows };
+  // (KaTeX's layout tree, a private export the sizes of TikZ nodes' text are read from: a KaTeX without it would give
+  //  estimated sizes, silently)
+  const math = join(web, "dist", "sagebrush-math.js");
+  check(existsSync(math) && /__renderToHTMLTree/.test(readFileSync(math, "utf8")), "the LaTeX build's sagebrush-math.js exports KaTeX's layout tree (__renderToHTMLTree), which TikZ nodes' sizes are read from");
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
   //  one left off that list is a 404 on sagebrush.space only; as web/site-dir.mts decides the site)
   const site = join(web, "site", "public");

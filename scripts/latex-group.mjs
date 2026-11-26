@@ -138,11 +138,15 @@ export const LATEX_LAZY = {
 // (294,217 raw / 99,416 gzip: Nov 25 2026, an element over PIECE_MAX split in turn (a theorem's long list, split.ts):
 //  294,153 / 99,352 measured on the shipped build of its merge with master b0b02122, with bun 1.4.4 and node 24.21.0
 //  (+73 / +46 over master's 294,080 / 99,306), + 64)
-// (295,044 raw / 99,759 gzip: Nov 26 2026, a render over the preview's 16 MiB shown up to there, whole chunks, and a
-//  note where it stops, from its source line (split.ts's boundRender, the worker's caller): 294,980 / 99,695 measured
-//  on the shipped build of master 20030715 with it, with bun 1.4.4 and node 24.21.0 (+827 / +343 over master's
-//  294,153 / 99,352), + 64)
-export const LATEX_CAPS = { raw: 295044, gzip: 99759 };
+// (309,826 raw / 105,261 gzip: Nov 26 2026, TikZ nodes drawn in the preview (their text typeset by KaTeX, sized from its
+//  layout tree; anchors, placement, labels, lines stopping at their borders), in the worker's bundle with the paths:
+//  309,762 / 105,197 measured on the shipped build of its merge with master 20030715, with bun 1.4.4 and node 24.21.0
+//  (+15,609 / +5,845 over master's 294,153 / 99,352), + 64)
+// (310,653 raw / 105,614 gzip: Nov 26 2026, a render over the preview's 16 MiB shown up to there, whole chunks, and a
+//  note where it stops, from its source line (split.ts's boundRender, the worker's caller): 310,589 / 105,550 measured
+//  on the shipped build of its merge with master 1ed271fd, with bun 1.4.4 and node 24.21.0 (+827 / +353 over master's
+//  309,762 / 105,197), + 64)
+export const LATEX_CAPS = { raw: 310653, gzip: 105614 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

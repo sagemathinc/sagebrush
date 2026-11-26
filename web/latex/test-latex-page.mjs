@@ -2741,8 +2741,9 @@ try {
   check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later") && (() => { const d = [...document.querySelectorAll(".tex-preview .dmath")].pop(); return !!d && !!d.querySelector(".katex") && d.textContent.includes("y=1"); })()`), "A2: $$ not closed: a note, the text after the blank line not math, the section and a later display after it rendered", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
 
   // TikZ in the browser (tikz.mjs): the picture's box is its span's, in the page's pt; every path lies in it (the box is
-  // TeX's, with half the line and the tips); the text after it starts below it; each arrow's marker exists, its id once
-  const TIKZ = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\nBefore.\n\n\\begin{tikzpicture}\n\\draw[->, thick] (0,0) -- (3,1);\n\\draw[red] (2,0) arc (0:200:1);\n\\draw[<->] (0,-1) .. controls (1,1) and (2,-2) .. (3,-1);\n\\foreach \\x in {0,0.5,...,3} \\draw[help lines] (\\x,-1.5) -- (\\x,-1.2);\n\\end{tikzpicture}\n\nAfter the picture.\n\\end{document}\n";
+  // TeX's, with half the line and the tips); a node's text (KaTeX's) is where its box is; the text after it starts below
+  // it; each arrow's marker exists, its id once
+  const TIKZ = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\nBefore.\n\n\\begin{tikzpicture}\n\\draw[->, thick] (0,0) -- (3,1);\n\\draw[red] (2,0) arc (0:200:1);\n\\draw[<->] (0,-1) .. controls (1,1) and (2,-2) .. (3,-1);\n\\foreach \\x in {0,0.5,...,3} \\draw[help lines] (\\x,-1.5) -- (\\x,-1.2);\n\\node[draw] at (1.5,-0.5) {$x^2+y^2$};\n\\end{tikzpicture}\n\nAfter the picture.\n\\end{document}\n";
   const ftk = await mk("/t/tikz.tex", enc(TIKZ));
   await open(ftk);
   const tk = await until(`!!document.querySelector(".tex-preview .tikz svg path") && document.querySelector(".tex-preview").textContent.includes("After the picture.")`, 20000);
@@ -2762,9 +2763,20 @@ try {
     if (top === null || top < r.bottom - 1) out.push(["text over the picture", top, r.bottom]);
     const refs = paths.flatMap((p) => ["marker-start", "marker-end"].map((k) => p.getAttribute(k)).filter(Boolean).map((u) => u.slice(5, -1)));
     for (const id of refs) if (document.querySelectorAll("#" + CSS.escape(id)).length !== 1) out.push(["marker", id]);
-    return { n: paths.length, refs: refs.length, out };
+    // (a node's text: KaTeX's own box where its line's box is, the top within a pixel, as wide as the metrics give
+    //  within a tenth, centred in it)
+    const lines = [...span.querySelectorAll(".tikz-n > span")];
+    for (const l of lines) {
+      // (KaTeX's text box: its base boxes, .katex-html's children, inline-blocks as tall as their struts; .katex-html
+      //  itself is an inline span, its rectangle its font's content area, taller than the text)
+      const bs = [...l.querySelectorAll(".katex-html > *")].map((b) => b.getBoundingClientRect());
+      const lr = l.getBoundingClientRect(), k = bs.length ? { top: Math.min(...bs.map((b) => b.top)), left: Math.min(...bs.map((b) => b.left)), right: Math.max(...bs.map((b) => b.right)) } : null;
+      if (k) k.width = k.right - k.left;
+      if (!k || Math.abs(k.top - lr.top) > 1 || Math.abs(k.width - lr.width) > 0.1 * lr.width || Math.abs((k.left + k.right) / 2 - (lr.left + lr.right) / 2) > 1) out.push(["node text", k && [k.top, k.width, k.left], [lr.top, lr.width, lr.left]]);
+    }
+    return { n: paths.length, refs: refs.length, lines: lines.length, out };
   })()`);
-  check(tkr && tkr.n >= 10 && tkr.refs === 3 && tkr.out.length === 0, "TikZ in the browser: the picture's box is its span's, every path inside it, the text after it below it, each marker once", tkr);
+  check(tkr && tkr.n >= 11 && tkr.refs === 3 && tkr.lines === 1 && tkr.out.length === 0, "TikZ in the browser: the picture's box is its span's, every path inside it, a node's text where its box is, the text after it below it, each marker once", tkr);
 
   // ---- source and preview in sync (A3): a double-click in the preview puts the cursor on that word in the source;
   // Follow (on by default) scrolls the preview to the cursor's place; Show flashes it; after an edit above, the
