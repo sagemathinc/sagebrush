@@ -32,5 +32,5 @@ export { APP_TOKEN_RATE, handleAppToken, handleControl } from "./worker.mjs";
 export { LEASE_ROUTE, LEASE_BODY_MAX, LEASE_TTL_MS, LEASE_SKEW_MS, LEASE_GATE_MARGIN_MS, LEASE_RATE_HOST, LEASE_RATE_SOURCE, NONCE_KEEP_MS, firstLeaseGateOpen, handleLease, nextExpiry } from "./lease-service.mjs";
 export {
   CHAIN_ROUTE, CHAIN_PAGE_ENTRIES, CHAIN_PAGE_BYTES, CHAIN_READ_MS, CHAIN_NONCE_KEEP_MS, CHAIN_RATE_HOST, CHAIN_RATE_SOURCE, chainTarget, parseChainTarget,
-  parseChainPage, handleChainRead,
+  parseChainPage, handleChainRead, chainPageBody,
 } from "./chain-service.mjs";
