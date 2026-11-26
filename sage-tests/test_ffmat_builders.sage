@@ -53,3 +53,8 @@ for rs, cs in [([3], []), ([0], []), ([1, 1], []), ([], [3]), ([], [0]), ([], [1
     B7 = copy(A7); B7.subdivide(rs, cs)
     print(rs, cs); print(B7)
     print("anti:"); print(B7.antitranspose())
+# copy keeps the subdivisions or not by Sage's matrix class; deepcopy never
+for K7 in [GF(2), GF(3), GF(101), Zmod(12), GF(4, 'b'), GF(9, 'c'), GF(125, 'd'), GF(2^20, 'e')]:
+    B7 = matrix(K7, 2, 2, [1, 0, 0, 1]); B7.subdivide([1], [1])
+    print(K7, copy(B7).subdivisions(), deepcopy(B7).subdivisions(), B7.__copy__().subdivisions(), B7.subdivisions())
+    print(copy(B7))

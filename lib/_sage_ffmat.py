@@ -1927,7 +1927,20 @@ class FFMatrix:
         return _matrix_hash(self._rows, self._ncols)
 
     def __copy__(self):
-        # (without the subdivisions, as Sage's copy of a matrix over GF(p))
+        # (the subdivisions kept or not as by Sage's matrix class for the
+        # base: dropped over Z/n, n != 2 (GF(p), p odd, among them) and over
+        # GF(2^k), 1 < k <= 16; kept over GF(2) and the other fields)
+        m = FFMatrix(self._base, self._rows, self._ncols)
+        sd = getattr(self, "_subdiv", None)
+        B = self._base
+        drop = (isinstance(B, _ff.IntegerModRing_) and B._n != 2) or (
+            isinstance(B, _ff.FiniteField_ext) and B._p == 2 and B._n <= 16)
+        if sd is not None and not drop:
+            m._subdiv = (list(sd[0]), list(sd[1]))
+        return m
+
+    def __deepcopy__(self, memo):
+        # (never the subdivisions, as Sage's deepcopy over every field)
         return FFMatrix(self._base, self._rows, self._ncols)
 
     def copy(self):
