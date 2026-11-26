@@ -16,7 +16,9 @@ defining polynomial, the embedding QuadraticField uses), by real and then
 imaginary part for an imaginary quadratic field (the root in the upper
 half-plane), and otherwise by the degree of the coordinate polynomial and
 its coordinates from the top (which is what Sage's factoring backend
-returns).
+returns).  All of these are on Sage's model of the field, whose root is the
+field's model's negated when the defining polynomial's leading coefficient
+is negative (_element_key).
 """
 
 from fractions import Fraction as _F
@@ -36,7 +38,7 @@ def _sa():
 
 
 def _call(name, **kw):
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     return call(name, **kw)
 
 
@@ -854,7 +856,8 @@ class Polynomial_nf:
     def _from_engine(self, d):
         K = self._ring._base
         den = int(d["den"])
-        return Polynomial_nf(self._ring, [K([_F(int(x), den) for x in c]) for c in d["num"]])
+        # (the engine's coordinates are the field's model's, as _engine sends them: K._from_model, not K(list))
+        return Polynomial_nf(self._ring, [K._from_model([_F(int(x), den) for x in c]) for c in d["num"]])
 
     def _field_t(self):
         return [str(c) for c in self._ring._base._f]
@@ -1109,9 +1112,19 @@ def _sign_p_q_sqrt(p, q, d):
 
 def _element_key(K):
     """A comparison function on elements of K, as Sage orders them."""
-    f = K._f
+    # (Sage orders on its own model, whose root carries the sign of the
+    # leading coefficient of the polynomial given: -x^3 + 2's is x^3 + 2, with
+    # root -a.  The field's model has root |d| a, so for a negative leading
+    # coefficient compare on y -> -y: coordinates c_i (-1)^i, the model's
+    # coefficients h_i (-1)^(n - i).)
+    s = -1 if K._uf[-1] < 0 else 1
+    n = len(K._f) - 1
+    f = [_F(t) * s ** (n - i) for i, t in enumerate(K._f)]
+
+    def co(x):
+        return [_F(t) * s ** i for i, t in enumerate(x._c)]
     if len(f) == 3:
-        c0, c1 = _F(f[0]), _F(f[1])  # x^2 + c1 x + c0
+        c0, c1 = f[0], f[1]  # x^2 + c1 x + c0
         disc = c1 * c1 - 4 * c0
         if disc > 0:
             # the larger root (-c1 + sqrt(disc)) / 2: u + v root = (u - v c1/2) + (v/2) sqrt(disc)
@@ -1120,13 +1133,15 @@ def _element_key(K):
             scale = _F(1, disc.denominator)
 
             def cmp(x, y):
-                u, v = _F(x._c[0]) - _F(y._c[0]), _F(x._c[1]) - _F(y._c[1])
+                cx, cy = co(x), co(y)
+                u, v = cx[0] - cy[0], cx[1] - cy[1]
                 return _sign_p_q_sqrt(u - v * c1 / 2, v / 2 * scale, d)
             return cmp
 
         def cmp(x, y):
             # (real part, imaginary part) with the root in the upper half-plane
-            u, v = _F(x._c[0]) - _F(y._c[0]), _F(x._c[1]) - _F(y._c[1])
+            cx, cy = co(x), co(y)
+            u, v = cx[0] - cy[0], cx[1] - cy[1]
             re = u - v * c1 / 2
             if re:
                 return 1 if re > 0 else -1
@@ -1134,7 +1149,7 @@ def _element_key(K):
         return cmp
 
     def k(x):
-        c = [_F(t) for t in x._c]
+        c = co(x)
         while c and c[-1] == 0:
             c.pop()
         return (len(c) - 1, list(reversed(c)))
