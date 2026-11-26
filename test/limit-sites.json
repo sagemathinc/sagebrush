@@ -20330,12 +20330,12 @@
   "owner": "sagebrush-python",
   "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
  },
- "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
+ "src/runtime/nd.ts :: ndMemoryMax :: return mem ? declaredMax.get(mem) ?? 0 : 0; #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
- "src/runtime/nd.ts :: sharedMemory :: const declaredMax = new WeakMap<WebAssembly.Memory, number>(); #0": {
+ "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
@@ -20354,6 +20354,11 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
+ "src/runtime/nd.ts :: sharedOk :: const declaredMax = new WeakMap<WebAssembly.Memory, number>(); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
  "src/runtime/nd.ts :: up :: const MAX_HELPERS = 8; #0": {
   "class": "1",
@@ -20577,6 +20582,11 @@
   "class": "none",
   "owner": "NumPy shim/runtime memory",
   "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_linalg.ts ::  :: import { useNd, ndCholesky, ndLu, ndMemoryMax, ndPath, ndProducts, ndRequestWarm, ndScratch, ndThreads, ndWarmState } from \"./nd\"; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
  "src/runtime/object.ts :: engineLimit :: function engineLimit(message: string): string | undefined { #0": {
   "class": "none",
@@ -21180,10 +21190,26 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
+ "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of rendered output\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
  "web/latex/engine/tikz.mjs :: X :: if (st.cap) a += ' stroke-linecap=\"' + st.cap + '\"'; #0": {
   "class": "none",
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
+ },
+ "web/latex/engine/tikz.mjs :: atBorder :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: atom :: if (!Number.isFinite(v)) fail(\"a value too large in \" + JSON.stringify(s)); #0": {
   "class": "1",
@@ -21200,6 +21226,11 @@
   },
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false, #0": {
+  "class": "none",
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: the path state's cap field"
  },
  "web/latex/engine/tikz.mjs :: checkPt :: if (Math.abs(p[0]) > TIKZ_LIMITS.COORD_MAX || Math.abs(p[1]) > TIKZ_LIMITS.COORD_MAX) fail(\"a point farther than \" + Math.round(TIKZ_LIMITS.COORD_MAX / PT_PER_CM / 100) + \" m\"); #0": {
   "class": "1",
@@ -21295,6 +21326,38 @@
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: lex :: if (this.lexed + n > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.labelHtml += utf8Len(r.html)) > TIKZ_LIMITS.LABEL_HTML) fail(\"node text past \" + TIKZ_LIMITS.LABEL_HTML / 2 ** 20 + \" MiB of HTML in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.nodeText += nb) > TIKZ_LIMITS.NODE_TEXT) fail(\"node text past \" + TIKZ_LIMITS.NODE_TEXT / 1024 + \" KiB in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (++this.nodeCount > TIKZ_LIMITS.NODES) fail(\"more than \" + TIKZ_LIMITS.NODES + \" nodes in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (nb > TIKZ_LIMITS.LABEL_TEXT) fail(\"a line of a node's text over \" + TIKZ_LIMITS.LABEL_TEXT / 1024 + \" KiB\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -21713,6 +21776,62 @@
   },
   "owner": "library chunk fetch",
   "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, hash FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: else if (this.kept() + 1 > this.bounds.entries && op !== \"remove\" && op !== \"recover\") throw new SyncError(\"limit\", \"the key chain is at its length bound: only removing a device, recovering or a reset goes on\", { max: this.bounds.entries }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if (!isReset && this.kept() + 1 > this.bounds.entries + this.bounds.reserve) throw new SyncError(\"limit\", \"the key chain is at its length bound\", { max: this.bounds.entries + this.bounds.reserve }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if ([...next.devices.values()].filter((d) => d.removed === null).length > E2E.devices) throw new SyncError(\"limit\", \"too many devices\", { max: E2E.devices }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: const all = this.sql.exec(\"SELECT entry FROM e2e_chain WHERE seq >= ? ORDER BY seq LIMIT ?\", from, E2E.page).toArray() as Row[]; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: const r = this.sql.exec(\"SELECT bytes, seq, epoch FROM e2e_wrappers WHERE kind = ? AND rid = ? AND epoch = ? ORDER BY seq DESC LIMIT 1\", kind, id, h.epoch).toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: if (live >= E2E.sessions) throw new SyncError(\"limit\", \"too many enrollments at once\", { max: E2E.sessions }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
  },
  "web/sync/entries.ts ::  :: bytes: IX_BYTES_MAX, #0": {
   "class": "1",
@@ -22289,62 +22408,6 @@
   "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
   "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
  },
- "web/sync/e2e-chain.ts :: stale :: const all = this.sql.exec(\"SELECT entry FROM e2e_chain WHERE seq >= ? ORDER BY seq LIMIT ?\", from, E2E.page).toArray() as Row[]; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: stale :: const r = this.sql.exec(\"SELECT bytes, seq, epoch FROM e2e_wrappers WHERE kind = ? AND rid = ? AND epoch = ? ORDER BY seq DESC LIMIT 1\", kind, id, h.epoch).toArray()[0] as Row | undefined; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: stale :: if (live >= E2E.sessions) throw new SyncError(\"limit\", \"too many enrollments at once\", { max: E2E.sessions }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, hash FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: kept :: else if (this.kept() + 1 > this.bounds.entries && op !== \"remove\" && op !== \"recover\") throw new SyncError(\"limit\", \"the key chain is at its length bound: only removing a device, recovering or a reset goes on\", { max: this.bounds.entries }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: kept :: if (!isReset && this.kept() + 1 > this.bounds.entries + this.bounds.reserve) throw new SyncError(\"limit\", \"the key chain is at its length bound\", { max: this.bounds.entries + this.bounds.reserve }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: kept :: if ([...next.devices.values()].filter((d) => d.removed === null).length > E2E.devices) throw new SyncError(\"limit\", \"too many devices\", { max: E2E.devices }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
  "web/workspace/checkpoint.ts ::  :: export const CHECKPOINT_BLOB_MAX = 32 << 20; #0": {
   "class": "1",
   "disposition": {
@@ -22582,58 +22645,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of rendered output\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: atBorder :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false, #0": {
-  "class": "none",
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "matched text that refuses nothing: the path state's cap field"
- },
- "web/latex/engine/tikz.mjs :: node :: if ((this.labelHtml += utf8Len(r.html)) > TIKZ_LIMITS.LABEL_HTML) fail(\"node text past \" + TIKZ_LIMITS.LABEL_HTML / 2 ** 20 + \" MiB of HTML in a picture\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: node :: if ((this.nodeText += nb) > TIKZ_LIMITS.NODE_TEXT) fail(\"node text past \" + TIKZ_LIMITS.NODE_TEXT / 1024 + \" KiB in a picture\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: node :: if (++this.nodeCount > TIKZ_LIMITS.NODES) fail(\"more than \" + TIKZ_LIMITS.NODES + \" nodes in a picture\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: node :: if (nb > TIKZ_LIMITS.LABEL_TEXT) fail(\"a line of a node's text over \" + TIKZ_LIMITS.LABEL_TEXT / 1024 + \" KiB\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  }
 }
