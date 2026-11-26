@@ -779,6 +779,11 @@ def _read_bytes(io):
         raise TypeError("Expected file path name or file-like object, got %r type" % type(io))
     if isinstance(io, str):
         # (as read_csv: pandas fetches a URL itself; here the file must be in the project first, nothing fetched)
+        # (a workspace file by sagebrush://: read through the page, sagebrush.fs; the one URL accepted)
+        if io.startswith("sagebrush://"):
+            from sagebrush import fs as _sbfs
+            with _sbfs.open(io, "rb") as f:
+                return f.read()
         if re.match(r"(?i)(https?|ftp|s3|gs)://", io):
             raise NotImplementedError("read_excel from a URL isn't supported; download the file into the project first")
         with open(io, "rb") as f:

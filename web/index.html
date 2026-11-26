@@ -814,6 +814,7 @@ import "./active.ts";
 import { mountVersionStamp } from "./version.ts";
 (window.requestIdleCallback ?? ((f) => setTimeout(f, 1)))(() => void mountVersionStamp(document.getElementById("sbversion")));
 import { WorkerKernel } from "./notebook/worker-kernel.js";
+import { FsCalls } from "./notebook/sb-fs.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
 import { NativeWorker } from "./notebook/native-worker.js";
 import { RUNNER_BROWSER } from "./notebook/runner-browser.js";
@@ -1090,6 +1091,15 @@ async function pinUsedPkgset(owner, S) {
     statusEl.textContent = `the notebook's package set pin isn't saved yet: ${String(e?.message ?? e).slice(0, 200)}`;
   }
 }
+// sagebrush:// (web/notebook/sb-fs.js): one admission for every kernel of this page, over this page's workspace
+// (`ws`, opened later: until then every call is unavailable); each kernel's worker is recorded with it
+const SB_FS = new FsCalls({
+  workspace: {
+    stat: (p) => ws.stat(p),
+    list: (p) => ws.list(p),
+    history: (p) => ws.history(p),
+  },
+});
 function makeKernel(owner) {
   // TimeTravel's execution journal (web/replay-page.js): each interpreter
   // session gets an id and its entropy's seed, in the Worker's name
@@ -1121,6 +1131,7 @@ function makeKernel(owner) {
     return stateOf(now) !== "off" && c.some((t) => coversW(t, path)) && now.some((t) => coversW(t, path));
   };
   const k = new WorkerKernel({
+    files: { fs: SB_FS, own: () => ws?.identity.workspace ?? null },
     createWorker: () => {
       const name = j?.workerName() ?? "";
       // (a document whose code can't change files never gets a plain worker, as the no-mutation review cleared)

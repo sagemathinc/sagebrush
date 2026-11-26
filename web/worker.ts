@@ -82,7 +82,9 @@ import { setStreamClock } from "../src/runtime/builtins";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
 import { LIVE_DEADLINE_MS, LIVE_MAX_BYTES, waitForAnswer, type LiveAnswer } from "../src/live-data";
-import type { LiveRequest } from "../src/notebook-session";
+import type { FsCall, LiveRequest } from "../src/notebook-session";
+import { FS_BUFFER_BYTES, FS_MAX_READ, KIND_DATA, KIND_HEADER, readHeader, releasePiece, waitPiece, type FsHeader } from "../src/sbfs";
+import { hostReserve, type HostHandle } from "../src/runtime/engine";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
 import { modeOfFlags } from "../src/modes";
 import { useSet, prefetchFor, onPkgUse, SetUnfetched } from "./pkgset-browser";
@@ -136,11 +138,63 @@ function liveData(req: LiveRequest): LiveAnswer | null {
   postMessage({ id: req.id, target: req.target, liveData: { op: req.op, params: req.params, key }, buffer });
   return waitForAnswer(buffer, R.INTR, LIVE_DEADLINE_MS);
 }
+// sagebrush:// (src/sbfs.ts): sagebrush.fs's closed operations, asked of the page as live data is, on this worker's one
+// transport buffer (FS_BUFFER_BYTES, made at the first call, reserved first in the engine's ledger as a host
+// obligation, design sagebrush-fsspec r3 §6.3).  fs.read's pieces are handed to `sink` as they come, each taken and
+// acknowledged ({sbFsAck}) before the page writes the next; a piece of an earlier call (one a Stop cut short) is
+// skipped.  The key correlates the answer; it authorizes nothing: the page binds the call to this worker itself
+// (web/notebook/sb-fs.js).  No shared memory: unavailable.
+const FS_TAG = Math.random().toString(36).slice(2, 10);
+let fsCount = 0;
+let fsBuffer: SharedArrayBuffer | null = null;
+let fsHold: HostHandle | null = null;
+const fsError = (code: string, message: string): FsHeader => ({ error: { code: code as any, message } });
+function sbFs(req: FsCall, sink: (piece: Uint8Array, at: number) => void): FsHeader | null {
+  if (typeof SharedArrayBuffer !== "function" || !(R.INTR.buffer instanceof SharedArrayBuffer) || !(globalThis as any).crossOriginIsolated) return null;
+  if (fsBuffer === null) {
+    const h = hostReserve("sagebrush:// transport buffer", FS_BUFFER_BYTES);
+    if ("memory" in h) return fsError("memory", `sagebrush://: no room for its ${FS_BUFFER_BYTES}-byte transport buffer; use the native app on a computer with more memory`);
+    fsHold = h;
+    fsBuffer = new SharedArrayBuffer(FS_BUFFER_BYTES);
+  }
+  const buffer = fsBuffer, call = ++fsCount, key = `${FS_TAG}.${call}`;
+  releasePiece(buffer);
+  postMessage({ id: req.id, target: req.target, sbFs: { op: req.request.op, params: req.request.params, key }, buffer });
+  const take = (seq: number, kind: number) => {
+    const p = waitPiece(buffer, R.INTR, call, seq);
+    if ("error" in p) return p;
+    if (p.kind !== kind) return { error: "unavailable" as const };
+    return p;
+  };
+  const ack = (seq: number) => {
+    releasePiece(buffer);
+    postMessage({ sbFsAck: { key, seq } });
+  };
+  const first = take(1, KIND_HEADER);
+  if ("error" in first) return fsError(first.error, first.error === "interrupted" ? "interrupted" : `sagebrush://: the page didn't answer (${first.error})`);
+  const h = readHeader(first.bytes);
+  ack(1);
+  if ("error" in h || req.request.op !== "fs.read") return h;
+  const len = h.ok.length;
+  if (!Number.isSafeInteger(len) || (len as number) < 0 || (len as number) > req.request.params.length || (len as number) > FS_MAX_READ) return fsError("unavailable", "sagebrush://: the page's answer was not understood");
+  let got = 0, seq = 1;
+  while (got < (len as number)) {
+    const q = take(++seq, KIND_DATA);
+    if ("error" in q) return fsError(q.error, q.error === "interrupted" ? "interrupted" : `sagebrush://: the page stopped answering (${q.error})`);
+    const n = q.bytes.length;
+    if (n === 0 || got + n > (len as number)) return fsError("unavailable", "sagebrush://: the page's answer was not understood");
+    sink(q.bytes, got);
+    got += n;
+    ack(seq);
+  }
+  return h;
+}
 // (the streams flush by the real clock, not the one a run's replay records: web/replay-env.ts)
 setStreamClock(replayEnv.now);
 const session = notebookSession((m) => postMessage(m), {
   stdin,
   liveData,
+  sbFs,
   limits,
   runs: {
     begin: (m) => {
