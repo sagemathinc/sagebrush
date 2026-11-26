@@ -167,6 +167,10 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Ep := ChangeRing(EllipticCurve([0, -1, 1, -10, -10]), GF(101)); Conductor(Ep);",
     "ChangeRing(EllipticCurve([0, -1, 1, -10, -10]), Rationals());",
     "ChangeRing(Ep, GF(7));",
+    "PermutationGroup<4 | (1,2)>;",
+    "PG := PermutationGroup<4 | (1,2,3,4)>; Generators(PG);",
+    "PH := PermutationGroup<40 | [i mod 40 + 1 : i in [1..40]]>; PH;",
+    "IsAbelian(Alt(2000));",
   ].join("\n") + "\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
   // (messages are wrapped at 80 columns, as Magma's are)
@@ -196,6 +200,10 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in 'Conductor': Conductor of an elliptic curve over a finite field is not supported yet",
     "Runtime error in 'ChangeRing': ChangeRing of a CrvEll, FldRat is not supported yet",
     "Runtime error in 'ChangeRing': ChangeRing of an elliptic curve over a finite field is not supported yet",
+    "Runtime error in PermutationGroup< ... >: the map PermutationGroup< ... > returns (its second value, printed with the group) is not supported yet",
+    "Runtime error in 'Generators': Generators of a GrpPerm is not supported yet",
+    "Runtime error: printing a permutation group whose generators are longer than a line is not supported yet",
+    "A permutation group of degree 2000 (its stabilizer chain) needs about",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
