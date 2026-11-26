@@ -97,15 +97,58 @@ fn coded(code: &str, message: String) -> Error {
     Error::new(Status::GenericFailure, format!("{}: {}", code, message))
 }
 
-/// Run one export's body: refused once the process is faulted; an
-/// interrupt is reported as such; any other panic faults the process.
+thread_local! {
+    /// Whether an addon export is running on this thread (design N1 r3.4, S4).
+    static DEPTH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether a nested export was attempted since the flag was last cleared
+    /// (the total host's answer reads and clears it: a tainted answer is
+    /// Unreadable, r3.4).
+    static REENTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The outermost export's depth (RAII): restores "no export" on every exit.
+struct Depth;
+
+impl Drop for Depth {
+    fn drop(&mut self) {
+        DEPTH.with(|d| d.set(false));
+    }
+}
+
+/// Enter an export: refused, touching nothing but the reentry flag, when
+/// another export is already running on this thread (a JS callback that
+/// called back into the addon).
+fn enter() -> Result<Depth> {
+    if DEPTH.with(|d| d.get()) {
+        REENTERED.with(|r| r.set(true));
+        return Err(coded("reentrant", "the native engine was called from inside one of its own calls".into()));
+    }
+    DEPTH.with(|d| d.set(true));
+    Ok(Depth)
+}
+
+/// Whether a nested export was attempted since the last call, clearing the flag.
+#[allow(dead_code)]
+pub(crate) fn take_reentered() -> bool {
+    REENTERED.with(|r| r.replace(false))
+}
+
+/// Run one export's body: refused when nested (r3.4) and before init or off
+/// the session's thread; refused once the process is faulted; an interrupt
+/// is reported as such; any other panic faults the process.
 fn guarded<T>(f: impl FnOnce() -> T) -> Result<T> {
+    let _depth = enter()?;
     owner()?;
-    guarded_unclaimed(f)
+    run(f)
 }
 
 /// `guarded` without the owner check (init itself).
 fn guarded_unclaimed<T>(f: impl FnOnce() -> T) -> Result<T> {
+    let _depth = enter()?;
+    run(f)
+}
+
+fn run<T>(f: impl FnOnce() -> T) -> Result<T> {
     if FAULTED.load(SeqCst) {
         return Err(coded(ENGINE_FAULT, "the engine faulted earlier in this process".into()));
     }
