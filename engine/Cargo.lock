@@ -998,6 +998,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-skltree"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-interrupt",
+ "sagebrush-wasmheap",
+]
+
+[[package]]
 name = "sagebrush-sym"
 version = "0.1.0"
 dependencies = [

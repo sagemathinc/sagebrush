@@ -92,7 +92,7 @@ grants(
      - the scheduled job deletes every row an hour past its expiry, 1,000 at a time;
      - **no token is ever stored:** approval makes the grant without a secret. The first poll after approval makes the secret, has the account object store its hash, and returns the token once. A second collection finds the pairing `collected`.
    - **Failure paths never disclose a token:** an expired, used or unknown pairing gets the same 404.
-2. **From the grant dialog,** for an agent the person configures by hand:
+2. **From the grant dialog,** for an agent the person configures by hand. **Under end-to-end encryption this route is dropped, and grants are made by pairing only:** pairing is where the agent's own key is certified (§4, design/e2e-encryption.md §6), and a copied token has no key behind it.
    - the person makes the grant and copies the token, which is shown once;
    - this is also how a token reaches a cocalc.ai project, pasted as a project secret, until the cocalc.ai adapter (§10) does it for them.
 
