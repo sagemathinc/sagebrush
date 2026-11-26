@@ -205,6 +205,7 @@
  "lib/_sage_ffmat.py: FFVector.__truediv__ :: comprehension :: v._e": 1,
  "lib/_sage_ffmat.py: FFVector._dot :: call :: zip(self._e, o)": 1,
  "lib/_sage_ffmat.py: FFVector._dot :: loop :: zip(self._e, o)": 1,
+ "lib/_sage_ffmat.py: FFVector._finite_meet :: comprehension :: self._e": 1,
  "lib/_sage_ffmat.py: FFVector._inexact_meet :: call :: min(pb, pp)": 1,
  "lib/_sage_ffmat.py: FFVector._inexact_meet :: comprehension :: self._e": 1,
  "lib/_sage_ffmat.py: FFVector._latex_ :: call :: \", \".join(repr(x) for x in self._e)": 1,
