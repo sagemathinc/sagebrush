@@ -1079,6 +1079,9 @@ class Emitter {
   // (whether the program can clear a variable as it runs: only then do top-level reads
   // check that the variable still exists, so other programs' reads stay plain names)
   mayClear = false;
+  // (the file this code is in, for mfilename: a Python expression, the program's own file at run time by default, a
+  // path file's absolute path, or "" for code in no file)
+  mfile = "_m._program_file()";
 
   constructor(private funcs: FuncDef[], private filename: string, private cell = false) {
     for (const f of funcs) this.fnNames.add(f.name);
@@ -1580,10 +1583,12 @@ class Emitter {
   lookup(name: string, scope: Scope): string {
     if (this.fnNames.has(name)) return pyName(name);
     const imp = scope.imports ? `, ${scope.fn ? "False" : "True"}, (${scope.imports.map((i) => JSON.stringify(i)).join(", ")},)` : "";
-    if (scope.fn) return `_m.fn(${JSON.stringify(name)}${imp})`;
+    // (mfilename: the file this code is in, known here, never the caller's)
+    const found = name === "mfilename" ? `_m.mfilename_in(${this.mfile})` : null;
+    if (scope.fn) return found ?? `_m.fn(${JSON.stringify(name)}${imp})`;
     const py = pyName(name);
     // (True: named at the top level, where a script found on the path can run)
-    return `(${py} if ${inWorkspace(py)} else _m.fn(${JSON.stringify(name)}${imp || ", True"}))`;
+    return `(${py} if ${inWorkspace(py)} else ${found ?? `_m.fn(${JSON.stringify(name)}${imp || ", True"})`})`;
   }
 
   // -------- expressions
@@ -1944,7 +1949,9 @@ export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?
     stmts[0].line = 0;
   }
   checkTreeDepth(stmts, p.functions);
-  return checkPython(new Emitter(p.functions, filename, !!opts.cell).program(stmts, src));
+  const em = new Emitter(p.functions, filename, !!opts.cell);
+  if (opts.cell) em.mfile = '""';
+  return checkPython(em.program(stmts, src));
 }
 
 // The generated Python's own limits, which the engine's compiler has: about 99 nested blocks (a fixed limit), and
@@ -2049,7 +2056,9 @@ export function matlabFunctionFileToPython(src: string): string {
   const stmts = p.program();
   if (stmts.length) throw new MatlabSyntaxError("a function file has statements outside its functions", stmts[0].line, stmts[0].col);
   checkTreeDepth([], p.functions);
-  return checkPython(new Emitter(p.functions, "").functionFile());
+  const em = new Emitter(p.functions, "");
+  em.mfile = '""';
+  return checkPython(em.functionFile());
 }
 
 /**
@@ -2057,12 +2066,19 @@ export function matlabFunctionFileToPython(src: string): string {
  * `#function`, or a script's statements, to run in the caller's workspace, after a first line `#script` and the Python
  * names of its local functions.  `name` is the script's name for its frame in an error's report.
  */
-export function matlabPathFileToPython(src: string, name: string): string {
+export function matlabPathFileToPython(src: string, name: string, path = ""): string {
   const p = new Parser(lex(src));
   const stmts = p.program();
   checkTreeDepth(stmts, p.functions);
-  if (!stmts.length && p.functions.length) return "#function\n" + checkPython(new Emitter(p.functions, "").functionFile());
-  return ["#script", ...p.functions.map((f) => pyName(f.name))].join(" ") + "\n" + checkPython(new Emitter(p.functions, name).scriptFile(stmts, src, name));
+  // (path: the file's absolute path, which mfilename gives; "" when unknown)
+  if (!stmts.length && p.functions.length) {
+    const em = new Emitter(p.functions, "");
+    em.mfile = JSON.stringify(path);
+    return "#function\n" + checkPython(em.functionFile());
+  }
+  const em = new Emitter(p.functions, name);
+  em.mfile = JSON.stringify(path);
+  return ["#script", ...p.functions.map((f) => pyName(f.name))].join(" ") + "\n" + checkPython(em.scriptFile(stmts, src, name));
 }
 
 /** The functions a MATLAB file defines (its first is the file's own). */
@@ -2120,11 +2136,11 @@ export function matlabHostOps(): Record<string, (...args: any[]) => any> {
         return `import sys\nsys.stderr.write(${JSON.stringify(matlabSyntaxMessage(e, s, f))})\n`;
       }
     },
-    matlab_path_file(src: unknown, file: unknown) {
+    matlab_path_file(src: unknown, file: unknown, path?: unknown) {
       const s = String(src), f = String(file);
       const name = f.replace(/\\/g, "/").split("/").pop()!.replace(/\.m$/, "");
       try {
-        return matlabPathFileToPython(s, name);
+        return matlabPathFileToPython(s, name, path === undefined ? "" : String(path));
       } catch (e) {
         if (!(e instanceof MatlabSyntaxError)) throw e;
         return `#function\nimport _matlab as _m\nraise _m.MatlabError(${JSON.stringify(matlabSyntaxMessage(e, s, f).trimEnd())}, "MATLAB:syntax")\n`;

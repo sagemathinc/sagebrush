@@ -184,6 +184,46 @@ _file_lines = {}
 def begin(name, text):
     _src[0] = name
     _src[1] = text.split("\n")
+    # (the program's own file, for mfilename: its absolute path, found before any cd, or "" for a program in no file)
+    try:
+        _src_path[0] = _os.path.abspath(name) if name.endswith(".m") and _os.path.isfile(name) else ""
+    except (OSError, ValueError, TypeError):
+        _src_path[0] = ""
+
+
+_src_path = [""]
+
+
+def _program_file():
+    return _src_path[0]
+
+
+_mfilename_fns = {}
+
+
+def mfilename_in(path):
+    """mfilename for the code of the file at path ("" for code in no file): the built-in each call of it there
+    makes, one per file"""
+    f = _mfilename_fns.get(path)
+    if f is None:
+        f = _mfilename_fns[path] = Builtin(lambda nargout, *args: _mfilename(path, args), "mfilename", (0, 1))
+    return f
+
+
+def _mfilename(path, args):
+    """the file's name without its folder and .m; 'fullpath': its absolute path without .m; 'class': the class of
+    a method's file, '' (Sagebrush has no classdef)"""
+    if len(args) > 1:
+        raise _err("Too many input arguments.", "MATLAB:TooManyInputs")
+    stem = path[:-2] if path.endswith(".m") else path
+    if not args:
+        return Char(stem.replace("\\", "/").split("/")[-1])
+    opt = _text(args[0]) if _istext(args[0]) else None
+    if opt == "fullpath":
+        return Char(stem)
+    if opt == "class":
+        return Char("")
+    raise _err("The input must be 'fullpath' or 'class'.")
 
 
 def _scriptname():
@@ -2068,6 +2108,11 @@ def _bi(*names):
             _B[n] = Builtin(f, n)
         return f
     return deco
+
+
+# (mfilename named as a value, @mfilename or feval('mfilename'), in no file: ''; a call in a file is that file's own,
+# src/matlab.ts)
+_B["mfilename"] = mfilename_in("")
 
 
 def _bs(*names):
