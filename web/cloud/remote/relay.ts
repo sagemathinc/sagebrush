@@ -95,6 +95,9 @@ type Att = PeerAtt | PageAtt;
 const newRx = (): Rx => ({ sent: 0, acked: 0, since: 0, tokens: [] });
 const b64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const bytes = (s: string | ArrayBuffer) => (typeof s === "string" ? enc.encode(s).length : s.byteLength);
+/** What a waiting message holds in memory, at most: a string two bytes per UTF-16 unit (the runtime may keep it in
+ * one byte per unit only while it is all Latin-1), an ArrayBuffer its bytes. */
+const held = (s: string | ArrayBuffer) => (typeof s === "string" ? 2 * s.length : s.byteLength);
 /** Bytes after an ASCII prefix: one ArrayBuffer. */
 const prefixed = (head: string, body: ArrayBuffer) => {
   const out = new Uint8Array(head.length + body.byteLength);
@@ -506,6 +509,8 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
    * no page left (set before the last one went) closes nothing: it is only cancelled (astra's ALARM-1). */
   async alarm(): Promise<void> {
     if (!this.pages().length) return this.ctx.storage.deleteAlarm();
+    // (any engine page of a generation below the stored one, left by a stop after an advance's write, ends here too)
+    await this.endStale(CLOSE.syncOff, "the connection's generation went up");
     await this.syncCheck();
     const now = this.now();
     for (const w of [...this.peers(), ...this.pages()]) {
@@ -805,7 +810,11 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
   private async syncSeen(generation: number): Promise<void> {
     const prev = await this.ctx.storage.get<number>("syncGen");
     if (prev !== generation) await this.ctx.storage.put("syncGen", generation);
-    if (await this.ctx.storage.get("syncFenced")) await this.ctx.storage.delete("syncFenced");
+    // (the transition ends here: what its advance may not have ended yet is ended first, then the marker cleared)
+    if (await this.ctx.storage.get("syncFenced")) {
+      await this.endStale(CLOSE.syncOff, "sync isn't active for this account");
+      await this.ctx.storage.delete("syncFenced");
+    }
     this.lastSync = generation;
     if (prev !== undefined && prev !== generation) await this.advance(CLOSE.syncOff, "sync was reset for this account");
   }
@@ -945,7 +954,10 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
       const q = this.page(gen);
       return q === p && this.live(q);
     };
-    await this.charged(ws, a, n, bytes(text) + RELAY_LIMITS.overhead, () => there() && this.forward(ws, p, this.att(p) as PageAtt, payload, n, caps.window), there);
+    // (an engine page's frame is charged what it holds while it waits: a string's two bytes per UTF-16 unit, at most;
+    // its bytes for binary (LIMITS H3: a mostly-ASCII string with one wide character is held two bytes per unit))
+    const cost = pa.chan === "engine" ? held(text) + RELAY_LIMITS.overhead : bytes(text) + RELAY_LIMITS.overhead;
+    await this.charged(ws, a, n, cost, () => there() && this.forward(ws, p, this.att(p) as PageAtt, payload, n, caps.window), there);
   }
 
   /**
@@ -1023,7 +1035,9 @@ export class RemoteRelay extends DurableObject<RelayEnv> {
     // (the receiver: the same peer (replaced or gone: nothing is sent); checked before the debit and again at the send)
     const there = () => this.peers()[0] === peer;
     const out = typeof text === "string" ? head + text : prefixed(head, text);
-    await this.charged(ws, a, head.length + n, head.length + n + RELAY_LIMITS.overhead, () => there() && this.forward(ws, peer, this.att(peer), out, head.length + n, peerWindow(kind)!), there);
+    // (an engine page's frame is charged what it holds while it waits, as above (LIMITS H3))
+    const cost = a.chan === "engine" ? held(out) + RELAY_LIMITS.overhead : head.length + n + RELAY_LIMITS.overhead;
+    await this.charged(ws, a, head.length + n, cost, () => there() && this.forward(ws, peer, this.att(peer), out, head.length + n, peerWindow(kind)!), there);
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {

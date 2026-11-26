@@ -351,6 +351,7 @@ let cur = 2; // (after the disconnect above)
       ok(first.status === 403, `durability (${what}): the first off read -> 403 (${first.status})`);
     }
     ok(await until(async () => (await engineState(r1.rid)).length === 0), `durability (${what}): the old page ended`);
+    await until(async () => p.got.some((t) => t.startsWith('{"relay":"cgen"')));
     const seen = [];
     while (p.got.length) seen.push(J(p.got.shift()));
     ok(seen.some((m) => m?.relay === "cgen" && m.cgen === cur + 1) && !seen.some((m) => m?.relay === "cgen" && m.cgen > cur + 1),
@@ -359,6 +360,39 @@ let cur = 2; // (after the disconnect above)
     await setSync("state=active&gen=7");
     x = await dialEngine(sa, r1.rid, { nb: "nbQ", cgen: cur - 1 });
     ok(x.status === 409, `durability (${what}): the old generation -> 409 (${x.status})`);
+    await tick(r1.rid, 121_000);
+  }
+}
+{
+  // (recovery when sync turns active again after a stop between the write and the ends: the open that reads "active"
+  // ends the old page (4412) before it clears the marker, and the old generation is refused)
+  await tick(r1.rid, 121_000);
+  for (const via of ["an active open", "the alarm"]) {
+    const f = await openAt(`nbR${via.length}`, cur);
+    ok(f.status === 101, `recovery (${via}): a page attached at cgen ${cur} (${f.status} ${f.error})`);
+    await site(`/__relay/__skipstale?remote=${r1.rid}&on=1`);
+    await setSync("state=off");
+    x = await dialEngine(sa, r1.rid, { nb: "nbQ" });
+    ok(x.status === 403 && (await engineState(r1.rid)).length === 1, `recovery (${via}): off commits, the stop leaves the old page (${x.status})`);
+    await setSync("state=active&gen=7");
+    if (via === "the alarm") {
+      p.send('{"relay":"ping"}');
+      f.leg.send('{"relay":"ping"}');
+      await until(async () => p.got.includes('{"relay":"pong"}'));
+      await tick(r1.rid, 5000);
+      await alarm(r1.rid);
+    } else {
+      const fresh = await openAt(`nbS${via.length}`, cur + 1);
+      ok(fresh.status === 101, `recovery (${via}): the active open at the new generation -> 101 (${fresh.status} ${fresh.error})`);
+      fresh.leg.close();
+    }
+    ok(await closedOr(f.leg, 4412) && await until(async () => !(await engineState(r1.rid)).some((a) => a.engine.cgen === cur)),
+      `recovery (${via}): the old generation's page ended`);
+    cur++;
+    x = await dialEngine(sa, r1.rid, { nb: "nbQ", cgen: cur - 1 });
+    ok(x.status === 409, `recovery (${via}): the old generation -> 409 (${x.status})`);
+    await sleep(100);
+    while (p.got.length) p.got.shift();
     await tick(r1.rid, 121_000);
   }
 }
@@ -591,8 +625,36 @@ const expire = () => tick(r1.rid, 121_000); // (the attempt ids so far expire)
   ok((await engineState(r1.rid)).some((a) => a.engine.nb === "qb"), "queue: the other page stays");
   await site(`/__relay/__holdput?remote=${r1.rid}&on=0`);
   qb.leg.close();
-  await budgetSet("queue=");
+  await sleep(200);
   while (p.got.length) p.got.shift();
+  // (LIMITS H3: a waiting string is charged two bytes per UTF-16 unit, binary its bytes.  Wide text: two strings of
+  // 2.1 M units, one wide character each (about 2.1 MB on the wire, 4.2 MB held), pass 8 MiB together; binary of the
+  // same wire size would not.  Mixed: 3 MiB binary and one such string (7.2 MiB held) fit; 1 MiB more doesn't.)
+  const wide = (c) => JSON.stringify({ t: c.repeat(2_100_000) + "\u00e9" });
+  for (const [what, sends, closed, stays] of [
+    ["wide text", [["wa", wide("a")], ["wb", wide("b")]], "wb", "wa"],
+    ["binary of the same wire size (control)", [["ba", new Uint8Array(2_100_020)], ["bb", new Uint8Array(2_100_020)]], null, "bb"],
+    ["mixed", [["ma", new Uint8Array(3 * 1024 * 1024)], ["mb", wide("m")], ["ma", new Uint8Array(1024 * 1024)]], "ma", "mb"],
+  ]) {
+    await expire();
+    const pages = {};
+    for (const nb of new Set(sends.map(([nb]) => nb))) pages[nb] = await openAt(nb, cur);
+    await site(`/__relay/__holdput?remote=${r1.rid}&on=1`);
+    for (const [nb, m] of sends) {
+      pages[nb].leg.send(m);
+      await sleep(200);
+    }
+    const attached = async () => (await engineState(r1.rid)).map((a) => a.engine.nb);
+    if (closed) ok(await until(async () => !(await attached()).includes(closed), 100), `queue (${what}): ${closed} closed past 8 MiB held (${await attached()})`);
+    else { await sleep(300); ok(Object.keys(pages).every((nb) => true) && (await attached()).length === Object.keys(pages).length, `queue (${what}): every page stays (${await attached()})`); }
+    ok((await attached()).includes(stays), `queue (${what}): ${stays} stays`);
+    await site(`/__relay/__holdput?remote=${r1.rid}&on=0`);
+    for (const l of Object.values(pages)) l.leg.close();
+    await until(async () => (await engineState(r1.rid)).length === 0);
+    await sleep(200);
+    while (p.got.length) p.got.shift();
+  }
+  await budgetSet("queue=");
 }
 
 // ---- the old channels are unchanged: the relay's own test suite (test-relay.mjs) runs them; here, one check

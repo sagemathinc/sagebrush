@@ -32,6 +32,9 @@ export const LABELS = Object.freeze({
   preEntry: "sagebrush.e2e.pre-entry.v1",
   publicKeyProbe: "sagebrush.e2e.public-key-probe.v1",
   keySalt: "sagebrush.e2e.v1",
+  // ---- a sealed index op's signed bytes (§4.1; e2e PR 5b): spelled in sealed-op.mjs (the server's and the client's),
+  // registered here so that the one collision check covers it
+  sealedOp: "sagebrush.e2e.sealed-op.v1",
   // ---- named by the design for later work (§6.2): listed so that nothing else takes them
   logSegment: "sagebrush.logseg.v1",
   remote: "sagebrush.remote.v1",
