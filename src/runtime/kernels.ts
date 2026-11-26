@@ -90,7 +90,9 @@ let route: FlagRoute = "past-max";
 
 // (each kernel below answers "use JavaScript", null or false, where the low-memory flag sends a call whose workspace
 //  is past its memory's fixed maximum there: growTo's USE_JS, decided by the input's size and the flag before any
-//  grow, wasm_room.ts)
+//  grow, wasm_room.ts. growTo is the only thrower of USE_JS, and each kernel grows once, in its layout, before it
+//  writes anything into the module's memory or runs it: so the catch can only ever answer before the kernel has
+//  begun. A kernel that grew again mid-computation must not catch USE_JS around that second grow.)
 function reserve(doubles: number): void {
   resident = "";
   const mem = K!.memory;
