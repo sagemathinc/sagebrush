@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-mp = { path = "../mp" }
-sagebrush-interrupt = { path = "../interrupt" }
+sagebrush-interrupt = { path = "../interrupt", features = ["node-host"] }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
 sagebrush-par = { path = "../par", features = ["parallel"] }

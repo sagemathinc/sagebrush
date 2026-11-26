@@ -88,7 +88,7 @@ pub fn with_session_stop<T>(flag: std::sync::Arc<AtomicBool>, f: impl FnOnce() -
 /// Whether an interrupt has been requested (polling the host in wasm), this thread's session's included.
 pub fn requested() -> bool {
     poll_host();
-    REQUESTED.load(Relaxed) || session_stopped()
+    REQUESTED.load(Relaxed) || session_stopped() || node_host::stopped()
 }
 
 /// Whether the caller asked the current call to stop at its next clean stop
@@ -138,7 +138,7 @@ pub fn check() {
     poll_host();
     #[cfg(feature = "test-hooks")]
     hooks::count(false);
-    if REQUESTED.load(Relaxed) || session_stopped() {
+    if REQUESTED.load(Relaxed) || session_stopped() || node_host::stopped() {
         interrupt()
     }
 }
@@ -151,7 +151,7 @@ pub fn check_coarse() {
     poll_host_now();
     #[cfg(feature = "test-hooks")]
     hooks::count(true);
-    if REQUESTED.load(Relaxed) || session_stopped() {
+    if REQUESTED.load(Relaxed) || session_stopped() || node_host::stopped() {
         interrupt()
     }
 }
@@ -368,8 +368,9 @@ pub fn catch<T>(f: impl FnOnce() -> T) -> Result<T, Interrupted> {
 }
 
 /// The default panic hook prints "thread panicked at ..." for every panic;
-/// an interruption is not an error, so it prints nothing.
-fn quiet_hook() {
+/// an interruption is not an error, so it prints nothing (public for the
+/// native addon, engine/node, whose exports catch their own panics).
+pub fn quiet_hook() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let prev = std::panic::take_hook();
@@ -379,6 +380,104 @@ fn quiet_hook() {
             }
         }));
     });
+}
+
+// ---- the Node host's control words (the native addon, engine/node; design #7 N1 r3 + r3.2)
+
+/// A Node session's Stop, keyed to run ids: the host's SharedArrayBuffer of
+/// four u32 words, `[VERSION, STOP_UPTO, RUN, reserved]`.  The host's main
+/// thread advances STOP_UPTO (stop every run up to and including it) and the
+/// session's thread advances RUN (the run being executed), both in RFC 1982
+/// serial arithmetic; a check stops iff STOP_UPTO is RUN or after it.  Off
+/// (never stopping) until the host installs the words and sets a first run.
+pub mod node_host {
+    #[cfg(feature = "node-host")]
+    use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering::Acquire, Ordering::Release};
+
+    #[cfg(feature = "node-host")]
+    static CTL: AtomicPtr<AtomicU32> = AtomicPtr::new(std::ptr::null_mut());
+    #[cfg(feature = "node-host")]
+    static ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// The words' indices.
+    pub const VERSION: usize = 0;
+    pub const STOP_UPTO: usize = 1;
+    pub const RUN: usize = 2;
+    pub const WORDS: usize = 4;
+
+    /// Whether `a` is after `b` (RFC 1982, 32-bit).
+    #[inline]
+    pub fn after(a: u32, b: u32) -> bool {
+        (a.wrapping_sub(b) as i32) > 0
+    }
+
+    /// Whether the stop number covers the run: STOP_UPTO is RUN or after it.
+    #[inline]
+    pub fn covers(stop_upto: u32, run: u32) -> bool {
+        (stop_upto.wrapping_sub(run) as i32) >= 0
+    }
+
+    /// Install the session's words (once per process: the addon's claim).
+    ///
+    /// # Safety
+    /// `words` points to `WORDS` aligned u32s that stay valid and are only
+    /// accessed atomically for the rest of the process (the addon holds a
+    /// strong reference to their SharedArrayBuffer and never releases it).
+    #[cfg(feature = "node-host")]
+    #[allow(unsafe_code)]
+    pub unsafe fn install(words: *mut AtomicU32) {
+        CTL.store(words, Release);
+    }
+
+    #[cfg(feature = "node-host")]
+    #[allow(unsafe_code)]
+    fn word(i: usize) -> Option<&'static AtomicU32> {
+        let p = CTL.load(Acquire);
+        // SAFETY: install's contract: `WORDS` valid atomic words for the process's life.
+        if p.is_null() { None } else { Some(unsafe { &*p.add(i) }) }
+    }
+
+    /// Advance RUN to `id` iff it is after the current RUN (the session's
+    /// thread, before a run's first engine call); otherwise an error, never a
+    /// silent no-op.  Arms the check.
+    #[cfg(feature = "node-host")]
+    pub fn set_run(id: u32) -> Result<(), String> {
+        let w = word(RUN).ok_or("the session's control words are not installed")?;
+        let cur = w.load(Acquire);
+        if !after(id, cur) {
+            return Err(format!("run id {} is not after the current run {}", id, cur));
+        }
+        w.store(id, Release);
+        ARMED.store(true, Release);
+        Ok(())
+    }
+
+    /// Whether the current run is stopped (false until a run is set).
+    #[inline]
+    pub fn stopped() -> bool {
+        #[cfg(feature = "node-host")]
+        {
+            if !ARMED.load(Acquire) {
+                return false;
+            }
+            if let (Some(s), Some(r)) = (word(STOP_UPTO), word(RUN)) {
+                return covers(s.load(Acquire), r.load(Acquire));
+            }
+        }
+        false
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn serial() {
+            assert!(after(0, 0xffff_ffff));
+            assert!(!after(0xffff_ffff, 0));
+            assert!(covers(0, 0) && covers(0, 0xffff_ffff) && !covers(0xffff_ffff, 0));
+            assert!(covers(0xffff_fffe, 0xffff_fffe) && !covers(0xffff_fffd, 0xffff_fffe));
+        }
+    }
 }
 
 // ---- the WebAssembly host's flag

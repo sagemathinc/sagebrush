@@ -12,6 +12,9 @@ libc = "0.2"
 # WebAssembly: poll the host's flag through the import `sagebrush.interrupted`
 # (engine/web, whose hosts provide it)
 wasm-host = []
+# Node, the native addon (engine/node): a session's control words in a
+# SharedArrayBuffer the host installs once per process (node_host)
+node-host = []
 # Tests only: count checks per phase and request Stop at a chosen check
 # (sagebrush_interrupt::hooks)
 test-hooks = []

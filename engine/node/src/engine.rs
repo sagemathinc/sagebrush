@@ -10,12 +10,83 @@
 //! call in this process is refused (the host retires the process).
 
 use napi::bindgen_prelude::{Buffer, Uint8Array};
-use napi::{Error, Result, Status};
+use napi::{Env, Error, JsTypedArray, Result, Status, TypedArrayType};
 use napi_derive::napi;
+use sagebrush_interrupt::node_host;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::SeqCst};
+use std::sync::OnceLock;
+use std::thread::ThreadId;
 
 static FAULTED: AtomicBool = AtomicBool::new(false);
+
+/// The session that claimed this process: the thread of its first `init`
+/// (design N1 r3, S2/H2: one native session per OS process; a second init,
+/// from any thread, Worker or N-API environment, is refused, and nothing
+/// resets the claim).
+static CLAIM: OnceLock<ThreadId> = OnceLock::new();
+
+/// The control buffer's layout version (node_host's four words).
+const CONTROL_VERSION: u32 = 1;
+
+/// Calls are taken only from the claiming session's thread, after `init`.
+fn owner() -> Result<()> {
+    match CLAIM.get() {
+        None => Err(coded("not_initialized", "the native engine's session is not initialized (init first)".into())),
+        Some(t) if *t != std::thread::current().id() => {
+            Err(coded("wrong_thread", "the native engine belongs to another thread of this process".into()))
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// Claim this process for one session and install its control words: a
+/// Uint32Array of exactly four words over the session's SharedArrayBuffer
+/// (the host checks that the buffer is shared), with `[VERSION, STOP_UPTO,
+/// RUN, reserved]`, VERSION equal to `version` and to this addon's
+/// CONTROL_VERSION, and nothing pending against an unstarted run
+/// (STOP_UPTO is not after RUN).  The buffer is referenced strongly for the
+/// rest of the process.
+#[napi]
+#[allow(unsafe_code)]
+pub fn init(env: Env, control: JsTypedArray, version: u32) -> Result<()> {
+    guarded_unclaimed(|| -> Result<()> {
+        if version != CONTROL_VERSION {
+            return Err(coded("bad_control", format!("control version {} (this addon speaks {})", version, CONTROL_VERSION)));
+        }
+        let reference = env.create_reference(&control)?;
+        let mut v = control.into_value()?;
+        if v.typedarray_type != TypedArrayType::Uint32 || v.length != node_host::WORDS || v.byte_offset % 4 != 0 {
+            return Err(coded("bad_control", format!("a Uint32Array of {} words is required", node_host::WORDS)));
+        }
+        let words = AsMut::<[u32]>::as_mut(&mut v).as_mut_ptr() as *mut AtomicU32;
+        // SAFETY: the typed array's data is `WORDS` u32s (checked above), 4-aligned
+        // (a SharedArrayBuffer's data is page-aligned and the offset is a multiple of 4);
+        // the strong reference below keeps the buffer alive for the process's life.
+        let w = |i: usize| unsafe { &*words.add(i) };
+        if w(node_host::VERSION).load(SeqCst) != CONTROL_VERSION {
+            return Err(coded("bad_control", "the control words' VERSION does not match".into()));
+        }
+        if node_host::after(w(node_host::STOP_UPTO).load(SeqCst), w(node_host::RUN).load(SeqCst)) {
+            return Err(coded("bad_control", "a Stop is pending against a run that hasn't started".into()));
+        }
+        if CLAIM.set(std::thread::current().id()).is_err() {
+            return Err(coded("already_claimed", "this process already has a native engine session".into()));
+        }
+        // the reference is never released: the session lives as long as the process
+        std::mem::forget(reference);
+        // SAFETY: as above; install's contract holds for the rest of the process.
+        unsafe { node_host::install(words) };
+        Ok(())
+    })?
+}
+
+/// Advance the session's RUN to `id` before that run's first engine call
+/// (RFC 1982: `id` must be after the current RUN; otherwise refused).
+#[napi(js_name = "setRun")]
+pub fn set_run(id: u32) -> Result<()> {
+    guarded(|| node_host::set_run(id))?.map_err(|e| coded("bad_run", e))
+}
 
 /// The error code of an interrupted call (the session's Stop).
 const INTERRUPTED: &str = "interrupted";
@@ -29,9 +100,16 @@ fn coded(code: &str, message: String) -> Error {
 /// Run one export's body: refused once the process is faulted; an
 /// interrupt is reported as such; any other panic faults the process.
 fn guarded<T>(f: impl FnOnce() -> T) -> Result<T> {
+    owner()?;
+    guarded_unclaimed(f)
+}
+
+/// `guarded` without the owner check (init itself).
+fn guarded_unclaimed<T>(f: impl FnOnce() -> T) -> Result<T> {
     if FAULTED.load(SeqCst) {
         return Err(coded(ENGINE_FAULT, "the engine faulted earlier in this process".into()));
     }
+    sagebrush_interrupt::quiet_hook();
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(v) => Ok(v),
         Err(payload) => {
