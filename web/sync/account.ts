@@ -130,8 +130,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private e2eResets = new Bucket(E2E.resetsPerMinute, E2E.resetsPerMinute / 60);
   private e2eResetWork = new Bucket(E2E.resetWorkPerMinute, E2E.resetWorkPerMinute / 60);
   private e2eStore: E2EStore | null = null;
-  /** tests only: the mailbox's clock, shifted (ms); and the next E2E write's transaction made to fail after its writes */
+  /** tests only: the E2E clock (the rate buckets' and the mailbox's), shifted (ms) or frozen at a moment; and the next E2E
+   * write's transaction made to fail after its writes */
   private e2eShift = 0;
+  private e2eFrozen: number | null = null;
   private e2eFailCommit = false;
   private e2eHold = 0;
   private ticketsAll = new Bucket(TICKETS_PER_MINUTE_ACCOUNT, TICKETS_PER_MINUTE_ACCOUNT / 60);
@@ -2406,16 +2408,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       let claimed: unknown = null;
       try { claimed = typeof a.entry === "string" ? (JSON.parse(a.entry) as { body?: { op?: unknown } })?.body?.op : null; } catch { /* (the checks refuse it) */ }
       if (claimed !== "reset") {
-        const wait = this.e2eAppends.take();
+        const wait = this.e2eAppends.take(1, this.e2eNow());
         if (wait) throw new SyncError("rate", "too many key-chain changes; wait", { retry_after: wait });
       }
       return store.append(a, {
         work: () => {
-          const wait = this.e2eResetWork.take();
+          const wait = this.e2eResetWork.take(1, this.e2eNow());
           if (wait) throw new SyncError("rate", "too many reset attempts; wait", { retry_after: wait });
         },
         verified: () => {
-          const wait = this.e2eResets.take();
+          const wait = this.e2eResets.take(1, this.e2eNow());
           if (wait) throw new SyncError("rate", "too many resets; wait", { retry_after: wait });
         },
       });
@@ -2450,9 +2452,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async e2eMailPost(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown; msg: unknown }): Promise<Result<{ expires: number }>> {
     return attempt(() => {
       const store = this.e2e(a.account, a.bind);
-      const wait = this.e2eMail.take();
+      const wait = this.e2eMail.take(1, this.e2eNow());
       if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
-      return store.post(a.session, a.phase, a.msg, Date.now() + this.e2eShift);
+      return store.post(a.session, a.phase, a.msg, this.e2eNow());
     });
   }
 
@@ -2460,18 +2462,25 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async e2eMailRead(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown }): Promise<Result<{ msg: string; expires: number }>> {
     return attempt(() => {
       const store = this.e2e(a.account, a.bind);
-      const wait = this.e2eMail.take();
+      const wait = this.e2eMail.take(1, this.e2eNow());
       if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
-      const m = store.read(a.session, a.phase, Date.now() + this.e2eShift);
+      const m = store.read(a.session, a.phase, this.e2eNow());
       if (!m) throw new SyncError("missing", "no such message");
       return m;
     });
   }
 
-  /** Tests only: shift the mailbox's clock, and count the E2E rows. */
-  async testE2E(a: { shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
+  /** The E2E clock: now, except in tests, where a seam may shift it or freeze it (so a rate test's buckets don't refill). */
+  private e2eNow(): number {
+    return (this.e2eFrozen ?? Date.now()) + this.e2eShift;
+  }
+
+  /** Tests only: shift or freeze the E2E clock (freeze: true holds it at this moment, false lets it run), and count the
+   * E2E rows. */
+  async testE2E(a: { shift?: number; freeze?: boolean; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
     if (a.shift !== undefined) this.e2eShift = a.shift;
+    if (a.freeze !== undefined) this.e2eFrozen = a.freeze ? Date.now() : null;
     if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
     if (a.hold !== undefined) this.e2eHold = a.hold;
     if (a.bounds !== undefined && this.e2eStore) Object.assign(this.e2eStore.bounds, a.bounds);
