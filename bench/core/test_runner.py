@@ -2313,6 +2313,24 @@ class Gemm(unittest.TestCase):
         self.assertIn("malformed POOL", r["detail"])
         self.assertEqual(go("blas-n", [time_line])["status"], "ok")
 
+    def test_the_native_gf_p_product_uses_the_user_paths_allowance(self):
+        # (the native driver's USER_ALLOWANCE mirrors the engine's
+        # MAT_MUL_FAST_ALLOWANCE, which Sage mode's A * B runs under: equal,
+        # or the native column times another route than users get)
+        def const(path, name):
+            src = (Path(run.ROOT) / path).read_text()
+            m = re.search(r"const %s: u64 = (\d+)(?: << (\d+))?;" % name, src)
+            self.assertIsNotNone(m, (path, name))
+            return int(m.group(1)) << int(m.group(2) or 0)
+
+        user = const("engine/web/src/bin_ops.rs", "MAT_MUL_FAST_ALLOWANCE")
+        self.assertEqual(const("bench/core/native/src/main.rs", "USER_ALLOWANCE"), user)
+        self.assertLess(user, const("bench/core/native/src/main.rs", "FAST_ALLOWANCE"))
+        rows = {r["id"]: r for r in json.loads((Path(run.HERE) / "items.json").read_text())["rows"]}
+        for rid in ("mat_fp_mul", "mat_fp31_mul"):
+            self.assertNotIn("user_sizes", rows[rid])
+            self.assertEqual(rows[rid]["backends"]["user"], "sage-mode")
+
     def test_threads_by_affinity_pins_the_one_thread_columns(self):
         got = []
 

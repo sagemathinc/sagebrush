@@ -18,6 +18,11 @@ const P31: u64 = 2_147_483_647;
 /// beyond any plan's workspace at their sizes, so every product whose plan
 /// takes the fast route runs it (not the engine's admission)
 const FAST_ALLOWANCE: u64 = 1 << 32;
+/// The allowance the user path gives a GF(p) product: Sage mode's A * B goes
+/// to the engine's binary nmod_mat_mul, which runs Mat::mul under this fixed
+/// constant (engine/web/src/bin_ops.rs MAT_MUL_FAST_ALLOWANCE; test_runner.py
+/// checks the two are equal), so the native column times what users get
+const USER_ALLOWANCE: u64 = 1 << 24;
 
 fn residue(x: &BigInt) -> u64 {
     let text = x.to_string();
@@ -426,16 +431,17 @@ fn main() {
             }
         }
         "mat_fp_mul" | "mat_fp31_mul" | "mat_fp_mul_fast" | "mat_fp31_mul_fast" => run(&mode, variants, |v| {
-            // (A from variant v, B from variant v + n; the classical product,
-            // the user path's default, or under _fast the fast route with
-            // FAST_ALLOWANCE)
+            // (A from variant v, B from variant v + n; Mat::mul under the user
+            // path's fixed allowance, USER_ALLOWANCE, or under _fast the far
+            // larger FAST_ALLOWANCE)
             let pm = if case_id.starts_with("mat_fp31_") { P31 } else { P };
             let rows = |w: usize| -> Vec<Vec<u64>> { entries(n, pm, 0, w).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect() };
             let (ra, rb) = (rows(v), rows(v + n));
             let h = hash_u64(&[ra.concat(), rb.concat()].concat());
             let (a, b) = (nmod_mat::Mat::from_rows(&ra, Modulus::new(pm)), nmod_mat::Mat::from_rows(&rb, Modulus::new(pm)));
             let fast = case_id.ends_with("_fast");
-            (h, move || if fast { nmod_mat::with_fast_product(FAST_ALLOWANCE, || a.mul(&b)) } else { a.mul(&b) })
+            let words = if fast { FAST_ALLOWANCE } else { USER_ALLOWANCE };
+            (h, move || nmod_mat::with_fast_product(words, || a.mul(&b)))
         }, |c| {
             let xs: Vec<u64> = (0..n).flat_map(|i| c.row(i).to_vec()).collect();
             format!("{}:{}", n, hash_u64(&xs))
