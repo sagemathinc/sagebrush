@@ -1,7 +1,7 @@
 // Splitting a large top-level chunk of the renderer's HTML into pieces (plan sbspace r5 §4, in the Worker), so that
 // no single insertion is larger than PIECE_MAX:
 //  - a container (a theorem div.thm, a proof div.proof, a list ol/ul.list, and the other block divs) is split at its
-//    top-level children; each later piece is a COPY of the container (same tag and classes, plus "cont"; no id, no
+//    top-level children, and a child over PIECE_MAX (a theorem's long list) in turn, at most SPLIT_DEPTH deep; each later piece is a COPY of the container (same tag and classes, plus "cont"; no id, no
 //    head), so styles carry over; list items keep their explicit labels (span.lbl: the list CSS has no counters);
 //  - a paragraph div.p is split at the boundaries between its inline runs, each later piece a div.p.cont;
 //  - a table is never split (its columns would misalign): over PIECE_MAX it is a placeholder, with its size;
@@ -16,6 +16,8 @@
 export const PIECE_MAX = 128 * 1024, CHUNK_MAX = 2 * 2 ** 20;
 // (the size aimed for: smaller pieces parse in less time each; PIECE_MAX stays the most any piece may be)
 export const PIECE_TARGET = 32 * 1024;
+// (how many containers deep an element over PIECE_MAX is split in turn: a theorem's list's item's list)
+export const SPLIT_DEPTH = 4;
 const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
 const enc = new TextEncoder();
 export const bytes = (s: string) => enc.encode(s).length;
@@ -89,7 +91,7 @@ function splitText(t: string, max: number): string[] | null {
 
 /** One chunk as pieces, each at most PIECE_MAX bytes (or one placeholder: `tooLarge`, if given, is told why and its
  * size, for latex check). */
-export function splitChunk(h: string, tooLarge?: (why: string, size: number) => void): string[] {
+export function splitChunk(h: string, tooLarge?: (why: string, size: number) => void, depth = 0): string[] {
   const n = bytes(h), w = weight(h);
   // (a placeholder only for what is over a limit: a chunk that fits one piece but can't be split is kept whole, one
   //  piece; and the size said is the one compared with the limit said, the chunk's bytes over CHUNK_MAX, else its
@@ -123,6 +125,13 @@ export function splitChunk(h: string, tooLarge?: (why: string, size: number) => 
     if (!s.startsWith("<")) { const t = splitText(s, PIECE_TARGET - 256); if (!t) return ph("this block is too large to display in the prototype"); parts.push(...t); continue; }
     // (one element over the target: a piece of its own, if it fits the maximum)
     if (b <= PIECE_MAX - 256) { parts.push(s); continue; }
+    // (one element over the maximum, a theorem's long list: split in turn, at most SPLIT_DEPTH containers deep, each
+    //  of its pieces a whole element (a later one a copy of its container, "cont") and a part of this one; one
+    //  placeholder piece means it couldn't be, and the pieces made here are checked against PIECE_MAX below)
+    if (depth < SPLIT_DEPTH) {
+      const sub = splitChunk(s, undefined, depth + 1);
+      if (sub.length > 1) { parts.push(...sub); continue; }
+    }
     return w <= PIECE_MAX ? [h] : ph("this block is too large to display in the prototype");
   }
   const first = o.open, later = contOpen(o.open, o.tag);

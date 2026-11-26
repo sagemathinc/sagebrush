@@ -135,7 +135,10 @@ export const LATEX_LAZY = {
 // (294,144 raw / 99,370 gzip: Nov 25 2026, latex check naming an \input file and its line for a problem found there (the
 //  expander's file-line markers, the renderer's where()): 294,080 / 99,306 measured on the shipped build of its merge with
 //  master fb8a65b0, with bun 1.4.4 and node 24.21.0 (+915 / +316 over master's 293,165 / 98,990), + 64)
-export const LATEX_CAPS = { raw: 294144, gzip: 99370 };
+// (294,217 raw / 99,416 gzip: Nov 25 2026, an element over PIECE_MAX split in turn (a theorem's long list, split.ts):
+//  294,153 / 99,352 measured on the shipped build of its merge with master b0b02122, with bun 1.4.4 and node 24.21.0
+//  (+73 / +46 over master's 294,080 / 99,306), + 64)
+export const LATEX_CAPS = { raw: 294217, gzip: 99416 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
