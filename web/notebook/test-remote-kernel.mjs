@@ -14,8 +14,11 @@ import { RemoteClient, GatewayError, NotSentError, AmbiguousError, StreamError, 
 import { RemoteKernel, NOTES, outcomeNote } from "./remote-kernel.js";
 import { FakeGateway } from "./remote-fake.js";
 
-// (the whole file is bounded: a hang is a failure, never a stuck CI job)
-setTimeout(() => { console.log("FAIL the tests did not finish within 120 s"); process.exit(1); }, 120_000).unref?.();
+// (the whole file is bounded: a hang is a failure, never a stuck CI job). CI's budget is 120 s: there the
+// suite takes 43-56 s (five runs, Nov 2026). Elsewhere it is 600 s, because the chain runs on real timers and on a
+// loaded shared host it passes in 120 s or more, so it would end on the deadline with no failed check.
+const BUDGET_S = process.env.CI ? 120 : 600;
+setTimeout(() => { console.log(`FAIL the tests did not finish within ${BUDGET_S} s`); process.exit(1); }, BUDGET_S * 1000).unref?.();
 
 let fails = 0;
 const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails++; };

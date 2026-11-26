@@ -1,14 +1,15 @@
 // ci: checks.3 order=107 runner=bun
 // web/code/tokens.ts (1a): a code file's tokens join to its text exactly, in every language, whatever the text (HTML
-// in it, entities, unclosed strings and comments, random characters); Python, Sage and MATLAB are the notebook's own
-// colors; anything a highlighter can't give back exactly is one plain token. No browser needed.
+// in it, entities, unclosed strings and comments, random characters); Python, Sage, MATLAB and Magma are the notebook's
+// own colors; anything a highlighter can't give back exactly is one plain token. No browser needed.
 //   bun web/code/test-code-tokens.mjs
 import { tokensOf, tokensFromHtml, langOf, CODE_LANGS } from "./tokens.ts";
 import { EDIT_BYTES, editableOf } from "./edit.ts";
+import { highlightMagma } from "../notebook/highlight-magma.js";
 
 let checks = 0, failed = 0;
 const check = (ok, what) => { checks++; if (!ok) { failed++; console.log("FAIL " + what); } };
-const LANGS = ["python", "sage", "matlab", "magma", "js", "json", "text"];
+const LANGS = ["python", "sage", "matlab", "magma", "js", "json", "rust", "text"];
 const joined = (t) => t.map((x) => x[1]).join("");
 
 const samples = [
@@ -46,6 +47,13 @@ const m = tokensOf("% c\nx = 'a';\n", "matlab");
 check(m.some(([c]) => c === "hc") && m.some(([c]) => c === "hs"), "matlab: a comment and a string: " + JSON.stringify(m));
 const mg = tokensOf("f := function(n) return n; end function; // c", "magma");
 check(mg.some(([c, t]) => c === "hk" && t === "function") && mg.some(([c]) => c === "hc"), "magma: function a keyword, // a comment");
+// (Magma's # is the cardinality operator, not a comment: the notebook's, the board's and this page's highlighter)
+const comments = (t) => t.filter(([c]) => c === "hc").map(([, s]) => s);
+const mg3 = tokensOf("G := Sym(5); Order(G); #ConjugacyClasses(G);\nx := #[1, 2]; // n\n/* a # b */ #S;", "magma");
+check(JSON.stringify(comments(mg3)) === JSON.stringify(["// n", "/* a # b */"]), "magma: # starts no comment, // and /* */ do: " + JSON.stringify(mg3));
+check(highlightMagma("#G; // c") === '#G; <span class="hc">// c</span>\n', "magma: the notebook's highlighter leaves #G plain: " + highlightMagma("#G; // c"));
+check(highlightMagma('s := "#"; #s;') === 's := <span class="hs">"#"</span>; #s;\n', "magma: # in a string is the string's: " + highlightMagma('s := "#"; #s;'));
+check(comments(tokensOf("#S  # not a comment in Magma", "python")).length === 1, "python: # is still a comment");
 const j = tokensOf('{"a": 1, "b": true}', "json");
 check(j.some(([c, t]) => c === "hs" && t === '"a"') && j.some(([c, t]) => c === "hn" && t === "1") && j.some(([c, t]) => c === "hk" && t === "true"), "json: strings, numbers, literals");
 check(tokensOf("plain <b>text</b>", "text").length === 1, "text: one plain token");
@@ -69,6 +77,14 @@ check(editableOf(true, 10, false) && editableOf(true, EDIT_BYTES, undefined), "e
 check(!editableOf(false, 10, false), "…not if it can't be written back exactly");
 check(!editableOf(true, EDIT_BYTES + 1, false), "…not over EDIT_BYTES");
 check(!editableOf(true, 10, true), "…not if it is in the cloud (remote)");
+
+// Rust (the 3D view's file panels): keywords, strings, numbers, comments; a lifetime isn't a string; a raw string is one
+{ const t = tokensOf(`fn main() { let s = "hi"; let r = r#"a "q" b"#; let x: &'a str = s; // done\n  1_000u32 }`, "rust");
+  const kinds = (c) => t.filter((x) => x[0] === c).map((x) => x[1]);
+  check(joined(t) === `fn main() { let s = "hi"; let r = r#"a "q" b"#; let x: &'a str = s; // done\n  1_000u32 }`, "rust: joins exactly");
+  check(kinds("hk").includes("fn") && kinds("hk").includes("let"), "rust: keywords");
+  check(kinds("hs").includes('"hi"') && kinds("hs").includes('r#"a "q" b"#') && !kinds("hs").some((x) => x.includes("'a")), "rust: strings, a raw string whole, and no lifetime taken for one");
+  check(kinds("hc").includes("// done") && kinds("hn").includes("1_000u32"), "rust: a comment, and a number with its suffix"); }
 
 console.log(failed ? `${failed} of ${checks} failed` : `ok: code tokens, ${checks} checks`);
 process.exit(failed ? 1 : 0);
