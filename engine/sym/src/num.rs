@@ -437,7 +437,7 @@ impl Num {
                 if *b == 0.0 && !k.complex() && a.is_finite() && *a != 0.0 && !(-1..=1).contains(&e) {
                     return pow_int_mp53(self, e, *k);
                 }
-                if let Some(r) = pow_past_doubles(*a, *b, e as f64, e % 2 != 0, &e, *k) {
+                if let Some(r) = pow_past_doubles(*a, *b, e as f64, Some(e as i128), e % 2 != 0, &e, *k) {
                     return r;
                 }
                 let (r, left) = in_steps(|| self.pow_int(e));
@@ -949,50 +949,171 @@ pub fn refuse_float_value(name: &str, v: &[(f64, f64)], k: Fk) -> ! {
 /// for a complex one): kept when each part is a double, refused otherwise.
 pub fn pow_int_mp53(b: &Num, n: i64, k: Fk) -> Num {
     let (re, im) = b.to_c64();
-    if let Some(r) = pow_past_doubles(re, im, n as f64, n % 2 != 0, &n, k) {
+    if let Some(r) = pow_past_doubles(re, im, n as f64, Some(n as i128), n % 2 != 0, &n, k) {
         return r;
     }
     from_mp53(&to_mp53(b).pow_int(n), k)
 }
 
-/// The power b^n of an RR or CC number b = re + im*I (parent k) to an
-/// integer n (as a double, odd its parity, shown as the refusal prints it)
-/// whose value is past the engine's MP numbers (2^(+-mpnum::MAX_EXP)) for
-/// certain, decided before computing it, by n log2 |b| with a margin for
-/// its double error and, for a complex b, for generic_power's (each of its
-/// about 2 log2 n products has a relative error of a few units of 2^-53,
-/// which later squarings double: all told under n 2^-48 in log2).  Past
-/// MPFR's exponents too (Sage's RR is [2^(-2^62), 2^(2^62 - 1))), a real
-/// one is Sage's double: an infinity, or a 0, signed as the power;
-/// otherwise it is refused, as an RR or CC value past the doubles with no
-/// value of Sage's to show (SR(RR(2))^(10^6), not a refusal about its exact
-/// power's integer).  None where the power is to be computed.
-pub fn pow_past_doubles(re: f64, im: f64, n: f64, odd: bool, shown: &dyn std::fmt::Display, k: Fk) -> Option<Num> {
-    let (hi, lo) = if re.abs() >= im.abs() { (re.abs(), im.abs()) } else { (im.abs(), re.abs()) };
-    if hi == 0.0 || !hi.is_finite() || !lo.is_finite() {
-        return None;
+/// Where a power b^n of an MP number (or of an RR or CC one, in the 53-bit
+/// MP field) lies, decided before computing it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PowRange {
+    /// within the engine's MP numbers, or not past them for certain
+    Compute,
+    /// past MPFR's largest exponent: Sage's infinity (for a real b)
+    Inf,
+    /// past MPFR's smallest exponent: Sage's 0 (for a real b)
+    Zero,
+    /// past the engine's MP numbers (2^(+-mpnum::MAX_EXP)) for certain
+    Refuse,
+}
+
+/// The range of b^n from lb = log2 |b| and n, an integer (n_exact when it
+/// fits an i128, else n alone, as a double).  MPFR's numbers, Sage's, are
+/// finite from 2^(-2^62) below 2^(2^62 - 1) (emin = 1 - 2^62, emax = 2^62
+/// - 1).  When |b| is a power of 2, 2^t (lb_exact), and n is exact, log2
+/// |b^n| = t n is exact and so is the decision (SR(RR(2))^(2^62 - 1) is
+/// +infinity, SR(RR(2))^(2^62 - 2) refused past the engine's MP numbers).
+/// Otherwise by the estimate lb n, with a margin for the error of lb (a
+/// double's log2, or an MP number's from its top 64 bits: under 2^-40
+/// relative, 2^-44 absolute) and, for a complex b, for generic_power's
+/// drift (each of its about 2 log2 n products has a relative error of a
+/// few units of 2^-53, which later squarings double: under n 2^-48 in
+/// log2), all under 8 + |lb n| 2^-40 + |n| 2^-44.
+pub fn pow_range(lb: f64, lb_exact: Option<i64>, n: f64, n_exact: Option<i128>) -> PowRange {
+    let max = crate::mpnum::MAX_EXP as i128;
+    if let (Some(t), Some(n)) = (lb_exact, n_exact) {
+        if let Some(l) = (t as i128).checked_mul(n) {
+            return if l >= (1i128 << 62) - 1 {
+                PowRange::Inf
+            } else if l < -(1i128 << 62) {
+                PowRange::Zero
+            } else if l + 1 > max || l + 1 < -max {
+                PowRange::Refuse
+            } else {
+                PowRange::Compute
+            };
+        }
     }
-    let l = hi.log2() + 0.5 * (1.0 + (lo / hi) * (lo / hi)).log2();
     // (an exponent past the doubles as 10^300, still far past MPFR's)
     let n = n.clamp(-1e300, 1e300);
-    let est = l * n;
-    let margin = 8.0 + est.abs() * 1e-12 + n.abs() * (-48f64).exp2();
+    let est = lb * n;
+    let margin = 8.0 + est.abs() * (-40f64).exp2() + n.abs() * (-44f64).exp2();
+    let mpfr = 62f64.exp2();
+    let max = max as f64;
+    if est - margin >= mpfr - 1.0 {
+        PowRange::Inf
+    } else if est + margin < -mpfr {
+        PowRange::Zero
+    } else if est - margin > max || est + margin < -max - 1.0 {
+        PowRange::Refuse
+    } else {
+        PowRange::Compute
+    }
+}
+
+/// b^n for b of RealField(p) or ComplexField(p) (p != 53) and an integer n
+/// of any size, as Sage: a real one correctly rounded (mpfr_pow_z), with
+/// the parity and the sign from n itself, never a rounded n; an infinity
+/// or a 0 past MPFR's exponents; refused past the engine's MP numbers
+/// (pow_range).  A complex one is generic_power by the bits of n (CC's
+/// I^(2^100) is 1), refused past them.  A 0, an infinity, a NaN or +-1 is
+/// as to a small exponent of the same sign and parity.
+pub fn mp_pow(b: &Num, n: &BigInt) -> Num {
+    let small = || -> i64 {
+        let k = if n.is_odd() { 3 } else { 2 };
+        if n.is_negative() {
+            -k
+        } else {
+            k
+        }
+    };
+    if let Num::Mpc(z) = b {
+        if z.re.sp != Sp::Fin || z.im.sp != Sp::Fin || z.is_zero() {
+            return Num::mpc(z.pow_int(n.to_i64().unwrap_or_else(small)));
+        }
+        let (lb, lb_exact) = z.log2_abs();
+        return match pow_range(lb, lb_exact, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128()) {
+            PowRange::Compute => Num::mpc(z.pow_big(n)),
+            _ => mpnum::refuse_range(),
+        };
+    }
+    let Num::Mp(x) = b else { return b.pow_int(n.to_i64().unwrap_or_else(small)) };
+    if x.sp != Sp::Fin || x.m.is_zero() {
+        return Num::mp(mpnum::pow_int(x, n.to_i64().unwrap_or_else(small)));
+    }
+    let (lb, lb_exact) = x.log2_abs();
+    if lb_exact == Some(0) {
+        return Num::mp(mpnum::pow_int(x, small()));
+    }
+    let neg = x.m.is_negative() && n.is_odd();
+    match pow_range(lb, lb_exact, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128()) {
+        PowRange::Inf => Num::mp(Mp::special(x.prec, if neg { Sp::NegInf } else { Sp::PosInf })),
+        PowRange::Zero => Num::mp(Mp::zero(x.prec, neg)),
+        PowRange::Refuse => mpnum::refuse_range(),
+        PowRange::Compute => match n.to_i64() {
+            Some(n) => Num::mp(mpnum::pow_int(x, n)),
+            None => not_implemented("a power of a real number with so large an exponent in a symbolic expression is not available in sagebrush yet"),
+        },
+    }
+}
+
+/// b^n for an element b of CC (parent k) and an integer n past i64, as
+/// Sage's generic_power by the bits of n (I^(2^100) is 1), refused past the
+/// doubles, before computing when for certain (pow_past_doubles).
+pub fn pow_big_mp53(b: &Num, n: &BigInt, shown: &dyn std::fmt::Display, k: Fk) -> Num {
+    let (re, im) = b.to_c64();
+    if let Some(r) = pow_past_doubles(re, im, n.to_f64().unwrap_or(f64::INFINITY), n.to_i128(), n.is_odd(), shown, k) {
+        return r;
+    }
+    let v = match to_mp53(b) {
+        Num::Mpc(z) => Num::mpc(z.pow_big(n)),
+        v => mp_pow(&v, n),
+    };
+    from_mp53(&v, k)
+}
+
+/// log2 |re + im*I| for finite doubles not both 0, and the exact one when
+/// it is a power of 2 (a part 0, the other +-2^t).
+pub fn log2_abs_c64(re: f64, im: f64) -> (f64, Option<i64>) {
+    let (hi, lo) = if re.abs() >= im.abs() { (re.abs(), im.abs()) } else { (im.abs(), re.abs()) };
+    let exact = if lo == 0.0 && hi.is_normal() && hi.to_bits() & ((1u64 << 52) - 1) == 0 {
+        Some(((hi.to_bits() >> 52) as i64) - 1023)
+    } else if lo == 0.0 && hi > 0.0 && hi.is_subnormal() && (hi.to_bits() & (hi.to_bits() - 1)) == 0 {
+        Some(hi.to_bits().trailing_zeros() as i64 - 1074)
+    } else {
+        None
+    };
+    (hi.log2() + 0.5 * (1.0 + (lo / hi) * (lo / hi)).log2(), exact)
+}
+
+/// The power b^n of an RR or CC number b = re + im*I (parent k) to an
+/// integer n (as a double, n_exact when it fits an i128, odd its parity,
+/// shown as the refusal prints it) whose value is past the engine's MP
+/// numbers for certain (pow_range), decided before computing it.  Past
+/// MPFR's exponents, a real one is Sage's double: an infinity, or a 0,
+/// signed as the power; otherwise it is refused, as an RR or CC value past
+/// the doubles with no value of Sage's to show (SR(RR(2))^(10^6), not a
+/// refusal about its exact power's integer).  None where the power is to
+/// be computed.
+pub fn pow_past_doubles(re: f64, im: f64, n: f64, n_exact: Option<i128>, odd: bool, shown: &dyn std::fmt::Display, k: Fk) -> Option<Num> {
+    if !re.is_finite() || !im.is_finite() || (re == 0.0 && im == 0.0) {
+        return None;
+    }
+    let (lb, lb_exact) = log2_abs_c64(re, im);
     let real = im == 0.0 && !k.complex();
     let neg = real && re < 0.0 && odd;
-    let mpfr = 62f64.exp2();
-    if real && est - margin > mpfr {
-        return Some(Num::Float(if neg { f64::NEG_INFINITY } else { f64::INFINITY }, 0.0, k));
+    match pow_range(lb, lb_exact, n, n_exact) {
+        PowRange::Compute => None,
+        PowRange::Inf if real => Some(Num::Float(if neg { f64::NEG_INFINITY } else { f64::INFINITY }, 0.0, k)),
+        PowRange::Zero if real => Some(Num::Float(if neg { -0.0 } else { 0.0 }, 0.0, k)),
+        _ => {
+            let b = crate::print::to_string(&crate::expr::num(Num::fl(re, im, k.to_real())));
+            let f = if k.complex() { "CC" } else { "RR" };
+            not_implemented(format!("pow({}, {}): the value in {}, past the double range, is not available in sagebrush yet", b, shown, f))
+        }
     }
-    if real && est + margin < -mpfr {
-        return Some(Num::Float(if neg { -0.0 } else { 0.0 }, 0.0, k));
-    }
-    let max = crate::mpnum::MAX_EXP as f64;
-    if est - margin > max || est + margin < -max - 1.0 {
-        let b = crate::print::to_string(&crate::expr::num(Num::fl(re, im, k.to_real())));
-        let f = if k.complex() { "CC" } else { "RR" };
-        not_implemented(format!("pow({}, {}): the value in {}, past the double range, is not available in sagebrush yet", b, shown, f))
-    }
-    None
 }
 
 /// A number of the 53-bit MP field as RR's or CC's doubles (parent k), or
@@ -1569,6 +1690,52 @@ mod tests {
         assert_eq!(re(d(2.0).pow_int(-(i64::MIN + 1))), f64::INFINITY);
         assert_eq!(Num::one().pow_int(i64::MIN).sage_str(), "1");
         assert_eq!(Num::i().pow_int(i64::MIN).sage_str(), "1");
+    }
+
+    #[test]
+    fn mp_powers_past_the_precision() {
+        // (MPFR's range exactly, for a power of 2: finite from 2^(-2^62)
+        // below 2^(2^62 - 1); Sage's 2^(2^62 - 2) finite, 2^(2^62 - 1)
+        // +infinity, 0.5^(2^62) finite, 0.5^(2^62 + 1) 0)
+        let e62 = 1i128 << 62;
+        let r = |t: i64, n: i128| pow_range(t as f64, Some(t), n as f64, Some(n));
+        assert_eq!(r(1, e62 - 2), PowRange::Refuse);
+        assert_eq!(r(1, e62 - 1), PowRange::Inf);
+        assert_eq!(r(-1, e62), PowRange::Refuse);
+        assert_eq!(r(-1, e62 + 1), PowRange::Zero);
+        assert_eq!(r(2, e62 / 2), PowRange::Inf);
+        assert_eq!(r(2, e62 / 2 - 1), PowRange::Refuse);
+        assert_eq!(r(1, 4095), PowRange::Compute);
+        assert_eq!(r(1, 4096), PowRange::Refuse);
+        assert_eq!(r(-1, 4097), PowRange::Compute);
+        assert_eq!(r(-1, 4098), PowRange::Refuse);
+        // (a RealField(24) power: the exponent's parity and sign its own)
+        let mp = |v: f64, p: u32| Num::mp(Mp::from_f64(v, p));
+        let big = |s: &str| BigInt::parse_bytes(s.as_bytes(), 10).unwrap();
+        let s = |n: Num| n.as_mp().unwrap().sage_str();
+        assert_eq!(s(mp_pow(&mp(-1.0, 24), &BigInt::from(2147483649i64))), "-1.00000");
+        assert_eq!(s(mp_pow(&mp(-1.0, 24), &big("-1000000000000000000000000000001"))), "-1.00000");
+        assert_eq!(s(mp_pow(&mp(-1.0, 100), &big("1267650600228229401496703205377"))), "-1.0000000000000000000000000000");
+        assert_eq!(s(mp_pow(&mp(-2.0, 24), &BigInt::from((1i64 << 62) + 1))), "-infinity");
+        assert_eq!(s(mp_pow(&mp(-1.5, 24), &BigInt::from(i64::MAX))), "-infinity");
+        assert_eq!(s(mp_pow(&mp(-0.5, 24), &big("-1000000000000000000000000000001"))), "-infinity");
+        assert_eq!(s(mp_pow(&mp(-0.5, 24), &BigInt::from((1i64 << 62) + 1))), "-0.000000");
+        // (1.5^7002 is about 2^4095.9, 1.5^7003 past 2^4096)
+        assert_eq!(s(mp_pow(&mp(1.5, 24), &BigInt::from(7002))), mpnum::pow_int(&Mp::from_f64(1.5, 24), 7002).sage_str());
+        assert!(crate::err::catch(|| mp_pow(&mp(1.5, 24), &BigInt::from(7003))).is_err());
+        // (a complex one: generic_power by the bits, I^(2^100) is 1, and
+        // pow_big is pow_int within i64)
+        let i = Mpc::new(Mp::zero(100, false), Mp::from_f64(1.0, 100));
+        let n100 = BigInt::one() << 100usize;
+        for (d, re, im) in [(0i64, 1.0, 0.0), (1, 0.0, 1.0), (2, -1.0, 0.0), (3, 0.0, -1.0)] {
+            let z = i.pow_big(&(&n100 + BigInt::from(d)));
+            assert!(z.re.to_f64() == re && z.im.to_f64() == im, "I^(2^100 + {})", d);
+        }
+        let z = Mpc::new(Mp::from_f64(0.6, 100), Mp::from_f64(0.8, 100));
+        for n in [5i64, -7, 1001, -4096] {
+            assert!(z.pow_big(&BigInt::from(n)).same_value(&z.pow_int(n)), "{}", n);
+        }
+        assert!(crate::err::catch(|| mp_pow(&Num::mpc(Mpc::new(Mp::from_f64(2.0, 100), Mp::from_f64(1.0, 100))), &n100)).is_err());
     }
 
     #[test]

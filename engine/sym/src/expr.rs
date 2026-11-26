@@ -814,14 +814,11 @@ fn num_pow(b: &Num, x: &Num) -> Expr {
         if b.mp_nan() {
             return raw(Kind::Pow(num(b.clone()), num(x.clone())));
         }
-        if let (Some(_), Some(n)) = (b.as_mpc(), x.as_i64()) {
-            return num(b.pow_int(n));
-        }
-        // (a power past the exact one's bound is the front end's too: its
-        // bracketed powering, SR(RealField(100)(3))^(-10^6))
-        if let (Some(m), Some(n)) = (b.as_mp(), x.as_i64()) {
-            if crate::mpnum::pow_int_fits(m, n) {
-                return num(b.pow_int(n));
+        // (to an integer of any size, its parity and sign its own, never a
+        // rounded one's: SR(RealField(24)(-1))^(2^31 + 1) is -1)
+        if b.as_mp().is_some() || b.as_mpc().is_some() {
+            if let Some(n) = x.as_int().filter(|_| x.is_exact()) {
+                return num(crate::num::mp_pow(b, &n));
             }
         }
         return raw(Kind::Pow(num(b.clone()), num(x.clone())));
@@ -840,6 +837,10 @@ fn num_pow(b: &Num, x: &Num) -> Expr {
     if !b.is_exact() && b.fk_with(x) == crate::num::Fk::CC {
         if let Some(n) = x.as_i64().filter(|_| x.is_exact()) {
             return num(b.pow_int(n));
+        }
+        // (past i64 too, by the bits of n: SR(CC(0, 1))^(2^100) is 1)
+        if let Some(n) = x.as_int().filter(|_| x.is_exact()) {
+            return num(crate::num::pow_big_mp53(b, &n, &crate::print::to_string(&num(x.clone())), crate::num::Fk::CC));
         }
     }
     if !b.is_exact() || !x.is_exact() {
@@ -1002,17 +1003,17 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
         // (an RR exponent's parity is its double's: odd ones reach 2^53,
         // past int_power's 9.0e15)
         let n = if x.is_exact() {
-            x.as_int().map(|n| (n.to_f64().unwrap_or(f64::INFINITY), n.is_odd()))
+            x.as_int().map(|n| (n.to_f64().unwrap_or(f64::INFINITY), n.to_i128(), n.is_odd()))
         } else {
-            Some((xr, xr.abs() < 9007199254740992.0 && xr % 2.0 != 0.0)).filter(|_| xr.is_finite() && xr.fract() == 0.0)
+            Some((xr, Some(xr as i128).filter(|_| xr.abs() < 1.7e38), xr.abs() < 9007199254740992.0 && xr % 2.0 != 0.0)).filter(|_| xr.is_finite() && xr.fract() == 0.0)
         };
-        if let Some((nf, odd)) = n {
+        if let Some((nf, ne, odd)) = n {
             // (-1 by the exponent's parity, which its double may have lost:
             // SR(RR(-1))^(10^20 + 1) is -1)
             if br.abs() == 1.0 {
                 return Num::Float(if br < 0.0 && odd { -1.0 } else { 1.0 }, 0.0, k);
             }
-            if let Some(r) = crate::num::pow_past_doubles(br, 0.0, nf, odd, &crate::print::to_string(&num(x.clone())), k) {
+            if let Some(r) = crate::num::pow_past_doubles(br, 0.0, nf, ne, odd, &crate::print::to_string(&num(x.clone())), k) {
                 return r;
             }
         }

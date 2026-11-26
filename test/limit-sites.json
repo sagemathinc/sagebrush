@@ -8216,11 +8216,6 @@
   "owner": "symbolic engine",
   "reason": "a unit test's choice of powers within the MP numbers' range, to compare with the exact power; refuses nothing"
  },
- "engine/sym/src/mpnum.rs :: pow_int_fits :: n == 0 || x.sp != Sp::Fin || x.m.is_zero() || x.m.bits().saturating_mul(n.unsigned_abs()) <= crate::num::MAX_INT_BITS #0": {
-  "class": "none",
-  "owner": "symbolic engine",
-  "reason": "whether a RealField power is computed in the engine (its exact form within num::MAX_INT_BITS) or by the front end, which has no such bound; refuses nothing"
- },
  "engine/sym/src/mpnum.rs :: refuse_range :: MAX_EXP, MAX_EXP + 1 #0": {
   "class": "coverage",
   "owner": "symbolic engine",
@@ -8236,15 +8231,30 @@
   "owner": "symbolic engine",
   "reason": "the operand range on which an RR or CC operation's double steps are MPFR's (outside it the operation is done again in the 53-bit MP field); refuses nothing"
  },
- "engine/sym/src/num.rs :: pow_past_doubles :: if est - margin > max || est + margin < -max - 1.0 { #0": {
-  "class": "coverage",
+ "engine/sym/src/num.rs :: mp_powers_past_the_precision :: assert_eq!(s(mp_pow(&mp(-1.5, 24), &BigInt::from(i64::MAX))), \"-infinity\"); #0": {
+  "class": "none",
   "owner": "symbolic engine",
-  "reason": "an RR or CC power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain, so past the doubles: refused as not available before it is computed, never a wrong value; not a resource cap"
+  "reason": "a unit test's exponent (the largest i64) for a power past MPFR's exponents; refuses nothing"
  },
- "engine/sym/src/num.rs :: pow_past_doubles :: let max = crate::mpnum::MAX_EXP as f64; #0": {
+ "engine/sym/src/num.rs :: pow_range :: let max = crate::mpnum::MAX_EXP as i128; #0": {
   "class": "coverage",
   "owner": "symbolic engine",
-  "reason": "an RR or CC power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain, so past the doubles: refused as not available before it is computed, never a wrong value; not a resource cap"
+  "reason": "an RR, CC or MP power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain: refused as not available before it is computed, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/num.rs :: pow_range :: let max = max as f64; #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "an RR, CC or MP power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain: refused as not available before it is computed, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/num.rs :: pow_range :: } else if est - margin > max || est + margin < -max - 1.0 { #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "an RR, CC or MP power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain: refused as not available before it is computed, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/num.rs :: pow_range :: } else if l + 1 > max || l + 1 < -max { #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "an RR, CC or MP power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain: refused as not available before it is computed, never a wrong value; not a resource cap"
  },
  "engine/sym/src/num.rs :: tame :: x == 0.0 || (TAME_MIN..=TAME_MAX).contains(&x.abs()) #0": {
   "class": "none",

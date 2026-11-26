@@ -94,7 +94,7 @@ pub fn round_int(m: &BigInt, e: i64, prec: u32) -> (BigInt, i64) {
     round_q(m, &BigInt::one(), prec, e)
 }
 
-fn refuse_range() -> ! {
+pub(crate) fn refuse_range() -> ! {
     not_implemented(format!(
         "a real number of absolute value at least 2^{} or less than 2^-{} in a symbolic expression is not available in sagebrush yet",
         MAX_EXP, MAX_EXP + 1
@@ -148,6 +148,17 @@ impl Mp {
     /// The exponent t of a finite nonzero number: 2^(t-1) <= |x| < 2^t.
     pub fn top(&self) -> i64 {
         self.e + self.m.bits() as i64
+    }
+    /// log2 |x| of a finite nonzero number, from the top 64 bits of its
+    /// mantissa (under 2^-52 relative error past those bits' own), and the
+    /// exact one when |x| is a power of 2.
+    pub fn log2_abs(&self) -> (f64, Option<i64>) {
+        let a = self.m.abs();
+        let b = a.bits();
+        let s = b.saturating_sub(64);
+        let top = (&a >> s as usize).to_f64().unwrap();
+        let exact = if a.trailing_zeros() == Some(b - 1) { Some(self.top() - 1) } else { None };
+        (top.log2() + (self.e + s as i64) as f64, exact)
     }
     pub fn signbit(&self) -> bool {
         self.m.is_negative() || self.neg0 || self.sp == Sp::NegInf
@@ -419,12 +430,6 @@ pub fn arith(a: &Mp, b: &Mp, op: char, prec: u32) -> Mp {
     Mp::checked(r)
 }
 
-/// Whether pow_int(x, n) computes x^n here (its exact power within the
-/// engine's integers, num::MAX_INT_BITS, or a value without powering: 0, an
-/// infinity, NaN, n 0).
-pub fn pow_int_fits(x: &Mp, n: i64) -> bool {
-    n == 0 || x.sp != Sp::Fin || x.m.is_zero() || x.m.bits().saturating_mul(n.unsigned_abs()) <= crate::num::MAX_INT_BITS
-}
 
 /// x^n for an integer n, correctly rounded (Sage's mpfr_pow_si): the exact
 /// power then one rounding when it is small, else bracketed (pow_bracket);
@@ -741,6 +746,43 @@ impl Mpc {
         let (a, b) = (&self.re, &self.im);
         let n = arith(&arith(a, a, '*', p), &arith(b, b, '*', p), '+', p);
         Mpc { re: arith(a, &n, '/', p), im: arith(&b.neg(), &n, '/', p) }
+    }
+    /// self^n for an integer n of any size, as pow_int (Sage's
+    /// generic_power on an Integer), by the bits of |n|: CC's I^(2^100) is 1.
+    pub fn pow_big(&self, n: &BigInt) -> Mpc {
+        if let Some(n) = n.to_i64() {
+            return self.pow_int(n);
+        }
+        let mut apow = if n.is_negative() { self.inv() } else { self.clone() };
+        let k = n.abs();
+        let bits = k.bits();
+        let mut i = 0;
+        while !k.bit(i) {
+            apow = apow.mul(&apow);
+            i += 1;
+        }
+        let mut res = apow.clone();
+        for j in i + 1..bits {
+            apow = apow.mul(&apow);
+            if k.bit(j) {
+                res = apow.mul(&res);
+            }
+        }
+        res
+    }
+    /// log2 |self| for a finite nonzero number (parts within MP numbers), and
+    /// the exact one when it is a power of 2 (a part 0, the other +-2^t).
+    pub fn log2_abs(&self) -> (f64, Option<i64>) {
+        let (r, i) = (&self.re, &self.im);
+        if r.is_zero() {
+            return i.log2_abs();
+        }
+        if i.is_zero() {
+            return r.log2_abs();
+        }
+        let (a, b) = (r.log2_abs().0, i.log2_abs().0);
+        let (hi, lo) = if a >= b { (a, b) } else { (b, a) };
+        (hi + 0.5 * (1.0 + (2.0 * (lo - hi)).exp2()).log2(), None)
     }
     /// self^n for an integer n, as Sage's generic_power: 1 for n = 0; for
     /// n < 0 the inverse to -n; the powers self^(2^i) by squaring, from the
