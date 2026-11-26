@@ -732,13 +732,21 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
       rl = readline.createInterface({ input: inp, output: process.stdout, completer, history, historySize: 1000, terminal: tty });
       rl.on("error", terminal.error);
       let buf: string[] = [];
+      // (the next prompt; once readline has closed at the input's end, while its last line ran, the prompt is
+      // written as readline would have, and the close below ends the session)
+      let closed = false;
+      const promptWith = (p: string) => {
+        if (!closed) {
+          rl!.setPrompt(p);
+          rl!.prompt();
+        } else if (!tty) process.stdout.write(p);
+      };
       // (one line at a time, from feed: the next is given once this one is done)
       const take = async (line: string) => {
         buf.push(line);
         const src = buf.join("\n");
         if ((await ask({ incomplete: src })).incomplete) {
-          rl!.setPrompt(ps2);
-          rl!.prompt();
+          promptWith(ps2);
           return;
         }
         buf = [];
@@ -762,8 +770,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
             return close(st.end);
           }
         }
-        rl!.setPrompt(ps1);
-        rl!.prompt();
+        promptWith(ps1);
       };
       // (the line being taken: at the input's end, readline closes once it has its last line, which runs first)
       let taking: Promise<void> = Promise.resolve();
@@ -783,6 +790,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
         rl!.prompt();
       });
       rl.on("close", () => {
+        closed = true;
         taking.then(() => {
           if (done) return;
           if (tty) process.stdout.write("\n");

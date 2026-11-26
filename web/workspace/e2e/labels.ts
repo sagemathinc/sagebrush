@@ -16,12 +16,22 @@ export const LABELS = Object.freeze({
   // ---- a document's, snapshot's or index snapshot's chunks (§3.2): the per-sealing key, and the AAD (chunks.ts)
   objectKey: "sagebrush.e2e.object.key.v1",
   objectChunkAad: "sagebrush.e2e.object.chunk.aad.v1",
+  // ---- a document's payloads (§4): where a patch or a presence message belongs, its header's first field (doc-payload.ts)
+  docPatch: "sagebrush.e2e.doc.patch.v1",
+  docPresence: "sagebrush.e2e.doc.presence.v1",
   // ---- the key chain's (keys and devices, §11.1 and §11.2): here so that one table covers every label
   keyring: "sagebrush.keyring.v1",
   kemPop: "sagebrush.kem-pop.v1",
   recoverySign: "sagebrush.e2e.recovery.sign.v1",
   recoveryKem: "sagebrush.e2e.recovery.kem.v1",
   epochCommit: "sagebrush.e2e.epoch-commit.v1",
+  // the key chain's envelopes, wrappers and probes (e2e/core/, keys and devices): spelled there for now, registered
+  // here so that the one collision check covers them
+  chainEnvelope: "sagebrush.e2e.chain.v1",
+  wrapEnvelope: "sagebrush.e2e.wrap.v1",
+  preEntry: "sagebrush.e2e.pre-entry.v1",
+  publicKeyProbe: "sagebrush.e2e.public-key-probe.v1",
+  keySalt: "sagebrush.e2e.v1",
   // ---- named by the design for later work (§6.2): listed so that nothing else takes them
   logSegment: "sagebrush.logseg.v1",
   remote: "sagebrush.remote.v1",

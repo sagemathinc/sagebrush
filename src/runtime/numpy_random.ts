@@ -9,7 +9,7 @@ import * as Obj from "./object";
 import * as O from "./ops";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype } from "./numpy";
-import { glibcLog as crlog, glibcExp, glibcLog1p, LOG_TABLES, EXP_TABLES } from "./libm";
+import { glibcLog as crlog, glibcExp, glibcLog1p, glibcPow, LOG_TABLES, EXP_TABLES } from "./libm";
 import { KI, WI, FI, KE, WE, FE, ZIGGURAT_NOR_R, ZIGGURAT_NOR_INV_R, ZIGGURAT_EXP_R } from "./ziggurat_data";
 import { wasmRandom } from "./kernels";
 
@@ -333,6 +333,40 @@ function loggam(x: number): number {
   }
   return gl;
 }
+// RandomState's gamma (NumPy's legacy_standard_gamma): Marsaglia and Tsang's method from the legacy gauss for a
+// shape of at least 1, the legacy rejection method below 1 (its pow and log glibc's), the exponential at 1
+function legacyStandardGamma(g: MT19937, shape: number): number {
+  if (shape === 1.0) return -crlog(1.0 - g.nextDouble());
+  if (shape === 0.0) return 0.0;
+  if (shape < 1.0) {
+    for (;;) {
+      const U = g.nextDouble();
+      const V = -crlog(1.0 - g.nextDouble());
+      if (U <= 1.0 - shape) {
+        const X = glibcPow(U, 1.0 / shape);
+        if (X <= V) return X;
+      } else {
+        const Y = -crlog((1 - U) / shape);
+        const X = glibcPow(1.0 - shape + shape * Y, 1.0 / shape);
+        if (X <= V + Y) return X;
+      }
+    }
+  }
+  const b = shape - 1.0 / 3.0;
+  const c = 1.0 / Math.sqrt(9 * b);
+  for (;;) {
+    let X: number, V: number;
+    do {
+      X = legacyGauss(g);
+      V = 1.0 + c * X;
+    } while (V <= 0.0);
+    V = V * V * V;
+    const U = g.nextDouble();
+    if (U < 1.0 - 0.0331 * (X * X) * (X * X)) return b * V;
+    if (crlog(U) < 0.5 * X * X + b * (1.0 - V + crlog(V))) return b * V;
+  }
+}
+
 function poisson(g: Gen, lam: number): number {
   if (lam >= 10) {
     const slam = Math.sqrt(lam), loglam = crlog(lam);
@@ -415,6 +449,7 @@ newBuiltinModule("_nprandom", (m) => {
   fn("doubles", (g: Gen, size: any) => fill(size, "float64", () => g.nextDouble(), g, 0));
   fn("legacy_gauss", (g: MT19937, size: any) => fill(size, "float64", () => legacyGauss(g), g, 1));
   fn("legacy_exponential", (g: MT19937, size: any) => fill(size, "float64", () => -crlog(1.0 - g.nextDouble()), g, 2));
+  fn("legacy_gamma", (g: MT19937, shape: any, size: any) => fill(size, "float64", () => legacyStandardGamma(g, O.fv(shape) ?? Number(shape))));
   fn("poisson", (g: Gen, lam: any, size: any) => fill(size, "int64", () => poisson(g, O.fv(lam) ?? Number(lam))));
   // integers in [low, high] (inclusive) by the legacy masked method or Lemire's
   fn("bounded", (g: Gen, low: any, high: any, size: any, lemire: any) => {

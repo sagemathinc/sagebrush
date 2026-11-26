@@ -2,6 +2,10 @@
 
 Status: design, for review. No code changes yet.
 
+**Since the decision-tree kernel (Nov 2026) there are five modules:** `sagebrush-skltree.wasm`, built by
+`scripts/build-skltree.mjs` (engine/skltree), joined the four below under the same rule. Where this design says
+"four", read "five": `pins.json` names exactly the five, and every check covers all five.
+
 The four WebAssembly modules in `wasm/` are build outputs of Rust code in `engine/`:
 
 | module | built by | bytes at master |
@@ -10,6 +14,7 @@ The four WebAssembly modules in `wasm/` are build outputs of Rust code in `engin
 | `sagebrush-raster.wasm` | `scripts/build-raster.mjs` | 825,587 |
 | `sagebrush-mp.wasm` | `scripts/build-mp.mjs` | 207,943 |
 | `sagebrush-nd.wasm` | `scripts/build-nd.mjs` | 72,841 |
+| `sagebrush-skltree.wasm` | `scripts/build-skltree.mjs` | (added later) |
 
 **Today:**
 - All four are committed, so that building Sagebrush doesn't need Rust.
@@ -62,7 +67,7 @@ All four modules move, under one rule.
 - **The pin is the reference.** Bytes match a pin when their length equals `bytes` exactly and their sha256
   equals `sha256`. The same rule holds everywhere: `wasm/`, the cache, an artifact, a download. The bucket, a
   cache, a mirror or a CDN in between can withhold bytes, but can't substitute them.
-- Exactly these four names; an extra or missing entry is an error.
+- Exactly these five names (four when this was written); an extra or missing entry is an error.
 - `wasm/*.wasm` goes into `.gitignore`.
 - **Size governance is unchanged:** the four modules stay direct governed rows of the size gate. Head and base
   records, ceilings and `.growth` markers stay authoritative; `bytes` in the pin is not a size budget.
