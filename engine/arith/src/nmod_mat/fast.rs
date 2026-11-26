@@ -277,6 +277,28 @@ thread_local! {
     static ALLOWANCE: Cell<Option<u64>> = const { Cell::new(None) };
 }
 
+/// The words [`Mat::mul`] allocates at once for an m x k by k x n product on
+/// a thread whose allowance is `allowance` words, and the part of them past
+/// the classical product's (0 on the classical route): the fast route's
+/// planned peak when its plan takes it and that excess fits the allowance,
+/// else the classical product's.  The same decision `Mat::mul` makes, from
+/// the shape, the prime and the allowance alone, for a caller's admission
+/// before it runs.  `None` if the classical peak overflows.
+pub fn product_peak(m: usize, k: usize, n: usize, md: &Modulus, allowance: u64) -> Option<(u64, u64)> {
+    let classical = classical_peak(m, k, n, md)?;
+    let n0 = n0_for(md);
+    if m.min(k).min(n) < n0 {
+        return Some((classical, 0));
+    }
+    match plan(m, k, n, md, n0) {
+        Some((Plan::Winograd, _, peak)) => {
+            let extra = peak.saturating_sub(classical);
+            Some(if extra <= allowance { (peak, extra) } else { (classical, 0) })
+        }
+        _ => Some((classical, 0)),
+    }
+}
+
 /// Runs `f` with an allowance of `words` (u64 words) for the fast product's
 /// workspace on this thread: each product ([`Mat::mul`]) inside it whose
 /// plan takes the fast route and whose peak exceeds the classical one's by
