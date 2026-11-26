@@ -1574,8 +1574,8 @@ class FFMatrix:
         return self.nrows() == self.ncols()
 
     def __repr__(self):
-        if not self._rows:
-            return "%d x %d dense matrix over %r" % (0, self._ncols, self._base)
+        if not self._rows or not self._ncols:
+            return "[]"
         cells = [[repr(x) for x in r] for r in self._rows]
         # (one width for every entry, the widest, as Sage over every field:
         # matrix(GF(101), [[1, 100], [2, 3]]) printed its columns at their
