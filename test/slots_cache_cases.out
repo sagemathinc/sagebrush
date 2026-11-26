@@ -18,3 +18,4 @@ falsy None ''
 falsy None []
 slot over dict 10 {'x': 'dict'}
 dir ['x', 'y']
+class assigned 1 1 AttributeError: 'B5' object has no attribute 'y'

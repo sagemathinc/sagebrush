@@ -113,3 +113,20 @@ e.x = 10
 e.__dict__["x"] = "dict"
 print("slot over dict", many(e), e.__dict__)
 print("dir", sorted(n for n in dir(a) if not n.startswith("__")))
+
+
+# (the class changed under a cached read site by __class__ assignment, to one of the same layout: the new class's own
+# members read the values the old one's held, and a slot never set is unset)
+class A5:
+    __slots__ = ("x", "y")
+
+
+class B5:
+    __slots__ = ("x", "y")
+
+
+o5 = A5()
+o5.x = 1
+print("class assigned", many(o5), end=" ")
+o5.__class__ = B5
+print(many(o5), t(lambda: o5.y))
