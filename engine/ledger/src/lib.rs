@@ -240,6 +240,40 @@ pub enum HostAnswer {
     NotAsked,
 }
 
+impl HostAnswer {
+    /// A host's answer from its parts, as the bindings receive them (the
+    /// Python extension's set_memory_total_source and the native addon's
+    /// total host share it): None, or (bytes, status code, joint, rows), each
+    /// row (kind, path, figure).  An unknown status is Unreadable; an unknown
+    /// row kind (or a cgroup row without its path) is kept as Unknown, so the
+    /// ledger fails closed rather than drops it.
+    pub fn from_parts(parts: Option<(u64, u32, bool, Vec<(String, Option<String>, u64)>)>) -> HostAnswer {
+        let Some((bytes, status, joint, rows)) = parts else {
+            return HostAnswer::Unreadable;
+        };
+        let Some(status) = TotalStatus::from_code(status) else {
+            return HostAnswer::Unreadable;
+        };
+        let total = Total { bytes, status, joint, uncertified: false };
+        let rows = rows
+            .into_iter()
+            .map(|(k, p, figure)| {
+                let kind = match (k.as_str(), p) {
+                    ("cgroup", Some(p)) => MeasureKind::Cgroup(p),
+                    ("address_space", _) => MeasureKind::AddressSpace,
+                    ("data_segment", _) => MeasureKind::DataSegment,
+                    ("physical", _) => MeasureKind::Physical,
+                    ("windows_job", _) => MeasureKind::WindowsJob,
+                    ("windows_physical", _) => MeasureKind::WindowsPhysical,
+                    _ => MeasureKind::Unknown,
+                };
+                Row { kind, figure }
+            })
+            .collect();
+        HostAnswer::Total(total, rows)
+    }
+}
+
 /// The native host: its answer, and whether this thread may ask it at all
 /// (published together, in the one registration that stands).  `may_ask`
 /// false means the answer here would be NotAsked, so a refresh on this

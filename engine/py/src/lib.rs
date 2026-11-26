@@ -806,29 +806,7 @@ fn set_memory_total_source(source: Py<PyAny>) {
                         return HostAnswer::Unreadable;
                     }
                 };
-                let Some((bytes, status, joint, rows)) = answer else {
-                    return HostAnswer::Unreadable;
-                };
-                let Some(status) = sagebrush_ledger::TotalStatus::from_code(status) else {
-                    return HostAnswer::Unreadable;
-                };
-                let total = sagebrush_ledger::Total { bytes, status, joint, uncertified: false };
-                let rows = rows
-                    .into_iter()
-                    .map(|(k, p, figure)| {
-                        let kind = match (k.as_str(), p) {
-                            ("cgroup", Some(p)) => sagebrush_ledger::MeasureKind::Cgroup(p),
-                            ("address_space", _) => sagebrush_ledger::MeasureKind::AddressSpace,
-                            ("data_segment", _) => sagebrush_ledger::MeasureKind::DataSegment,
-                            ("physical", _) => sagebrush_ledger::MeasureKind::Physical,
-                            ("windows_job", _) => sagebrush_ledger::MeasureKind::WindowsJob,
-                            ("windows_physical", _) => sagebrush_ledger::MeasureKind::WindowsPhysical,
-                            _ => sagebrush_ledger::MeasureKind::Unknown,
-                        };
-                        sagebrush_ledger::Row { kind, figure }
-                    })
-                    .collect();
-                HostAnswer::Total(total, rows)
+                HostAnswer::from_parts(answer)
             })
         },
         asking_here,
