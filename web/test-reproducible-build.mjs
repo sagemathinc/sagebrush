@@ -41,7 +41,7 @@ try {
   r = run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline", "--silent"], other);
   ok(r.status === 0, `the second checkout's dependencies install (status ${r.status}): ${(r.stderr ?? "").split("\n").slice(-3).join(" | ")}`);
   if (existsSync(join(root, "build"))) cpSync(join(root, "build"), join(other, "build"), { recursive: true });
-  // (wasm/'s four modules aren't tracked, only wasm/pins.json: the second checkout gets the first's, the bytes its
+  // (wasm/'s five modules aren't tracked, only wasm/pins.json: the second checkout gets the first's, the bytes its
   // build read, so both builds hash the same engine)
   for (const m of MODULES) cpSync(join(root, "wasm", m), join(other, "wasm", m));
   // (dist/, the TypeScript build, is the second checkout's own, as CI's first step makes it: web/build.ts builds the
