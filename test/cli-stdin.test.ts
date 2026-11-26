@@ -26,6 +26,26 @@ test("a program on stdin runs in each mode: Python, Sage, Magma and MATLAB", () 
   }
 });
 
+test("a prompt (-i) on piped input runs every line, writes its last prompt, and exits 0 at the input's end, in each mode", () => {
+  // (the input ends while its last line runs: the prompt after it is written, not refused by a closed readline)
+  const cases: [string[], string, string][] = [
+    [["-q", "-i"], "x = 1\nprint(x)\n", ">>> >>> 1\n>>> "],
+    [["--sage", "-q", "-i"], "x = 1\nprint(x)\n", "sage: sage: 1\nsage: "],
+    [["--magma", "-q", "-i"], "x := 1;\nprint x;\n", "> > 1\n> "],
+    [["--matlab", "-q", "-i"], "x = 1;\ndisp(x)\n", ">> >>      1\n>> "],
+    // (and input that ends in the middle of a statement: the continuation prompt is the one written, an empty one
+    // in Magma and MATLAB)
+    [["-q", "-i"], "if True:\n", ">>> ... "],
+    [["--sage", "-q", "-i"], "if True:\n", "sage: ....: "],
+    [["--magma", "-q", "-i"], "x := (1 +\n", "> "],
+    [["--matlab", "-q", "-i"], "if true\n", ">> "],
+  ];
+  for (const [args, input, out] of cases) {
+    const r = run(args, input);
+    assert.deepEqual([r.status, r.stdout, r.stderr], [0, out, ""], args.join(" "));
+  }
+});
+
 test("MATLAB on stdin stops at its first error with exit status 1, and reports a syntax error with its line", () => {
   const r = run(["--matlab"], "disp(1)\nerror('boom')\ndisp(2)\n");
   assert.equal(r.status, 1);

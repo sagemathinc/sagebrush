@@ -1153,7 +1153,7 @@ class RelayRunner:
                 self.leg.start()
                 self.stats["legs"] += 1
                 up_at = time.monotonic()
-                self.err("Connected to %s as %s. Pick it in a notebook's \"Run on\" menu.\n" % (self.origin, self.key.name)
+                self.err("Connected to %s as %s. In a notebook, choose \"Remote: %s\" in the menu next to Run all, or open Terminal on your computer from its ... menu.\n" % (self.origin, self.key.name, self.key.name)
                          if first else "Reconnected.\n")
                 first = False
                 ping = asyncio.ensure_future(self.pinger(self.leg))
@@ -1244,7 +1244,7 @@ USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND | --serve
   --serve-agents       also serve agent pages: the person's own agent, chatting beside their notebooks.  The agent
                        runs as you, in the folder this command was started in, and can change files there.
   --agent-cmd COMMAND  how to start the agent (split like a shell's words, never run through a shell), for example
-                       --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.16.tgz --stdio"
+                       --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz --stdio"
                        It's required with --serve-agents unless --agent is given: the runner never chooses or
                        fetches an agent by itself.  Its name is "default".
   --agent NAME=COMMAND another agent the page can pick by NAME (a lowercase letter, then up to 15 lowercase letters,
@@ -1303,12 +1303,14 @@ def main(argv):
         return 2
     try:
         key = _keys.load()
+    except _keys.OldKeyFile:
+        key = None  # (an older release's key file: enrolled again below, as with none; login keeps the old one aside)
     except _keys.KeyFileError as e:
         sys.stderr.write("sagebrush remote: %s\n" % e)
         return 1
     if key is None:
         from sagebrush.remote.enroll import main as login_main
-        code = login_main([])
+        code = login_main([], continuing=True)
         if code:
             return code
         key = _keys.load()

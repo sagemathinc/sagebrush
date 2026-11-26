@@ -168,7 +168,7 @@ for (const files of [["src/compile.ts"], ["web/notebook/x.ts"], ["engine/poly/sr
   }
   n += 6;
 }
-// ---- PR CI light (CI_PR_LIGHT, the repository variable PR_CI_LIGHT): a pull request runs only checks, the size gate
+// ---- PR CI light (CI_PR_LIGHT, the checked-in switch .github/pr-ci-light): a pull request runs only checks, the size gate
 // with its size-base, and the modules' build when it needs one; queue groups, pushes and a full-ci label are untouched
 {
   const pr = (files, env = {}) => paths("pull_request", files, { GITHUB_REF: "refs/pull/1/merge", ...env });
@@ -191,6 +191,27 @@ for (const files of [["src/compile.ts"], ["web/notebook/x.ts"], ["engine/poly/sr
     assert.deepEqual(label, pr(files, { CI_PR_LABELS: "full-ci" }));
     n += 5;
   }
+  // (a change to the LaTeX group's inputs keeps web-artifacts, whose suite checks the group's caps, even when light:
+  // #1702, Nov 24 2026; and only that job beyond the light set)
+  for (const files of [["web/latex/split.ts"], ["scripts/latex-group.mjs"], ["web/latex/core/x.ts", "src/compile.ts"], ["pnpm-lock.yaml"]]) {
+    const on = pr(files, { CI_PR_LIGHT: "true" }), off = pr(files);
+    assert.equal(on.latex_budget, "true", files.join());
+    assert.ok(runSet(on, PR).has("web-artifacts"), `${files.join()}: light keeps web-artifacts`);
+    assert.ok(runSet(off, PR).has("web-artifacts"), `${files.join()}: not light, the full tier runs it as before`);
+    const base = pr(files.filter((f) => f === "src/compile.ts").length ? ["src/compile.ts"] : ["design/x.md"], { CI_PR_LIGHT: "true" });
+    assert.deepEqual([...runSet(on, PR)].filter((j) => !runSet(base, PR).has(j) && j !== "web-artifacts" && j !== "wasm-modules" && !["checks", "size-base", "size-gate"].includes(j)), [], `${files.join()}: nothing else beyond the light set`);
+    n += 4;
+  }
+  // (and a change outside them doesn't: the light set as before)
+  for (const files of [["web/board/x.ts"], ["web/latex/test-latex-units.mjs"], ["src/compile.ts"]]) {
+    const on = pr(files, { CI_PR_LIGHT: "true" });
+    assert.equal(on.latex_budget, "false", files.join());
+    assert.ok(!runSet(on, PR).has("web-artifacts"), `${files.join()}: light, no web-artifacts`);
+    n += 2;
+  }
+  // (latex_budget is a pull request's only: a queue group and a push follow the full tier, as before)
+  for (const event of ["merge_group", "push"]) assert.equal(paths(event, ["web/latex/split.ts"]).latex_budget, "false", event);
+  n += 2;
   // (a docs-only pull request: light changes nothing it runs)
   assert.deepEqual([...runSet(pr(["design/x.md"], { CI_PR_LIGHT: "true" }), PR)].sort(), [...runSet(pr(["design/x.md"]), PR)].sort());
   // (never a queue group, a push or a track push: the full set, whatever the switch says)
@@ -200,10 +221,30 @@ for (const files of [["src/compile.ts"], ["web/notebook/x.ts"], ["engine/poly/sr
     assert.deepEqual([...runSet(o, gh)].sort(), [...runSet(paths(event, ["src/compile.ts"]), gh)].sort(), event);
   }
   assert.equal(paths("push", ["src/x.ts"], { CI_PR_LIGHT: "true", GITHUB_REF: "refs/heads/track/math" }).full, "true");
-  // (ci.yml passes the variable to ci-paths, and nothing else reads it)
-  assert.match(yml, /\n          CI_PR_LIGHT: \$\{\{ vars\.PR_CI_LIGHT \}\}\n/);
-  assert.equal((yml.match(/PR_CI_LIGHT/g) ?? []).length, 1, "the env line only");
-  n += 5;
+  // (ci.yml passes the checked-in switch's first line to ci-paths, and no repository variable: a fork's pull request
+  // gets no `vars`, so the switch must be a file in its checkout)
+  assert.equal((yml.match(/PR_CI_LIGHT/g) ?? []).length, 0, "no repository variable");
+  assert.equal((yml.match(/pr-ci-light/g) ?? []).length, 2, "the comment and the paths step's run line");
+  n += 6;
+  // (the paths step's own run line, in bash with ci-paths stubbed: what CI_PR_LIGHT it hands over for each file)
+  const line = /\n        run: (CI_PR_LIGHT=.*node scripts\/ci-paths\.mjs >> "\$GITHUB_OUTPUT")\n/.exec(yml)?.[1];
+  assert.ok(line, "the paths step's run line");
+  for (const [content, want] of [["true\n", "true"], ["true", "true"], [" true \r\n", "true"], ["true\nfalse\n", "true"],
+    ["false\n", "false"], ["TRUE\n", "TRUE"], ["", ""], [null, ""], ["# true\n", "#true"]]) {
+    const d = mkdtempSync(join(tmpdir(), "pr-ci-light-"));
+    spawnSync("mkdir", ["-p", join(d, ".github"), join(d, "bin")]);
+    if (content !== null) writeFileSync(join(d, ".github", "pr-ci-light"), content);
+    writeFileSync(join(d, "bin", "node"), '#!/bin/sh\nprintf "%s" "$CI_PR_LIGHT" > "$OUT_SEEN"\n', { mode: 0o755 });
+    const r = spawnSync("bash", ["-e", "-c", line], { cwd: d, encoding: "utf8",
+      env: { PATH: `${join(d, "bin")}:/usr/bin:/bin`, GITHUB_OUTPUT: join(d, "out"), OUT_SEEN: join(d, "seen") } });
+    assert.equal(r.status, 0, `${JSON.stringify(content)}: ${r.stderr}`);
+    assert.equal(readFileSync(join(d, "seen"), "utf8"), want, `switch file ${JSON.stringify(content)}`);
+    rmSync(d, { recursive: true, force: true });
+    n += 2;
+  }
+  // (the repository's switch, as committed, says true or false: a typo would read as off without a word)
+  assert.match(readFileSync(join(root, ".github", "pr-ci-light"), "utf8").split("\n")[0].replace(/[ \t\r]/g, ""), /^(?:true|false)$/);
+  n += 1;
 }
 // (a track push, or a dispatch on master, ignores CI_QUEUE_TESTED: the full set)
 const track = paths("push", ["src/x.ts"], { CI_QUEUE_TESTED: "true", GITHUB_REF: "refs/heads/track/math" });
