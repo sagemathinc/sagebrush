@@ -1,4 +1,11 @@
 # Scripts of scripts.txt that pass in Sagebrush's MATLAB mode (scripts/numbl-ratchet.py --write-expected).
+addpath/test_addpath_basic.m
+addpath/test_addpath_end.m
+addpath/test_addpath_multiple.m
+addpath/test_addpath_shadow.m
+addpath/test_name_mismatch.m
+addpath/test_path_builtin.m
+addpath/test_rmpath.m
 arguments/test_arguments_namevalue.m
 arithmetic/basic_ops.m
 arithmetic/colon_precedence.m
@@ -240,6 +247,7 @@ builtins/test_void_builtins.m
 builtins/test_warning_state.m
 builtins/test_warning_state_jit.m
 builtins/test_warning_struct.m
+builtins/test_which.m
 builtins/test_xor_arrays.m
 builtins/test_zeros_ones_eye_invalid.m
 builtins/unique_orientation.m

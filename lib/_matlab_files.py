@@ -80,7 +80,8 @@ def _translate(p):
         return None, None
     with open(p) as fh:
         src = fh.read()
-    return host("matlab_path_file", src, p), src.split("\n")
+    # (the file's path too, for mfilename: absolute, as _dirs gives every folder, so a later cd changes nothing)
+    return host("matlab_path_file", src, p, p), src.split("\n")
 
 
 def load(name):
