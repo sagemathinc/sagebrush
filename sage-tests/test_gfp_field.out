@@ -1,0 +1,36 @@
+F.quadratic_nonresidue() -> 2
+F.zeta(5) -> 95
+F.zeta_order() -> 100
+F.factored_order() -> 101
+F.factored_unit_order() -> (2^2 * 5^2,)
+F.unit_group_exponent() -> 100
+F.zeta(5)^5 == 1 -> True
+K.quadratic_nonresidue() -> None
+F.zeta() -> 2
+F.zeta(2) -> 100
+F.zeta(4) -> 10
+F.zeta(100) -> 2
+F.zeta(3) -> ValueError: no 3th root of unity in Finite Field of size 101
+F.zeta(1) -> 1
+K.zeta() -> 1
+K.zeta_order() -> 1
+K.factored_unit_order() -> (1,)
+K.unit_group_exponent() -> 1
+GF(7).quadratic_nonresidue() -> 3
+GF(41).quadratic_nonresidue() -> 3
+GF(97).zeta(8) -> 64
+GF(97).factored_unit_order() -> (2^5 * 3,)
+F.is_conway() -> False
+G9.is_conway() -> True
+GF(9, "b", modulus=GF(3)["t"]([1, 0, 1])).is_conway() -> False
+GF(125, "c").is_conway() -> True
+GF(125, "c").zeta(31) -> 2*c^2 + 2*c
+GF(125, "c").quadratic_nonresidue() -> c
+GF(4, "d").quadratic_nonresidue() -> ValueError: there are no non-squares in finite fields of even order
+Zmod(13).zeta(4) -> 8
+G9.quadratic_nonresidue() -> a
+G9.zeta_order() -> 8
+G9.zeta(4) -> a + 1
+G9.factored_order() -> 3^2
+G9.factored_unit_order() -> (2^3,)
+G9.unit_group_exponent() -> 8

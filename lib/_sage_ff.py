@@ -182,6 +182,103 @@ class IntegerModRing_:
     def __reduce__(self):
         return (GF if self._is_gf else IntegerModRing, (self._n,))
 
+    # ---- the unit group, roots of unity, squares (fields only here)
+    def _units_field(self, what):
+        if not self.is_field():
+            raise NotImplementedError("%s of %r (not a field) is not supported yet" % (what, self))
+
+    def factored_order(self):
+        """The order q, factored.
+
+        EXAMPLES::
+
+            sage: GF(101).factored_order(), GF(9, 'a').factored_order()
+            (101, 3^2)
+        """
+        self._units_field("factored_order")
+        return _sa().factor(self.order())
+
+    def factored_unit_order(self):
+        """(q - 1, factored,): the order of the unit group, in a tuple.
+
+        EXAMPLES::
+
+            sage: GF(101).factored_unit_order()
+            (2^2 * 5^2,)
+        """
+        self._units_field("factored_unit_order")
+        return (_sa().factor(self.order() - 1),)
+
+    def unit_group_exponent(self):
+        """q - 1 (the unit group is cyclic).
+
+        EXAMPLES::
+
+            sage: GF(101).unit_group_exponent()
+            100
+        """
+        self._units_field("unit_group_exponent")
+        return _Integer(int(self.order()) - 1)
+
+    def zeta_order(self):
+        """q - 1: the order of the largest group of roots of unity.
+
+        EXAMPLES::
+
+            sage: GF(101).zeta_order(), GF(2).zeta_order()
+            (100, 1)
+        """
+        self._units_field("zeta_order")
+        return _Integer(int(self.order()) - 1)
+
+    def zeta(self, n=None):
+        """A primitive n-th root of unity: g^((q - 1)/n) for the
+        multiplicative generator g (n = q - 1 by default: g itself).
+
+        EXAMPLES::
+
+            sage: GF(101).zeta(5), GF(101).zeta(4), GF(101).zeta()
+            (95, 10, 2)
+            sage: GF(101).zeta(3)
+            Traceback (most recent call last):
+            ...
+            ValueError: no 3th root of unity in Finite Field of size 101
+        """
+        self._units_field("zeta")
+        N = int(self.order()) - 1
+        n = N if n is None else int(n)
+        if n <= 0 or N % n:
+            raise ValueError("no %dth root of unity in %r" % (n, self))
+        return self.multiplicative_generator() ** (N // n)
+
+    def quadratic_nonresidue(self):
+        """The first element, in the field's order, that is not a square
+        (None in characteristic 2, where every element is).
+
+        EXAMPLES::
+
+            sage: GF(101).quadratic_nonresidue(), GF(9, 'a').quadratic_nonresidue(), GF(2).quadratic_nonresidue()
+            (2, a, None)
+        """
+        self._units_field("quadratic_nonresidue")
+        if int(self.characteristic()) == 2:
+            return None
+        for x in self:
+            if x and not x.is_square():
+                return x
+
+    def is_conway(self):
+        """False: a prime field has no Conway modulus to be defined by.
+
+        EXAMPLES::
+
+            sage: GF(101).is_conway()
+            False
+        """
+        if not self._is_gf:
+            raise AttributeError("'IntegerModRing_generic_with_category' object has no attribute 'is_conway'")
+        return False
+
     # ---- structure
     def order(self):
         """The number of elements.
@@ -1934,6 +2031,99 @@ class FiniteField_ext:
             True
         """
         return True
+
+    # ---- the unit group, roots of unity, squares (fields only here)
+    def _units_field(self, what):
+        pass  # (always a field)
+
+    def factored_order(self):
+        """The order q, factored.
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').factored_order()
+            3^2
+        """
+        self._units_field("factored_order")
+        return _sa().factor(self.order())
+
+    def factored_unit_order(self):
+        """(q - 1, factored,): the order of the unit group, in a tuple.
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').factored_unit_order()
+            (2^3,)
+        """
+        self._units_field("factored_unit_order")
+        return (_sa().factor(self.order() - 1),)
+
+    def unit_group_exponent(self):
+        """q - 1 (the unit group is cyclic).
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').unit_group_exponent()
+            8
+        """
+        self._units_field("unit_group_exponent")
+        return _Integer(int(self.order()) - 1)
+
+    def zeta_order(self):
+        """q - 1: the order of the largest group of roots of unity.
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').zeta_order()
+            8
+        """
+        self._units_field("zeta_order")
+        return _Integer(int(self.order()) - 1)
+
+    def zeta(self, n=None):
+        """A primitive n-th root of unity: g^((q - 1)/n) for the
+        multiplicative generator g (n = q - 1 by default: g itself).
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').zeta(4), GF(9, 'a').zeta()
+            (a + 1, a)
+        """
+        self._units_field("zeta")
+        N = int(self.order()) - 1
+        n = N if n is None else int(n)
+        if n <= 0 or N % n:
+            raise ValueError("no %dth root of unity in %r" % (n, self))
+        return self.multiplicative_generator() ** (N // n)
+
+    def quadratic_nonresidue(self):
+        """The first element, in the field's order, that is not a square
+        (in characteristic 2 every element is: Sage's ValueError).
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').quadratic_nonresidue()
+            a
+            sage: GF(4, 'b').quadratic_nonresidue()
+            Traceback (most recent call last):
+            ...
+            ValueError: there are no non-squares in finite fields of even order
+        """
+        if self._p == 2:
+            raise ValueError("there are no non-squares in finite fields of even order")
+        for x in self:
+            if x and not x.is_square():
+                return x
+
+    def is_conway(self):
+        """Whether the modulus is the Conway polynomial.
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').is_conway(), GF(9, 'b', modulus=GF(3)['t']([1, 0, 1])).is_conway()
+            (True, False)
+        """
+        return list(self._f) == list(_conway(self._p, self._n))
 
     def is_finite(self):
         """True.
