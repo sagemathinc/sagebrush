@@ -16,7 +16,7 @@ def isna(obj):
     if isinstance(obj, Index):
         return obj._pd_column().isna()
     if isinstance(obj, np.ndarray):
-        if str(obj.dtype) == "float64":
+        if str(obj.dtype) in ("float64", "float32"):
             return obj != obj
         return np.zeros(obj.shape, dtype=bool)
     if isinstance(obj, (list, tuple)):

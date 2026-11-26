@@ -1,6 +1,7 @@
 // The Worker that web/cloud/fleet/test-fleet.mjs runs in Miniflare: the fleet routes on any host. A request may carry
 // x-test-before-issue: the name of one change below, made after the handler's checks and immediately before the lease
-// batch, so a test can move state between the handler's own reads and the batch's re-reads.
+// batch, so a test can move state between the handler's own reads and the batch's re-reads. The person's routes take
+// their session from x-test-account / x-test-session (the deployed mount resolves the real one).
 import { handleFleet, type FleetEnv } from "./server.ts";
 import type { D1 } from "./store.ts";
 
@@ -17,6 +18,17 @@ export default {
     const name = req.headers.get("x-test-before-issue");
     const change = name ? CHANGES[name] : undefined;
     if (name && !change) return new Response("no such change", { status: 400 });
-    return (await handleFleet(req, env, change ? { beforeIssue: async (db) => { await change(db); } } : {})) ?? new Response("not the fleet API", { status: 404 });
+    // (the person's session, as the mounting Worker would resolve it: x-test-account names the account; x-test-session
+    // may say "none", "unavailable" or "throw" instead)
+    const person = {
+      session: async (r: Request) => {
+        const kind = r.headers.get("x-test-session");
+        if (kind === "throw") throw new Error("the session store failed");
+        if (kind === "unavailable") return { kind: "unavailable" as const };
+        const account = r.headers.get("x-test-account");
+        return kind === "none" || !account ? { kind: "none" as const } : { kind: "ok" as const, account };
+      },
+    };
+    return (await handleFleet(req, env, change ? { beforeIssue: async (db) => { await change(db); } } : {}, person)) ?? new Response("not the fleet API", { status: 404 });
   },
 };

@@ -5,6 +5,8 @@ API.  Every name outside the subset raises NotImplementedError."""
 from ._pd_dtypes import StringDtype as _StringDtype
 from ._pd_index import Index, RangeIndex, DatetimeIndex
 from ._pd_datetime import Timestamp, NaT, to_datetime
+from ._pd_category import Categorical, CategoricalDtype
+from ._pd_dummies import get_dummies
 from ._pd_series import Series
 from ._pd_frame import DataFrame
 from ._pd_options import get_option, set_option, reset_option, option_context, options, describe_option
@@ -16,7 +18,7 @@ from . import errors
 __version__ = "0.1.0"
 
 __all__ = [
-    "Index", "RangeIndex", "DatetimeIndex", "Series", "DataFrame", "read_csv", "read_excel", "Timestamp", "NaT", "to_datetime",
+    "Index", "RangeIndex", "DatetimeIndex", "Series", "DataFrame", "Categorical", "CategoricalDtype", "get_dummies", "read_csv", "read_excel", "Timestamp", "NaT", "to_datetime",
     "get_option", "set_option", "reset_option", "option_context", "options", "describe_option",
     "isna", "notna", "isnull", "notnull", "concat", "melt", "errors",
 ]
@@ -25,5 +27,7 @@ __all__ = [
 def __getattr__(name):
     from ._pd_names import PANDAS
     if name in PANDAS:
+        # (the builtin NotImplementedError, not the one that is also an AttributeError: `from pandas import name`
+        # turns an AttributeError into a bare ImportError, losing the message)
         raise NotImplementedError("pandas.%s is not in Sagebrush's pandas 0.x subset" % name)
     raise AttributeError("module 'pandas' has no attribute '%s'" % name)

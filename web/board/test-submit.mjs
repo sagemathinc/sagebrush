@@ -100,6 +100,8 @@ ws.onmessage = (ev) => {
   if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "iframe") {
     sessions.push(m.params.sessionId);
     send("Runtime.enable", {}, m.params.sessionId).catch(() => {});
+    // (the frame's page focused, as the top page is: below)
+    send("Emulation.setFocusEmulationEnabled", { enabled: true }, m.params.sessionId).catch(() => {});
     send("Runtime.runIfWaitingForDebugger", {}, m.params.sessionId).catch(() => {});
   }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
@@ -133,6 +135,10 @@ const $ = (part) => `document.querySelector('[data-sbb="${part}"]')`;
 try {
   await send("Runtime.enable");
   await send("Page.enable");
+  // (the page behaves as focused whether or not headless Chrome gives its window the focus: without this, a run where
+  // it doesn't (document.hasFocus() false) can't focus the reader's own words, and the focus checks fail on the
+  // machine, not the board)
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
 
   // without a nonce: the board shows, with no Submit (a port posted anyway is not taken)
@@ -248,10 +254,13 @@ try {
   await shot("submit-5b-no.png");
   check(await frame(`${fb}.querySelector('a.board-ask-choice[href="#s1"]').title === "→ Go to the next step"`), "a next item with no title or text: \"Go to the next step\", not its id");
   // Something else: the reader's own words, their field open and focused; Choose again: the options again
+  // (the board asks for the focus with the field's focus(); recorded, so the check doesn't hang on whether this
+  // headless window has the focus to give: where the frame's document has it, the field must hold it, as before)
+  await frame(`(() => { if (!window.__sbFocusPatched) { const f = HTMLElement.prototype.focus; HTMLElement.prototype.focus = function (...a) { window.__sbFocusAsked = this; return f.apply(this, a); }; window.__sbFocusPatched = true; } window.__sbFocusAsked = null; return 1; })()`);
   await frame(`${fb}.querySelector('.board-ask-own').click()`);
   // (each part on its own, so a failure says which one: the words said, the field focused, the field open; and what has
   // the focus instead, and whether the frame's document has it)
-  const ownState = `(() => { const ta = document.querySelector('[data-ask="q2"] details textarea'), a = document.activeElement; return { said: !!${fb}?.textContent.includes("Something else: your own words stand"), focused: !!ta && a === ta, open: !!document.querySelector('[data-ask="q2"] details')?.open, active: a ? a.tagName.toLowerCase() + (a.className ? "." + String(a.className).trim().replace(/\\s+/g, ".") : "") : null, hasFocus: document.hasFocus(), fields: document.querySelectorAll('[data-ask="q2"] details textarea').length }; })()`;
+  const ownState = `(() => { const ta = document.querySelector('[data-ask="q2"] details textarea'), a = document.activeElement; return { said: !!${fb}?.textContent.includes("Something else: your own words stand"), focused: !!ta && (document.hasFocus() ? a === ta : window.__sbFocusAsked === ta), asked: !!ta && window.__sbFocusAsked === ta, open: !!document.querySelector('[data-ask="q2"] details')?.open, active: a ? a.tagName.toLowerCase() + (a.className ? "." + String(a.className).trim().replace(/\\s+/g, ".") : "") : null, hasFocus: document.hasFocus(), fields: document.querySelectorAll('[data-ask="q2"] details textarea').length }; })()`;
   const ownOk = !!(await until(async () => { const s = await frame(ownState); return s.said && s.focused && s.open; }));
   check(ownOk, "Something else: said, the reader's own words open and focused" + (ownOk ? "" : ": " + JSON.stringify(await frame(ownState).catch((e) => String(e?.message ?? e)))));
   await shot("submit-5d-own.png");

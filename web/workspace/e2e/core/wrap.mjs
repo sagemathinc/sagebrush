@@ -1,8 +1,8 @@
 // Delivering an epoch secret (§2, §3.4): S[n] HPKE-wrapped to one device's X25519 key or to the recovery key's, inside
 // a signed context. RFC 9180's base mode authenticates no sender and stops no replay, so:
 // - HPKE's `info` is the canonical encoding of the wrapper's whole context, wrapper id included: protocol and
-//   version, purpose, account, the sender (its device id and signing-key id, which must be the envelope's signer), the
-//   chain position the sender saw, recipient (kind, id and KEM key id), epoch. So enc and ct can't be moved into an
+//   version, purpose, account, the chain's generation, the sender (its device id and signing-key id, which must be the
+//   envelope's signer), the chain position the sender saw, recipient (kind, id and KEM key id), epoch. So enc and ct can't be moved into an
 //   envelope another device signs: its context names another sender, and HPKE won't open under a rewritten one;
 // - the outer envelope ("sb.e2e-wrap.v1") is signed by the sender, a current device, over that context plus `enc`
 //   and the ciphertext;
@@ -20,14 +20,14 @@ import { b64, concat, enc, isId, newId, sha256b64, unb64 } from "../../fleet/cor
 import { canonText } from "../../fleet/core/canonical.mjs";
 import { keyId, verifyStrict } from "../../fleet/core/ed25519.mjs";
 import { E2EError, exactKeys, fail } from "./base.mjs";
-import { apply, currentDevice, epochAt } from "./chain.mjs";
+import { apply, currentDevice, epochAt, ringMeta } from "./chain.mjs";
 import { parse, seal } from "./envelope.mjs";
-import { epochCommit } from "./keyring.mjs";
+import { checkRingMeta, epochCommit } from "./keyring.mjs";
 import { recoveryKeys, seedOfCode } from "./recovery.mjs";
 
 export const TYPE = "sb.e2e-wrap.v1";
 const AAD = enc("sagebrush.e2e.wrap.v1");
-const FIELDS = ["aud", "account", "id", "purpose", "epoch", "chain_seq", "sender", "recipient", "enc", "ct"];
+const FIELDS = ["aud", "account", "generation", "id", "purpose", "epoch", "chain_seq", "sender", "recipient", "enc", "ct"];
 
 /** HPKE's info: the canonical context, everything but enc and ct. */
 export const contextOf = (body) => {
@@ -57,7 +57,7 @@ export async function wrapEpoch({ hpke, state, ctx, sender, recipient, n, S }) {
   if ((await epochCommit(S, state.account, n)) !== e.commit) fail("bad_epoch", "not this epoch's secret");
   const r = recipientKey(state, recipient);
   const body = {
-    aud: ctx.aud, account: ctx.account, id: newId(), purpose: recipient.kind === "recovery" ? "recovery" : "epoch", epoch: n,
+    aud: ctx.aud, account: ctx.account, generation: state.generation, id: newId(), purpose: recipient.kind === "recovery" ? "recovery" : "epoch", epoch: n,
     chain_seq: state.seq, sender: { id: sender.id, key: sender.sign.key }, recipient: { kind: recipient.kind, id: recipient.id, kem: r.kemKey },
   };
   const sealed = await hpke.seal(r.kem, contextOf(body), AAD, S);
@@ -77,6 +77,7 @@ export async function verifyWrapper(state, ctx, bytes) {
   const b = p.body;
   if (!exactKeys(b, FIELDS) || !exactKeys(b.recipient, ["kind", "id", "kem"]) || !exactKeys(b.sender, ["id", "key"]) || !isId(b.id))
     fail("bad_form", "a bad wrapper");
+  if (b.generation !== state.generation) fail("bad_form", "a wrapper of another generation");
   const d = currentDevice(state, p.signer.id);
   if (!d || d.signKey !== p.signer.key || !Number.isSafeInteger(b.chain_seq) || b.chain_seq < d.added || b.chain_seq > state.seq)
     fail("device_unknown", "not a current device");
@@ -121,6 +122,7 @@ function recipientsFor(next, entry) {
   const all = () => [...[...next.devices.values()].filter((d) => d.removed === null).map((d) => `device:${d.id}`), `recovery:${next.account}`];
   switch (entry.op) {
     case "genesis": case "remove": case "epoch": case "recover": return all();
+    case "reset": return [`device:${entry.body.device.id}`, `recovery:${next.account}`];
     case "add": return [`device:${entry.body.device.id}`];
     case "replace-recovery": return [`recovery:${next.account}`];
     default: return [];
@@ -129,17 +131,21 @@ function recipientsFor(next, entry) {
 
 /**
  * Check a chain entry with everything that must travel with it, before any of it is published: the entry extends
- * `state`; a new epoch's keyring is present and is the one its entry commits to (and none comes otherwise); and the
- * wrappers are exactly one per required recipient, each valid at the new head, for the new head's position and
- * current epoch, with distinct ids. Returns the new state. (The secrets inside can only be checked by their
- * recipients, against the signed commitments: openWrapper and openKeyring do.) The store that accepts an entry keeps
- * it and its package together, in one transaction, or neither.
+ * `state`; a new epoch's keyring row is present, is the one its entry commits to, and has exactly the metadata the
+ * chain gives it (its epoch, generation, suite, predecessor entry, and the current keyring's hash as prev_ring), and
+ * none comes otherwise; and the wrappers are exactly one per required recipient, each valid at the new head, for the
+ * new head's position and current epoch, with distinct ids. Returns { state, entry, row } (row: the keyring row to
+ * store, or null). (The secrets inside can only be checked by their recipients, against the signed commitments:
+ * openWrapper and walkBack do.) The store that accepts an entry keeps it and its package together, in one
+ * transaction, or neither.
  */
 export async function checkTransition({ state, ctx, entry, keyring = null, wrappers = [] }) {
   const { state: next, entry: e } = await apply(state, entry, ctx);
-  const startsEpoch = ["genesis", "remove", "epoch", "recover"].includes(e.op);
+  const startsEpoch = ["genesis", "remove", "epoch", "recover", "reset"].includes(e.op);
+  let row = null;
   if (startsEpoch && next.epoch.n > 0) {
     if (!(keyring instanceof Uint8Array) || (await sha256b64(keyring)) !== next.epoch.keyring.hash) fail("bad_package", "the epoch's keyring is missing or isn't the committed one");
+    row = { ...checkRingMeta(ringMeta(state, e.body)), bytes: keyring };
   } else if (keyring !== null) fail("bad_package", "a keyring with no new epoch");
   const want = recipientsFor(next, e);
   const got = new Set(), ids = new Set();
@@ -152,7 +158,7 @@ export async function checkTransition({ state, ctx, entry, keyring = null, wrapp
     ids.add(b.id);
   }
   if (got.size !== want.length || want.some((r) => !got.has(r))) fail("bad_package", "not exactly the required recipients");
-  return next;
+  return { state: next, entry: e, row };
 }
 
 const RECOVERY_FAILED = "that recovery code doesn't open this account";

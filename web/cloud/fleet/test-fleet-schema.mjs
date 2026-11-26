@@ -21,7 +21,7 @@ const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
 
 let failures = 0, count = 0;
 const ok = (c, what, detail) => { count++; if (!c) { failures++; console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 300)); } };
-const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql"];
+const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql"];
 const statements = MIGRATIONS.flatMap((m) => readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean));
 
 const ID = "abcdefghijklmnopqrstuvwxy2", B43 = "A".repeat(42) + "w", B22 = "A".repeat(21) + "w";
@@ -29,15 +29,26 @@ const ID = "abcdefghijklmnopqrstuvwxy2", B43 = "A".repeat(42) + "w", B22 = "A".r
 // base64url), or "utf8" with its byte bounds (the chain entry's text, the bucket key).
 const TABLES = {
   fleet_hosts: { row: { host: ID, fleet: ID, sign_key: B43, fingerprint: B43, revoked: 0 }, text: { host: "id", fleet: "id", sign_key: "b43", fingerprint: "b43" } },
-  fleet_agents: { row: { agent: ID, fleet: ID, host: ID, entry_gen: 1, revoked: 0 }, text: { agent: "id", fleet: "id", host: "id" } },
+  fleet_agents: { row: { agent: ID, fleet: ID, host: ID, entry_gen: 1, revoked: 0, entry: B43 }, text: { agent: "id", fleet: "id", host: "id", entry: "b43" } },
   fleet_chain_entries: { row: { fleet: ID, seq: 0, bytes: "{}" }, text: { fleet: "id", bytes: { min: 1, max: 65536 } } },
   lease_pending: { row: { agent: ID, from_host: ID, to_host: ID, transfer: B43, acked: 0 }, text: { agent: "id", from_host: "id", to_host: "id", transfer: "b43" } },
   lease_nonces: { row: { host: ID, nonce: B22, lease_id: ID, decided: "ok", created_ms: 0 }, text: { host: "id", nonce: "b22", lease_id: "id", decided: "enum" } },
   lease_clock: { row: { agent: ID, host: ID, expires_at: 0, lease_id: ID, gen: 1, request: B43 }, text: { agent: "id", host: "id", lease_id: "id", request: "b43" } },
   fleet_bucket_hits: { row: { key: "lease-src:198.51.100.7", t: 0, id: ID }, text: { key: { min: 1, max: 200 }, id: "id" } },
   fleet_chain_hashes: { row: { fleet: ID, seq: 0, hash: B43 }, text: { fleet: "id", hash: "b43" } },
-  fleet_host_certs: { row: { fleet: ID, host: ID, cert: B43 }, text: { fleet: "id", host: "id", cert: "b43" } },
-  fleet_revocations: { row: { fleet: ID, kind: "host", id: ID }, text: { fleet: "id", kind: "enum", id: "id" } },
+  fleet_host_certs: { row: { fleet: ID, host: ID, cert: B43, bytes: "{}" }, text: { fleet: "id", host: "id", cert: "b43", bytes: { min: 1, max: 65536 } } },
+  fleet_revocations: { row: { fleet: ID, kind: "host", id: ID, bytes: "{}" }, text: { fleet: "id", kind: "enum", id: "id", bytes: { min: 1, max: 65536 } } },
+  fleet_accounts: { row: { fleet: ID, account: "acct_1-x" }, text: { fleet: "id", account: { min: 1, max: 64, ascii: true } } },
+  fleet_grants: { row: { fleet: ID, host: ID, gen: 1, hash: B43, bytes: "{}" }, text: { fleet: "id", host: "id", hash: "b43", bytes: { min: 1, max: 65536 } } },
+  fleet_transfers: { row: { fleet: ID, nonce: B22, agent: ID, from_host: ID, from_gen: 1, to_host: ID, gen: 1, transfer: B43, receipt: "{}", applied_ms: 0 },
+    text: { fleet: "id", nonce: "b22", agent: "id", from_host: "id", to_host: "id", transfer: "b43", receipt: { min: 1, max: 65536 } } },
+  fleet_transfer_results: { row: { fleet: ID, request_key: B43, grant_hash: B43, transfers: B43, result: "[]" },
+    text: { fleet: "id", request_key: { min: 43, max: 2815, ascii: true }, grant_hash: "b43", transfers: { min: 43, max: 2815, ascii: true }, result: { min: 2, max: 1048576 } } },
+  fleet_retired_agents: { row: { fleet: ID, agent: ID }, text: { fleet: "id", agent: "id" } },
+  fleet_fence_acks: { row: { fleet: ID, transfer: B43 }, text: { fleet: "id", transfer: "b43" } },
+  fleet_host_queue: { row: { fleet: ID, host: ID, kind: "transfer", ref: B43, at_ms: 0 }, text: { fleet: "id", host: "id", kind: "enum", ref: "b43" } },
+  fleet_grant_decisions: { row: { request: ID, decided: "ok" }, text: { request: "id", decided: "enum" } },
+  fleet_request_nonces: { row: { fleet: ID, host: ID, nonce: B22, created_ms: 0 }, text: { fleet: "id", host: "id", nonce: "b22" } },
 };
 const VALID = { id: ID, b43: B43, b22: B22 };
 
@@ -54,6 +65,16 @@ function cases(col, fam, valid) {
       ["one byte long", v + v[0], false],
     ];
   }
+  // (a list of base64url hashes with commas: ASCII only, bounded in bytes on both sides)
+  if (fam.ascii) return [
+    ["a NUL inside the bounds", valid.slice(0, -1) + "\0", false],
+    ["valid text + NUL + suffix", valid + "\0EVIL", false],
+    ["a NUL first, then valid text", "\0" + valid.slice(1), false],
+    [`exactly ${fam.max} bytes`, "A".repeat(fam.max), true],
+    [`${fam.max + 1} bytes`, "A".repeat(fam.max + 1), false],
+    [`${fam.min - 1} bytes`, "A".repeat(fam.min - 1), false],
+    [`${fam.min} characters of 2-byte text`, "é".repeat(fam.min), false],
+  ];
   // (UTF-8 text with byte bounds: é is 2 bytes, 𝄞 is 4; the boundary at exactly max and max + 1 bytes)
   const at = (n, ch) => ch.repeat(Math.floor(n / Buffer.byteLength(ch))) + "a".repeat(n % Buffer.byteLength(ch));
   return [

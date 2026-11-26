@@ -9,6 +9,7 @@ r7).
   read_csv budget charges it when built, r7 §E 1a.)
 """
 
+from ._pd_errors import unsupported_name
 from ._pd_column import Column, column_from
 from ._pd_dtypes import is_missing, infer
 from ._pd_datetime import DT, NAT_INT, as_us, is_time, Timestamp, NaT
@@ -36,6 +37,9 @@ class Index(object):
             col = data.copy()
         else:
             col = column_from([] if data is None else data, dtype)
+        from ._pd_category import CatColumn, refuse
+        if isinstance(col, CatColumn):
+            raise refuse("an Index of category dtype (CategoricalIndex)")
         self._pd_col = col
         self._pd_name = name
         self._pd_map = None
@@ -78,6 +82,35 @@ class Index(object):
 
     def tolist(self):
         return self._pd_column().tolist()
+
+    def _pd_as_series(self):
+        from ._pd_series import Series
+        return Series._pd_new(self._pd_column(), default_index(len(self)), self.name)
+
+    def to_numpy(self, dtype=None, copy=False, na_value=None, **kwargs):
+        """The labels as a numpy array, as Series.to_numpy gives a column's
+        (a str Index gives a '<U' array: Sagebrush's numpy has no object
+        dtype yet)."""
+        if kwargs:
+            raise NotImplementedError("pandas.Index.to_numpy(**kwargs) is not in Sagebrush's pandas 0.x subset")
+        s = self._pd_as_series()
+        return s.to_numpy(dtype=dtype, copy=copy) if na_value is None else s.to_numpy(dtype=dtype, copy=copy, na_value=na_value)
+
+    def __array__(self, dtype=None, copy=None):
+        from ._pd_series import _export
+        from ._pd_dtypes import STR
+        if dtype is not None:
+            raise NotImplementedError("pandas.numpy.asarray(Index, dtype=) is not in Sagebrush's pandas 0.x subset")
+        col = self._pd_column()
+        if col.dtype is STR:
+            # (Sagebrush's numpy can't take a string array from __array__ yet; to_numpy() gives one)
+            raise NotImplementedError("pandas.numpy.asarray(Index) of str labels (Index.to_numpy() gives its '<U' array) is not in Sagebrush's pandas 0.x subset")
+        return _export(col, "numpy.asarray(Index)")
+
+    def astype(self, dtype, copy=True):
+        """The labels converted to dtype, as Series.astype converts a column."""
+        from ._pd_column import astype_column
+        return Index(astype_column(self._pd_column(), dtype), name=self.name)
 
     def to_list(self):
         return self.tolist()
@@ -187,7 +220,7 @@ class Index(object):
     def __getattr__(self, name):
         from ._pd_names import INDEX
         if not name.startswith("_") and name in INDEX:
-            raise NotImplementedError("pandas.%s.%s is not in Sagebrush's pandas 0.x subset" % (type(self).__name__, name))
+            raise unsupported_name("%s.%s" % (type(self).__name__, name))
         raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
 
     __str__ = __repr__

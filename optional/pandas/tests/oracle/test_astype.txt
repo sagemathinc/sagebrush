@@ -315,3 +315,25 @@ np.float64(150.0)
 0     7      1
 1    71      0
 2     8      1
+== negative-float64-to-uint8
+!! ValueError: Cannot losslessly cast from float64 to uint8
+== negative-float32-to-uint8
+!! ValueError: Cannot losslessly cast from float32 to uint8
+== negative-half-to-uint16
+!! ValueError: Cannot losslessly cast from float64 to uint16
+== negative-before-range
+!! ValueError: Cannot losslessly cast from float64 to uint8
+== negative-float32-to-uint32
+!! ValueError: Cannot losslessly cast from float32 to uint32
+== negative-zero-to-uint8
+
+0    0
+1    3
+dtype: uint8
+== negative-with-nan-to-uint8
+!! IntCastingNaNError: Cannot convert non-finite values (NA or inf) to integer. Replace or remove non-finite values or cast to an integer type that supports these values (e.g. 'Int64')
+== negative-to-int8-in-range
+
+0     -1
+1   -128
+dtype: int8
