@@ -795,6 +795,11 @@
   "owner": "engine arithmetic (GF(p) matrices)",
   "reason": "test code: a shape whose counts overflow gets no fast-product plan (so the classical product); refuses nothing itself"
  },
+ "engine/arith/src/nmod_mat/fast.rs :: mul_runs_the_route_product_peak_reports :: for allowance in [0, wanted.saturating_sub(1), wanted, wanted + 1, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "engine arithmetic (GF(p) matrices)",
+  "reason": "test code: allowances on both sides of a product's extra words, to compare the route Mat::mul runs with product_peak's report; refuses nothing itself"
+ },
  "engine/arith/src/nmod_mat/fast.rs :: units_of :: let mut meter = Meter::accounting(u64::MAX); #0": {
   "class": "none",
   "owner": "engine arithmetic (GF(p) matrices)",
