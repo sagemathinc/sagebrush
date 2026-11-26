@@ -43,6 +43,10 @@ test("requests: a closed form per operation, exact keys, checked to the characte
   ] as [string, unknown][])
     assert.ok("refused" in checkRequest(op, p), JSON.stringify([op, p]).slice(0, 120));
   assert.ok(isWorkspacePath("/") && isWorkspacePath("/" + "x".repeat(FS_MAX_PATH - 1)));
+  // the cap counts UTF-8 bytes: "/" + 2047 two-byte characters + "x" is 4096 bytes (accepted); "/" + 2048 of them is 4097
+  assert.ok("request" in checkRequest("fs.stat", { ws: null, path: "/" + "é".repeat(2047) + "x" }), "4096 bytes: accepted");
+  assert.ok("refused" in checkRequest("fs.stat", { ws: null, path: "/" + "é".repeat(2048) }), "4097 bytes: refused");
+  assert.equal(("/" + "é".repeat(2048)).length, 2049, "(well under the cap in UTF-16 units)");
 });
 
 test("ranges: zero-length and end-of-file reads never form offset + length - 1", () => {
@@ -222,6 +226,14 @@ test("sagebrush.fs against a synthetic page: open, read, seek, info, ls, exists,
   assert.equal(page.calls.filter((c) => c.op === "fs.read").every((c) => c.params.version === "c".repeat(64)), true);
   files["/data/t.csv"] = was;
   Object.assign(old, prevOld);
+  // a folder's URL with a trailing slash is the same folder
+  assert.equal(await run("print(fs.ls('sagebrush:///data/') == fs.ls('sagebrush:///data'), fs.info('sagebrush:///data/')['type'], fs.exists('sagebrush:///data/'))"), "True directory True\n");
+  // a malformed version is the URL's error (ValueError), before anything is asked
+  page.calls = [];
+  assert.equal(await run(`for v in ["${"A".repeat(64)}", "${"a".repeat(63)}"]:\n    try:\n        fs.info('sagebrush:///data/t.csv?v=' + v)\n    except ValueError as e:\n        print('ValueError')`), "ValueError\nValueError\n");
+  assert.equal(page.calls.length, 0);
+  // a negative position is a ValueError, and the position is unchanged
+  assert.equal(await run("f = fs.SagebrushFile('sagebrush:///data/t.csv')\nf.seek(3)\nfor a in [(-1,), (-f.size - 1, 2)]:\n    try:\n        f.seek(*a)\n    except ValueError:\n        print('ValueError', f.tell())"), "ValueError 3\nValueError 3\n");
   // ls follows the cursor; URLs carry the workspace as given
   assert.equal(await run("print(fs.ls('sagebrush:///data'))"), "['sagebrush:///data/big.bin', 'sagebrush:///data/t.csv']\n");
   // errors: another workspace, a write mode, a bad URL, a folder opened

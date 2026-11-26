@@ -116,13 +116,13 @@ let gen = 1;
 function worker(fs, own) {
   const w = { tag: Math.random().toString(36).slice(2, 10), n: 0, buffer: new SharedArrayBuffer(SB.FS_BUFFER_BYTES) };
   fs.attach(w, own);
-  w.ask = async (op, params, { stopAfter = Infinity, key, active = () => true } = {}) => {
+  w.ask = async (op, params, { stopAfter = Infinity, key, active = () => true, maxSpins = 20000 } = {}) => {
     const call = ++w.n;
     new Int32Array(w.buffer, 0, 5)[0] = 0;
     fs.admit({ id: 1, sbFs: { op, params, key: key ?? `${w.tag}.${call}` }, buffer: w.buffer }, w, gen, active);
     const pieces = [];
     for (let seq = 1, spins = 0; ; spins++) {
-      if (spins > 20000) return { timeout: true, pieces };
+      if (spins > maxSpins) return { timeout: true, pieces };
       const ctl = new Int32Array(w.buffer, 0, 5);
       if (Atomics.load(ctl, 0) !== 1 || Atomics.load(ctl, 4) !== call || Atomics.load(ctl, 2) !== seq) {
         await tick(0);
@@ -386,7 +386,8 @@ const baseline = (fs) => pinsHeld(fs) === 0 && tokensHeld(fs) === 0 && fs.freeRu
   // a Stop the worker reports ({sbFsCancel}) ends the call here too
   const fsy = new FsCalls({ workspace, fetchImpl }), Y = worker(fsy, OWN);
   net.delay = new Promise((r) => (open = r));
-  const p = Y.ask("fs.read", { ws: null, path: "/d/big.bin", version: f.sha, offset: 0, length: CHUNK });
+  // (a Stop: the worker takes no piece, the header included, and tells the page)
+  const p = Y.ask("fs.read", { ws: null, path: "/d/big.bin", version: f.sha, offset: 0, length: CHUNK }, { stopAfter: 0, maxSpins: 300 });
   await tick(5);
   fsy.cancel({ sbFsCancel: { key: `${Y.tag}.1` } }, Y);
   net.delay = null;
