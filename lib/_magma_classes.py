@@ -8,7 +8,7 @@ import sys as _sys
 
 import _magma as _m
 from _magma import (MSeq, MTuple, MagmaError, _MPerm, _MSymGroup, _MDihedralGroup, _wrap, _global_name,
-                    _bad_types, _collect_refusal, _gf_name)
+                    _bad_types, _gf_name)
 
 
 def _term(c, mono):
@@ -119,9 +119,23 @@ def change_ring_curve(E, F):
     return _MPlaneCubic(F, a) if int(E.discriminant()) % p == 0 else _MEllFF(F, a)
 
 
-# the largest n of Sym(n) whose classes ConjugacyClasses lists: the range
-# its order and representatives were checked against Magma 2.18 in
-_CLASSES_SYM_N = 30
+# a class's share of the heap while ConjugacyClasses makes Sym(n)'s classes,
+# at its peak (the partitions, the sort keys and the result together),
+# conservatively: measured on node 24.21.0 at 763 to 975 bytes a class for n
+# from 25 to 40 (less as n grows), so 2048, two collection elements' allowance
+# (LIMIT-2209-1)
+_CLASS_BYTES = 2048
+
+
+def _classes_refusal(n, count, allow):
+    """The collection memory guard's refusal, for more classes than the
+    allowance holds (count, or more than count)."""
+    import _capacity
+    e = _m._memory_error(_m._memguard.memory_guard("A list of more than %d conjugacy classes of Sym(%d)" % (allow // _CLASS_BYTES, n),
+                                                   count * _CLASS_BYTES, allow, "one collection",
+                                                   fixed=_m._COLLECT_MAX == 10 ** 6))
+    e.capacity = _capacity.capacity()
+    return e
 
 
 def _partition_count(n, stop):
@@ -243,20 +257,20 @@ def conjugacy_classes(G):
     lists them: by the order of their elements, then by their length, then
     with the representative whose sequence of images is the larger first;
     each representative is the type's cycles from the longest, on 1, 2, ...
-    in turn.  (Checked against Magma for every n up to 30, the n listed.)  A dihedral
+    in turn.  (Checked against Magma for every n up to 30; the same rule
+    for any n.)  A dihedral
     group's representatives are those of Magma's own algorithm, not
     modelled (DihedralGroup(3) is Sym(3))."""
     if isinstance(G, _MDihedralGroup) and G.n != 3:
         raise MagmaError("ConjugacyClasses of a dihedral group is not supported yet", "'ConjugacyClasses'")
     n = G.n
-    # (n up to 30 only: the order and representatives are checked against
-    # Magma that far, 5604 classes; a coverage bound, LIMIT-2209-1)
-    if n > _CLASSES_SYM_N:
-        raise MagmaError("ConjugacyClasses of Sym(n) for n above %d is not supported yet" % _CLASSES_SYM_N, "'ConjugacyClasses'")
-    # (and the classes are one collection, refused as one, before any is
-    # made, in a heap too small for them)
-    if _partition_count(n, _m._COLLECT_MAX) > _m._COLLECT_MAX:
-        raise _collect_refusal()
+    # (the classes are one collection, admitted before any is made by their
+    # peak while they are made: _CLASS_BYTES each against the collection
+    # allowance; whatever n, memory is the only bound)
+    allow = _m._COLLECT_MAX * _m._COLLECT_COST
+    count = _partition_count(n, allow // _CLASS_BYTES)
+    if count * _CLASS_BYTES > allow:
+        raise _classes_refusal(n, count, allow)
     H = _classes_group(G)
     # (each class's permutation made once, the one the result holds, and no
     # other copy of its images: the rows are sorted by the permutations'

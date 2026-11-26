@@ -109,7 +109,7 @@
       }
     ],
     "differs": [
-      "Sym(n) for n up to 30 (the range checked against Magma); a larger n is refused in words.",
+      "The order and representatives are checked against Magma for n up to 30; a larger n runs the same rule, as far as memory allows.",
       "Only the symmetric groups (and DihedralGroup(3), which is Sym(3)): another dihedral group's classes are refused, since Magma's representatives there come from its own algorithm.",
       "The table inside another value ([C], <C>) or in a string (Sprint) is refused: Magma lays it out in ways of its own."
     ],

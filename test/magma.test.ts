@@ -192,7 +192,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 10^7 elements",
     "Runtime error in 'ConjugacyClasses': ConjugacyClasses of a dihedral group is not supported yet",
     "Runtime error: printing the conjugacy classes inside another value or in a string is not supported yet",
-    "Runtime error in 'ConjugacyClasses': ConjugacyClasses of Sym(n) for n above 30 is not supported yet",
+    "conjugacy classes of Sym(80) needs about",
     "Runtime error in 'Conductor': Conductor of an elliptic curve over a finite field is not supported yet",
     "Runtime error in 'ChangeRing': ChangeRing of a CrvEll, FldRat is not supported yet",
     "Runtime error in 'ChangeRing': ChangeRing of an elliptic curve over a finite field is not supported yet",
@@ -1713,19 +1713,32 @@ test("the argument guard for finite fields' polynomials and matrices walks withi
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
-test("ConjugacyClasses of Sym(30), the largest n listed, fits a 96 MiB heap; Sym(31) is refused in words (LIMIT-2209-1)", () => {
+test("ConjugacyClasses in a 96 MiB heap: every Sym(n) the memory guard admits completes, the next is refused by it (LIMIT-2209-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const cli = join(__dirname, "..", "src", "cli.js");
-  const run = (n: number) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"],
-    { input: `#ConjugacyClasses(Sym(${n}));\nC := ConjugacyClasses(Sym(${n})); C[#C];\n"end";\n`, encoding: "utf8", timeout: WALL(600000) });
-  const fits = run(30);
-  assert.equal(fits.status, 0, fits.stdout + fits.stderr);
-  // (the last class, as Magma lists it: order 4620, cycle type 11 + 7 + 5 + 4 + 3)
-  assert.match(fits.stdout.replace(/\s+/g, " "), /^5604 <4620, 57414038920387675029504000000, \(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11\)\(12, 13, 14, 15, 16, 17, 18\)\(19, 20, 21, 22, 23\)\(24, 25, 26, 27\)\(28, 29, 30\)> end $/);
-  const refused = run(31);
-  assert.equal(refused.status, 0, refused.stdout + refused.stderr);
-  assert.match(refused.stdout.replace(/\s+/g, " "), /ConjugacyClasses of Sym\(n\) for n above 30 is not supported yet.* end $/);
+  const run = (src: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"],
+    { input: src + '"end";\n', encoding: "utf8", timeout: WALL(600000) });
+  // (the number of partitions of n, Sym(n)'s number of classes)
+  const p = (n: number) => { const a = [1, ...Array(n).fill(0)]; for (let k = 1; k <= n; k++) for (let m = k; m <= n; m++) a[m] += a[m - k]; return a[n]; };
+  // the control: a small group's classes, and the session goes on
+  const control = run("#ConjugacyClasses(Sym(5));\n");
+  assert.equal(control.stdout, "7\nend\n", control.stdout + control.stderr);
+  let n = 30;
+  for (;; n++) {
+    // (made twice, as a session would keep one and make another)
+    const r = run(`#ConjugacyClasses(Sym(${n}));\nC := ConjugacyClasses(Sym(${n})); #C;\n`);
+    assert.equal(r.status, 0, `Sym(${n}): ` + r.stdout + r.stderr);
+    const flat = r.stdout.replace(/\s+/g, " ");
+    if (/needs about/.test(flat)) {
+      assert.match(flat, new RegExp(`A list of more than \\d+ conjugacy classes of Sym\\(${n}\\) needs about .* for one collection.* end $`));
+      break;
+    }
+    assert.equal(r.stdout, `${p(n)}\n${p(n)}\nend\n`, `Sym(${n})`);
+    assert.ok(n < 60, "the guard must refuse well before n = 60 in a 96 MiB heap");
+  }
+  // (Sym(30), the largest n checked against Magma, is admitted there)
+  assert.ok(n > 30, `refused at n = ${n}`);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
