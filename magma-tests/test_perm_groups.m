@@ -42,3 +42,10 @@ Sym(5)!(1,2,3) in Stabilizer(Sym(5), 5); Sym(5)!(1,5) in Stabilizer(Sym(5), 5);
 #{G, sub<Sym(4) | (1,2,3,4), (1,3)>}; #{Alt(4), Alt(4)}; #{Alt(4), Sym(4)}; #{DihedralGroup(4), sub<Sym(4) | (1,2,3,4), (1,3)>};
 F := sub<Sym(4) | (1,2), (1,2,3,4)>; F; X := {F, Sym(4)}; #X; F;
 U := PermutationGroup<4 | (1,2,3,4)>; Y := {U}; U;
+// membership of groups in sets and sequences, a built-in group and a constructed one either way; equal
+// order but not equal (C4 and the Klein group) is not a member
+G := sub<Sym(4) | (1,2), (1,2,3,4)>; G in {Sym(4)}; Sym(4) in {G};
+A := Alt(4); H := sub<Sym(4) | (1,2,3), (1,2)(3,4)>; H in {A}; A in {H};
+D := DihedralGroup(4); K := PermutationGroup<4 | (1,2,3,4), (1,3)>; K in {D}; D in {K}; K in {Alt(4)};
+C := CyclicGroup(4); E := sub<Sym(4) | (1,2)(3,4), (1,3)(2,4)>; #C eq #E; C in {E}; E in {C};
+S := [G, Alt(4), K]; Sym(4) in S; CyclicGroup(4) in S; #{G, Sym(4), A, H, K, D};

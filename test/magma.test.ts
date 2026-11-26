@@ -170,7 +170,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "PermutationGroup<4 | (1,2)>;",
     "PG := PermutationGroup<4 | (1,2,3,4)>; Generators(PG);",
     "PH := PermutationGroup<40 | [i mod 40 + 1 : i in [1..40]]>; PH;",
-    "IsAbelian(Alt(2000));",
+    "IsAbelian(CyclicGroup(12000));",
   ].join("\n") + "\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
   // (messages are wrapped at 80 columns, as Magma's are)
@@ -203,7 +203,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in PermutationGroup< ... >: printing PermutationGroup< ... > itself (Magma prints its second value, a map, with it) is not supported yet: assign it, G := PermutationGroup< ... >",
     "Runtime error in 'Generators': Generators of a GrpPerm is not supported yet",
     "Runtime error: printing a permutation group whose generators are longer than a line is not supported yet",
-    "A permutation group of degree 2000 with 2 generators (its stabilizer chain and working space) needs about",
+    "A permutation group of degree 12000 with 1 generator (its stabilizer chain and working space) needs about",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
@@ -1771,9 +1771,9 @@ test("a permutation group's own lists and its engine work are admitted by the me
     // generators are given to the engine once)
     "m._COLLECT_MAX, m._COLLECT_COST = 10 ** 6, 1024",
     "G = g.MPermGroup(3, [(2, 1, 3), (1, 3, 2), (3, 2, 1), (2, 3, 1), (3, 1, 2)] * 200)",
-    // (the derived subgroup makes the order known first: S3's, 6)
-    "need5 = g._engine_bytes(3, 5, 6, ('derived_subgroup',))",
-    "print('pairs budgeted', need5 > g._engine_bytes(3, 5, 6, ('order',)), g._engine_bytes(3, 1000, 6, ('derived_subgroup',)) > 100 * need5)",
+    "five = [(2, 1, 3), (1, 3, 2), (3, 2, 1), (2, 3, 1), (3, 1, 2)]",
+    "need5 = g._engine_bytes(3, five, ('derived_subgroup',))",
+    "print('pairs budgeted', need5 > g._engine_bytes(3, five, ('order',)), g._engine_bytes(3, five * 200, ('derived_subgroup',)) > 100 * need5)",
     "m._COLLECT_MAX, m._COLLECT_COST = 1, need5",
     "run('derived, 5 distinct generators at the bound', lambda: g.derived_subgroup(G))",
     "m._COLLECT_COST = need5 - 1",
@@ -1792,6 +1792,9 @@ test("a permutation group of degree 600 whose order isn't known yet is computed,
   const cli = join(__dirname, "..", "src", "cli.js");
   const r = spawnSync(process.execPath, [cli, "--magma"], { input: "G := PermutationGroup< 600 | [i mod 600 + 1 : i in [1..600]] >; Order(G); IsAbelian(G); #Orbits(G);\n", encoding: "utf8", timeout: WALL(120000) });
   assert.equal(r.stdout, "600\ntrue\n1\n", r.stderr);
+  // (nor once its order is known: only the chain's certain first level is charged, about 128 MB at degree 4000)
+  const k = spawnSync(process.execPath, [cli, "--magma"], { input: "G := PermutationGroup< 4000 | [i mod 4000 + 1 : i in [1..4000]] >; Order(G); IsAbelian(G);\nC := CyclicGroup(4000); IsAbelian(C);\n", encoding: "utf8", timeout: WALL(300000) });
+  assert.equal(k.stdout, "4000\ntrue\ntrue\n", k.stderr);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {

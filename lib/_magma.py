@@ -3102,8 +3102,8 @@ def _eq_kind(x):
         return "map"
     if _is_struct(x):
         return "struct"
-    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
-        return "grp"  # (permutation groups: one set or sequence holds any)
+    if _is_perm_group(x):
+        return "grp"  # (permutation groups, lib/_magma_groups.py's too: one set or sequence holds any)
     if hasattr(x, "parent"):
         return "elt"
     return "other " + type(x).__name__

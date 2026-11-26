@@ -5718,7 +5718,7 @@
   "explained": true,
   "owner": "Magma compatibility/runtime memory"
  },
- "lib/_magma_groups.py :: _admit :: need, allow = _engine_bytes(n, k, order, what), _m._COLLECT_MAX * _m._COLLECT_COST #0": {
+ "lib/_magma_groups.py :: _admit :: need, allow, k = _engine_bytes(n, gens, what), _m._COLLECT_MAX * _m._COLLECT_COST, len(gens) #0": {
   "class": "2",
   "disposition": {
    "2": {
