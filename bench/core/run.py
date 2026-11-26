@@ -1350,6 +1350,10 @@ def selected(row: dict, key: str, backends: list[str]) -> tuple[list[str], dict]
                 present.remove(b)
                 skipped[b] = "the user column runs at sizes %s only (user_sizes)" % ", ".join(row["user_sizes"])
     if is_calibration_size(key):
+        # (the others are skipped by this rule, said so, not "not on host")
+        for b in present:
+            if b not in VTIME_TARGETS:
+                skipped[b] = "calibration sizes time the calibrated targets only"
         present = [b for b in present if b in VTIME_TARGETS]
         ws = working_set(row, n)
         if "wasm" in present and ws is not None and ws > WASM_BYTES:
