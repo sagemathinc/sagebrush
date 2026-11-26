@@ -5453,11 +5453,6 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
- "lib/_magma.py :: _MEllFF._magma_card :: except NotImplementedError: #0": {
-  "class": "coverage",
-  "owner": "Magma compatibility",
-  "reason": "the point count over GF(p) for p >= 2^64 is not available (Sage mode's counting, which needs SEA there): turned into Magma mode's refusal in words; an unsupported case, not a cap"
- },
  "lib/_magma.py :: _collect :: _COLLECT_MAX of them, before the collection is built (HARD-FCC-1).\"\"\" #0": {
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
@@ -5505,16 +5500,6 @@
   "explained": true,
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
- },
- "lib/_magma.py :: _conjugacy_classes :: if _partition_count(n, _COLLECT_MAX) > _COLLECT_MAX: #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "memguard"
-   }
-  },
-  "explained": true,
-  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma.py :: _ff_refuse :: bounds: fields of more than EMBED_MAX elements (ff.embed_max), or the work.\"\"\" #0": {
   "class": "none",
@@ -5677,6 +5662,21 @@
   "class": "3",
   "owner": "Magma compatibility",
   "row": "inv-25"
+ },
+ "lib/_magma_classes.py :: _MEllFF._magma_card :: except NotImplementedError: #0": {
+  "class": "coverage",
+  "owner": "Magma compatibility",
+  "reason": "the point count over GF(p) for p >= 2^64 is not available (Sage mode's counting, which needs SEA there): turned into Magma mode's refusal in words; an unsupported case, not a cap"
+ },
+ "lib/_magma_classes.py :: conjugacy_classes :: if _partition_count(n, _m._COLLECT_MAX) > _m._COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_matlab.py :: _oob :: return _err(\"Index exceeds the number of array elements. Index must not exceed %d.\" % n, \"MATLAB:badsubscript\") #0": {
   "class": "none",

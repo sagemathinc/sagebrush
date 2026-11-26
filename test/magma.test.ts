@@ -192,7 +192,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 10^7 elements",
     "Runtime error in 'ConjugacyClasses': ConjugacyClasses of a dihedral group is not supported yet",
     "Runtime error: printing the conjugacy classes inside another value or in a string is not supported yet",
-    "A collection of more than 1000000 elements needs about",
+    "Runtime error in 'ConjugacyClasses': ConjugacyClasses of Sym(n) for n above 30 is not supported yet",
     "Runtime error in 'Conductor': Conductor of an elliptic curve over a finite field is not supported yet",
     "Runtime error in 'ChangeRing': ChangeRing of a CrvEll, FldRat is not supported yet",
     "Runtime error in 'ChangeRing': ChangeRing of an elliptic curve over a finite field is not supported yet",
@@ -1711,6 +1711,21 @@ test("the argument guard for finite fields' polynomials and matrices walks withi
   assert.ok(out.includes("IsEmpty: Sagebrush's checks of arguments for polynomials and matrices over finite fields reached their limit for this run"), r.stdout);
   assert.match(r.stdout, /\nend\n$/);
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
+});
+
+test("ConjugacyClasses of Sym(30), the largest n listed, fits a 96 MiB heap; Sym(31) is refused in words (LIMIT-2209-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const run = (n: number) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"],
+    { input: `#ConjugacyClasses(Sym(${n}));\nC := ConjugacyClasses(Sym(${n})); C[#C];\n"end";\n`, encoding: "utf8", timeout: WALL(600000) });
+  const fits = run(30);
+  assert.equal(fits.status, 0, fits.stdout + fits.stderr);
+  // (the last class, as Magma lists it: order 4620, cycle type 11 + 7 + 5 + 4 + 3)
+  assert.match(fits.stdout.replace(/\s+/g, " "), /^5604 <4620, 57414038920387675029504000000, \(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11\)\(12, 13, 14, 15, 16, 17, 18\)\(19, 20, 21, 22, 23\)\(24, 25, 26, 27\)\(28, 29, 30\)> end $/);
+  const refused = run(31);
+  assert.equal(refused.status, 0, refused.stdout + refused.stderr);
+  assert.match(refused.stdout.replace(/\s+/g, " "), /ConjugacyClasses of Sym\(n\) for n above 30 is not supported yet.* end $/);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
