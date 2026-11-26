@@ -167,6 +167,10 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Ep := ChangeRing(EllipticCurve([0, -1, 1, -10, -10]), GF(101)); Conductor(Ep);",
     "ChangeRing(EllipticCurve([0, -1, 1, -10, -10]), Rationals());",
     "ChangeRing(Ep, GF(7));",
+    "PermutationGroup<4 | (1,2)>;",
+    "PG := PermutationGroup<4 | (1,2,3,4)>; Generators(PG);",
+    "PH := PermutationGroup<40 | [i mod 40 + 1 : i in [1..40]]>; PH;",
+    "IsAbelian(CyclicGroup(12000));",
   ].join("\n") + "\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
   // (messages are wrapped at 80 columns, as Magma's are)
@@ -196,6 +200,10 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in 'Conductor': Conductor of an elliptic curve over a finite field is not supported yet",
     "Runtime error in 'ChangeRing': ChangeRing of a CrvEll, FldRat is not supported yet",
     "Runtime error in 'ChangeRing': ChangeRing of an elliptic curve over a finite field is not supported yet",
+    "Runtime error in PermutationGroup< ... >: printing PermutationGroup< ... > itself (Magma prints its second value, a map, with it) is not supported yet: assign it, G := PermutationGroup< ... >",
+    "Runtime error in 'Generators': Generators of a GrpPerm is not supported yet",
+    "Runtime error: printing a permutation group whose generators are longer than a line is not supported yet",
+    "A permutation group of degree 12000 with 1 generator (its stabilizer chain and working space) needs about",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
@@ -548,16 +556,17 @@ test("functions take the values of their free variables when they are defined", 
 test("constructors name< ... > parse; those not implemented yet raise at run time", () => {
   // Magma has no `<` operator: an identifier followed by `<` starts a constructor
   for (const src of [
-    "H := sub< G | x, y >;",
     "Q, f := quo< G | H >;",
     "G<a, b> := Group< a, b | a^2 = b^3, (a*b)^5 >;",
-    "P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;",
     "h := hom< A -> B | <1, 2>, <2, 4> >;",
     "I := ideal< R | x^2 - y, sub< S | 1 > >;",
   ]) {
     const out = py(src);
     assert.match(out, /_m\._unsupported\("[A-Za-z]+", \(1, \d+\)\)/, src);
   }
+  // (sub< G | ... > and PermutationGroup< n | ... > are permutation groups now)
+  assert.match(py("H := sub< G | x, y >;"), /_m\._group_ctor\("sub", G, \[x, y\], \(1, 9\)\)/);
+  assert.match(py("P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;"), /_m\._group_ctor\("PermutationGroup", 5, \[/);
   assert.match(py("r := rec< F | a := 1, b := <2, 3> >;"), /_m\._rec\(F, \[\("a", 1\), \("b", _m\.MTuple\(\[2, 3\]\)\)\], \(1, 6\)\)/);
   assert.match(py("F := recformat< a : Integers(), b >;"), /_m\._recformat\(\[\("a", _m\._first\(Integers\(\)\)\), \("b", None\)\], \(1, 6\)\)/);
   // statements Magma rejects before running them: only the rejection is emitted
@@ -1739,6 +1748,53 @@ test("ConjugacyClasses in a 96 MiB heap: every Sym(n) the memory guard admits co
   }
   // (Sym(30), the largest n checked against Magma, is admitted there)
   assert.ok(n > 30, `refused at n = ${n}`);
+});
+
+test("a permutation group's own lists and its engine work are admitted by the memory guards, at their boundary (LIMIT-GRP-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // (the collection bound set to 8 points: a group of degree n with k generators keeps k + 1 lists of n points)
+  const py = [
+    "import _magma as m, _magma_groups as g",
+    "def run(label, f):",
+    "    try:",
+    "        f(); print(label, 'admitted')",
+    "    except m.MagmaError as e:",
+    "        print(label, 'refused', 'needs about' in str(e))",
+    "m._COLLECT_MAX = 8",
+    "run('degree 4, 1 generator', lambda: g.construct(4, [m.MSeq([2, 1, 3, 4])]))",
+    "run('degree 9, no generator', lambda: g.construct(9, []))",
+    "run('degree 4, 2 generators', lambda: g.construct(4, [m.MSeq([2, 1, 3, 4]), m.MSeq([1, 3, 2, 4])]))",
+    "run('sub of degree 4, 2 generators', lambda: g.sub(g.alt(4), [m.MSeq([2, 1, 4, 3]), m.MSeq([3, 4, 1, 2])]))",
+    // (the commutator of each pair of generators: budgeted for an operation of the derived series; repeated
+    // generators are given to the engine once)
+    "m._COLLECT_MAX, m._COLLECT_COST = 10 ** 6, 1024",
+    "G = g.MPermGroup(3, [(2, 1, 3), (1, 3, 2), (3, 2, 1), (2, 3, 1), (3, 1, 2)] * 200)",
+    "five = [(2, 1, 3), (1, 3, 2), (3, 2, 1), (2, 3, 1), (3, 1, 2)]",
+    "need5 = g._engine_bytes(3, five, ('derived_subgroup',))",
+    "print('pairs budgeted', need5 > g._engine_bytes(3, five, ('order',)), g._engine_bytes(3, five * 200, ('derived_subgroup',)) > 100 * need5)",
+    "m._COLLECT_MAX, m._COLLECT_COST = 1, need5",
+    "run('derived, 5 distinct generators at the bound', lambda: g.derived_subgroup(G))",
+    "m._COLLECT_COST = need5 - 1",
+    "run('derived, one byte past the bound', lambda: g.derived_subgroup(G))",
+  ].join("\n");
+  const r = spawnSync(process.execPath, [cli, "-c", py], { encoding: "utf8", timeout: WALL(120000) });
+  assert.equal(r.stdout, [
+    "degree 4, 1 generator admitted", "degree 9, no generator refused True", "degree 4, 2 generators refused True",
+    "sub of degree 4, 2 generators refused True", "pairs budgeted True True",
+    "derived, 5 distinct generators at the bound admitted", "derived, one byte past the bound refused True", ""].join("\n"), r.stderr);
+});
+
+test("a permutation group of degree 600 whose order isn't known yet is computed, not refused by an estimate", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: "G := PermutationGroup< 600 | [i mod 600 + 1 : i in [1..600]] >; Order(G); IsAbelian(G); #Orbits(G);\n", encoding: "utf8", timeout: WALL(120000) });
+  assert.equal(r.stdout, "600\ntrue\n1\n", r.stderr);
+  // (nor once its order is known: only the chain's certain first level is charged, about 128 MB at degree 4000)
+  const k = spawnSync(process.execPath, [cli, "--magma"], { input: "G := PermutationGroup< 4000 | [i mod 4000 + 1 : i in [1..4000]] >; Order(G); IsAbelian(G);\nC := CyclicGroup(4000); IsAbelian(C);\n", encoding: "utf8", timeout: WALL(300000) });
+  assert.equal(k.stdout, "4000\ntrue\ntrue\n", k.stderr);
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {

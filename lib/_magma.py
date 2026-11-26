@@ -628,6 +628,10 @@ def _key(x):
         raise MagmaError("a set of polynomials over a finite field (or of their rings) is not supported yet")
     if isinstance(x, _FFLINALL):
         raise MagmaError("a set of matrices or vectors over a finite field is not supported yet")
+    if getattr(type(x), "_lazy_magma_type", None) == "GrpPerm" or isinstance(x, (_MSymGroup, _MDihedralGroup)):
+        # (equal groups are one element: lib/_magma_groups.py)
+        import _magma_groups
+        return _magma_groups.GroupKey(x)
     return x
 
 
@@ -3098,8 +3102,8 @@ def _eq_kind(x):
         return "map"
     if _is_struct(x):
         return "struct"
-    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
-        return "grp"  # (permutation groups: one set or sequence holds any)
+    if _is_perm_group(x):
+        return "grp"  # (permutation groups, lib/_magma_groups.py's too: one set or sequence holds any)
     if hasattr(x, "parent"):
         return "elt"
     return "other " + type(x).__name__
@@ -3327,6 +3331,9 @@ def _eq(a, b, pos=None, op="eq"):
         return _ffpoly_eq(a, b, op, pos)
     if isinstance(a, _FFLINALL) or isinstance(b, _FFLINALL):
         return _ffmat_eq(a, b, op, pos)
+    if _is_perm_group(a) and _is_perm_group(b):
+        import _magma_groups
+        return _magma_groups.equal(a, b)
     for x, y in ((a, b), (b, a)):
         if isinstance(x, (_MVector, _MPerm)):
             return x._magma_eq(y, op)
@@ -4048,6 +4055,10 @@ def _set_result(t, op, a, b, pos, message, mode="any"):
 
 
 def _subset(a, b, pos=None, op="subset"):
+    if _is_perm_group(a) and _is_perm_group(b):
+        import _magma_groups
+        r = _magma_groups.subset(a, b)
+        return r if op == "subset" else not r
     _set_pair(op, a, b, pos, "Arguments 1 and 2 have incompatible universal sets")
     a, b = _ff_sets(a, b, op, pos, "Arguments 1 and 2 have incompatible universal sets")
     return all(_cmpeq_in(x, b) for x in a)
@@ -4706,6 +4717,8 @@ def _range_str(v):
 def _brackets(v):
     if isinstance(v, MSeq):
         return "[ ", " ]"
+    if getattr(type(v), "_gset", False):
+        return "GSet{@ ", " @}"  # (an orbit, lib/_magma_groups.py)
     return {"set": ("{ ", " }"), "indexed": ("{@ ", " @}"), "multi": ("{* ", " *}")}[v.kind]
 
 
@@ -5576,6 +5589,8 @@ def _type(x):
     if isinstance(x, (MSeq, MRange)):
         return "SeqEnum"
     if isinstance(x, MSet):
+        if getattr(type(x), "_gset", False):
+            return "GSetIndx"
         return {"set": "SetEnum", "indexed": "SetIndx", "multi": "SetMulti"}[x.kind]
     if isinstance(x, MTuple):
         return "Tup"
@@ -5627,7 +5642,7 @@ def _ext_type(x):
     if isinstance(x, MRec):
         return "Rec"
     if getattr(type(x), "_lazy_magma_type", None) is not None:
-        return "%s[FldFin]" % _type_name(x)
+        return getattr(type(x), "_lazy_ext_type", None) or "%s[FldFin]" % _type_name(x)
     if isinstance(x, _smod.EllipticCurve_rational_field):
         return "CrvEll[FldRat]"
     return str(_type_of(x))
@@ -6470,6 +6485,8 @@ def Degree(f):
         return f.degree()
     if hasattr(f, "_magma_degree"):
         return f._magma_degree()
+    if _is_perm_group(f):
+        return f.n  # (a permutation group's degree: the points it acts on)
     raise MagmaError("Degree: bad argument")
 
 
@@ -7608,9 +7625,10 @@ def Sqrt(x):
 # calls being made, innermost last: an argument's call has returned before
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
-    "ChangeRing CharacteristicPolynomial ConjugacyClasses DefiningPolynomial Embed Generator Identity Integral IsSubfield "
-    "MinimalPolynomial Norm Normalise Normalize PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
-    "Submatrix Subsets Sym Trace Vector").split())
+    "Alt ChangeRing CharacteristicPolynomial ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
+    "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
+    "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
+    "Stabilizer Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
 
@@ -8870,7 +8888,7 @@ def Order(x):
         return x._magma_order()
     if isinstance(x, _MPerm):
         return x._order()
-    if isinstance(x, (_MSymGroup, _MDihedralGroup)):
+    if isinstance(x, (_MSymGroup, _MDihedralGroup)) or _is_perm_group(x):
         return x._magma_card()  # (a group's order, #G)
     raise MagmaError("Order of this argument is not supported yet", "'Order'")
 
@@ -11789,6 +11807,92 @@ def _conjugacy_classes(G):
     (lib/_magma_classes.py, loaded when first used)."""
     import _magma_classes
     return _magma_classes.conjugacy_classes(G)
+
+
+def _is_perm_group(x):
+    """A permutation group: Sym(n), DihedralGroup(n), or one of
+    lib/_magma_groups.py's (not imported here)."""
+    return isinstance(x, (_MSymGroup, _MDihedralGroup)) or getattr(type(x), "_lazy_magma_type", None) == "GrpPerm"
+
+
+def _groups():
+    import _magma_groups
+    return _magma_groups
+
+
+def _group_ctor(kind, first, gens, pos):
+    """PermutationGroup< n | gens > and sub< G | gens > (lib/_magma_groups.py)."""
+    if kind == "PermutationGroup":
+        return _groups().construct(first, gens, pos)
+    return _groups().sub(first, gens, pos)
+
+
+@_signature("Alt", "RngIntElt", ret="GrpPerm")
+def _alt(n):
+    """The alternating group on 1 .. n, with Magma's generators."""
+    if n < 1:
+        raise MagmaError("Argument 1 (%d) should be >= 1" % n, "'Alt'", True, _call_pos("Alt"))
+    if n > _COLLECT_MAX:
+        raise _collect_refusal()  # (its generators are lists of n points, collections)
+    return _groups().alt(n)
+
+
+@_signature("CyclicGroup", "RngIntElt", ret="GrpPerm")
+def _cyclic_group(n):
+    """The cyclic group of order n, generated by (1, 2, ..., n)."""
+    if n < 1:
+        raise MagmaError("Argument 1 (%d) should be >= 1" % n, "'CyclicGroup'", True, _call_pos("CyclicGroup"))
+    if n > _COLLECT_MAX:
+        raise _collect_refusal()  # (its generators are lists of n points, collections)
+    return _groups().cyclic(n)
+
+
+@_signature("Orbits", "GrpPerm", ret="SeqEnum")
+def _orbits(G):
+    """The orbits of a permutation group, in Magma's order."""
+    return _groups().orbits(G)
+
+
+@_signature("Orbit", "GrpPerm", "RngIntElt", ret="GSetIndx")
+def _orbit(G, x):
+    """The orbit of a point, in the order Magma lists it."""
+    return _groups().orbit(G, x)
+
+
+@_signature("Stabilizer", "GrpPerm", "RngIntElt", ret="GrpPerm")
+def _stabilizer(G, x):
+    """The stabilizer of a point (its generators Sagebrush's own)."""
+    return _groups().stabilizer(G, x)
+
+
+@_signature("IsTransitive", "GrpPerm", ret="BoolElt")
+def _is_transitive(G):
+    """Whether a permutation group is transitive on 1 .. n."""
+    return _groups().is_transitive(G)
+
+
+@_signature("IsAbelian", "GrpPerm", ret="BoolElt")
+def _is_abelian(G):
+    """Whether a permutation group is abelian."""
+    return _groups().is_abelian(G)
+
+
+@_signature("IsSolvable", "GrpPerm", ret="BoolElt")
+def _is_solvable(G):
+    """Whether a permutation group is solvable."""
+    return _groups().is_solvable(G)
+
+
+@_signature("DerivedSubgroup", "GrpPerm", ret="GrpPerm")
+def _derived_subgroup(G):
+    """The commutator subgroup (its generators Sagebrush's own)."""
+    return _groups().derived_subgroup(G)
+
+
+@_signature("Ngens", "GrpPerm", ret="RngIntElt")
+def _ngens(G):
+    """The number of generators of a permutation group."""
+    return _groups().ngens(G)
 
 
 class _IsoNotModelled:

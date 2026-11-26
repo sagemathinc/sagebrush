@@ -5453,6 +5453,16 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: _alt :: if n > _COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
  "lib/_magma.py :: _collect :: _COLLECT_MAX of them, before the collection is built (HARD-FCC-1).\"\"\" #0": {
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
@@ -5500,6 +5510,16 @@
   "explained": true,
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
+ },
+ "lib/_magma.py :: _cyclic_group :: if n > _COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma.py :: _ff_refuse :: bounds: fields of more than EMBED_MAX elements (ff.embed_max), or the work.\"\"\" #0": {
   "class": "none",
@@ -5679,6 +5699,36 @@
   "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma_classes.py :: conjugacy_classes :: allow = _m._COLLECT_MAX * _m._COLLECT_COST #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit :: \"one computation\", fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit :: need, allow, k = _engine_bytes(n, gens, what), _m._COLLECT_MAX * _m._COLLECT_COST, len(gens) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit_points :: if count > _m._COLLECT_MAX: #0": {
   "class": "2",
   "disposition": {
    "2": {
