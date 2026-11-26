@@ -1,5 +1,5 @@
 {
- "note": "Input hashes every backend present agreed on, per point, in the protocol-2 run on n2-standard-16 (commit 0f6931b5cedb plus the K-variant drivers, Nov 18 2026). expected_inputs.py must reproduce every one (test_expected_inputs.py). Change this file only in a reviewed commit. The rank rows (mat_q_rank_* and mat_z_rank_* beyond the square ones) were added from the first sharded VM run where every backend agreed on them: n2-standard-16, n2d-standard-16 and c4a-standard-16, commit c194d692c64b, Nov 21 2026.",
+ "note": "Input hashes every backend present agreed on, per point, in the protocol-2 run on n2-standard-16 (commit 0f6931b5cedb plus the K-variant drivers, Nov 18 2026). expected_inputs.py must reproduce every one (test_expected_inputs.py). Change this file only in a reviewed commit. The rank rows (mat_q_rank_* and mat_z_rank_* beyond the square ones) were added from the first sharded VM run where every backend agreed on them: n2-standard-16, n2d-standard-16 and c4a-standard-16, commit c194d692c64b, Nov 21 2026. The class-group stream rows (class_group_prime, _composite, _large_h, _proven and _generic) were added from their first VM run, where the Sage-mode and Magma backends agreed on every point: n2-standard-16, commit 9d5473a71292, Nov 26 2026. The gemm rows (mat_fp_mul, mat_fp31_mul and their _fast rows, mat_f64_gemm and mat_f64_gemm_bits) were added from their VM runs, where every backend agreed on every point: n2-standard-16, n2d-standard-16 and c4a-standard-16 at commit d9dc8e87c275, and n2-standard-16 and c4a-standard-16 at 716985b6620b, Nov 26 2026.",
  "points": {
   "bigint_gcd:l": {
    "n": 1048576,
@@ -45,6 +45,81 @@
    "n": 12,
    "variants": 1,
    "input_hash": "34000799"
+  },
+  "class_group_composite:l": {
+   "n": 40,
+   "variants": 6,
+   "input_hash": "689540046"
+  },
+  "class_group_composite:m": {
+   "n": 28,
+   "variants": 12,
+   "input_hash": "30559421"
+  },
+  "class_group_composite:s": {
+   "n": 18,
+   "variants": 24,
+   "input_hash": "920300465"
+  },
+  "class_group_generic:l": {
+   "n": 12,
+   "variants": 3,
+   "input_hash": "521154262"
+  },
+  "class_group_generic:m": {
+   "n": 11,
+   "variants": 3,
+   "input_hash": "722014113"
+  },
+  "class_group_generic:s": {
+   "n": 10,
+   "variants": 4,
+   "input_hash": "616135690"
+  },
+  "class_group_large_h:l": {
+   "n": 40,
+   "variants": 6,
+   "input_hash": "827153994"
+  },
+  "class_group_large_h:m": {
+   "n": 28,
+   "variants": 12,
+   "input_hash": "719337567"
+  },
+  "class_group_large_h:s": {
+   "n": 18,
+   "variants": 24,
+   "input_hash": "714667955"
+  },
+  "class_group_prime:l": {
+   "n": 40,
+   "variants": 6,
+   "input_hash": "219143742"
+  },
+  "class_group_prime:m": {
+   "n": 28,
+   "variants": 12,
+   "input_hash": "344751741"
+  },
+  "class_group_prime:s": {
+   "n": 18,
+   "variants": 24,
+   "input_hash": "399455090"
+  },
+  "class_group_proven:l": {
+   "n": 13,
+   "variants": 3,
+   "input_hash": "795943527"
+  },
+  "class_group_proven:m": {
+   "n": 12,
+   "variants": 3,
+   "input_hash": "521154262"
+  },
+  "class_group_proven:s": {
+   "n": 11,
+   "variants": 4,
+   "input_hash": "290988187"
   },
   "ec_aplist:l": {
    "n": 100000,
@@ -106,6 +181,116 @@
    "variants": 1,
    "input_hash": "607891152"
   },
+  "mat_f64_gemm:c0": {
+   "input_hash": "816724007",
+   "n": 256,
+   "variants": 3
+  },
+  "mat_f64_gemm:c1": {
+   "input_hash": "772072943",
+   "n": 431,
+   "variants": 3
+  },
+  "mat_f64_gemm:c2": {
+   "input_hash": "475320599",
+   "n": 724,
+   "variants": 3
+  },
+  "mat_f64_gemm:c3": {
+   "input_hash": "307747744",
+   "n": 1218,
+   "variants": 3
+  },
+  "mat_f64_gemm:c4": {
+   "input_hash": "422027546",
+   "n": 2048,
+   "variants": 3
+  },
+  "mat_f64_gemm:l": {
+   "input_hash": "850500125",
+   "n": 1024,
+   "variants": 3
+  },
+  "mat_f64_gemm:m": {
+   "input_hash": "976202449",
+   "n": 512,
+   "variants": 3
+  },
+  "mat_f64_gemm:s": {
+   "input_hash": "816724007",
+   "n": 256,
+   "variants": 3
+  },
+  "mat_f64_gemm_bits:l": {
+   "input_hash": "495685133",
+   "n": 1024,
+   "variants": 3
+  },
+  "mat_f64_gemm_bits:m": {
+   "input_hash": "341525827",
+   "n": 512,
+   "variants": 3
+  },
+  "mat_f64_gemm_bits:s": {
+   "input_hash": "868737186",
+   "n": 256,
+   "variants": 3
+  },
+  "mat_fp31_mul:c0": {
+   "input_hash": "354451338",
+   "n": 128,
+   "variants": 8
+  },
+  "mat_fp31_mul:c1": {
+   "input_hash": "58033839",
+   "n": 215,
+   "variants": 8
+  },
+  "mat_fp31_mul:c2": {
+   "input_hash": "958003807",
+   "n": 362,
+   "variants": 8
+  },
+  "mat_fp31_mul:c3": {
+   "input_hash": "230387055",
+   "n": 609,
+   "variants": 8
+  },
+  "mat_fp31_mul:c4": {
+   "input_hash": "875563266",
+   "n": 1024,
+   "variants": 8
+  },
+  "mat_fp31_mul:l": {
+   "input_hash": "449861872",
+   "n": 1500,
+   "variants": 8
+  },
+  "mat_fp31_mul:m": {
+   "input_hash": "728961703",
+   "n": 600,
+   "variants": 8
+  },
+  "mat_fp31_mul:s": {
+   "input_hash": "986603396",
+   "n": 200,
+   "variants": 8
+  },
+  "mat_fp31_mul_fast:l": {
+   "input_hash": "449861872",
+   "n": 1500,
+   "variants": 8
+  },
+  "mat_fp31_mul_fast:m": {
+   "input_hash": "728961703",
+   "n": 600,
+   "variants": 8
+  },
+  "mat_fp31_mul_fast:s": {
+   "input_hash": "986603396",
+   "n": 200,
+   "variants": 8
+  },
   "mat_fp_charpoly:l": {
    "n": 400,
    "variants": 8,
@@ -135,6 +320,61 @@
    "n": 60,
    "variants": 8,
    "input_hash": "58847636"
+  },
+  "mat_fp_mul:c0": {
+   "input_hash": "470398960",
+   "n": 128,
+   "variants": 8
+  },
+  "mat_fp_mul:c1": {
+   "input_hash": "973915032",
+   "n": 215,
+   "variants": 8
+  },
+  "mat_fp_mul:c2": {
+   "input_hash": "956307955",
+   "n": 362,
+   "variants": 8
+  },
+  "mat_fp_mul:c3": {
+   "input_hash": "510928821",
+   "n": 609,
+   "variants": 8
+  },
+  "mat_fp_mul:c4": {
+   "input_hash": "636744683",
+   "n": 1024,
+   "variants": 8
+  },
+  "mat_fp_mul:l": {
+   "input_hash": "440311633",
+   "n": 1500,
+   "variants": 8
+  },
+  "mat_fp_mul:m": {
+   "input_hash": "626277400",
+   "n": 600,
+   "variants": 8
+  },
+  "mat_fp_mul:s": {
+   "input_hash": "954314665",
+   "n": 200,
+   "variants": 8
+  },
+  "mat_fp_mul_fast:l": {
+   "input_hash": "440311633",
+   "n": 1500,
+   "variants": 8
+  },
+  "mat_fp_mul_fast:m": {
+   "input_hash": "626277400",
+   "n": 600,
+   "variants": 8
+  },
+  "mat_fp_mul_fast:s": {
+   "input_hash": "954314665",
+   "n": 200,
+   "variants": 8
   },
   "mat_fp_rank:l": {
    "n": 400,
@@ -527,6 +767,512 @@
    "input_hash": "134140893"
   }
  },
- "pending_note": "Points not yet confirmed by every backend in a VM run (none at present): expected_inputs.py's hashes, matched at size s by the python-flint and Magma drivers in the project and by the Rust formulas (the native and flint-rust drivers' helper) at s and l. The first VM run that agrees on them moves each into points, in a reviewed commit.",
- "pending": {}
+ "pending_note": "Points not yet confirmed by every backend in a VM run: expected_inputs.py's hashes. The calibration sizes (c0 .. c4) are timed on the calibrated targets only (the Sage-mode, native and wasm drivers), and test_expected_inputs.py checks only their shape (their hashes take minutes to recompute). The first VM run that agrees on a point moves it into points, in a reviewed commit. mat_z_rank_wide's calibration hashes were computed on a spot VM (n2-standard-16, Nov 23 2026; up to 16 min each, for the certified-rank inputs), the smaller two also in the project.",
+ "pending": {
+  "galois_group_small:l": {
+   "n": 12,
+   "variants": 1,
+   "input_hash": "196815565"
+  },
+  "galois_group_small:m": {
+   "n": 8,
+   "variants": 1,
+   "input_hash": "356994766"
+  },
+  "galois_group_small:s": {
+   "n": 6,
+   "variants": 1,
+   "input_hash": "141415947"
+  },
+  "hecke_matrix:l": {
+   "n": 97,
+   "variants": 1,
+   "input_hash": "808210933"
+  },
+  "hecke_matrix:m": {
+   "n": 11,
+   "variants": 1,
+   "input_hash": "808210847"
+  },
+  "hecke_matrix:s": {
+   "n": 2,
+   "variants": 1,
+   "input_hash": "808210838"
+  },
+  "hecke_matrix_prebuilt:l": {
+   "input_hash": "808210933",
+   "n": 97,
+   "variants": 1
+  },
+  "hecke_matrix_prebuilt:m": {
+   "input_hash": "808210847",
+   "n": 11,
+   "variants": 1
+  },
+  "hecke_matrix_prebuilt:s": {
+   "input_hash": "808210838",
+   "n": 2,
+   "variants": 1
+  },
+  "mat_fp31_charpoly:c0": {
+   "n": 59,
+   "variants": 8,
+   "input_hash": "540580246"
+  },
+  "mat_fp31_charpoly:c1": {
+   "n": 105,
+   "variants": 8,
+   "input_hash": "647710310"
+  },
+  "mat_fp31_charpoly:c2": {
+   "n": 187,
+   "variants": 8,
+   "input_hash": "110005103"
+  },
+  "mat_fp31_charpoly:c3": {
+   "n": 333,
+   "variants": 8,
+   "input_hash": "665242312"
+  },
+  "mat_fp31_charpoly:c4": {
+   "n": 592,
+   "variants": 8,
+   "input_hash": "800723522"
+  },
+  "mat_fp31_charpoly:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "971559880"
+  },
+  "mat_fp31_charpoly:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "667857989"
+  },
+  "mat_fp31_charpoly:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "776023185"
+  },
+  "mat_fp31_det:c0": {
+   "n": 122,
+   "variants": 8,
+   "input_hash": "208349694"
+  },
+  "mat_fp31_det:c1": {
+   "n": 218,
+   "variants": 8,
+   "input_hash": "158665404"
+  },
+  "mat_fp31_det:c2": {
+   "n": 387,
+   "variants": 8,
+   "input_hash": "105324733"
+  },
+  "mat_fp31_det:c3": {
+   "n": 688,
+   "variants": 8,
+   "input_hash": "299633958"
+  },
+  "mat_fp31_det:c4": {
+   "n": 1224,
+   "variants": 8,
+   "input_hash": "640609974"
+  },
+  "mat_fp31_det:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "971559880"
+  },
+  "mat_fp31_det:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "667857989"
+  },
+  "mat_fp31_det:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "776023185"
+  },
+  "mat_fp31_rank:c0": {
+   "n": 122,
+   "variants": 8,
+   "input_hash": "208349694"
+  },
+  "mat_fp31_rank:c1": {
+   "n": 218,
+   "variants": 8,
+   "input_hash": "158665404"
+  },
+  "mat_fp31_rank:c2": {
+   "n": 387,
+   "variants": 8,
+   "input_hash": "105324733"
+  },
+  "mat_fp31_rank:c3": {
+   "n": 688,
+   "variants": 8,
+   "input_hash": "299633958"
+  },
+  "mat_fp31_rank:c4": {
+   "n": 1223,
+   "variants": 8,
+   "input_hash": "241502811"
+  },
+  "mat_fp31_rank:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "971559880"
+  },
+  "mat_fp31_rank:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "667857989"
+  },
+  "mat_fp31_rank:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "776023185"
+  },
+  "mat_fp31_solve:c0": {
+   "n": 106,
+   "variants": 8,
+   "input_hash": "482964971"
+  },
+  "mat_fp31_solve:c1": {
+   "n": 188,
+   "variants": 8,
+   "input_hash": "947159654"
+  },
+  "mat_fp31_solve:c2": {
+   "n": 335,
+   "variants": 8,
+   "input_hash": "97950272"
+  },
+  "mat_fp31_solve:c3": {
+   "n": 595,
+   "variants": 8,
+   "input_hash": "21714698"
+  },
+  "mat_fp31_solve:c4": {
+   "n": 1058,
+   "variants": 8,
+   "input_hash": "693615129"
+  },
+  "mat_fp31_solve:l": {
+   "n": 400,
+   "variants": 8,
+   "input_hash": "673965137"
+  },
+  "mat_fp31_solve:m": {
+   "n": 160,
+   "variants": 8,
+   "input_hash": "967596677"
+  },
+  "mat_fp31_solve:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "985305985"
+  },
+  "mat_fp_charpoly:c0": {
+   "n": 59,
+   "variants": 8,
+   "input_hash": "770670486"
+  },
+  "mat_fp_charpoly:c1": {
+   "n": 105,
+   "variants": 8,
+   "input_hash": "396589592"
+  },
+  "mat_fp_charpoly:c2": {
+   "n": 187,
+   "variants": 8,
+   "input_hash": "892518264"
+  },
+  "mat_fp_charpoly:c3": {
+   "n": 333,
+   "variants": 8,
+   "input_hash": "155267895"
+  },
+  "mat_fp_charpoly:c4": {
+   "n": 592,
+   "variants": 8,
+   "input_hash": "542254701"
+  },
+  "mat_fp_det:c0": {
+   "n": 122,
+   "variants": 8,
+   "input_hash": "439680061"
+  },
+  "mat_fp_det:c1": {
+   "n": 218,
+   "variants": 8,
+   "input_hash": "981948290"
+  },
+  "mat_fp_det:c2": {
+   "n": 387,
+   "variants": 8,
+   "input_hash": "438108019"
+  },
+  "mat_fp_det:c3": {
+   "n": 688,
+   "variants": 8,
+   "input_hash": "933800001"
+  },
+  "mat_fp_det:c4": {
+   "n": 1224,
+   "variants": 8,
+   "input_hash": "61937367"
+  },
+  "mat_fp_rank:c0": {
+   "n": 122,
+   "variants": 8,
+   "input_hash": "439680061"
+  },
+  "mat_fp_rank:c1": {
+   "n": 218,
+   "variants": 8,
+   "input_hash": "981948290"
+  },
+  "mat_fp_rank:c2": {
+   "n": 387,
+   "variants": 8,
+   "input_hash": "438108019"
+  },
+  "mat_fp_rank:c3": {
+   "n": 688,
+   "variants": 8,
+   "input_hash": "933800001"
+  },
+  "mat_fp_rank:c4": {
+   "n": 1223,
+   "variants": 8,
+   "input_hash": "829039473"
+  },
+  "mat_fp_solve:c0": {
+   "n": 106,
+   "variants": 8,
+   "input_hash": "351910578"
+  },
+  "mat_fp_solve:c1": {
+   "n": 188,
+   "variants": 8,
+   "input_hash": "197024135"
+  },
+  "mat_fp_solve:c2": {
+   "n": 335,
+   "variants": 8,
+   "input_hash": "791339548"
+  },
+  "mat_fp_solve:c3": {
+   "n": 595,
+   "variants": 8,
+   "input_hash": "696338882"
+  },
+  "mat_fp_solve:c4": {
+   "n": 1058,
+   "variants": 8,
+   "input_hash": "342325696"
+  },
+  "mat_z_elementary_divisors:c0": {
+   "n": 12,
+   "variants": 8,
+   "input_hash": "201144882"
+  },
+  "mat_z_elementary_divisors:c1": {
+   "n": 24,
+   "variants": 8,
+   "input_hash": "215860605"
+  },
+  "mat_z_elementary_divisors:c2": {
+   "n": 48,
+   "variants": 8,
+   "input_hash": "365423674"
+  },
+  "mat_z_elementary_divisors:c3": {
+   "n": 96,
+   "variants": 8,
+   "input_hash": "943473195"
+  },
+  "mat_z_elementary_divisors:c4": {
+   "n": 192,
+   "variants": 8,
+   "input_hash": "802334827"
+  },
+  "mat_z_elementary_divisors:l": {
+   "n": 60,
+   "variants": 1,
+   "input_hash": "548784494"
+  },
+  "mat_z_elementary_divisors:m": {
+   "n": 24,
+   "variants": 8,
+   "input_hash": "215860605"
+  },
+  "mat_z_elementary_divisors:s": {
+   "n": 12,
+   "variants": 8,
+   "input_hash": "201144882"
+  },
+  "mat_z_elementary_divisors_hard:l": {
+   "n": 100,
+   "variants": 4,
+   "input_hash": "870992852"
+  },
+  "mat_z_elementary_divisors_hard:m": {
+   "n": 60,
+   "variants": 4,
+   "input_hash": "416957991"
+  },
+  "mat_z_elementary_divisors_hard:s": {
+   "n": 30,
+   "variants": 4,
+   "input_hash": "470661165"
+  },
+  "mat_z_rank:c0": {
+   "n": 114,
+   "variants": 8,
+   "input_hash": "919160649"
+  },
+  "mat_z_rank:c1": {
+   "n": 204,
+   "variants": 8,
+   "input_hash": "637482691"
+  },
+  "mat_z_rank:c2": {
+   "n": 362,
+   "variants": 8,
+   "input_hash": "708513545"
+  },
+  "mat_z_rank:c3": {
+   "n": 644,
+   "variants": 8,
+   "input_hash": "550645032"
+  },
+  "mat_z_rank:c4": {
+   "n": 1145,
+   "variants": 8,
+   "input_hash": "505286096"
+  },
+  "mat_z_rank_wide:c0": {
+   "input_hash": "531346180",
+   "n": 85,
+   "variants": 8
+  },
+  "mat_z_rank_wide:c1": {
+   "input_hash": "689581221",
+   "n": 151,
+   "variants": 8
+  },
+  "mat_z_rank_wide:c2": {
+   "input_hash": "316277446",
+   "n": 268,
+   "variants": 8
+  },
+  "mat_z_rank_wide:c3": {
+   "input_hash": "565143403",
+   "n": 477,
+   "variants": 8
+  },
+  "mat_z_rank_wide:c4": {
+   "input_hash": "223634763",
+   "n": 848,
+   "variants": 8
+  },
+  "mat_z_smith_hard:l": {
+   "n": 100,
+   "variants": 4,
+   "input_hash": "870992852"
+  },
+  "mat_z_smith_hard:m": {
+   "n": 60,
+   "variants": 4,
+   "input_hash": "416957991"
+  },
+  "mat_z_smith_hard:s": {
+   "n": 30,
+   "variants": 4,
+   "input_hash": "470661165"
+  },
+  "poly_fp_factor_dense:l": {
+   "n": 500,
+   "variants": 8,
+   "input_hash": "168856292"
+  },
+  "poly_fp_factor_dense:m": {
+   "n": 120,
+   "variants": 8,
+   "input_hash": "264466984"
+  },
+  "poly_fp_factor_dense:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "720978558"
+  },
+  "poly_fp_mul:c0": {
+   "n": 5096,
+   "variants": 8,
+   "input_hash": "183644479"
+  },
+  "poly_fp_mul:c1": {
+   "n": 24229,
+   "variants": 8,
+   "input_hash": "994691979"
+  },
+  "poly_fp_mul:c2": {
+   "n": 117799,
+   "variants": 8,
+   "input_hash": "515956616"
+  },
+  "poly_fp_mul:c3": {
+   "n": 582663,
+   "variants": 8,
+   "input_hash": "158411277"
+  },
+  "poly_fp_mul:c4": {
+   "n": 2921707,
+   "variants": 8,
+   "input_hash": "260180386"
+  },
+  "poly_z_factor_dense:l": {
+   "n": 240,
+   "variants": 8,
+   "input_hash": "329404630"
+  },
+  "poly_z_factor_dense:m": {
+   "n": 120,
+   "variants": 8,
+   "input_hash": "486551508"
+  },
+  "poly_z_factor_dense:s": {
+   "n": 60,
+   "variants": 8,
+   "input_hash": "9479822"
+  },
+  "poly_z_mul:c0": {
+   "n": 4917,
+   "variants": 8,
+   "input_hash": "697118656"
+  },
+  "poly_z_mul:c1": {
+   "n": 23366,
+   "variants": 8,
+   "input_hash": "563554821"
+  },
+  "poly_z_mul:c2": {
+   "n": 113551,
+   "variants": 8,
+   "input_hash": "230893628"
+  },
+  "poly_z_mul:c3": {
+   "n": 561450,
+   "variants": 8,
+   "input_hash": "138169403"
+  },
+  "poly_z_mul:c4": {
+   "n": 2814536,
+   "variants": 8,
+   "input_hash": "961238924"
+  }
+ }
 }

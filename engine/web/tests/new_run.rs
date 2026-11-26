@@ -2,7 +2,8 @@
 // trapped call left behind (a trap runs no destructors) is cleared, and the
 // run generation moves (engine/web's new_run, the live progress's two trap
 // defenses in production), and the binomial factoring route's counts a
-// trapped call left are dropped.  The state is left as a trap leaves it: opened,
+// trapped call left are dropped, and so are a trapped fast product's
+// carried poll work and allowance.  The state is left as a trap leaves it: opened,
 // its guard forgotten.  Its own test binary (the progress state and the
 // generation are the process's), one test.
 use sagebrush_arith::smith::progress::testing;
@@ -37,10 +38,14 @@ fn every_entry_point_starts_a_new_run() {
         assert!(testing::state_set());
         // (and the binomial factoring route's counts, left as a trap leaves them)
         sagebrush_poly::binomial_testing::leave(1000);
+        // (and a fast product's carried poll work and held allowance)
+        sagebrush_arith::nmod_mat::leave_fast_product_state();
+        assert_eq!(sagebrush_arith::nmod_mat::fast_product_state(), ((1, 1000), Some(7)));
         let g = generation();
         call(f, req);
         assert!(!testing::state_set(), "{name}: the stale state survived the call");
         assert_eq!(sagebrush_poly::binomial_testing::pending(), 0, "{name}: the binomial route's stale counts survived the call");
+        assert_eq!(sagebrush_arith::nmod_mat::fast_product_state(), ((0, 0), None), "{name}: the fast product's stale state survived the call");
         assert!(generation() > g, "{name}: the run generation did not move");
     }
     testing::set_threshold(None);

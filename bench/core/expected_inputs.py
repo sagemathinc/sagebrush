@@ -17,12 +17,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 MOD = 1000000007
 P = 65537
+P31 = 2147483647  # (the mat_fp31_* rows: a word-size prime)
 
 
 def ihash(xs) -> int:
@@ -78,8 +81,110 @@ def zpoly(size: int, salt: int) -> list[int]:
     return trim([((i * i * salt + 3 * i + 1) % 1000003) - 500001 for i in range(size)])
 
 
+def dense_poly(size: int, kind: str, v: int) -> list[int]:
+    """The dense factoring rows' input: a monic polynomial of degree size,
+    its coefficients from a 64-bit LCG (not a polynomial in i, whose
+    generating function would be structured), residues mod 65537 (kind
+    "fp") or integers in [-1000, 1000] (kind "z"); the same in every
+    driver."""
+    s = 1000003 * (1 if kind == "fp" else 2) + 7919 * v + 12345
+    out = []
+    for _ in range(size):
+        s = (6364136223846793005 * s + 1442695040888963407) % (1 << 64)
+        r = s >> 33
+        out.append(r % 65537 if kind == "fp" else r % 2001 - 1000)
+    return out + [1]
+
+
+SMITH_P = 1000003
+
+
+def smith_hard_rows(size, v):
+    """The hard Smith family: U diag(1, p, ..., p) V with p = 1000003, U and
+    V unimodular (unit lower times unit upper triangular, off-diagonal
+    entries in [-2^16, 2^16] from a 64-bit LCG), so its Smith form is known
+    and its divisors are large.  The same in every driver."""
+    state = [987654321 + 7919 * v]
+
+    def rnd():
+        state[0] = (6364136223846793005 * state[0] + 1442695040888963407) % (1 << 64)
+        return (state[0] >> 33) % 131073 - 65536
+
+    def unimodular():
+        lo = [
+            [1 if i == j else (rnd() if j < i else 0) for j in range(size)]
+            for i in range(size)
+        ]
+        up = [[1 if i == j else 0 for j in range(size)] for i in range(size)]
+        for i in range(size):
+            for j in range(i + 1, size):
+                up[i][j] = rnd()
+        return [
+            [
+                sum(lo[i][k] * up[k][j] for k in range(min(i, j) + 1))
+                for j in range(size)
+            ]
+            for i in range(size)
+        ]
+
+    u, w = unimodular(), unimodular()
+    ud = [
+        [u[i][j] * (1 if j == 0 else SMITH_P) for j in range(size)] for i in range(size)
+    ]
+    return [
+        [sum(ud[i][k] * w[k][j] for k in range(size)) for j in range(size)]
+        for i in range(size)
+    ]
+
+
+# galois_group_small's inputs by degree, coefficients from the constant term
+# up: a sextic with group PSL(2,5) (6T12, order 60), x^8 - 2 (8T8, order 16,
+# a 2-group) and x^12 - 2 (12T28, order 48): small and imprimitive groups,
+# where S_n's cycle-type certificate doesn't apply (groups checked with a
+# black-box reference)
+SMALL_GROUP_POLYS = {
+    6: [3, 2, -2, -2, -1, 0, 1],
+    8: [-2, 0, 0, 0, 0, 0, 0, 0, 1],
+    12: [-2] + [0] * 11 + [1],
+}
+
+
 def fppoly(size: int, salt: int) -> list[int]:
     return trim([(i * i * salt + 3 * i + 1) % P for i in range(size)])
+
+
+def gemm_entries(size: int, v: int, salt: int) -> list[list[int]]:
+    """drivers/numpy_case.py's base: entry k (row-major) is
+    (2654435761 k + 40503 v + salt) mod 2049 - 1024, an integer in
+    [-1024, 1024]."""
+    c = v * 40503 + salt
+    return [[((i * size + j) * 2654435761 + c) % 2049 - 1024 for j in range(size)] for i in range(size)]
+
+
+def gemm_digest(m: list[list], fmt: str = "q") -> int:
+    """Every entry of a matrix: the CRC-32 and the Adler-32 (zlib's) of its
+    entries as little-endian int64 (fmt "q") or float64 bits ("d"),
+    row-major, as one 64-bit integer (drivers/numpy_case.py's digest)."""
+    flat = [x for r in m for x in r]
+    data = struct.pack("<%d%s" % (len(flat), fmt), *flat)
+    return zlib.crc32(data) << 32 | zlib.adler32(data)
+
+
+def gemm_bits_map(m: list[list[int]]) -> list[list[float]]:
+    """mat_f64_gemm_bits' entries: x / 1024 + 1/3 in float64 (x / 1024 is
+    exact; the sum rounds once, to nearest even)."""
+    third = 1.0 / 3.0
+    return [[x / 1024.0 + third for x in r] for r in m]
+
+
+def gemm_operands(row: str, size: int, v: int) -> list[int]:
+    """The gemm rows' operands: n, v and a digest of every entry of A and of
+    B; for the bits row also the digests of the mapped matrices' bits."""
+    a, b = gemm_entries(size, v, 12345), gemm_entries(size, v, 54321)
+    out = [size, v, gemm_digest(a), gemm_digest(b)]
+    if row == "mat_f64_gemm_bits":
+        out += [gemm_digest(gemm_bits_map(a), "d"), gemm_digest(gemm_bits_map(b), "d")]
+    return out
 
 
 def det_entries(kind: str, size: int, v: int) -> list[int]:
@@ -91,6 +196,8 @@ def det_entries(kind: str, size: int, v: int) -> list[int]:
                 out.append(rat(pow(i + 2 + v, j + 3, 101) - 50, 1 + (i * j) % 7))
             elif kind == "z":
                 out.append(pow(i + 2 + v, j + 3, 1000003) - 500001)
+            elif kind == "fp31":
+                out.append(pow(i + 2 + v, j + 3, P31))
             else:
                 out.append(pow(i + 2 + v, j + 3, P))
     return out
@@ -239,6 +346,110 @@ def katsura_shape(n: int) -> list[int]:
     return [x for pair in sorted(pairs) for x in pair]
 
 
+# The class-group stream rows' discriminants: variant v of a point is the
+# v-th D of its stream, so each repetition meets a D nothing has seen (no
+# cached field or class number), and every system walks the same list.
+# The drivers and the Magma driver build the same streams (a test checks).
+#   prime:     -p, p = 3 (mod 4) prime, from 2 10^(n-1) up
+#   composite: even v: -p q, p = 1 and q = 3 (mod 4); odd v: -4 p q,
+#              p = q = 1 (mod 4); p the first such prime from a pseudo-random
+#              point of [10^h, 10^(h+1)), h = (n-1)//2, q from one of the range
+#              that gives |D| exactly n digits (the 64-bit LCG below, seeded
+#              by n and v), so q / p is no simple ratio that Fermat-type
+#              methods would spot
+#   large_h:   -p, p = 7 (mod 8) prime with (-p | q) = +1 for q = 3 .. 23,
+#              so L(1, chi) and h are large for |D|
+_STREAM_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97)
+
+
+def _is_prime(m):
+    """Miller-Rabin with the first 25 primes as bases (deterministic below
+    3.3 10^24, and far past any doubt for the 40-digit streams)."""
+    if m < 2:
+        return False
+    for b in _STREAM_BASES:
+        if m % b == 0:
+            return m == b
+    d, s = m - 1, 0
+    while d % 2 == 0:
+        d, s = d // 2, s + 1
+    for b in _STREAM_BASES:
+        x = pow(b, d, m)
+        if x in (1, m - 1):
+            continue
+        for _ in range(s - 1):
+            x = x * x % m
+            if x == m - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _nth_prime(start, mod, res, j):
+    """The j-th prime p >= start with p = res (mod mod), j counting from 0."""
+    p = start + (res - start) % mod
+    while True:
+        if _is_prime(p):
+            if j == 0:
+                return p
+            j -= 1
+        p += mod
+
+
+def _lcg(s):
+    """The 64-bit LCG of the dense polynomials, one step."""
+    return (6364136223846793005 * s + 1442695040888963407) % (1 << 64)
+
+
+def _legendre(a, q):
+    t = pow(a % q, (q - 1) // 2, q)
+    return -1 if t == q - 1 else t
+
+
+def stream_disc(kind, n, v):
+    """Variant v's discriminant of the class-group stream `kind` at about n
+    digits (see above)."""
+    if kind == "prime":
+        return -_nth_prime(2 * 10 ** (n - 1), 4, 3, v)
+    if kind == "composite":
+        h = (n - 1) // 2
+        c, r = (1, 3) if v % 2 == 0 else (4, 1)
+        s1 = _lcg(1000003 * n + 7919 * v + 12345)
+        p = _nth_prime(10**h + s1 % (9 * 10**h), 4, 1, 0)
+        # (q from a pseudo-random point of the range that gives |D| exactly
+        # n digits, drawn again in the rare case the prime steps past it)
+        lo, hi = -(-(10 ** (n - 1)) // (c * p)), (10**n - 1) // (c * p)
+        s2 = s1
+        while True:
+            s2 = _lcg(s2)
+            q = _nth_prime(lo + s2 % (hi - lo + 1), 4, r, 0)
+            if q == p:
+                # (p = q would make -4 p q no fundamental discriminant)
+                q = _nth_prime(q + 1, 4, r, 0)
+            if c * p * q < 10**n:
+                return -c * p * q
+    if kind == "large_h":
+        p, left = 2 * 10 ** (n - 1) + (7 - 2 * 10 ** (n - 1)) % 8, v
+        while True:
+            if all(_legendre(-p, q) == 1 for q in (3, 5, 7, 11, 13, 17, 19, 23)) and _is_prime(p):
+                if left == 0:
+                    return -p
+                left -= 1
+            p += 8
+    raise ValueError(kind)
+
+
+# The class-group stream rows: each row's stream (stream_disc) and route
+CG_STREAM = {
+    "class_group_prime": "prime",
+    "class_group_composite": "composite",
+    "class_group_large_h": "large_h",
+    "class_group_proven": "prime",
+    "class_group_generic": "prime",
+}
+
+
 def class_disc(digits: int) -> int:
     return {
         12: -100000000003,
@@ -275,13 +486,24 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return ga + gb
     if row == "poly_fp_factor":
         return [P - 1] + [0] * (n - 1) + [1]
+    if row == "poly_fp_factor_dense":
+        return dense_poly(n, "fp", v)
+    if row == "poly_z_factor_dense":
+        return dense_poly(n, "z", v)
+    if row.endswith("_hard"):
+        return [x for r in smith_hard_rows(n, v) for x in r]
     if row.startswith("mat_") and "_rank_" in row:
         return rank_entries(row, n, v)
+    if row in ("mat_f64_gemm", "mat_f64_gemm_bits"):
+        return gemm_operands(row, n, v)
     if row.startswith("mat_"):
         kind = row.split("_")[1]
         entries = det_entries(kind, n, v)
         if row.endswith("_solve"):
             entries += list(range(1, n + 1))
+        if row.endswith(("_mul", "_mul_fast")):
+            # (B: variant v + n of the same family)
+            entries += det_entries(kind, n, v + n)
         return entries
     if row == "groebner_cyclic":
         return cyclic_shape(n)
@@ -289,10 +511,16 @@ def operands(row: str, n: int, v: int) -> list[int]:
         return katsura_shape(n)
     if row == "class_group":
         return [class_disc(n)]
+    if row in CG_STREAM:
+        return [stream_disc(CG_STREAM[row], n, v)]
     if row == "galois_group":
         return [-1, -1] + [0] * (n - 2) + [1]
+    if row == "galois_group_small":
+        return list(SMALL_GROUP_POLYS[n])
     if row in ("modsym_charpoly", "newforms"):
         return [n, 2]
+    if row in ("hecke_matrix", "hecke_matrix_prebuilt"):
+        return [389, 2, n]
     if row == "ec_aplist":
         return [0, 0, 1, -7, 6, n]
     raise ValueError("no input formula for row " + row)
@@ -311,7 +539,7 @@ def expected(sizes: list[str], only: list[str]) -> dict:
     for row in rows:
         if only and row["id"] not in only:
             continue
-        for key in sizes:
+        for key in (k for k in (sizes or row["sizes"]) if k in row["sizes"]):
             n, k = row["sizes"][key]["n"], run.variants(row, key)
             out[f"{row['id']}:{key}"] = {
                 "n": n,
@@ -323,10 +551,13 @@ def expected(sizes: list[str], only: list[str]) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--size", default="all", help="s, m, l or all")
+    ap.add_argument(
+        "--size", default="all", help="comma-separated sizes (s, m, l, c0 .. c4) or all"
+    )
     ap.add_argument("--only", action="append", default=[], metavar="ROW")
     a = ap.parse_args()
-    sizes = ["s", "m", "l"] if a.size == "all" else a.size.split(",")
+    # ("all": every size each row has, calibration sizes included)
+    sizes = [] if a.size == "all" else a.size.split(",")
     print(json.dumps(expected(sizes, a.only), indent=1, sort_keys=True))
     return 0
 

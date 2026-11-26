@@ -4,6 +4,7 @@ native bindings); the protocol is common.py's."""
 
 from __future__ import annotations
 
+import os
 import sys
 
 import common
@@ -71,7 +72,8 @@ def det_input(ring, size, v=0):
         return matrix(
             ZZ, size, size, lambda i, j: pow(i + 2 + v, j + 3, 1000003) - 500001
         )
-    return matrix(ring, size, size, lambda i, j: pow(i + 2 + v, j + 3, 65537))
+    p = int(ring.characteristic())
+    return matrix(ring, size, size, lambda i, j: pow(i + 2 + v, j + 3, p))
 
 
 # The rank rows beyond the square ones (expected_inputs.py's formulas, which
@@ -120,6 +122,82 @@ def zpoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % 1000003) - 500001 for i in range(size)]
 
 
+def dense_poly(size, kind, v):
+    """The dense factoring rows' input: a monic polynomial of degree size,
+    its coefficients from a 64-bit LCG (not a polynomial in i, whose
+    generating function would be structured), residues mod 65537 (kind
+    "fp") or integers in [-1000, 1000] (kind "z"); the same in every
+    driver."""
+    s = 1000003 * (1 if kind == "fp" else 2) + 7919 * v + 12345
+    out = []
+    for _ in range(size):
+        s = (6364136223846793005 * s + 1442695040888963407) % (1 << 64)
+        r = s >> 33
+        out.append(r % 65537 if kind == "fp" else r % 2001 - 1000)
+    return out + [1]
+
+
+SMITH_P = 1000003
+
+
+def smith_hard_rows(size, v):
+    """The hard Smith family: U diag(1, p, ..., p) V with p = 1000003, U and
+    V unimodular (unit lower times unit upper triangular, off-diagonal
+    entries in [-2^16, 2^16] from a 64-bit LCG), so its Smith form is known
+    and its divisors are large.  The same in every driver."""
+    state = [987654321 + 7919 * v]
+
+    def rnd():
+        state[0] = (6364136223846793005 * state[0] + 1442695040888963407) % (1 << 64)
+        return (state[0] >> 33) % 131073 - 65536
+
+    def unimodular():
+        lo = [
+            [1 if i == j else (rnd() if j < i else 0) for j in range(size)]
+            for i in range(size)
+        ]
+        up = [[1 if i == j else 0 for j in range(size)] for i in range(size)]
+        for i in range(size):
+            for j in range(i + 1, size):
+                up[i][j] = rnd()
+        return [
+            [
+                sum(lo[i][k] * up[k][j] for k in range(min(i, j) + 1))
+                for j in range(size)
+            ]
+            for i in range(size)
+        ]
+
+    u, w = unimodular(), unimodular()
+    ud = [
+        [u[i][j] * (1 if j == 0 else SMITH_P) for j in range(size)] for i in range(size)
+    ]
+    return [
+        [sum(ud[i][k] * w[k][j] for k in range(size)) for j in range(size)]
+        for i in range(size)
+    ]
+
+
+# The threads of the parallel ops: 1, or the -n backend's count (run.py
+# sets BENCH_THREADS; F4 reads SAGEBRUSH_THREADS, also set by run.py)
+THREADS = int(os.environ.get("BENCH_THREADS", "1"))
+
+# hecke_matrix's level: prime, S_2 of dimension 32 (one rational newform,
+# the curve 389a of rank 2, and a 20-dimensional orbit)
+HECKE_LEVEL = 389
+
+# galois_group_small's inputs by degree, coefficients from the constant term
+# up: a sextic with group PSL(2,5) (6T12, order 60), x^8 - 2 (8T8, order 16,
+# a 2-group) and x^12 - 2 (12T28, order 48): small and imprimitive groups,
+# where S_n's cycle-type certificate doesn't apply (groups checked with a
+# black-box reference)
+SMALL_GROUP_POLYS = {
+    6: [3, 2, -2, -2, -1, 0, 1],
+    8: [-2, 0, 0, 0, 0, 0, 0, 0, 1],
+    12: [-2] + [0] * 11 + [1],
+}
+
+
 def fppoly(size, salt):
     return [((i * i * salt + 3 * i + 1) % 65537) for i in range(size)]
 
@@ -132,6 +210,110 @@ def cyclic_ideal(size):
 def katsura_ideal(size):
     R = PolynomialRing(GF(32003), "x", size + 1, order="degrevlex")
     return sage.rings.ideal.Katsura(R)
+
+
+# The class-group stream rows' discriminants: variant v of a point is the
+# v-th D of its stream, so each repetition meets a D nothing has seen (no
+# cached field or class number), and every system walks the same list.
+# The drivers and the Magma driver build the same streams (a test checks).
+#   prime:     -p, p = 3 (mod 4) prime, from 2 10^(n-1) up
+#   composite: even v: -p q, p = 1 and q = 3 (mod 4); odd v: -4 p q,
+#              p = q = 1 (mod 4); p the first such prime from a pseudo-random
+#              point of [10^h, 10^(h+1)), h = (n-1)//2, q from one of the range
+#              that gives |D| exactly n digits (the 64-bit LCG below, seeded
+#              by n and v), so q / p is no simple ratio that Fermat-type
+#              methods would spot
+#   large_h:   -p, p = 7 (mod 8) prime with (-p | q) = +1 for q = 3 .. 23,
+#              so L(1, chi) and h are large for |D|
+_STREAM_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97)
+
+
+def _is_prime(m):
+    """Miller-Rabin with the first 25 primes as bases (deterministic below
+    3.3 10^24, and far past any doubt for the 40-digit streams)."""
+    if m < 2:
+        return False
+    for b in _STREAM_BASES:
+        if m % b == 0:
+            return m == b
+    d, s = m - 1, 0
+    while d % 2 == 0:
+        d, s = d // 2, s + 1
+    for b in _STREAM_BASES:
+        x = pow(b, d, m)
+        if x in (1, m - 1):
+            continue
+        for _ in range(s - 1):
+            x = x * x % m
+            if x == m - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _nth_prime(start, mod, res, j):
+    """The j-th prime p >= start with p = res (mod mod), j counting from 0."""
+    p = start + (res - start) % mod
+    while True:
+        if _is_prime(p):
+            if j == 0:
+                return p
+            j -= 1
+        p += mod
+
+
+def _lcg(s):
+    """The 64-bit LCG of the dense polynomials, one step."""
+    return (6364136223846793005 * s + 1442695040888963407) % (1 << 64)
+
+
+def _legendre(a, q):
+    t = pow(a % q, (q - 1) // 2, q)
+    return -1 if t == q - 1 else t
+
+
+def stream_disc(kind, n, v):
+    """Variant v's discriminant of the class-group stream `kind` at about n
+    digits (see above)."""
+    if kind == "prime":
+        return -_nth_prime(2 * 10 ** (n - 1), 4, 3, v)
+    if kind == "composite":
+        h = (n - 1) // 2
+        c, r = (1, 3) if v % 2 == 0 else (4, 1)
+        s1 = _lcg(1000003 * n + 7919 * v + 12345)
+        p = _nth_prime(10**h + s1 % (9 * 10**h), 4, 1, 0)
+        # (q from a pseudo-random point of the range that gives |D| exactly
+        # n digits, drawn again in the rare case the prime steps past it)
+        lo, hi = -(-(10 ** (n - 1)) // (c * p)), (10**n - 1) // (c * p)
+        s2 = s1
+        while True:
+            s2 = _lcg(s2)
+            q = _nth_prime(lo + s2 % (hi - lo + 1), 4, r, 0)
+            if q == p:
+                # (p = q would make -4 p q no fundamental discriminant)
+                q = _nth_prime(q + 1, 4, r, 0)
+            if c * p * q < 10**n:
+                return -c * p * q
+    if kind == "large_h":
+        p, left = 2 * 10 ** (n - 1) + (7 - 2 * 10 ** (n - 1)) % 8, v
+        while True:
+            if all(_legendre(-p, q) == 1 for q in (3, 5, 7, 11, 13, 17, 19, 23)) and _is_prime(p):
+                if left == 0:
+                    return -p
+                left -= 1
+            p += 8
+    raise ValueError(kind)
+
+
+# The class-group stream rows: each row's stream (stream_disc) and route
+CG_STREAM = {
+    "class_group_prime": "prime",
+    "class_group_composite": "composite",
+    "class_group_large_h": "large_h",
+    "class_group_proven": "prime",
+    "class_group_generic": "prime",
+}
 
 
 def class_disc(digits):
@@ -183,6 +365,10 @@ def prepare(v):
             f = x**n - 1
             operands(coeffs(f))
             return lambda: f.factor()
+        if case_id == "poly_z_factor_dense":
+            f = R(dense_poly(n, "z", v))
+            operands(coeffs(f))
+            return lambda: f.factor()
         f = R(1)
         for i in range(1, n + 1):
             f *= x**2 + (i + 1) * x + (i * i + i + 1 + v)
@@ -205,7 +391,7 @@ def prepare(v):
             ga, gb = g * a, g * b
             operands(coeffs(ga), coeffs(gb))
             return lambda: ga.gcd(gb)
-        f = x**n - 1
+        f = R(dense_poly(n, "fp", v)) if case_id == "poly_fp_factor_dense" else x**n - 1
         operands(coeffs(f))
         return lambda: f.factor()
     if case_id.startswith("mat_") and "_rank_" in case_id:
@@ -216,12 +402,15 @@ def prepare(v):
         ring = (
             ZZ
             if case_id.startswith("mat_z_")
+            else GF(2147483647)
+            if case_id.startswith("mat_fp31_")
             else GF(65537)
             if case_id.startswith("mat_fp_")
             else QQ
         )
-        A = det_input(ring, n, v)
-        op = case_id.rsplit("_", 1)[1]
+        hard = case_id.endswith("_hard")
+        A = matrix(ZZ, smith_hard_rows(n, v)) if hard else det_input(ring, n, v)
+        op = case_id.removesuffix("_hard").rsplit("_", 1)[1]
         operands(A.list())
         if op == "det":
             return lambda: A.det()
@@ -233,6 +422,13 @@ def prepare(v):
             return lambda: A.hermite_form()
         if op == "smith":
             return lambda: A.smith_form()[0]
+        if op == "divisors":
+            return lambda: A.elementary_divisors()
+        if op == "mul":
+            # (B: variant v + n of the same family)
+            B = det_input(ring, n, v + n)
+            operands(A.list(), B.list())
+            return lambda: A * B
         if op == "solve":
             b = vector(ring, [i + 1 for i in range(n)])
             operands(A.list(), list(b))
@@ -252,23 +448,51 @@ def prepare(v):
         operands([D])
         K = QuadraticField(D, "a")
         return lambda: K.class_group()
-    if case_id == "galois_group":
+    if case_id in CG_STREAM:
+        # (variant v's D from the row's stream, its field built outside the
+        # timer: the default route assumes GRH; class_group_proven certifies
+        # without it; class_group_generic takes the generic number field)
+        D = stream_disc(CG_STREAM[case_id], n, v)
+        operands([D])
+        if case_id == "class_group_generic":
+            x = PolynomialRing(QQ, "x").gen()
+            K = NumberField(x**2 - D, "b")
+        else:
+            K = QuadraticField(D, "a")
+        if case_id == "class_group_proven":
+            return lambda: K.class_group(proof=True)
+        return lambda: K.class_group()
+    if case_id in ("galois_group", "galois_group_small"):
         R = PolynomialRing(QQ, "x")
         x = R.gen()
-        f = x**n - x - 1
+        f = R(SMALL_GROUP_POLYS[n]) if case_id == "galois_group_small" else x**n - x - 1
         operands(coeffs(f))
         return lambda: f.galois_group()
     if case_id in ("modsym_charpoly", "newforms"):
         operands([n, 2])
+    if case_id in ("hecke_matrix", "hecke_matrix_prebuilt"):
+        # (T_n at the fixed level 389: the twisted traces build their
+        # newspace data inside each call, so there is no space to prebuild;
+        # the two rows differ on Magma's side only)
+        operands([HECKE_LEVEL, 2, n])
+        S = CuspForms(HECKE_LEVEL, 2)
+        return lambda: S.hecke_matrix(n)
     if case_id == "ec_aplist":
         operands([0, 0, 1, -7, 6, n])
     if case_id == "modsym_charpoly":
-        return lambda: modsym.charpoly_exact(n, 2, threads=1)["charpoly"]
+        return lambda: modsym.charpoly_exact(n, 2, threads=THREADS)["charpoly"]
     if case_id == "newforms":
-        return lambda: mf.newforms(n, 2, bound=30, threads=1)
+        return lambda: mf.newforms(n, 2, bound=30, threads=THREADS)
     if case_id == "ec_aplist":
-        return lambda: ap.aplist([0, 0, 1, -7, 6], n, threads=1)
+        return lambda: ap.aplist([0, 0, 1, -7, 6], n, threads=THREADS)
     raise ValueError(case_id)
+
+
+def known_smith(diagonal):
+    """The hard Smith rows' answer is known: diag(1, p, ..., p).  A wrong
+    one is an error here, even if every system agreed on it."""
+    if case_id.endswith("_hard") and diagonal != [1] + [SMITH_P] * (n - 1):
+        raise AssertionError("the hard Smith form is not diag(1, p, ..., p)")
 
 
 def signature(answer):
@@ -279,14 +503,25 @@ def signature(answer):
     if case_id.startswith("poly_"):
         return "%d:%d" % (answer.degree(), seq_hash(coeffs(answer)))
     if case_id.startswith("mat_"):
-        op = "rank" if "_rank_" in case_id else case_id.rsplit("_", 1)[1]
+        op = (
+            "rank"
+            if "_rank_" in case_id
+            else case_id.removesuffix("_hard").rsplit("_", 1)[1]
+        )
         if op in ("det", "rank"):
             return str(answer)
         if op == "charpoly":
             return "%d:%d" % (answer.degree(), seq_hash(coeffs(answer)))
         if op == "smith":
             diagonal = [abs(int(answer[i, i])) for i in range(n)]
+            known_smith(diagonal)
             return "%d:%d" % (n, seq_hash(diagonal))
+        if op == "divisors":
+            # (the diagonal, as the Smith form's signature: padded with
+            # zeros to n, since some systems list only the nonzero ones)
+            d = [abs(int(x)) for x in answer]
+            known_smith(d + [0] * (n - len(d)))
+            return "%d:%d" % (n, seq_hash(d + [0] * (n - len(d))))
         return "%d:%d" % (
             n,
             matrix_hash(answer if hasattr(answer, "list") else matrix(answer)),
@@ -294,13 +529,20 @@ def signature(answer):
     if case_id.startswith("groebner_"):
         degrees = sorted(f.total_degree() for f in answer)
         return "%d:%d" % (len(answer), seq_hash(degrees))
-    if case_id == "class_group":
+    if case_id == "class_group" or case_id in CG_STREAM:
         inv = sorted(map(int, answer.invariants()))
         return "%d:%s" % (int(answer.order()), ",".join(map(str, inv)))
+    if case_id == "galois_group_small":
+        # (the order and the transitive number: several transitive groups
+        # share an order, e.g. degree 8, order 16)
+        return "%d:T%d" % (int(answer.order()), int(answer.transitive_number()))
     if case_id == "galois_group":
         return str(int(answer.order()))
     if case_id == "modsym_charpoly":
         return "%d:%d" % (len(answer) - 1, seq_hash(answer))
+    if case_id in ("hecke_matrix", "hecke_matrix_prebuilt"):
+        f = answer.charpoly()
+        return "%d:%d" % (f.degree(), seq_hash([int(c) for c in coeffs(f)]))
     if case_id == "newforms":
         forms = answer["newforms"] if isinstance(answer, dict) else answer
         dims = sorted(int(f["dim"] if "dim" in f else f["dimension"]) for f in forms)

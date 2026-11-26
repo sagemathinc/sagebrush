@@ -13,8 +13,11 @@ README.md for the protocol, the backends and the output.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
+import math
+import operator
 import os
 import platform
 import re
@@ -29,10 +32,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-PROTOCOL = 4
+PROTOCOL = 5
 # Input variants per point (items.json may lower it for a row or a size)
 DEFAULT_VARIANTS = 8
 VENV_PY = ROOT / "engine/.venv/bin/python"
+# The blas reference's interpreter: a venv of its own (vm-setup.sh) holding
+# real NumPy with its bundled OpenBLAS, apart from engine/.venv so the
+# Sage-mode driver never sees it
+BLAS_PY = ROOT / ".venv-blas/bin/python"
 PYJS = ROOT / "build/cli/pyjs.cjs"
 MAGMA = Path("/usr/local/bin/magma")
 NATIVE = HERE / "native/target/release/bench-core-native"
@@ -44,11 +51,13 @@ WASM = HERE / "native/target/wasm32-wasip1/release/bench-core-native.wasm"
 WASI_RUN = HERE / "drivers/wasi_run.mjs"
 FLINT_RUST = HERE / "flint-rust/target/release/bench-core-flint"
 # Every backend; a name ending in "-n" is its base run on N threads
-BACKENDS = "user,native,native-host,native-n,wasm,magma,flint,flint-n"
+BACKENDS = "user,user-n,native,native-host,native-n,wasm,magma,flint,flint-n,blas,blas-n"
 # The delegated cgroup v2 directory the memory caps live under (README)
 CGROUP_ROOT = Path(os.environ.get("BENCH_CGROUP", "/sys/fs/cgroup/bench-core"))
 # The threads of the "-n" backends (main sets it: --threads, else nproc)
 THREADS = os.cpu_count() or 1
+# The thread sweep's columns, [(label, cpus)] (main sets it with --sweep)
+SWEEP = None
 # The memory cap of every subprocess (main sets it: a Cap, or None for an
 # explicitly uncapped run)
 CAP = None
@@ -57,6 +66,95 @@ EXPECTED = None
 # the CPU flags worth recording (SIMD and the arithmetic extensions)
 FLAGS = re.compile(r"^(avx|avx2|avx512\w*|fma|bmi2|adx|sse4_2|asimd|sve\w*|neon)$")
 LINE = re.compile(r"^(RESULT|TIME|INPUTS)\|(.*)$", re.MULTILINE)
+# (protocol 5: a time mode's samples, JSON, before its TIME line)
+# The meter's families (cost::Family): a units line with another count is
+# refused as such, not as a bad sum
+FAMILIES = 10
+UNITS_LINE = re.compile(
+    r"^UNITS\|(\d{1,6})\|(\d{1,20}(?:,\d{1,20}){0,63})\|(\d{1,20})$", re.MULTILINE
+)
+UNITS_NONE = re.compile(r"^UNITS\|unmetered$", re.MULTILINE)
+TIMING_LINE = re.compile(r"^TIMING\|(\{.*\})$", re.MULTILINE)
+TIMING_LIMIT = 1 << 16
+
+
+def parse_timing(text: str) -> dict | None:
+    """A driver's TIMING record, checked (bounded, the fields typed, the
+    sample counts consistent), or None when absent or malformed."""
+    found = TIMING_LINE.findall(text)
+    if not found or len(found[-1]) > TIMING_LIMIT:
+        return None
+    try:
+        t = json.loads(found[-1])
+    except ValueError:
+        return None
+
+    def num(x):
+        return (
+            isinstance(x, (int, float))
+            and not isinstance(x, bool)
+            and x == x
+            and 0 <= x < 1e9
+        )
+
+    if not isinstance(t, dict) or not all(
+        num(t.get(f)) for f in ("granularity", "threshold", "seed", "k")
+    ):
+        return None
+    k = t["k"]
+    if t.get("mode") == "per-op":
+        s = t.get("samples")
+        ok = (
+            isinstance(s, list)
+            and len(s) == k
+            and all(isinstance(v, list) and v and all(num(x) for x in v) for v in s)
+            and len({len(v) for v in s}) == 1
+        )
+    elif t.get("mode") == "stream":
+        # (the stream rows: one sample per variant, variant 0 the cold one)
+        s = t.get("samples")
+        ok = (
+            isinstance(s, list)
+            and len(s) == k
+            and k >= 2
+            and all(isinstance(v, list) and len(v) == 1 and num(v[0]) for v in s)
+        )
+    elif t.get("mode") == "batched":
+        b, o = t.get("batches"), t.get("offsets")
+        ok = (
+            isinstance(b, list)
+            and b
+            and all(num(x) for x in b)
+            and isinstance(o, list)
+            and len(o) == len(b)
+            and all(isinstance(x, int) and 0 <= x < k for x in o)
+            and num(t.get("reps"))
+        )
+    else:
+        ok = False
+    # (the per-variant pass, when asked for: one entry per variant, in order)
+    if ok and "vtime" in t:
+        vt = t["vtime"]
+        ok = (
+            isinstance(vt, list)
+            and len(vt) == k
+            and all(
+                isinstance(e, dict)
+                and e.get("v") == i
+                and all(num(e.get(f)) for f in ("seconds", "min", "max"))
+                and e["min"] <= e["seconds"] <= e["max"]
+                and all(
+                    isinstance(e.get(f), int)
+                    and not isinstance(e.get(f), bool)
+                    and e[f] >= 1
+                    for f in ("reps", "samples")
+                )
+                for i, e in enumerate(vt)
+            )
+        )
+    return t if ok else None
+
+
 SINGLE_THREAD = {
     "SAGEBRUSH_THREADS": "1",
     "RAYON_NUM_THREADS": "1",
@@ -70,7 +168,9 @@ GRACE = 5.0
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--sizes", default="s,m,l", help="comma-separated size keys (s, m, l)"
+        "--sizes",
+        default="s,m,l",
+        help="comma-separated size keys (s, m, l; c0 .. c4, the calibration sizes, on the rows that have them)",
     )
     p.add_argument(
         "--only",
@@ -89,6 +189,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=os.cpu_count() or 1,
         help="the threads of the -n backends (default: the CPU count)",
+    )
+    p.add_argument(
+        "--sweep",
+        action="store_true",
+        help="the thread sweep: the -n backends of the rows marked \"sweep\" "
+        "also timed on 1, 2, 4, 8, ... physical cores, then with the SMT "
+        "siblings, each pinned (core_columns)",
     )
     p.add_argument(
         "--mem-cap",
@@ -155,6 +262,121 @@ def machine(label: str) -> dict:
         "nproc": os.cpu_count(),
         "kernel": platform.release(),
     }
+
+
+def _read(path: str) -> str | None:
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return None
+
+
+def cpu_list(text: str) -> list[int]:
+    """A sysfs CPU list ("0-3,8,10-11") as its CPUs."""
+    out = []
+    for part in text.strip().split(","):
+        if part:
+            lo, _, hi = part.partition("-")
+            out += range(int(lo), int(hi or lo) + 1)
+    return out
+
+
+def core_columns(sysfs: Path = Path("/sys/devices/system/cpu"), allowed=None) -> list:
+    """The thread sweep's columns, [(label, cpus)]: the first c physical
+    cores for c = 1, 2, 4, 8, ... (and all of them), one logical CPU each
+    (the first of its thread_siblings_list), then, with SMT, every logical
+    CPU (label "<count>-smt").  Only the CPUs this process may run on."""
+    allowed = set(os.sched_getaffinity(0) if allowed is None else allowed)
+    groups = set()
+    for f in sysfs.glob("cpu[0-9]*/topology/thread_siblings_list"):
+        cpu = int(f.parent.parent.name[3:])
+        if cpu in allowed:
+            groups.add(tuple(sorted(c for c in cpu_list(f.read_text()) if c in allowed)))
+    firsts = sorted(g[0] for g in groups)
+    cols, c = [], 1
+    while c <= len(firsts):
+        cols.append((str(c), firsts[:c]))
+        c *= 2
+    if cols and len(cols[-1][1]) != len(firsts):
+        cols.append((str(len(firsts)), firsts))
+    every = sorted(x for g in groups for x in g)
+    if len(every) > len(firsts):
+        cols.append((f"{len(every)}-smt", every))
+    return cols
+
+
+def host() -> dict:
+    """What this machine is, in detail, for the cost fits: recorded with
+    every point and never compared (two VMs of one type may differ in
+    microcode, boost or cache sizes without being a different type; the
+    type's identity is `machine`)."""
+    info: dict = {}
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            key, _, value = line.partition(":")
+            key = key.strip()
+            for want, name in (
+                ("cpu family", "family"),
+                ("model", "model"),
+                ("stepping", "stepping"),
+                ("microcode", "microcode"),
+                ("CPU implementer", "implementer"),
+                ("CPU part", "part"),
+                ("CPU variant", "variant"),
+                ("CPU revision", "revision"),
+            ):
+                if key == want and name not in info:
+                    info[name] = value.strip()
+    except OSError:
+        pass
+    cores = set()
+    for d in Path("/sys/devices/system/cpu").glob("cpu[0-9]*/topology"):
+        core, pkg = _read(f"{d}/core_id"), _read(f"{d}/physical_package_id")
+        if core is not None:
+            cores.add((pkg, core))
+    caches = []
+    for d in sorted(Path("/sys/devices/system/cpu/cpu0/cache").glob("index[0-9]*")):
+        level, kind, size = _read(f"{d}/level"), _read(f"{d}/type"), _read(f"{d}/size")
+        if level and kind and size:
+            caches.append({"level": int(level), "type": kind, "size": size})
+    mem = None
+    for line in (_read("/proc/meminfo") or "").splitlines():
+        if line.startswith("MemTotal:"):
+            mem = int(line.split()[1]) * 1024
+    node = shutil.which("node")
+    js = None
+    if node:
+        try:
+            js = subprocess.run(
+                [
+                    node,
+                    "-e",
+                    "console.log(process.versions.node + ' ' + process.versions.v8)",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.split()
+        except (OSError, subprocess.TimeoutExpired):
+            js = None
+    return {
+        "cpu": info,
+        "physical_cores": len(cores) or None,
+        "logical_cpus": os.cpu_count(),
+        "smt_active": _read("/sys/devices/system/cpu/smt/active"),
+        "numa_nodes": len(list(Path("/sys/devices/system/node").glob("node[0-9]*")))
+        or None,
+        "caches": caches,
+        "memory_bytes": mem,
+        "governor": _read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+        "boost": _read("/sys/devices/system/cpu/cpufreq/boost"),
+        "kernel": platform.release(),
+        "node": js[0] if js and len(js) == 2 else None,
+        "v8": js[1] if js and len(js) == 2 else None,
+    }
+
+
+HOST: dict | None = None
 
 
 def toolchain() -> str:
@@ -246,18 +468,21 @@ class Cap:
         return max(total - max(2 << 30, total // 10), 256 << 20)
 
     @staticmethod
-    def problems(root: Path) -> list[str]:
-        """Why caps can't be made under root (none: they can)."""
+    def problems(root: Path, cpuset: bool = False) -> list[str]:
+        """Why caps (and, for the thread sweep, cpusets) can't be made under
+        root (none: they can)."""
         out = []
         if not root.is_dir():
             return [f"{root} does not exist"]
         if not os.access(root, os.W_OK):
             out.append(f"{root} is not writable by this user")
         try:
-            if "memory" not in (root / "cgroup.subtree_control").read_text().split():
-                out.append(
-                    f"the memory controller is not enabled in {root}/cgroup.subtree_control"
-                )
+            enabled = (root / "cgroup.subtree_control").read_text().split()
+            for c in ("memory", "cpuset") if cpuset else ("memory",):
+                if c not in enabled:
+                    out.append(
+                        f"the {c} controller is not enabled in {root}/cgroup.subtree_control"
+                    )
         except OSError as e:
             out.append(f"{root}/cgroup.subtree_control: {e}")
         # (the interfaces teardown needs: cgroup.kill, Linux 5.14; memory.peak, 5.19)
@@ -278,14 +503,17 @@ class Cap:
             )
         return out
 
-    def new(self) -> Path:
-        """A fresh capped cgroup; if any step fails, the directory is removed
-        before the error propagates."""
+    def new(self, cpus: list[int] | None = None) -> Path:
+        """A fresh capped cgroup (pinned to cpus, if given, by cpuset.cpus);
+        if any step fails, the directory is removed before the error
+        propagates."""
         self.k += 1
         d = self.root / f"p-{os.getpid()}-{self.k}"
         self._mkdir(d)
         try:
             self._write(d / "memory.max", str(self.limit))
+            if cpus:
+                self._write(d / "cpuset.cpus", ",".join(map(str, cpus)))
             for name, value in (("memory.swap.max", "0"), ("memory.oom.group", "1")):
                 if (d / name).exists():
                     self._write(d / name, value)
@@ -367,7 +595,12 @@ class Cap:
 
 
 def run_child(
-    cmd: list[str], timeout: float, threads: int = 1, cap: Cap | None = None
+    cmd: list[str],
+    timeout: float,
+    threads: int = 1,
+    cap: Cap | None = None,
+    extra_env: dict | None = None,
+    cpus: list[int] | None = None,
 ) -> dict:
     """Run cmd in its own process group with `threads`-thread settings (and,
     with a cap, in its own capped cgroup); its output, exit status, wall
@@ -376,22 +609,29 @@ def run_child(
     child exits, KILL again for anything it left behind in the group (and
     cgroup.kill for anything in its cgroup), and on any other way out (an
     interruption, an error) KILL and a reap of the child before the
-    exception propagates."""
+    exception propagates.  With cpus, the child is pinned to them: its
+    cgroup's cpuset.cpus (with a cap) and its affinity, so
+    sched_getaffinity, and so available_parallelism, see len(cpus)."""
     env = dict(os.environ, **{k: str(threads) for k in SINGLE_THREAD})
     env["BENCH_THREADS"] = str(threads)
+    env.update(extra_env or {})
     memory = None
     with tempfile.TemporaryFile() as out:
         # (the output file first, then the cgroup: from here on every way
         # out goes through the finally below, which tears the cgroup down)
-        cg = cap.new() if cap else None
+        cg = cap.new(cpus) if cap else None
         enter = None
-        if cg:
-            procs = str(cg / "cgroup.procs")
+        procs = str(cg / "cgroup.procs") if cg else None
+        if cg or cpus:
 
             def enter():
-                # (in the child, before it executes: into its own cgroup)
-                with open(procs, "w") as f:
-                    f.write(str(os.getpid()))
+                # (in the child, before it executes: into its own cgroup,
+                # then onto its cpus)
+                if procs:
+                    with open(procs, "w") as f:
+                        f.write(str(os.getpid()))
+                if cpus:
+                    os.sched_setaffinity(0, cpus)
 
         pgid, status, rusage, timed_out, termed, proc = (
             None,
@@ -473,10 +713,12 @@ def _killpg(pgid: int, sig: int) -> None:
 
 # The base of each derived backend (its driver, and whether the row has one)
 BASE = {
+    "user-n": "user",
     "native-host": "native",
     "native-n": "native",
     "wasm": "native",
     "flint-n": "flint",
+    "blas-n": "blas",
 }
 
 
@@ -504,6 +746,17 @@ def versions() -> dict:
         if VENV_PY.exists()
         else None,
         "magma": "V2.18-5" if MAGMA.exists() else None,
+        # (the blas column's NumPy, and the OpenBLAS its wheel bundles)
+        "numpy": out(
+            [
+                str(BLAS_PY),
+                "-c",
+                "import numpy; b = numpy.__config__.CONFIG['Build Dependencies']['blas']; "
+                "print(numpy.__version__, b.get('name'), b.get('version'))",
+            ]
+        )
+        if BLAS_PY.exists()
+        else None,
     }
 
 
@@ -637,6 +890,8 @@ def artifacts() -> dict:
     out["sagebrush-wheel"] = wheel_sha()
     out["sagebrush-installed"] = dist_files("sagebrush")
     out["python-flint-installed"] = dist_files("python-flint")
+    out["python-blas"] = sha256_file(Path(os.path.realpath(BLAS_PY))) if BLAS_PY.exists() else None
+    out["numpy-installed"] = dist_files("numpy", BLAS_PY) if BLAS_PY.exists() else None
     return out
 
 
@@ -650,6 +905,7 @@ NEEDS = {
     "magma": ("magma",),
     "flint-rust": ("flint-rust",),
     "flint-python": ("python", "python-flint-installed"),
+    "blas": ("python-blas", "numpy-installed"),
 }
 
 
@@ -657,7 +913,7 @@ def needs(backend: str, row: dict) -> tuple:
     """The artifacts a backend executes for this row."""
     base = backend[:-2] if backend.endswith("-n") else backend
     if base == "user":
-        return NEEDS["user-pyjs" if row["backends"]["user"] == "pyjs" else "user"]
+        return NEEDS["user-pyjs" if row["backends"].get("user") == "pyjs" else "user"]
     if base == "flint":
         return NEEDS[
             "flint-rust" if adapter("flint", row) == "flint-rust" else "flint-python"
@@ -733,6 +989,9 @@ def command(backend: str, row: dict, n: int, mode: str, k: int = 1) -> list[str]
     or isn't on this host.  A "-n" backend is its base's command (run on
     THREADS threads by invoke)."""
     if backend.endswith("-n"):
+        # (user-n only on the rows whose code runs in parallel)
+        if backend == "user-n" and not row.get("parallel"):
+            return None
         return command(backend[:-2], row, n, mode, k)
     cid, kinds = row["id"], row["backends"]
     if backend == "native-host":
@@ -749,12 +1008,16 @@ def command(backend: str, row: dict, n: int, mode: str, k: int = 1) -> list[str]
             else None
         )
     if backend == "user":
+        if not kinds.get("user"):
+            # (a row with no user column: the informational native-only rows)
+            return None
         if kinds["user"] == "pyjs":
+            # (the row's own pyjs script; the big-integer rows' by default)
             return (
                 [
                     "node",
                     str(PYJS),
-                    str(HERE / "drivers/sagebrush_bigint.py"),
+                    str(HERE / "drivers" / row.get("pyjs_driver", "sagebrush_bigint.py")),
                     cid,
                     str(n),
                     mode,
@@ -792,7 +1055,14 @@ def command(backend: str, row: dict, n: int, mode: str, k: int = 1) -> list[str]
                 f"variants:={k}",
                 str(HERE / "drivers/magma_case.m"),
             ]
-            if MAGMA.exists()
+            if MAGMA.exists() and kinds.get("magma", True)
+            else None
+        )
+    if backend == "blas":
+        # (numpy_case.py under real NumPy: OPENBLAS_NUM_THREADS from run_child)
+        return (
+            [str(BLAS_PY), str(HERE / "drivers/numpy_case.py"), cid, str(n), mode, str(k)]
+            if kinds.get("blas") and BLAS_PY.exists()
             else None
         )
     if backend == "flint":
@@ -822,10 +1092,11 @@ def adapter(backend: str, row: dict) -> str:
     if backend == "user":
         return (
             "pyjs (WebAssembly)"
-            if row["backends"]["user"] == "pyjs"
+            if row["backends"].get("user") == "pyjs"
             else "Sage mode (engine/.venv)"
         )
     return {
+        "blas": "NumPy with OpenBLAS (.venv-blas)",
         "native": "bench-core-native",
         "native-host": "bench-core-native (target-cpu=native)",
         "wasm": "bench-core-native (wasm32-wasip1, Node WASI)",
@@ -833,12 +1104,67 @@ def adapter(backend: str, row: dict) -> str:
     }[backend]
 
 
+# The targets the engine's cost estimates are calibrated on: their timed
+# runs also time each variant on its own (protocol 5's per-variant pass).
+# The references (Magma, FLINT) need no calibration and skip it.
+VTIME_TARGETS = ("user", "native", "native-host", "wasm")
+
+
+def is_calibration_size(key: str) -> bool:
+    return re.fullmatch(r"c[0-4]", key) is not None
+
+
+def wants_vtime(backend: str, row: dict) -> bool:
+    return (
+        backend in VTIME_TARGETS
+        and row.get("calibration", True) is not False
+        and not row.get("stream")
+    )
+
+
+RATIO_COLUMNS = ("user", "native", "native-host", "wasm")
+
+
+def ratio_columns(row: dict) -> tuple[str, ...]:
+    """The columns that get a 1-thread ratio on this row: all of
+    RATIO_COLUMNS, except a user column limited to user_sizes, which is
+    informational (no ratio, measured or bound)."""
+    return tuple(b for b in RATIO_COLUMNS if not (b == "user" and row.get("user_sizes") is not None))
+
+
+POOL_LINE = re.compile(r"^POOL\|(.*)$", re.M)
+
+
 def invoke(
-    backend: str, row: dict, n: int, mode: str, timeout: float, k: int = 1
+    backend: str,
+    row: dict,
+    n: int,
+    mode: str,
+    timeout: float,
+    k: int = 1,
+    cpus: list[int] | None = None,
 ) -> dict:
+    """One driver run, its output parsed; with cpus (the thread sweep),
+    pinned to them, on len(cpus) threads."""
+    # (the K asked for: the TIME line's parse below reuses k for its reps)
+    want_k = k
     cmd = command(backend, row, n, mode, k)
     s0 = cpu_times()
-    r = run_child(cmd, timeout, THREADS if backend.endswith("-n") else 1, CAP)
+    extra = (
+        {"BENCH_VTIME": "1"}
+        if mode in ("time", "time-fresh") and wants_vtime(backend, row)
+        else None
+    )
+    pinned = cpus is None and bool(row.get("threads_by_affinity"))
+    if pinned:
+        # (code that sizes its own threads from the CPUs it may use, the CLI's
+        # pool: a 1-thread column must be one CPU to be one thread, and an
+        # -n column its THREADS CPUs, the first ones; recorded)
+        cpus = sorted(os.sched_getaffinity(0))[: THREADS if backend.endswith("-n") else 1]
+    threads = len(cpus) if cpus else (THREADS if backend.endswith("-n") else 1)
+    r = run_child(cmd, timeout, threads, CAP, extra, cpus)
+    if pinned:
+        r["cpus"] = cpus
     r["steal"] = max_steal(s0, cpu_times())
     # (Magma 2.18 wraps long lines with backslash-newline)
     text = r.pop("output").replace("\\\n", "")
@@ -848,12 +1174,31 @@ def invoke(
     if r["status"] != "ok":
         r["detail"] = text[-600:]
         return r
+    # (numpy_case.py under the CLI: the pool's record, the workers every
+    # product since its readiness gate ran on, apart from the CPUs; a timed
+    # user run of a threads_by_affinity row must have it)
+    pools = POOL_LINE.findall(text)
+    if pools:
+        try:
+            r["pool"] = json.loads(pools[-1])
+        except ValueError:
+            r["status"], r["detail"] = "error", "malformed POOL line: " + pools[-1][:200]
+            return r
+    elif row.get("threads_by_affinity") and BASE.get(backend, backend) == "user" and mode.startswith("time"):
+        r["status"], r["detail"] = "error", "no POOL record (the pool's readiness gate didn't run)"
+        return r
     kind, fields = found[-1]
     parts = fields.split("|")
     if kind == "INPUTS":
         r["input_hash"] = parts[0]
     elif kind == "RESULT":
+        # (the first op in a fresh process: the cold sample, recorded apart
+        # from the timed samples and never in a fit)
         r["signature"] = parts[1]
+        try:
+            r["seconds_cold"] = float(parts[0])
+        except ValueError:
+            r["status"], r["detail"] = "error", "bad RESULT seconds: " + text[-600:]
     else:
         med, sig, lo, hi, k, count = parts
         r.update(
@@ -864,26 +1209,185 @@ def invoke(
             samples=int(count),
             signature=sig,
         )
+        # (protocol 5's samples; a driver without them yet has none)
+        timing = parse_timing(text)
+        if timing is not None:
+            r["timing"] = timing
+            if "vtime" in timing:
+                r["vtime"] = timing["vtime"]
+    # (after every kind: a timing run's answer is a TIME line, whatever
+    # other line a driver printed last; and a stream run is only its
+    # per-input record, a valid stream TIMING record of exactly K inputs.
+    # Anything else is an error, with the fields of the wrong answer
+    # dropped, so nothing falls back to them)
+    why = None
+    if mode in ("time", "time-fresh", "time-stream") and kind != "TIME":
+        why = f"{mode} needs a TIME line (got {kind})"
+    elif mode == "time-stream":
+        tm = r.get("timing")
+        if not (tm is not None and tm.get("mode") == "stream" and tm.get("k") == want_k):
+            got = "none" if tm is None else "mode %s, K %s" % (tm.get("mode"), tm.get("k"))
+            why = f"time-stream needs a stream TIMING record of K = {want_k} (got {got})"
+    if why:
+        for x in ("seconds", "min", "max", "reps", "samples", "timing", "vtime", "signature", "seconds_cold", "input_hash"):
+            r.pop(x, None)
+        r["status"], r["detail"] = "error", why
     return r
+
+
+def units_report(text: str, k: int) -> tuple[list | str | None, str]:
+    """A units run's report: ("unmetered", ""), or one {v, families, used}
+    per variant, in order, each with FAMILIES families summing to used; or
+    (None, why) when malformed."""
+    if UNITS_NONE.search(text) and not UNITS_LINE.search(text):
+        return "unmetered", ""
+    found = UNITS_LINE.findall(text)
+    if len(found) != k:
+        return None, f"units malformed ({len(found)} lines for {k} variants)"
+    out = []
+    for i, (v, fams, used) in enumerate(found):
+        f = [int(x) for x in fams.split(",")]
+        if int(v) != i:
+            return None, f"units malformed (variant {v} where {i} was due)"
+        if len(f) != FAMILIES:
+            return None, f"units malformed ({len(f)} families, not {FAMILIES}: cost::Family changed?)"
+        if sum(f) != int(used):
+            return None, "units malformed (families must sum to the total)"
+        out.append({"v": i, "families": f, "used": int(used)})
+    return out, ""
+
+
+def parse_units(text: str, k: int) -> list | str | None:
+    """units_report's result alone (None when malformed)."""
+    return units_report(text, k)[0]
+
+
+def units(row: dict, n: int, timeout: float, k: int) -> tuple[list | str | None, str]:
+    """The native driver's meter units for the K variants, checked: the
+    families sum to the total, two 1-thread runs agree (determinism), and
+    an N-thread run agrees with them (the tally is per thread: work moved
+    to other threads would go uncounted).  (units, "") or (None, why)."""
+    cmd = command("native", row, n, "units", k)
+    if cmd is None:
+        return None, "no native driver"
+    runs = []
+    for threads in (1, 1, THREADS):
+        r = run_child(cmd, timeout, threads, CAP)
+        if r["status"] != "ok":
+            return None, f"units run {r['status']}"
+        got, why = units_report(r.get("output", ""), k)
+        if got is None:
+            return None, why
+        runs.append(got)
+    if runs[0] != runs[1]:
+        return None, "units differ between two 1-thread runs"
+    if runs[0] != runs[2]:
+        return None, f"units differ between 1 and {THREADS} threads"
+    return runs[0], ""
+
+
+def working_set(row: dict, n: int) -> int | None:
+    """The row's working_set formula (items.json) at n, in bytes; None
+    without one.  The formula is an expression in n with numbers, + - * /
+    // ** and log2, nothing else (it is data, so it is never eval'd)."""
+    expr = row.get("working_set")
+    if expr is None:
+        return None
+    ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Pow: operator.pow,
+    }
+
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            return node.value
+        if isinstance(node, ast.Name) and node.id == "n":
+            return n
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](ev(node.left), ev(node.right))
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "log2"
+            and len(node.args) == 1
+            and not node.keywords
+        ):
+            return math.log2(ev(node.args[0]))
+        raise ValueError(f"working_set of {row['id']}: {ast.dump(node)[:80]} is not allowed")
+
+    value = ev(ast.parse(expr, mode="eval"))
+    if not value > 0:
+        raise ValueError(f"working_set of {row['id']} at n={n} is {value}")
+    return round(value)
+
+
+# wasm32's address space is 4 GiB; a calibration size whose working-set
+# estimate exceeds half of it is skipped on wasm, and recorded as skipped
+# (the margin: the formula is an estimate, and allocators peak above it)
+WASM_BYTES = 2 << 30
+
+
+def selected(row: dict, key: str, backends: list[str]) -> tuple[list[str], dict]:
+    """The backends a point runs (present on this host and applicable), and
+    those skipped by rule, with why: at a calibration size only the
+    calibrated targets (the references need no calibration, and some sizes
+    would take them far past the point's timeout), and wasm only while the
+    row's working set stays under half its 4 GiB."""
+    n = row["sizes"][key]["n"]
+    present = [b for b in backends if command(b, row, n, "once")]
+    skipped = {}
+    if row.get("user_sizes") is not None and key not in row["user_sizes"]:
+        # (a user column kept at a few sizes only, informational: a route
+        # that doesn't reach the engine yet, too slow for the rest)
+        for b in ("user", "user-n"):
+            if b in present:
+                present.remove(b)
+                skipped[b] = "the user column runs at sizes %s only (user_sizes)" % ", ".join(row["user_sizes"])
+    if is_calibration_size(key):
+        # (the others are skipped by this rule, said so, not "not on host")
+        for b in present:
+            if b not in VTIME_TARGETS:
+                skipped[b] = "calibration sizes time the calibrated targets only"
+        present = [b for b in present if b in VTIME_TARGETS]
+        ws = working_set(row, n)
+        if "wasm" in present and ws is not None and ws > WASM_BYTES:
+            present.remove("wasm")
+            skipped["wasm"] = f"working set {ws} bytes exceeds 2 GiB, half of wasm32's 4 GiB"
+    return present, skipped
 
 
 def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
     size = row["sizes"][key]
     n, timeout = size["n"], float(size["timeout"])
     k = variants(row, key)
+    global HOST
+    if HOST is None:
+        HOST = host()
     rec = dict(
         ident,
+        host=HOST,
         row=row["id"],
         item=row["item"],
         category=row["category"],
         label=row["label"],
         size=key,
         n=n,
+        working_set_bytes=working_set(row, n),
+        **({"stream": True} if row.get("stream") else {}),
+        **({"user_informational": True} if row.get("user_sizes") is not None else {}),
         fresh=row["fresh"],
         variants=k,
         backends={},
     )
-    present = [b for b in backends if command(b, row, n, "once")]
+    present, skipped = selected(row, key, backends)
+    for b, why in skipped.items():
+        rec["backends"][b] = {"status": "skipped", "detail": why}
     arts = ident.get("artifacts") or {}
     for b in list(present):
         missing = [a for a in needs(b, row) if not arts.get(a)]
@@ -898,8 +1402,11 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
         if b not in present and b not in rec["backends"]:
             rec["backends"][b] = {
                 "status": "not applicable"
-                if BASE.get(b, b) in ("native", "flint")
-                and not (row["backends"][BASE.get(b, b)])
+                if (
+                    BASE.get(b, b) in ("native", "flint", "magma", "blas", "user")
+                    and not row["backends"].get(BASE.get(b, b), BASE.get(b, b) == "magma")
+                )
+                or (b == "user-n" and not row.get("parallel"))
                 else "not on host"
             }
     # 1. the inputs each backend builds
@@ -925,7 +1432,7 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
     # the K variants, and their combined signatures must agree too (the
     # check above covers variant 0; this covers all K)
     if rec["status"] == "ok":
-        mode = "time-fresh" if row["fresh"] else "time"
+        mode = "time-stream" if row.get("stream") else ("time-fresh" if row["fresh"] else "time")
         for b in present:
             if rec["backends"][b]["check"]["status"] != "ok":
                 continue
@@ -941,6 +1448,45 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
             for t in timed.values():
                 if t["status"] == "ok":
                     t["status"] = "mismatch"
+        # (a stream point is its per-input pairing: a backend whose stream
+        # run failed, or came back without its stream record, makes the
+        # whole point an error rather than leaving an unpaired one)
+        failed = {b: t.get("detail") or t["status"] for b, t in timed.items() if t["status"] != "ok"}
+        if row.get("stream") and failed and rec["status"] == "ok":
+            rec["status"] = "error"
+            rec["stream_error"] = failed
+        # the thread sweep (--sweep, rows marked "sweep"): each -n backend
+        # again on each column's cpus, pinned; "ends" only the first and
+        # the last column (a flat baseline); a combined signature that
+        # differs from the timed one is a mismatch
+        if SWEEP and row.get("sweep") and rec["status"] == "ok":
+            cols = SWEEP if row["sweep"] == "cores" else [SWEEP[0], SWEEP[-1]]
+            for b in present:
+                if not b.endswith("-n") or "time" not in rec["backends"][b]:
+                    continue
+                sweep = {}
+                for label, cpus in cols:
+                    try:
+                        t = invoke(b, row, n, mode, timeout, k, cpus)
+                    except (OSError, subprocess.SubprocessError) as e:
+                        # (a column that can't be pinned, its cgroup's
+                        # cpuset or the child's affinity refused: that
+                        # column's error, not the point's)
+                        t = {"status": "error", "detail": f"pinning: {type(e).__name__}: {e}"}
+                    t["cpus"] = cpus
+                    if t["status"] == "ok" and t["signature"] not in combined:
+                        t["status"] = "mismatch"
+                    sweep[label] = t
+                rec.setdefault("sweep", {})[b] = sweep
+
+    # 4. the meter's units (calibration rows with a native driver): refused,
+    # as an error, when they are not deterministic or not thread-independent
+    if rec["status"] == "ok" and "native" in present and wants_vtime("native", row):
+        got, why = units(row, n, timeout, k)
+        if got is None:
+            rec["status"], rec["units_error"] = "error", why
+        else:
+            rec["units"] = got
 
     steals = [
         t["steal"]
@@ -955,20 +1501,22 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
 
     # 1-thread ratios against the best 1-thread reference; then our best
     # against theirs over 1 and N threads (the 2x rule's ratio; native-host
-    # never counts toward it: headroom only)
-    refs = {b: sec(b) for b in ("magma", "flint") if sec(b)}
-    if rec["status"] == "ok" and refs:
+    # never counts toward it: headroom only).  A row marked "ratio": false
+    # times different work on each side (hecke_space): no ratio.
+    refs = {b: sec(b) for b in ("magma", "flint", "blas") if sec(b)}
+    if rec["status"] == "ok" and refs and row.get("ratio", True) is not False:
         best = min(refs, key=refs.get)
         rec["best_ref"] = {
             "backend": best,
             "adapter": rec["backends"][best]["adapter"],
             "seconds": refs[best],
         }
-        for b in ("user", "native", "native-host", "wasm"):
+        for b in ratio_columns(row):
+            # (a user column limited to user_sizes is informational: no ratio)
             if sec(b):
                 rec["ratio_" + b.replace("-", "_")] = round(sec(b) / refs[best], 4)
         ours = {b: sec(b) for b in ("native", "native-n") if sec(b)}
-        theirs = {b: sec(b) for b in ("magma", "flint", "flint-n") if sec(b)}
+        theirs = {b: sec(b) for b in ("magma", "flint", "flint-n", "blas", "blas-n") if sec(b)}
         if ours and theirs:
             bo, bt = min(ours, key=ours.get), min(theirs, key=theirs.get)
             rec["best_ours"] = {"backend": bo, "seconds": ours[bo]}
@@ -978,8 +1526,177 @@ def point(row: dict, key: str, backends: list[str], ident: dict) -> dict:
                 "seconds": theirs[bt],
             }
             rec["ratio_best"] = round(ours[bo] / theirs[bt], 4)
+        if row.get("stream"):
+            # (a stream row: each variant is a new input timed once, so the
+            # headline ratios pair the systems input by input: the median of
+            # the per-input ratios, with their quartiles, over the variants
+            # after the first; variant 0 is the cold sample, its ratio kept
+            # apart and never in the median)
+            def per_input(b):
+                t = rec["backends"].get(b, {}).get("time", {})
+                tm = t.get("timing") or {}
+                smp = tm.get("samples")
+                if t.get("status") != "ok" or tm.get("mode") != "stream" or not smp or len(smp) != k:
+                    return None
+                return [x[0] for x in smp]
+
+            ref = per_input(best)
+            for b in ratio_columns(row):
+                ours = per_input(b)
+                if not (ref and ours):
+                    continue
+                ratios = sorted(o / r for o, r in zip(ours[1:], ref[1:]) if r > 0)
+                if not ratios:
+                    continue
+
+                def q(f):
+                    return round(ratios[round(f * (len(ratios) - 1))], 4)
+
+                key = b.replace("-", "_")
+                rec["ratio_" + key + "_of_medians"] = rec.pop("ratio_" + key, None)
+                rec["ratio_" + key] = q(0.5)
+                rec["per_input_" + key] = {
+                    "against": best,
+                    "ratios": [round(x, 4) for x in ratios],
+                    "min": q(0),
+                    "q1": q(0.25),
+                    "median": q(0.5),
+                    "q3": q(0.75),
+                    "max": q(1),
+                    "cold": round(ours[0] / ref[0], 4) if ref[0] > 0 else None,
+                    "reference_zero_samples": sum(1 for r in ref[1:] if r <= 0),
+                }
+            # (no aggregate headline for a stream row: a backend without its
+            # per-input pairing keeps the ratio of medians under that name)
+            for b in ratio_columns(row):
+                key = b.replace("-", "_")
+                if "per_input_" + key not in rec and "ratio_" + key in rec:
+                    rec["ratio_" + key + "_of_medians"] = rec.pop("ratio_" + key)
+        if row.get("cold"):
+            # (a row whose reference reuses internal state across repetitions
+            # in one process, hecke_matrix: every headline ratio is the cold
+            # first samples', like for like, against the reference with the
+            # fastest cold first op; each warm one is kept as <name>_warm; a
+            # ratio without both cold samples has no headline)
+            def cold(b):
+                return rec["backends"].get(b, {}).get("check", {}).get("seconds_cold")
+
+            for key in [x for x in rec if x.startswith("ratio_")]:
+                rec[key + "_warm"] = rec.pop(key)
+            crefs = {b: cold(b) for b in ("magma", "flint") if cold(b)}
+            if crefs:
+                cbest = min(crefs.values())
+                for b in ratio_columns(row):
+                    if cold(b):
+                        rec["ratio_" + b.replace("-", "_")] = round(cold(b) / cbest, 4)
+                cours = [cold(b) for b in ("native", "native-n") if cold(b)]
+                ctheirs = [cold(b) for b in ("magma", "flint", "flint-n") if cold(b)]
+                if cours and ctheirs:
+                    rec["ratio_best"] = round(min(cours) / min(ctheirs), 4)
+            rec["ratio_basis"] = "cold"
+    if rec["status"] == "ok" and row.get("ratio", True) is not False:
+        coarse_bounds(rec, ratio_columns(row))
     rec["complete"] = True
     return rec
+
+
+# A timed value within this many ticks of its timer's resolution (Magma's
+# 10 ms clock against a stream input timed once) is too coarse for a ratio:
+# the headline becomes a bound.
+COARSE_TICKS = 5
+
+
+def timed_value(rec: dict, b: str) -> tuple[float, float, list | None] | None:
+    """What a headline ratio uses for backend b, the resolution of the timer
+    it was read with (seconds), and for a stream row the per-input times it
+    pairs (inputs 1 .. K-1); None without a timing record.  A batched
+    median's resolution is the granularity over the repetitions per batch;
+    a stream input, a cold first op and a per-op sample are single
+    readings, so theirs is the granularity."""
+    t = rec["backends"].get(b, {}).get("time", {})
+    tm = t.get("timing") or {}
+    g = tm.get("granularity")
+    if not g or t.get("status") != "ok":
+        return None
+    if rec.get("ratio_basis") == "cold":
+        c = rec["backends"][b].get("check", {}).get("seconds_cold")
+        return None if c is None else (c, g, None)
+    if tm.get("mode") == "stream":
+        smp = [x[0] for x in tm.get("samples") or []][1:]
+        if not smp:
+            return None
+        return (sorted(smp)[(len(smp) - 1) // 2], g, smp)
+    if t.get("seconds") is None:
+        return None
+    if tm.get("mode") == "batched":
+        return (t["seconds"], g / max(1, int(tm.get("reps") or 1)), None)
+    return (t["seconds"], g, None)
+
+
+def coarse_bounds(rec: dict, columns: tuple[str, ...] = RATIO_COLUMNS) -> None:
+    """Each headline ratio whose terms are within COARSE_TICKS of their
+    timers' resolution, as a bound instead: ratio_<x>_bound = {op, value,
+    ticks}, its number kept as ratio_<x>_quantized.  A coarse reference
+    gives ">" ours / (reference + its resolution); coarse ours, "<" (ours +
+    its resolution) / reference; both, no bound (op null).  A stream row's
+    bound is the median of the per-input bounds.  Only the row's ratio
+    columns (ratio_columns) get one: an informational column gets no bound
+    either."""
+
+    def argmin(names, value):
+        got = {b: value(b) for b in names}
+        got = {b: v for b, v in got.items() if v}
+        return min(got, key=got.get) if got else None
+
+    if rec.get("ratio_basis") == "cold":
+        cold = lambda b: rec["backends"].get(b, {}).get("check", {}).get("seconds_cold")  # noqa: E731
+        ref = argmin(("magma", "flint"), cold)
+        best = (argmin(("native", "native-n"), cold), argmin(("magma", "flint", "flint-n"), cold))
+    else:
+        ref = (rec.get("best_ref") or {}).get("backend")
+        best = ((rec.get("best_ours") or {}).get("backend"), (rec.get("best_theirs") or {}).get("backend"))
+    zero = None
+    if ref is None:
+        # (every reference read 0, below its timer: no ratio was formed, but
+        # the reference's time is under one tick, so ours / tick bounds it)
+        zero = next(
+            (b for b in ("magma", "flint", "blas") if (timed_value(rec, b) or (1,))[0] == 0),
+            None,
+        )
+        ref = zero
+    pairs = {"ratio_" + b.replace("-", "_"): (b, ref) for b in columns}
+    pairs["ratio_best"] = best
+    for key, (num, den) in pairs.items():
+        if not (num and den) or (key not in rec and not (zero and key != "ratio_best" and timed_value(rec, num))):
+            continue
+        a, r = timed_value(rec, num), timed_value(rec, den)
+        if a is None or r is None:
+            continue
+        ca, cr = a[0] < COARSE_TICKS * a[1], r[0] < COARSE_TICKS * r[1]
+        if not (ca or cr):
+            continue
+        ticks = {num: round(a[0] / a[1], 2), den: round(r[0] / r[1], 2)}
+        if ca and cr:
+            op, value = None, None
+        else:
+            if a[2] is not None and r[2] is not None and len(a[2]) == len(r[2]):
+                pairs_ = list(zip(a[2], r[2]))
+            else:
+                pairs_ = [(a[0], r[0])]
+            if cr:
+                op, each = ">", [o / (x + r[1]) for o, x in pairs_]
+            else:
+                op, each = "<", [(o + a[1]) / x for o, x in pairs_ if x > 0]
+            each.sort()
+            value = round(each[(len(each) - 1) // 2], 4) if each else None
+            if value is None:
+                op = None
+        # (the numbers it replaces, a stream row's ratio of medians too, kept
+        # under their own names: quantized, not measured)
+        for k in (key, key + "_of_medians"):
+            if k in rec:
+                rec[k.replace(key, key + "_quantized", 1)] = rec.pop(k)
+        rec[key + "_bound"] = {"op": op, "value": value, "ticks": ticks, "within": COARSE_TICKS}
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -1009,16 +1726,86 @@ def secs(x) -> str:
     return f"{x:.3g}" if x < 1 else f"{x:.3f}"
 
 
+def engine_label(rec: dict) -> str:
+    """How a table names the user column's engine: "pinned <sha>" only when
+    it was checked strictly and is the pinned one; on a track tip (pin
+    policy track) "fresh <sha> @ <commit>", so its numbers are never quoted
+    as the pinned release's."""
+    pin = rec.get("engine_pin") or {}
+    sha = str(pin.get("sha256") or "")[:12] or "unknown"
+    commit = str(rec.get("commit") or "")[:12] or "unknown"
+    if pin.get("policy", "strict") == "strict" and pin.get("ok"):
+        return f"pinned {sha}"
+    if pin.get("policy") == "track":
+        return f"fresh {sha} @ {commit}"
+    return f"UNPINNED {sha} @ {commit} (not an official run)"
+
+
+def calibration(out: Path) -> None:
+    """calibration.json, for the fits: every point at a calibration size,
+    and every stream point, measured under this protocol, with what the
+    fits use (n, the working set, the host, the units, and per calibrated
+    target its times and per-variant vtime; for a stream point every
+    backend's seconds per input from input 1 on, references included, its
+    cold input 0 apart as seconds_cold, and the per-input ratios).  A point of another protocol is never mixed in:
+    it is only counted.  A point whose units are "unmetered" (an op the
+    meter doesn't cover yet) has times but no units: the fits must skip it
+    for the unit-cost terms."""
+    points, other = [], 0
+    for path in sorted((out / "rows").glob("*.json")):
+        r = json.loads(path.read_text())
+        if not (is_calibration_size(r.get("size", "")) or r.get("stream")):
+            continue
+        if r.get("protocol") != PROTOCOL:
+            other += 1
+            continue
+        keep = ("row", "size", "n", "variants", "status", "working_set_bytes", "units")
+        keep += ("host", "machine", "commit", "engine_pin")
+        pt = {k: r.get(k) for k in keep}
+        pt["backends"] = {}
+        if r.get("stream"):
+            # (a stream point: every backend's seconds per input, the
+            # references' too, so the fits pair them input by input; input 0
+            # is the cold one)
+            pt["stream"] = True
+            pt["per_input"] = {x: r[x] for x in r if x.startswith("per_input_")}
+        for b, v in r.get("backends", {}).items():
+            t = v.get("time") or {}
+            if r.get("stream") and (t.get("timing") or {}).get("mode") == "stream":
+                # (the cold input 0 apart, so a fit reading the list can't
+                # take it: seconds_per_input starts at input 1)
+                smp = [x[0] for x in t["timing"]["samples"]]
+                pt["backends"].setdefault(b, {}).update(seconds_cold=smp[0], seconds_per_input=smp[1:])
+            if b not in VTIME_TARGETS:
+                continue
+            pt["backends"][b] = dict(pt["backends"].get(b, {}), status=(t or v.get("check") or v).get("status"))
+            pt["backends"][b].update(
+                {x: t.get(x) for x in ("seconds", "min", "max", "reps", "samples", "vtime") if x in t}
+            )
+        points.append(pt)
+    doc = {"protocol": PROTOCOL, "points": points, "other_protocols_skipped": other}
+    write_atomic(out / "calibration.json", json.dumps(doc, indent=1, sort_keys=True) + "\n")
+
+
 def summary(out: Path, items: dict) -> None:
     recs = sorted(
-        (json.loads(p.read_text()) for p in (out / "rows").glob("*.json")),
+        (
+            r
+            for r in (json.loads(p.read_text()) for p in (out / "rows").glob("*.json"))
+            # (the calibration sizes are for the cost fits, not this table:
+            # calibration.json)
+            if not is_calibration_size(r["size"])
+        ),
         key=lambda r: (r["item"], r["row"], "sml".index(r["size"])),
     )
     if not recs:
+        calibration(out)
         return
     m = recs[0]["machine"]
     lines = [
         f"# Core-algorithm harness: {m['label']}",
+        "",
+        f"Engine: {engine_label(recs[0])}.",
         "",
         f"Commit `{recs[0]['commit']}`; {m['cpu']} ({m['arch']}, {m['nproc']} CPUs; flags {' '.join(m['flags']) or 'none recorded'}). "
         f"Memory cap per subprocess: {recs[0].get('mem_cap') or 'none (an uncapped run)'} bytes. "
@@ -1029,17 +1816,22 @@ def summary(out: Path, items: dict) -> None:
         "",
     ]
     gaps = [r for r in recs if (r.get("ratio_best") or 0) > 2]
+    # (a best/best that is only a bound above 2 is a gap too, listed apart)
+    bound_gaps = [r for r in recs if (r.get("ratio_best_bound") or {}).get("op") == ">" and r["ratio_best_bound"]["value"] > 2]
     gaps.sort(key=lambda r: -r["ratio_best"])
     lines += [
         f"- **{r['row']}** {r['size']} (n={r['n']}): best/best {r['ratio_best']:.2f}x ({r['best_ours']['backend']} against {r['best_theirs']['adapter']}); native 1-thread {r.get('ratio_native', 0):.2f}x, user {r.get('ratio_user', 0):.2f}x, wasm {r.get('ratio_wasm', 0):.2f}x"
         for r in gaps
+    ] + [
+        f"- **{r['row']}** {r['size']} (n={r['n']}): best/best > {r['ratio_best_bound']['value']:.2f}x, a bound (a term within {r['ratio_best_bound']['within']} timer ticks)"
+        for r in bound_gaps
     ] or ["None among the rows with a native driver."]
     lines += [
         "",
         "## Every point",
         "",
-        "| item | row | size | n | user | native | native-host | native-N | wasm | Magma | FLINT | FLINT-N | best 1-thread ref | user ratio | native ratio | wasm ratio | best/best | peak MiB | status |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|",
+        "| item | row | size | n | user | native | native-host | native-N | wasm | Magma | FLINT | FLINT-N | BLAS | BLAS-N | best 1-thread ref | user ratio | native ratio | wasm ratio | best/best | peak MiB | status |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|",
     ]
     for r in recs:
 
@@ -1052,14 +1844,68 @@ def summary(out: Path, items: dict) -> None:
         ]
         peaks = [x for x in peaks if x]
         peak = f"{max(peaks) / (1 << 20):.0f}" if peaks else "—"
+        # (a cold row's ratios are the first calls', marked; the warm ones
+        # beside them)
+        def ratio(key, r=r):
+            bd = r.get(key + "_bound")
+            if key not in r and bd:
+                # (a ratio whose terms are within a few timer ticks: a bound)
+                return f"{bd['op']} {bd['value']} (timer)" if bd["op"] else "— (timer)"
+            text = str(r.get(key, "—"))
+            pi = r.get("per_input_" + key[len("ratio_"):])
+            if pi:
+                text += f" per input [{pi['q1']}, {pi['q3']}]"
+            if r.get("ratio_basis") == "cold":
+                text += f" cold (warm {r.get(key + '_warm', '—')})"
+            return text
+
+        user_ratio = ratio("ratio_user")
+        # (a user column kept at a few sizes only: informational, no ratio)
+        user = t("user") + (" (informational)" if r.get("user_informational") and t("user") != "—" else "")
         lines.append(
-            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {t('user')} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {r.get('ratio_user', '—')} | {r.get('ratio_native', '—')} | {r.get('ratio_wasm', '—')} | {r.get('ratio_best', '—')} | {peak} | {r['status']} |"
+            f"| {r['item']} | {r['row']} | {r['size']} | {r['n']} | {user} | {t('native')} | {t('native-host')} | {t('native-n')} | {t('wasm')} | {t('magma')} | {t('flint')} | {t('flint-n')} | {t('blas')} | {t('blas-n')} | {r.get('best_ref', {}).get('adapter', '—')} | {user_ratio} | {ratio('ratio_native')} | {ratio('ratio_wasm')} | {ratio('ratio_best')} | {peak} | {r['status']} |"
         )
+    # the thread sweep: per row and -n backend, each column's median and
+    # its speedup over the 1-core column
+    swept = [r for r in recs if r.get("sweep")]
+    if swept:
+        lines += ["", "## Thread sweep", "", "Medians in seconds, pinned to the column's CPUs (c physical cores, then every logical CPU: -smt); in brackets the speedup over 1 core.", ""]
+        for r in swept:
+            for b, cols in r["sweep"].items():
+                one = (cols.get("1") or {}).get("seconds")
+                cells = []
+                for label, t in cols.items():
+                    sec = t.get("seconds") if t.get("status") == "ok" else None
+                    if sec is None:
+                        cells.append(f"{label}: {t.get('status')}")
+                    else:
+                        up = f" ({one / sec:.2f}x)" if one else ""
+                        # (the CLI pool's workers, when its record says: at
+                        # most 9, whatever the column's CPUs)
+                        w = (t.get("pool") or {}).get("threads")
+                        cells.append(f"{label}: {secs(sec)}{up}" + (f" [{w} workers]" if w else ""))
+                lines.append(f"- **{r['row']}** {r['size']} (n={r['n']}) {b}: " + "; ".join(cells))
     uncovered = [i for i in items.values() if i["status"] != "rows"]
     lines += ["", "## Items without rows", ""] + [
         f"- {i['id']} ({i['title']}): {i['status']}" for i in uncovered
     ]
     write_atomic(out / "summary.md", "\n".join(lines) + "\n")
+    calibration(out)
+
+
+def same_run(old: dict, ident: dict) -> bool:
+    """Whether a point file was measured under this run's identity, so a
+    complete one can be skipped on a rerun.  Every identity field must be
+    equal, except "backends": a point records its results per backend
+    there, one entry for each backend the run asked for, so the names are
+    compared with the run's list."""
+    for k, v in ident.items():
+        if k == "backends":
+            if not isinstance(old.get(k), dict) or sorted(old[k]) != sorted(v):
+                return False
+        elif old.get(k) != v:
+            return False
+    return True
 
 
 def main() -> int:
@@ -1078,23 +1924,31 @@ def main() -> int:
         return 0
     if args.build:
         build()
-    global THREADS, CAP, EXPECTED
+    global THREADS, CAP, EXPECTED, SWEEP
     THREADS = max(1, args.threads)
     if args.expected_inputs:
         EXPECTED = json.loads(args.expected_inputs.read_text())
+    SWEEP = core_columns() if args.sweep else None
     if args.dry_run:
         print(json.dumps(machine(args.host_label)))
+        if SWEEP:
+            print("sweep", json.dumps(SWEEP))
         for row in rows:
-            for key in sizes:
-                found = [
-                    b
-                    for b in backends
-                    if command(b, row, row["sizes"][key]["n"], "once")
-                ]
-                print(row["id"], key, row["sizes"][key]["n"], " ".join(found))
+            for key in (k for k in sizes if k in row["sizes"]):
+                found, skipped = selected(row, key, backends)
+                cols = list(found)
+                cols += [f"{b}:skipped" for b in skipped]
+                cols += [f"vtime:{b}" for b in found if wants_vtime(b, row)]
+                if "native" in found and wants_vtime("native", row):
+                    cols.append("units")
+                if SWEEP and row.get("sweep"):
+                    labels = [c[0] for c in (SWEEP if row["sweep"] == "cores" else [SWEEP[0], SWEEP[-1]])]
+                    cols += [f"{b}@{x}" for b in found if b.endswith("-n") for x in labels]
+                n = row["sizes"][key]["n"]
+                print(row["id"], key, n, f"ws={working_set(row, n)}", " ".join(cols))
         return 0
     if args.mem_cap != "none":
-        problems = Cap.problems(CGROUP_ROOT)
+        problems = Cap.problems(CGROUP_ROOT, cpuset=bool(SWEEP))
         if problems:
             raise SystemExit(
                 "a memory cap needs a delegated cgroup (README, 'Memory caps'):\n- "
@@ -1137,15 +1991,17 @@ def main() -> int:
             "wasm": "wasm32-wasip1, default target features",
         },
         "threads": THREADS,
+        # (the run's sweep columns; not "sweep", which is a point's results)
+        "sweep_columns": [[label, cpus] for label, cpus in SWEEP] if SWEEP else None,
         "mem_cap": CAP.limit if CAP else None,
         "backends": backends,
     }
     for row in rows:
-        for key in sizes:
+        for key in (k for k in sizes if k in row["sizes"]):
             path = out / "rows" / f"{row['id']}-{key}.json"
             if path.exists():
                 old = json.loads(path.read_text())
-                same = all(old.get(k) == ident[k] for k in ident) and (
+                same = same_run(old, ident) and (
                     old.get("n"),
                     old.get("variants"),
                 ) == (row["sizes"][key]["n"], variants(row, key))

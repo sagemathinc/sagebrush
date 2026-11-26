@@ -16,8 +16,9 @@ Each case prints "ok CASE ..." lines and raises on a failure.
     preflight  the host's need at need and need - 1 (the figure hook): the
                route, or the memory error with what fits, never the Python
                path
-    frame      a frame-only non-fit (the frame cap hook) keeps the Python
-               path under its own admission
+    frame      binary at the frame cap (the frame cap hook); one byte past
+               it the fixed limit's memory error, never the Python path,
+               at tall, wide and square shapes
     outcomes   the engine's replies by code: the reservation refused is the
                memory error, called once; an engine without the op falls
                back; protocol and invariant failures are RuntimeError; a
@@ -314,18 +315,35 @@ def case_preflight():
 
 
 def case_frame():
+    # (the binary route at the frame cap; one byte past it the fixed limit's
+    # memory error, never the Python path, which past SBW1's cap always has
+    # at least 2^25 multiply-adds to do: tall, wide and square shapes)
+    import _memguard
     F = GF(32003)
-    A = rand_matrix(F, 1100, 3, 41)
-    q = FB._ech_request_len(1100, 3)
-    want = python_path(A.rank)
-    FB._SBW1_FRAME_CAP = q
-    try:
-        assert calls(A.rank) == (want, [(1100, 3, False)])
-        FB._SBW1_FRAME_CAP = q - 1
-        assert calls(A.rank) == (want, []), "a frame-only non-fit keeps the Python path"
-    finally:
-        FB._SBW1_FRAME_CAP = None
-    ok("Q", q, "binary at the frame cap, the Python path one byte past it")
+    for r, c in [(1100, 3), (3, 1100), (60, 60)]:
+        A = rand_matrix(F, r, c, 41)
+        q = FB._ech_request_len(r, c)
+        want = python_path(A.rank)
+        FB._SBW1_FRAME_CAP = q
+        try:
+            assert calls(A.rank) == (want, [(r, c, False)]), (r, c)
+            FB._SBW1_FRAME_CAP = q - 1
+            try:
+                calls(A.rank)
+                raise AssertionError("%d x %d: admitted past the frame cap" % (r, c))
+            except _memguard.SagebrushMemoryError as e:
+                assert CALLS == [], (r, c, CALLS)
+                assert e.fixed and e.need_bytes == q and e.limit_bytes == q - 1, (r, c, e.need_bytes, e.limit_bytes)
+                assert FB._ech_request_len(e.fits, e.fits) <= q - 1 < FB._ech_request_len(e.fits + 1, e.fits + 1), (r, c, e.fits)
+                assert "The echelon form of a %d x %d matrix" % (r, c) in str(e) and "fixed limit" in str(e), str(e)
+                assert "At most about a %d x %d matrix fits" % (e.fits, e.fits) in str(e), str(e)
+        finally:
+            FB._SBW1_FRAME_CAP = None
+        ok("Q", q, "%d x %d: binary at the frame cap, the fixed limit's memory error one byte past it" % (r, c))
+    # (SBW1's own cap: the largest square that fits is 5792)
+    n = FB._isqrt((FB._ech_frame_cap() - FB._ech_request_len(0, 0)) // 8)
+    assert n == 5792 and FB._ech_request_len(n, n) <= 1 << 28 < FB._ech_request_len(n + 1, n + 1)
+    ok("N", n, "the largest square echelon within SBW1's frame cap")
 
 
 def er(code, text=b"x"):

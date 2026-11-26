@@ -19,6 +19,9 @@ uv venv --seed --python 3.14 engine/.venv >/dev/null
 uv pip install --python engine/.venv/bin/python maturin python-flint==0.9.0 >/dev/null
 (cd engine/py && ../.venv/bin/maturin build --release -i ../.venv/bin/python --out dist >/dev/null)
 uv pip install --python engine/.venv/bin/python engine/py/dist/*.whl >/dev/null
+# the blas reference column: real NumPy (pinned; its wheel bundles OpenBLAS), in a venv of its own
+uv venv --python 3.14 .venv-blas >/dev/null
+uv pip install --python .venv-blas/bin/python --only-binary :all: numpy==2.3.5 >/dev/null
 # the WebAssembly modules, built with CI's path mapping, then the CLI that embeds the engine
 pnpm install --frozen-lockfile >/dev/null
 RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=/home/runner/.cargo" node scripts/build-engine.mjs >/dev/null
@@ -69,3 +72,7 @@ fi
 # the bench drivers: native, native-host, WASI and the Rust FLINT oracle
 SAGEBRUSH_FLINT_PREFIX=$P python3 bench/core/run.py --build --dry-run --mem-cap none >/dev/null
 echo "== built in $((SECONDS - t0)) s"
+# (the caps' and the sweep's cgroup, checked once at the build: a VM whose
+# cgroup can't cap or pin fails its setup, which stops the type, rather
+# than failing every point)
+bash bench/core/cgroup-setup.sh true

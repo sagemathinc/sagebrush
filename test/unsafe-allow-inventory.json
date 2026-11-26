@@ -113,6 +113,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
+   "file": "engine/arith/tests/nmod_fast_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (the fast product's peak against its planned words). Token-identical to engine/web/tests/bin_alloc.rs's audited item (same hash)."
+  },
+  {
    "file": "engine/arith/tests/wire_decode_alloc.rs",
    "item": "impl GlobalAlloc for Counting",
    "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
@@ -747,6 +753,12 @@
    "item": "impl GlobalAlloc for Counting",
    "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it measures the binary nmod_echelon's peak live memory against its reservation (bin_ops::echelon_reservation) and its largest phase. Test-only, not shipped."
+  },
+  {
+   "file": "engine/web/tests/bin_mat_mul_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (the binary GF(p) product's peak against its reservation). Token-identical to engine/web/tests/bin_alloc.rs's audited item (same hash)."
   },
   {
    "file": "engine/web/tests/divrem_alloc.rs",

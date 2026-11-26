@@ -1,6 +1,7 @@
 {
  "version": 1,
  "note": "Rows of the core-algorithm harness (bench/core/README.md). item: the progress board's page-2 id (int: below the list); unlocks: the items that depend on it (math-track plan; a reading of the algorithms, not a measurement). sizes: n and the wall timeout (s) of each subprocess. fresh: every timed repetition gets a newly built input (the operation's objects cache answers). backends: the user-facing path, whether the native driver has a direct engine entry, and which FLINT adapter (rust preferred where it covers the op).",
+ "working_set_note": "working_set: the op's predicted live bytes at size n (run.py records it as working_set_bytes, next to the measured cgroup peak, for the fits' cache steps). A first cut: the operands and the result in 8-byte words (a rational two), the integer matrices' modular image counted once, the normal forms' entries up to the determinant's size; null where no closed form holds (Groebner bases, class groups, Galois groups). An expression in n with + - * / ** and log2.",
  "items": [
   {
    "id": "int",
@@ -63,7 +64,7 @@
    "id": "num0",
    "title": "Dense numerical linear algebra",
    "unlocks": [],
-   "status": "no rows yet (harness step 4)"
+   "status": "rows"
   },
   {
    "id": "num1",
@@ -299,7 +300,8 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "n/2"
   },
   {
    "id": "bigint_gcd",
@@ -326,7 +328,8 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "n/4"
   },
   {
    "id": "poly_z_mul",
@@ -345,6 +348,26 @@
     "l": {
      "n": 20000,
      "timeout": 900
+    },
+    "c0": {
+     "n": 4917,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 23366,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 113551,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 561450,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 2814536,
+     "timeout": 600
     }
    },
    "fresh": false,
@@ -353,7 +376,8 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "working_set": "32*n"
   },
   {
    "id": "poly_z_gcd",
@@ -380,7 +404,8 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "working_set": "32*n"
   },
   {
    "id": "poly_z_factor",
@@ -409,7 +434,10 @@
     "flint": "rust"
    },
    "variants": 1,
-   "variants_note": "one named input, x^n - 1"
+   "variants_note": "one named input, x^n - 1",
+   "structured": true,
+   "structured_note": "x^n - 1: its factors follow from the cyclotomic structure; poly_*_factor_dense is the general case",
+   "working_set": "8*n**2"
   },
   {
    "id": "poly_z_factor_product",
@@ -436,7 +464,36 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "working_set": "32*n**2"
+  },
+  {
+   "id": "poly_z_factor_dense",
+   "item": "poly2",
+   "category": "polynomials over Z",
+   "label": "factor a dense random monic (coefficients in [-1000, 1000])",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 120,
+     "timeout": 300
+    },
+    "l": {
+     "n": 240,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "rust"
+   },
+   "working_set": "8*n**2"
   },
   {
    "id": "poly_fp_mul",
@@ -455,6 +512,26 @@
     "l": {
      "n": 20000,
      "timeout": 900
+    },
+    "c0": {
+     "n": 5096,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 24229,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 117799,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 582663,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 2921707,
+     "timeout": 600
     }
    },
    "fresh": false,
@@ -463,7 +540,8 @@
     "native": true,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "32*n"
   },
   {
    "id": "poly_fp_gcd",
@@ -490,7 +568,8 @@
     "native": true,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "32*n"
   },
   {
    "id": "poly_fp_factor",
@@ -519,7 +598,38 @@
     "flint": "python"
    },
    "variants": 1,
-   "variants_note": "one named input, x^n - 1"
+   "variants_note": "one named input, x^n - 1",
+   "structured": true,
+   "structured_note": "x^n - 1: its factors follow from the cyclotomic structure; poly_*_factor_dense is the general case",
+   "working_set": "8*n**2"
+  },
+  {
+   "id": "poly_fp_factor_dense",
+   "item": "poly2",
+   "category": "polynomials over Fp",
+   "label": "factor a dense random monic (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 120,
+     "timeout": 300
+    },
+    "l": {
+     "n": 500,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "working_set": "8*n**2"
   },
   {
    "id": "mat_z_det",
@@ -546,7 +656,8 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "working_set": "16*n**2"
   },
   {
    "id": "mat_z_rank",
@@ -565,6 +676,26 @@
     "l": {
      "n": 250,
      "timeout": 900
+    },
+    "c0": {
+     "n": 114,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 204,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 362,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 644,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1145,
+     "timeout": 600
     }
    },
    "fresh": false,
@@ -573,7 +704,8 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "working_set": "16*n**2"
   },
   {
    "id": "mat_z_rank_wide",
@@ -592,6 +724,26 @@
     "l": {
      "n": 250,
      "timeout": 1800
+    },
+    "c0": {
+     "n": 85,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 151,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 268,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 477,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 848,
+     "timeout": 600
     }
    },
    "fresh": false,
@@ -600,7 +752,8 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "working_set": "32*n**2"
   },
   {
    "id": "mat_z_rank_def",
@@ -627,7 +780,8 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "working_set": "16*n**2"
   },
   {
    "id": "mat_z_rank_def_p",
@@ -654,7 +808,8 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "working_set": "16*n**2"
   },
   {
    "id": "mat_z_hnf",
@@ -681,7 +836,8 @@
     "native": true,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "8*n**2*(1+n*log2(n)/64)"
   },
   {
    "id": "mat_z_smith",
@@ -709,8 +865,125 @@
     "user": "sage-mode",
     "native": false,
     "magma": true,
+    "flint": false
+   },
+   "compares": "with transforms",
+   "compares_note": "FLINT's snf gives the diagonal only, so it is compared on mat_z_elementary_divisors instead",
+   "working_set": "8*n**2*(1+n*log2(n)/64)"
+  },
+  {
+   "id": "mat_z_elementary_divisors",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "elementary divisors (the Smith form's diagonal)",
+   "sizes": {
+    "s": {
+     "n": 12,
+     "timeout": 120
+    },
+    "m": {
+     "n": 24,
+     "timeout": 300
+    },
+    "l": {
+     "n": 60,
+     "timeout": 900,
+     "variants": 1,
+     "variants_note": "one Sage-mode operation takes about 2 minutes here, so repeating it can't warm anything"
+    },
+    "c0": {
+     "n": 12,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 24,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 48,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 96,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 192,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
     "flint": "python"
-   }
+   },
+   "compares": "diagonal",
+   "calibration_note": "provisional calibration sizes (doubling n; no level-A fit yet): re-fit after the first run",
+   "working_set": "8*n**2*(1+n*log2(n)/64)"
+  },
+  {
+   "id": "mat_z_smith_hard",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "Smith form with transforms, large known divisors",
+   "sizes": {
+    "s": {
+     "n": 30,
+     "timeout": 300
+    },
+    "m": {
+     "n": 60,
+     "timeout": 600
+    },
+    "l": {
+     "n": 100,
+     "timeout": 1800
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": false
+   },
+   "compares": "with transforms",
+   "variants": 4,
+   "input_note": "U diag(1, p, ..., p) V, p = 1000003, U and V random unimodular: the Smith form is known and its divisors are large (the big-integer route)",
+   "working_set": "24*n**2*(1+20*n/64)"
+  },
+  {
+   "id": "mat_z_elementary_divisors_hard",
+   "item": "la2",
+   "category": "linear algebra over Z",
+   "label": "elementary divisors, large known divisors",
+   "sizes": {
+    "s": {
+     "n": 30,
+     "timeout": 300
+    },
+    "m": {
+     "n": 60,
+     "timeout": 600
+    },
+    "l": {
+     "n": 100,
+     "timeout": 1800
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": "python"
+   },
+   "compares": "diagonal",
+   "variants": 4,
+   "input_note": "U diag(1, p, ..., p) V, p = 1000003, U and V random unimodular: the Smith form is known and its divisors are large (the big-integer route)",
+   "working_set": "8*n**2*(1+20*n/64)"
   },
   {
    "id": "mat_z_charpoly",
@@ -737,7 +1010,9 @@
     "native": true,
     "magma": true,
     "flint": "rust"
-   }
+   },
+   "sweep": "ends",
+   "working_set": "16*n**2"
   },
   {
    "id": "mat_fp_det",
@@ -756,6 +1031,26 @@
     "l": {
      "n": 400,
      "timeout": 900
+    },
+    "c0": {
+     "n": 122,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 218,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 387,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 688,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1224,
+     "timeout": 600
     }
    },
    "fresh": false,
@@ -764,7 +1059,8 @@
     "native": true,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "8*n**2"
   },
   {
    "id": "mat_fp_rank",
@@ -783,6 +1079,26 @@
     "l": {
      "n": 400,
      "timeout": 900
+    },
+    "c0": {
+     "n": 122,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 218,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 387,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 688,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1223,
+     "timeout": 600
     }
    },
    "fresh": false,
@@ -791,7 +1107,8 @@
     "native": true,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "8*n**2"
   },
   {
    "id": "mat_fp_solve",
@@ -810,6 +1127,26 @@
     "l": {
      "n": 400,
      "timeout": 900
+    },
+    "c0": {
+     "n": 106,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 188,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 335,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 595,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1058,
+     "timeout": 600
     }
    },
    "fresh": false,
@@ -818,7 +1155,8 @@
     "native": true,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "8*n**2+16*n"
   },
   {
    "id": "mat_fp_charpoly",
@@ -837,6 +1175,26 @@
     "l": {
      "n": 400,
      "timeout": 900
+    },
+    "c0": {
+     "n": 59,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 105,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 187,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 333,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 592,
+     "timeout": 600
     }
    },
    "fresh": false,
@@ -845,7 +1203,365 @@
     "native": true,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "8*n**2"
+  },
+  {
+   "id": "mat_fp_mul",
+   "item": "la0",
+   "category": "linear algebra over Fp",
+   "label": "product A*B (p=65537)",
+   "sizes": {
+    "s": {
+     "n": 200,
+     "timeout": 120
+    },
+    "m": {
+     "n": 600,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1500,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 128,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 215,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 362,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 609,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1024,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "route_note": "the product users get: Sage mode's A * B goes to the engine's nmod_mat_mul, which runs Mat::mul under a fixed allowance of 2^24 words for the fast route's workspace (engine/web bin_ops MAT_MUL_FAST_ALLOWANCE), so the route follows the shape and the prime alone; the native column runs Mat::mul under the same allowance; native-n at the sweep's ends: no parallel product yet, a flat baseline against flint-n",
+   "sweep": "ends",
+   "working_set": "24*n**2"
+  },
+  {
+   "id": "mat_fp_mul_fast",
+   "item": "la0",
+   "category": "linear algebra over Fp",
+   "label": "product A*B (p=65537), the fast route under a fixed generous allowance (informational)",
+   "sizes": {
+    "s": {
+     "n": 200,
+     "timeout": 120
+    },
+    "m": {
+     "n": 600,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1500,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": null,
+    "native": true,
+    "magma": false,
+    "flint": null
+   },
+   "route_note": "the native driver's Mat::mul under a fixed allowance of 2^32 words, far beyond the user path's 2^24: the fast route wherever its plan takes it, whatever the workspace; at these sizes the user path's allowance already admits every plan, so this row times the same route as mat_fp_mul's native column (informational: no ratio, no calibration)",
+   "compares": "the same products as mat_fp_mul; no ratio",
+   "calibration": false,
+   "ratio": false,
+   "working_set": "48*n**2"
+  },
+  {
+   "id": "mat_fp31_det",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "determinant (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 122,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 218,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 387,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 688,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1224,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "working_set": "8*n**2"
+  },
+  {
+   "id": "mat_fp31_rank",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "rank (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 122,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 218,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 387,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 688,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1223,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "working_set": "8*n**2"
+  },
+  {
+   "id": "mat_fp31_solve",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "solve (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 106,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 188,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 335,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 595,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1058,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "working_set": "8*n**2+16*n"
+  },
+  {
+   "id": "mat_fp31_charpoly",
+   "item": "la2",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "characteristic polynomial (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 60,
+     "timeout": 120
+    },
+    "m": {
+     "n": 160,
+     "timeout": 300
+    },
+    "l": {
+     "n": 400,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 59,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 105,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 187,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 333,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 592,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "control_note": "a control: charpoly is not on the folded u64 sums, so it should not move",
+   "working_set": "8*n**2"
+  },
+  {
+   "id": "mat_fp31_mul",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "product A*B (p = 2^31 - 1)",
+   "sizes": {
+    "s": {
+     "n": 200,
+     "timeout": 120
+    },
+    "m": {
+     "n": 600,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1500,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 128,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 215,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 362,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 609,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 1024,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "sage-mode",
+    "native": true,
+    "magma": true,
+    "flint": "python"
+   },
+   "route_note": "the product users get: Sage mode's A * B goes to the engine's nmod_mat_mul, which runs Mat::mul under a fixed allowance of 2^24 words for the fast route's workspace (engine/web bin_ops MAT_MUL_FAST_ALLOWANCE), so the route follows the shape and the prime alone; the native column runs Mat::mul under the same allowance; native-n at the sweep's ends: no parallel product yet, a flat baseline against flint-n",
+   "sweep": "ends",
+   "working_set": "24*n**2"
+  },
+  {
+   "id": "mat_fp31_mul_fast",
+   "item": "la0",
+   "category": "linear algebra over Fp, word-size p",
+   "label": "product A*B (p = 2^31 - 1), the fast route under a fixed generous allowance (informational)",
+   "sizes": {
+    "s": {
+     "n": 200,
+     "timeout": 120
+    },
+    "m": {
+     "n": 600,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1500,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": null,
+    "native": true,
+    "magma": false,
+    "flint": null
+   },
+   "route_note": "the native driver's Mat::mul under a fixed allowance of 2^32 words, far beyond the user path's 2^24: the fast route wherever its plan takes it, whatever the workspace; at these sizes the user path's allowance already admits every plan, so this row times the same route as mat_fp_mul's native column (informational: no ratio, no calibration)",
+   "compares": "the same products as mat_fp31_mul; no ratio",
+   "calibration": false,
+   "ratio": false,
+   "working_set": "48*n**2"
   },
   {
    "id": "mat_q_det",
@@ -872,7 +1588,8 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "32*n**2"
   },
   {
    "id": "mat_q_rank",
@@ -899,7 +1616,8 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "32*n**2"
   },
   {
    "id": "mat_q_rank_wide",
@@ -926,7 +1644,8 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "64*n**2"
   },
   {
    "id": "mat_q_rank_def",
@@ -953,7 +1672,8 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "32*n**2"
   },
   {
    "id": "mat_q_rank_def_p",
@@ -980,7 +1700,8 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "32*n**2"
   },
   {
    "id": "mat_q_solve",
@@ -1007,7 +1728,8 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "32*n**2"
   },
   {
    "id": "mat_q_charpoly",
@@ -1034,7 +1756,102 @@
     "native": false,
     "magma": true,
     "flint": "python"
-   }
+   },
+   "working_set": "32*n**2"
+  },
+  {
+   "id": "mat_f64_gemm",
+   "item": "num0",
+   "category": "dense numerical linear algebra",
+   "label": "f64 product A @ B, integer-valued entries (exact)",
+   "sizes": {
+    "s": {
+     "n": 256,
+     "timeout": 120
+    },
+    "m": {
+     "n": 512,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1024,
+     "timeout": 900
+    },
+    "c0": {
+     "n": 256,
+     "timeout": 600
+    },
+    "c1": {
+     "n": 431,
+     "timeout": 600
+    },
+    "c2": {
+     "n": 724,
+     "timeout": 600
+    },
+    "c3": {
+     "n": 1218,
+     "timeout": 600
+    },
+    "c4": {
+     "n": 2048,
+     "timeout": 600
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "pyjs",
+    "native": false,
+    "magma": false,
+    "flint": null,
+    "blas": true
+   },
+   "pyjs_driver": "numpy_case.py",
+   "variants": 3,
+   "variants_note": "three input pairs: every variant's operands stay in memory, and the largest calibration size is 2048",
+   "route_note": "NumPy's A @ B through the CLI, which takes the engine's wasm GEMM on its thread pool for n >= 256; the pool's size follows the CPUs the process may use, so every 1-thread column is pinned to one CPU (threads_by_affinity); entries integers |x| <= 1024, so every product is exact in f64 and the signature is exact; the reference is NumPy with OpenBLAS, OPENBLAS_NUM_THREADS matched; the CLI's pool has at most 8 helpers, so 9 workers whatever the CPUs (blas gets the column's N): each timed user run records the workers its products ran on (pool); its calibration points carry user times only, with no units (no native column), so the fits skip them for the unit-cost terms",
+   "parallel": true,
+   "sweep": "cores",
+   "threads_by_affinity": true,
+   "working_set": "24*n**2"
+  },
+  {
+   "id": "mat_f64_gemm_bits",
+   "item": "num0",
+   "category": "dense numerical linear algebra",
+   "label": "f64 product A @ B, non-integer entries: the same bits on any number of threads (informational)",
+   "sizes": {
+    "s": {
+     "n": 256,
+     "timeout": 120
+    },
+    "m": {
+     "n": 512,
+     "timeout": 300
+    },
+    "l": {
+     "n": 1024,
+     "timeout": 900
+    }
+   },
+   "fresh": false,
+   "backends": {
+    "user": "pyjs",
+    "native": false,
+    "magma": false,
+    "flint": null
+   },
+   "pyjs_driver": "numpy_case.py",
+   "variants": 3,
+   "variants_note": "three input pairs: every variant's operands stay in memory, and the largest calibration size is 2048",
+   "route_note": "mat_f64_gemm's inputs mapped to x/1024 + 1/3, so the products round; ours only (another library's rounding differs): its signature, a hash of the exact bits, must be the same in every sweep column",
+   "compares": "the exact bits of ours across thread counts; no ratio",
+   "calibration": false,
+   "ratio": false,
+   "parallel": true,
+   "sweep": "cores",
+   "threads_by_affinity": true,
+   "working_set": "24*n**2"
   },
   {
    "id": "groebner_cyclic",
@@ -1063,7 +1880,10 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input, the Cyclic-n ideal"
+   "variants_note": "one named input, the Cyclic-n ideal",
+   "parallel": true,
+   "sweep": "cores",
+   "working_set": null
   },
   {
    "id": "groebner_katsura",
@@ -1092,7 +1912,10 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input, the Katsura-n ideal"
+   "variants_note": "one named input, the Katsura-n ideal",
+   "parallel": true,
+   "sweep": "cores",
+   "working_set": null
   },
   {
    "id": "class_group",
@@ -1121,13 +1944,187 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input per size, a fixed discriminant"
+   "variants_note": "one named input per size, a fixed discriminant",
+   "working_set": null,
+   "route_note": "warm: both systems cache the field and its class group, so the repetitions time a cache hit; the stream rows (class_group_prime and the others) time a new discriminant per input"
+  },
+  {
+   "id": "class_group_prime",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group, a fresh prime discriminant -p per input",
+   "sizes": {
+    "s": {
+     "n": 18,
+     "variants": 24,
+     "timeout": 600
+    },
+    "m": {
+     "n": 28,
+     "variants": 12,
+     "timeout": 900
+    },
+    "l": {
+     "n": 40,
+     "variants": 6,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "a stream of discriminants (stream_disc): each input is a new D, timed once; input 0 is the cold sample",
+   "route_note": "ours: the default class group, assuming GRH; Magma: its quadratic-field route, which takes no proof option (its default, documented as rigorous), so the levels differ: class_group_proven compares at one level",
+   "working_set": null
+  },
+  {
+   "id": "class_group_composite",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group, fresh composite discriminants (-pq and -4pq) per input",
+   "sizes": {
+    "s": {
+     "n": 18,
+     "variants": 24,
+     "timeout": 600
+    },
+    "m": {
+     "n": 28,
+     "variants": 12,
+     "timeout": 900
+    },
+    "l": {
+     "n": 40,
+     "variants": 6,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "a stream of discriminants alternating -pq and -4pq: p the first prime of its class from a pseudo-random point of its decade, q from a pseudo-random point of the range that gives |D| exactly n digits (no simple q / p); each input a new D, timed once; input 0 is the cold sample",
+   "route_note": "ours: the default class group, assuming GRH; Magma: its quadratic-field route, which takes no proof option (its default, documented as rigorous), so the levels differ: class_group_proven compares at one level",
+   "working_set": null
+  },
+  {
+   "id": "class_group_large_h",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group, fresh discriminants of large h / sqrt|D| (about 2)",
+   "sizes": {
+    "s": {
+     "n": 18,
+     "variants": 24,
+     "timeout": 600
+    },
+    "m": {
+     "n": 28,
+     "variants": 12,
+     "timeout": 900
+    },
+    "l": {
+     "n": 40,
+     "variants": 6,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "-p with (-p | q) = +1 for every q up to 23, so L(1, chi) and h are large; each input a new D, timed once",
+   "route_note": "ours: the default class group, assuming GRH; Magma: its quadratic-field route, which takes no proof option (its default, documented as rigorous), so the levels differ: class_group_proven compares at one level",
+   "working_set": null
+  },
+  {
+   "id": "class_group_proven",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "imaginary quadratic class group without GRH (ours certified), fresh prime discriminants",
+   "sizes": {
+    "s": {
+     "n": 11,
+     "variants": 4,
+     "timeout": 600
+    },
+    "m": {
+     "n": 12,
+     "variants": 3,
+     "timeout": 900
+    },
+    "l": {
+     "n": 13,
+     "variants": 3,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "the prime stream at small sizes, where our certificate (a bound about 0.64 sqrt|d|) is feasible",
+   "route_note": "one level on both sides: ours class_group(proof=True), certified without GRH; Magma's quadratic route (its rigorous default). Magma's clock ticks in 10 ms, which these sizes approach",
+   "calibration": false,
+   "working_set": null
+  },
+  {
+   "id": "class_group_generic",
+   "item": "nt1",
+   "category": "number fields",
+   "label": "class group through the generic number field x^2 - D, fresh prime discriminants (informational)",
+   "sizes": {
+    "s": {
+     "n": 10,
+     "variants": 4,
+     "timeout": 600
+    },
+    "m": {
+     "n": 11,
+     "variants": 3,
+     "timeout": 900
+    },
+    "l": {
+     "n": 12,
+     "variants": 3,
+     "timeout": 1800
+    }
+   },
+   "fresh": true,
+   "stream": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants_note": "the prime stream; both sides build NumberField(x^2 - D) rather than the quadratic field",
+   "route_note": "informational: each system's generic number-field route, not its quadratic one; no calibration",
+   "calibration": false,
+   "working_set": null
   },
   {
    "id": "galois_group",
    "item": "nt2",
    "category": "number fields",
-   "label": "Galois group of x^n-x-1",
+   "label": "Galois group of x^n-x-1 (S_n: the cycle-type route)",
    "sizes": {
     "s": {
      "n": 3,
@@ -1150,7 +2147,39 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input, x^n - x - 1"
+   "variants_note": "one named input, x^n - x - 1",
+   "working_set": null
+  },
+  {
+   "id": "galois_group_small",
+   "item": "nt2",
+   "category": "number fields",
+   "label": "Galois group with a small or imprimitive group (PSL(2,5) sextic, x^8 - 2, x^12 - 2)",
+   "sizes": {
+    "s": {
+     "n": 6,
+     "timeout": 120
+    },
+    "m": {
+     "n": 8,
+     "timeout": 300
+    },
+    "l": {
+     "n": 12,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per degree: groups of order 60, 16 and 48",
+   "route_note": "not S_n: needs more than the cycle-type certificate",
+   "working_set": null
   },
   {
    "id": "modsym_charpoly",
@@ -1179,7 +2208,10 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input per size, a fixed level"
+   "variants_note": "one named input per size, a fixed level",
+   "parallel": true,
+   "sweep": "cores",
+   "working_set": "8*(n/12+1)**2"
   },
   {
    "id": "newforms",
@@ -1208,7 +2240,77 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input per size, a fixed level"
+   "variants_note": "one named input per size, a fixed level",
+   "parallel": true,
+   "sweep": "cores",
+   "working_set": "8*(n/12+1)**2"
+  },
+  {
+   "id": "hecke_matrix",
+   "item": "ag3",
+   "category": "modular forms",
+   "label": "T_p on S_2(Gamma0(389)) (p = 2, 11, 97), level to T_p; the user ratio is the cold first calls' (Magma reuses internal state across equal spaces: ratio_user_warm)",
+   "sizes": {
+    "s": {
+     "n": 2,
+     "timeout": 120
+    },
+    "m": {
+     "n": 11,
+     "timeout": 300
+    },
+    "l": {
+     "n": 97,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per size: the level 389, the prime p",
+   "route_note": "ours: twisted traces (each T_p builds its own newspace data, no space object, no cache); Magma: the sign +1 cuspidal modular symbols space (dimension 32 = dim S_2) built inside the timer, then T_p: level to T_p on both sides. Magma's rebuild of an equal space is warm within a process, so the headline user ratio compares the cold first samples (one per process); the warm one is ratio_user_warm",
+   "compares": "charpoly of T_p on S_2",
+   "cold": true,
+   "working_set": "8*32**2"
+  },
+  {
+   "id": "hecke_matrix_prebuilt",
+   "item": "ag3",
+   "category": "modular forms",
+   "label": "T_p on S_2(Gamma0(389)) (p = 2, 11, 97), Magma's space prebuilt (informational)",
+   "sizes": {
+    "s": {
+     "n": 2,
+     "timeout": 120
+    },
+    "m": {
+     "n": 11,
+     "timeout": 300
+    },
+    "l": {
+     "n": 97,
+     "timeout": 900
+    }
+   },
+   "fresh": true,
+   "backends": {
+    "user": "sage-mode",
+    "native": false,
+    "magma": true,
+    "flint": null
+   },
+   "variants": 1,
+   "variants_note": "one named input per size: the level 389, the prime p",
+   "route_note": "Magma's T_p alone, on a sign +1 cuspidal space built outside the timer; ours as in hecke_matrix (no space to prebuild), so the row has no ratio: the gap to hecke_matrix is Magma's space construction",
+   "compares": "charpoly of T_p on S_2; no ratio",
+   "calibration": false,
+   "ratio": false,
+   "working_set": "8*32**2"
   },
   {
    "id": "ec_aplist",
@@ -1237,7 +2339,8 @@
     "flint": null
    },
    "variants": 1,
-   "variants_note": "one named input, the curve 5077a1"
+   "variants_note": "one named input, the curve 5077a1",
+   "working_set": "16*n/(0.693*log2(n))"
   }
  ]
 }

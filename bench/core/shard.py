@@ -48,6 +48,9 @@ ROOT = HERE.parents[1]
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 RUNID_RE = re.compile(r"^[0-9a-f]{16}$")
 TYPE_RE = re.compile(r"^[a-z][a-z0-9]{0,11}$")
+# A point's size: s, m, l, or a calibration size c0 .. c4 (the calibrated
+# targets only)
+SIZE_RE = re.compile(r"^(s|m|l|c[0-4])$")
 TOKEN_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX64L = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -63,6 +66,16 @@ TRANSFER_TRIES = 3
 # type stops
 SSH_READY_S = 600.0
 SETUP_TRIES = 3
+# A point whose run.py fails on this many VMs (the VM still up: not a
+# preemption) fails for the run: it is recorded and no more VMs are spent
+# on it.  A crash that repeats on fresh VMs is the code's, not the VM's.
+POINT_TRIES = 2
+# How much of a failed run.py's output the ledger keeps (its tail: the
+# exception is at the end)
+ERROR_TAIL = 4000
+# A type with this many failed points stops: the failures are systematic
+# (the code or the image), and each one costs POINT_TRIES VMs
+TYPE_POINT_FAILURES = 3
 # The statuses a point's file may end with (terminal records: only "ok"
 # yields timings)
 TERMINAL = {"ok", "mismatch", "input mismatch", "no answer", "timeout", "oom", "error"}
@@ -149,7 +162,7 @@ def validate_plan(plan: dict) -> None:
     need(isinstance(points, list) and points, "points")
     for p in points:
         row, _, size = str(p).partition(":")
-        need(TOKEN_RE.match(row) and size in ("s", "m", "l"), f"point {p!r}")
+        need(TOKEN_RE.match(row) and SIZE_RE.match(size), f"point {p!r}")
     exp = plan.get("expected_inputs")
     need(
         isinstance(exp, dict) and all(p in exp for p in points),
@@ -450,6 +463,40 @@ def vm_identity_of(rec: dict) -> dict:
     return {k: rec.get(k) for k in VM_IDENTITY_KEYS}
 
 
+def point_failed(events: list[dict]) -> set[tuple[str, str]]:
+    """The points that failed for the run (POINT_TRIES run.py failures)."""
+    return {(e["type"], e["key"]) for e in events if e["ev"] == "point-failed"}
+
+
+def type_stops(events: list[dict]) -> dict:
+    """The types stopped by their failed points (TYPE_POINT_FAILURES of
+    them), with why: the same whether the stop happens in this driver or
+    is read back from an earlier driver's ledger."""
+    count: dict = {}
+    last: dict = {}
+    for e in events:
+        if e["ev"] == "point-failed":
+            count[e["type"]] = count.get(e["type"], 0) + 1
+            last[e["type"]] = e["key"]
+    return {
+        tk: f"{n} points failed on this type (last: {last[tk]})"
+        for tk, n in count.items()
+        if n >= TYPE_POINT_FAILURES
+    }
+
+
+def point_errors(events: list[dict]) -> dict:
+    """Each point's run.py failures so far, by (type, key), from the VMs
+    retired for them."""
+    types = {e["name"]: e["type"] for e in events if e["ev"] == "reserve"}
+    out: dict = {}
+    for e in events:
+        if e["ev"] == "retired" and e.get("point_error") and e.get("point"):
+            k = (types.get(e["name"], "?"), e["point"])
+            out[k] = out.get(k, 0) + 1
+    return out
+
+
 def retired_by_type(events: list[dict]) -> dict:
     """How many VMs of each type this ledger retired (setup failures and
     failed points alike), for the run's report."""
@@ -490,11 +537,7 @@ class Rows:
 
     def paths(self, tk: str, key: str) -> tuple[Path, Path]:
         row, _, size = key.partition(":")
-        if (
-            not TYPE_RE.match(tk)
-            or not TOKEN_RE.match(row)
-            or size not in ("s", "m", "l")
-        ):
+        if not TYPE_RE.match(tk) or not TOKEN_RE.match(row) or not SIZE_RE.match(size):
             raise Fatal(f"bad key {tk}/{key}")
         name = f"{row}-{size}"
         return (
@@ -860,6 +903,10 @@ def only_service_accounts(probs: list[str]) -> bool:
 # ------------------------------------------------------------------ the remote side
 
 
+class PointError(Exception):
+    """run.py itself failed on a VM that answered (not ssh's 255)."""
+
+
 class TransferError(Exception):
     """A copy from a VM failed or exceeded its bound."""
 
@@ -1034,12 +1081,15 @@ def point_sizes(plan: dict) -> dict:
 
 def expected_seconds(key: str) -> float:
     """A point's expected cost, for longest-first assignment: the row's
-    timeout (no earlier medians in v1)."""
+    timeout (no earlier medians in v1), times the thread sweep's extra
+    timed runs on the rows marked "sweep" (up to 6 columns, or 2 at the
+    ends)."""
     rows = json.loads((HERE / "items.json").read_text())["rows"]
     row, _, size = key.partition(":")
     for r in rows:
         if r["id"] == row:
-            return float(r["sizes"][size]["timeout"])
+            extra = {"cores": 6, "ends": 2}.get(r.get("sweep"), 0)
+            return float(r["sizes"][size]["timeout"]) * (1 + extra)
     return 0.0
 
 
@@ -1070,6 +1120,7 @@ class Driver:
         self.spend = threading.Lock()
         self.stopped: dict[str, str] = {}
         self.setup_failures: dict[str, int] = {}
+        self.point_failures: dict[tuple[str, str], int] = {}
         self.fatal: list[str] = []
         # (set by anything fatal and by SIGINT/SIGTERM: no new reservation,
         # setup or point after it; the remote's commands in flight are cut)
@@ -1448,13 +1499,17 @@ class Driver:
                 "out",
                 "--expected-inputs",
                 "sb/expected-inputs.json",
+                "--sweep",
             ],
             timeout,
         )
         if r["status"] != "ok":
-            raise TransferError(
-                f"{key} on {vm['name']}: run.py {r['status']} {str(r.get('output', ''))[-300:]}"
-            )
+            what = f"{key} on {vm['name']}: run.py {r['status']} (exit {r.get('exit')}) "
+            tail = str(r.get("output", ""))[-ERROR_TAIL:]
+            if r.get("exit") == 255:
+                # (ssh's own status: the connection, not run.py)
+                raise TransferError(what + tail)
+            raise PointError(what + tail)
         name = f"out/rows/{row}-{size}.json"
         for attempt in range(TRANSFER_TRIES):
             try:
@@ -1524,12 +1579,32 @@ class Driver:
                     key = queue.pop(0)
                 try:
                     self.measure(vm, key)
-                except (TransferError, ProviderError) as e:
+                except (PointError, TransferError, ProviderError) as e:
+                    up = self.alive(vm)
+                    failed = False
                     with self.spend:
-                        queue.insert(0, key)
+                        if isinstance(e, PointError) and up:
+                            n = self.point_failures.get((tk, key), 0) + 1
+                            self.point_failures[(tk, key)] = n
+                            failed = n >= POINT_TRIES
+                        if not failed:
+                            queue.insert(0, key)
+                    if failed:
+                        self.ledger.append(
+                            {
+                                "ev": "point-failed",
+                                "type": tk,
+                                "key": key,
+                                "detail": str(e)[-ERROR_TAIL - 200 :],
+                            }
+                        )
+                        with self.spend:
+                            why = type_stops(self.ledger.events).get(tk)
+                            if why:
+                                self.stopped[tk] = why
                     if self.stop.is_set():
                         return
-                    if not self.alive(vm):
+                    if not up:
                         self.ledger.append(
                             {
                                 "ev": "lost",
@@ -1547,7 +1622,8 @@ class Driver:
                                 "ev": "retired",
                                 "name": vm["name"],
                                 "point": key,
-                                "detail": str(e)[:200],
+                                "point_error": isinstance(e, PointError),
+                                "detail": str(e)[-ERROR_TAIL - 200 :],
                             }
                         )
                         vm = None
@@ -1618,8 +1694,19 @@ class Driver:
                 if v["state"] == "live":
                     self.delete(name)
             self.late_creates()
-            done = self.rows.accepted()
+            # (a point that failed for the run, here or in an earlier
+            # driver, is not measured again; its earlier run.py failures
+            # count toward POINT_TRIES)
+            failed = point_failed(self.ledger.events)
+            self.point_failures = point_errors(self.ledger.events)
+            # (a type an earlier driver stopped for its failed points stays
+            # stopped: no worker, so no reservation, for it)
+            for tk, why in type_stops(self.ledger.events).items():
+                self.stopped.setdefault(tk, why)
+            done = self.rows.accepted() | failed
             for tk, t in self.plan["types"].items():
+                if tk in self.stopped:
+                    continue
                 queue = sorted(
                     (k for k in self.plan["points"] if (tk, k) not in done),
                     key=lambda k: -expected_seconds(k),
@@ -1657,9 +1744,11 @@ class Driver:
             return {"fatal": self.fatal}
         done = self.rows.accepted()
         want = {(tk, k) for tk in self.plan["types"] for k in self.plan["points"]}
+        failed = point_failed(self.ledger.events)
         return {
             "accepted": len(done & want),
-            "left": sorted(f"{tk}/{k}" for tk, k in want - done),
+            "failed": sorted(f"{tk}/{k}" for tk, k in failed & want),
+            "left": sorted(f"{tk}/{k}" for tk, k in want - done - failed),
             "charged_hours": round(charged_hours(self.ledger.events, self.clock()), 3),
             "envelope_hours": self.plan["envelope_hours"],
             "stopped_types": self.stopped,
@@ -1681,8 +1770,11 @@ def make_plan(
 ) -> str:
     """A run directory ready for approval: plan.json (its sha256 printed),
     and payload.tar (a git archive of the clean HEAD, plus .bench-commit and
-    expected-inputs.json). The expected inputs are computed here, in the
-    project, before any VM exists."""
+    expected-inputs.json). The expected inputs come from the reviewed
+    golden file (its confirmed and pending points) where it has the point at
+    the row's current n and K; the rest are computed here, in the project,
+    before any VM exists (a wrong hash fails closed on the VM: an input
+    mismatch)."""
     import secrets
     import tarfile
     import io
@@ -1700,9 +1792,25 @@ def make_plan(
     commit = git("rev-parse", "HEAD").strip()
     run_dir.mkdir(parents=True, exist_ok=False)
     keys = sorted(set(points))
-    sizes = sorted({k.split(":")[1] for k in keys})
-    exp_all = expected_inputs.expected(sizes, sorted({k.split(":")[0] for k in keys}))
-    expected = {k: exp_all[k] for k in keys}
+    import run  # noqa: E402  (the variants rule)
+
+    rows = {r["id"]: r for r in json.loads((HERE / "items.json").read_text())["rows"]}
+    golden = json.loads((HERE / "expected_inputs_golden.json").read_text())
+    known = {**golden["pending"], **golden["points"]}
+    expected = {}
+    for k in keys:
+        row, _, size = k.partition(":")
+        if row not in rows or size not in rows[row]["sizes"]:
+            raise Fatal(f"no such point: {k}")
+        g = known.get(k)
+        now = (rows[row]["sizes"][size]["n"], run.variants(rows[row], size))
+        if g and (g["n"], g["variants"]) == now:
+            expected[k] = {"n": g["n"], "variants": g["variants"], "input_hash": g["input_hash"]}
+    rest = [k for k in keys if k not in expected]
+    if rest:
+        sizes = sorted({k.split(":")[1] for k in rest})
+        exp_all = expected_inputs.expected(sizes, sorted({k.split(":")[0] for k in rest}))
+        expected.update({k: exp_all[k] for k in rest})
     archive = run_dir / "payload.tar"
     subprocess.run(
         ["git", "archive", "--format=tar", "--prefix=", "-o", str(archive), commit],

@@ -417,6 +417,19 @@ class Acceptance(unittest.TestCase):
                 "bc-vm",
             )
 
+    def test_the_host_record_is_never_compared(self):
+        # (microcode, boost or cache sizes may differ between two VMs of
+        # one type: the per-point host record is not part of any identity)
+        self.accept(row(host={"cpu": {"microcode": "0x1"}}))
+        self.rows.check_identity(
+            "x86", row(host={"cpu": {"microcode": "0x2"}}), "bc-vm"
+        )
+        self.rows.check_identity(
+            "x86", row(host={"cpu": {"microcode": "0x3"}}), "bc-vm-2"
+        )
+        self.assertNotIn("host", shard.identity_of(row(host={"x": 1})))
+        self.assertNotIn("host", shard.vm_identity_of(row(host={"x": 1})))
+
     def test_a_rejected_point_records_no_vm_identity(self):
         self.rows.check_identity("x86", row(build={"rustc": "1.99.2"}), "bc-vm-0")
         with self.assertRaises(shard.Fatal):
@@ -777,6 +790,8 @@ class FakeRemote:
         self.refuse = {}
         # (VMs whose build command's connection drops, that many times)
         self.build_exit_255 = {}
+        # (points whose run.py crashes on every VM)
+        self.run_fails = set()
         self.build_fails, self.preempt_on, self.fetch_fails, self.corrupt = (
             False,
             set(),
@@ -834,6 +849,15 @@ class FakeRemote:
         if self.on_run:
             self.on_run(name)
         key = words[words.index("--only") + 1] + ":" + words[words.index("--sizes") + 1]
+        if key in self.run_fails:
+            # (run.py itself crashes: a traceback longer than the old 300
+            # characters, its exception at the end)
+            self.log.append(("run", key, name, -1))
+            return {
+                "status": "error",
+                "exit": 1,
+                "output": "Traceback (most recent call last):\n" + "  frame\n" * 400 + "OSError: [Errno 22] cpuset.cpus",
+            }
         self.provider.clock.t += 1000  # (a point takes time)
         self.log.append(
             (
@@ -991,6 +1015,77 @@ class Drivers(unittest.TestCase):
         )
         self.assertGreaterEqual(first, 2000 / 3600)
         self.assertGreater(rep["charged_hours"], first)
+
+    def test_a_point_that_crashes_run_py_fails_after_two_vms(self):
+        self.remote.run_fails = {"poly_fp_gcd:s"}
+        rep = self.driver().run()
+        self.assertEqual(rep["accepted"], 2)
+        self.assertEqual(rep["failed"], ["x86/poly_fp_gcd:s"])
+        self.assertEqual(rep["left"], [])
+        ret = self.events("retired")
+        self.assertEqual(len(ret), shard.POINT_TRIES)
+        self.assertTrue(all(e["point_error"] for e in ret))
+        # (the exception itself is kept, not just the traceback's frames)
+        self.assertTrue(all(e["detail"].endswith("OSError: [Errno 22] cpuset.cpus") for e in ret))
+        failed = self.events("point-failed")
+        self.assertEqual([(e["type"], e["key"]) for e in failed], [("x86", "poly_fp_gcd:s")])
+        self.assertIn("OSError", failed[0]["detail"])
+        self.assertEqual(len([x for x in self.remote.log if x[0] == "run" and x[1] == "poly_fp_gcd:s"]), shard.POINT_TRIES)
+        self.assertEqual(self.prov.vms, {})
+        # (a later driver on the same run doesn't measure it again)
+        runs = len([x for x in self.remote.log if x[0] == "run"])
+        rep = self.driver().run()
+        self.assertEqual(rep["failed"], ["x86/poly_fp_gcd:s"])
+        self.assertEqual(len([x for x in self.remote.log if x[0] == "run"]), runs)
+
+    def test_a_type_whose_points_all_crash_stops(self):
+        # (systematic: TYPE_POINT_FAILURES failed points stop the type, so a
+        # broken build costs POINT_TRIES VMs per point only that often)
+        self.remote.run_fails = {"poly_fp_mul:s", "poly_fp_gcd:s", "mat_fp_det:s"}
+        rep = self.driver().run()
+        self.assertEqual(rep["accepted"], 0)
+        self.assertEqual(len(rep["failed"]), shard.TYPE_POINT_FAILURES)
+        self.assertIn("points failed on this type", rep["stopped_types"]["x86"])
+        self.assertEqual(len(self.events("retired")), shard.TYPE_POINT_FAILURES * shard.POINT_TRIES)
+        self.assertEqual(self.prov.vms, {})
+
+    def test_a_stopped_type_stays_stopped_after_a_restart(self):
+        # (TYPE_POINT_FAILURES failed points with one point still pending: a
+        # new driver on the same ledger reserves nothing more for the type)
+        self.remote.run_fails = {"poly_fp_mul:s", "poly_fp_gcd:s", "mat_fp_det:s", "poly_fp_mul:m"}
+        self.plan["points"] = self.plan["points"] + ["poly_fp_mul:m"]
+        self.plan["expected_inputs"]["poly_fp_mul:m"] = {"n": 5000, "variants": 8, "input_hash": "104"}
+        (self.d / "plan.json").write_bytes(shard.canonical(self.plan))
+        rep = self.driver().run()
+        self.assertEqual(len(rep["failed"]), shard.TYPE_POINT_FAILURES)
+        self.assertEqual(len(rep["left"]), 1)
+        self.assertIn("x86", rep["stopped_types"])
+        reserved = len(self.events("reserve"))
+        rep = self.driver().run()
+        self.assertEqual(len(self.events("reserve")), reserved)
+        self.assertIn("points failed on this type", rep["stopped_types"]["x86"])
+        self.assertEqual(len(rep["left"]), 1)
+        self.assertEqual(self.prov.vms, {})
+
+    def test_one_crash_then_success_is_accepted(self):
+        self.remote.run_fails = {"poly_fp_gcd:s"}
+
+        def once(name):
+            if len([x for x in self.remote.log if x[0] == "run" and x[1] == "poly_fp_gcd:s"]) == 1:
+                self.remote.run_fails = set()
+
+        self.remote.on_run = once
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["failed"]), (3, []))
+        self.assertEqual(len(self.events("retired")), 1)
+        self.assertEqual(self.events("point-failed"), [])
+
+    def test_a_preempted_point_does_not_count_toward_failure(self):
+        # (the VM went away under run.py: lost, not a point error)
+        self.remote.preempt_on = {"poly_fp_gcd:s"}
+        rep = self.driver().run()
+        self.assertEqual((rep["accepted"], rep["failed"]), (3, []))
+        self.assertEqual(self.events("point-failed"), [])
 
     def test_failing_copies_retire_the_vm_and_the_point_moves(self):
         self.remote.fetch_fails = shard.TRANSFER_TRIES
@@ -1834,6 +1929,67 @@ class Plans2(unittest.TestCase):
             with self.assertRaisesRegex(shard.Fatal, "not clean"):
                 shard.make_plan(d / "run2", types, 18, ["poly_fp_mul:s"])
         shutil.rmtree(d)
+
+
+class PlanInputs(unittest.TestCase):
+    """make_plan's expected inputs: the golden file's where it has the point
+    at the row's current n and K, computed otherwise."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="shard-plan-"))
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.repo = self.d / "repo"
+        self.repo.mkdir()
+        (self.repo / "f.txt").write_text("x\n")
+        for a in (("init", "-q"), ("add", "f.txt"), ("commit", "-q", "-m", "c")):
+            subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                cwd=self.repo,
+                check=True,
+                capture_output=True,
+            )
+
+    def make(self, name, points, golden):
+        from unittest import mock
+        import expected_inputs
+
+        computed = []
+        real = expected_inputs.expected
+
+        def spy(sizes, only):
+            computed.append((tuple(sizes), tuple(only)))
+            return real(sizes, only)
+
+        real_read = Path.read_text
+
+        def read_text(path, *a, **k):
+            if path.name == "expected_inputs_golden.json":
+                return json.dumps(golden)
+            return real_read(path, *a, **k)
+
+        with (
+            mock.patch.object(shard, "ROOT", self.repo),
+            mock.patch.object(expected_inputs, "expected", spy),
+            mock.patch.object(Path, "read_text", read_text),
+        ):
+            shard.make_plan(self.d / name, plan()["types"], 18, points)
+        return json.loads((self.d / name / "plan.json").read_text()), computed
+
+    def test_golden_points_are_not_recomputed(self):
+        g = {"points": {"poly_fp_mul:s": {"n": 1000, "variants": 8, "input_hash": "111"}}, "pending": {}}
+        p, computed = self.make("a", ["poly_fp_mul:s"], g)
+        self.assertEqual(p["expected_inputs"]["poly_fp_mul:s"]["input_hash"], "111")
+        self.assertEqual(computed, [])
+
+    def test_a_stale_golden_point_is_recomputed(self):
+        g = {"points": {}, "pending": {"poly_fp_mul:s": {"n": 999, "variants": 8, "input_hash": "111"}}}
+        p, computed = self.make("b", ["poly_fp_mul:s"], g)
+        self.assertEqual(p["expected_inputs"]["poly_fp_mul:s"]["input_hash"], "308890519")
+        self.assertEqual(computed, [(("s",), ("poly_fp_mul",))])
+
+    def test_an_unknown_point_is_refused(self):
+        with self.assertRaisesRegex(shard.Fatal, "no such point"):
+            self.make("c", ["poly_fp_mul:xl"], {"points": {}, "pending": {}})
 
 
 class Locks(unittest.TestCase):

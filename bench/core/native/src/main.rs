@@ -4,6 +4,7 @@
 //! measures the engine itself; the Sage-mode driver measures what users
 //! get, and the difference between the two is the cost of reaching the
 //! engine.
+use sagebrush_arith::cost::{metered, Meter};
 use sagebrush_arith::nmod::Modulus;
 use sagebrush_arith::zmat::{self, ZMat};
 use sagebrush_arith::{nmod_mat, nmod_poly, zpoly};
@@ -12,6 +13,16 @@ use std::time::Instant;
 
 const MOD: u64 = 1_000_000_007;
 const P: u64 = 65537;
+const P31: u64 = 2_147_483_647;
+/// The informational fast-product rows' allowance (u64 words): fixed, and
+/// beyond any plan's workspace at their sizes, so every product whose plan
+/// takes the fast route runs it (not the engine's admission)
+const FAST_ALLOWANCE: u64 = 1 << 32;
+/// The allowance the user path gives a GF(p) product: Sage mode's A * B goes
+/// to the engine's binary nmod_mat_mul, which runs Mat::mul under this fixed
+/// constant (engine/web/src/bin_ops.rs MAT_MUL_FAST_ALLOWANCE; test_runner.py
+/// checks the two are equal), so the native column times what users get
+const USER_ALLOWANCE: u64 = 1 << 24;
 
 fn residue(x: &BigInt) -> u64 {
     let text = x.to_string();
@@ -35,6 +46,35 @@ fn hash_big(xs: &[BigInt]) -> u64 {
     xs.iter().fold(17, |h, x| (h * 1_000_003 + residue(x)) % MOD)
 }
 
+/// The smallest positive step Instant shows (seconds): protocol 5's timer
+/// granularity.
+/// Batch or rotation j's starting variant (drivers/common.py's offset: the
+/// same schedule, so no variant runs twice in a row).
+fn rotation_offset(seed: u64, j: usize, k: usize) -> usize {
+    if k == 1 {
+        return 0;
+    }
+    ((seed as u128 * 1_000_003 % (k as u128 - 1) + j as u128 * (k > 2) as u128) % k as u128) as usize
+}
+
+/// reps rounded up to whole rotations (drivers/common.py's whole).
+fn whole_rotations(reps: usize, k: usize) -> usize {
+    reps.div_ceil(k) * k
+}
+
+fn timer_granularity() -> f64 {
+    let (mut best, mut last) = (f64::INFINITY, Instant::now());
+    for _ in 0..2000 {
+        let now = Instant::now();
+        let d = now.duration_since(last).as_secs_f64();
+        if d > 0.0 && d < best {
+            best = d;
+        }
+        last = now;
+    }
+    if best.is_finite() { best } else { 1e-9 }
+}
+
 /// One invocation in the protocol of bench/core/drivers/common.py: `build(v)`
 /// makes variant v's operand hash and operation (outside any timing).
 /// `time` runs every variant once untimed (the warm-up, and the answers the
@@ -45,6 +85,32 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
     if mode == "inputs" {
         let hs: Vec<u64> = (0..variants).map(|v| build(v).0).collect();
         println!("INPUTS|{}", hash_u64(&hs));
+        return;
+    }
+    if mode == "units" {
+        // (spec: each variant built and run once, untimed, inside a metered
+        // region on an accounting meter with no bound; one line per variant,
+        // the 10 families in Family order, then the meter's total.  A row
+        // whose engine code charges nothing prints UNITS|unmetered.  Work on
+        // other threads is not counted (the tally is per thread): run.py
+        // compares 1 thread with N to catch that.)
+        let mut lines = Vec::with_capacity(variants);
+        let mut any = false;
+        for v in 0..variants {
+            let mut op = build(v).1;
+            let mut meter = Meter::accounting(u64::MAX);
+            std::hint::black_box(metered(&mut meter, || op()));
+            let u = meter.units();
+            any |= meter.used() > 0;
+            lines.push(format!("UNITS|{}|{}|{}", v, u.0.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","), meter.used()));
+        }
+        if any {
+            for line in lines {
+                println!("{line}");
+            }
+        } else {
+            println!("UNITS|unmetered");
+        }
         return;
     }
     if mode == "once" {
@@ -63,35 +129,135 @@ fn run<T, F: FnMut() -> T>(mode: &str, variants: usize, mut build: impl FnMut(us
         warm += started.elapsed().as_secs_f64();
         sigs.push(sig(&answer));
     }
-    let mut idx = 0usize;
-    let mut reps = |k: usize| {
-        let mut total = 0.0;
-        for _ in 0..k {
-            let op = &mut ops[idx % variants];
-            idx += 1;
-            let started = Instant::now();
-            std::hint::black_box(op());
-            total += started.elapsed().as_secs_f64();
-        }
-        total
-    };
+    // (protocol 5, drivers/common.py: per-op mode at or above
+    // max(1 ms, 1000 g), else batched from seeded offsets; a TIMING record
+    // before the TIME line)
+    let seed: u64 = std::env::var("BENCH_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let forced = std::env::var("BENCH_TIMING").unwrap_or_else(|_| "auto".to_string());
+    let g = timer_granularity();
+    let threshold = 1e-3f64.max(1000.0 * g);
+    let offset = |j: usize| rotation_offset(seed, j, variants);
     let per = warm / variants as f64;
-    let (mut k, mut t) = if per >= TARGET {
-        (1usize, per)
+    let head = format!("\"granularity\":{:e},\"threshold\":{:e},\"seed\":{},\"k\":{}", g, threshold, seed, variants);
+    let mut per_op_samples: Option<Vec<Vec<f64>>> = None;
+    let (record, med, lo, hi, k, count) = if forced == "per-op" || (forced == "auto" && per >= threshold) {
+        let rotations = if per <= 2.0 { 5 } else { 3 };
+        let mut samples: Vec<Vec<f64>> = vec![Vec::with_capacity(rotations); variants];
+        for r in 0..rotations {
+            let start = offset(r);
+            for i in 0..variants {
+                let v = (start + i) % variants;
+                let started = Instant::now();
+                std::hint::black_box(ops[v]());
+                samples[v].push(started.elapsed().as_secs_f64());
+            }
+        }
+        let mut means: Vec<f64> = (0..rotations).map(|r| samples.iter().map(|s| s[r]).sum::<f64>() / variants as f64).collect();
+        means.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let rows: Vec<String> = samples.iter().map(|s| format!("[{}]", s.iter().map(|x| format!("{:e}", x)).collect::<Vec<_>>().join(","))).collect();
+        let record = format!("{{{},\"mode\":\"per-op\",\"samples\":[{}]", head, rows.join(","));
+        per_op_samples = Some(samples);
+        (record, means[rotations / 2], means[0], means[rotations - 1], variants, rotations)
     } else {
-        let k = if per > 0.0 { ((TARGET * 1.2 / per) as usize + 1).max(1) } else { variants };
-        (k, reps(k))
+        let mut reps = |start: usize, k: usize| {
+            let mut total = 0.0;
+            for i in 0..k {
+                let op = &mut ops[(start + i) % variants];
+                let started = Instant::now();
+                std::hint::black_box(op());
+                total += started.elapsed().as_secs_f64();
+            }
+            total
+        };
+        // (whole rotations throughout, as common.py's calibrate)
+        let (mut k, mut t) = if per >= TARGET {
+            (variants, warm)
+        } else {
+            let k = whole_rotations(if per > 0.0 { ((TARGET * 1.2 / per) as usize + 1).max(1) } else { variants }, variants);
+            (k, reps(0, k))
+        };
+        while t < TARGET && k < 1 << 24 {
+            k = whole_rotations(if t <= 0.0 { 2 * k } else { (2 * k).max((16 * k).min((k as f64 * TARGET * 1.2 / t) as usize + 1)) }, variants);
+            t = reps(0, k);
+        }
+        let count = if t / k as f64 <= 2.0 { 5 } else { 3 };
+        let offsets: Vec<usize> = (0..count).map(offset).collect();
+        let batches: Vec<f64> = offsets.iter().map(|&o| reps(o, k) / k as f64).collect();
+        let mut sorted = batches.clone();
+        sorted.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let record = format!(
+            "{{{},\"mode\":\"batched\",\"reps\":{},\"batches\":[{}],\"offsets\":[{}]",
+            head,
+            k,
+            batches.iter().map(|x| format!("{:e}", x)).collect::<Vec<_>>().join(","),
+            offsets.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")
+        );
+        (record, sorted[count / 2], sorted[0], sorted[count - 1], k, count)
     };
-    while t < TARGET && k < 1 << 24 {
-        k = if t <= 0.0 { 2 * k } else { (2 * k).max((16 * k).min((k as f64 * TARGET * 1.2 / t) as usize + 1)) };
-        t = reps(k);
-    }
-    let count = if t / k as f64 <= 2.0 { 5 } else { 3 };
-    let mut samples: Vec<f64> = (0..count).map(|_| reps(k) / k as f64).collect();
-    samples.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    // (the per-variant pass, BENCH_VTIME=1 on the calibrated targets: each
+    // variant on its own, its per-op samples when one operation takes at
+    // least TARGET, else repetitions calibrated to TARGET and 3 samples)
+    let vtime = if std::env::var("BENCH_VTIME").as_deref() == Ok("1") {
+        let mut entries = Vec::with_capacity(variants);
+        for (v, op) in ops.iter_mut().enumerate() {
+            let reused = per_op_samples.as_ref().map(|s| s[v].clone()).filter(|s| s.iter().all(|&x| x >= TARGET));
+            let (mut xs, reps) = match reused {
+                Some(s) => (s, 1usize),
+                None => {
+                    let mut timed = |n: usize| {
+                        let started = Instant::now();
+                        for _ in 0..n {
+                            std::hint::black_box(op());
+                        }
+                        started.elapsed().as_secs_f64()
+                    };
+                    let one = timed(1);
+                    let (mut n, mut t) = if one >= TARGET { (1usize, one) } else {
+                        let n = if one > 0.0 { ((TARGET * 1.2 / one) as usize + 1).max(1) } else { 2 };
+                        (n, timed(n))
+                    };
+                    while t < TARGET && n < 1 << 24 {
+                        n = if t <= 0.0 { 2 * n } else { (2 * n).max((16 * n).min((n as f64 * TARGET * 1.2 / t) as usize + 1)) };
+                        t = timed(n);
+                    }
+                    ((0..3).map(|_| timed(n) / n as f64).collect(), n)
+                }
+            };
+            xs.sort_by(|x, y| x.partial_cmp(y).unwrap());
+            entries.push(format!(
+                "{{\"v\":{},\"seconds\":{:e},\"min\":{:e},\"max\":{:e},\"reps\":{},\"samples\":{}}}",
+                v,
+                xs[xs.len() / 2],
+                xs[0],
+                xs[xs.len() - 1],
+                reps,
+                xs.len()
+            ));
+        }
+        format!(",\"vtime\":[{}]", entries.join(","))
+    } else {
+        String::new()
+    };
+    println!("TIMING|{}{}}}", record, vtime);
     let joined = sigs.join(";");
     let combined = format!("{}:{}", variants, hash_u64(&joined.bytes().map(u64::from).collect::<Vec<_>>()));
-    println!("TIME|{:.9e}|{}|{:.9e}|{:.9e}|{}|{}", samples[count / 2], combined, samples[0], samples[count - 1], k, count);
+    println!("TIME|{:.9e}|{}|{:.9e}|{:.9e}|{}|{}", med, combined, lo, hi, k, count);
+}
+
+/// The dense factoring rows' input (drivers/sagebrush_case.py's dense_poly):
+/// monic of degree n, coefficients from a 64-bit LCG, residues mod 65537
+/// (fp) or integers in [-1000, 1000].
+fn dense_poly(n: usize, fp: bool, v: usize) -> Vec<i64> {
+    let mut s: u64 = 1_000_003 * if fp { 1 } else { 2 } + 7919 * v as u64 + 12345;
+    let mut out: Vec<i64> = (0..n)
+        .map(|_| {
+            s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            let r = s >> 33;
+            if fp { (r % 65537) as i64 } else { (r % 2001) as i64 - 1000 }
+        })
+        .collect();
+    out.push(1);
+    out
 }
 
 fn fppoly(n: usize, salt: u64) -> Vec<u64> {
@@ -217,6 +383,16 @@ fn main() {
             fp[n] = 1;
             (hash_u64(&fp), move || sagebrush_poly::factor_mod(&f, P))
         }, |r| factor_sig(r, |c: &Vec<u64>| ((c.len() - 1) as u64, hash_u64(c)))),
+        "poly_fp_factor_dense" => run(&mode, variants, |v| {
+            let c = dense_poly(n, true, v);
+            let f: Vec<BigInt> = c.iter().map(|&x| BigInt::from(x)).collect();
+            let fp: Vec<u64> = c.iter().map(|&x| x as u64).collect();
+            (hash_u64(&fp), move || sagebrush_poly::factor_mod(&f, P))
+        }, |r| factor_sig(r, |c: &Vec<u64>| ((c.len() - 1) as u64, hash_u64(c)))),
+        "poly_z_factor_dense" => run(&mode, variants, |v| {
+            let f: Vec<BigInt> = dense_poly(n, false, v).into_iter().map(BigInt::from).collect();
+            (hash_big(&f), move || sagebrush_poly::factor(&f))
+        }, |r| factor_sig(&r.1, |c: &Vec<BigInt>| ((c.len() - 1) as u64, hash_big(c)))),
         "poly_z_mul" => run(&mode, variants, |v| {
             let (a, b) = (zpoly_in(n, salt(11, v) as i64), zpoly_in(n, salt(17, v) as i64));
             (hash_big(&[a.clone(), b.clone()].concat()), move || zpoly::mul(&a, &b))
@@ -241,23 +417,42 @@ fn main() {
             };
             (hash_big(&f), move || sagebrush_poly::factor(&f))
         }, |r| factor_sig(&r.1, |c: &Vec<BigInt>| ((c.len() - 1) as u64, hash_big(c)))),
-        "mat_fp_det" | "mat_fp_rank" | "mat_fp_charpoly" => {
+        "mat_fp_det" | "mat_fp_rank" | "mat_fp_charpoly" | "mat_fp31_det" | "mat_fp31_rank" | "mat_fp31_charpoly" => {
+            // (mat_fp31_*: the same rows modulo 2^31 - 1, a word-size prime)
+            let pm = if case_id.starts_with("mat_fp31_") { P31 } else { P };
             let fp = |v: usize| {
-                let rows: Vec<Vec<u64>> = entries(n, P, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();
-                (hash_u64(&rows.concat()), nmod_mat::Mat::from_rows(&rows, Modulus::new(P)))
+                let rows: Vec<Vec<u64>> = entries(n, pm, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();
+                (hash_u64(&rows.concat()), nmod_mat::Mat::from_rows(&rows, Modulus::new(pm)))
             };
-            match case_id.as_str() {
-                "mat_fp_det" => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.det()) }, |d| d.to_string()),
-                "mat_fp_rank" => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.rank()) }, |r| r.to_string()),
+            match case_id.trim_start_matches("mat_fp31_").trim_start_matches("mat_fp_") {
+                "det" => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.det()) }, |d| d.to_string()),
+                "rank" => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.rank()) }, |r| r.to_string()),
                 _ => run(&mode, variants, |v| { let (h, a) = fp(v); (h, move || a.charpoly()) }, |c| poly_sig(c)),
             }
         }
-        "mat_fp_solve" => run(&mode, variants, |v| {
-            let rows: Vec<Vec<u64>> = entries(n, P, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();
+        "mat_fp_mul" | "mat_fp31_mul" | "mat_fp_mul_fast" | "mat_fp31_mul_fast" => run(&mode, variants, |v| {
+            // (A from variant v, B from variant v + n; Mat::mul under the user
+            // path's fixed allowance, USER_ALLOWANCE, or under _fast the far
+            // larger FAST_ALLOWANCE)
+            let pm = if case_id.starts_with("mat_fp31_") { P31 } else { P };
+            let rows = |w: usize| -> Vec<Vec<u64>> { entries(n, pm, 0, w).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect() };
+            let (ra, rb) = (rows(v), rows(v + n));
+            let h = hash_u64(&[ra.concat(), rb.concat()].concat());
+            let (a, b) = (nmod_mat::Mat::from_rows(&ra, Modulus::new(pm)), nmod_mat::Mat::from_rows(&rb, Modulus::new(pm)));
+            let fast = case_id.ends_with("_fast");
+            let words = if fast { FAST_ALLOWANCE } else { USER_ALLOWANCE };
+            (h, move || nmod_mat::with_fast_product(words, || a.mul(&b)))
+        }, |c| {
+            let xs: Vec<u64> = (0..n).flat_map(|i| c.row(i).to_vec()).collect();
+            format!("{}:{}", n, hash_u64(&xs))
+        }),
+        "mat_fp_solve" | "mat_fp31_solve" => run(&mode, variants, |v| {
+            let pm = if case_id.starts_with("mat_fp31_") { P31 } else { P };
+            let rows: Vec<Vec<u64>> = entries(n, pm, 0, v).into_iter().map(|r| r.into_iter().map(|x| x as u64).collect()).collect();
             let rhs: Vec<u64> = (1..=n as u64).collect();
             let h = hash_u64(&[rows.concat(), rhs.clone()].concat());
-            let a = nmod_mat::Mat::from_rows(&rows, Modulus::new(P));
-            let b = nmod_mat::Mat::from_rows(&rhs.iter().map(|&x| vec![x]).collect::<Vec<_>>(), Modulus::new(P));
+            let a = nmod_mat::Mat::from_rows(&rows, Modulus::new(pm));
+            let b = nmod_mat::Mat::from_rows(&rhs.iter().map(|&x| vec![x]).collect::<Vec<_>>(), Modulus::new(pm));
             (h, move || a.solve(&b).expect("solvable"))
         }, |x| {
             let xs: Vec<u64> = (0..n).map(|i| x.row(i)[0]).collect();
