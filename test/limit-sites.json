@@ -14443,14 +14443,6 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
- "web/latex/engine/tikz.mjs :: X :: if (out.length > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of SVG\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
  "web/latex/engine/tikz.mjs :: X :: if (st.cap) a += ' stroke-linecap=\"' + st.cap + '\"'; #0": {
   "class": "none",
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
@@ -14471,11 +14463,6 @@
   },
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false }; #0": {
-  "class": "none",
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
  },
  "web/latex/engine/tikz.mjs :: checkPt :: if (Math.abs(p[0]) > TIKZ_LIMITS.COORD_MAX || Math.abs(p[1]) > TIKZ_LIMITS.COORD_MAX) fail(\"a point farther than \" + Math.round(TIKZ_LIMITS.COORD_MAX / PT_PER_CM / 100) + \" m\"); #0": {
   "class": "1",
@@ -14587,14 +14574,6 @@
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: options :: if (depth > TIKZ_LIMITS.STYLE_DEPTH) fail(\"styles naming styles more than \" + TIKZ_LIMITS.STYLE_DEPTH + \" deep (a style that names itself?)\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: r :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15810,5 +15789,58 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of rendered output\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: atBorder :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false, #0": {
+  "class": "none",
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: the path state's cap field"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.labelHtml += utf8Len(r.html)) > TIKZ_LIMITS.LABEL_HTML) fail(\"node text past \" + TIKZ_LIMITS.LABEL_HTML / 2 ** 20 + \" MiB of HTML in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.nodeText += nb) > TIKZ_LIMITS.NODE_TEXT) fail(\"node text past \" + TIKZ_LIMITS.NODE_TEXT / 1024 + \" KiB in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (++this.nodeCount > TIKZ_LIMITS.NODES) fail(\"more than \" + TIKZ_LIMITS.NODES + \" nodes in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (nb > TIKZ_LIMITS.LABEL_TEXT) fail(\"a line of a node's text over \" + TIKZ_LIMITS.LABEL_TEXT / 1024 + \" KiB\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  }
 }

@@ -33,7 +33,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 294217 && LATEX_CAPS.gzip === 99416, "the caps are 294,217 B raw and 99,416 B gzip (2026-11-25, an element over PIECE_MAX split in turn, on its merge with master b0b02122: 294,153 / 99,352 measured + 64; 294,144 / 99,370 before, latex check naming an \\input file and its line)");
+check(LATEX_CAPS.raw === 309826 && LATEX_CAPS.gzip === 105261, "the caps are 309,826 B raw and 105,261 B gzip (2026-11-26, TikZ nodes drawn in the preview, on its merge with master 20030715: 309,762 / 105,197 measured + 64; 294,217 / 99,416 before, an element over PIECE_MAX split in turn)");
 
 // (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
@@ -158,6 +158,10 @@ else if (mode.ok) {
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
   latexReport = { group: { ...g, cap: LATEX_CAPS }, lazy: lazyRows };
+  // (KaTeX's layout tree, a private export the sizes of TikZ nodes' text are read from: a KaTeX without it would give
+  //  estimated sizes, silently)
+  const math = join(web, "dist", "sagebrush-math.js");
+  check(existsSync(math) && /__renderToHTMLTree/.test(readFileSync(math, "utf8")), "the LaTeX build's sagebrush-math.js exports KaTeX's layout tree (__renderToHTMLTree), which TikZ nodes' sizes are read from");
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
   //  one left off that list is a 404 on sagebrush.space only; as web/site-dir.mts decides the site)
   const site = join(web, "site", "public");
