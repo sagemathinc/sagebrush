@@ -178,8 +178,13 @@ def _cgroup_headroom(root):
             if not os.path.isdir(d):
                 return None
             if kind == "v2" and depth == 0:
-                break
-            if kind == "v2":
+                # (the mount's root: its figures are read when it has them; only the hierarchy's true root (the
+                # mount's root is "/" in the hierarchy) has none by design, and only there may they be absent)
+                if not os.path.exists(os.path.join(d, limit_f)):
+                    if mroot == []:
+                        break
+                    return None
+            elif kind == "v2":
                 # (the memory controller is on here only if the parent's subtree_control names it; then the files
                 # must be there)
                 parent = os.path.join(base, *rel[:depth - 1]) if depth > 1 else base

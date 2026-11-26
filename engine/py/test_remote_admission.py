@@ -117,6 +117,8 @@ def test_reading_memory():
         write(root, "proc/self/cgroup", "0::/ns/a/b\n")
         write(root, "proc/self/mountinfo", "40 23 0:26 /ns /mnt/cg rw - cgroup2 cgroup2 rw\n")
         write(root, "mnt/cg/cgroup.subtree_control", "memory\n")
+        write(root, "mnt/cg/memory.max", "max\n")  # (the mount's root isn't the hierarchy's: it has its figures)
+        write(root, "mnt/cg/memory.current", "9\n")
         write(root, "mnt/cg/a/cgroup.subtree_control", "memory\n")
         write(root, "mnt/cg/a/memory.max", str(2 * G))
         write(root, "mnt/cg/a/memory.current", str(G))
@@ -124,6 +126,28 @@ def test_reading_memory():
         write(root, "mnt/cg/a/b/memory.current", "5\n")
         r = A.read_memory(root, platform="Linux")
         assert r and r.available == G, "the mount's root and mountpoint from mountinfo"
+        # (SEC: a mount whose root isn't the hierarchy's root: its own figures count; membership equal to that root)
+        with tempfile.TemporaryDirectory() as r2:
+            write(r2, "proc/meminfo", "MemAvailable: 8388608 kB\n")
+            write(r2, "proc/self/cgroup", "0::/tenant\n")
+            write(r2, "proc/self/mountinfo", "40 23 0:26 /tenant /sys/fs/cgroup rw - cgroup2 cgroup2 rw\n")
+            write(r2, "sys/fs/cgroup/memory.max", str(2 * G))
+            write(r2, "sys/fs/cgroup/memory.current", str(G))
+            r = A.read_memory(r2, platform="Linux")
+            assert r and r.available == G, "a finite limit at the mount's root, membership equal to it"
+            write(r2, "sys/fs/cgroup/memory.max", "max\n")
+            assert A.read_memory(r2, platform="Linux").available == 8 * G, "max at the mount's root"
+            write(r2, "sys/fs/cgroup/memory.max", "2G?\n")
+            assert A.read_memory(r2, platform="Linux") is None, "a malformed figure at the mount's root"
+            os.remove(os.path.join(r2, "sys/fs/cgroup/memory.max"))
+            assert A.read_memory(r2, platform="Linux") is None, "no figure at a mount root that isn't the hierarchy's root"
+            # (a member below that root: the root's limit still counts on the way up)
+            write(r2, "proc/self/cgroup", "0::/tenant/k\n")
+            write(r2, "sys/fs/cgroup/memory.max", str(2 * G))
+            write(r2, "sys/fs/cgroup/cgroup.subtree_control", "memory\n")
+            write(r2, "sys/fs/cgroup/k/memory.max", "max\n")
+            write(r2, "sys/fs/cgroup/k/memory.current", "5\n")
+            assert A.read_memory(r2, platform="Linux").available == G
         # (the controller off at a level (not in the parent's subtree_control): no limit there, and no file needed)
         write(root, "mnt/cg/a/cgroup.subtree_control", "cpu\n")
         os.remove(os.path.join(root, "mnt/cg/a/b/memory.max"))
