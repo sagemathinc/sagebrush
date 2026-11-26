@@ -628,6 +628,10 @@ def _key(x):
         raise MagmaError("a set of polynomials over a finite field (or of their rings) is not supported yet")
     if isinstance(x, _FFLINALL):
         raise MagmaError("a set of matrices or vectors over a finite field is not supported yet")
+    if getattr(type(x), "_lazy_magma_type", None) == "GrpPerm" or isinstance(x, (_MSymGroup, _MDihedralGroup)):
+        # (equal groups are one element: lib/_magma_groups.py)
+        import _magma_groups
+        return _magma_groups.GroupKey(x)
     return x
 
 

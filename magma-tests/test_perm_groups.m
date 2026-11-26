@@ -31,3 +31,14 @@ G4 := PermutationGroup<4 | (1,2,3,4), (1,3)>; x := IsAbelian(G4); y := Orbits(G4
 G5 := PermutationGroup<4 | (1,2,3,4), (1,3)>; x := G5 subset Sym(4); G5; x := Sym(4) subset G5; G5;
 G6 := PermutationGroup<4 | (1,2,3,4), (1,3)>; x := G6!(1,3); G6;
 G7 := PermutationGroup<4 | (1,2,3,4), (1,3)>; x := Stabilizer(G7, 1); G7;
+// computed subgroups by content, not only their order: equal to the subgroup Magma names, their
+// orbits and invariants
+S := Stabilizer(Sym(5), 3); S eq sub<Sym(5) | (1,2), (1,2,4,5)>; [Set(o) : o in Orbits(S)]; IsTransitive(S); #S;
+DerivedSubgroup(Sym(4)) eq Alt(4); DerivedSubgroup(Alt(4)) eq sub<Alt(4) | (1,2)(3,4), (1,3)(2,4)>; IsAbelian(DerivedSubgroup(Alt(4)));
+D := DerivedSubgroup(DihedralGroup(6)); D eq sub<DihedralGroup(6) | (1,3,5)(2,4,6)>; [Set(o) : o in Orbits(D)]; IsAbelian(D);
+T := Stabilizer(PermutationGroup<6 | (1,2,3,4,5,6), (1,6)(2,5)(3,4)>, 1); T eq sub<Sym(6) | (2,6)(3,5)>; [Set(o) : o in Orbits(T)];
+Sym(5)!(1,2,3) in Stabilizer(Sym(5), 5); Sym(5)!(1,5) in Stabilizer(Sym(5), 5);
+// sets of groups: equal groups are one element, and a group made a key has its order known
+#{G, sub<Sym(4) | (1,2,3,4), (1,3)>}; #{Alt(4), Alt(4)}; #{Alt(4), Sym(4)}; #{DihedralGroup(4), sub<Sym(4) | (1,2,3,4), (1,3)>};
+F := sub<Sym(4) | (1,2), (1,2,3,4)>; F; X := {F, Sym(4)}; #X; F;
+U := PermutationGroup<4 | (1,2,3,4)>; Y := {U}; U;

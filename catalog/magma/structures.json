@@ -61,7 +61,7 @@
     ],
     "differs": [
       "Iterating over Sym(n) gives its permutations in Sagebrush's own (lexicographic) order, not Magma's.",
-      "PermutationGroup< n | ... >, sub< G | ... >, Alt(n) and CyclicGroup(n) are permutation groups too; their intersections (meet), Generators(G) and printing PermutationGroup< ... > itself (its second value, a map) are not supported yet."
+      "PermutationGroup< n | ... >, sub< G | ... >, Alt(n) and CyclicGroup(n) are permutation groups too; their intersections (meet), Generators(G), printing PermutationGroup< ... > itself (its second value, a map) and printing a permutation group whose generators are longer than a line are not supported yet."
     ],
     "status": "partial",
     "see_also": [
@@ -193,7 +193,7 @@
       }
     ],
     "differs": [
-      "A computed subgroup's generators are Sagebrush's own (the same group as Magma's, other generators)."
+      "A computed subgroup's generators are Sagebrush's own (the same group as Magma's, other generators), and so is the order of the points within its orbits."
     ],
     "status": "partial",
     "see_also": [
@@ -279,7 +279,7 @@
       }
     ],
     "differs": [
-      "A computed subgroup's generators are Sagebrush's own (the same group as Magma's, other generators)."
+      "A computed subgroup's generators are Sagebrush's own (the same group as Magma's, other generators), and so is the order of the points within its orbits."
     ],
     "status": "partial",
     "see_also": [
