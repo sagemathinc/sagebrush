@@ -33,7 +33,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 311297 && LATEX_CAPS.gzip === 105855, "the caps are 311,297 B raw and 105,855 B gzip (2026-11-26, \\input and \\include in a shared or GitHub view, on its merge with master 9063c669: 311,233 / 105,791 measured + 64; 310,653 / 105,614 before, a render over 16 MiB shown up to there)");
+check(LATEX_CAPS.raw === 313386 && LATEX_CAPS.gzip === 106615, "the caps are 313,386 B raw and 106,615 B gzip (2026-11-27, TikZ's plot, on master 5963e768: 313,322 / 106,551 measured + 64; 311,297 / 105,855 before, \\input and \\include in a shared or GitHub view)");
 
 // (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools

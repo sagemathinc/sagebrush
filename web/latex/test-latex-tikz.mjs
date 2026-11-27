@@ -40,6 +40,12 @@ const CM = 72.27 / 2.54, near = (a, b, e = 0.02) => Math.abs(a - b) <= e;
 // ---- the bounding box as TeX's: [name, source, TeX's x0 y0 x1 y1 in pt], within 0.05 pt (our numbers are to 0.01)
 const TEX = [
   ["line", "\\draw (0,0) -- (2,1);", [-0.2, -0.2, 57.10548, 28.65274]],
+  // (plot, Nov 27 2026: the bounding box as pgf's, its curves' control points in it; \x^2 at -1 is -1, as pgfmath
+  //  reads -1^2; a stray ) as pgfmath reads it)
+  ["plot-smooth-stray", "\\draw[smooth, samples=9, domain=-1.5:1.5] plot (\\x, {(\\x)^2)});", [-42.8791, -0.2, 42.8791, 64.21866]],
+  ["plot-x-squared", "\\draw[domain=-1:1, samples=5] plot (\\x, \\x^2);", [-28.65274, -28.65274, 28.65274, 28.65274]],
+  ["plot-coords-smooth", "\\draw[smooth] plot coordinates {(0,0) (1,1) (2,0) (3,1)};", [-0.2, -0.2, 85.55823, 28.65274]],
+  ["plot-line-to", "\\draw (0,-1) -- plot[domain=0:1, samples=3] (\\x, {(\\x)^2});", [-0.2, -28.65274, 28.65274, 28.65274]],
   ["thickline", "\\draw[line width=4pt] (0,0) -- (2,0);", [-2.0, -2.0, 58.90549, 2.0]],
   ["arrow", "\\draw[->] (0,0) -- (2,0);", [-0.2, -2.59998, 57.10548, 2.59998]],
   ["stealth", "\\draw[-Stealth] (0,0) -- (2,0);", [-0.2, -1.79999, 57.10548, 1.79999]],
@@ -92,7 +98,7 @@ section("tex-boxes", () => {
     const d = Math.max(...b.map((v, q) => Math.abs(v - t[q])));
     if (!(d <= 0.05)) bad.push([name, b, t, +d.toFixed(3)]);
   }
-  check("tex-bounding-boxes", bad.length === 0 && TEX.length === 45, bad);
+  check("tex-bounding-boxes", bad.length === 0 && TEX.length === 49, bad);
   // (the transform order TeX applies: the last option first. shift then rotate is not rotate then shift)
   const tb = (n) => TEX.find((r) => r[0] === n)[2];
   check("transform-order-pinned", tb("shift-rotate")[1] > 28 && tb("rotate-shift")[1] > 56 && tb("scale-xshift")[0] > 113 && tb("xshift-scale")[0] < 86, null);
@@ -434,6 +440,29 @@ section("engine", () => {
   const ids = (h) => { const defs = [...h.matchAll(/<marker id="([^"]+)"/g)].map((m) => m[1]), refs = [...h.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]); return { defs, refs, ok: defs.length === new Set(defs).size && refs.every((r) => defs.includes(r)) && defs.length >= 4 }; };
   const a = ids(e.update(doc(pic + pic)).chunks.join("")), b = ids(e.update(doc(pic + "Text.\n" + pic + pic)).chunks.join(""));
   check("marker-ids-unique-after-edits", a.ok && b.ok && b.defs.length >= 6, { a, b });
+});
+
+// ---- plot (Nov 27 2026): pgfmath's stray ) (TeX Live 2025's pgfmath: (2)^2) is 4.0, 1+2)*3 is 9.0, 2*3)+4 is 10.0),
+//      pgf's curveto handler (pgflibraryplothandlers.code.tex: support points at 0.2775 x tension (0.5) of the neighbours'
+//      difference; the first and last support points the ends themselves), the variable's samples, and what isn't drawn
+section("plot", () => {
+  check("plot-pgfmath-stray-paren", evalMath("(2)^2)").v === 4 && evalMath("1+2)*3").v === 9 && evalMath("2*3)+4").v === 10 && evalMath("(1+2))*3").v === 9 && evalMath("2)-4").v === -2, null);
+  // (three points, smooth: M p0 C p0 (p1 - d) p1 C (p1 + d) p2 p2, d = 0.13875 (p2 - p0); in cm, y up)
+  const pts = points(draw("\\draw[smooth] plot coordinates {(0,0) (1,1) (2,0)};")).map(([x, y]) => [x / CM, y / CM]);
+  const T = 0.2775 * 0.5, want = [[0, 0], [0, 0], [1 - 2 * T, 1], [1, 1], [1 + 2 * T, 1], [2, 0], [2, 0]];
+  check("plot-smooth-as-pgf", pts.length === 7 && pts.every((p, k) => near(p[0], want[k][0], 0.001) && near(p[1], want[k][1], 0.001)), pts);
+  // (samples: 5 over -1:1 is -1, -0.5, 0, 0.5, 1; a sharp plot's points; samples at a list)
+  const sp = points(draw("\\draw[domain=-1:1, samples=5] plot (\\x, {2*\\x});")).map(([x, y]) => [x / CM, y / CM]);
+  check("plot-samples", sp.length === 5 && sp.every((p, k) => near(p[0], -1 + k / 2, 0.001) && near(p[1], 2 * (-1 + k / 2), 0.001)), sp);
+  const sa = points(draw("\\draw[samples at={0,1,3}] plot (\\x, 0);")).map(([x]) => x / CM);
+  check("plot-samples-at", sa.length === 3 && near(sa[0], 0, 0.001) && near(sa[1], 1, 0.001) && near(sa[2], 3, 0.001), sa);
+  // (-- plot: a line to its first point; plot alone: a move)
+  const dOf = (src) => /d="([^"]+)"/.exec(draw(src))[1];
+  const lt = dOf("\\draw (0,-1) -- plot[domain=0:1, samples=2] (\\x, 0);"), mv = dOf("\\draw (0,-1) plot[domain=0:1, samples=2] (\\x, 0);");
+  check("plot-line-to-and-move", (lt.match(/M/g) || []).length === 1 && (lt.match(/L/g) || []).length === 2 && (mv.match(/M/g) || []).length === 2 && (mv.match(/L/g) || []).length === 1, [lt, mv]);
+  // (what the preview doesn't draw, named; a plot past the picture's segments bound, named)
+  check("plot-file-function-named", /plot file/.test(named("\\draw plot file {data.txt};")) && /plot function/.test(named("\\draw plot function {x**2};")), [named("\\draw plot file {data.txt};"), named("\\draw plot function {x**2};")]);
+  check("plot-bounded", /20000|segments|items/i.test(named("\\draw[samples=30000, domain=0:1] plot (\\x, \\x);") ?? ""), named("\\draw[samples=30000, domain=0:1] plot (\\x, \\x);"));
 });
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

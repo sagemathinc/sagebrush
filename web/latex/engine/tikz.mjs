@@ -133,14 +133,15 @@ const FUNCS2 = { min: Math.min, max: Math.max, atan2: (y, x) => (Math.atan2(y, x
 export function evalMath(text) {
   const s = String(text).trim();
   if (s.length > TIKZ_LIMITS.EXPR_LEN) fail("an expression over " + TIKZ_LIMITS.EXPR_LEN + " characters");
-  let i = 0, depth = 0, units = false;
+  let i = 0, depth = 0, units = false, carry = null;
   const ws = () => { while (i < s.length && /\s/.test(s[i])) i++; };
   const expr = () => { let v = term(); for (;;) { ws(); const c = s[i]; if (c === "+" || c === "-") { i++; const r = term(); v = c === "+" ? v + r : v - r; } else return v; } };
   const term = () => { let v = unary(); for (;;) { ws(); const c = s[i]; if (c === "*") { i++; v *= unary(); } else if (c === "/") { i++; const r = unary(); if (r === 0) fail("division by 0"); v /= r; } else return v; } };
   // (^ binds tighter than a sign, as pgfmath's: -2^2 is -4; its exponent may have a sign: 2^-1)
-  const unary = () => { ws(); if (s[i] === "-") { i++; return -unary(); } if (s[i] === "+") { i++; return unary(); } return power(); };
+  const unary = () => { if (carry !== null) return power(); ws(); if (s[i] === "-") { i++; return -unary(); } if (s[i] === "+") { i++; return unary(); } return power(); };
   const power = () => { const b = atom(); ws(); if (s[i] === "^") { i++; return b ** unary(); } return b; };
   const atom = () => {
+    if (carry !== null) { const c = carry; carry = null; return c; }
     ws();
     if (++depth > TIKZ_LIMITS.EXPR_DEPTH) fail("an expression nested over " + TIKZ_LIMITS.EXPR_DEPTH + " deep");
     try {
@@ -174,7 +175,10 @@ export function evalMath(text) {
       fail("an expression the preview can't read: " + JSON.stringify(s));
     } finally { depth--; }
   };
-  const v = expr(); ws();
+  // (a ) with no ( open, as pgfmath reads one: what is parsed so far becomes one operand and the parse goes on: (2)^2) is 4,
+  //  1+2)*3 is 9 (TeX Live 2025's pgfmath))
+  let v = expr(); ws();
+  while (s[i] === ")") { i++; carry = v; v = expr(); ws(); }
   if (i < s.length) fail("an expression the preview can't read: " + JSON.stringify(s));
   if (!Number.isFinite(v)) fail("a value too large in " + JSON.stringify(s));
   return { v, units };
@@ -314,6 +318,9 @@ class Picture {
       if (key === "help lines") { st.draw = colorRgb("gray!50"); st.lw = 0.2; st.doDraw = true; return; }
       if (key === "every picture" || key === "baseline") return;
       if (key === "transform shape") { st.tshape = true; return; }
+      // (plot's handler: smooth, pgf's curveto handler; sharp plot, lines (the default))
+      if (key === "smooth") { st.plotSmooth = true; return; }
+      if (key === "sharp plot") { st.plotSmooth = false; return; }
       if (SHAPES.has(key)) { st.shape = key; return; }
       if (Object.hasOwn(PLACES, key)) { this.place(st, key, null); return; }
       if (Object.hasOwn(POSITIONS, key)) { st.pos = POSITIONS[key]; return; }
@@ -325,6 +332,13 @@ class Picture {
     }
     const num = () => evalMath(val).v;
     const dim = (unitless = 1) => { const r = evalMath(val); return r.units ? r.v : r.v * unitless; };
+    // (plot's keys, as TikZ's: domain a:b (-5:5), samples (25, at least 2), samples at (a \foreach list), variable (\x),
+    //  tension (0.5): pgf's support points at 0.2775 x tension of the neighbours' difference)
+    if (key === "domain") { const d = /^([^:]+):([^:]+)$/.exec(val); if (!d) fail("a domain the preview can't read: " + val); st.plotDomain = [evalMath(d[1]).v, evalMath(d[2]).v]; st.plotAt = null; return; }
+    if (key === "samples") { st.plotSamples = Math.max(2, Math.floor(num())); st.plotAt = null; return; }
+    if (key === "samples at") { st.plotAt = val; return; }
+    if (key === "variable") { const v = /^\\([A-Za-z]+)$/.exec(val.trim()); if (!v) fail("a plot variable the preview can't read: " + val); st.plotVar = v[1]; return; }
+    if (key === "tension") { st.plotTension = num(); return; }
     if (Object.hasOwn(PLACES, key)) { this.place(st, key, val); return; }
     if ((m = /^(above|below|left|right) of$/.exec(key))) { st.anchor = "center"; st.placeShift = null; st.placeOf = { name: nodeName(val), dir: m[1], old: true }; return; }
     if (st.inNode && (key === "rotate" || key === "xscale" || key === "yscale" || key === "rotate around")) fail("a turned or stretched node isn't drawn by the preview yet");
@@ -579,6 +593,45 @@ class Picture {
     let inlined = [];
     const inline = (k) => { while (isWord(toks, k, "node")) { const [spec, j] = this.nodeSpec(toks, k + 4, toks.length, "node"); inlined.push(spec); k = j; } return k; };
     const placeInline = () => { for (const spec of inlined) pending.push({ spec, cur, seg: lastSeg, sg: segs[segs.length - 1], mid: true }); inlined = []; };
+    // (plot, as TikZ's: [options] then coordinates {(a) (b) ...} or a point of the variable, (\x, {f(\x)}), taken at each
+    //  sample of the domain (the value written in for \x as \foreach writes it, so \x^2 at -1 is -1, as pgfmath reads
+    //  -1^2); its first point a move, or a line after --; smooth as pgf's curveto handler, else lines)
+    const plot = (k, lineFirst) => {
+      let ps = st;
+      if (toks[k]?.t === "o") { ps = this.options(toks[k].v, { ...st, arrows: { ...st.arrows } }); k++; }
+      const pts = [];
+      if (isWord(toks, k, "coordinates")) {
+        k += 11;
+        if (toks[k]?.t !== "g") fail("plot coordinates without its {...}");
+        for (const t of this.lex(toks[k].v)) { if (t.t === "c") { this.count(); pts.push(checkPt(this.pointOf(t.v, ps))); } else if (!(t.t === "ch" && /\s/.test(t.v))) fail("plot coordinates with something not a point: " + JSON.stringify(srcOf([t]))); }
+        k++;
+      } else if (toks[k]?.t === "c") {
+        const v = ps.plotVar ?? "x", text = toks[k].v, re = new RegExp("\\\\" + v + "(?![A-Za-z])", "g");
+        let xs;
+        if (ps.plotAt) xs = expandList(ps.plotAt).map((x) => evalMath(x).v);
+        else {
+          const [a, b] = ps.plotDomain ?? [-5, 5], n = ps.plotSamples ?? 25;
+          xs = []; for (let q = 0; q < n; q++) { this.count(); xs.push(n === 1 ? a : a + (q * (b - a)) / (n - 1)); }
+        }
+        for (const x of xs) { this.count(); const r = +x.toFixed(5), w = Object.is(r, -0) ? "0" : String(r); pts.push(checkPt(this.pointOf(text.replace(re, () => w), ps))); }
+        k++;
+      } else if (isWord(toks, k, "function") || isWord(toks, k, "file")) fail("plot " + (isWord(toks, k, "file") ? "file" : "function") + " (gnuplot or a data file) isn't drawn by the preview");
+      else fail("plot without its points");
+      if (!pts.length) return k;
+      if (lineFirst && cur) line(pts[0]); else move(pts[0]);
+      if (!ps.plotSmooth) for (const p of pts.slice(1)) line(p);
+      else if (pts.length > 1) {
+        const T = 0.2775 * (ps.plotTension ?? 0.5);
+        let sup = pts[0];
+        for (let q = 1; q < pts.length - 1; q++) {
+          const d = [T * (pts[q + 1][0] - pts[q - 1][0]), T * (pts[q + 1][1] - pts[q - 1][1])];
+          curve(sup, [pts[q][0] - d[0], pts[q][1] - d[1]], pts[q]); sup = [pts[q][0] + d[0], pts[q][1] + d[1]];
+        }
+        const last = pts[pts.length - 1]; curve(sup, last, last);
+      }
+      ref = cur;
+      return k;
+    };
     while (i < toks.length) {
       const tk = toks[i];
       const c = coordAt(i);
@@ -587,6 +640,7 @@ class Picture {
         i += 2;
         i = inline(i);
         if (isWord(toks, i, "cycle")) { segs.push(["Z"]); cur = ref = start; i += 5; this.count(); continue; }
+        if (isPlot(toks, i)) { i = plot(i + 4, true); continue; }
         const q = coordAt(i); if (!q) fail("-- without the point after it");
         line(q[0], q[3]); placeInline(); settle(q[0], q[2]); i = q[1]; continue;
       }
@@ -735,8 +789,9 @@ class Picture {
         pending.push({ spec, cur, seg: lastSeg, sg: segs[segs.length - 1] });
         i = j; continue;
       }
-      if (isWord(toks, i, "pic") || isWord(toks, i, "edge") || isWord(toks, i, "plot") || isWord(toks, i, "sin") || isWord(toks, i, "cos") || isWord(toks, i, "parabola")) {
-        const w = ["pic", "edge", "plot", "sin", "cos", "parabola"].find((x) => isWord(toks, i, x));
+      if (isPlot(toks, i)) { i = plot(i + 4, false); continue; }
+      if (isWord(toks, i, "pic") || isWord(toks, i, "edge") || isWord(toks, i, "sin") || isWord(toks, i, "cos") || isWord(toks, i, "parabola")) {
+        const w = ["pic", "edge", "sin", "cos", "parabola"].find((x) => isWord(toks, i, x));
         fail("the path operation " + w + " isn't drawn by the preview yet");
       }
       fail("a path the preview can't read at " + JSON.stringify(srcOf(toks.slice(i, i + 4))));
@@ -1104,6 +1159,8 @@ function checkPt(p) {
   return p;
 }
 const isWord = (toks, i, w) => { for (let k = 0; k < w.length; k++) if (!(toks[i + k]?.t === "ch" && toks[i + k].v === w[k])) return false; const after = toks[i + w.length]; return !(after?.t === "ch" && /[A-Za-z]/.test(after.v)); };
+// ("plot", and "plot coordinates", "plot function", "plot file": the lexer drops spaces, so the words run together)
+const isPlot = (toks, i) => ["plot", "plotcoordinates", "plotfunction", "plotfile"].some((w) => isWord(toks, i, w));
 // (the index of the ; ending the command that starts at i, at the top level)
 // (a \foreach's body when not a {group}: one command up to its ;, or a \foreach, ending where its own body ends)
 function bodyEnd(toks, i, hi = toks.length) {
