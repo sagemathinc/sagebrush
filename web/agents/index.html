@@ -226,6 +226,7 @@
   .composer .row { flex-wrap: wrap; }
   #send-hint { order: 99; flex-basis: 100%; text-align: right; font-size: 12px; color: var(--muted); }
   #send-hint button { font-size: 12px; margin-left: 4px; }
+  #attach-hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
   /* (the connection's bar, A14: after the composer in tab order; its two live regions are always in the page, empty
      when there's nothing to say, so what is put in them is announced) */
   #conn-bar { max-width: 760px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
@@ -475,6 +476,7 @@
           <span id="send-hint" hidden><span id="send-hint-text">Not connected: Connect Claude to send</span> <button id="send-hint-act">Connect</button></span>
           <button id="send" title="Send (Shift+Enter)">Send</button>
         </div>
+        <div id="attach-hint"></div>
       </div>
       <div id="conn-bar">
         <span id="conn-alert" role="alert"></span><span id="conn-status" role="status"></span>
