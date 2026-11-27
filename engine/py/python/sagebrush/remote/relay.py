@@ -1110,6 +1110,8 @@ class RelayRunner:
             self.gateway.socket_lost(p)
 
     def _refuse(self, p, rid, kind, message):
+        # (said on this computer's terminal too: a page that can't pair is never silent here)
+        self.err("A %s page was refused: %s\n" % (getattr(p, "chan", None) or "new", message))
         p.send({"jsonrpc": "2.0", "id": rid if isinstance(rid, str) else None,
                 "error": {"code": -32000, "message": message, "data": {"code": kind, "message": message}}})
         p.close(1008 if kind == "refused" else 1002, message)
