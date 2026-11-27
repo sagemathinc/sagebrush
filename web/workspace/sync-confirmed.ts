@@ -16,8 +16,9 @@ import { OVERLAY, runPage, rowsOf, Halt, type Hidden, type Overlay, type Store }
 import { D11, RW, type Mapping } from "./sync-rewrite";
 import { VIEW_STORES, applyView, type ListedWhy } from "./sync-view";
 import { capNow } from "./sync-pins";
+import { ledgerPage } from "./sync-refs";
 import type { Entry, Op, SyncRenamed } from "./api";
-import type { SyncEntry, SyncOp } from "./sync-reduce";
+import type { Outcome, SyncEntry, SyncOp } from "./sync-reduce";
 
 const keyOf = (p: string) => p.normalize("NFC");
 const META = "meta";
@@ -335,7 +336,7 @@ export async function applyOps(
   w: Workspace,
   ns: string,
   ops: SyncOp[],
-  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string, large?: LargeApplied, taken?: SyncOp[]) => Promise<void>; locked?: <T>(f: () => Promise<T>) => Promise<T>; afterLarge?: (gen: string) => Promise<void> } = {},
+  opts: { prefix?: string; cursorAt?: string; stores?: string[]; onPage?: (tx: IDBTransaction, changed: string[], prefix: string, large?: LargeApplied, taken?: SyncOp[], outcomes?: Outcome[]) => Promise<void>; locked?: <T>(f: () => Promise<T>) => Promise<T>; afterLarge?: (gen: string) => Promise<void> } = {},
 ): Promise<Applied> {
   const stores = [...new Set(["syncIndex", META, ...(opts.stores ?? [])])];
   let at = 0, pages = 0, carry = 0, cursor = 0;
@@ -399,7 +400,7 @@ export async function applyOps(
         }
       }
       const changed = [...page.changed];
-      if (opts.onPage) await opts.onPage(tx, changed, prefix, large, ops.slice(at, at + taken));
+      if (opts.onPage) await opts.onPage(tx, changed, prefix, large, ops.slice(at, at + taken), page.outcomes);
       for (const id of changed) changedAll.push(id);
       at += taken;
       carry = page.carry;
@@ -423,7 +424,7 @@ export async function applyOps(
  * rows, the cursor and the view's difference on the entries, in one transaction; then the changes told, and the
  * contents of entries forgotten dropped (after their transaction, as emptying Trash does).
  */
-export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], hooks: { onLarge?: (tx: IDBTransaction, large: LargeApplied) => Promise<void>; afterLarge?: (gen: string) => Promise<void> } = {}): Promise<Applied & { listed: [string, ListedWhy][] }> {
+export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], hooks: { onLarge?: (tx: IDBTransaction, large: LargeApplied) => Promise<void>; afterLarge?: (gen: string) => Promise<void>; sealed?: ReadonlyMap<number, unknown> } = {}): Promise<Applied & { listed: [string, ListedWhy][] }> {
   const cap = await capNow();
   return (async () => {
     const told: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [], renamed: SyncRenamed[] = [];
@@ -458,8 +459,19 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
         // (each page holding the workspace's lock: an ordinary change's hold, refused while quarantined or after a
         // reset elsewhere, the durability witness brought up to its commit; never across a large move's own pages)
         locked: (f) => w.locked(f),
-        onPage: async (tx, changed, prefix, large, taken) => {
+        onPage: async (tx, changed, prefix, large, taken, outcomes) => {
           keep();
+          // (e2e PR 5d: the index's references, from this page's sealed ops, in the transaction that moves the cursor; a
+          // release op that can't be accepted throws here, so nothing of its page is kept)
+          if (hooks.sealed && taken?.length) await ledgerPage(tx.objectStore(META), idbStore(tx, prefix), prefix, taken, outcomes ?? [], (seq) => hooks.sealed!.has(seq));
+          // (e2e PR 5c: what pull had verified as of this page's last op, kept in the transaction that moves the cursor
+          // past it, so a reload resumes verifying from exactly there)
+          if (hooks.sealed && taken?.length) {
+            const top = taken[taken.length - 1].seq;
+            let at = -1, state: unknown;
+            for (const [s, st] of hooks.sealed) if (s <= top && s > at) [at, state] = [s, st];
+            if (at >= 0) tx.objectStore(META).put(state, sealedPullKey(ns));
+          }
           // (a large move's view: its tops and everything under their new places are the replay's (D11 r4 §3), the
           // rest of the page's view applied as usual)
           if (large && hooks.onLarge) await hooks.onLarge(tx, large);
@@ -485,13 +497,17 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
  * large move's view) is driven to its end before any later page (r5 §4's barrier); a large move published by a page
  * starts its replay in the same transaction, and the replay runs once its confirmed rewrite has drained.  A page the
  * fence refuses (`busy`: a local large move is being applied under it) waits for that move, then applies. */
-export const confirmedIndex = (w: Workspace) => async (page: { ns: string; ops: SyncOp[] }) => {
+/** What pull has verified (e2e PR 5c, sync-seal.ts PullState), kept with the cursor. */
+export const sealedPullKey = (ns: string) => `sync:${ns}:sealedPull`;
+
+export const confirmedIndex = (w: Workspace) => async (page: { ns: string; ops: SyncOp[]; sealed?: ReadonlyMap<number, unknown> }) => {
   const { runReplay, startReplay, startForget } = await import("./sync-replay");
   const { rewriting } = await import("./sync-rewrite");
   for (let tries = 0; ; tries++) {
     try {
       await runReplay(w, page.ns);
       await applyConfirmed(w, page.ns, page.ops, {
+        sealed: page.sealed,
         onLarge: async (tx, large) => {
           if (!large.maps.length) return;
           // (the entries' one record reserved for the replay's plan: a local large move pending there makes the

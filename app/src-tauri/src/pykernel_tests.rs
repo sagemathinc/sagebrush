@@ -85,6 +85,7 @@ for line in sys.stdin:
         say({"echo": c["v"]})
     elif k == "sleep":
         try:
+            say({"armed": True})
             time.sleep(30)
         except KeyboardInterrupt:
             say({"interrupted": True})
@@ -112,6 +113,8 @@ for line in sys.stdin:
         sys.stdout.write("x" * c["n"]); sys.stdout.flush(); time.sleep(30)
     elif k == "exit":
         sys.exit(c["code"])
+    elif k == "dispositions":
+        say({"int": signal.getsignal(signal.SIGINT) is signal.default_int_handler, "term": signal.getsignal(signal.SIGTERM) == signal.SIG_DFL})
     elif k == "exit_now":
         os._exit(c["code"])
     elif k == "hang":
@@ -323,8 +326,9 @@ fn lines_go_both_ways_and_an_interrupt_reaches_the_running_code() {
     k.send(r#"{"cmd":"echo","v":"héllo"}"#).unwrap();
     assert_eq!(line(&k)["echo"], "héllo");
     assert_eq!(k.send("a\nb"), Err(KernelError::InputRefused));
+    // (interrupted once the stub says it is inside the code that catches it)
     k.send(r#"{"cmd":"sleep"}"#).unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(line(&k)["armed"], true);
     k.interrupt();
     assert_eq!(line(&k)["interrupted"], true);
     k.send(r#"{"cmd":"exit","code":3}"#).unwrap();
@@ -601,4 +605,30 @@ fn an_interrupt_asked_around_and_after_the_end_never_signals_after_the_reap() {
     let reap = trace.iter().position(|&w| w == "reaped").expect("reaped");
     assert!(trace[..reap].contains(&"sigint"), "{trace:?}");
     assert_eq!(&trace[reap..], &["reaped"], "nothing sent after the reap: {trace:?}");
+}
+
+#[test]
+fn a_kernel_started_by_an_app_that_ignores_sigint_and_sigterm_still_gets_them() {
+    // (as under nohup or as a background job: this test process ignores both while it starts the kernel, then puts
+    //  back what it had; the kernel starts with both at their defaults (Python's own SIGINT handler installed), and an
+    //  interrupt reaches its running code)
+    let p = system_python();
+    let t = Tmp::new("ignored");
+    let (res, ws) = (stub(&t), workspace(&t));
+    let (old_int, old_term) = unsafe { (libc::signal(libc::SIGINT, libc::SIG_IGN), libc::signal(libc::SIGTERM, libc::SIG_IGN)) };
+    let started = Kernel::start(&KernelSpec { python: &p, resources: &res, cwd: &ws, base_env: Some(path_env()) }, my_uid());
+    unsafe {
+        libc::signal(libc::SIGINT, old_int);
+        libc::signal(libc::SIGTERM, old_term);
+    }
+    let mut k = started.unwrap();
+    line(&k);
+    k.send(r#"{"cmd":"dispositions"}"#).unwrap();
+    let d = line(&k);
+    assert_eq!((d["int"].as_bool(), d["term"].as_bool()), (Some(true), Some(true)), "{d}");
+    k.send(r#"{"cmd":"sleep"}"#).unwrap();
+    assert_eq!(line(&k)["armed"], true);
+    k.interrupt();
+    assert_eq!(line(&k)["interrupted"], true);
+    k.stop();
 }

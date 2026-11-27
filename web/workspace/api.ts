@@ -118,6 +118,14 @@ export type OpAfter = { id: string; parent: string | null; name: string; kind: K
 export type Op = {
   seq?: number; t: number; device: string; by: string; op: string; path: string; to?: string; kind: Kind;
   ref?: string; fid?: string; sha256?: string; size?: number; base?: string; parent?: string; after?: OpAfter | null; origin?: "server";
+  /** (dropVersions, never sent) the newest old versions of each file it kept, and whether it named only some: the
+   * account's history it releases follows them (e2e PR 5d) */
+  keep?: number; partial?: true;
+  /** (dropVersions) what the person saw when asking (e2e PR 5d): the verified index's cursor then, and the files in its
+   * scope by identity (none: every file) */
+  view?: number; fids?: string[];
+  /** (dropVersions) the sync namespace `view` was read in (its account and server generation): another's releases nothing */
+  viewNs?: string;
 };
 /** An entry's identity (design/sync-client.md §3): a data file's or folder's fid, a document's ref; undefined
  * where it has none yet (a folder or file from before ids were kept, until the migrator gives it one). */
@@ -407,6 +415,9 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
 const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed"), REVIEW_REFUSED = Symbol("the grant changed"), RUN_NOTE_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
+/** (tests) dropVersions: run just before its request is logged, the deletion done (e2e PR 5d: a namespace switch then
+ * must not rebind the request) */
+export const DROP_HOOK: { beforeLog?: () => Promise<void> | void } = {};
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
  * transaction is kept): `inRoot`, the root and record written, before the commit; `inPublish`, ready and its pages. */
 export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "root-late" | "copy" | "copy-late" | "folder-late" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
@@ -2213,6 +2224,13 @@ export class Workspace {
     const q = path(p), keep = Math.max(0, Math.floor(opts.keep ?? 0)), x = opts.expect;
     if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can drop old versions");
     return this.locked(async () => {
+      // (the sync namespace and its verified index as the person asked, read before any deletion page: the request is
+      // that namespace's for good. sync:current can change while the pages run (switchToIf doesn't take this lock), and
+      // a request read at the end would be stamped with the next namespace and release its history (e2e PR 5d))
+      const asked = await inTx(this.ws, "meta", "readonly", async (tx) => {
+        const meta = tx.objectStore("meta"), cur = (await req(meta.get("sync:current"))) as { ns?: string } | undefined;
+        return cur?.ns ? { viewNs: cur.ns, view: ((await req(meta.get(`sync:${cur.ns}:cursor`))) as number | undefined) ?? 0 } : { view: 0 };
+      });
       if (x) {
         const e = q === "/" ? undefined : await this.mustStat(q);
         if (x.fid !== undefined && e?.fid !== x.fid) throw new WorkspaceError("conflict", `${q} is another file now`);
@@ -2318,8 +2336,14 @@ export class Workspace {
         }
       }
       this.noteDeleting(1);
+      await DROP_HOOK.beforeLog?.();
       const ops: Op[] = [];
-      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind }); });
+      // (what the person saw, kept with the request (e2e PR 5d): the account's history it releases is bounded by the
+      // verified index as it was asked (`asked`, never read again here) and these files by identity, never by what has
+      // come since)
+      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => {
+        await this.log(tx, ops, { op: "dropVersions", path: q, kind, ...asked, ...(fids ? { fids } : {}), ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) });
+      });
       this.tell({ ops });
       return freed;
     });
