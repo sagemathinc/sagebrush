@@ -212,6 +212,32 @@ def print_value(v, write, opts=DEFAULT):
     return True
 
 
+def print_factor(labels, levels, ordered, names, write, opts=DEFAULT):
+    """print() of a factor (R 4.5.3, rill-tests/fac/): its labels unquoted, NA as <NA>, laid out as a character
+    vector (left-justified, or under its names), then "Levels:" and the levels, " < " between them for an ordered
+    one; an empty factor is factor().  A levels line wider than `width` is refused (R shortens it, by rules Rill
+    doesn't model yet); it is checked before anything is written."""
+    line = "Levels: " + (" < " if ordered else " ").join(levels)
+    if width(line) > opts.width:
+        return None
+    if not labels:
+        write("factor()\n")
+    else:
+        strs = ["<NA>" if s is None else s for s in labels]
+        if names is not None:
+            _print_named(strs, names, write, opts)
+        else:
+            n = len(strs)
+            w = max(width(s) for s in strs)
+            labw = len("[%d]" % n)
+            per = max(1, (opts.width - labw) // (w + 1))
+            for i in range(0, n, per):
+                lab = ("[%d]" % (i + 1)).rjust(labw)
+                write(lab + "".join(" " + _pad(s, w, True) for s in strs[i:i + per]) + "\n")
+    write(line + "\n")
+    return True
+
+
 def _print_named(strs, names, write, opts):
     """A named vector: rows of names over rows of values, every column the widest name or value, right-justified,
     each followed by a space; as many columns as fit in `width`."""

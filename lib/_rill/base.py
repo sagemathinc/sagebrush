@@ -11,7 +11,8 @@ Each builtin is called as f(session, call, args) with args a list of
 
 import math
 
-from . import fmt, mem
+from . import factors, fmt, mem
+from .factors import as_vector, cut, droplevels, factor, is_factor_, is_ordered, levels, nlevels, ordered
 from .access import (as_character, as_complex, as_double, as_integer, as_logical, character_, complex_, dollar,
                      double_, index, integer_, is_character, is_complex, is_double, is_finite, is_infinite,
                      is_integer, is_logical, is_na, is_nan, is_null, is_numeric, is_vector, length_, logical_,
@@ -524,9 +525,23 @@ def print_value(sess, v, digits=None):
         sess.write_out(fmt.deparse(v) + "\n")
         return
     opts = fmt.Options(sess.options["digits"] if digits is None else digits, sess.options["scipen"], sess.options["width"])
+    if factors.is_factor(v):
+        _print_factor(sess, v, opts)
+        return
     with _print_reservation(v):
         if fmt.print_value(v, sess.write_out, opts) is None:
             raise NotSupported("printing this value")
+
+
+def _print_factor(sess, v, opts):
+    labels = factors.labels_of(v)
+    names = v.attrs.get("names")
+    # (the labels as strings, laid out as a character vector of them would be: its own reservation)
+    with _print_reservation(RVector("character", ["<NA>" if s is None else s for s in labels],
+                                    {"names": names} if names is not None else None)):
+        if fmt.print_factor(labels, factors.levels_of(v), "ordered" in v.attrs["class"].data,
+                            names.data if names is not None else None, sess.write_out, opts) is None:
+            raise NotSupported("printing a factor whose levels are wider than the line")
 
 
 def _print_reservation(v):
@@ -676,6 +691,16 @@ FORMALS = {
     "complex": Closure("length.out", "real", "imaginary", "modulus", "argument"),
     "is.vector": Closure("x", "mode", required=("x",)),
     "options": Closure(DOTS),
+    "factor": Closure("x", "levels", "labels", "exclude", "ordered", "nmax"),
+    "ordered": Closure("x", "levels", "labels", "exclude", "nmax"),
+    "levels": Primitive("x"),
+    "nlevels": Closure("x"),
+    "is.factor": Closure("x", required=("x",)),
+    "is.ordered": Closure("x", required=("x",)),
+    "droplevels": Closure("x", DOTS, required=("x",)),
+    "as.vector": Closure("x", "mode", required=("x",)),
+    "cut": Closure("x", "breaks", "labels", "include.lowest", "right", "dig.lab", "ordered_result", DOTS,
+                   required=("x", "breaks")),
 }
 for _f in ("as.logical", "as.integer", "as.numeric", "as.double", "as.character", "as.complex"):
     FORMALS[_f] = Primitive("x", dots=True, least=0)
@@ -725,6 +750,16 @@ BUILTINS["is.finite"] = is_finite
 BUILTINS["is.infinite"] = is_infinite
 BUILTINS["is.vector"] = is_vector
 BUILTINS["options"] = options
+# A3: factors (factors.py)
+BUILTINS["factor"] = factor
+BUILTINS["ordered"] = ordered
+BUILTINS["levels"] = levels
+BUILTINS["nlevels"] = nlevels
+BUILTINS["is.factor"] = is_factor_
+BUILTINS["is.ordered"] = is_ordered
+BUILTINS["droplevels"] = droplevels
+BUILTINS["as.vector"] = as_vector
+BUILTINS["cut"] = cut
 BUILTINS["raw"] = refuse_raw
 BUILTINS["as.raw"] = refuse_raw
 # base's constants (values, not functions)

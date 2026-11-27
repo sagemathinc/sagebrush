@@ -69,6 +69,14 @@ def index(sess, call, args):
     i = args[1][1] if len(args) > 1 else MISSING
     if i is MISSING:
         return x
+    from .factors import is_factor, make
+    if is_factor(x):
+        # (a factor's elements keep its levels and class, R 4.5.3)
+        picked = index(sess, call, [(None, RVector("integer", x.data, {"names": x.attrs["names"]} if "names" in x.attrs else None)), args[1]])
+        return make(picked.data, list(x.attrs["levels"].data), "ordered" in x.attrs["class"].data,
+                    picked.attrs.get("names") if picked.attrs else None)
+    if x.attrs and set(x.attrs) != {"names"}:
+        raise NotSupported("`[` of a vector with attributes other than names")
     n = len(x.data)
     names = _names(x)
     # (the whole peak, before any position is computed: no index takes more than max(n, length(i)) positions,
@@ -279,6 +287,12 @@ def _coercion(to):
         v = _atomic(args[0][1], "as.%s()" % to)
         if v is NULL:
             return RVector(to, [])
+        from .factors import is_factor, labels_of
+        if is_factor(v):
+            # (a factor's labels to character and logical, its codes to numbers: R 4.5.3)
+            if to == "complex":
+                raise NotSupported("as.complex() of a factor")
+            v = RVector("character", labels_of(v)) if to in ("character", "logical") else RVector("integer", v.data)
         with mem.reserve(len(v.data), to):
             data = list(v.data) if v.type == to else _to(v, to, call, sess)
             return RVector(to, data)
@@ -294,7 +308,8 @@ def _type_test(test):
 
 
 def _is_type(*types):
-    return _type_test(lambda v: isinstance(v, RVector) and v.type in types)
+    # (a factor is an integer vector, but is.numeric, is.integer and the rest say FALSE for it, R 4.5.3)
+    return _type_test(lambda v: isinstance(v, RVector) and v.type in types and not (v.attrs and "class" in v.attrs))
 
 
 def _elementwise(test):
