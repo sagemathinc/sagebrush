@@ -39,3 +39,6 @@ SR exp (710, inf) | NaN + NaN*I
 SR sinh (710, inf) | NaN + NaN*I
 SR cosh (710, inf) | NaN + NaN*I
 SR tanh (710, inf) | NaN + NaN*I
+CDF exp(+inf) | +infinity
+RDF tanh(+inf) | 1.0
+RDF tanh(-inf) | -1.0

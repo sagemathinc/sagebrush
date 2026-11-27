@@ -33,7 +33,9 @@ show("SR sinh(CDF(1000+i))", lambda: sinh(SR(CDF(1000, 1))))
 show("SR cosh(CDF(-1000+i))", lambda: cosh(SR(CDF(-1000, 1))))
 show("SR tanh(CDF(1000+i))", lambda: tanh(SR(CDF(1000, 1))))
 # sinh and cosh past |x| = 709 with a part a double: e^710.5 cos(pi/3)/2 is
-# 9.208086724008932e+307 (Sage's CDF: +infinity + +infinity*I; its SR: NaN + NaN*I)
+# 9.208086724008932e+307, the true value; the imaginary part is within one ulp
+# of the true one, since sin(pi/3) is a rounded double first (Sage's CDF:
+# +infinity + +infinity*I; its SR: NaN + NaN*I)
 y = RDF(pi/3)
 show("CDF sinh(710.5+i pi/3)", lambda: CDF(710.5, y).sinh())
 show("SR sinh(CDF(710.5+i pi/3))", lambda: sinh(SR(CDF(710.5, y))))
@@ -46,3 +48,8 @@ i_, n_ = float('inf'), float('nan')
 for z in [(1000, i_), (1000, n_), (n_, 1), (i_, 1), (710, i_)]:
     for name, f in [("exp", exp), ("sinh", sinh), ("cosh", cosh), ("tanh", tanh)]:
         show("SR %s %s" % (name, z), lambda: f(SR(CDF(*z))))
+# an infinite argument: exp(+infinity) has imaginary part 0, tanh(+-infinity)
+# is +-1 (Sage's GSL: +infinity + NaN*I, and NaN, its inf/inf)
+show("CDF exp(+inf)", lambda: CDF(float('inf'), 0).exp())
+show("RDF tanh(+inf)", lambda: RDF(float('inf')).tanh())
+show("RDF tanh(-inf)", lambda: RDF(float('-inf')).tanh())

@@ -144,3 +144,5 @@ exp (5, inf) | NaN + NaN*I
 sinh (5, inf) | NaN + NaN*I
 cosh (5, inf) | NaN + NaN*I
 tanh (5, inf) | NaN + NaN*I
+tanh (0.5, inf) | NaN + NaN*I
+tanh (-0.5, -inf) | NaN + NaN*I

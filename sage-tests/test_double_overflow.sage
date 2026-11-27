@@ -36,3 +36,6 @@ i_, n_ = float('inf'), float('nan')
 for z in [(1000, i_), (1000, n_), (n_, 1), (i_, 1), (-i_, 1), (710, i_), (1000, -i_), (5, i_)]:
     for f in ["exp", "sinh", "cosh", "tanh"]:
         show("%s %s" % (f, z), lambda: getattr(CDF(*z), f)())
+# tanh with |x| < 1 and an infinite imaginary part: NaN + NaN*I, as Sage's
+show("tanh (0.5, inf)", lambda: CDF(0.5, float('inf')).tanh())
+show("tanh (-0.5, -inf)", lambda: CDF(-0.5, float('-inf')).tanh())
