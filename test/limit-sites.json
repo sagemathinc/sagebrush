@@ -8149,6 +8149,14 @@
   "class": "1+2",
   "owner": "raster/image I/O"
  },
+ "engine/raster/src/svg.rs :: apply :: \"stroke-miterlimit\" => style.miter = number(v)?, #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/svg.rs :: apply :: style.cap = match v { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
  "engine/raster/src/svg.rs :: draw_path :: let s = Stroke { width: st.stroke_width, line_cap: st.cap, line_join: st.join, miter_limit: st.miter, ..Stroke::default() }; #0": {
   "class": "none",
   "owner": "raster/image I/O"
@@ -8216,11 +8224,6 @@
   "owner": "symbolic engine",
   "reason": "a unit test's choice of powers within the MP numbers' range, to compare with the exact power; refuses nothing"
  },
- "engine/sym/src/mpnum.rs :: pow_int_fits :: n == 0 || x.sp != Sp::Fin || x.m.is_zero() || x.m.bits().saturating_mul(n.unsigned_abs()) <= crate::num::MAX_INT_BITS #0": {
-  "class": "none",
-  "owner": "symbolic engine",
-  "reason": "whether a RealField power is computed in the engine (its exact form within num::MAX_INT_BITS) or by the front end, which has no such bound; refuses nothing"
- },
  "engine/sym/src/mpnum.rs :: refuse_range :: MAX_EXP, MAX_EXP + 1 #0": {
   "class": "coverage",
   "owner": "symbolic engine",
@@ -8236,15 +8239,30 @@
   "owner": "symbolic engine",
   "reason": "the operand range on which an RR or CC operation's double steps are MPFR's (outside it the operation is done again in the 53-bit MP field); refuses nothing"
  },
- "engine/sym/src/num.rs :: pow_past_doubles :: if est - margin > max || est + margin < -max - 1.0 { #0": {
-  "class": "coverage",
+ "engine/sym/src/num.rs :: mp_powers_past_the_precision :: assert_eq!(s(mp_pow(&mp(-1.5, 24), &BigInt::from(i64::MAX))), \"-infinity\"); #0": {
+  "class": "none",
   "owner": "symbolic engine",
-  "reason": "an RR or CC power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain, so past the doubles: refused as not available before it is computed, never a wrong value; not a resource cap"
+  "reason": "a unit test's exponent (the largest i64) for a power past MPFR's exponents; refuses nothing"
  },
- "engine/sym/src/num.rs :: pow_past_doubles :: let max = crate::mpnum::MAX_EXP as f64; #0": {
+ "engine/sym/src/num.rs :: pow_range :: let max = crate::mpnum::MAX_EXP as i128; #0": {
   "class": "coverage",
   "owner": "symbolic engine",
-  "reason": "an RR or CC power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain, so past the doubles: refused as not available before it is computed, never a wrong value; not a resource cap"
+  "reason": "an RR, CC or MP power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain: refused as not available before it is computed, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/num.rs :: pow_range :: let max = max as f64; #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "an RR, CC or MP power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain: refused as not available before it is computed, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/num.rs :: pow_range :: } else if est - margin > max || est + margin < -max - 1.0 { #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "an RR, CC or MP power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain: refused as not available before it is computed, never a wrong value; not a resource cap"
+ },
+ "engine/sym/src/num.rs :: pow_range :: } else if l + 1 > max || l + 1 < -max { #0": {
+  "class": "coverage",
+  "owner": "symbolic engine",
+  "reason": "an RR, CC or MP power past the MP numbers' 2^+-4096 (mpnum::MAX_EXP) for certain: refused as not available before it is computed, never a wrong value; not a resource cap"
  },
  "engine/sym/src/num.rs :: tame :: x == 0.0 || (TAME_MIN..=TAME_MAX).contains(&x.abs()) #0": {
   "class": "none",
@@ -11402,6 +11420,11 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: MRec._str :: A maximal order in it prints on one line (_IN_REC), as a tuple's does: #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
  "lib/_magma.py :: PartialFractionDecomposition :: budget = _FunBudget() #0": {
   "class": "2+3",
   "owner": "Magma compatibility/rational functions",
@@ -11485,6 +11508,16 @@
   "class": "3",
   "owner": "Magma compatibility",
   "row": "inv-25"
+ },
+ "lib/_magma.py :: _MOrder._parts :: head = \"Maximal Equation Order\" if self._is_equation_order() else \"Maximal Order of Equation Order\" #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
+ "lib/_magma.py :: _MOrder._str :: \"\"\"Laid out as Magma prints a maximal equation order past WIDTH #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
  },
  "lib/_magma.py :: _alt :: if n > _COLLECT_MAX: #0": {
   "class": "2",
@@ -13105,6 +13138,61 @@
   "owner": "finite fields + configuration",
   "row": "inv-1"
  },
+ "lib/_sage_ff.py :: IntegerModRing_._units_field :: raise NotImplementedError(\"%s of %r (not a field) is not supported yet\" % (what, self)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: the unit-group and roots-of-unity methods of Z/n with n composite (Sage's values there are not modelled), and lift_centered of a vector over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.irreducible_element :: raise NotImplementedError(\"irreducible_element with algorithm=%r is not supported yet (only 'first_lexicographic')\" % algorithm) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: def monics(self, of_degree=None, max_degree=None): #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: if (of_degree is None) == (max_degree is None): #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: lo, hi = (int(of_degree), int(of_degree)) if of_degree is not None else (0, int(max_degree)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: raise ValueError(\"you should pass exactly one of of_degree and max_degree\") #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: PolynomialRing_ff_.monics :: sage: list(GF(3)['u'].monics(max_degree=1)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "monics(max_degree=...) is Sage's argument: the caller's degree bound for the enumeration, not a size or work limit"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff._need_field :: raise NotImplementedError(\"%s over %r, which is not a field\" % (what, B)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: resultant, discriminant and is_square over Z/n with n composite (not a field) are not implemented; not a size or work limit"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.nth_root :: NotImplementedError: nth_root of degree 2 of a polynomial over a field with several such roots is not supported yet #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.nth_root :: modelled: NotImplementedError. #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.nth_root :: raise NotImplementedError(\"nth_root of degree %d of a polynomial over a field with several such roots is not supported yet\" % n) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
   "owner": "finite fields + configuration"
@@ -13528,6 +13616,31 @@
   },
   "owner": "linear algebra/runtime memory",
   "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods._split_eigenvalues :: raise NotImplementedError(what) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenvalues :: NotImplementedError: eigenvalues of a matrix whose characteristic polynomial does not split over Finite Field of size 101 are not supported yet (Sage gives them in extension fields) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenvalues :: modelled here: NotImplementedError. #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.jordan_form :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFVectorMethods.lift_centered :: raise NotImplementedError(\"lift_centered of a vector over %r is not supported yet\" % self._base) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
  },
  "lib/_sage_ffsub.py ::  :: CONWAY_MAX = 10 ** 7 #0": {
   "class": "3",
@@ -14331,6 +14444,246 @@
   "class": "coverage",
   "owner": "symbolic linear algebra (@sagebrush-matlab)",
   "reason": "the doctest's expected output for _eigen's unsupported case (the review's N10 pin), not a cap"
+ },
+ "lib/_sage_modsym.py :: ModularSymbolsMethods._exact :: raise NotImplementedError(\"Hecke matrices and subspaces of modular symbols with a nontrivial character are not supported yet\") #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "domain refusals: exact modular symbols with a nontrivial character, and the old subspace (raising degeneracy maps), are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_modsym.py :: ModularSymbolsMethods.old_submodule :: NotImplementedError: the old subspace of modular symbols is not supported yet #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "domain refusals: exact modular symbols with a nontrivial character, and the old subspace (raising degeneracy maps), are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_modsym.py :: ModularSymbolsMethods.old_submodule :: raise NotImplementedError(\"the old subspace of modular symbols is not supported yet\") #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "domain refusals: exact modular symbols with a nontrivial character, and the old subspace (raising degeneracy maps), are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_modsym.py :: Space :: ....: print(\"refused\", e.need_bytes > e.limit_bytes, len(calls)) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's refusal, reuse, eviction, reservation before arithmetic, sound sum bounds and the one ledger"
+ },
+ "lib/_sage_modsym.py :: Space :: ....: print(e.need_bytes > e.limit_bytes, 997 in S._hecke) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space :: ....: print(type(e).__name__, e.need_bytes > e.limit_bytes) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 3200000; _ = L.hecke_matrix(2) # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 4 * 800000 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A computation\"); ch.take(ch.limit - ch.used); ch.used == ch.limit # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A product\"); ch.limit = ch.used + 10 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's refusal, reuse, eviction and reservation before arithmetic"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A row\"); ch.limit = ch.used + 10 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A sum\"); ch.used, ch.limit = 0, 240 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's refusal, reuse, eviction, reservation before arithmetic, sound sum bounds and the one ledger"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 10**6 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = 480000; M = ModularSymbols(33); _ = M._exact() # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's refusal, reuse, eviction, reservation before arithmetic, sound sum bounds and the one ledger"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = old # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = old; L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 6000000 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = old; M.new_submodule().dimension() # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's refusal, reuse, eviction, reservation before arithmetic, sound sum bounds and the one ledger"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = old; int(S.hecke_matrix(997)[0][0]) # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space._evict :: def _evict(self, limit, pin=()): #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest unpinned matrices: a cache policy, never a refusal"
+ },
+ "lib/_sage_modsym.py :: Space._evict :: if self.held() <= limit: #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest unpinned matrices: a cache policy, never a refusal"
+ },
+ "lib/_sage_modsym.py :: Space.coordinates :: self._pivbits = {p: _maxbits(r) for p, r in self._pivrow.items()} #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed (sums of products: the bits of all their terms), reserved against the allowance before the arithmetic (the admission's need), not a limit"
+ },
+ "lib/_sage_modsym.py :: Space.hecke_matrix :: self._evict(ch.limit // 2 - size) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest matrices: a cache policy, never a refusal"
+ },
+ "lib/_sage_modsym.py :: _Charge.__init__ :: self.limit = _capacity.heap_figure() // _SHARE #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "modular symbols/runtime memory",
+  "reason": "the modular symbols' working-storage admission: each computation's containers charged against a quarter of the heap figure, refused through the memory guard (LIMITS L1)"
+ },
+ "lib/_sage_modsym.py :: _Charge.take :: e = _memguard.memory_guard(self.what, self.used, self.limit, \"one modular symbols computation\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "modular symbols/runtime memory",
+  "reason": "the modular symbols' working-storage admission: each computation's containers charged against a quarter of the heap figure, refused through the memory guard (LIMITS L1)"
+ },
+ "lib/_sage_modsym.py :: _Charge.take :: if self.used > self.limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "modular symbols/runtime memory",
+  "reason": "the modular symbols' working-storage admission: each computation's containers charged against a quarter of the heap figure, refused through the memory guard (LIMITS L1)"
+ },
+ "lib/_sage_modsym.py :: _intersect :: b1max = [_maxbits(r) for r in B1] #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed (sums of products: the bits of all their terms), reserved against the allowance before the arithmetic (the admission's need), not a limit"
+ },
+ "lib/_sage_modsym.py :: _intersect :: terms = [(_bits(k[i]), b1max[i]) for i in range(len(B1)) if k[i]] #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed (sums of products: the bits of all their terms), reserved against the allowance before the arithmetic (the admission's need), not a limit"
+ },
+ "lib/_sage_modsym.py :: _kernel :: ab = max((_maxbits(r) for r in A), default=0) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _left_kernel :: ab = max((_maxbits(r) for r in A), default=0) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _mat_mul :: bmax = [_maxbits(r) for r in B] #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed (sums of products: the bits of all their terms), reserved against the allowance before the arithmetic (the admission's need), not a limit"
+ },
+ "lib/_sage_modsym.py :: _mat_mul :: terms = [(_bits(a), bmax[t]) for t, a in enumerate(r) if a] #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed (sums of products: the bits of all their terms), reserved against the allowance before the arithmetic (the admission's need), not a limit"
+ },
+ "lib/_sage_modsym.py :: _maxbits :: def _maxbits(r): #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _poly_at :: ab = max((_maxbits(r) for r in A), default=0) + n.bit_length() + 1 #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _poly_at :: rb = max((_maxbits(r) for r in R), default=0) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _poly_at :: res = _reserve(ch, n, _maxbits(r) + den.bit_length(), frac=False) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _poly_at :: res = _reserve(ch, n, _maxbits(r)) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _restrict :: mmax = [_maxbits(r) for r in M] #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed (sums of products: the bits of all their terms), reserved against the allowance before the arithmetic (the admission's need), not a limit"
+ },
+ "lib/_sage_modsym.py :: _restrict :: terms = [(_bits(b[t]), mmax[t]) for t in range(n) if b[t]] #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed (sums of products: the bits of all their terms), reserved against the allowance before the arithmetic (the admission's need), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref :: pb = _maxbits(P) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref :: res = _reserve(ch, len(keys), 2 * (_maxbits(r) + _bits(t) + pb) + 2) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed (sums of products: the bits of all their terms), reserved against the allowance before the arithmetic (the admission's need), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref :: res = _reserve(ch, len(old), _maxbits(old) + _bits(pv)) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref_int :: pb = _maxbits(P) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref_int :: res = _reserve(ch, n, _maxbits(A[i]) + pc.bit_length()) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref_int :: res = _reserve(ch, n, _maxbits(r) + d.bit_length(), frac=False) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref_int :: res = _reserve(ch, n, pc.bit_length() + _maxbits(old) + a.bit_length() + pb + 1, frac=False) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
  },
  "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
   "class": "none",
@@ -19859,7 +20212,7 @@
   "owner": "pyjs JSON/runtime memory",
   "row": "src-8"
  },
- "src/runtime/modules.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
+ "src/runtime/modules.ts ::  :: import { admitHeap, heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
@@ -19905,6 +20258,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",
@@ -20320,12 +20678,12 @@
   "owner": "sagebrush-python",
   "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
  },
- "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
+ "src/runtime/nd.ts :: ndMemoryMax :: return mem ? declaredMax.get(mem) ?? 0 : 0; #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
- "src/runtime/nd.ts :: sharedMemory :: const declaredMax = new WeakMap<WebAssembly.Memory, number>(); #0": {
+ "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
@@ -20344,6 +20702,11 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
+ "src/runtime/nd.ts :: sharedOk :: const declaredMax = new WeakMap<WebAssembly.Memory, number>(); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
  "src/runtime/nd.ts :: up :: const MAX_HELPERS = 8; #0": {
   "class": "1",
@@ -20368,6 +20731,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), checked before any storage is admitted, as NumPy checks the dimensions before allocating; NumPy's semantics, not a Sagebrush limit"
  },
+ "src/runtime/numpy.ts :: admitObjects :: export const objBackend = { denseLimit: v8DenseLength(), makeRefs: (n: number): any[] => new Array(n).fill(null) }; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
+ },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -20388,6 +20756,21 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
  },
+ "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "the heap a range's item takes, estimated for its admission (a number up to 2**53 is a 16-byte heap number, a larger one a BigInt); it refuses nothing itself"
+ },
+ "src/runtime/numpy.ts :: binary :: const beyond64 = big < I64MIN || big > I64MAX; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
+ },
+ "src/runtime/numpy.ts :: binary :: const outside = dt.kind !== \"b\" && (dt === D.uint64 ? big < 0n || big > U64MAX : rg ? big < BigInt(rg[0]) || big > BigInt(rg[1]) : beyond64); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -20402,6 +20785,16 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; it refuses an axis out of bounds for a 0-d array viewed as one element, as NumPy's cumsum"
+ },
+ "src/runtime/numpy.ts :: cutArray :: if (shape.length >= OBJ_MAXDIMS) { #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
+ },
+ "src/runtime/numpy.ts :: cutArray :: raise(T.NotImplementedError, \"this operation on object arrays is not supported by sagebrush's numpy yet (an array inside the data whose dimensions don't all fit the result's: NumPy assigns it whole, broadcasting)\"); #0": {
+  "class": "coverage",
+  "owner": "python",
+  "reason": "object arrays: operations not in sagebrush's numpy yet (arithmetic, ufuncs, an inner array cut off by the result's shape) refuse with NotImplementedError rather than compute something else"
  },
  "src/runtime/numpy.ts :: discover :: if (depth + s.length > MAX_DIMS) nestedTooDeep(); #0": {
   "class": "none",
@@ -20468,6 +20861,16 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, false, O.truth(stable)) : objSort(a, normAxis(intNum(axis), a.ndim), false, O.truth(stable)); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, true, O.truth(stable)) : objSort(a, normAxis(intNum(axis), a.ndim), true, O.truth(stable)); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
+ },
  "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(intNum(axis), a.ndim), false); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -20487,6 +20890,16 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; the axis read as an index (#1944)"
+ },
+ "src/runtime/numpy.ts :: objConcat :: const ax = normAxis(axis, nd); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
+ },
+ "src/runtime/numpy.ts :: objRefuse :: return raise(T.NotImplementedError, \"this operation on object arrays is not supported by sagebrush's numpy yet (object arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, take, isin, concatenate and printing)\"); #0": {
+  "class": "coverage",
+  "owner": "python",
+  "reason": "object arrays: operations not in sagebrush's numpy yet (arithmetic, ufuncs, an inner array cut off by the result's shape) refuse with NotImplementedError rather than compute something else"
  },
  "src/runtime/numpy.ts :: plainOperand :: const i = normAxis(Number(x), a.ndim, \"axis1\"), j = normAxis(Number(y), a.ndim, \"axis2\"); #0": {
   "class": "none",
@@ -20508,10 +20921,20 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/numpy.ts :: refuse :: if (objBackend.denseLimit !== null && n > objBackend.denseLimit) refuse(); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
+ },
  "src/runtime/numpy.ts :: scalarDtype :: const MAX_DIMS = 64; #0": {
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: setDim :: const OBJ_MAXDIMS = 64; #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
  },
  "src/runtime/numpy.ts :: str :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
   "class": "none",
@@ -20527,6 +20950,16 @@
   "class": "coverage",
   "owner": "NumPy shim",
   "reason": "string arrays: an operation v1 doesn't have, refused in words (NotImplementedError); not a cap"
+ },
+ "src/runtime/numpy.ts :: toNum :: if (!(n >= -9223372036854775808 && n < (dt.kind === \"u\" && dt.itemsize >= 4 ? 18446744073709551616 : 9223372036854775808))) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: NumPy's own OverflowError for a Python float past a C long, as int() packs it (#2149)"
+ },
+ "src/runtime/numpy.ts :: tooDeep :: return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${OBJ_MAXDIMS}.`); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
  },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",
@@ -20567,6 +21000,11 @@
   "class": "none",
   "owner": "NumPy shim/runtime memory",
   "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_linalg.ts ::  :: import { useNd, ndCholesky, ndLu, ndMemoryMax, ndPath, ndProducts, ndRequestWarm, ndScratch, ndThreads, ndWarmState } from \"./nd\"; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
  "src/runtime/object.ts :: engineLimit :: function engineLimit(message: string): string | undefined { #0": {
   "class": "none",
@@ -21170,10 +21608,26 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
+ "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of rendered output\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
  "web/latex/engine/tikz.mjs :: X :: if (st.cap) a += ' stroke-linecap=\"' + st.cap + '\"'; #0": {
   "class": "none",
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
+ },
+ "web/latex/engine/tikz.mjs :: atBorder :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: atom :: if (!Number.isFinite(v)) fail(\"a value too large in \" + JSON.stringify(s)); #0": {
   "class": "1",
@@ -21190,6 +21644,11 @@
   },
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false, #0": {
+  "class": "none",
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "matched text that refuses nothing: the path state's cap field"
  },
  "web/latex/engine/tikz.mjs :: checkPt :: if (Math.abs(p[0]) > TIKZ_LIMITS.COORD_MAX || Math.abs(p[1]) > TIKZ_LIMITS.COORD_MAX) fail(\"a point farther than \" + Math.round(TIKZ_LIMITS.COORD_MAX / PT_PER_CM / 100) + \" m\"); #0": {
   "class": "1",
@@ -21285,6 +21744,38 @@
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: lex :: if (this.lexed + n > TIKZ_LIMITS.LEX_TEXT) fail(MORE_TEXT()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.labelHtml += utf8Len(r.html)) > TIKZ_LIMITS.LABEL_HTML) fail(\"node text past \" + TIKZ_LIMITS.LABEL_HTML / 2 ** 20 + \" MiB of HTML in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.nodeText += nb) > TIKZ_LIMITS.NODE_TEXT) fail(\"node text past \" + TIKZ_LIMITS.NODE_TEXT / 1024 + \" KiB in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (++this.nodeCount > TIKZ_LIMITS.NODES) fail(\"more than \" + TIKZ_LIMITS.NODES + \" nodes in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (nb > TIKZ_LIMITS.LABEL_TEXT) fail(\"a line of a node's text over \" + TIKZ_LIMITS.LABEL_TEXT / 1024 + \" KiB\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -21703,6 +22194,62 @@
   },
   "owner": "library chunk fetch",
   "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, hash FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: else if (this.kept() + 1 > this.bounds.entries && op !== \"remove\" && op !== \"recover\") throw new SyncError(\"limit\", \"the key chain is at its length bound: only removing a device, recovering or a reset goes on\", { max: this.bounds.entries }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if (!isReset && this.kept() + 1 > this.bounds.entries + this.bounds.reserve) throw new SyncError(\"limit\", \"the key chain is at its length bound\", { max: this.bounds.entries + this.bounds.reserve }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if ([...next.devices.values()].filter((d) => d.removed === null).length > E2E.devices) throw new SyncError(\"limit\", \"too many devices\", { max: E2E.devices }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: const all = this.sql.exec(\"SELECT entry FROM e2e_chain WHERE seq >= ? ORDER BY seq LIMIT ?\", from, E2E.page).toArray() as Row[]; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: const r = this.sql.exec(\"SELECT bytes, seq, epoch FROM e2e_wrappers WHERE kind = ? AND rid = ? AND epoch = ? ORDER BY seq DESC LIMIT 1\", kind, id, h.epoch).toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: if (live >= E2E.sessions) throw new SyncError(\"limit\", \"too many enrollments at once\", { max: E2E.sessions }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
  },
  "web/sync/entries.ts ::  :: bytes: IX_BYTES_MAX, #0": {
   "class": "1",
@@ -22279,62 +22826,6 @@
   "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
   "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
  },
- "web/sync/e2e-chain.ts :: stale :: const all = this.sql.exec(\"SELECT entry FROM e2e_chain WHERE seq >= ? ORDER BY seq LIMIT ?\", from, E2E.page).toArray() as Row[]; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: stale :: const r = this.sql.exec(\"SELECT bytes, seq, epoch FROM e2e_wrappers WHERE kind = ? AND rid = ? AND epoch = ? ORDER BY seq DESC LIMIT 1\", kind, id, h.epoch).toArray()[0] as Row | undefined; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: stale :: if (live >= E2E.sessions) throw new SyncError(\"limit\", \"too many enrollments at once\", { max: E2E.sessions }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, hash FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: kept :: else if (this.kept() + 1 > this.bounds.entries && op !== \"remove\" && op !== \"recover\") throw new SyncError(\"limit\", \"the key chain is at its length bound: only removing a device, recovering or a reset goes on\", { max: this.bounds.entries }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: kept :: if (!isReset && this.kept() + 1 > this.bounds.entries + this.bounds.reserve) throw new SyncError(\"limit\", \"the key chain is at its length bound\", { max: this.bounds.entries + this.bounds.reserve }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
- "web/sync/e2e-chain.ts :: kept :: if ([...next.devices.values()].filter((d) => d.removed === null).length > E2E.devices) throw new SyncError(\"limit\", \"too many devices\", { max: E2E.devices }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
-  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
- },
  "web/workspace/checkpoint.ts ::  :: export const CHECKPOINT_BLOB_MAX = 32 << 20; #0": {
   "class": "1",
   "disposition": {
@@ -22572,58 +23063,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of rendered output\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: atBorder :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false, #0": {
-  "class": "none",
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "matched text that refuses nothing: the path state's cap field"
- },
- "web/latex/engine/tikz.mjs :: node :: if ((this.labelHtml += utf8Len(r.html)) > TIKZ_LIMITS.LABEL_HTML) fail(\"node text past \" + TIKZ_LIMITS.LABEL_HTML / 2 ** 20 + \" MiB of HTML in a picture\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: node :: if ((this.nodeText += nb) > TIKZ_LIMITS.NODE_TEXT) fail(\"node text past \" + TIKZ_LIMITS.NODE_TEXT / 1024 + \" KiB in a picture\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: node :: if (++this.nodeCount > TIKZ_LIMITS.NODES) fail(\"more than \" + TIKZ_LIMITS.NODES + \" nodes in a picture\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: node :: if (nb > TIKZ_LIMITS.LABEL_TEXT) fail(\"a line of a node's text over \" + TIKZ_LIMITS.LABEL_TEXT / 1024 + \" KiB\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  }
 }

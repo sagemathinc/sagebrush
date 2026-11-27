@@ -26,7 +26,7 @@
 
 import { sha256Hex } from "./sha256";
 import { Crew, type WorkerLike } from "./nd-crew";
-import { growTo } from "./wasm_room";
+import { growTo, memoryFailure, setupRefusal } from "./wasm_room";
 
 interface Nd {
   nd_info(what: number): number;
@@ -95,18 +95,26 @@ export function ndBytes(): Uint8Array {
 }
 
 // The module's memory: shared, 4 GiB at most (the module's own bound), or
-// less where so much address space can't be reserved; null if none can be
-// made (no SharedArrayBuffer: a page that isn't cross-origin isolated).
+// less where so much address space can't be reserved (the maximum then only
+// moves where a call is refused, never which code runs; ndMemoryMax() says
+// which); null where the engine makes no shared memory at all (a feature it
+// lacks). Memory the computer can't give for even the smallest is a refusal
+// (wasm_room.ts), thrown: nothing is decided, and the next call tries again.
 function sharedMemory(): WebAssembly.Memory | null {
   for (const maximum of [65536, 16384, 4096]) {
     try {
       const m = new WebAssembly.Memory({ initial: 17, maximum, shared: true });
       declaredMax.set(m, maximum * 65536);
       return m;
-    } catch {}
+    } catch (e) {
+      if (!memoryFailure(e)) return null;
+    }
   }
-  return null;
+  throw setupRefusal("engine/nd's shared memory");
 }
+
+// (the engine's features: shared memory needs SharedArrayBuffer, which a page has only when cross-origin isolated)
+const sharedOk = () => typeof SharedArrayBuffer === "function" && (globalThis as any).crossOriginIsolated !== false;
 // (each memory's declared maximum, in bytes: its fixed limit, wasm_room.ts)
 const declaredMax = new WeakMap<WebAssembly.Memory, number>();
 
@@ -115,27 +123,32 @@ const wasmOff = () => {
   return !!(g.__SAGEBRUSH_NO_WASM__ || g.process?.env?.SAGEBRUSH_NO_WASM || typeof WebAssembly !== "object");
 };
 
+// Which code runs, decided once from the engine's features (and SAGEBRUSH_NO_WASM): engine/nd, or the TypeScript
+// code with the reason. Memory the computer can't give while setting the module up is no answer about the engine
+// (#2157): the call is refused with a MemoryError, nothing is decided or kept, and the next call decides again.
 function decide(): void {
-  decided = true;
-  // (a warm-up still on its way is left to finish unused: this call compiles its own, as without one)
   const pre = compiled;
+  let why1: string;
+  if (wasmOff()) why1 = "WebAssembly is off here";
+  else if (!sharedOk()) why1 = "no shared WebAssembly memory here (the page is not cross-origin isolated)";
+  else {
+    const m = sharedMemory();
+    if (m === null) why1 = "no shared WebAssembly memory here (the page is not cross-origin isolated)";
+    else {
+      try {
+        instantiate(pre ?? new WebAssembly.Module(ndBytes() as any), m);
+        why1 = "";
+      } catch (err: any) {
+        if (memoryFailure(err)) throw setupRefusal("engine/nd");
+        why1 = `the numerics module could not be loaded (${err?.message ?? err})`;
+      }
+    }
+  }
+  decided = true;
+  why = why1;
+  // (a warm-up still on its way is left to finish unused: this call compiled its own, as without one)
   compiled = null;
   if (warm === "asked" || warm === "warming") warm = "unused";
-  if (wasmOff()) {
-    why = "WebAssembly is off here";
-    return;
-  }
-  const m = sharedMemory();
-  if (m === null) {
-    why = "no shared WebAssembly memory here (the page is not cross-origin isolated)";
-    return;
-  }
-  try {
-    instantiate(pre ?? new WebAssembly.Module(ndBytes() as any), m);
-    why = "";
-  } catch (err: any) {
-    why = `the numerics module could not be loaded (${err?.message ?? err})`;
-  }
 }
 
 function instantiate(mod: WebAssembly.Module, m: WebAssembly.Memory): void {
@@ -153,6 +166,12 @@ function instantiate(mod: WebAssembly.Module, m: WebAssembly.Memory): void {
 export function useNd(): boolean {
   if (!decided) decide();
   return ex !== null;
+}
+
+/** The module memory's declared maximum in bytes (its fixed limit: 4 GiB, or 1 GiB or 256 MiB where so much address
+ *  space can't be reserved); 0 before engine/nd runs. */
+export function ndMemoryMax(): number {
+  return mem ? declaredMax.get(mem) ?? 0 : 0;
 }
 
 /** Which code np.linalg's nd-backed functions run in this session, and why. */
@@ -530,6 +549,9 @@ function gemmOn(A: Float64Array, B: Float64Array, n: number, m: number, p: numbe
   const desc = P ? P.desc : base, lo = P ? base : base + 64;
   const stride = up(ex!.nd_info(0) * 8);
   const a = lo, b = up(a + 8 * m * p), c = up(b + 8 * n * m), scratch = up(c + 8 * n * p), hi = scratch + T * stride;
+  // (the scratch is one stride per participant, so a product within a few strides of the memory's maximum can fit
+  // on one thread and not on the pool: whether the pool is up yet is timing, never free memory; the bits are the
+  // same either way)
   reserve(hi);
   const f64 = new Float64Array(mem!.buffer), u32 = new Uint32Array(mem!.buffer);
   f64.set(B.subarray(0, m * p), a / 8);

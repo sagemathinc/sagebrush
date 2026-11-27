@@ -21,7 +21,7 @@ const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
 
 let failures = 0, count = 0;
 const ok = (c, what, detail) => { count++; if (!c) { failures++; console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 300)); } };
-const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql"];
+const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql"];
 const statements = MIGRATIONS.flatMap((m) => readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean));
 
 const ID = "abcdefghijklmnopqrstuvwxy2", B43 = "A".repeat(42) + "w", B22 = "A".repeat(21) + "w";
@@ -36,8 +36,9 @@ const TABLES = {
   lease_clock: { row: { agent: ID, host: ID, expires_at: 0, lease_id: ID, gen: 1, request: B43 }, text: { agent: "id", host: "id", lease_id: "id", request: "b43" } },
   fleet_bucket_hits: { row: { key: "lease-src:198.51.100.7", t: 0, id: ID }, text: { key: { min: 1, max: 200 }, id: "id" } },
   fleet_chain_hashes: { row: { fleet: ID, seq: 0, hash: B43 }, text: { fleet: "id", hash: "b43" } },
-  fleet_host_certs: { row: { fleet: ID, host: ID, cert: B43 }, text: { fleet: "id", host: "id", cert: "b43" } },
-  fleet_revocations: { row: { fleet: ID, kind: "host", id: ID }, text: { fleet: "id", kind: "enum", id: "id" } },
+  fleet_host_certs: { row: { fleet: ID, host: ID, cert: B43, bytes: "{}" }, text: { fleet: "id", host: "id", cert: "b43", bytes: { min: 1, max: 65536 } } },
+  fleet_revocations: { row: { fleet: ID, kind: "host", id: ID, bytes: "{}" }, text: { fleet: "id", kind: "enum", id: "id", bytes: { min: 1, max: 65536 } } },
+  fleet_accounts: { row: { fleet: ID, account: "acct_1-x" }, text: { fleet: "id", account: { min: 1, max: 64, ascii: true } } },
   fleet_grants: { row: { fleet: ID, host: ID, gen: 1, hash: B43, bytes: "{}" }, text: { fleet: "id", host: "id", hash: "b43", bytes: { min: 1, max: 65536 } } },
   fleet_transfers: { row: { fleet: ID, nonce: B22, agent: ID, from_host: ID, from_gen: 1, to_host: ID, gen: 1, transfer: B43, receipt: "{}", applied_ms: 0 },
     text: { fleet: "id", nonce: "b22", agent: "id", from_host: "id", to_host: "id", transfer: "b43", receipt: { min: 1, max: 65536 } } },
@@ -47,6 +48,7 @@ const TABLES = {
   fleet_fence_acks: { row: { fleet: ID, transfer: B43 }, text: { fleet: "id", transfer: "b43" } },
   fleet_host_queue: { row: { fleet: ID, host: ID, kind: "transfer", ref: B43, at_ms: 0 }, text: { fleet: "id", host: "id", kind: "enum", ref: "b43" } },
   fleet_grant_decisions: { row: { request: ID, decided: "ok" }, text: { request: "id", decided: "enum" } },
+  fleet_request_nonces: { row: { fleet: ID, host: ID, nonce: B22, created_ms: 0 }, text: { fleet: "id", host: "id", nonce: "b22" } },
 };
 const VALID = { id: ID, b43: B43, b22: B22 };
 

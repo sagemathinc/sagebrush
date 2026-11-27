@@ -240,6 +240,7 @@ pub enum HostAnswer {
     NotAsked,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl HostAnswer {
     /// A host's answer from its parts, as the bindings receive them (the
     /// Python extension's set_memory_total_source and the native addon's

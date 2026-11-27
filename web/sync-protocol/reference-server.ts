@@ -31,6 +31,10 @@ import {
   type Op, type Release,
 } from "./protocol.ts";
 import { PULL_FIELDS, batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkPullStart, checkUpto, hex } from "./doc-protocol.ts";
+import { checkSealedOp, isChainGeneration, isChainHead } from "./protocol.ts";
+import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
+import { e2eCore } from "../workspace/e2e/core-ready.ts";
+import * as prims from "../workspace/e2e/core/sealed-prims.mjs";
 
 /** The cookie a test session rides on: the same name as the site's, so a test front can pass it along. */
 export const SESSION_COOKIE = "__Host-sb_session";
@@ -61,7 +65,12 @@ interface Doc {
   recvFloor: number;
   chain: Uint8Array;
 }
-interface Device { next_dseq: number; answers: Map<number, { seq: number } | { code: string }>; refused: number }
+interface Device { next_dseq: number; answers: Map<number, { seq: number; env_sha256?: string } | { code: string }>; refused: number }
+/** An account's key chain as the server holds it (e2e PR 2c's store, reduced to what sealed ops read): the E2E account,
+ * the current head and generation, and each current device's Ed25519 key. */
+export interface RefChain { account: string; head: string; generation: string; signers: Map<string, Uint8Array> }
+/** A sealed op's answer (e2e PR 5b): decided (accepted with its envelope's hash, or refused), or undecided. */
+type SealedAck = { dseq: number; seq: number; env_sha256?: string } | { dseq: number; code: string } | { dseq: number; undecided: true };
 interface IndexOp extends Json { seq: number }
 interface Account {
   id: string;
@@ -73,6 +82,14 @@ interface Account {
   blobs: Map<string, Uint8Array>;
   docs: Map<string, Doc>;
   sockets: Set<RefSocket>;
+  /** e2e PR 5b: the key chain sealed ops are checked against (none: no_chain), the references sealed ops hold, and
+   * how many sealed ops the log holds */
+  chain?: RefChain;
+  refs: Map<string, number>;
+  /** the index's own references (as web/sync/account.ts index_refs): `address:add_seq` -> the seq of the op that
+   * released it, or null while live. A release must name a live add, and ends it once */
+  indexRefs: Map<string, number | null>;
+  sealed: number;
 }
 
 /** What a test answers instead of the server, for the next messages of a kind. */
@@ -127,6 +144,9 @@ export class ReferenceServer {
   private holding = 0;
   private fakes = new Map<string, Fake[]>();
   private nowMs: number | null = null;
+  private sealedCap: number = LIMITS.sealedLog;
+  private sealedHold: Promise<void> | null = null;
+  private refuseSealedAt: { dseq: number; code: string } | null = null;
   /** The force-reload floors and the release registry (n -> core sha); none by default, so every build may write. */
   private floors: Floors = { reload: 0, compat: 0, served: 0 };
   private registry = new Map<number, string>();
@@ -192,6 +212,26 @@ export class ReferenceServer {
         docs: [...a.docs].map(([k, d]) => [k, d.epoch, d.seq, d.head, d.batches.length, [...d.clients].map(([c, v]) => [c, v.fgen, v.next_cseq])]),
       });
     },
+    /** e2e PR 5b: an account's key chain as the server holds it (null: none), its sealed log's cap, and a sealed
+     * message's hold between its checks and its commit (the real object's verification awaits). */
+    setChain: (account: string, chain: RefChain | null) => {
+      const a = this.accounts.get(account);
+      if (!a) throw new Error("no such account yet");
+      if (chain) a.chain = { ...chain, signers: new Map(chain.signers) };
+      else delete a.chain;
+    },
+    setSealedCap: (n: number) => { this.sealedCap = n; },
+    /** The next sealed op at `dseq` (any device) refused with `code`, once, as a server's per-op check would. */
+    refuseSealed: (dseq: number, code: string) => { this.refuseSealedAt = { dseq, code }; },
+    holdSealed: (): (() => void) => {
+      let release!: () => void;
+      this.sealedHold = new Promise<void>((r) => (release = r));
+      return () => { this.sealedHold = null; release(); };
+    },
+    /** A blob's sealed references, for assertions. */
+    refs: (account: string, address: string): number => this.accounts.get(account)?.refs.get(address) ?? 0,
+    /** the index's references: each add, `address:add_seq`, with the seq that released it or null */
+    indexRefs: (account: string): [string, number | null][] => [...(this.accounts.get(account)?.indexRefs ?? new Map())],
     /** A document's head and stored batches, for assertions. */
     doc: (account: string, doc: string) => {
       const d = this.accounts.get(account)?.docs.get(doc);
@@ -223,7 +263,7 @@ export class ReferenceServer {
     let p = this.making.get(id);
     if (!p) {
       p = accountHash(id).then((hash) => {
-        const made: Account = { id, hash, state: "off", generation: 0, ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), sockets: new Set() };
+        const made: Account = { id, hash, state: "off", generation: 0, ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), sockets: new Set(), refs: new Map(), indexRefs: new Map(), sealed: 0 };
         this.accounts.set(id, made);
         this.making.delete(id);
         return made;
@@ -284,7 +324,8 @@ export class ReferenceServer {
       // (the sockets hear it first, then everything is gone at once: the reference has no steps)
       a.state = "deleting";
       for (const s of [...a.sockets]) { s.deliver({ t: "error", code: "deleting", detail: { message: "this account's synced data is being deleted" } }); s.close(4410, "deleting"); }
-      Object.assign(a, { state: "off", ops: [], devices: new Map(), blobs: new Map(), docs: new Map() });
+      // (the key chain is the account's identity: it survives "Delete my synced data"; the sealed log doesn't)
+      Object.assign(a, { state: "off", ops: [], devices: new Map(), blobs: new Map(), docs: new Map(), refs: new Map(), indexRefs: new Map(), sealed: 0 });
       return json({ state: "deleting", request_id: crypto.randomUUID(), generation: b.generation }, 202);
     }
     const bound = bindingRefusal(a, req.headers.get("x-sync-account"), req.headers.get("x-sync-generation"));
@@ -401,7 +442,7 @@ export class ReferenceServer {
     if (!isNat(req)) throw new SyncError("invalid", "req");
     this.admit(a);
     // (every write against the floors as they are now: a floor raised while this socket was open holds at its next write)
-    if (t === "ops" || t === "doc_claim" || t === "doc_fence" || t === "batch" || t === "clear") {
+    if (t === "ops" || t === "sops" || t === "doc_claim" || t === "doc_fence" || t === "batch" || t === "clear") {
       const stale = releaseRefusal(ws.release, this.floors, this.registry);
       if (stale) return this.refuseStale(ws, stale);
     }
@@ -410,6 +451,13 @@ export class ReferenceServer {
       const before = a.ops.length ? a.ops[a.ops.length - 1].seq : 0;
       const out = this.ops(a, ws.device, m.ops);
       this.answer(ws, "ops", req, { t: "ack", req, ops: out });
+      const head = a.ops.length ? a.ops[a.ops.length - 1].seq : 0;
+      if (head > before) for (const s of a.sockets) if (s !== ws && s.device) s.deliver({ t: "index_changed", head });
+    } else if (t === "sops") {
+      fields(m, ["t", "req", "ops"], "sops");
+      const before = a.ops.length ? a.ops[a.ops.length - 1].seq : 0;
+      const out = await this.sealedOps(a, ws.device, m.ops);
+      this.answer(ws, "sops", req, { t: "ack", req, ops: out });
       const head = a.ops.length ? a.ops[a.ops.length - 1].seq : 0;
       if (head > before) for (const s of a.sockets) if (s !== ws && s.device) s.deliver({ t: "index_changed", head });
     } else if (t === "pull_index") {
@@ -543,6 +591,120 @@ export class ReferenceServer {
       next++;
     }
     a.ops.push(...added);
+    for (const [k, v] of answers) dev.answers.set(k, v);
+    dev.next_dseq = next;
+    dev.refused = refused;
+    return out;
+  }
+
+  /**
+   * A device's sealed ops (e2e PR 5b), as the account object decides them (web/sync/account.ts sealedOps):
+   * - for the whole message, before anything is decided (no dseq spent): a key chain (no_chain); every new op under the
+   *   current head and generation (stale_head); every new op signed by a current device over its exact place,
+   *   envelope and references (forbidden); the new ops within the sealed log's cap (limit);
+   * - after the checks' awaits, the same sync generation, head and next dseq, or the message is refused;
+   * - then each op in dseq order: a resend answered as it was decided (an accepted one with its envelope's hash);
+   *   adds must be held and gain a reference; a release must name a live add of its address ({ address, add }) and
+   *   ends it once, giving no shared reference back (as the server); a refusal kept with its code,
+   *   and it ends the message: each new op after it is undecided (nothing spent, kept or counted).
+   */
+  private async sealedOps(a: Account, device: string, list: unknown): Promise<SealedAck[]> {
+    const chain = a.chain;
+    if (!chain) throw new SyncError("conflict", "this account has no key chain yet", { reason: "no_chain" });
+    if (!Array.isArray(list) || list.length === 0) throw new SyncError("invalid", "ops");
+    if (list.length > LIMITS.opsPerMessage) throw new SyncError("limit", "too many ops", { limit: "ops_per_message", max: LIMITS.opsPerMessage });
+    const dev = a.devices.get(device)!;
+    const next0 = dev.next_dseq, gen = a.generation;
+    const fresh = (raw: unknown, next: number) => {
+      const d = (raw as { dseq?: unknown })?.dseq;
+      return isNat(d) && d >= next;
+    };
+    const now = { hash: chain.head, generation: chain.generation };
+    for (const raw of list) {
+      const { head: h, chain_gen: g } = (raw ?? {}) as { head?: unknown; chain_gen?: unknown };
+      if (fresh(raw, next0) && ((isChainHead(h) && h !== now.hash) || (isChainGeneration(g) && g !== now.generation))) {
+        throw new SyncError("conflict", "sealed under another key chain head: seal again under the current one", { reason: "stale_head", head: now });
+      }
+    }
+    e2eCore(); // (the fleet core's backend installed, once, before any signature is checked or hash taken)
+    const core = prims;
+    const envHash = new Map<number, string>();
+    for (const [at, raw] of list.entries()) {
+      if (!fresh(raw, next0)) continue;
+      let op;
+      try {
+        op = checkSealedOp(raw);
+      } catch {
+        continue;
+      }
+      const key = chain.signers.get(op.signer);
+      const msg = await sealedOpMessage({ account: chain.account, syncGeneration: gen, chainGeneration: op.chainGen, head: op.head, device, dseq: op.dseq, env: op.env, adds: op.adds, releases: op.releases, signer: op.signer });
+      if (!key || !(await core.verifyStrict(key, msg, core.unb64(op.sig, 64)))) {
+        throw new SyncError("forbidden", "a sealed op not signed by a current device of this account's key chain", { dseq: op.dseq, signer: op.signer });
+      }
+      envHash.set(at, await core.sha256b64(op.env));
+    }
+    if (this.sealedHold) await this.sealedHold;
+    // (what was checked is still so, as the real object's transaction checks it)
+    this.admit(a);
+    if (a.generation !== gen) throw new SyncError("conflict", "this account's sync changed meanwhile", { reason: "generation" });
+    const cur = a.chain;
+    if (!cur || cur.head !== now.hash || cur.generation !== now.generation) throw new SyncError("conflict", "the key chain moved; seal again under its current head", { reason: "stale_head", head: cur ? { hash: cur.head, generation: cur.generation } : null });
+    if (dev.next_dseq !== next0) throw new SyncError("busy", "this device's ops moved meanwhile; send again", { retry_after: 0 });
+    const added0 = list.filter((raw) => fresh(raw, next0)).length;
+    if (added0 > 0 && a.sealed + added0 > this.sealedCap) throw new SyncError("limit", "this account's sealed log is full", { limit: "sealed_log", max: this.sealedCap });
+    let next = next0, refused = dev.refused, seq = a.ops.length ? a.ops[a.ops.length - 1].seq : 0, ended = false;
+    const out: SealedAck[] = [], rows: IndexOp[] = [], answers = new Map<number, { seq: number; env_sha256?: string } | { code: string }>();
+    const refs = new Map(a.refs), indexRefs = new Map(a.indexRefs);
+    for (const [at, raw] of list.entries()) {
+      const dseq = (raw as { dseq?: unknown })?.dseq;
+      if (!isNat(dseq) || dseq < 1) throw new SyncError("invalid", "op: dseq");
+      if (dseq < next) {
+        const r = dev.answers.get(dseq) ?? answers.get(dseq);
+        out.push(r && "seq" in r ? { dseq, seq: r.seq, ...(r.env_sha256 === undefined ? {} : { env_sha256: r.env_sha256 }) } : { dseq, code: (r as { code?: string } | undefined)?.code ?? "invalid" });
+        continue;
+      }
+      if (ended) {
+        out.push({ dseq, undecided: true });
+        continue;
+      }
+      if (dseq > next) throw new SyncError("order", "a gap in this device's ops", { next_dseq: next });
+      try {
+        const op = checkSealedOp(raw);
+        if (this.refuseSealedAt?.dseq === dseq) {
+          const code = this.refuseSealedAt.code;
+          this.refuseSealedAt = null;
+          throw new SyncError(code, "refused (a test's)");
+        }
+        for (const x of op.adds) if (!a.blobs.has(x)) throw new SyncError("missing", "upload the blob before the op that names it", { address: x });
+        for (const r of op.releases) if (indexRefs.get(`${r.address}:${r.add}`) !== null) throw new SyncError("invalid", "a release of an index reference that isn't live", { address: r.address, add: r.add });
+        const h = envHash.get(at);
+        if (h === undefined) throw new SyncError("invalid", "op: not checked before its decision");
+        const row: IndexOp = { seq: ++seq, device, dseq, size: op.env.length, env: toB64(op.env), head: op.head, chain_gen: op.chainGen, adds: op.adds, releases: op.releases, signer: op.signer, sig: op.sig };
+        rows.push(row);
+        for (const x of op.adds) {
+          refs.set(x, (refs.get(x) ?? 0) + 1);
+          indexRefs.set(`${x}:${row.seq}`, null);
+        }
+        // (a release ends its add in the index's ledger and gives no shared reference back: every blob an op names is
+        // held until the account is purged, as the server keeps it)
+        for (const r of op.releases) indexRefs.set(`${r.address}:${r.add}`, row.seq);
+        answers.set(dseq, { seq: row.seq, env_sha256: h });
+        out.push({ dseq, seq: row.seq, env_sha256: h });
+      } catch (e) {
+        if (!(e instanceof SyncError)) throw e;
+        if (refused >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
+        refused++;
+        answers.set(dseq, { code: e.code });
+        out.push({ dseq, code: e.code });
+        ended = true;
+      }
+      next++;
+    }
+    a.ops.push(...rows);
+    a.sealed += rows.length;
+    a.refs = refs;
+    a.indexRefs = indexRefs;
     for (const [k, v] of answers) dev.answers.set(k, v);
     dev.next_dseq = next;
     dev.refused = refused;

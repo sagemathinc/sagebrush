@@ -16,7 +16,7 @@
    "json.ts": 3,
    "modules.ts": 8,
    "mpcore.ts": 7,
-   "numpy.ts": 2,
+   "numpy.ts": 5,
    "numpy_linalg.ts": 4,
    "ops.ts": 3,
    "raster.ts": 2,
@@ -35,13 +35,13 @@
     "sha": "4478b682d95fb5b3"
    },
    "sage": {
-    "count": 204,
-    "sha": "42de243a74f7f9fa"
+    "count": 207,
+    "sha": "cfab0f2e3dddb68c"
    }
   },
   "libModules": {
-   "count": 185,
-   "sha": "09a046b75761a077"
+   "count": 187,
+   "sha": "ba626fc562899ed2"
   }
  },
  "entries": [

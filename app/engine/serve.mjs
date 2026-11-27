@@ -14,6 +14,16 @@
 //                               which carries TimeTravel replay's parameters, web/replay-env.ts)
 //        {to: sid, m}           a message for it: the page's worker protocol (src/notebook-session.ts, web/worker.ts)
 //        {close: sid}           stop it
+//        {state: sid}           what it is doing, for a client that comes back to it (the remote host's reattach,
+//                               design/remote-r3.md): answered in stream order with
+//   out: {state: sid, open: true, busy, queued, seq}   busy: the id of the run that has started and not finished, or
+//                               null; queued: the ids of runs sent to it and not started, in order (a run: a message
+//                               to it with an id and code, interact or evaluate; started at its {id, start}, finished
+//                               at its {id, done} or {id, skipped}; the worker runs one at a time, and a second
+//                               run's start while one is busy ends the engine, loudly: a protocolError, exit 5); seq: how many {from: sid}
+//                               messages came before this answer (counted as each is written, on the writer this
+//                               answer goes out on, so it is exactly the frames before it; from 0 at each open)
+//        {state: sid, open: false}   no such interpreter (never opened, or closed)
 //   out: {from: sid, m}         its message to the page
 //        {error: sid, message}  it failed (an exception that ended its thread)
 //        {error: sid, message, fault: true, code: "engine_fault"}  its native engine faulted: its process ends
@@ -72,15 +82,19 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
   let greeted = false, ended = false;
   const send = (msg) => {
     if (ended) return;
-    let p;
+    let p, from = msg.from;
     try {
       p = encode(msg);
     } catch (e) {
       // (a message that can't be sent is said as an error of its interpreter, never dropped)
       if (msg.from !== undefined) p = encode({ error: msg.from, message: `a message that can't be sent: ${String(e?.message ?? e)}` });
       else throw e;
+      from = undefined;
     }
     write(frame(p));
+    // (seq: counted here, as each {from: sid} frame is written, on the same writer as {state}'s answer, so that
+    // answer's seq is exactly the frames before it: no race)
+    if (from !== undefined) { const s = sessions.get(from); if (s && !s.child) s.seq++; }
     if (queued() > outMax) {
       // (the app isn't reading: stop now, with nothing more queued; the app sees the engine end)
       process.stderr.write(`sagebrush engine: the app hasn't read ${queued()} bytes of output; stopping\n`);
@@ -131,7 +145,7 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
       }
       if (msg.hello) {
         toChild({ open: sid, name });
-        for (const d of s.pending) toChild({ to: sid, m: d });
+        for (const m of s.pending) toChild(m);
         s.pending = null;
         return;
       }
@@ -141,6 +155,11 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
         return send(msg);
       }
       if (msg.closed === sid) { finish(null); child.kill(); return; }
+      // (its answer to {state}: the child counts its own {from} frames, and they come here in its order, unchanged)
+      if (msg.state === sid) return send(msg);
+      // (the child refused a message, the engine's own rule (a protocol error): the engine ends as it would with the
+      // session in a thread, with the child's words and its status, once it has exited)
+      if (typeof msg.protocolError === "string") { s.refused = msg.protocolError; return; }
       // (the child's own refusal: its session can't go on)
       child.kill();
       return finish(`the session's engine stopped: ${JSON.stringify(msg).slice(0, 1000)}`);
@@ -159,9 +178,12 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
     child.on("exit", (code, signal) => {
       held.delete(child.stdout);
       if (code === 4 && sessions.get(sid) === s) return end(4, null, true);
+      if (s.refused !== undefined && sessions.get(sid) === s) return end(code || 2, s.refused);
       finish(s.fault ? null : `the session's engine ended (${signal ?? `status ${code}`})`);
     });
-    s.post = (d) => (s.pending ? s.pending.push(d) : toChild({ to: sid, m: d }));
+    const toOpen = (m) => (s.pending ? s.pending.push(m) : toChild(m));
+    s.post = (d) => toOpen({ to: sid, m: d });
+    s.forward = (m) => toOpen(m);
     s.terminate = () => { toChild({ close: sid }); child.kill(); };
     sessions.set(sid, s);
     toChild({ hello: { protocol: PROTOCOL } });
@@ -172,7 +194,8 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
     // (the runner frame's state, per interpreter: web/runner/index.html)
     // (ask: the one refused change asked while its run waits (web/worker.ts fsAsk), {key, buffer}, as the runner's frame
     // keeps it: an allow's epoch is stored in the shared word BEFORE its answer is written; anything else answers no)
-    const s = { thread: null, flag: null, epoch: null, inputs: new Map(), lives: new Map(), ask: null, engine: null };
+    // (runs: queued ids in order, busy the started one, seq the {from} messages sent: the answer to {state})
+    const s = { thread: null, flag: null, epoch: null, inputs: new Map(), lives: new Map(), ask: null, engine: null, queued: [], busy: null, seq: 0 };
     s.post = (d) => toSession(s, d);
     s.terminate = () => s.thread.terminate();
     s.askNo = () => { if (s.ask) { giveInput(s.ask.buffer, null); s.ask = null; } };
@@ -207,6 +230,18 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
         d = { ...d, buffer: null };
       }
       if (d.done || d.skipped) s.retire(d.id);
+      if (d.id !== undefined && d.start) {
+        // (the worker runs one at a time (src/notebook-session.ts): {state}'s busy is one id. A second start while one
+        // is busy would make it wrong, so it ends the engine, loudly, never a state silently corrupted)
+        if (s.busy !== null && s.busy !== d.id) return end(5, `state: run ${String(d.id).slice(0, 64)} started in ${sid} while run ${String(s.busy).slice(0, 64)} is busy (the worker runs one at a time)`);
+        const i = s.queued.indexOf(d.id);
+        if (i >= 0) { s.queued.splice(i, 1); s.busy = d.id; }
+      }
+      if (d.id !== undefined && (d.done || d.skipped)) {
+        if (s.busy === d.id) s.busy = null;
+        const i = s.queued.indexOf(d.id);
+        if (i >= 0) s.queued.splice(i, 1);
+      }
       if (d.ready) {
         if (d.interrupt instanceof SharedArrayBuffer) s.flag = new Int32Array(d.interrupt);
         if (d.epoch instanceof SharedArrayBuffer) s.epoch = new Int32Array(d.epoch);
@@ -259,6 +294,7 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
         return;
       }
     }
+    if (d && typeof d === "object" && d.id !== undefined && (d.code !== undefined || d.interact !== undefined || d.evaluate !== undefined)) s.queued.push(d.id);
     s.thread.postMessage(d);
   }
 
@@ -273,7 +309,7 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
         send({ incompatible: { protocol: PROTOCOL } });
         return end(3);
       }
-      return send({ hello: { protocol: v, engine: ENGINE_VERSION, build, caps: ["threads", "files", "stop-word", "input", "live-data"] } });
+      return send({ hello: { protocol: v, engine: ENGINE_VERSION, build, caps: ["threads", "files", "stop-word", "input", "live-data", "state"] } });
     }
     const keys = Object.keys(msg);
     if (msg.open !== undefined && keys.every((k) => k === "open" || k === "name")) {
@@ -291,6 +327,12 @@ export function serve({ root, memory, input, write, queued, exit, onDrain, outMa
       const s = sessions.get(msg.close);
       if (s) { sessions.delete(msg.close); s.terminate(); send({ closed: msg.close }); }
       return;
+    }
+    if (msg.state !== undefined && keys.length === 1) {
+      if (typeof msg.state !== "string" || !SID.test(msg.state)) return end(2, "state: a session id is 1 to 64 of A-Z, a-z, 0-9, _ and -");
+      const s = sessions.get(msg.state);
+      if (s?.child) return s.forward(msg);
+      return send(s ? { state: msg.state, open: true, busy: s.busy, queued: [...s.queued], seq: s.seq } : { state: msg.state, open: false });
     }
     return end(2, `an unknown message (${keys.slice(0, 4).join(", ").slice(0, 200)})`);
   }
