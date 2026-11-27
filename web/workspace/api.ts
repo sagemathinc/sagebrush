@@ -415,6 +415,9 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
 const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed"), REVIEW_REFUSED = Symbol("the grant changed"), RUN_NOTE_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
+/** (tests) dropVersions: run just before its request is logged, the deletion done (e2e PR 5d: a namespace switch then
+ * must not rebind the request) */
+export const DROP_HOOK: { beforeLog?: () => Promise<void> | void } = {};
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
  * transaction is kept): `inRoot`, the root and record written, before the commit; `inPublish`, ready and its pages. */
 export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "root-late" | "copy" | "copy-late" | "folder-late" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
@@ -2221,6 +2224,13 @@ export class Workspace {
     const q = path(p), keep = Math.max(0, Math.floor(opts.keep ?? 0)), x = opts.expect;
     if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can drop old versions");
     return this.locked(async () => {
+      // (the sync namespace and its verified index as the person asked, read before any deletion page: the request is
+      // that namespace's for good. sync:current can change while the pages run (switchToIf doesn't take this lock), and
+      // a request read at the end would be stamped with the next namespace and release its history (e2e PR 5d))
+      const asked = await inTx(this.ws, "meta", "readonly", async (tx) => {
+        const meta = tx.objectStore("meta"), cur = (await req(meta.get("sync:current"))) as { ns?: string } | undefined;
+        return cur?.ns ? { viewNs: cur.ns, view: ((await req(meta.get(`sync:${cur.ns}:cursor`))) as number | undefined) ?? 0 } : { view: 0 };
+      });
       if (x) {
         const e = q === "/" ? undefined : await this.mustStat(q);
         if (x.fid !== undefined && e?.fid !== x.fid) throw new WorkspaceError("conflict", `${q} is another file now`);
@@ -2326,13 +2336,13 @@ export class Workspace {
         }
       }
       this.noteDeleting(1);
+      await DROP_HOOK.beforeLog?.();
       const ops: Op[] = [];
       // (what the person saw, kept with the request (e2e PR 5d): the account's history it releases is bounded by the
-      // verified index as of now and these files by identity, never by what has come since)
+      // verified index as it was asked (`asked`, never read again here) and these files by identity, never by what has
+      // come since)
       await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => {
-        const meta = tx.objectStore("meta"), cur = (await req(meta.get("sync:current"))) as { ns?: string } | undefined;
-        const view = cur?.ns ? (((await req(meta.get(`sync:${cur.ns}:cursor`))) as number | undefined) ?? 0) : 0;
-        await this.log(tx, ops, { op: "dropVersions", path: q, kind, view, ...(cur?.ns ? { viewNs: cur.ns } : {}), ...(fids ? { fids } : {}), ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) });
+        await this.log(tx, ops, { op: "dropVersions", path: q, kind, ...asked, ...(fids ? { fids } : {}), ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) });
       });
       this.tell({ ops });
       return freed;

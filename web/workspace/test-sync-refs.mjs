@@ -111,6 +111,38 @@ const halts = async (d, o) => {
   check(!fg.halted && (await how(A, s3.seq)) === null, "a forgotten file's last add released: accepted");
 }
 
+// ---- a release is checked against the state just before it, never a later op's in its page: alone in its page
+{
+  // (a release of a live file's current bytes, then in the same page the file removed and forgotten. Checked against the
+  // state after the page, the add would be a forgotten file's and accepted; against the state before it, the current
+  // bytes: so a sealed page with a release and anything after it halts, nothing of it kept)
+  const twin = async () => {
+    seq = 0;
+    const d = device();
+    const s1 = op({ op: "create", path: "/p.txt", kind: "file", fid: F, sha256: A, size: 1 });
+    const s2 = op({ op: "write", path: "/p.txt", kind: "file", fid: F, sha256: B, base: A, size: 1 });
+    for (const o of [s1, s2]) await d.apply([o]);
+    return { d, s2 };
+  };
+  const later = () => [op({ op: "remove", path: "/p.txt", to: "/Trash/p.txt", kind: "file", fid: F }), op({ op: "forget", path: "/Trash/p.txt", kind: "file", fid: F })];
+  {
+    const { d, s2 } = await twin();
+    const before = dump(d.meta);
+    let got;
+    try { await d.apply([release([{ address: B, add: s2.seq }]), ...later()]); got = { halted: false }; } catch (e) { got = { halted: e instanceof ReleaseHalt, why: e.message, same: dump(d.meta) === before }; }
+    check(got.halted && /not alone/.test(got.why) && got.same, `a sealed page [release of the current bytes, the file removed, forgotten]: halts, nothing kept (never checked against the page's later state): ${J(got)}`);
+  }
+  {
+    // (the order matters: the same release after the forget is accepted; before it, alone, it halts as the current bytes)
+    const { d, s2 } = await twin();
+    const early = await halts(d, release([{ address: B, add: s2.seq }]));
+    for (const o of later()) await d.apply([o]);
+    const after = await halts(d, release([{ address: B, add: s2.seq }]));
+    check(early.halted && /current bytes/.test(early.why) && early.same && !after.halted,
+      `(the controls: that release alone before the forget halts as the current bytes, and alone after it is accepted): ${J({ early, after })}`);
+  }
+}
+
 // ---- a folder forgotten with a file in it; a conflict copy; a plaintext write; a document
 {
   seq = 0;
