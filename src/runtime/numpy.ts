@@ -673,6 +673,17 @@ function warnInvalidCast(): void {
   if (invalidMode === "raise") raise(T.FloatingPointError, msg);
   Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), [msg, T.RuntimeWarning, 2]);
 }
+// (the warning of a conversion done inside a reduction, which NumPy names "reduce": a float operand summed in an
+// integer dtype)
+function warnInvalidReduce(): void {
+  const old = castLabel;
+  castLabel = "reduce";
+  try {
+    warnInvalidCast();
+  } finally {
+    castLabel = old;
+  }
+}
 
 function assign(out: NDArray, src: NDArray) {
   writable(out);
@@ -2292,7 +2303,11 @@ function maskedSum(a: NDArray, mask: NDArray, ax: number[], keepdims: boolean, r
     for (let k = 0; k < out.size; k++) out.data[k] = castNum(rt, 0);
     return shaped(out);
   }
-  const conv = cast && rt !== D.float64 ? (x: number) => castNum(rt, x) : null;
+  // (a float operand into an integer or bool dtype: each element as an array cast converts it, #2149's per-element
+  // rule, with its warning, which the caller gives once the sum is done)
+  const toInt = a.dt.kind === "f" && (rt.isInt || rt.kind === "b");
+  if (toInt) castInvalid = false;
+  const conv = cast && rt !== D.float64 ? (toInt ? (x: number) => floatToInt(rt, x) : (x: number) => castNum(rt, x)) : null;
   // (the axes innermost first; a length-1 axis is no loop at all)
   const order = iterAxisOrder(nd, [a.strides, mask.strides]).filter((i) => a.shape[i] > 1);
   const block: number[] = [];
@@ -2436,7 +2451,9 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first 
     const ax = axs === null ? a.shape.map((_, i) => i) : axs;
     if (rt === D.float32) return finish(maskedSum(a, mask, ax, keepdims, rt, (x, y) => f32(x + y), part ? pairwiseCplx32 : pairwise32, rt !== a.dt), axis, keepdims);
     const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
-    return finish(maskedSum(a, mask, ax, keepdims, rt, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, rt !== a.dt), axis, keepdims);
+    const r = maskedSum(a, mask, ax, keepdims, rt, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, rt !== a.dt);
+    warnInvalidReduce();
+    return finish(r, axis, keepdims);
   }
   if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, (x, y) => f32(x + y), part ? pairwiseCplx32 : pairwise32, first), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
@@ -2706,7 +2723,10 @@ function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   const out = empty(outShape, rt);
   const { off, rshape, rst, order } = prodOrder(a, ax, rt, mask);
   const mul = mulIn(rt, "prod");
-  const cast = (v: number) => (rt.kind === "f" ? castNum(rt, v) : v);
+  // (a float operand in an integer or bool dtype: each element cast as NumPy's float-to-int cast, warning "reduce")
+  const toInt = a.dt.kind === "f" && (rt.isInt || rt.kind === "b");
+  if (toInt) castInvalid = false;
+  const cast = (v: number) => (rt.kind === "f" ? castNum(rt, v) : toInt ? floatToInt(rt, v) : v);
   const d = a.data, od = out.data;
   const kshape = keep.map((i) => a.shape[i]), kst = keep.map((i) => a.strides[i]);
   if (mask !== null) {
@@ -4598,7 +4618,9 @@ newBuiltinModule("_numpy", (m) => {
     // rounded to it or wrapped to its integer width; from initial, in the
     // reduced elements' memory order: prodReduce)
     const init = initial === null ? 1 : rt.isInt ? toNum(initial, rt) : castNum(rt, toNum(initial));
-    return finish(prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null, m), axis, !!keepdims);
+    const r = prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null, m);
+    warnInvalidReduce();
+    return finish(r, axis, !!keepdims);
   });
   fn("amax", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first));
   fn("amin", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, false, opt(initial), !!first));

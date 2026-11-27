@@ -5377,6 +5377,11 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: MRec._str :: A maximal order in it prints on one line (_IN_REC), as a tuple's does: #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
  "lib/_magma.py :: PartialFractionDecomposition :: budget = _FunBudget() #0": {
   "class": "2+3",
   "owner": "Magma compatibility/rational functions",
@@ -5460,6 +5465,16 @@
   "class": "3",
   "owner": "Magma compatibility",
   "row": "inv-25"
+ },
+ "lib/_magma.py :: _MOrder._parts :: head = \"Maximal Equation Order\" if self._is_equation_order() else \"Maximal Order of Equation Order\" #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
+ "lib/_magma.py :: _MOrder._str :: \"\"\"Laid out as Magma prints a maximal equation order past WIDTH #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
  },
  "lib/_magma.py :: _alt :: if n > _COLLECT_MAX: #0": {
   "class": "2",

@@ -12,17 +12,28 @@
 // its first in this sync generation). Within one message, an op's prev is the envelope just before it in that
 // message. The server ends a message at its first refusal and answers the rest `undecided`, so a refused envelope
 // never has a successor in the log; the undecided ones are sealed again after the accepted one.
-import { opHash, sealIndexOp, signIndexOp } from "./e2e/index-op.ts";
+import { OP_REFS_MAX, opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp, type OpRelease } from "./e2e/index-op.ts";
 import type { EpochKeys } from "./e2e/keys.ts";
 import type { WireOp } from "./sync-outbox";
+import { RELEASE_OP as RELEASE, refsOf } from "./sync-refs";
 
-/** The key chain as this device last verified it: what a sealed op commits to. */
+/** The key chain as this device last verified it: what a sealed op commits to, and what pull checks one against. Every
+ * position is the chain's ABSOLUTE seq (its base plus the head's index), and anything about a head this verified chain
+ * doesn't hold is unknown (null), never ordered or guessed. */
 export interface ChainView {
   /** the chain's head (unpadded base64url SHA-256) and its generation */
   readonly head: string;
   readonly generation: string;
   /** the account's current epoch at that head */
   readonly currentEpoch: number;
+  /** a head's absolute position in this chain, or null if this chain doesn't hold it */
+  position(head: string): number | null;
+  /** a device's Ed25519 key if it was a current device at that head (added at or before it, not removed by it) */
+  signerAt(head: string, id: string): Uint8Array | null;
+  /** the epoch current at that head */
+  epochAt(head: string): number | null;
+  /** a device as this chain knows it (absolute positions), or null for a device it never had */
+  device(id: string): { added: number; removed: number | null } | null;
 }
 /** What the sync client needs to seal and sign: the E2E account, this device's signer, the chain and epoch keys. */
 export interface OpKeys {
@@ -46,19 +57,19 @@ export type Sealed = {
   head: string;
   chainGen: string;
   adds: string[];
-  /** each the add it ends: the blob's address and the seq of the accepted op whose adds named it */
-  releases: { address: string; add: number }[];
+  releases: OpRelease[];
   signer: string;
   sig: string;
 };
 
-/**
- * The blob references an op declares in the clear (the server counts them): as today's plaintext log counts them, a
- * data file's op adds a reference to the blob it names. Nothing is released yet: retention and Trash become explicit
- * ops that release (e2e PR 5d); until then the server holds every blob a sealed op adds, as it does for plaintext ops.
- */
-export function refsOf(op: WireOp): { adds: string[]; releases: { address: string; add: number }[] } {
-  return { adds: op.kind === "file" && op.sha256 !== undefined ? [op.sha256] : [], releases: [] };
+/** (the references an op declares, and the release op's name: sync-refs.ts, which the page has without this module) */
+export { refsOf, RELEASE };
+/** A release op as this device makes it. */
+export const releaseOp = (dseq: number, t: number, by: string, releases: readonly OpRelease[]): WireOp =>
+  ({ dseq, t, by, op: RELEASE, path: "/", kind: "folder", releases: releases.map((r) => ({ address: r.address, add: r.add })) });
+/** Whether an opened op is exactly a release op's form: those fields, no others (no content, nothing it could change). */
+export function isReleaseForm(op: Record<string, unknown>): boolean {
+  return Object.keys(op).sort().join(",") === "by,dseq,kind,op,path,releases,t" && op.op === RELEASE && op.path === "/" && op.kind === "folder" && Array.isArray(op.releases) && (op.releases as unknown[]).length > 0;
 }
 
 const b64 = (b: Uint8Array): string => {
@@ -106,4 +117,145 @@ export async function envHashOf(envB64: string): Promise<string> {
   const bin = atob(envB64);
   const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
   return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
+// ---- pull (e2e PR 5c, its pull half): every sealed op verified, in the log's order, before it is applied
+
+/**
+ * What pull has verified so far, kept with the cursor (in the same transaction): the floor, the largest chain position
+ * of any op verified in this log (heads only move forward in an honest log, since the server accepts an op only at the
+ * chain's current head), with the chain generation it was taken under; and each sync device's newest verified envelope
+ * (its dseq and hash), the per-device envelope chain's last link.
+ */
+export type PullState = Readonly<{ seq: number; floor: number; chainGen: string | null; devices: Readonly<Record<string, { dseq: number; hash: string }>> }>;
+/** (`seq`: the last op verified, so one read again from an earlier cursor, as an echo's match, isn't verified twice) */
+export const PULL_START: PullState = Object.freeze({ seq: 0, floor: -1, chainGen: null, devices: Object.freeze({}) });
+
+/** A sealed op that doesn't verify: pull stops there (deterministically, for every device reading the same log against
+ * the same verified chain), nothing from it on applied. */
+export class SealedHalt extends Error {
+  constructor(readonly seq: number, readonly why: string) { super(`sync: the server's sealed op ${seq} doesn't verify: ${why}`); }
+}
+
+const REF = /^(?:a1:)?[0-9a-f]{64}$/;
+const ENV_B64_MAX = Math.ceil((64 << 10) / 3) * 4;
+const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+const sameReleases = (a: readonly OpRelease[], b: readonly OpRelease[]) => a.length === b.length && a.every((x, i) => x.address === b[i].address && x.add === b[i].add);
+
+/**
+ * Verify one served sealed op (a log row with its signed values) and open it, after `st`:
+ * 1. its head is in this device's verified chain (read again once if not), under that chain's generation;
+ * 2. that head is at or after the floor (no op authorized at a head the log has already passed);
+ * 3. its signer was a current device at that head, and signed exactly this op (sealedOpMessage);
+ * 4. its envelope's epoch is the one current at that head;
+ * 5. its dseq is past its device's last verified one;
+ * 6. it opens under that epoch's index key at its place, naming its device's previous verified envelope (none for the
+ *    device's first in this sync generation) and exactly its visible references, which are the op's own (refsOf).
+ * Returns the op and the state after it; any failure is a SealedHalt.
+ */
+export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Record<string, unknown>, st: PullState): Promise<{ op: WireOp; state: PullState }> {
+  const seq = Number.isSafeInteger(row.seq) ? (row.seq as number) : -1;
+  const halt = (why: string): never => { throw new SealedHalt(seq, why); };
+  const str = (k: string) => (typeof row[k] === "string" ? (row[k] as string) : halt(`no ${k}`));
+  const env64 = str("env"), head = str("head"), chainGen = str("chain_gen"), device = str("device"), signer = str("signer"), sig = str("sig");
+  const dseq = row.dseq;
+  if (!Number.isSafeInteger(dseq) || (dseq as number) < 1) halt("a dseq that isn't one");
+  // (the reference lists as the server takes them: blob references, at most REFS_MAX, none twice; anything else halts here,
+  // never later as another error out of the signature's bytes)
+  const list = (k: string) => {
+    const x = row[k] ?? [];
+    if (!Array.isArray(x) || !x.every((r) => typeof r === "string" && REF.test(r))) halt(`${k} that aren't blob references`);
+    if ((x as string[]).length > OP_REFS_MAX) halt(`more ${k} than an op may have`);
+    if (new Set(x as string[]).size !== (x as string[]).length) halt(`${k} naming a reference twice`);
+    // (a copy, taken before any await: the served row can't change what is checked and signed)
+    return [...(x as string[])];
+  };
+  // (releases: { address, add } each, an add seq from 1, at most REFS_MAX, no add twice; copies of exactly those fields)
+  const releaseList = () => {
+    const x = row.releases ?? [];
+    if (!Array.isArray(x)) halt("releases that aren't a list");
+    if ((x as unknown[]).length > OP_REFS_MAX) halt("more releases than an op may have");
+    const out: OpRelease[] = [], seen = new Set<string>();
+    for (const r of x as unknown[]) {
+      const ok = !!r && typeof r === "object" && !Array.isArray(r) && Object.keys(r).sort().join(",") === "add,address";
+      const { address, add } = (ok ? r : {}) as { address?: unknown; add?: unknown };
+      if (!ok || typeof address !== "string" || !REF.test(address) || !Number.isSafeInteger(add) || (add as number) < 1) halt("releases that aren't { address, add }");
+      const k = `${address}:${add}`;
+      if (seen.has(k)) halt("releases naming one add twice");
+      seen.add(k);
+      out.push({ address: address as string, add: add as number });
+    }
+    return out;
+  };
+  const adds = list("adds"), releases = releaseList();
+  let env: Uint8Array;
+  try {
+    if (env64.length > ENV_B64_MAX) throw new Error("too long");
+    env = Uint8Array.from(atob(env64), (c) => c.charCodeAt(0));
+  } catch {
+    return halt("an envelope that isn't one");
+  }
+  // (1) the head, in this device's verified chain: read again once when it isn't there yet (a chain newer than ours)
+  let chain = await keys.chain();
+  let p = chain.position(head);
+  if (p === null) {
+    chain = await keys.chain(true);
+    p = chain.position(head);
+  }
+  if (p === null) halt("authorized at a head this device's verified chain doesn't hold");
+  if (chainGen !== chain.generation) halt("sealed under another chain generation");
+  // (2) the floor
+  if (p! < st.floor) halt("authorized at a head before one the log has already passed");
+  // (3) the signer, current at that head, and the signature over exactly this op
+  const key = chain.signerAt(head, signer);
+  if (!key) halt(chain.device(signer) ? "its signer wasn't a current device at that head" : "its signer was never a device of this chain");
+  const ctx = { account: keys.account, syncGeneration, chainGeneration: chainGen, head, device, dseq: dseq as number, adds, releases, signer };
+  // (verifyIndexOp refuses, as an error, what has no signed form: one that escaped here would end the connection, not
+  // halt it, so every refusal of the row's form is this op's halt)
+  let signedOk = false;
+  try {
+    signedOk = await verifyIndexOp(key!, ctx, env, sig);
+  } catch {
+    halt("values with no signed form");
+  }
+  if (!signedOk) halt("a signature that doesn't verify");
+  // (4) the epoch
+  let n: number;
+  try {
+    n = opEpoch(env);
+  } catch {
+    return halt("an envelope that isn't one");
+  }
+  if (n !== chain.epochAt(head)) halt("sealed under another epoch than its head's");
+  // (5) the device's order
+  const before = st.devices[device];
+  if (before && (dseq as number) <= before.dseq) halt("a dseq not past its device's last");
+  // (6) opened, chained, and its references its own
+  let epoch = await keys.epochKeys(n);
+  if (!epoch) {
+    await keys.chain(true);
+    epoch = await keys.epochKeys(n);
+  }
+  if (!epoch) halt("an epoch whose keys this device doesn't hold");
+  let op: WireOp;
+  try {
+    op = (await openIndexOp(epoch!, { device, dseq: dseq as number }, env, { prev: before ? fromB64url(before.hash) : null, adds, releases })) as WireOp;
+  } catch {
+    return halt("it doesn't open at its place, after its device's previous envelope, with its references");
+  }
+  if (!op || typeof op !== "object" || Array.isArray(op) || op.dseq !== dseq) halt("an op that isn't its own");
+  // (the opened op is untrusted too: its references read and compared under the halt, so nothing it holds escapes as
+  // another error)
+  let refsMatch = false;
+  try {
+    const own = refsOf(op);
+    refsMatch = sameList(own.adds, adds) && sameReleases(own.releases, releases);
+  } catch {
+    halt("an op whose references can't be read");
+  }
+  if (!refsMatch) halt("visible references that aren't its op's");
+  // (a release op is exactly its form: no content, nothing else it could change; e2e PR 5d)
+  if (op.op === RELEASE && !isReleaseForm(op as unknown as Record<string, unknown>)) halt("a release op that isn't only a release");
+  const hash = b64url(await opHash(env));
+  return { op, state: Object.freeze({ seq, floor: p!, chainGen: chain.generation, devices: Object.freeze({ ...st.devices, [device]: { dseq: dseq as number, hash } }) }) };
 }

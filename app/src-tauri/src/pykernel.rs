@@ -20,7 +20,7 @@
 // resource folder (the one holding sagebrush_kernel; an argument, never part of the code) first, changes to the
 // workspace, and runs sagebrush_kernel. Unlike the probe, the kernel gets the person's environment (their packages,
 // user site-packages, PYTHONPATH, GPU variables), less the app's own and CoCalc's variables (STRIPPED_PREFIXES:
-// control-plane credentials and private host settings), in its own session and process group (setsid), as the person.
+// control-plane credentials and private host settings), in its own session and process group (setsid), with SIGINT and SIGTERM at their defaults, as the person.
 // Its stdout is JSON lines, each at most LINE_MAX, queued up to QUEUE_MAX (each charged EVENT_COST besides its
 // bytes, so empty lines count) and then not read until taken; its stderr is kept, the last STDERR_KEEP bytes.
 // One thread does all of a kernel's I/O, on non-blocking pipes under poll(), and it is joined before stop() returns,
@@ -59,6 +59,9 @@ pub const TERM_GRACE: Duration = Duration::from_secs(2);
 const MAX_LINKS: usize = 40;
 /// Where the interpreter starts, before BOOTSTRAP changes to the workspace: root's, never the workspace.
 pub const START_DIR: &str = "/";
+/// Signals the kernel starts with at their defaults, whatever the app inherited: interrupt() and the tree rule rely on
+/// them.
+const KERNEL_DEFAULT_SIGNALS: [libc::c_int; 2] = [libc::SIGINT, libc::SIGTERM];
 /// Variables never passed to the kernel (the app's and CoCalc's control plane, and the host's private settings).
 pub const STRIPPED_PREFIXES: &[&str] = &["SAGEBRUSH_", "COCALC_", "TAURI_"];
 
@@ -317,9 +320,22 @@ impl Kernel {
         };
         cmd.env_clear().envs(env);
         cmd.current_dir(START_DIR).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        // (its own session, and so its own group: pgid = sid = its pid; if setsid fails, the spawn fails)
+        // (its own session, and so its own group: pgid = sid = its pid; if setsid fails, the spawn fails. And SIGINT and
+        //  SIGTERM back to their defaults: a signal the app was started ignoring (nohup, a background job) stays ignored
+        //  across exec, and the kernel would never be interrupted, nor ended before the SIGKILL. The signal mask is
+        //  already cleared by the spawn.)
         unsafe {
-            cmd.pre_exec(|| if libc::setsid() < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) });
+            cmd.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                for sig in KERNEL_DEFAULT_SIGNALS {
+                    if libc::signal(sig, libc::SIG_DFL) == libc::SIG_ERR {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
         }
         let mut child = cmd.spawn().map_err(|e| KernelError::Spawn(e.to_string()))?;
         let pid = child.id() as libc::pid_t;

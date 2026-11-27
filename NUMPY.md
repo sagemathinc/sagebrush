@@ -93,6 +93,21 @@ pass, and CI runs them.
   them.
 - **Broadcasting ufuncs** with `out`, `where`, `reduce`, `accumulate` and
   `outer`.
+  - `out=` takes the loop's result only under `casting=` (default
+    `same_kind`), checked before anything is computed: a float result into an
+    integer `out=` is NumPy's `UFuncTypeError`, and `out` keeps its values.
+    `casting='unsafe'` casts. `clip` refuses the same way (as `maximum` or
+    `minimum` with one bound), and `ptp`'s `out=` is NumPy's: the maximum
+    reduced into `out`, then `subtract` into it.
+  - A reduction without an identity (`max`, `min`, `maximum.reduce`,
+    `nanmax`, ...) into an `out=` of another dtype takes NumPy's two steps:
+    each position's first element is cast into `out` ("invalid value
+    encountered in cast"), then the rest are reduced from `out`'s value read
+    back, and the result is cast ("... in reduce"). An accumulation into
+    `out=` (`cumsum`, `add.accumulate`, ...) is computed in the dtype both
+    convert to, with each result cast into `out`. NumPy's buffered iterator
+    also writes `out` back every 8192 elements of some reductions; that is not
+    done, so a reduction past that length into a narrower `out` can differ.
 - **Reductions** with `axis` (int or tuple) and `keepdims`: `nan*`
   variants, `median`, `percentile`/`quantile` (NumPy's `_lerp`), `average`,
   `cov`, `corrcoef`.

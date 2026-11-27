@@ -99,33 +99,42 @@ test("ellipsis ranges: the same text as the old rewrite, on Sage programs and ge
 });
 
 // The shapes that took minutes (1 MiB each, a fraction of a second on an idle machine): linear now, so a 1 MiB file
-// costs about 4 times a 256 KiB one, where the old rewrite's cost grew 16 times (the bound leaves room for a busy
-// runner, with a floor of 50 ms so that one garbage collection in a fast shape can't fail it); and a few seconds at
-// most.  Code nested past Python's limit of 200 brackets is left as it is (Python refuses it, whatever the preparser
-// does).
-test("ellipsis ranges: linear in the file's length", () => {
-  const time = (src: string) => {
-    let best = Infinity;
-    for (let r = 0; r < 3; r++) {
-      const t = performance.now();
-      parseEllipsis(src);
-      best = Math.min(best, performance.now() - t);
+// costs about 4 times a 256 KiB one, where the old rewrite's cost grew 16 times; the bound, 8 times, sits between.
+// Measured so that a loaded runner can't fail it (#2276): CPU time, not wall-clock time (another process on the
+// runner takes the CPU away, not this process's CPU time); the two sizes back to back, alternately, the least of 5 of
+// each, with a floor of 50 ms so that one garbage collection in a fast shape can't fail it; and a ratio over the bound
+// measured again, up to 3 times, before it fails (a quadratic cost is over it every time, a burst of load once).
+// Code nested past Python's limit of 200 brackets is left as it is (Python refuses it, whatever the preparser does).
+const cpuMs = (f: () => unknown) => {
+  const t = process.cpuUsage();
+  f();
+  const d = process.cpuUsage(t);
+  return (d.user + d.system) / 1000;
+};
+const linear = (name: string, run: (src: string) => unknown, rep: (n: number) => string) => {
+  const small = rep(1 << 18), big = rep(1 << 20);
+  let last = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let s = Infinity, b = Infinity;
+    for (let r = 0; r < 5; r++) {
+      s = Math.min(s, cpuMs(() => run(small)));
+      b = Math.min(b, cpuMs(() => run(big)));
     }
-    return best;
-  };
+    if (b < 8 * Math.max(s, 50)) return;
+    last = name + ": 1 MiB " + Math.round(b) + " ms, 256 KiB " + Math.round(s) + " ms of CPU time";
+  }
+  assert.fail(last + ", 3 times");
+};
+
+test("ellipsis ranges: linear in the file's length", () => {
   const deep = (() => { let s = "1..2"; for (let d = 0; d < 199; d++) s = "[" + s + "]..3"; return "[" + s + "]\n"; })();
   for (const [name, unit] of [["[1,..,", "[1,..,"], ["[1..2]", "[1..2]\n"], ["mixed", "[(1..2), 3..4; 2]\n"], ["200 deep", deep]]) {
-    const rep = (n: number) => unit.repeat(Math.floor(n / unit.length));
-    const small = time(rep(1 << 18)), big = time(rep(1 << 20));
-    assert.ok(big < 8 * Math.max(small, 50), name + ": 1 MiB " + Math.round(big) + " ms, 256 KiB " + Math.round(small) + " ms");
-    assert.ok(big < 5000, name + ": 1 MiB " + Math.round(big) + " ms");
+    linear(name, parseEllipsis, (n) => unit.repeat(Math.floor(n / unit.length)));
   }
   const tooDeep = "[".repeat(201) + "1..2" + "]".repeat(201);
   assert.equal(parseEllipsis(tooDeep), tooDeep);
   const deepest = "[".repeat(200) + "1..2" + "]".repeat(200);
   assert.equal(parseEllipsis(deepest), oldParseEllipsis(deepest));
   // (and the whole preparser on the shape that took minutes)
-  const t = performance.now();
-  preparse("[1,..,".repeat(Math.floor((1 << 20) / 6)));
-  assert.ok(performance.now() - t < 5000);
+  linear("preparse [1,..,", preparse, (n) => "[1,..,".repeat(Math.floor(n / 6)));
 });
