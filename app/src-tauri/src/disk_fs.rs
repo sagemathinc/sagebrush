@@ -331,6 +331,37 @@ pub fn fill_settings_script(template: &str, settings_json: &str, keys_json: &str
     template.replacen("/*KEYS*/[]", keys_json, 1).replacen("/*SETTINGS*/null", settings_json, 1)
 }
 
+/// What Show in folder shows for workspace path `p`: the workspace's own folder for "/", else the file or folder at
+/// `p`, which must be there (each component walked, a link refused, as every other path is), and whether it is a
+/// folder.  Never anything outside Workspace/.
+pub fn reveal_target(root: &Path, p: &str) -> Result<(PathBuf, bool), String> {
+    if components(p)?.is_empty() {
+        no_link(root)?;
+        return Ok((root.to_path_buf(), true));
+    }
+    let (_, at) = parent(root, p, false)?;
+    let m = no_link_at(&at)?.ok_or_else(|| format!("{p}: not there"))?;
+    Ok((at, m.is_dir()))
+}
+
+/// The program and arguments that show `at` in the system's file manager: on macOS always selected in Finder (`open
+/// -R`), a folder as a file, since a folder can be an application (Name.app) that a plain `open` would launch; on
+/// Windows a folder opened, a file selected (Explorer); on Linux its folder opened (xdg-open).  A fixed program, never a
+/// shell; `at` is an absolute path inside Workspace/, so it can't be read as an option.
+pub fn reveal_argv(at: &Path, dir: bool) -> (String, Vec<std::ffi::OsString>) {
+    if cfg!(target_os = "macos") {
+        ("/usr/bin/open".into(), vec!["-R".into(), at.as_os_str().to_owned()])
+    } else if cfg!(windows) {
+        // (passed as written (disk.rs raw_arg): explorer takes /select,"<path>" as one argument, and a folder quoted
+        // the same way; a Windows path can't hold a quote, so the quotes can't be broken out of)
+        let a: std::ffi::OsString = if dir { format!("\"{}\"", at.display()).into() } else { format!("/select,\"{}\"", at.display()).into() };
+        ("explorer.exe".into(), vec![a])
+    } else {
+        let folder = if dir { at } else { at.parent().unwrap_or(at) };
+        ("xdg-open".into(), vec![folder.as_os_str().to_owned()])
+    }
+}
+
 #[cfg(test)]
 #[path = "disk_fs_tests.rs"]
 mod tests;

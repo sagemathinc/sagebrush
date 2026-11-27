@@ -983,9 +983,16 @@ class ufunc:
                 a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
-        if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
-            # (a sum without an identity starts from its first element: a product's 1 changes nothing)
-            r = quick[self._op](a, axis=axis, keepdims=keepdims, **({"initial": None} if first and self._op == "add" else {}))
+        masked = where is not True and self._op in ("add", "multiply", "maximum", "minimum")
+        if self._op in quick and (initial is None or masked) and not (dtype is not None and _wraps_in(self._op, dt)):
+            # (a sum without an identity starts from its first element: a product's 1 changes nothing; a where= mask
+            # goes to the functions that take it, #2088)
+            kw = {"initial": None} if first and self._op == "add" else {}
+            if masked:
+                kw["where"] = where
+                if initial is not None:
+                    kw["initial"] = initial
+            r = quick[self._op](a, axis=axis, keepdims=keepdims, **kw)
             if dtype is not None:
                 # (sum promotes small ints to int64 and bools to int: the
                 # accumulator is dtype, where an int sum wraps as it does
@@ -1407,10 +1414,10 @@ def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, wh
     a = asarray(a)
     if initial is None:
         _no_identity(a, axis, where, "add")
-    if where is not True:
-        a = _np.where3(_where_mask(a, where, axis), a, zeros((), a.dtype))
+    # (where=: the runtime's masked sum, #2088: each run of kept elements summed as NumPy's masked loop sums it)
+    m = None if where is True else _where_mask(a, where, axis)
     # (without an identity, each sum starts from its first element, as NumPy's)
-    r = _np.sum(a, axis, keepdims, dtype, initial is None)
+    r = _np.sum(a, axis, keepdims, dtype, initial is None, m)
     if initial is not None and initial is not _NoValue:
         r = r + initial
     return _out(r, out)
@@ -1433,8 +1440,105 @@ def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, w
 product = _removed_alias(prod, "product", "np.prod")
 
 
+def _count_where(a, axis, keepdims, where):
+    # (NumPy's _count_reduce_items with a mask: the mask broadcast to the operand's shape, by broadcast_to with its
+    # refusals, and summed as intp: before the reduction's own checks of the mask; None, an object, can't be)
+    if where is None:
+        raise TypeError("int() argument must be a string, a bytes-like object or a real number, not 'NoneType'")
+    return sum(broadcast_to(where, a.shape), axis, intp, None, keepdims)
+
+
+class _UFuncTypeError(TypeError):
+    """NumPy's UFuncTypeError (numpy._core._exceptions), a TypeError: a ufunc's output its casting rule refuses"""
+
+
+_UFuncTypeError.__name__ = _UFuncTypeError.__qualname__ = "UFuncTypeError"
+
+
+def _root(r):
+    # (std's root of the variance, as NumPy's: in place for an array (sqrt(r, out=r), refused for an integer one by
+    # same_kind casting), a scalar's in its own type)
+    if isinstance(r, ndarray):
+        s = sqrt(r)
+        if s.dtype != r.dtype and not can_cast(s.dtype, r.dtype, "same_kind"):
+            raise _UFuncTypeError("Cannot cast ufunc 'sqrt' output from dtype('%s') to dtype('%s') with casting rule "
+                                  "'same_kind'" % (s.dtype.name, r.dtype.name))
+        r[...] = s
+        return r
+    return r.dtype.type(sqrt(r))
+
+
+def _iter_order(nd, strides):
+    # (NumPy's nditer axis order, as the runtime's iterAxisOrder: innermost first, from C order an axis moved inward
+    # past another while an operand's stride there is larger, a zero stride saying nothing, C order winning when
+    # operands disagree)
+    perm = list(range(nd - 1, -1, -1))
+    for i0 in range(1, nd):
+        ipos, a0 = i0, perm[i0]
+        for i1 in range(i0 - 1, -1, -1):
+            ambig, swap, a1 = True, False, perm[i1]
+            for st in strides:
+                if st[a0] != 0 and st[a1] != 0:
+                    if _builtins.abs(st[a1]) <= _builtins.abs(st[a0]):
+                        swap = False
+                    elif ambig:
+                        swap = True
+                    ambig = False
+            if not ambig:
+                if not swap:
+                    break
+                ipos = i1
+        if ipos != i0:
+            perm.insert(ipos, perm.pop(i0))
+    return perm
+
+
+def _sq_dev(a, arrmean, given):
+    # (var's squared deviations, as NumPy's _var: a new array laid out in the order its iterator takes for the operand
+    # and the mean (order K; a mean it computed is laid out as the operand, a given one has its own layout), so that
+    # the sum over it walks it as NumPy's does. A float or integer operand's deviations squared (complex ones too,
+    # against a complex mean); a complex operand's parts squared in their own dtype, then added; any other's times
+    # its conjugate)
+    # (a given Python number stays a weak scalar in the subtraction; a given mean that broadcasts the operand to a
+    # larger shape is subtracted as it is, as NumPy's _var subtracts it)
+    weak = given and type(arrmean) in (int, float, complex)
+    if given and not weak and broadcast_shapes(a.shape, shape(arrmean)) != a.shape:
+        x = asarray(a - arrmean)
+        order = back = list(range(x.ndim))
+    else:
+        order = _iter_order(a.ndim, [a.strides] + ([broadcast_to(arrmean, a.shape).strides] if given and not weak else []))[::-1]
+        back = [order.index(i) for i in range(a.ndim)]
+        x = asarray(a.transpose(order) - (arrmean if weak else broadcast_to(arrmean, a.shape).transpose(order)))
+    if a.dtype.kind in "fiu":
+        x = x * x
+    elif x.dtype.kind == "c":
+        x = x.real * x.real + x.imag * x.imag
+    else:
+        x = (x * x.conj()).real if x.dtype.kind == "c" else x * x
+    return x.transpose(back)
+
+
+def _divided(r, n):
+    # (NumPy's true_divide(r, n, out=r, casting='unsafe'), or r.dtype.type(r / n) for a scalar: the quotient in the
+    # loop both resolve to (a float32 sum by an intp count in float64), converted back to r's dtype)
+    if isinstance(r, ndarray):
+        r[...] = r / n
+        return r
+    return r.dtype.type(r / n)
+
+
 def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
     a = asarray(a)
+    if where is not True:
+        # (where=, #2088, as NumPy's _mean: the kept elements counted (intp), summed (into out if given), divided)
+        n = _count_where(a, axis, keepdims, where)
+        if dtype is None and a.dtype.kind in "biu":
+            dtype = float64
+        if out is not None:
+            if not isinstance(out, ndarray):
+                raise TypeError("return arrays must be of ArrayType")
+            return _divided(add.reduce(a, axis, dtype, out, keepdims, where=where), n)
+        return _divided(sum(a, axis, dtype, None, keepdims, where=where), n)
     n = _count(a, axis)
     if dtype is None and a.dtype.kind in "biu":
         dtype = float64
@@ -1450,10 +1554,31 @@ def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
     return s / n if n else s / 0.0
 
 
+def _var(a, axis, dtype, out, ddof, keepdims, where, arrmean):
+    # (as NumPy's _var, #2088: the kept elements counted (intp), their mean (unless given) in dtype, kept dimensions,
+    # divided there; every element's squared deviation from it, the kept ones summed (into out if given) and divided by
+    # the count less ddof, at least 0)
+    n = intp(_count(a, axis)) if where is True else _count_where(a, axis, keepdims, where)
+    if dtype is None and a.dtype.kind in "biu":
+        dtype = float64
+    given = arrmean is not None
+    if not given:
+        arrmean = sum(a, axis, dtype, None, True, where=where)
+        arrmean = _divided(arrmean, n if ndim(n) == 0 else asarray(n).reshape(shape(arrmean)))
+    x = _sq_dev(a, arrmean, given)
+    r = add.reduce(x, axis, dtype, out, keepdims, where=where) if out is not None else \
+        sum(x, axis, dtype, None, keepdims, where=where)
+    return _divided(r, maximum(n - ddof, 0))
+
+
 def var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True, mean=None, correction=None):
     if correction is not None:
+        if ddof != 0:
+            raise ValueError("ddof and correction can't be provided simultaneously.")
         ddof = correction
     a = asarray(a)
+    if where is not True or mean is not None:
+        return _var(a, axis, dtype, out, ddof, keepdims, where, mean)
     n = _count(a, axis)
     if dtype is None and a.dtype.kind in "biu":
         dtype = float64
@@ -1462,18 +1587,15 @@ def var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=Tru
         r = _np.sqdev_sum(a, arrmean.ravel()[0])  # no temporaries, the same bits
         if r is not None:
             return _out(float64(r) / _builtins.max(n - ddof, 0), out)
-    x = asarray(a - arrmean)
-    if x.dtype.kind == "c":
-        x = (x * x.conj()).real
-    elif x.dtype.kind == "f":
-        x *= x  # in place, as NumPy
-    else:
-        x = x * x
+    x = _sq_dev(a, arrmean, False)  # (laid out as NumPy lays them out, #2088)
     r = _np.sum(x, axis, keepdims, dtype)
     return _out(r / _builtins.max(n - ddof, 0), out)
 
 
 def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True, mean=None, correction=None):
+    if where is not True or mean is not None:
+        # (as NumPy's _std, #2088: the variance (into out if given), then its root there)
+        return _root(var(a, axis, dtype, out, ddof, keepdims, where=where, mean=mean, correction=correction))
     return _out(sqrt(var(a, axis, dtype, None, ddof, keepdims, correction=correction)), out)
 
 
@@ -1482,6 +1604,9 @@ def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
     # initial (in a's dtype, converted as NumPy converts it) takes part, and is the result of a reduction over no
     # elements, which without it has no identity; a where mask needs it, and its masked elements take no part
     a = asarray(a)
+    # (a mask checked first, as NumPy's reductions check it, #2088: its conversion, the axes, its shape)
+    if mask is not True:
+        mask = _where_mask(a, mask, axis)
     if initial is None:
         if mask is not True:
             raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
@@ -1570,18 +1695,44 @@ def _nanfill(a, value):
     return where(isnan(a), value, a)
 
 
-def nansum(a, axis=None, dtype=None, out=None, keepdims=False):
-    return sum(_nanfill(a, 0), axis, dtype, out, keepdims)
+def _replace_nan(a, value):
+    # (NumPy's: a float or complex array copied with value at each NaN, and where its NaNs were; any other as it is,
+    # with no mask)
+    a = asarray(a)
+    if a.dtype.kind not in "fc":
+        return a, None
+    mask = isnan(a)
+    # (the copy keeps the operand's layout (order K), which the masked sums over it walk)
+    order = _iter_order(a.ndim, [a.strides])[::-1]
+    back = [order.index(i) for i in range(a.ndim)]
+    return where(mask.transpose(order), value, a.transpose(order)).astype(a.dtype).transpose(back), mask
 
 
-def nanprod(a, axis=None, dtype=None, out=None, keepdims=False):
-    return prod(_nanfill(a, 1), axis, dtype, out, keepdims)
+def _inexact_args(dtype, out):
+    # (NumPy's nanmean/nanvar refusals for a float or complex operand)
+    if dtype is not None and _np_dtype(dtype).kind not in "fc":
+        raise TypeError("If a is inexact, then dtype must be inexact")
+    if out is not None and out.dtype.kind not in "fc":
+        raise TypeError("If a is inexact, then out must be inexact")
+
+
+def nansum(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
+    if out is not None:
+        # (NumPy's np.sum into out is add.reduce's: in the loop the input's and out's dtypes convert to)
+        return add.reduce(_replace_nan(a, 0)[0], axis, dtype, out, keepdims, initial, where)
+    return sum(_replace_nan(a, 0)[0], axis, dtype, out, keepdims, initial, where)
+
+
+def nanprod(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
+    return prod(_replace_nan(a, 1)[0], axis, dtype, out, keepdims, initial, where)
 
 
 def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
     # (NumPy's nanmax/nanmin reduce with fmax/fmin, the names in their errors; a where mask needs initial first)
     # (the runtime's first-wins fold skips a NaN element itself; only a complex array is filled first)
     name = "fmax" if is_max else "fmin"
+    if where is not True:
+        _where_mask(asarray(a), where, axis)  # (checked first, as NumPy's reductions check it, #2088)
     if initial is None and where is not True:
         raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
                          "specify 'initial'" % name)
@@ -1604,28 +1755,65 @@ def nanmin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
     return _nan_minmax(a, axis, out, keepdims, initial, where, False)
 
 
-def nanmean(a, axis=None, dtype=None, out=None, keepdims=False):
-    a = asarray(a)
-    if a.dtype.kind not in "fc":
-        return mean(a, axis, dtype, out, keepdims)  # (no NaN to skip: NumPy's mean, its refusals included)
-    ok = ~isnan(a)
-    # (the mean, not the sum, in out, which is returned, as NumPy's)
-    return _out(sum(_nanfill(a, 0), axis, dtype, None, keepdims) / sum(ok, axis, keepdims=keepdims), out)
+def nanmean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
+    # (as NumPy's: no NaN to skip in another dtype, its mean; otherwise the NaNs as 0, the others (kept by where=,
+    # #2088) counted (intp) and summed (into out if given), and the sum divided there)
+    arr, isn = _replace_nan(a, 0)
+    if isn is None:
+        return mean(arr, axis, dtype, out, keepdims, where=where)
+    _inexact_args(dtype, out)
+    n = sum(~isn, axis, intp, None, keepdims, where=where)
+    # (into out as NumPy's sum into out, add.reduce: in the loop the input's and out's dtypes convert to)
+    tot = add.reduce(arr, axis, dtype, out, keepdims, where=where) if out is not None else \
+        sum(arr, axis, dtype, None, keepdims, where=where)
+    return _divided(tot, n)
 
 
-def nanvar(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False):
-    a = asarray(a)
-    if a.dtype.kind not in "fc":
-        return var(a, axis, dtype, out, ddof, keepdims)  # (no NaN to skip: NumPy's var, its refusals included)
-    ok = ~isnan(a)
-    n = sum(ok, axis, keepdims=True)
-    m = sum(_nanfill(a, 0), axis, keepdims=True) / n
-    d = where(ok, a - m, 0.0)
-    return _out(sum(d * d, axis, keepdims=keepdims) / (sum(ok, axis, keepdims=keepdims) - ddof), out)
+def nanvar(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True, mean=_NoValue,
+           correction=_NoValue):
+    # (as NumPy's: no NaN to skip in another dtype, its var; otherwise the NaNs as 0, the others (kept by where=,
+    # #2088) counted, their mean (unless given), each deviation from it in the operand's dtype (a NaN's 0), the kept
+    # ones' squares summed (into out if given) and divided by the count less ddof: NaN where that is not above 0)
+    arr, isn = _replace_nan(a, 0)
+    if isn is None:
+        return var(arr, axis, dtype, out, ddof, keepdims, where=where, mean=None if mean is _NoValue else mean,
+                   correction=None if correction is _NoValue else correction)
+    _inexact_args(dtype, out)
+    if correction is not _NoValue:
+        if ddof != 0:
+            raise ValueError("ddof and correction can't be provided simultaneously.")
+        ddof = correction
+    n = sum(~isn, axis, intp, None, True, where=where)
+    avg = _divided(sum(arr, axis, dtype, None, True, where=where), n) if mean is _NoValue else mean
+    # (NumPy's copy of the operand keeps its layout (order K), and the deviations and squares are made in it: computed
+    # here in that order, so that the masked sum walks them as NumPy's does)
+    order = _iter_order(arr.ndim, [asarray(a).strides])[::-1]
+    back = [order.index(i) for i in range(arr.ndim)]
+    # (a given Python number stays a weak scalar in the subtraction)
+    weak = type(avg) in (int, float, complex)
+    x = asarray(arr.transpose(order) - (avg if weak else broadcast_to(avg, arr.shape).transpose(order))).astype(arr.dtype)
+    x = _np.where3(isn.transpose(order), zeros((), x.dtype), x)  # (the parameter where hides the function)
+    x = ((x * x.conj()).real if x.dtype.kind == "c" else x * x).transpose(back)
+    r = add.reduce(x, axis, dtype, out, keepdims, where=where) if out is not None else \
+        sum(x, axis, dtype, None, keepdims, where=where)
+    if ndim(r) < n.ndim:
+        n = n.squeeze(axis)
+        n = n[()] if n.ndim == 0 else n
+    dof = n - ddof
+    r = _divided(r, dof)
+    bad = dof <= 0
+    if _builtins.bool(any(bad)):
+        if isinstance(r, ndarray):
+            r[...] = _np.where3(bad, nan, r)  # (a 0-d out too, which a boolean index doesn't take)
+        else:
+            r = r.dtype.type(nan)
+    return r
 
 
-def nanstd(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False):
-    return _out(sqrt(nanvar(a, axis, dtype, None, ddof, keepdims)), out)  # (the root, not the variance, in out)
+def nanstd(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True, mean=_NoValue,
+           correction=_NoValue):
+    # (the variance (into out if given), then its root there, as NumPy's)
+    return _root(nanvar(a, axis, dtype, out, ddof, keepdims, where=where, mean=mean, correction=correction))
 
 
 def _all_nan_refused(a, axis):
@@ -3504,15 +3692,20 @@ def _m_prod(self, axis=None, dtype=None, out=None, keepdims=False, initial=_NoVa
 
 
 def _m_mean(self, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
-    return mean(self, axis, dtype, out, keepdims)
+    return mean(self, axis, dtype, out, keepdims, where=where)
 
 
-def _m_var(self, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True):
-    return var(self, axis, dtype, out, ddof, keepdims)
+def _m_var(self, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True, mean=None, **kw):
+    # (NumPy's methods pass their keywords to its _methods._var, which has no correction)
+    for k in kw:
+        raise TypeError("_var() got an unexpected keyword argument '%s'" % k)
+    return var(self, axis, dtype, out, ddof, keepdims, where=where, mean=mean)
 
 
-def _m_std(self, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True):
-    return std(self, axis, dtype, out, ddof, keepdims)
+def _m_std(self, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True, mean=None, **kw):
+    for k in kw:
+        raise TypeError("_std() got an unexpected keyword argument '%s'" % k)
+    return std(self, axis, dtype, out, ddof, keepdims, where=where, mean=mean)
 
 
 def _m_all(self, axis=None, out=None, keepdims=False, *, where=True):
