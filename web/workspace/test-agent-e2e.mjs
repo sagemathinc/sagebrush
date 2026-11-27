@@ -700,6 +700,51 @@ try {
     await ev(`([...document.querySelectorAll(".sbag-box")].forEach((b) => [...b.querySelectorAll("button")].find((x) => x.textContent === "OK")?.click()), true)`);
   }
 
+  // ---- an unusable remembered session, forgotten only by the attempt that still owns the page (#1751, Codex review):
+  // two remembered agents, the first's session one its server doesn't know ("wrong session"), the second's on the
+  // second server. Control: the first is forgotten and the reconnect goes on to the second. Then the first's hello held
+  // at the server while the person connects the second agent; its late refusal must neither forget nor go on: the
+  // person's connection stays the page's, and the second remembered agent is never asked
+  {
+    const port2 = (await drive({ op: "code2" })).port;
+    const plant = () => ev(`(async () => {
+      sessionStorage.removeItem("sb-agent-reload-v1");
+      for (const id of Object.keys(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, null);
+      const g = { folders: ["/"], write: false, expires: Date.now() + 600000 };
+      await T.ws.putAgentGrant("000000000000", { grant: g, session: "s".repeat(43), port: ${PORT} });
+      await T.ws.putAgentGrant("zzzzzzzzzzzz", { grant: g, session: "t".repeat(43), port: ${port2} });
+      return Object.keys(await T.ws.agentGrants()).join(",");
+    })()`);
+    const at = (hs, port) => (hs.ok ?? []).filter(([p]) => p === port).length;
+
+    await drive({ op: "slow", s: 0 });
+    ok(await plant() === "000000000000,zzzzzzzzzzzz", "unusable session (control): two remembered agents, the stale one first");
+    await drive({ op: "hellos" });
+    ok(await open(""), "unusable session (control): a reload");
+    ok(await until(`T.ws.agentGrants().then((a) => !("000000000000" in a))`, 10000), "unusable session (control): the stale session is forgotten");
+    await sleep(1500);
+    const hc = await drive({ op: "hellos" });
+    ok(at(hc, PORT) === 1 && at(hc, port2) >= 1, `unusable session (control): the reconnect goes on to the second remembered agent (${at(hc, PORT)} and ${at(hc, port2)} hellos)`);
+
+    ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "status2" })).ok?.paired === false) return true; await sleep(50); } return false; })(), "unusable session (superseded): the second server free");
+    ok(await plant() === "000000000000,zzzzzzzzzzzz", "unusable session (superseded): the two remembered agents again");
+    await drive({ op: "hellos" });
+    await drive({ op: "hellogate", n: (await drive({ op: "hellon" })).ok + 1 });
+    ok(await open(""), "unusable session (superseded): a reload");
+    ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "hellowaiting" })).ok) return true; await sleep(25); } return false; })(), "unusable session (superseded): the stale session's hello waits at the server");
+    // (the page's own other way to connect, adopted meanwhile (the Agents page's Chat here): a link whose agent hasn't
+    //  answered yet; Connect itself waits while a reconnect is under way)
+    ok(await ev(`(() => { const link = { socket: () => ({ readyState: 0, send() {}, close() {} }), ready: () => undefined, send: () => "ok", owe: () => true, answer() {}, disconnect: async () => {} }; window.__mine = T.ui.adopt(link, "this browser"); return T.ui.pairing === window.__mine; })()`), "unusable session (superseded): a newer connection adopted meanwhile");
+    await drive({ op: "hellos" });
+    await drive({ op: "hellogo" });
+    await sleep(2500);
+    const hs = await drive({ op: "hellos" });
+    const mine = await ev(`T.ui.pairing === window.__mine && T.ui.pairing.state !== "closed"`);
+    const keptS = await ev(`T.ws.agentGrants().then((a) => Object.keys(a).join(","))`);
+    ok(mine && at(hs, port2) === 0 && keptS === "000000000000,zzzzzzzzzzzz", `unusable session (superseded): the late refusal leaves the person's connection the page's, the second remembered agent never asked, nothing forgotten (mine ${mine}, ${at(hs, port2)} hellos to the second, kept ${keptS})`);
+    await ev(`(async () => { for (const id of Object.keys(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, null); [...document.querySelectorAll(".sbag-box")].forEach((b) => b.remove()); return true; })()`);
+  }
+
   // ---- a spent code (A5): the agent refuses it, and the dialog says so, with no local-network advice; Connect shows
   // that it is trying
   ok(await open(""), "a spent code: a fresh page");

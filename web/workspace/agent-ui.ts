@@ -630,8 +630,11 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
         } catch {
           if (p && unusableSession(p)) {
             // A revoked/replaced session is not an offline or busy agent. Await forgetting it before going on.
+            // (only while this attempt still owns the page, before the cleanup and after it: a late refusal of an
+            //  attempt superseded meanwhile neither forgets nor goes on to the next remembered agent)
+            if (pairing !== p || fenced(gen)) return null;
             await p.revoke("the remembered session is no longer valid");
-            if (p.cleanup) return null;
+            if (p.cleanup || pairing !== p || fenced(gen)) return null;
             break;
           }
           // (the old page's connection not yet seen closed: asked again, briefly, while this attempt still owns the page)
