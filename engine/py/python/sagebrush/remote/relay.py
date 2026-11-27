@@ -1181,8 +1181,10 @@ class RelayRunner:
         p.jkt = q["jkt"]
         p.token = b64url(os.urandom(32))  # (this page's and this key's; never written anywhere)
         if p.chan == "agent":
+            self.err("An agent page is paired (%s).\n" % p.slot.name)
             return self.agent_hello(p, rid, q)
         if p.chan == "terminal":
+            self.err("A terminal page is paired.\n")
             # (its token is good for this page's terminal opens only: no kernel binding, nothing in the gateway)
             return p.send({"jsonrpc": "2.0", "id": rid, "result": {
                 "protocol": 1, "purpose": "terminal", "via": "relay", "token": p.token,
