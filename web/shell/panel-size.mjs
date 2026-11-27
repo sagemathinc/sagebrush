@@ -40,7 +40,10 @@ import { readPage } from "../../scripts/notebook-page.mjs";
 // project name, its version the package's own, one package per name), which the loader's set admission runs in this
 // chunk: measured 472 124 / 131 769 merged on master 747e6748's 471 459 / 131 578 (+665 / +191, bun 1.4.4, Node
 // 24.21.0's gzip -9); the ceilings at that measurement + 64)
-const LIMIT_RAW = 472188, LIMIT_GZIP = 131833;
+// (document key declarations in the sealed index (web/workspace/sync-dockeys.ts: the op's form and the ledger's page,
+// which the outbox and the confirmed index reach in this chunk): measured by CI 472 522 / 131 940 against 472 124 /
+// 131 769 (+398 / +171); the ceilings at that measurement + 64)
+const LIMIT_RAW = 472586, LIMIT_GZIP = 132004;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
