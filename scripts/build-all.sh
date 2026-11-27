@@ -5,7 +5,7 @@
 #
 #   scripts/build-all.sh             # everything
 #   scripts/build-all.sh --no-app    # without the Tauri app (no Tauri CLI or WebKitGTK needed)
-#   scripts/build-all.sh --no-engine # fetch the four WebAssembly modules by their pins instead (no Rust needed for them)
+#   scripts/build-all.sh --no-engine # fetch the five WebAssembly modules by their pins instead (no Rust needed for them)
 #
 # The prerequisites and their versions are DEVELOPMENT.md's. This script checks them first and stops on a
 # missing one, and on a bun older than CI's pin (an older Bun.build gives the build no metafile); another
@@ -63,8 +63,8 @@ if [ "$ENGINE" = 0 ]; then
 fi
 if [ "$ENGINE" = 1 ]; then
   # (rustup installs engine/rust-toolchain.toml's toolchain and wasm32 target on first use. The modules embed the
-  # crate registry's paths; mapped to CI's, a fresh build matches wasm/pins.json: README)
-  step "the engine as WebAssembly (wasm/sagebrush-engine.wasm)" env RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/home/runner/.cargo${RUSTFLAGS:+ $RUSTFLAGS}" node scripts/build-engine.mjs
+  # crate registry's paths; build-engine.mjs maps them to CI's, so a fresh build matches wasm/pins.json: README)
+  step "the engine as WebAssembly (wasm/sagebrush-engine.wasm)" node scripts/build-engine.mjs
 fi
 step "TypeScript (dist/)" pnpm run build
 step "the CLI (build/cli/pyjs.cjs)" node scripts/build-cli.mjs

@@ -8,7 +8,7 @@
 - `input()`: a field under the cell takes the line, as in Jupyter (Enter sends it; Stop raises KeyboardInterrupt). It needs a cross-origin-isolated page, as Stop does: elsewhere `input()` reads end of input (EOFError). The kernel's sink gets `input(prompt, reply)` (types.ts);
 - printing to PDF.
 
-It is plain DOM with no framework, MIT or Apache-2.0, and `web/build.ts` bundles it as `sagebrush-notebook.js` (about 110 kB minified, Markdown rendering included). [sagebrush.space/embed](https://sagebrush.space/embed/) is a whole page made with it.
+It is plain DOM with no framework, MIT or Apache-2.0, and `web/build.ts` bundles it as `sagebrush-notebook.js` (about 250 kB minified, Markdown rendering included). [sagebrush.space/embed](https://sagebrush.space/embed/) is a whole page made with it.
 
 ```js
 import { createNotebook, WorkerKernel, MemoryStore } from "/sagebrush-notebook.js";
@@ -73,7 +73,7 @@ src/dataflow.ts), cells form a dependency graph, as in marimo
 - Running a cell first runs its stale ancestors, then reruns what depends on
   it, in graph order with ties in page order.
 - Cells run automatically only within the budget (`setBudget(ms)`, default
-  2 s; `Infinity` is marimo's autorun, 0 its lazy mode). The rest are left
+  10 s; `Infinity` is marimo's autorun, 0 its lazy mode). The rest are left
   stale and say why.
 - A name read by other cells has one defining cell. Second definitions and
   cycles are errors on the cells (#1477's relaxation: names nobody reads may

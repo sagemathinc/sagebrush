@@ -149,6 +149,23 @@ const at = (s) => [TEX.indexOf(s), TEX.indexOf(s) + s.length];
   const slow = { read: async () => { await new Promise((r) => setTimeout(r, 60)); return { content: null, base: 0 }; }, write: async () => { tries3++; await new Promise((r) => setTimeout(r, 60)); const e = new Error("c"); e.code = "conflict"; throw e; } };
   const de = await C.update(slow, add("late"), { deadlineMs: 300 }).catch((e) => e);
   check("DB3-IMPL-4-deadline-busy-fewer-attempts", de.code === "busy" && tries3 < 5, { code: de.code, tries3 });
+  // A conflict can end busy just BEFORE the deadline: there is no time for the next backoff.
+  // Use a monotonic fake clock so this guard, unlike a wall-clock sleep near the boundary, is deterministic.
+  const realPerformance = Object.getOwnPropertyDescriptor(globalThis, "performance");
+  let now = 0, nearWrites = 0, nearSleeps = 0;
+  try {
+    Object.defineProperty(globalThis, "performance", { configurable: true, value: { now: () => now } });
+    const near = { read: async () => ({ content: null, base: 0 }), write: async () => {
+      nearWrites++; now = C.LIMITS.deadlineMs - 10; throw Object.assign(new Error("conflict"), { code: "conflict" });
+    } };
+    const e = await C.update(near, add("near deadline"), { draft: "near deadline", sleep: async () => { nearSleeps++; } }).catch((e) => e);
+    check("DB3-IMPL-4-next-backoff-reaches-deadline", e.code === "busy" && e.detail?.attempts === 1 &&
+      e.detail?.draft === "near deadline" && nearWrites === 1 && nearSleeps === 0 && now < C.LIMITS.deadlineMs,
+      { code: e.code, detail: e.detail, nearWrites, nearSleeps, now });
+  } finally {
+    if (realPerformance) Object.defineProperty(globalThis, "performance", realPerformance);
+    else delete globalThis.performance;
+  }
 }
 
 // ---- LC-T1 / LC-T3 / LC-T4 / LC-T6 / LC-T7: the edge contracts named in the implementation review

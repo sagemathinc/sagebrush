@@ -1,0 +1,28 @@
+0
+x + 2
+x + 3
+x + 1
+-2*x - 4
+x + 1
+-2*x - 4
+-x - 1
+x^2 + x + 2
+2*x^2 + 1
+true
+3
+1
+0
+0
+x + 3
+x + 1
+
+>> print (3*x + 7) div 0;
+                   ^
+Runtime error in 'div': Division by zero
+
+
+>> print (3*x + 7) mod 0;
+                   ^
+Runtime error in 'mod': Division by zero
+
+end

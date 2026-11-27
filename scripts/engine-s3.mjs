@@ -49,7 +49,10 @@ export function makeS3({ endpoint, bucket, accessKeyId, secretAccessKey, region 
   return {
     async head(key) {
       const r = await call("HEAD", key, null, {}, { "accept-encoding": "identity" });
-      return { status: r.status, size: r.headers.get("content-length") === null ? null : Number(r.headers.get("content-length")) };
+      // (no size when there's no length, or an encoded answer's length, which isn't the object's: engine-publish then
+      // compares the object's sha256)
+      const len = r.headers.get("content-length"), ce = (r.headers.get("content-encoding") ?? "").trim().toLowerCase();
+      return { status: r.status, size: len === null || !/^\d+$/.test(len) || (ce !== "" && ce !== "identity") ? null : Number(len) };
     },
     async get(key) {
       const r = await call("GET", key, null, {}, { "accept-encoding": "identity" });

@@ -1,0 +1,529 @@
+== series
+
+       a      b
+0  False   True
+1   True  False
+2  False  False
+3  False   True
+== series.dtypes
+['bool', 'bool']
+== series.columns
+['a', 'b']
+== series-dummy-na
+
+       a      b    NaN
+0  False   True  False
+1   True  False  False
+2  False  False   True
+3  False   True  False
+== series-dummy-na.dtypes
+['bool', 'bool', 'bool']
+== series-dummy-na.columns
+['a', 'b', nan]
+== series-prefix
+
+     p_a    p_b
+0  False   True
+1   True  False
+2  False  False
+3  False   True
+== series-prefix.dtypes
+['bool', 'bool']
+== series-prefix.columns
+['p_a', 'p_b']
+== series-prefix-dummy-na
+
+     p_a    p_b  p_nan
+0  False   True  False
+1   True  False  False
+2  False  False   True
+3  False   True  False
+== series-prefix-dummy-na.dtypes
+['bool', 'bool', 'bool']
+== series-prefix-dummy-na.columns
+['p_a', 'p_b', 'p_nan']
+== series-prefix-sep
+
+     p-a    p-b
+0  False   True
+1   True  False
+2  False  False
+3  False   True
+== series-prefix-sep.dtypes
+['bool', 'bool']
+== series-prefix-sep.columns
+['p-a', 'p-b']
+== series-drop-first
+
+       b
+0   True
+1  False
+2  False
+3   True
+== series-drop-first.dtypes
+['bool']
+== series-drop-first.columns
+['b']
+== series-dtype-int
+
+   a  b
+0  0  1
+1  1  0
+2  0  0
+3  0  1
+== series-dtype-int.dtypes
+['int64', 'int64']
+== series-dtype-int.columns
+['a', 'b']
+== series-dtype-float
+
+     a    b
+0  0.0  1.0
+1  1.0  0.0
+2  0.0  0.0
+3  0.0  1.0
+== series-dtype-float.dtypes
+['float64', 'float64']
+== series-dtype-float.columns
+['a', 'b']
+== series-dtype-float-string
+
+     a    b
+0  0.0  1.0
+1  1.0  0.0
+2  0.0  0.0
+3  0.0  1.0
+== series-dtype-float-string.dtypes
+['float64', 'float64']
+== series-dtype-float-string.columns
+['a', 'b']
+== series-named
+
+       a      b
+0  False   True
+1   True  False
+2  False  False
+3  False   True
+== series-named.dtypes
+['bool', 'bool']
+== series-named.columns
+['a', 'b']
+== series-index
+
+        u      v
+10   True  False
+20  False   True
+== series-index.dtypes
+['bool', 'bool']
+== series-index.columns
+['u', 'v']
+== int-series
+
+       1      3
+0  False   True
+1   True  False
+2  False   True
+== int-series.dtypes
+['bool', 'bool']
+== int-series.columns
+[1, 3]
+== int-series-prefix
+
+     n_1    n_3
+0  False   True
+1   True  False
+2  False   True
+== int-series-prefix.dtypes
+['bool', 'bool']
+== int-series-prefix.columns
+['n_1', 'n_3']
+== float-series
+
+     1.5
+0   True
+1  False
+== float-series.dtypes
+['bool']
+== float-series.columns
+[1.5]
+== float-series-prefix
+
+   f_1.5  f_nan
+0   True  False
+1  False   True
+== float-series-prefix.dtypes
+['bool', 'bool']
+== float-series-prefix.columns
+['f_1.5', 'f_nan']
+== bool-series
+
+   False  True 
+0  False   True
+1   True  False
+== bool-series.dtypes
+['bool', 'bool']
+== bool-series.columns
+[False, True]
+== list
+
+       a      b
+0   True  False
+1  False   True
+== list.dtypes
+['bool', 'bool']
+== list.columns
+['a', 'b']
+== category-unused
+
+      a      b
+0  True  False
+== category-unused.dtypes
+['bool', 'bool']
+== category-unused.columns
+['a', 'b']
+== category-order
+
+       b      a
+0  False   True
+1   True  False
+== category-order.dtypes
+['bool', 'bool']
+== category-order.columns
+['b', 'a']
+== frame
+
+   n  city_x  city_y    c_p    c_q
+0  1    True   False   True  False
+1  2   False    True  False   True
+2  3    True   False   True  False
+== frame.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== frame.columns
+['n', 'city_x', 'city_y', 'c_p', 'c_q']
+== frame-columns
+
+   n  c  city_x  city_y
+0  1  p    True   False
+1  2  q   False    True
+2  3  p    True   False
+== frame-columns.dtypes
+['int64', 'category', 'bool', 'bool']
+== frame-columns.columns
+['n', 'c', 'city_x', 'city_y']
+== frame-int-columns
+
+  city  c    n_1    n_2    n_3
+0    x  p   True  False  False
+1    y  q  False   True  False
+2    x  p  False  False   True
+== frame-int-columns.dtypes
+['str', 'category', 'bool', 'bool', 'bool']
+== frame-int-columns.columns
+['city', 'c', 'n_1', 'n_2', 'n_3']
+== frame-prefix-sep
+
+   n  city__x  city__y   c__p   c__q
+0  1     True    False   True  False
+1  2    False     True  False   True
+2  3     True    False   True  False
+== frame-prefix-sep.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== frame-prefix-sep.columns
+['n', 'city__x', 'city__y', 'c__p', 'c__q']
+== frame-prefix-dict
+
+   n    C_x    C_y    K_p    K_q
+0  1   True  False   True  False
+1  2  False   True  False   True
+2  3   True  False   True  False
+== frame-prefix-dict.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== frame-prefix-dict.columns
+['n', 'C_x', 'C_y', 'K_p', 'K_q']
+== frame-prefix-list
+
+   n    C_x    C_y    K_p    K_q
+0  1   True  False   True  False
+1  2  False   True  False   True
+2  3   True  False   True  False
+== frame-prefix-list.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== frame-prefix-list.columns
+['n', 'C_x', 'C_y', 'K_p', 'K_q']
+== frame-prefix-str
+
+   n    P_x    P_y    P_p    P_q
+0  1   True  False   True  False
+1  2  False   True  False   True
+2  3   True  False   True  False
+== frame-prefix-str.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== frame-prefix-str.columns
+['n', 'P_x', 'P_y', 'P_p', 'P_q']
+== frame-drop-first
+
+   n  city_y    c_q
+0  1   False  False
+1  2    True   True
+2  3   False  False
+== frame-drop-first.dtypes
+['int64', 'bool', 'bool']
+== frame-drop-first.columns
+['n', 'city_y', 'c_q']
+== frame-dummy-na
+
+     s_a  s_nan
+0   True  False
+1  False   True
+== frame-dummy-na.dtypes
+['bool', 'bool']
+== frame-dummy-na.columns
+['s_a', 's_nan']
+== frame-dtype-int
+
+   n  city_x  city_y  c_p  c_q
+0  1       1       0    1    0
+1  2       0       1    0    1
+2  3       1       0    1    0
+== frame-dtype-int.dtypes
+['int64', 'int64', 'int64', 'int64', 'int64']
+== frame-dtype-int.columns
+['n', 'city_x', 'city_y', 'c_p', 'c_q']
+== frame-no-str
+
+   n
+0  1
+1  2
+== frame-no-str.dtypes
+['int64']
+== frame-no-str.columns
+['n']
+== frame-prefix-length
+!! ValueError: Length of 'prefix' (1) did not match the length of the columns being encoded (2).
+== frame-columns-str
+!! TypeError: Input must be a list-like for parameter `columns`
+== empty
+
+Empty DataFrame
+Columns: []
+Index: []
+== prefix-sep-list
+
+   n    x-p    x-q    y+r    y+s
+0  1   True  False   True  False
+1  2  False   True  False   True
+== prefix-sep-list.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== prefix-sep-list.columns
+['n', 'x-p', 'x-q', 'y+r', 'y+s']
+== prefix-sep-dict
+
+   n    x-p    x-q    y+r    y+s
+0  1   True  False   True  False
+1  2  False   True  False   True
+== prefix-sep-dict.dtypes
+['int64', 'bool', 'bool', 'bool', 'bool']
+== prefix-sep-dict.columns
+['n', 'x-p', 'x-q', 'y+r', 'y+s']
+== prefix-sep-list-length
+!! ValueError: Length of 'prefix_sep' (1) did not match the length of the columns being encoded (2).
+== prefix-sep-int
+!! TypeError: 'int' object is not iterable
+== series-columns-ignored
+
+       a      b
+0  False   True
+1   True  False
+== series-columns-ignored.dtypes
+['bool', 'bool']
+== series-columns-ignored.columns
+['a', 'b']
+== float32-series-prefix
+
+   p_1.5  p_2.5
+0   True  False
+1  False   True
+== float32-series-prefix.dtypes
+['bool', 'bool']
+== float32-series-prefix.columns
+['p_1.5', 'p_2.5']
+== int8-series-prefix
+
+     p_1    p_2
+0   True  False
+1  False   True
+== int8-series-prefix.dtypes
+['bool', 'bool']
+== int8-series-prefix.columns
+['p_1', 'p_2']
+== datetime-series.columns
+[Timestamp('2020-01-01 00:00:00'), Timestamp('2021-01-01 00:00:00')]
+== datetime-series.values
+[[True, False], [False, True]]
+== frame-int8-columns
+
+     k_1    k_3
+0  False   True
+1   True  False
+== frame-int8-columns.dtypes
+['bool', 'bool']
+== frame-int8-columns.columns
+['k_1', 'k_3']
+== frame-float32-columns
+
+   k_1.5  k_2.5
+0   True  False
+1  False   True
+== frame-float32-columns.dtypes
+['bool', 'bool']
+== frame-float32-columns.columns
+['k_1.5', 'k_2.5']
+== frame-datetime-columns
+
+   k_2020-01-01 00:00:00  k_2021-01-01 00:00:00
+0                   True                  False
+1                  False                   True
+== frame-datetime-columns.dtypes
+['bool', 'bool']
+== frame-datetime-columns.columns
+['k_2020-01-01 00:00:00', 'k_2021-01-01 00:00:00']
+== repeated-labels-default
+
+     k_a    k_b    k_b    k_c
+0   True  False   True  False
+1  False   True  False   True
+== repeated-labels-default.dtypes
+['bool', 'bool', 'bool', 'bool']
+== repeated-labels-default.columns
+['k_a', 'k_b', 'k_b', 'k_c']
+== repeated-labels-columns
+
+     k_a    k_b    k_b    k_c
+0   True  False   True  False
+1  False   True  False   True
+== repeated-labels-columns.dtypes
+['bool', 'bool', 'bool', 'bool']
+== repeated-labels-columns.columns
+['k_a', 'k_b', 'k_b', 'k_c']
+== repeated-labels-columns-twice
+
+     k_a    k_b    k_b    k_c    k_a    k_b    k_b    k_c
+0   True  False   True  False   True  False   True  False
+1  False   True  False   True  False   True  False   True
+== repeated-labels-columns-twice.dtypes
+['bool', 'bool', 'bool', 'bool', 'bool', 'bool', 'bool', 'bool']
+== repeated-labels-columns-twice.columns
+['k_a', 'k_b', 'k_b', 'k_c', 'k_a', 'k_b', 'k_b', 'k_c']
+== dict-prefix-empty
+!! ValueError: Length of 'prefix' (0) did not match the length of the columns being encoded (2).
+== dict-prefix-empty-one-column
+!! ValueError: Length of 'prefix' (0) did not match the length of the columns being encoded (1).
+== dict-prefix-short
+!! ValueError: Length of 'prefix' (1) did not match the length of the columns being encoded (2).
+== dict-prefix-short-one-column
+['b', 'n', 'A_x', 'A_y']
+== dict-prefix-long
+!! ValueError: Length of 'prefix' (3) did not match the length of the columns being encoded (2).
+== dict-prefix-long-one-column
+!! ValueError: Length of 'prefix' (3) did not match the length of the columns being encoded (1).
+== dict-prefix-exact
+['n', 'A_x', 'A_y', 'B_u', 'B_v']
+== dict-prefix-exact-one-column
+!! ValueError: Length of 'prefix' (2) did not match the length of the columns being encoded (1).
+== dict-prefix-sep-long
+!! ValueError: Length of 'prefix_sep' (3) did not match the length of the columns being encoded (2).
+== list-prefix-no-columns
+!! ValueError: Length of 'prefix' (1) did not match the length of the columns being encoded (0).
+== columns-all-absent
+!! KeyError: "None of [Index(['absent'], dtype='str')] are in the [columns]"
+== columns-some-absent
+!! KeyError: "['absent'] not in index"
+== object-values-labels
+
+   False   True
+0  False   True
+1   True  False
+2  False  False
+== object-values-labels.dtypes
+['bool', 'bool']
+== object-values-labels.columns
+[False, True]
+== mixed-values
+
+       1      2      a      b    NaN
+0   True  False  False  False  False
+1  False  False   True  False  False
+2  False   True  False  False  False
+3  False  False  False   True  False
+== mixed-values.dtypes
+['bool', 'bool', 'bool', 'bool', 'bool']
+== mixed-values.columns
+[1, 2, 'a', 'b', nan]
+== index-int-categories-dummy-na
+[('3', 'int'), ('2', 'int'), ('1', 'int'), ('nan', 'float')]
+== index-int-categories-dummy-na-series
+[('3', 'int'), ('2', 'int'), ('1', 'int'), ('nan', 'float')]
+== index-int-categories-dummy-na-drop-first
+[('2', 'int'), ('1', 'int'), ('nan', 'float')]
+== index-int-categories-dummy-na-prefix
+('Index', 'str', ['p_3', 'p_2', 'p_1', 'p_nan'])
+== index-int-categories-frame-dummy-na
+('Index', 'str', ['c_3', 'c_2', 'c_1', 'c_nan'])
+== index-all-nan
+('RangeIndex', 'int64', [])
+== index-all-nan-prefix
+('RangeIndex', 'int64', [])
+== index-empty-list
+('RangeIndex', 'int64', [])
+== index-empty-dummy-na
+('Index', 'float64', [nan])
+== index-one-drop-first
+('RangeIndex', 'int64', [])
+== index-one-dummy-na-drop-first
+('Index', 'str', [nan])
+== index-int-dummy-na-drop-first
+('Index', 'float64', [nan])
+== index-int-dummy-na
+('Index', 'float64', [1.0, 2.0, nan])
+== index-bool-dummy-na
+('Index', 'object', [False, True, nan])
+== index-bool-none
+('Index', 'object', [False, True])
+== index-bool-none-prefix
+('Index', 'str', ['p_False', 'p_True'])
+== index-mixed-prefix
+('Index', 'str', ['p_1', 'p_1.5', 'p_2', 'p_a', 'p_b'])
+== index-object-ints-dummy-na
+('Index', 'object', [1, 2, nan])
+== index-datetime-dummy-na
+('DatetimeIndex', 'datetime64[us]', [Timestamp('2020-01-02 00:00:00'), NaT])
+== index-frame-all-dropped
+('RangeIndex', 'int64', [])
+== index-frame-all-nan
+('RangeIndex', 'int64', [])
+== index-frame-kept
+('Index', 'str', ['n'])
+== frame-no-columns
+!! ValueError: No objects to concatenate
+== dtype-object
+!! ValueError: dtype=object is not a valid dtype for get_dummies
+== dtype-object-string
+!! ValueError: dtype=object is not a valid dtype for get_dummies
+== datetime-dummy-na-prefix
+('Index', 'str', ['d_2020-01-01 00:00:00', 'd_2020-01-02 00:00:00', 'd_NaT'])
+== datetime-dummy-na-prefix-sep
+('Index', 'str', ['d2020-01-01 00:00:00', 'd2020-01-02 00:00:00', 'dNaT'])
+== datetime-frame-dummy-na
+
+   n  t_2020-01-01 00:00:00  t_2020-01-02 00:00:00  t_NaT
+0  1                  False                   True  False
+1  2                  False                  False   True
+2  3                   True                  False  False
+== datetime-frame-dummy-na.dtypes
+['int64', 'bool', 'bool', 'bool']
+== datetime-frame-dummy-na.columns
+['n', 't_2020-01-01 00:00:00', 't_2020-01-02 00:00:00', 't_NaT']
+== datetime-frame-dummy-na-drop-first
+('Index', 'str', ['t_2020-01-02 00:00:00', 't_NaT'])
+== float-dummy-na-prefix
+('Index', 'str', ['f_1.5', 'f_nan'])
