@@ -504,6 +504,7 @@ class Renderer {
             if (nm === "nonumber" || nm === "notag") { if (row) row.nonum = true; break; }
             if (nm === "tag" && row) row.tag = true;
             if (nm === "par") break;
+            if (nm === "\r" || nm === "\t") { s += "\\ "; break; }   // (\<return>, \<tab>: control spaces, as in text)
             s += "\\" + nm + (/^[A-Za-z@]+$/.test(nm) ? " " : "");
           } else {
             const c = catOf(n.v), k = codeOf(n.v);

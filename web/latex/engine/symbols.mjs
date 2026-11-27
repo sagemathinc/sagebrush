@@ -1,7 +1,8 @@
 // Text-mode symbols (LaTeX kernel, textcomp, textgreek, gensymb, amssymb text forms) -> Unicode.
 export const TEXT_SYMBOLS = {
-  // kernel
-  "&": "&", "%": "%", "$": "$", "#": "#", "_": "_", "{": "{", "}": "}", " ": " ", "@": "", "/": "", "-": "­",
+  // kernel (\<return> and \<tab>, a backslash ending a line or before a tab, are control spaces, as plain TeX and LaTeX define
+  //  \^^M and \^^I)
+  "&": "&", "%": "%", "$": "$", "#": "#", "_": "_", "{": "{", "}": "}", " ": " ", "\r": " ", "\t": " ", "@": "", "/": "", "-": "­",
   textbackslash: "\\", textasciitilde: "~", textasciicircum: "^", textunderscore: "_", textbar: "|", textless: "<", textgreater: ">",
   textbraceleft: "{", textbraceright: "}", textdollar: "$", textquotedbl: "\"", textquotesingle: "'", textasciigrave: "`",
   textquoteleft: "‘", textquoteright: "’", textquotedblleft: "“", textquotedblright: "”", quotedblbase: "„", quotesinglbase: "‚",

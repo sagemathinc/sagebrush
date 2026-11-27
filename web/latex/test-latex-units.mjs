@@ -1430,6 +1430,21 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("qedhere-each-proof-its-own", tags(two.h) === 1 && qeds(two.h) === 1, { tags: tags(two.h), qeds: qeds(two.h) });
 }
 
+// ---- control return and control tab (the census: a backslash ending a line, \^^M, was a grey "\r" chip and a problem
+//      in 18% of the papers): each is a space, as plain TeX and LaTeX define \^^M and \^^I, with LF and CRLF ends alike,
+//      and in math KaTeX is given a space. TeX's text for each: "Hello world. Tab there."
+{
+  setKatex((src) => src);
+  const doc = (body, nl) => ["\\documentclass{article}", "\\begin{document}", ...body, "\\end{document}", ""].join(nl);
+  const text = (r) => r.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  for (const [name, nl] of [["control-return-lf", "\n"], ["control-return-crlf", "\r\n"]]) {
+    const r = new Engine().update(doc(["Hello\\", "world. Tab\\\tthere."], nl));
+    check(name, text(r) === "Hello world. Tab there." && !r.problems.length && !/class="unk"/.test(r.chunks.join("")), [text(r), r.problems]);
+  }
+  const m = new Engine().update(doc(["$a\\", "b$ end."], "\r\n"));
+  check("control-return-in-math", !m.problems.length && !/\r/.test(m.chunks.join("")) && m.chunks.join("").includes("a\\ b"), [m.chunks.join("").slice(0, 300), m.problems]);
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's units, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);
