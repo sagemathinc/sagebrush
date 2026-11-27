@@ -46,6 +46,29 @@ def _row_bytes(r):
     return sum(_SLOT + _nbytes(v) for v in vals)
 
 
+def _bits(x):
+    """The bits of a number: numerator and denominator for a Fraction."""
+    if isinstance(x, _Fr):
+        return x.numerator.bit_length() + x.denominator.bit_length()
+    return abs(int(x)).bit_length()
+
+def _maxbits(r):
+    vals = r.values() if isinstance(r, dict) else r
+    return max((_bits(v) for v in vals), default=0)
+
+def _reserve(ch, entries, bits, frac=True):
+    """Take, before a row is computed, a bound on what it will hold:
+    entries numbers of at most bits bits; returns the bytes taken, to
+    settle with _settle once the row exists."""
+    b = entries * (_SLOT + (_FRAC if frac else _INT) + (bits + 7) // 8 + 8)
+    ch.take(b)
+    return b
+
+def _settle(ch, reserved, row):
+    """Release what a reservation took beyond the row it was for."""
+    ch.give(reserved - _row_bytes(row))
+
+
 class _Charge:
     """The running charge of one computation's storage against its
     allowance: what (the operation, in the user's words) and the bytes it
@@ -174,6 +197,27 @@ class Space:
         ([5], True)
         sage: sys._sagebrush_heap_limit = old; int(S.hecke_matrix(997)[0][0])  # sagebrush only
         998
+
+    The bound of a row is reserved before the arithmetic that makes it: a
+    refusal comes before any product is formed::
+
+        sage: from fractions import Fraction  # sagebrush only
+        sage: class F(Fraction):  # sagebrush only
+        ....:     def __mul__(self, o):
+        ....:         print("multiplied")
+        ....:         return Fraction.__mul__(self, o)
+        sage: ch = ms._Charge("A product"); ch.limit = ch.used + 10  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     try:
+        ....:         ms._mat_mul([[F(3)]], [[F(2)]])
+        ....:     except MemoryError:
+        ....:         print("refused")
+        refused
+        sage: ch = ms._Charge("A product")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     ms._mat_mul([[F(3)]], [[F(2)]])
+        multiplied
+        [[Fraction(6, 1)]]
     """
 
     def __init__(self, N, k, sign):
@@ -189,11 +233,20 @@ class Space:
         npts = _gamma0_index(N)
         m = (k - 1) * npts
         ch = _Charge("The modular symbols of level %d and weight %d" % (N, k))
-        ch.take(npts * (6 * _SLOT + 3 * _INT) + N * (2 * _SLOT + _INT) + m * (5 * _SLOT + 2 * _INT + _FRAC))
+        ch.take(Space._tables(N, k))
         with _Charging(ch):
             self._build(N, k, sign)
         # (what the space keeps: its tables and the pivot rows)
         self._held = npts * (4 * _SLOT + 2 * _INT) + m * (5 * _SLOT + 2 * _INT + _FRAC) + sum(_row_bytes(r) for r in self._pivrow.values())
+
+    @staticmethod
+    def _tables(N, k):
+        """The bytes of a space's tables, before they are built: P^1(Z/N)
+        has index(N) points (with its units and their stabilizers), and
+        k - 1 symbols each, with their union-find entries."""
+        npts = _gamma0_index(N)
+        m = (k - 1) * npts
+        return npts * (6 * _SLOT + 3 * _INT) + N * (2 * _SLOT + _INT) + m * (5 * _SLOT + 2 * _INT + _FRAC)
 
     def _build(self, N, k, sign):
         L, self._norm = _p1(N)
@@ -297,7 +350,16 @@ class Space:
         return {j: w for j, w in out.items() if w}
 
     def coordinates(self, vec):
-        """The coordinates on the basis of a combination of Manin symbols."""
+        """The coordinates on the basis of a combination of Manin symbols
+        (reserved, from the bits of vec and of the pivot rows, before they
+        are computed, when a computation is being charged)."""
+        ch = _CUR[0]
+        if ch is not None:
+            if getattr(self, "_pivbits", None) is None:
+                self._pivbits = max((_maxbits(r) for r in self._pivrow.values()), default=0)
+            fb = _maxbits(vec) + 2 * len(self._pivrow).bit_length() + 64
+            ch.take(len(vec) * (_SLOT + _FRAC + fb // 8))
+            reserved = _reserve(ch, len(self._bcols), fb + self._pivbits + len(self._pivrow).bit_length())
         f = self._free(vec)
         res = []
         for j in self._bcols:
@@ -306,6 +368,9 @@ class Space:
                 if f.get(p):
                     t -= f[p] * row.get(j, 0)
             res.append(_Fr(t))
+        if ch is not None:
+            ch.give(len(vec) * (_SLOT + _FRAC + fb // 8))
+            _settle(ch, reserved, res)
         return res
 
     def dimension(self):
@@ -315,19 +380,23 @@ class Space:
         """The bytes the space holds: its tables and its cached matrices."""
         return self._held + sum(self._hecke_bytes.values())
 
-    def _evict(self, limit):
-        # (the oldest cached matrices go while the space would pass limit)
-        while self._hecke and self.held() > limit:
-            old = next(iter(self._hecke))
+    def _evict(self, limit, pin=()):
+        # (the oldest cached matrices go while the space would pass limit;
+        # the ones a computation is using (pin) stay)
+        for old in [n for n in self._hecke if n not in pin]:
+            if self.held() <= limit:
+                break
             del self._hecke[old], self._hecke_bytes[old]
 
-    def work(self, what):
+    def work(self, what, pin=(), live=()):
         """A charge for a computation on the space, starting from what the
-        space holds, its cache first trimmed to half the allowance, the
-        other half the computation's (use: with sp.work(...): ...)."""
+        space holds, its cache first trimmed to half the allowance (except
+        the cached matrices pin the computation uses), the other half the
+        computation's; live: bytes it uses that the space does not hold
+        (use: with sp.work(...): ...)."""
         import _capacity
-        self._evict(_capacity.heap_figure() // _SHARE // 2)
-        return _Charging(_Charge(what, self.held()))
+        self._evict(_capacity.heap_figure() // _SHARE // 2, pin)
+        return _Charging(_Charge(what, self.held() + sum(live)))
 
     def hecke_matrix(self, n):
         """T_n's matrix (rows: the images of the basis), entries Fractions;
@@ -361,11 +430,10 @@ class Space:
                 for h in H:
                     for key, v in self._act(i, c, d, h).items():
                         if key not in vec:
-                            ch.take(_SLOT + _INT)
+                            ch.take(_SLOT + _INT + 64)
                         vec[key] = vec.get(key, 0) + v
-                row = self.coordinates(vec)
-                ch.take(_row_bytes(row))
-                M.append(row)
+                M.append(self.coordinates(vec))
+                ch.give(len(vec) * (_SLOT + _INT + 64))
         size = sum(_row_bytes(r) for r in M)
         # (the cache: the oldest evicted while the space and its cache would
         # pass half the allowance with this one)
@@ -377,7 +445,10 @@ class Space:
 
 def _rref(rows, ncols):
     """Reduced echelon form of sparse rows ({column: Fraction}): (pivot
-    columns, the pivot rows)."""
+    columns, the pivot rows).  Each new row is reserved before it is
+    computed (its entries at most those of the two rows it combines, its
+    bits at most their sum and those of the multiplier, plus 2) and the
+    reservation settled to it once it exists; the old row is let go."""
     ch = _charge()
     A = []
     for r in rows:
@@ -391,17 +462,26 @@ def _rref(rows, ncols):
             continue
         A[prow], A[sel] = A[sel], A[prow]
         pv = A[prow][c]
-        A[prow] = {j: w / pv for j, w in A[prow].items()}
+        old = A[prow]
+        res = _reserve(ch, len(old), _maxbits(old) + _bits(pv))
+        new = {j: w / pv for j, w in old.items()}
+        _settle(ch, res, new)
+        ch.give(_row_bytes(old))
+        A[prow] = P = new
+        pb = _maxbits(P)
         for i in range(len(A)):
             if i != prow and A[i].get(c):
                 t = A[i][c]
                 r = A[i]
-                was = _row_bytes(r)
-                for j, w in A[prow].items():
-                    r[j] = r.get(j, 0) - t * w
-                A[i] = {j: w for j, w in r.items() if w}
-                # (the fill-in and the coefficients' growth, as they come)
-                ch.take(_row_bytes(A[i]) - was)
+                keys = set(r) | set(P)
+                res = _reserve(ch, len(keys), _maxbits(r) + _bits(t) + pb + 2)
+                new = dict(r)
+                for j, w in P.items():
+                    new[j] = new.get(j, 0) - t * w
+                new = {j: w for j, w in new.items() if w}
+                _settle(ch, res, new)
+                ch.give(_row_bytes(r))
+                A[i] = new
         piv.append(c)
         prow += 1
     return piv, A[:prow]
@@ -412,7 +492,9 @@ def _rref(rows, ncols):
 def _rref_int(rows, n):
     """_rref of dense rationals rows, by integer elimination: each row
     scaled to integers and kept primitive (divided by its content) as it
-    is reduced, so the entries stay small; Fractions only at the end."""
+    is reduced, so the entries stay small; Fractions only at the end.  Each
+    new row is reserved before it is computed (n entries of at most the
+    bits a product and difference of its operands can have) and settled."""
     from math import lcm
     ch = _charge()
     A = []
@@ -420,11 +502,14 @@ def _rref_int(rows, n):
         d = 1
         for x in r:
             d = lcm(d, _Fr(x).denominator)
+        res = _reserve(ch, n, _maxbits(r) + d.bit_length(), frac=False)
         v = [int(_Fr(x) * d) for x in r]
         if any(v):
             v = _primitive(v)
-            ch.take(_row_bytes(v))
+            _settle(ch, res, v)
             A.append(v)
+        else:
+            ch.give(res)
     piv = []
     prow = 0
     for c in range(n):
@@ -434,19 +519,24 @@ def _rref_int(rows, n):
         A[prow], A[sel] = A[sel], A[prow]
         P = A[prow]
         pc = P[c]
+        pb = _maxbits(P)
         for i in range(len(A)):
             if i != prow and A[i][c]:
                 a = A[i][c]
-                was = _row_bytes(A[i])
-                A[i] = _primitive([pc * x - a * y for x, y in zip(A[i], P)])
-                ch.take(_row_bytes(A[i]) - was)
+                old = A[i]
+                res = _reserve(ch, n, pc.bit_length() + _maxbits(old) + a.bit_length() + pb + 1, frac=False)
+                new = _primitive([pc * x - a * y for x, y in zip(old, P)])
+                _settle(ch, res, new)
+                ch.give(_row_bytes(old))
+                A[i] = new
         piv.append(c)
         prow += 1
     out = []
     for i, c in enumerate(piv):
         pc = A[i][c]
+        res = _reserve(ch, n, _maxbits(A[i]) + pc.bit_length())
         row = {j: _Fr(x, pc) for j, x in enumerate(A[i]) if x}
-        ch.take(_row_bytes(row))
+        _settle(ch, res, row)
         out.append(row)
     return piv, out
 
@@ -476,13 +566,15 @@ def _kernel(M, n):
     Mt = [[M[i][j] for i in range(n)] for j in range(n)]
     piv, A = _rref_int(Mt, n)
     free = [j for j in range(n) if j not in set(piv)]
+    ab = max((_maxbits(r) for r in A), default=0)
     basis = []
     for f in free:
+        res = _reserve(ch, n, ab)
         v = [_Fr(0)] * n
         v[f] = _Fr(1)
         for i, p in enumerate(piv):
             v[p] = -A[i].get(f, _Fr(0))
-        ch.take(_row_bytes(v))
+        _settle(ch, res, v)
         basis.append(v)
     return _echelon(basis, n)[0] if basis else []
 
@@ -490,10 +582,12 @@ def _kernel(M, n):
 def _mat_mul(A, B):
     n = len(B[0]) if B else 0
     ch = _charge()
+    bb = max((_maxbits(r) for r in B), default=0) + len(B).bit_length()
     out = []
     for r in A:
+        res = _reserve(ch, n, _maxbits(r) + bb)
         row = [sum((a * B[t][j] for t, a in enumerate(r) if a), _Fr(0)) for j in range(n)]
-        ch.take(_row_bytes(row))
+        _settle(ch, res, row)
         out.append(row)
     return out
 
@@ -501,47 +595,56 @@ def _mat_mul(A, B):
 def _poly_at(coeffs, M):
     """A nonzero rational multiple of sum c_i M^i (coeffs constant first)
     for the square matrix M, computed in integers (Horner on the matrix
-    scaled to integers): only its kernel and image are used."""
+    scaled to integers): only its kernel and image are used.  Each row of
+    each step is reserved before it is computed, from the bits of the
+    operands, and settled; the previous step's matrix is let go."""
     n = len(M)
     from math import lcm
+    ch = _charge()
     den = 1
     for r in M:
         for x in r:
             den = lcm(den, _Fr(x).denominator)
-    ch = _charge()
     A = []
     for r in M:
+        res = _reserve(ch, n, _maxbits(r) + den.bit_length(), frac=False)
         row = [int(_Fr(x) * den) for x in r]
-        ch.take(_row_bytes(row))
+        _settle(ch, res, row)
         A.append(row)
     cden = 1
     for c in coeffs:
         cden = lcm(cden, _Fr(c).denominator)
     c = [int(_Fr(x) * cden) for x in coeffs]
     deg = len(c) - 1
+    ab = max((_maxbits(r) for r in A), default=0) + n.bit_length() + 1
     # den^deg e(M) = sum c_i A^i den^(deg - i)
-    ch.take(2 * n * n * _SLOT)
+    res = _reserve(ch, n * n, abs(c[deg]).bit_length(), frac=False)
     R = [[c[deg] if i == j else 0 for j in range(n)] for i in range(n)]
-    held = sum(_row_bytes(r) for r in R)
-    cols = list(zip(*A))
+    held = res
     for i in range(deg - 1, -1, -1):
+        cols = list(zip(*A))
+        rb = max((_maxbits(r) for r in R), default=0)
         new, size = [], 0
         for r in R:
+            res = _reserve(ch, n, rb + ab, frac=False)
             row = [sum(x * y for x, y in zip(r, col)) for col in cols]
-            b = _row_bytes(row)
-            ch.take(b)
-            size += b
+            _settle(ch, res, row)
+            size += _row_bytes(row)
             new.append(row)
         # (the previous step's matrix is let go)
         ch.give(held)
         R, held = new, size
+        # (the diagonal term, its bits reserved before it is formed)
+        sb = abs(c[i]).bit_length() + (deg - i) * den.bit_length()
+        ch.take(n * ((sb + rb + ab) // 8 + 16))
         s = c[i] * den ** (deg - i)
         for j in range(n):
             R[j][j] += s
     out = []
     for r in R:
+        res = _reserve(ch, n, _maxbits(r))
         row = [_Fr(x) for x in r]
-        ch.take(_row_bytes(row))
+        _settle(ch, res, row)
         out.append(row)
     return out
 
@@ -554,10 +657,12 @@ def _restrict(B, M):
     n = len(B[0])
     _, piv = _echelon(B, n)
     ch = _charge()
+    mb = max((_maxbits(r) for r in M), default=0) + n.bit_length()
     out = []
     for b in B:
+        res = _reserve(ch, n, _maxbits(b) + mb)
         w = [sum((b[t] * M[t][j] for t in range(n) if b[t]), _Fr(0)) for j in range(n)]
-        ch.take(_row_bytes(w))
+        _settle(ch, res, w)
         # in an echelon basis, the coordinate on row i is w's entry at its pivot
         out.append([w[p] for p in piv])
     return out
@@ -640,6 +745,8 @@ def _symbols_of(target, Q, x):
                     u = v * cs * _comb(w - e, t) * c ** t * d ** (w - e - t)
                     if u:
                         key = (s + t) * target._np + target._pidx[target._norm(c, d)]
+                        if key not in out:
+                            _charge().take(_SLOT + _INT + 64)
                         out[key] = out.get(key, 0) + u
     return out
 
@@ -659,9 +766,7 @@ def _degeneracy_rows(src, target, t):
         vec = _symbols_of(target, Q, beta)
         for key, v in _symbols_of(target, Q, alpha).items():
             vec[key] = vec.get(key, 0) - v
-        row = target.coordinates({key: v for key, v in vec.items() if v})
-        _charge().take(_row_bytes(vec) + _row_bytes(row))
-        rows.append(row)
+        rows.append(target.coordinates({key: v for key, v in vec.items() if v}))
     return rows
 
 
@@ -673,20 +778,21 @@ def _left_kernel(rows, ncols):
     ch = _charge()
     cols = []
     for j in range(ncols):
-        col = {i: rows[i][j] for i in range(n) if rows[i][j]}
-        ch.take(_row_bytes(col))
-        cols.append(col)
+        ch.take(_SLOT * sum(1 for i in range(n) if rows[i][j]))
+        cols.append({i: rows[i][j] for i in range(n) if rows[i][j]})
     piv, A = _rref(cols, n)
     pset = set(piv)
+    ab = max((_maxbits(r) for r in A), default=0)
     basis = []
     for f in range(n):
         if f in pset:
             continue
+        res = _reserve(ch, n, ab)
         v = [_Fr(0)] * n
         v[f] = _Fr(1)
         for r, p in enumerate(piv):
             v[p] = -A[r].get(f, _Fr(0))
-        ch.take(_row_bytes(v))
+        _settle(ch, res, v)
         basis.append(v)
     return _echelon(basis, n)[0] if basis else []
 
@@ -695,10 +801,18 @@ def _intersect(B1, B2, n):
     """An echelon basis of the intersection of the row spaces of B1 and B2."""
     if not B1 or not B2:
         return []
+    ch = _charge()
     # v = x B1 = y B2  <=>  (x, y) [B1; -B2] = 0
+    ch.take(sum(_row_bytes(r) for r in B2) + len(B1) * n * _SLOT)
     rows = [list(r) for r in B1] + [[-x for x in r] for r in B2]
     K = _left_kernel(rows, n)
-    vecs = [[sum((k[i] * B1[i][j] for i in range(len(B1)) if k[i]), _Fr(0)) for j in range(n)] for k in K]
+    bb = max((_maxbits(r) for r in B1), default=0) + len(B1).bit_length()
+    vecs = []
+    for k in K:
+        res = _reserve(ch, n, _maxbits(k) + bb)
+        v = [sum((k[i] * B1[i][j] for i in range(len(B1)) if k[i]), _Fr(0)) for j in range(n)]
+        _settle(ch, res, v)
+        vecs.append(v)
     return _echelon([v for v in vecs if any(v)], n)[0] if vecs else []
 
 
@@ -858,7 +972,9 @@ class _ModularSymbolsSubspace:
         import _sage_modsym as ms
         sp = self._A._exact()
         T = sp.hecke_matrix(n)
-        with sp.work("T_%d on a subspace of dimension %d of %r" % (n, len(self._B), self._A)):
+        # (T stays pinned in the cache while it is used; the basis is live)
+        with sp.work("T_%d on a subspace of dimension %d of %r" % (n, len(self._B), self._A),
+                     pin=(n,), live=[sum(ms._row_bytes(r) for r in self._B)]):
             return _qq_matrix(ms._restrict(self._B, T))
 
     def hecke_polynomial(self, n, var="x"):
@@ -867,7 +983,8 @@ class _ModularSymbolsSubspace:
 
     def _meet(self, other, kind):
         import _sage_modsym as ms
-        with self._A._exact().work("The intersection of two subspaces of %r" % (self._A,)):
+        with self._A._exact().work("The intersection of two subspaces of %r" % (self._A,),
+                                   live=[sum(ms._row_bytes(r) for r in self._B + list(other))]):
             return _ModularSymbolsSubspace(self._A, ms._intersect(self._B, other, self._A.dimension()), kind)
 
     def is_cuspidal(self):
@@ -1197,7 +1314,7 @@ class ModularSymbolsMethods:
                 d = len(c) - 1
                 facs.append((c, int(e), c[0] ** 2 > 4 ** d * p ** ((self._k - 1) * d)))
             want = (2 if self._sign == 0 else 1) * Gamma0(self._N).dimension_cusp_forms(self._k)
-            with sp.work("The cuspidal and Eisenstein subspaces of %r" % (self,)):
+            with sp.work("The cuspidal and Eisenstein subspaces of %r" % (self,), pin=(p,)):
                 for mult in (False, True):
                     eis = [_Fr(1)]
                     for c, e, is_eis in facs:
@@ -1271,11 +1388,19 @@ class ModularSymbolsMethods:
         sp = self._exact()
         primes = [q for q, _ in _factor(self._N)] if p is None else [int(p)]
         cols = [[] for _ in sp.basis]
-        lows = [ModularSymbols(self._N // q, self._k, sign=self._sign)._exact() for q in primes if self._N % q == 0]
+        qs = [q for q in primes if self._N % q == 0]
         with sp.work("The new subspace of %r" % (self,)) as ch:
-            # (the lower levels' spaces are held while the maps are built)
-            ch.take(sum(low.held() for low in lows))
-            for q, low in zip([q for q in primes if self._N % q == 0], lows):
+            # (each lower level's space admitted against the running total,
+            # the ambient included, before it is built; held while the maps
+            # are built)
+            lows = []
+            for q in qs:
+                est = ms.Space._tables(self._N // q, self._k)
+                ch.take(est)
+                low = ModularSymbols(self._N // q, self._k, sign=self._sign)._exact()
+                ch.take(low.held() - est)
+                lows.append(low)
+            for q, low in zip(qs, lows):
                 for t in (1, q):
                     for r, row in zip(cols, ms._degeneracy_rows(sp, low, t)):
                         r.extend(row)

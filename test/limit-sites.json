@@ -14377,6 +14377,11 @@
   "owner": "modular symbols/runtime memory",
   "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
  },
+ "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A product\"); ch.limit = ch.used + 10 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's refusal, reuse, eviction and reservation before arithmetic"
+ },
  "lib/_sage_modsym.py :: Space :: sage: old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 10**6 # sagebrush only #0": {
   "class": "none",
   "owner": "modular symbols/runtime memory",
@@ -14387,15 +14392,25 @@
   "owner": "modular symbols/runtime memory",
   "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
  },
- "lib/_sage_modsym.py :: Space._evict :: def _evict(self, limit): #0": {
+ "lib/_sage_modsym.py :: Space._evict :: def _evict(self, limit, pin=()): #0": {
   "class": "none",
   "owner": "modular symbols/runtime memory",
-  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest matrices: a cache policy, never a refusal"
+  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest unpinned matrices: a cache policy, never a refusal"
  },
- "lib/_sage_modsym.py :: Space._evict :: while self._hecke and self.held() > limit: #0": {
+ "lib/_sage_modsym.py :: Space._evict :: if self.held() <= limit: #0": {
   "class": "none",
   "owner": "modular symbols/runtime memory",
-  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest matrices: a cache policy, never a refusal"
+  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest unpinned matrices: a cache policy, never a refusal"
+ },
+ "lib/_sage_modsym.py :: Space.coordinates :: fb = _maxbits(vec) + 2 * len(self._pivrow).bit_length() + 64 #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: Space.coordinates :: self._pivbits = max((_maxbits(r) for r in self._pivrow.values()), default=0) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
  },
  "lib/_sage_modsym.py :: Space.hecke_matrix :: self._evict(ch.limit // 2 - size) #0": {
   "class": "none",
@@ -14431,6 +14446,106 @@
   },
   "owner": "modular symbols/runtime memory",
   "reason": "the modular symbols' working-storage admission: each computation's containers charged against a quarter of the heap figure, refused through the memory guard (LIMITS L1)"
+ },
+ "lib/_sage_modsym.py :: _intersect :: bb = max((_maxbits(r) for r in B1), default=0) + len(B1).bit_length() #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _intersect :: res = _reserve(ch, n, _maxbits(k) + bb) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _kernel :: ab = max((_maxbits(r) for r in A), default=0) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _left_kernel :: ab = max((_maxbits(r) for r in A), default=0) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _mat_mul :: bb = max((_maxbits(r) for r in B), default=0) + len(B).bit_length() #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _mat_mul :: res = _reserve(ch, n, _maxbits(r) + bb) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _maxbits :: def _maxbits(r): #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _poly_at :: ab = max((_maxbits(r) for r in A), default=0) + n.bit_length() + 1 #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _poly_at :: rb = max((_maxbits(r) for r in R), default=0) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _poly_at :: res = _reserve(ch, n, _maxbits(r) + den.bit_length(), frac=False) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _poly_at :: res = _reserve(ch, n, _maxbits(r)) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _restrict :: mb = max((_maxbits(r) for r in M), default=0) + n.bit_length() #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _restrict :: res = _reserve(ch, n, _maxbits(b) + mb) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref :: pb = _maxbits(P) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref :: res = _reserve(ch, len(keys), _maxbits(r) + _bits(t) + pb + 2) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref :: res = _reserve(ch, len(old), _maxbits(old) + _bits(pv)) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref_int :: pb = _maxbits(P) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref_int :: res = _reserve(ch, n, _maxbits(A[i]) + pc.bit_length()) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref_int :: res = _reserve(ch, n, _maxbits(r) + d.bit_length(), frac=False) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modsym.py :: _rref_int :: res = _reserve(ch, n, pc.bit_length() + _maxbits(old) + a.bit_length() + pb + 1, frac=False) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
  },
  "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
   "class": "none",
