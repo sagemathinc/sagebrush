@@ -57,12 +57,19 @@ const ctrl = async (k, code, vk) => {
 };
 
 try {
-  // (its process watched from the start: one that can't start (no such executable) fails here, through the cleanup)
+  // (its process watched from the start: one that can't start (no such executable) or exits early fails here, through
+  //  the cleanup, on a fixed CDP_PORT too, where Chrome writes no DevToolsActivePort file to wait for)
   chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
-  const said = await devtoolsPort(profile, 30000, { child: chrome });
-  if (!port) port = said;
+  let startError = null;
+  chrome.on("error", (e) => { startError = e; });
+  if (!port) port = await devtoolsPort(profile, 30000, { child: chrome });
+  else chrome.stderr.resume();
+  const gone = () => startError ? `Chrome couldn't start (${startError.code ?? startError.message})` : chrome.exitCode !== null || chrome.signalCode !== null ? `Chrome exited (${chrome.exitCode ?? chrome.signalCode})` : null;
   let targets;
-  for (let i = 0; i < 300 && !targets; i++) { try { targets = await within(fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()), 5000, "the targets"); } catch { await sleep(100); } }
+  for (let i = 0; i < 300 && !targets; i++) {
+    if (gone()) throw new Error(`${gone()} before its DevTools targets (${profile})`);
+    try { targets = await within(fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()), 5000, "the targets"); } catch { await sleep(100); }
+  }
   const page = targets?.find((t) => t.type === "page");
   if (!page) throw new Error("no page target from Chrome");
   ws = new WebSocket(page.webSocketDebuggerUrl);
