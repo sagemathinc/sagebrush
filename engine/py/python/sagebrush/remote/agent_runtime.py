@@ -29,8 +29,11 @@ import shutil
 import stat
 import tarfile
 import tempfile
+import threading
 
 from . import runtime
+
+_LOCK = threading.Lock()  # (one ensure at a time in this process; the state folder's lock file, between runners)
 
 AGENT = {
     "version": "0.8.18",
@@ -76,11 +79,17 @@ _KEY = re.compile(r"(node_modules/(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]
 
 
 class AgentRuntimeError(Exception):
-    """The built-in agent can't be fetched, verified or started: the words to show, on the terminal and the page."""
+    """The built-in agent can't be fetched, verified or started: the words for this computer's terminal (str(e)), and
+    its kind (download, check, private, platform), which alone decides the page's fixed sentence: a remote page never
+    gets this computer's paths or a download's error text."""
+
+    def __init__(self, msg, kind="check"):
+        super().__init__(msg)
+        self.kind = kind
 
 
-def _refuse(msg):
-    raise AgentRuntimeError(msg)
+def _refuse(msg, kind="check"):
+    raise AgentRuntimeError(msg, kind)
 
 
 def state_dir():
@@ -117,7 +126,7 @@ def _fetch(url, max_bytes, get=None):
     try:
         return (get or runtime._get)(origin, "/" + parts[3], max_bytes)
     except runtime.RuntimeError_ as e:
-        _refuse("couldn't download %s: %s" % (url, e))
+        _refuse("couldn't download %s: %s" % (url, e), "download")
 
 
 def _sha256_hex(b):
@@ -359,7 +368,7 @@ def _private(path):
     os.makedirs(path, mode=0o700, exist_ok=True)
     st = os.lstat(path)
     if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) & 0o077:
-        _refuse("the folder %s isn't private to you (owner and mode 0700 needed)" % path)
+        _refuse("the folder %s isn't private to you (owner and mode 0700 needed): chmod 700 %s" % (path, path), "private")
     return path
 
 
@@ -370,10 +379,21 @@ def ensure(root=None, plat=None, get=None, say=None, pins=None):
     try:
         plat = plat or runtime.this_platform()
     except runtime.RuntimeError_ as e:
-        _refuse(str(e))
+        _refuse(str(e), "platform")
     if plat not in NODE:
-        _refuse("the built-in agent isn't available for this machine (%s)" % plat)
+        _refuse("the built-in agent isn't available for this machine (%s)" % plat, "platform")
     root = _private(root or state_dir())
+    with _LOCK:
+        lock = os.open(os.path.join(root, ".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            import fcntl
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return _ensure_locked(root, plat, get, say, pins)
+        finally:
+            os.close(lock)
+
+
+def _ensure_locked(root, plat, get, say, pins):
     final = os.path.join(root, tree_name(plat))
     if os.path.lexists(final):
         # (N2: a link or a file in its place is removed, never followed; a folder that fails is rebuilt, never run)
@@ -490,12 +510,20 @@ def preflight(cmd=None, env=None, which=None, signed_in=_CHECK):
     return out
 
 
+# (the page's fixed sentence per kind of refusal: nothing of this computer's in it; the terminal has the detail)
+PAGE_WORDS = {
+    "download": "The agent couldn't start on that computer: the built-in agent couldn't be downloaded there. Check that computer's internet connection; the runner's terminal there says more.",
+    "check": "The agent couldn't start on that computer: the built-in agent failed its check there. The runner's terminal there says more.",
+    "private": "The agent couldn't start on that computer: the runner's state folder there isn't private to its user. The runner's terminal there says how to fix it.",
+    "platform": "The agent couldn't start on that computer: the built-in agent isn't available for that kind of computer yet. Start the runner there with --agent-cmd and your own agent's command.",
+}
+
+
 def start_failure(e, cmd=None, how="--agent-cmd"):
     """(the terminal's line, the page's words) for an agent that couldn't start. cmd: the kind's own argv, or None for
     the built-in agent; how: that kind's option (--agent-cmd, or --agent NAME=...)."""
     if isinstance(e, AgentRuntimeError):
-        return ("The built-in agent couldn't be set up: %s" % e,
-                "The agent couldn't start on that computer: %s. The runner's terminal there says more." % e)
+        return ("The built-in agent couldn't be set up: %s" % e, PAGE_WORDS.get(e.kind, PAGE_WORDS["check"]))
     fix = ("start the runner again without --agent-cmd to use the built-in agent: sagebrush remote --serve-agents"
            if how == "--agent-cmd" else "fix the runner's %s command, or start it with just --serve-agents for the built-in agent" % how)
     if isinstance(e, FileNotFoundError) and cmd is not None:

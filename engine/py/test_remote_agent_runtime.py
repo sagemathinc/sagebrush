@@ -337,6 +337,31 @@ def test_a_symlink_in_place_of_the_tree():
     assert os.path.isdir(elsewhere)  # (the link's target untouched)
 
 
+def test_two_ensures_at_once_both_start():
+    # (SEC W2: ensure() is serialized (a lock in this process, a lock file between runners): two starts at once, as
+    # when a page is replaced during a start, each get the verified tree; neither removes the other's)
+    import threading
+    rel = Release()
+    pinned(rel)
+    rel.gets.clear()  # (pinned()'s own scratch build isn't one of these)
+    root = fresh_root()
+    out, errs = [], []
+
+    def one():
+        try:
+            out.append(T.ensure(root, PLAT, rel.get).root)
+        except Exception as e:
+            errs.append(e)
+    ts = [threading.Thread(target=one) for _ in range(4)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(60)
+    assert not errs and len(out) == 4 and len(set(out)) == 1, (errs, out)
+    assert sum(1 for u in rel.gets if "agents.sagebrush.cloud" in u) == 1, rel.gets  # (built once)
+    assert os.path.isfile(os.path.join(root, ".lock"))
+
+
 def test_the_state_folder_must_be_private():
     rel = Release()
     pinned(rel)
@@ -425,8 +450,22 @@ def test_start_failure_words():
     assert page.startswith("The agent couldn't start on that computer: `npx` isn't installed there.") and "FileNotFoundError" not in page, page
     term, page = T.start_failure(FileNotFoundError(2, "x", "/opt/a"), ["/opt/a"], "--agent codex=...")
     assert "--agent codex=..." in page and "without --agent-cmd" not in page, page
-    term, page = T.start_failure(T.AgentRuntimeError("couldn't download x: offline"))
-    assert term == "The built-in agent couldn't be set up: couldn't download x: offline" and "offline" in page, (term, page)
+    # (SEC W1: the page gets a fixed sentence per kind of refusal, never this computer's paths or a download's error
+    # text; the terminal keeps the detail)
+    term, page = T.start_failure(T.AgentRuntimeError("couldn't download https://nodejs.org/x: offline", "download"))
+    assert term == "The built-in agent couldn't be set up: couldn't download https://nodejs.org/x: offline", term
+    assert page == T.PAGE_WORDS["download"] and "offline" not in page and "nodejs" not in page, page
+    for kind, words in T.PAGE_WORDS.items():
+        assert "/" not in words, (kind, words)
+    r = fresh_root()
+    os.chmod(r, 0o755)
+    try:
+        T.ensure(r, PLAT, None)
+        raise AssertionError("not refused")
+    except T.AgentRuntimeError as e:
+        term, page = T.start_failure(e)
+        assert e.kind == "private" and r in term and "chmod 700" in term, term
+        assert r not in page and "/" not in page and page == T.PAGE_WORDS["private"], page
 
 
 if __name__ == "__main__":
