@@ -17,7 +17,16 @@ test("numpy.prod and cumprod of complex arrays are NumPy's, imaginary parts and 
   for (let i = 0; i < Math.max(w.length, g.length); i++) assert.equal(g[i], w[i], `${name} line ${i + 1}`);
 });
 
-test("a complex array multiplied into a real dtype is refused in words, not its imaginary parts silently dropped", () => {
-  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", "import numpy as np\ntry:\n    np.prod(np.array([1+2j, 3]), dtype=float)\nexcept TypeError as e:\n    print(e)"], { encoding: "utf8" });
-  assert.equal(out.trim(), "prod: a complex array multiplied in the real dtype float64 would lose its imaginary parts; take .real first");
+// (#2283: as NumPy's, a complex array multiplied in a real dtype is the product of its real parts, with NumPy's
+// ComplexWarning, not a refusal; a bool dtype reads both parts; compared with the runner's NumPy, an x86-64 build)
+test("a complex array multiplied into a real dtype is its real parts' product, with NumPy's ComplexWarning", () => {
+  const src = `import numpy as np, warnings
+for d in (float, np.float32, np.int8, bool):
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        r = np.prod(np.array([1+2j, 3, 0.5+4j]), dtype=d)
+    print(repr(r), [(m.category.__name__, str(m.message)) for m in w])`;
+  const want = execFileSync("python3", ["-c", src], { encoding: "utf8" });
+  const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8" });
+  assert.equal(got, want);
 });
