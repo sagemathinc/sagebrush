@@ -120,17 +120,15 @@
     "kind": "function",
     "signature": "name = mfilename\np = mfilename('fullpath')\nc = mfilename('class')",
     "summary": "The name of the file whose code is running: the file that contains the call, never its caller's.",
-    "doc": "`mfilename` gives the file's name without its folder and `.m`; `mfilename('fullpath')` its absolute path without `.m` (the path the file had when it was loaded, whatever `cd` does afterwards). In a local function, a script run by name or a function file, it is that file's own name. Code in no file (a command line or a notebook cell) gives an empty char. The usual use is finding files next to the code: `fileparts(mfilename('fullpath'))` is its folder.",
+    "doc": "`mfilename` gives the file's name without its folder and `.m`; `mfilename('fullpath')` its absolute path without `.m` (the path the file had when it was loaded, whatever `cd` does afterwards). In a local function, a script run by name or a function file, it is that file's own name. `mfilename('class')` is the class's name in a classdef file and in a method file of its @-folder, else an empty char. Code in no file (a command line or a notebook cell) gives an empty char. The usual use is finding files next to the code: `fileparts(mfilename('fullpath'))` is its folder.",
     "examples": [
       {
         "code": "name = mfilename;\nsize(name)",
         "expected": "\nans =\n\n     0     0\n\n"
       }
     ],
-    "differs": [
-      "mfilename('class') is always empty: Sagebrush has no classdef."
-    ],
-    "status": "partial",
+    "differs": [],
+    "status": "full",
     "see_also": ["which", "fileparts", "addpath"],
     "tags": ["search path", "files"]
   },

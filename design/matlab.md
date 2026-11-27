@@ -328,6 +328,53 @@ ones, but not `KeyboardInterrupt` (Ctrl-C) or `SystemExit`.
   - the warnings are the same whether A, b or both are complex.
   - `inv` of a singular matrix is Inf throughout, with the warning.
 
+## Classes (classdef)
+
+Value classes are supported; the rest of MATLAB's classes come in stages,
+one PR each (value classes, object arrays, operator overloading, handle
+classes, inheritance, indexing overloads, property methods and validation,
+then enumerations, events and dynamic properties).
+
+- **Files:** a class is a classdef file found as a function is: `Name.m` in
+  the current folder or on the path, `@Name/Name.m` (whose other files are
+  its methods), or `+pkg/Name.m` and `+pkg/@Name/Name.m` (`pkg.Name`, or
+  through `import`). The translator (src/matlab.ts) turns the file into
+  Python after a first line `#class`: its methods under their own names
+  (never the file's local functions, so a method named like a built-in
+  doesn't take its calls), and its properties' defaults as functions;
+  lib/_matlab_classdef.py, loaded with the first class, defines the class.
+- **Objects:** an object is `_m.Obj`, its class and its properties' values;
+  an assignment copies it, as a struct is copied. Defaults are evaluated
+  once per class, when it is first used; a property without one is `[]`.
+- **Construction:** `Name(args)` makes an object with the defaults, then
+  runs the constructor with its output already that object. Without a
+  constructor, `Name()` gives the defaults and `Name(x)` is
+  `MATLAB:TooManyInputs`.
+- **Methods:** `obj.m(args)`, `m(obj, args)`, and `obj.m` (called with no
+  arguments) all call a method; static methods are `Name.m(args)` or
+  `obj.m(args)`, and `Constant` properties `Name.p`. A name that a loaded
+  class defines as a method resolves (in `fn`) to a dispatcher: the method
+  of the leftmost object among the arguments, the arguments in their order,
+  or else what the name is otherwise. A generation number, raised as each
+  class loads, makes function handles resolved before then resolve again.
+- **Access:** `Access`, `GetAccess` and `SetAccess` are checked: the class's
+  own methods are compiled with their class, and code elsewhere reading or
+  setting a property it may not gets `MATLAB:class:GetProhibited` or
+  `SetProhibited`.
+- **Display, and the built-ins on objects** (`class`, `isa`, `isobject`,
+  `isprop`, `properties`, `methods`, `fieldnames`, `struct`, `isequal`):
+  as MATLAB R2026b's rows show them (test/matlab-classdef.test.ts).
+- **A property and a method of one name:** the class file declaring both
+  is MATLAB's `MATLAB:class:PropertyInUse`, when the class is first used; a
+  method file of the @-folder may share the name (`obj.p` reads the
+  property, `p(obj)` calls the file).
+- **Refused when the class loads, with a clear error:** superclasses
+  (handle classes and inheritance), events, enumerations, property
+  validation, `Dependent` and `Abstract` members, property get and set
+  methods, and the class attributes `InferiorClasses` and
+  `AllowedSubclasses`. Arrays of objects are refused where they would be
+  made.
+
 ## Display
 
 The Command Window's format short with loose spacing, which is MATLAB's
@@ -897,7 +944,7 @@ The rest:
 - polar axes, lighting and apps (see Graphics);
 - MATLAB in the notebook's and the board's language menus (the session and the Jupyter kernel run it);
 - `eval`;
-- `classdef` and nested functions;
+- nested functions, and `classdef` beyond value classes (see Classes);
 - string arrays beyond the basics;
 - `containers.Map`, file I/O beyond `fprintf`, `input`;
 - `randperm(n, k)` with k < n giving MATLAB's numbers (`randperm(n)`
