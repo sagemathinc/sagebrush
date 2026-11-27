@@ -24,6 +24,11 @@ declare const __SB_NO_SYNC__: boolean | undefined;
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hooks fold away)
 declare const __SB_LATEX__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
+// (the 3D view's hooks, Open in 3D: offered only in a build with them and on its listed hosts, matched exactly (web/build.ts
+// SPACE_DEFINE: DEV only for now); their code is a chunk of its own, sagebrush-space3d.js (./space3d.ts), fetched when chosen)
+declare const __SB_SPACE__: boolean | undefined;
+declare const __SB_SPACE_HOSTS__: string[];
+// (each use tests the define first, so a build without them drops the use whole; openIn3D is at the end of this file)
 
 /** Empty Trash's question.  In the desktop app, whose Trash is a folder on the computer (.Trash in Sagebrush's
  * folder), it says that everything in it goes, a file changed by another program while it was there too. */
@@ -753,6 +758,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
     if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
+    if (typeof __SB_SPACE__ !== "undefined" && __SB_SPACE__ && e.kind === "folder" && __SB_SPACE_HOSTS__.includes(location.hostname)) items.push(["Open in 3D", () => void openIn3D(w, e.path).catch(fail)]);
     items.push(["Copy path name", () => navigator.clipboard?.writeText(e.path).then(() => say(`Copied path '${e.path}'`), () => say(e.path))]);
     if (host.reveal) items.push(["Show in folder", () => reveal(e.path)]);
     // (only a person deletes old versions, §2.5)
@@ -1063,7 +1069,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }));
   upBtn.onclick = () => pick("/");
   // (Download everything: the Storage panel's export, offered here too, where a person looks for it)
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(host.reveal ? [["Show in folder", () => reveal("/")] as [string, () => unknown]] : []), ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
+  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(typeof __SB_SPACE__ !== "undefined" && __SB_SPACE__ && __SB_SPACE_HOSTS__.includes(location.hostname) ? [["Open all files in 3D", () => void openIn3D(w, "/").catch(fail)] as [string, () => unknown]] : []), ...(host.reveal ? [["Show in folder", () => reveal("/")] as [string, () => unknown]] : []), ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {
@@ -1116,4 +1122,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     // (the Storage panel, with its sync section: the page's account menu, workspace/account.ts)
     storage: () => void storage(),
   };
+}
+
+// (Open in 3D: its chunk, sagebrush-space3d.js (./space3d.ts), fetched when it is chosen)
+async function openIn3D(w: Workspace, folder: string): Promise<void> {
+  const m: typeof import("./space3d") = await import(new URL("/sagebrush-space3d.js", location.href).href);
+  return m.openIn3D(w, folder);
 }
