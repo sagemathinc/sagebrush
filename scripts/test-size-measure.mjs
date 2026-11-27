@@ -10,6 +10,10 @@ import { evaluate, growthLimit, producerProblems, recordProblems, strictParse, m
   examplesFiles, testedTransition, gateInputs, TOOLCHAIN, MAX_DEPTH, overCap, sha256,
   CONTENT_BUNDLES, CONTENT_ALLOWANCE, limitOf, welcomeDirs, targetBranch } from "./size-measure.mjs";
 
+// (the runner's own event never reaches these cases: on a push to track/*, GITHUB_REF made an event without a ref, like
+// the push case below, a change into a track, which then needed origin/master in the case's scratch repository)
+for (const k of ["GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH", "GITHUB_REF", "SIZE_DISPATCH_MASTER"]) delete process.env[k];
+
 const key = { ...TOOLCHAIN, measure_sha256: "a".repeat(64) };
 const record = (sizes, commit = "merge", k = key) => ({
   format: "sagebrush-size-record", v: 1, repo: "sagemathinc/sagebrush",

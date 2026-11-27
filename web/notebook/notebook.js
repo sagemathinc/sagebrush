@@ -22,6 +22,7 @@ import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size.ts";
 import { safeSvg, RASTER_URL, XLINK_NS } from "../safe-svg.js";
 export { safeSvg };
 import { cellId } from "./ipynb.js";
+import { withCellIds } from "./nbformat.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
@@ -2369,12 +2370,21 @@ export function createNotebook(root, opts = {}) {
     closeCompleter(); closeMenu(false); activate(null);
     cellsEl.textContent = "";
     execCount = 0; // (without a kernel; an interpreter keeps its own count)
-    for (const c of list?.length ? list : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
+    // (a stored cell without an id shown with one, the same on every device and load (nbformat.js cellIdFor), never one
+    // made at random: the history matches cells by id; and saved once by the writer, below, so the ids are stored)
+    const stored = list ?? [], given = withCellIds(rest.id, stored), idsGiven = given !== stored;
+    for (const c of given.length ? given : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
     const snap = snapshot();
     lastJson = JSON.stringify(snap);
-    // (the base: the document as loaded, not as shown: an empty one is shown with a blank cell it doesn't have)
+    // (the base: the document as loaded, not as shown: an empty one is shown with a blank cell it doesn't have; and
+    // its cells as stored, without the ids given here, so the save that stores them is a change of the base)
     shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
-    Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
+    Promise.resolve().then(() => {
+      loading = false;
+      showParked();
+      // (the ids given here stored by the notebook's writer, once; a page that isn't its writer only shows them)
+      if (idsGiven && store && !store.readOnly) { lastJson = null; schedule(); }
+    }); // after the observer's records for this
     reactiveLoad();
     typed = false; // (another document shown: nothing typed in it yet; one left with saves to make is the page's to ask)
     guard(); // (its own failed save, or none)

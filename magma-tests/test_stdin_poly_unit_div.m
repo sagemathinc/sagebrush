@@ -1,0 +1,10 @@
+P<w> := PolynomialRing(Integers());
+Q<v> := PolynomialRing(Rationals());
+w / 1;
+Parent(w / 1);
+w / (1/1);
+Parent(w / (1/1));
+w / (-1);
+(w^2 + 1) / (2/2);
+w / (3/3);
+w / (-1/1);

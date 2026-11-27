@@ -1,0 +1,77 @@
+M.hecke_matrix(2) -> [ 3  0 -1]
+[ 0 -2  0]
+[ 0  0 -2]
+M.hecke_matrix(3).charpoly() -> x^3 - 2*x^2 - 7*x - 4
+M.dimension() -> 3
+M37.dimension() -> 3
+M37.hecke_matrix(2) -> [ 3  2 -2]
+[ 0 -2  0]
+[ 0 -2  0]
+M.sturm_bound() -> 2
+M.sign() -> 0
+M37.sign() -> 1
+M37m.sign() -> -1
+M37m.dimension() -> 2
+M37m.hecke_matrix(2) -> [-2  2]
+[ 0  0]
+M.hecke_matrix(5) -> [ 6  0 -1]
+[ 0  1  0]
+[ 0  0  1]
+M.hecke_matrix(11) -> [1 0 0]
+[0 1 0]
+[0 0 1]
+M.hecke_matrix(4) -> [ 7  0 -1]
+[ 0  2  0]
+[ 0  0  2]
+M.hecke_matrix(6) == M.hecke_matrix(2)*M.hecke_matrix(3) -> True
+M37.hecke_matrix(3) -> [ 4  2 -2]
+[ 0 -3  0]
+[ 0 -4  1]
+M37.hecke_matrix(37) -> [ 1  0  0]
+[ 0 -1  0]
+[ 0 -2  1]
+M33.dimension() -> 9
+M33.hecke_matrix(2).charpoly() -> x^9 - 3*x^8 - 18*x^7 + 46*x^6 + 129*x^5 - 243*x^4 - 416*x^3 + 504*x^2 + 432*x - 432
+M33.hecke_matrix(5).charpoly().factor() -> (x + 2)^2 * (x - 6)^3 * (x - 1)^4
+M4.dimension() -> 3
+M4.hecke_matrix(2) -> [ -24    0    0]
+[   0  -24    0]
+[4860    0 2049]
+M4.sturm_bound() -> 1
+M37.sturm_bound() -> 7
+M33.sturm_bound() -> 8
+M23.hecke_matrix(2).charpoly().factor() -> (x - 3) * (x^2 + x - 1)
+M.basis() -> ((1,0), (1,8), (1,9))
+M37.basis() -> ((1,0), (1,29), (1,32))
+M.hecke_matrix(2).parent() -> Full MatrixSpace of 3 by 3 dense matrices over Rational Field
+M.hecke_matrix(0) -> IndexError: n must be positive.
+M.hecke_matrix(-1) -> IndexError: n must be positive.
+M.T(2).matrix() -> [ 3  0 -1]
+[ 0 -2  0]
+[ 0  0 -2]
+M.hecke_operator(2).matrix() == M.hecke_matrix(2) -> True
+ModularSymbols(11, 4).dimension() -> 6
+ModularSymbols(11, 4).hecke_matrix(2).charpoly() -> x^6 - 22*x^5 + 153*x^4 - 316*x^3 - 140*x^2 + 576*x + 324
+ModularSymbols(11, 2, sign=1).hecke_matrix(2) -> [ 3 -2]
+[ 0 -2]
+M.weight() -> 2
+M.level() -> 11
+M37.hecke_polynomial(2) -> x^3 - x^2 - 6*x
+M.hecke_polynomial(3) -> x^3 - 2*x^2 - 7*x - 4
+ModularSymbols(11, 3).hecke_matrix(2) -> []
+ModularSymbols(11, 3).basis() -> ()
+ModularSymbols(1, 2).hecke_matrix(2) -> []
+ModularSymbols(1, 2).cuspidal_submodule().dimension() -> 0
+ModularSymbols(11, 2).hecke_matrix(1) -> [1 0 0]
+[0 1 0]
+[0 0 1]
+ModularSymbols(11, 2).hecke_matrix(121).charpoly() -> x^3 - 3*x^2 + 3*x - 1
+ModularSymbols(2, 8).hecke_matrix(2) -> [ -8   0   0   0]
+[  0 128  -8   8]
+[  0  64  -7   8]
+[  0  64   1   0]
+ModularSymbols(49, 2, sign=1).eisenstein_submodule().hecke_matrix(3).charpoly() -> x^4 - 4*x^3 - 9*x^2 + 8*x + 112
+ModularSymbols(25, 4).cuspidal_submodule().hecke_matrix(2).charpoly() -> x^10 + 8*x^9 - 18*x^8 - 272*x^7 - 223*x^6 + 2568*x^5 + 4592*x^4 - 4352*x^3 - 8448*x^2 + 2048*x + 4096
+ModularSymbols(11, 2).T(3).matrix() -> [ 4  0 -1]
+[ 0 -1  0]
+[ 0  0 -1]

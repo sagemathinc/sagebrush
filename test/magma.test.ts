@@ -460,16 +460,17 @@ test("index selections are admitted before they are taken, and a long chain of i
   const cli = join(__dirname, "..", "src", "cli.js");
   const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: WALL(60000) });
   const t0 = Date.now();
-  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1];\nT := S[10^6..10^6 + 19999]; #T;\n');
+  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1];\nT := S[10^6..10^6 + 7999]; #T;\n');
   assert.equal(sel.signal, null, sel.stderr);
   const flat = sel.stdout.replace(/\s+/g, " ");
   // (the limit in a 96 MiB heap, from its free part: at most 49152 elements,
-  // HARD-A57-1; a selection of 10^6 aborted V8 there on Node 24)
+  // HARD-A57-1; a selection of 10^6 aborted V8 there on Node 24; the one
+  // admitted, 8000, is under the limit's lowest seen, 12288 on a loaded host)
   const selBounds = [...flat.matchAll(/a selection of more than (\d+) elements is not supported yet/g)].map((m) => Number(m[1]));
   assert.ok(selBounds.length === 2 && selBounds[0] === selBounds[1] && selBounds[0] <= 49152, sel.stdout);
   assert.match(flat, /T := S\[5\.\.10\^30\]; \^ Runtime error in '\[\]': Sequence element not defined/);
   assert.match(flat, /Index 3 \(4\) should be in the range \[1 \.\. 3\]/);
-  assert.match(sel.stdout, /\n20000\n$/);
+  assert.match(sel.stdout, /\n8000\n$/);
   assert.ok(Date.now() - t0 < WALL(30000));
   // 5000 links, or 41: refused before running; 40 still work (each link nests the Python one level, which the
   // generated Python's bound allows: test/magma-malformed.test.ts)
@@ -1087,9 +1088,10 @@ test("Vector, Subsets and Solution are admitted before they copy or compute (HAR
   const t0 = Date.now();
   const src = "v := Vector([1..10^9]);\nv := Vector(Integers(), [1..10^9]);\nS := {1..300}; T := Subsets(S, 299);\nT := Subsets({1..40});\n#Subsets(S, 300); #Subsets({1..8});\n" +
     // (many small subsets: their sets are charged with their elements;
-    // 20000 singletons, so that U itself stays under the set bound, the heap
-    // left over in 96 MiB, 29696 on CI in Oct 2026)
-    "U := {1..20000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
+    // 16000 singletons, so that U itself stays under the set bound, the heap
+    // left over in 96 MiB, whose floor is 20000 and which CI has seen at
+    // 19456, while their 80000 cells stay well over it)
+    "U := {1..16000}; T := Subsets(U, 1);\nT := Subsets(U, 0); #T; #Subsets({1..300}, 1);\n" +
     "Solution(Matrix(Rationals(), 80, 80, [i eq j select 1 else 0 : i, j in [1..80]]), Vector(Rationals(), [1 : i in [1..80]]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
@@ -1319,14 +1321,15 @@ test("matrix arithmetic over a finite field is admitted before it computes, unde
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const t0 = Date.now();
-  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..20000]]);\nM := Matrix(F, 130, 130, [1..16900]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
+  const src = "F := GF(5); Matrix(F, 300, 300, [1..90000]);\nMatrix(F, 2, 2, [1..10^12]);\nr := [1..30000]; Matrix(F, [r : i in [1..16000]]);\nM := Matrix(F, 130, 130, [1..16900]);\nN := M * M;\nDeterminant(M);\nRank(M);\n" +
     "M^(10^100);\nCharacteristicPolynomial(M);\nK<w> := GF(9); P := Matrix(K, 80, 80, [w : i in [1..6400]]); Q := P * P;\nNrows(M); Rank(Matrix(F, 20, 20, [1..400]));\n\"end\";\n";
   const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
-  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 20000
-  // rows of 30000, fewer rows than the bound, by their entries: 20000, not
-  // 30000, as the bound is the heap left over in 96 MiB, 29696 in Oct 2026)
+  // (the 300 x 300 shape bounded before any entry, HARD-DE1-1; the 16000
+  // rows of 30000, fewer rows than the bound, by their entries: 16000, under
+  // the bound's floor of 20000 (the heap left over in 96 MiB, seen at 19456
+  // on CI), not 30000)
   // (M is 130 x 130, 16900 entries, admitted with room: the bound was 22528
   // under Node 24 in Nov 2026 and moves in steps of 1024 with the runner's
   // heap, so a 150 x 150 M, 22500, was refused on one runner; its products,
