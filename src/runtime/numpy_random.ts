@@ -394,12 +394,13 @@ function poisson(g: Gen, lam: number): number {
 // NumPy's binomial (random_binomial, distributions.c; the legacy RandomState's too): p reflected to at most 1/2,
 // then inversion when n p <= 30, else Kachitvichyanukul and Schmeiser's BTPE.  n is an int64, carried as N: its
 // double (where the C code converts n, rounded to nearest as C rounds) and its integer offsets n + c exactly
-// before the one rounding (where the C code adds in int64 first), so n beyond 2^53 draws NumPy's numbers too.
+// before the one rounding (where the C code adds in int64 first, wrapping as it does past 2^63), so n beyond 2^53
+// draws NumPy's numbers too.
 type BinomN = { d: number; b: bigint; off: (c: number) => number; gt: (y: number) => boolean };
 function binomN(b: bigint): BinomN {
   const d = Number(b);
   if (Number.isSafeInteger(d)) return { d, b, off: (c) => d + c, gt: (y) => y > d };
-  return { d, b, off: (c) => Number(b + BigInt(c)), gt: (y) => BigInt(y) > b };
+  return { d, b, off: (c) => Number(BigInt.asIntN(64, b + BigInt(c))), gt: (y) => BigInt(y) > b };
 }
 // (qn: the Generator's exp(n log1p(-p)), the legacy RandomState's exp(n log(q)))
 function binomialInversion(g: Gen, N: BinomN, p: number, legacy: boolean): number {
@@ -420,7 +421,7 @@ function binomialInversion(g: Gen, N: BinomN, p: number, legacy: boolean): numbe
   return X;
 }
 // (p <= 1/2 here: the caller reflects)
-function binomialBtpe(g: Gen, N: BinomN, p: number): number {
+function binomialBtpe(g: Gen, N: BinomN, p: number, legacy: boolean): number {
   const n = N.d, r = Math.min(p, 1.0 - p), q = 1.0 - r;
   const fm = n * r + r, m = Math.floor(fm);
   const p1 = Math.floor(2.195 * Math.sqrt(n * r * q) - 4.6 * q) + 0.5;
@@ -431,7 +432,10 @@ function binomialBtpe(g: Gen, N: BinomN, p: number): number {
   const lamr = a * (1.0 + a / 2.0);
   const p2 = p1 * (1.0 + 2.0 * c), p3 = p2 + c / laml, p4 = p3 + c / lamr;
   const nrq = n * r * q;
-  const tail = (t: number, t2: number) => (13680 - (462 - (132 - (99 - 140 / t2) / t2) / t2) / t2) / t / 166320;
+  // (Stirling's tail terms: the Generator's 13860, the third and fourth subtracted (NumPy's correction to the 1988
+  // paper); the legacy RandomState's 13680, all four added, as NumPy keeps them)
+  const K = legacy ? 13680 : 13860, sg = legacy ? 1 : -1;
+  const tail = (t: number, t2: number) => (K - (462 - (132 - (99 - 140 / t2) / t2) / t2) / t2) / t / 166320;
   for (;;) {
     const u = g.nextDouble() * p4;
     let v = g.nextDouble();
@@ -461,14 +465,15 @@ function binomialBtpe(g: Gen, N: BinomN, p: number): number {
       return y;
     }
     const rho = (k / nrq) * ((k * (k / 3.0 + 0.625) + 0.16666666666666666) / nrq + 0.5);
-    const t = (-k * k) / (2 * nrq);
+    // (-k * k in int64, as the C code: wrapped past 2^63, which k past 3037000499 reaches when n is near 2^63)
+    const t = (k <= 3037000499 ? -k * k : Number(BigInt.asIntN(64, -BigInt(k) * BigInt(k)))) / (2 * nrq);
     const A = crlog(v);
     if (A < t - rho) return y;
     if (A > t + rho) continue;
     // (z and w from n's double, as the C code; n - m + 0.5 from the exact n - m)
     const x1 = y + 1, f1 = m + 1, z = n + 1 - m, w = n - y + 1;
     if (A > xm * crlog(f1 / x1) + (N.off(-m) + 0.5) * crlog(z / w) + (y - m) * crlog((w * r) / (x1 * q)) +
-        tail(f1, f1 * f1) + tail(z, z * z) + tail(x1, x1 * x1) + tail(w, w * w)) continue;
+        tail(f1, f1 * f1) + tail(z, z * z) + sg * tail(x1, x1 * x1) + sg * tail(w, w * w)) continue;
     return y;
   }
 }
@@ -476,9 +481,12 @@ function binomialBtpe(g: Gen, N: BinomN, p: number): number {
 // the result exactly, a bigint where n - y is past 2^53)
 function binomial(g: Gen, N: BinomN, p: number, legacy: boolean): number | bigint {
   if (!legacy && (N.b === 0n || p === 0.0)) return 0;
-  if (p <= 0.5) return p * N.d <= 30.0 ? binomialInversion(g, N, p, legacy) : binomialBtpe(g, N, p);
+  if (p <= 0.5) {
+    const y = p * N.d <= 30.0 ? binomialInversion(g, N, p, legacy) : binomialBtpe(g, N, p, legacy);
+    return Number.isSafeInteger(y) ? y : BigInt(y);
+  }
   const q = 1.0 - p;
-  const y = q * N.d <= 30.0 ? binomialInversion(g, N, q, legacy) : binomialBtpe(g, N, q);
+  const y = q * N.d <= 30.0 ? binomialInversion(g, N, q, legacy) : binomialBtpe(g, N, q, legacy);
   const r = N.b - BigInt(y), d = Number(r);
   return Number.isSafeInteger(d) ? d : r;
 }

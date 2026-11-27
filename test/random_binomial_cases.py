@@ -55,4 +55,9 @@ CASES += [
     ("n-2pow53-scalar", "rs = np.random.RandomState(48); a = rs.binomial(2**53 + 3, 1.0); b = rs.binomial(2**53 + 1, 0.7); out = [type(a).__name__, str(a), str(b), rs.randint(0, 10**9)]"),
     ("gen-n-2pow62-reflect", "g = np.random.default_rng(49); out = [str(g.binomial(2**62 + 7, 0.75)), str(g.binomial(2**60 + 1, 0.999999)), str(g.binomial(2**53 + 5, 1 - 2.0**-40)), int(g.integers(0, 10**9))]"),
     ("n-2pow63", "rs = np.random.RandomState(50); rs.binomial(2**63, 0.5); out = 0"),
+    # (BTPE's squeeze: the legacy RandomState's Stirling terms (13680, all four added) against the Generator's; and
+    # -k * k wrapped in int64, as NumPy's, when n is near 2**63)
+    ("legacy-btpe-terms", "rs = np.random.RandomState(0); a = rs.binomial(1000, 0.3, size=3000); out = [int(a.sum())] + a[-3:].tolist() + [rs.randint(0, 10**9)]"),
+    ("gen-btpe-2pow63", "g = np.random.default_rng(0); out = [str(g.binomial(2**63 - 1, 0.4)) for _ in range(12)] + [int(g.integers(0, 10**9))]"),
+    ("legacy-btpe-2pow63", "rs = np.random.RandomState(0); out = [str(rs.binomial(2**63 - 1, 0.4)) for _ in range(12)] + [rs.randint(0, 10**9)]"),
 ]
