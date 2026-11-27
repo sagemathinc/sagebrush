@@ -192,7 +192,11 @@ export async function fetchSource(id: string, version: number, deadline: Deadlin
   cancelled(signal);
   deadline.check();
   const { r, done, ac } = await request(fetch, srcUrl(id, version), "GET", deadline.left(), signal);
+  // (after every await and before every return: Cancel, then the deadline; a refusal before the body is read cancels
+  //  it and aborts the request, so nothing more arrives)
+  const still = () => { cancelled(signal); deadline.check(); };
   try {
+    still();
     if (r.status === 429 || r.status === 503) throw new ArxivError("busy", "arXiv asked us to wait. Try again in a few minutes.");
     if (r.status !== 200 || !r.body) throw new ArxivError("status", `arXiv answered ${r.status}, so it didn't send a source.`);
     const len = Number(r.headers.get("content-length"));
@@ -205,27 +209,30 @@ export async function fetchSource(id: string, version: number, deadline: Deadlin
         let step;
         try { step = await reader.read(); }
         catch { cancelled(signal); deadline.check(); throw new ArxivError("network", "The download from arXiv failed part way."); }
+        still();
         if (step.done) break;
         const chunk = step.value;
         if (x) { x.push(chunk); continue; }
         head.push(chunk); headLen += chunk.length;
         if (headLen < SNIFF_BYTES) continue;
         const kind = sniff(join(head, headLen));
-        if (kind !== "gzip") { await reader.cancel().catch(() => {}); return { kind: kind === "pdf" ? "pdf" : "none" }; }
+        if (kind !== "gzip") { await reader.cancel().catch(() => {}); still(); return { kind: kind === "pdf" ? "pdf" : "none" }; }
         x = new SourceExtractor(caps);
         for (const h of head) x.push(h);
         head.length = 0;
       }
       if (!x) {
         const kind = headLen ? sniff(join(head, headLen)) : "other";
-        if (kind !== "gzip") return { kind: kind === "pdf" ? "pdf" : "none" };
+        if (kind !== "gzip") { still(); return { kind: kind === "pdf" ? "pdf" : "none" }; }
         x = new SourceExtractor(caps);
         for (const h of head) x.push(h);
       }
-      cancelled(signal);
-      deadline.check();
+      still();
       const extracted = x.end();
-      return { kind: "source", extracted, main: mainFileOf(extracted.files) };
+      still();
+      const main = mainFileOf(extracted.files);
+      still();
+      return { kind: "source", extracted, main };
     } catch (e) {
       await reader.cancel().catch(() => {});
       if (e instanceof TarError) throw new ArxivError("source", `arXiv's source couldn't be opened: ${e.message}.`);
@@ -233,6 +240,11 @@ export async function fetchSource(id: string, version: number, deadline: Deadlin
       if (ac.signal.aborted) deadline.check();
       throw e;
     }
+  } catch (e) {
+    // (refused before the body was read: it is cancelled and the request aborted)
+    if (r.body && !r.body.locked) await r.body.cancel().catch(() => {});
+    ac.abort();
+    throw e;
   } finally {
     done();
   }

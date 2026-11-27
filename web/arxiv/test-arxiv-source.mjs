@@ -42,7 +42,7 @@ const codeSync = (f) => { try { f(); return null; } catch (e) { return e instanc
 }
 
 // ---- a stand-in export.arxiv.org with a fake clock: `versions` exist; `flaky` versions fail their first probe
-function stand({ versions = 1, flaky = [], body = null, status = 200, headers = {}, chunks = 4096, stall = false } = {}) {
+function stand({ versions = 1, flaky = [], body = null, status = 200, headers = {}, chunks = 4096, stall = false, tick = 0 } = {}) {
   let t = 1_000_000;
   const log = [], flakySeen = new Set();
   const env = {
@@ -59,11 +59,13 @@ function stand({ versions = 1, flaky = [], body = null, status = 200, headers = 
         throw new TypeError("network"); // (a 404 has no CORS headers: the page sees a network error)
       }
       const b = body ?? new Uint8Array(0);
-      let at = 0;
+      let at = 0, pulls = 0;
       const stream = new ReadableStream({
         async pull(c) {
           if (stall) { t += IMPORT_DEADLINE_MS; await new Promise((r) => setTimeout(r, 5)); }
           if (init.signal?.aborted) { c.error(new Error("aborted")); return; }
+          pulls++;
+          if (pulls >= 2) t += tick; // (the first pull is the stream's own, before any read: the clock moves during reads only)
           if (at >= b.length) { c.close(); return; }
           c.enqueue(b.slice(at, at + chunks)); at += chunks; log.pulled = at;
         },
@@ -177,6 +179,23 @@ const targz = gzipSync(cat(member("paper.tex", MAIN), member("sec.tex", "a secti
   const dl = stand({ versions: 1, body: targz }), d = new Deadline(dl.env.now, 10);
   dl.advance(20);
   ok((await code(() => fetchSource("2611.26934", 1, d, dl.env))) === "deadline" && dl.log.length === 0, "the deadline already past: nothing requested");
+}
+
+// (LIMITS: the deadline checked after a read that succeeds, whatever the shape, and every early refusal cancelling the
+//  body: a clock that passes the deadline during an ordinary read, and the stand-in's cancel spy)
+{
+  for (const [what, body] of [["a PDF", enc("%PDF-1.7\n" + "x".repeat(5000))], ["an HTML page", enc("<html>" + "x".repeat(5000))], ["a tar.gz", targz]]) {
+    const s = stand({ versions: 1, body, chunks: 16, tick: IMPORT_DEADLINE_MS + 1 });
+    ok((await code(() => fetchSource("2611.26934", 1, new Deadline(s.env.now), s.env))) === "deadline", `the deadline passing during a read that succeeds (${what}): refused, not returned`);
+  }
+  const big = stand({ versions: 1, body: targz, headers: { "content-length": String(50 * 2 ** 20 + 1) } });
+  await code(() => fetchSource("2611.26934", 1, new Deadline(big.env.now), big.env));
+  const st = stand({ versions: 1, body: enc("x".repeat(5000)), status: 404 });
+  await code(() => fetchSource("2611.26934", 1, new Deadline(st.env.now), st.env));
+  const bz = stand({ versions: 1, body: enc("x".repeat(5000)), status: 429 });
+  await code(() => fetchSource("2611.26934", 1, new Deadline(bz.env.now), bz.env));
+  ok(big.log.cancelled && st.log.cancelled && bz.log.cancelled && big.log[0].init.signal.aborted && st.log[0].init.signal.aborted,
+    "a Content-Length over the cap, a 404 and a 429: each response's body cancelled and its request aborted", { big: big.log.cancelled, st: st.log.cancelled, bz: bz.log.cancelled });
 }
 
 console.log(failures ? `FAIL: ${failures} of ${checks}` : `ok: an arXiv paper's source, ${checks} checks`);
