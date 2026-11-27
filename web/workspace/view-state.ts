@@ -9,8 +9,8 @@ const KEY = "sagebrush-view-state";
  *  fields, each a finite number, an id (`ID`) or such an object again, at most `depth` deep; its JSON at most
  *  `chars` long. A field's name is a short word (`FIELD`). */
 export const VIEW_LIMITS = { docs: 200, chars: 512, fields: 16, depth: 3 };
-const ID = /^[\w.:-]{1,64}$/, FIELD = /^[A-Za-z][A-Za-z0-9_]{0,31}$/, KINDS = ["notebook", "board", "tex"];
-export type ViewKey = { kind: "notebook" | "board" | "tex"; id: string };
+const ID = /^[\w.:-]{1,64}$/, FIELD = /^[A-Za-z][A-Za-z0-9_]{0,31}$/, KINDS = ["notebook", "board", "tex", "code"];
+export type ViewKey = { kind: "notebook" | "board" | "tex" | "code"; id: string };
 export type View = { [field: string]: number | string | View };
 type Kept = Record<string, { t: number; v: View }>;
 

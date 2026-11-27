@@ -77,7 +77,7 @@ export function readOptional(rootDir = root, names = null) {
       out.push(readJsPackage(rootDir, dir, at, m, bad));
       continue;
     }
-    const known = new Set(["name", "version", "kind", "sagebrush", "modes", "python", "requires", "private_prefix", "provides", "oracle", "files"]);
+    const known = new Set(["name", "version", "kind", "sagebrush", "modes", "python", "requires", "private_prefix", "provides", "distribution", "oracle", "files"]);
     for (const k of Object.keys(m)) if (!known.has(k)) bad(`unknown field ${k}`);
     if (m.name !== `@sagebrush/${dir}`) bad(`name must be @sagebrush/${dir}`);
     if (typeof m.version !== "string" || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(m.version)) bad("version must be MAJOR.MINOR.PATCH");
@@ -90,6 +90,8 @@ export function readOptional(rootDir = root, names = null) {
     if (!Array.isArray(m.requires) || !m.requires.every((r) => typeof r === "string" && /^@sagebrush\/[a-z0-9][a-z0-9-]*@\d+\.\d+\.\d+$/.test(r))) bad("requires lists exact package ids");
     if (typeof m.private_prefix !== "string" || !/^_[a-z][a-z0-9]*_$/.test(m.private_prefix)) bad('private_prefix must look like "_name_"');
     if (m.provides !== undefined && (typeof m.provides !== "object" || Array.isArray(m.provides))) bad("provides must be {class: {method: [argument]}}");
+    // (the distribution the package stands for, as PyPI names it: importlib.metadata.version(name) answers its version)
+    if (m.distribution !== undefined && (typeof m.distribution !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$/.test(m.distribution))) bad("distribution must be a project name (letters, digits, . _ -)");
     // (shipped files: everything under python.root, each pinned; tests and docs aren't shipped)
     const present = walkFiles(at).filter((f) => !DOCS.test(f) && f.startsWith(py.root + "/"));
     if (!m.files || typeof m.files !== "object") bad("files must map each shipped file to its SHA-256");
@@ -244,19 +246,37 @@ function nodes(tree, visit) {
 /**
  * Lint one package (from readOptional) against `api` (core-api-surface.json):
  * {findings: [{file, line, construct, target, message}], uses: [...], level}.
+ * `others`: the packages read with it (readOptional), so that the modules of a package it `requires` (an exact
+ * id) may be imported and used, as that package's API, not the core's; their private names stay banned.
  */
-export function lintPackage(pkg, api) {
+export function lintPackage(pkg, api, others = []) {
   const { parse } = require(join(root, "dist", "src", "parse.js"));
   const findings = [], uses = [];
   const own = new Set(pkg.manifest.python.modules);
   const ownTop = new Set([...own].map((m) => m.split(".")[0]));
+  // (the modules of the packages it requires, as their manifests list them)
+  const required = new Set();
+  for (const r of pkg.manifest.requires ?? []) {
+    const dep = others.find((o) => o.id === r && o.kind !== "js");
+    if (dep) for (const m of dep.manifest.python.modules) required.add(m);
+  }
+  const requiredModule = (name) => required.has(name);
+  // (the modules of every other package read with it: one it doesn't require is never its to import, declared or not)
+  const foreign = new Set();
+  for (const o of others) if (o.kind !== "js" && o.id !== pkg.id && !(pkg.manifest.requires ?? []).includes(o.id)) for (const m of o.manifest.python.modules) foreign.add(m);
+  const foreignModule = (name) => foreign.has(name) && !own.has(name);
   const prefix = pkg.manifest.private_prefix;
   const coreModule = (name) => Object.hasOwn(api.modules, name);
+  // (a reference waiver names its target exactly: one without a target waives nothing)
+  const referenceWaiver = (file, line, target) => pkg.declarations.some((d) => d.file === file && d.line === line && d.construct === "reference" && d.target === target);
   const declaration = (file, line, construct, target) => pkg.declarations.find((d) => d.file === file && d.line === line && d.construct === construct && (d.target === undefined || d.target === target));
   // (a declared dynamic access waives its finding and is a use of the core
   // name it reaches, "access" (else its target), in its stated call form,
   // "call": [parameter names], or else at that name's maximum parameter
   // level: §5.3, §6.2, astra's CORR-PR68-2)
+  // (a finding no declaration waives: another package's private names and changes to its modules, which a reviewed
+  // exception may never reach)
+  const hard = (file, line, construct, target, message) => findings.push({ file, line, construct, target, message, hard: true });
   const flag = (file, line, construct, target, message) => {
     const d = declaration(file, line, construct, target);
     if (!d) findings.push({ file, line, construct, target, message });
@@ -276,11 +296,25 @@ export function lintPackage(pkg, api) {
     }
     // names bound to core modules, or to names imported from them, in this file
     const coreAlias = new Map(); // local name -> "module" or "module.attr"
+    const requiredAlias = new Set(); // local names bound to a required package's modules or names
+    const requiredModules = new Map(); // local name -> the required module it is bound to
     nodes(tree, (n) => {
       if (n.k === "Import") {
         for (const a of n.names) {
           const parts = a.name.split(".");
           if (!ownTop.has(parts[0])) {
+            if (requiredModule(a.name)) {
+              if (parts.some((p) => p.startsWith("_"))) hard(file, n.line, "import", a.name, `imports the private module ${a.name} of a required package`);
+              else {
+                requiredAlias.add(a.asname ?? parts[0]);
+                requiredModules.set(a.asname ?? parts[0], a.asname ? a.name : parts[0]);
+              }
+              continue;
+            }
+            if (foreignModule(a.name)) {
+              hard(file, n.line, "import", a.name, `imports ${a.name}, a module of a package it doesn't require`);
+              continue;
+            }
             if (parts.some((p) => p.startsWith("_"))) flag(file, n.line, "import", a.name, `imports the private module ${a.name}`);
             if (BANNED_MODULES.has(parts[0])) flag(file, n.line, "import", a.name, `imports ${a.name}, a reflection or dynamic-import module`);
             else if (!coreModule(a.name)) flag(file, n.line, "import", a.name, `${a.name} is not a public core module (core-api-surface.json)`);
@@ -290,6 +324,25 @@ export function lintPackage(pkg, api) {
       } else if (n.k === "ImportFrom") {
         const mod = n.module ?? "";
         if (n.level > 0 || ownTop.has(mod.split(".")[0])) return;
+        if (requiredModule(mod)) {
+          if (mod.split(".").some((p) => p.startsWith("_"))) {
+            hard(file, n.line, "import", mod, `imports from the private module ${mod} of a required package`);
+            return;
+          }
+          for (const a of n.names) {
+            if (a.name === "*") hard(file, n.line, "import", mod + ".*", "from ... import * hides which names are used");
+            else if (a.name.startsWith("_")) hard(file, n.line, "import", `${mod}.${a.name}`, `imports the private name ${mod}.${a.name} of a required package`);
+            else {
+              requiredAlias.add(a.asname ?? a.name);
+              if (requiredModule(`${mod}.${a.name}`)) requiredModules.set(a.asname ?? a.name, `${mod}.${a.name}`);
+            }
+          }
+          return;
+        }
+        if (foreignModule(mod)) {
+          hard(file, n.line, "import", mod, `imports from ${mod}, a module of a package it doesn't require`);
+          return;
+        }
         if (mod.split(".").some((p) => p.startsWith("_"))) flag(file, n.line, "import", mod, `imports from the private module ${mod}`);
         if (BANNED_MODULES.has(mod.split(".")[0])) flag(file, n.line, "import", mod, `imports from ${mod}, a reflection or dynamic-import module`);
         else if (!coreModule(mod)) flag(file, n.line, "import", mod, `${mod} is not a public core module (core-api-surface.json)`);
@@ -303,6 +356,68 @@ export function lintPackage(pkg, api) {
         }
       }
     });
+    // (a required package's names, followed: a name bound from one, through assignment, destructuring, a for or
+    // with target, a comprehension or :=, is one too, so a change to it or a private name read through it is a hard
+    // finding; a call's result is a new value, not the package's)
+    const fromRequired = (v) => {
+      switch (v?.k) {
+        case "Name": return requiredAlias.has(v.id);
+        case "Attribute": case "Subscript": case "Starred": case "NamedExpr": return fromRequired(v.value);
+        case "Tuple": case "List": case "Set": return (v.elts ?? []).some(fromRequired);
+        // (a dict's values, and its keys, which iterating it yields)
+        case "Dict": return (v.values ?? []).some(fromRequired) || (v.keys ?? []).some(fromRequired);
+        case "IfExp": return fromRequired(v.body) || fromRequired(v.orelse);
+        // (a comprehension's elements: a list, set or generator of them, or a dict's keys and values)
+        case "Comp": return fromRequired(v.elt) || fromRequired(v.value);
+        case "BoolOp": return (v.values ?? []).some(fromRequired);
+        default: return false;
+      }
+    };
+    const boundNames = (t, out) => {
+      if (typeof t === "string") out.push(t);
+      else if (t?.k === "Name") out.push(t.id);
+      else if (t?.k === "Tuple" || t?.k === "List") for (const y of t.elts ?? []) boundNames(y, out);
+      else if (t?.k === "Starred") boundNames(t.value, out);
+      return out;
+    };
+    for (let grew = true; grew; ) {
+      grew = false;
+      nodes(tree, (n) => {
+        const pairs = n.k === "Assign" ? (n.targets ?? []).map((t) => [t, n.value])
+          : n.k === "AnnAssign" || n.k === "NamedExpr" ? [[n.target, n.value]]
+          : n.k === "For" || n.k === "AsyncFor" || n.k === "comprehension" ? [[n.target, n.iter]]
+          : n.k === "withitem" ? [[n.optional_vars, n.context_expr]]
+          : n.k === "Comp" ? (n.generators ?? []).map((g) => [g.target, g.iter]) : [];
+        for (const [t, v] of pairs) {
+          if (!fromRequired(v)) continue;
+          for (const name of boundNames(t, [])) if (!requiredAlias.has(name)) {
+            requiredAlias.add(name);
+            grew = true;
+          }
+        }
+      });
+    }
+    // (a required package's module object, dep or dep.sub, is used only as the base of a longer attribute
+    // (pd.DataFrame, dep.sub.Thing): bound to another name, passed, returned or stored, it could be changed where the
+    // lint can't follow it)
+    const requiredModuleOf = (e) => {
+      if (e?.k === "Name") return requiredModules.get(e.id) ?? null;
+      if (e?.k === "Attribute") {
+        const b = requiredModuleOf(e.value);
+        return b !== null && requiredModule(`${b}.${e.attr}`) ? `${b}.${e.attr}` : null;
+      }
+      return null;
+    };
+    const attributeBases = new Set();
+    nodes(tree, (n) => {
+      if (n.k === "Attribute") attributeBases.add(n.value);
+    });
+    nodes(tree, (n) => {
+      if ((n.k === "Name" || n.k === "Attribute") && !attributeBases.has(n)) {
+        const m = requiredModuleOf(n);
+        if (m !== null) hard(file, n.line, "escape", m, `uses ${m}, a required package's module, other than as the base of an attribute`);
+      }
+    });
     // the resolved core target of an expression, or null
     const resolve = (e) => {
       if (e?.k === "Name") return coreAlias.get(e.id) ?? null;
@@ -313,6 +428,8 @@ export function lintPackage(pkg, api) {
       return null;
     };
     const rootName = (e) => (e?.k === "Attribute" ? rootName(e.value) : e?.k === "Name" ? e.id : null);
+    // (the name an attribute or item of a required package's binding starts from: xs[0].attr is xs's)
+    const requiredRoot = (e) => (e?.k === "Attribute" || e?.k === "Subscript" ? requiredRoot(e.value) : e?.k === "Name" ? e.id : null);
     // the names and attributes stored to, and those only read as the start of
     // a longer reference: neither lets a core callable escape
     const notEscaping = new Set();
@@ -340,9 +457,12 @@ export function lintPackage(pkg, api) {
       if (n.k === "Attribute") {
         if (BANNED_ATTRS.has(n.attr)) flag(file, n.line, "attribute", n.attr, `uses .${n.attr}, which the contract bans`);
         else if (n.attr === "modules" && rootName(n.value) !== null && coreAlias.get(rootName(n.value)) === "sys") flag(file, n.line, "attribute", "sys.modules", "uses sys.modules");
-        else if (n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__")) && !n.attr.startsWith(prefix)) {
+        else if (n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__")) && requiredAlias.has(requiredRoot(n.value))) {
+          hard(file, n.line, "attribute", n.attr, `.${n.attr}: a private name of a required package`);
+        } else if (n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__")) && !n.attr.startsWith(prefix)) {
           const base = n.value?.k === "Name" ? n.value.id : null;
-          if (base !== "self" && base !== "cls") flag(file, n.line, "attribute", n.attr, `.${n.attr} on something other than self or cls: package-private names start with ${prefix}`);
+          // (in a package that requires another, any such name could be that package's private one: hard)
+          if (base !== "self" && base !== "cls") (required.size ? hard : flag)(file, n.line, "attribute", n.attr, `.${n.attr} on something other than self or cls: package-private names start with ${prefix}`);
         }
         const t = resolve(n);
         if (t !== null && n.attr.startsWith("_") && !(n.attr.startsWith("__") && n.attr.endsWith("__"))) flag(file, n.line, "attribute", t, `uses the private core name ${t}`);
@@ -353,6 +473,7 @@ export function lintPackage(pkg, api) {
         const walk = (x) => {
           if (x?.k === "Tuple" || x?.k === "List") for (const y of x.elts ?? []) walk(y);
           else if (x?.k === "Attribute" && resolve(x.value) !== null) flag(file, n.line, "monkeypatch", resolve(x), `changes the core's ${resolve(x)}`);
+          else if (x?.k === "Attribute" && requiredAlias.has(requiredRoot(x.value))) hard(file, n.line, "monkeypatch", x.attr, `changes the required package's .${x.attr}`);
         };
         walk(t);
       }
@@ -380,7 +501,8 @@ export function lintPackage(pkg, api) {
   for (const u of uses) {
     const l = useLevel(api, u);
     if (l === null) {
-      if (!u.target.startsWith("*.") && !u.declared) findings.push({ file: u.file, line: u.line, construct: "reference", target: u.target, message: `${u.target} is not in the Core API (core-api-surface.json)` });
+      // (a reviewed declaration may waive it, as it may the other findings: one exact line and target)
+      if (!u.target.startsWith("*.") && !u.declared && !referenceWaiver(u.file, u.line, u.target)) findings.push({ file: u.file, line: u.line, construct: "reference", target: u.target, message: `${u.target} is not in the Core API (core-api-surface.json)` });
     } else level = Math.max(level, l);
   }
   return { findings, uses, level };
@@ -495,7 +617,7 @@ export async function buildSet(pkgs, api, outDir, { pre = null, costs = null } =
       ix.packages[p.id] = { dir: p.dir, js: { ...ref, host_req: m.host_req } };
       continue;
     }
-    const lint = lintPackage(p, api);
+    const lint = lintPackage(p, api, pkgs);
     if (lint.findings.length) throw new Error(`${p.id}: the contract lint failed:\n` + lint.findings.map((f) => `  ${f.file}:${f.line} ${f.message}`).join("\n"));
     const files = {};
     for (const [f, text] of Object.entries(p.files)) files[f] = sha256(Buffer.from(text, "utf8"));
@@ -506,6 +628,7 @@ export async function buildSet(pkgs, api, outDir, { pre = null, costs = null } =
       pre: {}, cost: {},
     };
     if (p.manifest.provides) entry.provides = p.manifest.provides;
+    if (p.manifest.distribution) entry.distribution = { name: p.manifest.distribution, version: p.manifest.version };
     for (const [build, modules] of Object.entries(pre?.[p.id] ?? {})) entry.pre[build] = put(outDir, { format: "sagebrush-pkg-chunk", v: 1, kind: "pre", package: p.id, build, modules });
     if (costs?.[p.id]) entry.cost = costs[p.id];
     ix.packages[p.id] = entry;
@@ -573,6 +696,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (cmd === "check") {
       const api = loadApi();
       let bad = 0;
+      // (every package, so that a checked package's requires resolve whichever are named)
+      const all = readOptional(root);
       for (const p of readOptional(root, rest)) {
         if (p.kind === "js") {
           // (bundled and checked as build does, nothing written)
@@ -580,7 +705,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           console.log(`${p.id}: ok; js module ${m.moduleBytes} bytes, notices ${m.noticeBytes} bytes, chunk ${m.chunkBytes} bytes, host_req ${m.host_req}`);
           continue;
         }
-        const { findings, level } = lintPackage(p, api);
+        const { findings, level } = lintPackage(p, api, all);
         for (const f of findings) console.error(`optional/${p.dir}/${f.file}:${f.line}: ${f.message}`);
         bad += findings.length;
         console.log(`${p.id}: ${findings.length ? findings.length + " contract finding(s)" : "ok"}; needs core API ${api.api} level ${level}`);

@@ -2349,6 +2349,67 @@ def Codomain(f):
     return f.cod
 
 
+class _MCoercionMap(MMap):
+    """Coercion(D, C): the map x :-> C!(D!x), as Magma 2.18-5's (checked
+    against it): an argument D doesn't take is "Could not coerce into
+    map's domain", an image C doesn't is "Application of map failed"; a
+    preimage is D!y; a sequence or set is mapped element by element; two
+    with the same domain and codomain are equal."""
+
+    def __init__(self, dom, cod):
+        MMap.__init__(self, dom, cod, rule=lambda x: x)
+
+    def __repr__(self):
+        # (a finite field no global variable holds is GF(q) here, as Magma's, and as _MExtMap's)
+        name = lambda S: _gf_name(S) if isinstance(S, _MFinField) and _global_name(S) is None else _struct_name(S)
+        return "Mapping from: %s to %s" % (name(self.dom), name(self.cod))
+
+    @staticmethod
+    def _into(S, x):
+        if isinstance(S, (MSeq, MSet, MRange)):
+            if not _in(x, S):
+                raise MagmaError("not an element")
+            return x
+        return _coerce(S, x)
+
+    def __call__(self, x):
+        if isinstance(x, MSet) and x.kind == "multi":
+            # (Magma's for a multiset)
+            raise MagmaError("Could not coerce into map's domain", "map application")
+        if isinstance(x, (MSeq, MSet)):
+            # (element by element, one level deep, as Magma's: an element the map doesn't take, at either step, is
+            # "Element is not in the domain of the map" there, a sequence or set in it too; a sequence, set or
+            # indexed set of the images, in its order)
+            ys = []
+            for y in x:
+                try:
+                    ys.append(self._into(self.cod, self._into(self.dom, y)))
+                except MagmaError:
+                    raise MagmaError("Element is not in the domain of the map", "map application")
+            return MSeq(ys) if isinstance(x, MSeq) else _iset(ys) if x.kind == "indexed" else _set(ys)
+        try:
+            y = self._into(self.dom, x)
+        except MagmaError:
+            raise MagmaError("Could not coerce into map's domain", "map application")
+        try:
+            return self._into(self.cod, y)
+        except MagmaError:
+            raise MagmaError("Application of map failed", "map application")
+
+    def _preimage(self, y, where):
+        try:
+            return self._into(self.dom, y)
+        except MagmaError:
+            raise MagmaError("Application of map failed", where)
+
+    def __eq__(self, o):
+        return isinstance(o, _MCoercionMap) and _eq(self.dom, o.dom) and _eq(self.cod, o.cod)
+
+    def __hash__(self):
+        # (one value for the class, consistent with __eq__: {f, g} of two equal ones is one map, as Magma's)
+        return hash(_MCoercionMap)
+
+
 def Inverse(f):
     """The inverse of a map (applying it needs an inverse rule)."""
     if isinstance(f, MMap):
@@ -3380,6 +3441,10 @@ def _eq(a, b, pos=None, op="eq"):
     if ka == "map":
         if a is b:
             return True
+        if isinstance(a, _MCoercionMap) and isinstance(b, _MCoercionMap):
+            # (two coercion maps are equal when their domains and codomains are, as Magma's; with another map, Magma
+            # can't test it)
+            return a == b
         raise MagmaError("Cannot test equality for those maps", "'%s'" % op, True, pos)
     if ka == "tup":
         # tuples of one length whose entries compare
@@ -6404,8 +6469,16 @@ FractionField = FieldOfFractions
 
 # ------------------------------------------------------------------ polynomials
 
+# PolynomialRing(Integers()) and PolynomialRing(Rationals()), one of each for the session, as Magma 2.18-5 has it
+# (base ring name -> ring): P := PolynomialRing(Rationals()); Q<t> := PolynomialRing(Rationals()); is one ring,
+# and naming it renames it everywhere, P.1 printing as t
+_ZQ_RINGS = {}
+
+
 def PolynomialRing(R, n=1):
-    """A new polynomial ring; its variable prints as $.1 until named."""
+    """The polynomial ring over R; its variable prints as $.1 until named.
+    Over the integers and the rationals it is the session's one ring
+    (_ZQ_RINGS); over a finite field, the field's."""
     # (one variable only: PolynomialRing(Q, 3) is not a univariate ring)
     if n != 1 or isinstance(n, bool):
         raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
@@ -6418,8 +6491,16 @@ def PolynomialRing(R, n=1):
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
-    out = _MPolyRingZQ(base, "$.1")
+    out = _zq_ring(base)
     _fun_remember_poly(_fun_base_key(R), out)
+    return out
+
+
+def _zq_ring(base):
+    """The session's one polynomial ring over base (ZZ or QQ, _ZQ_RINGS)."""
+    out = _ZQ_RINGS.get(base._name)
+    if out is None:
+        out = _ZQ_RINGS[base._name] = _MPolyRingZQ(base, "$.1")
     return out
 
 
@@ -6428,9 +6509,36 @@ class _MPolyRingZQ(_sp.PolynomialRing_):
     Until its variable is named, it prints as P.1 for the oldest global P that
     holds the ring now, and as $.1 when none does (Magma: `P := PolynomialRing(
     Rationals()); P.1 + 1;` prints P.1 + 1).  Only the printing changes: the
-    ring's _name, which equality and hashing use, stays $.1."""
+    ring's _name, which equality and hashing use, stays $.1, and a name given
+    to it, R<x> := ..., is _shown (the ring is shared, _ZQ_RINGS: naming it
+    again renames it, with its elements kept in sets and as keys)."""
+
+    _shown = None
+
+    def __repr__(self):
+        if self._shown is not None:
+            return "Univariate Polynomial Ring in %s over %r" % (self._shown, self._base)
+        return _sp.PolynomialRing_.__repr__(self)
+
+    # (the name the ring's variable was given, for what is built from it: a number field's generator, a ring
+    # made in the same variable)
+    def variable_name(self):
+        return self._shown if self._shown is not None else self._name
+
+    def variable_names(self):
+        return (self.variable_name(),)
+
+    def change_ring(self, R):
+        # (over the integers or the rationals, the session's one ring there, as Magma's: a polynomial over the
+        # integers taken to the rationals, by ChangeRing or a gcd, is in PolynomialRing(Rationals()), printed by
+        # that ring's name)
+        if R is _sp.ZZ or R is _sp.QQ:
+            return _zq_ring(R)
+        return _sp.PolynomialRing_.change_ring(self, R)
 
     def _repr_name(self):
+        if self._shown is not None:
+            return self._shown
         if self._name != "$.1":
             return self._name
         v = _global_name(self)
@@ -6456,7 +6564,10 @@ def _refcall(f, refs, *args, **kw):
 
 def _assign_gen_names(R, names):
     """R<x, ...> := ...: the generators' names (a list of strings)."""
-    if isinstance(R, _sp.PolynomialRing_) and names:
+    if isinstance(R, _MPolyRingZQ) and names:
+        # (the session's shared ring: renamed for printing only, _shown)
+        R._shown = names[0]
+    elif isinstance(R, _sp.PolynomialRing_) and names:
         R._name = names[0]
     elif hasattr(R, "_magma_names"):
         R._magma_names(names)
@@ -7641,7 +7752,7 @@ def Sqrt(x):
 # calls being made, innermost last: an argument's call has returned before
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
-    "Alt ChangeRing CharacteristicPolynomial ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
+    "Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
     "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
     "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
     "Stabilizer Submatrix Subsets Sym Trace Vector").split())
@@ -7664,6 +7775,11 @@ def _call(pos, f, *args, **kw):
     _CALLPOS.append((pos, getattr(f, "__name__", None)))
     try:
         return f(*args, **kw)
+    except MagmaError as e:
+        if isinstance(f, _MCoercionMap):
+            # (a coercion map's application error is said at the call's "(", as Magma's)
+            e.pos = e.pos or pos
+        raise
     finally:
         _CALLPOS.pop()
 
@@ -7873,6 +7989,13 @@ def _cr_source_ok(X):
         return True
     ring = X if isinstance(X, _sp.PolynomialRing_) else getattr(X, "_ring", None)
     return type(ring) in (_sp.PolynomialRing_, _MPolyRingZQ) and (ring._base is _sp.ZZ or ring._base is _sp.QQ)
+
+
+@_signature("Coercion", "Str", "Str", ret="Map")
+def _coercion(D, C):
+    """The coercion map from D to C (Magma's Coercion; it is made whether or
+    not C takes D's elements, as Magma's is)."""
+    return _MCoercionMap(D, C)
 
 
 @_signature("ChangeRing", "RngUPol", "Rng", ret="RngUPol")
