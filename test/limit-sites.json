@@ -14362,6 +14362,76 @@
   "owner": "modular symbols",
   "reason": "domain refusals: exact modular symbols with a nontrivial character, and the old subspace (raising degeneracy maps), are not supported yet; not a size or work limit"
  },
+ "lib/_sage_modsym.py :: Space :: ....: print(e.need_bytes > e.limit_bytes, 997 in S._hecke) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space :: ....: print(type(e).__name__, e.need_bytes > e.limit_bytes) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 4 * 800000 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 10**6 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = old; int(S.hecke_matrix(997)[0][0]) # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
+ },
+ "lib/_sage_modsym.py :: Space._evict :: def _evict(self, limit): #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest matrices: a cache policy, never a refusal"
+ },
+ "lib/_sage_modsym.py :: Space._evict :: while self._hecke and self.held() > limit: #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest matrices: a cache policy, never a refusal"
+ },
+ "lib/_sage_modsym.py :: Space.hecke_matrix :: self._evict(ch.limit // 2 - size) #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "the Hecke cache trimmed to half the allowance by evicting its oldest matrices: a cache policy, never a refusal"
+ },
+ "lib/_sage_modsym.py :: _Charge.__init__ :: self.limit = _capacity.heap_figure() // _SHARE #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "modular symbols/runtime memory",
+  "reason": "the modular symbols' working-storage admission: each computation's containers charged against a quarter of the heap figure, refused through the memory guard (LIMITS L1)"
+ },
+ "lib/_sage_modsym.py :: _Charge.take :: e = _memguard.memory_guard(self.what, self.used, self.limit, \"one modular symbols computation\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "modular symbols/runtime memory",
+  "reason": "the modular symbols' working-storage admission: each computation's containers charged against a quarter of the heap figure, refused through the memory guard (LIMITS L1)"
+ },
+ "lib/_sage_modsym.py :: _Charge.take :: if self.used > self.limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "modular symbols/runtime memory",
+  "reason": "the modular symbols' working-storage admission: each computation's containers charged against a quarter of the heap figure, refused through the memory guard (LIMITS L1)"
+ },
  "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",

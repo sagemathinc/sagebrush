@@ -42,3 +42,6 @@ G.is_odd() -> False
 H.index() == H.projective_index() -> True
 G.ncusps() == len(G.cusps()) -> True
 G.cusps()[0].parent() -> Set P^1(QQ) of all cusps
+Gamma0(65).genus() -> 5
+Gamma0(91).genus() -> 7
+(Gamma0(65).nu2(), Gamma0(91).nu3()) -> (4, 4)
