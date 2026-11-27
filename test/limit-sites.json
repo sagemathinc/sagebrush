@@ -13824,6 +13824,16 @@
   "owner": "python",
   "reason": "the heap a range's item takes, estimated for its admission (a number up to 2**53 is a 16-byte heap number, a larger one a BigInt); it refuses nothing itself"
  },
+ "src/runtime/numpy.ts :: binary :: const beyond64 = big < I64MIN || big > I64MAX; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
+ },
+ "src/runtime/numpy.ts :: binary :: const outside = dt.kind !== \"b\" && (dt === D.uint64 ? big < 0n || big > U64MAX : rg ? big < BigInt(rg[0]) || big > BigInt(rg[1]) : beyond64); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",

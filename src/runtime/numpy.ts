@@ -411,6 +411,15 @@ function wideExact(d: DType, op: string, r: number, x: number, y: number): numbe
   if (g === undefined || !Number.isInteger(x) || !Number.isInteger(y)) return wideRefuse(d);
   return exact64(d, g(BigInt(x), BigInt(y))) ?? wideRefuse(d);
 }
+// (a sum's adder in int64 or uint64: a partial sum in the safe range kept as it is (in uint64 a negative one, from a
+// float operand's negative element, is congruent to NumPy's wrapped value modulo 2**64, and the store wraps it once);
+// past the safe range computed exactly and wrapped, or refused, as wideExact)
+function wideAdd(d: DType): (x: number, y: number) => number {
+  return (x, y) => {
+    const r = x + y;
+    return Number.isSafeInteger(r) && Number.isSafeInteger(x) && Number.isSafeInteger(y) ? r : wideExact(d, "add", r, x, y);
+  };
+}
 function allNonNeg(a: NDArray): boolean {
   let ok = true;
   loop1(a.shape, a.strides, a.offset, (p) => {
@@ -646,12 +655,26 @@ export class FlagsObj {
 // of a contiguous array other values (NUMPY.md); one rule
 // here, the same for every element and on every machine. An invalid
 // conversion sets castInvalid, for the cast's RuntimeWarning; each cast clears
-// it first (a cast that threw midway may have left it set). int64 and
-// uint64 are left to castNum: their x86-64 results (INT64_MIN, 2**63) are
-// past the 2**53 Sagebrush's 64-bit stores hold.
+// it first (a cast that threw midway may have left it set). For int64 the
+// 64-bit one (INT64_MIN, -2**63, out of range, NaN or infinite); for uint64
+// x86-64's unsigned conversion (2**63 for NaN, -infinity and x < -2**63; 0 for
+// x >= 2**64 and infinity; a negative x in range wrapped, as a double holds it
+// exactly or refused). With congruent, a reduction's operand: a negative x in
+// uint64's wrapped range is kept as its truncation, a value congruent to the
+// wrapped one modulo 2**64, which the reduction's exact 64-bit arithmetic
+// wraps once at the end.
 let castInvalid = false;
-function floatToInt(dt: DType, v: number): number {
-  if (dt.kind === "b" || dt.ctor === Float64Array) return castNum(dt, v);
+function floatToInt(dt: DType, v: number, congruent = false): number {
+  if (dt.kind === "b") return castNum(dt, v);
+  if (dt.ctor === Float64Array) {
+    if (v >= -9223372036854775808 && v < 9223372036854775808) {
+      const t = Math.trunc(v) + 0;
+      return t < 0 && dt.kind === "u" && !congruent ? castNum(dt, t) : t;
+    }
+    if (dt.kind === "u" && v >= 9223372036854775808 && v < 18446744073709551616) return Math.trunc(v);
+    castInvalid = true;
+    return dt.kind === "i" ? -9223372036854775808 : v >= 18446744073709551616 ? 0 : 9223372036854775808;
+  }
   if (dt.name === "uint32") {
     if (v >= -9223372036854775808 && v < 9223372036854775808) return Math.trunc(v);
     castInvalid = true;
@@ -675,6 +698,28 @@ function warnInvalidCast(): void {
   if (invalidMode === "raise") raise(T.FloatingPointError, msg);
   Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), [msg, T.RuntimeWarning, 2]);
 }
+// (NumPy's ComplexWarning, once per cast of complex values to a real dtype other than bool: the imaginary parts
+// dropped; issued through warnings.warn, which a runtime test without the interpreter replaces)
+export const castWarnings = {
+  complex(): void {
+    const ComplexWarning = Obj.getattr(Obj.hooks.importModule("numpy.exceptions"), "ComplexWarning");
+    Obj.callObj(Obj.getattr(Obj.hooks.importModule("warnings"), "warn"), ["Casting complex values to real discards the imaginary part", ComplexWarning, 2]);
+  },
+};
+function warnComplexCast(): void {
+  castWarnings.complex();
+}
+// (the warning of a conversion done inside a reduction, which NumPy names "reduce": a float operand summed in an
+// integer dtype)
+function warnInvalidReduce(): void {
+  const old = castLabel;
+  castLabel = "reduce";
+  try {
+    warnInvalidCast();
+  } finally {
+    castLabel = old;
+  }
+}
 
 function assign(out: NDArray, src: NDArray) {
   writable(out);
@@ -693,6 +738,7 @@ function assign(out: NDArray, src: NDArray) {
     if (dt.kind === "b") loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = sd[2 * q] !== 0 || sd[2 * q + 1] !== 0 ? 1 : 0));
     else {
       const conv = dt.kind === "i" || dt.kind === "u" ? floatToInt : castNum;
+      warnComplexCast();
       castInvalid = false;
       loop2(out.shape, out.strides, out.offset, sb, src.offset, (p, q) => (od[p] = conv(dt, sd[2 * q])));
       warnInvalidCast();
@@ -857,8 +903,8 @@ const CMP_OPS: Record<string, (a: bigint, b: bigint) => boolean> = {
 };
 // (an integer array compared with a Python int a double does not hold
 // exactly, or past int64: element by element, exactly, as NumPy 2)
-function bigCompare(op: string, A: { arr: NDArray; weak: Weak | null }, B: { arr: NDArray; weak: Weak | null }): NDArray {
-  const left = A.weak === null, arr = left ? A.arr : B.arr, big = (left ? B.weak : A.weak)!.big!;
+function bigCompare(op: string, A: { arr: NDArray; weak: Weak | null }, B: { arr: NDArray; weak: Weak | null }, big: bigint): NDArray {
+  const left = A.weak === null, arr = left ? A.arr : B.arr;
   const f = CMP_OPS[op];
   const res = empty(arr.shape, D.bool), od = res.data, d = arr.data;
   loop1(arr.shape, arr.strides, arr.offset, (p, k) => {
@@ -1583,6 +1629,13 @@ function ipow(x: number, y: number): number {
   return r;
 }
 
+// A 0-d operand as float32 (its value rounded to the float32 nearest)
+function asType32(x: NDArray): NDArray {
+  const r = empty([], D.float32);
+  r.data[0] = Math.fround(Number(x.data[x.offset]));
+  return r;
+}
+
 function operand(x: any): { arr: NDArray; weak: Weak | null } {
   if (x instanceof NDArray) return { arr: x, weak: null };
   if (x instanceof ObjArray) objRefuse();
@@ -1710,9 +1763,17 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   }
   // (a Python int past what a double or int64 holds, against an integer
   // array: compared exactly; in arithmetic with a float, NumPy's error)
+  // (and, as NumPy 2 compares them, a Python int outside an integer array's dtype: exactly, never an
+  // OverflowError; a bool array's loop is int64, so past int64 that is NumPy's OverflowError)
   if (CMP_OPS[op] && !out) {
     const w = A.weak ?? B.weak, o = A.weak ? B : A;
-    if (w && w.kind === "i" && w.big !== undefined && o.weak === null && (o.arr.dt.isInt || o.arr.dt.kind === "b") && (w.inexact || w.big < I64MIN || w.big > I64MAX)) return bigCompare(op, A, B);
+    if (w && w.kind === "i" && o.weak === null && (o.arr.dt.isInt || o.arr.dt.kind === "b")) {
+      const big = w.big ?? BigInt(w.v), dt = o.arr.dt;
+      const beyond64 = big < I64MIN || big > I64MAX;
+      const rg = RANGE[dt.name];
+      const outside = dt.kind !== "b" && (dt === D.uint64 ? big < 0n || big > U64MAX : rg ? big < BigInt(rg[0]) || big > BigInt(rg[1]) : beyond64);
+      if (outside || (dt.kind === "b" && !beyond64 && w.inexact) || (dt.kind !== "b" && w.inexact)) return bigCompare(op, A, B, big);
+    }
   }
   // (minimum and maximum of an integer array and a Python int a double does
   // not hold: compared exactly, the int refused only where it is chosen, so
@@ -1729,6 +1790,10 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatLoop(op, A, B, ct);
   if (op === "power" && ct.kind === "b") ct = D.int8;
   const rt = spec.out === "bool" ? D.bool : ct;
+  // (a Python scalar takes a float32 loop's type before the loop runs, as NumPy casts it: 0.1 is the float32
+  // nearest 0.1, so a float32 array times 0.1 rounds each product of two float32 values, and a comparison
+  // with 0.1 compares float32 values)
+  if (ct === D.float32) for (const W of [A, B]) if (W.weak && W.arr.dt !== D.float32) W.arr = asType32(W.arr);
   const a = A.arr, b = B.arr;
   const kop = op === "power" ? powerExponent(ct, b) : op; // the kernel
   const shape = broadcastShapes(a.shape, b.shape);
@@ -2311,7 +2376,11 @@ function maskedSum(a: NDArray, mask: NDArray, ax: number[], keepdims: boolean, r
     for (let k = 0; k < out.size; k++) out.data[k] = castNum(rt, 0);
     return shaped(out);
   }
-  const conv = cast && rt !== D.float64 ? (x: number) => castNum(rt, x) : null;
+  // (a float operand into an integer or bool dtype: each element as an array cast converts it, #2149's per-element
+  // rule, with its warning, which the caller gives once the sum is done)
+  const toInt = a.dt.kind === "f" && (rt.isInt || rt.kind === "b");
+  if (toInt) castInvalid = false;
+  const conv = cast && rt !== D.float64 ? (toInt ? (x: number) => floatToInt(rt, x, true) : (x: number) => castNum(rt, x)) : null;
   // (the axes innermost first; a length-1 axis is no loop at all)
   const order = iterAxisOrder(nd, [a.strides, mask.strides]).filter((i) => a.shape[i] > 1);
   const block: number[] = [];
@@ -2421,6 +2490,15 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first 
   const rt = dtype !== null ? toDtype(dtype) : sumType(a.dt);
   const axs = axesArg(axis, a.ndim);
   const outN = axs === null ? 1 : prod(a.shape.filter((_, i) => !axs.includes(i)));
+  if (a.dt.cplx && !rt.cplx && !part) {
+    // (a complex operand in a real dtype: its real parts, converted as NumPy's cast converts them, with its
+    // ComplexWarning (a bool dtype reads both parts: not this))
+    if (rt.kind === "b") a = unary("logical_not", unary("logical_not", a));
+    else {
+      warnComplexCast();
+      a = realPart(a);
+    }
+  }
   if (a.dt.cplx) {
     // (the whole complex sum admitted first: the real and imaginary sums,
     // each with its accumulator, and the combined result; daybreak2's
@@ -2454,12 +2532,14 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first 
     // (the operand itself, in its own layout (NumPy's iterator orders the axes by it), its values converted as read)
     const ax = axs === null ? a.shape.map((_, i) => i) : axs;
     if (rt === D.float32) return finish(maskedSum(a, mask, ax, keepdims, rt, (x, y) => f32(x + y), part ? pairwiseCplx32 : pairwise32, rt !== a.dt), axis, keepdims);
-    const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
-    return finish(maskedSum(a, mask, ax, keepdims, rt, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, rt !== a.dt), axis, keepdims);
+    const add = isWide(rt) ? wideAdd(rt) : (x: number, y: number) => x + y;
+    const r = maskedSum(a, mask, ax, keepdims, rt, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, rt !== a.dt);
+    warnInvalidReduce();
+    return finish(r, axis, keepdims);
   }
   if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, (x, y) => f32(x + y), part ? pairwiseCplx32 : pairwise32, first), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
-  const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
+  const add = isWide(rt) ? wideAdd(rt) : (x: number, y: number) => x + y;
   return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, first), axis, keepdims);
 }
 // The product of a complex array (or of one into a complex dtype) over the
@@ -2472,7 +2552,7 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first 
 // 1+0j and this 0j (as the real fold does for a real array), a known
 // traversal-order limitation.
 function complexProd(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DType, init: [number, number] | null = null, mask: NDArray | null = null): NDArray {
-  // (NumPy discards the imaginary parts with a ComplexWarning, which Sagebrush does not have)
+  // (prod passes a complex operand in a real dtype as its real parts, with NumPy's ComplexWarning; never here)
   if (a.dt.cplx && !rt.cplx) raise(T.TypeError, `prod: a complex array multiplied in the real dtype ${rt.name} would lose its imaginary parts; take .real first`);
   const nd = a.ndim;
   const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))].sort((x, y) => x - y);
@@ -2725,7 +2805,10 @@ function prodReduce(a: NDArray, axes: number[] | null, keepdims: boolean, rt: DT
   const out = empty(outShape, rt);
   const { off, rshape, rst, order } = prodOrder(a, ax, rt, mask);
   const mul = mulIn(rt, "prod");
-  const cast = (v: number) => (rt.kind === "f" ? castNum(rt, v) : v);
+  // (a float operand in an integer or bool dtype: each element cast as NumPy's float-to-int cast, warning "reduce")
+  const toInt = a.dt.kind === "f" && (rt.isInt || rt.kind === "b");
+  if (toInt) castInvalid = false;
+  const cast = (v: number) => (rt.kind === "f" ? castNum(rt, v) : toInt ? floatToInt(rt, v, true) : v);
   const d = a.data, od = out.data;
   const kshape = keep.map((i) => a.shape[i]), kst = keep.map((i) => a.strides[i]);
   if (mask !== null) {
@@ -2773,6 +2856,14 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
   }
   const ax = axis === null || axis === undefined ? 0 : normAxis(intNum(axis), a.ndim);
   const rt = dtype !== null && dtype !== undefined ? toDtype(dtype) : sumType(a.dt);
+  // (a complex operand in a real dtype: its real parts with NumPy's ComplexWarning, as sum's (a bool dtype both parts))
+  if (a.dt.cplx && !rt.cplx) {
+    if (rt.kind === "b") a = unary("logical_not", unary("logical_not", a));
+    else {
+      warnComplexCast();
+      a = realPart(a);
+    }
+  }
   const out = empty(a.shape, rt);
   const t = moveAxisToEnd(a, ax), o = moveAxisToEnd(out, ax);
   const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1], ost = o.strides[o.ndim - 1];
@@ -2795,18 +2886,25 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
     });
     return out;
   }
-  // (NumPy discards the imaginary parts with a ComplexWarning, which Sagebrush does not have)
+  // (a complex operand in a real dtype was taken as its real parts above; never here)
   if (a.dt.cplx) raise(T.TypeError, `${isProd ? "cumprod" : "cumsum"}: a complex array accumulated in the real dtype ${rt.name} would lose its imaginary parts; take .real first`);
   const mul = mulIn(rt, "cumprod");
   const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
+  // (each element cast to rt before it is accumulated, as NumPy's buffer casts it: a float operand in an integer or bool
+  // dtype truncated as floatToInt converts it (a uint64 one kept congruent, wrapped when stored), with the cast's
+  // warning; into float32 rounded)
+  const toInt = a.dt.kind === "f" && (rt.isInt || rt.kind === "b");
+  const el = (v: number) => (toInt ? floatToInt(rt, v, true) : rt.kind === "f" ? castNum(rt, v) : v);
+  castInvalid = false;
   loop2(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, o.strides.slice(0, -1), o.offset, (p, q) => {
     let acc = isProd ? 1 : 0;
     for (let i = 0; i < n; i++) {
-      acc = i === 0 ? t.data[p] : isProd ? mul(acc, t.data[p + i * st]) : add(acc, t.data[p + i * st]);
+      acc = i === 0 ? el(t.data[p]) : isProd ? mul(acc, el(t.data[p + i * st])) : add(acc, el(t.data[p + i * st]));
       acc = castNum(rt, acc);
       o.data[q + i * ost] = acc;
     }
   });
+  warnInvalidCast();
   return out;
 }
 
@@ -5279,7 +5377,8 @@ newBuiltinModule("_numpy", (m) => {
         if (ct.kind === "f") {
           const rt = spec.out === "bool" ? D.bool : ct;
           const f = spec.f;
-          const v = castNum(rt, f(wa.v, wb.v));
+          // (each operand in the loop's type first: a Python float with a float32 scalar is the float32 nearest)
+          const v = ct === D.float32 ? castNum(rt, f(Math.fround(wa.v), Math.fround(wb.v))) : castNum(rt, f(wa.v, wb.v));
           return pyScalarOf(rt, [v], 0);
         }
       }
@@ -5295,8 +5394,16 @@ newBuiltinModule("_numpy", (m) => {
     return 0 + pairwiseSqDev(a.data, a.offset, a.size, toNum(m));
   });
   fn("prod", (a: any, axis: any = null, keepdims: any = false, dtype: any = null, initial: any = null, where: any = null) => {
-    const x = asarray(a);
+    let x = asarray(a);
     const rt = dtype !== null ? toDtype(dtype) : sumType(x.dt);
+    // (a complex operand in a real dtype: its real parts with NumPy's ComplexWarning, as sum's (a bool dtype both parts))
+    if (x.dt.cplx && !rt.cplx) {
+      if (rt.kind === "b") x = unary("logical_not", unary("logical_not", x));
+      else {
+        warnComplexCast();
+        x = realPart(x);
+      }
+    }
     // (where=: a bool mask of x's shape, checked and broadcast by the caller, #1944)
     const m = where === null ? null : asarray(where);
 
@@ -5307,7 +5414,9 @@ newBuiltinModule("_numpy", (m) => {
     // rounded to it or wrapped to its integer width; from initial, in the
     // reduced elements' memory order: prodReduce)
     const init = initial === null ? 1 : rt.isInt ? toNum(initial, rt) : castNum(rt, toNum(initial));
-    return finish(prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null, m), axis, !!keepdims);
+    const r = prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null, m);
+    warnInvalidReduce();
+    return finish(r, axis, !!keepdims);
   });
   fn("amax", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first));
   fn("amin", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, false, opt(initial), !!first));

@@ -37,7 +37,7 @@ const accountId2 = (i) => `c2c2c2c2-${String(i).padStart(4, "0")}-4c2c-8c2c-c2c2
 // (the cloud's fake CoCalc gives FULL a small storage and SMALL small files; the reference server has no plan limits,
 // so the two cases that use them are skipped here, by name)
 const FULL = accountId(87), SMALL = accountId(88);
-const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), ...Array.from({ length: 30 }, (_, i) => accountId2(i)), FULL, SMALL];
+const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), ...Array.from({ length: 40 }, (_, i) => accountId2(i)), FULL, SMALL];
 // (the control pages' accounts: their own, so no case of the main run sees a control's log)
 // (each control page takes its own 3 of them, by its place in CONTROL_PAGES)
 const CTL_ACCOUNTS = Array.from({ length: 30 }, (_, i) => `d0d0d0d0-${String(i).padStart(4, "0")}-4d0d-8d0d-d0d0d0d0d0${String(i).padStart(2, "0")}`);
@@ -448,6 +448,8 @@ async function control(body) {
     case "sealedCap": ref.controls.setSealedCap(body.n); return { ok: true };
     case "refuseSealed": ref.controls.refuseSealed(body.dseq, body.code); return { ok: true };
     case "sealedRefs": return { refs: ref.controls.refs(body.account, body.address) };
+    // (e2e PR 5d: the index's references, each add `address:add_seq` with the seq that released it or null)
+    case "indexRefs": return { rows: ref.controls.indexRefs(body.account) };
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the client's side is tested by injecting them here; the server's own are dropped unless
     // ctl.serverNotices)
@@ -1608,12 +1610,16 @@ try {
     writeFileSync(join(site, "floors.html"), `<!doctype html><meta charset="utf-8"><title>sync floors: the old front</title><script>window.ACCOUNTS = ${J(FLOOR_ACCOUNTS)}; window.OLD_SHA = ${J(OLD_SHA)};</script><script type="module">import { runFloors } from "./cases.js"; window.runFloors = runFloors; window.ready = true;</script>`);
   } else {
     waitingOn = "the page's bundle (Bun.build of index.ts)";
-    const b = await bounded(Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
+    // (index.ts, and the test hooks it doesn't export: dropVersions' DROP_HOOK sits between an irreversible deletion and
+    // its log, so only this test bundle carries it, never the product's public surface)
+    const wsEntry = join(site, "ws-entry.ts");
+    writeFileSync(wsEntry, `export * from ${J(join(here, "index.ts"))};\nexport { DROP_HOOK } from ${J(join(here, "api.ts"))};\n`);
+    const b = await bounded(Bun.build({ entrypoints: [wsEntry], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
     if (!b.success) throw new Error("the page's bundle: " + b.logs.map(String).join("\n"));
     // (e2e PR 5c: the sealing module and an epoch's keys, a bundle of their own that only the sealed cases load, so the
     // workspace's bundle carries none of it, as a page without end-to-end encryption doesn't)
     const kitEntry = join(site, "sealkit-entry.ts");
-    writeFileSync(kitEntry, `export * from ${J(join(here, "sync-seal.ts"))};\nexport { deriveEpochKeys } from ${J(join(here, "e2e", "keys.ts"))};\nexport { openIndexOp } from ${J(join(here, "e2e", "index-op.ts"))};\n`);
+    writeFileSync(kitEntry, `export * from ${J(join(here, "sync-seal.ts"))};\nexport { deriveEpochKeys } from ${J(join(here, "e2e", "keys.ts"))};\nexport { openIndexOp } from ${J(join(here, "e2e", "index-op.ts"))};\nexport { mintDocCek } from ${J(join(here, "e2e", "doc-cek.ts"))};\n`);
     const kb = await bounded(Bun.build({ entrypoints: [kitEntry], outdir: site, naming: "sealkit.js", target: "browser", format: "esm" }), "the sealed cases' kit", 120_000);
     if (!kb.success) throw new Error("the sealed cases' kit: " + kb.logs.map(String).join("\n"));
     copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));

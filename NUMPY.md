@@ -76,13 +76,17 @@ pass, and CI runs them.
   cast" when that conversion is invalid, and so does Sagebrush, once per cast. NumPy's vectorized loop gives some
   uint32 elements of a contiguous array other values (in blocks of 4: NaN gives 2147483648 there); Sagebrush gives
   every element the per-element result. A Python float (or a NumPy float scalar) assigned or listed is converted by
-  `int()`, NaN, infinity and out-of-range values refused, as in NumPy. int64 and uint64 keep refusing results past
-  $2^{53}$. The warning names the operation as NumPy's does ("in cast"; "in add" and so on when a ufunc writes into
-  an integer `out=`; "in reduce" for a reduction into one), and `np.errstate`/`np.seterr` set whether it warns, is
-  ignored or raises `FloatingPointError` (their 'call', 'print' and 'log' modes are not supported for 'invalid'
-  yet). Sagebrush gives one warning per call: NumPy casts the first element of `min`/`max` (and of an accumulation,
-  "in accumulate") into `out=` on its own, so it may give a second warning, or say "in cast" when only that element
-  is invalid.
+  `int()`, NaN, infinity and out-of-range values refused, as in NumPy. int64 converts through a 64-bit integer (out
+  of range, NaN or infinity gives $-2^{63}$), and uint64 by x86-64's unsigned conversion ($2^{63}$ for NaN,
+  $-\infty$ and values below $-2^{63}$; 0 for $\infty$ and values from $2^{64}$): values these stores hold exactly.
+  Results past $2^{53}$ that a double can't hold are still refused. A complex value cast to a real type other than
+  bool drops its imaginary part with NumPy's `ComplexWarning` (`astype`, assignment, `out=`, and `sum`, `prod`,
+  `mean`, `cumsum` and `cumprod` with a real `dtype=`). The warning names the operation as NumPy's does ("in cast";
+  "in add" and so on when a ufunc writes into an integer `out=`; "in reduce" for a reduction into one), and
+  `np.errstate`/`np.seterr` set whether it warns, is ignored or raises `FloatingPointError` (their 'call', 'print'
+  and 'log' modes are not supported for 'invalid' yet). Sagebrush gives one warning per call: NumPy casts the first
+  element of `min`/`max` (and of an accumulation, "in accumulate") into `out=` on its own, so it may give a second
+  warning, or say "in cast" when only that element is invalid.
 
 ## What is there
 
@@ -99,6 +103,15 @@ pass, and CI runs them.
     `casting='unsafe'` casts. `clip` refuses the same way (as `maximum` or
     `minimum` with one bound), and `ptp`'s `out=` is NumPy's: the maximum
     reduced into `out`, then `subtract` into it.
+  - A reduction without an identity (`max`, `min`, `maximum.reduce`,
+    `nanmax`, ...) into an `out=` of another dtype takes NumPy's two steps:
+    each position's first element is cast into `out` ("invalid value
+    encountered in cast"), then the rest are reduced from `out`'s value read
+    back, and the result is cast ("... in reduce"). An accumulation into
+    `out=` (`cumsum`, `add.accumulate`, ...) is computed in the dtype both
+    convert to, with each result cast into `out`. NumPy's buffered iterator
+    also writes `out` back every 8192 elements of some reductions; that is not
+    done, so a reduction past that length into a narrower `out` can differ.
 - **Reductions** with `axis` (int or tuple) and `keepdims`: `nan*`
   variants, `median`, `percentile`/`quantile` (NumPy's `_lerp`), `average`,
   `cov`, `corrcoef`.
