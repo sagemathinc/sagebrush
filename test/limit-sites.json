@@ -14432,6 +14432,11 @@
   "owner": "modular forms",
   "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
  },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: ....: ms._CUR[0].limit = ms._CUR[0].used #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
  "lib/_sage_mfmore.py :: QSpaceMethods :: ....: print(type(e).__name__, e.need_bytes > e.limit_bytes) #0": {
   "class": "none",
   "owner": "modular forms/runtime memory",
@@ -14442,7 +14447,27 @@
   "owner": "modular forms/runtime memory",
   "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
  },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sm._mf = Spy(); sys._sagebrush_heap_limit = 4 * (est + P * ms._SLOT) # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = 4 * P * ms._SLOT // 2 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
  "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old # sagebrush only #1": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old # sagebrush only #2": {
   "class": "none",
   "owner": "modular forms/runtime memory",
   "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
@@ -14892,12 +14917,17 @@
   "owner": "modular forms (Sage mode)",
   "reason": "spaces with a nontrivial character: their bases need the engine's forms over Q(chi), not available yet; refused, never a wrong basis"
  },
- "lib/_sage_modular.py :: _new_cusp_rows :: bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1 #0": {
+ "lib/_sage_modular.py :: _hecke_qexp :: vb = ms._maxbits(v[:(prec - 1) * n + 1]) #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "the bits of the coefficients a Hecke translate reads, for the bound its row is reserved at; it refuses nothing"
+ },
+ "lib/_sage_modular.py :: _new_cusp_rows_charged :: bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1 #0": {
   "class": "none",
   "owner": "modular forms (Sage mode)",
   "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"
  },
- "lib/_sage_modular.py :: _new_cusp_rows :: r_max = max(int(o[\"dim\"]) for o in orbits) #0": {
+ "lib/_sage_modular.py :: _new_cusp_rows_charged :: r_max = max(int(o[\"dim\"]) for o in orbits) #0": {
   "class": "none",
   "owner": "modular forms (Sage mode)",
   "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"

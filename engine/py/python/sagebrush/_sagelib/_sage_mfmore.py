@@ -195,12 +195,68 @@ class QSpaceMethods:
         sage: len(ModularForms(11, 2).q_echelon_basis(8)), len(ModularForms(144, 2).eisenstein_series()), Newforms(11, names='a')[0].qexp(4)  # sagebrush only
         (2, 23, q - 2*q^2 - q^3 + O(q^4))
 
+    The basis rows' producer charges the same ledger: an allowance enough
+    for the rows' estimate but not for the engine's traces is refused
+    before the engine is asked for them, and caches nothing; the same call
+    works with the allowance restored; a cached basis charges the copies it
+    hands out; and a basis is published only once its storage is admitted
+    (here the allowance is spent just after its echelon form)::
+
+        sage: import _sage_modular as sm, _sage_modsym as ms  # sagebrush only
+        sage: S = CuspForms(11, 2); P = 3000; S.dimension()  # sagebrush only
+        1
+        sage: for c in (sm._QBASIS, sm._NEWROWS):  # sagebrush only
+        ....:     for key in [key for key in c if key[:2] == (11, 2)]:
+        ....:         del c[key]
+        sage: import _sage_mfmore as mm; est = P * (ms._SLOT + ms._FRAC + (mm._basis_bits(2, P) + 7) // 8 + 8)  # sagebrush only
+        sage: asked = []; engine = sm._mf  # sagebrush only
+        sage: class Spy:  # sagebrush only
+        ....:     def __getattr__(self, name):
+        ....:         if name == "newforms":
+        ....:             asked.append(name)
+        ....:         return getattr(engine, name)
+        sage: sm._mf = Spy(); sys._sagebrush_heap_limit = 4 * (est + P * ms._SLOT)  # sagebrush only
+        sage: try:  # sagebrush only
+        ....:     S.q_echelon_basis(P)
+        ....: except MemoryError as e:
+        ....:     print(type(e).__name__, asked, [key for key in sm._QBASIS if key[:2] == (11, 2)], (11, 2) in sm._NEWROWS)
+        SagebrushMemoryError [] [] False
+        sage: sys._sagebrush_heap_limit = old  # sagebrush only
+        sage: len(S.q_echelon_basis(P)), asked[:1], (11, 2, 'cusp') in sm._QBASIS  # sagebrush only
+        (1, ['newforms'], True)
+        sage: sm._mf = engine  # sagebrush only
+        sage: ch = ms._Charge("A check")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = sm._qbasis(11, 2, "cusp", P)
+        sage: ch.used >= P * ms._SLOT  # sagebrush only
+        True
+        sage: sys._sagebrush_heap_limit = 4 * P * ms._SLOT // 2  # sagebrush only
+        sage: try:  # sagebrush only
+        ....:     sm._qbasis(11, 2, "cusp", P)
+        ....: except MemoryError as e:
+        ....:     print(type(e).__name__)
+        SagebrushMemoryError
+        sage: sys._sagebrush_heap_limit = old  # sagebrush only
+        sage: del sm._QBASIS[(11, 2, 'cusp')]; real = ms._echelon  # sagebrush only
+        sage: def spent(rows, n):  # sagebrush only
+        ....:     out = real(rows, n)
+        ....:     ms._CUR[0].limit = ms._CUR[0].used
+        ....:     return out
+        sage: ms._echelon = spent  # sagebrush only
+        sage: try:  # sagebrush only
+        ....:     sm._qbasis(11, 2, "cusp", P)
+        ....: except MemoryError as e:
+        ....:     print(type(e).__name__, (11, 2, 'cusp') in sm._QBASIS)
+        SagebrushMemoryError False
+        sage: ms._echelon = real  # sagebrush only
+
     Each reservation, by its step, at least the floor of its stated bound
     (entries times the slot, the Fraction and the bound's bytes): the basis
     rows at >= 256 bits, the Eisenstein rows likewise, a newform's
     coefficients at (k + 1) log2(prec) / 2 bits; the echelon form's
     elimination charges as it goes; q_integral_basis reserves its kernel and
-    its Hermite form; Hadamard's bound is the product of the rows' norms::
+    its Hermite form at Hadamard's bound on their minors (with their working
+    copies, half as much again); Hadamard's bound is the product of the rows' norms::
 
         sage: import _sage_modsym as ms, _sage_mfmore as mm  # sagebrush only
         sage: def steps(f):  # sagebrush only
@@ -218,8 +274,10 @@ class QSpaceMethods:
         sage: s = steps(lambda: Newforms(11, names='a')[0].qexp(1000))  # sagebrush only
         sage: s["coefficients"] >= 1000 * (unit + (3 * 10 // 2 + 2) // 8)  # sagebrush only
         True
-        sage: s = steps(lambda: ModularForms(35, 2).q_integral_basis(8)); s["kernel"] > 0, s["hermite"] > 0  # sagebrush only
-        (True, True)
+        sage: s = steps(lambda: ModularForms(35, 2).q_integral_basis(8))  # sagebrush only
+        sage: floor = lambda E, H: 3 * E * (ms._SLOT + ms._INT + (H + 7) // 8 + 8) // 2  # sagebrush only
+        sage: [s[t] >= floor(*s[t + " bound"]) and s[t + " bound"][1] > 1 for t in ("kernel", "hermite")]  # sagebrush only
+        [True, True]
         sage: mm._hadamard_bits([[3, 4]]), mm._hadamard_bits([[3, 4], [0, 8]])  # sagebrush only
         (4, 8)
     """
@@ -349,7 +407,9 @@ class QSpaceMethods:
             ms._settle(ch, res, [x for r in rows for x in r])
             # (the kernel's basis and its working copies: at most d + m rows of
             # d + m entries, each a minor of the system, within Hadamard's bound)
-            _take_step(ch, "kernel", 3 * ms._reserve(ch, (d + m) * (d + m), _hadamard_bits(rows), frac=False) // 2)
+            E, H = (d + m) * (d + m), _hadamard_bits(rows)
+            _note(ch, "kernel bound", (E, H))
+            _take_step(ch, "kernel", 3 * ms._reserve(ch, E, H, frac=False) // 2)
             K = matrix(ZZ, rows).left_kernel().basis_matrix()
             res = ms._reserve(ch, K.nrows() * d, max((abs(int(x)).bit_length() for x in K.list()), default=0), frac=False)
             gens = [[int(x) for x in list(K.row(i))[:d]] for i in range(K.nrows())]
@@ -363,7 +423,9 @@ class QSpaceMethods:
             ms._settle(ch, res, v)
             vecs.append(v)
         # (the Hermite form and its working copies: entries within Hadamard's bound)
-        _take_step(ch, "hermite", 3 * ms._reserve(ch, len(vecs) * n, _hadamard_bits(vecs), frac=False) // 2)
+        E, H = len(vecs) * n, _hadamard_bits(vecs)
+        _note(ch, "hermite bound", (E, H))
+        _take_step(ch, "hermite", 3 * ms._reserve(ch, E, H, frac=False) // 2)
         H = matrix(ZZ, vecs).echelon_form()
         res = ms._reserve(ch, H.nrows() * prec, max((abs(int(x)).bit_length() for x in H.list()), default=0))
         out = [[_Fr(int(x)) for x in H.row(i)] for i in range(H.nrows()) if any(H.row(i))]

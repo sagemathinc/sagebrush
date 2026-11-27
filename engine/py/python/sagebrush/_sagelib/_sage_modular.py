@@ -1320,8 +1320,51 @@ def _bernoulli(n):
     return _BERNOULLI[n]
 
 
+# ---- admission for the q-expansion bases (lib/_sage_modsym.py's ledger:
+# the active charge, or one of the basis's own): each list of coefficients
+# is reserved before it is built, at a proven bound on its bits, and the
+# caches publish only storage that was admitted
+
+def _ledger(what):
+    import _sage_modsym as ms
+    return ms._Charging(ms._CUR[0] or ms._Charge(what))
+
+
+def _reserve_rows(ch, rows, cols, bits, frac=True):
+    import _sage_modsym as ms
+    return ms._reserve(ch, rows * cols, bits, frac=frac)
+
+
+def _deligne_bits(k, J, r=1):
+    """Bits bounding |a_j|, j <= J, of a trace form of an orbit of
+    dimension r: r d(j) j^((k-1)/2) <= r j^((k+1)/2)."""
+    return max(r, 1).bit_length() + ((k + 1) * max(J, 2).bit_length() + 1) // 2 + 1
+
+
+def _minor_bits(rows):
+    """Bits bounding every minor of rows scaled to integers row by row
+    (Hadamard: the product of the scaled rows' norms); an entry of their
+    reduced echelon form is a ratio of two such minors."""
+    from math import lcm
+    total = 0
+    for r in rows:
+        den = 1
+        for x in r:
+            den = lcm(den, _Fr(x).denominator)
+        n2 = 0
+        for x in r:
+            y = _Fr(x) * den
+            n2 += y.numerator * y.numerator
+        total += (n2.bit_length() + 1) // 2
+    return total + 1
+
+
 def _subs_qd(v, d, prec):
     """f(q^d) to precision prec, from f's coefficients v."""
+    import _sage_modsym as ms
+    ch = ms._CUR[0]
+    if ch is not None:
+        ch.take(prec * ms._SLOT)
     out = [_Fr(0)] * prec
     for n in range(0, (prec - 1) // d + 1):
         out[n * d] = v[n]
@@ -1334,6 +1377,12 @@ def _hecke_qexp(v, n, N, k, prec):
     d^(k-1) a_(mn/d^2)(f); a_0(T_n f) = sum over d | n, (d, N) = 1, of d^(k-1) a_0(f)."""
     ds = [d for d in _divisors(n) if _gcd(d, N) == 1]
     pw = {d: d ** (k - 1) for d in ds}
+    import _sage_modsym as ms
+    ch = ms._CUR[0]
+    if ch is not None:
+        # (|a_m(T_n f)| <= d(n) n^(k-1) max|a_j(f)|, j <= (prec - 1) n)
+        vb = ms._maxbits(v[:(prec - 1) * n + 1])
+        _reserve_rows(ch, 1, prec, n.bit_length() + (k - 1) * n.bit_length() + vb + 2)
     out = [_Fr(0)] * prec
     out[0] = sum(pw[d] for d in ds) * v[0]
     for m in range(1, prec):
@@ -1370,16 +1419,6 @@ class _ModpEchelon:
         self.rows.append([x * inv % p for x in v])
         self.piv.append(c)
         return True
-
-
-def _rref_exact(rows):
-    """The reduced row echelon form over QQ of rows (the engine's exact
-    elimination), without its zero rows."""
-    if not rows:
-        return []
-    from _sagebrush_lib import linalg
-    R, piv = linalg.rref(rows)
-    return [[_Fr(x) for x in R[i]] for i in range(len(piv))]
 
 
 # The primes the engine's cusp_hecke_matrix takes (its domain: below 2^30);
@@ -1434,7 +1473,14 @@ def _solve_rows(B, V):
         return [[] for _ in V]
     from _sagebrush_lib import linalg
     s = len(B[0])
+    import _sage_modsym as ms
+    ch = ms._CUR[0]
+    if ch is not None:
+        ch.take(s * (d + len(V)) * ms._SLOT)
     aug = [[B[i][c] for i in range(d)] + [v[c] for v in V] for c in range(s)]
+    if ch is not None:
+        # (the engine's echelon form and the coordinates: ratios of minors)
+        _reserve_rows(ch, 2 * min(s, d + len(V)), d + len(V), 2 * _minor_bits(aug))
     R, piv = linalg.rref(aug)
     if list(piv) != list(range(d)):
         raise ValueError("not in the span")
@@ -1457,10 +1503,22 @@ def _new_cusp_rows(M, k, prec):
     key = (M, k)
     have = _NEWROWS.get(key)
     if have is not None and have[0] >= prec:
+        import _sage_modsym as ms
+        # (the copies handed out are this computation's)
+        ms._charge().take(len(have[1]) * prec * ms._SLOT)
         return [r[:prec] for r in have[1]]
     if k % 2 or k < 2 or _mf_engine_dims(M, k)["new"] == 0:
         _NEWROWS[key] = (prec, [])
         return []
+    with _ledger("The new cusp forms of level %d and weight %d to precision %d" % (M, k, prec)) as ch:
+        return _new_cusp_rows_charged(M, k, prec, key, ch)
+
+
+def _new_cusp_rows_charged(M, k, prec, key, ch):
+    nd = _mf_engine_dims(M, k)["new"]
+    # (the engine's traces: at most nd orbits, prec coefficients each, at
+    # Deligne's bound)
+    held = _reserve_rows(ch, nd, prec + 1, _deligne_bits(k, prec, nd), frac=False)
     data = _mf.newforms(M, k, None, bound=prec)
     orbits = data["newforms"] if isinstance(data, dict) else data
     # (the translates T_1, ..., T_m of an orbit of dimension r reached rank r
@@ -1468,8 +1526,13 @@ def _new_cusp_rows(M, k, prec):
     # doubles when they don't)
     r_max = max(int(o["dim"]) for o in orbits)
     bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1
+    import _sage_modsym as ms
     while True:
+        res = _reserve_rows(ch, nd, bound + 1, _deligne_bits(k, bound, nd), frac=False)
         data = _mf.newforms(M, k, None, bound=bound)
+        # (the previous traces and rows are dropped)
+        ch.give(held)
+        held = res
         orbits = data["newforms"] if isinstance(data, dict) else data
         rows, short = [], False
         for o in orbits:
@@ -1485,15 +1548,30 @@ def _new_cusp_rows(M, k, prec):
                 if m > 64 * r + 64:
                     raise RuntimeError("internal error: the Hecke translates of orbit %s of level %d weight %d stopped at rank %d of %d"
                                        % (o.get("letter"), M, k, got, r))
+                before = ch.used
                 v = _hecke_qexp(t, m, M, k, prec)
                 if ech.add([int(x) for x in v]):
+                    # (kept: settled to its size; dropped: released)
                     rows.append(v)
                     got += 1
+                    b = ms._row_bytes(v)
+                    held += b
+                    d = ch.used - before - b
+                    if d >= 0:
+                        ch.give(d)
+                    else:
+                        ch.take(-d)
+                else:
+                    ch.give(ch.used - before)
             if short:
                 break
         if not short:
             break
         bound *= 2
+    # (the rows are kept and the traces dropped; published once the copies
+    # handed out are admitted)
+    ch.take(len(rows) * prec * ms._SLOT)
+    ch.give(held - sum(ms._row_bytes(r) for r in rows))
     _NEWROWS[key] = (prec, rows)
     return [r[:prec] for r in rows]
 
@@ -1570,7 +1648,13 @@ def _eis_components(m, j, L, k, prec):
     a_n = sum over d | n of chibar(d) chi(n/d) d^(k-1); a_0 = 0 (chi is not trivial)."""
     phi_poly = _cyclotomic(m)
     deg = len(phi_poly) - 1
-    # zeta^e in the power basis: x^e mod Phi_m
+    import _sage_modsym as ms
+    ch = ms._CUR[0]
+    # (x^e mod Phi_m: each reduction multiplies the coefficients by at most
+    # 1 + max |Phi_m's coefficients|)
+    gb = (1 + max(abs(c) for c in phi_poly)).bit_length()
+    if ch is not None:
+        _reserve_rows(ch, m, deg, m * gb + 1, frac=False)
     powers = []
     cur = [1] + [0] * (deg - 1)
     for e in range(m):
@@ -1580,6 +1664,9 @@ def _eis_components(m, j, L, k, prec):
         if top:
             nxt = [a - top * b for a, b in zip(nxt, phi_poly[:deg])]
         cur = nxt
+    if ch is not None:
+        # (|a_n| <= sigma_(k-1)(n) max |power coefficient| <= n^k 2^(m gb))
+        _reserve_rows(ch, deg, prec, k * prec.bit_length() + m * gb + 2)
     comps = [[_Fr(0)] * prec for _ in range(deg)]
     for n in range(1, prec):
         acc = [0] * deg
@@ -1601,6 +1688,14 @@ def _eis_rows(N, k, prec, new=False):
     if k % 2 or k < 2:
         return []
     rows = []
+    import _sage_modsym as ms
+    ch = ms._CUR[0]
+    if ch is not None:
+        # (sigma_(k-1)(n) <= n^k, the constant term -B_k/2k or (t - 1)/24,
+        # E_2(q) - t E_2(q^t): one more bit and t's; each t a row)
+        bk = _bernoulli(k) if k >= 2 else _Fr(0)
+        _reserve_rows(ch, 2 * len(_divisors(N)) + 2, prec,
+                      k * prec.bit_length() + bk.numerator.bit_length() + bk.denominator.bit_length() + 2 * N.bit_length() + 8)
     # the trivial pair
     if k >= 4:
         base = [-_bernoulli(k) / (2 * k)] + [_Fr(sum(d ** (k - 1) for d in _divisors(n))) for n in range(1, prec)]
@@ -1648,7 +1743,16 @@ def _qbasis(N, k, which, prec):
     key = (N, k, which)
     have = _QBASIS.get(key)
     if have is not None and have[0] >= prec:
+        import _sage_modsym as ms
+        # (the copies handed out are this computation's)
+        ms._charge().take(len(have[1]) * prec * ms._SLOT)
         return [r[:prec] for r in have[1]]
+    with _ledger("The q-expansion basis of %s forms of level %d and weight %d to precision %d" % (which, N, k, prec)):
+        return _qbasis_charged(N, k, which, prec, key)
+
+
+def _qbasis_charged(N, k, which, prec, key):
+    import _sage_modsym as ms
     work = max(prec, _sturm_bound(N, k) + 2)
     d = _mf_engine_dims(N, k)
     if which == "cusp":
@@ -1665,10 +1769,16 @@ def _qbasis(N, k, which, prec):
         rows, want = _eis_rows(N, k, work, new=True), _part_dim(N, k, "eis_new")
     else:
         raise ValueError(which)
-    basis = _rref_exact(rows)
+    # (the reduced echelon form by _sage_modsym's charged elimination: each
+    # row reserved at a sound bound before it is computed)
+    basis = ms._echelon(rows, work)[0] if rows else []
     if want is not None and len(basis) != want:
         raise RuntimeError("internal error: the q-expansion basis of %s of weight %d level %d has rank %d, the dimension is %d"
                            % (which, k, N, len(basis), want))
+    # (the basis is kept: its storage, and the copies handed out, admitted
+    # before it is published)
+    ch = ms._CUR[0]
+    ch.take(sum(ms._row_bytes(r) for r in basis) + len(basis) * prec * ms._SLOT)
     _QBASIS[key] = (work, basis)
     return [r[:prec] for r in basis]
 
