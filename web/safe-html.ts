@@ -74,6 +74,9 @@ export interface SafeOptions {
   /** an attachment that refers to a workspace image file ({"sagebrush/file": path}, image-store.ts): its blob: URL and
    * size once loaded, or null (not loaded yet, missing, or not an image). Without it, such attachments aren't shown. */
   fileImage?: (path: string) => Shown | null;
+  /** the folder of the document these attachments belong to (image-store.ts imageFolder of its owner): only references
+   * into it are followed. Without it, no file attachment is shown. */
+  fileFolder?: string | null;
 }
 
 // whether a link or an image address is harmless (control characters and spaces, which browsers ignore inside a scheme, are taken out first)
@@ -117,10 +120,11 @@ export function safeImage(src: string, o: SafeOptions = {}): string | null {
   if (a) {
     const att = o.attachments?.[a[1]];
     if (!att) return null;
-    // (one of ours, referring to a workspace file: only a well-formed path under /Attachments, only as the page
-    //  loaded and checked it, and counted in the pixel budget like any picture; anything else of our key: missing)
+    // (one of ours, referring to a workspace file: only a well-formed path in this document's own folder, only as the
+    //  page loaded and checked it, and counted in the pixel budget like any picture; anything else of our key, another
+    //  notebook's or chat's folder included: missing)
     if (isFileEntry(att)) {
-      const p = filePathOf(att), got = p && o.fileImage ? o.fileImage(p) : null;
+      const p = filePathOf(att, o.fileFolder ?? null), got = p && o.fileImage ? o.fileImage(p) : null;
       return got && /^blob:/.test(got.url) && (o.pixels ?? new PixelBudget(Infinity)).take(got, "file\n" + p) === null ? got.url : null;
     }
     const [mime, b64] = Object.entries(att)[0] ?? [];

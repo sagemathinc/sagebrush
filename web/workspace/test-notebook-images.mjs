@@ -183,7 +183,9 @@ try {
   //  export waits for that one too, and embeds it
   {
     const doc = await P.ev(`${NB}.snapshot()`);
-    const extraPath = p8; // (a file that exists: N7's, rewritten by N9)
+    // (a file that exists, in the folder of the notebook shown now: only its own folder is ever followed (H1))
+    const extraPath = `/Attachments/nb-${await P.ev(`${T}.ref()`)}/n11extra.png`;
+    await P.ev(`${W}.create(${J(extraPath)}, { content: ${PNG_JS} }).then(() => true, () => true)`);
     const reloaded = { ...doc, cells: [...doc.cells, { id: "n11", type: "markdown", code: "![n](attachment:n11.png)", attachments: { "n11.png": { "sagebrush/file": extraPath } } }] };
     await P.ev(`${NB}.load(${J(doc)})`);
     await sleep(300);
@@ -206,6 +208,26 @@ try {
   const reads = await P.ev(`window.__reads`);
   const shown6 = await P.ev(`(() => { const cs = ${NB}.cells(); const c = cs[cs.length - 1]; return { img: !!c.md.querySelector("img"), text: c.md.textContent }; })()`);
   ok(!reads.some((p) => p.startsWith("/private")) && !shown6.img && /x/.test(shown6.text), "N6: an ill-formed reference: shown as missing (its alt text), never read", { reads, shown6 });
+  // ---- N12 (H1): a reference into ANOTHER notebook's folder, or a chat's, is never read, shown or embedded: a saved
+  //  notebook (as an agent or an edit could make it), its Download, and an import that brings such references
+  const OTHER = "/Attachments/nb-someoneelse/secret.png", CHAT = "/Attachments/chat-x1/secret.png";
+  for (const p of [OTHER, CHAT]) await P.ev(`${W}.create(${J(p)}, { content: ${PNG_JS} }).then(() => true, () => true)`);
+  await P.ev(`(() => { window.__reads = []; return true; })()`);
+  await P.ev(`(() => { const c = ${NB}.addCell("![o](attachment:o.png) ![c](attachment:c.png)", null, false, "markdown"); c.attachments = { "o.png": { "sagebrush/file": ${J(OTHER)} }, "c.png": { "sagebrush/file": ${J(CHAT)} } }; ${NB}.run(c); return true; })()`);
+  await sleep(800);
+  const shown12 = await P.ev(`(() => { const cs = ${NB}.cells(); const c = cs[cs.length - 1]; return { img: c.md.querySelectorAll("img").length, text: c.md.textContent }; })()`);
+  const ex12 = JSON.parse(await P.ev(`${T}.exportIpynb()`));
+  const cell12 = ex12.cells.find((c) => [].concat(c.source).join("").includes("attachment:o.png"));
+  const reads12 = await P.ev(`window.__reads`);
+  ok(shown12.img === 0 && !reads12.includes(OTHER) && !reads12.includes(CHAT), "N12: a notebook's reference into another notebook's folder, or a chat's: not shown, never read", { shown12, reads12 });
+  ok(cell12 && !cell12.attachments?.["o.png"] && !cell12.attachments?.["c.png"] && !JSON.stringify(ex12).includes(b64(PNG).slice(0, 40) + "secret"), "N12: …and Download embeds neither (left out, as a missing one is)", cell12?.attachments);
+  // (an import that brings references: removed, never followed, not even into its own new folder)
+  const src12 = { cells: [{ cell_type: "markdown", id: "m12", metadata: {}, source: ["![o](attachment:o.png)"], attachments: { "o.png": { "sagebrush/file": OTHER } } }], metadata: {}, nbformat: 4, nbformat_minor: 5 };
+  await P.ev(`(() => { window.__reads = []; return true; })()`);
+  const r12 = await P.ev(`(async () => { const r = await ${T}.importIpynb("brings-refs.ipynb", ${J(J(src12))}); return r.made.map((e) => ({ path: e.path, ref: e.ref })); })()`);
+  const doc12 = r12[0] && (await P.ev(`(async () => (await ${W}.read(${J(r12[0].path)})).content)()`));
+  const reads12b = await P.ev(`window.__reads.filter((p) => p.startsWith("/Attachments/"))`);
+  ok(r12[0] && !JSON.stringify(doc12?.cells?.[0]?.attachments ?? null).includes("sagebrush/file") && reads12b.length === 0, "N12: an imported .ipynb's own sagebrush/file references are removed on import, and nothing under /Attachments is read", { att: doc12?.cells?.[0]?.attachments, reads12b });
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the run threw: " + String(e?.stack ?? e).slice(0, 600));

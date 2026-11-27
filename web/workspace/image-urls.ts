@@ -12,7 +12,9 @@ export type Shown = { url: string; w: number; h: number };
 type Held = { shown: Shown | null; bytes: Uint8Array };
 /** blob: URLs for image files, for a page that shows them: `url(path)` is synchronous (null until loaded), `load(path)`
  * reads the file, checks it again by its bytes and the cap, and makes its URL once; `changed` is called when one
- * arrives, so the page can draw again. Only paths filePathOf accepts are read. */
+ * arrives, so the page can draw again. Only paths filePathOf accepts in the document's own folder are read: the folder
+ * is the owner's, given by the page at clear() for each document it shows (never read from the document), and with no
+ * folder nothing is read at all. */
 export class ImageUrls {
   private urls = new Map<string, Held | null>();
   private loading = new Map<string, Promise<void>>();
@@ -27,6 +29,10 @@ export class ImageUrls {
   private clears = 0;
   /** true once dispose()d: nothing is read or held any more, ever (the document's page or pane is gone) */
   disposed = false;
+  /** the folder of the document shown (imageFolder of its owner), or null: then no path is accepted */
+  private folder: string | null = null;
+  /** whether `path` is a reference this page may follow: well formed, in the shown document's own folder */
+  private ok = (path: string) => filePathOf({ [FILE_KEY]: path }, this.folder) === path;
   private version = (p: string) => this.ver.get(p) ?? this.floor;
   private letGo(p: string) {
     this.ver.set(p, ++this.counter);
@@ -48,7 +54,7 @@ export class ImageUrls {
   }
   /** An image saved just now: its bytes are known, so it needn't be read back. */
   put(path: string, u: Uint8Array) {
-    if (this.urls.has(path) || filePathOf({ [FILE_KEY]: path }) !== path) return;
+    if (this.urls.has(path) || !this.ok(path)) return;
     this.hold(path, u);
   }
   /** Every one of `paths` read again from the workspace (or found missing), for an export that is about to embed them:
@@ -76,7 +82,7 @@ export class ImageUrls {
       const v = this.version(p);
       const fresh = !this.urls.has(p) && !this.loading.has(p);
       await this.load(p);
-      if (fresh || v !== this.version(p) || filePathOf({ [FILE_KEY]: p }) !== p) return;
+      if (fresh || v !== this.version(p) || !this.ok(p)) return;
       const now = await this.read(p).catch(() => null);
       if (v !== this.version(p)) return;
       const had = this.urls.get(p);
@@ -92,7 +98,7 @@ export class ImageUrls {
     if (this.disposed || this.urls.has(path)) return Promise.resolve();
     const going = this.loading.get(path);
     if (going) return going;
-    if (filePathOf({ [FILE_KEY]: path }) !== path) { this.urls.set(path, null); return Promise.resolve(); }
+    if (!this.ok(path)) { this.urls.set(path, null); return Promise.resolve(); }
     const v = this.version(path);
     let p: Promise<void> | undefined;
     p = (async () => {
@@ -120,7 +126,7 @@ export class ImageUrls {
   forget(path: string) { this.letGo(path); }
   /** Whether `path` is settled: held (an image or found not one), or never to be read (not a well-formed reference). */
   settled(path: string): boolean {
-    return this.urls.has(path) || filePathOf({ [FILE_KEY]: path }) !== path;
+    return this.urls.has(path) || !this.ok(path);
   }
   /** Let go of the images not among `paths` (those no cell refers to any more): their URLs revoked, their bytes
    * dropped, so pasting and deleting images doesn't keep them all. */
@@ -128,13 +134,15 @@ export class ImageUrls {
     const keep = new Set(paths);
     for (const p of [...this.urls.keys(), ...this.loading.keys()]) if (!keep.has(p)) this.letGo(p);
   }
-  /** Let go of every image (another document shown): their URLs revoked and their bytes dropped, and any read still on
-   * its way dropped when it arrives. */
-  clear() {
+  /** Let go of every image (another document shown, or none): their URLs revoked and their bytes dropped, and any read
+   * still on its way dropped when it arrives. `folder` is the folder of the document now shown (imageFolder of its
+   * owner), or null for none: only references into it are followed from now on. */
+  clear(folder: string | null = null) {
+    this.folder = folder;
     this.clears++;
     for (const p of [...this.urls.keys(), ...this.loading.keys()]) this.letGo(p);
     this.floor = ++this.counter;
     this.ver.clear();
   }
-  dispose() { this.disposed = true; this.clear(); }
+  dispose() { this.disposed = true; this.clear(null); }
 }

@@ -680,6 +680,8 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
         return r?.content instanceof Uint8Array ? r.content : null;
       },
       say: (text: string) => ui.saved(text),
+      // (the mounted document's own folder, by its ref: the only one its references may name)
+      folder: () => imageFolder("nb", ref),
     };
     const comp = (nb = mod.createNotebook(nbRoot, { kernel: k, assetBase: SITE.href, reactive: false, remotePictures: "click", images }));
 

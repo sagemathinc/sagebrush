@@ -20,7 +20,7 @@ import { boardBytes, boardSlices, Counter, notebookBytes, notebookSlices, sizes,
 // rather than handed over by the page, so that a page carries them only if it uses them itself before any click
 // (E1 r2a, @sagebrush's eager-size ruling); the same source, so the export's bytes are Download's by construction)
 import { boardFileText, boardTextParts, cleanDocSteps, ipynbObject, notebookFileText } from "../file-bytes";
-import { embedAttachments } from "../image-store";
+import { embedAttachments, imageFolder } from "../image-store";
 const SER: BoardKit = { cleanDocSteps, boardTextParts };
 
 /** What the page gives this chunk, from its own bundle, so the chunk carries no second copy of the workspace: how a
@@ -309,7 +309,9 @@ async function capture(w: Workspace, e: Entry, signal: AbortSignal): Promise<{ e
   // (a notebook's Markdown images kept as files (#1872): embedded in its .ipynb, as Download's are, so the export opens
   //  anywhere; one whose file is missing is left out. The files are exported as files too, in /Attachments)
   if (r.entry.kind === "notebook" && r.content && typeof r.content === "object") {
-    const doc = (await embedAttachments(r.content as any, async (p) => {
+    // (only the files of this notebook's own folder, by the ref of the entry just checked, never the document's say)
+    const folder = typeof r.entry.ref === "string" ? imageFolder("nb", r.entry.ref) : null;
+    const doc = (await embedAttachments(r.content as any, folder, async (p) => {
       const f = await w.read(p).catch(() => null);
       return f?.content instanceof Uint8Array ? f.content : null;
     })).doc;

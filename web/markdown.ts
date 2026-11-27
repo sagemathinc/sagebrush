@@ -23,6 +23,8 @@ export interface Options {
   pixels?: PixelBudget;
   // a cell attachment that refers to a workspace image file: its blob: URL and size once loaded (safe-html.ts)
   fileImage?: (path: string) => { url: string; w: number; h: number } | null;
+  // the folder of the document those attachments belong to (its owner's, image-store.ts imageFolder): only it is read
+  fileFolder?: string | null;
   // a Jupytext MyST notebook's directives and roles (web/myst, loaded only for one): an extension given render()
   // itself for its bodies, with these same options one level deeper (`depth`), and the inline renderer for titles
   myst?: MystHook;

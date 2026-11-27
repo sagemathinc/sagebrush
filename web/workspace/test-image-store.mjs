@@ -46,9 +46,9 @@ ok(imageFolder("chat", "abc") === "/Attachments/abc" && imageFolder("nb", "u-1")
 }
 
 // ---- the file-referring attachment, failing closed
-ok(filePathOf({ [FILE_KEY]: "/Attachments/nb-x/ab12.png" }) === "/Attachments/nb-x/ab12.png", "a well-formed reference");
+ok(filePathOf({ [FILE_KEY]: "/Attachments/nb-x/ab12.png" }, "/Attachments/nb-x") === "/Attachments/nb-x/ab12.png", "a well-formed reference in its owner's folder");
 const bad = [{ [FILE_KEY]: "/Attachments/nb-x/../../secret.png" }, { [FILE_KEY]: "/private/a.png" }, { [FILE_KEY]: "/private/notes/a.png" }, { [FILE_KEY]: "/attachments/nb-x/a.png" }, { [FILE_KEY]: "/Attachments/a.png" }, { [FILE_KEY]: "/Attachments/nb-x/a/b.png" }, { [FILE_KEY]: "/Attachments/nb-x/a.svg" }, { [FILE_KEY]: "/Attachments/nb-x/.a.png" }, { [FILE_KEY]: 7 }, { [FILE_KEY]: "/Attachments/nb-x/a.png", extra: 1 }, { "image/png": "AAAA" }, null, [], "x"];
-ok(bad.every((b) => filePathOf(b) === null), "ill-formed references are refused: traversal, outside /Attachments, wrong depth, not raster, hidden, not a string, extra keys", bad.filter((b) => filePathOf(b) !== null));
+ok(bad.every((b) => filePathOf(b, "/Attachments/nb-x") === null), "ill-formed references are refused: traversal, outside /Attachments, wrong depth, not raster, hidden, not a string, extra keys", bad.filter((b) => filePathOf(b, "/Attachments/nb-x") !== null));
 ok(isFileEntry({ [FILE_KEY]: 1 }) && !isFileEntry({ "image/png": "x" }), "an entry of our key is ours even when ill-formed");
 
 // ---- base64 and data: URLs
@@ -69,24 +69,24 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
     { id: "a", type: "markdown", code: "![a](attachment:a.png) ![g](attachment:g.gif) ![s](attachment:s.svg)", attachments: { "a.png": { "image/png": toBase64(png) }, "g.gif": { "image/gif": toBase64(gif) }, "s.svg": svg, "two.png": { "image/png": toBase64(png), "text/plain": "x" }, "lie.png": { "image/png": toBase64(gif) } } },
     { id: "b", code: "1+1", attachments: { "c.png": { "image/png": toBase64(png) } } },
   ] };
-  const S = store();
-  const x = await extractAttachments(doc, (u) => saveImage(S.create, "/Attachments/nb-r1", u));
+  const S = store(), R1 = "/Attachments/nb-r1";
+  const x = await extractAttachments(doc, (u) => saveImage(S.create, R1, u));
   const att = x.doc.cells[0].attachments;
-  ok(x.extracted === 2 && filePathOf(att["a.png"]) && filePathOf(att["g.gif"]) && att["s.svg"] === svg && att["two.png"]["text/plain"] === "x" && att["lie.png"]["image/png"] && S.files.size === 2, "import: raster images become files; SVG, several mimes and a mime that lies stay inline", att);
+  ok(x.extracted === 2 && filePathOf(att["a.png"], R1) && filePathOf(att["g.gif"], R1) && att["s.svg"] === svg && att["two.png"]["text/plain"] === "x" && att["lie.png"]["image/png"] && S.files.size === 2, "import: raster images become files; SVG, several mimes and a mime that lies stay inline", att);
   ok(x.doc.cells[0].code === doc.cells[0].code && x.doc.cells[1] === doc.cells[1] && doc.cells[0].attachments["a.png"]["image/png"], "the source never changes, code cells are untouched, the given document isn't modified");
-  const e = await embedAttachments(x.doc, S.read);
+  const e = await embedAttachments(x.doc, R1, S.read);
   ok(e.missing.length === 0 && JSON.stringify(e.doc.cells[0].attachments) === JSON.stringify(doc.cells[0].attachments) && e.doc.cells[0].code === doc.cells[0].code, "export: the same attachments, byte for byte, and the same source (round trip)", e.doc.cells[0].attachments);
   // a missing file, and a file that isn't an image any more
-  S.files.delete(filePathOf(att["a.png"]));
-  S.files.set(filePathOf(att["g.gif"]), new TextEncoder().encode("not an image"));
-  const m = await embedAttachments(x.doc, S.read);
+  S.files.delete(filePathOf(att["a.png"], R1));
+  S.files.set(filePathOf(att["g.gif"], R1), new TextEncoder().encode("not an image"));
+  const m = await embedAttachments(x.doc, R1, S.read);
   ok(m.missing.join() === "a.png,g.gif" && !("a.png" in m.doc.cells[0].attachments) && m.doc.cells[0].attachments["s.svg"] === svg, "export: a missing or changed file is left out and listed; the rest is kept", m.missing);
   const evil = { cells: [{ type: "markdown", code: "x", attachments: { "e.png": { [FILE_KEY]: "/private/notes.png" } } }] };
   let asked = 0;
-  const ev = await embedAttachments(evil, async () => { asked++; return bytes(PNG); });
+  const ev = await embedAttachments(evil, R1, async () => { asked++; return bytes(PNG); });
   ok(asked === 0 && ev.missing.join() === "e.png", "export: an ill-formed reference is never read, only listed as missing");
   const plain = { cells: [{ type: "markdown", code: "x" }] };
-  ok((await embedAttachments(plain, S.read)).doc === plain && (await extractAttachments(plain, () => { throw new Error("no"); })).doc === plain, "a notebook with nothing to do is returned as it is");
+  ok((await embedAttachments(plain, R1, S.read)).doc === plain && (await extractAttachments(plain, () => { throw new Error("no"); })).doc === plain, "a notebook with nothing to do is returned as it is");
 }
 
 // ---- ImageUrls: shown when its size can be read; its checked bytes kept for export either way
@@ -97,6 +97,7 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   const reads = [];
   let changes = 0;
   const U = new ImageUrls(async (p) => { reads.push(p); return files.get(p) ?? null; }, () => changes++);
+  U.clear("/Attachments/nb-x");
   await U.ready(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/c.png", "/Attachments/nb-x/none.png", "/private/x.png"]);
   const a = U.url("/Attachments/nb-x/a.png");
   ok(a && a.url.startsWith("blob:") && a.w === 3 && a.h === 2 && U.bytes("/Attachments/nb-x/a.png")?.length === 64, "a readable image: a blob: URL with its size, and its bytes");
@@ -106,8 +107,8 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   U.put("/Attachments/nb-x/d.png", real);
   ok(U.bytes("/Attachments/nb-x/d.png")?.length === 64 && !reads.includes("/Attachments/nb-x/d.png"), "an image saved just now is held without reading it back");
   const doc = { cells: [{ type: "markdown", code: "x", attachments: { "a.png": { [FILE_KEY]: "/Attachments/nb-x/a.png" }, "b.png": { [FILE_KEY]: "/Attachments/nb-x/b.png" }, "c.png": { [FILE_KEY]: "/Attachments/nb-x/c.png" } } }] };
-  ok(J(referencedPaths(doc)) === J(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/c.png"]), "the paths a notebook refers to");
-  const e = embedAttachmentsWith(doc, (p) => U.bytes(p));
+  ok(J(referencedPaths(doc, "/Attachments/nb-x")) === J(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/c.png"]), "the paths a notebook refers to");
+  const e = embedAttachmentsWith(doc, "/Attachments/nb-x", (p) => U.bytes(p));
   ok(e.missing.join() === "c.png" && Object.keys(e.doc.cells[0].attachments).join() === "a.png,b.png", "export from held bytes: both images embedded (the one not drawn too); the non-image left out and listed", e.missing);
   // (ready() reads again: a changed file's new bytes, a deleted one gone, a restored one back)
   const other = new Uint8Array(real); other[40] = 9;
@@ -119,7 +120,7 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   ok(U.bytes("/Attachments/nb-x/a.png")?.[40] === 9 && U.bytes("/Attachments/nb-x/b.png") === null && U.bytes("/Attachments/nb-x/none.png")?.length === 64 && changes > before, "ready() reads again: a changed file's new bytes, a deleted one gone, a restored one found; the page told to draw again");
   U.retain(["/Attachments/nb-x/a.png"]);
   ok(U.bytes("/Attachments/nb-x/a.png") !== null && U.bytes("/Attachments/nb-x/none.png") === null && U.bytes("/Attachments/nb-x/d.png") === null, "retain() lets go of the images no cell refers to, keeps the rest");
-  U.clear();
+  U.clear("/Attachments/nb-x");
   ok(U.bytes("/Attachments/nb-x/a.png") === null, "clear() lets every image go");
   U.dispose();
 }
@@ -129,9 +130,10 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   let release;
   const gate = new Promise((r) => (release = r));
   const U = new ImageUrls(async () => { await gate; return real; }, () => {});
+  U.clear("/Attachments/nb-a");
   const loading = U.load("/Attachments/nb-a/x.png");
   const readying = U.ready(["/Attachments/nb-a/y.png"]);
-  U.clear();
+  U.clear("/Attachments/nb-a");
   release();
   await loading; await readying;
   ok(U.bytes("/Attachments/nb-a/x.png") === null && U.bytes("/Attachments/nb-a/y.png") === null && U.url("/Attachments/nb-a/x.png") === null, "reads that arrive after clear() (another document shown) aren't kept");
@@ -144,6 +146,7 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   let hold = false, release = () => {}, readsOf = 0;
   const read = async (p) => { if (p.endsWith("c.png")) readsOf++; if (hold) await new Promise((r) => (release = r)); return real; };
   const U = new ImageUrls(read, () => {});
+  U.clear("/Attachments/nb-r");
   hold = true;
   const l = U.load("/Attachments/nb-r/a.png");
   U.retain([]);
@@ -172,9 +175,10 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
   const releases = [];
   const U = new ImageUrls(() => new Promise((r) => releases.push(() => r(real))), () => {});
+  U.clear("/Attachments/nb-ab");
   const p = "/Attachments/nb-ab/x.png";
   const r = U.ready([p]);
-  U.clear();
+  U.clear("/Attachments/nb-ab");
   void U.load(p);
   let done = false;
   void r.then(() => (done = true));
@@ -191,12 +195,13 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
   const releases = [];
   const U = new ImageUrls(() => new Promise((r) => releases.push(() => r(real))), () => {});
+  U.clear("/Attachments/nb-ab");
   const p = "/Attachments/nb-ab/y.png";
   const r = U.ready([p]);
   let done = false;
   void r.then(() => (done = true));
   for (let k = 0; k < 5; k++) {
-    U.clear();
+    U.clear("/Attachments/nb-ab");
     void U.load(p);
     releases[k]();
     await new Promise((res) => setTimeout(res, 5));
@@ -213,6 +218,7 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   const releases = [];
   let reads = 0;
   const U = new ImageUrls(() => { reads++; return new Promise((r) => releases.push(() => r(real))); }, () => {});
+  U.clear("/Attachments/nb-d");
   const p = "/Attachments/nb-d/z.png";
   const r = U.ready([p]);
   U.dispose();
@@ -228,16 +234,60 @@ ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== nul
   const doc = JSON.parse('{"cells":[{"type":"markdown","code":"![p](attachment:__proto__)","attachments":{"__proto__":{"image/png":"' + toBase64(bytes(PNG)) + '"}}}]}');
   const x = await extractAttachments(doc, (u) => saveImage(S.create, "/Attachments/nb-p", u));
   const xa = x.doc.cells[0].attachments;
-  ok(x.extracted === 1 && Object.hasOwn(xa, "__proto__") && filePathOf(xa["__proto__"]), "import: an attachment named __proto__ is extracted like any other");
-  const e = await embedAttachments(x.doc, S.read);
+  ok(x.extracted === 1 && Object.hasOwn(xa, "__proto__") && filePathOf(xa["__proto__"], "/Attachments/nb-p"), "import: an attachment named __proto__ is extracted like any other");
+  const e = await embedAttachments(x.doc, "/Attachments/nb-p", S.read);
   ok(JSON.stringify(e.doc.cells[0].attachments) === JSON.stringify(doc.cells[0].attachments), "export: and embedded back, the same", e.doc.cells[0].attachments);
+}
+// ---- H1: a reference is followed only in its owner's own folder (a confused deputy otherwise: another notebook's or a
+//  chat's images read, shown and embedded by whoever renders or exports this one)
+{
+  const OWN = "/Attachments/nb-mine", OTHER = "/Attachments/nb-other/secret.png", CHAT = "/Attachments/chat1/secret.png", MINE = OWN + "/a.png";
+  const ref = (p) => ({ [FILE_KEY]: p });
+  ok(filePathOf(ref(MINE), OWN) === MINE, "H1: a reference into the owner's folder is followed");
+  ok(filePathOf(ref(OTHER), OWN) === null && filePathOf(ref(CHAT), OWN) === null, "H1: one into another notebook's folder, or a chat's, is refused");
+  ok([null, undefined, "", "/Attachments", "/Attachments/", "/Attachments/nb-mine/", "/private", "/Attachments/../x", "/Attachments/a/b"].every((f) => filePathOf(ref(MINE), f) === null), "H1: no owner folder, or a malformed one, follows nothing");
+  ok(filePathOf(ref("/Attachments/nb-mine-x/a.png"), OWN) === null && filePathOf(ref("/Attachments/nb-min/a.png"), OWN) === null, "H1: a folder that merely starts or ends like the owner's is another folder");
+  const doc = { cells: [{ type: "markdown", code: "x", attachments: { "own.png": ref(MINE), "o.png": ref(OTHER), "c.png": ref(CHAT) } }] };
+  ok(J(referencedPaths(doc, OWN)) === J([MINE]) && J(referencedPaths(doc, null)) === "[]", "H1: referencedPaths lists only the owner's folder, and nothing without one");
+  const asked = [];
+  const e = await embedAttachments(doc, OWN, async (p) => { asked.push(p); return bytes(PNG); });
+  ok(J(asked) === J([MINE]) && J(Object.keys(e.doc.cells[0].attachments)) === J(["own.png"]) && e.missing.join() === "o.png,c.png", "H1: an export (Download, Export all, a share, a push) reads only the owner's file; the others are left out and listed, never read", { asked, missing: e.missing });
+  const got = [];
+  const w = embedAttachmentsWith(doc, OWN, (p) => (got.push(p), bytes(PNG)));
+  ok(J(got) === J([MINE]) && w.missing.join() === "o.png,c.png", "H1: the same from held bytes (the open notebook's Download and share)", got);
+  const none = [];
+  const n = await embedAttachments(doc, null, async (p) => (none.push(p), bytes(PNG)));
+  ok(none.length === 0 && n.missing.length === 3, "H1: with no owner folder, nothing is read at all");
+  // (the page's held images: only the shown document's folder, and nothing before a folder is given)
+  const reads = [];
+  const U = new ImageUrls(async (p) => { reads.push(p); return bytes(PNG); }, () => {});
+  await U.ready([MINE]);
+  ok(reads.length === 0 && U.settled(MINE), "H1: ImageUrls reads nothing before the page gives the document's folder");
+  U.clear(OWN);
+  await U.ready([MINE, OTHER, CHAT]);
+  U.url(OTHER); U.url(CHAT); U.put(OTHER, bytes(PNG));
+  await new Promise((res) => setTimeout(res, 5));
+  ok(J(reads) === J([MINE]) && U.bytes(OTHER) === null && U.bytes(CHAT) === null && U.settled(OTHER), "H1: ImageUrls follows only the shown document's folder: another notebook's or a chat's is never read, shown or held", reads);
+  U.clear("/Attachments/nb-other");
+  ok(U.bytes(MINE) === null, "H1: another document shown: the last one's images let go");
+  U.dispose();
+  // (an import: references the file brings are removed, and none is ever followed or saved)
+  const S = store();
+  const imported = { cells: [{ type: "markdown", code: "![x](attachment:o.png) ![y](attachment:own.png) ![z](attachment:i.png)", attachments: { "o.png": ref(OTHER), "own.png": ref("/Attachments/nb-new/guess.png"), "bad.png": { [FILE_KEY]: 7 }, "i.png": { "image/png": toBase64(bytes(PNG)) } } }] };
+  const saves = [];
+  const x = await extractAttachments(imported, (u) => { saves.push(u); return saveImage(S.create, "/Attachments/nb-new", u); });
+  const xa = x.doc.cells[0].attachments;
+  ok(x.dropped === 3 && x.extracted === 1 && saves.length === 1 && J(Object.keys(xa)) === J(["i.png"]) && filePathOf(xa["i.png"], "/Attachments/nb-new"), "H1: an import drops every reference the file brought (another folder's, a guess at its own, an ill-formed one) and extracts only its inline image", { dropped: x.dropped, keys: Object.keys(xa) });
+  const only = { cells: [{ type: "markdown", code: "x", attachments: { "o.png": ref(OTHER) } }] };
+  const y = await extractAttachments(only, () => { throw new Error("never saved"); });
+  ok(y.dropped === 1 && y.extracted === 0 && y.doc !== only && y.doc.cells[0].attachments === null, "H1: an import with only a reference: removed (the document is rewritten), nothing saved", y.doc.cells[0]);
 }
 // ---- the board's content-addressed names: "i" + 64 hex
 {
   const T = store();
   const name = "i" + "ab".repeat(32);
   const r = await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name, read: T.read });
-  ok(r.path === `/Attachments/board-1/${name}.png` && filePathOf({ [FILE_KEY]: r.path }) === r.path, "a 65-character content name (i + SHA-256 hex) is saved, and its path is a valid reference");
+  ok(r.path === `/Attachments/board-1/${name}.png` && filePathOf({ [FILE_KEY]: r.path }, "/Attachments/board-1") === r.path, "a 65-character content name (i + SHA-256 hex) is saved, and its path is a valid reference");
 }
 
 console.log(failures ? `${failures} FAILED` : "test-image-store: all passed");
