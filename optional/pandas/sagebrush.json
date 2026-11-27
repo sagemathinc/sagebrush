@@ -43,6 +43,7 @@
   },
   "requires": [],
   "private_prefix": "_pd_",
+  "distribution": "pandas",
   "files": {
     "py/pandas/__init__.py": "12cef533b2f8781661a54d846e5e573c03a281613f6b7f6e3f043ef77179ebba",
     "py/pandas/_pd_arith.py": "cbaa8e92f9dda04954c4bf9006de05d61437d94d6b9f504e5c3fe43daed5c1b4",
