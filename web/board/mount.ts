@@ -119,6 +119,8 @@ export interface BoardHost {
   /** the engine of code items, made the first time a board has code (the document then) */
   /** an interpreter for a language (a board's items may be in several: codes.ts) */
   code?: (d: BoardDoc, mode: BoardMode) => BoardCode;
+  /** An unavailable exported engine: an explicit reader action, not a document's request. */
+  engineRecovery?(): (() => boolean) | null;
   /** KaTeX, loaded the first time a board has math */
   math?: () => Promise<{ typeset(el: Element): void }>;
   /** TimeTravel's history, asked for the first time it is needed */
@@ -991,7 +993,30 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.cacheId = outputsId;
     c.usePictures(docPixels);
     // (a language's interpreter could not start: the caption says why, until the next edit)
-    c.onError = (why) => { if (code === c) say(plain("The code can't run here:", why)); };
+    c.onError = async (why) => {
+      // All languages are registered synchronously by sync(). Wait for their
+      // checks, not just the first failure, before offering substitution.
+      await c.ready;
+      if (destroyed || code !== c) return;
+      const note = plain("The code can't run here:", why);
+      const recover = host.engineRecovery?.();
+      if (recover) {
+        const button = document.createElement("button");
+        button.textContent = "Use the latest engine from sagebrush.space";
+        button.onclick = () => {
+          if (destroyed || code !== c || !doc) return;
+          if (!recover()) return; // recheck pending checks and the load generation
+          button.disabled = true;
+          c.close();
+          code = null;
+          say("Loading the latest compatible engine from sagebrush.space…");
+          const d = doc, order = codeOrder(d);
+          if (order.length) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: engine recovery:", e));
+        };
+        note.append(" ", button, " Or upload this HTML file to sagebrush.space, then choose Open as a board in Files.");
+      }
+      say(note);
+    };
     const codeHost: CodeHost = { highlight: (s, id) => c.highlight(s, cell(id)) ?? escapeHtml(s), output: (id, copy) => c.output(cell(id), copy), state: (id) => c.state(cell(id)), run: (id) => { c.run([cell(id)]); } };
     // (an interpreter ready later, made as its language's items came: their
     // code shown again, highlighted now, UI-C5A-1)
@@ -1328,7 +1353,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!r || loads !== opening) return;
     original = r.original ?? null;
     converted = r.notice ?? "";
-    return load(r.doc, true).then(sayConverted);
+    // (a notice said while it loaded, e.g. File ▸ Examples… on a site without them, is there until the next edit:
+    //  shown again over the caption the load put back, unless another document was loaded meanwhile)
+    return load(r.doc, true).then(() => {
+      if (notice && loads === opening + 1 && !destroyed) caption(notice, "");
+    }).then(sayConverted);
   }).catch(fail);
 
   // editing, and keeping what was edited
@@ -2593,6 +2622,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       print: async (o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) => { const r = await printBoard(o); return r?.querySelectorAll(".pr-sheet").length ?? 0; },
       /** The document, the tour's step, the camera, and the laid out items' boxes. */
       snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points, label, lx, ly, src }) => ({ id, from, to, points, label, lx, ly, src })), selectedEdge: board.selectedEdge }),
+      /** Resolves once the store's document, the one the page opened with, is shown (or none was to come): true if it was. */
+      opened: async () => !!opened && (await opened.then(() => doc !== null)),
       /** Change the document (undoable, as an edit): f gets a copy to modify. */
       edit: (f: (d: BoardDoc) => void) => editor.commit(f, false, true, "page"),
       /** Run code items (all when none are given), then what depends on them; resolves to outputs(). */

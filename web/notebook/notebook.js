@@ -22,6 +22,7 @@ import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size.ts";
 import { safeSvg, RASTER_URL, XLINK_NS } from "../safe-svg.js";
 export { safeSvg };
 import { cellId } from "./ipynb.js";
+import { withCellIds } from "./nbformat.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
@@ -32,6 +33,7 @@ const STOP_MESSAGE = "\nStopped: it did not stop when interrupted, so the interp
 // (web/notebook/highlight.js, which the board's editor uses too)
 import { esc, highlight, highlightMarkdown } from "./highlight.js";
 import { highlightMatlab } from "./highlight-matlab.js";
+import { highlightMagma } from "./highlight-magma.js";
 import { armStop, disarmStop, stopIgnored } from "./stop-guard.js";
 export { esc, highlight, highlightMarkdown };
 
@@ -158,12 +160,12 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 <tr><td>${k("D")} ${k("D")}</td><td>delete the cell</td></tr>
 <tr><td>${k("Z")}</td><td>undo the cell deletion</td></tr>
 <tr><td>${k("X")} ${k("C")} ${k("V")}</td><td>cut, copy, paste below (${k("Shift", "V")}: above)</td></tr>
-<tr><td>${k("M")} ${k("Y")}</td><td>to Markdown, to code</td></tr>
+<tr><td>${k("M")} ${k("Y")} ${k("R")}</td><td>to Markdown, to code, to raw</td></tr>
 <tr><td>${k("Shift", "M")}</td><td>merge with the cell below</td></tr>
 <tr><td>${k("I")} ${k("I")}</td><td>interrupt</td></tr>
 <tr><td>${k("0")} ${k("0")}</td><td>restart the interpreter</td></tr>
 <tr><td>${k("H")}</td><td>this list</td></tr></table></div></div>
-<p>Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, ${k("Cmd")} works where ${k("Ctrl")} is shown.</p>`;
+<p>Drag a cell by its prompt (or the ⠿ handle) to move it. On a Mac, ${k("Cmd")} works where ${k("Ctrl")} is shown, except in ${k("Ctrl", "M")}.</p>`;
 
 /**
  * A notebook in `root`.
@@ -223,7 +225,7 @@ export function createNotebook(root, opts = {}) {
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
   function paint(cell) {
-    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
     // (a Markdown cell's blocks: its text changed elsewhere, merged, undone, an agent's)
     if (cell.blocks && cell.ta.value !== cell.blocksText) { cell.blocksText = cell.ta.value; cell.blocks.value = cell.ta.value; }
   }
@@ -1160,7 +1162,7 @@ export function createNotebook(root, opts = {}) {
   // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
   // the analysis a worker's: opts.analyzer.analyze(code, mode))
   let reactiveOn = !!opts.reactive;
-  let budget = opts.budget ?? 2000;
+  let budget = opts.budget ?? 10000;
   const reactive = () => reactiveOn && !!kernel && !!opts.analyzer;
   const analyses = new Map(); // mode + code -> Promise<analysis>
   const cellById = (id) => cells().find((c) => c.id === id);
@@ -1882,6 +1884,7 @@ export function createNotebook(root, opts = {}) {
   }
   // Highlight fenced Python/Sage code in Markdown as in code cells.
   const mdHighlight = (code, lang) => (/^(matlab|m)$/i.test(lang ?? "") || (!lang && isMatlab()) ? highlightMatlab(code).replace(/\n$/, "")
+    : /^(magma|mag)$/i.test(lang ?? "") || (!lang && isMagma()) ? highlightMagma(code).replace(/\n$/, "")
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
@@ -2367,12 +2370,21 @@ export function createNotebook(root, opts = {}) {
     closeCompleter(); closeMenu(false); activate(null);
     cellsEl.textContent = "";
     execCount = 0; // (without a kernel; an interpreter keeps its own count)
-    for (const c of list?.length ? list : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
+    // (a stored cell without an id shown with one, the same on every device and load (nbformat.js cellIdFor), never one
+    // made at random: the history matches cells by id; and saved once by the writer, below, so the ids are stored)
+    const stored = list ?? [], given = withCellIds(rest.id, stored), idsGiven = given !== stored;
+    for (const c of given.length ? given : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
     const snap = snapshot();
     lastJson = JSON.stringify(snap);
-    // (the base: the document as loaded, not as shown: an empty one is shown with a blank cell it doesn't have)
+    // (the base: the document as loaded, not as shown: an empty one is shown with a blank cell it doesn't have; and
+    // its cells as stored, without the ids given here, so the save that stores them is a change of the base)
     shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
-    Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
+    Promise.resolve().then(() => {
+      loading = false;
+      showParked();
+      // (the ids given here stored by the notebook's writer, once; a page that isn't its writer only shows them)
+      if (idsGiven && store && !store.readOnly) { lastJson = null; schedule(); }
+    }); // after the observer's records for this
     reactiveLoad();
     typed = false; // (another document shown: nothing typed in it yet; one left with saves to make is the page's to ask)
     guard(); // (its own failed save, or none)
@@ -2403,7 +2415,7 @@ export function createNotebook(root, opts = {}) {
   function reactiveLoad() {
     if (!reactive()) return;
     const a = meta.autorun;
-    budget = a === "always" ? Infinity : a === "never" ? 0 : typeof a === "number" && a >= 0 ? a : opts.budget ?? 2000;
+    budget = a === "always" ? Infinity : a === "never" ? 0 : typeof a === "number" && a >= 0 ? a : opts.budget ?? 10000;
     for (const c of cells()) if (c.type === "code") showManual(c);
     if (kernel.reactive) reactiveSync();
     else engine().load({ fresh: kernel.ran ?? new Set() });
@@ -2889,7 +2901,7 @@ export function createNotebook(root, opts = {}) {
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
-    setReadOnly(ro) { opts.readOnly = !!ro; root.classList.toggle("readonly", !!ro); for (const c of cells()) c.ta.readOnly = !!ro; },
+    setReadOnly(ro) { opts.readOnly = !!ro; root.classList.toggle("readonly", !!ro); for (const c of cells()) c.ta.readOnly = !!ro; guard(); },
     // outputs, for other places (a console's picture panel) and agents
     output: { text: appendText, display: appendDisplay, interact: renderInteract, forget: forgetInteracts, sink: areaSink },
     outputText, pictures, interacts, setInteract, saveOutputs, loadOutputs,

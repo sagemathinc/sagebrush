@@ -11,6 +11,8 @@
 //   1. a talk asked for by ?f= whose chunk arrives after the reader opened the notebook: never opened;
 //   2. opening a talk: the notebook's interpreter is stopped first; openShared gets the talk's path and text, its
 //      results (parsed), the runner's classes and /runner/, and every file of the collection as mounted for notebooks;
+//      its read() (for \input) gives a listed file's checked bytes, null for one not listed, and refuses one listed past
+//      4 MiB unfetched and bytes that aren't the listed ones;
 //      the talk's bar replaces the notebook's;
 //   3. Run/Stop follow the view's onRunning; Present calls present();
 //   4. back to the notebook: the talk is disposed, and the notebook runs (its interpreter starts again);
@@ -80,6 +82,7 @@ export async function openShared(root, o) {
     classes: !!o.sandbox && typeof o.sandbox.WorkerKernel === "function" && typeof o.sandbox.RunnerWorker === "function",
     workerAtCall: !!(window.shared && window.shared.kernel.worker), aliveAtCall: window.__alive ?? 0, calls: [] };
   (window.__talks ??= []).push(rec);
+  window.__talkRead = o.read;
   window.__alive = (window.__alive ?? 0) + 1;
   root.textContent = "STUB VIEW " + o.path;
   if (window.__talkHold) {
@@ -101,6 +104,9 @@ const ID = "talkscollect", V = "0123456789abcdef".repeat(4);
 const sha = Object.fromEntries(Object.entries(FILES).map(([p, t]) => [p, createHash("sha256").update(t).digest("hex")]));
 const bySha = Object.fromEntries(Object.entries(FILES).map(([p, t]) => [sha[p], t]));
 const files = Object.entries(FILES).map(([path, t]) => ({ path, sha256: sha[path], size: Buffer.byteLength(t) }));
+// (a file listed past the LaTeX editor's limit, 4 MiB: in the listing only, never served)
+const HUGE = { path: "other/huge.bin", sha256: "ab".repeat(32), size: 5 * 2 ** 20 };
+files.push(HUGE);
 const collection = { id: ID, version: V, latest: V, files_origin: site, manifest: { title: "Talks", license: "MIT", created: "2026-11-12T00:00:00Z", files } };
 const link = `${site}/s/${ID}`;
 const PAGE = readFileSync(join(web, "dist", "s", "index.html"));
@@ -167,6 +173,15 @@ try {
     ok(t.classes && t.runnerUrl === "/runner/", "…the runner's kernel classes, and /runner/");
     const expectMount = files.map((f) => [f.path, { url: `${site}/c/${ID}/${f.sha256}`, sha256: f.sha256, size: f.size }]);
     ok(J(t.mount) === J(expectMount), "…every file of the collection, as the notebook mounts them (the view keeps to the talk's folder)");
+    // (\input and \include: read() gives a listed file's checked bytes; the view keeps it to the talk's folder)
+    ok((await ev(`window.__talkRead("talks/data.csv").then((b) => new TextDecoder().decode(b))`)) === "x\n1\n", "…read(): a listed file's bytes, checked as every file here is (for \\input)");
+    ok((await ev(`window.__talkRead("talks/nothere.tex")`)) === null, "…read(): null for a path the collection doesn't list");
+    const askedHuge = () => ev(`performance.getEntriesByType("resource").filter((e) => e.name.includes(${J(HUGE.sha256)})).length`);
+    ok(/too large/.test(await ev(`window.__talkRead(${J(HUGE.path)}).then(() => "read", (e) => String(e.message))`)) && (await askedHuge()) === 0, "…read(): a file listed past 4 MiB is refused, never fetched");
+    bySha[sha["talks/data.csv"]] = "tampered\n";
+    const tampered = await ev(`window.__talkRead("talks/data.csv").then(() => "read", (e) => String(e.message))`);
+    bySha[sha["talks/data.csv"]] = FILES["talks/data.csv"];
+    ok(/talks\/data\.csv could not be loaded/.test(tampered), "…read(): bytes that aren't the listed ones are refused");
     ok(t.workerAtCall === false, "the notebook's interpreter was stopped before the talk's view was opened (one interpreter in the page)");
     ok(!(await shown("nbbar")) && !(await shown("nb")) && (await shown("talkbar")) && (await shown("talk")), "the talk's bar and view replace the notebook's");
     ok((await ev("document.querySelector('#talkname').textContent")) === "talks/st.tex" && /STUB VIEW talks\/st\.tex/.test(await ev("document.querySelector('#talk').textContent")), "…named, the view drawn in the page");

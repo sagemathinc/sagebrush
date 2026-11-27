@@ -82,7 +82,7 @@ function factors(env: Record<string, string> = {}) {
 test("np.linalg.cholesky on engine/nd: the module's bits (POTRF_FNV, R = L^T), the oracle, and _kernels() saying so", () => {
   const { kernels, L } = factors();
   // (the CLI asks for the warm-up at numpy's import but has no idle moment for it: the first call compiles)
-  assert.deepEqual(kernels, { path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n: 48, warm: "unused" });
+  assert.deepEqual(kernels, { path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n: 48, warm: "unused", memory_max: 2 ** 32 });
   const r: number[] = [];
   for (const [n, F] of L) {
     // L's strict upper part is 0; R's upper triangle, column by column, is L's lower one, row by row
@@ -96,7 +96,7 @@ test("np.linalg.cholesky on engine/nd: the module's bits (POTRF_FNV, R = L^T), t
 
 test("np.linalg.cholesky without WebAssembly: the TypeScript loop, within the oracle, and _kernels() saying why", () => {
   const { kernels, L } = factors({ SAGEBRUSH_NO_WASM: "1" });
-  assert.deepEqual(kernels, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 48, warm: "unused" });
+  assert.deepEqual(kernels, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 48, warm: "unused", memory_max: 0 });
   for (const [n, F] of L) assert.ok(residual(spd(n, 2029), F, n) <= 10 * U, `n=${n}`);
 });
 
@@ -190,8 +190,9 @@ test("a URL with no hash, or a malformed one, is never fetched: the session runs
   assert.deepEqual(c, { path: "typescript", why: "the numerics module could not be loaded (the numerics module fetched is not the one this page was built with)", fetches: 1 });
 });
 
-// (engine cost policy r2: no room in the module's memory is not a refusal; the loop computes it. Was grader N12's MemoryError)
-test("a module memory that can't grow: the factor is computed in JavaScript, the same, and the session goes on", async () => {
+// (no automatic fallback, William Nov 25 2026, #2147 N2: a module memory that can't grow is a MemoryError naming the
+// workspace, not the JavaScript loop; nothing is kept, so the next call factors on engine/nd)
+test("a module memory that can't grow: a MemoryError naming the workspace, and the session goes on", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const s = notebookSession(() => {}, { captureStreams: true });
   await s.ready;
@@ -208,7 +209,7 @@ test("a module memory that can't grow: the factor is computed in JavaScript, the
   await s.handle({ id: 3, code: "OK = float(np.linalg.cholesky(B)[0, 0])" });
   const main = require("../src/runtime/object").getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
   const v = (name: string) => require("../src/runtime/object").callObj(require("../src/runtime/object").getattr(main, "__getitem__"), [name]);
-  assert.equal(v("R"), Math.SQRT2);
+  assert.match(v("R"), /^WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); use the native app on a computer with more memory$/);
   assert.equal(v("OK"), Math.SQRT2);
 });
 

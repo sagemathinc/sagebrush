@@ -23,6 +23,7 @@ import { readDebt, unackedDocs } from "../journal/rows.js";
 import { CLIENT, type Refusal } from "./sync-client";
 import { listedSummary } from "./sync-view";
 import { OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
+import { RESET_BUTTON, RESET_CONFIRM, RESET_DONE } from "./sync-reset";
 import { learnMore } from "../docs-link";
 import { signInUrl } from "../share-client/upload";
 import { syncConfirmDocs } from "./doc-sync-switch";
@@ -196,6 +197,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   let deleting: { generation: number; account: string } | null = null;
   let note = "";
   let retryAt = 0;
+  // (a reset of this browser's sync running: its button disabled meanwhile)
+  let resetting = false;
   // (each draw's generation: a details read started by an older draw, or after close, never touches the panel:
   // daybreak3's CORR-PR130-1)
   let renderGen = 0;
@@ -271,13 +274,19 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     // (one short line, and what it means or what to do in the docs: /docs/storage, web/docs/storage.md)
     const line = (text: string, doc: string, cls = "note") => sec.append(h("p", { className: cls }, text + " ", learnMore(doc)));
     // (EXACT-ONLY: old sync state here: sync can't be turned on, and the page says what to do; its sync data
-    // unreadable (R-DET-1): off the same, without advice to clear anything)
+    // unreadable (R-DET-1): off the same, without advice to clear anything.  Older sync data has a way out here, the
+    // reset (sync-reset.ts, SyncOwner.resetHere); unreadable data has none (reload), so no reset is offered for it)
     const why = owner.view().s.reason;
     if (why === OLD_SYNC_REASON || why === UNREADABLE_REASON) {
       const sw = btn("Turn on sync…", () => {});
       sw.disabled = true;
       sec.append(sw);
       line(why === OLD_SYNC_REASON ? OLD_SYNC_LINE : UNREADABLE_MESSAGE, "storage#sync-off");
+      if (why === OLD_SYNC_REASON) {
+        const r = btn(RESET_BUTTON, () => void resetOnce());
+        r.disabled = resetting;
+        sec.append(r);
+      }
       return;
     }
     if (!st.available) {
@@ -455,6 +464,23 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   async function off() {
     if (await offIf(await readLife(w), "off")) host.say("Sync turned off here: this browser's copy stays as it is");
     poll.request();
+  }
+
+  // (one reset at a time: asked with RESET_CONFIRM, then SyncOwner.resetHere (it refuses unreadable data, and does
+  // nothing where nothing is blocked); afterwards RESET_DONE in the note and the panel drawn afresh: Turn on offered)
+  async function resetOnce() {
+    if (resetting || !confirmFn(RESET_CONFIRM)) return;
+    resetting = true;
+    draw();
+    try {
+      await owner.resetHere();
+      note = RESET_DONE;
+    } catch (e) {
+      host.fail(e);
+    } finally {
+      resetting = false;
+    }
+    if (!poll.closed) draw();
   }
 
   async function del() {

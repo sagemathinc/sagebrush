@@ -72,8 +72,9 @@ scripts/preview.sh agents SAGEBRUSH_PREVIEW_MOCKS=agent-feed,journal-active
 scripts/preview.sh kernels SAGEBRUSH_PREVIEW_MOCKS=remote-kernel
 ```
 
-Only the two documented `KEY=value` build flags are accepted, as arguments or
-inherited values. There is no shell evaluation, arbitrary command argument,
+Only the two documented `KEY=value` build flags, and the debugging option
+`SAGEBRUSH_PREVIEW_NO_STORE=1` (below), are accepted, as arguments or inherited
+values. There is no shell evaluation, arbitrary command argument,
 endpoint, bucket, output-directory, host or credentials override. A new lane flag
 requires an explicit allowlist change here. The script sets
 `SAGEBRUSH_PREVIEW_HOST=<name>.sagebrush.cloud` itself. Names match
