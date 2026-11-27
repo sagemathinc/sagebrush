@@ -1421,7 +1421,9 @@ class Emitter {
     const used = usedNames(f.body);
     const own = new Set([...f.params, ...f.outs]);
     const shared = opts.nest ? [...used].filter((v) => !own.has(v) && v !== "ans" && opts.nest!.has.some((h) => h.has(v))) : [];
-    const fromNested = f.nested ? [...used].filter((v) => !own.has(v) && !shared.includes(v) && nestedAssigned(f).has(v)) : [];
+    const sharedSet = new Set(shared);
+    const inNested = f.nested ? nestedAssigned(f) : null;
+    const fromNested = inNested ? [...used].filter((v) => !own.has(v) && !sharedSet.has(v) && inNested.has(v)) : [];
     const nfns = new Map(opts.nest?.fns ?? []);
     for (const n of f.nested ?? []) nfns.set(n.name, `_nf_${pyName(n.name)}`);
     const scope: Scope = { fn: f, vars: new Set([...shared, ...fromNested]), globals: new Set(), persistents: new Set(), imports: importsOf(f.body, this.fnNames), nfns: nfns.size ? nfns : undefined };
@@ -1449,7 +1451,7 @@ class Emitter {
       const changed = indexAssigned(f.body);
       for (const p of f.params) if (p !== "~" && changed.has(p)) this.emit(`${pyName(p)} = _m.cp(${pyName(p)})`);
       // every other local starts undefined
-      const locals = [...new Set([...f.outs, ...assigned(f.body), ...fromNested])].filter((n) => !f.params.includes(n) && !shared.includes(n));
+      const locals = [...new Set([...f.outs, ...assigned(f.body), ...fromNested])].filter((n) => !f.params.includes(n) && !sharedSet.has(n));
       // (a class's constructor: its output starts as the object being made, defaults set)
       for (const n of locals) this.emit(n === opts.self ? `${pyName(n)} = _m.cd_self()` : `${pyName(n)} = _m.Undef(${JSON.stringify(n)})`);
       for (const o of f.outs) scope.vars.add(o);

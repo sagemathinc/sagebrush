@@ -118,3 +118,26 @@ test("the tree check walks nested functions' bodies", () => {
   const inner = { name: "g", params: [], outs: [], args: [], line: 2, body: [{ k: "expr", e: d, print: true, line: 3, col: 1 }] };
   assert.throws(() => checkTreeDepth([], [{ name: "f", params: [], outs: [], args: [], line: 1, body: [], nested: [inner] } as any]), MatlabSyntaxError);
 });
+
+test("compiling a wide function with a nested function takes time linear in its width", async () => {
+  const { matlabToPython } = await import("../src/matlab");
+  // (the parent assigns V variables, which the nested function reads: each set made once, not once per name)
+  const src = (v: number) => {
+    const names = Array.from({ length: v }, (_, k) => `a${k}`);
+    return ["function main()", ...names.map((n) => `  ${n} = 1;`), "  function inner()", ...names.map((n) => `    t = ${n};`), "  end", "  inner();", "end", ""].join("\n");
+  };
+  const time = (v: number) => {
+    const s = src(v);
+    let best = Infinity;
+    for (let k = 0; k < 3; k++) {
+      const t0 = process.hrtime.bigint();
+      matlabToPython(s, "main.m", { file: true });
+      best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6);
+    }
+    return best;
+  };
+  time(500); // (warm up)
+  const small = time(2000), large = time(8000);
+  // (4 times the width: about 4 times the time when linear, 16 when quadratic)
+  assert.ok(large / small < 8, `2000: ${small.toFixed(1)} ms, 8000: ${large.toFixed(1)} ms`);
+});
