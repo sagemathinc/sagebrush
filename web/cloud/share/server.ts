@@ -51,6 +51,7 @@
 // through a collection: /c/<collection>/<sha256>, for files of its versions.
 
 import { purgeRemotes, remoteDeletes } from "../remote/server.ts";
+import { grantTotals, handleGrantsAdmin } from "./grants.ts";
 import { purgeMirror, mirrorGone } from "../mirror/server.ts";
 import { authorizeUrl, exchangeCode, refreshSession, revokeSession, sidOf, verifyAccessToken, type WorkosConfig, type WorkosUser } from "../../share/identity/workos.ts";
 import { seal, sealKeys, unseal } from "../../share/identity/seal.ts";
@@ -101,6 +102,9 @@ export interface ShareEnv {
   /** with AUTH_PROVIDER "local": every account's limits unless account_limits has its own row, as JSON
    * {"storage_bytes": n, "max_file_bytes": n}; missing or invalid, no uploads (fail closed) */
   DEFAULT_LIMITS?: string;
+  /** with AUTH_PROVIDER "workos": the admins who may make and revoke grants, comma-separated account ids (grants.ts
+   * adminSet: parsed exactly, any malformed entry means no admins); kept in the versioned Worker config */
+  SAGEBRUSH_ADMINS?: string;
   /** this deployment's name in identity configuration ("id-dev"): no two environments share a key cache */
   AUTH_ENV?: string;
   /** the one origin sign-in runs on (the callback's): a request for another origin is refused */
@@ -763,7 +767,7 @@ const REAUTH_LIFE_MS = 600_000;
 /** the SQL value of a new session's reauth_ms: `nowSql` while it is at most `until` (a parameter, NULL for none), else NULL */
 export const reauthAt = (nowSql: string, until: string) => `CASE WHEN ${until} IS NOT NULL AND ${nowSql} <= ${until} THEN ${nowSql} END`;
 /** The last moment (D1 ms) a callback's session may record a re-authentication, or null when it may not record one. */
-export function reauthUntil(st: { reauth?: unknown; started: number }, claims: { auth_time?: unknown }): number | null {
+export function reauthUntil(st: { reauth?: unknown; started: number }, claims: Readonly<Record<string, unknown>>): number | null {
   if (st.reauth !== true) return null;
   const at = claims.auth_time;
   // (whole seconds: a sign-in within the second `started` falls in stands, one in any earlier second doesn't)
@@ -1061,9 +1065,25 @@ async function localLimits(env: ShareEnv, id: string): Promise<Limits | null> {
   return ok(v) ? { tier: "local", storage_bytes: v.storage_bytes, max_file_bytes: Math.min(v.max_file_bytes, MAX_PUT), private_links: false } : null;
 }
 
+/** A grants read that failed: the request is answered 503, never with the free plan taken as the truth. */
+export class GrantsUnavailable extends Error {}
+
+/** With WorkOS sign-in: Sagebrush's free plan, with what the account's grants active now give (grants.ts grantTotals:
+ * the largest storage, never a sum); read from the primary each time, so a revocation counts on the next request. */
+async function grantLimits(env: ShareEnv, id: string): Promise<Limits> {
+  let g;
+  try {
+    g = await grantTotals(env.SHARE_DB!, id, now());
+  } catch {
+    throw new GrantsUnavailable("grants unreadable");
+  }
+  if (g.count === 0) return FREE_LIMITS;
+  return { tier: "grant", storage_bytes: Math.max(FREE_LIMITS.storage_bytes, g.storage_bytes ?? 0), max_file_bytes: FREE_LIMITS.max_file_bytes, private_links: FREE_LIMITS.private_links || g.private_links };
+}
+
 export async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
-  // (no CoCalc plan counts with WorkOS sign-in: Sagebrush's free plan, until grants)
-  if (workosMode(env)) return FREE_LIMITS;
+  // (no CoCalc plan counts with WorkOS sign-in: Sagebrush's free plan and the account's grants)
+  if (workosMode(env)) return grantLimits(env, who.id);
   if (localMode(env)) return localLimits(env, who.id);
   if (!knownProvider(env)) return null;
   const db = env.SHARE_DB!;
@@ -1873,7 +1893,13 @@ export function noindex(r: Response): Response {
 
 /** The share API (/auth/, /api/share/, /api/admin/), or null for any other path; every answer says NOINDEX. */
 export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | null> {
-  const r = await route(req, env, ctx);
+  let r: Response | null;
+  try {
+    r = await route(req, env, ctx);
+  } catch (e) {
+    if (!(e instanceof GrantsUnavailable)) throw e;
+    r = err(503, "your plan can't be read right now; try again soon");
+  }
   return r && noindex(r);
 }
 
@@ -1892,6 +1918,19 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
     // (CoCalc is no authority here: its sign-in and its signed purge call are gone; never a fallback to them)
     if (p === "/auth/login" && m === "GET") return workosLogin(req, env);
     if (p === "/auth/callback" && m === "GET") return workosCallback(req, env, ctx);
+    // (the grant routes, Sagebrush's own admins: same-origin for a write, then grants.ts's checks in order)
+    if (p === "/api/admin/grants" || p.startsWith("/api/admin/grants/")) {
+      if (m !== "GET" && !sameSite(req)) return err(403, "cross-site request");
+      const g = await handleGrantsAdmin(req, url, env.SHARE_DB, env.SAGEBRUSH_ADMINS, {
+        session: async (q) => {
+          const r = await sessionResult(q, env, ctx);
+          return r.kind === "ok" ? { kind: "ok", id: r.id, reauthMs: r.reauthMs } : r;
+        },
+        now: () => Date.now(),
+        sha256Hex,
+      });
+      if (g) return g;
+    }
     if (p.startsWith("/api/admin/")) return err(404, "not found");
   } else {
     if (p === "/auth/login" && m === "GET") return login(req, env);
