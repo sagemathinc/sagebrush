@@ -81,6 +81,7 @@ import urllib.parse
 import urllib.request
 
 from sagebrush.remote import dpop as _dpop
+from sagebrush.remote import agent_runtime
 from sagebrush.remote import keys as _keys
 from sagebrush.remote.agent_child import AGENT_ADVERTISED, AGENT_FRAME, AGENT_GRACE_MS, AgentChild, AgentLog
 from sagebrush.remote.enroll import USER_AGENT, EnrollError, _post, check_origin
@@ -739,8 +740,9 @@ class AgentSlot:
     """One agent kind this runner offers: its name and command, and its child (if any) with that child's resume secret's
     SHA-256 and the page key it is bound to."""
 
-    def __init__(self, name, cmd):
+    def __init__(self, name, cmd, builtin=False):
         self.name, self.cmd = name, list(cmd)
+        self.builtin = builtin  # (the built-in agent (agent_runtime.py): its tree verified, or built, before each start)
         self.child = None
         self.resume = None
         self.resume_jkt = None
@@ -827,7 +829,7 @@ class RelayRunner:
 
     def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None,
                  terminals=True, agents=False, agent_cmd=None, agent_grace_ms=AGENT_GRACE_MS, agent_log=None,
-                 now_ms=None, agent_cmds=None, kernels=None, ledger=None, idle_s=IDLE_OMITTED):
+                 now_ms=None, agent_cmds=None, kernels=None, ledger=None, idle_s=IDLE_OMITTED, builtin_agent=False):
         self.key = key
         # (engine pages (r3 P2a): only with a kernel factory, kernels(nb, entry, on_end) -> a kernel; the connection
         # generation is the highest seen, across legs; each notebook's session generation likewise)
@@ -841,7 +843,7 @@ class RelayRunner:
         # (agent pages (agent_child.py): off unless --serve-agents, with each kind's command: agent_cmds [(name, argv)],
         # in the order given, the first the default; agent_cmd alone is the one kind "default")
         kinds = agent_kinds(agent_cmds if agent_cmds else [("default", agent_cmd)] if agent_cmd else [])
-        self.slots = {name: AgentSlot(name, cmd) for name, cmd in kinds}
+        self.slots = {name: AgentSlot(name, cmd, builtin=(name == "default" and builtin_agent)) for name, cmd in kinds}
         self.agent_default = kinds[0][0] if kinds else None
         self.serve_agents = bool(agents and kinds)
         self.agent_grace_ms = agent_grace_ms
@@ -1275,22 +1277,35 @@ class RelayRunner:
 
     async def _agent_start(self, slot, a):
         try:
+            if slot.builtin:
+                # (the built-in agent's tree, verified before this start, or built again from its pins: never run as
+                # it was if it changed)
+                inst = await asyncio.to_thread(agent_runtime.ensure, None, None, None, lambda t: self.err(t + "\n"))
+                a.argv = inst.argv()
             await a.start()
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, agent_runtime.AgentRuntimeError) as e:
             a.ended = True
             if slot.child is a:
                 slot.child = None
                 slot.resume = slot.resume_jkt = None
+            how = "--agent-cmd" if slot.name == "default" else "--agent %s=..." % slot.name
+            terminal, words = agent_runtime.start_failure(e, None if slot.builtin else slot.cmd, how)
+            self.err(("%s\n" % terminal) if slot.name == self.agent_default else ("[agent %s] %s\n" % (slot.name, terminal)))
             page = a.page
             if page is not None and not page.closed:
-                how = "--agent-cmd" if slot.name == "default" else "--agent %s=..." % slot.name
-                page.told("The agent couldn't start (%s). Check the runner's %s." % (type(e).__name__, how), 1011)
+                page.told(words, 1011)
 
     def _agent_exited(self, a):
         for slot in self.slots.values():
             if slot.child is a:  # (a replaced child's exit changes nothing for its kind's new one)
                 slot.child = None
                 slot.resume = slot.resume_jkt = None
+        # (on this computer's terminal: what ended it and the last line it wrote, redacted as the log is; the page
+        # gets the exit's words only, never the agent's stderr)
+        if a.exit_text and not a.stopped_by_runner:
+            last = a.log.last if a.log is not None else None
+            self.err("%s.%s\n" % (a.exit_text, (" Its last words: %s" % last) if last else "")
+                     + ("  (the whole log: %s)\n" % a.log.path if a.log is not None and getattr(a.log, "path", None) else ""))
 
     def stop_slot(self, slot, why):
         a, slot.child = slot.child, None
@@ -1484,9 +1499,9 @@ async def finish_agent_starts(runner, wait_s=None):
     return pending
 
 
-async def run_relay(key, err=None, cwd=None, agents=False, agent_cmds=None):
+async def run_relay(key, err=None, cwd=None, agents=False, agent_cmds=None, builtin_agent=False):
     """`sagebrush remote`: until Ctrl-C or SIGTERM (close 1001, the kernels' groups stopped: R8), or a Fatal."""
-    runner = RelayRunner(key, err=err, cwd=cwd, agents=agents, agent_cmds=agent_cmds)
+    runner = RelayRunner(key, err=err, cwd=cwd, agents=agents, agent_cmds=agent_cmds, builtin_agent=builtin_agent)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     import signal
@@ -1520,10 +1535,12 @@ USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND | --serve
 
   --serve-agents       also serve agent pages: the person's own agent, chatting beside their notebooks.  The agent
                        runs as you, in the folder this command was started in, and can change files there.
-  --agent-cmd COMMAND  how to start the agent (split like a shell's words, never run through a shell), for example
-                       --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz --stdio"
-                       It's required with --serve-agents unless --agent is given: the runner never chooses or
-                       fetches an agent by itself.  Its name is "default".
+                       Without --agent-cmd or --agent, it's the built-in agent: the reviewed sagebrush-agent
+                       release and a Node to run it, fetched and checked by the runner itself the first time
+                       (about 200 MB, kept under ~/.local/state/sagebrush/remote/agent). You need only
+                       Claude Code, installed and signed in.
+  --agent-cmd COMMAND  your own agent's command instead (split like a shell's words, never run through a shell).
+                       Its name is "default".
   --agent NAME=COMMAND another agent the page can pick by NAME (a lowercase letter, then up to 15 lowercase letters,
                        digits or -), started with COMMAND as --agent-cmd's is; repeat it for each, at most 4 in all.
                        Of --agent-cmd and the --agent options, the first given is the one a page gets when it names none.
@@ -1561,8 +1578,6 @@ def parse_args(argv):
         else:
             raise ValueError("unknown argument %s" % a)
         i += 1
-    if agents and not kinds:
-        raise ValueError("--serve-agents needs --agent-cmd or --agent")
     if kinds and not agents:
         raise ValueError("--agent-cmd and --agent need --serve-agents")
     return agents, agent_kinds(kinds)
@@ -1596,4 +1611,19 @@ def main(argv):
     except EnrollError as e:
         sys.stderr.write("sagebrush remote: the key file's origin: %s\n" % e)
         return 1
-    return asyncio.run(run_relay(key, agents=agents, agent_cmds=agent_cmds))
+    builtin = agents and not agent_cmds
+    if agents:
+        # (before anything connects: what the agent will need on this computer and isn't here, each with its fix)
+        for problem, fix in agent_runtime.preflight(None if builtin else agent_cmds[0][1]):
+            sys.stderr.write("For the agent: %s\n  To fix it: %s\n" % (problem, fix))
+    if builtin:
+        try:
+            inst = agent_runtime.ensure(say=lambda t: sys.stderr.write(t + "\n"))
+            cmd = inst.argv()
+        except agent_runtime.AgentRuntimeError as e:
+            # (notebooks and terminals still work; an agent page is told this, and the next start tries again)
+            sys.stderr.write("The built-in agent couldn't be set up: %s\nNotebooks and terminals still work; the "
+                             "agent is tried again when a page starts a chat.\n" % e)
+            cmd = ["<the built-in agent>"]
+        agent_cmds = agent_kinds([("default", cmd)])
+    return asyncio.run(run_relay(key, agents=agents, agent_cmds=agent_cmds, builtin_agent=builtin))

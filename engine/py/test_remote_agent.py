@@ -715,8 +715,9 @@ def test_cli_arguments():
         True, [("claude", ["npx", "-y", "a", "--stdio"]), ("codex", ["b", "--x=1"]), ("default", ["c"])])
     four = [x for i in range(4) for x in ("--agent", "a%d=x" % i)]
     assert len(R.parse_args(["--serve-agents", *four])[1]) == R.AGENT_KINDS == 4
-    for bad, why in ((["--serve-agents"], "--serve-agents needs --agent-cmd or --agent"),
-                     (["--agent-cmd"], "--agent-cmd needs the agent's command"),
+    # (--serve-agents alone: the built-in agent (agent_runtime.py); no kinds here, main() makes its one)
+    assert R.parse_args(["--serve-agents"]) == (True, [])
+    for bad, why in ((["--agent-cmd"], "--agent-cmd needs the agent's command"),
                      (["--serve-agents", "--agent-cmd", "  "], "--agent-cmd needs the agent's command"),
                      (["--agent-cmd", "x"], "--agent-cmd and --agent need --serve-agents"),
                      (["--agent", "a=x"], "--agent-cmd and --agent need --serve-agents"),
@@ -1339,11 +1340,15 @@ def test_the_vendored_agents_page_verbs_are_this_pages():
         assert theirs[n] == ours[n], "%s: the vendored agent's copy differs from web/workspace/schema.json" % n
 
 
-def test_vendored_agent_is_the_version_usage_names():
+def test_vendored_agent_is_the_built_in_one():
+    # (the built-in agent (agent_runtime.py) pins exactly the reviewed tarball these tests vendor: its version, its
+    # SHA-256 and its URL; so what the runner fetches is what was reviewed and tested here)
+    from sagebrush.remote import agent_runtime as AR
     pkg = unpack_vendored()
     with open(os.path.join(pkg, "package.json")) as f:
         version = json.load(f)["version"]
-    assert "sagebrush-agent-%s.tgz" % version in R.USAGE, (version, R.USAGE)
+    assert AR.AGENT["version"] == version and AR.AGENT["sha256"] == VENDORED_SHA256, (AR.AGENT, version)
+    assert AR.AGENT["url"] == "https://agents.sagebrush.cloud/agents/sagebrush-agent-%s.tgz" % version, AR.AGENT
 
 
 
@@ -1693,6 +1698,7 @@ async def test_kinds_a_failed_start_names_its_own_kinds_option():
     # for a named kind, --agent-cmd for "default"), and that kind holds no child or secret afterwards)
     missing = os.path.join(TMP, "no-such-agent-command")
     run = await Run().start(agent_cmds=[("default", [missing]), ("codex", [missing + "-2"])])
+    cmd_of = {"default": missing, "codex": missing + "-2"}
     sg = await signer()
     try:
         for kind, how in (("codex", "--agent codex=..."), ("default", "--agent-cmd")):
@@ -1703,7 +1709,13 @@ async def test_kinds_a_failed_start_names_its_own_kinds_option():
                 m = await run.leg.json()
                 if m.get("method") == "agent.ended":
                     break
-            assert m["params"]["text"] == "The agent couldn't start (FileNotFoundError). Check the runner's %s." % how, (kind, m)
+            # (plain words for that computer, naming the missing command and that kind's own option; never an
+            # exception's class name)
+            t = m["params"]["text"]
+            assert t.startswith("The agent couldn't start on that computer: `%s` isn't installed there." % os.path.basename(cmd_of[kind])), (kind, t)
+            assert ("without --agent-cmd" in t) if kind == "default" else ("--agent codex=..." in t), (kind, t)
+            assert "FileNotFoundError" not in t, t
+            assert any(("`%s` was not found on this computer" % cmd_of[kind]) in line for line in run.said), (kind, run.said[-3:])
             await until(lambda: pg.gen in closed_gens(run), what="the page's close")
             slot = run.runner.slots[kind]
             assert slot.child is None and slot.resume is None and slot.resume_jkt is None, kind
