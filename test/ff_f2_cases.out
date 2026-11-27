@@ -40,7 +40,7 @@ Root 2 in GF(7) exact admitted 4
 Root 2 in GF(9) one short refused powers 0 Root of an element of a finite field of degree 2 is not supported yet
 Root 2 in GF(9) exact admitted $.1
 Root(GF(7)!2, 2) at WORK = 9 refused powers 0 Root of an element of a finite field of degree 1 is not supported yet
-Root 2 in GF(9) products 68 within the charge True
+Root 2 in GF(9) products 54 within the charge True
 sage nth_root k = -(2^1024 + 1) refused NotImplementedError powers 0 nth_root of an exponent of more than 1024 bits is not supported yet
   inverses 0
 sage nth_root k = -7 admitted $.1^2

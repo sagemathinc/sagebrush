@@ -37,11 +37,26 @@ impl IdStub for std::thread::ThreadId {
     }
 }
 
+/// `content` written to `path` with `mode` by a child process, not by this one: an executable this test process held
+/// open for writing could be inherited by a child another test thread forks at that moment, and running it would then
+/// fail with "text file busy". Written by a child, no descriptor for it ever exists here.
+fn write_exec(path: &Path, content: &str, mode: u32) {
+    use std::io::Write;
+    let mut c = std::process::Command::new("/bin/sh")
+        .args(["-c", "cat > \"$1\" && chmod \"$2\" \"$1\"", "sh"])
+        .arg(path)
+        .arg(format!("{mode:o}"))
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    c.stdin.take().unwrap().write_all(content.as_bytes()).unwrap();
+    assert!(c.wait().unwrap().success(), "writing {}", path.display());
+}
+
 /// A script at dir/name: "#!/bin/sh" and `body`, with `mode`.
 fn script(dir: &Path, name: &str, body: &str, mode: u32) -> PathBuf {
     let p = dir.join(name);
-    fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-    fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+    write_exec(&p, &format!("#!/bin/sh\n{body}\n"), mode);
     p
 }
 const GOOD: &str = "printf '2.1.330 (Claude Code)\\n'";
@@ -141,8 +156,7 @@ fn its_folders_must_not_be_writable_by_others_and_a_root_sticky_one_only_above_i
     assert!(choose(&p, my_uid(), &run(&private)).is_ok(), "under a private folder in /tmp");
     let direct = tmp.join(format!("sb-tools-direct-{}", std::process::id()));
     let _ = fs::remove_file(&direct);
-    fs::write(&direct, format!("#!/bin/sh\n{GOOD}\n")).unwrap();
-    fs::set_permissions(&direct, fs::Permissions::from_mode(0o755)).unwrap();
+    write_exec(&direct, &format!("#!/bin/sh\n{GOOD}\n"), 0o755);
     let r = choose(&direct, my_uid(), &run(&private));
     let _ = fs::remove_file(&direct);
     assert_eq!(r.unwrap_err(), ToolRefusal::ParentWritable, "directly in /tmp");

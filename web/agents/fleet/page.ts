@@ -4,7 +4,7 @@
 // - A host (#host/<id>): the agents its verified grant lists, each with the host's unverified report beside it.
 // Every signed object is verified on this page (fleet-verify.ts) before anything about it is shown. The host's state is
 // an unverified report (view.ts). This page signs nothing; its one write is Reset this device (fleet-device.ts).
-import { PinMoved, StorageFailed, hostFingerprintShown, readChainPage, syncChain, verifyGrant, verifyGrantAck, verifyHostCert, verifyHostRevocation, type Chain, type FleetCtx, type HostCert } from "../../workspace/fleet-verify";
+import { PinMoved, StorageFailed, fleetFingerprintShown, hostFingerprintShown, readChainPage, syncChain, verifyGrant, verifyGrantAck, verifyHostCert, verifyHostRevocation, type Chain, type FleetCtx, type HostCert } from "../../workspace/fleet-verify";
 import { deviceKey, resetDevice } from "../../workspace/fleet-device";
 import { ServiceError, fixtureSource, isLoopback, serviceSource, sourceKind, type HostRow, type OpRow, type Source } from "./client";
 import * as V from "./view";
@@ -32,6 +32,8 @@ const T = {
   resetDone: "This device was reset.",
   storage: "This browser couldn't save its fleet record. Nothing was trusted.",
   noHosts: "No hosts are paired with your fleet yet.",
+  fleetFp: "This fleet's fingerprint",
+  fleetFpUse: "To pair a host, type this into sagebrush-agent host pair --fleet on that host. It comes from this device's own checked device list.",
   hostBad: (code: string) => `Its certificate didn't verify (${code}). Nothing about this host is shown.`,
   revocationBad: (code: string) => `A revocation of this host was given but didn't verify (${code}). Nothing about this host is shown.`,
   tooLarge: "The fleet service sent more than this page reads. Nothing here was trusted.",
@@ -105,16 +107,17 @@ type Loaded =
   | { kind: "no-fleet" }
   | { kind: "error"; text: string }
   | { kind: "fork"; ctx: FleetCtx }
-  | { kind: "ok"; ctx: FleetCtx; chain: Chain; hosts: HostView[] };
+  | { kind: "ok"; ctx: FleetCtx; chain: Chain; hosts: HostView[]; fleetFp: string | null };
 
 /** What a service failure says: sign in, try again, or the refusal's own code. */
 const serviceText = (e: ServiceError) => (e.code === "limit" ? T.tooLarge : e.code === "unauthenticated" || e.status === 401 ? T.signIn : e.code === "unavailable" || e.code === "rate" || e.status === 429 || e.status >= 500 ? T.unavailable : T.refused(e.code));
 const codeOf = (e: unknown) => (e && typeof e === "object" && typeof (e as any).code === "string" && /^[a-z_]{1,40}$/.test((e as any).code) ? (e as any).code : "error");
 
-async function verifiedChain(ctx: FleetCtx): Promise<Chain> {
+async function verifiedChain(ctx: FleetCtx): Promise<{ chain: Chain; genesis: string }> {
   // (another tab pinned further meanwhile: read the list again, once)
   for (let i = 0; ; i++) {
-    try { return await syncChain(ctx, await src.chain()); } catch (e) { if (e instanceof PinMoved && i === 0) continue; throw e; }
+    const entries = await src.chain();
+    try { return { chain: await syncChain(ctx, entries), genesis: entries[0] }; } catch (e) { if (e instanceof PinMoved && i === 0) continue; throw e; }
   }
 }
 
@@ -197,8 +200,8 @@ async function load(): Promise<Loaded> {
   try { f = await src.fleet(); } catch (e) { return { kind: "error", text: e instanceof ServiceError ? serviceText(e) : T.unavailable }; }
   if (!f) return { kind: "no-fleet" };
   const ctx: FleetCtx = { aud: f.aud, fleet: f.fleet };
-  let chain: Chain;
-  try { chain = await verifiedChain(ctx); } catch (e) {
+  let chain: Chain, genesis: string;
+  try { ({ chain, genesis } = await verifiedChain(ctx)); } catch (e) {
     if (codeOf(e) === "chain_fork") return { kind: "fork", ctx };
     if (e instanceof ServiceError) return { kind: "error", text: serviceText(e) };
     // (the core refuses with a reason code; anything else came from this browser's own storage, which couldn't keep or
@@ -210,7 +213,9 @@ async function load(): Promise<Loaded> {
   try { rows = await src.hosts(); } catch (e) { return { kind: "error", text: e instanceof ServiceError ? serviceText(e) : T.unavailable }; }
   const hosts: HostView[] = [];
   for (const h of rows) hosts.push(await verifyHost(ctx, chain, h));
-  return { kind: "ok", ctx, chain, hosts };
+  // (the fleet's fingerprint, from this device's own verified chain: what a host being paired is given)
+  const fleetFp = await fleetFingerprintShown(ctx, chain, genesis).catch(() => null);
+  return { kind: "ok", ctx, chain, hosts, fleetFp };
 }
 
 // ---- the views
@@ -245,7 +250,8 @@ async function deviceView(l: Loaded, ticket: { n: number; key: string }) {
     if (d.raw.length === k.publicRaw.length && d.raw.every((x, i) => x === k.publicRaw[i])) { status = d.removed === null ? T.enrolled(d.name) : T.removed; break; }
   }
   const seq = (l.chain as any).seq as number, head = (l.chain as any).hashes[seq] as string;
-  draw(tabs("device"), el("div", { className: "card" }, el("h2", { textContent: T.tier }), note(T.tierLine), note(status), note(T.pin(seq, head.slice(0, 8)))));
+  const fp = l.fleetFp ? el("div", { className: "card fleet-fp" }, el("h2", { textContent: T.fleetFp }), el("code", { className: "fp", id: "fleet-fp", textContent: l.fleetFp }), note(T.fleetFpUse)) : null;
+  draw(tabs("device"), el("div", { className: "card" }, el("h2", { textContent: T.tier }), note(T.tierLine), note(status), note(T.pin(seq, head.slice(0, 8)))), fp);
 }
 
 function grantLine(h: HostView): string {

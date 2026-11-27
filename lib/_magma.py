@@ -2022,6 +2022,10 @@ _PYBUILTINS = set((
 _PYKW |= _PYBUILTINS
 
 
+# (records being printed: a maximal order in one keeps the one-line form, _MOrder._str)
+_IN_REC = [0]
+
+
 class MRec:
     """A record: values for some of its format's fields."""
 
@@ -2070,7 +2074,16 @@ class MRec:
 
     def _str(self, indent, tail=""):
         """Printed over lines at `indent`, its closing ">" added after its
-        last field is laid out (_close), then `tail` (a sequence's comma)."""
+        last field is laid out (_close), then `tail` (a sequence's comma).
+        A maximal order in it prints on one line (_IN_REC), as a tuple's does:
+        Magma's layout of these is an open issue."""
+        _IN_REC[0] += 1
+        try:
+            return self._str1(indent, tail)
+        finally:
+            _IN_REC[0] -= 1
+
+    def _str1(self, indent, tail):
         head = "rec<%s | " % _format_name(self.fmt)
         names = [n for n in self.fmt.names if n in self.vals]
         if not names:
@@ -2365,6 +2378,67 @@ def Domain(f):
 def Codomain(f):
     """The codomain of a map."""
     return f.cod
+
+
+class _MCoercionMap(MMap):
+    """Coercion(D, C): the map x :-> C!(D!x), as Magma 2.18-5's (checked
+    against it): an argument D doesn't take is "Could not coerce into
+    map's domain", an image C doesn't is "Application of map failed"; a
+    preimage is D!y; a sequence or set is mapped element by element; two
+    with the same domain and codomain are equal."""
+
+    def __init__(self, dom, cod):
+        MMap.__init__(self, dom, cod, rule=lambda x: x)
+
+    def __repr__(self):
+        # (a finite field no global variable holds is GF(q) here, as Magma's, and as _MExtMap's)
+        name = lambda S: _gf_name(S) if isinstance(S, _MFinField) and _global_name(S) is None else _struct_name(S)
+        return "Mapping from: %s to %s" % (name(self.dom), name(self.cod))
+
+    @staticmethod
+    def _into(S, x):
+        if isinstance(S, (MSeq, MSet, MRange)):
+            if not _in(x, S):
+                raise MagmaError("not an element")
+            return x
+        return _coerce(S, x)
+
+    def __call__(self, x):
+        if isinstance(x, MSet) and x.kind == "multi":
+            # (Magma's for a multiset)
+            raise MagmaError("Could not coerce into map's domain", "map application")
+        if isinstance(x, (MSeq, MSet)):
+            # (element by element, one level deep, as Magma's: an element the map doesn't take, at either step, is
+            # "Element is not in the domain of the map" there, a sequence or set in it too; a sequence, set or
+            # indexed set of the images, in its order)
+            ys = []
+            for y in x:
+                try:
+                    ys.append(self._into(self.cod, self._into(self.dom, y)))
+                except MagmaError:
+                    raise MagmaError("Element is not in the domain of the map", "map application")
+            return MSeq(ys) if isinstance(x, MSeq) else _iset(ys) if x.kind == "indexed" else _set(ys)
+        try:
+            y = self._into(self.dom, x)
+        except MagmaError:
+            raise MagmaError("Could not coerce into map's domain", "map application")
+        try:
+            return self._into(self.cod, y)
+        except MagmaError:
+            raise MagmaError("Application of map failed", "map application")
+
+    def _preimage(self, y, where):
+        try:
+            return self._into(self.dom, y)
+        except MagmaError:
+            raise MagmaError("Application of map failed", where)
+
+    def __eq__(self, o):
+        return isinstance(o, _MCoercionMap) and _eq(self.dom, o.dom) and _eq(self.cod, o.cod)
+
+    def __hash__(self):
+        # (one value for the class, consistent with __eq__: {f, g} of two equal ones is one map, as Magma's)
+        return hash(_MCoercionMap)
 
 
 def Inverse(f):
@@ -3382,6 +3456,10 @@ def _eq(a, b, pos=None, op="eq"):
     if ka == "map":
         if a is b:
             return True
+        if isinstance(a, _MCoercionMap) and isinstance(b, _MCoercionMap):
+            # (two coercion maps are equal when their domains and codomains are, as Magma's; with another map, Magma
+            # can't test it)
+            return a == b
         raise MagmaError("Cannot test equality for those maps", "'%s'" % op, True, pos)
     if ka == "tup":
         # tuples of one length whose entries compare
@@ -4877,6 +4955,8 @@ def _str1(v, indent, col, tail):
         return ("\n" + " " * indent).join(repr(v).split("\n")) + tail, True
     if isinstance(v, (MTuple, MRec)) and any(isinstance(p, _MFFMat) for p in (v if isinstance(v, MTuple) else v.vals.values())):
         raise MagmaError("printing a tuple or record holding a matrix over a finite field is not supported yet")
+    if isinstance(v, _MOrder):
+        return v._str(col, indent, tail), True
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
     if isinstance(v, MTuple) and any(_multiline(p) for p in v):
@@ -4971,6 +5051,23 @@ def _extra(v):
     return 0
 
 
+def _cont_words(pieces):
+    """The words of pieces (text, continuation column), for _flow: each word
+    with the column of the piece it starts in."""
+    words, cur, at = [], "", 0
+    for text, cont in pieces:
+        for ch in text:
+            if ch == " ":
+                words.append((cur, True, at))
+                cur = ""
+            else:
+                if not cur:
+                    at = cont
+                cur += ch
+    words.append((cur, False, at))
+    return words
+
+
 def _flow(chunks, first_col, cont, indent=None):
     """Magma's layout of chunks (text, space after it) on lines of WIDTH
     columns, the first starting at first_col (its text already written),
@@ -4986,19 +5083,23 @@ def _flow(chunks, first_col, cont, indent=None):
     sequences, nested sequences, tuples and print lines)."""
     indent = cont if indent is None else indent
     out, c = [], first_col
-    for text, space in chunks:
+    for chunk in chunks:
+        # (a chunk may carry its own continuation column, a third element: a maximal order's polynomial,
+        # _MOrder._pieces)
+        text, space = chunk[0], chunk[1]
+        cc = chunk[2] if len(chunk) > 2 else cont
         # (the first chunk of a value printf writes after its own text is
         # split where it doesn't fit, never moved: _sprint_str)
         nomove, _NOMOVE[0] = _NOMOVE[0], False
         if text:
-            if not nomove and (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cont:
+            if not nomove and (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cc:
                 if c + len(text) <= WIDTH:
                     out.append(text)
                     c += len(text)
                     text = ""
                 else:
-                    out.append("\n" + " " * cont)
-                    c = cont
+                    out.append("\n" + " " * cc)
+                    c = cc
             # (by offsets: no copy of the rest of a long chunk for each line)
             i, n = 0, len(text)
             while i < n and c + n - i > WIDTH - 1:
@@ -5007,9 +5108,9 @@ def _flow(chunks, first_col, cont, indent=None):
                     # (just the backslash when the line is full and the
                     # next has room, as after printf's own text; else at
                     # least one character, so that deep lines progress)
-                    k = 0 if c == WIDTH - 1 and cont < WIDTH - 1 else 1
-                out.append(text[i:i + k] + "\\\n" + " " * cont)
-                i, c = i + k, cont
+                    k = 0 if c == WIDTH - 1 and cc < WIDTH - 1 else 1
+                out.append(text[i:i + k] + "\\\n" + " " * cc)
+                i, c = i + k, cc
             out.append(text[i:])
             c += n - i
         if space and c < WIDTH:
@@ -6406,8 +6507,16 @@ FractionField = FieldOfFractions
 
 # ------------------------------------------------------------------ polynomials
 
+# PolynomialRing(Integers()) and PolynomialRing(Rationals()), one of each for the session, as Magma 2.18-5 has it
+# (base ring name -> ring): P := PolynomialRing(Rationals()); Q<t> := PolynomialRing(Rationals()); is one ring,
+# and naming it renames it everywhere, P.1 printing as t
+_ZQ_RINGS = {}
+
+
 def PolynomialRing(R, n=1):
-    """A new polynomial ring; its variable prints as $.1 until named."""
+    """The polynomial ring over R; its variable prints as $.1 until named.
+    Over the integers and the rationals it is the session's one ring
+    (_ZQ_RINGS); over a finite field, the field's."""
     # (one variable only: PolynomialRing(Q, 3) is not a univariate ring)
     if n != 1 or isinstance(n, bool):
         raise MagmaError("PolynomialRing in more than one variable (or with weights) is not supported yet", "'PolynomialRing'")
@@ -6420,8 +6529,16 @@ def PolynomialRing(R, n=1):
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
-    out = _MPolyRingZQ(base, "$.1")
+    out = _zq_ring(base)
     _fun_remember_poly(_fun_base_key(R), out)
+    return out
+
+
+def _zq_ring(base):
+    """The session's one polynomial ring over base (ZZ or QQ, _ZQ_RINGS)."""
+    out = _ZQ_RINGS.get(base._name)
+    if out is None:
+        out = _ZQ_RINGS[base._name] = _MPolyRingZQ(base, "$.1")
     return out
 
 
@@ -6430,9 +6547,36 @@ class _MPolyRingZQ(_sp.PolynomialRing_):
     Until its variable is named, it prints as P.1 for the oldest global P that
     holds the ring now, and as $.1 when none does (Magma: `P := PolynomialRing(
     Rationals()); P.1 + 1;` prints P.1 + 1).  Only the printing changes: the
-    ring's _name, which equality and hashing use, stays $.1."""
+    ring's _name, which equality and hashing use, stays $.1, and a name given
+    to it, R<x> := ..., is _shown (the ring is shared, _ZQ_RINGS: naming it
+    again renames it, with its elements kept in sets and as keys)."""
+
+    _shown = None
+
+    def __repr__(self):
+        if self._shown is not None:
+            return "Univariate Polynomial Ring in %s over %r" % (self._shown, self._base)
+        return _sp.PolynomialRing_.__repr__(self)
+
+    # (the name the ring's variable was given, for what is built from it: a number field's generator, a ring
+    # made in the same variable)
+    def variable_name(self):
+        return self._shown if self._shown is not None else self._name
+
+    def variable_names(self):
+        return (self.variable_name(),)
+
+    def change_ring(self, R):
+        # (over the integers or the rationals, the session's one ring there, as Magma's: a polynomial over the
+        # integers taken to the rationals, by ChangeRing or a gcd, is in PolynomialRing(Rationals()), printed by
+        # that ring's name)
+        if R is _sp.ZZ or R is _sp.QQ:
+            return _zq_ring(R)
+        return _sp.PolynomialRing_.change_ring(self, R)
 
     def _repr_name(self):
+        if self._shown is not None:
+            return self._shown
         if self._name != "$.1":
             return self._name
         v = _global_name(self)
@@ -6458,7 +6602,10 @@ def _refcall(f, refs, *args, **kw):
 
 def _assign_gen_names(R, names):
     """R<x, ...> := ...: the generators' names (a list of strings)."""
-    if isinstance(R, _sp.PolynomialRing_) and names:
+    if isinstance(R, _MPolyRingZQ) and names:
+        # (the session's shared ring: renamed for printing only, _shown)
+        R._shown = names[0]
+    elif isinstance(R, _sp.PolynomialRing_) and names:
         R._name = names[0]
     elif hasattr(R, "_magma_names"):
         R._magma_names(names)
@@ -7643,7 +7790,7 @@ def Sqrt(x):
 # calls being made, innermost last: an argument's call has returned before
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
-    "Alt ChangeRing CharacteristicPolynomial ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
+    "Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
     "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Nclasses Ngens "
     "Norm Normalise Normalize NumberOfClasses Orbit Orbits PrimeField Root RootsInSplittingField Solution "
     "SquarefreeFactorization Stabilizer Submatrix Subsets Sym Trace Vector").split())
@@ -7666,6 +7813,11 @@ def _call(pos, f, *args, **kw):
     _CALLPOS.append((pos, getattr(f, "__name__", None)))
     try:
         return f(*args, **kw)
+    except MagmaError as e:
+        if isinstance(f, _MCoercionMap):
+            # (a coercion map's application error is said at the call's "(", as Magma's)
+            e.pos = e.pos or pos
+        raise
     finally:
         _CALLPOS.pop()
 
@@ -7875,6 +8027,13 @@ def _cr_source_ok(X):
         return True
     ring = X if isinstance(X, _sp.PolynomialRing_) else getattr(X, "_ring", None)
     return type(ring) in (_sp.PolynomialRing_, _MPolyRingZQ) and (ring._base is _sp.ZZ or ring._base is _sp.QQ)
+
+
+@_signature("Coercion", "Str", "Str", ret="Map")
+def _coercion(D, C):
+    """The coercion map from D to C (Magma's Coercion; it is made whether or
+    not C takes D's elements, as Magma's is)."""
+    return _MCoercionMap(D, C)
 
 
 @_signature("ChangeRing", "RngUPol", "Rng", ret="RngUPol")
@@ -9831,18 +9990,42 @@ class _MNumberField(_snf.NumberField_absolute):
 
 class _MOrder:
     _magma_block = True
-    _magma_nowrap = True  # Magma prints the description on one line
 
     def __init__(self, K):
         self.K = K
 
-    def __repr__(self):
-        K = self.K
-        f = _snf._repr_poly(K._zf, K._var)
+    def _is_equation_order(self):
         # (a non-monic polynomial's equation order isn't the maximal order, as Magma has it)
-        if K._zf[-1] == 1 and K._nfdata()["index"] == 1:
-            return "Maximal Equation Order with defining polynomial %s over its ground order" % f
-        return "Maximal Order of Equation Order with defining polynomial %s over its ground order" % f
+        return self.K._zf[-1] == 1 and self.K._nfdata()["index"] == 1
+
+    def _parts(self):
+        # (the defining polynomial always in x, whatever the field's own variable is called: Magma 2.18-5 prints the
+        # equation order's polynomial so, for NumberField(t^3 - 2) and NumberField(PolynomialRing(Rationals()).1^3 - 2)
+        # alike)
+        K = self.K
+        f = _snf._repr_poly(K._zf, "x")
+        head = "Maximal Equation Order" if self._is_equation_order() else "Maximal Order of Equation Order"
+        return head + " with defining polynomial", f, "over its ground order"
+
+    def __repr__(self):
+        return "%s %s %s" % self._parts()
+
+    def _pieces(self, indent, plus):
+        """The order's text in pieces with the column a line broken in each
+        continues at (_cont_words): the polynomial's terms after its first
+        `plus` more in, as a polynomial is; the description, the first term
+        and what follows at the indentation (Magma 2.18-5)."""
+        head, f, rest = self._parts()
+        first = f.split(" ")[0]
+        return [(head + " " + first, indent), (f[len(first):], indent + plus), (" " + rest, indent)]
+
+    def _str(self, col, indent, tail):
+        """Laid out as Magma prints a maximal equation order past WIDTH
+        columns (_pieces); under printf's %o without the polynomial's 4."""
+        if _making_string() or not self._is_equation_order() or _IN_REC[0]:
+            return repr(self) + tail
+        plus = 0 if _SPRINT[0] is not None else 4
+        return _flow(_cont_words(self._pieces(indent, plus) + [(tail, indent)]), col, indent, indent)
 
     def _magma_degree(self):
         return self.K.degree()

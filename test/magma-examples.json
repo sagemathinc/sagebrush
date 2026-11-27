@@ -245,6 +245,8 @@
   "Integral": "> P<x> := PolynomialRing(Rationals());\n> Integral(3*x^2 + 1);\nx^3 + x",
   "Normalise": "> P<x> := PolynomialRing(Rationals());\n> Normalise(-3*x + 1);\nx - 1/3",
   "Normalize": "> P<x> := PolynomialRing(Rationals());\n> Normalize(2*x^2 + 4*x + 6);\nx^2 + 2*x + 3",
-  "SquarefreeFactorization": "> P<x> := PolynomialRing(Rationals());\n> SquarefreeFactorization((x - 1)^2 * (x + 2)^3);\n[\n    <x - 1, 2>,\n    <x + 2, 3>\n]"
+  "SquarefreeFactorization": "> P<x> := PolynomialRing(Rationals());\n> SquarefreeFactorization((x - 1)^2 * (x + 2)^3);\n[\n    <x - 1, 2>,\n    <x + 2, 3>\n]",
+  "Coercion": "> f := Coercion(Integers(), Rationals());\n> f;\nMapping from: Integer Ring to Rational Field\n> f(3);\n3",
+  "Coercion(Str, Str)": "> Coercion(Integers(), GF(7))(10);\n3"
  }
 }

@@ -8149,6 +8149,14 @@
   "class": "1+2",
   "owner": "raster/image I/O"
  },
+ "engine/raster/src/svg.rs :: apply :: \"stroke-miterlimit\" => style.miter = number(v)?, #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/svg.rs :: apply :: style.cap = match v { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
  "engine/raster/src/svg.rs :: draw_path :: let s = Stroke { width: st.stroke_width, line_cap: st.cap, line_join: st.join, miter_limit: st.miter, ..Stroke::default() }; #0": {
   "class": "none",
   "owner": "raster/image I/O"
@@ -11412,6 +11420,11 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: MRec._str :: A maximal order in it prints on one line (_IN_REC), as a tuple's does: #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
  "lib/_magma.py :: PartialFractionDecomposition :: budget = _FunBudget() #0": {
   "class": "2+3",
   "owner": "Magma compatibility/rational functions",
@@ -11495,6 +11508,16 @@
   "class": "3",
   "owner": "Magma compatibility",
   "row": "inv-25"
+ },
+ "lib/_magma.py :: _MOrder._parts :: head = \"Maximal Equation Order\" if self._is_equation_order() else \"Maximal Order of Equation Order\" #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
+ "lib/_magma.py :: _MOrder._str :: \"\"\"Laid out as Magma prints a maximal equation order past WIDTH #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
  },
  "lib/_magma.py :: _alt :: if n > _COLLECT_MAX: #0": {
   "class": "2",
@@ -20269,9 +20292,14 @@
   "owner": "pyjs JSON/runtime memory",
   "row": "src-8"
  },
- "src/runtime/modules.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
+ "src/runtime/modules.ts ::  :: import { admitHeap, heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
@@ -20942,6 +20970,11 @@
   "class": "coverage",
   "owner": "NumPy shim",
   "reason": "string arrays: an operation v1 doesn't have, refused in words (NotImplementedError); not a cap"
+ },
+ "src/runtime/numpy.ts :: toNum :: if (!(n >= -9223372036854775808 && n < (dt.kind === \"u\" && dt.itemsize >= 4 ? 18446744073709551616 : 9223372036854775808))) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: NumPy's own OverflowError for a Python float past a C long, as int() packs it (#2149)"
  },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",

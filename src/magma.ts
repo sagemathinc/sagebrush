@@ -241,7 +241,7 @@ export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.sta
  * (lib/_magma.py's _CALL_POS_NAMES, which a test keeps equal): their calls
  * are emitted as _m._call((line, col), f, args), so that a repeated or
  * nested call is told apart. */
-export const CALL_POS = new Set(("Alt ChangeRing CharacteristicPolynomial ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed " +
+export const CALL_POS = new Set(("Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed " +
   "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Nclasses Ngens " +
   "Norm Normalise Normalize NumberOfClasses Orbit Orbits PrimeField Root RootsInSplittingField Solution " +
   "SquarefreeFactorization Stabilizer Submatrix Subsets Sym Trace Vector").split(" "));

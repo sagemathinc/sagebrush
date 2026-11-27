@@ -242,6 +242,7 @@ TABLE = {
     "NumberOfColumns": (["matrices"], "The number of columns of a matrix."),
     "Nrows": (["matrices"], "The same as NumberOfRows."),
     "Ncols": (["matrices"], "The same as NumberOfColumns."),
+    "Coercion": (["maps"], "The coercion map from one structure to another: x :-> C!(D!x)."),
     "Domain": (["maps"], "The domain of a map."),
     "Codomain": (["maps"], "The codomain of a map."),
     "Image": (["maps"], "The set of images of a map given by its graph."),
@@ -1127,6 +1128,12 @@ $.1^2 - 2*$.1 - 6""",
     "Ncols": """\
 > Ncols(Matrix(Integers(), 4, 1, [1, 2, 3, 4]));
 1""",
+    "Coercion": """\
+> f := Coercion(Integers(), Rationals());
+> f;
+Mapping from: Integer Ring to Rational Field
+> f(3);
+3""",
     "Domain": """\
 > f := map< Integers() -> Rationals() | n :-> n / 2 >;
 > Domain(f);
@@ -1153,6 +1160,10 @@ Rational Field""",
 # example)}, written for Sagebrush.  (Its TABLE summary and EXAMPLES entry
 # are for the name as a whole.)
 SIGNATURES = {
+    "Coercion": {
+        "Str, Str": ("The coercion map from D to C: an element of D, coerced into C; the preimage of y is D!y.",
+                     "> Coercion(Integers(), GF(7))(10);\n3"),
+    },
     "Vector": {
         "SeqEnum": ("A vector of the integers or rationals of a sequence (over the rationals if any is not an integer).",
                     "> Vector([3, -1]);\n( 3 -1)"),

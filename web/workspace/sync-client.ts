@@ -31,13 +31,15 @@
 //   or state, or the person's resume().
 import { COPIES, LEGACY_MAX, type Workspace } from "./api";
 import { inTx, req } from "./db";
-import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
+import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wireOf, ownedSeq, SealedMismatch, type Lease, type OutboxRecord, type ReleaseResend, type WireOp } from "./sync-outbox";
+import type * as SealMod from "./sync-seal";
 import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
-import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
+import { cursorOf, applyOps, genPrefix, genKey, idbStore, drainConfirmed, sealedPullKey } from "./sync-confirmed";
 import { capture as captureAdoption } from "./sync-adopt";
 import { SENDER_HOLD, ReplayHalted, runReplay } from "./sync-replay";
 import { Halt } from "./sync-overlay";
+import { ReleaseHalt, RELEASE_OP as RELEASE, REFS, addRow, duePairs, heldAs, refusalVerdict, type RefPair } from "./sync-refs";
 import { rewriting } from "./sync-rewrite";
 import { REBUILD, passOf, passCursor, cleanStep, stage, stageEchoes, logDone, captureStep, done, viewStep, retireStep, acked as rebuiltAcked, announceInvalid } from "./sync-rebuild";
 import type { SyncOp } from "./sync-reduce";
@@ -49,6 +51,9 @@ import type { DocSync } from "./doc-sync";
 /** (syncReady) refresh tokens: at most this many waiting, and as many answered kept in the status; each a short
  * random word (the status message's bound, sync-owner STATUS_PUB, holds them) */
 export const READY = { tokens: 8, form: /^[0-9a-z]{12}$/ };
+/** (e2e PR 5d) the sweep of the adds due: at most every `everyMs` (plus up to `jitterMs`), that times up to
+ * `maxBackoff` after each release race; tests lower them, and `hold` (tests only) holds a refusal's check and the sweep. */
+export const SWEEP = { everyMs: 10 * 60_000, jitterMs: 60_000, maxBackoff: 32, hold: false };
 
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
@@ -155,7 +160,9 @@ export type SyncStatus = {
 /** An op of the server's log, as an `index` message carries it. */
 export type IndexOp = WireOp & { seq: number; device: string };
 /** A page of the server's log: step 4's confirmed index takes it (C3); step 3 gives it to no one. */
-export type IndexPage = { ns: string; ops: IndexOp[]; more: boolean };
+/** A page of the server's log; `sealed` (e2e PR 5c): what pull had verified after each sealed op in it, by seq, which
+ * whoever applies the page keeps with the cursor (sync-confirmed.ts applyConfirmed) */
+export type IndexPage = { ns: string; ops: IndexOp[]; more: boolean; sealed?: ReadonlyMap<number, unknown> };
 /** A refusal kept for the Sync panel; `n` counts them, 1, 2, 3, … in the order they came (the panel's "seen" mark is
  * an n: neither a clock nor a dseq, which a rebuild may start again).  Older entries have none. */
 export type Refusal = { dseq: number; code: string; path: string; at: number; n?: number };
@@ -186,6 +193,11 @@ export type ClientOptions = {
   docs?: DocSync;
   /** (P0 #3) the network's state and its return: the browser's unless given (tests) */
   net?: NetWatch;
+  /** (e2e PR 5c) index ops sealed and signed at send time, sent as `sops`: given only with a key provider, which no
+   * page gives yet, and the sealing module itself (sync-seal.ts, the `kit`), passed in rather than imported, so a page
+   * without end-to-end encryption carries none of its code. Another device's sealed ops halt the pull until they can
+   * be verified (5c-2) */
+  e2e?: { keys: SealMod.OpKeys; kit: Pick<typeof SealMod, "sealOps" | "sopsItem" | "envHashOf" | "verifyRow" | "PULL_START" | "SealedHalt"> };
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -198,6 +210,9 @@ const META = "meta";
 /** why sync is off when another page's upgrade closed the workspace here (Workspace.closed) */
 const CLOSED_ELSEWHERE = "your files were upgraded by a newer Sagebrush page: reload this page to sync";
 const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
+/** The largest sealed envelope's base64 (the server's LIMITS.sealedOpBytes, 64 KiB, as base64): a longer one is no
+ * envelope of this device's, and isn't hashed. */
+const SEALED_ENV_B64_MAX = Math.ceil((64 << 10) / 3) * 4;
 // (the fields of an op that make it this op: what an echo must repeat of its record)
 const SAME = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
 const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a as Record<string, unknown>)[k] === b[k]);
@@ -247,6 +262,9 @@ type Conn = {
   rebuildRunning?: boolean;
   /** (D11) a large move's view stopped, stable (failed, or late before its plan's publication): pages held, why said */
   largeHalt?: string;
+  /** (e2e PR 5d) when the next sweep may run, and its backoff after release races */
+  sweepAt?: number;
+  sweepBackoff?: number;
   /** (r5, CORR-D11-R4-1) a pull or an ops run asked for while the announce was pending: run once it is settled */
   deferPull?: boolean;
   deferOps?: boolean;
@@ -290,6 +308,9 @@ export class SyncClient {
   /** the server's log as far as this page has read it: in memory only (step 3, D2) */
   private cursor = 0;
   private cursorNs = "";
+  /** (e2e PR 5c) what pull has verified (sync-seal.ts PullState): kept with the cursor when pages are applied
+   * (applyConfirmed), read back at each connection; in memory only without onIndex, as the cursor is */
+  private pullState: unknown = undefined;
   private subs = new Set<(s: SyncStatus) => void>();
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
@@ -299,7 +320,7 @@ export class SyncClient {
   private barriers = new Map<string, number>();
   private answered: string[] = [];
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, sealedHalt: "" as string, releasesDropped: 0, releaseChecks: 0, releaseCheckFailures: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -418,6 +439,20 @@ export class SyncClient {
   }
 
   /** (tests) the in-memory cursor, and what is in flight */
+  /** Tests only (e2e PR 5d): release records for exactly `pairs`, as a current device that doesn't check them would
+   * make them: what every other device's check of a release op is for. Their last dseq, or null. */
+  async testRelease(pairs: RefPair[]): Promise<number | null> {
+    for (let i = 0; i < 100 && !this.conn; i++) {
+      this.kick();
+      await new Promise((ok) => setTimeout(ok, 50));
+    }
+    const c = this.conn;
+    if (!c) return null;
+    const d = await c.ob.addReleases(pairs);
+    this.kick();
+    return d;
+  }
+
   debug() {
     const c = this.conn;
     return { cursor: this.cursor, wakes: this.wakes.size, target: c?.target, pages: c?.pages, ns: c?.ns, inflight: c?.pending.size ?? 0, next: c?.next, writable: c?.writable, halted: c?.halted, paused: this.paused };
@@ -478,6 +513,7 @@ export class SyncClient {
     if (this.cursorNs !== ns) {
       // (another namespace: its own log, read from its start)
       this.cursor = 0;
+      this.pullState = undefined;
       this.cursorNs = ns;
       this.paused = null;
     }
@@ -517,6 +553,7 @@ export class SyncClient {
     }
     this.opts.onLease?.(lease);
     const ob = new Outbox(this.w, lease);
+    ob.sealing = !!this.opts.e2e;
     // (with the confirmed index: the first sync's adoption captured (the tree as of W1) before the socket opens (C3);
     // without it (step 3): the scan starts at the latest op)
     if (this.opts.onIndex) await captureAdoption(this.w, ns);
@@ -537,6 +574,8 @@ export class SyncClient {
     const start = this.opts.onIndex
       ? Math.min(awaiting ? awaiting.lo - 1 : Infinity, await cursorOf(this.w, ns))
       : awaiting ? awaiting.lo - 1 : this.cursor;
+    // (what pull had verified, as of the durable cursor: read with it, never defaulted below it)
+    if (this.opts.onIndex && this.opts.e2e) this.pullState = await this.metaGet(sealedPullKey(ns));
     // (stopped while this connection was being prepared: no socket is opened)
     if (this.stopped) return "stopped";
     const url = this.origin.replace(/^http/, "ws") + "/api/sync/v1/account";
@@ -788,27 +827,127 @@ export class SyncClient {
       last = o.seq;
       ops.push(o as unknown as IndexOp);
     }
-    // (this device's echoes: their records confirmed, if each is the very op of its record)
+    // (sealed ops: none read without the sealing module; with it, every one verified and opened, in the log's order,
+    // before anything of the page is applied (e2e PR 5c): one that doesn't verify stops the pull at it, the cursor where
+    // it was, so every device reading this log against the same verified chain stops at the same op)
+    const sealedRow = (o: IndexOp) => typeof (o as unknown as { env?: unknown }).env === "string";
+    let pullAfter: unknown = this.pullState;
+    const pageStates = new Map<number, unknown>(), opened = new Map<number, WireOp>();
+    if (ops.some(sealedRow)) {
+      if (!this.opts.e2e) {
+        c.halted = "sealed-unverified";
+        this.showWaiting(c, (await c.ob.status()).count);
+        return;
+      }
+      const { keys, kit } = this.opts.e2e;
+      let st = (pullAfter ?? kit.PULL_START) as SealMod.PullState;
+      for (const o of ops) {
+        // (verified already: read again from an earlier cursor to match an echo; what it opened to was applied then)
+        if (!sealedRow(o) || o.seq <= st.seq) continue;
+        try {
+          const r = await kit.verifyRow(keys, c.generation, o as unknown as Record<string, unknown>, st);
+          st = r.state;
+          pageStates.set(o.seq, st);
+          opened.set(o.seq, r.op);
+        } catch (e) {
+          if (!(e instanceof kit.SealedHalt)) throw e;
+          c.halted = "sealed-halt";
+          this.stats.sealedHalt = e.message.slice(0, 300);
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
+      }
+      pullAfter = st;
+    }
+    // (this device's echoes: their records confirmed, if each is the very op of its record; a sealed echo is its record's
+    // if it is the envelope this device kept for that dseq, and goes on as the record's own op)
     const mine = ops.filter((o) => o.device === this.w.device);
+    // (a sealed echo of this device's with no sealing module to check it by: not read, the pull stops, said)
+    if (!this.opts.e2e && mine.some(sealedRow)) {
+      c.halted = "sealed-unverified";
+      this.showWaiting(c, (await c.ob.status()).count);
+      return;
+    }
     if (mine.length) {
       const lo = mine[0].dseq, hi = mine[mine.length - 1].dseq;
       const recs = new Map((await c.ob.records(lo, Math.max(1, hi - lo + 1))).map((r) => [r.dseq, r]));
-      const ok: number[] = [];
+      const kept = mine.some(sealedRow) ? await c.ob.sealed(mine.filter(sealedRow).map((o) => o.dseq)) : new Map();
+      const ok: number[] = [], echoed = new Map<number, string>(), passed = new Set<number>(), seqs = new Map<number, number>();
+      let sealedTop: number | undefined;
       for (const o of mine) {
         const r = recs.get(o.dseq);
-        if (!r) continue;
+        if (!r) {
+          // (a sealed echo whose record is gone: one this device already confirmed (at or before its chain's last link)
+          // is read again from an earlier cursor, and is passed over, not read (its op was applied here when made); any
+          // other is no op of this device's)
+          if (sealedRow(o)) {
+            if (sealedTop === undefined) sealedTop = (await c.ob.sealedLast())?.dseq ?? 0;
+            if (o.dseq > sealedTop) {
+              await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} has no record here`);
+              return;
+            }
+            passed.add(o.seq);
+          }
+          continue;
+        }
+        if (sealedRow(o)) {
+          const s = kept.get(o.dseq), env = (o as unknown as { env: string }).env;
+          // (its hash, bounded first: an envelope past the largest the server takes, or that isn't base64, is no
+          // envelope of this device's)
+          let h: string | null = null;
+          if (env.length <= SEALED_ENV_B64_MAX) {
+            try {
+              h = await this.opts.e2e!.kit.envHashOf(env);
+            } catch {
+              h = null;
+            }
+          }
+          if (!s || h === null || h !== s.envHash) {
+            await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} isn't the envelope this device sealed`);
+            return;
+          }
+          ops[ops.indexOf(o)] = { ...r.op, seq: o.seq, device: o.device, dseq: o.dseq } as unknown as IndexOp;
+          ok.push(o.dseq);
+          seqs.set(o.dseq, o.seq);
+          echoed.set(o.dseq, h);
+          continue;
+        }
         if (!sameOp(r.op, o as unknown as Record<string, unknown>)) {
           await this.halt(c, "diverged", `the server's op ${o.seq} for dseq ${o.dseq} isn't this device's record`);
           return;
         }
         ok.push(o.dseq);
+        seqs.set(o.dseq, o.seq);
       }
-      if (ok.length) await c.ob.confirmed(ok);
+      if (passed.size) for (let i = ops.length - 1; i >= 0; i--) if (passed.has(ops[i].seq)) ops.splice(i, 1);
+      if (ok.length) {
+        try {
+          await c.ob.confirmed(ok, echoed, seqs);
+        } catch (e) {
+          if (!(e instanceof SealedMismatch)) throw e;
+          await this.halt(c, "diverged", e.message);
+          return;
+        }
+      }
+    }
+    // (another device's sealed ops go on as the ops they opened to, at their place in the log)
+    for (let i = 0; i < ops.length; i++) {
+      const op = opened.get(ops[i].seq);
+      if (op && ops[i].device !== this.w.device) ops[i] = { ...op, seq: ops[i].seq, device: ops[i].device, dseq: ops[i].dseq } as unknown as IndexOp;
     }
     if (this.opts.onIndex && ops.length) {
       try {
-        await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+        // (with the sealing module, every page carries its map, empty or not: the index's references (e2e PR 5d) are kept
+        // from every page alike, however the log was cut into pages)
+        await this.opts.onIndex({ ns: c.ns, ops, more: m.more, ...(this.opts.e2e || pageStates.size ? { sealed: pageStates } : {}) });
       } catch (e) {
+        // (a release op this device can't accept (e2e PR 5d): stopped at it, as at a sealed op that doesn't verify)
+        if (e instanceof ReleaseHalt) {
+          c.halted = "sealed-halt";
+          this.stats.sealedHalt = e.message.slice(0, 300);
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
         // (D11: a large move's rewrite stuck, or its view's replay stopped: the pages held (nothing past them is
         // read), sending goes on, the person told; a reload tries once more)
         if (e instanceof ReplayHalted || e instanceof Halt) {
@@ -823,6 +962,7 @@ export class SyncClient {
     // (the view may have queued fetches; and a page is a moment to look at the queue anyway)
     this.fetchKick(c);
     this.cursor = last;
+    this.pullState = pullAfter;
     // (an idle pull's discovery: each page raises the target; a page that ends the log ends it, D8b r2)
     if (c.discover) {
       c.target = Math.max(c.target, last);
@@ -830,6 +970,13 @@ export class SyncClient {
     }
     // (no further than the target: past it, pages are another time's, LIMIT-PR58-3)
     if (!m.more && c.target > last) c.target = last;
+    // (the log read to its end: a release refusal checked against it, or a sweep of the adds due; e2e PR 5d)
+    if (!m.more && this.opts.e2e && this.opts.onIndex) {
+      await this.releases(c);
+      if (c.halted) return;
+      // (and the scan, which waits at a "delete old versions" until the ledger has this device's own ops: e2e PR 5d)
+      this.kick();
+    }
     // (syncReady: the log's end, read by a pull asked after a token was given, its pages applied: that token answered;
     // a token given after this pull was asked: once more, to the end)
     if (!m.more && this.barriers.size) {
@@ -949,11 +1096,19 @@ export class SyncClient {
     c.pending.delete(m.req);
     hubOf(this.w.ws).answered(c.ns, c.ob.lease.gen, p.recs.map(ownedSeq).filter((x): x is number => x !== undefined));
     if (!Array.isArray(m.ops)) return c.end("closed");
-    const results = m.ops as ({ dseq: number; seq: number } | { dseq: number; code: string })[];
-    await c.ob.acked(results);
+    const results = m.ops as ({ dseq: number; seq: number; env_sha256?: string } | { dseq: number; code: string } | { dseq: number; undecided: true })[];
+    try {
+      await c.ob.acked(results);
+    } catch (e) {
+      if (!(e instanceof SealedMismatch)) throw e;
+      await this.halt(c, "diverged", e.message);
+      return;
+    }
     // (the server decides in dseq order with no gaps: its decided prefix, D6's server_next, follows each ack, so a
-    // rebuild starting now knows which records it has decided)
-    for (const d of results) if (isNat(d.dseq)) c.serverNext = Math.max(c.serverNext ?? 1, d.dseq + 1);
+    // rebuild starting now knows which records it has decided; an undecided op isn't decided)
+    for (const d of results) if (isNat(d.dseq) && !("undecided" in d)) c.serverNext = Math.max(c.serverNext ?? 1, d.dseq + 1);
+    // (undecided ones, after a refusal in their message: sealed again, from the lowest, once nothing is in flight)
+    if (results.some((d) => "undecided" in d)) c.resync = true;
     await this.timerOk(c.ns, "ops");
     const byDseq = new Map(p.recs.map((r) => [r.dseq, r]));
     const refused = results.filter((d): d is { dseq: number; code: string } => "code" in d);
@@ -969,6 +1124,8 @@ export class SyncClient {
     }
     // (accepted ones wait for their echo: the log is read on, to the newest of them, and no further)
     for (const d of results) if ("seq" in d && isNat(d.seq)) c.target = Math.max(c.target, d.seq);
+    // (a release refused (e2e PR 5d): the log read to its end, where its check runs (releases))
+    if (refused.some((d) => byDseq.get(d.dseq)?.op.op === RELEASE)) c.discover = true;
     this.pull(c);
     this.kick();
   }
@@ -986,7 +1143,7 @@ export class SyncClient {
   }
   private async errorOf(c: Conn, m: Record<string, unknown>) {
     const code = String(m.code ?? "");
-    const detail = (m.detail && typeof m.detail === "object" ? m.detail : {}) as { message?: string; retry_after?: number; next_dseq?: number };
+    const detail = (m.detail && typeof m.detail === "object" ? m.detail : {}) as { message?: string; retry_after?: number; next_dseq?: number; reason?: string; limit?: string };
     const ra = isNat(detail.retry_after) ? detail.retry_after : undefined;
     const p = isNat(m.req) ? c.pending.get(m.req) : undefined;
     // (an announce's refusal stays pending until it is handled, as its answer does (r4): deleted by error())
@@ -1046,6 +1203,26 @@ export class SyncClient {
     if (code === "readonly" || code === "deleting") {
       c.writable = false;
       this.say({ state: "paused", ns: c.ns, reason: code === "readonly" ? "read-only" : "deleting" });
+    }
+    if (this.opts.e2e) {
+      // (sealed: the key chain moved (or the server has none yet) for the whole message, so nothing was decided: every
+      // record not yet accepted is sealed again under the chain as it is now, with its dseq)
+      if (code === "conflict" && (detail.reason === "stale_head" || detail.reason === "no_chain")) {
+        await c.ob.dropSealed();
+        await this.opts.e2e.keys.chain(true);
+      }
+      // (the sealed log is full: no resend can fit, so it stops and says so, rather than trying again)
+      if (code === "limit" && detail.limit === "sealed_log") {
+        c.halted = "sealed-log-full";
+        this.showWaiting(c, (await c.ob.status()).count);
+        return;
+      }
+      // (a signature the server doesn't take: this device isn't a current device of the account's key chain)
+      if (code === "forbidden") {
+        c.halted = "not-a-device";
+        this.showWaiting(c, (await c.ob.status()).count);
+        return;
+      }
     }
     if (code === "forbidden") return c.end("closed");
     // (order: a gap, after an earlier message failed; resent from the lowest, so no timer of its own beyond the first)
@@ -1107,6 +1284,13 @@ export class SyncClient {
         // (the refusal limit, already found unliftable on this server for this very obligation: halted, no rebuild)
         const un = await this.metaGet<{ n: number }>(key(c.ns, "resetUnsupported"));
         if (ob.why === "invalid" && un?.n === ob.n) return this.haltUnsupported(c);
+        // (sealed: a rebuild reads the server's log back, which this device can't do until it verifies and opens sealed
+        // ops (e2e PR 5c's pull half): halted, said, the obligation kept for then)
+        if (this.opts.e2e) {
+          c.halted = "sealed-rebuild";
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
         c.rebuilding = true;
       }
     }
@@ -1164,6 +1348,16 @@ export class SyncClient {
         return;
       }
       const batch = recs.slice(0, n);
+      // (sealed sends: each record's sealed form, kept before it first goes, then the same bytes on every resend)
+      let sealedItems: unknown[] | null = null;
+      if (this.opts.e2e) {
+        sealedItems = await this.sealFor(c, batch);
+        if (this.conn !== c || c.resync) return;
+        if (!sealedItems) {
+          this.again = true;
+          return;
+        }
+      }
       const wait = this.bucket.take(batch.length, this.clock.now());
       if (wait === Infinity) throw new Error("sync: a message larger than the pace allows");
       if (wait > 0) {
@@ -1175,7 +1369,7 @@ export class SyncClient {
       this.stats.opsMessages++;
       this.stats.opsSent += batch.length;
       this.stats.maxOps = Math.max(this.stats.maxOps, batch.length);
-      this.ask(c, { t: "ops", ops: batch.map((r) => r.op) }, { kind: "ops", recs: batch });
+      this.ask(c, sealedItems ? { t: "sops", ops: sealedItems } : { t: "ops", ops: batch.map((r) => r.op) }, { kind: "ops", recs: batch });
       // (sent: in memory only, fenced by this connection's lease generation (task #14))
       hubOf(this.w.ws).sent(c.ns, c.epoch, c.ob.lease.gen, batch.map(ownedSeq).filter((x): x is number => x !== undefined));
       c.next = batch[batch.length - 1].dseq + 1;
@@ -1206,6 +1400,11 @@ export class SyncClient {
   private showWaiting(c: Conn, count: number, resumesAt?: number) {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
     if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
+    if (c.halted === "sealed-unverified") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device can't verify another device's encrypted changes yet" });
+    if (c.halted === "sealed-halt") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "the server's log doesn't verify: sync stopped at the first change that doesn't" });
+    if (c.halted === "sealed-rebuild") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device can't rebuild its sync from encrypted changes yet" });
+    if (c.halted === "sealed-log-full") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this account's encrypted change log is full" });
+    if (c.halted === "not-a-device") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device isn't one of this account's encryption devices any more" });
     if (c.halted === "blob-conflict") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server holds other bytes for one of this device's files. Delete my synced data to start again" });
     if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
     if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync", stuck: true });
@@ -1813,6 +2012,98 @@ export class SyncClient {
     // (the obligation, its counter incremented in the same transaction (D7 r2); a halt is never lowered to a refusal)
     await inTx(this.w.ws, META, "readwrite", async (tx) => { await obligate(tx.objectStore(META), ns, why, detail); });
   }
+  /** The `sops` items for `batch`: each record's kept sealed form, sealed and kept now for those that have none (in
+   * runs, each chained from the record before it), or null if a sealing couldn't be kept (an ack or a drop came
+   * meanwhile: sealed again on the next run). */
+  private async sealFor(c: Conn, batch: OutboxRecord[]): Promise<unknown[] | null> {
+    const { keys, kit } = this.opts.e2e!;
+    const have = await c.ob.sealed(batch.map((r) => r.dseq));
+    for (let i = 0; i < batch.length; ) {
+      if (have.has(batch[i].dseq)) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < batch.length && !have.has(batch[j].dseq)) j++;
+      const prev = await c.ob.chainAfter(batch[i].dseq - 1);
+      const fresh = await kit.sealOps(keys, c.generation, this.w.device, batch.slice(i, j).map((r) => r.op), prev);
+      if (!(await c.ob.keepSealed(fresh, prev))) return null;
+      for (const s of fresh) have.set(s.dseq, s);
+      i = j;
+    }
+    return batch.map((r) => kit.sopsItem(have.get(r.dseq)!));
+  }
+
+  /**
+   * The index's references (e2e PR 5d), once the log has been read to its end. A release refusal first: against this
+   * newer verified prefix, each refused release's pairs are either ended now by another device's release (a race: the
+   * pairs still live and still eligible are sent again, at fresh dseqs) or not one of them is (the log isn't what this
+   * device verified: it stops, said); a pair still live but no longer eligible stops it too. Otherwise, at most every
+   * SWEEP.everyMs (jittered, backing off after a race) and with no release in flight: a sweep of the adds due.
+   */
+  private async releases(c: Conn) {
+    if (SWEEP.hold) return;
+    const refused = await c.ob.releaseRefused();
+    const gen = genPrefix(c.ns, (await this.metaGet<number>(genKey(c.ns))) ?? 0);
+    if (refused.length) {
+      // (each refusal not yet checked: each pair ended by a release after the cursor it was sent at (another device's, a
+      // race), or how it is held now, or "gone": not live, and not ended since; then refusalVerdict decides)
+      const held = await inTx(this.w.ws, [META, "syncIndex"], "readonly", async (tx) => {
+        const meta = tx.objectStore(META), store = idbStore(tx, gen);
+        const out: (string[] | null)[] = [];
+        for (const r of refused) {
+          if (r.checked) { out.push(null); continue; }
+          const h: string[] = [];
+          for (const p of r.pairs) {
+            const row = await addRow(meta, gen, p);
+            h.push(row?.rel !== undefined && row.rel > r.at ? "ended" : ((await heldAs(meta, store, gen, p)) ?? "gone"));
+          }
+          out.push(h);
+        }
+        return out;
+      });
+      const resends: ReleaseResend[] = [];
+      for (let i = 0; i < refused.length; i++) {
+        const r = refused[i], h = held[i];
+        // (checked already, and left over for want of room: only made now)
+        if (!h) { resends.push({ pairs: r.pairs, retried: r.retried, person: r.person, at: r.at }); continue; }
+        const v = refusalVerdict(h, r.pairs, r.person, r.retried);
+        if ("halt" in v) {
+          c.halted = "sealed-halt";
+          this.stats.sealedHalt = v.halt.slice(0, 300);
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
+        this.stats.releasesDropped += v.dropped;
+        resends.push({ pairs: v.resend, retried: r.retried, person: r.person, at: r.at });
+      }
+      // (its transaction failing (storage, a crash's abort) leaves every refusal as it was, for the next read of the log
+      // to its end: never an error out of the pull)
+      try {
+        await c.ob.releaseChecked(resends, refused.length);
+      } catch (e) {
+        if (e instanceof Fenced) throw e;
+        this.stats.releaseCheckFailures++;
+        console.warn("sync: a release refusal's check couldn't be kept; it runs again:", e);
+        return;
+      } finally {
+        this.stats.releaseChecks++;
+      }
+      c.sweepBackoff = Math.min((c.sweepBackoff ?? 1) * 2, SWEEP.maxBackoff);
+      this.kick();
+      return;
+    }
+    const now = this.clock.now();
+    if (now < (c.sweepAt ?? 0) || (await c.ob.releaseOut())) return;
+    c.sweepAt = now + SWEEP.everyMs * (c.sweepBackoff ?? 1) + Math.floor(Math.random() * SWEEP.jitterMs);
+    const due = await inTx(this.w.ws, [META, "syncIndex"], "readwrite", (tx) => duePairs(tx.objectStore(META), idbStore(tx, gen), gen, now, REFS.page));
+    if (!due.length) {
+      c.sweepBackoff = 1;
+      return;
+    }
+    if ((await c.ob.addReleases(due)) !== null) this.kick();
+  }
+
   private async halt(c: Conn, why: "invalid" | "diverged", detail: string) {
     c.halted = why;
     // (tests: between the halt, in memory, and its flag's write: the window a crash can fall in)
