@@ -126,18 +126,20 @@ test("compiling a wide function with a nested function takes time linear in its 
     const names = Array.from({ length: v }, (_, k) => `a${k}`);
     return ["function main()", ...names.map((n) => `  ${n} = 1;`), "  function inner()", ...names.map((n) => `    t = ${n};`), "  end", "  inner();", "end", ""].join("\n");
   };
-  const time = (v: number) => {
-    const s = src(v);
-    let best = Infinity;
-    for (let k = 0; k < 3; k++) {
-      const t0 = process.hrtime.bigint();
-      matlabToPython(s, "main.m", { file: true });
-      best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6);
+  const cpuMs = (f: () => unknown) => { const t = process.cpuUsage(); f(); const d = process.cpuUsage(t); return (d.user + d.system) / 1000; };
+  const small = src(2000), large = src(16000);
+  matlabToPython(src(500), "main.m", { file: true }); // (warm up)
+  // (CPU time, the two sizes interleaved, the least of 3 each, a floor, and 3 attempts)
+  let last = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let s = Infinity, b = Infinity;
+    for (let r = 0; r < 3; r++) {
+      s = Math.min(s, cpuMs(() => matlabToPython(small, "main.m", { file: true })));
+      b = Math.min(b, cpuMs(() => matlabToPython(large, "main.m", { file: true })));
     }
-    return best;
-  };
-  time(500); // (warm up)
-  const small = time(2000), large = time(8000);
-  // (4 times the width: about 4 times the time when linear, 16 when quadratic)
-  assert.ok(large / small < 8, `2000: ${small.toFixed(1)} ms, 8000: ${large.toFixed(1)} ms`);
+    // (8 times the width: about 8 times the time when linear, 64 times when quadratic)
+    if (b < 24 * Math.max(s, 20)) return;
+    last = `2000: ${s.toFixed(1)} ms, 16000: ${b.toFixed(1)} ms of CPU time`;
+  }
+  assert.fail(last + ", 3 times");
 });
