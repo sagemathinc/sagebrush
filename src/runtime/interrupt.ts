@@ -39,10 +39,8 @@ export function takeFlush(intr: Int32Array = INTR): boolean {
  * waiting on the word. */
 export function requestCtrlC(intr: Int32Array = INTR): void {
   Atomics.or(intr, 0, INTR_CTRL_C);
-  if (intr.buffer instanceof SharedArrayBuffer) {
-    stopNativeRun(intr.buffer);
-    Atomics.notify(intr, 0);
-  }
+  if (intr.buffer instanceof SharedArrayBuffer) Atomics.notify(intr, 0);
+  if (intr.buffer instanceof SharedArrayBuffer) stopNativeRun(intr.buffer);
 }
 /** The native engine's Stop of its current run (STOP_UPTO = RUN), when the
  * buffer carries installed control words (VERSION 1); else nothing. */

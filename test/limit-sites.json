@@ -10358,9 +10358,15 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "lib/_capacity.py :: _engine_domain :: return \"wasm-engine\" if hasattr(_sys, \"_sagebrush_heap_limit\") else \"cpython-heap\" #0": {
+ "lib/_capacity.py :: _engine_domain :: return \"wasm-engine\" if hasattr(_sys, \"_sagebrush_heap_limit\") and not _native_engine else \"cpython-heap\" #0": {
   "class": "2",
-  "owner": "python (@sagebrush-python)"
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the engine's memory domain the capacity record reports: the wasm heap in the browser engine, this process's heap under the native engine (#7 N1), whose figure the memory guard admits against"
  },
  "lib/_capacity.py :: _job_choice :: \"\"\"The job limit a Windows process is under: (limit, used, scope).  A #0": {
   "class": "2",
@@ -19921,7 +19927,7 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/engine.ts :: engine :: const PAGE = 65536, MAX_SAFE = 2 ** 53 - 1; #0": {
+ "src/runtime/engine.ts :: pushNativeShare :: const PAGE = 65536, MAX_SAFE = 2 ** 53 - 1; #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
@@ -23063,5 +23069,25 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "lib/_capacity.py ::  :: _MEASURES = {\"RLIMIT_AS\": \"address_space\", \"RLIMIT_DATA\": \"data_segment\", \"MemAvailable\": \"physical\", #0": {
+  "class": "none",
+  "owner": "native engine N1 (#7, @sagebrush-sage2)",
+  "reason": "the native host's measure names, mapping a capacity record's rows to the ledger's row kinds for native_total_answer; refuses nothing"
+ },
+ "src/runtime/engine.ts :: nativeTotalSource :: const cap = Obj.hooks.importModule(\"_capacity\"); #0": {
+  "class": "none",
+  "owner": "native engine N1 (#7, @sagebrush-sage2)",
+  "reason": "the native engine's total source: asks _capacity for the host's total and rows; refuses nothing itself"
+ },
+ "src/runtime/engine.ts :: nativeTotalSource :: const r = Obj.callObj(Obj.getattr(cap, \"native_total_answer\"), []); #0": {
+  "class": "none",
+  "owner": "native engine N1 (#7, @sagebrush-sage2)",
+  "reason": "the native engine's total source: asks _capacity for the host's total and rows; refuses nothing itself"
+ },
+ "src/runtime/engine.ts :: pushNativeShare :: if (now - nativeShareAt < SHARE_MAX_AGE_MS) return; #0": {
+  "class": "none",
+  "owner": "native engine N1 (#7, @sagebrush-sage2)",
+  "reason": "how often the native engine's share of this process's heap is refreshed (a time between refreshes); refuses nothing"
  }
 }

@@ -221,15 +221,15 @@ function startNative(addon: any): void {
   if (!(INTR.buffer instanceof SharedArrayBuffer) || INTR.buffer.byteLength < NATIVE_CONTROL_BYTE + 16) {
     throw new Error("no shared memory for the native engine's control words");
   }
-  const c = new Uint32Array(INTR.buffer, NATIVE_CONTROL_BYTE, 4);
-  c[1] = 0xffffffff;
-  c[2] = 0xffffffff;
-  c[3] = 0;
-  Atomics.store(c, 0, CONTROL_VERSION);
+  const native = new Uint32Array(INTR.buffer, NATIVE_CONTROL_BYTE, 4);
+  native[1] = 0xffffffff;
+  native[2] = 0xffffffff;
+  native[3] = 0;
+  Atomics.store(native, 0, CONTROL_VERSION);
   // (the capacity module's engine domain: this process's heap from now on)
   Obj.callObj(Obj.getattr(Obj.hooks.importModule("_capacity"), "_set_native_engine"), []);
-  addon.init(c, CONTROL_VERSION, nativeTotalSource);
-  control = c;
+  addon.init(native, CONTROL_VERSION, nativeTotalSource);
+  control = native;
   nativeRun = 0xffffffff;
 }
 
@@ -266,7 +266,10 @@ function nativeCall<T>(addon: any, f: () => T): T {
     // (the addon's errors are "code: message"; an interrupted call is the
     // Ctrl-C that stopped it, taken by the caller's engineError)
     const m = String(err?.message ?? "");
-    if (/^interrupted:/.test(m)) Atomics.or(INTR, 0, INTR_CTRL_C);
+    if (/^interrupted:/.test(m)) {
+      Atomics.or(INTR, 0, INTR_CTRL_C);
+      Atomics.notify(INTR, 0);
+    }
     // (a fault: the process is faulted for good, every later call refused; in the app's engine the host is told,
     // and it ends this session's process with the fault frame (design N1 r3: app/engine/serve.mjs))
     else if (/^engine_fault:/.test(m)) {

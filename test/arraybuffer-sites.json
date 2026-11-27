@@ -1560,7 +1560,7 @@
   "a30165178a6a0930": {"decl":"src/runtime/engine.ts :: get","class":"allocates","via":"src/runtime/object.ts :: getattr"},
   "5e63a6513753520a": {"decl":"src/runtime/engine.ts :: mpCall","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
   "22084e9e2afe2e83": {"decl":"src/runtime/engine.ts :: native","class":"allocates","via":"src/runtime/engine.ts :: chooseBackend"},
-  "c628eace97521ddf": {"decl":"src/runtime/engine.ts :: nativeCall","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
+  "f47252ea411ee2d6": {"decl":"src/runtime/engine.ts :: nativeCall","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "83a0aa1d77af37c9": {"decl":"src/runtime/engine.ts :: only","class":"allocates","via":"src/runtime/object.ts :: tuple"},
   "f03a877cfb507c3b": {"decl":"src/runtime/engine.ts :: pieceViews","class":"allocates","via":"src/runtime/engine.ts :: admitPieces"},
   "008af92fb68a8e6a": {"decl":"src/runtime/engine.ts :: refuse","class":"no-new-store"},

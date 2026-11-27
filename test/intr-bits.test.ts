@@ -44,8 +44,10 @@ test("no source stores to INTR[0]: producers or, consumers and (the census)", ()
   // web/worker.ts makes and announces in `ready`, never the interrupt word; and live data's answer state word,
   // src/live-data.ts writeAnswer's `ctl`, a view of the answer's own SharedArrayBuffer, as input()'s is; and confinement
   // phase 2's epoch word, `epochWord`: a SharedArrayBuffer of its own that web/worker.ts makes and announces in `ready`
-  // (`epoch`), which worker-kernel.js binds as `this.epochWord`, never the interrupt word)
-  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl", "web/notebook/worker-kernel.js ctl", "web/runner/index.html ctl", "web/worker.ts writableWord", "web/runner/index.html writable", "web/notebook/worker-kernel.js this.writableWord", "src/live-data.ts ctl", "web/worker.ts epochWord", "web/notebook/worker-kernel.js this.epochWord"]);
+  // (`epoch`), which worker-kernel.js binds as `this.epochWord`, never the interrupt word; and the native engine's
+  // control words, src/runtime/engine.ts startNative's `native`: a Uint32Array at NATIVE_CONTROL_BYTE of the same
+  // buffer, past the interrupt word's two Int32 words, whose word 0 is their VERSION, never the interrupt word)
+  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl", "web/notebook/worker-kernel.js ctl", "web/runner/index.html ctl", "web/worker.ts writableWord", "web/runner/index.html writable", "web/notebook/worker-kernel.js this.writableWord", "src/live-data.ts ctl", "web/worker.ts epochWord", "web/notebook/worker-kernel.js this.epochWord", "src/runtime/engine.ts native"]);
   const bad: string[] = [];
   for (const [f, t] of text)
     t.split("\n").forEach((line, i) => {
