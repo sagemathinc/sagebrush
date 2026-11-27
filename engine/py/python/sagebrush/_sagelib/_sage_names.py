@@ -286,6 +286,7 @@ DEPS = {
     '_sage_crystals': ('_sage_lie',),
     '_sage_ff': ('_sage_frac',),
     '_sage_ffmat': ('_sage_ff',),
+    '_sage_graph': ('sage_plot',),
     '_sage_hmf': ('_sage_lang',),
     '_sage_poly': ('_sage_frac',),
     'sage_plot_fields': ('sage_plot',),

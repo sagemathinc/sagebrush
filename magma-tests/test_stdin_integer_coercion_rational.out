@@ -1,0 +1,52 @@
+
+>> Integers()!(1/2);
+             ^
+Runtime error in '!': Rational argument is not a whole integer
+LHS: RngInt
+RHS: FldRatElt
+
+>> Integers()!(-2^-1);
+             ^
+Runtime error in '!': Rational argument is not a whole integer
+LHS: RngInt
+RHS: FldRatElt
+
+>> Integers()!(+2^-1);
+             ^
+Runtime error in '!': Rational argument is not a whole integer
+LHS: RngInt
+RHS: FldRatElt
+
+>> Integers()!(-1/3);
+             ^
+Runtime error in '!': Rational argument is not a whole integer
+LHS: RngInt
+RHS: FldRatElt
+2
+-2
+
+>> Z := Integers(); Z!(7/2);
+                     ^
+Runtime error in '!': Rational argument is not a whole integer
+LHS: RngInt
+RHS: FldRatElt
+
+>> IntegerRing()!(5/4);
+                ^
+Runtime error in '!': Rational argument is not a whole integer
+LHS: RngInt
+RHS: FldRatElt
+
+>> x := 3/2; Integers()!x;
+                       ^
+Runtime error in '!': Rational argument is not a whole integer
+LHS: RngInt
+RHS: FldRatElt
+
+>> Integers()!(10^20/3);
+             ^
+Runtime error in '!': Rational argument is not a whole integer
+LHS: RngInt
+RHS: FldRatElt
+1/2
+end

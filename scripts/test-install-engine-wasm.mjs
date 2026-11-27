@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installWasm } from "./install-engine-wasm.mjs";
+import { installWasm, namesLocalCargoHome, remappedRustflags } from "./install-engine-wasm.mjs";
 
 let failures = 0;
 const ok = (c, what) => (c ? console.log("ok  ", what) : (failures++, console.log("FAIL", what)));
@@ -63,6 +63,20 @@ try {
   ok(readFileSync(dst).equals(fresh) && mode(dst) === 0o644, "then a working install replaces it whole");
 } finally {
   rmSync(dir, { recursive: true, force: true });
+}
+// the Cargo home written as CI's: the flag first, the caller's own after it, never twice; a module naming this
+// machine's Cargo home is caught, CI's (or none) is not
+{
+  const env = { CARGO_HOME: "/home/someone/.cargo" };
+  const flag = "--remap-path-prefix=/home/someone/.cargo=/home/runner/.cargo";
+  ok(remappedRustflags(env) === flag, "no RUSTFLAGS of its own: the remap alone");
+  ok(remappedRustflags({ ...env, RUSTFLAGS: "-Cdebuginfo=2" }) === `${flag} -Cdebuginfo=2`, "its own RUSTFLAGS after the remap");
+  ok(remappedRustflags({ ...env, RUSTFLAGS: `${flag} -Cdebuginfo=2` }) === `${flag} -Cdebuginfo=2`, "an already-remapped RUSTFLAGS unchanged (build-all.sh's callers, a nested build)");
+  const named = new TextEncoder().encode("panicked at /home/someone/.cargo/registry/src/x.rs:1");
+  ok(namesLocalCargoHome(named, env), "a module naming the local Cargo home is caught");
+  ok(!namesLocalCargoHome(new TextEncoder().encode("panicked at /home/runner/.cargo/registry/src/x.rs:1"), env), "CI's Cargo home is fine");
+  ok(!namesLocalCargoHome(named, { CARGO_HOME: "/home/runner/.cargo" }), "on CI's own runner nothing is local");
+  ok(!namesLocalCargoHome(new TextEncoder().encode("/home/someone/.cargo2/x"), env), "a longer path that only starts the same is not the Cargo home");
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

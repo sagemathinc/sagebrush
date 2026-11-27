@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The notebook window: open and save the files the person picks in the app's own dialogs (by the grants the app makes, never a path; no fs plugin), set its title, and talk to the engine subprocess. A phone adds the dialog and fs plugins (src/nav.rs page_capability). A template: it grants nothing as it stands (no origin); the app adds it at launch for its page's exact origin, http://127.0.0.1:<the port it holds> (src/nav.rs page_capability).",
+  "description": "The app's windows (the first, main, and those it opens, doc-<n>, src/windows.rs): open and save the files the person picks in the app's own dialogs (by the grants the app makes, never a path; no fs plugin), set its title, and talk to the engine subprocess. A phone adds the dialog and fs plugins (src/nav.rs page_capability). A template: it grants nothing as it stands (no origin); the app adds it at launch for its page's exact origin, http://127.0.0.1:<the port it holds> (src/nav.rs page_capability).",
   "windows": [
-    "main"
+    "main",
+    "doc-*"
   ],
   "permissions": [
     "allow-startup-files",
@@ -23,6 +24,8 @@
     "allow-engine-send",
     "allow-engine-ack",
     "allow-engine-stop",
+    "allow-window-open",
+    "allow-window-claim",
     "allow-disk-list",
     "allow-disk-stat",
     "allow-disk-read",
@@ -31,6 +34,7 @@
     "allow-disk-rename",
     "allow-disk-remove",
     "allow-disk-where",
+    "allow-disk-reveal",
     "allow-settings-write",
     "allow-grants-read",
     "allow-grants-write",
