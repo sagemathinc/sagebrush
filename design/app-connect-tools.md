@@ -14,6 +14,8 @@ The agents page shows, for Claude Code and for Codex, one of:
 
 Nothing happens on its own. The app never searches PATH, never downloads without a click, and never switches to another copy on its own.
 
+The Store builds (the Microsoft Store listing, design/app-agent-host.md §2) make no executable downloads at run time, so they offer only **Choose installed…** and no Download button. The direct-download builds offer both (design/app-agent-host.md §1, Updates).
+
 A copy the person installed may update itself: Claude Code's own installer does by default. After an update it no longer matches what was chosen, so the app shows *the file changed; choose it again*, or *this version isn't supported yet*. That is the rule working. The page says so, and recommends the downloaded copy for a setup that stays put.
 
 ## 2. Choose installed (the person's own copy)

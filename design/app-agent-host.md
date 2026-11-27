@@ -22,7 +22,7 @@ Nothing in Sagebrush's design may make it hard to install later through the chan
 **What exists.** The macOS and Linux apps ship a pinned Node 24.21.0 sidecar (`binaries/sagebrush-node`, hash-checked against nodejs.org's SHASUMS256 in `app/engine/bundle.mjs`) to run the engine. The Windows app doesn't ship it yet; it comes with the Windows engine work. `sagebrush-agent` is a Node package (Node 20 or later) that:
 - runs Claude through Anthropic's Claude Agent SDK, with the person's own Claude login (`~/.claude`);
 - runs Codex through `codex app-server`, with the person's own Codex login;
-- uses its own pinned, hash-checked Claude Code (an exact dependency) and Codex (fetched from upstream on first use), never the ones on PATH;
+- uses its own pinned, hash-checked Claude Code (an exact dependency) and Codex, never the ones on PATH. Run on its own (the command line, a remote runner), it fetches that Codex from upstream on first use; the app's mode never does (Updates, below);
 - pairs with one page origin, using a one-time code that it generates and puts in a pairing link it prints, which the person opens.
 
 **What the app adds.** Everything in this list is proposed; none of it exists yet.
@@ -35,7 +35,10 @@ Nothing in Sagebrush's design may make it hard to install later through the chan
   The app stops the agent, and the work it started, when the app quits (§5).
 - **Sign-in.** It is the agent's own: Claude's and Codex's login flows open the browser. The app never sees a password or a token; the logins live where the CLIs keep them, in `~/.claude` and `~/.codex`. *To verify before building:* how Claude Code's and Codex's logins can be started without a terminal. Both open a browser URL today, but the CLI front ends expect a TTY. The app may need to run them in a hidden pseudo-terminal and open the URL, or use the SDK's own login entry if it has one.
 - **The version shown.** The app's About box and the agents page show the bundled `sagebrush-agent` version, and the Claude Code and Codex versions in use (design/app-connect-tools.md).
-- **Updates.** A new agent release reaches app users in the next app release, through the app's normal update. There are no executable downloads at run time in the Store builds (§2). The direct-download builds may keep the agent's own first-use fetch of the pinned Codex, which is hash-checked as in the CLI.
+- **Updates.** A new agent release reaches app users in the next app release, through the app's normal update. Claude Code and Codex are never fetched on first use in the app. The policy per distribution (design/app-connect-tools.md, §3 and §4):
+  - **Direct-download builds** (the notarized DMG, AppImage, deb, rpm, and the signed NSIS/MSI from our site): the only executable download is the pinned, hash-checked one that **Download from Anthropic** or **Download from OpenAI** makes, after the person clicks it. The agent runs in the app's mode (`--pair-stdin`). There, starting Codex without `--codex-path` uses only a complete, rechecked cache that `--fetch-codex` filled. If there is none, the start fails with a reason word and makes no network request.
+  - **Store builds** (the Microsoft Store listing, §2): no executable downloads at run time at all. The two Download buttons aren't offered; only **Choose installed** is.
+  - The agent run on its own, outside the app, keeps its first-use fetch of the pinned Codex as today.
 
 **What the agent may touch.**
 - **Today, with the CLI:** a local `sagebrush-agent` paired with a page reaches only the workspace tools that page's grant allows (writing a notebook, its own git branch, and so on); it has no shell or files on the computer. Shell and files on a computer come only through `sagebrush remote` and that computer's explicit grant ("Allow shell and files on <computer>").
