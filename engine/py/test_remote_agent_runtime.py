@@ -445,12 +445,22 @@ def test_preflight_words():
     class P:
         def __init__(self, out):
             self.stdout = out
-    assert T.claude_auth_status("claude", {}, run=lambda *a, **k: P(b'{"loggedIn": false, "authMethod": "none"}')) is False
-    assert T.claude_auth_status("claude", {}, run=lambda *a, **k: P(b'{"loggedIn": true}')) is True
-    assert T.claude_auth_status("claude", {}, run=lambda *a, **k: P(b"error: unknown command 'auth'")) is None
+    assert T.claude_auth_status("claude", {}, run=lambda argv, env: P(b'{"loggedIn": false, "authMethod": "none"}')) is False
+    assert T.claude_auth_status("claude", {}, run=lambda argv, env: P(b'{"loggedIn": true}')) is True
+    assert T.claude_auth_status("claude", {}, run=lambda argv, env: P(b"error: unknown command 'auth'")) is None
     def boom(*a, **k):
         raise OSError("gone")
     assert T.claude_auth_status("claude", {}, run=boom) is None
+    # (the real runner: a fake `claude` whose grandchild holds the pipe open past the timeout is ended, group and all,
+    # and answers None within the bound)
+    import time
+    fake = os.path.join(fresh_root(), "claude")
+    with open(fake, "w") as f:
+        f.write("#!/bin/sh\n(sleep 120) &\nsleep 120\n")
+    os.chmod(fake, 0o755)
+    t = time.monotonic()
+    assert T.claude_auth_status(fake, {"PATH": "/usr/bin:/bin"}) is None
+    assert time.monotonic() - t < 40, time.monotonic() - t
     # (the credentials file, where Linux's Claude Code keeps the login: the fallback)
     home = fresh_root()
     assert T.claude_signed_in({"HOME": home}, "Linux") is False

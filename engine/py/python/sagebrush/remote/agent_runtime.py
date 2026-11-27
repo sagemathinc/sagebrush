@@ -478,11 +478,27 @@ INSTALL_CLAUDE = "curl -fsSL https://claude.ai/install.sh | bash"
 def claude_auth_status(claude, env=None, run=None):
     """Claude Code's own answer (`claude auth status --json`: loggedIn), or None when it can't give one (an older
     Claude Code without the command, a timeout, output that isn't its JSON)."""
+    import signal
     import subprocess
-    run = run or subprocess.run
+
+    def _run(argv, env):
+        # (its own session, and on the timeout the whole group killed: a grandchild holding the pipes can't stretch
+        # the 20 s)
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                             start_new_session=True)
+        try:
+            out, _ = p.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            p.communicate()
+            raise
+        return type("Done", (), {"stdout": out})()
+    run = run or _run
     try:
-        p = run([claude, "auth", "status", "--json"], capture_output=True, timeout=20, stdin=subprocess.DEVNULL,
-                env=dict(os.environ if env is None else env))
+        p = run([claude, "auth", "status", "--json"], dict(os.environ if env is None else env))
         v = json.loads(p.stdout.decode("utf-8", "replace"))
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
