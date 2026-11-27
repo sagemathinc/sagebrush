@@ -42,13 +42,46 @@ pub struct Leave {
     held: HashSet<String>,
     /// (the windows the person is being asked about now)
     asking: HashSet<String>,
+    /// (windows being built now, reserved before the quit could begin: the app doesn't exit while any is)
+    opening: usize,
 }
 
 impl Leave {
     /// Whether the app is quitting (a close asked meanwhile changes nothing: every window is already asked).
-    #[cfg(test)]
     pub fn quitting(&self) -> bool {
         self.quitting
+    }
+    /// A new window is about to be built (windows.rs window_open): refused once a quit has begun, since the quit asked
+    /// only the windows there were, and a window it didn't ask could take edits it then exits without; else reserved,
+    /// so that a quit beginning while it is built doesn't exit before it is (opened, open_failed).
+    pub fn begin_open(&mut self) -> bool {
+        if self.quitting {
+            return false;
+        }
+        self.opening += 1;
+        true
+    }
+    /// Window `label`, reserved by begin_open, was built: if a quit began meanwhile, it is destroyed at once, before
+    /// its page can take any edit, and the app exits if nothing else is left to wait for; else nothing.
+    pub fn opened(&mut self, label: &str) -> Vec<Act> {
+        self.opening -= 1;
+        if !self.quitting {
+            return vec![];
+        }
+        let mut acts = vec![Act::Destroy(label.to_string())];
+        if self.exit_due() {
+            acts.push(Act::Exit);
+        }
+        acts
+    }
+    /// A window reserved by begin_open wasn't built after all.
+    pub fn open_failed(&mut self) -> Vec<Act> {
+        self.opening -= 1;
+        if self.quitting && self.exit_due() { vec![Act::Exit] } else { vec![] }
+    }
+    /// (quitting: every window asked is done and none is being built)
+    fn exit_due(&self) -> bool {
+        self.pending.is_empty() && self.opening == 0
     }
     fn asked(&self, label: &str) -> bool {
         if self.quitting { self.pending.contains(label) } else { self.closing.contains(label) }
@@ -58,10 +91,14 @@ impl Leave {
         if self.quitting {
             return vec![];
         }
-        if windows.is_empty() {
+        if windows.is_empty() && self.opening == 0 {
             return vec![Act::Exit];
         }
         self.quitting = true;
+        if windows.is_empty() {
+            // (only windows being built: opened or open_failed exits)
+            return vec![];
+        }
         // (a window being closed on its own is asked again, as every window is: its answer counts for the quit)
         self.closing.clear();
         self.pending = windows.iter().cloned().collect();
@@ -90,7 +127,7 @@ impl Leave {
     fn gone(&mut self, label: &str) -> Vec<Act> {
         self.held.remove(label);
         if self.quitting {
-            return if self.pending.remove(label) && self.pending.is_empty() { vec![Act::Exit] } else { vec![] };
+            return if self.pending.remove(label) && self.exit_due() { vec![Act::Exit] } else { vec![] };
         }
         if self.closing.remove(label) {
             return vec![Act::Destroy(label.to_string())];
@@ -128,7 +165,7 @@ impl Leave {
         self.closing.remove(label);
         self.held.remove(label);
         self.asking.remove(label);
-        if self.quitting && self.pending.remove(label) && self.pending.is_empty() {
+        if self.quitting && self.pending.remove(label) && self.exit_due() {
             return vec![Act::Exit];
         }
         vec![]
@@ -143,6 +180,61 @@ mod tests {
     }
     fn s(x: &str) -> String {
         x.to_string()
+    }
+
+    #[test]
+    fn no_window_opens_once_a_quit_has_begun() {
+        let mut l = Leave::default();
+        assert!(l.begin_open());
+        assert_eq!(l.opened("doc-1"), vec![]);
+        l.quit(w(&["main", "doc-1"]));
+        assert!(!l.begin_open());
+        assert_eq!(l.done("doc-1"), vec![]);
+        assert_eq!(l.done("main"), vec![Act::Exit]);
+    }
+
+    #[test]
+    fn a_window_being_built_as_the_quit_begins_holds_the_exit_until_it_is_built_and_destroyed() {
+        // (reserved before the quit; the quit's windows all finish while it is still being built: no exit yet; built:
+        // destroyed at once, and then the exit)
+        let mut l = Leave::default();
+        assert!(l.begin_open());
+        l.quit(w(&["main"]));
+        l.hold("main");
+        assert_eq!(l.done("main"), vec![]);
+        assert_eq!(l.opened("doc-2"), vec![Act::Destroy(s("doc-2")), Act::Exit]);
+        // (its destruction then asks nothing more)
+        assert_eq!(l.destroyed("doc-2"), vec![]);
+        // (built before the quit's windows finish: destroyed, and the exit comes with their done)
+        let mut m = Leave::default();
+        assert!(m.begin_open());
+        m.quit(w(&["main"]));
+        assert_eq!(m.opened("doc-2"), vec![Act::Destroy(s("doc-2"))]);
+        assert_eq!(m.destroyed("doc-2"), vec![]);
+        assert_eq!(m.done("main"), vec![Act::Exit]);
+        // (its building failed: the exit comes then, or with the last done)
+        let mut f = Leave::default();
+        assert!(f.begin_open());
+        f.quit(w(&["main"]));
+        assert_eq!(f.done("main"), vec![]);
+        assert_eq!(f.open_failed(), vec![Act::Exit]);
+        // (a quit with only a window being built: none asked, the exit comes once it is built)
+        let mut e = Leave::default();
+        assert!(e.begin_open());
+        assert_eq!(e.quit(vec![]), vec![]);
+        assert!(!e.begin_open());
+        assert_eq!(e.opened("doc-3"), vec![Act::Destroy(s("doc-3")), Act::Exit]);
+    }
+
+    #[test]
+    fn a_window_built_as_the_quit_began_and_asked_by_it_counts_as_answered_when_destroyed() {
+        // (built just before the quit listed the windows, so the quit asked it too)
+        let mut l = Leave::default();
+        assert!(l.begin_open());
+        l.quit(w(&["main", "doc-3"]));
+        assert_eq!(l.opened("doc-3"), vec![Act::Destroy(s("doc-3"))]);
+        assert_eq!(l.done("main"), vec![]);
+        assert_eq!(l.destroyed("doc-3"), vec![Act::Exit]);
     }
 
     #[test]
