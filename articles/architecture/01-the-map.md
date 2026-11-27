@@ -19,7 +19,7 @@ Start with [`README.md`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e3
 
 **A cell:** notebook → pyjs → engine (JSON) → result.
 
-**An edit:** an op (or, for a notebook or board, a patchflow patch) in the device's outbox → sync client → account object (→ the document's object, for a patch) → the other device, which is told and pulls.
+**An edit:** an op (or, for a notebook, a patchflow patch; boards' contents don't sync yet) in the device's outbox → sync client → account object (→ the document's object, for a patch) → the other device, which is told and pulls.
 
 **A share:** upload → D1 and R2 → the public page → its files, from the files domain.
 
@@ -51,7 +51,7 @@ Source: [`web/board/board.ts, lines 1–11`](https://github.com/sagemathinc/sage
 
 ### One workspace, kept in this browser
 
-Notebooks (`.ipynb`), boards (`.board.json`) and data files live in one tree in IndexedDB, with one file browser and one File menu. Every edit to a notebook or board is also a patchflow patch in a history database: that's TimeTravel, and in slice 2 it's what sync sends.
+Notebooks (`.ipynb`), boards (`.board.json`) and data files live in one tree in IndexedDB, with one file browser and one File menu. Every edit to a notebook or board is also a patchflow patch in a history database: that's TimeTravel. For notebooks it's also what sync sends (slice 2); boards' contents don't sync yet.
 
 patchflow is CoCalc's patch library. A document is a set of records with primary keys, and each change is a patch with its parents, so any version can be rebuilt and two histories merge. Notebooks and boards share this code (`patch-history.js`). A notebook's save is compare-and-swap on a revision, and a conflict is merged three ways; a board's conflicting save is kept as a copy.
 
@@ -95,9 +95,9 @@ Source: [`src/magma.ts, lines 1–10`](https://github.com/sagemathinc/sagebrush/
 
 ### One core, many engines
 
-The mathematics is pure Rust, one cargo workspace in `engine/`. Shared layers (`arith`, `bigint`, `ball`, `poly`, `mpoly`, `sym`) carry the engines: `modsym`, `ap`, `classgroup`, `galois`, `group`, `hmf`. There are no C libraries in the engines, so they all compile to WebAssembly.
+The mathematics is pure Rust, one cargo workspace in `engine/`. Shared layers (`arith`, `bigint`, `ball`, `poly`, `mpoly`, `sym`) carry the engines: `modsym`, `ap`, `classgroup`, `galois`, `group`, `hmf` and `lfun`, with `primes`, `mp` (mpmath's arithmetic) and `nd` (dense numerics) beside them. There are no C libraries in the engines, so they all compile to WebAssembly.
 
-`arith` is in the spirit of FLINT's nmod, nmod_poly, fmpz_poly and fmpz_mat layers: word-size moduli, number-theoretic transforms, CRT, dense matrices over $\mathbb{Z}/p$, $\mathbb{Z}$ and $\mathbb{Q}$. It's clean-room: FLINT and PARI appear only in the `oracle` and `flint` crates, as test oracles and benchmarks, never as dependencies. `hmf` (Hilbert modular forms over $\mathbb{Q}(\sqrt 5)$) is ported from William Stein's PSAGE code, with his permission.
+`arith` is in the spirit of FLINT's nmod, nmod_poly, fmpz_poly and fmpz_mat layers: word-size moduli, number-theoretic transforms, CRT, dense matrices over $\mathbb{Z}/p$, $\mathbb{Z}$ and $\mathbb{Q}$. It's clean-room: FLINT and PARI appear only in the `oracle` and `flint` crates, as test oracles and benchmarks, never as dependencies. Two parts are ported from William Stein's PSAGE code, with his permission (NOTICE.md): `hmf` (Hilbert modular forms over $\mathbb{Q}(\sqrt 5)$), and, in `modsym`, the evaluation of an elliptic curve's modular symbol map, which follows PSAGE's `modular_symbol_map.pyx`.
 
 Source: [`engine/arith/src/lib.rs, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/engine/arith/src/lib.rs#L1-L12)
 
@@ -137,7 +137,7 @@ Source: [`lib/_capacity.py, lines 1–30`](https://github.com/sagemathinc/sagebr
 
 ### The same runtime, in Node
 
-`src/cli.ts` runs Python, Sage (`--sage`), Magma or MATLAB programs, or a prompt. Everything, the engine's wasm included, is bundled into one JavaScript file, so it needs neither Python nor native libraries.
+`src/cli.ts` runs Python, Sage (`--sage`), Magma or MATLAB programs, or a prompt. Everything but the LaTeX commands, the engine's wasm included, is bundled into one JavaScript file, so it needs neither Python nor native libraries. `sagebrush latex` loads a second file beside it, `sagebrush-latex.cjs`, only when it runs.
 
 It's on npm (`npx sagebrush`), and there's also a single executable from `get.sagebrush.space`. CI measures its install time and startup time.
 
@@ -163,9 +163,9 @@ Source: [`src/board-open.ts, lines 1–12`](https://github.com/sagemathinc/sageb
 
 ### Local-first: the device is the truth
 
-Sync is backup and multi-device for a signed-in account. Everything works with it off. The workspace's operations go up in order, and data files go up once each, by SHA-256. It's in testing, not yet on sagebrush.space.
+Sync is backup and multi-device for a signed-in account. Everything works with it off. The workspace's operations go up in order, and data files go up once each, by SHA-256. Which accounts may use it is the server's setting: those it lists, or every signed-in account.
 
-Slice 1 (the index and files) is built. Slice 2 (the contents of notebooks, boards and chats, as their patch logs, merged by patchflow) is being built now. One tab per device holds a Web Lock, opens the account socket and sends the outbox. After a lost ack, a resend is answered with the server's stored decision, so nothing is applied twice.
+Slice 1 (the index and files) is built. Slice 2 (the contents of notebooks, boards and chats, as their patch logs, merged by patchflow) is built for notebooks so far. One tab per device holds a Web Lock, opens the account socket and sends the outbox. After a lost ack, a resend is answered with the server's stored decision, so nothing is applied twice.
 
 Source: [`web/workspace/sync-client.ts, lines 1–14`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/web/workspace/sync-client.ts#L1-L14)
 
@@ -223,15 +223,15 @@ Source: [`web/share/files.ts, lines 1–12`](https://github.com/sagemathinc/sage
 
 ### Open core, separate servers
 
-This repository (MIT/Apache) holds everything that runs in a browser or on your computer, plus the sync protocol and client. The servers that run sagebrush.space are maintained separately, built on that open protocol.
+Apart from `web/cloud/`, this repository holds everything that runs in a browser or on your computer, plus the sync protocol and client, under MIT OR Apache-2.0. The site's own Worker, built on that open protocol, is deployed from a separate repository. Part of the servers' code is here, in `web/cloud/`: source-available under the Microsoft Reference Source License (MS-RSL), and in no download.
 
-The open repository still has the sharing and sync servers' code from when they moved out (`web/share/`, `web/sync/`), MIT/Apache, used by its own tests; the links in Sharing point to it, and those in Sync to the server's design. The deployed servers have changed since, so read those links for the design, not as the exact code running today. What you run locally, from the CLI or the desktop app, needs no server at all.
+The open repository still has the sharing and sync servers' code from when they moved out (`web/share/`, `web/sync/`), MIT OR Apache-2.0, used by its own tests; the links in Sharing point to it, and those in Sync to the server's design. The deployed servers have changed since, so read those links for the design, not as the exact code running today. The share server's hosted variant, the one for sagebrush.space, is in `web/cloud/share/` (MS-RSL). What you run locally, from the CLI or the desktop app, needs no server at all.
 
 ### Cloudflare: Workers, Durable Objects, D1, R2
 
 The site is a Cloudflare Worker that serves static files, the articles and the share API. Shared files have their own Worker, on their own domain. Sharing's records are in D1 (SQLite), and file bytes are in R2 (object storage).
 
-Sync adds Durable Objects, one per account and one per document. A separate test deployment runs the same code with sync turned on for test accounts; production doesn't route sync yet. No secret is ever in a repository.
+Sync adds Durable Objects, one per account and one per document. A separate test deployment runs the same code. Both route sync, and on each, the server's own setting decides which accounts may use it: those it lists, or every signed-in account. No secret is ever in a repository.
 
 ### Engines by content, kept forever
 
