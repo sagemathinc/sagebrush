@@ -15,6 +15,18 @@ export const RUNNER_COPY = {
   notEnabled: NOT_ENABLED,
   failed: (reason: string) => `Your computers: ${reason}`,
   signIn: "Sign in",
+  // (each computer's line under its name: when it last connected with an agent, and when it was set up; two with one
+  //  name also show the start of their ids, so they can be told apart)
+  seen: (ago: string) => `connected ${ago}`,
+  added: (date: string) => `added ${date}`,
+  id: (id: string) => `id ${id}`,
+  remove: "Remove…",
+  removeTitle: (name: string) => `Remove ${name} from your computers`,
+  removeAsk: (name: string) => `Remove ${name}? It can't connect again until you run sagebrush remote login on it.`,
+  removeYes: "Remove",
+  removeNo: "Keep",
+  removing: "Removing…",
+  removeFailed: (name: string, reason: string) => `Couldn't remove ${name}: ${reason}`,
 };
 /** How long a computer's agent has to say it's ready (agent.ready) after the leg's hello: its process starting. */
 export const READY_MS = 30_000;
@@ -23,7 +35,7 @@ export const READY_MS = 30_000;
 export const WAIT_MS = 60_000;
 export const RETRY_MS = 2_000;
 
-type Runner = { remote_id: string; name: string };
+type Runner = { remote_id: string; name: string; agents_at?: number | null; created?: number | null };
 type End = { kind: string; why: string };
 /** What the attempt needs: your computers, a leg to one (open, or ended with why), and the page's words for it. */
 export type ChatHereHost = {
@@ -33,6 +45,8 @@ export type ChatHereHost = {
   /** its runner isn't connected yet: waiting for it */
   onWaiting(r: Runner): void;
   onFailed(r: Runner, e: End): void;
+  /** remove it from your computers (the site's revoke); throws with the reason if it wasn't removed */
+  remove?(r: Runner): Promise<void>;
 };
 /** What it needs of the page's pairing (agent-ui.ts's mountAgentPairing). */
 type Ui = { adopt(link: AgentLink, computer: string): AgentPairing; grant(p: AgentPairing): Promise<void>; live(): boolean; readonly pairing: AgentPairing | null };
@@ -40,7 +54,31 @@ type Ui = { adopt(link: AgentLink, computer: string): AgentPairing; grant(p: Age
 const CSS = `
 .sbag-box .runners { display: grid; gap: 6px; border-top: 1px solid #e6e9e1; padding-top: 10px; }
 .sbag-box .runner { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.sbag-box .runner .who { display: grid; min-width: 0; }
+.sbag-box .runner .who > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbag-box .runner .seen { color: #5f6b5a; font-size: 0.85em; }
+.sbag-box .runner .acts { display: flex; gap: 6px; flex: 0 0 auto; }
 `;
+
+/** How long ago, in words (as the fleet pages say it): "just now", "40 s ago", "3 min ago", "2 h ago", "5 days ago". */
+export function ago(ms: number): string {
+  const s = Math.floor(Math.max(0, ms) / 1000);
+  if (s < 5) return "just now";
+  if (s < 60) return `${s} s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 172800) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} days ago`;
+}
+
+/** A computer's line under its name: when it last connected, when it was set up, and its id's start when another of
+ *  your computers has the same name. */
+export function runnerDetail(r: Runner, sameName: boolean, now = Date.now()): string {
+  const parts: string[] = [];
+  if (typeof r.agents_at === "number") parts.push(RUNNER_COPY.seen(ago(now - r.agents_at)));
+  if (typeof r.created === "number") parts.push(RUNNER_COPY.added(new Date(r.created * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })));
+  if (sameName) parts.push(RUNNER_COPY.id(r.remote_id.slice(0, 6)));
+  return parts.join(" · ");
+}
 
 export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
   if (!document.getElementById("sbag-runners-css")) document.head.append(Object.assign(document.createElement("style"), { id: "sbag-runners-css", textContent: CSS }));
@@ -88,10 +126,18 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
       if (!available) { status.textContent = RUNNER_COPY.notEnabled; return; }
       if (!list.length) { status.textContent = RUNNER_COPY.none; return; }
       status.textContent = "";
+      const names = new Map<string, number>();
+      for (const r of list) names.set(r.name, (names.get(r.name) ?? 0) + 1);
       for (const r of list) {
         const b = el("button", { type: "button", textContent: RUNNER_COPY.button });
         b.onclick = () => { close(); void start(r); };
-        sec.append(el("div", { className: "runner" }, el("span", { textContent: r.name }), b));
+        const detail = runnerDetail(r, names.get(r.name)! > 1);
+        const who = el("span", { className: "who" }, el("span", { textContent: r.name }));
+        if (detail) who.append(el("span", { className: "seen", textContent: detail }));
+        const acts = el("span", { className: "acts" }, b);
+        const row = el("div", { className: "runner" }, who, acts);
+        if (host.remove) acts.append(removeButton(r, row, acts));
+        sec.append(row);
       }
     }, (e) => {
       // (a site without computers, a local one: no section at all, nothing a person there could do about it)
@@ -101,5 +147,39 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
       if ((e as { signedOut?: boolean })?.signedOut) sec.append(el("a", { className: "sign-in", href: `/auth/login?return=${encodeURIComponent(location.pathname + location.search)}`, textContent: RUNNER_COPY.signIn }));
     });
     return sec;
+
+    // (Remove…: asked in the row itself, then the site's revoke; the row goes once it's removed, and the list says so
+    //  when none is left)
+    function removeButton(r: Runner, row: HTMLElement, acts: HTMLElement): HTMLButtonElement {
+      const rm = el("button", { type: "button", textContent: RUNNER_COPY.remove, title: RUNNER_COPY.removeTitle(r.name) });
+      rm.onclick = () => {
+        const ask = el("span", { className: "note", textContent: RUNNER_COPY.removeAsk(r.name) });
+        const yes = el("button", { type: "button", className: "danger", textContent: RUNNER_COPY.removeYes });
+        const no = el("button", { type: "button", textContent: RUNNER_COPY.removeNo });
+        const kept = [...acts.childNodes];
+        const confirmRow = el("div", { className: "runner remove-ask" }, ask, el("span", { className: "acts" }, yes, no));
+        row.after(confirmRow);
+        acts.replaceChildren();
+        no.onclick = () => { confirmRow.remove(); acts.replaceChildren(...kept); rm.focus(); };
+        yes.onclick = async () => {
+          yes.disabled = no.disabled = true;
+          ask.textContent = RUNNER_COPY.removing;
+          status.textContent = "";
+          try {
+            await host.remove!(r);
+          } catch (e) {
+            confirmRow.remove();
+            acts.replaceChildren(...kept);
+            status.textContent = RUNNER_COPY.removeFailed(r.name, String((e as Error)?.message ?? e));
+            return;
+          }
+          confirmRow.remove();
+          row.remove();
+          if (!sec.querySelector(".runner")) status.textContent = RUNNER_COPY.none;
+        };
+        yes.focus();
+      };
+      return rm;
+    }
   };
 }

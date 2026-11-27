@@ -16,11 +16,12 @@
    "json.ts": 3,
    "modules.ts": 8,
    "mpcore.ts": 7,
-   "numpy.ts": 2,
+   "numpy.ts": 5,
    "numpy_linalg.ts": 4,
    "ops.ts": 3,
    "raster.ts": 2,
    "re.ts": 2,
+   "skltree.ts": 3,
    "strpos.ts": 1,
    "types.ts": 14
   },
@@ -39,8 +40,8 @@
    }
   },
   "libModules": {
-   "count": 182,
-   "sha": "5828654118ab68cb"
+   "count": 184,
+   "sha": "809f6d281bb98877"
   }
  },
  "entries": [

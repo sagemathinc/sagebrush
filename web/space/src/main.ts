@@ -13,10 +13,22 @@ import { texToText } from "./tex.ts";
 import { drawCode, editor, codeRuns } from "./code.ts";
 import { run, interrupt, sceneObject, SCENE } from "./run.ts";
 import { sizeOf } from "./sizes.ts";
-import { treeRoom } from "./treeroom.ts";
-import { checkSpace, readText, sameSite } from "./read.ts";
+import { treeRoom, resolveImport } from "./treeroom.ts";
+import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
 import { EDIT, keepEdit } from "./keep.ts";
 import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.ts";
+// (the languages whose files are entered: by their names; each parser loaded the first time one of its files is)
+const CODE = { py: "python", sage: "python", js: "js", mjs: "js", cjs: "js", jsx: "js", ts: "js", mts: "js", cts: "js", tsx: "js" };
+const codeOf = (p) => CODE[/\.([a-z]+)$/i.exec(String(p))?.[1]?.toLowerCase()] ?? null;
+// (a file's room by its language; at most ROOM_TEXT bytes of text (UTF-8) are parsed, so a long file's parse can't hold
+//  the page)
+async function codeRoom(text, path, scope = null, lang = null) {
+  if (utf8Bytes(text) > ROOM_TEXT) throw new Error("it's too long to enter here");
+  const k = codeOf(path) ?? (lang === "sage" || lang === "python" ? "python" : null);
+  if (k === "js") { const { jsRoom } = await import("./jsroom.ts"); return checkSpace(jsRoom(text, { path, scope })); }
+  const { pythonRoom } = await import("./pyroom.ts");
+  return checkSpace(pythonRoom(text, { path, sage: /\.sage$/.test(path) || lang === "sage", scope: scope?.[0] ?? null }));
+}
 // The viewer's own root (its page's one [data-space3d] element) and its parts, each found once inside the root by its
 // name (data-c): nothing is looked up in the rest of the document, so another page's #dims or #status is never ours.
 const root = document.querySelector<HTMLElement>("[data-space3d]");
@@ -756,7 +768,7 @@ async function load(name, data = null, again = false, opts: { room?: boolean; P?
   // (a tour belongs to its space: entering a room and leaving it keep it; another space ends it)
   if (!view && !opts.room) tour = null;
   renderTours();
-  document.title = (space.title ?? name) + " · Sagebrush";
+  document.title = (space.title ?? name) + " · 3D view";
   crumbs();
   ui.status.textContent = `${nodes.length} objects, ${pairs.length} links · ${r3.laid ? "laid out in " + Math.round(performance.now() - t0) + " ms" : "at their saved places"}`;
   if (!view || selected === null) closeOverlay();
@@ -1037,7 +1049,7 @@ function showOverlay(nd) {
     `<div class="tourbar"><button data-tour="-1"${stop.i === 0 ? " disabled" : ""}>◀ Back</button><button data-tour="1" class="next">${stop.i + 1 < stop.n ? "Next ▶" : "Finish"}</button><button data-tour="end">End tour</button></div></div>`;
   // (a room to enter: a directory, a Python or Sage file, a class, a space)
   const ek = enterKind(nd);
-  if (ek) body += `<div class="enterbar"><button class="enter" title="Enter it (Enter)">Enter ▶</button><span class="hint">${esc(ENTER_HINT[ek] ?? "")}</span></div>`;
+  if (ek) body += `<div class="enterbar"><button class="enter" title="Enter it (Enter)">${ek === "import" ? "Go there ▶" : "Enter ▶"}</button><span class="hint">${esc(ek === "import" ? ENTER_HINT.import + ": " + importTarget(nd).path : ENTER_HINT[ek] ?? "")}</span></div>`;
   else if (noRoomWhy(nd)) body += `<div class="hint noroom">${esc(noRoomWhy(nd))}</div>`;
   else if (nd.kind === "import" && space.tree) body += `<div class="hint noroom">It isn't in the repository (the standard library, or a package from elsewhere).</div>`;
   // (what it is for, before what it says)
@@ -1063,8 +1075,9 @@ function showOverlay(nd) {
       `<div class="code-edit"></div><p class="hint kept">Your edits and runs here are kept in this browser, on this site.</p><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
       (nd.kind === "plot3d" || nd.scene ? `<p class="hint">A 3D plot is a real object in the space: drag to turn around it. Edit its code and run it to change it.</p>` : "");
   } else {
-    // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes)
-    const pending = nd.src && !nd._full;
+    // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes; not a notebook's
+    //  or a board's, which are read only when entered)
+    const pending = nd.src && !nd._full && nd.doc !== "notebook" && nd.doc !== "board";
     // (only if it is still this object, in this space: ids repeat from room to room)
     const still = () => selected === nd.id && space.nodes.includes(nd) && !ui.overlay.hidden;
     if (pending) fullText(nd).then(() => { if (still()) showOverlay(nd); }, (e) => {
@@ -1198,38 +1211,121 @@ addEventListener("resize", viewOffset);
 const scopes = [];
 let spaceName = "", entering = false, focusNode = null; // (focusNode: what an import named, arrived at)
 const MAX_SHOWN = 4000; // (lines of a file the drawer highlights)
-const ENTER_HINT = { dir: "Its folders and files", space: "The space it holds" };
-// (what can be entered: a folder of the space's tree, and a space in a file)
+const ENTER_HINT = { dir: "Its folders and files, and what imports what", python: "Its functions and classes, and what calls what",
+  import: "Through to the file it imports", js: "Its functions and classes, and what calls what", class: "Its methods, and which calls which",
+  space: "The space it holds" };
+// (an import in a file's room, when the space knows the repository: the file it leads to, or null)
+function importTarget(nd) {
+  if (nd?.kind !== "import" || !space?.tree || space.room?.kind !== "file") return null;
+  const from = String(space.room.path), lang = codeOf(from);
+  if (lang === "js") return jsResolve ? jsResolve(space.tree, from, nd.js?.spec ?? String(nd.title)) : null;
+  return resolveImport(space.tree, from, String(nd.title), nd.imported ?? []);
+}
+// (why a file has no room: its language has no parser here yet)
+function noRoomWhy(nd) {
+  if (nd?.kind !== "file" || enterKind(nd)) return null;
+  if (nd.doc === "board" || nd.doc === "notebook") return "No room for it yet: open it in its editor.";
+  const lang = nd.lang || "";
+  const NAMES = { matlab: "MATLAB", magma: "Magma", rust: "Rust" };
+  const name = /\.(pyx|pxd|pxi)$/.test(String(nd.path ?? nd.title ?? "")) ? "Cython" : NAMES[lang];
+  return name ? `No room for ${name} files yet: Python, Sage, JavaScript and TypeScript files can be entered so far.` : null;
+}
+// (what can be entered: a folder of the space's tree, a file of a language with a parser here, a class in a file's
+//  room, an import that leads to a file of the tree, and a space in a file)
 function enterKind(nd) {
   if (!nd) return null;
+  if (importTarget(nd)) return "import";
   if (nd.enter?.kind === "dir" && space?.tree) return "dir";
+  if (nd.enter?.kind === "class" && typeof space?._text === "string") return "class";
   if (nd.kind !== "file") return null;
   const p = String(nd.path ?? nd.title ?? "");
-  // (a file is read whole: its text fetched from `src`, or all of it in the space)
+  // (a file is parsed whole: its text fetched from `src`, or all of it in the space)
   const whole = !!nd.src || !(Number(nd.lines) > shownLines(nd));
+  // (by its name; by its language only when its title isn't a file name: a .pyx is Cython, which Python's grammar refuses)
+  if ((/\.(py|sage)$/.test(p) || (!/\.\w+$/.test(p) && (nd.lang === "python" || nd.lang === "sage"))) && whole) return "python";
+  if (codeOf(p) && whole) return codeOf(p);
   if (/\.space\.json$/.test(p) && whole) return "space";
+  if (nd.doc === "notebook" && nd.src) return "notebook";
   return null;
 }
-// (why an object can't be entered: none yet, for files)
-const noRoomWhy = (nd) => (nd?.kind === "file" && !enterKind(nd) ? "Files can't be entered yet." : null);
-// (a file's whole text: from its `src` (a file of this site), once; the faces drawn again with it)
+// (the JS import resolver: set when its module first loads, enterRoom)
+let jsResolve = null;
+async function loadResolvers() {
+  if (codeOf(String(space?.room?.path ?? "")) === "js" && !jsResolve) jsResolve = (await import("./jsroom.ts")).resolveJs;
+}
+// (a file's whole text: from its `src` (a file of this site, or of the person's workspace, which the page that opened
+//  this view reads for it), once; the faces drawn again with it)
 const fetched = new Map();
 async function fullText(nd) {
   if (!nd.src || nd._full) return String(nd.text ?? "");
-  const url = sameSite(nd.src);
-  if (!fetched.has(url.href)) fetched.set(url.href, readText(url));
+  const src = String(nd.src), mine = src.startsWith("workspace:");
+  const key = mine ? src : sameSite(src).href;
+  if (!fetched.has(key)) fetched.set(key, mine ? askPage(decodeURIComponent(src.slice("workspace:".length))) : readText(sameSite(src)));
   let text;
-  try { text = await fetched.get(url.href); } catch (e) { fetched.delete(url.href); throw e; }
+  try { text = await fetched.get(key); } catch (e) { fetched.delete(key); throw e; }
   nd.text = text; nd._full = true;
   const o = objects[space.nodes.indexOf(nd)];
   if (o) { for (const t of o.userData.tex) t?.dispose(); o.userData.tex = []; o.userData.level = -1; }
   return text;
 }
+// (a file of the person's workspace: asked of the page that opened this view (web/workspace/space3d.ts), by its path in
+//  the tree that page sent; the answer is a "space-file", of at most LIMITS.bytes, or the reason it can't be read)
+const asked = new Map<number, { resolve: (t: string) => void; reject: (e: Error) => void }>();
+let askSeq = 0;
+function askPage(path: string): Promise<string> {
+  if (!embedded) return Promise.reject(new Error("only the page that opened this view reads your files"));
+  return new Promise((resolve, reject) => {
+    const id = ++askSeq;
+    asked.set(id, { resolve, reject });
+    window.parent.postMessage({ sagebrush: "space-read", version: 1, id, path }, location.origin);
+    setTimeout(() => { if (asked.delete(id)) reject(new Error("the page didn't answer")); }, 60000);
+  });
+}
+function answered(m) {
+  const a = asked.get(m.id);
+  if (!a) return;
+  asked.delete(m.id);
+  if (typeof m.text !== "string") return a.reject(new Error(String(m.error ?? "couldn't read it").slice(0, 300)));
+  if (utf8Bytes(m.text) > LIMITS.bytes) return a.reject(new Error("it's too large to show here"));
+  a.resolve(m.text);
+}
 async function roomFor(nd, k) {
   if (k === "dir") return checkSpace(treeRoom(space.tree, nd.enter.path));
-  const s = checkSpace(JSON.parse(await fullText(nd)));
-  if (!(Array.isArray(s.nodes) || s.tree)) throw new Error("it has no objects");
-  return s;
+  if (k === "notebook") {
+    // (a notebook of the workspace: its cells, as the page sent them)
+    let nb;
+    try { nb = JSON.parse(await fullText(nd)); } catch { throw new Error("it isn't a notebook"); }
+    if (nb?.format !== "sagebrush-notebook-cells" || !Array.isArray(nb.cells)) throw new Error("it isn't a notebook");
+    const { notebookRoom } = await import("./nbroom.ts");
+    const r = notebookRoom(nb, { path: String(nd.path ?? nd.title) });
+    if (space.tree) r.tree = space.tree;
+    return r;
+  }
+  if (k === "import") {
+    // (through the portal: the imported file's own room, its text read as any file's, from this site)
+    const { path, sub } = importTarget(nd), tree = space.tree;
+    const target = { kind: "file", path, title: path, lang: codeOf(path) ?? "", text: "", src: tree.base + path.split("/").map(encodeURIComponent).join("/") };
+    const text = await fullText(target);
+    const r = await codeRoom(text, path);
+    r._text = text; r.tree = tree;
+    // (one name taken from a module (not a submodule of it): arriving at it)
+    if (!sub && (nd.imported ?? []).length === 1) r._focus = nd.imported[0];
+    return r;
+  }
+  if (k === "space") {
+    const s = checkSpace(JSON.parse(await fullText(nd)));
+    if (!(Array.isArray(s.nodes) || s.tree)) throw new Error("it has no objects");
+    return s;
+  }
+  // (a file, or a class (a module, a function) in the file whose room this is)
+  const text = k === "class" ? space._text : await fullText(nd);
+  const path = k === "class" ? space.room.path : String(nd.path ?? nd.title);
+  const scope = k === "class" ? (nd.enter.scope ?? [nd.enter.name]) : null;
+  const r = await codeRoom(text, path, scope, k === "class" ? space.room.lang : nd.lang);
+  r._text = text;
+  // (the repository goes along, so its imports lead on)
+  if (space.tree) r.tree = space.tree;
+  return r;
 }
 async function enterRoom(nd) {
   const k = enterKind(nd);
@@ -1250,6 +1346,7 @@ async function enterRoom(nd) {
     future.length = 0;
     pushed = true;
     await load(spaceName, room, false, { room: true });
+    await loadResolvers();
     if (!ui.overlay.hidden && selected !== null) showOverlay(space.nodes.find((n) => n.id === selected));
     xr.roomChanged();
     focusNode = room._focus ? space.nodes.find((n) => n.name === room._focus) ?? null : null;
@@ -1278,8 +1375,11 @@ function leaveRoom() {
   const v = k >= 0 ? history[k] : null;
   if (k >= 0) history.length = k;
   future.length = 0;
-  // (given the space itself, load runs to its end at once)
-  load(spaceName, s.space, false, { room: true, P: s.P }).catch(fail);
+  // (the space you come back to is checked again, as any space is, without what drawing it added: its objects' links
+  //  to each other (_in, _out), which load draws anew. Refused (it was changed meanwhile, past the limits), you stay in
+  //  the room you are in)
+  for (const n of Array.isArray(s.space?.nodes) ? s.space.nodes : []) if (n && typeof n === "object") { delete n._in; delete n._out; }
+  load(spaceName, s.space, false, { room: true, P: s.P }).catch((e) => { scopes.push(s); fail(e); });
   xr.roomChanged();
   return v ?? { pos: camera.position.clone(), target: controls.target.clone(), sel: null };
 }
@@ -1743,6 +1843,7 @@ function embed() {
   addEventListener("message", (e) => {
     const m = e.data;
     if (e.source !== window.parent || e.origin !== location.origin || m?.version !== 1) return;
+    if (m.sagebrush === "space-file" && Number.isSafeInteger(m.id)) return answered(m);
     if (m.sagebrush !== "space-load") return;
     const name = String(m.name ?? "space");
     const again = name === current;

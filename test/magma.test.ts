@@ -68,6 +68,51 @@ test("a notebook or kernel cell (no recovery) still stops at its first error, an
   assert.equal(runtime.stdout, "1\nRuntime error: stop\n");
 });
 
+test("a script file stops at an intrinsic Sagebrush lacks, with exit status 1, as at a runtime error; a file or process intrinsic is refused and the file goes on; a session goes on", () => {
+  const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const dir = mkdtempSync(join(tmpdir(), "magma-file-"));
+  try {
+    const file = (src: string) => {
+      const f = join(dir, "script.m");
+      writeFileSync(f, src);
+      return spawnSync(process.execPath, [cli, "--magma", f], { encoding: "utf8", timeout: WALL(60000) });
+    };
+    const said = /User error: 'QuadraticForms' is a Magma intrinsic not implemented in Sagebrush\n$/;
+    const lacking = file("print 1;\nQ := QuadraticForms(-23);\nprint \"AFTER\";\n");
+    assert.equal(lacking.status, 1, lacking.stdout + lacking.stderr);
+    assert.match(lacking.stdout, /^1\n/);
+    assert.match(lacking.stdout, said);
+    // (also read in a function's body, where the function reads it)
+    const inFunction = file("function f(D) return QuadraticForms(D); end function;\nprint 1;\nQ := f(-23);\nprint \"AFTER\";\n");
+    assert.equal(inFunction.status, 1, inFunction.stdout + inFunction.stderr);
+    assert.match(inFunction.stdout, /^1\n[\s\S]*User error: 'QuadraticForms' is a Magma intrinsic not implemented in Sagebrush\n$/);
+    // as a runtime error, and a "not supported yet" one, stop it
+    const runtime = file("print 1;\nerror \"stop\";\nprint \"AFTER\";\n");
+    assert.equal(runtime.status, 1);
+    assert.doesNotMatch(runtime.stdout, /AFTER/);
+    // a name Magma doesn't have either is Magma's compile-time error: the file goes on, as in Magma
+    const undeclared = file("print 1;\nFoo;\nprint \"AFTER\";\n");
+    assert.equal(undeclared.status, 0);
+    assert.match(undeclared.stdout, /Identifier 'Foo' has not been declared or assigned\nAFTER\n$/);
+    // a file or process intrinsic is refused by name and the file goes on, exit status 0 (no file or process route)
+    for (const call of ['System("ls");', 'print Read("x.txt");', 'Write("x.txt", 1);', 'p := POpen("ls", "r");']) {
+      const refused = file(`print 1;\n${call}\nprint "AFTER";\n`);
+      assert.equal(refused.status, 0, call + refused.stdout + refused.stderr);
+      assert.match(refused.stdout, /is a Magma intrinsic not implemented in Sagebrush\nAFTER\n$/, call);
+    }
+    // on standard input (Magma's interactive session) every error is reported and the session goes on
+    const session = spawnSync(process.execPath, [cli, "--magma"], { input: "Q := QuadraticForms(-23);\nprint \"AFTER\";\n", encoding: "utf8", timeout: WALL(60000) });
+    assert.equal(session.status, 0);
+    assert.match(session.stdout, /is a Magma intrinsic not implemented in Sagebrush\nAFTER\n$/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("QuadraticField's squarefree part by bounded work: a hard 78-digit semiprime is refused at once (HARD-731-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
@@ -115,6 +160,17 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Random(1, 4);",
     "Universe({ {1} });",
     "H<h> := GF(2^11); J<j> := GF(2^10); h + j;",
+    "ConjugacyClasses(DihedralGroup(4));",
+    "[ConjugacyClasses(Sym(2))];",
+    "Sprint(ConjugacyClasses(Sym(2)));",
+    "#ConjugacyClasses(Sym(80));",
+    "Ep := ChangeRing(EllipticCurve([0, -1, 1, -10, -10]), GF(101)); Conductor(Ep);",
+    "ChangeRing(EllipticCurve([0, -1, 1, -10, -10]), Rationals());",
+    "ChangeRing(Ep, GF(7));",
+    "PermutationGroup<4 | (1,2)>;",
+    "PG := PermutationGroup<4 | (1,2,3,4)>; Generators(PG);",
+    "PH := PermutationGroup<40 | [i mod 40 + 1 : i in [1..40]]>; PH;",
+    "IsAbelian(CyclicGroup(12000));",
   ].join("\n") + "\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout;
   // (messages are wrapped at 80 columns, as Magma's are)
@@ -138,6 +194,16 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
     "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 10^7 elements",
+    "Runtime error in 'ConjugacyClasses': ConjugacyClasses of a dihedral group is not supported yet",
+    "Runtime error: printing the conjugacy classes inside another value or in a string is not supported yet",
+    "conjugacy classes of Sym(80) needs about",
+    "Runtime error in 'Conductor': Conductor of an elliptic curve over a finite field is not supported yet",
+    "Runtime error in 'ChangeRing': ChangeRing of a CrvEll, FldRat is not supported yet",
+    "Runtime error in 'ChangeRing': ChangeRing of an elliptic curve over a finite field is not supported yet",
+    "Runtime error in PermutationGroup< ... >: printing PermutationGroup< ... > itself (Magma prints its second value, a map, with it) is not supported yet: assign it, G := PermutationGroup< ... >",
+    "Runtime error in 'Generators': Generators of a GrpPerm is not supported yet",
+    "Runtime error: printing a permutation group whose generators are longer than a line is not supported yet",
+    "A permutation group of degree 12000 with 1 generator (its stabilizer chain and working space) needs about",
   ]) assert.ok(flat.includes(said), said + "\n" + out);
   // Integers(F) is F's maximal order
   assert.match(flat, /Maximal Equation Order with defining polynomial z\^2 - 5 over its ground order|Maximal Order/);
@@ -490,16 +556,17 @@ test("functions take the values of their free variables when they are defined", 
 test("constructors name< ... > parse; those not implemented yet raise at run time", () => {
   // Magma has no `<` operator: an identifier followed by `<` starts a constructor
   for (const src of [
-    "H := sub< G | x, y >;",
     "Q, f := quo< G | H >;",
     "G<a, b> := Group< a, b | a^2 = b^3, (a*b)^5 >;",
-    "P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;",
     "h := hom< A -> B | <1, 2>, <2, 4> >;",
     "I := ideal< R | x^2 - y, sub< S | 1 > >;",
   ]) {
     const out = py(src);
     assert.match(out, /_m\._unsupported\("[A-Za-z]+", \(1, \d+\)\)/, src);
   }
+  // (sub< G | ... > and PermutationGroup< n | ... > are permutation groups now)
+  assert.match(py("H := sub< G | x, y >;"), /_m\._group_ctor\("sub", G, \[x, y\], \(1, 9\)\)/);
+  assert.match(py("P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;"), /_m\._group_ctor\("PermutationGroup", 5, \[/);
   assert.match(py("r := rec< F | a := 1, b := <2, 3> >;"), /_m\._rec\(F, \[\("a", 1\), \("b", _m\.MTuple\(\[2, 3\]\)\)\], \(1, 6\)\)/);
   assert.match(py("F := recformat< a : Integers(), b >;"), /_m\._recformat\(\[\("a", _m\._first\(Integers\(\)\)\), \("b", None\)\], \(1, 6\)\)/);
   // statements Magma rejects before running them: only the rejection is emitted
@@ -1596,19 +1663,27 @@ test("Matrix checks its shape in Magma's words before it builds anything: no Pyt
 test("polynomial arithmetic over a finite field is admitted before it computes, under 96 MiB", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
+  const run = (src: string) => spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
+  // moves with the build, the machine's load and between runs (29696 or
+  // 30720 on CI's Node 24 in late October 2026, 33792 on Node 26, 19456 on
+  // a loaded machine) and is never more than 49152: so the degree admitted
+  // here is half of the bound measured in a run of its own, D, under the
+  // bound of the run below by a wide margin, and the three refused, 100000,
+  // 10^20 and 3000^2, stay over it, whatever it is)
+  const probe = run("R<x> := PolynomialRing(GF(7));\n(x+1)^100000;\n");
+  const bound = Number(probe.stdout.replace(/\s+/g, " ").match(/a polynomial of degree more than (\d+) is not supported yet/)?.[1]);
+  assert.ok(bound > 4000 && bound <= 49152, probe.stdout + probe.stderr);
+  // (D's derivative, D (D - 1) coefficient products, stays over 10^6)
+  const D = Math.floor(bound / 2);
   const t0 = Date.now();
   const src = "R<x> := PolynomialRing(GF(7)); K<w> := GF(9); S<y> := PolynomialRing(K);\n" +
     "(x+1)^100000;\nx^(10^20);\n(R!3)^(10^20);\nFactorization(x^1001 + 1);\nFactorization(y^70 + w);\nIsIrreducible(y^70 + w);\n" +
-    "f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^20000 + x, 19999);\n" +
+    `f := x^3000 + 3*x + 1; g := f * f;\nh := y^400 + w; k := h * h;\nEvaluate(f, f);\nGCD(f, f);\nDerivative(x^${D} + x, ${D - 1});\n` +
     // (each step within the allowance, the fold past it: HARD-53E-1)
     "a := x^500 + 1; GCD([a, a, a, a, a, a]);\nLCM([x^300 + 1, x^300 + 2, x^300 + 3, x^300 + 4]);\n" +
-    "Degree(x^20000); #Factorization(x^200 + x + 1);\n\"end\";\n";
-  // (the degree bound is _COLLECT_MAX, the heap left over in 96 MiB, which
-  // moves with the build and between runs (29696 or 30720 on CI's Node 24
-  // in late October 2026, 33792 on Node 26) and is never more than 49152:
-  // so the degrees admitted here stay at 20000, under it, and the three
-  // refused, 100000, 10^20 and 3000^2, stay over it, whatever it is)
-  const r = spawnSync(process.execPath, ["--max-old-space-size=96", join(__dirname, "..", "src", "cli.js"), "--magma"], { input: src, encoding: "utf8", timeout: WALL(60000) });
+    `Degree(x^${D}); #Factorization(x^200 + x + 1);\n"end";\n`;
+  const r = run(src);
   assert.equal(r.signal, null, r.stderr);
   const out = r.stdout.replace(/\s+/g, " ");
   assert.equal((out.match(/a polynomial of degree more than \d+ is not supported yet/g) ?? []).length, 3, r.stdout);
@@ -1623,7 +1698,7 @@ test("polynomial arithmetic over a finite field is admitted before it computes, 
   for (const what of ["a product", "a Gcd", "a derivative", "a Lcm"])
     assert.ok(out.includes(`${what} of polynomials over a finite field of more than 1000000 coefficient products is not supported yet`), what + r.stdout);
   assert.doesNotMatch(out, /TypeError|Traceback|AttributeError/);
-  assert.match(r.stdout, /\n20000\n\d+\nend\n$/);
+  assert.match(r.stdout, new RegExp(`\\n${D}\\n\\d+\\nend\\n$`));
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
@@ -1647,12 +1722,87 @@ test("the argument guard for finite fields' polynomials and matrices walks withi
   assert.ok(Date.now() - t0 < WALL(30000), `${Date.now() - t0} ms`);
 });
 
+test("ConjugacyClasses in a 96 MiB heap: every Sym(n) the memory guard admits completes, the next is refused by it (LIMIT-2209-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const run = (src: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"],
+    { input: src + '"end";\n', encoding: "utf8", timeout: WALL(600000) });
+  // (the number of partitions of n, Sym(n)'s number of classes)
+  const p = (n: number) => { const a = [1, ...Array(n).fill(0)]; for (let k = 1; k <= n; k++) for (let m = k; m <= n; m++) a[m] += a[m - k]; return a[n]; };
+  // the control: a small group's classes, and the session goes on
+  const control = run("#ConjugacyClasses(Sym(5));\n");
+  assert.equal(control.stdout, "7\nend\n", control.stdout + control.stderr);
+  let n = 30;
+  for (;; n++) {
+    // (made twice, as a session would keep one and make another)
+    const r = run(`#ConjugacyClasses(Sym(${n}));\nC := ConjugacyClasses(Sym(${n})); #C;\n`);
+    assert.equal(r.status, 0, `Sym(${n}): ` + r.stdout + r.stderr);
+    const flat = r.stdout.replace(/\s+/g, " ");
+    if (/needs about/.test(flat)) {
+      assert.match(flat, new RegExp(`A list of more than \\d+ conjugacy classes of Sym\\(${n}\\) needs about .* for one collection.* end $`));
+      break;
+    }
+    assert.equal(r.stdout, `${p(n)}\n${p(n)}\nend\n`, `Sym(${n})`);
+    assert.ok(n < 60, "the guard must refuse well before n = 60 in a 96 MiB heap");
+  }
+  // (Sym(30), the largest n checked against Magma, is admitted there)
+  assert.ok(n > 30, `refused at n = ${n}`);
+});
+
+test("a permutation group's own lists and its engine work are admitted by the memory guards, at their boundary (LIMIT-GRP-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // (the collection bound set to 8 points: a group of degree n with k generators keeps k + 1 lists of n points)
+  const py = [
+    "import _magma as m, _magma_groups as g",
+    "def run(label, f):",
+    "    try:",
+    "        f(); print(label, 'admitted')",
+    "    except m.MagmaError as e:",
+    "        print(label, 'refused', 'needs about' in str(e))",
+    "m._COLLECT_MAX = 8",
+    "run('degree 4, 1 generator', lambda: g.construct(4, [m.MSeq([2, 1, 3, 4])]))",
+    "run('degree 9, no generator', lambda: g.construct(9, []))",
+    "run('degree 4, 2 generators', lambda: g.construct(4, [m.MSeq([2, 1, 3, 4]), m.MSeq([1, 3, 2, 4])]))",
+    "run('sub of degree 4, 2 generators', lambda: g.sub(g.alt(4), [m.MSeq([2, 1, 4, 3]), m.MSeq([3, 4, 1, 2])]))",
+    // (the commutator of each pair of generators: budgeted for an operation of the derived series; repeated
+    // generators are given to the engine once)
+    "m._COLLECT_MAX, m._COLLECT_COST = 10 ** 6, 1024",
+    "G = g.MPermGroup(3, [(2, 1, 3), (1, 3, 2), (3, 2, 1), (2, 3, 1), (3, 1, 2)] * 200)",
+    "five = [(2, 1, 3), (1, 3, 2), (3, 2, 1), (2, 3, 1), (3, 1, 2)]",
+    "need5 = g._engine_bytes(3, five, ('derived_subgroup',))",
+    "print('pairs budgeted', need5 > g._engine_bytes(3, five, ('order',)), g._engine_bytes(3, five * 200, ('derived_subgroup',)) > 100 * need5)",
+    "m._COLLECT_MAX, m._COLLECT_COST = 1, need5",
+    "run('derived, 5 distinct generators at the bound', lambda: g.derived_subgroup(G))",
+    "m._COLLECT_COST = need5 - 1",
+    "run('derived, one byte past the bound', lambda: g.derived_subgroup(G))",
+  ].join("\n");
+  const r = spawnSync(process.execPath, [cli, "-c", py], { encoding: "utf8", timeout: WALL(120000) });
+  assert.equal(r.stdout, [
+    "degree 4, 1 generator admitted", "degree 9, no generator refused True", "degree 4, 2 generators refused True",
+    "sub of degree 4, 2 generators refused True", "pairs budgeted True True",
+    "derived, 5 distinct generators at the bound admitted", "derived, one byte past the bound refused True", ""].join("\n"), r.stderr);
+});
+
+test("a permutation group of degree 600 whose order isn't known yet is computed, not refused by an estimate", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: "G := PermutationGroup< 600 | [i mod 600 + 1 : i in [1..600]] >; Order(G); IsAbelian(G); #Orbits(G);\n", encoding: "utf8", timeout: WALL(120000) });
+  assert.equal(r.stdout, "600\ntrue\n1\n", r.stderr);
+  // (nor once its order is known: only the chain's certain first level is charged, about 128 MB at degree 4000)
+  const k = spawnSync(process.execPath, [cli, "--magma"], { input: "G := PermutationGroup< 4000 | [i mod 4000 + 1 : i in [1..4000]] >; Order(G); IsAbelian(G);\nC := CyclicGroup(4000); IsAbelian(C);\n", encoding: "utf8", timeout: WALL(300000) });
+  assert.equal(k.stdout, "4000\ntrue\ntrue\n", k.stderr);
+});
+
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const cli = join(__dirname, "..", "src", "cli.js");
   const src = "P<x> := PolynomialRing(Integers());\nTrace(x^2 + 1);\nF<z> := GF(9);\nTrace(z, GF(3));\n" +
-    "K<w> := QuadraticField(7);\nTrace(w, Rationals());\nE := EllipticCurve([0, -1, 1, -10, -20]);\nTrace(E);\n" +
+    "K<w> := QuadraticField(7);\nTrace(w, Rationals());\nM := ModularForms(11, 2);\nTrace(M);\nE := EllipticCurve([0, -1, 1, -10, -20]);\nTrace(E);\n" +
     "ISA(Mtrx, MtrxS);\nISA(1, RngIntElt);\n\"end\";\n";
   const out = spawnSync(process.execPath, [cli, "--magma"], { input: src, encoding: "utf8" }).stdout as string;
   // (Magma has these signatures: not Bad argument types)
@@ -1662,7 +1812,9 @@ test("an intrinsic of several signatures refuses in words those Magma has and Sa
   assert.ok(out.includes("Runtime error in 'Trace': Trace of a FldQuadElt, FldRat is not supported yet"), out);
   // (a value whose type the signatures don't know)
   assert.ok(out.includes("Runtime error in 'Trace': Trace with these arguments is not supported yet"), out);
-  assert.doesNotMatch(out, /Runtime error in 'Trace': Bad argument types/);
+  // (an elliptic curve's type is known, CrvEll: no signature takes it, Magma's words, checked against Magma)
+  assert.ok(out.includes("Runtime error in 'Trace': Bad argument types\nArgument types given: CrvEll[FldRat]\n"), out);
+  assert.equal(out.match(/Runtime error in 'Trace': Bad argument types/g)?.length, 1, out);
   // (ISA of a type outside the table is not guessed)
   assert.ok(out.includes("ISA(Mtrx, MtrxS) is not supported yet"), out);
   assert.ok(out.includes("Runtime error in 'ISA': Bad argument types\nArgument types given: RngIntElt, Cat[RngIntElt]\n"), out);

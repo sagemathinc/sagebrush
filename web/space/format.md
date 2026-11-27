@@ -1,6 +1,6 @@
 # The space format (`*.space.json`), for agents
 
-A space is a board in 3D: notes, code with its output, files and 3D plots, placed by their links and groups. A `.space.json` file of the site opens at `/space/?space=NAME` as a 3D space the person can walk or fly through, search, and click. You write the structure, not the geometry: the viewer lays it out.
+A space is a board in 3D: notes, code with its output, files and 3D plots, placed by their links and groups. A `.space.json` file of the site opens in the 3D view, at `/space/?space=NAME`, as a space the person can walk or fly through, search, and click. You write the structure, not the geometry: the viewer lays it out.
 
 ```json
 {
@@ -29,7 +29,7 @@ A space is a board in 3D: notes, code with its output, files and 3D plots, place
   - `file`: a source file; `text` is its code, highlighted by `lang` (`rust`, `python`, `typescript`, `javascript`, `json`, `matlab`); `lines` is its length.
   - `code`: code the person can edit and run in the browser; `lang` is the language it runs in: `python`, `sage`, `matlab` or `magma`. Give `output` (text) if you know it; otherwise the person presses Run.
   - `plot3d`: a 3D plot shown as a real object. Give `text` (Sage code making a 3D plot, which runs and replaces the object) and, so something shows before it runs, an optional `surface`: `x` and `y` are the grid's values, and `z[j][i]` is the height over `x[i]`, `y[j]`.
-- `src`: for a `file`, where its whole text is: a path on the same site, such as `/files/lib.rs` (files of other sites aren't read). Then `text` can be just its first lines: the whole file is read when it is opened. A file whose name ends in `.space.json` can be entered: it opens as a room, and Back leaves it.
+- `src`: for a `file`, where its whole text is: a path on the same site, such as `/files/lib.rs` (files of other sites aren't read). Then `text` can be just its first lines: the whole file is read when it is opened. A file can be entered when its language has a parser here (Python and Sage, `.py` and `.sage`; JavaScript and TypeScript), or when its name ends in `.space.json`: it opens as a room of its own, and Back leaves it. A Python or JavaScript file's room holds its functions, classes (entered in turn: their methods) and imports; an import of a file in the same tree leads there (Go there). At most 1 MiB of a file (in UTF-8) is parsed, and a room has at most as many parts and links as a space may have objects and links.
 - `group`: objects of a group cluster together, in one color, with the group's name above them from afar. Use groups for directories, crates, modules or topics.
 - `near`: another object's id; this one is placed beside it (a sample beside the code it illustrates).
 - Don't give `position`: the layout is computed and is the same each time for the same file.

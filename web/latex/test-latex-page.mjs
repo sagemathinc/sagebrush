@@ -2448,6 +2448,17 @@ try {
     check(landed && lts.every((d) => d <= 50), "no Long Task over 50 ms while re-patching (a timing box)", { lts, own, landed });
   } else console.log("timing, reported, not gated (a build box): long tasks over 50 ms:", JSON.stringify(lts.filter((d) => d > 50)), "own step/swap over 50 ms:", own.step > 50 || own.swap > 50);
 
+  // ---- a document past the preview's 16 MiB (a long paper's formulas, each KaTeX's HTML and MathML): its start shown,
+  //  then the note where the preview stops, last, from a line of its source; was one line in place of all of it
+  const longDoc = "\\documentclass{article}\n\\begin{document}\nFIRSTWORDS here.\n\n" + "Para $a_{1}+b^{2}=c_{3}$ and $\\sum_{k=1}^{n} k^{2}$.\n\n".repeat(8000) + "LASTWORDS\n\\end{document}\n";
+  const fLong = await mk("/t/long.tex", enc(longDoc));
+  await open(fLong);
+  const longOk = await until(`/The preview stops here/.test(document.querySelector(".tex-preview .bounderr")?.textContent ?? "")`, 180000);
+  const lg = await ev(`(() => { const P = document.querySelector(".tex-preview"), t = P.textContent, b = [...P.querySelectorAll(".bounderr")];
+    return { first: t.includes("FIRSTWORDS"), last: t.includes("LASTWORDS"), notes: b.length, noteLast: b.length === 1 && t.trimEnd().endsWith(b[0].textContent.trimEnd()),
+      line: +((/from line (\\d+) of/.exec(b[0]?.textContent ?? "") || [])[1] ?? 0), old: /too large for the prototype/.test(t), utf8: new TextEncoder().encode(P.innerHTML).length }; })()`);
+  check(longOk && lg.first && !lg.last && lg.notes === 1 && lg.noteLast && lg.line > 4 && !lg.old && lg.utf8 > 8 * 2 ** 20 && lg.utf8 <= 17 * 2 ** 20, "a document past 16 MiB: its start shown, then the note where the preview stops, from its source line", lg);
+
   // ---- a 1.5 MiB enumerate and a 1.5 MiB plain theorem: pieces whose styles and labels continue; a large table: a placeholder
   const thmDoc = "\\documentclass{article}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\begin{theorem}\n" + "theorem words go on and on here. ".repeat(6000).split(". ").join(".\n\n") + "\n\\end{theorem}\n\n\\begin{enumerate}\n" + "\\item an item\n".repeat(6000) + "\\end{enumerate}\n\\end{document}\n";
   const ft = await mk("/t/thm.tex", enc(thmDoc));
@@ -2728,6 +2739,44 @@ try {
   await open(fa2);
   const a2 = await until(`!!document.querySelector(".tex-preview .mathopen") && document.querySelector(".tex-preview").textContent.includes("After words here.")`, 20000);
   check(a2 && await ev(`[...document.querySelectorAll(".tex-preview .katex")].every((k) => !k.textContent.includes("After")) && document.querySelector(".tex-preview h2")?.textContent.includes("Later") && (() => { const d = [...document.querySelectorAll(".tex-preview .dmath")].pop(); return !!d && !!d.querySelector(".katex") && d.textContent.includes("y=1"); })()`), "A2: $$ not closed: a note, the text after the blank line not math, the section and a later display after it rendered", await ev(`(document.querySelector(".tex-preview") ?? document.body).textContent.slice(0, 300)`));
+
+  // TikZ in the browser (tikz.mjs): the picture's box is its span's, in the page's pt; every path lies in it (the box is
+  // TeX's, with half the line and the tips); a node's text (KaTeX's) is where its box is; the text after it starts below
+  // it; each arrow's marker exists, its id once
+  const TIKZ = "\\documentclass{article}\n\\usepackage{tikz}\n\\begin{document}\nBefore.\n\n\\begin{tikzpicture}\n\\draw[->, thick] (0,0) -- (3,1);\n\\draw[red] (2,0) arc (0:200:1);\n\\draw[<->] (0,-1) .. controls (1,1) and (2,-2) .. (3,-1);\n\\foreach \\x in {0,0.5,...,3} \\draw[help lines] (\\x,-1.5) -- (\\x,-1.2);\n\\node[draw] at (1.5,-0.5) {$x^2+y^2$};\n\\end{tikzpicture}\n\nAfter the picture.\n\\end{document}\n";
+  const ftk = await mk("/t/tikz.tex", enc(TIKZ));
+  await open(ftk);
+  const tk = await until(`!!document.querySelector(".tex-preview .tikz svg path") && document.querySelector(".tex-preview").textContent.includes("After the picture.")`, 20000);
+  const tkr = tk && await ev(`(() => {
+    const span = document.querySelector(".tex-preview .tikz"), r = span.getBoundingClientRect(), px = 96 / 72, out = [];
+    const [x0, y0, x1, y1] = span.dataset.box.split(" ").map(Number);
+    if (Math.abs(r.width - (x1 - x0) * px) > 0.6 || Math.abs(r.height - (y1 - y0) * px) > 0.6) out.push(["size", r.width, r.height, (x1 - x0) * px, (y1 - y0) * px]);
+    const paths = [...span.querySelectorAll("svg > path")];
+    for (const p of paths) {
+      const b = p.getBBox(), m = p.getScreenCTM(), a = new DOMPoint(b.x, b.y).matrixTransform(m), c = new DOMPoint(b.x + b.width, b.y + b.height).matrixTransform(m);
+      if (Math.min(a.x, c.x) < r.left - 0.6 || Math.max(a.x, c.x) > r.right + 0.6 || Math.min(a.y, c.y) < r.top - 0.6 || Math.max(a.y, c.y) > r.bottom + 0.6) out.push(["path out of the box", p.getAttribute("d").slice(0, 60)]);
+    }
+    const tw = document.createTreeWalker(document.querySelector(".tex-preview"), NodeFilter.SHOW_TEXT);
+    let tn; while ((tn = tw.nextNode()) && !tn.data.includes("After the picture.")) {}
+    const rg = document.createRange(); if (tn) rg.selectNodeContents(tn);
+    const top = tn ? rg.getBoundingClientRect().top : null;
+    if (top === null || top < r.bottom - 1) out.push(["text over the picture", top, r.bottom]);
+    const refs = paths.flatMap((p) => ["marker-start", "marker-end"].map((k) => p.getAttribute(k)).filter(Boolean).map((u) => u.slice(5, -1)));
+    for (const id of refs) if (document.querySelectorAll("#" + CSS.escape(id)).length !== 1) out.push(["marker", id]);
+    // (a node's text: KaTeX's own box where its line's box is, the top within a pixel, as wide as the metrics give
+    //  within a tenth, centred in it)
+    const lines = [...span.querySelectorAll(".tikz-n > span")];
+    for (const l of lines) {
+      // (KaTeX's text box: its base boxes, .katex-html's children, inline-blocks as tall as their struts; .katex-html
+      //  itself is an inline span, its rectangle its font's content area, taller than the text)
+      const bs = [...l.querySelectorAll(".katex-html > *")].map((b) => b.getBoundingClientRect());
+      const lr = l.getBoundingClientRect(), k = bs.length ? { top: Math.min(...bs.map((b) => b.top)), left: Math.min(...bs.map((b) => b.left)), right: Math.max(...bs.map((b) => b.right)) } : null;
+      if (k) k.width = k.right - k.left;
+      if (!k || Math.abs(k.top - lr.top) > 1 || Math.abs(k.width - lr.width) > 0.1 * lr.width || Math.abs((k.left + k.right) / 2 - (lr.left + lr.right) / 2) > 1) out.push(["node text", k && [k.top, k.width, k.left], [lr.top, lr.width, lr.left]]);
+    }
+    return { n: paths.length, refs: refs.length, lines: lines.length, out };
+  })()`);
+  check(tkr && tkr.n >= 11 && tkr.refs === 3 && tkr.lines === 1 && tkr.out.length === 0, "TikZ in the browser: the picture's box is its span's, every path inside it, a node's text where its box is, the text after it below it, each marker once", tkr);
 
   // ---- source and preview in sync (A3): a double-click in the preview puts the cursor on that word in the source;
   // Follow (on by default) scrolls the preview to the cursor's place; Show flashes it; after an edit above, the
@@ -3519,6 +3568,16 @@ try {
       const chips = await until(`[...document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip")].filter((c) => c.textContent.includes(${JSON.stringify("Not run: an item before this one failed (fix it and run again)")})).length === 2`, 20000);
       check(ranStop && chips, "stop rule: a failing item stops the rest: the later items say M4, the status counts only the item that ran (Ran 1 of 3; 1 failed)",
         { ranStop, chips, status: await ev(`document.querySelector(".tex-status").textContent`), text: await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`) });
+      // (William's item: a sageblock whose last line is a plot shows it under its code, after a Run, as a notebook cell)
+      {
+        const fbp = await mk("/t/block-plot.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sageblock}\np = plot(sin(x), (x, 0, 3))\np\n\\end{sageblock}\nAfter.\n\\end{document}\n"));
+        await open(fbp);
+        await until(`!!document.querySelector(".tex-preview pre.sageblock") && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+        const ranBp = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+        const shownBp = await until(`(() => { const p = document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock"), i = p?.nextElementSibling; return !!i && i.matches("img.sageplot") && i.complete && i.naturalWidth > 0; })()`, 20000);
+        check(ranBp && shownBp, "Run: a sageblock whose last line is a plot shows the plot under its code", { ranBp, shownBp, html: await ev(`(document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock")?.parentElement?.innerHTML ?? "").slice(0, 300)`) });
+      }
       // (Magma, a Sagebrush extension: \magma{}, magmablock and magmasilent run with Run in the page's session, Magma's
       //  own; what Magma printed shown as text; Run's title names the languages, one rule)
       {

@@ -151,7 +151,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/agents/page.ts :: renderHeader :: $(\"#banner\").innerHTML = live() #0": {
+  "web/agents/page.ts :: renderHeader :: $(\"#who-info\").innerHTML = live() #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -398,7 +398,7 @@
     "web/board/code.ts :: text"
    ]
   },
-  "web/notebook/notebook.js :: paint :: cell.hl.innerHTML = cell.type === \"code\" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === \"markdown\" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + \"\\n\"; #0": {
+  "web/notebook/notebook.js :: paint :: cell.hl.innerHTML = cell.type === \"code\" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === \"markdown\" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + \"\\n\"; #0": {
    "kind": "host",
    "owner": "host"
   },
