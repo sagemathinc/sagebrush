@@ -22,6 +22,20 @@ def _work(what):
     return ms._Charging(ms._CUR[0] or ms._Charge(what))
 
 
+def _note(ch, step, nbytes):
+    """Record a reservation under its step's name on a charge that keeps a
+    list ch.steps (the doctests' checks); nothing otherwise."""
+    steps = getattr(ch, "steps", None)
+    if steps is not None:
+        steps.append((step, nbytes))
+    return nbytes
+
+
+def _take_step(ch, step, nbytes):
+    ch.take(nbytes)
+    return _note(ch, step, nbytes)
+
+
 def _rows_reserve(ch, rows, cols, bits):
     """Reserve rows x cols rational coefficients of at most bits bits."""
     import _sage_modsym as ms
@@ -178,6 +192,34 @@ class QSpaceMethods:
         sage: sys._sagebrush_heap_limit = old  # sagebrush only
         sage: len(ModularForms(11, 2).q_echelon_basis(8)), len(ModularForms(144, 2).eisenstein_series()), Newforms(11, names='a')[0].qexp(4)  # sagebrush only
         (2, 23, q - 2*q^2 - q^3 + O(q^4))
+
+    Each reservation, by its step, at least the floor of its stated bound
+    (entries times the slot, the Fraction and the bound's bytes): the basis
+    rows at >= 256 bits, the Eisenstein rows likewise, a newform's
+    coefficients at (k + 1) log2(prec) / 2 bits; the echelon form's
+    elimination charges as it goes; q_integral_basis reserves its kernel and
+    its Hermite form; Hadamard's bound is the product of the rows' norms::
+
+        sage: import _sage_modsym as ms, _sage_mfmore as mm  # sagebrush only
+        sage: def steps(f):  # sagebrush only
+        ....:     ch = ms._Charge("A check"); ch.steps = []
+        ....:     with ms._Charging(ch):
+        ....:         f()
+        ....:     return {s: max(b for t, b in ch.steps if t == s) for s, _ in ch.steps}
+        sage: unit = ms._SLOT + ms._FRAC + 8  # sagebrush only
+        sage: s = steps(lambda: ModularForms(11, 2).q_echelon_basis(40))  # sagebrush only
+        sage: s["rows"] >= 2 * 40 * (unit + 32), s["echelon"] >= 2 * 40 * ms._SLOT  # sagebrush only
+        (True, True)
+        sage: s = steps(lambda: ModularForms(144, 2).eisenstein_series())  # sagebrush only
+        sage: s["eisenstein rows"] >= ModularForms(144, 2).eisenstein_subspace().dimension() * 51 * (unit + 32)  # sagebrush only
+        True
+        sage: s = steps(lambda: Newforms(11, names='a')[0].qexp(1000))  # sagebrush only
+        sage: s["coefficients"] >= 1000 * (unit + (3 * 10 // 2 + 2) // 8)  # sagebrush only
+        True
+        sage: s = steps(lambda: ModularForms(35, 2).q_integral_basis(8)); "kernel" in s, "hermite" in s  # sagebrush only
+        (True, True)
+        sage: mm._hadamard_bits([[3, 4]]), mm._hadamard_bits([[3, 4], [0, 8]])  # sagebrush only
+        (4, 8)
     """
 
     def _all_cusp(self):
@@ -219,10 +261,12 @@ class QSpaceMethods:
             # (the basis rows: at an estimate, settled by admission; their echelon
             # form: by _sage_modsym's integer elimination, each row reserved at
             # a sound bound before it is computed)
-            res = _rows_reserve(ch, d, work, _basis_bits(A._k, work))
+            res = _note(ch, "rows", _rows_reserve(ch, d, work, _basis_bits(A._k, work)))
             q = self._qrows(work)
             _rows_settle(ch, res, q)
+            before = ch.used
             rows = ms._echelon(q, work)[0] if q else []
+            _note(ch, "echelon", ch.used - before)
         return rows, work
 
     def q_echelon_basis(self, prec=None):
@@ -303,7 +347,7 @@ class QSpaceMethods:
             ms._settle(ch, res, [x for r in rows for x in r])
             # (the kernel's basis and its working copies: at most d + m rows of
             # d + m entries, each a minor of the system, within Hadamard's bound)
-            ch.take(3 * ms._reserve(ch, (d + m) * (d + m), _hadamard_bits(rows), frac=False) // 2)
+            _take_step(ch, "kernel", 3 * ms._reserve(ch, (d + m) * (d + m), _hadamard_bits(rows), frac=False) // 2)
             K = matrix(ZZ, rows).left_kernel().basis_matrix()
             res = ms._reserve(ch, K.nrows() * d, max((abs(int(x)).bit_length() for x in K.list()), default=0), frac=False)
             gens = [[int(x) for x in list(K.row(i))[:d]] for i in range(K.nrows())]
@@ -317,7 +361,7 @@ class QSpaceMethods:
             ms._settle(ch, res, v)
             vecs.append(v)
         # (the Hermite form and its working copies: entries within Hadamard's bound)
-        ch.take(3 * ms._reserve(ch, len(vecs) * n, _hadamard_bits(vecs), frac=False) // 2)
+        _take_step(ch, "hermite", 3 * ms._reserve(ch, len(vecs) * n, _hadamard_bits(vecs), frac=False) // 2)
         H = matrix(ZZ, vecs).echelon_form()
         res = ms._reserve(ch, H.nrows() * prec, max((abs(int(x)).bit_length() for x in H.list()), default=0))
         out = [[_Fr(int(x)) for x in H.row(i)] for i in range(H.nrows()) if any(H.row(i))]
@@ -360,7 +404,7 @@ class QSpaceMethods:
             # (the space's rows the coordinates are solved against, and each
             # series' prec coefficients: |a_n| <= sigma_(k-1)(n) <= n^k, the
             # constant term -B_k / 2k or (t - 1)/24)
-            res = _rows_reserve(ch, E.dimension(), prec, _basis_bits(k, prec))
+            res = _note(ch, "eisenstein rows", _rows_reserve(ch, E.dimension(), prec, _basis_bits(k, prec)))
             for psi, t in pairs:
                 r = _rows_reserve(ch, 1, prec, k * prec.bit_length() + abs(_bernoulli(k).numerator).bit_length() + abs(_bernoulli(k).denominator).bit_length() + 2 * k.bit_length() + 8)
                 coords = E._coords_of(lambda p, psi=psi, t=t: _eis_series(N, k, psi, t, p))
@@ -455,7 +499,7 @@ class NewformMethods:
         # (prec coefficients reserved before they are computed, at Deligne's
         # bound |a_n| <= d(n) n^((k-1)/2), d(n) <= n)
         with _work("The q-expansion of a newform of level %d to precision %d" % (self.level(), p)) as ch:
-            res = _rows_reserve(ch, 1, max(p, 1), (k + 1) * max(p, 2).bit_length() // 2 + 2)
+            res = _note(ch, "coefficients", _rows_reserve(ch, 1, max(p, 1), (k + 1) * max(p, 2).bit_length() // 2 + 2))
             s = self.q_expansion(prec)
             _rows_settle(ch, res, [[0] * max(p - 1, 0)])
         return s
