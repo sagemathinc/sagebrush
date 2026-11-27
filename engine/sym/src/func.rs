@@ -732,11 +732,30 @@ fn csin(a: C) -> C {
 fn ccos(a: C) -> C {
     (a.0.cos() * a.1.cosh(), -a.0.sin() * a.1.sinh())
 }
+// (past |x| = 709, where sinh x and cosh x leave the doubles, each part on
+// its own, as IEEE's csinh and ccosh: e^|x| f/2, signed as sinh x, so that a
+// part 0 stays 0 and a part within the doubles is not infinite)
 fn csinh(a: C) -> C {
+    if a.0.abs() > 709.0 && a.0.is_finite() {
+        let h = |f: f64| crate::num::exp_mul(a.0.abs(), f / 2.0);
+        return (1f64.copysign(a.0) * h(a.1.cos()), h(a.1.sin()));
+    }
     (a.0.sinh() * a.1.cos(), a.0.cosh() * a.1.sin())
 }
 fn ccosh(a: C) -> C {
+    if a.0.abs() > 709.0 && a.0.is_finite() {
+        let h = |f: f64| crate::num::exp_mul(a.0.abs(), f / 2.0);
+        return (h(a.1.cos()), 1f64.copysign(a.0) * h(a.1.sin()));
+    }
     (a.0.cosh() * a.1.cos(), a.0.sinh() * a.1.sin())
+}
+// tanh past |x| = 709 (sinh x past the doubles): +-1 with a signed 0
+// imaginary part, as Sage's formula (sin 2y/(2D), D infinite) gives it
+fn ctanh(a: C) -> C {
+    if a.0.abs() > 709.0 {
+        return (1f64.copysign(a.0), 0f64.copysign((2.0 * a.1).sin()));
+    }
+    cdiv(csinh(a), ccosh(a))
 }
 const I: C = (0.0, 1.0);
 const ONE: C = (1.0, 0.0);
@@ -834,7 +853,7 @@ pub fn float_eval(f: &Fun, v: &[C]) -> Option<C> {
         }
         Fun::Sinh => if real { r(x.sinh()) } else { Some(csinh(z)) },
         Fun::Cosh => if real { r(x.cosh()) } else { Some(ccosh(z)) },
-        Fun::Tanh => if real { r(x.tanh()) } else { Some(cdiv(csinh(z), ccosh(z))) },
+        Fun::Tanh => if real { r(x.tanh()) } else { Some(ctanh(z)) },
         Fun::Coth => if real { r(1.0 / x.tanh()) } else { Some(cdiv(ccosh(z), csinh(z))) },
         Fun::Sech => if real { r(1.0 / x.cosh()) } else { Some(cdiv(ONE, ccosh(z))) },
         Fun::Csch => if real { r(1.0 / x.sinh()) } else { Some(cdiv(ONE, csinh(z))) },

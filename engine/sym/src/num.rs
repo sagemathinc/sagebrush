@@ -43,6 +43,62 @@ pub fn check_q_bits(x: &Q) {
     check_int_bits(x.numer().bits().max(x.denom().bits()));
 }
 
+/// f e^a for finite doubles a and f, as IEEE arithmetic gives it where e^a
+/// alone overflows (a > 709): the product correctly rounded to a double, a
+/// signed infinity past them, f's signed 0 for f = 0 (CDF's e^(710 + 3i) has
+/// the imaginary part e^710 sin 3 = 3.1526135940644185e+307, its real part
+/// -infinity).  In 192-bit fixed point: a = k ln 2 + r, e^r by its Taylor
+/// series, ln 2 from sum 1/(j 2^j); the truncations are under 2^-180
+/// relative, so the one rounding is the correct one but within that of a
+/// tie.  Past a = 1455 every nonzero f overflows (e^1455 2^-1074 > 2^1024).
+pub fn exp_mul(a: f64, f: f64) -> f64 {
+    if f == 0.0 {
+        return f;
+    }
+    if a <= 709.0 {
+        return f * a.exp();
+    }
+    if a > 1455.0 {
+        return f64::INFINITY.copysign(f);
+    }
+    const P: usize = 192;
+    let one = BigInt::one() << P;
+    // ln 2 = sum_{j >= 1} 1/(j 2^j), each term truncated (j to P + 8 keeps
+    // the tail and the truncations under 2^-P)
+    let mut ln2 = BigInt::zero();
+    for j in 1..(P as u64 + 8) {
+        ln2 += &one / (BigInt::from(j) << j as usize);
+    }
+    // a 2^P exactly (a = m 2^e, an integer times a power of 2 at most 2^-42)
+    let (am, ae) = {
+        let b = a.to_bits();
+        let e = ((b >> 52) & 0x7ff) as i64 - 1075;
+        (BigInt::from((b & ((1u64 << 52) - 1)) | (1u64 << 52)), e)
+    };
+    let big_a = am << (P as i64 + ae) as usize;
+    let k = &big_a / &ln2;
+    let r = &big_a - &k * &ln2;
+    // e^r = sum r^n/n!, r < ln 2
+    let mut sum = one.clone();
+    let mut term = one.clone();
+    let mut n = 1u64;
+    while !term.is_zero() {
+        term = (&term * &r >> P) / BigInt::from(n);
+        sum += &term;
+        n += 1;
+    }
+    let (fm, fe) = {
+        let b = f.abs().to_bits();
+        let ex = ((b >> 52) & 0x7ff) as i64;
+        let mant = b & ((1u64 << 52) - 1);
+        if ex == 0 { (BigInt::from(mant), -1074) } else { (BigInt::from(mant | (1u64 << 52)), ex - 1075) }
+    };
+    let m = fm * sum;
+    let bits = m.bits() as u32;
+    let v = Mp::fin(&m, fe + k.to_i64().unwrap() - P as i64, bits).to_f64();
+    v.copysign(f)
+}
+
 /// log2 |n| for n != 0, finite however large n is (its top 64 bits and
 /// its length: n.to_f64() is infinite past 2^1024).
 pub fn log2_big(n: &BigInt) -> f64 {
@@ -1775,6 +1831,19 @@ mod tests {
             assert!(z.pow_big(&BigInt::from(n)).same_value(&z.pow_int(n)), "{}", n);
         }
         assert!(crate::err::catch(|| mp_pow(&Num::mpc(Mpc::new(Mp::from_f64(2.0, 100), Mp::from_f64(1.0, 100))), &n100)).is_err());
+    }
+
+    #[test]
+    fn exp_mul_past_the_doubles() {
+        // (f e^a correctly rounded where e^a alone overflows: mpmath's values
+        // at 200 bits; a signed infinity past the doubles, 0 kept)
+        assert_eq!(exp_mul(710.0, 3f64.sin()), 3.1526135940644185e307);
+        assert_eq!(exp_mul(710.0, 3f64.cos()), f64::NEG_INFINITY);
+        assert_eq!(exp_mul(1420.0, 5e-324), 2.4657495327684952e293);
+        assert_eq!(exp_mul(1420.0, -5e-324), -2.4657495327684952e293);
+        assert_eq!(exp_mul(1500.0, 5e-324), f64::INFINITY);
+        assert!(exp_mul(1000.0, -0.0).is_sign_negative() && exp_mul(1000.0, -0.0) == 0.0);
+        assert_eq!(exp_mul(1.0, 2.0), 2.0 * 1f64.exp());
     }
 
     #[test]
