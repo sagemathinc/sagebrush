@@ -23,7 +23,7 @@ function canon(v: any): string {
   return JSON.stringify(v);
 }
 
-type Pkg = { name: string; version?: string; root?: string; modules: string[]; files: Record<string, string>; requires?: string[]; level?: number; pre?: Record<string, any>; provides?: any };
+type Pkg = { name: string; version?: string; root?: string; modules: string[]; files: Record<string, string>; requires?: string[]; level?: number; pre?: Record<string, any>; provides?: any; distribution?: string };
 // A set (index + chunks by sha256) for these packages; `mutate` edits the
 // index object (or a chunk) before it is serialized, to build hostile sets
 // whose hashes are still right.
@@ -47,6 +47,7 @@ function makeSet(pkgs: Pkg[], mutate?: { index?: (ix: any) => void; chunk?: (id:
       core_req: { api: 1, level: p.level ?? 1 }, src: put(srcObj), pre: {}, cost: { [BUILD]: { src: { cpu_ms: 100, peak_mb: 5 } } },
     };
     if (p.provides) entry.provides = p.provides;
+    if (p.distribution) entry.distribution = { name: p.distribution, version: p.version ?? "0.1.0" };
     if (p.pre) {
       const preObj: any = { format: "sagebrush-pkg-chunk", v: 1, kind: "pre", package: id, build: BUILD, modules: p.pre };
       mutate?.chunk?.(id, "pre", preObj);
@@ -288,6 +289,32 @@ function run(code: string, s: { S: string; index: Uint8Array; chunks: Map<string
     w.once("error", reject);
   });
 }
+
+test("a package's distribution: a project name at its own version, one package per normalized name; anything else refused", () => {
+  const plan = P.admitIndex(...((s) => [s.S, s.index] as const)(makeSet([{ ...hello, distribution: "Hello-World" }])), BUILD, reserved);
+  assert.deepEqual(plan.packages.get("@sagebrush/hello@0.1.0").distribution, { name: "Hello-World", version: "0.1.0" });
+  assert.equal(P.admitIndex(...((s) => [s.S, s.index] as const)(makeSet([hello])), BUILD, reserved).packages.get("@sagebrush/hello@0.1.0").distribution, null);
+  const id = "@sagebrush/hello@0.1.0";
+  const cases: [string, Pkg[], ((ix: any) => void) | undefined, RegExp][] = [
+    ["another version than its own", [{ ...hello, distribution: "hello" }], (ix) => (ix.packages[id].distribution.version = "9.9.9"), /distribution.version must be the package's own version/],
+    ["a name with a space", [{ ...hello, distribution: "hello world" }], undefined, /distribution.name must be a project name/],
+    ["a name starting with a dash", [{ ...hello, distribution: "-hello" }], undefined, /distribution.name must be a project name/],
+    ["a non-string name", [{ ...hello, distribution: "hello" }], (ix) => (ix.packages[id].distribution.name = 7), /distribution.name must be a project name/],
+    ["an extra key", [{ ...hello, distribution: "hello" }], (ix) => (ix.packages[id].distribution.extra = 1), /unknown field/],
+    ["not an object", [hello], (ix) => (ix.packages[id].distribution = "hello"), /distribution must be \{name, version\}/],
+    ["two packages, one normalized name", [{ ...hello, distribution: "Foo_Bar" }, { name: "b", modules: ["bb"], files: { "py/bb.py": "" }, distribution: "foo.bar" }], undefined, /distribution foo.bar is also @sagebrush\/hello@0\.1\.0's|distribution Foo_Bar is also @sagebrush\/b@0\.1\.0's/],
+  ];
+  for (const [what, pkgs, mut, re] of cases) {
+    const s = makeSet(pkgs, mut ? { index: mut } : undefined);
+    assert.throws(() => P.admitIndex(s.S, s.index, BUILD, reserved), (e: any) => e.name === "PkgsetError" && re.test(e.message), what);
+  }
+});
+
+test("importlib.metadata.version answers for the set's distributions (normalized names), before any import of them; others are not found", async () => {
+  const s = makeSet([{ ...hello, version: "0.3.1", distribution: "Hello-World" }, { name: "b", modules: ["bb"], files: { "py/bb.py": "" } }]);
+  const code = "import importlib.metadata as m\nfor n in ('Hello-World', 'hello_world', 'HELLO.world', 'b', 'hello'):\n    try:\n        print(n, m.version(n))\n    except m.PackageNotFoundError as e:\n        print(n, 'not found')\nimport sys\nprint('hello' in sys.modules)";
+  assert.equal(await run(code, s), "Hello-World 0.3.1\nhello_world 0.3.1\nHELLO.world 0.3.1\nb not found\nhello not found\nFalse\n");
+});
 
 test("an optional package imports after sys.path, the library and bundled packages; its submodules too", async () => {
   const s = makeSet([hello]);

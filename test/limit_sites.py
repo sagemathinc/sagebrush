@@ -86,9 +86,14 @@ CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
 # its work meter (the Budget and its charges): class 1, interim until #904's slice 2 (LIMITS on #913), never membership)
 # and the LaTeX preview's TikZ pictures (web/latex/engine/tikz.mjs TIKZ_LIMITS, each bound a named problem and a
 # placeholder, never a partial picture, with its hostile row in web/latex/test-latex-tikz.mjs): class 1)
+# and the E2E key chain and enrollment mailbox (web/sync/e2e-chain.ts): the chain's, a package's and the
+# mailbox's host bounds, the length bound's reserve for removal and recovery, and the rates: class 1, never membership)
+# and the 3D view's rooms for Sage files (web/space/src/pyroom.ts): the preparser's work bound on a file's ranges
+# (ELLIPSIS_BUDGET, interim until the preparser rewrites ranges in one pass), which protects the page: class 1)
 WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts", "web/stall-fetch.js", "web/workspace/checkpoint.ts", "web/latex/run-core.mjs",
        "web/latex/results-check.mjs", "web/output-shell/protocol.js", "web/output-shell/shell.js", "web/notebook/output-frames.js",
-       "web/sync/entries.ts", "web/latex/engine/tikz.mjs"}
+       "web/sync/entries.ts", "web/latex/engine/tikz.mjs", "web/sync/e2e-chain.ts",
+       "web/space/src/pyroom.ts"}
 
 
 def short(key):

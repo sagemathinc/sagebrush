@@ -101,3 +101,48 @@ export async function verifyGrant(ctx: FleetCtx, chain: Chain, cert: HostCert, g
 export async function verifyGrantAck(ctx: FleetCtx, cert: HostCert, ack: string, currentGen: number): Promise<unknown> {
   return fleetCore().verifyGrantAck(utf8(ack), { aud: ctx.aud, fleet: ctx.fleet, cert, currentGen });
 }
+
+/**
+ * What a person compares for a host (§3.1): the first 100 bits of its fingerprint, recomputed from the verified
+ * certificate's keys (never taken from the object), as 20 base32 characters in groups of 4.
+ */
+export async function hostFingerprintShown(cert: HostCert): Promise<string> {
+  const core = fleetCore();
+  return core.showFingerprint(await core.hostFingerprint(cert.body.host, cert.signRaw, cert.encRaw));
+}
+
+/**
+ * A host's revocation (sb.revocation.v1, §2.3), verified against the chain: signed by a device of the fleet (one since
+ * removed still counts: obeying a revocation only narrows), and about this very host. The verified body, or a refusal.
+ */
+export async function verifyHostRevocation(ctx: FleetCtx, chain: Chain, host: string, revocation: string): Promise<unknown> {
+  const core = fleetCore();
+  const b = (await core.verifyRevocation(utf8(revocation), { aud: ctx.aud, fleet: ctx.fleet, chain })) as { what?: unknown; id?: unknown };
+  if (b.what !== "host" || b.id !== host) core.refuse("bad_form", "a revocation of something else");
+  return b;
+}
+
+/**
+ * One page of the device chain as the service serves it ({ entries, head }, canonical, bounded), read by the core's own
+ * reader for a request with `after` (-1: from genesis): each entry's text, the head, and the `after` of the next page.
+ * The entries are still unverified: syncChain verifies them, all together, against this browser's pin.
+ */
+export function readChainPage(bytes: Uint8Array, after: number): { entries: string[]; head: number; next: number } {
+  const p = fleetCore().parseChainPage(bytes, after);
+  const dec = new TextDecoder("utf-8", { fatal: true });
+  return { entries: p.entries.map((e: Uint8Array) => dec.decode(e)), head: p.head, next: p.next };
+}
+
+/**
+ * What the person types into a host being paired (`sagebrush-agent host pair --fleet`, F7): this fleet's fingerprint,
+ * from this device's OWN verified chain, never from the service. `genesis` is the chain's seq-0 entry as synced; it is
+ * replayed on its own and must give the very entry the verified chain starts with, or it is refused. The core's one
+ * definition (fleetFingerprint over the entry's exact bytes), shown as 20 base32 characters in groups of 4.
+ */
+export async function fleetFingerprintShown(ctx: FleetCtx, chain: Chain, genesis: string): Promise<string> {
+  const core = fleetCore();
+  const g = utf8(genesis);
+  const alone = await core.replayChain([g], { aud: ctx.aud, fleet: ctx.fleet });
+  if (alone.hashes[0] !== chain.hashes[0]) core.refuse("bad_form", "not this chain's genesis");
+  return core.showFingerprint(await core.fleetFingerprint(ctx.fleet, g));
+}

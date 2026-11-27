@@ -107,7 +107,7 @@ test("np.linalg.solve from n = 256 on engine/nd: the loader's bits, the oracle; 
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
   // (the CLI asks for the warm-up at numpy's import but has no idle moment for it: the first call compiles)
-  const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n, warm: "unused" });
+  const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n, warm: "unused", memory_max: 2 ** 32 });
   assert.deepEqual(kernels, { cholesky: k(48), solve: k(256), det: k(256), slogdet: k(256), inv: k(256) });
   // det is slogdet's sign times exp of its log (NumPy's own formula), and agrees with the older LU's
   const ts = seededCalls({ SAGEBRUSH_NO_WASM: "1" }).det;
@@ -121,8 +121,8 @@ test("without WebAssembly: the older LU, within the oracle, and _kernels() sayin
   const { X, inv, kernels } = seededCalls({ SAGEBRUSH_NO_WASM: "1" });
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
-  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused" });
-  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused" });
+  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused", memory_max: 0 });
+  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused", memory_max: 0 });
 });
 
 test("both paths: a singular matrix is NumPy's LinAlgError for solve and inv, det 0 and slogdet (0, -inf); P's sign", () => {
@@ -262,8 +262,9 @@ test("a non-contiguous view or an integer matrix gives its contiguous float64 co
   assert.deepEqual(run(code), ["False True True True", "True True", "engine/nd"]);
 });
 
-// (engine cost policy r2: no room in the module's memory is not a refusal; the TypeScript LU computes it)
-test("a module memory that can't grow: inv, det and solve are computed in JavaScript, and the session goes on", async () => {
+// (no automatic fallback, William Nov 25 2026, #2147 N2: a module memory that can't grow is a MemoryError naming the
+// workspace, not the TypeScript LU; nothing is kept, so the next call runs on engine/nd)
+test("a module memory that can't grow: inv, det and solve each a MemoryError naming the workspace, and the session goes on", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const Obj = require("../src/runtime/object");
   const s = notebookSession(() => {}, { captureStreams: true });
@@ -281,7 +282,9 @@ test("a module memory that can't grow: inv, det and solve are computed in JavaSc
   await s.handle({ id: 3, code: "OK = float(np.linalg.inv(B)[0, 0])" });
   const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
   const v = (name: string) => Obj.callObj(Obj.getattr(main, "__getitem__"), [name]);
-  assert.deepEqual(require("../src/runtime").R.toArray(v("R")), ["0.5", "True", "0.5"]);
+  const R = require("../src/runtime").R.toArray(v("R"));
+  assert.equal(R.length, 3);
+  for (const r of R) assert.match(r, /^WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); use the native app on a computer with more memory$/);
   assert.equal(v("OK"), 0.5);
 });
 

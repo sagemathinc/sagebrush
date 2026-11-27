@@ -35,6 +35,7 @@ import numpy as np
 from .errors import EmptyDataError, ParserError
 from ._pd_column import Column
 from ._pd_dtypes import STR, resolve_dtype
+from ._pd_datetime import DT
 from ._pd_index import Index, RangeIndex, default_index
 
 __all__ = ["read_csv"]
@@ -65,6 +66,16 @@ _EXACT = 2 ** 53
 
 _SUPPORTED = frozenset(["sep", "header", "names", "index_col", "usecols", "na_values",
                         "keep_default_na", "dtype", "nrows", "skiprows", "quotechar", "parse_dates"])
+
+
+def _parsed_dtype(d):
+    # (the dtypes the parser fills: str, object, float64, int64 and bool; datetime64[us] is pandas' TypeError, and
+    # any other dtype (the smaller integers, float32), which pandas parses into, is refused rather than mis-built)
+    if d is not None and d is not STR and d not in ("object", "float64", "int64", "bool"):
+        if d is DT:
+            raise TypeError("the dtype %s is not supported for parsing, pass this column using parse_dates instead" % (d,))
+        raise _unsupported("dtype=%s" % (d,))
+    return d
 
 
 def _unsupported(what):
@@ -1065,9 +1076,9 @@ def _parse_rows(reader, header, names, index_col, usecols, na, dtype, nrows, ski
         if isinstance(dtype, dict):
             lab = labels[j]
             if lab in dtype:
-                return resolve_dtype(dtype[lab])
+                return _parsed_dtype(resolve_dtype(dtype[lab]))
             return None
-        return resolve_dtype(dtype)
+        return _parsed_dtype(resolve_dtype(dtype))
 
     builders = [_Builder(budget, forced_for(j), j) for j in keep]
     count = 0

@@ -7,11 +7,12 @@
 //  - images: only names in the caller's allowlist map (opts.images), never a document-supplied URL;
 //  - no eval / new Function anywhere.
 // KaTeX's renderToString is given by the host (setKatex): on the site, the shared sagebrush-math.js's copy
-let renderToString = null;
-export function setKatex(f) { renderToString = f; }
+let renderToString = null, renderToHTMLTree = null;
+// (renderToHTMLTree, optional: KaTeX's layout, read for the sizes of TikZ node text; without it they are estimated)
+export function setKatex(f, tree) { renderToString = f; renderToHTMLTree = tree || null; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { renderTikz, TikzError, TIKZ_LIMITS, utf8Len } from "./tikz.mjs";
+import { renderTikz, TikzError, TIKZ_LIMITS, utf8Len, designWidth } from "./tikz.mjs";
 import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, staleTitle, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
@@ -79,11 +80,14 @@ const dimPt = (s) => { const m = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*(pt|mm|cm|in|em|
 export function buildTree(events, items = []) {
   const root = { t: "g", kids: [] }; const st = [root];
   let pos = -1, last = -1;   // (last: the latest marker, kept: a code item's source position, it.at)
+  // (an \input file's line, {k:"fpos", file, line}, or back in the main file, {file: null}: on the next node as n.fp)
+  let fp;
   const top = () => st[st.length - 1];
   for (const e of events) {
     const before = top().kids.length, at = top();
-    if (typeof e === "number") { top().kids.push({ t: "x", v: e }); if (pos >= 0) { at.kids[before].p = pos; pos = -1; } continue; }
+    if (typeof e === "number") { top().kids.push({ t: "x", v: e }); if (pos >= 0) { at.kids[before].p = pos; pos = -1; } if (fp !== undefined) { at.kids[before].fp = fp; fp = undefined; } continue; }
     if (e.k === "pos") { pos = last = e.at; continue; }
+    if (e.k === "fpos") { fp = e.file ? { file: e.file, line: e.line } : null; continue; }
     switch (e.k) {
       case "o": { const g = { t: "g", kids: [] }; top().kids.push(g); st.push(g); break; }
       case "c": if (st.length > 1 && top().t === "g") st.pop(); break;
@@ -103,7 +107,7 @@ export function buildTree(events, items = []) {
       // (PythonTeX: a stale result read back begins (on) or ends; what is drawn in between is faded, R3-4)
       case "z": top().kids.push({ t: "Z", on: e.on }); break;
       case "label": top().kids.push({ t: "L", key: e.key }); break;
-      case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
+      case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt, star: !!e.star }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
       case "natbib": top().kids.push({ t: "natbib", opt: e.opt }); break;
@@ -112,6 +116,7 @@ export function buildTree(events, items = []) {
       case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
       default: break;
     }
+    if (fp !== undefined && at.kids.length > before) { at.kids[before].fp = fp; fp = undefined; }
     if (pos >= 0 && at.kids.length > before) { at.kids[before].p = pos; pos = -1; }
   }
   return root.kids;
@@ -212,9 +217,134 @@ class Flow {
   inlineHtml() { return this.finish().join(""); }
 }
 
+// ------------------------------------------------------------------ TikZ node text (for tikz.mjs: opts.label)
+// A node's text, one line of it, as KaTeX's HTML and its size in pt at 10pt (TeX's text box: width, height, depth):
+// text as \text{...} in the node's family (KaTeX's fonts are Computer Modern-based, as TeX's are), $...$ as math. The size is
+// read from KaTeX's layout tree: each symbol's advance width (a run of text KaTeX merged into one symbol, character by
+// character), the spaces it puts between atoms, a script's or a fraction's widest row, scaled by its size class.
+const FAMILY = { bold: "textbf", italic: "textit", sans: "textsf", mono: "texttt" };
+const SIZE_CLASS = [0, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.44, 1.728, 2.074, 2.488];
+const CHAR_W = new Map();
+/** (how many characters charWidth has typeset alone: each distinct one once, while kept; for the tests) */
+export const charWidthRenders = { n: 0 };
+export function tikzLabel(text, font = {}, macros = {}, macroSig = "", stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0 }) {
+  const fam = FAMILY[font.family] || "text";
+  let src = "", i = 0, buf = "";
+  const flushText = () => { if (buf.trim()) src += "\\" + fam + "{" + buf + "}"; else if (buf) src += "\\ "; buf = ""; };
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\" && i + 1 < text.length) { buf += c + text[i + 1]; i += 2; continue; }
+    if (c === "$") {
+      const j = text.indexOf("$", i + 1);
+      if (j < 0) throw new TikzError("a node's text with a $ not closed");
+      flushText(); src += "{" + text.slice(i + 1, j) + "}"; i = j + 1; continue;
+    }
+    buf += c; i++;
+  }
+  flushText();
+  if (!src) return { html: "", w: 0, h: 0, d: 0 };
+  const html = texMath(src, false, macros, macroSig, stats);
+  if (html.includes("katex-error")) throw new TikzError("a node's text KaTeX can't typeset: " + text.slice(0, 60));
+  if (!renderToHTMLTree) {
+    // (no layout tree: an estimate that errs large, half an em a character, a full line's height and depth)
+    return { html, w: 5.5 * [...text.replace(/[$\\{}]/g, "")].length, h: 7.5, d: 2.5 };
+  }
+  let tree;
+  try { tree = renderToHTMLTree(src, { displayMode: false, throwOnError: true, trust: false, maxSize: 20, maxExpand: 1000, strict: "ignore", macros: Object.assign({}, macros) }); }
+  catch { throw new TikzError("a node's text KaTeX can't typeset: " + text.slice(0, 60)); }
+  return { html, w: 10 * treeWidth(tree), h: 10 * Math.max(0, tree.height), d: 10 * Math.max(0, tree.depth) };
+}
+const em = (v) => (typeof v === "string" && /em$/.test(v) ? parseFloat(v) || 0 : 0);
+function treeWidth(n, depth = 0) {
+  if (!n || depth > 60) return 0;
+  const cls = n.classes || [];
+  if (cls.includes("katex-mathml")) return 0;
+  const st = n.style || {};
+  let w;
+  if (typeof n.text === "string") {
+    const chars = [...n.text];
+    w = chars.length <= 1 ? n.width || 0 : chars.reduce((a, c) => a + charWidth(c, cls), 0);
+    // (a math letter's box includes its italic correction in TeX, as KaTeX's advance doesn't: errs wide before a subscript)
+    if (cls.includes("mathnormal") && n.italic > 0) w += n.italic;
+  } else {
+    const kids = (n.children || []).map((k) => treeWidth(k, depth + 1));
+    w = cls.includes("vlist") ? Math.max(0, ...kids) : kids.reduce((a, b) => a + b, 0);
+    const reset = cls.find((c) => /^reset-size\d+$/.test(c)), size = cls.find((c) => /^size\d+$/.test(c));
+    if (reset && size) { const f = SIZE_CLASS[+size.slice(4)] / SIZE_CLASS[+reset.slice(10)]; w *= f * (f < 1 ? designWidth(f) : 1); }
+  }
+  if (cls.includes("nulldelimiter")) w += 0.12;
+  w = Math.max(w, em(st.width), em(st.minWidth));
+  return w + em(st.marginLeft) + em(st.marginRight) + em(st.paddingLeft) + em(st.paddingRight);
+}
+// (one character's width in a run KaTeX merged: rendered alone in the run's font, kept)
+function charWidth(c, cls) {
+  if (c === " " || c === "\u00a0") return 0.3333;
+  const fam = ["textbf", "textit", "textsf", "texttt", "mathbf", "mathit"].find((f) => cls.includes(f)) || (cls.includes("mathnormal") ? "mathnormal" : "text");
+  const key = fam + c;
+  let w = CHAR_W.get(key);
+  if (w === undefined) {
+    const esc1 = /[#$%&_{}]/.test(c) ? "\\" + c : c === "\\" ? "\\textbackslash " : c === "^" ? "\\textasciicircum " : c === "~" ? "\\textasciitilde " : c;
+    charWidthRenders.n++;
+    try {
+      const t = renderToHTMLTree(fam === "mathnormal" ? esc1 : "\\" + (fam.startsWith("math") ? fam : fam === "text" ? "text" : fam) + "{" + esc1 + "}", { throwOnError: true, strict: "ignore" });
+      w = treeWidth(t);
+    } catch { w = 0; }
+    if (!(w > 0)) w = 0.6;   // (a character KaTeX has no metrics for: an estimate that errs large)
+    // (every character kept, so each distinct one is typeset once: a picture's are at most its NODE_TEXT; cleared when
+    //  large, between documents' worth)
+    if (CHAR_W.size >= 200000) CHAR_W.clear();
+    CHAR_W.set(key, w);
+  }
+  return w;
+}
+
 // ------------------------------------------------------------------ KaTeX
 const KCACHE = new Map();
+// (an accent before a font command with its own argument, unbraced, \bar\mathbb F: KaTeX refuses it ("Unexpected end
+//  of input in a macro argument"). It comes most often from a macro, \bar\F with \newcommand{\F}{\mathbb F}, which TeX
+//  takes as \bar{\mathbb F} (the macro is the accent's one-token argument) and the preview has expanded before KaTeX;
+//  written out, plain LaTeX takes it too (amsmath refuses it). Braced here, before KaTeX: the font command's argument is
+//  read as TeX reads it, a group or one token, and a font command as that token brings its own (\mathbf\mathit x); the
+//  argument is rewritten in turn (\bar\mathrm{\hat\mathcal O}), at most ACCENT_NEST groups deep, past which it is left
+//  as written. Anything else, and a source TeX would refuse, is left as written)
+const ACCENT_CS = "bar|hat|tilde|vec|dot|ddot|check|breve|acute|grave|mathring|widehat|widetilde|overline|underline";
+const FONT_CS = "mathbb|mathcal|mathrm|mathbf|mathit|mathsf|mathtt|mathfrak|mathscr|boldsymbol|bm|operatorname";
+const ACCENT_FONT = new RegExp("\\\\(" + ACCENT_CS + ")(?![A-Za-z])\\s*\\\\(" + FONT_CS + ")(?![A-Za-z])\\s*", "g");
+const FONT_TOKEN = new RegExp("^\\\\(?:" + FONT_CS + ")(?![A-Za-z])\\s*");
+export const ACCENT_NEST = 16;
+// (the argument starting at j, as TeX reads it, made explicit for KaTeX: [end, its text braced], or null. A group has the
+//  pairs inside it braced in turn; a font command as the token takes its own argument ({\mathit{x}} for \mathit x);
+//  one token otherwise. depth: how many arguments deep, at most ACCENT_NEST)
+function accentArg(src, j, depth) {
+  if (depth > ACCENT_NEST) return null;
+  if (src[j] === "{") {
+    let d = 0;
+    for (let k = j; k < src.length; k++) { const c = src[k]; if (c === "\\") { k++; continue; } if (c === "{") d++; else if (c === "}" && --d === 0) return [k + 1, "{" + braceAccentFonts(src.slice(j + 1, k), depth + 1) + "}"]; }
+    return null;
+  }
+  if (src[j] === "\\") {
+    const f = FONT_TOKEN.exec(src.slice(j));
+    if (f) { const r = accentArg(src, j + f[0].length, depth + 1); return r && [r[0], "{" + f[0].trimEnd() + r[1] + "}"]; }
+    const w = /^\\([A-Za-z]+|.)/.exec(src.slice(j)); return w ? [j + w[0].length, "{" + w[0] + "}"] : null;
+  }
+  if (j >= src.length || /[}\s^_&]/.test(src[j])) return null;
+  const e = j + String.fromCodePoint(src.codePointAt(j)).length;
+  return [e, "{" + src.slice(j, e) + "}"];
+}
+export function braceAccentFonts(src, depth = 0) {
+  if (!src.includes("\\")) return src;
+  const re = new RegExp(ACCENT_FONT.source, "g");
+  let out = "", at = 0, m;
+  while ((m = re.exec(src))) {
+    const r = accentArg(src, m.index + m[0].length, depth);
+    if (!r) continue;
+    out += src.slice(at, m.index) + "\\" + m[1] + "{\\" + m[2] + r[1] + "}";
+    at = r[0]; re.lastIndex = r[0];
+  }
+  return at ? out + src.slice(at) : src;
+}
 function texMath(src, display, macros, macroSig, stats) {
+  src = braceAccentFonts(src);
   const key = (display ? "D" : "I") + macroSig + "\u0000" + src;
   const hit = KCACHE.get(key);
   if (hit !== undefined) { if (hit.includes("katex-error")) { stats.katexErrors++; if (stats.katexErrorSamples.length < 5) stats.katexErrorSamples.push(src.slice(0, 120)); } return hit; }
@@ -277,7 +407,7 @@ class Renderer {
     this.cls = "article"; this.book = false; this.clsOpt = ""; this.nat = null;
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
-    this.frameList = []; this.problems = []; this.lastPos = -1; this.ov = null;
+    this.frameList = []; this.problems = []; this.lastPos = -1; this.lastFile = null; this.ov = null;
     this.ctr = { part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0, paragraph: 0, subparagraph: 0, equation: 0, figure: 0, table: 0, footnote: 0 };
     this.appendix = false;
     this.thmCtr = {}; this.thms = {}; this.thmStyle = "plain"; this.eqWithin = null;
@@ -305,7 +435,9 @@ class Renderer {
     flow.html('<span class="unk" title="not supported in this prototype">\\' + esc(name) + "</span>", st);
   }
 
-  problem(kind, name) { if (!this.inPreamble && this.problems.length < 500) this.problems.push({ kind, name: String(name), at: this.lastPos }); }
+  // (where a problem is: the main file's offset, and, inside an \input file, that file and its line)
+  where() { return this.lastFile ? { at: this.lastPos, file: this.lastFile.file, fline: this.lastFile.line } : { at: this.lastPos }; }
+  problem(kind, name) { if (!this.inPreamble && this.problems.length < 500) this.problems.push({ kind, name: String(name), ...this.where() }); }
 
   // ---- argument readers over a sibling list
   isSp(n) { return n && n.t === "x" && !isCs(n.v) && catOf(n.v) === CAT.SPACE; }
@@ -432,6 +564,7 @@ class Renderer {
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       if (n.p !== undefined) { this.lastPos = n.p; if (!flow.inline) flow.pos = n.p; }
+      if (n.fp !== undefined) this.lastFile = n.fp;
       switch (n.t) {
         case "x": i = this.tok(nodes, i, ctx, flow); break;
         case "g": this.walk(n.kids, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), flow); break;
@@ -463,7 +596,7 @@ class Renderer {
         case "err":
           // (an \input or \include not read: its name and why, never silent; in the preamble too, listed for the page's note)
           if (n.code === "input") {
-            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), at: this.lastPos, why: String(n.text || "") });
+            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), ...this.where(), why: String(n.text || "") });
             if (this.inPreamble) { if (this.inputMisses.length < 50) this.inputMisses.push({ name: String(n.name), why: String(n.text || "") }); }
             else flow.html('<span class="unk errchip" title="\\input or \\include: the file is not in the preview">[input: ' + esc(n.name) + ": " + esc(n.text || "not found") + "]</span>", ctx.st);
             break;
@@ -702,7 +835,7 @@ class Renderer {
       case "tikzpicture": {
         // (TikZ's drawing: tikz.mjs: paths, styles, transforms, \foreach; what it doesn't draw, a placeholder
         //  naming it, and check's problem says it)
-        try { flow.html(renderTikz(this.tikzStr(n.kids), { styles: this.tikzStyles || "" }, this), c2.st); }
+        try { flow.html(renderTikz(this.tikzStr(n.kids), { styles: this.tikzStyles || "", label: (t, f) => tikzLabel(t, f, this.macros, this.macroSig, this.stats) }, this), c2.st); }
         catch (e) {
           if (!(e instanceof TikzError)) throw e;
           this.problem("not-rendered", "tikzpicture (" + e.why + ")");
@@ -1003,6 +1136,8 @@ class Renderer {
     return out;
   }
   resolveRef(r, plain) {
+    // (a starred reference, \ref*{key}: the same text, without its link)
+    if (r.star && !plain) return this.resolveRef(Object.assign({}, r, { star: false }), false).replace(/<a\b[^>]*>|<\/a>/g, "");
     if ((r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") && this.nat?.numbers) return this.natCite(r, plain);
     if (r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });

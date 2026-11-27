@@ -10,6 +10,8 @@
 //   - no sandbox: Run says why, and no kernel is made;
 //   - dispose() during a Run: its runner ended, nothing said after, the box emptied;
 //   - opened again: the author's results, not the last Run's (they stayed in that page);
+//   - \input and \include: the .tex's folder's files (and its subfolders') read through the share page's read() and
+//     drawn in place; "../" and a leading "/" refused before any read; a file missing or refused said in its place;
 //   - Present: Shift+Enter runs, S stops.
 //   bun web/build.ts && python3 web/serve.py 8765 &  CHROME=google-chrome node web/latex/test-latex-share.mjs
 import { spawn } from "node:child_process";
@@ -156,6 +158,43 @@ try {
   await until(`document.querySelectorAll(".share-box .slide").length === 2`);
   await sleep(500);
   check(!/42/.test(await slideText("One") ?? "") && !/B: 5/.test(await slideText("Two") ?? ""), "opened again: a Run's results aren't there (they stayed in its page)", [await slideText("One"), await slideText("Two")]);
+
+  // ---- \input and \include: the files of the .tex's folder and under it, read through the share page's read() (its
+  //  checked bytes); "../" and a leading "/" refused before any read; a file the share lacks, or whose bytes the share
+  //  page refused, said in its place; each path asked once
+  await ev(`window.__v.dispose(), true`);
+  const ART = `\\documentclass{article}
+\\begin{document}
+Start.
+\\input{part}
+\\include{sub/deep}
+\\input{../secret}
+\\input{/secret}
+\\input{missing}
+\\input{bad}
+End.
+\\end{document}
+`;
+  const opened = await ev(`(async () => {
+    const T = window.__share, F = { "talks/part.tex": "Part says PARTMARK, and \\\\input{sub/deep} again.\\n", "talks/sub/deep.tex": "Deep says DEEPMARK.\\n", "secret.tex": "SECRETMARK\\n" };
+    T.reads = [];
+    T.read = async (p) => { T.reads.push(p); if (p === "talks/bad.tex") throw new Error("talks/bad.tex could not be loaded: it doesn't match GitHub's listing"); return p in F ? new TextEncoder().encode(F[p]) : null; };
+    window.__v = await T.open({ path: "talks/art.tex", text: ${JSON.stringify(ART)}, results: null, sandbox: null, mount: [], read: T.read });
+    return true;
+  })()`);
+  const pvText = `(document.querySelector(".share-box .tex-preview")?.textContent ?? "").replace(/\\s+/g, " ")`;
+  check(opened === true && await until(`/DEEPMARK/.test(${pvText}) && /PARTMARK/.test(${pvText}) && /input: bad:/.test(${pvText})`, 30000), "input: a file beside the .tex and one in a folder under it are drawn in place (\\input, \\include, and an \\input inside an input)", await ev(pvText));
+  const pvNow = await ev(pvText);
+  check(/Start\. Part says PARTMARK/.test(pvNow) && /End\./.test(pvNow), "input: the part is drawn where its \\input is", pvNow.slice(0, 300));
+  check(!/SECRETMARK/.test(pvNow) && /input: \.\.\/secret: outside the shared folder/.test(pvNow) && /input: \/secret: outside the shared folder/.test(pvNow), "input: \"../\" and a leading \"/\" (outside the .tex's folder) are refused, and said so", pvNow.slice(0, 600));
+  const reads = await ev(`window.__share.reads`);
+  check(reads.length > 0 && reads.every((p) => p.startsWith("talks/")) && !reads.some((p) => /secret/.test(p)), "input: only paths in the .tex's folder or under it are ever asked of the share page", reads);
+  check(new Set(reads).size === reads.length, "input: each path is asked once", reads);
+  check(/input: missing: [^\]]*/.test(pvNow) && /input: bad: talks\/bad\.tex could not be loaded: it doesn't match GitHub's listing/.test(pvNow), "input: a file the share lacks, and one whose bytes the share page refused, each said in its place", pvNow.slice(0, 800));
+  // (no read(): as before, an \input is said not found and nothing is asked)
+  await ev(`window.__v.dispose(), true`);
+  await ev(`(async () => { window.__share.reads.length = 0; window.__v = await window.__share.open({ path: "talks/art.tex", text: ${JSON.stringify(ART)}, results: null, sandbox: null, mount: [] }); return true; })()`);
+  check(await until(`/input: part:/.test(${pvText})`, 30000) && !/PARTMARK/.test(await ev(pvText)) && (await ev(`window.__share.reads.length`)) === 0, "input: without the share page's read(), an \\input is said not read, and nothing is asked", (await ev(pvText)).slice(0, 300));
 
   // ---- Present: Shift+Enter runs, S stops
   await ev(`window.__v.dispose(), true`);
