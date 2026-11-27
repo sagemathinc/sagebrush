@@ -14347,6 +14347,41 @@
   "owner": "symbolic linear algebra (@sagebrush-matlab)",
   "reason": "the doctest's expected output for _eigen's unsupported case (the review's N10 pin), not a cap"
  },
+ "lib/_sage_mfmore.py :: NewformMethods.atkin_lehner_eigenvalue :: NotImplementedError: Atkin-Lehner eigenvalues at p with p^2 | N (here p = 3) are not supported yet #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: NewformMethods.atkin_lehner_eigenvalue :: raise NotImplementedError(\"Atkin-Lehner eigenvalues at p with p^2 | N (here p = %d) are not supported yet\" % p) #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.cuspidal_submodule :: raise NotImplementedError(\"the cuspidal part of %s is not supported yet\" % self) #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.eisenstein_series :: NotImplementedError: Eisenstein series with coefficients in a cyclotomic field (characters of order > 2 mod 25) are not supported yet #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.eisenstein_submodule :: raise NotImplementedError(\"the Eisenstein part of %s is not supported yet\" % self) #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: _real_characters :: DirichletGroup order; NotImplementedError if one is not real (its #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: _real_characters :: raise NotImplementedError(\"Eisenstein series with coefficients in a cyclotomic field (characters of order > 2 mod %d) are not supported yet\" % N) #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
  "lib/_sage_modsym.py :: ModularSymbolsMethods._exact :: raise NotImplementedError(\"Hecke matrices and subspaces of modular symbols with a nontrivial character are not supported yet\") #0": {
   "class": "none",
   "owner": "modular symbols",

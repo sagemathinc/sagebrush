@@ -562,6 +562,39 @@ _MORE_MODSYM = frozenset([
 ])
 
 
+# the spaces' and newforms' methods that load on first use, from
+# lib/_sage_mfmore.py (as _MORE_GAMMA0 and _MORE_MODSYM from _sage_modsym)
+_MORE_QSPACE = frozenset([
+    "hecke_bound", "q_echelon_basis", "q_integral_basis", "echelon_basis", "eisenstein_series",
+    "cuspidal_submodule", "eisenstein_submodule", "_all_cusp", "_echelon_rows",
+])
+_MORE_NEWFORM = frozenset([
+    "coefficient", "character", "padded_list", "qexp", "_cm_disc", "has_cm", "cm_discriminant",
+    "atkin_lehner_eigenvalue",
+])
+
+
+def _load_mfmore():
+    """Copy lib/_sage_mfmore.py's methods onto _QSpace and Newform (once);
+    True when they are there.
+
+    EXAMPLES::
+
+        sage: import _sage_modular  # sagebrush only
+        sage: _sage_modular._load_mfmore(), _sage_modular._MORE_NEWFORM <= set(dir(_sage_modular.Newform))  # sagebrush only
+        (True, True)
+    """
+    if "hecke_bound" not in _QSpace.__dict__:
+        import _sage_mfmore as m
+        for cls, more, names in ((_QSpace, m.QSpaceMethods, _MORE_QSPACE), (Newform, m.NewformMethods, _MORE_NEWFORM)):
+            got = {k for k in vars(more) if not k.startswith("__")}
+            if got != names:
+                raise AssertionError("_sage_mfmore and _MORE_* disagree: %s" % sorted(got ^ names))
+            for k in names:
+                setattr(cls, k, vars(more)[k])
+    return True
+
+
 def _load_modsym():
     """Copy lib/_sage_modsym.py's methods onto Gamma0 and ModularSymbols
     (once); True when they are there.
@@ -1864,6 +1897,14 @@ class _QSpace:
 
     def _amb(self):
         return self if self.is_ambient() else self._A
+
+    def __getattr__(self, name):
+        if name in _MORE_QSPACE and _load_mfmore():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_QSPACE)
 
     def _check_trivial(self):
         A = self._amb()
@@ -4953,6 +4994,14 @@ class Newform:
             '11.2.a.a'
         """
         return self._o.label()
+
+    def __getattr__(self, name):
+        if name in _MORE_NEWFORM and _load_mfmore():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_NEWFORM)
 
     def __repr__(self):
         return repr(self.q_expansion(6))
