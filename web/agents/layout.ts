@@ -56,6 +56,23 @@ function readFilesWidth(): number | null {
     return null;
   }
 }
+// (the move to one shared width is made once per browser: after it, a missing files width means the files' own reset
+//  (a double-click on their edge removes it), so the chat list takes the default, never this page's older width again)
+const SHARED_KEY = "sagebrush-agents-side-shared";
+function sharedYet(): boolean {
+  try {
+    return localStorage.getItem(SHARED_KEY) === "1";
+  } catch {
+    return true; // (storage unavailable: nothing to move)
+  }
+}
+function markShared() {
+  try {
+    localStorage.setItem(SHARED_KEY, "1");
+  } catch {
+    // (storage unavailable: nothing was moved either)
+  }
+}
 function writeFilesWidth(v: number) {
   try {
     localStorage.setItem(FILES_W.key, String(Math.round(v)));
@@ -195,11 +212,14 @@ export function mountLayout() {
   if (new URLSearchParams(location.search).has("layout-test")) {
     (window as unknown as { __sbLayout: unknown }).__sbLayout = { stats, setFrame: (f: typeof frame) => (frame = f) };
   }
-  // (the chat list: the files' width; else the one this page kept before they shared it, which then becomes theirs)
-  const s = readStored(), files = readFilesWidth();
+  // (the chat list: the files' width; else, the first time only, the one this page kept before they shared it, which
+  //  then becomes theirs; else the default)
+  const s = readStored(), files = readFilesWidth(), first = !sharedYet();
   if (s) want = { side: s.side, pane: s.pane };
   if (files != null) want.side = files;
-  else if (s) writeFilesWidth(s.side);
+  else if (s && first) writeFilesWidth(s.side);
+  else want.side = null;
+  if (first) markShared();
   sepSide = document.getElementById("sep-side");
   sepPane = document.getElementById("sep-pane");
   if (sepSide) wire(sepSide, "side");
