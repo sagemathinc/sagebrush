@@ -13797,7 +13797,7 @@
  "src/runtime/numpy.ts :: admitObjects :: export const objBackend = { denseLimit: v8DenseLength(), makeRefs: (n: number): any[] => new Array(n).fill(null) }; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (daybreak2, #1894); admitHeap first; chunking is #2304"
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
  },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
@@ -13977,7 +13977,7 @@
  "src/runtime/numpy.ts :: refuse :: if (objBackend.denseLimit !== null && n > objBackend.denseLimit) refuse(); #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (daybreak2, #1894); admitHeap first; chunking is #2304"
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
  },
  "src/runtime/numpy.ts :: scalarDtype :: const MAX_DIMS = 64; #0": {
   "class": "none",

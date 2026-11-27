@@ -147,10 +147,11 @@ test("object arrays: discovery's own memory is admitted by the heap at its measu
   assert.equal(await run("print(np.array(x, dtype=object).size)"), `${2 ** 22}\n`);
 });
 
-// (an object array has no element count of Sagebrush's own (daybreak2's LIMITS rulings on #1894): its references are
-// admitted by the heap, and their dense JS array is bounded only by the JS engine, whose refusal (a RangeError before
-// the store is made) is the MemoryError. With the engine's bound stubbed to 10 elements: 10 made, 11 refused naming
-// the engine's storage bound; with the heap shown full, refused by the heap before any store is asked for)
+// (an object array has no element count of Sagebrush's own (LIMITS ruling on #1894; follow-up #2304): its references
+// are admitted by the heap, and their dense JS array is bounded only by the JS engine: V8's known bound checked
+// before the array is asked for, elsewhere the engine's RangeError where it is made, either way the MemoryError. With
+// the bound stubbed to 10 elements: 10 made, 11 refused naming the engine's storage bound; with the heap shown full,
+// refused by the heap before any store is asked for)
 test("object arrays: no count of Sagebrush's own; the heap, then the JS engine's dense-array bound, refuse", () => {
   const np = require("../src/runtime/numpy");
   const H = require("../src/runtime/heap");
