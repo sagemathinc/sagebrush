@@ -170,10 +170,12 @@ built so far.
   function uses is shared, as a `nonlocal`, when a function it is nested in
   has it: as an argument or output, by assigning it, or by reading a name a
   nested function assigns. Otherwise, as are its own arguments and outputs,
-  it is the nested function's own. Handles to nested functions keep the
-  variables of the call that made them. A file is read with nesting first;
-  if that fails, as a file whose functions don't end with `end`, where each
-  `function` begins the next one.
+  it is the nested function's own, and so is `ans` (a parent's `ans` is
+  unchanged by its nested functions' expression statements, and a nested
+  function can't read its parent's, as MATLAB R2026b's rows show). Handles
+  to nested functions keep the variables of the call that made them. A file
+  is read with nesting first; if that fails, as a file whose functions don't
+  end with `end`, where each `function` begins the next one.
 
 **Anonymous functions** capture copies of the variables they use when they
 are made (`@(x) x + a`), as MATLAB does. They print as MATLAB writes them

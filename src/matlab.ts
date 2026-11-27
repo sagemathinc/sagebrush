@@ -1422,6 +1422,7 @@ class Emitter {
     // nonlocals, except the nested function's own arguments and outputs; MATLAB's "Nested Functions" page
     const used = usedNames(f.body);
     const own = new Set([...f.params, ...f.outs]);
+    // (`ans` is never shared: each function's own, as MATLAB R2026b's rows show)
     const shared = opts.nest ? [...used].filter((v) => !own.has(v) && v !== "ans" && opts.nest!.has.some((h) => h.has(v))) : [];
     const sharedSet = new Set(shared);
     const inNested = f.nested ? nestedAssigned(f) : null;
