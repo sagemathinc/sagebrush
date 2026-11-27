@@ -38,7 +38,7 @@ import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
-import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
+import { AgentLeg, legKey, listComputers, pageLegUrl, removeComputer, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
 import { filesIcon, modeSwitch, answerAgentsLive, agentsTabLive, agentsTabRemembered, releaseAgentsTab, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
@@ -1851,6 +1851,7 @@ const chatHereSection = chatHere({
   onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
   onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
   onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
+  remove: (r) => removeComputer(r.remote_id),
 }, () => agentUi);
 
 // A notebook the agent created (the pairing's onCreated): taken at once, as it is created, into the pane of the chat
