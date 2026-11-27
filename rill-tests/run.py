@@ -15,10 +15,10 @@ Held-out files (rill-tests/heldout/<phase>/) are frozen by their SHA256SUMS
 once committed: --regen refuses to touch a frozen held-out file (a needed fix
 becomes a new visible case, design/rill.md §7.4).
 
-The oracle is R 4.5.3 over ssh on RILL_ORACLE_HOST, or, with
-RILL_ORACLE_RSCRIPT set to an Rscript on this machine, that R run locally
-(the same oracle.py and pinned environment; its environment record must
-match PROVENANCE.json's as a remote one's must).
+The oracle is R 4.5.3: with RILL_ORACLE_RSCRIPT set to an Rscript on this
+machine, that R run locally, in a minimal environment (the same oracle.py
+and pinned settings; its environment record must match PROVENANCE.json's);
+else over ssh on RILL_ORACLE_HOST.  With neither, --regen refuses.
 
 An oracle bump (a new R or package version) re-records everything with
 --all, in one PR that shows the diff and updates KNOWN.json; --regen of some
@@ -35,7 +35,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PROV = os.path.join(HERE, "PROVENANCE.json")
-HOST = os.environ.get("RILL_ORACLE_HOST", "sagebrush-4")
+HOST = os.environ.get("RILL_ORACLE_HOST")
 # (a local oracle: an Rscript on this machine, run without ssh)
 LOCAL = os.environ.get("RILL_ORACLE_RSCRIPT")
 RSCRIPT = LOCAL or "~/sbm-r/env/bin/Rscript"
@@ -137,12 +137,16 @@ def regen(paths, everything):
         if LOCAL:
             tmp = os.path.join(d, "tmp")
             os.mkdir(tmp)
+            # (a minimal environment: nothing of the caller's, such as R_LIBS, reaches R; oracle.py adds the pinned
+            # LC_ALL and TZ)
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", d), "TMPDIR": tmp}
             with open(rj, "w", encoding="utf-8") as out:
-                subprocess.run([sys.executable, os.path.join(HERE, "oracle.py"), LOCAL, cj], stdout=out, check=True,
-                               env=dict(os.environ, TMPDIR=tmp))
+                subprocess.run([sys.executable, os.path.join(HERE, "oracle.py"), LOCAL, cj], stdout=out, check=True, env=env)
             results = json.load(open(rj, encoding="utf-8"))
-        else:
+        elif HOST:
             results = remote(cj, rj)
+        else:
+            raise SystemExit("no oracle: set RILL_ORACLE_RSCRIPT to a local R 4.5.3 Rscript, or RILL_ORACLE_HOST to a host with one")
     return record_results(prov, paths, cases, results, everything)
 
 
@@ -179,7 +183,7 @@ def record_results(prov, paths, cases, results, everything):
         f = rel(p)
         write_json(out_path(p), {"format": "rill-out", "v": 1, "file": f, "cases": by_file[f]})
         prov["files"][f] = {"r_sha256": sha256(p), "out_sha256": sha256(out_path(p)), "cases": len(by_file[f])}
-    prov["oracle"] = {"host": "local" if LOCAL else "VM4 (%s)" % HOST, "rscript": "Rscript (local)" if LOCAL else RSCRIPT, "env": {"LC_ALL": "C.UTF-8", "TZ": "UTC"},
+    prov["oracle"] = {"host": "local" if LOCAL else HOST, "rscript": "Rscript (local)" if LOCAL else RSCRIPT, "env": {"LC_ALL": "C.UTF-8", "TZ": "UTC"},
                       "record": record, "oracle_py_sha256": sha256(os.path.join(HERE, "oracle.py")),
                       "run_py_sha256": sha256(os.path.abspath(__file__))}
     write_json(PROV, prov)

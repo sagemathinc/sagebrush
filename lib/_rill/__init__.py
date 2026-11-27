@@ -3,6 +3,10 @@
 `run(src)` runs an R program as Rscript does: one top-level statement at a
 time, printing each visible value; an error prints R's message on stderr and
 stops with exit status 1, after the statements before it have run.
+`run_cell(src)` runs an input at the prompt or a notebook cell the same way,
+in the one session they share, which keeps its variables between inputs
+(`reset()` starts a new one); `is_incomplete(src)` says whether an input ends
+inside a statement, so a prompt reads another line.
 `run_cases(cases)` runs corpus cases, each in a fresh session (design §7.5).
 
 The modules load on first use: lex and parse, values, eval and base, fmt,
@@ -53,7 +57,43 @@ def _warning_lines(warnings):
 
 
 def _not_supported(what):
-    return "Error: Rill doesn't support %s yet" % what
+    return "Error: Sagebrush's R doesn't support %s yet" % what
+
+
+# (the prompt's and notebook's session: made at the first input)
+_SESSION = None
+
+
+def session():
+    """The session inputs and cells share; its output goes to sys.stdout and sys.stderr as they are at each write."""
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = Session(lambda t: sys.stdout.write(t), lambda t: sys.stderr.write(t))
+    return _SESSION
+
+
+def reset():
+    """A new session for the next input: no variables."""
+    global _SESSION
+    _SESSION = None
+
+
+def run_cell(src):
+    """Run one input or cell in the shared session, as run does a program; returns 0, or 1 after an error, which
+    stops the rest of the input but not the session."""
+    sess = session()
+    try:
+        with mem.reserve(0, "character", extra_bytes=len(src) * mem.PARSE_BYTES_PER_CHAR):
+            return _run(sess, src, sess.write_err)
+    except _memguard.SagebrushMemoryError as e:
+        sess.write_err(_memory_text(e) + "\n")
+        return 1
+
+
+def is_incomplete(src):
+    """Whether src ends inside a statement."""
+    from . import parse
+    return parse.is_incomplete(src)
 
 
 def run(src, write_out=None, write_err=None):
