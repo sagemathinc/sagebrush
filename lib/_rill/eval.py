@@ -38,6 +38,12 @@ class NotSupported(Exception):
         self.what = what
 
 
+def _later(name):
+    """For a name R has and Rill doesn't implement yet, the note that says so."""
+    from .r_names import NAMES
+    return " (R has it: not implemented in Sagebrush yet)" if name in NAMES else ""
+
+
 class Session:
     """One Rill session: its global variables, options and pending warnings."""
 
@@ -70,14 +76,14 @@ class Session:
             return self.values[name]
         if name in self.builtins:
             raise NotSupported("a function as a value")
-        raise RError("object '%s' not found" % name)
+        raise RError("object '%s' not found" % name + _later(name))
 
     def function(self, name, call):
         if name in LATER:
             raise NotSupported("'%s'" % name)
         f = self.builtins.get(name)
         if f is None:
-            raise RError('could not find function "%s"' % name, call)
+            raise RError('could not find function "%s"' % name + _later(name), call)
         return f
 
     # ---------------------------------------------------------------- evaluation

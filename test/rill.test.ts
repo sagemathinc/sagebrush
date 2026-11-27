@@ -11,6 +11,8 @@ import { join } from "node:path";
 // Stop never swallowed.
 const ROOT = join(__dirname, "..", "..");
 const CLI = join(__dirname, "..", "src", "cli.js");
+// (the names R exports, catalog/rill/upstream.txt)
+const R_NAMES = new Set(readFileSync(join(ROOT, "catalog", "rill", "upstream.txt"), "utf8").split("\n").filter((l) => !l.startsWith("#") && l.includes("::")).map((l) => l.slice(l.indexOf("::") + 2).trim()));
 
 function rill(src: string, cwd: string) {
   const r = spawnSync(process.execPath, [CLI, "--rill", "-c", src], { cwd, encoding: "utf8", timeout: 120000 });
@@ -58,12 +60,13 @@ test("§9: names reach only R's variables and Rill's builtins, never the host's"
   try {
     for (const name of ["__import__", "__builtins__", "__class__", "os", "sys", "open", "eval", "exec", "getattr", "_rill", "Session", "globals", "math", "_memguard"]) {
       const r = rill("`" + name + "`", dir);
-      assert.equal(r.stderr, `Error: object '${name}' not found\n`, name);
+      // (a name R itself has, such as open or eval, is reported as R's, not implemented yet: still never the host's)
+      assert.equal(r.stderr, `Error: object '${name}' not found${R_NAMES.has(name) ? " (R has it: not implemented in Sagebrush yet)" : ""}\n`, name);
       assert.equal(r.status, 1);
     }
     // (a builtin's name is no host object either: Rill refuses it as a value until closures, A1.3)
     const r = rill("x <- print", dir);
-    assert.match(r.stderr, /^Error: Rill doesn't support a function as a value yet\n$/);
+    assert.match(r.stderr, /^Error: Sagebrush's R doesn't support a function as a value yet\n$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -480,16 +483,28 @@ test("§8.1 (A1.1's part): no bare except, no except BaseException or Exception 
   }
 });
 
-test("--rill runs only -c in this version (hidden until A1.7), and is not in --help", () => {
+test("R mode: --r (or --rill) runs -c, a .R file, stdin and the prompt; -m and --emit are refused; --help lists it", () => {
   const dir = mkdtempSync(join(tmpdir(), "rill-flag-"));
   try {
-    for (const args of [["--rill", "x.R"], ["--rill"], ["--rill", "-i", "-c", "1"], ["--rill", "-m", "x"]]) {
-      const r = spawnSync(process.execPath, [CLI, ...args], { cwd: dir, encoding: "utf8", input: "1\n", timeout: 60000 });
+    const run = (args: string[], input = "") => spawnSync(process.execPath, [CLI, ...args], { cwd: dir, encoding: "utf8", input, timeout: 60000 });
+    for (const args of [["--r", "-m", "x"], ["--rill", "-m", "x"]]) {
+      const r = run(args);
       assert.equal(r.status, 2, args.join(" "));
-      assert.equal(r.stderr, "sagebrush: --rill runs only -c in this version of Sagebrush\n");
+      assert.equal(r.stderr, "sagebrush: --r runs R: -m runs a Python module\n");
     }
-    const help = spawnSync(process.execPath, [CLI, "--help"], { encoding: "utf8" });
-    assert.doesNotMatch(help.stdout + help.stderr, /rill/i);
+    const e = run(["--r", "--emit", "x.R"]);
+    assert.deepEqual([e.status, e.stderr], [2, "sagebrush: --r runs R: --emit has nothing to print (R isn't compiled to Python)\n"]);
+    // (a .R file is R's, as Rscript runs it: up to its first error, status 1)
+    writeFileSync(join(dir, "x.R"), "x <- c(1, 2)\nx * 3\nnot_a_function(1)\ncat('never')\n");
+    const f = run(["x.R"]);
+    assert.deepEqual([f.status, f.stdout, f.stderr], [1, "[1] 3 6\n", 'Error in not_a_function(1) : could not find function "not_a_function"\n']);
+    // (R on stdin, and -c)
+    assert.equal(run(["--r"], "y <- 1:3\ny + 1\n").stdout, "[1] 2 3 4\n");
+    assert.equal(run(["--r", "-c", "2 * 21"]).stdout, "[1] 42\n");
+    // (a function R has and Rill doesn't implement yet says so)
+    assert.match(run(["--r", "-c", "pbirthday(23)"]).stderr, /could not find function "pbirthday" \(R has it: not implemented in Sagebrush yet\)/);
+    const help = run(["--help"]);
+    assert.match(help.stdout, /--r +R: the program is R/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
