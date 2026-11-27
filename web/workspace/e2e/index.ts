@@ -13,3 +13,5 @@ export { FLOOR_MESSAGE, checkFloor } from "./floor.ts";
 export type { Floor } from "./floor.ts";
 export { PAYLOAD_CODEC, PARENTS_MAX, SEAL_ID, PATCH_SLICE_MAX, PATCH_PAYLOAD_MAX, PRESENCE_PAYLOAD_MAX, patchHead, presenceHead, sealPatch, openPatch, sealPresence, openPresence } from "./doc-payload.ts";
 export type { PatchPlace, PresencePlace } from "./doc-payload.ts";
+export { OP_ENV_VERSION, OP_ENV_MAX, OP_PLAINTEXT_MAX, OP_REFS_MAX, sealIndexOp, openIndexOp, opEpoch, opHash, signIndexOp, verifyIndexOp } from "./index-op.ts";
+export type { OpPlace, OpCommit, OpContext } from "./index-op.ts";

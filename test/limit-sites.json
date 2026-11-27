@@ -3754,6 +3754,14 @@
   "class": "1+2",
   "owner": "raster/image I/O"
  },
+ "engine/raster/src/svg.rs :: apply :: \"stroke-miterlimit\" => style.miter = number(v)?, #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/svg.rs :: apply :: style.cap = match v { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
  "engine/raster/src/svg.rs :: draw_path :: let s = Stroke { width: st.stroke_width, line_cap: st.cap, line_join: st.join, miter_limit: st.miter, ..Stroke::default() }; #0": {
   "class": "none",
   "owner": "raster/image I/O"
@@ -13252,9 +13260,14 @@
   "owner": "pyjs JSON/runtime memory",
   "row": "src-8"
  },
- "src/runtime/modules.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
+ "src/runtime/modules.ts ::  :: import { admitHeap, heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",

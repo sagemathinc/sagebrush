@@ -154,3 +154,102 @@ fn a_saved_setting_holding_a_blank_is_never_filled_in() {
     assert!(out.contains(&format!("const saved = {saved};")), "the settings filled in, exactly as saved");
     assert_eq!(out.matches("/*KEYS*/[]").count(), 1, "the blank inside the saved value left as it is");
 }
+
+#[test]
+fn show_in_folder_names_only_what_is_in_the_workspace() {
+    let (rp, outside) = dirs("reveal");
+    let root = open_root(&rp).unwrap();
+    std::fs::create_dir_all(rp.join("a")).unwrap();
+    std::fs::write(rp.join("a/n.ipynb"), "{}").unwrap();
+    // (the root, a folder and a file: each itself, with whether it is a folder)
+    assert_eq!(reveal_target(&root, "/").unwrap(), (root.clone(), true));
+    assert_eq!(reveal_target(&root, "/a").unwrap(), (rp.join("a"), true));
+    assert_eq!(reveal_target(&root, "/a/n.ipynb").unwrap(), (rp.join("a/n.ipynb"), false));
+    // (what isn't there, and what isn't a workspace path: refused)
+    assert!(reveal_target(&root, "/a/missing.txt").is_err());
+    for p in ["/../outside", "/a/../../outside", "", "outside", "/a//n.ipynb", "/c:x"] {
+        assert!(reveal_target(&root, p).is_err(), "{p:?} accepted");
+    }
+    outside_untouched(&outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn show_in_folder_follows_no_link() {
+    let (rp, outside) = dirs("reveal-links");
+    let root = open_root(&rp).unwrap();
+    std::os::unix::fs::symlink(&outside, rp.join("out")).unwrap();
+    std::os::unix::fs::symlink(outside.join("secret.txt"), rp.join("s.txt")).unwrap();
+    // (a link as the target, or on the way to it: refused, never outside the workspace)
+    assert!(reveal_target(&root, "/out").is_err());
+    assert!(reveal_target(&root, "/out/secret.txt").is_err());
+    assert!(reveal_target(&root, "/s.txt").is_err());
+    // (the workspace's folder itself a link: refused too)
+    let base = rp.parent().unwrap().join("linked");
+    let _ = std::fs::remove_file(&base);
+    std::os::unix::fs::symlink(&outside, &base).unwrap();
+    assert!(reveal_target(&base, "/").is_err());
+}
+
+#[test]
+fn show_in_folder_runs_the_file_manager_on_the_path_alone() {
+    let at = Path::new("/w/Workspace/a b/n.ipynb");
+    let (program, args) = reveal_argv(at, false);
+    let args: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    if cfg!(target_os = "macos") {
+        assert_eq!((program.as_str(), args), ("/usr/bin/open", vec!["-R".to_string(), "/w/Workspace/a b/n.ipynb".to_string()]));
+    } else if cfg!(windows) {
+        assert_eq!(program, "explorer.exe");
+        assert_eq!(args.len(), 1);
+        assert!(args[0].starts_with("/select,\"") && args[0].ends_with('"'));
+    } else {
+        // (xdg-open can't select a file: its folder)
+        assert_eq!((program.as_str(), args), ("xdg-open", vec!["/w/Workspace/a b".to_string()]));
+    }
+    let (_, args) = reveal_argv(Path::new("/w/Workspace"), true);
+    if cfg!(target_os = "macos") {
+        assert_eq!(args, vec![std::ffi::OsString::from("-R"), "/w/Workspace".into()], "a folder: selected, never opened");
+    } else {
+        assert_eq!(args.len(), 1, "a folder: the folder alone");
+    }
+}
+
+#[test]
+fn show_in_folder_never_opens_a_folder_on_macos() {
+    // (a folder that is an application: a plain `open` would launch it; -R selects it in Finder, for every target)
+    for (p, dir) in [("/w/Workspace/Evil.app", true), ("/w/Workspace/a", true), ("/w/Workspace/a/n.ipynb", false), ("/w/Workspace", true)] {
+        let (program, args) = reveal_argv(Path::new(p), dir);
+        if cfg!(target_os = "macos") {
+            assert_eq!(program, "/usr/bin/open");
+            assert_eq!(args, vec![std::ffi::OsString::from("-R"), p.into()], "{p}: always open -R <path>");
+        }
+    }
+}
+
+// (macOS CI only, never on a person's Mac (it shows a Finder window): Show in folder on an application bundle in the
+// workspace, one whose launch would write a marker, selects it and doesn't launch it.  The CI variable gates it)
+#[cfg(target_os = "macos")]
+#[test]
+fn show_in_folder_doesnt_launch_an_app_bundle() {
+    if std::env::var_os("CI").is_none() {
+        return;
+    }
+    let (rp, _outside) = dirs("reveal-app");
+    let root = open_root(&rp).unwrap();
+    let marker = rp.parent().unwrap().join("launched");
+    let _ = std::fs::remove_file(&marker);
+    let mac = rp.join("Evil.app/Contents/MacOS");
+    std::fs::create_dir_all(&mac).unwrap();
+    std::fs::write(rp.join("Evil.app/Contents/Info.plist"), "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>evil</string><key>CFBundleIdentifier</key><string>space.sagebrush.test.evil</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n").unwrap();
+    let exe = mac.join("evil");
+    std::fs::write(&exe, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (at, dir) = reveal_target(&root, "/Evil.app").unwrap();
+    assert!(dir);
+    let (program, args) = reveal_argv(&at, dir);
+    let status = std::process::Command::new(program).args(&args).status().unwrap();
+    assert!(status.success(), "open -R failed: {status}");
+    std::thread::sleep(std::time::Duration::from_secs(5));
+    assert!(!marker.exists(), "Show in folder launched the application");
+}
