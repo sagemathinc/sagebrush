@@ -379,4 +379,39 @@ out = pair(g)
 g = sns.pairplot(TIPS, vars=["bill", "tip"], corner=True, diag_kind="hist", height=2)
 out = pair(g)
 '''),
+    # (the hue colors one mapping for the whole grid: the first "A" has no y, so the y-x cell's first level is B)
+    ('pair-hue-missing', r'''
+P = pd.DataFrame({"x": [1.0, 2.0, 3.5, 4.0, 5.5, 6.0], "y": [np.nan, 2.5, 1.0, 4.5, 3.0, 5.0],
+                  "z": [0.5, 1.5, 2.0, 3.5, 2.5, 4.0], "g": ["A", "B", "A", "B", "A", "B"]})
+g = sns.pairplot(P, hue="g")
+out = pair(g)
+'''),
+    ('pair-int-columns', r'''
+g = sns.pairplot(pd.DataFrame(np.array([[1.0, 4.0], [2.0, 3.5], [3.0, 5.0], [4.5, 1.0], [5.0, 2.5]])))
+out = pair(g)
+'''),
+    ('pair-x-vars-only', r'''
+g = sns.pairplot(TIPS[["bill", "tip", "size"]], x_vars="bill")
+out = pair(g)
+'''),
+    ('pair-y-vars-only', r'''
+g = sns.pairplot(TIPS[["bill", "tip", "size"]], y_vars="tip")
+out = pair(g)
+'''),
+    ('pair-rect-overlap', r'''
+g = sns.pairplot(TIPS, x_vars=["bill", "tip"], y_vars=["tip", "size"])
+out = pair(g)
+'''),
+    ('pair-reordered', r'''
+g = sns.pairplot(TIPS, x_vars=["bill", "tip"], y_vars=["tip", "bill"])
+out = pair(g)
+'''),
+    ('pair-diag-none-one', r'''
+g = sns.pairplot(TIPS[["bill"]], diag_kind=None)
+out = pair(g)
+'''),
+    ('pair-diag-none', r'''
+g = sns.pairplot(TIPS[["bill", "tip"]], diag_kind=None)
+out = pair(g)
+'''),
 ]

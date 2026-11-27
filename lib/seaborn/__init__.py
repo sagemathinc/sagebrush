@@ -242,8 +242,9 @@ def _wide(data):
     return [(None, _floats(seq))]
 
 
-def _groups(data, var, hue, palette):
-    """[(label, values, color or None)]: the values of var split by hue, or the wide form's groups"""
+def _groups(data, var, hue, palette, hue_order=None):
+    """[(label, values, color or None)]: the values of var split by hue (in hue_order, only its levels, if given;
+    a dict palette's color for each level), or the wide form's groups"""
     if var is None:
         return [(lab, v, None) for lab, v in _wide(data)]
     vals = _column(data, var)
@@ -252,11 +253,14 @@ def _groups(data, var, hue, palette):
     keys = _column(data, hue)
     keys = keys.tolist() if hasattr(keys, "tolist") else list(keys)
     vals = vals.tolist() if hasattr(vals, "tolist") else list(vals)
-    order = list(_known_order(data, hue) or [])
-    for k in keys:
-        if k not in order:
-            order.append(k)
-    cols = color_palette(palette, len(order))
+    if hue_order is not None:
+        order = list(hue_order)
+    else:
+        order = list(_known_order(data, hue) or [])
+        for k in keys:
+            if k not in order:
+                order.append(k)
+    cols = [_rgb(palette[k]) for k in order] if isinstance(palette, dict) else color_palette(palette, len(order))
     return [(str(k), _floats([v for v, kk in zip(vals, keys) if kk == k]), cols[i]) for i, k in enumerate(order)]
 
 
@@ -357,7 +361,7 @@ def histplot(data=None, *, x=None, y=None, hue=None, weights=None, stat="count",
         raise ValueError("The `stat` parameter for `Hist` must be one of 'count', 'density', 'percent', "
                          "'probability' or 'frequency'; not %r." % (stat,))
     ax = _ax(ax)
-    groups = _groups(data, x, hue, palette)
+    groups = _groups(data, x, hue, palette, hue_order)
     allv = [u for _, v, _ in groups for u in v]
     if discrete and binwidth is None:
         binwidth = 1
@@ -439,7 +443,7 @@ def kdeplot(data=None, *, x=None, y=None, hue=None, weights=None, palette=None, 
     if y is not None and x is None:
         raise NotImplementedError("kdeplot(y=...): Sagebrush's seaborn draws densities of x only")
     ax = _ax(ax)
-    groups = _groups(data, x, hue, palette)
+    groups = _groups(data, x, hue, palette, hue_order)
     total = sum(len(v) for _, v, _ in groups)
     arts = {}
     for label, v, gcol in (groups[::-1] if hue is not None else groups):
@@ -1434,27 +1438,38 @@ def pairplot(data, *, hue=None, hue_order=None, palette=None, vars=None, x_vars=
         raise NotImplementedError("pairplot(markers=, grid_kws=): not in Sagebrush's seaborn")
     if size is not None:
         height = size
-    cols = [str(c) for c in data.columns]
+    # (the frame's own column keys, an integer label included; only what's shown is a string)
+    cols = list(data.columns)
 
     def numeric(c):
         vals = data[c].tolist()
         return bool(vals) and all(_is_number(v) or _missing_value(v) for v in vals) and not \
             all(_missing_value(v) for v in vals)
+    # (a single name is one variable, before the other side's default)
+    if isinstance(x_vars, str):
+        x_vars = [x_vars]
+    if isinstance(y_vars, str):
+        y_vars = [y_vars]
     if vars is not None:
         x_vars = y_vars = list(vars)
     if x_vars is None or y_vars is None:
         found = [c for c in cols if c != hue and numeric(c)]
         x_vars = list(x_vars) if x_vars is not None else found
         y_vars = list(y_vars) if y_vars is not None else found
-    x_vars, y_vars = [x_vars] if isinstance(x_vars, str) else list(x_vars), \
-        [y_vars] if isinstance(y_vars, str) else list(y_vars)
+    x_vars, y_vars = list(x_vars), list(y_vars)
     if diag_kind == "auto":
         diag_kind = "hist" if hue is None else "kde"
-    square = x_vars == y_vars
+    # the hue levels and their colors, from the whole frame once, for every cell and the legend: as seaborn's
+    # PairGrid, a categorical order (sorted numbers, else as they first appear)
+    hue_kw = {}
+    if hue is not None:
+        hs, _ = _vector(data, hue)
+        levels, look, _ = _hue_mapping(hs, palette, _order(hs, hue_order if hue_order is not None else _known_order(data, hue)))
+        hue_kw = {"hue_order": levels, "palette": look}
     nr, nc = len(y_vars), len(x_vars)
     fig = _plt.figure(figsize=(nc * height * aspect, nr * height))
     axes = _Grid(nr, nc)
-    diag = []
+    diag, twin = [], {}
     for i, yv in enumerate(y_vars):
         for j, xv in enumerate(x_vars):
             if corner and j > i:
@@ -1462,25 +1477,24 @@ def pairplot(data, *, hue=None, hue_order=None, palette=None, vars=None, x_vars=
                 continue
             ax = fig.add_subplot(nr, nc, i * nc + j + 1)
             axes[i, j] = ax
-            if square and i == j:
-                if diag_kind is not None:
-                    # (on a twin of the cell's Axes, its own axis hidden: the cell keeps the row variable's y
-                    #  scale, as seaborn's)
-                    dax = ax.twinx()
-                    dax.axis("off")
-                    dk = dict(diag_kws or {})
-                    if diag_kind == "hist":
-                        histplot(data=data, x=xv, hue=hue, hue_order=hue_order, palette=palette, ax=dax, legend=False,
-                                 **dk)
-                    else:
-                        dk.setdefault("fill", True)
-                        kdeplot(data=data, x=xv, hue=hue, hue_order=hue_order, palette=palette, ax=dax, legend=False,
-                                **dk)
-                    diag.append(dax)
+            # (a cell whose x and y are the same variable, wherever it is, gets that variable's distribution, as
+            #  seaborn's map_diag; with diag_kind=None every cell is a scatter plot)
+            if diag_kind is not None and xv == yv:
+                # (on a twin of the cell's Axes, its own axis hidden: the cell keeps the row variable's y
+                #  scale, as seaborn's)
+                dax = ax.twinx()
+                dax.axis("off")
+                dk = dict(diag_kws or {})
+                if diag_kind == "hist":
+                    histplot(data=data, x=xv, hue=hue, ax=dax, legend=False, **hue_kw, **dk)
+                else:
+                    dk.setdefault("fill", True)
+                    kdeplot(data=data, x=xv, hue=hue, ax=dax, legend=False, **hue_kw, **dk)
+                diag.append(dax)
+                twin[(i, j)] = dax
             else:
                 pk = dict(plot_kws or {})
-                scatterplot(data=data, x=xv, y=yv, hue=hue, hue_order=hue_order, palette=palette, ax=ax,
-                            legend=False, **pk)
+                scatterplot(data=data, x=xv, y=yv, hue=hue, ax=ax, legend=False, **hue_kw, **pk)
     # each column's x and each row's y shared, as seaborn's grid (sharex="col", sharey="row"): the data's range
     # over the column's (or row's) cells, the diagonal's twin included for x, with matplotlib's margins
     from _graphics import Panel
@@ -1490,18 +1504,17 @@ def pairplot(data, *, hue=None, hue_order=None, palette=None, vars=None, x_vars=
 
     def spread(lo, hi, m):
         return (lo, hi) if hi <= lo else (lo - m * (hi - lo), hi + m * (hi - lo))
-    twin = {k: d for k, d in zip([k for k in range(min(nr, nc)) if square and axes[k, k] is not None], diag)} \
-        if diag_kind is not None else {}
     xm, ym = float(_mpl.rcParams["axes.xmargin"]), float(_mpl.rcParams["axes.ymargin"])
     for j in range(nc):
-        bb = [b for b in [bounds(axes[i, j]) for i in range(nr)] + [bounds(twin.get(j))] if b]
+        tw = [d for (_, c), d in twin.items() if c == j]
+        bb = [b for b in [bounds(axes[i, j]) for i in range(nr)] + [bounds(d) for d in tw] if b]
         if bb:
             lim = spread(min(b[0] for b in bb), max(b[1] for b in bb), xm)
             for i in range(nr):
                 if axes[i, j] is not None:
                     axes[i, j].set_xlim(*lim)
-            if j in twin:
-                twin[j].set_xlim(*lim)
+            for d in tw:
+                d.set_xlim(*lim)
     for i in range(nr):
         bb = [b for b in [bounds(axes[i, j]) for j in range(nc)] if b]
         if bb:
@@ -1522,8 +1535,8 @@ def pairplot(data, *, hue=None, hue_order=None, palette=None, vars=None, x_vars=
             if ax is None:
                 continue
             bottom = i == nr - 1
-            ax.set_xlabel(x_vars[j] if bottom else "")
-            ax.set_ylabel(y_vars[i] if j == 0 else "")
+            ax.set_xlabel(str(x_vars[j]) if bottom else "")
+            ax.set_ylabel(str(y_vars[i]) if j == 0 else "")
             # (the inner tick labels blanked; setting ticks widens the view to them, so the limits are kept)
             if not bottom:
                 t, lim = ax.get_xticks(), ax.get_xlim()
@@ -1536,8 +1549,6 @@ def pairplot(data, *, hue=None, hue_order=None, palette=None, vars=None, x_vars=
     g = PairGrid(fig, axes, diag, x_vars, y_vars)
     if hue is not None:
         # the hue legend, titled with the hue variable, on the top right Axes (seaborn puts it beside the grid)
-        hs, _ = _vector(data, hue)
-        levels, look, _ = _hue_mapping(hs, palette, hue_order if hue_order is not None else _known_order(data, hue))
         from _graphics import Points
         r = 6 * (100 / 72) / 2
         handles = [_Handle(Points([], [], marker="o", size=r, color=_mpl.colors.to_hex(look[v]))) for v in levels]
