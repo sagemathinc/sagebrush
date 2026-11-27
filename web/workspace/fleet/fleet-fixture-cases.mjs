@@ -89,6 +89,12 @@ export async function checkFixtures(core, F) {
     check("approvals", c.name, got, c.expect);
   }
 
+  // the fleet fingerprint: computed from the fleet id and the genesis's exact bytes, never taken from a reply
+  for (const c of F.fleet_fingerprints ?? []) {
+    const full = await core.fleetFingerprint(c.fleet, enc(c.genesis));
+    check("fleet_fingerprints", c.name, core.b64(full) === c.full && core.showFingerprint(full) === c.shown ? "ok" : "differs", "ok");
+  }
+
   // moving an agent (r2.4 §3.7): the receipt pair (checks 1-3), then the host's records (checks 4-6)
   const X = F.transfers;
   const chains = { honest: await core.replayChain(X.chain.map(enc), ctx), removed: await core.replayChain(X.chain_removed.map(enc), ctx) };
