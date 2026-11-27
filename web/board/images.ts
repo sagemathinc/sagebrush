@@ -65,6 +65,26 @@ async function idb<T>(mode: IDBTransactionMode, f: (s: IDBObjectStore) => IDBReq
   });
 }
 
+/** Keeps `blob` in this browser's picture store as `name` (its content name: anything else isn't kept), where a board
+ * shows it from when it isn't one of the board's files; true only once the write is committed (no store here, a
+ * failed or aborted write: false), so a caller can rely on it. */
+export async function keepInBrowser(blob: Blob, name: string): Promise<boolean> {
+  if ((await nameOf(blob)) !== name) return false;
+  const d = await db();
+  if (!d) return false;
+  return new Promise((resolve) => {
+    try {
+      const t = d.transaction(STORE, "readwrite");
+      t.objectStore(STORE).put(blob, name);
+      t.oncomplete = () => resolve(true);
+      t.onerror = () => resolve(false);
+      t.onabort = () => resolve(false);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 // A name from the bytes' SHA-256 (the first 128 bits): the same picture is
 // kept once, and a document cannot name its picture after another one.
 async function nameOf(blob: Blob): Promise<string> {
