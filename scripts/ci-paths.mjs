@@ -85,7 +85,7 @@ const latexBudgetPaths = [
   // its answers (entry-url.ts, with the code page's languages and address))
   // (the agent pairing chunk's doc-protocol.ts: also a sync path, fullTierPaths, but listed here for latex_budget)
   /^web\/sync-protocol\/doc-protocol\.ts$/,
-  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
+  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url|image-store)\.ts$/, /^src\/modes\.ts$/,
   /^web\/code\/(?:langs|url)\.ts$/,
   // (and the highlighting chunk's highlighter, the notebook's)
   /^web\/notebook\/highlight\.js$/,
