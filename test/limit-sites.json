@@ -14347,6 +14347,21 @@
   "owner": "symbolic linear algebra (@sagebrush-matlab)",
   "reason": "the doctest's expected output for _eigen's unsupported case (the review's N10 pin), not a cap"
  },
+ "lib/_sage_modsym.py :: ModularSymbolsMethods._exact :: raise NotImplementedError(\"Hecke matrices and subspaces of modular symbols with a nontrivial character are not supported yet\") #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "domain refusals: exact modular symbols with a nontrivial character, and the old subspace (raising degeneracy maps), are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_modsym.py :: ModularSymbolsMethods.old_submodule :: NotImplementedError: the old subspace of modular symbols is not supported yet #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "domain refusals: exact modular symbols with a nontrivial character, and the old subspace (raising degeneracy maps), are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_modsym.py :: ModularSymbolsMethods.old_submodule :: raise NotImplementedError(\"the old subspace of modular symbols is not supported yet\") #0": {
+  "class": "none",
+  "owner": "modular symbols",
+  "reason": "domain refusals: exact modular symbols with a nontrivial character, and the old subspace (raising degeneracy maps), are not supported yet; not a size or work limit"
+ },
  "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
