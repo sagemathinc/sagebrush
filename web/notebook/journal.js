@@ -34,6 +34,7 @@
 import { journalTexts } from "../journal/core.js";
 import { journalStoreClasses, canonical, hashOf } from "../journal/store.js";
 import { bytesHash } from "./stores.js";
+import { withCellIds } from "./nbformat.js";
 export * from "./journal-rows.js";
 // (the journal's store-level part, kind-neutral, moved to web/journal/core.js: here under the same names)
 export { writeIntent, prune, neverFits, replay } from "../journal/core.js";
@@ -114,6 +115,13 @@ export function notebookKind(mod) {
       return { ...rest, mode: v.mode, cells: v.cells.map(cell) };
     },
     empty: (id, initial) => ({ ...(initial ?? { name: "Untitled", mode: "python", cells: [] }), id }),
+    // (a stored notebook whose cells have no ids (an older version's record): the history keys cells by id, so such
+    // cells would be one key there; given ids first, the same on every device (nbformat.js cellIdFor); null if none
+    // is missing)
+    normalize(rec) {
+      const cells = withCellIds(rec?.id, rec?.cells);
+      return cells === rec?.cells ? null : { ...rec, cells };
+    },
     // (dbMerge3's rules (history.js exactRecords3), as the patch graph merges, the side `wins` names as `b`, the later
     // one: never a clash (plan-exact-only r1))
     apply(lastSynced, shown, remote, wins) {

@@ -27,7 +27,7 @@ def _sa():
 
 
 def _nf():
-    from sagebrush import nf
+    from _sagebrush_lib import nf
     return nf
 
 
@@ -129,12 +129,25 @@ def _int_coeffs(f):
             name = p.variable_name()
         except Exception:
             raise TypeError("cannot make a number field from %r" % (f,))
-    if any(a.denominator != 1 for a in c):
-        raise NotImplementedError("defining polynomials must have integer coefficients")
-    c = [int(a) for a in c]
-    if not c or c[-1] != 1:
-        raise NotImplementedError("defining polynomials must be monic (for now)")
+    while c and c[-1] == 0:
+        c.pop()
     return c, name
+
+
+def _monic_model(c):
+    """For f (rational coefficients, constant first): the integral monic
+    model h(y) = d^n g(y/d) of g = f / lc(f), with d the least common
+    denominator of g's coefficients, and d. The field's generator alpha, a
+    root of f, is y/d: alpha^i = y^i / d^i.  (d is 1 for a monic integral f,
+    whose h is f itself.)"""
+    n = len(c) - 1
+    g = [_F(a) / c[-1] for a in c]
+    d = 1
+    for a in g:
+        d = d * a.denominator // _gcd_int(d, a.denominator)
+    h = [g[i] * d ** (n - i) for i in range(n + 1)]
+    assert all(a.denominator == 1 for a in h)
+    return [int(a) for a in h], d
 
 
 
@@ -146,7 +159,8 @@ def _exact_int(x, what):
     return int(q.numerator)
 
 class NumberField_absolute:
-    """K = Q[x]/(f), f monic with integer coefficients, irreducible.
+    """K = Q[x]/(f), f irreducible over Q; the arithmetic on the integral
+    monic model h of f (_monic_model), the generator a = y/d for h's root y.
 
     EXAMPLES::
 
@@ -164,11 +178,16 @@ class NumberField_absolute:
     def __init__(self, f, name, embedding_repr=None, irreducible=False):
         # (irreducible: known to be, not factored again, a cyclotomic
         # polynomial in Magma mode)
-        self._f, self._var = _int_coeffs(f)
-        if len(self._f) < 2:
+        # (f as given, rational and perhaps not monic, is the user's; the
+        # arithmetic and the engine work on the integral monic model h of it,
+        # _f, whose root y is d times the generator: _monic_model)
+        uf, self._var = _int_coeffs(f)
+        if len(uf) < 2:
             raise ValueError("the defining polynomial must have degree at least 1")
+        self._uf = tuple(uf)
+        self._f, self._d = _monic_model(uf)
         if not irreducible and not _nf_irreducible(tuple(self._f)):
-            raise ValueError("defining polynomial (%s) must be irreducible" % _repr_poly(self._f, self._var))
+            raise ValueError("defining polynomial (%s) must be irreducible" % _repr_poly(self._uf, self._var))
         self._name = name
         self._n = len(self._f) - 1
         self._emb = embedding_repr
@@ -181,7 +200,7 @@ class NumberField_absolute:
         n = getattr(self, "_cyclotomic_order", None)
         if n is not None:
             return "Cyclotomic Field of order %d and degree %d" % (n, len(self._f) - 1)
-        s = "Number Field in %s with defining polynomial %s" % (self._name, _repr_poly(self._f, self._var))
+        s = "Number Field in %s with defining polynomial %s" % (self._name, _repr_poly(self._uf, self._var))
         return s + (" with %s = %s" % (self._name, self._emb) if self._emb else "")
 
     def _first_ngens(self, k):
@@ -250,7 +269,7 @@ class NumberField_absolute:
                 raise TypeError("no coercion between different number fields")
             return x
         if isinstance(x, (list, tuple)):
-            c = [_F(a) for a in x]
+            c = self._from_user([_F(a) for a in x])
             c += [_F(0)] * (self._n - len(c))
             return self._element_class(self, _reduce(c, self._f))
         from _sage_poly import Polynomial
@@ -258,18 +277,33 @@ class NumberField_absolute:
             return self(x.list())
         return self._element_class(self, [_F(x)] + [_F(0)] * (self._n - 1))
 
+    # ---- the user's coordinates (on 1, alpha, alpha^2, ...) and the model's (on 1, y, y^2, ..., y = d alpha)
+    def _from_user(self, c):
+        d = self._d
+        return list(c) if d == 1 else [_F(a) / d ** i for i, a in enumerate(c)]
+
+    def _to_user(self, c):
+        d = self._d
+        return list(c) if d == 1 else [_F(a) * d ** i for i, a in enumerate(c)]
+
+    def _from_model(self, c):
+        """The element with the model's coordinates c (y basis, reduced)."""
+        c = [_F(a) for a in c]
+        c += [_F(0)] * (self._n - len(c))
+        return self._element_class(self, _reduce(c, self._f))
+
     def __eq__(self, other):
         # the embedding is part of the field, as in Sage (QuadraticField(2)
         # differs from NumberField(x^2 - 2)), so that equal fields are the
         # same object (_unique) and their elements, ideals and coercions agree
         # (a cyclotomic field, with its canonical embedding, is likewise not
         # NumberField of the cyclotomic polynomial)
-        return (isinstance(other, NumberField_absolute) and other._f == self._f and other._name == self._name
+        return (isinstance(other, NumberField_absolute) and other._uf == self._uf and other._name == self._name
                 and getattr(other, "_emb", None) == getattr(self, "_emb", None)
                 and getattr(other, "_cyclotomic_order", None) == getattr(self, "_cyclotomic_order", None))
 
     def __hash__(self):
-        return hash((tuple(self._f), self._name, getattr(self, "_emb", None), getattr(self, "_cyclotomic_order", None)))
+        return hash((self._uf, self._name, getattr(self, "_emb", None), getattr(self, "_cyclotomic_order", None)))
 
     def __contains__(self, x):
         return isinstance(x, NumberFieldElement) and x._K is self
@@ -289,14 +323,15 @@ class NumberField_absolute:
             # QuadraticField, and a cyclotomic field under its default name
             return "\\Bold{Q}(%s)" % v
         terms = []
-        f = self._f
+        f = self._uf
         for i in range(len(f) - 1, -1, -1):
-            c = f[i]
+            c = _F(f[i])
             if c == 0:
                 continue
             mono = "" if i == 0 else v if i == 1 else "%s^{%d}" % (v, i)
             a = abs(c)
-            t = str(a) if not mono else (mono if a == 1 else "%d %s" % (a, mono))
+            num = str(a.numerator) if a.denominator == 1 else "\\frac{%d}{%d}" % (a.numerator, a.denominator)
+            t = num if not mono else (mono if a == 1 else "%s %s" % (num, mono))
             terms.append(("-" if c < 0 else "+", t))
         s = ("-" if terms[0][0] == "-" else "") + terms[0][1]
         for sign, t in terms[1:]:
@@ -404,7 +439,7 @@ class NumberField_absolute:
             sage: NumberField(x^3 - 2, 'a').polynomial()
             x^3 - 2
         """
-        return _sa().QQ[self._var](self._f)
+        return _sa().QQ[self._var]([_q(c) for c in self._uf])
 
     defining_polynomial = polynomial
     absolute_polynomial = polynomial
@@ -502,7 +537,7 @@ class NumberField_absolute:
             [1/3*a^2 + 1/3*a + 1/3, a, a^2]
         """
         d = self._nfdata()
-        return [self([_F(c, d["den"]) for c in row]) for row in d["basis"]]
+        return [self._from_model([_F(c, d["den"]) for c in row]) for row in d["basis"]]
 
     def maximal_order(self):
         """The ring of integers.
@@ -822,9 +857,11 @@ class NumberField_absolute:
             # in quadratic fields Sage reduces the second generator into
             # [0, p): (3, a + 2); in higher degree it keeps PARI's (5, a - 1)
             cs = [_F(c, q["pi_den"]) for c in q["pi"]]
-            if self.degree() == 2 and all(c.denominator == 1 for c in cs):
+            # (the reduction is in the model's coordinates, which are the user's when d is 1; with d > 1 the
+            # generator may not be integral, and multiples of p times its powers aren't in the ideal)
+            if self.degree() == 2 and self._d == 1 and all(c.denominator == 1 for c in cs):
                 cs = [c % q["p"] for c in cs]
-            return self(cs)
+            return self._from_model(cs)
         out = [PrimeIdeal(self, q["p"], q["e"], q["f"], pi(q)) for q in _primes_above(tuple(self._f), p)]
         out = _sort_primes(out)
         if degree is not None:
@@ -872,7 +909,7 @@ def _primes_above(f, p):
 
 @_ft.lru_cache(maxsize=256)
 def _nf_irreducible(f):
-    from sagebrush import poly
+    from _sagebrush_lib import poly
     _, fs = poly.factor(list(f))
     return len(fs) == 1 and fs[0][1] == 1
 
@@ -989,10 +1026,10 @@ class NumberFieldElement:
             sage: (1 + 3*a^2).list()
             [1, 0, 3]
         """
-        return [_q(x) for x in self._c]
+        return [_q(x) for x in self._K._to_user(self._c)]
 
     def __repr__(self):
-        return _repr_poly(self._c, self._K._name)
+        return _repr_poly(self._K._to_user(self._c), self._K._name)
 
     def _latex_(self):
         """LaTeX, as Sage writes it: the generator as Sage names it
@@ -1009,8 +1046,9 @@ class NumberFieldElement:
         """
         v = _latex_name(self._K)
         out = []
-        for i in range(len(self._c) - 1, -1, -1):
-            q = _F(self._c[i])
+        c = self._K._to_user(self._c)
+        for i in range(len(c) - 1, -1, -1):
+            q = _F(c[i])
             if q == 0:
                 continue
             neg = q < 0
@@ -1197,7 +1235,8 @@ class NumberFieldElement:
         x = self
         g = K.gen()
         for _ in range(K._n):
-            rows.append(list(x._c))
+            # (on the user's basis, as the rows are self * a^i)
+            rows.append(K._to_user(x._c))
             x = x * g
         from _sage_matrix import matrix as _matrix
         from sage_all import QQ
@@ -1334,17 +1373,18 @@ class Order:
         self._K = K
 
     def __repr__(self):
+        # (named by the field, as Sage names it: Gaussian Integers for the field of discriminant -4, Eisenstein
+        # Integers for -3, whatever the polynomial; generated by the model's root y when it generates the order,
+        # 2*a for x^2 - 1/2, else by the order's ring generators)
         K = self._K
-        f = K._f
-        if f == [1, 0, 1]:
-            return "Gaussian Integers generated by %s in %r" % (K._name, K)
-        b = K.integral_basis()
-        if f == [1, 1, 1] or (f == [3, 0, 1]):
-            return "Eisenstein Integers generated by %s in %r" % (b[0] if f == [3, 0, 1] else K._name, K)
+        name = "Maximal Order"
+        if K.degree() == 2:
+            name = {-4: "Gaussian Integers", -3: "Eisenstein Integers"}.get(int(K.discriminant()), name)
         if K._nfdata()["index"] == 1:
-            return "Maximal Order generated by %s in %r" % (K._name, K)
-        gens = _ring_generators(K, b)
-        return "Maximal Order generated by %s in %r" % (repr(gens[0]) if len(gens) == 1 else "[%s]" % ", ".join(repr(x) for x in gens), K)
+            gens = [K._from_model([0, 1])]
+        else:
+            gens = _ring_generators(K, K.integral_basis())
+        return "%s generated by %s in %r" % (name, repr(gens[0]) if len(gens) == 1 else "[%s]" % ", ".join(repr(x) for x in gens), K)
 
     def basis(self):
         """A Z-basis.
@@ -1830,9 +1870,10 @@ class UnitGroup:
 
 
 def NumberField(polynomial, name=None, names=None, **kwds):
-    """K.<a> = NumberField(x^3 - 2): the number field defined by a monic
-    integer polynomial (class groups and units by Buchmann's algorithm in the
-    Rust engine, assuming GRH).
+    """K.<a> = NumberField(x^3 - 2): the number field defined by an
+    irreducible polynomial over Q, a its root (class groups and units by
+    Buchmann's algorithm in the Rust engine, assuming GRH; a non-monic or
+    rational polynomial is worked on through an integral monic model).
 
     EXAMPLES::
 
@@ -1841,6 +1882,10 @@ def NumberField(polynomial, name=None, names=None, **kwds):
         Number Field in a with defining polynomial x^3 - 2
         sage: a^3, (a + 1)^2
         (2, a^2 + 2*a + 1)
+        sage: L.<b> = NumberField(3*x^2 + 1); L
+        Number Field in b with defining polynomial 3*x^2 + 1
+        sage: b^2, L.integral_basis(), L.discriminant()
+        (-1/3, [3/2*b + 1/2, 3*b], -3)
         sage: NumberField(x^2 + 5, 'b')
         Number Field in b with defining polynomial x^2 + 5
         sage: NumberField([x^2 - 2, x^2 - 3], 'a')  # sagebrush only
@@ -1867,7 +1912,7 @@ _FIELDS = {}
 
 
 def _unique(K):
-    key = (type(K).__name__, tuple(K._f), K._name, repr(getattr(K, "_emb", None)), getattr(K, "_cyclotomic_order", None))
+    key = (type(K).__name__, K._uf, K._name, repr(getattr(K, "_emb", None)), getattr(K, "_cyclotomic_order", None))
     old = _FIELDS.get(key)
     if old is not None:
         return old
@@ -2025,7 +2070,7 @@ def _ring_generators(K, basis):
         # the Z-module Z[gens]: products until stable
         mods = _hnf_rows([vec(K(1))])
         while True:
-            elts = [K([_F(c, den) for c in r]) for r in mods]
+            elts = [K._from_model([_F(c, den) for c in r]) for r in mods]
             new = _hnf_rows(mods + [vec(e * g) for e in elts for g in gens])
             if new == mods:
                 return mods

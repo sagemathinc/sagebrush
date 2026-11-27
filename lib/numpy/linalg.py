@@ -180,9 +180,11 @@ def _kernels():
     engine/nd, the smallest n it is used for (below it, the older code,
     which is faster there), and whether the module was compiled ahead
     ("warm": "ready" once compiled; it changes the time of the first call,
-    never its result)."""
-    path, kernel, why, chol, lu, warm = _L._kernels()
-    k = lambda n: {"path": path, "kernel": kernel, "why": why, "from_n": n, "warm": warm}
+    never its result), and the module memory's maximum in bytes ("memory_max":
+    4 GiB, or less where so much address space can't be reserved; past it a
+    call is refused; 0 before engine/nd runs)."""
+    path, kernel, why, chol, lu, warm, memory_max = _L._kernels()
+    k = lambda n: {"path": path, "kernel": kernel, "why": why, "from_n": n, "warm": warm, "memory_max": memory_max}
     return {"cholesky": k(chol), "solve": k(lu), "det": k(lu), "slogdet": k(lu), "inv": k(lu)}
 
 

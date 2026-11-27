@@ -8,7 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evaluate, growthLimit, producerProblems, recordProblems, strictParse, measureFiles,
   examplesFiles, testedTransition, gateInputs, TOOLCHAIN, MAX_DEPTH, overCap, sha256,
-  CONTENT_BUNDLES, CONTENT_ALLOWANCE, limitOf, welcomeDirs } from "./size-measure.mjs";
+  CONTENT_BUNDLES, CONTENT_ALLOWANCE, limitOf, welcomeDirs, targetBranch } from "./size-measure.mjs";
+
+// (the runner's own event never reaches these cases: on a push to track/*, GITHUB_REF made an event without a ref, like
+// the push case below, a change into a track, which then needed origin/master in the case's scratch repository)
+for (const k of ["GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH", "GITHUB_REF", "SIZE_DISPATCH_MASTER"]) delete process.env[k];
 
 const key = { ...TOOLCHAIN, measure_sha256: "a".repeat(64) };
 const record = (sizes, commit = "merge", k = key) => ({
@@ -63,6 +67,44 @@ assert.equal(count.ok, true);
 assert.deepEqual(count.rows, [], "package counts are not gated or reported as bytes");
 assert.deepEqual(evaluate({ mode: "absolute", merge: { record: record({ "registry/packages": 50300 }) } }).rows, []);
 assert.equal(compare({ x: 1 }, { "\n| forged |": 1 }).ok, false);
+// A master merge into a track (design/size-gate.md): also compared with the master commit merged in, its side; a
+// bundle fails only when it is over the limit against both the track's base and the side.
+const sided = (base, side, merge, k = key) => evaluate({ merge: { record: record(merge, "merge", k) },
+  base: { commit: "base", record: record(base, "base") }, side: { commit: "side".padEnd(40, "0"), record: record(side, "side".padEnd(40, "0")) } });
+{
+  // (#2200's shape: the track is far behind master; the growth is master's, within the limit against master)
+  const r = sided({ "engine/lib/sci.pre": 2_046_211 }, { "engine/lib/sci.pre": 2_190_000 }, { "engine/lib/sci.pre": 2_193_988 });
+  assert.equal(r.ok, true, "master's own growth passes");
+  assert(r.notes.some((n) => /engine\/lib\/sci\.pre: \+147777 over the track's base, but \+3988 against master side0/.test(n)), r.notes.join("; "));
+  assert(r.notes.some((n) => /A master merge into a track/.test(n)));
+  assert.deepEqual(r.rows[0], { bundle: "engine/lib/sci.pre", base: 2_046_211, merge: 2_193_988, delta: 147777, limit: 50000, note: "" });
+}
+for (const [base, side, merge, ok, why] of [
+  [1000, 1000, 51001, false, "over against both: the track's own growth fails"],
+  [1000, 1001, 51001, true, "exactly the limit against the side passes"],
+  [1000, 1000, 50999 + 2, false, "one byte over against both fails"],
+  [1000, 900_000, 950_000, true, "within against the side"],
+  [1000, 900_000, 950_001, false, "one byte over against the side too"],
+  [1000, 1000, 1000, true, "no growth"],
+]) assert.equal(sided({ x: base }, { x: side }, { x: merge }).ok, ok, why);
+assert.equal(sided({ x: 1000 }, {}, { x: 900_000 }).ok, false, "a bundle the side doesn't have: the track's own, gated against the base alone");
+assert.equal(sided({ x: 1000 }, { x: 900_000 }, { x: 900_000 }, { ...key, bun: "wrong" }).ok, false, "the merge's toolchain still checked");
+assert.equal(evaluate({ merge: { record: record({ x: 900_000 }) }, base: { commit: "base", record: record({ x: 1000 }, "base") },
+  side: { commit: "side", record: { ...record({ x: 900_000 }, "side"), key: { ...key, measure_sha256: "c".repeat(64) } } } }).ok, false, "a side under another recipe fails closed");
+assert.equal(evaluate({ merge: { record: record({ x: 900_000 }) }, base: { commit: "base", record: record({ x: 1000 }, "base") },
+  side: { commit: "side", record: undefined } }).ok, false, "a missing side record fails closed");
+{
+  // (the side excuses growth only bundle by bundle: another bundle over against both still fails, in the
+  //  track-pull wording)
+  const r = sided({ a: 1000, b: 1000 }, { a: 900_000, b: 1000 }, { a: 900_000, b: 60_000 });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.problems, ["b: growth +59000 exceeds 50000 bytes (both 2% and 50,000 B)"]);
+}
+assert.equal(targetBranch("pull_request", { pull_request: { base: { ref: "track/numeric" } } }), "track/numeric");
+assert.equal(targetBranch("merge_group", { merge_group: { base_ref: "refs/heads/track/math" } }), "track/math");
+assert.equal(targetBranch("push", { ref: "refs/heads/track/numeric" }), "track/numeric");
+assert.equal(targetBranch("push", {}, "refs/heads/master"), "master");
+assert.equal(targetBranch("schedule", {}), null);
 for (const name of ["x\ry", "x\ty", "x\u001by", "x|y", "x y"])
   assert(recordProblems(record({ [name]: 1 })).length, name);
 assert.equal(compare({ x: 1 }, { x: 1 }, { ...key, bun: "wrong" }).ok, false);
@@ -171,6 +213,55 @@ try {
   assert.equal(testedTransition({ cwd: dir, name: "workflow_dispatch", master: tip }).base, base, "no forced master merge");
   git("checkout", "-q", "queue");
   assert.throws(() => testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: tip, head_sha: merge2 } } }), /merge-base|ancestor|Command failed/, "a base that isn't an ancestor");
+  // A change into a track: when it merges master commits the track doesn't have, the master commit merged in (the
+  // merge-base of the tested commit and master) is its side; otherwise there is none.
+  let trackCase;
+  {
+    git("checkout", "-qb", "track-x", base);
+    writeFileSync(join(dir, "track-work"), "track"); git("add", "."); git("commit", "-qm", "track work");
+    const trackTip = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "sync", trackTip); git("merge", "--no-ff", "-qm", "Merge master into the track", tip);
+    const syncHead = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "sync-pr", trackTip); git("merge", "--no-ff", "-qm", "tested merge of the sync", syncHead);
+    const syncMerge = git("rev-parse", "HEAD");
+    trackCase = { trackTip, syncHead, syncMerge };
+    const pr = (ref, head = syncHead) => ({ pull_request: { head: { sha: head }, base: { ref } } });
+    assert.deepEqual(testedTransition({ cwd: dir, name: "pull_request", ev: pr("track/x"), master: tip }),
+      { mode: "transition", merge: syncMerge, base: trackTip, head: syncHead, side: tip, master: tip }, "a sync into a track: master's commit is the side");
+    // (master has moved on since: the side is still the commit the change merges, not today's tip)
+    git("checkout", "-qb", "master-later", tip);
+    writeFileSync(join(dir, "later"), "later"); git("add", "."); git("commit", "-qm", "master later");
+    const later = git("rev-parse", "HEAD");
+    git("checkout", "-q", "sync-pr");
+    assert.equal(testedTransition({ cwd: dir, name: "pull_request", ev: pr("track/x"), master: later }).side, tip);
+    assert.equal(testedTransition({ cwd: dir, name: "pull_request", ev: pr("master"), master: tip }).side, undefined, "a pull request into master has no side");
+    assert.equal(testedTransition({ cwd: dir, name: "merge_group", ev: { merge_group: { base_sha: trackTip, head_sha: syncMerge, base_ref: "refs/heads/track/x" } }, master: tip }).side, tip, "the track's queue too");
+    assert.equal(testedTransition({ cwd: dir, name: "push", ev: { before: trackTip, ref: "refs/heads/track/x" }, master: tip }).side, tip, "the track's push too");
+    // (a change into the track that brings no new master commits: no side)
+    git("checkout", "-qb", "track-only", syncMerge);
+    writeFileSync(join(dir, "more-track"), "more"); git("add", "."); git("commit", "-qm", "more track work");
+    const plainHead = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "plain-pr", syncMerge); git("merge", "--no-ff", "-qm", "tested merge of track work", plainHead);
+    const plain = testedTransition({ cwd: dir, name: "pull_request", ev: pr("track/x", plainHead), master: tip });
+    assert.equal(plain.side, undefined, "no new master commits: gated against the track alone");
+    assert.equal(plain.base, syncMerge);
+    assert.equal(plain.master, tip, "master as resolved, kept even without a side, for the gate job");
+    // (master merging the track change's own head, resolving its growth away there, doesn't make that head a side:
+    //  the side is on master's first-parent line, and here the change brings no new master commit)
+    git("checkout", "-qb", "master-took-track", tip); git("merge", "--no-ff", "-qm", "master merges the track work", plainHead);
+    const masterTook = git("rev-parse", "HEAD");
+    git("checkout", "-q", "plain-pr");
+    assert.equal(testedTransition({ cwd: dir, name: "pull_request", ev: pr("track/x", plainHead), master: masterTook }).side, undefined,
+      "the track's own head, reached by master through a second parent, is never the side");
+    // (and when the change also merges a newer master commit, the side is that commit)
+    git("checkout", "-qb", "sync2", plainHead); git("merge", "--no-ff", "-qm", "merge master again", masterTook);
+    const sync2Head = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "sync2-pr", syncMerge); git("merge", "--no-ff", "-qm", "tested merge of the second sync", sync2Head);
+    assert.equal(testedTransition({ cwd: dir, name: "pull_request", ev: pr("track/x", sync2Head), master: masterTook }).side, masterTook);
+    git("checkout", "-q", "plain-pr");
+    // (no origin/master and none given: refused, never silently gated against the track alone)
+    assert.throws(() => testedTransition({ cwd: dir, name: "pull_request", ev: pr("track/x", plainHead), master: "" }), /refs\/remotes\/origin\/master/);
+  }
   git("checkout", "-q", "feature");
 
   // Exercise the actual CLI, record admission, exit status and summary output.
@@ -210,6 +301,35 @@ try {
   assert(!forged.stdout.includes("\n| forged |"), "untrusted bundle names cannot inject summary rows");
   writeFileSync(join(dir, "merge-record.json"), " ".repeat(262145));
   assert.match(run().stdout, /refused before parsing/);
+  // (the real gate on a master merge into a track: the base and the master side, both from size-base)
+  {
+    const { trackTip, syncHead, syncMerge } = trackCase;
+    git("checkout", "-q", "sync-pr");
+    writeFileSync(script, source);
+    const trackEvent = join(dir, "track-event.json");
+    writeFileSync(trackEvent, JSON.stringify({ pull_request: { head: { sha: syncHead }, base: { ref: "track/x" } } }));
+    writeFileSync(join(dir, "base-record.json"), JSON.stringify(make({ x: 1_000_000 }, trackTip, "size-base")));
+    writeFileSync(join(dir, "merge-record.json"), JSON.stringify(make({ x: 1_200_000 }, syncMerge, "checks")));
+    const trackRun = () => run([], { GITHUB_EVENT_PATH: trackEvent, SIZE_DISPATCH_MASTER: tip });
+    assert.equal(trackRun().status, 1, "no side record: fails closed");
+    writeFileSync(join(dir, "side-record.json"), JSON.stringify(make({ x: 1_190_000 }, tip, "size-base")));
+    const ok = trackRun();
+    assert.equal(ok.status, 0, "master's own growth passes: " + ok.stdout);
+    assert.match(readFileSync(summary, "utf8"), /master side /);
+    assert.match(readFileSync(summary, "utf8"), /x: \+200000 over the track's base, but \+10000 against master/);
+    writeFileSync(join(dir, "side-record.json"), JSON.stringify(make({ x: 1_100_000 }, tip, "size-base")));
+    assert.equal(trackRun().status, 1, "over against both fails");
+    writeFileSync(join(dir, "side-record.json"), JSON.stringify(make({ x: 1_190_000 }, trackTip, "size-base")));
+    assert.equal(trackRun().status, 1, "a side record of another commit is refused");
+    writeFileSync(join(dir, "side-record.json"), JSON.stringify(make({ x: 1_190_000 }, tip, "checks")));
+    const wrongJob = trackRun();
+    assert.equal(wrongJob.status, 1, "a side record from another job is refused");
+    assert.match(wrongJob.stdout, /record producer does not match this run, attempt and size-base job/);
+    rmSync(join(dir, "side-record.json"));
+    writeFileSync(join(dir, "base-record.json"), JSON.stringify(make({ x: 1_000_000 }, base, "size-base")));
+    git("checkout", "-q", "integration");
+    writeFileSync(script, source);
+  }
   rmSync(join(dir, "base-record.json"));
   assert.equal(run().status, 1, "missing records fail closed");
 } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -221,6 +341,11 @@ assert(!ci.includes("need_old")); assert(!ci.includes("--legacy")); assert(!ci.i
 for (const [name, pin] of [["bun-version", TOOLCHAIN.bun], ["node-version", TOOLCHAIN.node]])
   assert(ci.includes(name + ': "' + pin + '"'));
 assert(!readFileSync(new URL("./size-measure.mjs", import.meta.url), "utf8").includes("function epochReset"));
+// (the master side of a master merge into a track: built and recorded by size-base, read by the gate as side-record.json)
+assert.equal(ci.split("if: steps.resolve.outputs.side != ''").length - 1, 4, "size-base's four side steps (worktree, install, build, record) run when there is a side");
+assert(ci.includes('--root "$RUNNER_TEMP/size-side" --out "$RUNNER_TEMP/size-records/side-record.json"'), "the side's record");
+assert(ci.includes("for w in size-base size-side; do"), "both worktrees removed");
+assert(readFileSync(new URL("./size-measure.mjs", import.meta.url), "utf8").includes('readRecord(dir, "side-record.json")'));
 // A track pull (design/size-gate.md, "Track pulls"): the workflow excuses growth only when every problem
 // matches this pattern, so evaluate's growth wording is pinned here; drift fails closed.
 const TRACK_PULL_GROWTH = "/: growth \\+\\d+ exceeds \\d+ bytes/";

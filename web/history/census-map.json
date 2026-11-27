@@ -45,9 +45,9 @@
    "class": "NOT-SOURCE",
    "why": "versions, versionBytes, prunable only (dropping kept versions): no source store written"
   },
-  "workspace/api.ts|1|await inTx(this.ws, withSync(\"ops\"), \"readwrite\", async (tx) => { await this.log(tx, ops, { op: \"dropVersions\", path: q, kind }); });": {
+  "workspace/api.ts|1|await inTx(this.ws, withSync(\"ops\"), \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
-   "why": "ops only (dropVersions logged): no source row changed"
+   "why": "ops only (dropVersions logged, with the view it was asked in, read from meta): no source row changed"
   },
   "workspace/api.ts|1|const gone: Entry[] = await inTx(this.ws, withSync(...RELEASE_STORES, \"entries\", \"ops\", \"fileBytes\", \"trash\"), \"readwrite\", async (tx) => {": {
    "class": "TOKEN",
@@ -105,9 +105,9 @@
    "class": "TOKEN",
    "why": "adopt with a board's row: boardRowWrite and log()"
   },
-  "workspace/api.ts|1|const moved = await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+  "workspace/api.ts|1|const moved = await inTx(this.ws, withSync(\"entries\", \"ops\", ...(branch ? [\"meta\"] : [])), \"readwrite\", async (tx) => {": {
    "class": "TOKEN",
-   "why": "rename/move (small): log() per entry"
+   "why": "rename/move (small): log() per entry; a branch root's removal also drops its branch records (meta), not a source"
   },
   "workspace/api.ts|1|await inTx(this.ws, [\"entries\", \"meta\"], \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
@@ -117,9 +117,9 @@
    "class": "EXEMPT",
    "why": "a local large move's record dropped: unpublished, nothing visible changed"
   },
-  "workspace/api.ts|2|const moved = await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => {": {
+  "workspace/api.ts|2|const moved = await inTx(this.ws, withSync(\"entries\", \"ops\", ...(branch ? [\"meta\"] : [])), \"readwrite\", async (tx) => {": {
    "class": "TOKEN",
-   "why": "a local large move published: log() for its top in the publication's transaction"
+   "why": "a local large move published: log() for its top in the publication's transaction; a branch root's removal also drops its branch records (meta), not a source"
   },
   "workspace/api.ts|3|return inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
@@ -376,6 +376,10 @@
   "workspace/sync-reset.ts|1|const more = await inTx(w.ws, [\"meta\", \"entries\", \"fileBytes\"], \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
    "why": "a sync reset's leftover orphan markers swept a slice at a time, as the cleanup's sweep: only orphaned bytes (no entry names them) deleted"
+  },
+  "workspace/sync-client.ts|1|const due = await inTx(this.w.ws, [META, \"syncIndex\"], \"readwrite\", (tx) => duePairs(tx.objectStore(META), idbStore(tx, gen), gen, now, REFS.page));": {
+   "class": "NOT-SOURCE",
+   "why": "meta and syncIndex only (the sweep's first-sight stamps and walk position, e2e PR 5d): no source store"
   }
  }
 }
