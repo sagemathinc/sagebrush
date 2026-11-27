@@ -734,30 +734,33 @@ fn ccos(a: C) -> C {
 }
 // (past |x| = 709, where sinh x and cosh x leave the doubles, each part on
 // its own, as IEEE's csinh and ccosh: e^|x| f/2, signed as sinh x, so that a
-// part 0 stays 0 and a part within the doubles is not infinite)
+// part 0 stays 0 and a part within the doubles is not infinite; the 1/2
+// inside exp_mul, as f/2 would round the least subnormal f to 0)
 fn csinh(a: C) -> C {
     if a.0.abs() > 709.0 && a.0.is_finite() {
-        let h = |f: f64| crate::num::exp_mul(a.0.abs(), f / 2.0);
+        let h = |f: f64| crate::num::exp_mul(a.0.abs(), f, true);
         return (1f64.copysign(a.0) * h(a.1.cos()), h(a.1.sin()));
     }
     (a.0.sinh() * a.1.cos(), a.0.cosh() * a.1.sin())
 }
 fn ccosh(a: C) -> C {
     if a.0.abs() > 709.0 && a.0.is_finite() {
-        let h = |f: f64| crate::num::exp_mul(a.0.abs(), f / 2.0);
+        let h = |f: f64| crate::num::exp_mul(a.0.abs(), f, true);
         return (h(a.1.cos()), 1f64.copysign(a.0) * h(a.1.sin()));
     }
     (a.0.cosh() * a.1.cos(), a.0.sinh() * a.1.sin())
 }
 // tanh past |x| = 709 (sinh x past the doubles): +-1 with a signed 0
-// imaginary part, as Sage's formula (sin 2y/(2D), D infinite) gives it; an
-// infinite or NaN y is NaN there (Sage's CDF: NaN + NaN*I)
+// imaginary part, as Sage's formula (sin 2y/(2D), D infinite) gives it, the
+// sign of sin 2y = 2 sin y cos y where 2y leaves the doubles; an infinite or
+// NaN y is NaN there (Sage's CDF: NaN + NaN*I)
 fn ctanh(a: C) -> C {
     if a.0.abs() > 709.0 && !a.1.is_finite() {
         return (f64::NAN, f64::NAN);
     }
     if a.0.abs() > 709.0 {
-        return (1f64.copysign(a.0), 0f64.copysign((2.0 * a.1).sin()));
+        let s2 = if (2.0 * a.1).is_finite() { (2.0 * a.1).sin() } else { a.1.sin() * a.1.cos() };
+        return (1f64.copysign(a.0), 0f64.copysign(s2));
     }
     cdiv(csinh(a), ccosh(a))
 }

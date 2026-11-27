@@ -52,13 +52,17 @@ pub fn check_q_bits(x: &Q) {
 /// relative, so the one rounding is the correct one but within that of a
 /// tie.  Past a = 1455 every nonzero f overflows (e^1455 2^-1074 > 2^1024).
 /// A NaN or an infinity in a or f is IEEE's f * e^a (NaN, an infinity or
-/// 0), never the fixed point's.
-pub fn exp_mul(a: f64, f: f64) -> f64 {
+/// 0), never the fixed point's.  half = true gives f e^a / 2 (sinh and cosh
+/// past the doubles), the 1/2 in the exponent, before the one rounding: f/2
+/// first would round the least subnormal f to 0 (e^1455 2^-1075 > 2^1024
+/// still, so the bound holds).
+pub fn exp_mul(a: f64, f: f64, half: bool) -> f64 {
+    let sh: i64 = if half { 1 } else { 0 };
     if f == 0.0 {
         return f;
     }
     if !a.is_finite() || !f.is_finite() || a <= 709.0 {
-        return f * a.exp();
+        return f * a.exp() / (1 << sh) as f64;
     }
     if a > 1455.0 {
         return f64::INFINITY.copysign(f);
@@ -97,7 +101,7 @@ pub fn exp_mul(a: f64, f: f64) -> f64 {
     };
     let m = fm * sum;
     let bits = m.bits() as u32;
-    let v = Mp::fin(&m, fe + k.to_i64().unwrap() - P as i64, bits).to_f64();
+    let v = Mp::fin(&m, fe + k.to_i64().unwrap() - P as i64 - sh, bits).to_f64();
     v.copysign(f)
 }
 
@@ -1839,21 +1843,28 @@ mod tests {
     fn exp_mul_past_the_doubles() {
         // (f e^a correctly rounded where e^a alone overflows: mpmath's values
         // at 200 bits; a signed infinity past the doubles, 0 kept)
-        assert_eq!(exp_mul(710.0, 3f64.sin()), 3.1526135940644185e307);
-        assert_eq!(exp_mul(710.0, 3f64.cos()), f64::NEG_INFINITY);
-        assert_eq!(exp_mul(1420.0, 5e-324), 2.4657495327684952e293);
-        assert_eq!(exp_mul(1420.0, -5e-324), -2.4657495327684952e293);
-        assert_eq!(exp_mul(1500.0, 5e-324), f64::INFINITY);
-        assert!(exp_mul(1000.0, -0.0).is_sign_negative() && exp_mul(1000.0, -0.0) == 0.0);
-        assert_eq!(exp_mul(1.0, 2.0), 2.0 * 1f64.exp());
+        assert_eq!(exp_mul(710.0, 3f64.sin(), false), 3.1526135940644185e307);
+        assert_eq!(exp_mul(710.0, 3f64.cos(), false), f64::NEG_INFINITY);
+        assert_eq!(exp_mul(1420.0, 5e-324, false), 2.4657495327684952e293);
+        assert_eq!(exp_mul(1420.0, -5e-324, false), -2.4657495327684952e293);
+        assert_eq!(exp_mul(1500.0, 5e-324, false), f64::INFINITY);
+        assert!(exp_mul(1000.0, -0.0, false).is_sign_negative() && exp_mul(1000.0, -0.0, false) == 0.0);
+        assert_eq!(exp_mul(1.0, 2.0, false), 2.0 * 1f64.exp());
         // (a NaN or an infinity is IEEE's f * e^a, never the fixed point's:
         // a NaN a once reached k.to_i64().unwrap() and trapped)
-        assert!(exp_mul(f64::NAN, 2.0).is_nan());
-        assert!(exp_mul(1000.0, f64::NAN).is_nan());
-        assert_eq!(exp_mul(1000.0, f64::INFINITY), f64::INFINITY);
-        assert_eq!(exp_mul(1000.0, f64::NEG_INFINITY), f64::NEG_INFINITY);
-        assert_eq!(exp_mul(f64::INFINITY, 2.0), f64::INFINITY);
-        assert_eq!(exp_mul(f64::NEG_INFINITY, 2.0), 0.0);
+        assert!(exp_mul(f64::NAN, 2.0, false).is_nan());
+        assert!(exp_mul(1000.0, f64::NAN, false).is_nan());
+        assert_eq!(exp_mul(1000.0, f64::INFINITY, false), f64::INFINITY);
+        assert_eq!(exp_mul(1000.0, f64::NEG_INFINITY, false), f64::NEG_INFINITY);
+        assert_eq!(exp_mul(f64::INFINITY, 2.0, false), f64::INFINITY);
+        assert_eq!(exp_mul(f64::NEG_INFINITY, 2.0, false), 0.0);
+        // (half: f e^a / 2, the 1/2 in the exponent, so the least subnormal
+        // f is not rounded to 0 first: sinh and cosh past the doubles)
+        assert_eq!(exp_mul(1000.0, 5e-324, true), 4.866722286500082e110);
+        assert_eq!(exp_mul(1000.0, -5e-324, true), -4.866722286500082e110);
+        assert_eq!(exp_mul(1420.0, 5e-324, true), 1.2328747663842476e293);
+        assert_eq!(exp_mul(710.0, 3f64.sin(), true), 1.5763067970322092e307);
+        assert_eq!(exp_mul(1.0, 2.0, true), 1f64.exp());
     }
 
     #[test]

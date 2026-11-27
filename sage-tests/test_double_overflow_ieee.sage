@@ -53,3 +53,26 @@ for z in [(1000, i_), (1000, n_), (n_, 1), (i_, 1), (710, i_)]:
 show("CDF exp(+inf)", lambda: CDF(float('inf'), 0).exp())
 show("RDF tanh(+inf)", lambda: RDF(float('inf')).tanh())
 show("RDF tanh(-inf)", lambda: RDF(float('-inf')).tanh())
+# sinh and cosh past |x| = 709 with the least subnormal sin y: the imaginary
+# part e^1000 sin(y)/2 is +-4.866722286500082e+110, the 1/2 kept in the
+# exponent rather than rounding sin(y)/2 to 0 first (Sage's CDF:
+# +-infinity*I; its SR: NaN)
+t = 5e-324
+for z in [(1000, t), (1000, -t), (-1000, t)]:
+    show("CDF sinh %s" % (z,), lambda: CDF(*z).sinh())
+    show("CDF cosh %s" % (z,), lambda: CDF(*z).cosh())
+    show("SR sinh %s" % (z,), lambda: sinh(SR(CDF(*z))))
+    show("SR cosh %s" % (z,), lambda: cosh(SR(CDF(*z))))
+# tanh with |y| > DBL_MAX/2, where 2y leaves the doubles: sin(2y)/2 as
+# sin(y) cos(y).  True values: tanh(1000 + 1e308 i) = 1.0 - 0.0 i,
+# tanh(-1000 - 1e308 i) = -1.0 + 0.0 i, tanh(0.5 + 1e308 i) =
+# 0.5512345821481115 - 0.37910598694810577 i, tanh(2 - 1.7e308 i) =
+# 0.98878040528907 + 0.03466066108563915 i; the imaginary part at 0.5 is
+# within one ulp of the true one (Sage's CDF: a NaN imaginary part,
+# sin(inf); its SR: NaN + NaN*I past |x| = 709)
+for z in [(1000, 1e308), (-1000, -1e308), (0.5, 1e308), (2, -1.7e308)]:
+    show("CDF tanh %s" % (z,), lambda: CDF(*z).tanh())
+    show("CDF tanh %s imag" % (z,), lambda: CDF(*z).tanh().imag())
+for z in [(1000, 1e308), (-1000, -1e308)]:
+    show("SR tanh %s" % (z,), lambda: tanh(SR(CDF(*z))))
+    show("SR tanh %s imag" % (z,), lambda: tanh(SR(CDF(*z))).imag())
