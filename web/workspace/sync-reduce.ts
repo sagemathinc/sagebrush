@@ -80,8 +80,10 @@ export type SyncEntry = {
   seq: number;
 };
 
-/** What one op did: the identities it changed (made, moved, written or gone), or why it did nothing. */
-export type Outcome = { changed: string[]; skipped?: string };
+/** What one op did: the identities it changed (made, moved, written or gone), or why it did nothing.  `holder`: the
+ * data file whose current bytes are now this op's (a create, a write applied, a conflict copy), if any: the entry that
+ * holds the blob reference the op adds (e2e PR 5d); none for the same bytes again, or an op that did nothing. */
+export type Outcome = { changed: string[]; skipped?: string; holder?: string };
 
 /** The index: entries by identity, by path (its NFC form) and by folder, and the last path of each identity forgotten.  clone() copies all of it (O(entries)): once per snapshot or page, never per op. */
 export class SyncIndex {
@@ -200,7 +202,7 @@ export function reduce(ix: SyncIndex, op: SyncOp): Outcome {
     r.undo();
     return { changed: [], skipped: err instanceof Skip ? err.message : `not applied: ${String(err).slice(0, 200)}` };
   }
-  return { changed: r.changes() };
+  return r.holder === undefined ? { changed: r.changes() } : { changed: r.changes(), holder: r.holder };
 }
 
 /** The index from empty, `ops` in order. */
@@ -215,6 +217,8 @@ class Reducer {
   private log: (() => void)[] = [];
   // (folders made for this op: a counter, so each has its own derived identity)
   private made = 0;
+  /** the data file whose current bytes became this op's (Outcome.holder) */
+  holder: string | undefined;
   constructor(private ix: SyncIndex, private op: SyncOp, private id: string) {}
 
   changes(): string[] {
@@ -225,6 +229,7 @@ class Reducer {
     for (let i = this.log.length - 1; i >= 0; i--) this.log[i]();
     this.log = [];
     this.changed.clear();
+    this.holder = undefined;
   }
 
   // ---- the maps, each change logged
@@ -423,6 +428,7 @@ class Reducer {
     if (this.ix.byId.has(this.id)) throw new Skip(`${this.id} is already there`);
     if (op.kind === "file" && !(typeof op.sha256 === "string" && HEX64.test(op.sha256))) throw new Skip("a data file's create carries its sha256");
     this.put(this.entry(this.id, this.place(p), op.kind, op.sha256, op.size));
+    if (op.kind === "file") this.holder = this.id;
   }
 
   private entry(id: string, path: string, kind: Kind, sha256?: string, size?: number): SyncEntry {
@@ -455,6 +461,7 @@ class Reducer {
     if (op.sha256 === cur.sha256) return;
     if (op.base !== cur.sha256) return this.conflictCopy(cur.path);
     this.update(cur, { sha256: op.sha256, size: Number.isSafeInteger(op.size) && op.size! >= 0 ? op.size : 0, by: op.by });
+    this.holder = this.id;
   }
 
   /** The write's bytes as a copy beside `at`: `name (conflict, <device's first 8>).ext`, its identity derived from the op. */
@@ -463,6 +470,7 @@ class Reducer {
     const folder = this.folderAt(parentOf(at));
     const cid = this.fresh(this.id, op.device, op.dseq);
     this.put(this.entry(cid, this.free(folder, base, ext, ` (conflict, ${op.device.slice(0, 8)})`), "file", op.sha256, op.size));
+    this.holder = cid;
   }
 
   rename(to: string) {

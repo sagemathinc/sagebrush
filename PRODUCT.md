@@ -10,7 +10,7 @@ Open the page and start computing: nothing to install, no sign-in needed, on a l
 ### Sagebrush app: desktop builds for Mac, Windows and Linux; iPhone and Android in progress
 The same documents and file model as Sagebrush Space, with what a local app adds:
 - **Your files are real files,** in a folder on your disk, with their history kept beside them, and no browser storage limits.
-- **Agents connect directly:** an agent on your computer pairs with the app, without going through a website.
+- **Agents connect directly (in progress):** an agent on your computer will pair with the app, without going through a website. For now, connect agents on sagebrush.space.
 - **Native engines and multicore acceleration are being added engine by engine.** Today the app runs the same engines as the web.
 
 ### Sagebrush engine: the mathematics
@@ -37,10 +37,16 @@ One document at a time, in one small, uniform frame. We keep polishing it toward
 3. **Minimalism:** nothing on screen that the document doesn't need.
 4. **Usability with agents:** everything visible, checkable and safe for a person and an agent working together.
 
+## Privacy
+
+- **Your work starts on your device.** By default, notebooks run in your browser or the app, and nothing is uploaded to run them.
+- **Sync will be end-to-end encrypted, as the only mode,** before it opens to everyone: only your devices hold the keys, and Sagebrush's server stores what it can't read. A recovery code, shown once, is the only way back without one of your devices; lose both, and the data is gone. The relay to your own computers and agents' logs are covered too.
+- **Exceptions are explicit and named:** publishing a link is public; a support bundle is only what you choose to send; class work from a school's course site stays readable by the course's instructors and graders, with any other readers and how long it's kept decided before that part is built. See [Storage](https://sagebrush.space/docs/storage#encryption).
+
 ## Safety
 
 - **TimeTravel and Trash** let you recover recent edits and deleted documents within their retention limits.
 - **History is bounded,** so it never grows without limit.
 - **You can export everything to a zip at any time.**
 
-Browser storage can still be cleared by the browser or by you; export, or sign in to sync across devices, if the work matters. Signing in adds sync; paying adds more storage and longer history. Nothing here locks you in.
+Browser storage can still be cleared by the browser or by you; export if the work matters. Sync across devices needs signing in, and isn't available to every account yet; paying adds more storage and longer history. Nothing here locks you in.

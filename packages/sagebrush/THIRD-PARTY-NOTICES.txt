@@ -166,7 +166,12 @@ routes, `fastScalarPower`, from `fast_scalar_power` in
 `numpy/_core/src/multiarray/number.c`; `arange`'s length and values, from
 `_calc_length` and `PyArray_ArangeObj` in `numpy/_core/src/multiarray/ctors.c`
 and the `@NAME@_fill` loops of `numpy/_core/src/multiarray/arraytypes.c.src`;
-`linspace`'s arithmetic, from `numpy/_core/function_base.py`; and the
+`linspace`'s arithmetic, from `numpy/_core/function_base.py`; the default
+sort and argsort of object arrays, `objQuick` and `objHeap`, from `npy_quicksort`,
+`npy_aquicksort`, `npy_heapsort` and `npy_aheapsort` in
+`numpy/_core/src/npysort/quicksort_generic.cpp` and `heapsort.cpp`, with the
+comparison of `OBJECT_compare` in `numpy/_core/src/multiarray/arraytypes.c.src`;
+and the
 size in an array's MemoryError, from `_ArrayMemoryError._size_to_string` in
 `numpy/_core/_exceptions.py`), `src/runtime/numpy_random.ts`,
 `src/runtime/ziggurat_data.ts` and `kernels/src/random.rs` (MT19937 with

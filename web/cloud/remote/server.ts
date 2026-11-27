@@ -15,7 +15,10 @@
 //   POST /api/remote/v1/revoke       {remote_id}             -> {ok}
 //   GET  /api/remote/v1/runner       (WebSocket) a runner's leg: x-sb-remote-challenge, x-sb-remote-signature (b2a),
 //                                    and x-sb-remote-agents, its agent kinds (agentKinds())
-//   GET  /api/remote/v1/page?remote=&chan=   (WebSocket) a page's leg, signed in, same site (b2a)
+//   GET  /api/remote/v1/page?remote=&chan=   (WebSocket) a page's leg, signed in, same site (b2a); chan=engine
+//                                    (remote r3.3 P1) also &nb=&entry=&attempt=[&cgen=]: a notebook's kernel page
+//   POST /api/remote/v1/disconnect   {remote_id}             -> {ok, cgen}: the workspace switched away from this remote
+//                                    (H2): its engine pages end, and a page presenting the old generation is refused
 //
 // The relay's routes (b2a, relay.ts) are inert also until REMOTE_RELAY (the RemoteRelay Durable Object binding) is
 // bound, at b4.
@@ -25,7 +28,7 @@
 // merging this changes no deployment until the bindings are added (step b4, by @sagebrush).  Unauthenticated routes
 // are rate-limited per IP (REMOTE_PREAUTH) before any D1 work, when that binding is present.
 import { sessionResult, authTier, sha256Hex, hmac, same, accountHash, type ShareEnv, type Ctx, type D1Stmt } from "../share/server.ts";
-import { capsFor } from "./relay-caps.ts";
+import { capsFor, ENGINE_CAP, ENGINE_ENTRIES } from "./relay-caps.ts";
 
 export interface RemoteEnv extends ShareEnv {
   /** the challenge key (HMAC-SHA-256): a secret */
@@ -510,6 +513,13 @@ function storedAgents(kind: Kind, agents: string | null | undefined, at: number 
   return ok ? { agents: list as string[], agents_at: Number.isSafeInteger(at) && (at as number) >= 0 ? (at as number) : null } : { agents: [], agents_at: null };
 }
 
+/** What a runner's leg says it speaks (x-sb-remote-caps): a comma-separated list, at most 100 ASCII bytes; only the
+ *  versions this site knows are kept (engine/1), anything else is dropped, never passed on. */
+export function runnerCaps(kind: string, h: string | null): string[] {
+  if (kind !== "runner" || h === null || h.length > 100 || !/^[\x21-\x7e]*$/.test(h)) return [];
+  return [...new Set(h.split(","))].filter((c) => c === ENGINE_CAP);
+}
+
 /** After the relay admitted a runner's leg: its reported agent kinds (null clears them) and the time, together, on its
  *  own live row only (the admitted remote and account; not revoked, not an account being deleted or deleted).  It
  *  never makes a row, and a failure here (a database before the agents columns, say) leaves the admitted leg alone. */
@@ -558,7 +568,10 @@ async function peerLeg(req: Request, env: RemoteEnv, kind: "runner" | "agent"): 
   if (v.chal.kind !== kind) return err(403, "kind");
   const relay = env.REMOTE_RELAY.get(env.REMOTE_RELAY.idFromName(v.chal.rid));
   const res = await relay.fetch("https://relay/peer", {
-    headers: { upgrade: "websocket", "x-r-account": v.account, "x-r-remote": v.chal.rid, "x-r-kind": v.chal.kind, "x-r-chal": v.chal.n, "x-r-exp": String(v.chal.exp) },
+    headers: {
+      upgrade: "websocket", "x-r-account": v.account, "x-r-remote": v.chal.rid, "x-r-kind": v.chal.kind, "x-r-chal": v.chal.n, "x-r-exp": String(v.chal.exp),
+      "x-r-caps": runnerCaps(kind, req.headers.get("x-sb-remote-caps")).join(","),
+    },
   });
   // (only once the relay has admitted it: a used challenge, a revoked remote, a full account or a superseded leg is
   // refused there, and changes nothing here)
@@ -583,7 +596,40 @@ async function pageLeg(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response
   if (!r || r.account !== s.id) return err(404, "unknown_remote");
   if (!capsFor(r.kind, chan)) return err(400, "unknown channel");
   const relay = env.REMOTE_RELAY.get(env.REMOTE_RELAY.idFromName(rid));
-  return relay.fetch("https://relay/page", { headers: { upgrade: "websocket", "x-r-account": s.id, "x-r-remote": rid, "x-r-kind": r.kind, "x-r-chan": chan } });
+  const headers: Record<string, string> = { upgrade: "websocket", "x-r-account": s.id, "x-r-remote": rid, "x-r-kind": r.kind, "x-r-chan": chan };
+  if (chan === "engine") {
+    // (remote r3.3 H1, H4: the notebook, its kernel entry, a single-use attempt id and the connection generation the
+    // page last had, checked for form here and again in the relay, which binds them; the account's sync namespace is
+    // derived here, never the page's)
+    const nb = url.searchParams.get("nb") ?? "";
+    const entry = url.searchParams.get("entry") ?? "";
+    const attempt = url.searchParams.get("attempt") ?? "";
+    const cgen = url.searchParams.get("cgen");
+    if (!/^[A-Za-z0-9_-]{1,43}$/.test(nb) || !(ENGINE_ENTRIES as readonly string[]).includes(entry) || !/^[A-Za-z0-9_-]{22}$/.test(attempt)
+      || (cgen !== null && !/^[1-9][0-9]{0,15}$/.test(cgen))) {
+      return err(400, "invalid_request");
+    }
+    Object.assign(headers, { "x-r-nb": nb, "x-r-entry": entry, "x-r-attempt": attempt, "x-r-sync": "acct:" + (await accountHash(s.id)) });
+    if (cgen !== null) headers["x-r-cgen"] = cgen;
+  }
+  return relay.fetch("https://relay/page", { headers });
+}
+
+/** POST /api/remote/v1/disconnect {remote_id}: the workspace switched away from this remote, or disconnected it (r3.3
+ *  H2): same site, signed in, the account's own live remote; the relay advances its connection generation. */
+async function disconnect(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
+  if (!env.REMOTE_RELAY) return err(404, "not found");
+  if (!sameSite(req)) return err(403, "cross-site request");
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return err(503, UNAVAILABLE);
+  if (!s) return err(401, "not signed in");
+  const b = await body(req);
+  if (!b || typeof b.remote_id !== "string" || !/^r[A-Za-z0-9_-]{20}$/.test(b.remote_id)) return err(400, "invalid_request");
+  const r = await liveRemote(env, b.remote_id);
+  if (!r || r.account !== s.id) return err(404, "unknown_remote");
+  const res = await env.REMOTE_RELAY.get(env.REMOTE_RELAY.idFromName(b.remote_id)).fetch("https://relay/disconnect", { method: "POST" });
+  if (!res.ok) return err(503, "try again");
+  return json(await res.json());
 }
 
 // ---- routing
@@ -606,6 +652,7 @@ export async function handleRemote(req: Request, env: RemoteEnv, ctx: Ctx): Prom
   }
   if (p === "/api/remote/v1/peers" && m === "GET") return peers(req, env, ctx);
   if (p === "/api/remote/v1/revoke" && m === "POST") return revoke(req, env, ctx);
+  if (p === "/api/remote/v1/disconnect" && m === "POST") return disconnect(req, env, ctx);
   if (p === "/api/remote/v1/runner" && m === "GET") return peerLeg(req, env, "runner");
   if (p === "/api/remote/v1/page" && m === "GET") return pageLeg(req, env, ctx);
   if (m !== "POST") return err(404, "not found");

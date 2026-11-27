@@ -1,0 +1,139 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== frame
+
+          legs         w        ok
+legs  1.000000 -0.240192 -0.174078
+w    -0.240192  1.000000       NaN
+ok   -0.174078       NaN  1.000000
+== frame.exact
+[[1.0, -0.24019223070763066, -0.17407765595569788], [-0.24019223070763066, 1.0, nan], [-0.17407765595569788, nan, 1.0]]
+== frame.dtypes
+[('legs', 'float64'), ('w', 'float64'), ('ok', 'float64')]
+== frame.index
+Index(['legs', 'w', 'ok'], dtype='str')
+== frame.numeric-only
+
+     x    y
+x  1.0 -1.0
+y -1.0  1.0
+== frame.str
+!! ValueError: could not convert string to float: 'cat'
+== frame.str-numbers
+
+          s         x
+s  1.000000 -0.654654
+x -0.654654  1.000000
+== frame.str-second
+!! ValueError: could not convert string to float: 'dog'
+== frame.constant
+
+     a   b
+a  1.0 NaN
+b  NaN NaN
+== frame.pairwise-nan
+
+     a         b         c
+a  1.0  1.000000  1.000000
+b  1.0  1.000000  0.928571
+c  1.0  0.928571  1.000000
+== frame.pairwise-nan.exact
+[[1.0, 1.0, 1.0], [1.0, 1.0, 0.9285714285714285], [1.0, 0.9285714285714285, 1.0]]
+== frame.min-periods
+
+     a    b
+a  1.0  NaN
+b  NaN  1.0
+== frame.perfect
+[[1.0, 1.0], [1.0, 1.0]]
+== frame.anti
+[[1.0, -1.0], [-1.0, 1.0]]
+== frame.rounding
+[[1.0, -0.39999999999999997], [-0.39999999999999997, 1.0]]
+== frame.wide.exact
+[[1.0, -0.26482785929169234, 0.04848938731495609, -0.04645660711055958], [-0.26482785929169234, 1.0, 0.030048012401198736, -0.0018615035277423477], [0.04848938731495609, 0.030048012401198736, 1.0, 0.047953495559944666], [-0.04645660711055958, -0.0018615035277423477, 0.047953495559944666, 1.0]]
+== frame.one-column
+
+     a
+a  1.0
+== frame.one-row
+
+    a   b
+a NaN NaN
+b NaN NaN
+== frame.no-columns
+
+Empty DataFrame
+Columns: []
+Index: []
+== frame.uint8
+
+     a    b
+a  1.0 -0.5
+b -0.5  1.0
+== frame.int-labels
+
+          0         1
+0  1.000000  0.821995
+1  0.821995  1.000000
+== frame.callable
+
+      legs    w
+legs   1.0  0.5
+w      0.5  1.0
+== frame.callable-sizes
+
+      legs    w
+legs   1.0  3.0
+w      3.0  1.0
+== frame.bad-method
+!! ValueError: method must be either 'pearson', 'spearman', 'kendall', or a callable, 'x' was supplied
+== series
+np.float64(-0.24019223070763074)
+== series.rounded
+0.048489387315
+== series.aligned
+np.float64(0.5)
+== series.partial-overlap
+np.float64(0.14285714285714288)
+== series.no-overlap
+nan
+== series.one-pair
+nan
+== series.min-periods
+nan
+== series.constant
+nan
+== series.ints
+np.float64(0.9819805060619657)
+== series.perfect
+np.float64(1.0)
+== series.bool
+np.float64(0.8660254037844387)
+== series.callable
+0.25
+== series.bad-method
+!! ValueError: method must be either 'pearson', 'spearman', 'kendall', or a callable, 'x' was supplied
+== original-kept
+
+   legs    w     ok
+0     4  4.5   True
+1     6  NaN  False
+2     4  1.0   True
+3     8  2.0   True
