@@ -303,6 +303,62 @@ try {
   const f2Cur = () => ev(`(() => { const r = document.querySelector("#wssidebar .frow.cur"); r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); return 1; })()`);
   const typeTitle = (t) => ev(`(() => { const i = document.querySelector("#nbname"); i.value = ${JSON.stringify(t)}; i.dispatchEvent(new Event("input")); return 1; })()`);
   const nbPaths = () => ev(`${W}.list("/").then((l) => l.filter((e) => e.kind === "notebook").map((e) => e.path).sort())`);
+  // A's persisted rename intent must not resume against B when A's workspace listing finishes after B opened.
+  // Give B the transient title/path mismatch a sidebar rename has until its title notification arrives: even then,
+  // A's callback cannot rename B.
+  const crossA = await ev(`sagebrush.notebook.store.id`);
+  await ev(`(sagebrush.notebook.setMeta({ name: "Pending A", file_rename: "Pending A" }), sagebrush.notebook.saved().then(() => 1))`);
+  const crossB = await ev(`${W}.create("/Sidebar B.ipynb", { content: { name: "Sidebar B", mode: "python", cells: [{ id: "b", code: "" }] } }).then((e) => e.ref)`);
+  await ev(`sagebrush.open(${JSON.stringify(crossB)}).then(() => 1)`);
+  await ev(`(() => { const t = sagebrush.wsListTest; t.pause = (id) => id === ${JSON.stringify(crossA)} ? new Promise((r) => (window.__listRelease = r)) : undefined; return 1; })()`);
+  await ev(`sagebrush.open(${JSON.stringify(crossA)}).then(() => 1)`);
+  await ev(`sagebrush.open(${JSON.stringify(crossB)}).then(() => 1)`);
+  await ev(`(document.querySelector("#nbname").value = "Old B", sagebrush.notebook.setMeta({ name: "Old B", file_rename: null }), sagebrush.notebook.saved().then(() => 1))`);
+  await ev(`(sagebrush.wsListTest.pause = null, window.__listRelease(), 1)`);
+  await sleep(300);
+  check((await ev(`${W}.stat("/Sidebar B.ipynb").then((e) => e?.ref ?? null)`)) === crossB && (await ev(`sagebrush.notebook.store.id`)) === crossB,
+    "a delayed open callback for A cannot rename the current B, even while B's title and sidebar path differ");
+  // The same delayed callback cannot resurrect an intent cleared while A stayed open (the sidebar's rename callback
+  // already has its own end-to-end controls below; this isolates the asynchronous re-check).
+  await ev(`(() => { const t = sagebrush.wsListTest; t.pause = (id) => id === ${JSON.stringify(crossA)} ? new Promise((r) => (window.__listRelease = r)) : undefined; return 1; })()`);
+  await ev(`sagebrush.open(${JSON.stringify(crossA)}).then(() => 1)`);
+  await ev(`${W}.list("/").then((l) => l.find((e) => e.ref === ${JSON.stringify(crossA)})?.path).then((p) => ${W}.rename(p, "/Sidebar A.ipynb")).then(() => 1)`);
+  await ev(`(document.querySelector("#nbname").value = "Sidebar A", sagebrush.notebook.setMeta({ name: "Sidebar A", file_rename: null }), sagebrush.notebook.saved().then(() => 1))`);
+  await ev(`(sagebrush.wsListTest.pause = null, window.__listRelease(), 1)`);
+  await sleep(300);
+  check((await ev(`sagebrush.notebook.meta.file_rename ?? null`)) === null && (await ev(`document.querySelector("#nbname").value`)) === "Sidebar A",
+    "a delayed open callback cannot resurrect a rename intent cleared by a sidebar rename");
+  // Two openings of A have independently held listings, with B opened between them.  Releasing A's first, stale
+  // listing while the second A is current must do nothing: in particular it cannot take fileNameWins's else branch,
+  // replace the live title with A's old path, or clear the second opening's pending intent.  Its own listing then
+  // resumes that intent.
+  const abaA = await ev(`${W}.create("/ABA Old.ipynb", { content: { name: "ABA Pending", file_rename: "ABA Pending", mode: "python", cells: [{ id: "aa", code: "" }] } }).then((e) => e.ref)`);
+  const abaB = await ev(`${W}.create("/ABA B.ipynb", { content: { name: "ABA B", mode: "python", cells: [{ id: "ab", code: "" }] } }).then((e) => e.ref)`);
+  await ev(`(() => { window.__listReleases = []; sagebrush.wsListTest.pause = (id) => id === ${JSON.stringify(abaA)} ? new Promise((r) => window.__listReleases.push(r)) : undefined; return 1; })()`);
+  await ev(`sagebrush.open(${JSON.stringify(abaA)}).then(() => 1)`);
+  check(await until(`window.__listReleases.length === 1`), "A's first workspace listing is held independently");
+  // Workspace creation derives the initial notebook title from its file name.  Persist the pending title after the
+  // first opening has captured that old document; the second opening below then captures this newer intent.
+  await ev(`(document.querySelector("#nbname").value = "ABA Pending", sagebrush.notebook.setMeta({ name: "ABA Pending", file_rename: "ABA Pending" }), sagebrush.notebook.saved().then(() => 1))`);
+  await ev(`sagebrush.open(${JSON.stringify(abaB)}).then(() => 1)`);
+  await ev(`sagebrush.open(${JSON.stringify(abaA)}).then(() => 1)`);
+  check(await until(`window.__listReleases.length === 2`), "after B, A's second workspace listing is held independently");
+  await ev(`(window.__listReleases.shift()(), 1)`);
+  await sleep(300);
+  const abaStale = await ev(`({ title: document.querySelector("#nbname").value, intent: sagebrush.notebook.meta.file_rename ?? null, id: sagebrush.notebook.store.id })`);
+  check(abaStale.id === abaA && abaStale.title === "ABA Pending" && abaStale.intent === "ABA Pending" && !(await ev(`${W}.stat("/ABA Pending.ipynb").then((e) => !!e)`)),
+    "A's stale first listing does not take either branch or clear the live second opening's rename intent: " + JSON.stringify(abaStale));
+  await ev(`(sagebrush.wsListTest.pause = null, window.__listReleases.shift()(), 1)`);
+  check(await until(`${W}.stat("/ABA Pending.ipynb").then((e) => e?.ref === ${JSON.stringify(abaA)})`, 30000), "A's current listing resumes and finishes its pending rename");
+  // A reload can end the page after its title is saved but before the debounced workspace rename runs.  Catch that
+  // one 800 ms timer, making the ordering deterministic; the reopened writer finishes the saved rename intent.
+  await ev(`(() => { const real = window.setTimeout; window.setTimeout = (f, ms, ...a) => ms === 800 ? 2147483646 : real(f, ms, ...a); return 1; })()`);
+  await typeTitle("Survives reload");
+  await ev(`sagebrush.notebook.saved().then(() => 1)`);
+  check(!(await ev(`${W}.stat("/Survives reload.ipynb").then((e) => !!e)`)), "a title saved while its file rename is blocked has not renamed the file yet");
+  await send("Page.reload");
+  check(await until(`!!${W} && document.querySelector("#nbname")?.value === "Survives reload"`, 60000), "after an immediate reload, the saved title reopens");
+  check(await until(`${W}.stat("/Survives reload.ipynb").then((e) => !!e)`, 30000), "…and the reopened writer finishes its pending file rename");
   // a title typed, then (before its rename, 0.8 s later) the file renamed in
   // the sidebar: the sidebar's, the later, stays (CORR-0B0-1)
   await typeTitle("Queued title");
@@ -1556,7 +1612,8 @@ try {
     await until(`!!${W}`, 60000);
     if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
     await ev(`(async () => { const w = ${W}; await w.create("/lm a.ipynb", ${nb}); await new Promise((r) => setTimeout(r, 30)); await w.create("/lm b.ipynb", ${nb}); await w.create("/Number theory (10).ipynb", ${nb}); return 1; })()`);
-    await until(`!!${row("/lm b.ipynb")}`, 20000);
+    // (each row this block reads, not only the one made second: the third, made last, can be drawn by a later refresh)
+    await until(`!!${row("/lm a.ipynb")} && !!${row("/lm b.ipynb")} && !!${row("/Number theory (10).ipynb")}`, 20000);
     // (the time cell, and the hover over the visible name: the element under the pointer at the name's middle)
     const cell = (p) => ev(`(() => { const r = ${row(p)}, t = r?.querySelector(".t"), n = r?.querySelector(".n"); if (!t) return null; n.scrollIntoView({ block: "center" }); const b = n.getBoundingClientRect(), at = document.elementFromPoint(b.left + Math.min(20, b.width / 2), b.top + b.height / 2); return { shown: getComputedStyle(t).display !== "none", text: t.textContent, title: at?.closest("[title]")?.title ?? "", cut: n.scrollWidth > n.clientWidth }; })()`);
     const narrow = await cell("/Number theory (10).ipynb");

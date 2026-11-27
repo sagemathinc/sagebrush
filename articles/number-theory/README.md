@@ -36,8 +36,8 @@ are small in absolute terms.
 | rational newforms, all levels to 2000 | Magma 2.18 | faster (13.5×); a current Magma is surely faster than 2.18 |
 | traces of Frobenius to $10^7$–$10^8$ | smalljac 4.1.3 | 1.2–1.6× slower; on 16 threads, from 1.3× faster to 1.4× slower |
 | Galois groups, degree 12 | Magma 2.18 | faster (2.2×) |
-| imaginary quadratic class groups | PARI 2.17 | 2.3× slower at $\lvert D \rvert \approx 10^9$ (milliseconds); equal at $10^{17}$; faster beyond |
-| class groups of cubic and quartic fields | PARI 2.17 | cubics faster from $\lvert d \rvert \approx 10^{25}$; quartics 1–4× slower |
+| imaginary quadratic class groups | PARI 2.17 | with the default certificate, faster from about $10^{27}$ (the certificate costs 75–150 ms below $10^{25}$); without it, 1.7× slower at $\lvert D \rvert \approx 10^9$ (milliseconds) and faster from about $10^{15}$ |
+| class groups of cubic and quartic fields | PARI 2.17 | cubics faster from $\lvert d \rvert \approx 10^{20}$; quartics faster from about $10^{33}$, slower below |
 
 Most engines also run in parallel, and all of them run in the browser as
 WebAssembly, at roughly 1.3–4× the native single-core time. The articles

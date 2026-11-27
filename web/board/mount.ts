@@ -1357,7 +1357,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!r || loads !== opening) return;
     original = r.original ?? null;
     converted = r.notice ?? "";
-    return load(r.doc, true).then(sayConverted);
+    // (a notice said while it loaded, e.g. File ▸ Examples… on a site without them, is there until the next edit:
+    //  shown again over the caption the load put back, unless another document was loaded meanwhile)
+    return load(r.doc, true).then(() => {
+      if (notice && loads === opening + 1 && !destroyed) caption(notice, "");
+    }).then(sayConverted);
   }).catch(fail);
 
   // editing, and keeping what was edited
@@ -2622,6 +2626,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       print: async (o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) => { const r = await printBoard(o); return r?.querySelectorAll(".pr-sheet").length ?? 0; },
       /** The document, the tour's step, the camera, and the laid out items' boxes. */
       snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points, label, lx, ly, src }) => ({ id, from, to, points, label, lx, ly, src })), selectedEdge: board.selectedEdge }),
+      /** Resolves once the store's document, the one the page opened with, is shown (or none was to come): true if it was. */
+      opened: async () => !!opened && (await opened.then(() => doc !== null)),
       /** Change the document (undoable, as an edit): f gets a copy to modify. */
       edit: (f: (d: BoardDoc) => void) => editor.commit(f, false, true, "page"),
       /** Run code items (all when none are given), then what depends on them; resolves to outputs(). */
