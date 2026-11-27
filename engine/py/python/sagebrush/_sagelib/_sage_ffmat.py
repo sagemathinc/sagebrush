@@ -1465,8 +1465,17 @@ class FFVector:
         """
         return [i for i, a in enumerate(self._e) if a]
 
+
     def __copy__(self):
         return FFVector(self._base, self._e)
+
+    def __getattr__(self, name):
+        if name in _MORE_VECTOR and _load_more():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_VECTOR)
 
 
 def _rhs_entries(b, n, what):
@@ -1581,7 +1590,7 @@ class FFMatrix:
         TypeError: unsupported operand type(s) for *: 'complex' and 'FFMatrix'
     """
 
-    __slots__ = ("_base", "_rows", "_ncols")
+    __slots__ = ("_base", "_rows", "_ncols", "_subdiv")
 
     def __init__(self, base, rows, ncols=None):
         # read boundedly, within the heap budget, and check the shape and
@@ -1599,6 +1608,7 @@ class FFMatrix:
         else:
             self._rows = [[base(x) for x in r] for r in rows]
         self._ncols = ncols
+        self._subdiv = None
 
     # ---- data
     def parent(self):
@@ -1669,7 +1679,22 @@ class FFMatrix:
         # matrix(GF(101), [[1, 100], [2, 3]]) printed its columns at their
         # own widths, [1 100] for Sage's [  1 100])
         w = max((len(c) for r in cells for c in r), default=0)
-        return "\n".join("[" + " ".join(c.rjust(w) for c in r) + "]" for r in cells)
+        rc, cc = getattr(self, "_subdiv", None) or ([], [])
+        if not rc and not cc:
+            return "\n".join("[" + " ".join(c.rjust(w) for c in r) + "]" for r in cells)
+        # (subdivided: | between column blocks, a -+- line between row blocks)
+        cuts = [0] + list(cc) + [self._ncols]
+        segs = [(cuts[i], cuts[i + 1]) for i in range(len(cuts) - 1)]
+        # (a line before row i for each time i is listed, so also at the
+        # bottom edge and twice for a repeated index, as Sage prints them)
+        sep = "[" + "+".join("-" * max(0, (b - a) * (w + 1) - 1) for a, b in segs) + "]"
+        lines = []
+        for i, r in enumerate(cells):
+            lines.extend([sep] * rc.count(i))
+            lines.append("[" + "|".join(" ".join(c.rjust(w) for c in r[a:b]) for a, b in segs) + "]")
+        lines.extend([sep] * rc.count(len(cells)))
+        return "\n".join(lines)
+
 
     def _latex_(self):
         import _sage_expr
@@ -1777,6 +1802,20 @@ class FFMatrix:
         return _matrix_hash(self._rows, self._ncols)
 
     def __copy__(self):
+        # (the subdivisions kept or not as by Sage's matrix class for the
+        # base: dropped over Z/n, n != 2 (GF(p), p odd, among them) and over
+        # GF(2^k), 1 < k <= 16; kept over GF(2) and the other fields)
+        m = FFMatrix(self._base, self._rows, self._ncols)
+        sd = getattr(self, "_subdiv", None)
+        B = self._base
+        drop = (isinstance(B, _ff.IntegerModRing_) and B._n != 2) or (
+            isinstance(B, _ff.FiniteField_ext) and B._p == 2 and B._n <= 16)
+        if sd is not None and not drop:
+            m._subdiv = (list(sd[0]), list(sd[1]))
+        return m
+
+    def __deepcopy__(self, memo):
+        # (never the subdivisions, as Sage's deepcopy over every field)
         return FFMatrix(self._base, self._rows, self._ncols)
 
     def copy(self):
@@ -1799,7 +1838,11 @@ class FFMatrix:
             [1 4]
             [2 0]
         """
-        return FFMatrix(self._base, [[r[j] for r in self._rows] for j in range(self._ncols)], len(self._rows))
+        m = FFMatrix(self._base, [[r[j] for r in self._rows] for j in range(self._ncols)], len(self._rows))
+        sd = getattr(self, "_subdiv", None)
+        if sd is not None:
+            m._subdiv = (list(sd[1]), list(sd[0]))
+        return m
 
     T = property(transpose)
 
@@ -2184,6 +2227,7 @@ class FFMatrix:
             bas += list(b)
         return _sa().diagonal_matrix(A.base_ring(), dia), _sa().matrix(A.base_ring(), [list(v) for v in bas]).transpose()
 
+
     def __getattr__(self, name):
         # numerical matrices (RDF, CDF, RR, CC): eigenvalues, SVD, ... by numpy
         base = object.__getattribute__(self, "_base")
@@ -2201,7 +2245,12 @@ class FFMatrix:
                 return refuse
             if f is not None:
                 return lambda *a, **k: f(self, *a, **k)
+        if name in _MORE_MATRIX and _load_more():
+            return getattr(self, name)
         raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_MATRIX)
 
     def diagonal(self):
         """The diagonal entries.
@@ -3670,3 +3719,47 @@ def vector(base, entries):
     """
     # (FFVector reads the entries within the heap budget)
     return FFVector(base, entries)
+
+
+# Methods that load on first use, from lib/_sage_ffmat_more.py: a session
+# that never calls them (Magma mode's, among others) does not hold them.
+# The first lookup of one of these names copies them all onto the classes;
+# the numeric route of FFMatrix.__getattr__ keeps its priority.
+_MORE_MATRIX = frozenset([
+    "add_multiple_of_row", "add_multiple_of_column", "rescale_row", "rescale_col", "swap_rows", "swap_columns",
+    "with_added_multiple_of_row", "with_added_multiple_of_column", "with_rescaled_row", "with_rescaled_col",
+    "with_swapped_rows", "with_swapped_columns",
+    "is_symmetric", "is_diagonal", "is_scalar", "is_one", "is_nilpotent", "is_idempotent", "is_singular", "is_triangular",
+    "delete_rows", "delete_columns", "matrix_from_rows", "matrix_from_columns", "matrix_from_rows_and_columns",
+    "antitranspose", "elementwise_product", "block_sum", "tensor_product", "subdivide", "subdivisions", "get_subdivisions",
+    "nonpivots", "pivot_rows", "nonzero_positions", "nonzero_positions_in_row", "nonzero_positions_in_column", "density",
+    "left_kernel_matrix", "adjugate", "permanent", "pfaffian",
+    "minimal_polynomial", "eigenvalues", "eigenvectors_right", "eigenvectors_left", "right_eigenvectors", "left_eigenvectors",
+    "eigenspaces_right", "eigenspaces_left", "LU", "fcp", "jordan_form", "rational_form",
+    "_row_index", "_col_index", "_with", "_checked_indices", "_numeric_route", "_split_eigenvalues", "_eigenvectors",
+    "_eigenspaces", "_jordan_chains", "_invariant_factors", "_square_for",
+])
+_MORE_VECTOR = frozenset([
+    "inner_product", "pairwise_product", "outer_product", "monic", "normalized", "lift", "lift_centered", "concatenate",
+])
+
+
+def _load_more():
+    """Copy lib/_sage_ffmat_more.py's methods onto FFMatrix and FFVector
+    (once); True when they are there.
+
+    EXAMPLES::
+
+        sage: import _sage_ffmat  # sagebrush only
+        sage: _sage_ffmat._load_more(), _sage_ffmat._MORE_MATRIX <= set(dir(_sage_ffmat.FFMatrix)), _sage_ffmat._MORE_VECTOR <= set(dir(_sage_ffmat.FFVector))  # sagebrush only
+        (True, True, True)
+    """
+    if "LU" not in FFMatrix.__dict__:
+        import _sage_ffmat_more as m
+        for cls, more, names in ((FFMatrix, m.FFMatrixMethods, _MORE_MATRIX), (FFVector, m.FFVectorMethods, _MORE_VECTOR)):
+            got = {k for k in vars(more) if not k.startswith("__")}
+            if got != names:
+                raise AssertionError("_sage_ffmat_more and _MORE_* disagree: %s" % sorted(got ^ names))
+            for k in names:
+                setattr(cls, k, vars(more)[k])
+    return True
