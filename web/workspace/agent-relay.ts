@@ -36,7 +36,7 @@
 //   each (8 KiB).
 // The heap these allow is an accounted model, not a browser ceiling: a JS string takes at most 2 bytes per UTF-8 byte.
 
-import { listComputers, listRunners, pageLegUrl, type Runner } from "./remote-runners";
+import { listComputers, listRunners, pageLegUrl, removeComputer, type Runner } from "./remote-runners";
 
 export const LEG = {
   helloMs: 10_000,
@@ -552,4 +552,4 @@ export class AgentLeg {
   }
 }
 
-export { listComputers, listRunners, pageLegUrl, type Runner };
+export { listComputers, listRunners, pageLegUrl, removeComputer, type Runner };

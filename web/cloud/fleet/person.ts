@@ -6,16 +6,19 @@
 //   POST /api/fleet/v1/chain                         append one device-chain entry; a genesis binds the fleet
 //   GET  /api/fleet/v1/hosts                         { hosts: [{ host, cert, revocation, grant_gen, ack }] }
 //   GET  /api/fleet/v1/hosts/<id>/grants[?before=<gen> | ?after=<gen>]   { grants, head }: the accepted lineage
+//   GET  /api/fleet/v1/session                       { account, reauth_ms, now_ms, fresh_ms }: the session's last
+//                                                    re-authentication (null for none), the clock, and how long it counts
 //
 // The fleet is always the session account's (fleet_accounts); no route takes a fleet id, and a host or fleet that isn't
 // the account's is not_found, never told apart from one that doesn't exist. The session is resolved by the mounting
 // Worker's own code (the site's session read of SHARE_DB's primary), passed in as `session`: this file never sees a
 // cookie or a token. Every answer is read by ONE SQL statement. Nothing is cached (no-store).
-import { appendChainEntry, type WriterCore } from "./writers.ts";
+import { appendChainEntry, AUTH_MS, type WriterCore } from "./writers.ts";
 import { bucket, chainPage, type D1 } from "./store.ts";
 import { sessionResult, type Ctx, type ShareEnv } from "../share/server.ts";
 
-export type PersonSession = { kind: "ok"; account: string } | { kind: "none" } | { kind: "unavailable" };
+/** `reauthMs`: when this session's person last re-authenticated (sessions.reauth_ms, D1 ms), or null for never. */
+export type PersonSession = { kind: "ok"; account: string; reauthMs: number | null } | { kind: "none" } | { kind: "unavailable" };
 /** What the mounting Worker supplies: the request's account session, read now from the primary (never a cache). */
 export interface PersonDeps { session(req: Request): Promise<PersonSession> }
 
@@ -29,7 +32,7 @@ export function shareSession(env: ShareEnv, ctx?: Ctx): PersonDeps {
     async session(req) {
       if (!env.SHARE_DB) return { kind: "unavailable" };
       const r = await sessionResult(req, env, ctx);
-      return r.kind === "ok" ? { kind: "ok", account: r.id } : r.kind === "unavailable" ? { kind: "unavailable" } : { kind: "none" };
+      return r.kind === "ok" ? { kind: "ok", account: r.id, reauthMs: r.reauthMs } : r.kind === "unavailable" ? { kind: "unavailable" } : { kind: "none" };
     },
   };
 }
@@ -55,7 +58,7 @@ export const GRANTS_PAGE = 16;
 export const PERSON_RATE = Object.freeze({ limit: 120, windowMs: 60_000 });
 const APPEND_READ_MS = 10_000;
 
-const FLEET = "/api/fleet/v1/fleet", CHAIN = "/api/fleet/v1/chain", HOSTS = "/api/fleet/v1/hosts";
+const FLEET = "/api/fleet/v1/fleet", CHAIN = "/api/fleet/v1/chain", HOSTS = "/api/fleet/v1/hosts", SESSION = "/api/fleet/v1/session";
 const GRANTS = /^\/api\/fleet\/v1\/hosts\/([^/]+)\/grants$/;
 const ACCOUNT = /^[A-Za-z0-9_-]{1,64}$/;
 const COUNT = /^(0|[1-9][0-9]{0,15})$/;
@@ -73,7 +76,7 @@ const utf8 = (s: string) => new TextEncoder().encode(s).length;
 export async function handlePerson(req: Request, url: URL, env: PersonEnv, getCore: () => PersonCore, deps?: PersonDeps): Promise<Response | null> {
   const path = url.pathname;
   const grants = GRANTS.exec(path);
-  if (path !== FLEET && path !== CHAIN && path !== HOSTS && !grants) return null;
+  if (path !== FLEET && path !== CHAIN && path !== HOSTS && path !== SESSION && !grants) return null;
   const write = path === CHAIN && req.method === "POST";
   if (req.method !== "GET" && !write) return bare(405);
   const db = env.FLEET_DB;
@@ -88,6 +91,12 @@ export async function handlePerson(req: Request, url: URL, env: PersonEnv, getCo
   if (!(await bucket(db, `fleet-read:${s.account}`, PERSON_RATE.limit, PERSON_RATE.windowMs, Date.now(), core.newId())))
     return refusal("rate", { retry_after_s: Math.ceil(PERSON_RATE.windowMs / 1000) });
   if (write) return append(req, core, db, env.FLEET_AUD, s.account);
+  // (the page's re-authentication state: Approve and every signed write need a re-authentication within fresh_ms)
+  if (path === SESSION) {
+    const r = s.reauthMs;
+    if (r !== null && !(Number.isSafeInteger(r) && r >= 0)) return bare(500);
+    return json(200, { account: s.account, reauth_ms: r, now_ms: Date.now(), fresh_ms: AUTH_MS });
+  }
   const fleet = (await db.prepare("SELECT fleet FROM fleet_accounts WHERE account = ?1").bind(s.account).first<{ fleet: string }>())?.fleet ?? null;
   if (path === FLEET) return fleet ? json(200, { fleet, aud: env.FLEET_AUD }) : refusal("no_fleet");
   if (!fleet) return refusal("no_fleet");
