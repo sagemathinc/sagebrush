@@ -122,6 +122,14 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:format": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:formatC": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:integer": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -190,6 +198,10 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:nchar": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:numeric": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -198,6 +210,14 @@
    "decision": "internal",
    "why": "sets the session's own print options (digits, scipen), checked as R checks them: no host effect"
   },
+  "builtin:paste": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:paste0": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:print": {
    "decision": "internal",
    "why": "writes to the session's output only"
@@ -205,6 +225,22 @@
   "builtin:raw": {
    "decision": "refused",
    "why": "raw vectors are deferred (A1.2's scope note): an R-level refusal before any effect (gate:raw vectors)"
+  },
+  "builtin:sprintf": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:substr": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:tolower": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:toupper": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
   },
   "builtin:|": {
    "decision": "internal",
@@ -290,7 +326,19 @@
    "decision": "internal",
    "why": "a constant R value"
   },
+  "value:LETTERS": {
+   "decision": "internal",
+   "why": "a constant R value"
+  },
   "value:T": {
+   "decision": "internal",
+   "why": "a constant R value"
+  },
+  "value:letters": {
+   "decision": "internal",
+   "why": "a constant R value"
+  },
+  "value:month.name": {
    "decision": "internal",
    "why": "a constant R value"
   },

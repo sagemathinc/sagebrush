@@ -286,11 +286,6 @@
    "reason": "lists: list() and $ on a list (A1.6)",
    "sha256": "abd75ca23f48987bae7fe988510f28b5f850412aa2a6df2fac7f5506c30fa484"
   },
-  "rill-tests/parse/test_3.R#tok-string-bell-etc": {
-   "class": "not-implemented",
-   "reason": "the builtin nchar (A1.2b)",
-   "sha256": "c7927cd0e24502a886b7dbad93e4716a60e76962825712483d39e5e5503f56e1"
-  },
   "rill-tests/parse/test_3.R#tok-unmatched-close-bb": {
    "class": "not-implemented",
    "reason": "lists and matrices (A1.6)",
@@ -355,6 +350,16 @@
    "class": "not-implemented",
    "reason": "strings holding invalid UTF-8 and several warnings in one statement (A1.4)",
    "sha256": "1a37b5debf4a08a2b385e3f8686ce8844deb2afa834dea00da07b56f529f628e"
+  },
+  "rill-tests/str/test_1.R#str-10": {
+   "class": "not-implemented",
+   "reason": "strsplit's result is a list, and lists are not implemented yet (A3: the lists PR, then strsplit)",
+   "sha256": "729c25ed5c469ef7b1532828368ee5c7e98e57abbc9dfb89f45210856c04ef89"
+  },
+  "rill-tests/str/test_1.R#str-9": {
+   "class": "not-implemented",
+   "reason": "strsplit's result is a list, and lists are not implemented yet (A3: the lists PR, then strsplit)",
+   "sha256": "7b593ef21e3e938d11608f5ef1ca12aff4d5c0dbd10537b9bf473c1ee9563ddd"
   }
  }
 }
