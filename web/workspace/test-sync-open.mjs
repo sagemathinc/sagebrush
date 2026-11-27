@@ -85,7 +85,7 @@ async function logOf(C, signers, plan) {
     const d = (dseq.get(syncDev) ?? 0) + (step.gap ?? 0) + 1;
     dseq.set(syncDev, d);
     const P = C.provider(s);
-    const [sealed] = await K.sealOps(P, SYNC_GEN, syncDev, [opOf(d, i, step.file)], last.get(syncDev) ?? null);
+    const [sealed] = await K.sealOps(P, SYNC_GEN, syncDev, [step.op ? { ...step.op, dseq: d } : opOf(d, i, step.file)], last.get(syncDev) ?? null);
     last.set(syncDev, sealed.envHash);
     rows.push({ seq: ++seq, device: syncDev, dseq: d, env: sealed.env, head: sealed.head, chain_gen: sealed.chainGen, adds: sealed.adds, releases: sealed.releases, signer: sealed.signer, sig: sealed.sig, _op: opOf(d, i, step.file) });
   }
@@ -127,6 +127,22 @@ const haltOf = async (P, rows, k, change) => {
     "V1: the state after it: the last seq, the floor at the newest head, each device's last dseq", r.state);
   const again = await read(C.provider(b), rows, [2, 2, 1]);
   ok(J(again.state) === J(r.state) && again.verdict === "ok", "V1: read in other pages by another device: the same state");
+}
+
+// ---- V2r (e2e PR 5d): a release op is exactly its form: it opens; with anything more (a path, content), it halts
+{
+  const C = await chainOf();
+  const a = await C.device();
+  const P = C.provider(a);
+  const R = (extra) => ({ t: 1, by: "person", op: "release", path: "/", kind: "folder", releases: [{ address: "5".repeat(64), add: 1 }], ...extra });
+  const good = await read(P, await logOf(C, { a }, [{ dev: "a" }, { dev: "a", op: R({}) }]));
+  const how = {};
+  for (const [name, extra] of [["another path", { path: "/x" }], ["a kind", { kind: "file" }], ["bytes", { sha256: "6".repeat(64) }], ["an identity", { fid: "0123456789abcdef" }], ["no releases", { releases: [] }]]) {
+    const r = await read(P, await logOf(C, { a }, [{ dev: "a" }, { dev: "a", op: R(extra) }]));
+    how[name] = r.verdict === "halt" && r.seq === 2 && /only a release/.test(r.why) ? "halt" : r;
+  }
+  ok(good.verdict === "ok" && good.opened[1]?.op === "release" && Object.values(how).every((x) => x === "halt"),
+    "V2r: a release op of exactly its form opens; one with another path or kind, bytes, an identity, or no release halts at it", { good: good.verdict, how });
 }
 
 // ---- V2: every way one row can fail: halted at it, the check named, nothing after it opened

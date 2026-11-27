@@ -84,14 +84,17 @@ test("a cast that throws midway leaves no warning for the next cast", () => {
 // element on its own ("cast"), then the rest ("reduce", "accumulate"), so it
 // can give two warnings, or "cast" alone; Sagebrush gives one, named by the
 // operation (NUMPY.md))
-test("min, max and accumulations into an integer out give one warning, named by the operation", () => {
-  const cases: [string, string][] = [
-    ["np.max(np.array([np.nan, 1.0]), out=np.zeros((), np.int8))", "reduce"],
-    ["np.min(np.array([[np.nan, 1.0], [2.0, np.nan]]), axis=1, out=np.zeros(2, np.int8))", "reduce"],
-    ["np.max(np.array([np.inf, 1.0]), out=np.zeros((), np.int8))", "reduce"],
-    ["np.cumsum(np.array([np.nan, 1.0]), out=np.zeros(2, np.int8))", "accumulate"],
-    ["np.cumprod(np.array([np.nan, 1.0]), out=np.zeros(2, np.int8))", "accumulate"],
-    ["np.add.accumulate(np.array([np.nan, 1.0]), out=np.zeros(2, np.int8))", "accumulate"],
+test("min, max and accumulations into an integer out warn as NumPy's two steps do, each warning named by its step", () => {
+  // (NumPy 2.5.1: a reduction without an identity casts each position's first element into out, "in cast", then
+  // reduces the rest from out's value, "in reduce"; an accumulation casts each result, "in cast" then "in accumulate")
+  const cases: [string, string[]][] = [
+    ["np.max(np.array([np.nan, 1.0]), out=np.zeros((), np.int8))", ["cast"]],
+    ["np.min(np.array([[np.nan, 1.0], [2.0, np.nan]]), axis=1, out=np.zeros(2, np.int8))", ["cast", "reduce"]],
+    ["np.max(np.array([np.inf, 1.0]), out=np.zeros((), np.int8))", ["cast"]],
+    ["np.max(np.array([1.0, np.nan]), out=np.zeros((), np.int8))", ["reduce"]],
+    ["np.cumsum(np.array([np.nan, 1.0]), out=np.zeros(2, np.int8))", ["cast", "accumulate"]],
+    ["np.cumprod(np.array([np.nan, 1.0]), out=np.zeros(2, np.int8))", ["cast", "accumulate"]],
+    ["np.add.accumulate(np.array([np.nan, 1.0]), out=np.zeros(2, np.int8))", ["cast", "accumulate"]],
   ];
   const src = "import numpy as np, warnings\n" + cases.map(([c]) => `with warnings.catch_warnings(record=True) as w:
     warnings.simplefilter("always")
@@ -99,5 +102,5 @@ test("min, max and accumulations into an integer out give one warning, named by 
 print([str(m.message) for m in w])`).join("\n");
   const out = run(src);
   assert.equal(out.length, cases.length);
-  cases.forEach(([c, op], i) => assert.equal(out[i], `['invalid value encountered in ${op}']`, c));
+  cases.forEach(([c, ops], i) => assert.equal(out[i], `[${ops.map((op) => `'invalid value encountered in ${op}'`).join(", ")}]`, c));
 });

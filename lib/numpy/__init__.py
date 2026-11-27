@@ -1008,6 +1008,11 @@ class ufunc:
             _reduce_out_check(self.__name__, asarray(a), axis, keepdims, out)
             if dtype is None:
                 dtype = result_type(asarray(a).dtype, out.dtype)
+            if self._op in ("maximum", "minimum", "fmax", "fmin") and initial in (None, _NoValue) and where is True:
+                r = _into_two_steps(a, axis, out, keepdims, self._op in ("maximum", "fmax"), self._op in ("fmax", "fmin"),
+                                    _dtype_of(dtype))
+                if r is not None:
+                    return r
             _store(out, self.reduce(a, axis, dtype, None, keepdims, initial, where), "reduce")
             return out
         if initial is _NoValue:
@@ -1075,16 +1080,14 @@ class ufunc:
         if asarray(a).ndim == 0:
             raise TypeError("cannot accumulate on a scalar")
         if out is not None:
-            # (computed in out's dtype unless dtype is given, as NumPy's)
+            # (computed in dtype if given, else in the loop both the input's and out's dtypes convert to, as NumPy's: a
+            # float array into an int out accumulates in float, each result cast into out; an invalid conversion
+            # warns "... in cast", then "... in accumulate")
             out = _one_out(out)
-            # (its input converted to out's dtype is the accumulation's own conversion: its warning says so)
-            old = _np._cast_label("accumulate")
-            try:
-                r = asarray(self.accumulate(a, axis, dtype if dtype is not None else out.dtype))
-            finally:
-                _np._cast_label(old)
+            r = asarray(self.accumulate(a, axis, dtype if dtype is not None else result_type(asarray(a).dtype, out.dtype)))
             if r.shape != out.shape:
                 raise ValueError("provided out is the wrong size for the accumulation.")
+            _store(out, r, "cast")
             _store(out, r, "accumulate")
             return out
         a = asarray(a)
@@ -1700,11 +1703,65 @@ def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
     return (_np.amax if is_max else _np.amin)(a, axis, keepdims, ini, first)
 
 
+def _into_two_steps(a, axis, out, keepdims, is_max, first, loop=None):
+    """NumPy's reduction without an identity (maximum, minimum, and fmax/fmin when first) into an out= of another
+    dtype than its loop's, in NumPy's two steps, or None where that doesn't apply (out not an array of the result's
+    shape, or no element to reduce: the one-step path takes and refuses those):
+    1. each output position's first element (index 0 along every reduced axis) cast into out, an invalid conversion
+       warning "... in cast";
+    2. the rest reduced in the loop's dtype, starting from out's value read back, and the result cast into out,
+       warning "... in reduce". With one element to reduce, an invalid first conversion is reported by both.
+    (NumPy's buffered iterator also writes out back every 8192 elements of some layouts; that isn't done here)"""
+    a = asarray(a)
+    if not isinstance(out, ndarray):
+        return None
+    red = _reduce_axes(a, axis)
+    if _builtins.any(a.shape[ax] == 0 for ax in red):
+        return None
+    shape_k = tuple(1 if i in red else d for i, d in enumerate(a.shape))
+    if out.shape != (shape_k if keepdims else tuple(d for i, d in enumerate(a.shape) if i not in red)):
+        return None
+    if loop is None:
+        loop = result_type(a.dtype, out.dtype)
+    if out.dtype == loop:
+        return None  # (out holds the loop's values: one step is the same)
+    _store(out, a[tuple(slice(0, 1) if i in red else slice(None) for i in range(a.ndim))].reshape(out.shape), "cast")
+    n = 1
+    for ax in red:
+        n *= a.shape[ax]
+    if n == 1:
+        # (nothing more to reduce: NumPy reports an invalid first conversion again, as the reduction's)
+        _store(out, a.reshape(out.shape), "reduce")
+        return out
+    op = (fmax if is_max else fmin) if first else (maximum if is_max else minimum)
+    acc = out.astype(loop).reshape(shape_k)
+    reds = sorted(red)
+    for k, ax in enumerate(reds):
+        # (the elements past the first: those with a later index along this axis and index 0 along the earlier ones)
+        sl = [slice(None)] * a.ndim
+        for p in reds[:k]:
+            sl[p] = slice(0, 1)
+        sl[ax] = slice(1, None)
+        part = a[tuple(sl)]
+        if part.shape[ax]:
+            acc = op(acc, asarray((_np.amax if is_max else _np.amin)(part, tuple(reds), True, None, first)).astype(loop))
+    _store(out, acc.reshape(out.shape), "reduce")
+    return out
+
+
 def amax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
+    if out is not None and initial is None and where is True:
+        r = _into_two_steps(a, axis, out, keepdims, True, False)
+        if r is not None:
+            return r
     return _out(_minmax(a, axis, keepdims, initial, where, True), out, "reduce")
 
 
 def amin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
+    if out is not None and initial is None and where is True:
+        r = _into_two_steps(a, axis, out, keepdims, False, False)
+        if r is not None:
+            return r
     return _out(_minmax(a, axis, keepdims, initial, where, False), out, "reduce")
 
 
@@ -1747,10 +1804,17 @@ def any(a, axis=None, out=None, keepdims=False, *, where=True):
 
 
 def cumsum(a, axis=None, dtype=None, out=None):
+    if out is not None and isinstance(out, ndarray):
+        # (NumPy's: add.accumulate into out, flattened for axis=None)
+        a = asarray(a)
+        return add.accumulate(a.ravel() if axis is None else a, 0 if axis is None else axis, dtype, out)
     return _out(_np.cumsum(asarray(a), axis, dtype), out, "accumulate")
 
 
 def cumprod(a, axis=None, dtype=None, out=None):
+    if out is not None and isinstance(out, ndarray):
+        a = asarray(a)
+        return multiply.accumulate(a.ravel() if axis is None else a, 0 if axis is None else axis, dtype, out)
     return _out(_np.cumprod(asarray(a), axis, dtype), out, "accumulate")
 
 
@@ -1816,6 +1880,10 @@ def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
     if initial is None:
         if a.size == 0 and _count(a, axis) == 0:
             raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
+        if out is not None:
+            r = _into_two_steps(a, axis, out, keepdims, is_max, True)
+            if r is not None:
+                return r
         r = (_np.amax if is_max else _np.amin)(a, axis, keepdims, None, True)
         return r if out is None else _out(r, out, "reduce")
     return _out(_minmax(a, axis, keepdims, initial, where, is_max, True), out, "reduce")

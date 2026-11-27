@@ -448,6 +448,8 @@ async function control(body) {
     case "sealedCap": ref.controls.setSealedCap(body.n); return { ok: true };
     case "refuseSealed": ref.controls.refuseSealed(body.dseq, body.code); return { ok: true };
     case "sealedRefs": return { refs: ref.controls.refs(body.account, body.address) };
+    // (e2e PR 5d: the index's references, each add `address:add_seq` with the seq that released it or null)
+    case "indexRefs": return { rows: ref.controls.indexRefs(body.account) };
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the client's side is tested by injecting them here; the server's own are dropped unless
     // ctl.serverNotices)
@@ -1608,7 +1610,11 @@ try {
     writeFileSync(join(site, "floors.html"), `<!doctype html><meta charset="utf-8"><title>sync floors: the old front</title><script>window.ACCOUNTS = ${J(FLOOR_ACCOUNTS)}; window.OLD_SHA = ${J(OLD_SHA)};</script><script type="module">import { runFloors } from "./cases.js"; window.runFloors = runFloors; window.ready = true;</script>`);
   } else {
     waitingOn = "the page's bundle (Bun.build of index.ts)";
-    const b = await bounded(Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
+    // (index.ts, and the test hooks it doesn't export: dropVersions' DROP_HOOK sits between an irreversible deletion and
+    // its log, so only this test bundle carries it, never the product's public surface)
+    const wsEntry = join(site, "ws-entry.ts");
+    writeFileSync(wsEntry, `export * from ${J(join(here, "index.ts"))};\nexport { DROP_HOOK } from ${J(join(here, "api.ts"))};\n`);
+    const b = await bounded(Bun.build({ entrypoints: [wsEntry], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
     if (!b.success) throw new Error("the page's bundle: " + b.logs.map(String).join("\n"));
     // (e2e PR 5c: the sealing module and an epoch's keys, a bundle of their own that only the sealed cases load, so the
     // workspace's bundle carries none of it, as a page without end-to-end encryption doesn't)

@@ -2004,6 +2004,10 @@ _PYBUILTINS = set((
 _PYKW |= _PYBUILTINS
 
 
+# (records being printed: a maximal order in one keeps the one-line form, _MOrder._str)
+_IN_REC = [0]
+
+
 class MRec:
     """A record: values for some of its format's fields."""
 
@@ -2052,7 +2056,16 @@ class MRec:
 
     def _str(self, indent, tail=""):
         """Printed over lines at `indent`, its closing ">" added after its
-        last field is laid out (_close), then `tail` (a sequence's comma)."""
+        last field is laid out (_close), then `tail` (a sequence's comma).
+        A maximal order in it prints on one line (_IN_REC), as a tuple's does:
+        Magma's layout of these is an open issue."""
+        _IN_REC[0] += 1
+        try:
+            return self._str1(indent, tail)
+        finally:
+            _IN_REC[0] -= 1
+
+    def _str1(self, indent, tail):
         head = "rec<%s | " % _format_name(self.fmt)
         names = [n for n in self.fmt.names if n in self.vals]
         if not names:
@@ -4924,6 +4937,8 @@ def _str1(v, indent, col, tail):
         return ("\n" + " " * indent).join(repr(v).split("\n")) + tail, True
     if isinstance(v, (MTuple, MRec)) and any(isinstance(p, _MFFMat) for p in (v if isinstance(v, MTuple) else v.vals.values())):
         raise MagmaError("printing a tuple or record holding a matrix over a finite field is not supported yet")
+    if isinstance(v, _MOrder):
+        return v._str(col, indent, tail), True
     if getattr(v, "_magma_nowrap", False):
         return _inline(v), False
     if isinstance(v, MTuple) and any(_multiline(p) for p in v):
@@ -5018,6 +5033,23 @@ def _extra(v):
     return 0
 
 
+def _cont_words(pieces):
+    """The words of pieces (text, continuation column), for _flow: each word
+    with the column of the piece it starts in."""
+    words, cur, at = [], "", 0
+    for text, cont in pieces:
+        for ch in text:
+            if ch == " ":
+                words.append((cur, True, at))
+                cur = ""
+            else:
+                if not cur:
+                    at = cont
+                cur += ch
+    words.append((cur, False, at))
+    return words
+
+
 def _flow(chunks, first_col, cont, indent=None):
     """Magma's layout of chunks (text, space after it) on lines of WIDTH
     columns, the first starting at first_col (its text already written),
@@ -5033,19 +5065,23 @@ def _flow(chunks, first_col, cont, indent=None):
     sequences, nested sequences, tuples and print lines)."""
     indent = cont if indent is None else indent
     out, c = [], first_col
-    for text, space in chunks:
+    for chunk in chunks:
+        # (a chunk may carry its own continuation column, a third element: a maximal order's polynomial,
+        # _MOrder._pieces)
+        text, space = chunk[0], chunk[1]
+        cc = chunk[2] if len(chunk) > 2 else cont
         # (the first chunk of a value printf writes after its own text is
         # split where it doesn't fit, never moved: _sprint_str)
         nomove, _NOMOVE[0] = _NOMOVE[0], False
         if text:
-            if not nomove and (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cont:
+            if not nomove and (2 * (c - indent) > WIDTH - indent and c > 2 * indent or c >= WIDTH - 1) and c > cc:
                 if c + len(text) <= WIDTH:
                     out.append(text)
                     c += len(text)
                     text = ""
                 else:
-                    out.append("\n" + " " * cont)
-                    c = cont
+                    out.append("\n" + " " * cc)
+                    c = cc
             # (by offsets: no copy of the rest of a long chunk for each line)
             i, n = 0, len(text)
             while i < n and c + n - i > WIDTH - 1:
@@ -5054,9 +5090,9 @@ def _flow(chunks, first_col, cont, indent=None):
                     # (just the backslash when the line is full and the
                     # next has room, as after printf's own text; else at
                     # least one character, so that deep lines progress)
-                    k = 0 if c == WIDTH - 1 and cont < WIDTH - 1 else 1
-                out.append(text[i:i + k] + "\\\n" + " " * cont)
-                i, c = i + k, cont
+                    k = 0 if c == WIDTH - 1 and cc < WIDTH - 1 else 1
+                out.append(text[i:i + k] + "\\\n" + " " * cc)
+                i, c = i + k, cc
             out.append(text[i:])
             c += n - i
         if space and c < WIDTH:
@@ -9936,18 +9972,42 @@ class _MNumberField(_snf.NumberField_absolute):
 
 class _MOrder:
     _magma_block = True
-    _magma_nowrap = True  # Magma prints the description on one line
 
     def __init__(self, K):
         self.K = K
 
-    def __repr__(self):
-        K = self.K
-        f = _snf._repr_poly(K._zf, K._var)
+    def _is_equation_order(self):
         # (a non-monic polynomial's equation order isn't the maximal order, as Magma has it)
-        if K._zf[-1] == 1 and K._nfdata()["index"] == 1:
-            return "Maximal Equation Order with defining polynomial %s over its ground order" % f
-        return "Maximal Order of Equation Order with defining polynomial %s over its ground order" % f
+        return self.K._zf[-1] == 1 and self.K._nfdata()["index"] == 1
+
+    def _parts(self):
+        # (the defining polynomial always in x, whatever the field's own variable is called: Magma 2.18-5 prints the
+        # equation order's polynomial so, for NumberField(t^3 - 2) and NumberField(PolynomialRing(Rationals()).1^3 - 2)
+        # alike)
+        K = self.K
+        f = _snf._repr_poly(K._zf, "x")
+        head = "Maximal Equation Order" if self._is_equation_order() else "Maximal Order of Equation Order"
+        return head + " with defining polynomial", f, "over its ground order"
+
+    def __repr__(self):
+        return "%s %s %s" % self._parts()
+
+    def _pieces(self, indent, plus):
+        """The order's text in pieces with the column a line broken in each
+        continues at (_cont_words): the polynomial's terms after its first
+        `plus` more in, as a polynomial is; the description, the first term
+        and what follows at the indentation (Magma 2.18-5)."""
+        head, f, rest = self._parts()
+        first = f.split(" ")[0]
+        return [(head + " " + first, indent), (f[len(first):], indent + plus), (" " + rest, indent)]
+
+    def _str(self, col, indent, tail):
+        """Laid out as Magma prints a maximal equation order past WIDTH
+        columns (_pieces); under printf's %o without the polynomial's 4."""
+        if _making_string() or not self._is_equation_order() or _IN_REC[0]:
+            return repr(self) + tail
+        plus = 0 if _SPRINT[0] is not None else 4
+        return _flow(_cont_words(self._pieces(indent, plus) + [(tail, indent)]), col, indent, indent)
 
     def _magma_degree(self):
         return self.K.degree()

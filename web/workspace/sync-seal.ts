@@ -15,6 +15,7 @@
 import { OP_REFS_MAX, opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp, type OpRelease } from "./e2e/index-op.ts";
 import type { EpochKeys } from "./e2e/keys.ts";
 import type { WireOp } from "./sync-outbox";
+import { RELEASE_OP as RELEASE, refsOf } from "./sync-refs";
 
 /** The key chain as this device last verified it: what a sealed op commits to, and what pull checks one against. Every
  * position is the chain's ABSOLUTE seq (its base plus the head's index), and anything about a head this verified chain
@@ -56,19 +57,19 @@ export type Sealed = {
   head: string;
   chainGen: string;
   adds: string[];
-  /** each the add it ends: the blob's address and the seq of the accepted op whose adds named it */
-  releases: { address: string; add: number }[];
+  releases: OpRelease[];
   signer: string;
   sig: string;
 };
 
-/**
- * The blob references an op declares in the clear (the server counts them): as today's plaintext log counts them, a
- * data file's op adds a reference to the blob it names. Nothing is released yet: retention and Trash become explicit
- * ops that release (e2e PR 5d); until then the server holds every blob a sealed op adds, as it does for plaintext ops.
- */
-export function refsOf(op: WireOp): { adds: string[]; releases: { address: string; add: number }[] } {
-  return { adds: op.kind === "file" && op.sha256 !== undefined ? [op.sha256] : [], releases: [] };
+/** (the references an op declares, and the release op's name: sync-refs.ts, which the page has without this module) */
+export { refsOf, RELEASE };
+/** A release op as this device makes it. */
+export const releaseOp = (dseq: number, t: number, by: string, releases: readonly OpRelease[]): WireOp =>
+  ({ dseq, t, by, op: RELEASE, path: "/", kind: "folder", releases: releases.map((r) => ({ address: r.address, add: r.add })) });
+/** Whether an opened op is exactly a release op's form: those fields, no others (no content, nothing it could change). */
+export function isReleaseForm(op: Record<string, unknown>): boolean {
+  return Object.keys(op).sort().join(",") === "by,dseq,kind,op,path,releases,t" && op.op === RELEASE && op.path === "/" && op.kind === "folder" && Array.isArray(op.releases) && (op.releases as unknown[]).length > 0;
 }
 
 const b64 = (b: Uint8Array): string => {
@@ -253,6 +254,8 @@ export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Recor
     halt("an op whose references can't be read");
   }
   if (!refsMatch) halt("visible references that aren't its op's");
+  // (a release op is exactly its form: no content, nothing else it could change; e2e PR 5d)
+  if (op.op === RELEASE && !isReleaseForm(op as unknown as Record<string, unknown>)) halt("a release op that isn't only a release");
   const hash = b64url(await opHash(env));
   return { op, state: Object.freeze({ seq, floor: p!, chainGen: chain.generation, devices: Object.freeze({ ...st.devices, [device]: { dseq: dseq as number, hash } }) }) };
 }
