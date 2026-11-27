@@ -518,6 +518,11 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       fieldFor: (k) => comp.cells().find((c: any) => c.id === k)?.ta ?? null,
       hasKey: (k) => comp.cells().some((c: any) => c.id === k),
       notApplied: (n) => ui.bar({ kind: "refused", text: `${n} input action${n === 1 ? "" : "s"} made here while it was taking over the notebook from another tab ${n === 1 ? "wasn't" : "weren't"} applied: enter that input again.` }),
+      // (a whole write of the notebook asked of this pane while it writes it (an agent's workspace_write, through any page
+      // of this browser): made as the notebook page makes it, a change made here, saved and recorded.  None while the
+      // pane can't save it (closing, let go, frozen): the write is left to the tab that writes it next)
+      shownDoc: () => (alive && nb === comp && attached && bound && !frozen && guard === "open" && comp.store === jstore ? comp.snapshot() : null),
+      replaceDoc: (doc) => comp.replace(doc),
     });
     handover.bind(jstore);
     const c = controlsOf(jstore);
@@ -700,6 +705,9 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       controlsOf = hist.pageControls;
       // (tests, loopback pages only: this pane's journal store, to put it in a hand-over's state, test-agents-artifacts.mjs J10)
       if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) (globalThis as any).__sbTestPaneJournal = () => jstore;
+      // (tests, loopback pages only: a close's first step alone (freeze), so the pane holds the writer lock while it can't
+      // save the notebook; test-agents-artifacts.mjs J15, J16)
+      if (/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) (globalThis as any).__sbTestPaneFreeze = () => { if (nb) freeze(nb); };
     }
     const inner = jstore ?? new mod.IdbStore(guarded, ref);
     stored = () => inner.loadRecord();

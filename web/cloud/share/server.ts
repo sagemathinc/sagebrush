@@ -1,7 +1,8 @@
 // Shared collections: the API on sagebrush.space (design/sharing.md).
 //
 //   GET  /auth/login?return=/path      sign in with CoCalc (code + PKCE); with AUTH_PROVIDER "workos", with
-//                                      WorkOS AuthKit instead (and CoCalc is then no authority here at all)
+//                                      WorkOS AuthKit instead (and CoCalc is then no authority here at all);
+//                                      &reauth=1 (WorkOS only): sign in again, recorded as sessions.reauth_ms
 //   GET  /auth/callback                the provider sends the user back here
 //   POST /auth/logout
 //   POST /auth/dev                     dev only: a session for a test account
@@ -416,7 +417,7 @@ async function account(req: Request, env: ShareEnv, ctx?: Ctx): Promise<Who | nu
 }
 
 export type SessionResult =
-  | { kind: "ok"; id: string; session: string; expires: number; created: number }
+  | { kind: "ok"; id: string; session: string; expires: number; created: number; reauthMs: number | null }
   | { kind: "none" }
   | { kind: "unavailable" };
 
@@ -435,10 +436,10 @@ interface SessionRow {
   account_id: string; expires: number; created: number; last_active: number | null; kind: string;
   validated: number | null; abs_expires: number | null; refresh_ct: string | null; key_version: string | null;
   refresh_failed: number | null; identity_id: string | null; provider_sid: string | null; generation: number;
-  agen: number; subject: string | null; idle_s: number | null; last_used: number | null;
+  agen: number; subject: string | null; idle_s: number | null; last_used: number | null; reauth_ms: number | null;
 }
 const SESSION_ROW = `SELECT s.account_id, s.expires, s.created, a.last_active, s.kind, s.validated, s.abs_expires, s.refresh_ct, s.key_version, s.idle_s, s.last_used,
-  s.refresh_failed, s.identity_id, s.provider_sid, s.generation, a.generation AS agen, i.subject
+  s.reauth_ms, s.refresh_failed, s.identity_id, s.provider_sid, s.generation, a.generation AS agen, i.subject
   FROM sessions s JOIN accounts a ON a.account_id = s.account_id LEFT JOIN identities i ON i.identity_id = s.identity_id`;
 
 /**
@@ -487,7 +488,7 @@ export async function sessionResult(req: Request, env: ShareEnv, ctx?: Ctx): Pro
     // through past the session's stored end)
     if (!(expires > now())) return { kind: "none" };
   }
-  return { kind: "ok", id: row.account_id, session, expires, created: row.created };
+  return { kind: "ok", id: row.account_id, session, expires, created: row.created, reauthMs: row.reauth_ms };
 }
 
 /** How often a session with an idle limit records its holder's activity (seconds): at most once an hour, and always
@@ -625,14 +626,16 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
   const t = now();
   const h = await accountHash(who.account_id);
   const hash = await sha256Hex(token);
-  if (workosMode(env)) return startIdentitySession(env, who.account_id, ttl, ident ?? { kind: "dev" }, token, hash, h, t);
+  // (with WorkOS, a session needs its identity: a WorkOS sign-in's or /auth/dev's, never one by default)
+  if (workosMode(env)) return ident ? startIdentitySession(env, who.account_id, ttl, ident, token, hash, h, t) : null;
   try {
     await db.batch([
       ...guard(db, `NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?1) AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND deleting IS NOT NULL)`, h, who.account_id),
       // (active users, r2 §1.1: a new account counts on its day, only while no account row exists yet)
       db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) SELECT ?1, 'account', 'all', 1 WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day, who.account_id),
       db.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(account_id) DO UPDATE SET email = ?2, name = ?3, last_login = ?4").bind(who.account_id, who.email ?? null, who.name ?? null, t),
-      db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind) VALUES (?1, ?2, ?3, ?4, ?5)").bind(hash, who.account_id, t, t + ttl, ident?.kind === "dev" ? "dev" : "legacy"),
+      // (reauth_ms: /auth/dev's (DEV only) is now; a CoCalc sign-in's is NULL, since it proves no fresh sign-in)
+      db.prepare(`INSERT INTO sessions (token_hash, account_id, created, expires, kind, reauth_ms) VALUES (?1, ?2, ?3, ?4, ?5, CASE WHEN ?5 = 'dev' THEN ${D1_NOW_MS} END)`).bind(hash, who.account_id, t, t + ttl, ident?.kind === "dev" ? "dev" : "legacy"),
       // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3)
       db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
     ]);
@@ -646,8 +649,9 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
  * A session's identity, with AUTH_PROVIDER "workos": a WorkOS sign-in's, or /auth/dev's (DEV only).  A WorkOS one
  * carries its refresh token (sealed here, bound to the new session), when its attempt started (D1 ms, for the
  * sign-out-everywhere barrier) and the slot its callback reserved (pending_exchanges), which becomes the session.
+ * `reauthUntil` (D1 ms): for a re-authentication (see reauthUntil), the last moment its session may record one.
  */
-type SessionIdentity = { kind: "workos"; identity_id: string; sid: string; refreshToken: string; started: number; pending: string; email: string | null; ticket: number } | { kind: "dev" };
+type SessionIdentity = { kind: "workos"; identity_id: string; sid: string; refreshToken: string; started: number; pending: string; email: string | null; ticket: number; reauthUntil: number | null } | { kind: "dev" };
 
 /** The address to store for the identity of a verified token's subject: WorkOS's verified one for that same user, or null. */
 const verifiedEmail = (u: WorkosUser | null, subject: string) => (u && u.id === subject ? u.email : null);
@@ -702,9 +706,9 @@ async function startIdentitySession(env: ShareEnv, account: string, ttl: number,
             // sweep has already turned into a sid-unknown row makes no session, and is settled by the caller)
             ...guard(db, "EXISTS (SELECT 1 FROM pending_exchanges WHERE id = ?1)", ident.pending),
             db.prepare("DELETE FROM pending_exchanges WHERE id = ?1").bind(ident.pending),
-            db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, identity_id, provider_sid, abs_expires, validated, refresh_ct, key_version, generation) SELECT ?1, ?2, ?3, ?4, 'workos', ?5, ?6, ?7, ?3, ?8, ?9, (SELECT generation FROM accounts WHERE account_id = ?2) WHERE EXISTS (SELECT 1 FROM identities WHERE identity_id = ?5 AND account_id = ?2)").bind(hash, account, t, expires, ident.identity_id, ident.sid, abs, sealed!.ct, sealed!.version),
+            db.prepare(`INSERT INTO sessions (token_hash, account_id, created, expires, kind, identity_id, provider_sid, abs_expires, validated, refresh_ct, key_version, generation, reauth_ms) SELECT ?1, ?2, ?3, ?4, 'workos', ?5, ?6, ?7, ?3, ?8, ?9, (SELECT generation FROM accounts WHERE account_id = ?2), ${reauthAt(D1_NOW_MS, "?10")} WHERE EXISTS (SELECT 1 FROM identities WHERE identity_id = ?5 AND account_id = ?2)`).bind(hash, account, t, expires, ident.identity_id, ident.sid, abs, sealed!.ct, sealed!.version, ident.reauthUntil),
           ]
-        : [db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, 'dev', ?5, ?3)").bind(hash, account, t, expires, abs)]),
+        : [db.prepare(`INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated, reauth_ms) VALUES (?1, ?2, ?3, ?4, 'dev', ?5, ?3, ${D1_NOW_MS})`).bind(hash, account, t, expires, abs)]),
       // (the session must exist: a WorkOS session whose identity isn't this account's inserted nothing above)
       ...guard(db, "EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?1)", hash),
       // (the identity's verified email, as this sign-in's WorkOS answer gave it, or null: in the session's own batch, so
@@ -747,6 +751,26 @@ const STATE_SKEW_S = 60;
 const statesMax = (env: ShareEnv) => (devGates(env) && env.AUTH_STATES_MAX ? Number(env.AUTH_STATES_MAX) : AUTH_STATES_MAX);
 const STATES_EXPIRED = "DELETE FROM auth_states WHERE rowid IN (SELECT rowid FROM auth_states WHERE expires < ?1 LIMIT ?2)";
 
+/**
+ * A re-authentication (sessions.reauth_ms): /auth/login?reauth=1 asks AuthKit to sign the person in again (max_age=0)
+ * and writes `reauth: true` into the signed sign-in state, never anywhere the browser could set it.  Its callback's
+ * session records D1's clock when it is made, only within the state's life (REAUTH_LIFE_MS from `started`), and only
+ * if the access token's auth_time (AuthKit's time of the person's last active sign-in, whole seconds) isn't before
+ * `started`.  Without a usable auth_time it records nothing: the token's iat is this exchange's own and proves no sign-in.
+ * Every other session's reauth_ms is NULL, except /auth/dev's (DEV only), which is now.
+ */
+const REAUTH_LIFE_MS = 600_000;
+/** the SQL value of a new session's reauth_ms: `nowSql` while it is at most `until` (a parameter, NULL for none), else NULL */
+export const reauthAt = (nowSql: string, until: string) => `CASE WHEN ${until} IS NOT NULL AND ${nowSql} <= ${until} THEN ${nowSql} END`;
+/** The last moment (D1 ms) a callback's session may record a re-authentication, or null when it may not record one. */
+export function reauthUntil(st: { reauth?: unknown; started: number }, claims: { auth_time?: unknown }): number | null {
+  if (st.reauth !== true) return null;
+  const at = claims.auth_time;
+  // (whole seconds: a sign-in within the second `started` falls in stands, one in any earlier second doesn't)
+  if (typeof at !== "number" || !Number.isSafeInteger(at) || at * 1000 + 999 < st.started) return null;
+  return st.started + REAUTH_LIFE_MS;
+}
+
 async function workosLogin(req: Request, env: ShareEnv): Promise<Response> {
   const c = workosConfig(env);
   const url = new URL(req.url);
@@ -761,9 +785,10 @@ async function workosLogin(req: Request, env: ShareEnv): Promise<Response> {
   // sign-out everywhere, which is on the same clock)
   const d = await env.SHARE_DB!.prepare(`SELECT ${D1_NOW_MS} AS t`).first<{ t: number }>().catch(() => null);
   if (!d || !Number.isSafeInteger(d.t)) return authErr(503, "sign-in is unavailable; try again soon");
-  const payload = b64url(enc.encode(JSON.stringify({ state, nonce, verifier, ret: returnPath(url.searchParams.get("return"), url.origin), exp: now() + 600, started: d.t })));
+  const reauth = url.searchParams.get("reauth") === "1";
+  const payload = b64url(enc.encode(JSON.stringify({ state, nonce, verifier, ret: returnPath(url.searchParams.get("return"), url.origin), exp: now() + REAUTH_LIFE_MS / 1000, started: d.t, ...(reauth ? { reauth: true } : {}) })));
   const signed = `${payload}.${await hmac(env.SESSION_KEY!, "workos-oauth\n" + payload)}`;
-  const to = authorizeUrl(c, { redirectUri: `${env.AUTH_ORIGIN}/auth/callback`, state, challenge, signUp: url.searchParams.get("screen") === "sign-up" });
+  const to = authorizeUrl(c, { redirectUri: `${env.AUTH_ORIGIN}/auth/callback`, state, challenge, signUp: url.searchParams.get("screen") === "sign-up", reauth });
   return new Response(null, { status: 302, headers: { location: to, "set-cookie": cookie(OAUTH, signed, 600), ...AUTH_HEADERS } });
 }
 
@@ -889,7 +914,7 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
   const raw = cookies(req).get(OAUTH) ?? "";
   const [payload, sig] = raw.length <= STATE_MAX ? raw.split(".") : [];
   if (!payload || !sig || !same(sig, await hmac(env.SESSION_KEY!, "workos-oauth\n" + payload))) return authErr(400, "sign-in expired; try again");
-  let st: { state?: unknown; nonce?: unknown; verifier?: unknown; ret?: unknown; exp?: unknown; started?: unknown };
+  let st: { state?: unknown; nonce?: unknown; verifier?: unknown; ret?: unknown; exp?: unknown; started?: unknown; reauth?: unknown };
   try {
     st = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0))));
   } catch {
@@ -938,7 +963,7 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
     return !v.ok && v.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(401, "sign-in failed; try again");
   }
   const ident = await identityAccount(db, c.issuer, v.subject);
-  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid, refreshToken: x.refreshToken, email: verifiedEmail(x.user, v.subject), ticket, started: st.started, pending }));
+  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid, refreshToken: x.refreshToken, email: verifiedEmail(x.user, v.subject), ticket, started: st.started, pending, reauthUntil: reauthUntil({ reauth: st.reauth, started: st.started }, v.claims) }));
   if (!ident || !session) {
     // (refused here: the account disabled or being deleted, the sign-out-everywhere barrier, no account could be made,
     // or the exchange took so long that the sweep counted it as unknown; WorkOS's session is queued for revoking in
@@ -949,6 +974,20 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
     return swept ? authErr(503, "sign-in took too long; try again") : ident ? authErr(403, "this account can't sign in") : authErr(503, "sign-in is unavailable; try again soon");
   }
   await db.batch(activityBatch(db, ident.account_id, session.hash, touchClock(), country(req))).catch(() => {});
+  // (a re-authentication replaces the session this browser held: it is ended as a sign-out ends it, its WorkOS session
+  // queued for revoking unless it is the new session's own)
+  const prior = st.reauth === true ? cookies(req).get(SESSION) : undefined;
+  if (prior && SESSION_TOKEN.test(prior)) {
+    const ph = await sha256Hex(prior);
+    if (ph !== session.hash) {
+      await db.batch([
+        db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'replaced', ?2, ?2 FROM sessions WHERE token_hash = ?1 AND provider_sid IS NOT NULL AND provider_sid != ?3").bind(ph, now(), v.sid),
+        db.prepare("DELETE FROM admin_grants WHERE session = ?1").bind(ph),
+        db.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(ph),
+      ]).catch(() => {});
+      ctx.waitUntil(drainRevokes(env, 5, 6000));
+    }
+  }
   const h = new Headers({ location: ret, ...AUTH_HEADERS });
   h.append("set-cookie", clear);
   h.append("set-cookie", session.cookie);
@@ -1775,8 +1814,12 @@ export async function scheduled(env: ShareEnv): Promise<void> {
     const r = await db.prepare(STATES_EXPIRED).bind(t - STATE_SKEW_S, 1000).run().catch(() => null);
     if (!r || Number(r.meta?.changes ?? 0) < 1000) break;
   }
-  // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4)
-  await db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY).run();
+  // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4): a view's targets with it, in
+  // one batch, the targets first (they reference the view)
+  await db.batch([
+    db.prepare("DELETE FROM admin_view_targets WHERE view_id IN (SELECT id FROM admin_views WHERE at < ?1)").bind(t - ADMIN_RECORD_DAYS * DAY),
+    db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY),
+  ]);
   // expired admin grants (r1h §1.8)
   await db.prepare("DELETE FROM admin_grants WHERE expires_at < ?1").bind(t).run();
   // records of finished deletions, after their time (HARD-SHARE-3, HARD-E55-2):

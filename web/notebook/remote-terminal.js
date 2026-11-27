@@ -35,6 +35,7 @@ export const TERMINAL = {
   helloMs: 10_000,
   pingMs: 15_000,         // between the page's pings to the relay (relay.py RELAY_LIMITS["pingMs"])
   missedPongs: 2,         // pings unanswered: the leg is dead (relay.py RELAY_LIMITS["missedPongs"])
+  probeMs: 5_000,         // a probe's ping (the tab came back): no pong in this long, and the leg is taken for dead
 };
 export const SYNTHETIC_BASE = "https://local.sagebrush.invalid/api/compute/v1";
 const RELAY_CONTROL = '{"relay":"';
@@ -103,7 +104,8 @@ export class RemoteTerminal {
    * @param o.on         (event) => void: {t:"opened",session} {t:"live"} {t:"exit",code,signal} {t:"elsewhere"}
    *                     {t:"error",error,reason?} {t:"closed",code,why}
    * @param o.WebSocket  injectable
-   * @param o.timers     { setInterval, clearInterval } (injectable; default the global ones): the relay pings
+   * @param o.timers     { setInterval, clearInterval, setTimeout, clearTimeout } (injectable; default the global ones): the
+ *                     relay pings and a probe's wait
    */
   constructor(o) {
     this.o = o;
@@ -124,6 +126,7 @@ export class RemoteTerminal {
     this.pinger = null;          // the ping interval, from the leg's open to any close
     this.missedPongs = 0;        // pings sent since the last pong
     this.receiptUpto = -1;       // the last receipt's upto: each next one must be higher (cumulative, never repeated)
+    this.probes = new Set();     // probes waiting for a pong: each { answer(alive) }
   }
 
   start() {
@@ -178,6 +181,31 @@ export class RemoteTerminal {
   _stopPinger() {
     if (this.pinger !== null) this.timers.clearInterval(this.pinger);
     this.pinger = null;
+    // (an ended leg answers every probe still waiting: not alive)
+    for (const p of [...this.probes]) p.answer(false);
+  }
+
+  /**
+   * Is the leg alive now?  One ping, outside the interval (a tab that comes back from the background, where the browser
+   * slowed its timers and the relay may have closed the leg meanwhile): true once the relay pongs, false if it doesn't
+   * within ms or the leg ends first.  Counted as a ping like the interval's, so it adds to the missed pings until a pong.
+   */
+  probe(ms = TERMINAL.probeMs) {
+    if (this.state === "ended" || !this.ws) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const p = {
+        answer: (alive) => {
+          if (!this.probes.delete(p)) return;
+          (this.timers.clearTimeout ? this.timers.clearTimeout(timer) : globalThis.clearTimeout(timer));
+          resolve(alive);
+        },
+      };
+      const expire = () => p.answer(false);
+      const timer = this.timers.setTimeout ? this.timers.setTimeout(expire, ms) : globalThis.setTimeout(expire, ms);
+      this.probes.add(p);
+      this.missedPongs++;
+      this._send({ relay: "ping" });
+    });
   }
 
   /**
@@ -204,6 +232,7 @@ export class RemoteTerminal {
     }
     if (o.relay === "pong" && keys === "relay") {
       this.missedPongs = 0;
+      for (const p of [...this.probes]) p.answer(true);
       return undefined;
     }
     return this._fail("an unknown relay control");

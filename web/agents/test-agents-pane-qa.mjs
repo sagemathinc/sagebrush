@@ -1,7 +1,8 @@
 // ci: web-artifacts.1 order=46 runner=bun chrome
 // The agents page as William tried it on DEV (Nov 22 2026): the composer's draft is kept by chat, through another chat,
 // a reload and a visit to Files, and goes once sent (#1615); an artifact's status says Saving… only while a change is
-// saved, never after a touch that changed nothing (#1617). The built page (SAGEBRUSH_AGENTS=1), served by
+// saved, never after a touch that changed nothing (#1617); a code file is shown in colour, read only, with ✎ Edit to
+// write in it (#1618); the pane's head has Open, the file on its own page in a new tab (#1614). The built page (SAGEBRUSH_AGENTS=1), served by
 // web/serve.py; for the artifacts, paired with the stand-in agent (test-delegate-host.mjs), which writes the files with
 // the workspace verb and shows them as its turn's artifacts, as sagebrush-agent does.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-pane-qa.mjs
@@ -203,10 +204,16 @@ try {
   const ci=closingTrace.indexOf('Closing…');ok(ci>=0&&!closingTrace.slice(ci+1).includes('Saved'),'S3: a save that completes while the notebook closes never says Saved over Closing…',closingTrace);
 
   // (a script, the same way)
+  // (every resize watcher a code editor starts is counted, and let go when it disconnects: R1 below)
+  await P.ev(`(() => { const live = (window.__codeWatchers = { live: new Set(), made: 0 }); const o = ResizeObserver.prototype.observe, d = ResizeObserver.prototype.disconnect;
+    ResizeObserver.prototype.observe = function (t, ...a) { if (t?.matches?.('textarea.code-edit')) (live.live.add(this), live.made++); return o.call(this, t, ...a); };
+    ResizeObserver.prototype.disconnect = function () { live.live.delete(this); return d.call(this); }; return true; })()`);
   made = await H.call("workspace.create", { path: "/qa.py", content: { text: "print(1)\n" } });
   ok(!made.error, "the agent wrote /qa.py", made.error);
   show("t-py", "/qa.py", "code");
-  await P.until(`!!document.querySelector('#artifacts .pane-host:not([hidden]) textarea.code-edit') && document.querySelector('#artifacts .pane-host:not([hidden]) .saved')?.textContent === 'Saved'`, 30000);
+  await P.until(`!!document.querySelector('#artifacts .pane-host:not([hidden]) .mode-toggle:not([hidden])') && document.querySelector('#artifacts .pane-host:not([hidden]) .saved')?.textContent === 'Saved'`, 30000);
+  await P.ev(`(document.querySelector('#artifacts .pane-host:not([hidden]) .mode-toggle').click(), true)`);
+  await P.until(`!!document.querySelector('#artifacts .pane-host:not([hidden]) textarea.code-edit')`);
   await P.ev(watch);
   await P.ev(`(document.querySelector('#artifacts .pane-host:not([hidden]) textarea.code-edit').focus(), true)`);
   await P.send("Input.insertText", { text: "x" });
@@ -214,6 +221,64 @@ try {
   await sleep(1800);
   ok((await said()) === "Saved", "S2: a script touched but not changed says Saved again", { now: await said(), said: await P.ev(`__said`) });
   ok(!(await P.ev(`__said`)).includes("Editing…"), "S2: it never says Editing…", await P.ev(`__said`));
+
+  // ======================================================================== #1618: a code file in colour, ✎ Edit
+  const HOST = "#artifacts .pane-host:not([hidden])";
+  made = await H.call("workspace.create", { path: "/mandel.py", content: { text: "def f(z):\n    return z * z + 1  # step\n# <img src=x onerror=\"window.__xss = 1\">\n" } });
+  ok(!made.error, "the agent wrote /mandel.py", made.error);
+  show("t-mandel", "/mandel.py", "code");
+  await P.until(`document.querySelector('${HOST} .file-path')?.textContent.startsWith('/mandel.py') && !!document.querySelector('${HOST} pre.code-view .hk')`, 30000);
+  const v = await P.ev(`(() => { const h = document.querySelector('${HOST}'), b = h.querySelector('.mode-toggle'); return { text: h.querySelector('pre.code-view').textContent, kw: [...h.querySelectorAll('pre.code-view .hk')].map((e) => e.textContent), comment: h.querySelector('pre.code-view .hc')?.textContent, ta: !!h.querySelector('textarea'), label: b.textContent, img: !!h.querySelector('img'), xss: !!window.__xss }; })()`);
+  ok(v.text === "def f(z):\n    return z * z + 1  # step\n# <img src=x onerror=\"window.__xss = 1\">\n" && v.kw.includes("def") && v.kw.includes("return") && v.comment === "# step", "C1: a .py artifact is shown in colour (keywords, comment), its text exactly", v);
+  ok(!v.ta && v.label === "✎ Edit", "C1: read only (no field), with ✎ Edit", v);
+  ok(!v.img && !v.xss, "C1: markup in the file is text, never an element (no <img>, its onerror never runs)", v);
+  await P.ev(`(document.querySelector('${HOST} .mode-toggle').click(), true)`);
+  await P.until(`!!document.querySelector('${HOST} textarea.code-edit')`);
+  const e = await P.ev(`(() => { const h = document.querySelector('${HOST}'), ta = h.querySelector('textarea.code-edit'), hl = h.querySelector('pre.code-hl'), b = h.querySelector('.mode-toggle'), r1 = ta.getBoundingClientRect(), r2 = hl.getBoundingClientRect(), s1 = getComputedStyle(ta), s2 = getComputedStyle(hl);
+    return { value: ta.value, focused: document.activeElement === ta, hlKw: [...hl.querySelectorAll('.hk')].map((x) => x.textContent), label: b.textContent, same: r1.left === r2.left && r1.top === r2.top && s1.font === s2.font && s1.paddingLeft === s2.paddingLeft && s1.paddingTop === s2.paddingTop && s1.lineHeight === s2.lineHeight, color: s1.color,
+      d: [r1.left, r2.left, r1.top, r2.top, s1.font, s2.font, s1.paddingLeft, s2.paddingLeft, s1.paddingTop, s2.paddingTop, s1.lineHeight, s2.lineHeight] }; })()`);
+  ok(e.value === "def f(z):\n    return z * z + 1  # step\n# <img src=x onerror=\"window.__xss = 1\">\n" && e.focused && e.label === "View", "C2: ✎ Edit makes it a field, with its text, focused; the switch says View", e);
+  ok(e.hlKw.includes("def") && e.same && e.color === "rgba(0, 0, 0, 0)", "C2: the colours are behind the field's (transparent) text, in the same font, place and padding", e);
+  await P.ev(`(() => { const t = document.querySelector('${HOST} textarea.code-edit'); t.setSelectionRange(t.value.length, t.value.length); return true; })()`);
+  await P.send("Input.insertText", { text: "while True:\n" });
+  await P.until(`document.querySelector('${HOST} .saved')?.textContent === 'Saved' && [...document.querySelectorAll('${HOST} pre.code-hl .hk')].some((x) => x.textContent === 'while')`, 10000).catch(() => {});
+  const r = await H.call("workspace.read", { path: "/mandel.py" });
+  ok(JSON.stringify(r.result ?? r).includes("while True:"), "C2: typed text is saved to the file", r);
+  ok(await P.ev(`[...document.querySelectorAll('${HOST} pre.code-hl .hk')].some((x) => x.textContent === 'while')`), "C2: and coloured as it is typed (the new keyword)");
+  await P.ev(`(document.querySelector('${HOST} .mode-toggle').click(), true)`);
+  const back = await P.ev(`(() => { const h = document.querySelector('${HOST}'); return { ta: !!h.querySelector('textarea'), text: h.querySelector('pre.code-view')?.textContent ?? null }; })()`);
+  ok(!back.ta && back.text?.endsWith("while True:\n"), "C3: View again shows the text as edited, read only", back);
+  // (the one remembered is /qa.py's, left in Edit above (S2); /mandel.py, left in View, isn't)
+  const modes = await P.ev(`Object.keys(JSON.parse(localStorage.getItem('sagebrush-doc-modes') ?? '{}'))`);
+  ok(Array.isArray(modes) && modes.length === 1, "C3: left in View, this file isn't remembered (View is the default); the one left in Edit is", modes);
+
+  // ======================================================================== #1614: Open, at the head's right
+  const o = await P.ev(`(() => { const a = document.querySelector('#artifacts .pane-head a.open-full'), head = document.querySelector('#artifacts .pane-head'), tabs = head.querySelector('.tabs'), close = head.querySelector('#close');
+    const ra = a.getBoundingClientRect(), rt = tabs.getBoundingClientRect(), rc = close.getBoundingClientRect();
+    return { hidden: a.hidden, href: a.getAttribute('href'), target: a.target, rel: a.rel, text: a.textContent, right: ra.left >= rt.right && ra.right <= rc.left, row: Math.abs((ra.top + ra.bottom) / 2 - (rc.top + rc.bottom) / 2) < 3, inBody: !!document.querySelector('${HOST} .file-path a') }; })()`);
+  const st = await H.call("workspace.stat", { path: "/mandel.py" }).catch(() => null);
+  ok(!o.hidden && /^\/\?code=[0-9a-f]+$/.test(o.href ?? "") && o.target === "_blank" && /noopener/.test(o.rel) && /^Open/.test(o.text), "O1: the head has Open, the code file's own page (/?code=<its id>), in a new tab", { o, st });
+  // (exactly the file's own page, as the workspace's stat names it to the agent, not only an address of that shape)
+  const entryOf = (r) => r?.result?.entry ?? r?.entry ?? r?.result ?? r;
+  const pageOf = (e) => { try { const u = new URL(e.url); return u.pathname + u.search; } catch { return null; } };
+  const codeEntry = entryOf(st);
+  ok(!!pageOf(codeEntry) && o.href === pageOf(codeEntry), "O1: Open is exactly this file's page, as the workspace names it", { href: o.href, entry: codeEntry });
+  ok(o.right && o.row, "O1: at the head's right, after the tabs, in the row of Copy and Close", o);
+  ok(!o.inBody, "O1: the small text link under the head is gone (one way, the head's)", o);
+  await P.ev(`([...document.querySelectorAll('#artifacts .pane-head [data-tab]')].find((t) => /qa\.ipynb/.test(t.textContent)).click(), true)`);
+  await P.until(`(document.querySelector('#artifacts .pane-head a.open-full:not([hidden])')?.getAttribute('href') ?? '').startsWith('/?nb=')`, 10000).catch(() => {});
+  const onb = await P.ev(`document.querySelector('#artifacts .pane-head a.open-full:not([hidden])')?.getAttribute('href') ?? null`);
+  ok((onb ?? "").startsWith("/?nb="), "O2: on the notebook's tab, Open is the notebook's page (/?nb=<its id>)", onb);
+  const nbEntry = entryOf(await H.call("workspace.stat", { path: "/qa.ipynb" }).catch(() => null));
+  ok(!!pageOf(nbEntry) && onb === pageOf(nbEntry), "O2: exactly this notebook's page, as the workspace names it", { onb, entry: nbEntry });
+  const page = await P.ev(`fetch(${"document.querySelector('#artifacts .pane-head a.open-full').getAttribute('href')"}).then((r) => r.status)`);
+  ok(page === 200, "O2: that address answers 200", page);
+  // ======================================================================== R1: the resize watcher goes with the editor
+  const before = await P.ev(`({ live: window.__codeWatchers.live.size, made: window.__codeWatchers.made })`);
+  await P.ev(`(document.querySelector('#close').click(), true)`);
+  await P.until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+  const after = await P.ev(`({ live: window.__codeWatchers.live.size, made: window.__codeWatchers.made, open: document.body.classList.contains('has-artifact') })`);
+  ok(before.made >= 1 && before.live >= 1 && !after.open && after.live === 0, "R1: the code editors' resize watchers are let go when the pane closes (none left watching)", { before, after });
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

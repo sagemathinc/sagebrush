@@ -10,12 +10,19 @@
 // check runs without the engine subprocess) and OPFS (said only).  One report line, then the app exits.
 // It also keeps a file permission across the launches (#1565, grants-file.ts): "write" allows the notebook to change one
 // folder, and waits for grants.json; "check" finds the notebook (another id now, made again from disk) allowed there.
+// "windows:<token>" (#1541, app/src-tauri/src/windows.rs): two windows, each its own storage, the same files.  The first
+// writes a file to disk, claims it, leaves a marker in its localStorage, sessionStorage and IndexedDB, and opens a
+// second window (window_open), which runs this probe too: it reads the three, finds the file (its own import of the
+// disk), claims the same file (it must be told the first window has it), and writes what it saw to a file of the
+// workspace, which reaches the first window as another window's change (disk.rs "sb-disk-changed", DiskMirror.pull):
+// the first must find it there, saying the second saw none of its markers.  "windows:<token>:same", the control: the
+// second window's reading done in the first window itself, which must see its own markers, so the check must fail.
 export async function persistProbe(spec: string, host: { ws: () => Promise<any>; mirror: () => any; invoke: (c: string, a?: any) => Promise<any>; grant?: (doc: string, folder: string) => boolean; trees?: (doc: string) => string[]; grantsSaved?: () => Promise<void> | undefined }) {
   const [mode, token] = [spec.slice(0, spec.indexOf(":")), spec.slice(spec.indexOf(":") + 1)];
   const f = `/sagebrush-persist-${token}.txt`, n = `/sagebrush-persist-${token}.ipynb`, b = `/sagebrush-persist-${token}.board.json`;
   const SCOPE = `/sagebrush-persist-${token}-out`;
   const SETTING = "sagebrush-files-sort", dec = (c: any) => (typeof c === "string" ? c : new TextDecoder().decode(c));
-  let ok = false, line = "";
+  let ok = false, line = "", peer = false;
   const caps = async () => {
     const worker = await new Promise<string>((res) => { const w = new Worker(URL.createObjectURL(new Blob(["postMessage(typeof SharedArrayBuffer)"], { type: "text/javascript" }))); w.onmessage = (e: MessageEvent) => { res(e.data); w.terminate(); }; w.onerror = () => res("error"); setTimeout(() => res("no answer"), 5000); });
     let opfs = "none";
@@ -135,7 +142,49 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
       const stillOk = await host.invoke("disk_where").then((w: any) => w === where, () => false);
       ok = mainOk && !!frameOut && !reached.length && stayed && stillOk;
       line = `nav at ${location.origin}: this page's commands ${mainOk ? "work" : `FAIL (disk_where ${JSON.stringify(where)}, the page's plugin:fs ${fsOk}, __TAURI__.fs ${fsGlobal})`}; an output frame (bootstrap ${frameOut?.bootstrap ?? "?"}): ${reached.length ? `REACHED ${reached.join(", ")}` : "every way refused"} ${JSON.stringify(frameOut)}; sent to ${other}: ${stayed ? "stayed on this page" : "LEFT this page"}, its commands ${stillOk ? "still work" : "FAIL"}`;
+    } else if (mode === "windows") {
+      const [tok, control] = token.split(":"), me = (window as any).__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
+      const MARK = `sagebrush-window-mark-${tok}`, before = `/sagebrush-windows-${tok}.txt`, out = `/sagebrush-windows-${tok}-seen.txt`;
+      const idbMark = (put: boolean) => new Promise<string | null>((res) => {
+        const r = indexedDB.open(MARK, 1);
+        r.onupgradeneeded = () => r.result.createObjectStore("kv");
+        r.onerror = () => res(null);
+        r.onsuccess = () => {
+          const db = r.result, tx = db.transaction("kv", put ? "readwrite" : "readonly"), st = tx.objectStore("kv");
+          if (put) { st.put(tok, "m"); tx.oncomplete = () => { db.close(); res(tok); }; tx.onerror = () => { db.close(); res(null); }; }
+          else { const q = st.get("m"); q.onsuccess = () => { db.close(); res(q.result ?? null); }; q.onerror = () => { db.close(); res(null); }; }
+        };
+      });
+      // (what a window sees of the first's: its three markers, the file it wrote, and who has that file)
+      const look = async () => ({ label: me, local: localStorage.getItem(MARK), session: sessionStorage.getItem(MARK), idb: await idbMark(false), file: (await ws.stat(before)) ? dec((await ws.read(before)).content) : null, holder: await host.invoke("window_claim", { doc: before }) });
+      if (me !== "main") {
+        peer = true;
+        await ws.create(out, { content: JSON.stringify(await look()) });
+        await settled(m);
+      } else {
+        await ws.create(before, { content: tok });
+        await settled(m);
+        await host.invoke("window_claim", { doc: before });
+        localStorage.setItem(MARK, tok);
+        sessionStorage.setItem(MARK, tok);
+        await idbMark(true);
+        let saw: any = null, label = "main";
+        if (control === "same") saw = await look();
+        else {
+          // (window_open's answer: {label, opened}, app/src-tauri/src/windows.rs)
+          label = (await host.invoke("window_open", { at: "/" }))?.label;
+          for (let i = 0; i < 600 && !(await ws.stat(out)); i++) await new Promise((r) => setTimeout(r, 100));
+          if (await ws.stat(out)) saw = JSON.parse(dec((await ws.read(out)).content));
+        }
+        for (const p of [before, out]) if (await ws.stat(p)) { const t = await ws.remove(p); await ws.emptyTrash([t.path]); }
+        await settled(m);
+        const marks = saw ? ["local", "session", "idb"].filter((k) => saw[k] !== null) : [];
+        ok = !!saw && saw.label === label && label !== "main" && !marks.length && saw.file === tok && saw.holder === "main";
+        line = `windows at ${location.origin}: ${!saw ? `no word from the second window (${label}) within 60 s` : `the second window (${saw.label}) ${marks.length ? `saw the first's marker in ${marks.join(", ")}` : "saw none of the first's markers (localStorage, sessionStorage, IndexedDB)"}, ${saw.file === tok ? "found the first's file on disk" : `found ${JSON.stringify(saw.file)} for the first's file`}, and was told ${saw.holder === "main" ? "the first window has it" : `${JSON.stringify(saw.holder)} has it`}; what it saw reached the first as another window's change`}`;
+      }
     } else line = `no such mode ${JSON.stringify(mode)}`;
   } catch (e: any) { line = `${mode} at ${location.origin}: ${e?.message ?? e}`; }
+  // (the second window of "windows" reports through the first)
+  if (peer) return;
   await host.invoke("selftest_report", { report: `${ok ? "ok" : "FAIL"} persist: ${line}`, ok });
 }

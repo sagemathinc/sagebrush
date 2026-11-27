@@ -182,6 +182,28 @@ async function upload(c, files, title = "T") {
   const d = await fetchSite("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "wrong", account_id: A }) });
   ok(d.status === 403, "dev sign-in needs the dev token");
 }
+// ---- re-authentication (sessions.reauth_ms) on the CoCalc sign-in: never set by it, and reauth=1 changes nothing
+{
+  const reauthOf = async (c) => (await db.prepare("SELECT reauth_ms FROM sessions WHERE token_hash = ?1").bind(sha(c.slice(c.indexOf("=") + 1))).first())?.reauth_ms;
+  const { session } = await signIn(A);
+  ok(session && (await reauthOf(session)) === null, "re-auth: a CoCalc sign-in's session has reauth_ms NULL");
+  // (its authorize URL with reauth=1 is the default's, apart from the per-attempt state and challenge; no max_age)
+  const shape = async (q) => {
+    const r = await fetchSite(`/auth/login?return=%2Fx${q}`);
+    const u = new URL(r.headers.get("location"));
+    for (const k of ["state", "code_challenge"]) u.searchParams.set(k, "-");
+    return `${r.status} ${u}`;
+  };
+  const plain = await shape("");
+  ok(plain === (await shape("&reauth=1")) && !plain.includes("max_age"), "re-auth: with CoCalc, /auth/login?reauth=1 answers as without it", plain);
+  const r = await fetchSite(`/auth/login?return=${encodeURIComponent("//evil.example/")}&reauth=1`);
+  const to = new URL(r.headers.get("location"));
+  const oauth = r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_oauth="));
+  const code = b64url(Buffer.from(Math.random().toString()));
+  fake.codes.set(code, { account_id: A, email: "a@example.com", verified: true, redirect_uri: to.searchParams.get("redirect_uri"), challenge: to.searchParams.get("code_challenge") });
+  const cb = await fetchSite(`/auth/callback?code=${code}&state=${to.searchParams.get("state")}&reauth=1`, { headers: { cookie: oauth } });
+  ok(cb.status === 302 && cb.headers.get("location") === "/" && (await reauthOf(sessionOf(cb))) === null, "re-auth: with CoCalc, reauth=1 keeps the return check and sets no reauth_ms");
+}
 // ---- DEV's /auth/dev: a short session when asked (ttl, whole seconds 300 to 32400), else 30 days (plan-fuzz-F3b A1)
 {
   const D = "33333333-3333-4333-8333-333333333333";
@@ -193,8 +215,11 @@ async function upload(c, files, title = "T") {
   const maxAge = (r) => Number((r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_session=")) ?? "").match(/Max-Age=(\d+)/)?.[1] ?? NaN);
   const sessionsOfD = async () => (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(D).first()).n;
   // (none asked: 30 days, as before)
+  const t0 = Date.now();
   const r0 = await dev({});
   const j0 = await r0.json(), row0 = await rowOf(r0);
+  const rm = (await db.prepare("SELECT reauth_ms FROM sessions WHERE token_hash = ?1").bind(sha(sessionOf(r0).slice(sessionOf(r0).indexOf("=") + 1))).first())?.reauth_ms;
+  ok(Number.isSafeInteger(rm) && rm >= t0 - 1000 && rm <= Date.now() + 1000, "re-auth: /auth/dev's session (DEV only) is re-authenticated now", { t0, rm });
   ok(r0.status === 200 && row0 && row0.expires - row0.created === 30 * 86400 && j0.expires === row0.expires && maxAge(r0) === 30 * 86400, `dev sign-in without ttl: a 30-day session, as before (${row0?.expires - row0?.created} s, Max-Age ${maxAge(r0)}, answered expires ${j0.expires === row0?.expires})`);
   // (the bounds, and one between: the session ends exactly ttl after it starts, the cookie says so, the answer too)
   for (const ttl of [300, 2700, 32400]) {
@@ -878,6 +903,18 @@ async function purgeStatus(rid) {
     const a2 = await aged();
     const young = (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner = 'old-0' AND retired >= ?1").bind(t - 30 * 86400).first()).n;
     ok(a0 === 12_000 && a1 === 2000 && a2 === 0 && young === 5, `S10 12,000 receipts past their days: 10,000 removed by one run (20 pages of 500), the rest by the next; 5 younger ones stay (${a0} -> ${a1} -> ${a2}, young ${young})`);
+  }
+  // S12: the admin log's retention: a view past ADMIN_RECORD_DAYS (365) goes with its targets, in one run; a younger
+  // view and its targets stay
+  {
+    const t = Math.floor(Date.now() / 1000), old = t - 366 * 86400, young = t - 364 * 86400;
+    const view = async (at) => (await db.prepare("INSERT INTO admin_views (at, admin_id, view) VALUES (?1, 'adm', 'accounts') RETURNING id").bind(at).first()).id;
+    const v1 = await view(old), v2 = await view(young);
+    for (const [v, h] of [[v1, "h1"], [v1, "h2"], [v2, "h3"]]) await db.prepare("INSERT INTO admin_view_targets (view_id, target_hash) VALUES (?1, ?2)").bind(v, h).run();
+    await tick();
+    const views = (await db.prepare("SELECT id FROM admin_views WHERE id IN (?1, ?2) ORDER BY id").bind(v1, v2).all()).results.map((r) => r.id);
+    const targets = (await db.prepare("SELECT target_hash FROM admin_view_targets WHERE view_id IN (?1, ?2) ORDER BY target_hash").bind(v1, v2).all()).results.map((r) => r.target_hash);
+    ok(JSON.stringify(views) === JSON.stringify([v2]) && JSON.stringify(targets) === JSON.stringify(["h3"]), `S12 the admin log past 365 days goes with its targets; a younger view keeps its own (${JSON.stringify({ views, targets })})`);
   }
 
   // S11 (daybreak3's S2): a Worker rolled back to before this change (07b50cf5's share server, from git history),

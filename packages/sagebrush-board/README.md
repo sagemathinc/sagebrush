@@ -10,7 +10,7 @@ sagebrush.space's board page ([web/board/page.ts](../../web/board/page.ts)) is
 one host, and CoCalc is to be another. The design is in
 [design/board.md](../../design/board.md).
 
-Not published yet (`"private": true`).
+Published on npm as `@sagemathinc/sagebrush-board`.
 
 ## Use
 
@@ -41,12 +41,15 @@ caption). The stylesheet goes into the page once, as
 ## What the host gives (mount.ts `BoardHost`)
 
 Each is optional, except `images`. What a host does not give is not offered.
+The main ones are below; mount.ts `BoardHost` lists them all, among them
+`answers` (where Submit sends a reader's answers), `files` (the File menu),
+`newBoard`, `duplicate`, `outputs` and `view`.
 
 | | What it is | Without it |
 |---|---|---|
 | `store` | where the document comes from (`load`), where edits go (`save`), and `revert` | nothing is shown until `agent.load(doc)` |
 | `images` | where pictures' bytes are kept, by the SHA-256 of their content | (required) |
-| `code` | the code items' engine, given the document: `(doc) => new BoardCode(base, { runner })` | code shows as text, not run |
+| `code` | the code items' engine for one language, given the document and the language: `(doc, mode) => new BoardCode(base, { runner })` | code shows as text, not run |
 | `math` | KaTeX: `() => import(...)`, a module with `typeset(el)` | math shows as its TeX |
 | `history` | TimeTravel's versions (`BoardHistory` on a patchflow PatchStore) | no TimeTravel |
 | `address` | where the page and step shown are kept (`#p2-3`) | not kept |
@@ -104,6 +107,8 @@ typed refusals (`reason`, `what`, `limit`, `size`) and pictures by reference
 `sagebrush` 0.6.x and is published with `sagebrush` 0.6.0; it also adds a host
 store's optional `editing` hook (whether Edit is offered and allowed, and why),
 and in notes an https `<iframe>` becomes a link that opens in a new tab.
+0.4.2 and 0.4.3 pair with `sagebrush` 0.10.x; they are published with
+`sagebrush` 0.10.0 and 0.10.1.
 
 ## Build and test
 

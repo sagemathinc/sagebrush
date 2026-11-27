@@ -53,7 +53,7 @@ async function socket(server, who, device) {
   };
   const tell = (m) => { const r = ++req; s.send(J({ ...m, req: r })); return r; };
   if (device) {
-    s.send(J({ t: "hello", v: 2, device, name: device, index_after: 0 }));
+    s.send(J({ t: "hello", v: 3, device, name: device, index_after: 0 }));
     await next((m) => m.t === "welcome");
     await next((m) => m.t === "index");
   }
@@ -114,18 +114,25 @@ try {
   const idx = await a1.ask({ t: "pull_index", after: 1 });
   check(idx.t === "index" && J(idx.ops.map((o) => o.seq)) === J([2, 3]) && idx.more === false, "pull_index after 1: seqs 2 and 3: " + J(idx.ops.map((o) => o.seq)));
   const s3 = await socket(server, A, null);
-  s3.s.send(J({ t: "hello", v: 2, device: "devA0003", name: "x", index_after: 0, account: "f".repeat(64) }));
+  s3.s.send(J({ t: "hello", v: 3, device: "devA0003", name: "x", index_after: 0, account: "f".repeat(64) }));
   const ref = await s3.next((m) => m.t === "error");
   check(ref.code === "forbidden" && ref.detail.reason === "account", "hello bound to another account: forbidden, reason account");
   const early = await s3.ask({ t: "pull_index", after: 0 });
   check(early.code === "invalid", "a message before hello: invalid");
   // (B1a, plan-exact-only r1 §3: a version 1 client merged concurrent edits by the older rule, so its hello is refused
   // and it never reaches the index or a document; the server says the version it takes)
+  // (and a version 2 client, which names a blob `sha256` in blobs/check where version 3 says `address` (e2e PR 3a): the
+  // same refusal, so an old page reloads rather than sending checks this server refuses)
+  const s5 = await socket(server, A, null);
+  s5.s.send(J({ t: "hello", v: 2, device: "devA0005", name: "old2", index_after: 0 }));
+  const v2 = await s5.next((m) => m.t === "error" || m.t === "welcome");
+  check(v2.t === "error" && v2.code === "invalid" && /protocol version 3 only/.test(v2.detail?.message ?? ""), "B1a: a version 2 hello is refused too (invalid, \"protocol version 3 only\"): " + J(v2));
+  s5.s.close();
   const s4 = await socket(server, A, null);
   s4.s.send(J({ t: "hello", v: 1, device: "devA0004", name: "old", index_after: 0 }));
   const v1 = await s4.next((m) => m.t === "error" || m.t === "welcome");
   const after = await s4.ask({ t: "pull_index", after: 0 });
-  check(v1.t === "error" && v1.code === "invalid" && /protocol version 2 only/.test(v1.detail?.message ?? "") && after.code === "invalid", "B1a: a version 1 hello is refused (invalid, \"protocol version 2 only\"), and the socket gets no index: " + J({ v1, after }));
+  check(v1.t === "error" && v1.code === "invalid" && /protocol version 3 only/.test(v1.detail?.message ?? "") && after.code === "invalid", "B1a: a version 1 hello is refused (invalid, \"protocol version 3 only\"), and the socket gets no index: " + J({ v1, after }));
   for (const x of [a1, a2, s3, s4]) x.s.close();
 }
 
@@ -263,16 +270,36 @@ const C1 = "clientA1", C2 = "clientB1";
 {
   const bytes = new TextEncoder().encode("hello, blob");
   const sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
-  const miss = await (await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha, size: bytes.length }] })).json();
+  const miss = await (await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: sha, ct_sha256: sha, size: bytes.length }] })).json();
   check(J(miss.missing) === J([sha]), "blobs/check: missing before the PUT");
   const o1 = await socket(server, A, "devA0020");
   const op = { dseq: 1, t: Date.now(), by: "person", op: "create", path: "/f.txt", kind: "file", fid: "00000000000000f1", sha256: sha, size: bytes.length };
   const early = await o1.ask({ t: "ops", ops: [op] });
   check(early.ops?.[0]?.code === "missing", "an op naming bytes not uploaded: refused, missing");
-  const put = await A.call("PUT", "/api/sync/v1/blob/" + sha, bytes, { "content-length": String(bytes.length) });
+  const putAt = (at, b, ct) => A.call("PUT", "/api/sync/v1/blob/" + at, b, { "content-length": String(b.length), ...(ct === undefined ? {} : { "x-sb-ct-sha256": ct }) });
+  const put = await putAt(sha, bytes, sha);
   check(put.status === 200, "PUT the blob: 200");
-  const wrong = await A.call("PUT", "/api/sync/v1/blob/" + "0".repeat(64), bytes, { "content-length": String(bytes.length) });
-  check(wrong.status === 400, "PUT bytes under another sha256: 400");
+  // (e2e PR 3a: a blob's address names its bytes but needn't be their hash; the declared ct_sha256 is checked, and the
+  // first (ct_sha256, size) held at an address stays)
+  const other = new TextEncoder().encode("other bytes"), otherSha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", other)));
+  const addr = "a".repeat(64);
+  check((await putAt(addr, bytes, sha)).status === 200, "PUT under an address that isn't the bytes' hash, with their ct_sha256: 200");
+  check((await putAt("b".repeat(64), bytes, otherSha)).status === 400, "PUT bytes whose hash isn't the declared ct_sha256: 400");
+  check((await putAt("c".repeat(64), bytes)).status === 400, "PUT without x-sb-ct-sha256: 400");
+  check((await putAt("d".repeat(64), bytes, "nope")).status === 400, "PUT with a malformed x-sb-ct-sha256: 400");
+  const again = await putAt(addr, bytes, sha);
+  check(again.status === 200 && (await again.json()).have === true, "the same bytes again at a held address: 200, have");
+  const clash = await putAt(addr, other, otherSha);
+  const clashJ = await clash.json();
+  check(clash.status === 409 && clashJ.error === "conflict" && J(clashJ.held) === J({ address: addr, ct_sha256: sha, size: bytes.length }), "other bytes at a held address: 409 conflict naming what is held: " + J(clashJ));
+  const kept = await (await server.fetch(new Request((await A.call("GET", "/api/sync/v1/blob/" + addr)).headers.get("location")))).arrayBuffer();
+  check(new TextDecoder().decode(kept) === "hello, blob", "…and the first bytes stay");
+  const chk2 = await (await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: addr, ct_sha256: otherSha, size: other.length }, { address: addr, ct_sha256: sha, size: bytes.length + 1 }, { address: addr, ct_sha256: sha, size: bytes.length }] })).json();
+  check(J(chk2.missing) === "[]" && chk2.conflicts?.length === 2 && chk2.conflicts.every((h) => J(h) === J({ address: addr, ct_sha256: sha, size: bytes.length })), "blobs/check: held as other bytes or another size is a conflict, never present or missing: " + J(chk2));
+  const badChk = await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: addr, size: bytes.length }] });
+  check(badChk.status === 400, "blobs/check without ct_sha256: 400");
+  const oldName = await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ sha256: addr, ct_sha256: sha, size: bytes.length }] });
+  check(oldName.status === 400, "blobs/check naming the blob `sha256` (protocol 2): 400");
   const get = await A.call("GET", "/api/sync/v1/blob/" + sha);
   const loc = get.headers.get("location");
   const file = await server.fetch(new Request(loc));
@@ -341,11 +368,11 @@ const C1 = "clientA1", C2 = "clientB1";
     };
     const head0 = J(server.controls.doc(A.account, D3)), cl0 = J(server.controls.clients(A.account, D3));
     const miss = await a.ask(withBlob([{ cseq: 1, id: pid(1, "bc1") }, { cseq: 2, id: pid(2, "bc1"), parents: [pid(1, "bc1")], blob: true }]));
-    check(miss.code === "missing" && miss.detail.sha256 === sha, "CORR-173-2: an accepted + new batch whose new patch names a blob not held: missing, whole: " + J(miss));
+    check(miss.code === "missing" && miss.detail.address === sha, "CORR-173-2: an accepted + new batch whose new patch names a blob not held: missing, whole: " + J(miss));
     check(J(server.controls.doc(A.account, D3)) === head0 && J(server.controls.clients(A.account, D3)) === cl0, "CORR-173-2: …head and clients unchanged");
     const resendOnly = await a.ask(withBlob([{ cseq: 1, id: pid(1, "bc1") }]));
     check(resendOnly.batch?.new === 0 && resendOnly.batch.resent[pid(1, "bc1")] === 1, "CORR-173-2: the accepted patch alone still answered with its seq");
-    await A.call("PUT", "/api/sync/v1/blob/" + sha, bytes, { "content-length": String(bytes.length) });
+    await A.call("PUT", "/api/sync/v1/blob/" + sha, bytes, { "content-length": String(bytes.length), "x-sb-ct-sha256": sha });
     const ok = await a.ask(withBlob([{ cseq: 1, id: pid(1, "bc1") }, { cseq: 2, id: pid(2, "bc1"), parents: [pid(1, "bc1")], blob: true }]));
     check(ok.batch?.new === 1 && ok.batch.seq === 2, "CORR-173-2: after the upload, the same batch is stored: " + J(ok));
     const rootMiss = await a.ask({ t: "clear", doc: D3, expect_head: { epoch: 1, seq: 2 }, root: (() => { const r = patches([{ cseq: 3, id: pid(3, "bc1") }]); r.patches[0].blobs = ["e".repeat(64)]; return r; })(), fgen: { bc1: 0 } });
@@ -359,14 +386,14 @@ const C1 = "clientA1", C2 = "clientB1";
     const bytes = new TextEncoder().encode("late bytes"), sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
     let push;
     const body = new ReadableStream({ start(c) { push = () => { c.enqueue(bytes); c.close(); }; } });
-    const put = server.fetch(new Request("https://ref.test/api/sync/v1/blob/" + sha, { method: "PUT", body, duplex: "half", headers: { cookie: P.cookie, "content-length": String(bytes.length), "x-sync-generation": "1" } }));
+    const put = server.fetch(new Request("https://ref.test/api/sync/v1/blob/" + sha, { method: "PUT", body, duplex: "half", headers: { cookie: P.cookie, "content-length": String(bytes.length), "x-sync-generation": "1", "x-sb-ct-sha256": sha } }));
     await sleep(20);
     await P.call("POST", "/api/sync/v1/delete", { confirm: "delete", generation: 1 });
     const en = await (await P.call("POST", "/api/sync/v1/enable")).json();
     push();
     const r = await put;
     check(en.generation === 2 && r.status === 409 && (await r.json()).reason === "generation", "CORR-173-3: the paused PUT, completed in generation 2: 409, reason generation");
-    const chk = await (await P.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ sha256: sha, size: bytes.length }] })).json();
+    const chk = await (await P.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: sha, ct_sha256: sha, size: bytes.length }] })).json();
     check(J(chk.missing) === J([sha]), "CORR-173-3: …and generation 2 doesn't hold the bytes");
     // (the held forward's audit: a batch held across a delete and a re-enable doesn't commit into the new generation)
     const Q = await signedIn(server, "acct-held");
@@ -391,7 +418,7 @@ const C1 = "clientA1", C2 = "clientB1";
     const [sock] = await Promise.all([server.connect(C.cookie), C.call("POST", "/api/sync/v1/enable")]);
     const got = [];
     sock.onmessage = (t) => got.push(JSON.parse(t));
-    sock.send(J({ t: "hello", v: 2, device: "devC0001", name: "c", index_after: 0 }));
+    sock.send(J({ t: "hello", v: 3, device: "devC0001", name: "c", index_after: 0 }));
     await sleep(30);
     check(got[0]?.t === "welcome" && got[0].state === "active" && got[0].generation === 1, "CORR-173-4: the socket made concurrently with enable says hello to the one, active account: " + J(got[0]));
     const other = await socket(server, C, "devC0002");
@@ -548,7 +575,7 @@ const C1 = "clientA1", C2 = "clientB1";
   // (a page's hello with a release, or none; what came back: welcomed, or the pushed refusal and the close code)
   const hello = async (device, release) => {
     const s = await socket(fr, F, null);
-    s.s.send(J({ t: "hello", v: 2, device, name: device, index_after: 0, ...(release ? { release } : {}) }));
+    s.s.send(J({ t: "hello", v: 3, device, name: device, index_after: 0, ...(release ? { release } : {}) }));
     const first = await s.next((m) => m.t === "welcome" || m.t === "error");
     await sleep(5);
     return { s, first, closed: s.closed() };
@@ -621,7 +648,7 @@ const C1 = "clientA1", C2 = "clientB1";
 
   // (a blob PUT: the release at its start; refused with a retry, never as final)
   const bytes = new TextEncoder().encode("floors"), sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  const put = (h) => F.call("PUT", `/api/sync/v1/blob/${sha}`, bytes, { "content-length": String(bytes.length), ...h });
+  const put = (h) => F.call("PUT", `/api/sync/v1/blob/${sha}`, bytes, { "content-length": String(bytes.length), "x-sb-ct-sha256": sha, ...h });
   const p0 = await put({});
   const pj = await p0.json();
   check(p0.status === 409 && pj.error === "stale_build" && pj.retry_after === 60000, "a blob PUT without a release, under a floor: 409 stale_build with a retry, not 400/413: " + J(pj));
@@ -668,7 +695,7 @@ const C1 = "clientA1", C2 = "clientB1";
     check(refusedStale(await hello("devF0099", { n: 5, core: SHA5 }), "below") && fr.controls.snapshot("acct-floors") === beforeH, "per-path hello: refused, closed 4426, no device recorded");
     const beforeP = fr.controls.snapshot("acct-floors");
     const bytes2 = new TextEncoder().encode("floors, per path"), sha2 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes2))].map((b) => b.toString(16).padStart(2, "0")).join("");
-    const pp = await F.call("PUT", `/api/sync/v1/blob/${sha2}`, bytes2, { "content-length": String(bytes2.length), "x-sync-release": `5:${SHA5}` });
+    const pp = await F.call("PUT", `/api/sync/v1/blob/${sha2}`, bytes2, { "content-length": String(bytes2.length), "x-sb-ct-sha256": sha2, "x-sync-release": `5:${SHA5}` });
     check(pp.status === 409 && fr.controls.snapshot("acct-floors") === beforeP, "per-path blob PUT: 409, nothing stored");
     fr.controls.setFloors({ reload: 0, served: 10 });
   }

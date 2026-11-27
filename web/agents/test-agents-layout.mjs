@@ -2,7 +2,9 @@
 // The agents page's resizable columns (William A1 + A10; the layout plan r3, PR 2): the chat list and the artifact
 // pane are dragged or moved with the keys, clamped so the chat keeps 420 px and the pane 320, re-clamped on a resize
 // and when the pane opens, kept in localStorage only in a valid shape, and left alone by the narrow overlay and full
-// screen. Copy chat and a message's Copy put Markdown on the clipboard (C-copy-*).
+// screen. Copy chat and a message's Copy put Markdown on the clipboard (C-copy-*). Switching between Files and Agents
+// moves no edge (#1808, M-*): the chat list is the files panel's width, its header row theirs, the top bar the files'
+// header's height, no banner above; the status's popover says what the banner said.
 // The scripted agent (no pairing) opens a code artifact ("plot a Fourier series"); notebooks are
 // test-agents-artifacts.mjs's (A10 there: opening a notebook leaves the pane width as it was).
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-layout.mjs
@@ -100,8 +102,8 @@ try {
   const key = async (k) => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: k, code: k }); await sleep(80); };
   const near = (a, b) => Math.abs(a - b) < 1;
 
-  // ---- the sidebar's clamps (1600 px, no pane: 180-480)
-  for (const [id, x, want] of [["L2-side-179", 179, 180], ["L2-side-180", 180, 180], ["L2-side-480", 480, 480], ["L2-side-481", 481, 480]]) {
+  // ---- the sidebar's clamps (1600 px, no pane: 200-640, the files panel's)
+  for (const [id, x, want] of [["L2-side-199", 199, 200], ["L2-side-200", 200, 200], ["L2-side-640", 640, 640], ["L2-side-641", 641, 640]]) {
     await fresh(1600);
     await drag("sep-side", x);
     const m = await w();
@@ -121,6 +123,15 @@ try {
     //  rather than pushing the buttons out of the header)
     const h = await ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(), top = r('.top'), who = r('#who'), how = r('#howto'), con = r('#connect');
       return { chat: r('main').width, whoTop: who.top, howTop: how.top, conTop: con.top, whoRight: who.right, howLeft: how.left, conRight: con.right, topRight: top.right, topH: top.height, conH: con.height }; })()`);
+    const al = await ev(`(() => { const t = document.querySelector('.top'), cs = getComputedStyle(t), g = document.querySelector('.top .top-actions').getBoundingClientRect(), r = t.getBoundingClientRect(); return { gap: (r.right - parseFloat(cs.paddingRight)) - g.right }; })()`);
+    ok("L2-header-actions-right", Math.abs(al.gap) < 1.5, "with the chat at 420 px the header's actions keep to its right edge (#1793)", al);
+    // (and room to spare on that line: another browser's or system's font draws the same words a few px wider; CI's
+    //  google-chrome left 6 px less than local chromium (18 against 24), and before the narrow header's spacing the line
+    //  had 7 px locally and wrapped in the merge queue)
+    const sp = await ev(`(() => { const t = document.querySelector('.top'), who = document.querySelector('#who').getBoundingClientRect(), g = document.querySelector('.top .top-actions'), kids = [...g.children].filter((b) => !b.hidden).map((b) => b.getBoundingClientRect());
+      const need = kids.reduce((s, k) => s + k.width, 0) + parseFloat(getComputedStyle(g).columnGap) * (kids.length - 1);
+      return { spare: (t.getBoundingClientRect().right - parseFloat(getComputedStyle(t).paddingRight)) - need - parseFloat(getComputedStyle(t).columnGap) - who.right, need, kids: kids.length }; })()`);
+    ok("L2-header-spare", sp.kids === 2 && sp.spare >= 12, "with the chat at 420 px and both actions shown, the header's line has at least 12 px to spare (for wider fonts)", sp);
     ok("L2-header-one-line", near(h.chat, 420) && Math.abs(h.conTop - h.howTop) < 2 && Math.abs(h.conTop - h.whoTop) < 6 && h.topH < 2 * h.conH && h.whoRight <= h.howLeft + 1 && h.conRight <= h.topRight + 1, "with the chat at 420 px the header is one line: the name gives way, the buttons stay in the header", h);
     // (board's B-O2-1: "on your computer" either whole or visually hidden, never cut to a letter; the name itself whole,
     //  its own characters measured, not the space after it)
@@ -128,7 +139,29 @@ try {
       const name = [...who.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()), rg = document.createRange(), t = name.textContent, i0 = t.length - t.trimStart().length; rg.setStart(name, i0); rg.setEnd(name, i0 + t.trim().length); const nr = rg.getBoundingClientRect();
       return { name: name.textContent.trim(), nameRight: nr.right, whoRight: w.right, smallRight: s.right, smallW: s.width, clip: cs.clipPath, display: cs.display, visibility: cs.visibility, smallText: sm.textContent }; })()`);
     const whole = l.smallW > 1 && l.smallRight <= l.whoRight + 0.5, hidden = l.smallW <= 1 && l.clip !== "none" && l.display !== "none" && l.visibility === "visible";
+    const cv = await ev(`(() => { const w = document.querySelector('#who'), a = getComputedStyle(w, '::after'), r = w.getBoundingClientRect(), top = document.querySelector('.top').getBoundingClientRect();
+      return { content: a.content, pos: a.position, right: a.right, pad: getComputedStyle(w).paddingRight, whoRight: r.right, howLeft: document.querySelector('#howto').getBoundingClientRect().left, topRight: top.right }; })()`);
+    ok("M-chevron-narrow", cv.content === '""' && cv.pos === "absolute" && parseFloat(cv.right) + 5 < parseFloat(cv.pad) && cv.whoRight <= cv.howLeft + 1 && cv.whoRight <= cv.topRight, "with the chat at 420 px the status's chevron is still drawn, in the status's own right padding, before the next button", cv);
     ok("L2-header-label", (whole || hidden) && l.nameRight <= l.whoRight + 0.5 && l.smallText.trim() !== "", "with the chat at 420 px the agent's name is whole, and the where-it-runs label is either whole or visually hidden (still read by screen readers), never cut", l);
+  }
+  {
+    // (#1793: all four of the header's actions shown (Use your own Claude, Review changes, Delegate, Connected) with the
+    //  chat at its 420 px minimum: they wrap within the header, and none is drawn past the chat over the pane's tabs)
+    const h4 = await ev(`(() => {
+      document.querySelector('#howto').hidden = false;
+      document.querySelector('#review').hidden = false;
+      const con = document.querySelector('#connect'); con.hidden = false; con.textContent = 'Connected';
+      let sw = document.querySelector('#delegate-switch');
+      if (!sw) { sw = Object.assign(document.createElement('button'), { id: 'delegate-switch', className: 'link', type: 'button' }); con.before(sw); }
+      sw.hidden = false; sw.textContent = 'Delegate: on';
+      const r = (e) => e.getBoundingClientRect(), main = r(document.querySelector('main')), pane = r(document.querySelector('#artifacts'));
+      const btns = ['#howto', '#review', '#delegate-switch', '#connect'].map((s) => { const b = r(document.querySelector(s)); return { s, left: b.left, right: b.right, top: b.top, bottom: b.bottom, w: b.width, h: b.height }; });
+      return { mainRight: main.right, paneLeft: pane.left, btns };
+    })()`);
+    const apart = (a, b) => a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5;
+    const noOverlap = h4.btns.every((a, i) => h4.btns.every((b, j) => i === j || apart(a, b)));
+    ok("L2-header-actions-fit", h4.btns.every((b) => b.w > 0 && b.h > 0 && b.right <= h4.mainRight + 0.5 && b.right <= h4.paneLeft + 0.5 && b.left >= 0) && noOverlap, "with the chat at 420 px and all four header actions shown (each drawn), none runs past the chat over the pane's tabs, and none overlaps another (#1793)", h4);
+    await ev(`(() => { document.querySelector('#review').hidden = true; const con = document.querySelector('#connect'); con.hidden = true; const sw = document.querySelector('#delegate-switch'); if (sw) sw.hidden = true; return true; })()`);
   }
   for (const [id, pane] of [["L2-pane-319", 319], ["L2-pane-320", 320]]) {
     await drag("sep-pane", 1600 - pane);
@@ -136,7 +169,7 @@ try {
     ok(id, near(m.pane, 320), `the pane dragged to ${pane} px is 320 px wide`, m);
   }
 
-  // ---- too narrow for 180 + 420 + 320 beside an open pane: the chat list collapses (910 px)
+  // ---- too narrow for 200 + 420 + 320 beside an open pane: the chat list collapses (910 px)
   await fresh(910);
   await openPane();
   {
@@ -152,12 +185,12 @@ try {
     const a = await w(), aa = await aria("sep-side");
     await key("ArrowLeft");
     const b = await w(), ba = await aria("sep-side");
-    ok("L2-key-arrows", near(a.side, 266) && aa.now === "266" && near(b.side, 250) && ba.now === "250", "the arrows move the chat list's edge 16 px, and aria-valuenow follows", { a, aa, b, ba });
+    ok("L2-key-arrows", near(a.side, 288) && aa.now === "288" && near(b.side, 272) && ba.now === "272", "the arrows move the chat list's edge 16 px, and aria-valuenow follows", { a, aa, b, ba });
     await key("Home");
     const h = await w(), ha = await aria("sep-side");
     await key("End");
     const e = await w(), ea = await aria("sep-side");
-    ok("L2-key-home-end", near(h.side, 180) && ha.now === "180" && near(e.side, 480) && ea.now === "480", "Home and End take the chat list to 180 and 480 px", { h, ha, e, ea });
+    ok("L2-key-home-end", near(h.side, 200) && ha.now === "200" && near(e.side, 640) && ea.now === "640", "Home and End take the chat list to 200 and 640 px", { h, ha, e, ea });
   }
   await fresh(1600);
   await openPane();
@@ -171,7 +204,7 @@ try {
   await openPane();
   {
     const m = await w(), ap = await aria("sep-pane");
-    ok("L2-aria-clamped", near(m.pane, 330) && ap.now === "330", "the default pane re-clamped to keep the chat at 420 px: aria-valuenow is the width shown (330)", { m, ap });
+    ok("L2-aria-clamped", near(m.pane, 320) && ap.now === "320" && m.chat >= 419.5, "the default pane re-clamped to keep the chat at 420 px: aria-valuenow is the width shown (320)", { m, ap });
   }
 
   // ---- pointer capture: a drag that ends far from the handle
@@ -214,7 +247,7 @@ try {
     await fresh(1600, { stored: raw });
     await openPane();
     const m = await w();
-    ok(id, near(m.side, 250) && near(m.pane, 736) && exceptions.length === 0, `stored ${raw}: the defaults (250, 736 px), no page exception`, { m, exceptions });
+    ok(id, near(m.side, 272) && near(m.pane, 736) && exceptions.length === 0, `stored ${raw}: the defaults (272, 736 px), no page exception`, { m, exceptions });
   }
   // (storage that throws for this key: the page mounts and the drag works)
   {
@@ -345,9 +378,18 @@ try {
     const state = () => ev(`(() => { const q = (s) => document.querySelector(s); return { running: !q('#stop').hidden, primary: q('#send').textContent, keys: q('#keys').textContent, now: !q('#send-now').hidden && q('#send-now').textContent, queued: q('#queued').textContent, interrupted: [...document.querySelectorAll('.status')].filter((x) => x.textContent === 'Interrupted').length, users: [...document.querySelectorAll('.user')].map((u) => u.className) }; })()`);
     const idle = await state();
     ok("Q1-idle", idle.primary === "Send" && idle.keys === "send" && idle.now === false && !idle.running, "with no turn running: Send, Shift+Enter sends, no Send now", idle);
+    // (#1806: the keys aren't said three times: no sidebar line, a plain placeholder, and the row under the prompt only
+    //  once there's text; Send's tooltip says its key)
+    const keysOf = () => ev(`(() => { const ph = [...document.querySelectorAll('#editor [data-placeholder], #editor textarea')].map((e) => e.dataset?.placeholder || e.placeholder || '').filter(Boolean); return { hint: getComputedStyle(document.querySelector('.composer .hint')).visibility, side: document.querySelector('nav.side').innerText, ph, sendTitle: document.querySelector('#send').title }; })()`);
+    const k0 = await keysOf();
+    ok("K1-empty", k0.hint === "hidden" && !/Shift\+Enter/.test(k0.side) && k0.ph.length > 0 && k0.ph.every((p) => /^Message .+…$/.test(p) && !/Enter/.test(p)) && /Shift\+Enter/.test(k0.sendTitle), "with nothing typed: no keys under the prompt, none in the chat list, the placeholder plain; Send's tooltip says Shift+Enter (#1806)", k0);
     await type("plot a Fourier series");
+    const k1 = await keysOf();
+    ok("K1-typed", k1.hint === "visible", "once there's text, the keys row shows (#1806)", k1);
     await shiftEnter();
     await until(`!document.querySelector('#stop').hidden`, 10000);
+    await until(`getComputedStyle(document.querySelector('.composer .hint')).visibility === 'hidden'`, 3000).catch(() => {});
+    ok("K1-sent", (await keysOf()).hint === "hidden", "after a send clears the prompt, the keys row goes again (#1806)", await keysOf());
     const run0 = await state();
     ok("Q2-running", run0.primary === "Queue" && run0.keys === "queue" && run0.now === "Send now", "while a turn runs: the primary button is Queue, Shift+Enter queues, Send now beside it", run0);
     await type("and a square wave too");
@@ -364,6 +406,105 @@ try {
     await ev(`document.querySelector('#send-now').click()`);
     const stopped = await until(`[...document.querySelectorAll('.status')].some((x) => x.textContent === 'Interrupted')`, 10000).then(() => true, () => false);
     ok("Q5-send-now", stopped, "Send now interrupts the turn and sends", await state());
+  }
+  // ---- Files <-> Agents (#1808): nothing moves. The same edge, header row, top bar height and wordmark in both modes,
+  //      switched by the switch itself, there and back; no banner above the Agents page
+  {
+    const FW = "sagebrush-files-width";
+    const filesShown = `!!document.querySelector('#wssidebar:not([hidden]) .sbfiles .fh .sb-mode') && !!document.querySelector('header .title')`;
+    const agentsShown = `document.readyState === 'complete' && !!document.querySelector('#editor .mb') && document.getElementById('sep-side').hasAttribute('aria-valuenow')`;
+    const r = (s) => `(() => { const b = document.querySelector(${JSON.stringify(s)})?.getBoundingClientRect(); return b ? [b.left, b.top, b.width, b.height].map(Math.round) : null; })()`;
+    const filesRects = async () => ({ edge: (await ev(r("#wssidebar")))?.[2], sw: await ev(r("#wssidebar .sb-mode")), toggle: await ev(r(".sb-files-toggle")), label: await ev(r(".sbfiles .fh > b")), top: (await ev(r("header")))?.[3], word: (await ev(r("header .title")))?.[0] });
+    const agentsRects = async () => ({ edge: (await ev(r("nav.side")))?.[2], sw: await ev(r("nav.side .sb-mode")), toggle: await ev(r("#sidetoggle")), label: await ev(r("nav.side .brand-name")), top: (await ev(r(".top")))?.[3], word: (await ev(r(".top .wordmark")))?.[0], sideTop: (await ev(r("nav.side")))?.[1], banner: await ev(`!!document.querySelector('#banner, .banner')`) });
+    const same = (f, a) => f.edge === a.edge && JSON.stringify(f.sw) === JSON.stringify(a.sw) && JSON.stringify(f.toggle) === JSON.stringify(a.toggle) && Math.abs(f.label[0] - a.label[0]) <= 1 && Math.abs((f.label[1] + f.label[3] / 2) - (a.label[1] + a.label[3] / 2)) <= 1 && f.top === a.top && f.word === a.word;
+    await fresh(1400);
+    await ev(`(localStorage.setItem("sagebrush-files-sidebar", "1"), true)`);
+    await send("Page.navigate", { url: `${origin}/` });
+    await until(filesShown, 60000);
+    await sleep(500);
+    const f0 = await filesRects();
+    await ev(`(document.querySelector('#wssidebar .sb-mode [data-mode="agents"]').click(), true)`);
+    await until(`location.pathname === '/agents/'`, 20000);
+    await until(agentsShown, 30000);
+    await sleep(500);
+    const a = await agentsRects();
+    ok("M-files-to-agents", same(f0, a) && a.edge === 272 && a.sideTop === 0 && !a.banner, "Files -> Agents by the switch: the panel's edge (272 px), the switch, the toggle, the panel's name, the top bar's height and the wordmark stay where they were; no banner", { f0, a });
+    await ev(`(document.querySelector('nav.side .sb-mode [data-mode="files"]').click(), true)`);
+    await until(`location.pathname === '/'`, 20000);
+    await until(filesShown, 60000);
+    await sleep(500);
+    const f1 = await filesRects();
+    ok("M-agents-to-files", JSON.stringify(f1) === JSON.stringify(f0), "and Agents -> Files puts the files back exactly as they were", { f0, f1 });
+
+    // (one width for both: a drag of the chat list's edge is the files' width; the files' width is the chat list's)
+    await fresh(1400);
+    await drag("sep-side", 360);
+    const kept = await ev(`localStorage.getItem(${JSON.stringify(FW)})`);
+    await ev(`(localStorage.setItem("sagebrush-files-sidebar", "1"), true)`);
+    await send("Page.navigate", { url: `${origin}/` });
+    await until(filesShown, 60000);
+    await sleep(500);
+    const fw = (await ev(r("#wssidebar")))?.[2];
+    ok("M-width-to-files", kept === "360" && fw === 360, "the chat list dragged to 360 px: the files open 360 px wide", { kept, fw });
+    await ev(`(localStorage.setItem(${JSON.stringify(FW)}, "300"), true)`);
+    await send("Page.navigate", { url: `${origin}/agents/` });
+    await until(agentsShown, 30000);
+    await sleep(300);
+    const aw = (await ev(r("nav.side")))?.[2];
+    ok("M-width-from-files", aw === 300, "the files' width (300 px) is the chat list's", { aw });
+    // (a width this page kept before they shared one, and none for the files yet: it stays, and becomes the files')
+    await fresh(1400, { stored: '{"side":330,"pane":600}' });
+    const mig = { side: (await ev(r("nav.side")))?.[2], files: await ev(`localStorage.getItem(${JSON.stringify(FW)})`) };
+    ok("M-width-migrated", mig.side === 330 && mig.files === "330", "a chat list width kept before (330 px) stays, and the files take it", mig);
+
+    // (the status's popover: what the banner said; the status opens it, Escape and a click elsewhere close it)
+    await fresh(1400);
+    const pop = () => ev(`(() => { const w = document.querySelector('#who'), i = document.querySelector('#who-info'); return { shown: !i.hidden && i.getBoundingClientRect().height > 0, expanded: w.getAttribute('aria-expanded'), text: i.textContent, focus: document.activeElement === w, below: i.getBoundingClientRect().top >= document.querySelector('.top').getBoundingClientRect().bottom }; })()`);
+    const p0 = await pop();
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const p1 = await pop();
+    ok("M-popover-open", !p0.shown && p0.expanded === "false" && p1.shown && p1.expanded === "true" && p1.below && /scripted/.test(p1.text) && p1.text.endsWith("Chats are kept in this browser only."), "the status opens its popover, under the top bar: the scripted preview, and where the chats are kept", { p0, p1 });
+    // (the chevron: always there, pointing down at rest and up while open, and still there when the status's children
+    //  are replaced, as whoText replaces them)
+    const chev = () => ev(`(() => { const a = getComputedStyle(document.querySelector('#who'), '::after'); return { content: a.content, w: a.width, border: a.borderRightWidth, transform: a.transform }; })()`);
+    const cOpen = await chev();
+    ok("M-chevron", p1.shown && cOpen.content === '""' && cOpen.w === "5px" && parseFloat(cOpen.border) > 0, "the status shows a small chevron (a pseudo-element, no text)", cOpen);
+    await key("Escape");
+    const cRest = await chev();
+    await ev(`(document.querySelector('#who').replaceChildren(document.createTextNode('Claude on laptop')), true)`);
+    const cNew = await chev();
+    ok("M-chevron-states", cRest.content === '""' && cRest.transform !== cOpen.transform && cNew.content === '""' && cNew.transform === cRest.transform, "it points another way while the popover is open, and stays when the status's text is replaced", { cOpen, cRest, cNew });
+    const p2 = await pop();
+    ok("M-popover-escape", !p2.shown && p2.expanded === "false" && p2.focus, "Escape closes it, back to the status", p2);
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const [lx, ly] = await ev(`(() => { const b = document.querySelector('#log').getBoundingClientRect(); return [b.left + b.width / 2, b.bottom - 40]; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: lx, y: ly, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 });
+    await sleep(100);
+    const p3 = await pop();
+    ok("M-popover-away", !p3.shown && p3.expanded === "false", "a click elsewhere closes it", p3);
+
+    // (it stays inside the window and the top bar: on a phone, after a resize while open, and beside a pane with the chat
+    //  at its 420 px; where it fits, right under the status, the control)
+    const place = () => ev(`(() => { const i = document.querySelector('#who-info').getBoundingClientRect(), w = document.querySelector('#who').getBoundingClientRect(), t = document.querySelector('.top').getBoundingClientRect();
+      return { left: Math.round(i.left), right: Math.round(i.right), whoLeft: Math.round(w.left), topLeft: Math.round(t.left), topRight: Math.round(t.right), vw: innerWidth, scroll: document.documentElement.scrollWidth, shown: !document.querySelector('#who-info').hidden }; })()`);
+    const inside = (q) => q.shown && q.left >= q.topLeft && q.right <= q.topRight && q.right <= q.vw && q.scroll <= q.vw;
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const wide = await place();
+    ok("M-popover-fits", inside(wide) && wide.left === wide.whoLeft, "at 1400 px it opens right under the status (the control)", wide);
+    await size(390);
+    await sleep(400);
+    const resized = await place();
+    ok("M-popover-resize", inside(resized), "resized to 390 px while open: still inside the window, no sideways scroll", resized);
+    await fresh(390);
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const phone = await place();
+    ok("M-popover-390", inside(phone), "opened at 390 px: inside the window, no sideways scroll", phone);
+    await fresh(1600);
+    await openPane();
+    await drag("sep-pane", 1600 - 931);
+    await ev(`(document.querySelector('#who').click(), true)`);
+    const tight = await place();
+    ok("M-popover-tight", inside(tight) && (await w()).chat < 421, "beside a pane, the chat at 420 px: inside the top bar", tight);
   }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;

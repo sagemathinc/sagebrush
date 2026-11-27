@@ -151,7 +151,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/agents/page.ts :: renderHeader :: $(\"#banner\").innerHTML = live() #0": {
+  "web/agents/page.ts :: renderHeader :: $(\"#who-info\").innerHTML = live() #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -398,7 +398,7 @@
     "web/board/code.ts :: text"
    ]
   },
-  "web/notebook/notebook.js :: paint :: cell.hl.innerHTML = cell.type === \"code\" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === \"markdown\" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + \"\\n\"; #0": {
+  "web/notebook/notebook.js :: paint :: cell.hl.innerHTML = cell.type === \"code\" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === \"markdown\" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + \"\\n\"; #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -630,6 +630,56 @@
   "web/workspace/persist-probe.ts :: on :: f.srcdoc = probe; #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/space/src/main.ts :: crumbs :: ui.title.innerHTML = all.map((s, k) => (k < all.length - 1 ? `<a href=\"#\" data-k=\"${k}\">${esc(labelOf(s))}</a>` : `<span>${esc(labelOf(s))}</span>`)).join(\" › \"); #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: embed :: if (!again) ui.space.innerHTML = `<option selected>${esc(name)}</option>`; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: last :: if (box) box.querySelector<HTMLElement>(\".output\").innerHTML = `<pre class=\"out err\">${esc(\"couldn't start Sagebrush's engine: \" + (e?.message ?? e))}</pre>`; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: last :: if (box) box.querySelector<HTMLElement>(\".output\").innerHTML = outputHtml(nd); #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: links :: ui.overlay.innerHTML = `<div class=\"grip\" title=\"Drag to resize\"></div><button class=\"close\" title=\"Close (Esc)\">×</button><h2>${esc(nd.title)}</h2>${body}${links(outL, nd._out)}${links(inL, nd._in)}`; #0": {
+   "kind": "rich",
+   "owner": "phase-5",
+   "readers": []
+  },
+  "web/space/src/main.ts :: renderTours :: sel.innerHTML = `<option value=\"\">${tour ? \"On a tour: \" + esc(tour.t.title ?? \"\") : \"Guided tours…\"}</option>` + #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: runNode :: update: (r) => { const box = shownRunner(nd); if (box) box.querySelector<HTMLElement>(\".output\").innerHTML = liveHtml(r); }, #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: search :: if (!q || !space) { ul.innerHTML = \"\"; return; } #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: search :: ul.innerHTML = hits.map((h) => { #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: start :: sel.innerHTML = list.map((f) => `<option${f === want ? \" selected\" : \"\"}>${esc(f)}</option>`).join(\"\"); #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: tourPill :: el.innerHTML = `<span>On a tour: ${esc(tour.t.title ?? \"Tour\")} · stop ${tour.i + 1} of ${tour.t.steps.length}</span>` + #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/workspace/review/proposal-view.ts :: say :: if (md) await rendered(body, a, b, stale, \"md-rendered\", async () => md, (render, el, t) => { el.innerHTML = render(t); return null; }); #0": {
+   "kind": "rich",
+   "owner": "phase-5",
+   "readers": []
   }
  }
 }

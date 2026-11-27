@@ -96,15 +96,17 @@ it doesn't know.
 On the window (`postMessage` to `window.parent`, or to the frame's
 `contentWindow`):
 
-- From the frame: `{ sagebrush: "ready", version: 1, nonce? }`. The frame
-  listens. `nonce` is the one in the address the frame was loaded with (see
-  The bootstrap), in its first `ready` only.
+- From the frame: `{ sagebrush: "ready", version: 1, nonce?, pictures }`. The
+  frame listens. `nonce` is the one in the address the frame was loaded with
+  (see The bootstrap), in its first `ready` only. `pictures` is
+  `["by-reference"]`: the frame can take pictures by reference (see Pictures).
 - From the frame: `{ sagebrush: "error", version: 1, message }`. A posted
   text isn't a board; the board shown stays.
-- From the host: `{ sagebrush: "board", version: 1, text, name?, revision?, edit? }`,
+- From the host: `{ sagebrush: "board", version: 1, text, name?, revision?, edit?, pictures? }`,
   with the transferred port. `revision` is any string up to 200 characters,
   which the frame only echoes back. `edit: true` (with a `revision`) grants
-  editing (see Editing).
+  editing (see Editing), and `pictures: "by-reference"` has the board's
+  pictures sent apart (see Pictures).
 
 On the channel:
 
@@ -536,7 +538,8 @@ It refuses it without `retryAfter`.
   frame meets this;
 - each change well formed:
   - `op` one of the two, and `type` one of the four;
-  - `page` and `id` strings of at most 200 characters;
+  - `page` and `id` strings of at most 200 characters (an edge's `id`, the
+    JSON of its two ends and its ordinal, at most 2,452);
   - at most 200 fields, with names of at most 64 characters, and never
     `__proto__`, `constructor` or `prototype`. Records are plain objects
     whose fields are set as own properties only;
@@ -1100,8 +1103,7 @@ function openChannel(me) {
   plays a host that grants them against the real frame. The frame doesn't
   yet act on a refusal's `reason` beyond saying `message`.
 
-- Ask items, `sb board answers` and the controls are built in the order of
-  /scratch/sagebrush-reviews/boards-both-ways-plan.md.
+- Ask items, `sb board answers` and the controls are built.
 - The nonce, the channel, `revision`, `answers`, `received`, `refused` and
   `checkSubmission` are new. So are `decide`, `decided` and `decideRequest`.
   test/board-host-protocol.test.ts runs the example host above against

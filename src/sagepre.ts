@@ -87,57 +87,128 @@ function preparseFString(lit: string, f: (code: string) => string): string {
   return out;
 }
 
-const OPEN = "([{", CLOSE = ")]}";
+// Python's tokenizer refuses brackets nested deeper than this ("too many
+// nested parentheses", its MAXLEVEL)
+const PY_MAX_NESTING = 200;
 
-/** The innermost ( or [ around index i, and its matching close (exclusive). */
-function containingBlock(code: string, i: number): [number, number] | null {
-  let depth = 0, s = i;
-  for (; s >= 0; s--) {
-    const ch = code[s];
-    if (CLOSE.includes(ch)) depth++;
-    else if (OPEN.includes(ch)) {
-      if (depth === 0) break;
-      depth--;
-    }
-  }
-  if (s < 0 || code[s] === "{") return null;
-  depth = 0;
-  let e = i;
-  for (; e < code.length; e++) {
-    const ch = code[e];
-    if (OPEN.includes(ch)) depth++;
-    else if (CLOSE.includes(ch)) {
-      if (depth === 0) break;
-      depth--;
-    }
-  }
-  if (e >= code.length) return null;
-  return [s, e + 1];
-}
-
-/** [a..b] -> (ellipsis_range(a,Ellipsis,b)), (a..b) -> (ellipsis_iter(...)). */
+/** [a..b] -> (ellipsis_range(a,Ellipsis,b)), (a..b) -> (ellipsis_iter(...)).
+ *
+ *  Each `..` (not part of `...`, Python's Ellipsis) rewrites the innermost
+ *  ( or [ around it, its brackets of any kind counted, if that one is closed
+ *  (a { or an unclosed one: the `..` stays).  The `..` are taken left to
+ *  right, and one rewrites its whole block, so a later `..` inside it goes
+ *  with it; a block rewritten earlier inside a later one is part of the
+ *  later one's text.  In one pass: the brackets matched once, the `..`
+ *  visited once, each rewritten block's text made once from its own.  (It
+ *  rewrote the source and searched again from the start for each `..`, and
+ *  scanned across the source for each one's block: (number of `..`) x
+ *  (length), minutes for a 1 MiB file.)  Code nested past Python's limit is
+ *  left as it is: Python refuses it whatever this does. */
 export function parseEllipsis(code: string): string {
   let ix = code.indexOf("..");
+  if (ix === -1) return code;
+  const n = code.length;
+  // each open bracket's matching close (-1: none), and the innermost open
+  // bracket at each `..` (a close with nothing open matches nothing)
+  const close = new Int32Array(n).fill(-1);
+  // (at each `..`'s first dot: its innermost open bracket, plus 1; 0 for none)
+  const inner = new Int32Array(n);
+  const stack = new Int32Array(PY_MAX_NESTING + 1);
+  let depth = 0;
+  for (let i = 0; i < n; i++) {
+    const c = code.charCodeAt(i);
+    if (c === 40 || c === 91 || c === 123) {
+      // ( [ {
+      if (depth === PY_MAX_NESTING) return code;
+      stack[depth++] = i;
+    } else if (c === 41 || c === 93 || c === 125) {
+      // ) ] }
+      if (depth > 0) close[stack[--depth]] = i;
+    } else if (c === 46 && code.charCodeAt(i + 1) === 46) inner[i] = depth ? stack[depth - 1] + 1 : 0;
+  }
+  // the blocks rewritten, by their open bracket: [start, end), as the `..`
+  // come, left to right
+  const blocks: [number, number][] = [];
   while (ix !== -1) {
     if (code[ix + 2] === "." || code[ix - 1] === ".") {
       // `...` is Python's Ellipsis
       ix = code.indexOf("..", ix + 3);
       continue;
     }
-    const b = containingBlock(code, ix);
-    if (!b) {
+    const s = inner[ix] - 1;
+    if (s < 0 || code[s] === "{" || close[s] < 0) {
       ix = code.indexOf("..", ix + 2);
       continue;
     }
-    const [s, e] = b;
-    let args = code.slice(s + 1, e - 1).replace(/\.\./g, ",Ellipsis,").replace(/,\s*,/g, ",").replace(/,\s*$/, "");
-    args = args.replace(/;\s*/, ", step=");
-    // a trailing step=... keeps working: [1..3, step=0.5]
-    const kind = code[s] === "[" ? "range" : "iter";
-    code = `${code.slice(0, s)}(ellipsis_${kind}(${args}))${code.slice(e)}`;
-    ix = code.indexOf("..");
+    blocks.push([s, close[s] + 1]);
+    // (the block's own `..` go with it)
+    ix = code.indexOf("..", close[s] + 1);
   }
-  return code;
+  if (!blocks.length) return code;
+  // innermost first: a block's text is made from its source with the blocks
+  // inside it already made
+  blocks.sort((a, b) => a[0] - b[0]);
+  // (a made block's text, as parts: strings and the made blocks inside it, so a block's text is not copied into each
+  // block around it; and whether a block around it would change it: a , , or a ; left in it.  One starts with ( and
+  // ends with ), so no .., , , or trailing , runs across its edges)
+  type Made = { parts: (string | Made)[]; residue: boolean };
+  const made = new Map<number, Made>();
+  const flat = (m: Made): string => {
+    const out: string[] = [];
+    const todo: (string | Made)[] = [m];
+    while (todo.length) {
+      const p = todo.pop()!;
+      if (typeof p === "string") out.push(p);
+      else for (let i = p.parts.length - 1; i >= 0; i--) todo.push(p.parts[i]);
+    }
+    return out.join("");
+  };
+  const pieces = (lo: number, hi: number, k: number): (string | Made)[] => {
+    // [lo, hi) of the source as its own text and the made blocks in it, from blocks[k] on
+    const out: (string | Made)[] = [];
+    let at = lo;
+    for (; k < blocks.length && blocks[k][0] < hi; k++) {
+      const [s, e] = blocks[k];
+      if (s < at) continue;
+      out.push(code.slice(at, s), made.get(s)!);
+      at = e;
+    }
+    out.push(code.slice(at, hi));
+    return out;
+  };
+  const RESIDUE = /,\s*,|;/;
+  for (let k = blocks.length - 1; k >= 0; k--) {
+    const [s, e] = blocks[k];
+    const head = `(ellipsis_${code[s] === "[" ? "range" : "iter"}(`;
+    if (k + 1 >= blocks.length || blocks[k + 1][0] >= e) {
+      // (no block made inside it, the common case: its own text)
+      let args = code.slice(s + 1, e - 1).replace(/\.\./g, ",Ellipsis,").replace(/,\s*,/g, ",").replace(/,\s*$/, "");
+      args = args.replace(/;\s*/, ", step=");
+      made.set(s, { parts: [head + args + "))"], residue: RESIDUE.test(args) });
+      continue;
+    }
+    const ps = pieces(s + 1, e - 1, k + 1);
+    if (ps.some((p) => typeof p !== "string" && p.residue)) {
+      // (the rewrite of the whole text, a block inside included, as it was)
+      let args = ps.map((p) => (typeof p === "string" ? p : flat(p))).join("").replace(/\.\./g, ",Ellipsis,").replace(/,\s*,/g, ",").replace(/,\s*$/, "");
+      args = args.replace(/;\s*/, ", step=");
+      made.set(s, { parts: [head + args + "))"], residue: RESIDUE.test(args) });
+      continue;
+    }
+    // (the same rewrite, of the block's own text only: the made blocks in it have nothing it would change)
+    const own = ps.map((p) => (typeof p === "string" ? p.replace(/\.\./g, ",Ellipsis,").replace(/,\s*,/g, ",") : p));
+    own[own.length - 1] = (own[own.length - 1] as string).replace(/,\s*$/, "");
+    for (let i = 0; i < own.length; i += 2) {
+      if ((own[i] as string).includes(";")) {
+        own[i] = (own[i] as string).replace(/;\s*/, ", step=");
+        break;
+      }
+    }
+    // a trailing step=... keeps working: [1..3, step=0.5]
+    const residue = own.some((p, i) => (i % 2 === 0 ? RESIDUE.test(p as string) : (p as Made).residue));
+    made.set(s, { parts: [head, ...own, "))"], residue });
+  }
+  return flat({ parts: pieces(0, n, 0), residue: false });
 }
 
 // A number not preceded by an identifier character (of any script: xʹ2 is a

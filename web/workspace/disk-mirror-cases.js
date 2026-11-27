@@ -244,6 +244,28 @@ async function cases() {
     m.close();
   }
   {
+    // (closing one window, #1541: "sb-close" names it; another window's close changes nothing here; this one's drains,
+    // then says it is done, as a quit does)
+    const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+    await ws.create("/c.txt", { content: enc("one") });
+    await m.drain(5000);
+    const calls = [], listeners = new Map();
+    W.drainOnQuit({ mirror: () => m, invoke: async (c) => { calls.push(c); }, listen: (ev, f) => listeners.set(ev, f), freeze: () => calls.push("freeze"), timeoutMs: 5000, label: "doc-1" });
+    const other = listeners.get("sb-close")({ payload: { label: "doc-2" } });
+    await tick(20);
+    check(other === undefined && calls.length === 0, "another window's close: nothing here (" + calls.join() + ")");
+    const release = disk.hold("/c.txt");
+    await ws.write("/c.txt", enc("two"));
+    const done = listeners.get("sb-close")({ payload: { label: "doc-1" } });
+    await tick(50);
+    check(calls.includes("app_quit_hold") && calls.includes("freeze") && !calls.includes("app_quit_now"), "this window's close with a write in flight: held, edits stopped, not gone yet");
+    release();
+    await done;
+    check(calls.at(-1) === "app_quit_now" && text(disk, "/c.txt") === "two", "...then done, once it was on disk");
+    document.getElementById("sb-quitting")?.remove();
+    m.close();
+  }
+  {
     // (the control: quit at once, without draining: the change isn't on disk)
     const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
     await ws.create("/q.txt", { content: enc("one") });
@@ -645,6 +667,61 @@ async function cases() {
     await disk2.external("/.Trash/F/bad.ipynb", "not JSON");
     const ws5 = await launch(), r5 = await W.importDisk(ws5, disk2);
     check(!(await ws5.stat("/F")) && !!(await ws5.stat("/Trash/F/ok.txt")) && r5.skipped.length === 1 && r5.skipped[0][0] === "/.Trash/F/bad.ipynb", "a Trash folder that partly imports: in Trash, not at the top " + JSON.stringify(r5.skipped));
+  }
+
+  // ---- 8l. two windows of the app (#1541): each its own workspace, of the same disk; one's changes read by the other
+  // (pull, after the tasks before it), never written back, and that one's own later changes written as ever
+  {
+    const disk = memDisk(), snap = () => JSON.stringify([...disk.files].map(([k, v]) => [k, v.sha, v.mtime]).sort());
+    await disk.external("/a.txt", "one");
+    await disk.external("/n/nb.ipynb", JSON.stringify(NB("x = 1")));
+    await disk.external("/gone.txt", "bye");
+    await disk.external("/p.txt", "p0");
+    // (each window's storage its own, as the app gives it (windows.rs): no channel between them, as there is between
+    // two workspaces of this one test page)
+    const alone = (w) => { w.channel?.close(); w.channel = null; return w; };
+    const wa = alone(await launch()), ra = await W.importDisk(wa, disk), ma = mirror(wa, disk, ra.known);
+    const wb = alone(await launch()), rb = await W.importDisk(wb, disk), pulled = [];
+    const mb = mirror(wb, disk, rb.known, { pulled: (i, g, sk) => pulled.push([i, g, sk]) });
+    await wa.write("/a.txt", enc("two"));
+    await wa.create("/new/made.txt", { content: enc("new") });
+    await wa.mkdir("/emptydir");
+    const e = await wa.stat("/n/nb.ipynb");
+    await wa.write("/n/nb.ipynb", NB("x = 2"));
+    ma.docSaved(e.ref);
+    await wa.rename("/gone.txt", "/moved.txt");
+    await ma.drain(5000);
+    const before = snap(), dirsBefore = [...disk.dirs].sort().join();
+    // (the first read starts at once; of the calls while it runs, one more read)
+    mb.pull();
+    mb.pull();
+    mb.pull();
+    await mb.drain(5000);
+    const bytes = async (w, p) => dec(await W.fileBytes(w, p));
+    check((await bytes(wb, "/a.txt")) === "two", "two windows: another window's write read here");
+    check((await bytes(wb, "/new/made.txt")) === "new" && (await wb.stat("/emptydir"))?.kind === "folder", "two windows: another window's new file and empty folder here");
+    check(nbSource(await bytes(wb, "/n/nb.ipynb")) === "x = 2", "two windows: another window's notebook save read here");
+    check(!(await wb.stat("/gone.txt")) && (await bytes(wb, "/moved.txt")) === "bye", "two windows: another window's rename: gone from its old path here, at its new one");
+    check(snap() === before && [...disk.dirs].sort().join() === dirsBefore && mb.pending === 0, "two windows: what was read never written back to disk");
+    check(pulled.length === 2 && pulled[0][2].length === 0 && pulled[0][1].join() === "/gone.txt" && pulled[1].every((x) => !x.length), "two windows: two reads for three calls (one more while one ran, finding nothing new), what went said (" + JSON.stringify(pulled) + ")");
+    await wb.write("/a.txt", enc("three"));
+    await mb.drain(5000);
+    check(text(disk, "/a.txt") === "three" && ![...disk.files.keys()].some((k) => k.includes("from Sagebrush")), "two windows: this window's own later change written over the other's (it read it): no conflict");
+    ma.pull();
+    await ma.drain(5000);
+    check((await bytes(wa, "/a.txt")) === "three" && ma.pending === 0, "two windows: and read back by the first");
+    // (a file this window still waits to write when another changes it: left to that write, which finds the change and
+    // goes beside it; the read after it leaves this window's version alone)
+    const release = disk.hold("/p.txt");
+    await wb.write("/p.txt", enc("pB"));
+    await tick(20);
+    await disk.external("/p.txt", "pA");
+    mb.pull();
+    release();
+    await mb.drain(5000);
+    check((await bytes(wb, "/p.txt")) === "pB" && text(disk, "/p.txt") === "pA" && text(disk, "/p (from Sagebrush).txt") === "pB", "two windows: a file this window was writing when another changed it: both kept, this window's version left here");
+    ma.close();
+    mb.close();
   }
 
   // ---- 9. what the import can't open: reported, left on disk

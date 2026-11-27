@@ -222,9 +222,9 @@ installPythontex(pythontexCode);
 // ---- no preview execution: the engine never loads Run's code or a session
 {
   const dir = new URL("./engine/", import.meta.url);
-  const srcs = ["pipeline.mjs", "demo-machine.mjs", "render.mjs", "sagetex.mjs"].map((f) => readFileSync(new URL(f, dir), "utf8"));
+  const srcs = ["pipeline.mjs", "demo-machine.mjs", "render.mjs", "sagetex.mjs", "tikz.mjs"].map((f) => readFileSync(new URL(f, dir), "utf8"));
   const imports = srcs.flatMap((s) => [...s.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]));
-  check("no-preview-execution", imports.length > 0 && imports.every((f) => /^\.\/(incremental-demo|render|demo-machine|sagetex|symbols|shim)\.mjs$|^\.\.\/core\//.test(f)) && srcs.every((s) => !/\bsessionOf\(|\.execute\(/.test(s)), imports);
+  check("no-preview-execution", imports.length > 0 && imports.every((f) => /^\.\/(incremental-demo|render|demo-machine|sagetex|symbols|shim|tikz)\.mjs$|^\.\.\/core\//.test(f)) && srcs.every((s) => !/\bsessionOf\(|\.execute\(/.test(s)), imports);
 }
 
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);

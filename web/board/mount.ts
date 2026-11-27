@@ -171,6 +171,8 @@ export interface BoardHost {
    * presses "Run this board's code" (an interim, until design/capabilities.md's gate); `codeResumed` when they do. */
   codePaused?: boolean;
   codeResumed?(): void;
+  /** File ▸ New window (the desktop app's board page, #1541); none: not drawn */
+  newWindow?(): void;
   /** Sagebrush's own board page: the File menu shows what the host can't do here disabled
    * (design/workspace-files.md §3); otherwise (the library in another site) it is hidden */
   fullFileMenu?: boolean;
@@ -339,6 +341,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   renderFileMenu($("filemenu"), {
     attr: "data-sbb",
     latex: !!host.files?.newLatex,
+    newWindow: host.newWindow ? "newwindow" : undefined,
     keys: { newNotebook: "newnotebook", newBoard: "newboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
     disabled: {
       newNotebook: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
@@ -360,6 +363,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     chosen: () => { $("filemenu").hidden = true; },
   });
   ($("home") as HTMLAnchorElement).href = host.home ?? "/";
+  if (host.newWindow) root.querySelector<HTMLElement>('[data-sbb="newwindow"]')!.onclick = () => host.newWindow!();
   // pictures: where the host keeps them (by name); a board that carries them (data: URLs) gives them up on the way in
   const images = host.images;
   board.imageUrl = (name) => images.url(name);
@@ -1353,7 +1357,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (!r || loads !== opening) return;
     original = r.original ?? null;
     converted = r.notice ?? "";
-    return load(r.doc, true).then(sayConverted);
+    // (a notice said while it loaded, e.g. File ▸ Examples… on a site without them, is there until the next edit:
+    //  shown again over the caption the load put back, unless another document was loaded meanwhile)
+    return load(r.doc, true).then(() => {
+      if (notice && loads === opening + 1 && !destroyed) caption(notice, "");
+    }).then(sayConverted);
   }).catch(fail);
 
   // editing, and keeping what was edited
@@ -2618,6 +2626,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       print: async (o: PrintOptions & { mode?: "pages" | "tour"; dialog?: boolean } = {}) => { const r = await printBoard(o); return r?.querySelectorAll(".pr-sheet").length ?? 0; },
       /** The document, the tour's step, the camera, and the laid out items' boxes. */
       snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points, label, lx, ly, src }) => ({ id, from, to, points, label, lx, ly, src })), selectedEdge: board.selectedEdge }),
+      /** Resolves once the store's document, the one the page opened with, is shown (or none was to come): true if it was. */
+      opened: async () => !!opened && (await opened.then(() => doc !== null)),
       /** Change the document (undoable, as an edit): f gets a copy to modify. */
       edit: (f: (d: BoardDoc) => void) => editor.commit(f, false, true, "page"),
       /** Run code items (all when none are given), then what depends on them; resolves to outputs(). */

@@ -90,7 +90,7 @@ try {
   await until(`window.performance.getEntriesByType("resource").some((e) => e.name.includes("/api/mirror/v1/status"))`, 10000);
   await sleep(300);
   ok(await ev(`document.querySelector("#mirror-btn").hidden && !document.querySelector("#threads .thread.mirror")`), "the mirror unavailable (the site answers 404): no Mirror button, no mirrored conversations");
-  ok(await ev(`document.querySelector("#banner").textContent.endsWith("Chats are kept in this browser only.")`), "unavailable: the banner as before");
+  ok(await ev(`document.querySelector("#who-info").textContent.endsWith("Chats are kept in this browser only.")`), "unavailable: the status's popover as before");
 
   // ---- available and on
   fake.available = true;
@@ -99,8 +99,8 @@ try {
   ok(await until(`!!document.querySelector("#threads .thread.mirror")`), "the account's conversation this browser doesn't have is listed");
   const item = await ev(`(() => { const b = document.querySelector("#threads .thread.mirror"); return { text: b.textContent, badge: b.querySelector(".badge")?.textContent }; })()`);
   ok(item.badge === "mirror" && item.text.startsWith("Mirrored conversation"), "with a small mirror badge, in the same list (Q2)", item);
-  const banner = await ev(`document.querySelector("#banner").textContent`);
-  ok(banner.endsWith("Chats are kept in this browser only.") && !banner.includes("mirrored"), "the mirror on, but no agent connected (the scripted demo): nothing is uploaded, so the banner says this browser only, never mirrored", banner);
+  const info = await ev(`document.querySelector("#who-info").textContent`);
+  ok(info.endsWith("Chats are kept in this browser only.") && !info.includes("mirrored"), "the mirror on, but no agent connected (the scripted demo): nothing is uploaded, so the status's popover says this browser only, never mirrored", info);
   await ev(`(document.querySelector("#threads .thread.mirror").click(), true)`);
   ok(await until(`!document.querySelector("#mirror-log").hidden && !!document.querySelector("#mirror-log .mirror-section")`), "opening it shows its sections");
   const v = await ev(`(() => {
@@ -180,7 +180,7 @@ try {
   ok(await ev(`!document.querySelector("#mirror-switch").checked && document.querySelector("#mirror-about").textContent.startsWith("Your conversations live on the computer")`), "off: the switch off, and the words for off");
   await ev(`(document.querySelector("#mirror-close").click(), true)`);
   ok(await until(`!document.querySelector("#threads .thread.mirror")`), "off: no mirrored conversations listed");
-  ok(await until(`document.querySelector("#banner").textContent.endsWith("Chats are kept in this browser only.")`), "off: the banner says this browser only again", await ev(`document.querySelector("#banner").textContent`));
+  ok(await until(`document.querySelector("#who-info").textContent.endsWith("Chats are kept in this browser only.")`), "off: the status's popover says this browser only again", await ev(`document.querySelector("#who-info").textContent`));
 
   // ---- Escape while a mirrored conversation is shown over a running chat: nothing of that chat stops (SEC)
   fake.on = true;
