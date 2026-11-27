@@ -99,7 +99,9 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (161,926 / 58,770: Nov 21 2026, every way out of the LaTeX page by the hosting page's leaveTo (the page module's
 //  leaveThen and home link), on its merge with master 97da53af: 161,862 / 58,706 measured on the shipped build (bun
 //  1.4.4, node 24.21.0), + 64)
-const AGG_RAW = 161926, AGG_GZIP = 58770;
+// (163,296 / 59,619: Nov 27 2026, each code item's run time (the page module's gutter and the Run chunk's timing), 163,232 / 59,555 (+1,995 / +786 over master's 161,237 / 58,769) measured on
+//  the shipped build of its merge with master 5963e768, + 64)
+const AGG_RAW = 163296, AGG_GZIP = 59619;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)

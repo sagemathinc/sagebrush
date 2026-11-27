@@ -149,7 +149,10 @@ export const LATEX_LAZY = {
 // (311,297 raw / 105,855 gzip: Nov 26 2026, \input and \include in a shared or GitHub view (mountEditor's inputs,
 //  web/latex/component.ts): 311,233 / 105,791 measured on the shipped build of its merge with master 9063c669, with bun
 //  1.4.4 and node 24.21.0 (+644 / +241 over master's 310,589 / 105,550), + 64)
-export const LATEX_CAPS = { raw: 311297, gzip: 105855 };
+// (313,677 raw / 106,838 gzip: Nov 27 2026, each code item's run time (sagetex.mjs's tookMs and TOOK, the renderer's math-region sum): 313,613 / 106,774 measured
+//  on the shipped build of its merge with master 5963e768, with bun 1.4.4 and node 24.21.0 (+2,380 / +983 over master's 311,233 /
+//  105,791), + 64)
+export const LATEX_CAPS = { raw: 313677, gzip: 106838 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -295,7 +298,9 @@ export const LATEX_LAZY_CAPS = {
   //  files and ended at once, a Run kept in the page, the run half shared with the editor's): measured + 64, 19,401 /
   //  7,715 on master 8431bd54 (+793 / +205 over 18,608 / 7,510); renewed after its review fixes (a session ended for
   //  good at every step, a Run admitted again just before its script): 19,580 / 7,748 measured on master 9534e419, + 64
-  RUN: { label: "the LaTeX Run chunk", raw: 19644, gzip: 7812 },
+  // (19,965 / 7,957: Nov 27 2026, each code item's run time measured and kept (run-core.mjs): 19,901 / 7,893 measured (+321 / +146 over master's 19,580 / 7,747) on its merge with master
+  //  5963e768, + 64)
+  RUN: { label: "the LaTeX Run chunk", raw: 19965, gzip: 7957 },
   // (@interact, a Sagebrush extension (Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split (Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room (the

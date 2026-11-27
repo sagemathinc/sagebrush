@@ -51,7 +51,7 @@ self.onmessage = async (e: MessageEvent) => {
     if (cut) tooLarge.push({ kind: "toolong", name: "the rest of the document", at: cut.at });
     (self as any).postMessage(Object.assign(echo, { ok: true, items, groups, pos, imageRefs: r.imageRefs || [], inputRefs: r.inputRefs || [], stats: r.stats, tooLarge: !!cut,
       // (what latex_check reports, check.ts: small, the problems bounded by the renderer)
-      check: { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: (r.problems || []).concat(tooLarge), frames: r.frames || [], sage: (r.sageItems || []).map((it: any, k: number) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(r.sageStates?.[k] ? { s: r.sageStates[k].s, msg: r.sageStates[k].msg } : {}),
+      check: { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: (r.problems || []).concat(tooLarge), frames: r.frames || [], sage: (r.sageItems || []).map((it: any, k: number) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(r.sageStates?.[k] ? { s: r.sageStates[k].s, msg: r.sageStates[k].msg, ...(typeof r.sageStates[k].ms === "number" ? { ms: r.sageStates[k].ms } : {}) } : {}),
         // (and what the editor's Run needs, run-core.mjs: the item's key, its code, a refused one's name; the code
         //  is the document's own, so all of it is at most the text sent)
         key: itemKey(it), ...(typeof it.code === "string" && !it.err ? { code: it.code } : {}), ...(it.name ? { name: String(it.name) } : {}) })) } }));
