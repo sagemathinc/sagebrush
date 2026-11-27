@@ -166,6 +166,55 @@ print(json.dumps(r))
 // (grader's T-b, astra's and daybreak3's R2) each caller reserves its operation's whole peak (result, coerced
 // operands, element strings) before allocating: the peak, exactly, from the measured costs written out here
 // (integer 32, double 64, logical 8, string 136 bytes), admitted at the boundary and refused one byte short
+// (cat's join, measured: what it allocates for long character arguments, a newline separator, NULL and a
+// zero-length argument, never more than it reserved; on the host's CPython, whose tracemalloc counts every
+// allocation, with Rill's sources as Sagebrush runs them)
+test("§8.5: cat's measured peak stays within its reservation (long strings, newline sep, NULL, zero-length)", () => {
+  const src = `
+import json, sys, tracemalloc
+sys.path.insert(0, "lib")
+from _rill import mem
+import _rill.base as B
+from _rill.eval import Session
+from _rill.parse import parse
+L = 200000
+s = Session(lambda t: None, lambda t: None)
+s.evaluate(parse('a <- c("%s", "%s", "%s")' % ("a" * L, "b" * L, "c" * L))[0])
+s.evaluate(parse('b <- c("%s", "%s")' % ("d" * L, "e" * L))[0])
+s.evaluate(parse("n <- c(1.5, 2.25, 1e-20)")[0])
+mem.SMALL_BYTES = 0
+reserved = [0]
+real_enter = mem.Reservation.__enter__
+def spy(self):
+    r = real_enter(self)
+    reserved[0] = max(reserved[0], mem.open_bytes())
+    return r
+mem.Reservation.__enter__ = spy
+real_cat = B._cat
+peak = [0]
+def measured(sess, args):
+    tracemalloc.start()
+    try:
+        real_cat(sess, args)
+    finally:
+        peak[0] = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+B._cat = measured
+out = {}
+for code in ['cat(a, b, sep = "\\n")', 'cat(a, NULL, b, character(0), sep = "--")', 'cat(NULL, a, n, b)']:
+    reserved[0] = peak[0] = 0
+    s.evaluate(parse(code)[0])
+    out[code] = [peak[0], reserved[0]]
+print(json.dumps(out))
+`;
+  const r = spawnSync("python3", ["-I", "-c", src], { cwd: ROOT, encoding: "utf8", timeout: 120000 });
+  assert.equal(r.status, 0, r.stderr);
+  for (const [code, [peak, reserved]] of Object.entries<any>(JSON.parse(r.stdout.trim().split("\n").pop()!))) {
+    assert.ok(peak > 1000000, `${code}: the measure saw the output (${peak})`);
+    assert.ok(peak <= reserved, `${code}: allocated ${peak} bytes, reserved ${reserved}`);
+  }
+});
+
 test("§8.5: each builtin reserves its whole peak first: admitted at the boundary, refused one byte short", () => {
   const got = py(`
 import json
@@ -190,7 +239,9 @@ cases = {
   "-x": 50 * 32 * 2,
   "!x": 50 * 8 * 2,
   "x & y": 50 * 8 * 3,
-  "cat(x)": 50 * 136 + 24 * 50 + 50,
+  # (cat: the element strings, the output and its separators, and the join's pieces: an element and a separator
+  # each, and the newline's slot, PIECE_BYTES each, and the list's and output's headers, JOIN_BYTES)
+  "cat(x)": 50 * 136 + 24 * 50 + 50 + 10 * (50 + 50 + 1) + 128,
   "print(x)": 50 * 136 + 24 * 50 + 2 * (50 * (24 + 1) + 50 * len("[50] ")),
   # (grader's M5) doubles at their own cost: the result and both operands coerced
   "z + z": 50 * 64 * 3,

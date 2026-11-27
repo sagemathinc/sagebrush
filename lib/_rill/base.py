@@ -574,10 +574,17 @@ def invisible(sess, call, args):
     return v
 
 
+# (a piece of cat's join: a list slot, 8 bytes, with up to an eighth more for the list's growth; and the joined
+# output's own header and the list's, measured on CPython 3.14: 49 + 56 bytes, rounded up)
+PIECE_BYTES = 10
+JOIN_BYTES = 128
+
+
 def _cat_reservation(args, sep):
-    """cat's peak: an element string per element (numbers at most 24 characters, strings their own length) and
-    the output they are joined into, with its final newline when sep has one, reserved before either is built
-    (§8.5)."""
+    """cat's peak: an element string per element (numbers at most 24 characters, strings their own length), the
+    list of the pieces they are joined from (an element, a separator before it, and the final newline: PIECE_BYTES
+    each, with the list's growth) and the output they are joined into, with its final newline when sep has one and
+    the string's own header, reserved before any is built (§8.5)."""
     count, chars, seps = 0, 0, 0
     for name, v in args:
         # (every argument but sep is printed: a named one went to `...`, e.g. cat(1, se = "-"))
@@ -586,7 +593,9 @@ def _cat_reservation(args, sep):
             # (a separator per element, and one more for a zero-length argument, which writes only its separator)
             seps += len(v.data) or 1
             chars += sum(len(e) for e in v.data if e is not None) if v.type == "character" else 24 * len(v.data)
-    return mem.reserve(0, "character", (count, "character"), extra_bytes=chars + seps * len(sep) + ("\n" in sep))
+    pieces = count + seps + 1
+    return mem.reserve(0, "character", (count, "character"),
+                       extra_bytes=chars + seps * len(sep) + ("\n" in sep) + PIECE_BYTES * pieces + JOIN_BYTES)
 
 
 def cat(sess, call, args):
@@ -602,38 +611,39 @@ def cat(sess, call, args):
 
 def _cat(sess, args):
     sep = " "
-    # (each argument's elements joined by sep, in order; NULL stays as its position, its text None)
-    parts = []
     for name, v in args:
         if name == "sep":
             if not (isinstance(v, RVector) and v.type == "character" and len(v.data) == 1):
                 raise NotSupported("cat(sep =) other than one string")
             sep = v.data[0]
-        elif v is NULL:
-            parts.append(None)
-        else:
+    # (a separator goes before every argument but NULL and the first, which is first even when it is NULL:
+    # cat(NULL, "b") is " b", and a zero-length vector is its separator alone, cat("a", character(0), "b") "a  b";
+    # the pieces are the element strings and sep themselves, joined once, so the output is the only new text)
+    out = []
+    k = 0
+    for name, v in args:
+        if name == "sep":
+            continue
+        if v is not NULL:
             if not isinstance(v, RVector) or v.type == "complex":
                 raise NotSupported("cat() of this type")
-            items = []
-            for e in v.data:
-                if e is None:
-                    items.append("NA")
-                elif v.type == "double":
-                    items.append(fmt.format_real1(e, fmt.real_layout([e])))
-                elif v.type == "logical":
-                    items.append("TRUE" if e else "FALSE")
-                else:
-                    items.append(str(e))
-            parts.append(items)
-    # (a separator goes before every argument but NULL and the first, which is first even when it is NULL:
-    # cat(NULL, "b") is " b", and a zero-length vector is its separator alone, cat("a", character(0), "b") "a  b")
-    out = []
-    for k, items in enumerate(parts):
-        if items is not None:
             if k:
                 out.append(sep)
-            out.append(sep.join(items))
-    sess.write_out("".join(out) + ("\n" if "\n" in sep else ""))
+            for i, e in enumerate(v.data):
+                if i:
+                    out.append(sep)
+                if e is None:
+                    out.append("NA")
+                elif v.type == "double":
+                    out.append(fmt.format_real1(e, fmt.real_layout([e])))
+                elif v.type == "logical":
+                    out.append("TRUE" if e else "FALSE")
+                else:
+                    out.append(str(e))
+        k += 1
+    if "\n" in sep:
+        out.append("\n")
+    sess.write_out("".join(out))
 
 
 # the shapes of calls Rill refuses, checked after R's matching (args.match: `plan`, the formal each actual
