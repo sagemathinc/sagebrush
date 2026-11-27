@@ -6410,10 +6410,16 @@ def PolynomialRing(R, n=1):
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
+    out = _zq_ring(base)
+    _fun_remember_poly(_fun_base_key(R), out)
+    return out
+
+
+def _zq_ring(base):
+    """The session's one polynomial ring over base (ZZ or QQ, _ZQ_RINGS)."""
     out = _ZQ_RINGS.get(base._name)
     if out is None:
         out = _ZQ_RINGS[base._name] = _MPolyRingZQ(base, "$.1")
-    _fun_remember_poly(_fun_base_key(R), out)
     return out
 
 
@@ -6440,6 +6446,14 @@ class _MPolyRingZQ(_sp.PolynomialRing_):
 
     def variable_names(self):
         return (self.variable_name(),)
+
+    def change_ring(self, R):
+        # (over the integers or the rationals, the session's one ring there, as Magma's: a polynomial over the
+        # integers taken to the rationals, by ChangeRing or a gcd, is in PolynomialRing(Rationals()), printed by
+        # that ring's name)
+        if R is _sp.ZZ or R is _sp.QQ:
+            return _zq_ring(R)
+        return _sp.PolynomialRing_.change_ring(self, R)
 
     def _repr_name(self):
         if self._shown is not None:

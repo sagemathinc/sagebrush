@@ -813,7 +813,7 @@ class Polynomial:
         while c and c[-1] == 0:
             c.pop()
         if ring._base is ZZ and any(not isinstance(a, int) for a in c):
-            ring = PolynomialRing(QQ, ring._name, _internal=True)
+            ring = ring.change_ring(QQ)
         self._ring = ring
         self._c = c
 
@@ -1003,7 +1003,7 @@ class Polynomial:
         # the ring over QQ in the same variable: our own when it is over QQ
         # (an equal ring either way; keeping ours keeps its class, e.g. Magma
         # mode's ring, which names its variable when printing)
-        return self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name, _internal=True)
+        return self._ring if self._ring._base is QQ else self._ring.change_ring(QQ)
 
     def __repr__(self):
         return _poly_repr(self._c, self._ring._repr_name()) if self._c else "0"
@@ -1321,10 +1321,10 @@ class Polynomial:
             # shared core's budget; daybreak2 LIMIT-F3-2)
             S.charge([S.WORK], len(self._c), refuse)
             if R is QQ:
-                return PolynomialRing(R, self._ring._name, _internal=True)(self._c)
+                return self._ring.change_ring(R)(self._c)
             if any(int(a.denominator) != 1 for a in self._c):
                 raise TypeError("no conversion of this rational to integer")
-            return PolynomialRing(R, self._ring._name, _internal=True)([int(a) for a in self._c])
+            return self._ring.change_ring(R)([int(a) for a in self._c])
         if isinstance(R, PolynomialRing_):
             return R(self._c)
         import _sage_ff
