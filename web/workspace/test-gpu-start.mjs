@@ -3,7 +3,7 @@
 // auto-adds the first matching key; anything else is the approval card or a warning; a refused start spends the
 // intent; token_used withdraws the notice; without E2E it just starts.
 //   bun web/workspace/test-gpu-start.mjs
-import { CONSENT, GpuRefused, GpuStart, SECOND_KEY, WHY_WORDS } from "./gpu-start.ts";
+import { CONSENT, GpuRefused, GpuStart, SECOND_KEY, UNSAFE_KEY, WHY_WORDS } from "./gpu-start.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -29,6 +29,7 @@ function fakeKeys() {
     onPending(cb) { pendingCbs.add(cb); return () => pendingCbs.delete(cb); },
     async devices() { return devices; },
     async enrollAtStart(it, p) {
+      if (k.refuseWith) return { ok: false, why: k.refuseWith };
       if (!intents.includes(it)) return { ok: false, why: "other-page" };
       if (p.intent == null) return { ok: false, why: "no-intent" };
       if (p.intent !== it.id) return { ok: false, why: "other-page" };
@@ -68,7 +69,11 @@ const api = (answer = { machineId: "m1", reservation: "res1" }) => {
   const keys = fakeKeys(), a = api();
   let t = 1000;
   const g = new GpuStart(keys, a, () => t);
-  ok(g.consentShown && CONSENT.includes("Sagebrush's service sets it up and adds it for you"), "E2E on: the consent words show under Start");
+  ok(g.consentShown, "E2E on: the consent words show under Start");
+  ok(CONSENT === "This machine will be able to read and change everything in your end-to-end workspace until it's removed " +
+    "(and anything written before then, for as long as it keeps a copy). It can't add or remove devices or change your recovery. " +
+    "The machine's administrators, the provider's and Sagebrush's, can read your keys and your files while you use it. " +
+    "Sagebrush's service will set it up and add it for you.", "the consent is r12.1 §1's Start dialog text, verbatim");
   await g.start("A40");
   ok(a.calls[0].intent === "N1" && a.calls[0].gpuType === "A40", "the start carries the intent's id, only its id");
   ok(keys.intents[0].reservation === "res1" && g.state.phase === "connecting", "the reservation from the answer is bound; connecting");
@@ -120,6 +125,41 @@ const api = (answer = { machineId: "m1", reservation: "res1" }) => {
     await g.approve();
     ok(g.state.phase === "ready" && g.state.added?.atStart === false && keys.signed.length === 1, `${why}: Approve signs exactly that key`);
   }
+}
+{ // a key not over the H1 channel, or not a provisioned machine's: a warning, never the card
+  for (const why of ["not-h1", "not-provisioned"]) {
+    const keys = fakeKeys(), g = new GpuStart(keys, api());
+    await g.start("A40");
+    keys.refuseWith = why;
+    keys.deliver(pend());
+    await tick();
+    ok(g.state.phase === "warning" && g.state.text === UNSAFE_KEY && keys.signed.length === 0, `${why}: the warning, nothing signed`);
+    let threw = false;
+    try { await g.approve(); } catch { threw = true; }
+    ok(threw && keys.signed.length === 0, `${why}: approve() throws`);
+    keys.refuseWith = null;
+    keys.deliver(pend({ session: "s2" }));
+    await tick();
+    ok(g.state.phase === "warning" && g.state.text === UNSAFE_KEY && keys.signed.length === 0, `${why}: a later key changes nothing`);
+  }
+}
+{ // not-bound after the bind (PageKeys' anomaly): the card, not stranded
+  const keys = fakeKeys(), g = new GpuStart(keys, api());
+  await g.start("A40");
+  keys.refuseWith = "not-bound";
+  keys.deliver(pend());
+  await tick();
+  ok(g.state.phase === "approve" && g.state.why === WHY_WORDS["not-bound"], "not-bound after the bind: the card with its reason");
+}
+{ // a failed bind's warning is final: a later key doesn't turn it into the card
+  const keys = fakeKeys();
+  keys.startIntent = ((orig) => () => { const it = orig(); it.bind = () => { it.spent = true; throw new Error("bind"); }; return it; })(keys.startIntent);
+  const g = new GpuStart(keys, api());
+  await g.start("A40");
+  ok(g.state.phase === "warning", "a failed bind: the warning");
+  keys.deliver(pend());
+  await tick();
+  ok(g.state.phase === "warning" && keys.signed.length === 0, "a failed bind: a later key leaves the warning, nothing signed");
 }
 { // another machine's key is ignored
   const keys = fakeKeys(), g = new GpuStart(keys, api());

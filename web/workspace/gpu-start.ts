@@ -6,10 +6,12 @@
 
 import type { PageKeys, PendingEnrollment, RefusedWhy, StartIntent, TokenUsedWarning } from "./e2e/page-keys-interface.ts";
 
-/** The consent shown under the Start button whenever E2E is on (r3's card words). */
+/** The consent shown under the Start button whenever E2E is on: r12.1 §1's Start dialog text, verbatim (r3's card words). */
 export const CONSENT =
-  "Starting it lets this machine read and change everything in your end-to-end workspace until it's removed. " +
-  "Sagebrush's service sets it up and adds it for you; it's removed automatically when it stops.";
+  "This machine will be able to read and change everything in your end-to-end workspace until it's removed " +
+  "(and anything written before then, for as long as it keeps a copy). It can't add or remove devices or change your recovery. " +
+  "The machine's administrators, the provider's and Sagebrush's, can read your keys and your files while you use it. " +
+  "Sagebrush's service will set it up and add it for you.";
 export const APPROVE_MYSELF = "Approve it myself instead";
 
 /** Why a key wasn't added automatically, in the card's words. */
@@ -24,6 +26,9 @@ export const WHY_WORDS: Readonly<Record<RefusedWhy, string>> = {
   "not-first": "Another key for this machine arrived first.",
   "not-bound": "The machine isn't fully registered yet.",
 };
+/** A key whose fingerprint didn't come over the H1-bound channel, or that isn't a provisioned machine's: never
+ *  offered for approval (the card's fingerprint guarantee rests on that channel, r11). */
+export const UNSAFE_KEY = "This machine's key didn't arrive safely. It was not added. Stop this machine and start a new one.";
 /** A second key, or one after this Start already added a machine: never offered for approval. */
 export const SECOND_KEY =
   "Another machine tried to use this machine's setup. It was not added. Stop this machine and start a new one.";
@@ -124,6 +129,7 @@ export class GpuStart {
         this.#intent.bind(answer.reservation);
       } catch {
         this.#intent = null;
+        this.#decided = true;
         this.#set({ phase: "warning", machineId: answer.machineId, text: "This machine couldn't be added automatically. Stop it and start a new one." });
         return;
       }
@@ -140,6 +146,7 @@ export class GpuStart {
       return;
     }
     if (p.reservation !== this.#reservation) return; // another machine's key: not this card's business
+    if (this.state.phase === "warning") return; // a warning is final for this Start: no card replaces it
     const machineId = this.#machineId!;
     if (this.#decided) {
       // a second key for this machine: never offered for approval (r12.1)
@@ -159,13 +166,15 @@ export class GpuStart {
       this.#set({ phase: "ready", machineId, reservation: this.#reservation, added: { device: r.device, name: p.name, fingerprint: p.fingerprint, atStart } });
       return;
     }
-    if (r.why === "not-bound") {
-      this.#held.push(p);
-      return;
-    }
+    // (not-bound can't happen here: the reservation is bound before any key is looked at; if PageKeys says so
+    // anyway, the card shows it, with a fingerprint that came over the H1 channel)
     this.#decided = true;
     if (r.why === "not-first" || r.why === "used") {
       this.#set({ phase: "warning", machineId, text: SECOND_KEY });
+      return;
+    }
+    if (r.why === "not-h1" || r.why === "not-provisioned") {
+      this.#set({ phase: "warning", machineId, text: UNSAFE_KEY });
       return;
     }
     this.#set({ phase: "approve", machineId, reservation: this.#reservation, pending: p, why: WHY_WORDS[r.why] });
