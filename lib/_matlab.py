@@ -3589,9 +3589,14 @@ def hcat(vals, narrow=True):
 
 def vcat(rows):
     """[a; b; ...] (each already a row)"""
-    if len(rows) == 1:
+    n = len(rows)
+    if n == 1:
         return cp(rows[0])
-    return _cat(rows, 1)
+    # (a column of doubles: [a; b] of scalars, as hcat's row of them)
+    for v in rows:
+        if type(v) is not float:
+            return _cat(rows, 1)
+    return np.array(rows).reshape((1, n))
 
 
 def _cat_class(vals):
