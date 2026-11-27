@@ -269,6 +269,19 @@ let happy;
   let l;
   for (let i = 0; i < 11; i++) l = await lookupAs(f.account, "aaaaaaaa");
   ok(errorOf(l) === "rate", "L-5: the 11th lookup in a minute from one account: rate");
+  // (31 lookups from one source over 4 accounts, about 8 each: under the per-account 10, over the per-source 30)
+  const oneSource = { "cf-connecting-ip": "203.0.113.77" };
+  for (let i = 0; i < 31; i++) l = await lookupAs("acct-src" + (i % 4), "aaaaaaaa", oneSource);
+  ok(errorOf(l) === "rate", "L-6: the 31st lookup in a minute from one source, over 4 accounts: rate");
+}
+
+// ---- the poll's nonce: a captured poll can't be replayed inside its window
+{
+  const h = await hostOf();
+  const first = await ask(h);
+  const nonce = core.b64(core.random(16));
+  ok((await pollOf(h, first.json.pairing, { sigOpts: { nonce } })).status === 200, "R-12: a first poll");
+  ok(errorOf(await pollOf(h, first.json.pairing, { sigOpts: { nonce } })) === "replay", "R-12: the same poll nonce again: replay");
 }
 
 // ---- Q: the poll's answers to the wrong asker
