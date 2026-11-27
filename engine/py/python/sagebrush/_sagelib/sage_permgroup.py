@@ -939,7 +939,7 @@ class PermutationGroup:
         The engine enumerates the group, admitted first by the memory guard."""
         if "classes" not in self._cache:
             order, n = int(self.order()), self._n
-            _admit_elements(order, n, "the conjugacy classes", order)
+            _admit_elements(order, _element_bytes(n), "the conjugacy classes", order, _ENUM_FIXED)
             count = self._q("conjugacy_class_count")
             # (then their output, by their number, before the engine writes it)
             try:
@@ -1062,19 +1062,38 @@ def _partitions_count(n):
     return p[n]
 
 
-# what a permutation of degree n certainly takes wherever Sagebrush runs (a
-# 32-bit heap in the browser): its images, 4 bytes a point, and at least 24
-# bytes of header and index entry (LIMIT-CLS-1)
+# a group element's share of the engine's peak while it lists the classes by
+# enumerating the group, measured (Nov 2026, the engine native and in wasm32):
+# at most 8n + 212 bytes; and the enumeration's own fixed part, at most 1 KB
+# (LIMIT-CLS-1)
 def _element_bytes(n):
-    return 4 * n + 24
+    return 8 * n + 256
 
 
-def _admit_elements(count, n, what, order):
-    """The memory guard's refusal when count permutations of degree n of a
-    group of this order (before the engine enumerates them, or held so far)
-    don't fit a quarter of the heap, the share of one computation."""
+_ENUM_FIXED = 4096
+
+
+# a class's row once decoded (its representative's tuple, a new int each past
+# 256 under CPython), measured: at most 40n + 700 bytes under CPython, 16n +
+# 1000 in pyjs; and a ConjugacyClass's element while it is listed (a tuple
+# held in a set and a list), measured: at most 8n + 100 under CPython, in
+# pyjs 2960 bytes at n = 300 and 6881 at 600, a slope of 13.1 a point
+# (LIMIT-CLS-1)
+def _row_bytes(n):
+    return 40 * n + 1024
+
+
+def _held_bytes(n):
+    return 16 * n + 1024
+
+
+def _admit_elements(count, per, what, order, fixed=0):
+    """The memory guard's refusal when count items of per bytes each (and
+    fixed more) of a group of this order (before the engine enumerates
+    them, or held so far) don't fit a quarter of the heap, the share of one
+    computation."""
     import _capacity
-    need, limit = count * _element_bytes(n), _capacity.heap_figure() // 4
+    need, limit = count * per + fixed, _capacity.heap_figure() // 4
     if need > limit:
         import _memguard
         e = _memguard.memory_guard("Listing %s of a permutation group of order %d" % (what, order), need, limit, "one computation")
@@ -1082,12 +1101,10 @@ def _admit_elements(count, n, what, order):
         raise e
 
 
-# what a class's output certainly takes once the engine has counted them:
-# its words in the engine's binary reply (n images, its length and its order,
-# 8 bytes each) and its row decoded from them (a tuple of n images, 4 bytes a
-# point and a 12-byte header at least, wherever Sagebrush runs) (LIMIT-CLS-1)
+# a class's share of the output's peak: its decoded row and its words in the
+# engine's reply (8n + 16), alive together (LIMIT-CLS-1)
 def _class_output_bytes(n):
-    return 12 * n + 28
+    return _row_bytes(n) + 8 * n + 16
 
 
 def _bin_classes(n, gens):
@@ -1184,7 +1201,7 @@ class ConjugacyClass:
                         # (the class's length isn't known before it is listed:
                         # what it holds so far is checked as it grows)
                         if len(queue) % 4096 == 0:
-                            _admit_elements(len(queue), G._n, "a conjugacy class", int(G.order()))
+                            _admit_elements(len(queue), _held_bytes(G._n), "a conjugacy class", int(G.order()))
             self._set = seen
         return self._set
 
@@ -1270,7 +1287,7 @@ class SymmetricGroup(_Named):
                     return
                 for k in range(min(rest, top), 0, -1):
                     parts(rest - k, k, acc + [k])
-            _admit_elements(_partitions_count(n), n, "the conjugacy classes", math.factorial(n))
+            _admit_elements(_partitions_count(n), _row_bytes(n), "the conjugacy classes", math.factorial(n))
             parts(n, n, [])
             rows = []
             for lam in types:

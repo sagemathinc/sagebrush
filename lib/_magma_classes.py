@@ -252,20 +252,25 @@ def _classes_group(G):
     return G
 
 
-# what a group element certainly takes while the engine lists the classes by
-# enumerating the group, wherever Sagebrush runs (a 32-bit heap in the
-# browser): its images, 4 bytes a point, and at least 24 bytes of header and
-# index entry (LIMIT-CLS-1)
+# a group element's share of the engine's peak while it lists the classes by
+# enumerating the group, measured (Nov 2026, the engine native and in wasm32):
+# at most 8n + 212 bytes, an abelian group's (each element its own class's
+# representative too); and the enumeration's own fixed part, at most 1 KB
+# (LIMIT-CLS-1)
 def _element_bytes(n):
-    return 4 * n + 24
+    return 8 * n + 256
 
 
-# what a class's output certainly takes once the engine has counted them:
-# its words in the engine's binary reply (n images, its length and its order,
-# 8 bytes each) and its row decoded from them (a tuple of n images, 4 bytes a
-# point and a 12-byte header at least, wherever Sagebrush runs) (LIMIT-CLS-1)
+_ENUM_FIXED = 4096
+
+
+# a class's share of the output's peak once the engine has counted them,
+# measured: its row decoded (a tuple of n images, a new int each past 256
+# under CPython, the _MPerm and the MTuple: at most 40n + 700 bytes under
+# CPython, 16n + 1000 in pyjs) and its words in the engine's reply (8n + 16),
+# alive together (LIMIT-CLS-1)
 def _class_output_bytes(n):
-    return 12 * n + 28
+    return 48 * n + 1040
 
 
 def _bin_classes(G):
@@ -317,7 +322,7 @@ def _engine_count(G):
     _engine_classes), its order times its degree admitted first."""
     import _magma_groups as gr
     n, order = G.n, gr.order(G)
-    _admit_classes(order * _element_bytes(n), "The conjugacy classes of a permutation group of order %d" % order)
+    _admit_classes(order * _element_bytes(n) + _ENUM_FIXED, "The conjugacy classes of a permutation group of order %d" % order)
     return gr._engine_group(G, "conjugacy_class_count")
 
 

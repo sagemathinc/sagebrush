@@ -17008,7 +17008,7 @@
   "explained": true,
   "owner": "Sage permutation groups/runtime memory"
  },
- "lib/sage_permgroup.py :: _admit_elements :: need, limit = count * _element_bytes(n), _capacity.heap_figure() // 4 #0": {
+ "lib/sage_permgroup.py :: _admit_elements :: need, limit = count * per + fixed, _capacity.heap_figure() // 4 #0": {
   "class": "2",
   "disposition": {
    "2": {

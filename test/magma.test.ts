@@ -1806,7 +1806,7 @@ test("a permutation group of degree 600 whose order isn't known yet is computed,
   assert.equal(k.stdout, "4000\ntrue\ntrue\n", k.stderr);
 });
 
-test("ConjugacyClasses of a group other than Sym(n) is admitted at its boundary: each element its certain 4n + 24 bytes (LIMIT-CLS-1)", () => {
+test("ConjugacyClasses of a group other than Sym(n) is admitted at its boundary, each element and each class by its measured peak (LIMIT-CLS-1)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
   const cli = join(__dirname, "..", "src", "cli.js");
@@ -1817,29 +1817,42 @@ test("ConjugacyClasses of a group other than Sym(n) is admitted at its boundary:
     "        print(label, 'admitted', f())",
     "    except m.MagmaError as e:",
     "        print(label, 'refused', 'needs about' in str(e))",
-    "print('per element', c._element_bytes(4), c._element_bytes(1000))",
-    "m._COLLECT_MAX, m._COLLECT_COST = 1, 12 * c._element_bytes(4)",
+    "print('per element', c._element_bytes(4), c._element_bytes(1000), 'fixed', c._ENUM_FIXED, 'per class', c._class_output_bytes(20), c._class_output_bytes(300))",
+    // (the enumeration's peak per element, measured with the engine native and in wasm32 (the larger, native):
+    // Sym(9) 116 bytes, D(2000) 10136, C(5000) 40212; each charge covers it, and a heap just below the peak
+    // times the order is refused before the engine enumerates anything)
+    "def cyc(n): return tuple(list(range(2, n + 1)) + [1])",
+    "def dih(n): return [cyc(n), tuple([1] + list(range(n, 1, -1)))]",
+    "peaks = [('Sym(9)', g.MPermGroup(9, [cyc(9), (2, 1) + tuple(range(3, 10))], 362880), 116),",
+    "         ('D(2000)', g.MPermGroup(2000, dih(2000), 4000), 10136), ('C(5000)', g.MPermGroup(5000, [cyc(5000)], 5000), 40212)]",
+    "print('charges cover the peaks', [c._element_bytes(G.n) >= p for _, G, p in peaks])",
+    "for name, G, p in peaks:",
+    "    m._COLLECT_MAX, m._COLLECT_COST = 1, g.order(G) * p - 1",
+    "    run(name + ' below its peak', lambda: len(c._engine_classes(G)))",
+    "m._COLLECT_MAX, m._COLLECT_COST = 1, 12 * c._element_bytes(4) + c._ENUM_FIXED",
     "run('Alt(4) at the bound', lambda: len(c._engine_classes(g.alt(4))))",
     "m._COLLECT_COST -= 1",
     "run('Alt(4) one byte past it', lambda: len(c._engine_classes(g.alt(4))))",
     // (the output, admitted by the classes' number once the engine has counted them: an abelian group's are as
-    // many as its elements, 1024 of 20 points here, whose output outweighs their enumeration, 106496 bytes)
+    // many as its elements; C2^10 on 20 points, and C(300), whose images pass 256 (a new int each under CPython))
     "def swap(i):",
     "    im = list(range(1, 21)); im[2 * i], im[2 * i + 1] = im[2 * i + 1], im[2 * i]",
     "    return tuple(im)",
-    "E = g.MPermGroup(20, [swap(i) for i in range(10)])",
-    "print('output per class', c._class_output_bytes(20), 'enumeration', 1024 * c._element_bytes(20))",
-    "m._COLLECT_MAX, m._COLLECT_COST = 1, 1024 * c._class_output_bytes(20)",
-    "run('C2^10, output at the bound', lambda: len(c._engine_classes(E)))",
-    "m._COLLECT_COST -= 1",
-    "run('C2^10, output one byte past it', lambda: len(c._engine_classes(E)))",
-    "run('C2^10, its number of classes (no output)', lambda: c.number_of_classes(E))",
+    "for name, G, k in [('C2^10', g.MPermGroup(20, [swap(i) for i in range(10)]), 1024), ('C(300)', g.MPermGroup(300, [cyc(300)]), 300)]:",
+    "    m._COLLECT_MAX, m._COLLECT_COST = 1, k * c._class_output_bytes(G.n)",
+    "    run(name + ', output at the bound', lambda: len(c._engine_classes(G)))",
+    "    m._COLLECT_COST -= 1",
+    "    run(name + ', output one byte past it', lambda: len(c._engine_classes(G)))",
+    "    run(name + ', its number of classes (no output)', lambda: c.number_of_classes(G))",
     "run('then another group', lambda: len(c._engine_classes(g.alt(4))))",
   ].join("\n");
   const r = spawnSync(process.execPath, [cli, "-c", py], { encoding: "utf8", timeout: WALL(120000) });
-  assert.equal(r.stdout, ["per element 40 4024", "Alt(4) at the bound admitted 4", "Alt(4) one byte past it refused True",
-    "output per class 268 enumeration 106496", "C2^10, output at the bound admitted 1024", "C2^10, output one byte past it refused True",
-    "C2^10, its number of classes (no output) admitted 1024", "then another group admitted 4", ""].join("\n"), r.stderr);
+  assert.equal(r.stdout, ["per element 288 8256 fixed 4096 per class 2000 15440", "charges cover the peaks [True, True, True]",
+    "Sym(9) below its peak refused True", "D(2000) below its peak refused True", "C(5000) below its peak refused True",
+    "Alt(4) at the bound admitted 4", "Alt(4) one byte past it refused True",
+    "C2^10, output at the bound admitted 1024", "C2^10, output one byte past it refused True", "C2^10, its number of classes (no output) admitted 1024",
+    "C(300), output at the bound admitted 300", "C(300), output one byte past it refused True", "C(300), its number of classes (no output) admitted 300",
+    "then another group admitted 4", ""].join("\n"), r.stderr);
 });
 
 test("ConjugacyClasses of a group other than Sym(n): Sagebrush's canonical representatives (each class's least element) and order (element order, length, representative), pinned", () => {

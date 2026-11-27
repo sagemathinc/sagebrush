@@ -200,9 +200,9 @@ for ai in [[0,0,1,-1,0], [0,1,1,-2,0], [0,0,1,-7,6]]:
   assert.deepEqual(out.trim().split("\n"), ["1 0.306 1 1", "2 1.51863 - 2", "3 10.3911 - 3"]);
 });
 
-test("conjugacy classes in Sage mode are admitted by the memory guard at their boundary, a class by what it holds (LIMIT-CLS-1)", () => {
-  // (a quarter of the heap is one computation's share; each permutation is
-  // charged only its certain 4n + 24 bytes)
+test("conjugacy classes in Sage mode are admitted by the memory guard at their boundary, by their measured peaks (LIMIT-CLS-1)", () => {
+  // (a quarter of the heap is one computation's share; the engine's enumeration, a decoded row and a class's
+  // element held while it is listed are charged their measured peaks, the larger of pyjs's and CPython's)
   const out = cli("--sage", "-c", `
 import _capacity, sage_permgroup as P
 def run(label, heap, f):
@@ -211,45 +211,46 @@ def run(label, heap, f):
         print(label, 'admitted', f())
     except MemoryError as e:
         print(label, 'refused', str(e).splitlines()[1].split(' needs')[0])
-print('per element', P._element_bytes(4), P._element_bytes(10))
-need = 12 * P._element_bytes(4)
+print('per element', P._element_bytes(4), P._element_bytes(10), 'fixed', P._ENUM_FIXED, 'row', P._row_bytes(10), 'held', P._held_bytes(10))
+need = 12 * P._element_bytes(4) + P._ENUM_FIXED
 run('Alt(4) at the bound', 4 * need, lambda: len(AlternatingGroup(4).conjugacy_classes()))
 run('Alt(4) one byte short', 4 * need - 4, lambda: len(AlternatingGroup(4).conjugacy_classes()))
 G = SymmetricGroup(10)
 # (the class of a transposition: 45 elements, not the group's 10! charged)
-run('transpositions', 4 * 45 * P._element_bytes(10), lambda: G.conjugacy_class(G('(1,2)')).cardinality())
-# (the class of a 10-cycle, 9! elements: refused once it holds 4096 of them)
-run('10-cycles', 4 * 4096 * P._element_bytes(10) - 4, lambda: G.conjugacy_class(G('(1,2,3,4,5,6,7,8,9,10)')).cardinality())
-# (the output, admitted by the classes' number once the engine has counted them: C2^10 on 20 points has 1024,
-# whose output, 1024 * 268 bytes, outweighs their enumeration, 1024 * 104)
-print('output per class', P._class_output_bytes(20))
-E = PermutationGroup(['(%d,%d)' % (2 * i + 1, 2 * i + 2) for i in range(10)])
-run('C2^10 at the bound', 4 * 1024 * P._class_output_bytes(20), lambda: len(E.conjugacy_classes()))
-E = PermutationGroup(['(%d,%d)' % (2 * i + 1, 2 * i + 2) for i in range(10)])
-run('C2^10 one byte short', 4 * 1024 * P._class_output_bytes(20) - 4, lambda: len(E.conjugacy_classes()))
-run('then Alt(4)', 4 * 12 * P._element_bytes(4), lambda: len(AlternatingGroup(4).conjugacy_classes()))
-# (the 10-cycles' refusal is at the first 4096 held: its need is theirs)
-_capacity.heap_figure = lambda: 4 * 4096 * P._element_bytes(10) - 4
+run('transpositions', 4 * 45 * P._held_bytes(10), lambda: G.conjugacy_class(G('(1,2)')).cardinality())
+# (the class of a 10-cycle, 9! elements: refused once it holds 4096 of them, by their exact need)
+_capacity.heap_figure = lambda: 4 * 4096 * P._held_bytes(10) - 4
 try:
     G.conjugacy_class(G('(1,2,3,4,5,6,7,8,9,10)')).cardinality()
 except MemoryError as e:
-    print('10-cycles need', e.need_bytes == 4096 * P._element_bytes(10))
-# (SymmetricGroup(n)'s classes, one for each partition of n, admitted by their number before any is made)
-need = P._partitions_count(10) * P._element_bytes(10)
+    print('10-cycles refused, need', e.need_bytes == 4096 * P._held_bytes(10))
+# (the output, admitted by the classes' number once the engine has counted them: an abelian group's are as
+# many as its elements; C2^10 on 20 points, and C(300), whose images pass 256)
+print('output per class', P._class_output_bytes(20), P._class_output_bytes(300))
+for name, mk, k in [('C2^10', lambda: PermutationGroup(['(%d,%d)' % (2 * i + 1, 2 * i + 2) for i in range(10)]), 1024),
+                    ('C(300)', lambda: CyclicPermutationGroup(300), 300)]:
+    H = mk()
+    run(name + ' at the bound', 4 * k * P._class_output_bytes(H.degree()), lambda: len(H.conjugacy_classes()))
+    H = mk()
+    run(name + ' one byte short', 4 * k * P._class_output_bytes(H.degree()) - 4, lambda: len(H.conjugacy_classes()))
+run('then Alt(4)', 4 * need, lambda: len(AlternatingGroup(4).conjugacy_classes()))
+# (SymmetricGroup(n)'s classes, one row for each partition of n, admitted by their number before any is made)
+need = P._partitions_count(10) * P._row_bytes(10)
 run('Sym(10) at the bound', 4 * need, lambda: len(SymmetricGroup(10).conjugacy_classes()))
 run('Sym(10) one byte short', 4 * need - 4, lambda: len(SymmetricGroup(10).conjugacy_classes()))
 `);
   assert.deepEqual(out.trim().split("\n"), [
-    "per element 40 64",
+    "per element 288 336 fixed 4096 row 1424 held 1184",
     "Alt(4) at the bound admitted 4",
     "Alt(4) one byte short refused Listing the conjugacy classes of a permutation group of order 12",
     "transpositions admitted 45",
-    "10-cycles refused Listing a conjugacy class of a permutation group of order 3628800",
-    "output per class 268",
+    "10-cycles refused, need True",
+    "output per class 2000 15440",
     "C2^10 at the bound admitted 1024",
     "C2^10 one byte short refused Listing the 1024 conjugacy classes of a permutation group of order 1024",
+    "C(300) at the bound admitted 300",
+    "C(300) one byte short refused Listing the 300 conjugacy classes of a permutation group of order 300",
     "then Alt(4) admitted 4",
-    "10-cycles need True",
     "Sym(10) at the bound admitted 42",
     "Sym(10) one byte short refused Listing the conjugacy classes of a permutation group of order 3628800",
   ]);
