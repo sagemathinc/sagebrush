@@ -460,16 +460,17 @@ test("index selections are admitted before they are taken, and a long chain of i
   const cli = join(__dirname, "..", "src", "cli.js");
   const run = (input: string) => spawnSync(process.execPath, ["--max-old-space-size=96", cli, "--magma"], { input, encoding: "utf8", timeout: WALL(60000) });
   const t0 = Date.now();
-  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1];\nT := S[10^6..10^6 + 19999]; #T;\n');
+  const sel = run('S := [1..10000000]; T := S[1..10000000];\nT := S[5..10^30];\nw := "abc"; w[2..10^20];\nT := S[10^6..2*10^6 - 1];\nT := S[10^6..10^6 + 7999]; #T;\n');
   assert.equal(sel.signal, null, sel.stderr);
   const flat = sel.stdout.replace(/\s+/g, " ");
   // (the limit in a 96 MiB heap, from its free part: at most 49152 elements,
-  // HARD-A57-1; a selection of 10^6 aborted V8 there on Node 24)
+  // HARD-A57-1; a selection of 10^6 aborted V8 there on Node 24; the one
+  // admitted, 8000, is under the limit's lowest seen, 12288 on a loaded host)
   const selBounds = [...flat.matchAll(/a selection of more than (\d+) elements is not supported yet/g)].map((m) => Number(m[1]));
   assert.ok(selBounds.length === 2 && selBounds[0] === selBounds[1] && selBounds[0] <= 49152, sel.stdout);
   assert.match(flat, /T := S\[5\.\.10\^30\]; \^ Runtime error in '\[\]': Sequence element not defined/);
   assert.match(flat, /Index 3 \(4\) should be in the range \[1 \.\. 3\]/);
-  assert.match(sel.stdout, /\n20000\n$/);
+  assert.match(sel.stdout, /\n8000\n$/);
   assert.ok(Date.now() - t0 < WALL(30000));
   // 5000 links, or 41: refused before running; 40 still work (each link nests the Python one level, which the
   // generated Python's bound allows: test/magma-malformed.test.ts)
