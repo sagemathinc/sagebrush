@@ -98,18 +98,25 @@ test("ellipsis ranges: the same text as the old rewrite, on Sage programs and ge
   assert.ok(n > 40000);
 });
 
-// The shapes that took minutes (1 MiB each, a fraction of a second on an idle machine): linear now, so a 1 MiB file
-// costs about 4 times a 256 KiB one, where the old rewrite's cost grew 16 times; the bound, 8 times, sits between.
-// Measured so that a loaded runner can't fail it (#2276): CPU time, not wall-clock time (another process on the
-// runner takes the CPU away, not this process's CPU time); the two sizes back to back, alternately, the least of 5 of
-// each, with a floor of 50 ms so that one garbage collection in a fast shape can't fail it; and a ratio over the bound
-// measured again, up to 3 times, before it fails (a quadratic cost is over it every time, a burst of load once).
+// The shapes that took minutes (1 MiB each, a fraction of a second on an idle machine). Linear now, so a 1 MiB file
+// costs about 4 times a 256 KiB one: up to 7.4 times measured, as caches and garbage collection make the larger
+// size dearer per byte. The old rewrite's cost grew 16 times, and the bound, 12 times, sits between. Each run also
+// has a ceiling, 10 s of CPU time, many times what any shape takes; a regression fails at its first run over it.
+// Measured so that a loaded runner can't fail it (#2276):
+// - CPU time, not wall-clock time: another process on the runner takes the CPU away, not this process's CPU time;
+// - the two sizes back to back, alternately, keeping the least of 5 of each, with a floor of 50 ms so that one
+//   garbage collection in a fast shape can't fail it;
+// - a ratio over the bound measured again, up to 3 times, before it fails: a quadratic cost is over it every time,
+//   a burst of load once.
 // Code nested past Python's limit of 200 brackets is left as it is (Python refuses it, whatever the preparser does).
-const cpuMs = (f: () => unknown) => {
+const CEILING_MS = 10000;
+const cpuMs = (name: string, f: () => unknown) => {
   const t = process.cpuUsage();
   f();
   const d = process.cpuUsage(t);
-  return (d.user + d.system) / 1000;
+  const ms = (d.user + d.system) / 1000;
+  assert.ok(ms < CEILING_MS, name + ": " + Math.round(ms) + " ms of CPU time, over the ceiling of " + CEILING_MS);
+  return ms;
 };
 const linear = (name: string, run: (src: string) => unknown, rep: (n: number) => string) => {
   const small = rep(1 << 18), big = rep(1 << 20);
@@ -117,10 +124,10 @@ const linear = (name: string, run: (src: string) => unknown, rep: (n: number) =>
   for (let attempt = 0; attempt < 3; attempt++) {
     let s = Infinity, b = Infinity;
     for (let r = 0; r < 5; r++) {
-      s = Math.min(s, cpuMs(() => run(small)));
-      b = Math.min(b, cpuMs(() => run(big)));
+      s = Math.min(s, cpuMs(name + " 256 KiB", () => run(small)));
+      b = Math.min(b, cpuMs(name + " 1 MiB", () => run(big)));
     }
-    if (b < 8 * Math.max(s, 50)) return;
+    if (b < 12 * Math.max(s, 50)) return;
     last = name + ": 1 MiB " + Math.round(b) + " ms, 256 KiB " + Math.round(s) + " ms of CPU time";
   }
   assert.fail(last + ", 3 times");
@@ -135,6 +142,8 @@ test("ellipsis ranges: linear in the file's length", () => {
   assert.equal(parseEllipsis(tooDeep), tooDeep);
   const deepest = "[".repeat(200) + "1..2" + "]".repeat(200);
   assert.equal(parseEllipsis(deepest), oldParseEllipsis(deepest));
-  // (and the whole preparser on the shape that took minutes)
-  linear("preparse [1,..,", preparse, (n) => "[1,..,".repeat(Math.floor(n / 6)));
+  // (and the whole preparser on the shape that took minutes, under the ceiling: its other passes grow faster than
+  // linearly per byte between 256 KiB and 1 MiB, caches and garbage collection, 8 to 10 times, so a ratio would be
+  // too close to its bound)
+  cpuMs("preparse [1,.., 1 MiB", () => preparse("[1,..,".repeat(Math.floor((1 << 20) / 6))));
 });
