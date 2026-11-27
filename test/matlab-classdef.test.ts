@@ -232,7 +232,8 @@ test("files, packages, copies, a method named like a built-in, mfilename('class'
     "fprintf('scalar|%g %g %g %g %s\\n', b5.s.a, b5(1).s.a, z.s.a, bt.s.a, class(bc));",
     "fprintf('selfhandle|%g\\n', myop(Fh));",
     "for k = {'Hd', 'Ev', 'En', 'Va', 'Gs'}, try, feval(k{1}); fprintf('refuse|%s|made\\n', k{1}); catch e, fprintf('refuse|%s|%s\\n', k{1}, e.message), end, end",
-    "try, x = [Rect(1, 2) Rect(3, 4)]; fprintf('array|made\\n'); catch e, fprintf('array|refused\\n'), end",
+    "try, x = [Rect(1, 2) Rect(3, 4)]; fprintf('array|made\\n'); catch e, fprintf('array|refused|%s\\n', e.message), end",
+    "try, x = Rect.empty; fprintf('empty|made\\n'); catch e, fprintf('empty|refused|%s\\n', e.message), end",
     "fprintf('mfclass|[%s]\\n', mfilename('class'));",
     // (an end in a named function's arguments, which refers to the index around the call: here a global's, whose
     // index is made first; the call's frame is its lookup)
@@ -255,9 +256,62 @@ test("files, packages, copies, a method named like a built-in, mfilename('class'
     assert.match(g[0], what, k);
     assert.match(g[0], /not supported in Sagebrush yet/, k);
   }
-  assert.deepEqual(got.get("array"), ["refused"]);
+  // (arrays of objects: the next stage, refused with a message that says so)
+  assert.equal(got.get("array")![0], "refused");
+  assert.match(got.get("array")![1], /Arrays of objects are not supported in Sagebrush yet/);
+  assert.match(got.get("empty")![1], /Arrays of objects are not supported in Sagebrush yet: Rect\.empty/);
   assert.deepEqual(got.get("mfclass"), ["[]"]);
   assert.deepEqual(got.get("endchain"), ["[1 9 3 4]", "3"]);
+});
+
+test("private methods and private Constant properties: refused outside the class, in either form; allowed in its methods", () => {
+  // (MathWorks' method and property attribute pages: Access = private is the class's own methods only)
+  const dir = tree({
+    "Priv.m": lines("classdef Priv",
+      "  properties (Constant, Access = private)", "    hidden = 42", "  end",
+      "  properties (Constant)", "    open = 5", "  end",
+      "  methods",
+      "    function r = inside(obj)", "      r = secret(obj);", "    end",
+      "    function r = insideDot(obj)", "      r = obj.secret();", "    end",
+      "    function r = ownconst(obj)", "      r = [obj.hidden, Priv.hidden];", "    end",
+      "    function r = ownconst2(obj)", "      r = Priv.hidden;", "    end",
+      "    function r = ownstatic(obj)", "      r = Priv.staticsecret();", "    end",
+      "    function r = viaHandle(obj)", "      h = @secret;", "      r = h(obj);", "    end",
+      "    function r = pub(obj)", "      r = 3;", "    end",
+      "  end",
+      "  methods (Access = private)", "    function r = secret(obj)", "      r = 7;", "    end", "  end",
+      "  methods (Static, Access = private)", "    function r = staticsecret()", "      r = 11;", "    end", "  end",
+      "end"),
+    // (an @-folder's method file is one of the class's methods: the class's access)
+    "@Pf/Pf.m": lines("classdef Pf", "  properties (Access = private)", "    hid = 6", "  end",
+      "  methods (Access = private)", "    function r = sec(obj)", "      r = 8;", "    end", "  end", "end"),
+    "@Pf/peek.m": lines("function r = peek(obj)", "  r = [obj.hid, sec(obj), obj.sec()];", "end"),
+    // (a Constant read through a captured class name: no object is made, so this constructor never runs)
+    "Kc.m": lines("classdef Kc", "  properties (Constant)", "    K = 4", "  end", "  methods", "    function obj = Kc()", "      error('constructed');", "    end", "  end", "end"),
+  });
+  const r = run(dir, lines(
+    "p = Priv; q = Pf;",
+    "row('inside', @() p.inside()); row('insideDot', @() p.insideDot()); row('ownconst', @() mat2str(p.ownconst()));",
+    "row('ownconst2', @() p.ownconst2());",
+    "row('ownstatic', @() p.ownstatic()); row('viaHandle', @() p.viaHandle()); row('folder', @() mat2str(peek(q)));",
+    "row('pub_fn', @() pub(p)); row('pub_dot', @() p.pub()); row('open_inst', @() p.open); row('open_class', @() Priv.open);",
+    "row('private_dot', @() p.secret()); row('private_function', @() secret(p));",
+    "row('private_const_instance', @() p.hidden); row('private_const_class', @() Priv.hidden);",
+    "row('private_static_instance', @() p.staticsecret()); row('private_static_class', @() Priv.staticsecret());",
+    "row('folder_outside_prop', @() q.hid); row('folder_outside_method', @() sec(q));",
+    "h = @secret; row('handle_outside', @() h(p));",
+    "row('const_in_anon', @() Kc.K);",
+  ) + ROW);
+  assert.equal(r.err, "");
+  const got = new Map(r.out.split("\n").filter((l) => l.includes("|")).map((l) => [l.split("|")[0], l.slice(l.indexOf("|") + 1)] as [string, string]));
+  const allowed: Record<string, string> = { inside: "double:7", insideDot: "double:7", ownconst: "[42 42]", ownconst2: "double:42", ownstatic: "double:11",
+    viaHandle: "double:7", folder: "[6 8 8]", const_in_anon: "double:4", pub_fn: "double:3", pub_dot: "double:3", open_inst: "double:5", open_class: "double:5" };
+  for (const [k, w] of Object.entries(allowed)) assert.equal(got.get(k), w, k);
+  const method = "ERROR|MATLAB:class:MethodRestricted|Cannot access method";
+  const prop = "ERROR|MATLAB:class:GetProhibited|No public property";
+  for (const k of ["private_dot", "private_function", "private_static_instance", "private_static_class", "folder_outside_method", "handle_outside"])
+    assert.ok(got.get(k)?.startsWith(method), `${k}: ${got.get(k)}`);
+  for (const k of ["private_const_instance", "private_const_class", "folder_outside_prop"]) assert.ok(got.get(k)?.startsWith(prop), `${k}: ${got.get(k)}`);
 });
 
 test("a handle made before a class loads: called with its object, the method; with a number, the function it was", () => {

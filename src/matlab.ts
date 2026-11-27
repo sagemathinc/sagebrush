@@ -1793,6 +1793,11 @@ class Emitter {
     const imp = scope.imports ? `, ${scope.fn ? "False" : "True"}, (${scope.imports.map((i) => JSON.stringify(i)).join(", ")},)` : "";
     // (mfilename: the file this code is in, known here, never the caller's)
     const found = name === "mfilename" ? `_m.mfilename_in(${this.mfile})` : null;
+    // (in a class's methods, resolution knows the class: a private method dispatches there, and only there)
+    if (scope.fn && this.classCtx && !found) {
+      const imps = scope.imports ? `(${scope.imports.map((i) => JSON.stringify(i)).join(", ")},)` : "None";
+      return `_m.fn(${JSON.stringify(name)}, False, ${imps}, ${JSON.stringify(this.classCtx)})`;
+    }
     if (scope.fn) return found ?? `_m.fn(${JSON.stringify(name)}${imp})`;
     const py = pyName(name);
     // (True: named at the top level, where a script found on the path can run)
@@ -1892,7 +1897,8 @@ class Emitter {
       case "anon": return this.anon(e, scope);
       case "handle": {
         if (this.fnNames.has(e.name)) return `_m.Handle(${pyName(e.name)}, ${JSON.stringify(e.name)})`;
-        return `_m.handle(${JSON.stringify(e.name)})`;
+        // (a handle made in a class's methods resolves with the class's access)
+        return this.classCtx ? `_m.handle(${JSON.stringify(e.name)}, ${JSON.stringify(this.classCtx)})` : `_m.handle(${JSON.stringify(e.name)})`;
       }
     }
   }
@@ -1901,6 +1907,9 @@ class Emitter {
    * itself (uint8.empty, a class's static method; or f.x, f called first) */
   fieldBase(e: Expr, scope: Scope): string {
     if (e.k === "id" && !this.isVar(e.name, scope) && !(scope.caps?.has(e.name)) && !(scope.fn && (e.name === "nargin" || e.name === "nargout"))) return this.lookup(e.name, scope);
+    // (a name an anonymous function captured, before a dot: its value, or the function it names, uncalled, which
+    // field() calls unless it is a class, Name.x a static member, never an object made)
+    if (e.k === "id" && scope.caps?.has(e.name)) return `_m.capf(${pyName(e.name)}, ${JSON.stringify(e.name)})`;
     // (a chain on a name that is not a variable, a.b.c: each step dot-indexes the one before, so a namespace's
     // namespace, a.b, is indexed, not called)
     if (e.k === "field" && this.chainOnName(e, scope)) return `_m.field(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)})`;
@@ -2305,8 +2314,14 @@ export function matlabPathFileToPython(src: string, name: string, path = ""): st
     const em = new Emitter(p.functions, "");
     em.mfile = JSON.stringify(path);
     // (a method file of a class's @-folder: its own name is the method, which a call or a handle in it reaches by
-    // dispatch, not directly: @myop there names whatever myop is for its arguments)
-    if (/[\\/]@[^\\/]+[\\/][^\\/]+$/.test(path)) em.fnNames.delete(p.functions[0].name);
+    // dispatch, not directly: @myop there names whatever myop is for its arguments; and it is a method of the
+    // class, with the class's access: +a/+b/@Name is class a.b.Name)
+    const at = /((?:[\\/]\+[^\\/]+)*)[\\/]@([^\\/]+)[\\/][^\\/]+$/.exec(path);
+    if (at) {
+      em.fnNames.delete(p.functions[0].name);
+      const pkgs = at[1].split(/[\\/]/).filter((x) => x).map((x) => x.slice(1));
+      em.classCtx = [...pkgs, at[2]].join(".");
+    }
     return "#function\n" + checkPython(em.functionFile());
   }
   const em = new Emitter(p.functions, name);

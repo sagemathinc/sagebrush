@@ -198,35 +198,48 @@ def _bound(fn, obj, name):
     return Builtin(lambda nargout, *a: fn.call(nargout, [obj] + list(a)), name, (0, None))
 
 
+def _check_get(cd, name, ctx):
+    if _get_access(cd, name) != "public" and ctx != cd.name:
+        raise _err("No public property '%s' for class '%s'." % (name, cd.name), "MATLAB:class:GetProhibited")
+
+
+def _check_method(cd, name, attrs, ctx):
+    if (_attr(attrs, "Access") or "public") != "public" and ctx != cd.name:
+        raise _err("Cannot access method '%s' in class '%s'." % (name, cd.name), "MATLAB:class:MethodRestricted")
+
+
 def get(obj, name, ctx, call):
     """obj.name: a property's value, or a method, called (call) or as a callable, with the access of class ctx"""
     cd = obj.cls
     if name in obj.props:
-        if _get_access(cd, name) != "public" and ctx != cd.name:
-            raise _err("No public property '%s' for class '%s'." % (name, cd.name), "MATLAB:class:GetProhibited")
+        _check_get(cd, name, ctx)
         return obj.props[name]
     if name in cd.consts:
+        _check_get(cd, name, ctx)
         _defaults(cd)
         return cd.cvals[name]
     m = cd.methods.get(name)
     if m is not None:
         fn, attrs, static = m
-        if (_attr(attrs, "Access") or "public") != "public" and ctx != cd.name:
-            raise _err("Cannot access method '%s' in class '%s'." % (name, cd.name), "MATLAB:class:MethodRestricted")
+        _check_method(cd, name, attrs, ctx)
         if static:
             return fn.call(1, []) if call else fn
         return fn.call(1, [obj]) if call else _bound(fn, obj, name)
     raise _err("Unrecognized method, property, or field '%s' for class '%s'." % (name, cd.name), "MATLAB:noSuchMethodOrField")
 
 
-def static(cd, name, call):
-    """Name.name: a static method (called, or as a callable) or a Constant property"""
+def static(cd, name, call, ctx=None):
+    """Name.name: a static method (called, or as a callable) or a Constant property, with the access of class ctx"""
     if name in cd.consts:
+        _check_get(cd, name, ctx)
         _defaults(cd)
         return cd.cvals[name]
     m = cd.methods.get(name)
     if m is not None and m[2]:
+        _check_method(cd, name, m[1], ctx)
         return m[0].call(1, []) if call else m[0]
+    if name == "empty":
+        raise _err("Arrays of objects are not supported in Sagebrush yet: %s.empty comes with them." % cd.name)
     raise _err("The class %s has no Constant property or Static method named '%s'." % (cd.name, name),
                "MATLAB:subscripting:classHasNoPropertyOrMethod")
 
@@ -255,11 +268,11 @@ def set_member(obj, name, path, i, v, ctx):
 _DISPATCH = {}
 
 
-def dispatcher(name, top, imports):
+def dispatcher(name, top, imports, cls=None):
     """the callee a method's name resolves to: the method of the dominant argument's class (the leftmost object, as
     MATLAB picks it among classes of equal precedence), the arguments in their order; without one, what the name is
     otherwise"""
-    key = (name, top, tuple(imports) if imports else None)
+    key = (name, top, tuple(imports) if imports else None, cls)
     d = _DISPATCH.get(key)
     if d is None:
         def call(nargout, *args):
@@ -267,6 +280,8 @@ def dispatcher(name, top, imports):
                 if type(a) is Obj:
                     m = a.cls.methods.get(name)
                     if m is not None and not m[2]:
+                        # (a private method: only in its class's own methods, cls)
+                        _check_method(a.cls, name, m[1], cls)
                         return m[0].call(nargout, list(args))
                     break
             return _m._fn_tail(name, top, imports).call(nargout, list(args))

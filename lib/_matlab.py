@@ -1969,7 +1969,7 @@ def mfield(obj, name, ctx=None):
     if t is Obj:
         return _cd().get(obj, name, ctx, False)
     if t is Builtin and obj in _CD_CTORS:
-        return _cd().static(_CD_CTORS[obj], name, False)
+        return _cd().static(_CD_CTORS[obj], name, False, ctx)
     return field(obj, name)
 
 
@@ -1977,6 +1977,8 @@ def cfield(obj, name, ctx):
     """obj.name in a class's methods: with that class's access"""
     if type(obj) is Obj:
         return _cd().get(obj, name, ctx, True)
+    if type(obj) is Builtin and obj in _CD_CTORS:
+        return _cd().static(_CD_CTORS[obj], name, True, ctx)
     return field(obj, name)
 
 
@@ -2124,23 +2126,25 @@ class Anon:
 
 class Handle:
     """A handle to a named function (@sin): resolved when first called."""
-    __slots__ = ("target", "name", "gen")
+    __slots__ = ("target", "name", "gen", "cls")
 
-    def __init__(self, target, name):
+    def __init__(self, target, name, cls=None):
         self.target = target
         self.name = name
         self.gen = -1
+        # (the class whose method made the handle: it resolves with that class's access)
+        self.cls = cls
 
     def call(self, nargout, args):
         # (resolved again when a class has loaded since: its methods may now take the name, _CD_GEN)
         if self.target is None or (self.gen != _CD_GEN[0] and self.gen >= 0):
-            self.target = fn(self.name)
+            self.target = fn(self.name, cls=self.cls)
             self.gen = _CD_GEN[0]
         return self.target.call(nargout, args)
 
 
-def handle(name):
-    return Handle(None, name)
+def handle(name, cls=None):
+    return Handle(None, name, cls)
 
 
 _CALLABLE = (Builtin, Function, Anon, Handle)
@@ -2208,7 +2212,7 @@ def _workspace():
     return m.__dict__ if m is not None else {}
 
 
-def fn(name, top=False, imports=None):
+def fn(name, top=False, imports=None, cls=None):
     """the function a name refers to, when the code runs.  top: named at the top level, where a
     script can run (it sees the workspace); imports: the import list of the code naming it (a
     function's or a script's, src/matlab.ts), else at the top level the workspace's"""
@@ -2225,7 +2229,7 @@ def fn(name, top=False, imports=None):
             return f
     if name in _CDM:
         # (a loaded class's method: called for an object of the class, else what the name is without it)
-        return _cd().dispatcher(name, top, imports)
+        return _cd().dispatcher(name, top, imports, cls)
     return _fn_tail(name, top, imports)
 
 
@@ -2877,6 +2881,8 @@ def fieldname(v):
 def field_cs(obj, name, ctx=None):
     if type(obj) is Obj:
         return [_cd().get(obj, name, ctx, True)]
+    if type(obj) is Builtin and obj in _CD_CTORS:
+        return [_cd().static(_CD_CTORS[obj], name, True, ctx)]
     if type(obj) is Builtin or type(obj) is Function:
         return [field(obj, name)]
     if type(obj) is Namespace:
@@ -3590,6 +3596,9 @@ def vcat(rows):
 
 def _cat_class(vals):
     """the class of a concatenation"""
+    if any(type(v) is Obj for v in vals):
+        raise _err("Arrays of objects are not supported in Sagebrush yet: [a b] of classdef objects, repmat and "
+                   "Name.empty come with them.")
     if any(isinstance(v, HandleObj) or type(v) is HandleArr for v in vals):
         return "handle"
     classes = [class_(v) for v in vals]
