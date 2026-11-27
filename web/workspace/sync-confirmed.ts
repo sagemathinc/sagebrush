@@ -17,6 +17,7 @@ import { D11, RW, type Mapping } from "./sync-rewrite";
 import { VIEW_STORES, applyView, type ListedWhy } from "./sync-view";
 import { capNow } from "./sync-pins";
 import { ledgerPage } from "./sync-refs";
+import { docKeyPage, type DocKeyVerdict } from "./sync-dockeys";
 import type { Entry, Op, SyncRenamed } from "./api";
 import type { Outcome, SyncEntry, SyncOp } from "./sync-reduce";
 
@@ -424,7 +425,7 @@ export async function applyOps(
  * rows, the cursor and the view's difference on the entries, in one transaction; then the changes told, and the
  * contents of entries forgotten dropped (after their transaction, as emptying Trash does).
  */
-export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], hooks: { onLarge?: (tx: IDBTransaction, large: LargeApplied) => Promise<void>; afterLarge?: (gen: string) => Promise<void>; sealed?: ReadonlyMap<number, unknown> } = {}): Promise<Applied & { listed: [string, ListedWhy][] }> {
+export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], hooks: { onLarge?: (tx: IDBTransaction, large: LargeApplied) => Promise<void>; afterLarge?: (gen: string) => Promise<void>; sealed?: ReadonlyMap<number, unknown>; docKeys?: ReadonlyMap<number, DocKeyVerdict> } = {}): Promise<Applied & { listed: [string, ListedWhy][] }> {
   const cap = await capNow();
   return (async () => {
     const told: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [], renamed: SyncRenamed[] = [];
@@ -464,6 +465,8 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
           // (e2e PR 5d: the index's references, from this page's sealed ops, in the transaction that moves the cursor; a
           // release op that can't be accepted throws here, so nothing of its page is kept)
           if (hooks.sealed && taken?.length) await ledgerPage(tx.objectStore(META), idbStore(tx, prefix), prefix, taken, outcomes ?? [], (seq) => hooks.sealed!.has(seq));
+          // (and its document key declarations, each by the verdict its row's verification found, in log order)
+          if (hooks.sealed && taken?.length) await docKeyPage(tx.objectStore(META), prefix, taken, (seq) => (hooks.sealed!.has(seq) ? hooks.docKeys?.get(seq) : undefined));
           // (e2e PR 5c: what pull had verified as of this page's last op, kept in the transaction that moves the cursor
           // past it, so a reload resumes verifying from exactly there)
           if (hooks.sealed && taken?.length) {
@@ -500,7 +503,7 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
 /** What pull has verified (e2e PR 5c, sync-seal.ts PullState), kept with the cursor. */
 export const sealedPullKey = (ns: string) => `sync:${ns}:sealedPull`;
 
-export const confirmedIndex = (w: Workspace) => async (page: { ns: string; ops: SyncOp[]; sealed?: ReadonlyMap<number, unknown> }) => {
+export const confirmedIndex = (w: Workspace) => async (page: { ns: string; ops: SyncOp[]; sealed?: ReadonlyMap<number, unknown>; docKeys?: ReadonlyMap<number, DocKeyVerdict> }) => {
   const { runReplay, startReplay, startForget } = await import("./sync-replay");
   const { rewriting } = await import("./sync-rewrite");
   for (let tries = 0; ; tries++) {
@@ -508,6 +511,7 @@ export const confirmedIndex = (w: Workspace) => async (page: { ns: string; ops: 
       await runReplay(w, page.ns);
       await applyConfirmed(w, page.ns, page.ops, {
         sealed: page.sealed,
+        docKeys: page.docKeys,
         onLarge: async (tx, large) => {
           if (!large.maps.length) return;
           // (the entries' one record reserved for the replay's plan: a local large move pending there makes the

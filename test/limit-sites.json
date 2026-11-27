@@ -20216,11 +20216,6 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
- },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -20263,6 +20258,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",
@@ -20731,6 +20731,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), checked before any storage is admitted, as NumPy checks the dimensions before allocating; NumPy's semantics, not a Sagebrush limit"
  },
+ "src/runtime/numpy.ts :: admitObjects :: export const objBackend = { denseLimit: v8DenseLength(), makeRefs: (n: number): any[] => new Array(n).fill(null) }; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
+ },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -20751,6 +20756,21 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
  },
+ "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "the heap a range's item takes, estimated for its admission (a number up to 2**53 is a 16-byte heap number, a larger one a BigInt); it refuses nothing itself"
+ },
+ "src/runtime/numpy.ts :: binary :: const beyond64 = big < I64MIN || big > I64MAX; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
+ },
+ "src/runtime/numpy.ts :: binary :: const outside = dt.kind !== \"b\" && (dt === D.uint64 ? big < 0n || big > U64MAX : rg ? big < BigInt(rg[0]) || big > BigInt(rg[1]) : beyond64); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -20765,6 +20785,16 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; it refuses an axis out of bounds for a 0-d array viewed as one element, as NumPy's cumsum"
+ },
+ "src/runtime/numpy.ts :: cutArray :: if (shape.length >= OBJ_MAXDIMS) { #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
+ },
+ "src/runtime/numpy.ts :: cutArray :: raise(T.NotImplementedError, \"this operation on object arrays is not supported by sagebrush's numpy yet (an array inside the data whose dimensions don't all fit the result's: NumPy assigns it whole, broadcasting)\"); #0": {
+  "class": "coverage",
+  "owner": "python",
+  "reason": "object arrays: operations not in sagebrush's numpy yet (arithmetic, ufuncs, an inner array cut off by the result's shape) refuse with NotImplementedError rather than compute something else"
  },
  "src/runtime/numpy.ts :: discover :: if (depth + s.length > MAX_DIMS) nestedTooDeep(); #0": {
   "class": "none",
@@ -20831,6 +20861,16 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, false, O.truth(stable)) : objSort(a, normAxis(intNum(axis), a.ndim), false, O.truth(stable)); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, true, O.truth(stable)) : objSort(a, normAxis(intNum(axis), a.ndim), true, O.truth(stable)); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
+ },
  "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(intNum(axis), a.ndim), false); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -20850,6 +20890,16 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; the axis read as an index (#1944)"
+ },
+ "src/runtime/numpy.ts :: objConcat :: const ax = normAxis(axis, nd); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
+ },
+ "src/runtime/numpy.ts :: objRefuse :: return raise(T.NotImplementedError, \"this operation on object arrays is not supported by sagebrush's numpy yet (object arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, take, isin, concatenate and printing)\"); #0": {
+  "class": "coverage",
+  "owner": "python",
+  "reason": "object arrays: operations not in sagebrush's numpy yet (arithmetic, ufuncs, an inner array cut off by the result's shape) refuse with NotImplementedError rather than compute something else"
  },
  "src/runtime/numpy.ts :: plainOperand :: const i = normAxis(Number(x), a.ndim, \"axis1\"), j = normAxis(Number(y), a.ndim, \"axis2\"); #0": {
   "class": "none",
@@ -20871,10 +20921,20 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/numpy.ts :: refuse :: if (objBackend.denseLimit !== null && n > objBackend.denseLimit) refuse(); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
+ },
  "src/runtime/numpy.ts :: scalarDtype :: const MAX_DIMS = 64; #0": {
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: setDim :: const OBJ_MAXDIMS = 64; #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
  },
  "src/runtime/numpy.ts :: str :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
   "class": "none",
@@ -20895,6 +20955,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: NumPy's own OverflowError for a Python float past a C long, as int() packs it (#2149)"
+ },
+ "src/runtime/numpy.ts :: tooDeep :: return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${OBJ_MAXDIMS}.`); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
  },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",

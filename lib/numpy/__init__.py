@@ -358,6 +358,18 @@ _np.register_scalar("complex64", complex64)
 _np.register_str(str_)
 
 
+class object_(generic):
+    """NumPy's scalar type of the object dtype (np.dtype(object).type): np.object_(x) is x itself; a sequence or a
+    nonzero-dimensional array gives an object array, and a 0-d array gives its element."""
+
+    def __new__(cls, value=None):
+        a = asarray(value, dtype=object)
+        return a.item() if a.ndim == 0 else a
+
+
+_np.register_object(object_)
+
+
 
 def _scalar_round(self, ndigits=None):
     """round() of a NumPy scalar: a Python int without ndigits, else the
@@ -568,7 +580,7 @@ def ones(shape, dtype=None, order="C", *, like=None):
 
 
 def empty(shape, dtype=float, order="C", *, like=None):
-    return _np.zeros(_shape(shape), dtype)
+    return _np.empty(_shape(shape), dtype)
 
 
 def full(shape, fill_value, dtype=None, order="C", *, like=None):
@@ -1018,22 +1030,29 @@ class ufunc:
         if initial is _NoValue:
             initial = None
         a = asarray(a)
+        quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
+                 "logical_or": any}
+        masked = where is not True and self._op in ("add", "multiply", "maximum", "minimum")
+        # (a float sum or product in uint64 goes to sum or prod with its dtype, which keep a negative element congruent
+        # modulo 2**64 and wrap once at the end, as NumPy's arithmetic does: no whole-array cast first)
+        congruent = False
         if dtype is not None:
             dt = self._loop(dtype)
-            if a.dtype != dt:
+            congruent = (self._op in ("add", "multiply") and a.dtype.kind == "f" and dt.kind == "u" and
+                         dt.itemsize == 8 and (initial is None or masked))
+            if a.dtype != dt and not congruent:
                 # (accumulated in dtype, as NumPy's: the conversion is the reduction's, and its warning says so)
                 old = _np._cast_label("reduce")
                 try:
                     a = a.astype(dt)
                 finally:
                     _np._cast_label(old)
-        quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
-                 "logical_or": any}
-        masked = where is not True and self._op in ("add", "multiply", "maximum", "minimum")
         if self._op in quick and (initial is None or masked) and not (dtype is not None and _wraps_in(self._op, dt)):
             # (a sum without an identity starts from its first element: a product's 1 changes nothing; a where= mask
             # goes to the functions that take it, #2088)
             kw = {"initial": None} if first and self._op == "add" else {}
+            if congruent:
+                kw["dtype"] = dt
             if masked:
                 kw["where"] = where
                 if initial is not None:
@@ -1222,44 +1241,57 @@ def _round_float(a, decimals):
 
 
 def _around_out(a, decimals, out):
-    # (the result written into out, which is returned, as NumPy's, under
-    # its rules: the same shape, same_kind casting, and the rounding done in
-    # the wider of the two types; CORR-90C-1..3)
+    # (the result written into out, which is returned, as NumPy's PyArray_Round: the same shape; an integer array with
+    # decimals >= 0 copied into out under same_kind; anything else rounded through out by the ufuncs themselves, rint
+    # alone for decimals 0, else multiply (or divide, for decimals < 0) by the power of ten into out, rint in place, and
+    # the inverse in place, so each stage's out= check and cast is the ufunc's own: a refused stage is a UFuncTypeError
+    # naming that ufunc, and a narrower out rounds by its own precision between stages. A complex array's real parts are
+    # rounded into out first, then its imaginary parts)
     if not isinstance(out, ndarray):
         raise TypeError("output must be an array")
     if tuple(out.shape) != tuple(a.shape):
         raise ValueError("invalid output shape")
     sk, ok = a.dtype.kind, out.dtype.kind
-
-    def refuse(src):
-        raise TypeError(f"Cannot cast ufunc 'rint' output from {src!r} to {out.dtype!r} with casting rule 'same_kind'")
-
-    if sk == "b" or (sk in "fc" and ok in "iub"):
-        refuse(a.dtype)
+    if sk == "c":
+        if ok != "c":
+            _around_out(a.real, decimals, out)
+            raise TypeError("Cannot set imaginary part of non-complex array.")
+        wide = result_type(a.dtype, out.dtype)
+        if wide != out.dtype:
+            # (into a narrower complex out NumPy rounds each part by out's precision between stages; not implemented)
+            raise NotImplementedError(f"np.round of a {a.dtype} array into a narrower {out.dtype} out is not supported")
+        out[...] = _round_float(a.astype(wide), decimals)
+        return out
     if sk in "iu":
-        if ok == "b":
-            refuse(a.dtype)
-        if ok in "iu":
-            if decimals < 0:
-                refuse(dtype("float64"))
-            if sk == "i" and ok == "u":
+        if decimals >= 0:
+            if not _can_cast_rule(a.dtype, out.dtype, "same_kind"):
                 raise TypeError(f"Cannot cast array data from {a.dtype!r} to {out.dtype!r} according to the rule 'same_kind'")
             out[...] = a
             return out
-        out[...] = a if decimals >= 0 else _round_float(a.astype("float64"), decimals)
-        return out
-    if sk == "c" and ok == "f":
-        raise TypeError("Cannot set imaginary part of non-complex array.")
-    if ok == "c" and sk != "c":
+        if ok == "c":
+            # (an integer's quotient by a power of ten, rounded and multiplied back, is exact in float64 here, as NumPy's
+            # stages give it through a complex out)
+            out[...] = _round_float(a.astype("float64"), decimals)
+            return out
+    if ok == "c":
         # (NumPy rounds such a value as a complex number, with complex
         # division's rounding; not implemented: refused, not answered)
         raise NotImplementedError("np.round of a real array into a complex out is not supported")
-    wide = result_type(a.dtype, out.dtype)
-    if wide != out.dtype:
-        # (into a narrower out NumPy casts between its stages, so a near tie
-        # rounds by out's precision; not implemented: refused, CORR-90C-3)
-        raise NotImplementedError(f"np.round of a {a.dtype} array into a narrower {out.dtype} out is not supported")
-    out[...] = _round_float(a.astype(wide), decimals)
+    if decimals == 0:
+        if sk == "b":
+            # (NumPy's rint of a bool array runs in float16, which Sagebrush doesn't have: its refusal is that loop's,
+            # and an allowed out takes the same values, 0 and 1, exactly)
+            if ok != "f":
+                raise _UFuncTypeError("Cannot cast ufunc 'rint' output from dtype('float16') to %r with casting rule 'same_kind'" % (out.dtype,))
+            out[...] = a.astype("float64")
+            return out
+        rint(a, out=out)
+        return out
+    f = 10.0 ** (decimals if decimals > 0 else -decimals)
+    first, last = (multiply, true_divide) if decimals > 0 else (true_divide, multiply)
+    first(a, f, out=out)
+    rint(out, out=out)
+    last(out, f, out=out)
     return out
 
 
@@ -1585,7 +1617,8 @@ def _divided(r, n):
     if isinstance(r, ndarray):
         r[...] = r / n
         return r
-    return r.dtype.type(r / n)
+    # (converted as an array cast converts: a NaN quotient (an empty slice's) into an integer dtype is NumPy's value)
+    return asarray(r / n).astype(r.dtype)[()]
 
 
 def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
@@ -1613,7 +1646,7 @@ def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
         return out
     s = _np.sum(a, axis, keepdims, dtype)
     # (as NumPy's _mean: the quotient converted back to the sum's dtype, an integer dtype's included)
-    return _divided(s, n) if n else s / 0.0
+    return _divided(s, n)
 
 
 def _var(a, axis, dtype, out, ddof, keepdims, where, arrmean):
@@ -1815,7 +1848,11 @@ cumulative_prod = cumprod
 
 
 def count_nonzero(a, axis=None, *, keepdims=False):
-    return sum(asarray(a) != 0, axis=axis, keepdims=keepdims)
+    a = asarray(a)
+    # (an object array's elements count by their truth, bool() of each, as NumPy's)
+    if a.dtype.kind == "O":
+        a = a.astype(bool)
+    return sum(a != 0, axis=axis, keepdims=keepdims)
 
 
 def _nanfill(a, value):
@@ -2833,12 +2870,17 @@ def argwhere(a):
     return stack(nz, axis=1) if nz else zeros((0, 0), int64)
 
 
+def _stable(kind, stable):
+    # (a stable sort asked for: only an object array's default sort differs from it, NumPy's introsort)
+    return bool(stable) or kind in ("stable", "mergesort")
+
+
 def sort(a, axis=-1, kind=None, order=None, *, stable=None):
-    return _np.sort(asarray(a), axis)
+    return _np.sort(asarray(a), axis, _stable(kind, stable))
 
 
 def argsort(a, axis=-1, kind=None, order=None, *, stable=None):
-    return _np.argsort(asarray(a), axis)
+    return _np.argsort(asarray(a), axis, _stable(kind, stable))
 
 
 def lexsort(keys, axis=-1):
@@ -2906,7 +2948,8 @@ def unique(ar, return_index=False, return_inverse=False, return_counts=False, ax
     if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c":
         return _np.unique1d(ar)
     a = asarray(ar).ravel()
-    order = argsort(a)
+    # (as NumPy's: a stable sort when the first indices are asked for, its default sort otherwise)
+    order = argsort(a, kind="stable" if return_index else None)
     s = a[order]
     if s.size == 0:
         flags = zeros(0, bool_)
@@ -3257,7 +3300,10 @@ def dot(a, b, out=None):
 
 
 def matmul(a, b, out=None):
-    return _out(_np.matmul(asarray(a), asarray(b)), out)
+    a, b = asarray(a), asarray(b)
+    # (matmul is a ufunc in NumPy: its out= takes the loop's dtype only under same_kind casting, checked before computing)
+    _out_cast("matmul", result_type(a.dtype, b.dtype), out, "same_kind")
+    return _out(_np.matmul(a, b), out, "matmul")
 
 
 def vdot(a, b):
@@ -3273,7 +3319,8 @@ def inner(a, b):
 
 def outer(a, b, out=None):
     a, b = asarray(a).ravel(), asarray(b).ravel()
-    return _out(multiply(a[:, None], b[None, :]), out)
+    # (NumPy's outer is multiply's, out= and its casting check included)
+    return multiply(a[:, None], b[None, :], out=out)
 
 
 def tensordot(a, b, axes=2):
@@ -3835,10 +3882,10 @@ def _m_astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
     return _np.astype(self, dtype)
 
 
-def _m_sort(self, axis=-1, kind=None, order=None):
+def _m_sort(self, axis=-1, kind=None, order=None, *, stable=None):
     if not self.flags.writeable:
         raise ValueError("sort array is read-only")
-    self[...] = sort(self, axis)
+    self[...] = sort(self, axis, kind, stable=stable)
 
 
 def _m_round(self, decimals=0, out=None):
@@ -3942,8 +3989,8 @@ def _m_any(self, axis=None, out=None, keepdims=False, *, where=True):
     return any(self, axis, out, keepdims)
 
 
-def _m_argsort(self, axis=-1, kind=None, order=None):
-    return argsort(self, axis)
+def _m_argsort(self, axis=-1, kind=None, order=None, *, stable=None):
+    return argsort(self, axis, kind, stable=stable)
 
 
 def _m_flatten(self, order="C"):
