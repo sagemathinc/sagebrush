@@ -313,10 +313,54 @@ test("comprehensions by bounded work: at most 10^6 elements (fewer in a small he
   assert.ok(bounds.every((b) => b === bounds[0]) && bounds[0] >= 16384 && bounds[0] <= 49152, above.stdout);
   assert.match(above.stdout, /\n1\n$/);
   assert.ok(Date.now() - t0 < WALL(60000));
-  // within the limit: 140^2 elements are built in 96 MiB
-  const at = run("#[ x : x, y in [1..140] ];\n#[ y : x in [1..140], y in [1..140] | true ];\n#{ x*y : x, y in [1..140] };\n#[ <x, [x, x+1], x/3> : x in [1..16384] ];\n");
+  // within the limit, at the run's own bound B (taken from the heap V8 has after the modules load, so it moves with
+  // the load heap; a fixed 140^2 broke whenever a run's load heap rounded past 76 MiB). In one short script (a long
+  // one, compiled first, leaves less heap and a smaller B), for each kind, plain (refused before iterating), with a
+  // condition (the collector's bound, met while building) and as a set: n x n from n = 120 up is built while n^2 <= B
+  // and the first n with n^2 > B is refused with B, which ends that loop. B is held to heap-budget.json's
+  // collect_floor, the contract the heap ceiling keeps for these tests, less one MiB's worth of elements (1024 at
+  // _COLLECT_COST 1024 bytes) for a run above the median (runs spread by about 1 MB, scripts/heap-budget.mjs): a
+  // load-heap regression fails here, never shrinking the test.
+  const { readFileSync } = require("node:fs");
+  const floor = JSON.parse(readFileSync(join(__dirname, "..", "..", "heap-budget.json"), "utf8")).collect_floor - 1024;
+  const kinds: [string, (n: string) => string][] = [
+    ["plain", (n) => `#[ x : x, y in [1..${n}] ]`],
+    ["cond", (n) => `#[ y : x in [1..${n}], y in [1..${n}] | true ]`],
+    ["set", (n) => `#{ x*y : x, y in [1..${n}] }`],
+  ];
+  const at = run(
+    kinds.map(([kind, e]) => `for n in [128..230] do printf "@%o ${kind}\\n", n; print ${e("n")}; end for;\n`).join("") +
+      // (refused before iterating: an element that says when it is made says nothing, while 2 x 2 says it twice)
+      'function f(x) if x eq 1 then print "made"; end if; return x; end function;\n"@0 probe";\nprint #[ f(x) : x, y in [1..230] ];\n' +
+      '"@1 probe";\nprint #[ f(x) : x, y in [1..2] ];\n' +
+      "#[ <x, [x, x+1], x/3> : x in [1..16384] ];\n\"end\";\n",
+  );
   assert.equal(at.signal, null, at.stderr);
-  assert.match(at.stdout, /^19600\n19600\n\d+\n16384\n$/);
+  assert.match(at.stdout, /\n16384\nend\n$/, at.stdout.slice(-600));
+  const atBounds = [...at.stdout.replace(/\s+/g, " ").matchAll(refusal)].map((m) => Number(m[1]));
+  assert.equal(atBounds.length, 4, at.stdout.slice(0, 600));
+  const B = atBounds[0];
+  assert.ok(atBounds.every((b) => b === B) && B >= floor && B <= 49152, `the bound ${atBounds} under a 96 MiB heap, the contract's floor ${floor}`);
+  const k = Math.floor(Math.sqrt(B));
+  const parts = at.stdout.split(/^@(\d+) (\w+)$/m);
+  for (const [kind] of kinds) {
+    const seen: [number, string][] = [];
+    for (let p = 1; p < parts.length; p += 3) if (parts[p + 1] === kind) seen.push([Number(parts[p]), parts[p + 2]]);
+    // (every n from 120 to k built, k + 1 refused at B, and none after)
+    assert.deepEqual(seen.map(([n]) => n), Array.from({ length: k - 126 }, (_, i) => 128 + i), `${kind}: ${seen.map(([n]) => n)}`);
+    for (const [n, out] of seen.slice(0, -1)) {
+      const c = Number(/^\s*(\d+)\s*$/.exec(out)?.[1]);
+      assert.ok(kind === "set" ? c > 0 : c === n * n, `${kind} ${n}: ${out}`);
+    }
+    assert.match(seen[seen.length - 1][1].replace(/\s+/g, " "), new RegExp(`A collection of more than ${B} elements needs about`), kind);
+  }
+  const probe = (i: number) => {
+    for (let p = 1; p < parts.length; p += 3) if (parts[p] === String(i) && parts[p + 1] === "probe") return parts[p + 2];
+    return "";
+  };
+  assert.doesNotMatch(probe(0), /made/, probe(0));
+  assert.match(probe(0).replace(/\s+/g, " "), new RegExp(`A collection of more than ${B} elements needs about`), probe(0));
+  assert.match(probe(1), /^\s*made\s+made\s+4\s+16384\s+end\s*$/, probe(1));
   // and 10^6 in an ordinary heap
   const big = spawnSync(process.execPath, [cli, "--magma"], { input: "#[ x : x, y in [1..1000] ];\n", encoding: "utf8", timeout: WALL(120000) });
   assert.equal(big.stdout, "1000000\n", big.stderr);
