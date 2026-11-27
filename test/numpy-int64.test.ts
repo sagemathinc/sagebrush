@@ -64,7 +64,7 @@ test("an int64 or uint64 value Sagebrush cannot hold exactly is refused, never r
 
 // (#2283: a float out of int64's or uint64's range, NaN or infinite converts as NumPy's x86-64 cast does, to values
 // Sagebrush's 64-bit stores hold exactly: INT64_MIN for int64; 2**63, or 0 at 2**64 and past, for uint64; with the
-// cast's warning)
+// cast's warning; compared with the runner's NumPy, which must be an x86-64 build: other machines' casts differ)
 test("a float out of int64's or uint64's range converts to NumPy's value, which these stores hold exactly", () => {
   const src = `import numpy as np, warnings
 for v in (1e20, -1e20, float("nan"), float("inf"), -float("inf"), 2.0**63, 2.0**64, -2.0**63, -3e18, 1.8e19):

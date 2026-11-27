@@ -81,12 +81,12 @@ pass, and CI runs them.
   $-\infty$ and values below $-2^{63}$; 0 for $\infty$ and values from $2^{64}$): values these stores hold exactly.
   Results past $2^{53}$ that a double can't hold are still refused. A complex value cast to a real type other than
   bool drops its imaginary part with NumPy's `ComplexWarning` (`astype`, assignment, `out=`, and `sum`, `prod`,
-  `mean`, `cumsum` and `cumprod` with a real `dtype=`). The warning names the operation as NumPy's does ("in cast"; "in add" and so on when a ufunc writes into
-  an integer `out=`; "in reduce" for a reduction into one), and `np.errstate`/`np.seterr` set whether it warns, is
-  ignored or raises `FloatingPointError` (their 'call', 'print' and 'log' modes are not supported for 'invalid'
-  yet). Sagebrush gives one warning per call: NumPy casts the first element of `min`/`max` (and of an accumulation,
-  "in accumulate") into `out=` on its own, so it may give a second warning, or say "in cast" when only that element
-  is invalid.
+  `mean`, `cumsum` and `cumprod` with a real `dtype=`). The warning names the operation as NumPy's does ("in cast";
+  "in add" and so on when a ufunc writes into an integer `out=`; "in reduce" for a reduction into one), and
+  `np.errstate`/`np.seterr` set whether it warns, is ignored or raises `FloatingPointError` (their 'call', 'print'
+  and 'log' modes are not supported for 'invalid' yet). Sagebrush gives one warning per call: NumPy casts the first
+  element of `min`/`max` (and of an accumulation, "in accumulate") into `out=` on its own, so it may give a second
+  warning, or say "in cast" when only that element is invalid.
 
 ## What is there
 

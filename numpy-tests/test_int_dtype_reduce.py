@@ -1,7 +1,7 @@
 # A float operand reduced in an integer dtype (#2250): sum, add.reduce, prod and mean with dtype= an integer or bool
 # type cast each element as NumPy's float-to-int cast does (NaN, inf and out-of-range values included), with or without
 # where= and along an axis, warning "invalid value encountered in reduce"; std into an integer out= refused before
-# sqrt runs, as NumPy's same_kind casting refuses it. (uint32 and cumsum differ and are left out: NUMPY.md.)
+# sqrt runs, as NumPy's same_kind casting refuses it. (uint32 differs and is left out: NUMPY.md.)
 import numpy as np
 import warnings
 
@@ -82,3 +82,29 @@ show("sum int64 nan", lambda: np.sum(np.array([np.nan, 0.0]), dtype="int64"))
 for d in ("int64", "int8", "uint8", "uint64", "bool", "float32"):
     show(f"mean empty {d}", lambda: np.mean(np.zeros(0), dtype=d), False)
     show(f"mean empty axis {d}", lambda: np.mean(np.zeros((0, 2)), axis=0, dtype=d), False)
+# (cumsum and cumprod into an integer dtype: each element truncated as NumPy's cast converts it, before it is
+# accumulated, a float or complex operand alike; and uint64 sums through a negative element, wrapped once at the end)
+f = np.array([1.5, 2.5, -0.5, -2.75, 3.9])
+cn = np.array([1.5 + 2j, 2.5 - 1j, -0.5 + 3j, -2.75 - 1j])
+for d in ("int8", "uint8", "int16", "int64", "bool"):
+    show(f"cumsum float {d}", lambda: np.cumsum(f, dtype=d))
+    show(f"cumprod float {d}", lambda: np.cumprod(f, dtype=d))
+    show(f"cumsum float axis {d}", lambda: np.cumsum(f.reshape(1, 5), axis=1, dtype=d))
+    show(f"cumsum complex {d} 2", lambda: np.cumsum(cn, dtype=d))
+    show(f"cumprod complex {d} 2", lambda: np.cumprod(cn, dtype=d))
+show("cumsum nan int8", lambda: np.cumsum(np.array([1.5, np.nan, 2.0]), dtype="int8"))
+show("cumprod nan int8", lambda: np.cumprod(np.array([1.5, np.nan, 2.0]), dtype="int8"))
+for v in ([-1.0, 2.0], [-3.5, 2.0, 5.0], [2.0, -1.0]):
+    show(f"sum uint64 {v}", lambda: np.sum(np.array(v), dtype="uint64"))
+    show(f"sum where uint64 {v}", lambda: np.sum(np.array(v), dtype="uint64", where=[True] * len(v)))
+    show(f"add.reduce uint64 {v}", lambda: np.add.reduce(np.array(v), dtype="uint64"))
+    show(f"mean uint64 {v}", lambda: np.mean(np.array(v), dtype="uint64"))
+show("sum uint64 [-1.0, 3.0]", lambda: np.sum(np.array([-1.0, 3.0]), dtype="uint64"))
+# (a bool dtype reads both parts of a complex operand: purely imaginary values are true)
+z = np.array([2j, 0j, -0.5j])
+show("sum imag bool", lambda: np.sum(z, dtype=bool))
+show("sum imag bool where", lambda: np.sum(z, dtype=bool, where=[True, True, False]))
+show("prod imag bool", lambda: np.prod(np.array([2j, 1 + 0j]), dtype=bool))
+show("cumsum imag bool", lambda: np.cumsum(z, dtype=bool))
+show("cumprod imag bool", lambda: np.cumprod(np.array([2j, 1, 0j]), dtype=bool))
+show("add.reduce imag bool", lambda: np.add.reduce(z, dtype=bool))

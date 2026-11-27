@@ -62,16 +62,21 @@ test("a cast that throws midway leaves no warning for the next cast", () => {
   assert.deepEqual(Array.from(np.copy(ok, i8).data), [1, -2]);
   // (a complex source, by its real parts: its own loop, after its ComplexWarning, counted here)
   let complexWarnings = 0;
+  const issue = np.castWarnings.complex;
   np.castWarnings.complex = () => void complexWarnings++;
-  const c128 = np.toDtype("complex128");
-  const badc = np.empty([3], c128);
-  badc.data[0] = NaN;
-  badc.data = new Proxy(badc.data, { get: (t: any, k: any) => (k === "2" ? assert.fail("midway") : Reflect.get(t, k)) });
-  assert.throws(() => np.copy(badc, i8), /midway/);
-  const okc = np.empty([1], c128);
-  okc.data.set([3.5, 9]);
-  assert.deepEqual(Array.from(np.copy(okc, i8).data), [3]);
-  assert.equal(complexWarnings, 2);
+  try {
+    const c128 = np.toDtype("complex128");
+    const badc = np.empty([3], c128);
+    badc.data[0] = NaN;
+    badc.data = new Proxy(badc.data, { get: (t: any, k: any) => (k === "2" ? assert.fail("midway") : Reflect.get(t, k)) });
+    assert.throws(() => np.copy(badc, i8), /midway/);
+    const okc = np.empty([1], c128);
+    okc.data.set([3.5, 9]);
+    assert.deepEqual(Array.from(np.copy(okc, i8).data), [3]);
+    assert.equal(complexWarnings, 2);
+  } finally {
+    np.castWarnings.complex = issue;
+  }
 });
 
 // (NUMERIC's ruling on 15c03313: one warning per call, naming the operation.

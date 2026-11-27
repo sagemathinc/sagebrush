@@ -981,22 +981,29 @@ class ufunc:
         if initial is _NoValue:
             initial = None
         a = asarray(a)
+        quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
+                 "logical_or": any}
+        masked = where is not True and self._op in ("add", "multiply", "maximum", "minimum")
+        # (a float sum or product in uint64 goes to sum or prod with its dtype, which keep a negative element congruent
+        # modulo 2**64 and wrap once at the end, as NumPy's arithmetic does: no whole-array cast first)
+        congruent = False
         if dtype is not None:
             dt = self._loop(dtype)
-            if a.dtype != dt:
+            congruent = (self._op in ("add", "multiply") and a.dtype.kind == "f" and dt.kind == "u" and
+                         dt.itemsize == 8 and (initial is None or masked))
+            if a.dtype != dt and not congruent:
                 # (accumulated in dtype, as NumPy's: the conversion is the reduction's, and its warning says so)
                 old = _np._cast_label("reduce")
                 try:
                     a = a.astype(dt)
                 finally:
                     _np._cast_label(old)
-        quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
-                 "logical_or": any}
-        masked = where is not True and self._op in ("add", "multiply", "maximum", "minimum")
         if self._op in quick and (initial is None or masked) and not (dtype is not None and _wraps_in(self._op, dt)):
             # (a sum without an identity starts from its first element: a product's 1 changes nothing; a where= mask
             # goes to the functions that take it, #2088)
             kw = {"initial": None} if first and self._op == "add" else {}
+            if congruent:
+                kw["dtype"] = dt
             if masked:
                 kw["where"] = where
                 if initial is not None:

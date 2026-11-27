@@ -18,7 +18,7 @@ test("numpy.prod and cumprod of complex arrays are NumPy's, imaginary parts and 
 });
 
 // (#2283: as NumPy's, a complex array multiplied in a real dtype is the product of its real parts, with NumPy's
-// ComplexWarning, not a refusal; a bool dtype reads both parts)
+// ComplexWarning, not a refusal; a bool dtype reads both parts; compared with the runner's NumPy, an x86-64 build)
 test("a complex array multiplied into a real dtype is its real parts' product, with NumPy's ComplexWarning", () => {
   const src = `import numpy as np, warnings
 for d in (float, np.float32, np.int8, bool):

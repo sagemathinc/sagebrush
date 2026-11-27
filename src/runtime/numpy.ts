@@ -409,6 +409,15 @@ function wideExact(d: DType, op: string, r: number, x: number, y: number): numbe
   if (g === undefined || !Number.isInteger(x) || !Number.isInteger(y)) return wideRefuse(d);
   return exact64(d, g(BigInt(x), BigInt(y))) ?? wideRefuse(d);
 }
+// (a sum's adder in int64 or uint64: a partial sum in the safe range kept as it is (in uint64 a negative one, from a
+// float operand's negative element, is congruent to NumPy's wrapped value modulo 2**64, and the store wraps it once);
+// past the safe range computed exactly and wrapped, or refused, as wideExact)
+function wideAdd(d: DType): (x: number, y: number) => number {
+  return (x, y) => {
+    const r = x + y;
+    return Number.isSafeInteger(r) && Number.isSafeInteger(x) && Number.isSafeInteger(y) ? r : wideExact(d, "add", r, x, y);
+  };
+}
 function allNonNeg(a: NDArray): boolean {
   let ok = true;
   loop1(a.shape, a.strides, a.offset, (p) => {
@@ -2466,14 +2475,14 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first 
     // (the operand itself, in its own layout (NumPy's iterator orders the axes by it), its values converted as read)
     const ax = axs === null ? a.shape.map((_, i) => i) : axs;
     if (rt === D.float32) return finish(maskedSum(a, mask, ax, keepdims, rt, (x, y) => f32(x + y), part ? pairwiseCplx32 : pairwise32, rt !== a.dt), axis, keepdims);
-    const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
+    const add = isWide(rt) ? wideAdd(rt) : (x: number, y: number) => x + y;
     const r = maskedSum(a, mask, ax, keepdims, rt, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, rt !== a.dt);
     warnInvalidReduce();
     return finish(r, axis, keepdims);
   }
   if (rt === D.float32) return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, (x, y) => f32(x + y), part ? pairwiseCplx32 : pairwise32, first), axis, keepdims);
   // (int64: each partial sum checked, as wideExact)
-  const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
+  const add = isWide(rt) ? wideAdd(rt) : (x: number, y: number) => x + y;
   return finish(reduceAxes(src, axesArg(axis, a.ndim), keepdims, rt, init, add, rt.kind === "f" ? (part ? pairwiseCplx : pairwise) : undefined, first), axis, keepdims);
 }
 // The product of a complex array (or of one into a complex dtype) over the
@@ -2824,14 +2833,21 @@ function cumulative(a: NDArray, axis: any, isProd: boolean, dtype: any): NDArray
   if (a.dt.cplx) raise(T.TypeError, `${isProd ? "cumprod" : "cumsum"}: a complex array accumulated in the real dtype ${rt.name} would lose its imaginary parts; take .real first`);
   const mul = mulIn(rt, "cumprod");
   const add = isWide(rt) ? (x: number, y: number) => wideExact(rt, "add", x + y, x, y) : (x: number, y: number) => x + y;
+  // (each element cast to rt before it is accumulated, as NumPy's buffer casts it: a float operand in an integer or bool
+  // dtype truncated as floatToInt converts it (a uint64 one kept congruent, wrapped when stored), with the cast's
+  // warning; into float32 rounded)
+  const toInt = a.dt.kind === "f" && (rt.isInt || rt.kind === "b");
+  const el = (v: number) => (toInt ? floatToInt(rt, v, true) : rt.kind === "f" ? castNum(rt, v) : v);
+  castInvalid = false;
   loop2(t.shape.slice(0, -1), t.strides.slice(0, -1), t.offset, o.strides.slice(0, -1), o.offset, (p, q) => {
     let acc = isProd ? 1 : 0;
     for (let i = 0; i < n; i++) {
-      acc = i === 0 ? t.data[p] : isProd ? mul(acc, t.data[p + i * st]) : add(acc, t.data[p + i * st]);
+      acc = i === 0 ? el(t.data[p]) : isProd ? mul(acc, el(t.data[p + i * st])) : add(acc, el(t.data[p + i * st]));
       acc = castNum(rt, acc);
       o.data[q + i * ost] = acc;
     }
   });
+  warnInvalidCast();
   return out;
 }
 
