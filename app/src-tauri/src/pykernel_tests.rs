@@ -44,10 +44,25 @@ fn system_python() -> ChosenPython {
     panic!("the tests need a CPython >= 3.10 that passes the rules (or SB_TEST_PYTHON naming one); tried {tried:?}");
 }
 
+/// `content` written to `path` with `mode` by a child process, not by this one: an executable this test process held
+/// open for writing could be inherited by a child another test thread forks at that moment, and running it would then
+/// fail with "text file busy". Written by a child, no descriptor for it ever exists here.
+fn write_exec(path: &Path, content: &str, mode: u32) {
+    use std::io::Write;
+    let mut c = std::process::Command::new("/bin/sh")
+        .args(["-c", "cat > \"$1\" && chmod \"$2\" \"$1\"", "sh"])
+        .arg(path)
+        .arg(format!("{mode:o}"))
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    c.stdin.take().unwrap().write_all(content.as_bytes()).unwrap();
+    assert!(c.wait().unwrap().success(), "writing {}", path.display());
+}
+
 fn script(dir: &Path, name: &str, body: &str, mode: u32) -> PathBuf {
     let p = dir.join(name);
-    fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-    fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+    write_exec(&p, &format!("#!/bin/sh\n{body}\n"), mode);
     p
 }
 
@@ -70,12 +85,14 @@ for line in sys.stdin:
         say({"echo": c["v"]})
     elif k == "sleep":
         try:
+            say({"armed": True})
             time.sleep(30)
         except KeyboardInterrupt:
             say({"interrupted": True})
     elif k == "sleep_counted":
         hits = []
         signal.signal(signal.SIGINT, lambda *a: hits.append(1))
+        say({"armed": True})
         while not hits:
             time.sleep(0.01)
         say({"interrupted": True})
@@ -96,6 +113,8 @@ for line in sys.stdin:
         sys.stdout.write("x" * c["n"]); sys.stdout.flush(); time.sleep(30)
     elif k == "exit":
         sys.exit(c["code"])
+    elif k == "exit_now":
+        os._exit(c["code"])
     elif k == "hang":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         p = subprocess.Popen(["sleep", "60"])
@@ -305,8 +324,9 @@ fn lines_go_both_ways_and_an_interrupt_reaches_the_running_code() {
     k.send(r#"{"cmd":"echo","v":"héllo"}"#).unwrap();
     assert_eq!(line(&k)["echo"], "héllo");
     assert_eq!(k.send("a\nb"), Err(KernelError::InputRefused));
+    // (interrupted once the stub says it is inside the code that catches it)
     k.send(r#"{"cmd":"sleep"}"#).unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(line(&k)["armed"], true);
     k.interrupt();
     assert_eq!(line(&k)["interrupted"], true);
     k.send(r#"{"cmd":"exit","code":3}"#).unwrap();
@@ -552,9 +572,10 @@ fn the_kernel_has_its_own_session_and_group() {
 fn an_interrupt_asked_around_and_after_the_end_never_signals_after_the_reap() {
     let (_t, k) = start_stub("trace");
     line(&k);
-    // (a handler that counts and never raises, so the stream of interrupts can't end the stub early)
+    // (a handler that counts and never raises, so the stream of interrupts can't end the stub early; the askers start
+    //  only once the stub says it is in place)
     k.send(r#"{"cmd":"sleep_counted"}"#).unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(line(&k)["armed"], true);
     let k = Arc::new(k);
     // (four threads ask for interrupts throughout: while it runs, while it exits, and after it is reaped)
     let done = Arc::new(AtomicBool::new(false));
@@ -570,7 +591,8 @@ fn an_interrupt_asked_around_and_after_the_end_never_signals_after_the_reap() {
         })
         .collect();
     assert_eq!(line(&k)["interrupted"], true);
-    k.send(r#"{"cmd":"exit","code":0}"#).unwrap();
+    // (os._exit: no interpreter shutdown, which would put SIGINT back to its default while the askers still ask)
+    k.send(r#"{"cmd":"exit_now","code":0}"#).unwrap();
     assert_eq!(exit_of(&k, Duration::from_secs(10)), "exit 0");
     std::thread::sleep(Duration::from_millis(300));
     done.store(true, Ordering::SeqCst);
