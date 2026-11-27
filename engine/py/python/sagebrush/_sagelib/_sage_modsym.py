@@ -56,6 +56,13 @@ def _maxbits(r):
     vals = r.values() if isinstance(r, dict) else r
     return max((_bits(v) for v in vals), default=0)
 
+def _sum_bits(terms, count):
+    """A sound bound, in bits (numerator and denominator alike), for a sum
+    of count products whose factors' bits are given in terms (pairs): the
+    denominators multiply, so the bits add over the terms."""
+    return 2 * (sum(a + b for a, b in terms) + max(count, 1).bit_length())
+
+
 def _reserve(ch, entries, bits, frac=True):
     """Take, before a row is computed, a bound on what it will hold:
     entries numbers of at most bits bits; returns the bytes taken, to
@@ -65,8 +72,14 @@ def _reserve(ch, entries, bits, frac=True):
     return b
 
 def _settle(ch, reserved, row):
-    """Release what a reservation took beyond the row it was for."""
-    ch.give(reserved - _row_bytes(row))
+    """Release what a reservation took beyond the row it was for; a row
+    larger than its reservation is admitted for the excess (refused past
+    the allowance), never added silently."""
+    d = reserved - _row_bytes(row)
+    if d >= 0:
+        ch.give(d)
+    else:
+        ch.take(-d)
 
 
 class _Charge:
@@ -218,6 +231,40 @@ class Space:
         ....:     ms._mat_mul([[F(3)]], [[F(2)]])
         multiplied
         [[Fraction(6, 1)]]
+
+    A sum of products with independent denominators is reserved with the
+    bits of all its terms: 1/2 + 1/3 + ... + 1/541 (the first 100 primes)
+    has a denominator of 730 bits::
+
+        sage: P = [p for p in range(2, 542) if all(p % q for q in range(2, p))]; len(P)  # sagebrush only
+        100
+        sage: calls = []  # sagebrush only
+        sage: class G(Fraction):  # sagebrush only
+        ....:     def __mul__(self, o):
+        ....:         calls.append(1)
+        ....:         return Fraction.__mul__(self, o)
+        sage: ch = ms._Charge("A sum"); ch.used, ch.limit = 0, 240  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     try:
+        ....:         ms._mat_mul([[G(1) for p in P]], [[Fraction(1, p)] for p in P])
+        ....:     except MemoryError as e:
+        ....:         print("refused", e.need_bytes > e.limit_bytes, len(calls))
+        refused True 0
+        sage: with ms._Charging(ms._Charge("A sum")):  # sagebrush only
+        ....:     ms._mat_mul([[Fraction(1) for p in P]], [[Fraction(1, p)] for p in P])[0][0].denominator.bit_length()
+        730
+
+    One ledger: the lower levels' spaces a new subspace needs are built on
+    the computation's charge, with the ambient space's::
+
+        sage: sys._sagebrush_heap_limit = 480000; M = ModularSymbols(33); _ = M._exact()  # sagebrush only
+        sage: try:  # sagebrush only
+        ....:     M.new_submodule()
+        ....: except MemoryError as e:
+        ....:     print(e.what.split(" of ")[0])
+        The new subspace
+        sage: sys._sagebrush_heap_limit = old; M.new_submodule().dimension()  # sagebrush only
+        3
     """
 
     def __init__(self, N, k, sign):
@@ -232,7 +279,9 @@ class Space:
         # each, with their union-find entries
         npts = _gamma0_index(N)
         m = (k - 1) * npts
-        ch = _Charge("The modular symbols of level %d and weight %d" % (N, k))
+        # (one ledger: a space built inside a charged computation draws on
+        # its charge; only a space built at top level has a charge of its own)
+        ch = _CUR[0] or _Charge("The modular symbols of level %d and weight %d" % (N, k))
         ch.take(Space._tables(N, k))
         with _Charging(ch):
             self._build(N, k, sign)
@@ -292,6 +341,7 @@ class Space:
                 (y, v), = self._image(x, _I).items()
                 union(x, _Fr(sign * v), y)
         self._value = value
+        self._coefbits = max((_bits(c) for c in coef), default=0)
         self._zero = zero
         roots = sorted({find(x) for x in range(m) if not zero[find(x)]})
         self._col = {r: j for j, r in enumerate(roots)}
@@ -356,10 +406,14 @@ class Space:
         ch = _CUR[0]
         if ch is not None:
             if getattr(self, "_pivbits", None) is None:
-                self._pivbits = max((_maxbits(r) for r in self._pivrow.values()), default=0)
-            fb = _maxbits(vec) + 2 * len(self._pivrow).bit_length() + 64
-            ch.take(len(vec) * (_SLOT + _FRAC + fb // 8))
-            reserved = _reserve(ch, len(self._bcols), fb + self._pivbits + len(self._pivrow).bit_length())
+                self._pivbits = {p: _maxbits(r) for p, r in self._pivrow.items()}
+            # (the free vector: each entry a sum of the vector's entries times
+            # the union-find coefficients; the coordinates: an entry minus
+            # the sum over the pivots of products; bits added over terms)
+            fb = _sum_bits([(_bits(v), self._coefbits) for v in vec.values()], len(vec))
+            ch.take(len(vec) * (_SLOT + _FRAC + fb // 8 + 8))
+            terms = [(fb, self._pivbits[p]) for p in self._pivrow] + [(fb, 0)]
+            reserved = _reserve(ch, len(self._bcols), _sum_bits(terms, len(terms)))
         f = self._free(vec)
         res = []
         for j in self._bcols:
@@ -369,7 +423,7 @@ class Space:
                     t -= f[p] * row.get(j, 0)
             res.append(_Fr(t))
         if ch is not None:
-            ch.give(len(vec) * (_SLOT + _FRAC + fb // 8))
+            ch.give(len(vec) * (_SLOT + _FRAC + fb // 8 + 8))
             _settle(ch, reserved, res)
         return res
 
@@ -474,7 +528,7 @@ def _rref(rows, ncols):
                 t = A[i][c]
                 r = A[i]
                 keys = set(r) | set(P)
-                res = _reserve(ch, len(keys), _maxbits(r) + _bits(t) + pb + 2)
+                res = _reserve(ch, len(keys), 2 * (_maxbits(r) + _bits(t) + pb) + 2)
                 new = dict(r)
                 for j, w in P.items():
                     new[j] = new.get(j, 0) - t * w
@@ -582,10 +636,11 @@ def _kernel(M, n):
 def _mat_mul(A, B):
     n = len(B[0]) if B else 0
     ch = _charge()
-    bb = max((_maxbits(r) for r in B), default=0) + len(B).bit_length()
+    bmax = [_maxbits(r) for r in B]
     out = []
     for r in A:
-        res = _reserve(ch, n, _maxbits(r) + bb)
+        terms = [(_bits(a), bmax[t]) for t, a in enumerate(r) if a]
+        res = _reserve(ch, n, _sum_bits(terms, len(terms)))
         row = [sum((a * B[t][j] for t, a in enumerate(r) if a), _Fr(0)) for j in range(n)]
         _settle(ch, res, row)
         out.append(row)
@@ -657,10 +712,11 @@ def _restrict(B, M):
     n = len(B[0])
     _, piv = _echelon(B, n)
     ch = _charge()
-    mb = max((_maxbits(r) for r in M), default=0) + n.bit_length()
+    mmax = [_maxbits(r) for r in M]
     out = []
     for b in B:
-        res = _reserve(ch, n, _maxbits(b) + mb)
+        terms = [(_bits(b[t]), mmax[t]) for t in range(n) if b[t]]
+        res = _reserve(ch, n, _sum_bits(terms, len(terms)))
         w = [sum((b[t] * M[t][j] for t in range(n) if b[t]), _Fr(0)) for j in range(n)]
         _settle(ch, res, w)
         # in an echelon basis, the coordinate on row i is w's entry at its pivot
@@ -806,10 +862,11 @@ def _intersect(B1, B2, n):
     ch.take(sum(_row_bytes(r) for r in B2) + len(B1) * n * _SLOT)
     rows = [list(r) for r in B1] + [[-x for x in r] for r in B2]
     K = _left_kernel(rows, n)
-    bb = max((_maxbits(r) for r in B1), default=0) + len(B1).bit_length()
+    b1max = [_maxbits(r) for r in B1]
     vecs = []
     for k in K:
-        res = _reserve(ch, n, _maxbits(k) + bb)
+        terms = [(_bits(k[i]), b1max[i]) for i in range(len(B1)) if k[i]]
+        res = _reserve(ch, n, _sum_bits(terms, len(terms)))
         v = [sum((k[i] * B1[i][j] for i in range(len(B1)) if k[i]), _Fr(0)) for j in range(n)]
         _settle(ch, res, v)
         vecs.append(v)
@@ -1390,16 +1447,11 @@ class ModularSymbolsMethods:
         cols = [[] for _ in sp.basis]
         qs = [q for q in primes if self._N % q == 0]
         with sp.work("The new subspace of %r" % (self,)) as ch:
-            # (each lower level's space admitted against the running total,
-            # the ambient included, before it is built; held while the maps
-            # are built)
-            lows = []
-            for q in qs:
-                est = ms.Space._tables(self._N // q, self._k)
-                ch.take(est)
-                low = ModularSymbols(self._N // q, self._k, sign=self._sign)._exact()
-                ch.take(low.held() - est)
-                lows.append(low)
+            # (each lower level's space charged to the running total, the
+            # ambient included, as it is built; held while the maps are built)
+            # (each built inside this charge: one ledger for the ambient
+            # space, the lower levels and the maps)
+            lows = [ModularSymbols(self._N // q, self._k, sign=self._sign)._exact() for q in qs]
             for q, low in zip(qs, lows):
                 for t in (1, q):
                     for r, row in zip(cols, ms._degeneracy_rows(sp, low, t)):
