@@ -62,3 +62,7 @@ o = full(2, np.uint8); show("int into uint8: a copy's", lambda: np.around(np.arr
 o = full(2, np.float64); show("complex into float", lambda: np.around(np.array([1 + 1j, 2]), out=o), o)
 o = full(2, np.float32); show("float into float32", lambda: np.around(np.array([1.5, 2.5]), out=o), o)
 o = full(2, np.int64); show("int into int", lambda: np.around(np.array([15, 25]), out=o), o)
+for d in (0, 1, -1):
+    o = full(2, np.complex128); show("int into complex, decimals %d" % d, lambda: np.around(np.array([1, 25]), d, out=o), o)
+o = full(2, np.complex64); show("int8 into complex64, decimals -1", lambda: np.around(np.array([14, 26], np.int8), -1, out=o), o)
+o = full(2, np.complex64); show("uint8 into complex64", lambda: np.around(np.array([1, 250], np.uint8), out=o), o)

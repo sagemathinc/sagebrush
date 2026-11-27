@@ -1238,15 +1238,21 @@ def _around_out(a, decimals, out):
             raise NotImplementedError(f"np.round of a {a.dtype} array into a narrower {out.dtype} out is not supported")
         out[...] = _round_float(a.astype(wide), decimals)
         return out
+    if sk in "iu":
+        if decimals >= 0:
+            if not _can_cast_rule(a.dtype, out.dtype, "same_kind"):
+                raise TypeError(f"Cannot cast array data from {a.dtype!r} to {out.dtype!r} according to the rule 'same_kind'")
+            out[...] = a
+            return out
+        if ok == "c":
+            # (an integer's quotient by a power of ten, rounded and multiplied back, is exact in float64 here, as NumPy's
+            # stages give it through a complex out)
+            out[...] = _round_float(a.astype("float64"), decimals)
+            return out
     if ok == "c":
         # (NumPy rounds such a value as a complex number, with complex
         # division's rounding; not implemented: refused, not answered)
         raise NotImplementedError("np.round of a real array into a complex out is not supported")
-    if sk in "iu" and decimals >= 0:
-        if not _can_cast_rule(a.dtype, out.dtype, "same_kind"):
-            raise TypeError(f"Cannot cast array data from {a.dtype!r} to {out.dtype!r} according to the rule 'same_kind'")
-        out[...] = a
-        return out
     if decimals == 0:
         if sk == "b":
             # (NumPy's rint of a bool array runs in float16, which Sagebrush doesn't have: its refusal is that loop's,
