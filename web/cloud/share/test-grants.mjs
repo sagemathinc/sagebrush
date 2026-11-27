@@ -293,6 +293,11 @@ const admin = await sessionFor(mf, db, ADMIN, 1000);
   // (a Stripe-sourced grant, as the later webhook writes one: its source_ref is kept)
   await db.prepare("INSERT INTO grants (id, account_id, storage_bytes, valid_from, valid_until, source, source_ref, note, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5, 'stripe', 'sub_TEST123', ?6, ?4, 'stripe')").bind("s".repeat(25) + "a", P, GiB, nowS() - 10, until(30), CANARY).run();
   await db.prepare("INSERT INTO grant_audit (grant_id, at, actor, action, detail) VALUES (?1, ?2, 'stripe', 'create', ?3)").bind("s".repeat(25) + "a", nowS(), `${CANARY} ${P}`).run();
+  // (the purge's replacement value can't be taken first: "purged:<id>" is outside the request id grammar, and a
+  // grant made with "purged-<id>", the old form, doesn't block the purge)
+  const squat = await post(mf, "/api/admin/grants", admin5, { request_id: `purged-${live.grant.id}`, account_id: OTHER, storage_bytes: GiB, valid_until: until(5) });
+  const taken = await post(mf, "/api/admin/grants", admin5, { request_id: `purged:${live.grant.id}`, account_id: OTHER, storage_bytes: GiB, valid_until: until(5) });
+  ok(squat.status === 201 && taken.status === 400, `P0 a request_id of purged:<id> is refused (${taken.status}); one of purged-<id> is an ordinary request (${squat.status})`);
   // (P is also an admin's grantee here; ADMIN5 itself is purged below, as an admin who made grants)
   const del = await post(mf, "/api/share/delete-everything", ps, { confirm: "delete" });
   ok(del.status === 200, `P1 the account deletes itself (${del.status})`);
@@ -305,7 +310,7 @@ const admin = await sessionFor(mf, db, ADMIN, 1000);
   ok(liveRow?.revoked_by === "purge" && endedRow?.revoked_by === ADMIN5, "P1 an active grant is revoked by the purge; one already revoked keeps its revoker", { live: liveRow?.revoked_by, ended: endedRow?.revoked_by });
   ok(rows.every((r) => (r.note === null || r.note === "removed") && r.revoke_reason === "removed"), "P2 every note and revoke reason is the fixed \"removed\"", rows.map((r) => [r.note, r.revoke_reason]));
   ok(stripe?.source_ref === "sub_TEST123", "P2 a Stripe grant's source_ref, the Stripe object id, is kept on purpose", stripe?.source_ref);
-  ok(rows.filter((r) => r.source === "admin").every((r) => r.source_ref === `purged-${r.id}`), "P2 an admin grant's source_ref (the admin's request id) becomes purged-<grant id>", rows.map((r) => r.source_ref));
+  ok(rows.filter((r) => r.source === "admin").every((r) => r.source_ref === `purged:${r.id}`), "P2 an admin grant's source_ref (the admin's request id) becomes purged:<grant id>, even with a purged-<id> request taken first", rows.map((r) => r.source_ref));
   ok(rows.every((r) => r.request_hash === null), "P2 every request hash goes");
   const text = JSON.stringify([rows, audit]);
   ok(!text.includes(P) && !text.includes(CANARY), "P2 no text field of the account's grants or audit rows holds its id or the planted canary");
