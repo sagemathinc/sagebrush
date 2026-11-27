@@ -7,8 +7,10 @@ What R prints, observed:
   precision accumulators"): here a 64-bit significand, rounded to nearest
   even after each step (_LD), then once to a double.  Each argument is summed
   (or multiplied) on its own and the results combined in double, so
-  sum(0.1, 0.2, 0.3) is not sum(c(0.1, 0.2, 0.3)).  An integer sum is exact,
-  and a double when it, or one argument's sum, leaves the integer range.  Of
+  sum(0.1, 0.2, 0.3) is not sum(c(0.1, 0.2, 0.3)).  An integer sum is exact;
+  it is a double once the running total, checked after each argument, has
+  left the integer range (so sum(-5L, c(2147483647L, 1L)) is integer but
+  sum(c(2147483647L, 1L), -5L) is double, as is an NA met after that).  Of
   NA and NaN, the first one met is the result.
 - min and max: NA if any element is NA, else NaN if any is NaN; integer for
   logical and integer arguments, double with any double, character (compared
@@ -152,16 +154,16 @@ def sum_(sess, call, args):
         raise RError("invalid 'type' (character) of argument", call)
     if t in ("logical", "integer"):
         total, wide = 0, False
+        # (the total is checked after each argument: once outside the integer range, the result is double,
+        # an NA included; within an argument the sum is exact)
         for v in vs:
-            s = 0
             for e in v.data:
                 if e is None:
                     if na_rm:
                         continue
-                    return RVector("integer", [None])
-                s += int(e)
-            total += s
-            if not (-INT_MAX <= s <= INT_MAX and -INT_MAX <= total <= INT_MAX):
+                    return RVector("double" if wide else "integer", [None])
+                total += int(e)
+            if not -INT_MAX <= total <= INT_MAX:
                 wide = True
         return RVector("double", [float(total)]) if wide else RVector("integer", [total])
     if t == "complex":

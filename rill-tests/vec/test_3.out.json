@@ -191,6 +191,24 @@
    "status": 0,
    "stderr": "",
    "stdout": "[1] \"double\"\n[1] -2147483648\n"
+  },
+  {
+   "id": "sum-integer-argument-overflow",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"double\"\n[1] 2147483643\n[1] \"double\"\n[1] \"integer\"\n[1] 2147483643\n[1] \"integer\"\n[1] \"double\"\n[1] \"double\"\n[1] NA\n[1] \"integer\"\n[1] \"integer\"\n"
+  },
+  {
+   "id": "prod-zero-sign",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -Inf\n[1] Inf\n[1] -Inf\n[1] -Inf\n[1] Inf\n"
+  },
+  {
+   "id": "mean-trim-rounding",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 19.875\n[1] 4\n"
   }
  ],
  "file": "rill-tests/vec/test_3.R",

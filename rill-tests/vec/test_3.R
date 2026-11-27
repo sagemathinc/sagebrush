@@ -65,3 +65,11 @@ mean(c(1e20, 1, -1e20)); mean(c(-1e308, 1e308, 1e308)); print(mean(c(0.1, 0.2, 0
 print(mean(c(3, 0.3, 1e16, 1e16, 1e16, 0.7, 0.2, 3, 0.2, 0.1)), digits = 17)
 #-- sum-integer-low-edge
 x <- sum(-2147483647L, -1L); typeof(x); print(x, digits = 15)
+#-- sum-integer-argument-overflow
+x <- sum(c(2147483647L, 1L), -5L); typeof(x); x; typeof(sum(c(2147483647L, 1L), -1L))
+x <- sum(-5L, c(2147483647L, 1L)); typeof(x); x; typeof(sum(5L, c(-2147483647L, -1L))); typeof(sum(c(2147483647L, 2147483647L), c(-2147483647L, -2147483647L)))
+x <- sum(c(2147483647L, 1L), NA); typeof(x); x; typeof(sum(2147483647L, NA, 1L)); typeof(sum(NA, c(2147483647L, 1L)))
+#-- prod-zero-sign
+1/prod(c(-1, 0)); 1/prod(c(-1, -1, 0)); 1/prod(c(0, -2), 3); 1/prod(c(-0, 2)); 1/prod(c(-0, -0))
+#-- mean-trim-rounding
+mean(c(1, 2, 3, 4, 10, 20, 30, 40, 50, 1000), trim = 0.15); mean(1:7, trim = 0.2)
