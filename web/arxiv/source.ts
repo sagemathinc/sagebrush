@@ -53,7 +53,7 @@ export function parseArxiv(rest: string): ArxivId {
   if (s.length > 200) throw new ArxivError("address", NOT_AN_ID);
   s = s.replace(/^arxiv:/i, "");
   const url = /^(?:https?:\/\/)?(?:www\.|export\.)?arxiv\.org\/(?:abs|pdf|src|e-print)\/(.+)$/i.exec(s);
-  if (url) s = url[1].replace(/\.pdf$/i, "").replace(/[?#].*$/, "");
+  if (url) s = url[1].replace(/[?#].*$/, "").replace(/\.pdf$/i, "");
   else if (/[:?#]|^\/|\/\//.test(s)) throw new ArxivError("address", NOT_AN_ID);
   const nu = /^([0-9]{4})\.([0-9]{4,5})(?:v([0-9]+))?$/.exec(s);
   if (nu) {
@@ -191,7 +191,11 @@ export async function fetchSource(id: string, version: number, deadline: Deadlin
   const cap = { ...CAPS, ...caps };
   cancelled(signal);
   deadline.check();
-  const { r, done, ac } = await request(fetch, srcUrl(id, version), "GET", deadline.left(), signal);
+  // (a request the deadline stopped before its headers came is the deadline's, not the network's)
+  let got;
+  try { got = await request(fetch, srcUrl(id, version), "GET", deadline.left(), signal); }
+  catch (e) { if (e instanceof ArxivError && e.code === "network") deadline.check(); throw e; }
+  const { r, done, ac } = got;
   // (after every await and before every return: Cancel, then the deadline; a refusal before the body is read cancels
   //  it and aborts the request, so nothing more arrives)
   const still = () => { cancelled(signal); deadline.check(); };

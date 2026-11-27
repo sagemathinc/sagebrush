@@ -28,7 +28,7 @@ const codeSync = (f) => { try { f(); return null; } catch (e) { return e instanc
     ["hep-th/9108001", "hep-th/9108001", null], ["cond-mat/0703999v999", "cond-mat/0703999", 999], ["arXiv:2611.26934", "2611.26934", null],
     ["https://arxiv.org/abs/2611.26934v2", "2611.26934", 2], ["arxiv.org/pdf/2611.26934v2.pdf", "2611.26934", 2], ["https://arxiv.org/pdf/2611.26934", "2611.26934", null],
     ["https://export.arxiv.org/src/math/0211159", "math/0211159", null], ["https://arxiv.org/e-print/2611.26934v1", "2611.26934", 1],
-    ["https://www.arxiv.org/abs/2611.26934?context=math", "2611.26934", null], ["  2611.26934  ", "2611.26934", null],
+    ["https://www.arxiv.org/abs/2611.26934?context=math", "2611.26934", null], ["https://arxiv.org/pdf/2611.26934v3.pdf?download=1", "2611.26934", 3], ["arxiv.org/pdf/2611.26934.pdf#page=2", "2611.26934", null], ["  2611.26934  ", "2611.26934", null],
   ];
   const bad = good.map(([s, id, v]) => [s, id, v, (() => { try { return parseArxiv(s); } catch (e) { return e.code; } })()]).filter(([, id, v, r]) => r?.id !== id || r?.version !== v);
   ok(bad.length === 0, "parseArxiv: every id and URL form, with its version", bad);
@@ -196,6 +196,25 @@ const targz = gzipSync(cat(member("paper.tex", MAIN), member("sec.tex", "a secti
   await code(() => fetchSource("2611.26934", 1, new Deadline(bz.env.now), bz.env));
   ok(big.log.cancelled && st.log.cancelled && bz.log.cancelled && big.log[0].init.signal.aborted && st.log[0].init.signal.aborted,
     "a Content-Length over the cap, a 404 and a 429: each response's body cancelled and its request aborted", { big: big.log.cancelled, st: st.log.cancelled, bz: bz.log.cancelled });
+}
+
+// (TESTS: the deadline passing before the response's headers arrive is the deadline, not a network failure; and a read
+//  past the deadline stops at once, the rest of the body never pulled)
+{
+  const s = stand({ versions: 1, body: targz });
+  const env = { ...s.env, fetch: async (url, init) => { s.advance(IMPORT_DEADLINE_MS + 1); await new Promise((r) => setTimeout(r, 2)); init.signal.dispatchEvent?.(new Event("abort")); throw new TypeError("aborted"); } };
+  ok((await code(() => fetchSource("2611.26934", 1, new Deadline(s.env.now), env))) === "deadline", "the deadline passing before the headers come: deadline, not network");
+  const net = stand({ versions: 1, body: targz });
+  const envN = { ...net.env, fetch: async () => { throw new TypeError("offline"); } };
+  ok((await code(() => fetchSource("2611.26934", 1, new Deadline(net.env.now), envN))) === "network", "a network failure in time is still network");
+  const long = gzipSync(cat(member("paper.tex", MAIN), member("big.bin", "y".repeat(200_000)), new Uint8Array(1024)));
+  const b = stand({ versions: 1, body: long, chunks: 64, tick: IMPORT_DEADLINE_MS + 1 });
+  ok((await code(() => fetchSource("2611.26934", 1, new Deadline(b.env.now), b.env))) === "deadline" && b.log.pulled < long.length && b.log.cancelled,
+    "a read past the deadline: stopped at once, the rest of the body not pulled, the read cancelled", { pulled: b.log.pulled, of: long.length, cancelled: b.log.cancelled });
+  const c = stand({ versions: 1, body: long, chunks: 64 }), ac = new AbortController();
+  let reads = 0;
+  const envC = { ...c.env, fetch: async (u, i) => { const r = await c.env.fetch(u, i); const rd = r.body.getReader(); return new Response(new ReadableStream({ async pull(ctl) { if (++reads === 3) ac.abort(); const x = await rd.read(); if (x.done) ctl.close(); else ctl.enqueue(x.value); }, cancel() { rd.cancel(); } }), { status: 200 }); } };
+  ok((await code(() => fetchSource("2611.26934", 1, new Deadline(c.env.now), { ...envC, signal: ac.signal }))) === "cancelled" && c.log.pulled < long.length, "Cancel mid-download: stopped at once, the rest not pulled", { pulled: c.log.pulled, of: long.length });
 }
 
 console.log(failures ? `FAIL: ${failures} of ${checks}` : `ok: an arXiv paper's source, ${checks} checks`);
