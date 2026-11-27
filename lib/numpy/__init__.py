@@ -1550,7 +1550,8 @@ def _divided(r, n):
     if isinstance(r, ndarray):
         r[...] = r / n
         return r
-    return r.dtype.type(r / n)
+    # (converted as an array cast converts: a NaN quotient (an empty slice's) into an integer dtype is NumPy's value)
+    return asarray(r / n).astype(r.dtype)[()]
 
 
 def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
@@ -1578,7 +1579,7 @@ def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
         return out
     s = _np.sum(a, axis, keepdims, dtype)
     # (as NumPy's _mean: the quotient converted back to the sum's dtype, an integer dtype's included)
-    return _divided(s, n) if n else s / 0.0
+    return _divided(s, n)
 
 
 def _var(a, axis, dtype, out, ddof, keepdims, where, arrmean):
