@@ -171,3 +171,15 @@ test("an anonymous function made after clear of a variable named like a function
   assert.equal(r.err, "");
   assert.equal(r.out, "cleared|3.14159 1 3.14159\nsnapshot|3\ncaptured|3\ngone|Unrecognized function or variable 'x'.\n");
 });
+
+test("ans is each function's own, never shared with a nested function (MATLAB R2026b's rows)", () => {
+  const r = run({ "main.m": lines(
+    "fprintf('after|%g\\n', after_());",
+    "try, readp(); catch e, fprintf('read|%s|%s\\n', e.identifier, e.message); end",
+    // (the parent's ans, 3, unchanged by its nested function's expression statement, 7)
+    "function v = after_()", "  3;", "  function g(), 7; end", "  g();", "  v = ans;", "end",
+    // (a nested function reading ans: its own, which it hasn't set, not its parent's)
+    "function readp()", "  3;", "  function r = h(), r = ans; end", "  h();", "end") });
+  assert.equal(r.err, "");
+  assert.equal(r.out, "after|3\nread|MATLAB:UndefinedFunction|Unrecognized function or variable 'ans'.\n");
+});
