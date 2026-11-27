@@ -2,7 +2,7 @@
 // known-good engine, so the first run works offline): run before `tauri build` (or
 // `cargo build`) there, after app/dist is built (node app/build-frontend.mjs).
 //
-//   node app/engine/bundle.mjs [--cache DIR]
+//   node app/engine/bundle.mjs [--cache DIR] [--native-addon FILE]
 //
 // It puts into app/src-tauri/ (all ignored by git):
 //   binaries/sagebrush-node-<target triple>        Node, pinned below by version and SHA-256: the engine's runtime
@@ -11,6 +11,10 @@
 //   engine/*.mjs                                   the engine (app/engine/, its tests and this file left out)
 //   engine/root/                                   the interpreter's files from app/dist: the worker, its
 //                                                  WebAssembly modules, the library's chunks and the packages
+//   engine/sagebrush-engine.node                   with --native-addon: the native engine (engine/node, built for
+//                                                  this platform; on macOS signed before this runs), which the
+//                                                  engine loads instead of WebAssembly; build.rs compiles its
+//                                                  SHA-256 in, and the engine refuses any other bytes
 //   agent/                                         the agent the app hosts, with agent/MANIFEST.json
 //                                                  (app/engine/agent-bundle.mjs; build.rs compiles its SHA-256 in)
 // The download is checked against the pinned SHA-256 before anything is
@@ -65,10 +69,13 @@ function fetchPinned(cache, file, url, want) {
 
 function main(argv) {
   let cache = join(homedir(), ".cache", "sagebrush-node");
+  let addon = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--cache") cache = argv[++i];
-    else throw new Error(`unknown argument: ${argv[i]} (usage: node app/engine/bundle.mjs [--cache DIR])`);
+    else if (argv[i] === "--native-addon") addon = argv[++i];
+    else throw new Error(`unknown argument: ${argv[i]} (usage: node app/engine/bundle.mjs [--cache DIR] [--native-addon FILE])`);
   }
+  if (addon !== null && !(addon && existsSync(addon))) throw new Error(`--native-addon: no such file: ${addon}`);
   const key = `${process.platform}-${process.arch}`;
   const pin = NODE[key];
   if (!pin) throw new Error(`the app ships its engine on macOS (Apple silicon) and Linux (x64) only, not ${key}`);
@@ -131,9 +138,18 @@ function main(argv) {
   // engine's thread loads it as one whatever this says)
   writeFileSync(join(engine, "package.json"), JSON.stringify({ type: "module", private: true }) + "\n");
   for (const f of ROOT_FILES) cpSync(join(dist, f), join(engine, "root", f), { recursive: true });
+  // the native engine, when given: copied as it is (its bytes are what build.rs pins), not writable by group or others
+  // (the engine's loader refuses such a file); without it, any earlier copy is removed, so the app runs WebAssembly
+  const native = join(engine, "sagebrush-engine.node");
+  rmSync(native, { force: true });
+  if (addon !== null) {
+    copyFileSync(addon, native);
+    chmodSync(native, 0o755);
+  }
   const n = readdirSync(join(engine, "root", "lib")).length;
   console.log(`engine bundled: Node ${NODE.version} (${pin.triple}), ${ENGINE_FILES.length} engine files, the interpreter's files (${n} entries in lib/)`);
   console.log(`agent bundled: ${agent.files} files, MANIFEST.json ${agent.sha256}`);
+  console.log(addon === null ? "native engine: not bundled (the app runs WebAssembly)" : `native engine bundled: ${createHash("sha256").update(readFileSync(native)).digest("hex")}`);
 }
 
 main(process.argv.slice(2));
