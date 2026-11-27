@@ -36,6 +36,7 @@
     "allow-disk-where",
     "allow-disk-reveal",
     "allow-settings-write",
+    "allow-settings-read",
     "allow-grants-read",
     "allow-grants-write",
     "allow-app-quit-hold",
