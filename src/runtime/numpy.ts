@@ -4327,13 +4327,13 @@ export function admitObjects(shape: number[]): void {
   admitArray(shape, OBJ_DT as unknown as DType);
   admitHeap(OBJ_REF_BYTES * prod(shape), `an object array of shape (${shape.join(", ")}${shape.length === 1 ? "," : ""})`);
 }
-// (an object array's references are a dense JS array, whose length the JS engine bounds, not Sagebrush. V8's bound is
-// FixedArray::kMaxLength, 2**27 in its standard builds (deps/v8/src/objects/fixed-array.h in Node 24.21.0), and V8
-// meets a longer array only after building most of it (2**27 + 1 references: 1.4 GB and 6 s before its RangeError,
-// measured on Node 24.21.0), so there a longer one is refused before. Elsewhere (JavaScriptCore, SpiderMonkey, V8's
-// lower-limits builds, whose bound is 2**24) the engine's own RangeError is the bound, read where it is met. Either
-// way a MemoryError naming the engine's storage bound; a sparse array grown past it is never made (V8 can't survive
-// that). denseLimit and makeRefs are replaceable by tests)
+// (an object array's references are a dense JS array, whose length the JS engine bounds, not Sagebrush. V8's bound
+// is FixedArray::kMaxLength, 2**27 in its standard builds (deps/v8/src/objects/fixed-array.h in Node 24.21.0), and
+// V8 meets a longer array only after building most of it (2**27 + 1 references: 1.4 GB and 6 s before its
+// RangeError, measured on Node 24.21.0), so on V8 that standard-build bound is checked up front. Every other bound
+// (JavaScriptCore's, SpiderMonkey's, V8's lower-limits testing builds at 2**24) is caught where the array is made:
+// the engine's RangeError, on V8 too. Either way a MemoryError naming the engine's storage bound; a sparse array
+// grown past it is never made (V8 can't survive that). denseLimit and makeRefs are replaceable by tests)
 export const objBackend = { denseLimit: v8DenseLength(), makeRefs: (n: number): any[] => new Array(n).fill(null) };
 function v8DenseLength(): number | null {
   const g: any = globalThis;

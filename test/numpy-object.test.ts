@@ -184,6 +184,10 @@ test("object arrays: no count of Sagebrush's own; the heap, then the JS engine's
     assert.equal(msg(() => np.objEmpty([10])), "made");
     assert.equal(msg(() => np.objEmpty([11])), refused);
     assert.equal(asked, 1);
+    // (V8 detected, its standard bound 2**27, but a lower bound met where the array is made (a lower-limits build):
+    // the RangeError is the same MemoryError)
+    np.objBackend.denseLimit = 2 ** 27;
+    assert.equal(msg(() => np.objEmpty([11])), refused);
     // (the heap first: shown full, a large request is refused before the engine is asked for its store)
     H.heapProbe.collect = () => false;
     H.heapProbe.used = () => H.heapLimit();
