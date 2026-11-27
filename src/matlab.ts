@@ -319,7 +319,8 @@ type Stmt = { line: number; col: number } & (
   | { k: "cmd"; name: string; args: string[]; print: boolean }
 );
 
-interface FuncDef { name: string; params: string[]; outs: string[]; body: Stmt[]; line: number; args: ArgEntry[] }
+// (nested: the functions defined in its body, in a file whose functions end with `end`)
+interface FuncDef { name: string; params: string[]; outs: string[]; body: Stmt[]; line: number; args: ArgEntry[]; nested?: FuncDef[] }
 
 /** an entry of an `arguments` block: x (1,:) double {mustBeNumeric} = 0, or opts.Name ... */
 /** a classdef file: the class's definition, and the local functions after it */
@@ -353,6 +354,7 @@ class Parser {
   private mat: boolean[] = []; // innermost bracket: true for [ ] and { } (whitespace separates elements)
   private frames: Frame[] = []; // enclosing indexes (`end`)
   functions: FuncDef[] = [];
+  private sawFunction = false;
 
   constructor(private toks: Tok[]) {}
 
@@ -375,14 +377,34 @@ class Parser {
   skipSeps() { while (this.sep()) this.next(); }
 
   // -------- statements
-  program(): Stmt[] {
+  /** the file's statements, its functions in this.functions; `ended`: as a file whose functions end with `end` */
+  private programIn(ended: boolean): Stmt[] {
     const stmts: Stmt[] = [];
     while (true) {
       this.skipSeps();
       const t = this.peek();
       if (t.t === "eof") return stmts;
-      if (this.at("function")) { this.functions.push(this.funcDef()); continue; }
+      if (this.at("function")) { this.sawFunction = true; this.functions.push(this.funcDef(ended)); continue; }
       stmts.push(...this.statementAndSep());
+    }
+  }
+
+  /** a file's statements, its functions in this.functions: first read as a file whose functions end with `end`, where
+   * a function in a function's body is nested in it; failing that, as a file whose functions don't, where each
+   * `function` begins the next one (MATLAB's two forms, which one file can't mix) */
+  program(): Stmt[] {
+    const start = this.i;
+    this.sawFunction = false;
+    try {
+      return this.programIn(true);
+    } catch (e) {
+      if (!(e instanceof MatlabSyntaxError) || !this.sawFunction) throw e;
+      this.i = start;
+      this.nest = 0;
+      this.mat = [];
+      this.frames = [];
+      this.functions = [];
+      return this.programIn(false);
     }
   }
 
@@ -594,7 +616,8 @@ class Parser {
     return { k: "switch", e, cases, otherwise } as any;
   }
 
-  funcDef(): FuncDef {
+  /** a function; `ended`: it ends with `end`, and a function in its body is nested in it */
+  funcDef(ended = false): FuncDef {
     const ft = this.expect("function");
     let outs: string[] = [];
     let name: string;
@@ -627,16 +650,24 @@ class Parser {
     }
     const body: Stmt[] = [];
     const args: ArgEntry[] = [];
+    const nested: FuncDef[] = [];
     while (true) {
       this.skipSeps();
       const t = this.peek();
-      if (t.t === "eof") break;
-      if (this.at("function")) break; // the next function (files without `end`)
+      if (t.t === "eof") {
+        if (ended) this.fail("expected 'end' but found end of input");
+        break;
+      }
+      if (this.at("function")) {
+        if (!ended) break; // the next function (files without `end`)
+        nested.push(this.deeper(() => this.funcDef(true)));
+        continue;
+      }
       if (this.at("end")) { this.next(); break; }
-      if (!body.length && this.atArgumentsBlock()) { this.argumentsBlock(args); continue; }
+      if (!body.length && !nested.length && this.atArgumentsBlock()) { this.argumentsBlock(args); continue; }
       body.push(...this.statementAndSep());
     }
-    return { name, params, outs, body, line: ft.line, args };
+    return nested.length ? { name, params, outs, body, line: ft.line, args, nested } : { name, params, outs, body, line: ft.line, args };
   }
 
   /** whether the file starts with classdef (after blank lines and comments) */
@@ -1172,6 +1203,7 @@ interface Scope {
   caps?: Set<string>; // in an anonymous function: captured names that may be functions (_m.NOVAR)
   anon?: boolean; // an anonymous function's body: its parameters and captures are Python locals
   imports?: string[]; // a function's or a script file's import list (import ns.name, import ns.*): its names' lookups get it
+  nfns?: Map<string, string>; // the nested functions this code can call, by name: their Python names
 }
 
 /** The imports written directly in a function body or a script's statement list:
@@ -1213,6 +1245,38 @@ function assigned(stmts: Stmt[], out = new Set<string>()): Set<string> {
   }
   return out;
 }
+
+/** every name a statement list reads or assigns (not its nested functions') */
+function usedNames(stmts: Stmt[], out = new Set<string>()): Set<string> {
+  assigned(stmts, out);
+  const walk = (list: Stmt[]) => {
+    for (const s of list) {
+      switch (s.k) {
+        case "expr": freeNames(s.e, out); break;
+        case "assign": freeNames(s.rhs, out); for (const l of s.lhs) if (l) for (const x of l.path) freeNames(x, out); break;
+        case "if": for (const [c, b] of s.clauses) { freeNames(c, out); walk(b); } if (s.els) walk(s.els); break;
+        case "for": freeNames(s.e, out); walk(s.body); break;
+        case "while": freeNames(s.cond, out); walk(s.body); break;
+        case "switch": freeNames(s.e, out); for (const [c, b] of s.cases) { freeNames(c, out); walk(b); } if (s.otherwise) walk(s.otherwise); break;
+        case "try": walk(s.body); walk(s.handler); break;
+      }
+    }
+  };
+  walk(stmts);
+  return out;
+}
+
+/** the names a function's nested functions, at any depth, assign, other than their own arguments and outputs */
+function nestedAssigned(f: FuncDef, out = new Set<string>()): Set<string> {
+  for (const n of f.nested ?? []) {
+    for (const v of nestedAssigned(n, assigned(n.body))) if (!n.params.includes(v) && !n.outs.includes(v)) out.add(v);
+  }
+  return out;
+}
+
+/** a nested function's surroundings: the variables of each function it is nested in, outermost first, and the nested
+ * functions it can call, by name, as their Python names */
+interface Nest { has: Set<string>[]; fns: Map<string, string> }
 
 /** the names a statement list assigns into (x(i) = v, x.f = v, x{i} = v) */
 function indexAssigned(stmts: Stmt[], out = new Set<string>()): Set<string> {
@@ -1346,14 +1410,24 @@ class Emitter {
   }
 
   // -------- functions
-  funcDef(f: FuncDef, opts: { py?: string; self?: string } = {}) {
+  funcDef(f: FuncDef, opts: { py?: string; self?: string; nest?: Nest } = {}) {
     const py = opts.py ?? pyName(f.name);
     const varargin = f.params[f.params.length - 1] === "varargin";
     let params = varargin ? f.params.slice(0, -1) : f.params;
     const varargout = f.outs[f.outs.length - 1] === "varargout";
-    const scope: Scope = { fn: f, vars: new Set(), globals: new Set(), persistents: new Set(), imports: importsOf(f.body, this.fnNames) };
+    // nested functions: a nested function's variables are those of a function it is nested in, which has them (its
+    // arguments and outputs, what it assigns, and what it reads that a function nested in it assigns), shared as Python
+    // nonlocals, except the nested function's own arguments and outputs; MATLAB's "Nested Functions" page
+    const used = usedNames(f.body);
+    const own = new Set([...f.params, ...f.outs]);
+    const shared = opts.nest ? [...used].filter((v) => !own.has(v) && v !== "ans" && opts.nest!.has.some((h) => h.has(v))) : [];
+    const fromNested = f.nested ? [...used].filter((v) => !own.has(v) && !shared.includes(v) && nestedAssigned(f).has(v)) : [];
+    const nfns = new Map(opts.nest?.fns ?? []);
+    for (const n of f.nested ?? []) nfns.set(n.name, `_nf_${pyName(n.name)}`);
+    const scope: Scope = { fn: f, vars: new Set([...shared, ...fromNested]), globals: new Set(), persistents: new Set(), imports: importsOf(f.body, this.fnNames), nfns: nfns.size ? nfns : undefined };
     this.emit(`def ${py}(_nargout, *_a):`);
     this.indent(() => {
+      if (shared.length) this.emit(`nonlocal ${shared.map(pyName).join(", ")}`);
       // name-value arguments (opts.Name in an arguments block): the trailing pairs
       const nvParams = [...new Set(f.args.filter((a) => a.field).map((a) => a.name))];
       if (nvParams.length) {
@@ -1375,10 +1449,16 @@ class Emitter {
       const changed = indexAssigned(f.body);
       for (const p of f.params) if (p !== "~" && changed.has(p)) this.emit(`${pyName(p)} = _m.cp(${pyName(p)})`);
       // every other local starts undefined
-      const locals = [...new Set([...f.outs, ...assigned(f.body)])].filter((n) => !f.params.includes(n));
+      const locals = [...new Set([...f.outs, ...assigned(f.body), ...fromNested])].filter((n) => !f.params.includes(n) && !shared.includes(n));
       // (a class's constructor: its output starts as the object being made, defaults set)
       for (const n of locals) this.emit(n === opts.self ? `${pyName(n)} = _m.cd_self()` : `${pyName(n)} = _m.Undef(${JSON.stringify(n)})`);
       for (const o of f.outs) scope.vars.add(o);
+      // (its nested functions, defined first: callable anywhere in it, as MATLAB's are)
+      if (f.nested) {
+        const has = new Set([...own, ...locals, ...shared]);
+        const nest: Nest = { has: [...(opts.nest?.has ?? []), has], fns: nfns };
+        for (const n of f.nested) this.funcDef(n, { py: nfns.get(n.name), nest });
+      }
       this.emit(`_L = ${f.line}`);
       this.emit("try:");
       this.indent(() => {
@@ -1579,7 +1659,7 @@ class Emitter {
       else this.emit(v);
       return;
     }
-    if (e.k === "id" && WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) {
+    if (e.k === "id" && WORKSPACE_FNS.has(e.name) && !this.isFn(e.name, scope)) {
       // (whos, clear, ... alone: they see the workspace)
       e = { k: "index", e, brace: false, args: [], frame: { code: "", n: 0, cur: 0 } };
     }
@@ -1598,7 +1678,7 @@ class Emitter {
       });
       return;
     }
-    if (e.k === "id" && !this.fnNames.has(e.name) && !scope.fn) {
+    if (e.k === "id" && !this.isFn(e.name, scope) && !scope.fn) {
       // a variable of the workspace, or a function called with no arguments
       this.emit(`${t} = _m.bare(${this.lookup(e.name, scope)}, ${JSON.stringify(e.name)}, ${print ? "True" : "False"})`);
     } else if (e.k === "id") {
@@ -1780,6 +1860,11 @@ class Emitter {
     return scope.vars.has(name);
   }
 
+  /** whether a name is a function of this file that its code can call directly: a local function, or a nested one */
+  isFn(name: string, scope: Scope) {
+    return this.fnNames.has(name) || !!scope.nfns?.has(name);
+  }
+
   /** a variable's value where it is read: a global's from the shared
    * registry at that point, since any call (even earlier in the same
    * expression) may have changed it, as MATLAB's global page says */
@@ -1789,6 +1874,8 @@ class Emitter {
 
   /** a name that is not a known variable: the value it names when the code runs */
   lookup(name: string, scope: Scope): string {
+    const nf = scope.nfns?.get(name);
+    if (nf) return nf;
     if (this.fnNames.has(name)) return pyName(name);
     const imp = scope.imports ? `, ${scope.fn ? "False" : "True"}, (${scope.imports.map((i) => JSON.stringify(i)).join(", ")},)` : "";
     // (mfilename: the file this code is in, known here, never the caller's)
@@ -1839,7 +1926,7 @@ class Emitter {
         if (this.isVar(e.name, scope)) {
           // (at the top level, a variable that clear removed: the function of that name
           // again, as MATLAB's, so upper = 7; clear; upper('abc') works)
-          if (this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(e.name) && !this.fnNames.has(e.name)) {
+          if (this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(e.name) && !this.isFn(e.name, scope)) {
             const py = pyName(e.name);
             return `(${py} if ${inWorkspace(py)} else _m.val(_m.fn(${JSON.stringify(e.name)}, True)))`;
           }
@@ -1847,7 +1934,7 @@ class Emitter {
         }
         if (e.name === "nargin" && scope.fn) return "_m.nargs(_a)";
         if (e.name === "nargout" && scope.fn) return "_m.nargs(_nargout)";
-        if (WORKSPACE_FNS.has(e.name) && !this.fnNames.has(e.name)) return `_m.ws_call(${JSON.stringify(e.name)}, ${scope.fn ? "locals()" : "globals()"}, [], 1)`;
+        if (WORKSPACE_FNS.has(e.name) && !this.isFn(e.name, scope)) return `_m.ws_call(${JSON.stringify(e.name)}, ${scope.fn ? "locals()" : "globals()"}, [], 1)`;
         return `_m.val(${this.lookup(e.name, scope)})`;
       }
       case "end": {
@@ -1896,7 +1983,7 @@ class Emitter {
       }
       case "anon": return this.anon(e, scope);
       case "handle": {
-        if (this.fnNames.has(e.name)) return `_m.Handle(${pyName(e.name)}, ${JSON.stringify(e.name)})`;
+        if (this.isFn(e.name, scope)) return `_m.Handle(${this.lookup(e.name, scope)}, ${JSON.stringify(e.name)})`;
         // (a handle made in a class's methods resolves with the class's access)
         return this.classCtx ? `_m.handle(${JSON.stringify(e.name)}, ${JSON.stringify(this.classCtx)})` : `_m.handle(${JSON.stringify(e.name)})`;
       }
@@ -1929,7 +2016,7 @@ class Emitter {
     if (f.k === "id" && !this.isVar(f.name, scope)) {
       // (int64 or uint64 of an integer literal: its exact value, as MATLAB converts it
       // without going through a double: int64(-72057594035891654))
-      if ((f.name === "int64" || f.name === "uint64") && !this.fnNames.has(f.name) && e.args.length === 1) {
+      if ((f.name === "int64" || f.name === "uint64") && !this.isFn(f.name, scope) && e.args.length === 1) {
         let a = e.args[0], neg = false;
         if (a.k === "un" && a.op === "-") { neg = true; a = a.e; }
         if (a.k === "num" && /^\d+$/.test(a.v)) {
@@ -1938,7 +2025,7 @@ class Emitter {
         }
       }
       // a function call (or a workspace variable, at the top level)
-      if (WORKSPACE_FNS.has(f.name) && !this.fnNames.has(f.name)) {
+      if (WORKSPACE_FNS.has(f.name) && !this.isFn(f.name, scope)) {
         // (clear inside a function: a function's variables are Python locals, which
         // locals() cannot delete, so the names chosen become undefined again here: the
         // names given literally at compile time, the rest at run time)
@@ -1990,7 +2077,7 @@ class Emitter {
       // (a function named, not the file's own: resolved after its arguments are evaluated, as MATLAB picks it by
       // their classes, so a class first used in them dispatches its method)
       // (an end in them, x(min(end, 5)), reads the call's frame: its code is the lookup itself)
-      if (!this.fnNames.has(f.name)) {
+      if (!this.isFn(f.name, scope)) {
         e.frame.code = base;
         return `_m.paren_r(${this.argList(e.args, scope)}, ${base}, ${nargout})`;
       }
@@ -2002,7 +2089,7 @@ class Emitter {
       return `_m.paren_r(${this.argList(e.args, scope)}, ${base}, ${nargout})`;
     }
     // (at the top level, x(args) after clear x is the function x again)
-    else if (f.k === "id" && this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(f.name) && !this.fnNames.has(f.name)) {
+    else if (f.k === "id" && this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(f.name) && !this.isFn(f.name, scope)) {
       base = this.lookup(f.name, scope);
       e.frame.fn = true;
     }
@@ -2050,7 +2137,7 @@ class Emitter {
 
   anon(e: Extract<Expr, { k: "anon" }>, scope: Scope): string {
     // the body sees its parameters, and the values variables have now
-    const inner: Scope = { fn: scope.fn, vars: new Set(e.params.filter((p) => p !== "~")), globals: new Set(), persistents: new Set(), caps: new Set(), anon: true, imports: scope.imports };
+    const inner: Scope = { fn: scope.fn, vars: new Set(e.params.filter((p) => p !== "~")), globals: new Set(), persistents: new Set(), caps: new Set(), anon: true, imports: scope.imports, nfns: scope.nfns };
     const captured: string[] = [];
     const free = new Set<string>();
     freeNames(e.body, free);
@@ -2061,7 +2148,7 @@ class Emitter {
         // keeps a snapshot, its own scope having no globals)
         captured.push(`${pyName(n)}=_m.cp(${this.varRead(n, scope)})`);
         inner.vars.add(n);
-      } else if (!scope.fn && !this.fnNames.has(n)) {
+      } else if (!scope.fn && !this.isFn(n, scope)) {
         // (at the top level: a workspace variable now, else a function)
         captured.push(`${pyName(n)}=(_m.cp(${pyName(n)}) if ${inWorkspace(pyName(n))} else _m.NOVAR)`);
         inner.vars.add(n);
@@ -2237,9 +2324,13 @@ export function checkTreeDepth(stmts: Stmt[], functions: FuncDef[]): void {
   const pushStmts = (list: Stmt[], d: number) => { for (let i = list.length - 1; i >= 0; i--) stack.push({ s: list[i], d, line: list[i].line, col: list[i].col }); };
   const pushExpr = (e: Expr | null | undefined, d: number, line: number, col: number) => { if (e) stack.push({ e, d, line, col }); };
   pushStmts(stmts, 1);
-  for (const f of functions) {
+  // (each function, and the functions nested in it)
+  const fns = [...functions];
+  for (let k = 0; k < fns.length; k++) {
+    const f = fns[k];
     pushStmts(f.body, 1);
     for (const a of f.args) { for (const v of a.validators) pushExpr(v, 1, a.line, 1); pushExpr(a.dflt, 1, a.line, 1); }
+    if (f.nested) fns.push(...f.nested);
   }
   while (stack.length) {
     const it = stack.pop()!;

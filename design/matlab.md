@@ -164,7 +164,16 @@ built so far.
 - `varargin` and `varargout` are cells, and `nargin` and `nargout` are
   numbers;
 - local functions anywhere in the file are defined before the script's
-  statements run.
+  statements run;
+- **nested functions** (in a file whose functions end with `end`) are Python
+  closures, defined first in their parent's body. A variable a nested
+  function uses is shared, as a `nonlocal`, when a function it is nested in
+  has it: as an argument or output, by assigning it, or by reading a name a
+  nested function assigns. Otherwise, as are its own arguments and outputs,
+  it is the nested function's own. Handles to nested functions keep the
+  variables of the call that made them. A file is read with nesting first;
+  if that fails, as a file whose functions don't end with `end`, where each
+  `function` begins the next one.
 
 **Anonymous functions** capture copies of the variables they use when they
 are made (`@(x) x + a`), as MATLAB does. They print as MATLAB writes them
@@ -944,7 +953,7 @@ The rest:
 - polar axes, lighting and apps (see Graphics);
 - MATLAB in the notebook's and the board's language menus (the session and the Jupyter kernel run it);
 - `eval`;
-- nested functions, and `classdef` beyond value classes (see Classes);
+- nested functions in `classdef` methods, and `classdef` beyond value classes (see Classes);
 - string arrays beyond the basics;
 - `containers.Map`, file I/O beyond `fprintf`, `input`;
 - `randperm(n, k)` with k < n giving MATLAB's numbers (`randperm(n)`
