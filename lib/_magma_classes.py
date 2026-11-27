@@ -260,13 +260,56 @@ def _element_bytes(n):
     return 4 * n + 24
 
 
-# what a class's output certainly takes once the engine has listed them,
-# wherever Sagebrush runs: its representative kept for the output (4n bytes
-# and a 12-byte header), its images written in the output's string and in
-# the string serialized from it (2 bytes a point at least: a digit and a
-# comma), and its length and order (two values of 24 bytes) (LIMIT-CLS-1)
+# what a class's output certainly takes once the engine has counted them:
+# its words in the engine's binary reply (n images, its length and its order,
+# 8 bytes each) and its row decoded from them (a tuple of n images, 4 bytes a
+# point and a 12-byte header at least, wherever Sagebrush runs) (LIMIT-CLS-1)
 def _class_output_bytes(n):
-    return 8 * n + 60
+    return 12 * n + 28
+
+
+def _bin_classes(G):
+    """The classes the engine counted, fetched by the binary op
+    conjugacy_classes_bin (SBW1, engine/wire: words, no text): memoryviews
+    ('Q') of the representatives' images (n a class, on 0 .. n-1), the
+    lengths and the orders."""
+    import array
+    import _magma_groups as gr
+    from _sagebrush_lib._engine import call_bin
+    n = G.n
+    gens = gr._engine_gens(n, gr._distinct(n, gr.gens_of(G)))
+    words = array.array("Q", [x for g in gens for x in g])
+    u641 = lambda w: b"".join([(12 + 8 * len(w)).to_bytes(4, "little"), b"U641", len(w).to_bytes(8, "little"), w.tobytes()])
+    op = b"conjugacy_classes_bin"
+    r = call_bin(b"".join([b"SBW1", len(op).to_bytes(4, "little"), op, (2).to_bytes(4, "little"), u641(array.array("Q", (n,))), u641(words)]))
+    del words
+    if r is None:
+        raise RuntimeError("Sagebrush engine: no binary entry point for conjugacy_classes_bin")
+    return _u641_results(memoryview(r))
+
+
+def _u641_results(r):
+    """An SBW1 reply's U641 results, as memoryviews ('Q') over it; an error
+    record raises (a refused reservation, code 7, as a memory error)."""
+    if bytes(r[:4]) != b"SBW1":
+        raise RuntimeError("Sagebrush engine: a malformed SBW1 reply")
+    if bytes(r[4:6]) == b"er":
+        code = int.from_bytes(r[6:8], "little")
+        text = bytes(r[18:18 + int.from_bytes(r[16:18], "little")]).decode("ascii", "replace")
+        if code == 7:
+            raise _m._memory_error(_m._memguard.memory_guard("The conjugacy classes' output", 0, 0, "one computation",
+                                                             unmeasured="the engine's memory ledger refused its reservation"))
+        raise RuntimeError("Sagebrush engine: conjugacy_classes_bin: %s" % text)
+    out, i = [], 10
+    for _ in range(int.from_bytes(r[6:10], "little")):
+        m, k = int.from_bytes(r[i:i + 4], "little"), int.from_bytes(r[i + 8:i + 16], "little")
+        if bytes(r[i + 4:i + 8]) != b"U641" or m != 12 + 8 * k:
+            raise RuntimeError("Sagebrush engine: a malformed SBW1 reply")
+        out.append(r[i + 16:i + 16 + 8 * k].cast("Q"))
+        i += 4 + m
+    if i != len(r):
+        raise RuntimeError("Sagebrush engine: a malformed SBW1 reply")
+    return out
 
 
 def _engine_count(G):
@@ -303,9 +346,9 @@ def _engine_classes(G):
     except BaseException:
         gr._engine_group(G, "conjugacy_classes_clear")
         raise
-    r = gr._engine_group(G, "conjugacy_classes")
-    pts = [int(x) + 1 for x in r["reps"].split(",")]
-    rows = [MTuple([o, k, _MPerm(G, tuple(pts[i * n:(i + 1) * n]))]) for i, (o, k) in enumerate(zip(r["orders"], r["lengths"]))]
+    reps, lengths, orders = _bin_classes(G)
+    rows = [MTuple([orders[i], lengths[i], _MPerm(G, tuple(x + 1 for x in reps[i * n:(i + 1) * n]))]) for i in range(count)]
+    del reps
     C = _MClasses(rows)
     C._G, C._classes_table = G, True
     return C

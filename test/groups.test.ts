@@ -221,7 +221,7 @@ run('transpositions', 4 * 45 * P._element_bytes(10), lambda: G.conjugacy_class(G
 # (the class of a 10-cycle, 9! elements: refused once it holds 4096 of them)
 run('10-cycles', 4 * 4096 * P._element_bytes(10) - 4, lambda: G.conjugacy_class(G('(1,2,3,4,5,6,7,8,9,10)')).cardinality())
 # (the output, admitted by the classes' number once the engine has counted them: C2^10 on 20 points has 1024,
-# whose output, 1024 * 220 bytes, outweighs their enumeration, 1024 * 104)
+# whose output, 1024 * 268 bytes, outweighs their enumeration, 1024 * 104)
 E = PermutationGroup(['(%d,%d)' % (2 * i + 1, 2 * i + 2) for i in range(10)])
 run('C2^10 at the bound', 4 * 1024 * P._class_output_bytes(20), lambda: len(E.conjugacy_classes()))
 E = PermutationGroup(['(%d,%d)' % (2 * i + 1, 2 * i + 2) for i in range(10)])

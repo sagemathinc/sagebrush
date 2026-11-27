@@ -9,7 +9,9 @@
 //!   the JSON op's echelon (nmod_ops.rs) on a `MAT1` of words, without its
 //!   per-dimension cap (below);
 //! - `nmod_mat_mul(p, A, B)` -> [A B]: the product of an r x k and a k x c
-//!   `MAT1` of words, row-major (below).
+//!   `MAT1` of words, row-major (below);
+//! - `conjugacy_classes_bin(n, gens)` -> [reps, lengths, orders]: a
+//!   permutation group's conjugacy classes (below).
 //!
 //! p is a typed scalar (a `U641` of one word), prime, below 2^63.  A
 //! polynomial is a `U641` of its coefficients,
@@ -104,6 +106,9 @@ fn find(name: &str) -> Option<&'static BinOp> {
 fn spec(name: &str) -> Option<OpSpec> {
     if name == ECHELON || name == MAT_MUL {
         return Some(OpSpec { min_args: 3, max_args: 3, request_cap: wire::FRAME_CAP });
+    }
+    if name == CLASSES {
+        return Some(OpSpec { min_args: 2, max_args: 2, request_cap: wire::FRAME_CAP });
     }
     // (an overflow, excluded at compile time above, would leave the op
     // without a spec: refused, never admitted with a wrong cap)
@@ -226,6 +231,9 @@ fn run_with(req: &[u8], frame_cap: usize) -> Result<Vec<u8>, WireError> {
     }
     if f.op == MAT_MUL {
         return mat_mul(&f);
+    }
+    if f.op == CLASSES {
+        return classes(&f);
     }
     let op = find(f.op).ok_or(fail(Code::Internal, 0, "an admitted op without a row"))?;
     let arg = |i: usize| f.arg(i).ok_or(fail(Code::Internal, 0, "an admitted argument missing"));
@@ -535,3 +543,73 @@ fn mat_mul(f: &wire::Frame) -> Result<Vec<u8>, WireError> {
 
 #[cfg(test)]
 mod tests;
+
+// ---------------------------------------------------------------- classes
+
+const CLASSES: &str = "conjugacy_classes_bin";
+
+/// `conjugacy_classes_bin`'s reply length for c classes of degree n: the
+/// representatives (n words each), the lengths and the orders.
+pub fn classes_reply_len(n: usize, c: usize) -> Option<usize> {
+    wire::ok_u641_len(&[c.checked_mul(n)?, c, c])
+}
+
+/// `conjugacy_classes_bin(n, gens)`: n a U641 scalar, 1 <= n < 2^32; gens a
+/// U641 of the generators' images on 0 .. n-1, n words each (none for the
+/// trivial group).  The classes are the ones conjugacy_class_count (JSON)
+/// computed and kept for this group, else computed now (the caller has
+/// admitted the enumeration and, by their number, this reply); the cache is
+/// emptied.  The reply's three U641 results: each class's least element's
+/// images (n words a class), its length and its elements' order, by (order,
+/// length, representative).  One ledger reservation of the representatives'
+/// words and the reply, before either is made.
+fn classes(f: &wire::Frame) -> Result<Vec<u8>, WireError> {
+    use sagebrush_group::{Group, Perm};
+    let arg = |i: usize| f.arg(i).ok_or(fail(Code::Internal, 0, "an admitted argument missing"));
+    let na = arg(0)?;
+    let n = wire::scalar(na)?;
+    // (points are u32 words in the group engine; the frame cap bounds the request)
+    if n == 0 || n > u64::from(u32::MAX) {
+        let at = na.offset.checked_add(12).ok_or(fail(Code::Internal, 0, "an offset past u64"))?;
+        return Err(fail(Code::Domain, at, "the degree must be at least 1 and a u32"));
+    }
+    let n = n as usize;
+    let ga = arg(1)?;
+    let gv = wire::u641(ga)?;
+    if gv.count % n != 0 {
+        return Err(fail(Code::Domain, ga.offset, "the generators must be n images each"));
+    }
+    if gv.iter().any(|x| x >= n as u64) {
+        return Err(fail(Code::Domain, ga.offset, "an image past the degree"));
+    }
+    let words: Vec<u32> = gv.iter().map(|x| x as u32).collect();
+    let gens = words
+        .chunks(n)
+        .map(|c| Perm::from_images(c.to_vec()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| fail(Code::Domain, ga.offset, "a generator is not a permutation"))?;
+    drop(words);
+    let g = Group::new(n, gens.clone()).map_err(|_| fail(Code::Domain, ga.offset, "not a permutation group"))?;
+    let cs = crate::group_classes(n, &gens, &g);
+    crate::clear_classes();
+    drop(g);
+    let c = cs.len();
+    let len = classes_reply_len(n, c).ok_or(fail(Code::Cap, 0, "a reply too large to frame"))?;
+    // the representatives' words and the reply, reserved before either is made
+    let need = (c as u64).checked_mul(n as u64).and_then(|w| w.checked_mul(8)).and_then(|b| b.checked_add(len as u64)).ok_or(fail(Code::Cap, 0, "a memory bound too large"))?;
+    let _r = sagebrush_ledger::reserve(CLASSES, need).map_err(|e| match e {
+        sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, "the call's memory reservation was refused"),
+        sagebrush_ledger::EngineError::Internal(_) => fail(Code::Internal, 0, "the ledger failed an invariant"),
+    })?;
+    let mut reps: Vec<u64> = Vec::with_capacity(c * n);
+    for k in cs.iter() {
+        sagebrush_interrupt::check();
+        reps.extend(k.rep.0.iter().map(|&x| x as u64));
+    }
+    let lengths: Vec<u64> = cs.iter().map(|k| k.length).collect();
+    let orders: Vec<u64> = cs.iter().map(|k| k.order).collect();
+    drop(cs);
+    let mut out = Vec::with_capacity(len);
+    wire::write_ok_u641(&mut out, &[&reps, &lengths, &orders])?;
+    Ok(out)
+}

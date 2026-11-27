@@ -1111,17 +1111,22 @@ fn perm_json(gs: &[sagebrush_group::Perm]) -> Value {
 
 thread_local! {
     /// The last group's conjugacy classes, by its degree and generators,
-    /// between conjugacy_class_count and conjugacy_classes: the caller
-    /// admits their output by their number before fetching them, and the
-    /// group is enumerated once.  One entry; conjugacy_classes and
-    /// conjugacy_classes_clear take it out.
+    /// between conjugacy_class_count (JSON) and the binary
+    /// conjugacy_classes_bin (bin_ops.rs): the caller admits their output by
+    /// their number before fetching them, and the group is enumerated once.
+    /// One entry; the fetch and conjugacy_classes_clear take it out.
     static CLASSES: std::cell::RefCell<Option<(usize, Vec<sagebrush_group::Perm>, std::rc::Rc<Vec<sagebrush_group::classes::Class>>)>> =
         const { std::cell::RefCell::new(None) };
 }
 
+/// Empties the classes' cache (the fetch and a refused output).
+pub(crate) fn clear_classes() {
+    CLASSES.with(|c| *c.borrow_mut() = None);
+}
+
 /// The classes of g (degree n, generators gens): the cached ones when they
 /// are this group's, else computed and cached.
-fn group_classes(n: usize, gens: &[sagebrush_group::Perm], g: &sagebrush_group::Group) -> std::rc::Rc<Vec<sagebrush_group::classes::Class>> {
+pub(crate) fn group_classes(n: usize, gens: &[sagebrush_group::Perm], g: &sagebrush_group::Group) -> std::rc::Rc<Vec<sagebrush_group::classes::Class>> {
     if let Some(cs) = CLASSES.with(|c| c.borrow().as_ref().filter(|(m, k, _)| *m == n && k.as_slice() == gens).map(|(_, _, cs)| cs.clone())) {
         return cs;
     }
@@ -1138,13 +1143,14 @@ fn perm_group(v: &Value) -> Result<Value, String> {
     use sagebrush_group::{Group, Rng};
     let n = size(v, "n", None, 1 << 20)?;
     let gens = perms(n, v.get("gens"))?;
-    let key = gens.clone();
-    let g = Group::new(n, gens)?;
     let what: Vec<String> = match v.get("what") {
         Some(Value::String(s)) => vec![s.clone()],
         Some(Value::Array(a)) => a.iter().map(|x| x.as_str().map(String::from).ok_or("what must be names")).collect::<Result<_, _>>()?,
         _ => vec!["order".into()],
     };
+    // (the classes' cache key: the generators, copied only for the classes)
+    let key = if what.iter().any(|w| w == "conjugacy_class_count") { gens.clone() } else { Vec::new() };
+    let g = Group::new(n, gens)?;
     let point = || -> Result<u32, String> { v.get("point").and_then(Value::as_u64).filter(|&x| x < n as u64).map(|x| x as u32).ok_or_else(|| "missing or bad point".to_string()) };
     let mut rng = Rng::new(v.get("seed").and_then(Value::as_u64).unwrap_or(1));
     let mut out = serde_json::Map::new();
@@ -1220,25 +1226,8 @@ fn perm_group(v: &Value) -> Result<Value, String> {
                 // then the output by this number)
                 json!(group_classes(n, &key, &g).len())
             }
-            "conjugacy_classes" => {
-                // (each class's least element, its length and its elements'
-                // order, by (order, length, representative), as columns: the
-                // representatives' images in one string, n a class, so the
-                // output is a few bytes a point, not a value each; the cache
-                // is emptied)
-                let cs = group_classes(n, &key, &g);
-                CLASSES.with(|c| *c.borrow_mut() = None);
-                let mut reps = String::new();
-                for (i, x) in cs.iter().flat_map(|c| c.rep.0.iter()).enumerate() {
-                    if i > 0 {
-                        reps.push(',');
-                    }
-                    reps.push_str(&x.to_string());
-                }
-                json!({"reps": reps, "lengths": cs.iter().map(|c| c.length).collect::<Vec<_>>(), "orders": cs.iter().map(|c| c.order).collect::<Vec<_>>()})
-            }
             "conjugacy_classes_clear" => {
-                CLASSES.with(|c| *c.borrow_mut() = None);
+                clear_classes();
                 Value::Null
             }
             "base" => json!(g.chain.base()),

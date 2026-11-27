@@ -1838,7 +1838,7 @@ test("ConjugacyClasses of a group other than Sym(n) is admitted at its boundary:
   ].join("\n");
   const r = spawnSync(process.execPath, [cli, "-c", py], { encoding: "utf8", timeout: WALL(120000) });
   assert.equal(r.stdout, ["per element 40 4024", "Alt(4) at the bound admitted 4", "Alt(4) one byte past it refused True",
-    "output per class 220 enumeration 106496", "C2^10, output at the bound admitted 1024", "C2^10, output one byte past it refused True",
+    "output per class 268 enumeration 106496", "C2^10, output at the bound admitted 1024", "C2^10, output one byte past it refused True",
     "C2^10, its number of classes (no output) admitted 1024", "then another group admitted 4", ""].join("\n"), r.stderr);
 });
 

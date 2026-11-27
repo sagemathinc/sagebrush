@@ -8399,6 +8399,32 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
+ "engine/web/src/bin_ops.rs :: classes :: if n == 0 || n > u64::from(u32::MAX) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' admission: a degree of at least one point that the group engine's u32 points can hold (a representational need, not a size bound); the frame cap bounds the request, and the caller admits the enumeration and the reply by memory first"
+ },
+ "engine/web/src/bin_ops.rs :: classes :: let len = classes_reply_len(n, c).ok_or(fail(Code::Cap, 0, \"a reply too large to frame\"))?; #0": {
+  "class": "none",
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' plumbing (the reply's exact length; an overflow is a typed refusal); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: classes :: let need = (c as u64).checked_mul(n as u64).and_then(|w| w.checked_mul(8)).and_then(|b| b.checked_add(len as u64)).ok_or(fail(Code::Cap, 0, \"a memory bound too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' reservation bound (the representatives' words and the reply) overflowing its u64: refused as Cap, as the echelon's; the ledger decides the rest"
+ },
+ "engine/web/src/bin_ops.rs :: classes :: sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, \"the call's memory reservation was refused\"), #0": {
+  "class": "none",
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' plumbing: the ledger's refusal mapped to its reply code (Cap), as the other binary ops do; the ledger decides"
+ },
  "engine/web/src/bin_ops.rs :: echelon :: if p >= MAX_P || !is_prime(p) { #0": {
   "class": "1",
   "disposition": {
@@ -8559,6 +8585,14 @@
   },
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: spec :: return Some(OpSpec { min_args: 2, max_args: 2, request_cap: wire::FRAME_CAP }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' admission: two arguments and the frame cap as its request cap, as the echelon's; the caller admits by memory first"
  },
  "engine/web/src/bin_ops.rs :: spec :: return Some(OpSpec { min_args: 3, max_args: 3, request_cap: wire::FRAME_CAP }); #0": {
   "class": "1",
