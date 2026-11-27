@@ -132,3 +132,17 @@ export function readChainPage(bytes: Uint8Array, after: number): { entries: stri
   const dec = new TextDecoder("utf-8", { fatal: true });
   return { entries: p.entries.map((e: Uint8Array) => dec.decode(e)), head: p.head, next: p.next };
 }
+
+/**
+ * What the person types into a host being paired (`sagebrush-agent host pair --fleet`, F7): this fleet's fingerprint,
+ * from this device's OWN verified chain, never from the service. `genesis` is the chain's seq-0 entry as synced; it is
+ * replayed on its own and must give the very entry the verified chain starts with, or it is refused. The core's one
+ * definition (fleetFingerprint over the entry's exact bytes), shown as 20 base32 characters in groups of 4.
+ */
+export async function fleetFingerprintShown(ctx: FleetCtx, chain: Chain, genesis: string): Promise<string> {
+  const core = fleetCore();
+  const g = utf8(genesis);
+  const alone = await core.replayChain([g], { aud: ctx.aud, fleet: ctx.fleet });
+  if (alone.hashes[0] !== chain.hashes[0]) core.refuse("bad_form", "not this chain's genesis");
+  return core.showFingerprint(await core.fleetFingerprint(ctx.fleet, g));
+}

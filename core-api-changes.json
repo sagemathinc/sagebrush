@@ -44,6 +44,13 @@
    "new": "(base, name=, arg2=, names=, sparse=, default_prec=, **kwds=)",
    "reason": "Sage 10.10's own PowerSeriesRing signature, from the oracle's inspect.signature: (base_ring, name=None, arg2=None, names=None, sparse=False, default_prec=None, order=, num_gens=, implementation=). The third positional argument is arg2 (a default precision after one name, a count after several, a name string after a count), and default_prec is a keyword of its own, so (QQ, 'x,y', default_prec=7) and (QQ, 2, names='x') read as Sage reads them (board's C1, daybreak3's SERIES-NAME-WORK-4). Positional calls keep their meaning.",
    "pr": 776
+  },
+  {
+   "name": "numpy.seterr",
+   "old": "(**kw=)",
+   "new": "(all=, divide=, over=, under=, invalid=)",
+   "reason": "NumPy's own seterr signature (NumPy 2.5): all, divide, over, under and invalid, each a keyword NumPy also takes positionally; an unknown keyword is refused with NumPy's TypeError. The recorded (**kw) took and ignored any keyword, when seterr was a no-op; it now keeps the error modes (#2149: the float-to-integer cast's 'invalid' warning). Every call NumPy accepts keeps its meaning.",
+   "pr": 2158
   }
  ]
 }

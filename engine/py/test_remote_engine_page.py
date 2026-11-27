@@ -38,8 +38,8 @@ class Kernel:
 
     made = []
 
-    def __init__(self, nb, entry, on_end):
-        self.nb, self.entry, self.on_end = nb, entry, on_end
+    def __init__(self, nb, entry, on_end, charge=None):
+        self.nb, self.entry, self.on_end, self.charge = nb, entry, on_end, charge
         self.events = []
         self.page = None
         Kernel.made.append(self)
