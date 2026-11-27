@@ -9,6 +9,30 @@ export const joinText = (t) => (Array.isArray(t) ? t.join("") : t ?? "");
 export const cellId = () => (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/-/g, "").slice(0, 12);
 const validId = (id) => typeof id === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(id);
 
+// (FNV-1a over a string, from a given basis: 32 bits)
+const fnv = (s, h) => { for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0; return h; };
+/** The id of a stored cell that has none (or one nbformat wouldn't take): the same on every device and every load,
+ * from the notebook's own id, the cell's place and a counter, and never one in `used` (taken into it).  Cells are
+ * matched by id in the history and its merges, so an id made at random on each load made the cell a different one
+ * each time (a typed edit became a second cell). */
+export function cellIdFor(ref, index, used) {
+  for (let n = 0; ; n++) {
+    const s = `${ref ?? ""}:${index}:${n}`;
+    const id = (fnv(s, 0x811c9dc5).toString(16).padStart(8, "0") + fnv(s, 0x9e3779b9).toString(16).padStart(8, "0")).slice(0, 12);
+    if (!used.has(id)) { used.add(id); return id; }
+  }
+}
+/** `cells` with every cell given an id (cellIdFor) that lacks a valid one, or repeats one an earlier cell has (two
+ * cells with one id would be one cell to the history); the same array when none does.  What isn't a cell (not an
+ * object) is left as it is. */
+export function withCellIds(ref, cells) {
+  if (!Array.isArray(cells)) return cells;
+  const seen = new Set();
+  const keep = cells.map((c) => { if (!c || typeof c !== "object") return true; const ok = validId(c.id) && !seen.has(c.id); if (ok) seen.add(c.id); return ok; });
+  if (keep.every(Boolean)) return cells;
+  return cells.map((c, i) => (keep[i] ? c : { ...c, id: cellIdFor(ref, i, seen) }));
+}
+
 /** The mode a notebook's metadata says (its kernel). */
 export function modeOf(metadata) {
   const k = metadata?.kernelspec ?? {};

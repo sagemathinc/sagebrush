@@ -126,6 +126,31 @@ pub fn disk_where(app: tauri::AppHandle) -> Result<String, String> {
     Ok(data_dir(&app)?.join("Workspace").to_string_lossy().into_owned())
 }
 
+/// Show in folder: the system's file manager at workspace path `path` ("/" the workspace's own folder), never
+/// anything outside Workspace/ (disk_fs.rs reveal_target).  The file manager is started and left running; its exit is
+/// waited for on a thread of its own, so it leaves no zombie.
+#[tauri::command]
+pub fn disk_reveal(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let (at, dir) = reveal_target(&root(&app)?, &path)?;
+    let (program, args) = reveal_argv(&at, dir);
+    let mut cmd = std::process::Command::new(&program);
+    #[cfg(windows)]
+    {
+        // (explorer's "/select,<path>" passed as written: Rust's quoting of an argument with a comma isn't explorer's)
+        use std::os::windows::process::CommandExt;
+        for a in &args {
+            cmd.raw_arg(a);
+        }
+    }
+    #[cfg(not(windows))]
+    cmd.args(&args);
+    let mut child = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map_err(|e| format!("couldn't open the folder ({program}): {e}"))?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// The page's settings kept in settings.json: these localStorage keys only (documents' drafts, journals and a
 /// GitHub push's settings, which localStorage also holds, are no settings), each a string of at most SETTING_MAX
 /// bytes, the file at most SETTINGS_MAX.  settings-init.js gets the list from here; reading and writing both refuse
