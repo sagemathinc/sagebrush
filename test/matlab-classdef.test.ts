@@ -346,3 +346,22 @@ test("a handle made before a class loads: called with its object, the method; wi
   assert.equal(r.err, "");
   assert.equal(r.out, "before|path scaleit\nafter|20\nagain|path scaleit\n");
 });
+
+test("a namespace's function or class named without parentheses: in an anonymous function, and after clear of a variable of the namespace's name", () => {
+  const dir = tree({
+    "+aa/top.m": lines("function r = top()", "  r = 7;", "end"),
+    "+aa/+bb/nfun.m": lines("function r = nfun()", "  r = 21;", "end"),
+    "+aa/+bb/Nc.m": lines("classdef Nc", "  properties", "    v = 3", "  end", "  properties (Constant)", "    K = 9", "  end", "end"),
+  });
+  const r = run(dir, lines(
+    "f = @() aa.top + 1; g = @() aa.bb.nfun + 1; k = @() aa.bb.Nc.K; m = @() class(aa.bb.Nc);",
+    "s.a.b = 5; h = @() s.a.b + 1;",
+    "fprintf('anon|%g %g %g %s %g\\n', f(), g(), k(), m(), h());",
+    // (a variable named like the namespace hides it; cleared, the namespace is found again)
+    "aa = 1; clear aa",
+    "fprintf('cleared|%g %g %s\\n', aa.bb.nfun, aa.top + 1, class(aa.bb.Nc));",
+    "aa.x = 3; fprintf('shadow|%g\\n', aa.x);",
+    "try, p = aa.bb.Nc; fprintf('shadowpkg|made\\n'); catch e, fprintf('shadowpkg|%s\\n', e.message), end"));
+  assert.equal(r.err, "");
+  assert.equal(r.out, "anon|8 22 9 aa.bb.Nc 6\ncleared|21 8 aa.bb.Nc\nshadow|3\nshadowpkg|Unrecognized field name \"bb\".\n");
+});
