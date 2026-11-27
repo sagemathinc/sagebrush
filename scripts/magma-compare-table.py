@@ -107,7 +107,6 @@ REFUSED = [
     (("idiv",), MAT, NUM + NFE, "div of a matrix by a scalar"),
     (("div",), POLY, NFE, "a polynomial divided by a rational number field element"),
     (("idiv", "mod"), NUM, POLY, "div and mod of a number by a polynomial"),
-    (("idiv", "mod"), ("x", "x2", "z"), NUM, "div and mod of a polynomial over the integers by a number"),
     (("add",), ("tup", "tup3"), ("tup", "tup3"), "arithmetic of tuples"),
     (("mul",), NUM, ("empty",), "a number times the empty sequence"),
     (("pow",), ("map", "map2"), NUM, "powers of maps"),

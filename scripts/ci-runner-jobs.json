@@ -1,0 +1,52 @@
+{
+  "_doc": "The ci.yml jobs (their ids, GITHUB_JOB) that may run on the self-hosted sagebrush-ci runners, and the trusted events they may run for. ci.yml routes exactly these (scripts/test-ci-runners.mjs); the runners' admission hook checks the same list from its own copy in the image, never from the workflow. William, Nov 22 2026; @sagebrush's ruling on astra4's review of the runner plan.",
+  "repository": "sagemathinc/sagebrush",
+  "workflow": ".github/workflows/ci.yml",
+  "events": [
+    "merge_group",
+    "push refs/heads/master",
+    "push refs/heads/track/*"
+  ],
+  "jobs": [
+    "census",
+    "changes",
+    "checks",
+    "ci",
+    "conformance",
+    "engine-clippy",
+    "engine-cpython",
+    "engine-language",
+    "engine-modes",
+    "engine-node",
+    "engine-rust",
+    "engine-unsafe-sweep",
+    "engine-wasm",
+    "examples",
+    "examples-census",
+    "export-controls",
+    "interrupt-matrix",
+    "language-node",
+    "lookalike-controls",
+    "modes",
+    "mpmath-suite",
+    "node-tests",
+    "size-base",
+    "size-gate",
+    "sprig",
+    "wasm-modules",
+    "web-artifacts",
+    "web-browser",
+    "web-export",
+    "web-lookalike",
+    "web-runner",
+    "web-runner-sync",
+    "web-sync",
+    "web-sync-ops",
+    "webkit"
+  ],
+  "not_for": {
+    "wasm-modules": [
+      "push refs/heads/master"
+    ]
+  }
+}

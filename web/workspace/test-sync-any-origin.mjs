@@ -67,7 +67,7 @@ front = Bun.serve({
     if (p === "/api/share/me") return s ? Response.json({ account_id: ACCOUNT }) : Response.json({ error: "sign in first" }, { status: 401 });
     if (p === "/auth/dev" || p.startsWith("/api/sync/") || p.startsWith("/__files/")) {
       const h = new Headers();
-      for (const k of ["cookie", "content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+      for (const k of ["cookie", "content-type", "content-length", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
       const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
       const r = await ref.fetch(new Request(ORIGIN + p + u.search, { method: req.method, headers: h, body }));
       const out = new Headers();

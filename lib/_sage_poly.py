@@ -813,7 +813,7 @@ class Polynomial:
         while c and c[-1] == 0:
             c.pop()
         if ring._base is ZZ and any(not isinstance(a, int) for a in c):
-            ring = PolynomialRing(QQ, ring._name, _internal=True)
+            ring = ring.change_ring(QQ)
         self._ring = ring
         self._c = c
 
@@ -1003,7 +1003,7 @@ class Polynomial:
         # the ring over QQ in the same variable: our own when it is over QQ
         # (an equal ring either way; keeping ours keeps its class, e.g. Magma
         # mode's ring, which names its variable when printing)
-        return self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name, _internal=True)
+        return self._ring if self._ring._base is QQ else self._ring.change_ring(QQ)
 
     def __repr__(self):
         return _poly_repr(self._c, self._ring._repr_name()) if self._c else "0"
@@ -1102,7 +1102,7 @@ class Polynomial:
             return self._make([], o)
         if len(self._c) * len(o._c) > 2500:
             # long products in the engine (NTT / Kronecker substitution)
-            from sagebrush import poly
+            from _sagebrush_lib import poly
             da, ca = self._integral()
             db, cb = o._integral()
             c = poly.mul(ca, cb)
@@ -1321,10 +1321,10 @@ class Polynomial:
             # shared core's budget; daybreak2 LIMIT-F3-2)
             S.charge([S.WORK], len(self._c), refuse)
             if R is QQ:
-                return PolynomialRing(R, self._ring._name, _internal=True)(self._c)
+                return self._ring.change_ring(R)(self._c)
             if any(int(a.denominator) != 1 for a in self._c):
                 raise TypeError("no conversion of this rational to integer")
-            return PolynomialRing(R, self._ring._name, _internal=True)([int(a) for a in self._c])
+            return self._ring.change_ring(R)([int(a) for a in self._c])
         if isinstance(R, PolynomialRing_):
             return R(self._c)
         import _sage_ff
@@ -1419,7 +1419,7 @@ class Polynomial:
             if over_zz or not a._c:
                 return Polynomial(self._ring if over_zz else a._ring, a._c)
             return a.change_ring(QQ).monic()
-        from sagebrush import poly
+        from _sagebrush_lib import poly
         da, ca = self._integral()
         db, cb = o._integral()
         g = poly.gcd(ca, cb)
@@ -1494,7 +1494,7 @@ class Polynomial:
         """
         if not self._c:
             raise ArithmeticError("factorization of 0 is not defined")
-        from sagebrush import poly
+        from _sagebrush_lib import poly
         sa = _sa()
         if self._ring._base is ZZ:
             content, fs = poly.factor(self._c) if self.degree() > 0 else (self._c[0], [])
@@ -1576,6 +1576,82 @@ class Polynomial:
             # second review's R2-POL-F3); over a field it is a unit
             return all(e == 1 for _, e in self.factor())
         return all(e == 1 for _, e in self.factor() if isinstance(_, Polynomial))
+
+    def squarefree_decomposition(self):
+        """The square-free decomposition, as Sage's: one factor for each
+        exponent, by the exponent; over QQ monic ones, the leading
+        coefficient in the factor of exponent 1 (else the unit); over ZZ
+        primitive ones with positive leading coefficients, the content and
+        sign the unit.  By Yun's algorithm (gcds, no factoring).
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[]
+            sage: ((x - 1)^2*(2*x + 1)*(x^2 + 1)^3).squarefree_decomposition()
+            (2*x + 1) * (x - 1)^2 * (x^2 + 1)^3
+            sage: (3*(x - 1)^2/7).squarefree_decomposition(), R(-5).squarefree_decomposition()
+            ((3/7) * (x - 1)^2, -5)
+            sage: S.<y> = ZZ[]
+            sage: F = (-6*(y + 1)^2*(y^2 - 3)).squarefree_decomposition(); F
+            (-6) * (y^2 - 3) * (y + 1)^2
+            sage: F.unit(), list(F)
+            (-6, [(y^2 - 3, 1), (y + 1, 2)])
+            sage: ((2*y + 1)^2*(3*y - 1)).squarefree_decomposition()
+            (3*y - 1) * (2*y + 1)^2
+            sage: (3/7*x*(x + 1)^2).squarefree_decomposition(), (-3*x*(x + 1)^2).squarefree_decomposition()
+            (3/7*x * (x + 1)^2, (-3*x) * (x + 1)^2)
+            sage: F = S(0).squarefree_decomposition(); F, F.unit(), list(F)
+            (0, 0, [])
+            sage: R(0).squarefree_decomposition()
+            Traceback (most recent call last):
+            ...
+            ValueError: square-free decomposition not defined for zero polynomial
+        """
+        if not self._c:
+            if self._ring._base is ZZ:
+                # (as Sage's: over ZZ, 0 is the empty decomposition with unit 0)
+                return PolyFactorization([], _norm(0), field=True, by_exponent=True)
+            raise ValueError("square-free decomposition not defined for zero polynomial")
+        lc = _F(self._c[-1])
+        parts = []
+        if self.degree() > 0:
+            # (Yun's algorithm over QQ, on the monic polynomial: f = prod a_i^i
+            # with b_1 = f/gcd(f, f'), and a_i = gcd(b_i, b_i' ... ) as below)
+            Q = self._qq_ring()
+            f = Polynomial(Q, [_F(a) / lc for a in self._c])
+            fp = f.derivative()
+            a = f.gcd(fp)
+            b, c = f.quo_rem(a)[0], fp.quo_rem(a)[0]
+            d = c - b.derivative()
+            i = 1
+            while b.degree() > 0:
+                g = b.gcd(d)
+                if g.degree() > 0:
+                    parts.append((g, i))
+                b = b.quo_rem(g)[0]
+                d = d.quo_rem(g)[0] - b.derivative()
+                i += 1
+        unit = lc
+        if self._ring._base is ZZ:
+            items = []
+            for g, e in parts:
+                # (primitive, the leading coefficient positive: that of the
+                # monic factor's integral multiple, divided by its content)
+                _, cg = g._integral()
+                from math import gcd
+                k = 0
+                for a in cg:
+                    k = gcd(k, a)
+                h = Polynomial(self._ring, [a // k for a in cg])
+                unit /= _F(h._c[-1]) ** e
+                items.append((h, e))
+        else:
+            items = parts
+            if parts and parts[0][1] == 1:
+                g = parts[0][0]
+                items = [(Polynomial(g._ring, [_F(a) * lc for a in g._c]), 1)] + parts[1:]
+                unit = _F(1)
+        return PolyFactorization(items, _norm(unit), field=True, by_exponent=True)
 
     def roots(self, ring=None, multiplicities=True):
         """The roots in the base ring (or `ring`, ZZ or QQ): [(root, m)].
@@ -1691,10 +1767,13 @@ class PolyFactorization(list):
         ([(2, 1), (x - 1, 1), (x + 1, 1)], 1)
     """
 
-    def __init__(self, items, unit=1, field=False, constant=None, constant_value=None):
-        # Sage's order: degree, then exponent, then the factor
+    def __init__(self, items, unit=1, field=False, constant=None, constant_value=None, by_exponent=False):
+        # Sage's order: degree, then exponent, then the factor (a square-free
+        # decomposition's, one factor for each exponent: by the exponent)
         def key(it):
             f, e = it
+            if by_exponent:
+                return e
             if isinstance(f, Polynomial):
                 return (f.degree(), e, [_F(a) for a in reversed(f._c)])
             return (0, e, [_F(f)])
@@ -1755,13 +1834,15 @@ class PolyFactorization(list):
 
         def term(f, e):
             s = repr(f)
-            if (e != 1 or paren) and any(c in s for c in "*+- "):
+            # (a sign or a space only, as Sage's: 3/7*x * (x + 1)^2, (-3*x) * (x + 1)^2)
+            if (e != 1 or paren) and any(c in s for c in "+- "):
                 s = "(%s)" % s
             return s if e == 1 else "%s^%d" % (s, e)
 
         parts = [term(f, e) for f, e in self]
         if self._field:
-            if self._unit != 1:
+            # (a lone unit prints bare, as Sage's: -5, not (-5))
+            if self._unit != 1 and parts:
                 parts.insert(0, "(%r)" % (self._unit,))
         elif self._unit == -1:
             parts.insert(0, "(-1)")

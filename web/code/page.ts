@@ -20,6 +20,7 @@ import { tokensOf, drawTokens } from "./tokens";
 import { langOf, type Lang } from "./langs";
 import { EDIT_BYTES, editableOf } from "./edit";
 import { codeUrl } from "./url";
+import { keepView, viewToRestore } from "../workspace/view-state";
 
 export const CODE = { openBytes: 4 * 2 ** 20, editBytes: EDIT_BYTES, viewBytes: 2 ** 20, liveBytes: 256 * 1024, saveMs: 600 };
 /** What the notebook page gives the code page: its workspace and the file's id; how to open what is chosen here; and
@@ -91,6 +92,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the agent's bar, when one is connected: its row under the head, over the notebook page's; workspace/agent-ui.ts)
   const agentRow = el("div", "code-agent"); agentRow.dataset.sbagSlot = "2";
   page.append(head, agentRow, bar, body);
+  // (where you were: asked for from now, so a scroll, key, click or touch while the file loads means the person has
+  //  moved, and a target in the address wins; asked once, below, or when this page goes first)
+  const restore = viewToRestore({ kind: "code", id: host.fid }, page, !!location.hash);
+  life.signal.addEventListener("abort", () => void restore());
   const files = el("button", "code-files", "Files"); files.setAttribute("aria-controls", "wssidebar");
   files.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else void leave(); };
   const name = el("span", "code-name"), lang = el("span", "code-lang"), status = el("span", "code-status");
@@ -397,5 +402,18 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   sb.code = handle;
   current = { dispose: () => { life.abort(); if (sb.code === handle) delete sb.code; } };
   showMode();
+  // ---- where you were (design/view-state.md r3, kind code): the first line in view, and in Edit the cursor; kept in
+  // this browser as numbers only, put back once now. A line past the end is the top; the cursor only in Edit, where the
+  // page opens only if the person last left this file in Edit
+  const lh = () => parseFloat(getComputedStyle(body).lineHeight) || 19.5, scroller = () => (mode === "edit" ? ta : body);
+  const v = restore();
+  if (v) {
+    const n = typeof v.line === "number" && v.line >= 0 && v.line < lines(text) ? Math.floor(v.line) : 0, s = v.sel;
+    if (mode === "edit" && typeof s === "number" && Number.isInteger(s) && s >= 0 && s <= ta.value.length) ta.setSelectionRange(s, s);
+    scroller().scrollTop = n * lh();
+  }
+  const kept = keepView({ kind: "code", id: host.fid }, () => ({ line: Math.floor(scroller().scrollTop / lh()), ...(mode === "edit" ? { sel: ta.selectionStart } : {}) }));
+  for (const [t, evs] of [[body, ["scroll"]], [ta, ["scroll", "keyup", "click"]]] as const) for (const e of evs) t.addEventListener(e, () => kept.changed(), { passive: true, signal: life.signal });
+  life.signal.addEventListener("abort", () => kept.stop());
   say(editable ? "" : `Read-only: ${whyNot()}`);
 }

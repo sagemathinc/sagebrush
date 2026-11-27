@@ -13,6 +13,7 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { dispatch } from "../miniflare-dispatch.mjs";
+import { SCOPE_CASES } from "../workspace/agent-scope-cases.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const units = execFileSync("bun", ["build", join(here, "test-agent-units.ts"), "--format", "esm", "--target", "node"], { encoding: "utf8" });
@@ -84,6 +85,18 @@ await section("units", async () => {
   ok(U.inScope(sco, "/Algebra", "write") && U.inScope(sco, "/Algebra/x.tex", "write") && !U.inScope(sco, "/Algebra2", "read") && !U.inScope(sco, "/Algebra2/x", "read"), "/Algebra covers itself and what's under it, never /Algebra2");
   ok(U.inScope(sco, "/Notes/a", "read") && !U.inScope(sco, "/Notes/a", "write") && !U.inScope(sco, "/", "read"), "read access is read only, and a scope doesn't cover its parent");
   ok(U.inScope(sc([s("/")]), "/Trash/x", "read") && !U.inScope(sc([s("/")]), "/x", "write"), "/ covers the whole workspace");
+  // (the agents' reserved folder, /.agents: no scope reaches into it, "/" included, and none may be made in it)
+  const all = sc([s("/", "write")]);
+  ok(!U.inScope(all, "/.agents", "read") && !U.inScope(all, "/.agents/memory/agent/x/n.md", "read") && !U.inScope(all, "/.agents/x", "write"), "/ doesn't cover /.agents or anything in it");
+  ok(U.inScope(all, "/.agentsX", "write") && U.inScope(all, "/.Agents/x", "write") && U.inScope(all, "/x/.agents/y", "write"), "only the exact top-level /.agents is reserved: /.agentsX, /.Agents and a nested .agents are ordinary");
+  ok(sc([s("/.agents")]) === "refused" && sc([s("/.agents/memory", "write")]) === "refused" && sc([s("/A"), s("/.agents/x")]) === "refused" && Array.isArray(sc([s("/.agentsX"), s("/.Agents")])), "a scope at or under /.agents is refused when the grant is made, others alike are not");
+  ok(U.inScope === U.sharedInScope && U.RESERVED === "/.agents" && U.reserved("/.agents/x") && !U.reserved("/.agentsX"), "the server's scope check is the shared module's (web/workspace/agent-scope.ts), the one a device's check of a relayed verb imports");
+  // (the shared table, web/workspace/agent-scope-cases.mjs: the server's call site here and in test-index; a device's
+  // check of a relayed verb runs the same table when it exists)
+  for (const c of SCOPE_CASES) {
+    const v = U.scopeCheck(c.scopes.map(([path, access]) => ({ path, access })), c.path, c.need).verdict;
+    ok(v === c.verdict, `scope table: ${JSON.stringify(c.scopes)} ${JSON.stringify(c.path)} ${c.need}: ${c.verdict}`, v);
+  }
   const nm = (v) => {
     try {
       return U.checkAgentName(v);
