@@ -475,9 +475,23 @@ def build(root, plat, get=None, say=None):
 INSTALL_CLAUDE = "curl -fsSL https://claude.ai/install.sh | bash"
 
 
+def claude_auth_status(claude, env=None, run=None):
+    """Claude Code's own answer (`claude auth status --json`: loggedIn), or None when it can't give one (an older
+    Claude Code without the command, a timeout, output that isn't its JSON)."""
+    import subprocess
+    run = run or subprocess.run
+    try:
+        p = run([claude, "auth", "status", "--json"], capture_output=True, timeout=20, stdin=subprocess.DEVNULL,
+                env=dict(os.environ if env is None else env))
+        v = json.loads(p.stdout.decode("utf-8", "replace"))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return v.get("loggedIn") if isinstance(v, dict) and isinstance(v.get("loggedIn"), bool) else None
+
+
 def claude_signed_in(env=None, system=None):
     """True or False where it can be told from the files (Linux: Claude Code's credentials file), None where it can't
-    (macOS keeps the login in the Keychain)."""
+    (macOS keeps the login in the Keychain): the fallback when `claude auth status` gives no answer."""
     env = os.environ if env is None else env
     import platform as _p
     if (system or _p.system()) == "Darwin":
@@ -509,9 +523,12 @@ def preflight(cmd=None, env=None, which=None, signed_in=_CHECK):
         out.append(("Claude Code isn't installed on this computer (no `claude` on PATH).",
                     "%s   (then run `claude` once and sign in)" % INSTALL_CLAUDE))
     else:
-        s = claude_signed_in(env) if signed_in is _CHECK else signed_in
-        if s is False:
-            out.append(("Claude Code isn't signed in on this computer.", "claude   (then follow its sign-in, or type /login)"))
+        if signed_in is _CHECK:
+            s = claude_auth_status(which("claude"), env)
+            signed_in = claude_signed_in(env) if s is None else s
+        if signed_in is False:
+            out.append(("Claude Code isn't signed in on this computer.",
+                        "claude auth login   (it prints a link: open it in any browser, sign in, and paste the code it shows back here)"))
     return out
 
 

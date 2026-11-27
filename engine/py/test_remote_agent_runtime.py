@@ -435,7 +435,18 @@ def test_preflight_words():
                                    "Claude Code isn't signed in on this computer."], out
     assert T.preflight(None, env={"PATH": "/x"}, which=claude, signed_in=True) == []
     assert T.preflight(None, env={"PATH": "/x"}, which=claude, signed_in=None) == []  # (macOS: can't tell, says nothing)
-    # (the credentials file, where Linux's Claude Code keeps the login)
+    assert any("claude auth login" in f for _, f in T.preflight(None, env={"PATH": "/x"}, which=claude, signed_in=False))
+    # (Claude Code's own answer, `claude auth status --json`; None when it gives none)
+    class P:
+        def __init__(self, out):
+            self.stdout = out
+    assert T.claude_auth_status("claude", {}, run=lambda *a, **k: P(b'{"loggedIn": false, "authMethod": "none"}')) is False
+    assert T.claude_auth_status("claude", {}, run=lambda *a, **k: P(b'{"loggedIn": true}')) is True
+    assert T.claude_auth_status("claude", {}, run=lambda *a, **k: P(b"error: unknown command 'auth'")) is None
+    def boom(*a, **k):
+        raise OSError("gone")
+    assert T.claude_auth_status("claude", {}, run=boom) is None
+    # (the credentials file, where Linux's Claude Code keeps the login: the fallback)
     home = fresh_root()
     assert T.claude_signed_in({"HOME": home}, "Linux") is False
     os.makedirs(os.path.join(home, ".claude"))
