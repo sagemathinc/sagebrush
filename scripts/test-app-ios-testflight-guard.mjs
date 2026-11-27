@@ -72,6 +72,7 @@ function check(t) {
   }
   const archive = steps(arc).find((s) => s.name === "Build the unsigned archive");
   need(!!archive && /cargo tauri ios build .*--archive-only --no-sign\b/.test(archive.run) && !/--export-method/.test(archive.run), "the archive is unsigned (--archive-only --no-sign)");
+  need(all.some((s) => /^\s*find "\$RUNNER_TEMP\/archive" -type l -print0 \| while/m.test(s.run) && /case "\$r" in "\$base"\/\*\) ;; \*\) echo "FAIL: the link/.test(s.run)), "no link in the archive resolves outside it (checked after the untar)");
   const at = (re) => all.findIndex((s) => re.test(s.name));
   const sign = at(/^Sign for the App Store/), upload = at(/^Upload to App Store Connect/), clean = at(/^Remove the keychain/);
   need(sign >= 0 && upload > sign && clean === all.length - 1, "the order: sign, upload, then the clean-up last");
@@ -126,6 +127,7 @@ const controls = [
   }, "the order"],
   ["a script run in the signing step", (t) => t.replace(/(\n {10}umask 077\n {10}s="\$RUNNER_TEMP\/signing")/, "\n          bash app/x.sh$1"), "no script file"],
   ["the upload key in the signing step", (t) => t.replace(signEnv, (m) => m + "          K: ${{ secrets.SAGEBRUSH_ASC_KEY_BASE64 }}\n"), "nothing else"],
+  ["the archive's links not checked", (t) => t.replace(/case "\$r" in "\$base"\/\*\) ;; /, 'case "$r" in *) ;; '), "resolves outside it"],
   ["the artifact renamed in the sign job", (t) => t.replace(/(  sign:\n[\s\S]*?name: )ios-archive/, "$1other"), "the artifact ios-archive"],
 ];
 for (const [what, alter, expect] of controls) {

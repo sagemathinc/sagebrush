@@ -193,6 +193,13 @@ jobs:
           tar -C "$RUNNER_TEMP/archive" -xzf "$RUNNER_TEMP/in/archive.tar.gz"
           archive=$(find "$RUNNER_TEMP/archive" -maxdepth 1 -name '*.xcarchive' -type d -print -quit)
           [ -n "$archive" ] || { echo "FAIL: no .xcarchive in the artifact" >&2; exit 1; }
+          # (no link in the archive may resolve outside it: the export could otherwise copy a file of this machine
+          # into the .ipa)
+          base=$(cd "$RUNNER_TEMP/archive" && pwd -P)
+          find "$RUNNER_TEMP/archive" -type l -print0 | while IFS= read -r -d '' l; do
+            r=$(realpath "$l" 2>/dev/null || echo "?")
+            case "$r" in "$base"/*) ;; *) echo "FAIL: the link $l resolves outside the archive ($r)" >&2; exit 1 ;; esac
+          done
           echo "SAGEBRUSH_ARCHIVE=$archive" >> "$GITHUB_ENV"
       # The one signing step: the distribution certificate, imported non-extractable (-x) into a keychain made for
       # this run, usable by codesign alone; the profile installed; then only `xcodebuild -exportArchive`, which runs
