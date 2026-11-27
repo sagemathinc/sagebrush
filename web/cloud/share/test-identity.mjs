@@ -59,7 +59,8 @@ function sign(claims, { kid = "k1", key = k1.privateKey, alg = "RS256" } = {}) {
   const s = alg === "RS256" ? createSign("RSA-SHA256").update(`${h}.${p}`).sign(key).toString("base64url") : "";
   return `${h}.${p}.${s}`;
 }
-const claimsFor = (subject, sid, extra = {}) => ({ iss: ISSUER, sub: subject, sid, client_id: CLIENT, iat: nowS(), exp: nowS() + 300, ...extra });
+// (auth_time: AuthKit's time of the last active sign-in, on every access token it issues)
+const claimsFor = (subject, sid, extra = {}) => ({ iss: ISSUER, sub: subject, sid, client_id: CLIENT, iat: nowS(), exp: nowS() + 300, auth_time: nowS(), ...extra });
 
 async function outbound(req) {
   const u = new URL(req.url);
@@ -1315,23 +1316,28 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   const again = await callback(used, "user_01REAUTH", "session_01C1e");
   ok(again.status === 400 && !cookieOf(again, "__Host-sb_session"), `C1 a re-authentication state used again: refused, nothing set again (${again.status})`);
 
-  // C2: WorkOS's time for the sign-in: auth_time when given, else the access token's iat, against the state's started
+  // C2: the sign-in's time is the access token's auth_time, against the state's started; iat (this exchange's own) proves none
   const timed = async (claims, label) => {
     const b = await login("&reauth=1");
     const S = Math.floor(stateOf(b).started / 1000);
-    const r = await callback(b, "user_01REAUTH", `session_01C2${label}`, { token: sign(claimsFor("user_01REAUTH", `session_01C2${label}`, claims(S))) });
+    const c = claimsFor("user_01REAUTH", `session_01C2${label}`, claims(S));
+    for (const k of Object.keys(c)) if (c[k] === undefined) delete c[k];
+    const r = await callback(b, "user_01REAUTH", `session_01C2${label}`, { token: sign(c) });
     return { status: r.status, v: (await rowOf(cookieOf(r, "__Host-sb_session") ?? "x=x"))?.reauth_ms };
   };
   const c2 = {
-    iatBefore: await timed((S) => ({ iat: S - 1 }), "a"),
-    iatSame: await timed((S) => ({ iat: S }), "b"),
+    iatNow: await timed(() => ({ auth_time: undefined }), "a"),
+    iatSame: await timed((S) => ({ auth_time: undefined, iat: S }), "b"),
     authBefore: await timed((S) => ({ auth_time: S - 1 }), "c"),
     authSame: await timed((S) => ({ auth_time: S, iat: S - 1 }), "d"),
+    authFraction: await timed((S) => ({ auth_time: S + 0.5 }), "e"),
+    authText: await timed((S) => ({ auth_time: String(S) }), "f"),
   };
-  ok(c2.iatBefore.status === 302 && c2.iatBefore.v === null, `C2 an access token issued before the attempt started (iat, no auth_time): NULL (${JSON.stringify(c2.iatBefore)})`);
-  ok(c2.iatSame.status === 302 && c2.iatSame.v !== null, `C2 iat in the second the attempt started: set (${JSON.stringify(c2.iatSame)})`);
-  ok(c2.authBefore.status === 302 && c2.authBefore.v === null, `C2 auth_time before the attempt started, iat now: NULL, auth_time is the one read (${JSON.stringify(c2.authBefore)})`);
+  ok(c2.iatNow.status === 302 && c2.iatNow.v === null, `C2 a token without auth_time, its iat now: NULL (${JSON.stringify(c2.iatNow)})`);
+  ok(c2.iatSame.status === 302 && c2.iatSame.v === null, `C2 a token without auth_time, its iat in the attempt's second: NULL (${JSON.stringify(c2.iatSame)})`);
+  ok(c2.authBefore.status === 302 && c2.authBefore.v === null, `C2 auth_time before the attempt started, iat now: NULL (${JSON.stringify(c2.authBefore)})`);
   ok(c2.authSame.status === 302 && c2.authSame.v !== null, `C2 auth_time in that second, iat before it: set, auth_time is the one read (${JSON.stringify(c2.authSame)})`);
+  ok(c2.authFraction.status === 302 && c2.authFraction.v === null && c2.authText.status === 302 && c2.authText.v === null, `C2 an auth_time that isn't whole seconds, or isn't a number: NULL (${JSON.stringify([c2.authFraction, c2.authText])})`);
 
   // C3: the migration: rows from before it read NULL; the CHECK; the column
   const m2 = worker(bindings);

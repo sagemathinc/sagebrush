@@ -626,7 +626,8 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
   const t = now();
   const h = await accountHash(who.account_id);
   const hash = await sha256Hex(token);
-  if (workosMode(env)) return startIdentitySession(env, who.account_id, ttl, ident ?? { kind: "dev" }, token, hash, h, t);
+  // (with WorkOS, a session needs its identity: a WorkOS sign-in's or /auth/dev's, never one by default)
+  if (workosMode(env)) return ident ? startIdentitySession(env, who.account_id, ttl, ident, token, hash, h, t) : null;
   try {
     await db.batch([
       ...guard(db, `NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?1) AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND deleting IS NOT NULL)`, h, who.account_id),
@@ -754,16 +755,17 @@ const STATES_EXPIRED = "DELETE FROM auth_states WHERE rowid IN (SELECT rowid FRO
  * A re-authentication (sessions.reauth_ms): /auth/login?reauth=1 asks AuthKit to sign the person in again (max_age=0)
  * and writes `reauth: true` into the signed sign-in state, never anywhere the browser could set it.  Its callback's
  * session records D1's clock when it is made, only within the state's life (REAUTH_LIFE_MS from `started`), and only
- * if WorkOS's own time for the sign-in (auth_time, else the access token's iat; whole seconds) isn't before `started`.
+ * if the access token's auth_time (AuthKit's time of the person's last active sign-in, whole seconds) isn't before
+ * `started`.  Without a usable auth_time it records nothing: the token's iat is this exchange's own and proves no sign-in.
  * Every other session's reauth_ms is NULL, except /auth/dev's (DEV only), which is now.
  */
 const REAUTH_LIFE_MS = 600_000;
 /** the SQL value of a new session's reauth_ms: `nowSql` while it is at most `until` (a parameter, NULL for none), else NULL */
 export const reauthAt = (nowSql: string, until: string) => `CASE WHEN ${until} IS NOT NULL AND ${nowSql} <= ${until} THEN ${nowSql} END`;
 /** The last moment (D1 ms) a callback's session may record a re-authentication, or null when it may not record one. */
-export function reauthUntil(st: { reauth?: unknown; started: number }, claims: { iat?: unknown; auth_time?: unknown }): number | null {
+export function reauthUntil(st: { reauth?: unknown; started: number }, claims: { auth_time?: unknown }): number | null {
   if (st.reauth !== true) return null;
-  const at = typeof claims.auth_time === "number" ? claims.auth_time : claims.iat;
+  const at = claims.auth_time;
   // (whole seconds: a sign-in within the second `started` falls in stands, one in any earlier second doesn't)
   if (typeof at !== "number" || !Number.isSafeInteger(at) || at * 1000 + 999 < st.started) return null;
   return st.started + REAUTH_LIFE_MS;
