@@ -91,7 +91,8 @@ async function shown(w, srv = fakeServer({ available: true, state: "off" })) {
     el.remove();
   }
 }
-const isOld = (v) => v.s.state === "off" && v.s.reason === W.OLD_SYNC_REASON && !v.client && v.line === "Sync off: " + W.OLD_SYNC_REASON && J(v.buttons) === J(["[x] Turn on sync…"]) && v.text.includes(W.OLD_SYNC_LINE);
+// (older sync data: Turn on disabled, the line, and the way out, the reset's button)
+const isOld = (v) => v.s.state === "off" && v.s.reason === W.OLD_SYNC_REASON && !v.client && v.line === "Sync off: " + W.OLD_SYNC_REASON && J(v.buttons) === J(["[x] Turn on sync…", W.RESET_BUTTON]) && v.text.includes(W.OLD_SYNC_LINE);
 const isClean = (v) => v.s.reason !== W.OLD_SYNC_REASON && J(v.buttons) === J(["Turn on sync…"]) && !v.text.includes(W.OLD_SYNC_LINE);
 // (R-DET-1: a read that failed, or an unexpected schema: off and refused the same, said without any clear-data advice)
 const isUnreadable = (v) => v.s.state === "off" && v.s.reason === W.UNREADABLE_REASON && !v.client && v.line === "Sync off: " + W.UNREADABLE_REASON && J(v.buttons) === J(["[x] Turn on sync…"]) && v.text.includes(W.UNREADABLE_MESSAGE) && !v.text.includes(W.OLD_SYNC_LINE) && !/clear this site|site data|deletes/i.test(v.text);
@@ -803,7 +804,46 @@ async function reset9() {
   check(kept.cur?.off === true && kept.cur.gen > L1.gen && kept.epoch > e0 && kept.dseq === 7 && L2.gen > kept.cur.gen && (threw instanceof W.Fenced || /is no longer current/.test(threw?.message)), `RESET9: fences kept and moved on (${J(kept)}), re-enabled at gen ${L2.gen} after ${L1.gen}, a stale Outbox refused: ${threw?.name} ${threw?.message}`);
 }
 
-const CASES = { union, old1, old2, asked, old3, old4, old5, old6, old7, old8, old9, schema, falsePositive, old10, large, reset1, reset2, reset3, reset4, reset5, reset6, reset7, reset8, reset9 };
+/** RESET10: the panel's way out.  Blocked by older sync data: Turn on disabled, the line, and "Reset sync on this
+ * browser…".  Asked with the reset's own confirmation: declined, nothing changes; accepted, the reset runs (nothing
+ * asked of the server), the panel says it was done and offers Turn on, and Turn on then works. */
+async function reset10() {
+  await dropHistory();
+  const w = await fresh(), srv = fakeServer({ available: true, state: "off" });
+  await usedThenOld(w);
+  const o = ownerOf(w, srv);
+  await o.reconcile();
+  const asked = [], answers = [false];
+  const host = { ...hostOf(w), confirm: (t) => { asked.push(t); return answers.length ? answers.shift() : true; } };
+  const el = document.body.appendChild(document.createElement("div"));
+  const sec = W.syncSection(w, el, host, { fetch: srv.fetch });
+  const resetBtn = () => [...el.querySelectorAll("button")].find((b) => b.textContent === W.RESET_BUTTON && !b.disabled);
+  try {
+    const drawn = await until(() => !!resetBtn(), 3000);
+    const b0 = buttons(el), said = el.textContent.includes(W.OLD_SYNC_LINE);
+    check(drawn && J(b0) === J(["[x] Turn on sync…", W.RESET_BUTTON]) && said, `RESET10 blocked: the panel offers the reset (${J(b0)}), and says why (${said})`);
+    // (declined: nothing done)
+    resetBtn().click();
+    await sleep(200);
+    const kept0 = (await o.blocked())?.why, proto0 = await meta(w, W.PROTO_KEY);
+    check(J(asked) === J([W.RESET_CONFIRM]) && kept0 === "old-format" && proto0 === undefined && J(buttons(el)) === J(b0), `RESET10 declined: asked with the reset's confirmation, nothing changed (${J({ blocked: kept0, proto: proto0, buttons: buttons(el) })})`);
+    // (accepted: reset, said, Turn on offered)
+    resetBtn().click();
+    const done = await until(() => J(buttons(el)) === J(["Turn on sync…"]) && el.textContent.includes(W.RESET_DONE), 5000);
+    const b1 = await o.blocked(), posts = [...srv.posts];
+    check(done && asked.length === 2 && asked[1] === W.RESET_CONFIRM && b1 === null && (await isForgotten(w)) && (await count(w, "pins")) === 0 && posts.length === 0 && !el.textContent.includes(W.OLD_SYNC_LINE), `RESET10 accepted: reset without any POST to the server (${J(posts)}), the panel says so and offers Turn on (${J(buttons(el))}; blocked ${J(b1)})`);
+    // (then Turn on, from the same panel: this browser joins with a new lease and the marker)
+    [...el.querySelectorAll("button")].find((b) => b.textContent === "Turn on sync…" && !b.disabled)?.click();
+    const on = await until(async () => { const c = await meta(w, "sync:current"); return !!c && !c.off; }, 5000);
+    const lease = await meta(w, "sync:current");
+    check(on && lease.ns === `${await hashOf("acct-old")}:1:${w.device}` && (await meta(w, W.PROTO_KEY)) === W.PROTO, `RESET10 then Turn on: a new lease (${J(lease)})`);
+  } finally {
+    sec.dispose();
+    el.remove();
+  }
+}
+
+const CASES = { union, old1, old2, asked, old3, old4, old5, old6, old7, old8, old9, schema, falsePositive, old10, large, reset1, reset2, reset3, reset4, reset5, reset6, reset7, reset8, reset9, reset10 };
 export async function run(only = "") {
   const pick = only ? only.split(",").filter(Boolean) : Object.keys(CASES);
   for (const name of pick) {
