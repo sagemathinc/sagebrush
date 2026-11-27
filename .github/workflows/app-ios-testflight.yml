@@ -1,0 +1,270 @@
+# The iOS app to TestFlight: the same Tauri project as app-ios-selftest.yml,
+# built for devices (aarch64-apple-ios), signed for App Store distribution
+# and uploaded to App Store Connect, where it appears in TestFlight for the
+# internal testers.  Run by hand only (a dispatch on master), in the
+# sagebrush-signing environment, whose secrets are:
+#   SAGEBRUSH_IOS_DIST_P12_BASE64, SAGEBRUSH_IOS_DIST_P12_PASSWORD
+#     the Apple Distribution certificate and its key (.p12, base64);
+#   SAGEBRUSH_IOS_PROFILE_BASE64
+#     the App Store Connect provisioning profile for space.sagebrush.notebook;
+#   SAGEBRUSH_ASC_KEY_ID, SAGEBRUSH_ASC_ISSUER_ID, SAGEBRUSH_ASC_KEY_BASE64
+#     an App Store Connect API key (App Manager), for the upload.
+# Each is checked present first and none is printed.  The build number is
+# the run number, so each upload is a new TestFlight build.
+#
+# The signing secrets never share a machine with the project's code.  The
+# archive job (no environment, no secret) compiles and runs it: cargo, the
+# Tauri CLI, xcodebuild's archive, every build script.  It makes an unsigned
+# archive and uploads it as an artifact.  The sign job is a fresh GitHub-hosted
+# VM (a self-hosted or reused runner would break this) with nothing from the
+# repository on it: no checkout and no local action, only the archive
+# downloaded.  There one step signs: the certificate imported non-extractable
+# into a keychain of this run's own (codesign only), the profile installed,
+# and `xcodebuild -exportArchive` alone, which re-signs the archive for the App
+# Store.  The upload step holds only the API key.  The keychain, the profile
+# and the key are removed in an always() step.  Steps of one job are not
+# isolated from each other ($GITHUB_ENV, $GITHUB_PATH, processes left
+# running), jobs are.  What remains: the archive is data that the build made,
+# and the export signs it (you sign what was built); nothing in it is run by
+# the export.  scripts/test-app-ios-testflight-guard.mjs pins this.
+
+name: app-ios-testflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  # (the same page as app.yml's page job)
+  page:
+    if: github.repository == 'sagemathinc/sagebrush' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 11
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: "false"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: node scripts/build-cli.mjs
+      - run: bun web/build.ts
+      - run: node app/build-frontend.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: app-page
+          path: app/dist
+
+  # The project's code, built into an unsigned archive: no environment, no secret.
+  archive:
+    if: github.repository == 'sagemathinc/sagebrush' && github.ref == 'refs/heads/master'
+    needs: page
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      XCODE_APP: /Applications/Xcode_26.2.app
+      XCODE_VERSION: "Xcode 26.2"
+      TAURI_CLI_VERSION: 2.12.4
+      XCODEGEN_VERSION: 2.46.0
+      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: app-page
+          path: app/dist
+      - name: Xcode 26.2
+        run: |
+          set -euo pipefail
+          [ "$(uname -m)" = arm64 ] || { echo "FAIL: the runner is not arm64"; exit 1; }
+          [ -d "$XCODE_APP" ] || { echo "FAIL: $XCODE_APP is not on this runner image"; exit 1; }
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          got=$(xcodebuild -version | head -1)
+          [ "$got" = "$XCODE_VERSION" ] || { echo "FAIL: xcodebuild says '$got', not '$XCODE_VERSION'"; exit 1; }
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-ios
+      - name: the Tauri CLI (crate tauri-cli ${{ env.TAURI_CLI_VERSION }}, --locked)
+        run: cargo install tauri-cli --version "=$TAURI_CLI_VERSION" --locked
+      - name: XcodeGen ${{ env.XCODEGEN_VERSION }} (its release zip, by sha256)
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/xcodegen-dl"; x="$RUNNER_TEMP/xcodegen"
+          mkdir "$d" "$x"
+          curl -fsSL --retry 3 -o "$d/xcodegen.zip" "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $d/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$d/xcodegen.zip" -d "$x"
+          echo "$x/xcodegen/bin" >> "$GITHUB_PATH"
+      # (as app-ios-selftest.yml: brew, gem and pod run only their read-only subcommands while the signing secrets
+      # are in this job, every call logged, and any refused call fails the job after the build)
+      - name: brew, gem and pod allow-listed (wrappers)
+        run: |
+          set -euo pipefail
+          g="$RUNNER_TEMP/guard"; mkdir "$g"
+          wrap() {  # the tool, then the first arguments it may be called with
+            local tool=$1 real
+            shift
+            real=$(command -v "$tool")
+            cat > "$g/$tool" <<EOF
+          #!/bin/bash
+          echo "$tool \$*" >> "$RUNNER_TEMP/guard-calls.txt"
+          for ok in $*; do [ "\${1:-}" = "\$ok" ] && exec "$real" "\$@"; done
+          echo "app-ios-testflight: REFUSED: $tool \$* (allowed first arguments: $*)" >&2
+          echo "$tool \$*" >> "$RUNNER_TEMP/guard-refused.txt"
+          exit 1
+          EOF
+            chmod 0755 "$g/$tool"
+          }
+          wrap brew list outdated info --prefix --version
+          wrap gem list outdated --version
+          wrap pod --version
+          echo "$g" >> "$GITHUB_PATH"
+      - name: the app's Rust dependencies
+        working-directory: app/src-tauri
+        run: cargo fetch --locked
+      # (an unsigned archive, from no secret: the Tauri CLI's own archive with code signing off, the build number in it)
+      - name: Build the unsigned archive
+        working-directory: app/src-tauri
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          set -euo pipefail
+          cargo tauri ios build --ci --target aarch64 --archive-only --no-sign --build-number "$GITHUB_RUN_NUMBER"
+          archive=$(find gen/apple/build -name '*.xcarchive' -type d -prune -print -quit)
+          [ -n "$archive" ] || { echo "FAIL: no .xcarchive was made" >&2; exit 1; }
+          app=$(find "$archive/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)
+          [ -n "$app" ] || { echo "FAIL: no .app in $archive" >&2; exit 1; }
+          # (as the Tauri CLI does before its own export of an unsigned archive: an ad hoc signature carrying the
+          # app's entitlements, which the export's signature then takes over)
+          name=$(basename "$app" .app)
+          codesign --force --sign - --entitlements gen/apple/sagebrush-app_iOS/sagebrush-app_iOS.entitlements "$app/$name"
+          if [ -s "$RUNNER_TEMP/guard-refused.txt" ]; then echo "FAIL: refused calls:" >&2; cat "$RUNNER_TEMP/guard-refused.txt" >&2; exit 1; fi
+          # (a tarball: an artifact keeps neither the executable bits nor the symbolic links an archive has)
+          tar -C "$(dirname "$archive")" -czf "$RUNNER_TEMP/archive.tar.gz" "$(basename "$archive")"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-archive
+          path: ${{ runner.temp }}/archive.tar.gz
+          retention-days: 1
+
+  # The signing, on a fresh GitHub-hosted VM with nothing from the repository: no checkout, no local action, no build;
+  # only the archive, downloaded.
+  sign:
+    if: github.repository == 'sagemathinc/sagebrush' && github.ref == 'refs/heads/master'
+    needs: archive
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: sagebrush-signing
+    env:
+      XCODE_APP: /Applications/Xcode_26.2.app
+      XCODE_VERSION: "Xcode 26.2"
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ios-archive
+          path: ${{ runner.temp }}/in
+      - name: Xcode 26.2, and the archive unpacked
+        run: |
+          set -euo pipefail
+          [ "$(uname -m)" = arm64 ] || { echo "FAIL: the runner is not arm64"; exit 1; }
+          [ -d "$XCODE_APP" ] || { echo "FAIL: $XCODE_APP is not on this runner image"; exit 1; }
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          got=$(xcodebuild -version | head -1)
+          [ "$got" = "$XCODE_VERSION" ] || { echo "FAIL: xcodebuild says '$got', not '$XCODE_VERSION'"; exit 1; }
+          mkdir "$RUNNER_TEMP/archive"
+          tar -C "$RUNNER_TEMP/archive" -xzf "$RUNNER_TEMP/in/archive.tar.gz"
+          archive=$(find "$RUNNER_TEMP/archive" -maxdepth 1 -name '*.xcarchive' -type d -print -quit)
+          [ -n "$archive" ] || { echo "FAIL: no .xcarchive in the artifact" >&2; exit 1; }
+          echo "SAGEBRUSH_ARCHIVE=$archive" >> "$GITHUB_ENV"
+      # The one signing step: the distribution certificate, imported non-extractable (-x) into a keychain made for
+      # this run, usable by codesign alone; the profile installed; then only `xcodebuild -exportArchive`, which runs
+      # none of the project's code. The team and the profile's UUID are read from the profile itself.
+      - name: Sign for the App Store (export the archive)
+        env:
+          P12_BASE64: ${{ secrets.SAGEBRUSH_IOS_DIST_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.SAGEBRUSH_IOS_DIST_P12_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.SAGEBRUSH_IOS_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          for value in P12_BASE64 P12_PASSWORD PROFILE_BASE64; do
+            [[ -n "${!value}" ]] || { echo "Missing $value (a sagebrush-signing secret)" >&2; exit 1; }
+          done
+          umask 077
+          s="$RUNNER_TEMP/signing"; mkdir "$s"
+          node -e 'const fs = require("fs"); for (const [v, f] of [["P12_BASE64", "dist.p12"], ["PROFILE_BASE64", "app.mobileprovision"]]) fs.writeFileSync(process.argv[1] + "/" + f, Buffer.from(process.env[v], "base64"), { mode: 0o600 })' "$s"
+          unset P12_BASE64 PROFILE_BASE64
+          kc="$RUNNER_TEMP/sagebrush-signing.keychain-db"
+          kcpw=$(openssl rand -hex 32)
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings -lut 1800 "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          security import "$s/dist.p12" -k "$kc" -f pkcs12 -P "$P12_PASSWORD" -x -T /usr/bin/codesign
+          unset P12_PASSWORD
+          rm -f "$s/dist.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          security cms -D -i "$s/app.mobileprovision" > "$s/profile.plist"
+          uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$s/profile.plist")
+          team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$s/profile.plist")
+          appid=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$s/profile.plist")
+          [ "$appid" = "$team.space.sagebrush.notebook" ] || { echo "FAIL: the profile is for $appid, not space.sagebrush.notebook" >&2; exit 1; }
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d"
+            cp "$s/app.mobileprovision" "$d/$uuid.mobileprovision"
+          done
+          echo "$uuid" > "$RUNNER_TEMP/profile-uuid"
+          o="$s/ExportOptions.plist"
+          plutil -create xml1 "$o"
+          /usr/libexec/PlistBuddy -c 'Add :method string app-store-connect' -c 'Add :destination string export' \
+            -c 'Add :signingStyle string manual' -c "Add :teamID string $team" -c 'Add :signingCertificate string Apple Distribution' \
+            -c 'Add :provisioningProfiles dict' -c "Add :provisioningProfiles:space.sagebrush.notebook string $uuid" "$o"
+          xcodebuild -exportArchive -archivePath "$SAGEBRUSH_ARCHIVE" -exportOptionsPlist "$o" -exportPath "$RUNNER_TEMP/export"
+          ipa=$(find "$RUNNER_TEMP/export" -name '*.ipa' -print -quit)
+          [ -n "$ipa" ] || { echo "FAIL: the export made no .ipa" >&2; exit 1; }
+          echo "SAGEBRUSH_IPA=$ipa" >> "$GITHUB_ENV"
+          ls -l "$ipa"
+      - name: Upload to App Store Connect (TestFlight)
+        env:
+          ASC_KEY_ID: ${{ secrets.SAGEBRUSH_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.SAGEBRUSH_ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.SAGEBRUSH_ASC_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          for value in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY; do
+            [[ -n "${!value}" ]] || { echo "Missing $value (a sagebrush-signing secret)" >&2; exit 1; }
+          done
+          umask 077
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from(process.env.ASC_KEY, "base64"), { mode: 0o600 })' \
+            "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          unset ASC_KEY
+          xcrun altool --upload-app --type ios --file "$SAGEBRUSH_IPA" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+      - name: Remove the keychain, the profile and the upload key
+        if: always()
+        run: |
+          kc="$RUNNER_TEMP/sagebrush-signing.keychain-db"
+          [ -e "$kc" ] && security delete-keychain "$kc"
+          rm -rf "$RUNNER_TEMP/signing" "$RUNNER_TEMP/export" "$HOME/.appstoreconnect"
+          if [ -s "$RUNNER_TEMP/profile-uuid" ]; then
+            uuid=$(cat "$RUNNER_TEMP/profile-uuid")
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$uuid.mobileprovision"
+          fi
+          exit 0
