@@ -333,10 +333,8 @@ async function approve(db: D1, core: PairingCore, aud: string, now: () => number
   if (!chain) no("not_granted");
   // 2. the approval, against the STORED pairing (never the request), with a fresh sign-in
   const spent = new Set((await db.prepare("SELECT approval FROM fleet_pairing_approvals WHERE pairing = ?1").bind(p.pairing).all<{ approval: string }>()).results.map((r) => r.approval));
-  const a = await core.verifyApproval(approvalBytes, {
-    aud, fleet, chain: chain!.state, now: t, checkAuthTime: true, current: null, used: (id: string) => spent.has(id),
-    expect: { kind: "host-pair", requester: { pairing: p.pairing }, subject: { host: p.host, sign_key: p.sign_key, enc_key: p.enc_key, fingerprint: p.fingerprint, name: p.name } },
-  });
+  const expect = { kind: "host-pair", requester: { pairing: p.pairing }, subject: { host: p.host, sign_key: p.sign_key, enc_key: p.enc_key, fingerprint: p.fingerprint, name: p.name } };
+  const a = await core.verifyApproval(approvalBytes, { aud, fleet, chain: chain!.state, now: t, checkAuthTime: true, current: null, used: (id: string) => spent.has(id), expect });
   // 3. the certificate's body names exactly the stored keys, in this account's fleet (pairHost verifies it in full)
   const cert = core.parseCanonical(certBytes, core.SIGNED_MAX)?.body;
   if (!cert || typeof cert !== "object") no("bad_form");
@@ -375,7 +373,12 @@ async function approve(db: D1, core: PairingCore, aud: string, now: () => number
   // 5. the holder pairs the host: one batch under the head CAS
   let paired: Awaited<ReturnType<typeof pairHost>>;
   try {
-    paired = await pairHost(db, core, { fleet: fleet!, aud, bytes: certBytes });
+    // (the approval verified again against the chain state the pairing's batch binds, on every attempt: a policy change
+    // or the approval signer's removal since the checks above refuses here. Its own claim spent it, so `used` is off)
+    paired = await pairHost(db, core, {
+      fleet: fleet!, aud, bytes: certBytes,
+      authorize: async (state) => { await core.verifyApproval(approvalBytes, { aud, fleet, chain: state, now: now(), checkAuthTime: true, current: null, used: () => false, expect }); },
+    });
   } catch (e) {
     await release(db, claim, p.pairing, null);
     throw e;

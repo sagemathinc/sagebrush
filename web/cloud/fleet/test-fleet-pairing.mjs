@@ -495,6 +495,50 @@ for (const order of ["B-first", "A-first"]) {
   await bare.dispose();
 }
 
+// ---- A-C: the approval is judged against the chain state the pairing's batch binds (a policy change or the approval
+// signer's removal while an approval is in flight refuses, though the certificate's signer stays valid)
+{
+  /** append one chain entry to f, signed by its native device N (or `add` with the new device's countersignature) */
+  const appendAs = async (f, op, extra, add) => {
+    const prev = (await one("SELECT hash FROM fleet_chain_hashes WHERE fleet = ?1 AND seq = ?2", f.fleet, f.seq - 1)).hash;
+    const body = { ...f.body(op, extra), seq: f.seq, prev };
+    const bytes = add ? await core.sealAdd(f.sN, body, f.N, add) : await core.seal("sb.device-chain.v1", f.sN, body, f.N);
+    const r = await call("/api/fleet/v1/chain", { body: text(bytes), headers: { "x-test-account": f.account } });
+    if (r.status !== 200) throw new Error(`${op}: ${JSON.stringify(r.json)}`);
+    f.seq++;
+  };
+  /** a fleet with a second device D2 of `tier`, a waiting host, an approval signed by D2 and a certificate signed by N */
+  const setup = async (name, tier) => {
+    const f = await fleetOf();
+    const D2 = await key(), d2Id = core.newId();
+    await appendAs(f, "add", { device: { id: d2Id, alg: "ed25519", key: core.b64(D2.raw), name: "laptop", tier } }, D2);
+    const g = await asked(name);
+    const sD2 = { kind: "device", id: d2Id, alg: "ed25519", key: D2.key }, subject = subjectOf(g.h);
+    const approval = text(await core.seal("sb.approval.v1", sD2, { fleet: f.fleet, aud: AUD, chain_seq: f.seq - 1, approval: core.newId(), kind: "host-pair",
+      requester: { pairing: g.pairing }, subject, subject_hash: await core.sha256b64(enc(core.canonText(subject))), at_ms: NOW, not_after_ms: NOW + 600_000, auth_time_ms: NOW }, D2));
+    return { f, g, d2Id, body: { pairing: g.pairing, approval, cert: await certOf(f, g.h) } };
+  };
+  const settle = async (s) => ({ host: await one("SELECT host FROM fleet_hosts WHERE host = ?1", s.g.h.host), claim: (await one("SELECT claim FROM fleet_pairings WHERE pairing = ?1", s.g.pairing))?.claim ?? null });
+  // (control: the same, with nothing changing in flight, pairs)
+  const c = await setup("ac-control", "native");
+  const rc = await approveAs(c.f, c.body, { seam: "wait-after-claim:600" });
+  ok(rc.status === 200 && (await settle(c)).host?.host === c.g.h.host, "A-C1: control, an approval by a second native device pairs", rc.json);
+  // (the approval's signer removed while the approval is in flight, after the claim and before the pairing's batch)
+  const r = await setup("ac-removed", "native");
+  const pr = approveAs(r.f, r.body, { seam: "wait-after-claim:1200" });
+  await new Promise((res) => setTimeout(res, 300));
+  await appendAs(r.f, "remove", { remove: r.d2Id, regrants: [] });
+  const rr = await pr, sr = await settle(r);
+  ok(rr.status >= 400 && sr.host === null && sr.claim === null, `A-C2: the approval's signer removed in flight: refused (${errorOf(rr)}), no host row, the claim released`, { rr: rr.json, sr });
+  // (the policy turned native-only while a browser device's approval is in flight)
+  const p = await setup("ac-policy", "browser");
+  const pp = approveAs(p.f, p.body, { seam: "wait-after-claim:1200" });
+  await new Promise((res) => setTimeout(res, 300));
+  await appendAs(p.f, "policy", { policy: { require_native_for_widening: true } });
+  const rp = await pp, sp = await settle(p);
+  ok(rp.status >= 400 && errorOf(rp) === "device_tier" && sp.host === null && sp.claim === null, `A-C3: the policy turned native-only in flight: device_tier (${errorOf(rp)}), no host row, the claim released`, { rp: rp.json, sp });
+}
+
 console.log(`${count - failures}/${count} passed`);
 await mf.dispose();
 process.exit(failures ? 1 : 0);
