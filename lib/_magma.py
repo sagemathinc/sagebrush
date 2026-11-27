@@ -12100,6 +12100,25 @@ def _group_ctor(kind, first, gens, pos):
         gens = gens()
     finally:
         _CYCLE_CTX[0] -= 1
+    return _group_built(kind, first, gens, pos)
+
+
+def _ctx_push(first):
+    """first, a permutation group's context entered for generators evaluated
+    in place (ones that bind names, as exists(w){ ... } does), which
+    _group_ctor_after leaves; an error in them ends the statement, where
+    _report clears the context (_ctx_enter's invariant)."""
+    _CYCLE_CTX[0] += 1
+    return first
+
+
+def _group_ctor_after(kind, first, gens, pos):
+    """_group_ctor for generators evaluated in place (_ctx_push)."""
+    _CYCLE_CTX[0] -= 1
+    return _group_built(kind, first, gens, pos)
+
+
+def _group_built(kind, first, gens, pos):
     if kind == "PermutationGroup":
         return _groups().construct(first, gens, pos)
     return _groups().sub(first, gens, pos)

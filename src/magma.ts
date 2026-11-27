@@ -1856,6 +1856,7 @@ class Parser {
       const first = this.expr();
       if (this.eat("|")) {
         const gens: string[] = [];
+        const w0 = this.witnessDepths.length, depth = this.capturing;
         if (!this.at(">")) {
           do {
             gens.push(this.expr());
@@ -1864,8 +1865,14 @@ class Parser {
         this.expect(">");
         // (it returns the group and a map: in an expression, the group, as a
         // call's first value)
-        // (the generators evaluated in the group's context, a lambda: a cycle written there is made, _cycle)
-        const call = `_m._group_ctor(${JSON.stringify(t.v)}, ${first}, lambda: [${gens.join(", ")}], (${lt.line}, ${lt.col}))`;
+        // (the generators evaluated in a permutation group's context, so that a cycle written there is made: in a
+        // lambda; generators that bind names in this scope, a quantifier's witnesses, in place between _ctx_push and
+        // _group_ctor_after, as the "!" operand's are, since a lambda would make the names its own)
+        const binds = this.witnessDepths.slice(w0).some((d) => d === depth);
+        const kind = JSON.stringify(t.v), at = `(${lt.line}, ${lt.col})`;
+        const call = binds
+          ? `_m._group_ctor_after(${kind}, _m._ctx_push(${first}), [${gens.join(", ")}], ${at})`
+          : `_m._group_ctor(${kind}, ${first}, lambda: [${gens.join(", ")}], ${at})`;
         const e = `_m._first(${call})`;
         this.calls.set(e, call);
         return e;
