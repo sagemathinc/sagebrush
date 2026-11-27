@@ -440,7 +440,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
     pairing = p;
     showBar(); // (a newer pairing, not yet granted: the chip of the one before goes now)
     o.onPairing?.(p);
-    let was = false;
+    // (`lost`: this pairing's loss is said once. Its local cleanup notifies again (started, done, a failure and each
+    //  retry) and the bar follows every one of those; only the first closed change after it was connected is the loss)
+    let was = false, lost = false;
     p.onChange(() => {
       showBar();
       if (p.state === "paired" || p.state === "granted") was = true;
@@ -451,7 +453,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
       // (a refused hello is said in the Connect dialog itself; this is for a pairing that was connected)
       // (let go for another tab: nothing kept for a [Reconnect], nothing tried again; the remembered grant stays)
       if (released.has(p)) { if (pairing === p) kept = null; return; }
-      if (was && p.state === "closed" && p.closeReason && !/^revoked by the person$|^not allowed$/.test(p.closeReason)) {
+      if (was && !lost && p.state === "closed" && p.closeReason && !/^revoked by the person$|^not allowed$/.test(p.closeReason)) {
+        lost = true;
         if (pairing === p && p.closeReason !== "the grant expired") kept = p.lostRecord;
         // (B, #1620: tried again by itself, once per loss, on a page that keeps a reload record; a remembered grant's
         //  pairing, which keeps none, with its remembered access)

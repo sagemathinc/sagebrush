@@ -534,16 +534,35 @@ try {
 
   // ---- a refusal other than the agent's "another page is paired with this agent" is final: one hello, no retry (A11,
   // the remote computer's words; A12, any other)
-  for (const [n, text] of [["10", "another page is paired with this computer"], ["11", "wrong session"]]) {
+  const keptN = () => ev(`T.ws.agentGrants().then((a) => Object.keys(a).length)`);
+  for (const [n, text] of [["10", "another page is paired with this computer"], ["11", "not now"]]) {
     await drive({ op: "slow", s: 0 });
     await sleep(700);
+    const before = await keptN();
     await drive({ op: "refuse", text });
     await drive({ op: "hellos" });
     ok(await open(""), `reload ${n}`);
     await sleep(2500);
     const hs = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === PORT);
     await drive({ op: "refuse", text: null });
-    ok(hs.length === 1 && !(await ev(`!!document.querySelector(".sbag-bar")`)), `reload ${n}: refused "${text}", the reconnect asks once and stops (${hs.length} hellos)`);
+    const after = await keptN();
+    ok(hs.length === 1 && !(await ev(`!!document.querySelector(".sbag-bar")`)) && before > 0 && after === before, `reload ${n}: refused "${text}", the reconnect asks once and stops, the remembered grant kept (${hs.length} hellos, ${before} -> ${after} kept)`);
+  }
+  // ---- the agent's own unusable-session refusal (pairing.py's "wrong session"): asked once, and the remembered grant
+  // forgotten, not kept for the next load (#1751); then put back as it was, for reload 12
+  {
+    await drive({ op: "slow", s: 0 });
+    await sleep(700);
+    const saved = await ev(`T.ws.agentGrants().then((a) => JSON.stringify(a))`);
+    await drive({ op: "refuse", text: "wrong session" });
+    await drive({ op: "hellos" });
+    ok(await open(""), "reload 11b");
+    await sleep(2500);
+    const hs = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === PORT);
+    await drive({ op: "refuse", text: null });
+    const after = await keptN();
+    ok(hs.length === 1 && !(await ev(`!!document.querySelector(".sbag-bar")`)) && after === 0, `reload 11b: refused "wrong session", asked once, the remembered grant forgotten (${hs.length} hellos, ${after} kept)`);
+    await ev(`(async () => { for (const [id, k] of Object.entries(${saved})) await T.ws.putAgentGrant(id, k); return true; })()`);
   }
 
   // ---- an expiry inside the retry window ends it (A9, reconnect()'s remembered grant), on a fake clock
@@ -649,6 +668,37 @@ try {
   const g13 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === sixth.port);
   ok(h13.length >= 1 && h13.length <= 2 && g13.length === 0, `reload 13: the reload record's grant expired during the window: no further attempt, and it isn't given again (${h13.length} hellos, ${g13.length} grants)`);
   await drive({ op: "slow", s: 0 });
+
+  // ---- one "disconnected" dialog per pairing (#1751, Codex review): a timed grant's expiry ends the pairing once; its
+  // local cleanup then notifies again (started, done, a failure and each retry), and those update the bar, never a new
+  // dialog
+  const lossDialogs = `[...document.querySelectorAll(".sbag-box h2")].filter((h) => h.textContent === "The agent is disconnected").length`;
+  for (const mode of ["cleanup succeeds", "cleanup fails, then retries"]) {
+    ok(await open(""), `expiry (${mode}): a fresh page`);
+    await sleep(300);
+    const c = await drive({ op: "code" });
+    if (mode !== "cleanup succeeds") await ev(`(() => { const put = T.ws.putAgentGrant.bind(T.ws); window.__failDeletes = 0; window.__allowDelete = false; T.ws.putAgentGrant = async (id, g) => { if (g === null && !window.__allowDelete) { window.__failDeletes++; throw new Error("controlled local cleanup failure"); } return put(id, g); }; return true; })()`);
+    ok(await openConnect(c.code, c.port), `expiry (${mode}): the Connect dialog`);
+    const allowShown = nextDialog("Allow this agent?");
+    await click(".sbag-box button.primary");
+    ok((await allowShown).ok, `expiry (${mode}): the grant dialog`);
+    // (a grant of 1.5 s, given through the dialog's own Allow: one more duration offered by its select)
+    await ev(`(() => { const b = [...document.querySelectorAll(".sbag-box")].pop(); const s = b.querySelector("select"); s.append(Object.assign(document.createElement("option"), { value: "1500", textContent: "for 1.5 s" })); s.value = "1500"; s.dispatchEvent(new Event("change")); [...b.querySelectorAll("button")].find((x) => x.textContent === "Allow").click(); return true; })()`);
+    ok(await until(`T.ui.pairing?.state === "granted"`, 10000), `expiry (${mode}): granted`);
+    ok(await until(`T.ui.pairing?.state === "closed" && T.ui.pairing.closeReason === "the grant expired"`, 10000), `expiry (${mode}): the grant expires`);
+    if (mode === "cleanup succeeds") {
+      ok(await until(`!T.ui.pairing.cleanup`, 10000), "expiry (cleanup succeeds): the local cleanup commits");
+      await sleep(1500);
+    } else {
+      ok(await until(`window.__failDeletes >= 3`, 20000), `expiry (cleanup fails): the local cleanup failed and was retried (${await ev("window.__failDeletes")} attempts)`);
+      await ev("(window.__allowDelete = true, 1)");
+      ok(await until(`!T.ui.pairing.cleanup`, 20000), "expiry (cleanup fails): a later retry commits it");
+      await sleep(500);
+    }
+    const n = await ev(lossDialogs);
+    ok(n === 1, `expiry (${mode}): exactly one "The agent is disconnected" dialog, across the cleanup's notifications (${n})`);
+    await ev(`([...document.querySelectorAll(".sbag-box")].forEach((b) => [...b.querySelectorAll("button")].find((x) => x.textContent === "OK")?.click()), true)`);
+  }
 
   // ---- a spent code (A5): the agent refuses it, and the dialog says so, with no local-network advice; Connect shows
   // that it is trying
