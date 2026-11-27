@@ -100,9 +100,10 @@ const approvalOf = async (f, h, pairing, { approval = core.newId(), at = NOW, au
     subject_hash: await core.sha256b64(enc(core.canonText(subject))), at_ms: at, not_after_ms: at + 600_000, auth_time_ms: auth }, f.N));
 const certOf = async (f, h, extra = {}) => text(await core.seal("sb.host-cert.v1", f.sN, { fleet: f.fleet, aud: AUD, chain_seq: f.seq - 1, host: h.host, sign_key: core.b64(h.K.raw),
   enc_key: core.b64(h.encRaw), fingerprint: h.fingerprint, name: h.name, at_ms: NOW, ...extra }, f.N));
-async function approveAs(f, body, { now, seam } = {}) {
+async function approveAs(f, body, { now, seam, advance } = {}) {
   const headers = { "x-test-account": f.account };
   if (now !== undefined) headers["x-test-now"] = String(now);
+  if (advance !== undefined) headers["x-test-advance-before-claim"] = String(advance);
   if (seam) headers["x-test-pairing"] = seam;
   return call("/api/fleet/v1/pairings/approve", { body: JSON.stringify(body), headers });
 }
@@ -417,6 +418,44 @@ for (const order of ["B-first", "A-first"]) {
   ok((await one("SELECT claim FROM fleet_pairings WHERE pairing = ?1", g.pairing))?.claim === null, `G-${order}-3: no claim is left behind`);
   const st = (await pollOf(g.h, g.pairing, { now: lapsed + 10 })).json;
   ok(st?.state === "approved" && st?.fleet === winner.fleet, `G-${order}-4: the poll names that fleet`, st);
+}
+
+// ---- T: the claim reads the clock afresh: an approve's checks await reads, so time passes before its claim. The claim
+// re-checks the pairing's expiry inside its own SQL at that sample, and the approval's window and sign-in age; the lease
+// and the loser's answer run from it too. Each row has a twin one millisecond short of the edge, which certifies.
+{
+  const certs = async (h) => (await all("SELECT host FROM fleet_host_certs WHERE host = ?1", h.host)).length;
+  const go = async (o, advance, seam) => {
+    const f = await fleetOf(), g = await asked();
+    const r = await approveAs(f, { pairing: g.pairing, approval: await approvalOf(f, g.h, g.pairing, o), cert: await certOf(f, g.h) }, { now: NOW, advance, ...(seam ? { seam } : {}) });
+    return { r, g, f };
+  };
+  // (an approval at NOW + 5 min, fresh enough at NOW and still at NOW + 10 min: only the pairing's expiry decides)
+  const late = { at: NOW + 300_000, auth: NOW + 300_000 };
+  const x = await go(late, 600_000);
+  ok(x.r.status === 404 && x.r.json?.error === "not_found" && (await certs(x.g.h)) === 0, "T-1: the pairing expires between the checks and the claim: not_found, no certificate", x.r.json);
+  const xt = await go(late, 599_999);
+  ok(xt.r.status === 200 && (await certs(xt.g.h)) === 1, "T-1: its twin, 1 ms before the expiry: certified", xt.r.json);
+  const spent = (await all("SELECT at_ms FROM fleet_pairing_approvals WHERE pairing = ?1", xt.g.pairing))[0];
+  ok(spent?.at_ms === NOW + 599_999, "T-2: the approval is spent at the claim's own sample", spent);
+  const w = await go({ at: NOW - 300_000, auth: NOW }, 300_000);
+  ok(w.r.status === 403 && w.r.json?.error === "approval_stale" && (await certs(w.g.h)) === 0, "T-3: the approval's window ends before the claim: approval_stale", w.r.json);
+  const wt = await go({ at: NOW - 300_000, auth: NOW }, 299_999);
+  ok(wt.r.status === 200, "T-3: its twin: certified", wt.r.json);
+  const a = await go({ at: NOW, auth: NOW - 299_999 }, 2);
+  ok(a.r.status === 401 && a.r.json?.error === "stale_auth" && (await certs(a.g.h)) === 0, "T-4: the sign-in passes 5 minutes old before the claim: stale_auth", a.r.json);
+  const at = await go({ at: NOW, auth: NOW - 299_999 }, 1);
+  ok(at.r.status === 200, "T-4: its twin: certified", at.r.json);
+  const d = await go({}, 1000, "die-after-claim");
+  const held = (await all("SELECT claim_until_ms FROM fleet_pairings WHERE pairing = ?1", d.g.pairing))[0];
+  ok(held?.claim_until_ms === NOW + 1000 + P.PAIRING_CLAIM_MS, "T-5: the lease runs from the claim's sample", held);
+  // (a second approve whose checks ran inside the first's lease, and whose claim comes after it: it claims)
+  const f2 = await fleetOf();
+  const next = await approveAs(f2, { pairing: d.g.pairing, approval: await approvalOf(f2, d.g.h, d.g.pairing), cert: await certOf(f2, d.g.h) }, { now: NOW + 59_000, advance: 1_001 + 60_000 - 59_000 });
+  ok(next.status === 200 && (await certs(d.g.h)) === 1, "T-6: checks inside another's lease, the claim after it: claims and certifies", next.json);
+  const g3 = await go({}, 1000, "die-after-claim"), f3 = await fleetOf();
+  const busy = await approveAs(f3, { pairing: g3.g.pairing, approval: await approvalOf(f3, g3.g.h, g3.g.pairing), cert: await certOf(f3, g3.g.h) }, { now: NOW + 59_000, advance: 1_999 });
+  ok(busy.status === 409 && busy.json?.error === "in_progress", "T-6: its twin, claiming 1 ms before the lease ends: in_progress", busy.json);
 }
 
 // ---- S: the session and the method

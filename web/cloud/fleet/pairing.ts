@@ -23,6 +23,8 @@ export const PAIRING_HOST_RESUME_MAX_MS = 7 * 24 * 3600_000;
  * limit is CPU time, not time spent awaiting D1, so a lapsed holder may still reach pairHost. What keeps a host in one
  * fleet is fleet_hosts.host, a global key that pairHost inserts only where it is absent. */
 export const PAIRING_CLAIM_MS = 60_000;
+/** A host-pair approval's sign-in age at the claim: the core's own (freshAuth's AUTH_MS, 5 minutes). */
+const AUTH_FRESH_MS = 5 * 60_000;
 /** A pairing request's body cap. */
 export const PAIRING_BODY_MAX = 4096;
 /** The per-source, per-account and per-pairing limits (§3). */
@@ -341,25 +343,32 @@ async function approve(db: D1, core: PairingCore, aud: string, now: () => number
   if (cert.host !== p.host || cert.sign_key !== p.sign_key || cert.enc_key !== p.enc_key || cert.fingerprint !== p.fingerprint) no("approval_mismatch");
   if (cert.fleet !== fleet) no("not_granted");
   if (hooks.beforeClaim) await hooks.beforeClaim();
-  // 4. the claim: ONE batch; exactly one racer's UPDATE changes a row, and only its approval is spent
-  const claim = core.newId(), until = t + PAIRING_CLAIM_MS;
+  // 4. the claim, at a FRESH clock sample: the checks above awaited reads, so time has passed since t. The pairing's
+  // expiry is checked again inside the claim's own SQL at this sample, the approval's window and sign-in age here, and
+  // the lease runs from it: a claim can't cross an expiry that the earlier sample didn't see
+  const tc = now();
+  if (tc >= a.not_after_ms || tc < a.at_ms - 5 * 60_000) no("approval_stale");
+  if (!(tc - a.auth_time_ms <= AUTH_FRESH_MS && a.auth_time_ms <= tc + AUTH_FRESH_MS)) no("stale_auth");
+  // ONE batch: exactly one racer's UPDATE changes a row, and only its approval is spent
+  const claim = core.newId(), until = tc + PAIRING_CLAIM_MS;
   const claimable = `p.expires_ms > ?3 AND (p.claim IS NULL OR p.claim_until_ms <= ?3) AND NOT ${CERTIFIED}`;
   let res;
   try {
     res = await db.batch([
       db.prepare(`INSERT INTO fleet_pairing_approvals (approval, pairing, account, at_ms) SELECT ?1, ?2, ?4, ?3 WHERE EXISTS (SELECT 1 FROM fleet_pairings p WHERE p.pairing = ?2 AND ${claimable})`)
-        .bind(a.approval, p.pairing, t, account),
+        .bind(a.approval, p.pairing, tc, account),
       db.prepare(`UPDATE fleet_pairings AS p SET claim = ?1, claim_account = ?4, claim_until_ms = ?5 WHERE p.pairing = ?2 AND ${claimable}`)
-        .bind(claim, p.pairing, t, account, until),
+        .bind(claim, p.pairing, tc, account, until),
     ]);
   } catch (e) {
     if (isUnique(e)) no("approval_used");
     throw e;
   }
   if ((res[1]?.meta?.changes ?? 0) !== 1) {
+    // (the loser's answer, at the claim's own sample: in_progress only while another claim's lease still runs)
     const again = await rowOf(db, "pairing", p.pairing);
-    const certified = again ? (await stateOf(db, core, again, t)).state === "approved" : false;
-    if (again && !certified && again.expires_ms > t && again.claim !== null && (again.claim_until_ms ?? 0) > t) no("in_progress");
+    const certified = again ? (await stateOf(db, core, again, tc)).state === "approved" : false;
+    if (again && !certified && again.expires_ms > tc && again.claim !== null && (again.claim_until_ms ?? 0) > tc) no("in_progress");
     no("not_found");
   }
   if (hooks.afterClaim) await hooks.afterClaim();
