@@ -446,6 +446,10 @@ for (const order of ["B-first", "A-first"]) {
   ok(a.r.status === 401 && a.r.json?.error === "stale_auth" && (await certs(a.g.h)) === 0, "T-4: the sign-in passes 5 minutes old before the claim: stale_auth", a.r.json);
   const at = await go({ at: NOW, auth: NOW - 299_999 }, 1);
   ok(at.r.status === 200, "T-4: its twin: certified", at.r.json);
+  // (the checks' own sample still decides first: a sign-in time more than 5 minutes ahead at the checks is refused there,
+  // though it would be within 5 minutes of the later claim)
+  const ahead = await go({ at: NOW, auth: NOW + 300_001 }, 2);
+  ok(ahead.r.status === 401 && ahead.r.json?.error === "stale_auth" && (await certs(ahead.g.h)) === 0, "T-4: a sign-in time 5 min + 1 ms ahead at the checks: stale_auth, before the claim", ahead.r.json);
   const d = await go({}, 1000, "die-after-claim");
   const held = (await all("SELECT claim_until_ms FROM fleet_pairings WHERE pairing = ?1", d.g.pairing))[0];
   ok(held?.claim_until_ms === NOW + 1000 + P.PAIRING_CLAIM_MS, "T-5: the lease runs from the claim's sample", held);
