@@ -1,0 +1,98 @@
+\begin{thebibliography}{10}
+
+\bibitem{alpha2}
+Ann Able.
+\newblock An earlier second.
+\newblock {\em Alpha J.}, 1998.
+
+\bibitem{alpha}
+Ann Able.
+\newblock First by sort.
+\newblock {\em Alpha J.}, pages 1--10, March 1999.
+
+\bibitem{same1}
+Ann Able and Zed Zimmer.
+\newblock Two authors.
+\newblock {\em J}, 2000.
+
+\bibitem{corp}
+{Barnes and Noble}.
+\newblock {\em A Catalog}.
+\newblock B\&N, 2005.
+
+\bibitem{edonly}
+Eve Editor and Fay Fixer, editors.
+\newblock {\em Collected Works}, volume~2 of {\em Lecture Notes}.
+\newblock Pub, 2010.
+
+\bibitem{inb}
+Gus Green.
+\newblock {\em Big Book}, chapter~4, pages 33--44.
+\newblock Pub, 2011.
+
+\bibitem{inc}
+Hal Hill.
+\newblock A chapter.
+\newblock In Ivy Ink, editor, {\em The Collection}, pages 5--6. Pub, 2012.
+
+\bibitem{conf}
+Jo~Jones and Kim Kay.
+\newblock A talk on {GPU} methods.
+\newblock In {\em Proc. of {SIGGRAPH}}, pages 100--101. ACM, 2013.
+
+\bibitem{jr}
+Martin~Luther King, Jr.
+\newblock {\em Strength to Love}.
+\newblock Harper, New York, second edition, 1963.
+
+\bibitem{tr}
+Lou Long.
+\newblock Report.
+\newblock Technical report, Inst, 2014.
+
+\bibitem{phd}
+Mo~Moore.
+\newblock {\em A Thesis}.
+\newblock PhD thesis, Univ, June 2015.
+
+\bibitem{ms}
+Ned North.
+\newblock Masters.
+\newblock Master's thesis, Univ, 2016.
+
+\bibitem{man2}
+Org.
+\newblock {\em Manual Only Title}, 2018.
+
+\bibitem{misc}
+Oz~Orr.
+\newblock Something online.
+\newblock \url{http://x.org}, 2017.
+\newblock Note here.
+
+\bibitem{accent}
+{\"O}zg{\"u}r {\"O}zt{\"u}rk.
+\newblock Accents.
+\newblock {\em J}, 2019.
+
+\bibitem{unp2}
+Pat Poe.
+\newblock Draft.
+\newblock In preparation.
+
+\bibitem{noyear}
+Quin Quick.
+\newblock No year here.
+\newblock {\em J}.
+
+\bibitem{vonb}
+Ludwig van Beethoven.
+\newblock {\em Symphonies}.
+\newblock Breitkopf, 1808.
+
+\bibitem{zeta}
+Zed Zimmer, Ann Able, Bob Baker, Cy~Cole, and Di~Dunn.
+\newblock Five authors: A study of many hands.
+\newblock {\em J. Many}, 3:7, 2001.
+
+\end{thebibliography}

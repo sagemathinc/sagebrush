@@ -154,69 +154,102 @@ export function titleCase(s: string): string {
 /** Letters outside braces lowercased, as change.case$ "l" (a control sequence and math left as they are). */
 const lower = (s: string) => titleCase("x" + s).slice(1).replace(/^./, (c) => c.toLowerCase());
 const dashify = (p: string) => p.replace(/(\d)\s*-\s*(?=\d)/g, "$1--").replace(/(\d)\s*--+\s*(?=\d)/g, "$1--");
-const pagesWord = (p: string) => (/[-,+]/.test(p) ? "pages " + dashify(p) : "page " + p);
 /** BibTeX's purify$: letters, digits and spaces, a special character as its letter. */
 const purify = (s: string) => s.replace(/\\[A-Za-z]+\s*|\\./g, "").replace(/-/g, " ").replace(/[^A-Za-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
 
+// (the names part of plain's sort key, by type, as its presort: book and inbook author, else editor; proceedings editor,
+//  else organization; manual author, else organization; every other type author only; then the key field; else empty,
+//  so the entry sorts first: plain warns "to sort, need author or key")
 function sortKey(e: Entry): string {
-  const f = e.fields, who = f.get("author") || f.get("editor");
-  const names = who ? splitNames(who).map((x) => { const p = nameParts(x); return [p.von, p.last, p.first, p.jr].filter(Boolean).join(" "); }).join("   ") : f.get("key") || f.get("organization") || e.key;
+  const f = e.fields, t = e.type;
+  const names = (s: string) => splitNames(s).map((x) => { const p = nameParts(x); return [p.von, p.last, p.first, p.jr].filter(Boolean).join(" "); }).join("   ");
+  const org = (o: string) => o.replace(/^The\s+/, "");
+  const by = (...ks: string[]) => { for (const k of ks) { const v = f.get(k); if (v) return k === "organization" ? org(v) : k === "key" ? v : names(v); } return ""; };
+  const who = t === "book" || t === "inbook" ? by("author", "editor", "key") : t === "proceedings" ? by("editor", "organization", "key")
+    : t === "manual" ? by("author", "organization", "key") : by("author", "key");
   const title = (f.get("title") ?? "").replace(/^(A|An|The)\s+/, "");
-  return (purify(names) + "    " + (f.get("year") ?? "") + "    " + purify(title)).toLowerCase();
+  return (purify(who) + "    " + (f.get("year") ?? "") + "    " + purify(title)).toLowerCase();
 }
 
-/** One entry's text as plain writes it: its blocks, each ending with a period, joined by \newblock. */
+// (plain's output: a state machine of sentences and blocks. output writes ", " in a sentence, ". " after new.sentence,
+//  ".\n\newblock " after new.block; a period ends the entry, none added after one (add.period$))
+const addPeriod = (s: string) => (/[.?!]\}*$/.test(s) ? s : s + ".");
+class Out {
+  s = ""; st: "before" | "mid" | "sentence" | "block" = "before";
+  out(x: string) { if (!x) return; if (this.st === "mid") this.s += ", "; else if (this.st === "sentence") this.s = addPeriod(this.s) + " "; else if (this.st === "block") this.s = addPeriod(this.s) + "\n\\newblock "; this.s += x; this.st = "mid"; }
+  block() { if (this.st !== "before") this.st = "block"; }
+  sentence() { if (this.st !== "block" && this.st !== "before") this.st = "sentence"; }
+  blockIf(...xs: string[]) { if (xs.some(Boolean)) this.block(); }
+  sentenceIf(...xs: string[]) { if (xs.some(Boolean)) this.sentence(); }
+}
+/** A number joined to its word as plain's tie.or.space.connect: a tie when it is shorter than 3 characters. */
+const tie = (w: string, n: string) => w + (n.length < 3 ? "~" : " ") + n;
+
+/** One entry's text as plain.bst writes it: each type's fields in its order, sentences and blocks as plain makes them. */
 export function formatEntry(e: Entry): string {
   const f = (k: string) => e.fields.get(k) ?? "";
-  const blocks: string[] = [];
-  const add = (s: string) => { if (s.trim()) blocks.push(s.trim()); };
-  const list = (...xs: string[]) => xs.filter((x) => x.trim()).join(", ");
-  const date = [f("month"), f("year")].filter(Boolean).join(" ");
-  const authors = f("author") ? formatNames(f("author")) : "";
+  const o = new Out(), t = e.type;
   const em = (s: string) => (s ? "{\\em " + s + "}" : "");
-  // (an edition as plain writes it, lowercased: "second edition")
+  const authors = f("author") ? formatNames(f("author")) : "", eds = f("editor") ? editors(f("editor")) : "";
+  const title = f("title") ? titleCase(f("title")) : "", btitle = em(f("title"));
+  const date = f("year") ? (f("month") ? f("month") + " " + f("year") : f("year")) : f("month");
   const edition = f("edition") ? lower(f("edition")) + " edition" : "";
-  const series = f("volume") ? "volume " + f("volume") + (f("series") ? " of " + em(f("series")) : "") : f("series");
-  const t = e.type;
+  const multi = /[-,+]/.test(f("pages"));
+  const pages = f("pages") ? (multi ? tie("pages", dashify(f("pages"))) : tie("page", f("pages"))) : "";
+  const bvolume = f("volume") ? tie("volume", f("volume")) + (f("series") ? " of " + em(f("series")) : "") : "";
+  // (format.number.series: "number" in a sentence, "Number" starting one; nothing with a volume, which bvolume shows)
+  const numSeries = () => f("volume") ? "" : f("number") ? tie(o.st === "mid" ? "number" : "Number", f("number")) + (f("series") ? " in " + f("series") : "") : f("series");
+  const chapterPages = () => f("chapter") ? tie(f("type") ? lower(f("type")) : "chapter", f("chapter")) + (pages ? ", " + pages : "") : pages;
+  const inEdBooktitle = f("booktitle") ? "In " + (eds ? eds + ", " : "") + em(f("booktitle")) : "";
+  const thesis = (dflt: string) => (f("type") ? titleCase(f("type")) : dflt);
   if (t === "article") {
-    add(authors); add(titleCase(f("title")));
-    let j = em(f("journal"));
-    if (f("volume")) j = list(j, f("volume") + (f("number") ? "(" + f("number") + ")" : "") + (f("pages") ? ":" + dashify(f("pages")) : ""));
-    else if (f("pages")) j = list(j, pagesWord(f("pages")));
-    add(list(j, date));
+    o.out(authors); o.block(); o.out(title); o.block(); o.out(em(f("journal")));
+    let vnp = f("volume") + (f("number") ? "(" + f("number") + ")" : "");
+    if (f("pages")) vnp = vnp ? vnp + ":" + dashify(f("pages")) : pages;
+    o.out(vnp); o.out(date);
   } else if (t === "book" || t === "inbook") {
-    add(authors || (f("editor") ? editors(f("editor")) : ""));
-    add(list(em(f("title")), series, t === "inbook" ? list(f("chapter") ? "chapter " + f("chapter") : "", f("pages") ? pagesWord(f("pages")) : "") : ""));
-    add(list(f("publisher"), f("address"), edition, date));
-  } else if (t === "incollection" || t === "inproceedings" || t === "conference") {
-    add(authors); add(titleCase(f("title")));
-    const inn = "In " + list(f("editor") ? editors(f("editor")) : "", em(f("booktitle")), series, f("pages") ? pagesWord(f("pages")) : "");
-    // (the publisher in the same block, after a period, as plain's new.sentence puts it)
-    const then = (x: string, y: string) => (x && y ? x + ". " + y : x || y);
-    if (t === "incollection") add(then(inn, list(f("publisher"), f("address"), date)));
-    else add(then(list(inn, f("address"), date), list(f("organization"), f("publisher"))));
-  } else if (t === "phdthesis" || t === "mastersthesis") {
-    add(authors); add(em(f("title")));
-    add(list(f("type") || (t === "phdthesis" ? "PhD thesis" : "Master's thesis"), f("school"), f("address"), date));
-  } else if (t === "techreport") {
-    add(authors); add(titleCase(f("title")));
-    add(list((f("type") || "Technical Report") + (f("number") ? " " + f("number") : ""), f("institution"), f("address"), date));
+    o.out(authors || eds); o.block(); o.out(btitle); o.out(bvolume);
+    if (t === "inbook") o.out(chapterPages());
+    o.block(); o.out(numSeries()); o.sentence(); o.out(f("publisher")); o.out(f("address")); o.out(edition); o.out(date);
+  } else if (t === "booklet") {
+    o.out(authors); o.block(); o.out(title); o.blockIf(f("howpublished"), f("address")); o.out(f("howpublished")); o.out(f("address")); o.out(date);
+  } else if (t === "incollection") {
+    o.out(authors); o.block(); o.out(title); o.block(); o.out(inEdBooktitle); o.out(bvolume); o.out(numSeries()); o.out(chapterPages());
+    o.sentence(); o.out(f("publisher")); o.out(f("address")); o.out(edition); o.out(date);
+  } else if (t === "inproceedings" || t === "conference") {
+    o.out(authors); o.block(); o.out(title); o.block(); o.out(inEdBooktitle); o.out(bvolume); o.out(numSeries()); o.out(pages);
+    if (!f("address")) { o.sentenceIf(f("organization"), f("publisher")); o.out(f("organization")); o.out(f("publisher")); o.out(date); }
+    else { o.out(f("address")); o.out(date); o.sentence(); o.out(f("organization")); o.out(f("publisher")); }
   } else if (t === "manual") {
-    add(authors || f("organization"));
-    add(list(em(f("title")), authors ? f("organization") : "", f("address"), edition, date));
+    if (authors) o.out(authors); else if (f("organization")) { o.out(f("organization")); o.out(f("address")); }
+    o.block(); o.out(btitle);
+    if (!authors) { if (!f("organization")) { o.blockIf(f("address")); o.out(f("address")); } }
+    else { o.blockIf(f("organization"), f("address")); o.out(f("organization")); o.out(f("address")); }
+    o.out(edition); o.out(date);
+  } else if (t === "mastersthesis" || t === "phdthesis") {
+    o.out(authors); o.block(); o.out(t === "phdthesis" ? btitle : title); o.block();
+    o.out(thesis(t === "phdthesis" ? "PhD thesis" : "Master's thesis")); o.out(f("school")); o.out(f("address")); o.out(date);
+  } else if (t === "proceedings") {
+    o.out(eds || f("organization")); o.block(); o.out(btitle); o.out(bvolume); o.out(numSeries());
+    if (!f("address")) {
+      if (!eds) o.sentenceIf(f("publisher")); else { o.sentenceIf(f("organization"), f("publisher")); o.out(f("organization")); }
+      o.out(f("publisher")); o.out(date);
+    } else { o.out(f("address")); o.out(date); o.sentence(); if (eds) o.out(f("organization")); o.out(f("publisher")); }
+  } else if (t === "techreport") {
+    o.out(authors); o.block(); o.out(title); o.block();
+    const tr = f("type") || "Technical Report";
+    o.out(f("number") ? tie(tr, f("number")) : titleCase(tr)); o.out(f("institution")); o.out(f("address")); o.out(date);
   } else if (t === "unpublished") {
-    add(authors); add(titleCase(f("title"))); add(list(f("note"), date));
+    o.out(authors); o.block(); o.out(title); o.block(); o.out(f("note")); o.out(date);
   } else {
-    // (misc, booklet and any other type: what it has, simply)
-    // (with no howpublished, the date in the title's block: "A preprint, 2024.")
-    add(authors || (f("editor") ? editors(f("editor")) : ""));
-    const rest = list(f("howpublished"), t === "booklet" ? f("address") : "", date);
-    if (f("howpublished")) { add(titleCase(f("title"))); add(rest); } else add(list(titleCase(f("title")), rest));
+    // (misc, and any type plain doesn't know, as plain's default.type: misc)
+    o.out(authors); o.blockIf(f("title"), f("howpublished")); o.out(title); o.blockIf(f("howpublished")); o.out(f("howpublished")); o.out(date);
   }
-  if (t !== "unpublished") add(f("note"));
+  if (t !== "unpublished") { o.block(); o.out(f("note")); }
+  // (a doi, an eprint and a url, which plain leaves out: shown, simply, in a block of their own)
   const eprint = f("eprint") ? (/^arxiv$/i.test(f("archiveprefix") || f("eprinttype") || "arxiv") ? "arXiv:" + f("eprint") : f("eprint")) : "";
-  add(list(f("doi") ? "doi:" + f("doi") : "", eprint, f("url") ? "\\url{" + f("url") + "}" : ""));
-  return blocks.map((b) => (/[.?!]\}*$/.test(b) ? b : b + ".")).join("\n\\newblock ");
+  o.block(); o.out(f("doi") ? "doi:" + f("doi") : ""); o.out(eprint); o.out(f("url") ? "\\url{" + f("url") + "}" : "");
+  return o.s ? addPeriod(o.s) : "";
 }
 
 /** Strip TeX comments: "%" to the line's end, not "\%". */

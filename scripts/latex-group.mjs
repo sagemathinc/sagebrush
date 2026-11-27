@@ -284,8 +284,10 @@ export const LATEX_LAZY_CAPS = {
   //  its own row, not in an existing chunk; 5 KiB / 2.25 KiB, the smallest rounded cap above its first build's 4,540 / 2,008; 4,799 / 2,153 with the stale fade's code; 4,892 / 2,191 with display states made afresh on a cache hit)
   PYTHONTEX: { label: "the LaTeX PythonTeX results chunk", raw: 5 * 1024, gzip: 2.25 * 1024 },
   // (a .bib's reading, web/latex/bib.ts: the worker's, fetched when a document has a .bib read and no .bbl; inputs.ts
-  //  makes the .bbl from it. 8,147 / 3,368: Nov 26 2026, 8,083 / 3,304 measured on master 9063c669 with it (the same on its merge with master bd4a014f), + 64)
-  BIB: { label: "the LaTeX .bib chunk", raw: 8147, gzip: 3368 },
+  //  makes the .bbl from it. 8,147 / 3,368: Nov 26 2026, 8,083 / 3,304 measured on master 9063c669 with it (the same on its merge with master bd4a014f), + 64;
+  //  10,130 / 3,781: Nov 27 2026, 10,066 / 3,717 measured with plain.bst's output machine (sentences and blocks, every type's order, the sort
+  //  key by type: a BibTeX differential's 35 entries), + 64)
+  BIB: { label: "the LaTeX .bib chunk", raw: 10130, gzip: 3781 },
   // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
   //  the group so save-as-you-type (eager by nature) fits under the group's cap without a raise (Nov 7:
   //  a lazy split, not a raise). 12 KiB / 5.25 KiB: Nov 7, on 11,330 / 4,804 measured at master

@@ -1,0 +1,81 @@
+\begin{thebibliography}{10}
+
+\bibitem{mi2}
+Only a title.
+
+\bibitem{c2}
+Al~Ames.
+\newblock With publisher.
+\newblock In {\em Conf}, pages 1--2, NYC, 2013. ACM, ACM Press.
+
+\bibitem{c3}
+Bo~Best.
+\newblock Plain conf.
+\newblock In {\em Conf}, 2013.
+
+\bibitem{c4}
+Cy~Coe.
+\newblock Conf volume.
+\newblock In Ed~Edd, editor, {\em Conf}, volume~5 of {\em LNCS}, Berlin, July
+  2013.
+
+\bibitem{t2}
+Di~Dee.
+\newblock Typed.
+\newblock Working Paper~12, Inst, 2014.
+
+\bibitem{t3}
+Ed~Egg.
+\newblock Numbered.
+\newblock Technical Report~7, Inst, Here, 2014.
+
+\bibitem{m2}
+Flo Fay.
+\newblock Typed masters.
+\newblock Diploma thesis, Univ, 2016.
+
+\bibitem{p2}
+Gil Gee.
+\newblock {\em Typed PhD}.
+\newblock Habilitation, Univ, 2016.
+
+\bibitem{bk}
+Hy~Ho.
+\newblock A booklet.
+\newblock Handout, 2001.
+
+\bibitem{pr}
+Ian Ivy, editor.
+\newblock {\em The Proceedings}. Org, Pub, 2002.
+
+\bibitem{ib2}
+Jan Jay, editor.
+\newblock {\em Edited Book}, section~2.
+\newblock Pub, 2003.
+
+\bibitem{ar2}
+Kat Kim et~al.
+\newblock With others.
+\newblock {\em J}, 1(2):3--4, dec 2004.
+\newblock A note.
+
+\bibitem{bk2}
+Lee Lu.
+\newblock {\em Volumed}, volume~3 of {\em S}.
+\newblock Pub, third edition, 2005.
+
+\bibitem{bk3}
+Max Mo.
+\newblock {\em Numbered In Series}.
+\newblock Number~9 in S. Pub, 2006.
+
+\bibitem{ar3}
+Nia Nu.
+\newblock Title ends with question?
+\newblock {\em J}, 2007.
+
+\bibitem{pr2}
+Org.
+\newblock {\em Org Proceedings}, 2002.
+
+\end{thebibliography}

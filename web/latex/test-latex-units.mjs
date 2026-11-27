@@ -1248,6 +1248,17 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   const mine = items(B.bibToBbl([FIX], { all: true, keys: [] }));
   const off = mine.map((x, k) => [x, BIBTEX[k]]).filter(([a, b]) => a !== b);
   check("bib-plain-as-bibtex", mine.length === 13 && off.length === 0, off.slice(0, 2));
+  // (a second oracle, independent of FIX: 35 entries over every type plain knows, in test/fixtures/latex/bibtex/, each
+  //  .bbl recorded by BibTeX 0.99d (TeX Live 2025) with plain.bst and \nocite{*}: every entry the same (a tie as a space, as above), and in
+  //  the same order: an entry with no author or key sorts first; inproceedings' organization; techreport's and
+  //  mastersthesis' cases; proceedings; inbook's type; "Number n in series")
+  for (const n of ["probe", "probe2"]) {
+    const dir = new URL("../../test/fixtures/latex/bibtex/", import.meta.url).pathname;
+    const raw = (s) => s.split("\\bibitem").slice(1).map((x) => x.replace(/\\end\{thebibliography\}[\s\S]*$/, "").replace(/~/g, " ").replace(/\s+/g, " ").trim());
+    const want = raw(readFileSync(dir + n + ".bbl", "utf8")), got = raw(B.bibToBbl([readFileSync(dir + n + ".bib", "utf8")], { all: true, keys: [] }));
+    const diff = want.map((x, k) => [x, got[k]]).filter(([x, y]) => x !== y);
+    check("bib-plain-differential-" + n, want.length >= 16 && got.length === want.length && diff.length === 0, diff.slice(0, 2));
+  }
   // (the cited ones only, each with the key as cited (BibTeX's keys match whatever their case); one not in the .bib left out)
   const some = B.bibToBbl([FIX], B.citedKeys(["\\cite{Knuth84} \\nocite{tr} % \\cite{thesis}\n\\citep[p.~2]{nosuch, lamport94}"]));
   check("bib-cited-only", JSON.stringify(items(some).map((x) => /^\{([^}]*)\}/.exec(x)[1])) === JSON.stringify(["Knuth84", "lamport94", "tr"]), items(some));
