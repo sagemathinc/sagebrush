@@ -1,7 +1,8 @@
 // The Worker that web/cloud/fleet/test-fleet.mjs runs in Miniflare: the fleet routes on any host. A request may carry
 // x-test-before-issue: the name of one change below, made after the handler's checks and immediately before the lease
 // batch, so a test can move state between the handler's own reads and the batch's re-reads. The person's routes take
-// their session from x-test-account / x-test-session (the deployed mount resolves the real one).
+// their session from x-test-account / x-test-session, and its re-authentication time from x-test-reauth-ms (ms, or
+// "null"; absent is null) (the deployed mount resolves the real one).
 import { handleFleet, type FleetEnv } from "./server.ts";
 import type { D1 } from "./store.ts";
 
@@ -26,7 +27,9 @@ export default {
         if (kind === "throw") throw new Error("the session store failed");
         if (kind === "unavailable") return { kind: "unavailable" as const };
         const account = r.headers.get("x-test-account");
-        return kind === "none" || !account ? { kind: "none" as const } : { kind: "ok" as const, account };
+        const rm = r.headers.get("x-test-reauth-ms");
+        const reauthMs = rm === null || rm === "null" ? null : Number(rm);
+        return kind === "none" || !account ? { kind: "none" as const } : { kind: "ok" as const, account, reauthMs };
       },
     };
     return (await handleFleet(req, env, change ? { beforeIssue: async (db) => { await change(db); } } : {}, person)) ?? new Response("not the fleet API", { status: 404 });

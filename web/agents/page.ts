@@ -38,7 +38,7 @@ import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
-import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
+import { AgentLeg, legKey, listComputers, pageLegUrl, removeComputer, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
 import { filesIcon, modeSwitch, answerAgentsLive, agentsTabLive, agentsTabRemembered, releaseAgentsTab, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
@@ -255,7 +255,7 @@ const mirror = new Mirror({
   changed: () => {
     renderSidebar();
     renderMirrorSettings();
-    renderHeader(); // (the banner says where the chats are kept)
+    renderHeader(); // (the status's popover says where the chats are kept)
   },
 });
 /** The mirrored conversation shown instead of a thread of this browser's, or null. */
@@ -1851,6 +1851,7 @@ const chatHereSection = chatHere({
   onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
   onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
   onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
+  remove: (r) => removeComputer(r.remote_id),
 }, () => agentUi);
 
 // A notebook the agent created (the pairing's onCreated): taken at once, as it is created, into the pane of the chat
@@ -2159,7 +2160,7 @@ function whoText(who: HTMLElement, dot: string, name: string, small: string) {
   who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
 }
 
-/** Where the chats are kept, for the banner: "mirrored" only while uploads are actually under way (mirror.ts). */
+/** Where the chats are kept, for the status's popover: "mirrored" only while uploads are actually under way (mirror.ts). */
 function keptWhere() {
   return mirror.keptLine();
 }
@@ -2186,7 +2187,7 @@ function renderHeader() {
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
-  $("#banner").innerHTML = live()
+  $("#who-info").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; ${mirror.uploading() ? "chats are kept in this browser and mirrored to your Sagebrush account" : "chats are kept in this browser"}.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
@@ -2197,6 +2198,27 @@ function renderHeader() {
     : `Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). ${keptWhere()}`;
 }
 
+// (the status's popover, in place of the banner the page had (#1808: a banner in this mode only pushed everything down
+//  on switching from Files): the status opens it, and a click elsewhere, Escape or the status again closes it)
+{
+  const who = $("#who"), info = $("#who-info");
+  // (under the status, as far left as it fits: kept inside the top bar, so a phone's narrow window never scrolls sideways;
+  //  placed again on a resize while it is open)
+  const place = () => {
+    const room = who.parentElement!.clientWidth;
+    info.style.left = `${Math.max(8, Math.min(who.offsetLeft, room - info.offsetWidth - 8))}px`;
+  };
+  const show = (on: boolean) => {
+    info.hidden = !on;
+    who.setAttribute("aria-expanded", String(on));
+    if (on) place();
+  };
+  who.addEventListener("click", () => show(info.hidden));
+  addEventListener("resize", () => { if (!info.hidden) place(); });
+  addEventListener("pointerdown", (e) => { if (!info.hidden && !who.contains(e.target as Node) && !info.contains(e.target as Node)) show(false); }, true);
+  // (first, and taken: Escape that closes it doesn't also stop a running turn or leave full screen)
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && !info.hidden) { e.preventDefault(); show(false); who.focus(); } }, true);
+}
 renderHeader();
 openArtifact = current().artifacts.at(-1)?.id ?? null;
 mountLayout();
