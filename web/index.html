@@ -607,7 +607,7 @@ the Agents pane's frame of the LaTeX editor, /?tex=&embed=1, which is the editor
          hidden, that the corner toggle and ⋯ ▸ Files press) -->
     <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, on your own computer (paired), or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="paired" title="Runs on your own computer, with your files">Your computer (paired)</option><option value="gpu">Remote compute (preview)</option></select>
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
-    <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
+    <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option><option value="r">R</option></select>
     <!-- (named for what it does, beside the header's Agent panel button, until the panel takes the connecting over) -->
     <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose" aria-label="Connect agent"><span class="wide">Connect agent…</span><span class="narrow">Connect</span></button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File<span class="sb-caret" aria-hidden="true"></span></button>
@@ -903,6 +903,7 @@ const MODE_TITLE = {
   sage: "Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in",
   magma: "Magma mode: Magma's language, 2^3 is 8 and statements end with ;",
   matlab: "MATLAB mode: MATLAB's language, 2^3 is 8 and [1 2; 3 4] is a matrix",
+  r: "R mode: R's language, x <- c(1, 2, 3) and x * 2; a subset so far, and what isn't implemented yet says so",
 };
 function showMode(m) { modeEl.value = m; modeEl.title = MODE_TITLE[modeEl.value] ?? ""; }
 const announce = (text) => ($("#announce").textContent = text);
@@ -2284,7 +2285,7 @@ $("#restart").onclick = () => nb.restart();
 // one with code only once they confirm it: its code is written in the old
 // language and won't run in the new one until rewritten.  Nothing else
 // changes it (search, an agent): only opening or receiving a document.
-const LANG_NAME = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma" };
+const LANG_NAME = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma", r: "R" };
 const hasCode = () => cells().some((c) => c.type === "code" && c.ta.value.trim());
 modeEl.onchange = (e) => {
   const to = modeEl.value, from = nb.mode;

@@ -36,4 +36,7 @@ export function rillRefusal(o: { mod: string | null; emit: boolean }): string | 
 }
 
 /** A .R file is R's. */
-export const isRFile = (f: string | null) => f !== null && /\.R$/.test(f);
+/** The R prompt's first lines: Sagebrush's version (without its Python language), and how to leave. */
+export const rillBanner = (version: string) => `${version.replace(/ \(.*\)$/, "")} (R, a subset, on a JavaScript runtime: what is not implemented yet says so)\nType q() or Ctrl-D to leave.\n`;
+
+export const isRFile = (f: string | null) => f !== null && /\.[Rr]$/.test(f);

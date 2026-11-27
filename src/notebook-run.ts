@@ -88,7 +88,8 @@ export interface CellReport {
 export function modeOf(metadata: any): Mode {
   const k = metadata?.kernelspec ?? {};
   const lang = `${k.name ?? ""} ${k.language ?? ""} ${metadata?.language_info?.name ?? ""}`;
-  return /magma/i.test(lang) ? "magma" : /matlab|octave/i.test(lang) ? "matlab" : /sage/i.test(lang) ? "sage" : "python";
+  // (R: IRkernel's "ir" and language R, and Sagebrush's sagebrush-r, before Sage, whose test it would also pass)
+  return /magma/i.test(lang) ? "magma" : /matlab|octave/i.test(lang) ? "matlab" : /(^|[\s-])(ir|r)(\s|$)/i.test(lang) ? "r" : /sage/i.test(lang) ? "sage" : "python";
 }
 const joinText = (t: unknown) => (Array.isArray(t) ? t.join("") : typeof t === "string" ? t : "");
 

@@ -396,7 +396,7 @@ export class WorkerKernel {
 
   /**
    * Run code; `sink` receives what happens to it.
-   * opts: {mode: "python"|"sage"|"magma"|"matlab", repl, cell (the notebook cell's id,
+   * opts: {mode: "python"|"sage"|"magma"|"matlab"|"r", repl, cell (the notebook cell's id,
    * for the journal), clock (TimeTravel replay: the clock values to replay),
    * forget (global names to delete first: the reactive notebook), mangle
    * (the cell's `_` names are its own: the reactive notebook), seed (64 hex
@@ -418,7 +418,7 @@ export class WorkerKernel {
     // the journal when it is done ("run"))
     this.track(id, run);
     this.claim(id, opts.mode);
-    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget }));
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", r: opts.mode === "r", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget }));
   }
 
   // after the start, in the order asked, if this is still pending in the same worker
@@ -465,7 +465,7 @@ export class WorkerKernel {
    * is none (synchronously: a storm of triggers finds it); null for Python,
    * which loads nothing.  `fresh`: whether it was just made. */
   modeEntry(mode) {
-    if (mode !== "sage" && mode !== "magma" && mode !== "matlab") return null;
+    if (mode !== "sage" && mode !== "magma" && mode !== "matlab" && mode !== "r") return null;
     let e = this.modeState.get(mode);
     const fresh = !e || e.gen !== this.generation;
     if (fresh) this.modeState.set(mode, (e = { gen: this.generation, token: ++this.modeToken, state: "pending" }));
@@ -508,7 +508,7 @@ export class WorkerKernel {
       this.pending.set(id, entry);
       if (entry0) this.modeClaims.set(id, { mode, e: entry0 });
       else if (msg.complete !== undefined || msg.check !== undefined) this.claim(id, mode);
-      this.whenStarted(id, entry, () => this.worker.postMessage({ id, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", ...msg }));
+      this.whenStarted(id, entry, () => this.worker.postMessage({ id, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", r: mode === "r", ...msg }));
     });
   }
 
@@ -556,7 +556,7 @@ export class WorkerKernel {
         stopped: () => finish(over ? { ok: false, error: `it ran out of time (${ms} ms)`, timedOut: true } : { ok: false, error: "the interpreter stopped" }),
       };
       this.pending.set(id, entry);
-      this.whenStarted(id, entry, () => this.worker.postMessage({ id, code: "", evaluate: { code, answer }, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab" }));
+      this.whenStarted(id, entry, () => this.worker.postMessage({ id, code: "", evaluate: { code, answer }, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", r: mode === "r" }));
       // (an interpreter that never takes it up: given up after evaluateStartMs,
       // or at `by`, an absolute deadline (Date.now) for the whole of it, the
       // caller's remaining allowance, HARD-729-1)

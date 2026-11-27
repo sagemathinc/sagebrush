@@ -348,10 +348,10 @@ export const FORMAT = "sagebrush-board";
 export const VERSION = 1;
 
 /** a board's language (BoardDoc.mode) */
-export type BoardMode = "python" | "sage" | "magma" | "matlab";
+export type BoardMode = "python" | "sage" | "magma" | "matlab" | "r";
 // (written out, not read from src/modes.ts: scripts/board-format-schema.mjs reads BoardMode from this file's text, and
 // packages/sagebrush-board compiles web/ alone; test/modes.test.ts pins all three to the registry)
-const MODES = ["sage", "magma", "matlab"] as const, ITEM_MODES = ["python", "sage", "magma", "matlab"] as const;
+const MODES = ["sage", "magma", "matlab", "r"] as const, ITEM_MODES = ["python", "sage", "magma", "matlab", "r"] as const;
 
 /** A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`). */
 export interface BoardDoc {

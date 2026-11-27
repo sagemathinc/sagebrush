@@ -110,7 +110,7 @@ export function fromMyst(name, text, cellId) {
   const tail = body.slice(sepFrom);
   const kernelspec = fm.data?.kernelspec ? plain(fm.data.kernelspec) : null;
   const lang = `${kernelspec?.language ?? ""} ${kernelspec?.name ?? ""}`;
-  const mode = /sage/i.test(lang) ? "sage" : /magma/i.test(lang) ? "magma" : /matlab|octave/i.test(lang) ? "matlab" : "python";
+  const mode = /(^|[\s-])(ir|r)(\s|$)/i.test(lang) ? "r" : /sage/i.test(lang) ? "sage" : /magma/i.test(lang) ? "magma" : /matlab|octave/i.test(lang) ? "matlab" : "python";
   // (its chapter number, from a name like "09-Improving_DL.md"; 0, a book's unnumbered intro, is none)
   const chapter = +(/^(\d{1,3})[-_ ]/.exec(name)?.[1] ?? 0);
   const metadata = {

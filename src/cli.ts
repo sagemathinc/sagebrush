@@ -29,7 +29,7 @@ import { runNotebookServer, notebookWorker } from "./notebook";
 import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
 import { selectLimits } from "./limits-file";
 import { setDataRoot } from "./runtime/modules";
-import { isRFile, rillRefusal, rillSource } from "./rill";
+import { isRFile, rillBanner, rillRefusal, rillSource } from "./rill";
 import { sprigRefusal, sprigSource } from "./sprig";
 import type { ReplMode } from "./modes";
 import { PromptSession, type StepResult } from "./repl-step";
@@ -361,7 +361,7 @@ const isRill = (f: string | null) => rill || (!magma && !matlab && isRFile(f));
 /** The interactive prompt's first lines: the version, the language, and how to leave. */
 function promptBanner(mode: ReplMode): string {
   if (mode === "python") return `${VERSION}\nType help(obj) for help, exit() or Ctrl-D to leave.\n`;
-  if (mode === "r") return `${VERSION} (R, a subset: what is not implemented yet says so)\nType q() or Ctrl-D to leave.\n`;
+  if (mode === "r") return rillBanner(VERSION);
   return `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${mode === "magma" ? "quit;" : "exit"} or Ctrl-D to leave.\n`;
 }
 

@@ -13,6 +13,7 @@ const KERNELSPEC = {
   sage: { name: "sagemath", display_name: "SageMath", language: "sage" },
   magma: { name: "magma", display_name: "Magma", language: "magma" },
   matlab: { name: "matlab", display_name: "MATLAB", language: "matlab" },
+  r: { name: "ir", display_name: "R", language: "R" },
 };
 /** The .ipynb text of a document.  What Sagebrush does not use (notebook and
  * cell metadata: widgets, tags, ...; raw cells) is written back as it was

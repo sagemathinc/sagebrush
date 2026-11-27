@@ -27,7 +27,8 @@ export const BOARD_SCHEMA = {
     "python",
     "sage",
     "magma",
-    "matlab"
+    "matlab",
+    "r"
    ],
    "description": "the language of its code items, one per board (default `python`)"
   },
@@ -317,7 +318,8 @@ export const BOARD_SCHEMA = {
       "python",
       "sage",
       "magma",
-      "matlab"
+      "matlab",
+      "r"
      ],
      "description": "a code item's language, when it is not the board's (`\"python\"`, `\"sage\"`, `\"magma\"` or `\"matlab\"`; default: the board's `mode`). Each language runs in its own interpreter: languages share no values, so copy data from one to another as literals"
     },

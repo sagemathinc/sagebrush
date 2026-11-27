@@ -38,18 +38,21 @@ ok(["mod-sage-ffmat", "mod-sage-ec-ff", "mod-sage-ffsub"].every((g) => sageItem?
 ok(!(modulesItem?.groups ?? []).some((g) => g.startsWith("mod-sage-")), "the modules item holds no mod-sage- group");
 
 // Hidden items (@sagebrush's ruling on #847, Nov 8; agents-ui's three points): the Rill and Sprig items are in the
-// inventory, so every control above counts them, but each is hidden until the page can run its mode (Rill's A2,
-// Sprig's S7), and the service worker drops a hidden item where it loads the inventory, so it is never listed, in
+// inventory, so every control above counts them, but each is hidden until the page can run its mode (Sprig's S7;
+// Rill's, R, is shown now), and the service worker drops a hidden item where it loads the inventory, so it is never listed, in
 // "download all", or named as a new item
 const hidden = inv.items.filter((it) => it.hidden === true);
-ok(JSON.stringify(hidden.map((it) => it.id).sort()) === JSON.stringify(["rill", "sprig"]) && hidden.every((it) => it.groups.length > 0 && it.groups.every((g) => new RegExp(`^${it.id}(-|$)`).test(g))), "hidden: only the Rill and Sprig items, each still owning its own groups: " + JSON.stringify(hidden.map((it) => [it.id, it.groups])));
+ok(JSON.stringify(hidden.map((it) => it.id).sort()) === JSON.stringify(["sprig"]) && hidden.every((it) => it.groups.length > 0 && it.groups.every((g) => new RegExp(`^${it.id}(-|$)`).test(g))), "hidden: only the Sprig item, still owning its own groups: " + JSON.stringify(hidden.map((it) => [it.id, it.groups])));
+// (R's item is shown, the page runs R, and owns every rill-* group)
+const rItem = inv.items.find((it) => it.id === "rill");
+ok(rItem && rItem.hidden !== true && rItem.groups.length > 0 && rItem.groups.every((g) => /^rill(-|$)/.test(g)), "R's item: shown, owning the rill groups: " + JSON.stringify(rItem));
 ok(inv.totals.files === inv.items.reduce((t, it) => t + it.files, 0), "hidden: the totals (and so the caps) still count the hidden item");
 ok(/const inventory = \(\) => \(invP \?\?= invGet\(\)[\s\S]{0,400}inv\.items = inv\.items\.filter\(\(it\) => it\.hidden !== true\);/.test(sw), "hidden: sw.js's inventory() drops hidden items as it loads the inventory");
 ok((sw.match(/\binvGet\(\)\./g) ?? []).length === 1 && (sw.match(/\binvGet\(/g) ?? []).length === 2, "hidden: inventory() is the one reader of the inventory in sw.js (ids(\"all\"), the keep record's new list, fetch and remove all go through it)");
 const visible = inv.items.filter((it) => it.hidden !== true);
 const allPaths = LAZY.filter((_, i) => visible.some((it) => it.id === owners[i][0]));
-ok(allPaths.length > 0 && !allPaths.some((p) => /^lib\/(rill|sprig)/.test(p)), `hidden: "download all" over the visible items fetches no rill or sprig path (${allPaths.length} paths)`);
-ok(!visible.some((it) => it.id === "rill" || it.id === "sprig"), "hidden: a new-items list over the visible items can't name Rill or Sprig");
+ok(allPaths.length > 0 && !allPaths.some((p) => /^lib\/sprig/.test(p)) && allPaths.some((p) => /^lib\/_?rill/.test(p)), `hidden: "download all" over the visible items fetches no sprig path, and R's (${allPaths.length} paths)`);
+ok(!visible.some((it) => it.id === "sprig") && visible.some((it) => it.id === "rill"), "hidden: a new-items list over the visible items can't name Sprig, and names R");
 
 // K2: a group no rule places, and each cap exceeded, are refused by the build
 ok(refuses(() => itemOfGroup("brand-new-group"), /belongs to no item/), "K2: a library group no rule places is refused");

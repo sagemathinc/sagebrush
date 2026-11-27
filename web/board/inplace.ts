@@ -870,7 +870,7 @@ const clearTop = () => Math.max(48, document.querySelector(".board-toolbar:not([
 
 // (the completions listed at most: the notebook's 500)
 const SHOWN = 500;
-const LANGUAGES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+const LANGUAGES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB", r: "R" };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 function area(cls: string, value: string, placeholder: string) {

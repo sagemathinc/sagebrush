@@ -70,7 +70,7 @@ function noteOf(text: string): Pick<DocNote, "title" | "text" | "code"> & { lang
   let t = text.replace(/\r\n/g, "\n").trim(), title: string | undefined, code: string | undefined, lang: BoardMode | undefined;
   const h = /^#{1,3} +(.+)(\n|$)/.exec(t);
   if (h) { title = h[1].trim(); t = t.slice(h[0].length).trim(); }
-  const c = /(^|\n)```(python|py|sage|magma|matlab)\n([\s\S]*?)\n?```\s*$/.exec(t);
+  const c = /(^|\n)```(python|py|sage|magma|matlab|r)\n([\s\S]*?)\n?```\s*$/.exec(t);
   if (c) { code = c[3]; lang = c[2] === "py" ? "python" : (c[2] as BoardMode); t = t.slice(0, c.index).trim(); }
   return { ...(title ? { title } : {}), ...(t ? { text: t } : {}), ...(code !== undefined ? { code } : {}), ...(lang && lang !== "python" ? { lang } : {}) };
 }

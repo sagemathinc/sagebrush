@@ -34,6 +34,7 @@ import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, outputHistory } from "./magic-syntax";
 import { KERNEL_MODES, KERNEL_SPECS, isModeName, type KernelMode } from "./modes";
+import { rillCellSource, rillIsIncomplete } from "./rill";
 
 export type Mode = KernelMode;
 
@@ -628,7 +629,7 @@ export function kernelWorker(mode: Mode) {
   port.on("message", async (m: any) => {
     const { main, host } = await ready;
     if (m.check !== undefined) {
-      port.postMessage({ id: m.id, more: needsMore(m.check, { sage: mode === "sage" }) });
+      port.postMessage({ id: m.id, more: mode === "r" ? rillIsIncomplete(m.check) : needsMore(m.check, { sage: mode === "sage" }) });
       return;
     }
     if (m.complete !== undefined) {
@@ -678,6 +679,14 @@ export function kernelWorker(mode: Mode) {
           errorReported = { ename: "MATLAB", evalue: lines[0], traceback: lines };
           port.postMessage({ id: m.id, error: errorReported });
         }
+      }
+    } else if (mode === "r") {
+      // R: run on lib/_rill in the kernel's one R session; R's error message is on stderr, and the cell is marked
+      // failed for Jupyter
+      run(rillCellSource(m.code), main, "exec", "<cell>");
+      if (R.callObj(R.getattr(R.importModule("_rill"), "cell_failed"), []) === true && errorReported === null) {
+        errorReported = { ename: "Error", evalue: "", traceback: [] };
+        port.postMessage({ id: m.id, error: errorReported });
       }
     } else {
       run(MAGIC_PRE, host, "exec", "<autoreload>");

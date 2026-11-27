@@ -19,16 +19,16 @@ const repo = join(__dirname, "..", "..");
 const text = (p: string) => readFileSync(join(repo, p), "utf8");
 
 test("the registry's subsets, in their consumers' orders", () => {
-  // (R, lib/_rill: the CLI's prompt so far; notebooks, boards, workers and kernels take it in their own PR)
+  // (R, lib/_rill: the CLI's prompt, notebooks, boards, the worker's flag and a Jupyter kernel; not translated)
   assert.deepEqual(MODE_NAMES, ["python", "sage", "magma", "matlab", "r"]);
-  assert.deepEqual(DOCUMENT_MODES, ["python", "sage", "magma", "matlab"]);
-  assert.deepEqual(FLAG_MODES, ["sage", "magma", "matlab"]);
+  assert.deepEqual(DOCUMENT_MODES, ["python", "sage", "magma", "matlab", "r"]);
+  assert.deepEqual(FLAG_MODES, ["sage", "magma", "matlab", "r"]);
   assert.deepEqual(TRANSLATED_MODES, ["magma", "matlab"]);
   assert.deepEqual(REPL_MODES, ["python", "magma", "matlab", "r"]);
-  assert.deepEqual(KERNEL_MODES, ["sage", "python", "magma", "matlab"]);
+  assert.deepEqual(KERNEL_MODES, ["sage", "python", "magma", "matlab", "r"]);
   for (const s of [...MODE_NAMES]) assert.ok(isModeName(s));
   for (const s of ["", "Python", "R", "all", null, undefined, 1, {}]) assert.ok(!isModeName(s) && !isFlagMode(s) && !isTranslated(s as any), String(s));
-  assert.ok(isModeName("r") && !isFlagMode("r") && !isTranslated("r"));
+  assert.ok(isModeName("r") && isFlagMode("r") && !isTranslated("r"));
   assert.deepEqual(MODE_NAMES.filter(isFlagMode), FLAG_MODES);
   assert.deepEqual(MODE_NAMES.filter(isTranslated), TRANSLATED_MODES);
 });
@@ -41,30 +41,33 @@ test("src/modes.ts is plain data: it imports nothing", () => {
 
 test("a worker message's mode flags, as each host sent them", () => {
   // (src/reactive-session.ts and src/board-run.ts: every flag, in this order)
-  assert.equal(JSON.stringify(modeFlags("python")), '{"sage":false,"magma":false,"matlab":false}');
-  assert.equal(JSON.stringify(modeFlags("sage")), '{"sage":true,"magma":false,"matlab":false}');
-  assert.equal(JSON.stringify(modeFlags("magma")), '{"sage":false,"magma":true,"matlab":false}');
-  assert.equal(JSON.stringify(modeFlags("matlab")), '{"sage":false,"magma":false,"matlab":true}');
-  assert.equal(JSON.stringify(modeFlags(undefined)), '{"sage":false,"magma":false,"matlab":false}');
+  assert.equal(JSON.stringify(modeFlags("python")), '{"sage":false,"magma":false,"matlab":false,"r":false}');
+  assert.equal(JSON.stringify(modeFlags("sage")), '{"sage":true,"magma":false,"matlab":false,"r":false}');
+  assert.equal(JSON.stringify(modeFlags("magma")), '{"sage":false,"magma":true,"matlab":false,"r":false}');
+  assert.equal(JSON.stringify(modeFlags("matlab")), '{"sage":false,"magma":false,"matlab":true,"r":false}');
+  assert.equal(JSON.stringify(modeFlags("r")), '{"sage":false,"magma":false,"matlab":false,"r":true}');
+  assert.equal(JSON.stringify(modeFlags(undefined)), '{"sage":false,"magma":false,"matlab":false,"r":false}');
   // (src/local-gateway.ts: only the one set; the gateway's mode is any string, Python by default)
-  assert.deepEqual([modeFlag("python"), modeFlag("sage"), modeFlag("magma"), modeFlag("matlab"), modeFlag("r"), modeFlag(undefined)], [{}, { sage: true }, { magma: true }, { matlab: true }, {}, {}]);
+  assert.deepEqual([modeFlag("python"), modeFlag("sage"), modeFlag("magma"), modeFlag("matlab"), modeFlag("r"), modeFlag("R"), modeFlag(undefined)], [{}, { sage: true }, { magma: true }, { matlab: true }, { r: true }, {}, {}]);
   // (web/worker.ts, src/notebook-session.ts: the first flag set, in this order; none is Python)
   assert.equal(modeOfFlags({}), null);
   assert.equal(modeOfFlags({ sage: false, magma: false, matlab: false }), null);
   assert.equal(modeOfFlags({ matlab: 1 }), "matlab");
   assert.equal(modeOfFlags({ magma: true, matlab: true }), "magma");
   assert.equal(modeOfFlags({ sage: true, magma: true, matlab: true }), "sage");
+  assert.equal(modeOfFlags({ r: true }), "r");
+  assert.equal(modeOfFlags({ matlab: true, r: true }), "matlab");
 });
 
 test("web/notebook/worker-kernel.js (loaded from its text, so it imports nothing) sends the same flags", () => {
   const src = text("web/notebook/worker-kernel.js");
-  assert.match(src, /if \(mode !== "sage" && mode !== "magma" && mode !== "matlab"\) return null;/);
-  const sent = src.match(/sage: (?:opts\.)?mode === "sage", magma: (?:opts\.)?mode === "magma", matlab: (?:opts\.)?mode === "matlab"/g) ?? [];
+  assert.match(src, /if \(mode !== "sage" && mode !== "magma" && mode !== "matlab" && mode !== "r"\) return null;/);
+  const sent = src.match(/sage: (?:opts\.)?mode === "sage", magma: (?:opts\.)?mode === "magma", matlab: (?:opts\.)?mode === "matlab", r: (?:opts\.)?mode === "r"/g) ?? [];
   assert.equal(sent.length, 3);
   // (and the notebook's setMode, whose text test/remote-approval-census.test.ts plants a fault in)
-  assert.match(text("web/notebook/notebook.js"), /^    mode = \["python", "sage", "magma", "matlab"\]\.includes\(m\) \? m : "python";$/m);
+  assert.match(text("web/notebook/notebook.js"), /^    mode = \["python", "sage", "magma", "matlab", "r"\]\.includes\(m\) \? m : "python";$/m);
   assert.deepEqual(MODE_NAMES, ["python", "sage", "magma", "matlab", "r"]);
-  assert.deepEqual(FLAG_MODES, ["sage", "magma", "matlab"]);
+  assert.deepEqual(FLAG_MODES, ["sage", "magma", "matlab", "r"]);
 });
 
 test("the Jupyter kernels: specs, install order and --mode's error", () => {
@@ -93,6 +96,12 @@ test("the Jupyter kernels: specs, install order and --mode's error", () => {
       language: "matlab",
       info: { name: "matlab", version: "", mimetype: "text/x-matlab", file_extension: ".m", codemirror_mode: "octave", pygments_lexer: "matlab" },
     },
+    r: {
+      dir: "sagebrush-r",
+      display: "Sagebrush (R)",
+      language: "R",
+      info: { name: "R", version: "", mimetype: "text/x-r-source", file_extension: ".r", codemirror_mode: "r", pygments_lexer: "r" },
+    },
   });
   const dir = mkdtempSync(join(tmpdir(), "sb-modes-"));
   const out: string[] = [], err: string[] = [];
@@ -103,7 +112,7 @@ test("the Jupyter kernels: specs, install order and --mode's error", () => {
   try {
     all = installKernel(["--prefix", dir, "--mode", "all"]);
     sage = installKernel(["--prefix", dir]);
-    bad = installKernel(["--prefix", dir, "--mode", "r"]);
+    bad = installKernel(["--prefix", dir, "--mode", "R"]);
     none = installKernel(["--prefix", dir, "--mode"]);
   } finally {
     process.stdout.write = write.out;
@@ -117,9 +126,10 @@ test("the Jupyter kernels: specs, install order and --mode's error", () => {
       'installed the Jupyter kernel "Sagebrush (Python)" in K/sagebrush-python\n',
       'installed the Jupyter kernel "Sagebrush (Magma)" in K/sagebrush-magma\n',
       'installed the Jupyter kernel "Sagebrush (MATLAB)" in K/sagebrush-matlab\n',
+      'installed the Jupyter kernel "Sagebrush (R)" in K/sagebrush-r\n',
       'installed the Jupyter kernel "Sagebrush (Sage)" in K/sagebrush\n',
     ]);
-    assert.deepEqual(err, ["sagebrush: --mode must be sage, python, magma, matlab or all, not r\n", "sagebrush: --mode must be sage, python, magma, matlab or all, not undefined\n"]);
+    assert.deepEqual(err, ["sagebrush: --mode must be sage, python, magma, matlab, r or all, not R\n", "sagebrush: --mode must be sage, python, magma, matlab, r or all, not undefined\n"]);
     for (const [mode, spec] of Object.entries(KERNEL_SPECS)) {
       const k = JSON.parse(readFileSync(join(kernels, spec.dir, "kernel.json"), "utf8"));
       assert.deepEqual(k.argv.slice(-4), ["--jupyter-kernel", "{connection_file}", "--mode", mode]);
@@ -157,35 +167,35 @@ test("a relative --prefix installs the kernel under its absolute path, and kerne
   }
 });
 
-test("the board format: its mode, Python by default and not written; a code item's, any of the four", () => {
+test("the board format: its mode, Python by default and not written; a code item's, any of the five", () => {
   // (written out in web/board/: the schema's script reads BoardMode from doc.ts's text, and packages/sagebrush-board
   // compiles web/ alone, so web/board/ reads nothing from src/)
   const doc = text("web/board/doc.ts");
-  assert.match(doc, /^export type BoardMode = "python" \| "sage" \| "magma" \| "matlab";$/m);
-  assert.match(doc, /^const MODES = \["sage", "magma", "matlab"\] as const, ITEM_MODES = \["python", "sage", "magma", "matlab"\] as const;$/m);
-  assert.match(text("web/board/mount.ts"), /const m = b\.dataset\.mode; if \(m === "sage" \|\| m === "magma" \|\| m === "matlab"\) d\.mode = m; else delete d\.mode;/);
-  assert.match(text("web/board/page.ts"), /^const LOCAL_LIST = "sagebrush-boards", MODES = \["python", "sage", "magma", "matlab"\];$/m);
+  assert.match(doc, /^export type BoardMode = "python" \| "sage" \| "magma" \| "matlab" \| "r";$/m);
+  assert.match(doc, /^const MODES = \["sage", "magma", "matlab", "r"\] as const, ITEM_MODES = \["python", "sage", "magma", "matlab", "r"\] as const;$/m);
+  assert.match(text("web/board/mount.ts"), /const m = b\.dataset\.mode; if \(m === "sage" \|\| m === "magma" \|\| m === "matlab" \|\| m === "r"\) d\.mode = m; else delete d\.mode;/);
+  assert.match(text("web/board/page.ts"), /^const LOCAL_LIST = "sagebrush-boards", MODES = \["python", "sage", "magma", "matlab", "r"\];$/m);
   // (any import form: `from "../../src/…"`, a bare `import "../../src/…"`, or a dynamic `import("../../src/…")`;
   // grader's #842 note, widened in Rill A1.1)
   for (const f of readdirSync(join(repo, "web", "board")).filter((f) => f.endsWith(".ts")))
     assert.doesNotMatch(text(`web/board/${f}`), /(?:\bfrom\s*|\bimport\s*\(?\s*)["'](?:\.\.\/)+src\//, f);
-  assert.deepEqual([FLAG_MODES, DOCUMENT_MODES], [["sage", "magma", "matlab"], ["python", "sage", "magma", "matlab"]]);
+  assert.deepEqual([FLAG_MODES, DOCUMENT_MODES], [["sage", "magma", "matlab", "r"], ["python", "sage", "magma", "matlab", "r"]]);
   const schema = BOARD_SCHEMA as any;
   assert.deepEqual(schema.properties.mode.enum, DOCUMENT_MODES);
   const json = JSON.parse(text("web/board-format.schema.json"));
   assert.deepEqual(json.properties.mode.enum, DOCUMENT_MODES);
   const board = (mode: unknown, item: unknown) => cleanDoc({ format: "sagebrush-board", version: 1, mode, nodes: [{ id: "a", code: "1", mode: item }, { id: "b", text: "x", mode: item }] });
   for (const m of [...FLAG_MODES]) assert.equal(board(m, m).mode, m);
-  for (const m of ["python", "r", "", null, undefined, 3]) assert.equal("mode" in board(m, m), false, String(m));
+  for (const m of ["python", "R", "", null, undefined, 3]) assert.equal("mode" in board(m, m), false, String(m));
   for (const m of [...DOCUMENT_MODES]) {
     const [code, note] = board("sage", m).nodes!;
     assert.equal((code as any).mode, m);
     assert.equal("mode" in note, false);
   }
-  for (const m of ["r", "", null, 3]) assert.equal("mode" in board("sage", m).nodes![0], false, String(m));
+  for (const m of ["R", "", null, 3]) assert.equal("mode" in board("sage", m).nodes![0], false, String(m));
 });
 
-test("the workspace's create verb takes the four document modes", () => {
+test("the workspace's create verb takes the five document modes", () => {
   const schema = JSON.parse(text("web/workspace/schema.json"));
   const modes: unknown[] = [];
   JSON.stringify(schema, (k, v) => (k === "mode" && v && Array.isArray(v.enum) && modes.push(v.enum), v));

@@ -38,7 +38,8 @@ export function modeOf(metadata) {
   const k = metadata?.kernelspec ?? {};
   const lang = `${k.name ?? ""} ${k.language ?? ""} ${metadata?.language_info?.name ?? ""}`;
   // (MATLAB: the MathWorks kernel's notebooks too, jupyter_matlab_kernel, and Octave's)
-  return /magma/i.test(lang) ? "magma" : /matlab|octave/i.test(lang) ? "matlab" : /sage/i.test(lang) ? "sage" : "python";
+  // (R: IRkernel's "ir" and language R, and Sagebrush's sagebrush-r, before Sage, whose test it would also pass)
+  return /magma/i.test(lang) ? "magma" : /matlab|octave/i.test(lang) ? "matlab" : /(^|[\s-])(ir|r)(\s|$)/i.test(lang) ? "r" : /sage/i.test(lang) ? "sage" : "python";
 }
 
 /** One nbformat cell (4, or 3's input/prompt_number/heading) as Sagebrush's; an Error for a heading level not 1 to 6. */
