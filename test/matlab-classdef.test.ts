@@ -365,3 +365,12 @@ test("a namespace's function or class named without parentheses: in an anonymous
   assert.equal(r.err, "");
   assert.equal(r.out, "anon|8 22 9 aa.bb.Nc 6\ncleared|21 8 aa.bb.Nc\nshadow|3\nshadowpkg|Unrecognized field name \"bb\".\n");
 });
+
+test("a chain on a top-level variable clear may remove: the variable's branch reads it plainly, without _m.val", async () => {
+  const { matlabToPython } = await import("../src/matlab");
+  const py = matlabToPython(lines("s.a.b = 1; q = 2; clear q", "t = s.a.b + 1;"), "main.m");
+  const line = py.split("\n").find((l) => l.trim().startsWith("t = "))!;
+  // (one branch runs: the variable's, a plain field read, or the name's, called when it names a function)
+  assert.match(line, /\(_m\.field\(_m\.field\(s, "a"\), "b"\) if /);
+  assert.match(line, / else _m\.val\(_m\.field\(_m\.field\(_m\.fn\("s", True\), "a"\), "b"\)\)\)/);
+});
