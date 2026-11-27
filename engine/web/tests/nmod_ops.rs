@@ -233,6 +233,25 @@ fn preq(f: &str, a: &[u64], b: &[u64], p: u64) -> String {
 }
 
 #[test]
+fn classical_division_near_two_to_the_32() {
+    // the classical rows' Barrett path (moduli below 2^32) at its top, and
+    // the Shoup path just above it: divisors or quotients shorter than
+    // the Newton cutoff (60), gcds of at most 1000 coefficients (Euclid)
+    let mut s = 3232u64;
+    for p in [4294967291u64, 4294967279, 2147483647, 4294967311] {
+        for (la, lb) in [(2, 2), (9, 3), (59, 59), (120, 59), (59, 30), (300, 7), (61, 2), (1000, 999)] {
+            let (a, b) = (poly(&mut s, la, p), poly(&mut s, lb, p));
+            let (q, r) = naive_divrem(&a, &b, p);
+            let got = ok(&preq("nmod_poly_divrem", &a, &b, p));
+            assert_eq!((uncsv(got["q"].as_str().unwrap()), uncsv(got["r"].as_str().unwrap())), (q, r), "p={p} {la} {lb}");
+            let g = poly(&mut s, 1 + la.min(lb) / 2, p);
+            let (ga, gb) = (naive_mul(&a, &g, p), naive_mul(&b, &g, p));
+            assert_eq!(uncsv(ok(&preq("nmod_poly_gcd", &ga, &gb, p)).as_str().unwrap()), naive_gcd(&ga, &gb, p), "p={p} {la} {lb}");
+        }
+    }
+}
+
+#[test]
 fn polys_match_schoolbook() {
     let before = stats();
     let mut s = 4242u64;
@@ -247,6 +266,12 @@ fn polys_match_schoolbook() {
             let g = poly(&mut s, 1 + la / 3, p);
             let (ga, gb) = (naive_mul(&a, &g, p), naive_mul(&b, &g, p));
             assert_eq!(uncsv(ok(&preq("nmod_poly_gcd", &ga, &gb, p)).as_str().unwrap()), naive_gcd(&ga, &gb, p), "p={p} {la} {lb}");
+        }
+        // the half-gcd (both inputs longer than 1000), with a common factor
+        for (la, lb, lc) in [(1001, 1001, 1), (1500, 1200, 400), (2500, 1001, 900)] {
+            let g = poly(&mut s, lc, p);
+            let (ga, gb) = (naive_mul(&poly(&mut s, la - lc + 1, p), &g, p), naive_mul(&poly(&mut s, lb - lc + 1, p), &g, p));
+            assert_eq!(uncsv(ok(&preq("nmod_poly_gcd", &ga, &gb, p)).as_str().unwrap()), naive_gcd(&ga, &gb, p), "p={p} {la} {lb} {lc}");
         }
         // equal operands, constants, an exact quotient
         let a = poly(&mut s, 100, p);

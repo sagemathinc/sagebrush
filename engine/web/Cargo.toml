@@ -23,6 +23,7 @@ sagebrush-classgroup = { path = "../classgroup" }
 sagebrush-group = { path = "../group" }
 sagebrush-galois = { path = "../galois" }
 sagebrush-primes = { path = "../primes" }
+sagebrush-wire = { path = "../wire" }
 serde = "1"
 serde_json = "1"
 
@@ -30,6 +31,12 @@ serde_json = "1"
 # (tests only: per-phase check counts and Stop at a chosen check,
 # tests/nmod_phases.rs)
 sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host", "test-hooks"] }
+# (tests only: a fake ledger row, for the exact admission boundary of
+# tests/bin_echelon_alloc.rs)
+sagebrush-ledger = { path = "../ledger", features = ["test-hooks"] }
+# (tests only: the fast product's state left as a trap leaves it,
+# tests/new_run.rs)
+sagebrush-arith = { path = "../arith", features = ["test-hooks"] }
 
 [lints]
 workspace = true

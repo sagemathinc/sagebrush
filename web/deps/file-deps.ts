@@ -949,7 +949,7 @@ export async function fileDeps(input: FileDepsInput): Promise<{ complete: boolea
       let src = c.source.replaceAll(" ", " ");
       const ipython = c.kind === "python" || c.kind === "sage";
       try {
-        if (ipython) src = ipythonSyntax(src);
+        if (ipython) src = ipythonSyntax(src, c.kind === "sage");
         if (c.kind === "sage") src = preparse(src);
         else if (c.kind === "magma") src = magmaToPython(src, "<cell>");
         else if (c.kind === "matlab") src = matlabToPython(src, "<cell>", { cell: true });

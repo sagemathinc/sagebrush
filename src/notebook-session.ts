@@ -654,7 +654,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         // (a reactive notebook's cell: _, __ and ___ are the values shown by the nearest cells above it that showed
         // one, `above` the keys of the cells above, nearest first; and what this cell shows is kept by its key)
         if (mangle) run(`try: __import__('builtins').__pyjs_record_output__.begin(${JSON.stringify(aboveOf(m))})\nexcept Exception: pass\n`, host, "exec", "<outputs>");
-        ok = run(ipythonSyntax(code) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, transform });
+        ok = run(ipythonSyntax(code, !!m.sage) + "\n", main, m.repl ? "single" : "cell", m.repl ? "<stdin>" : "<cell>", { sage: !!m.sage, transform });
         if (mangle) shown = ranShown(mangle);
       }
       if (modeReady) run(FLUSH_FIGURES, host, "exec", "<figures>");

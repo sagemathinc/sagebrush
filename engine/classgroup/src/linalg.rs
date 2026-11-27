@@ -3,6 +3,8 @@
 //! determinant, and the Smith normal form (the group structure).
 
 use crate::relations::Relation;
+use sagebrush_arith::cost::{bigdiv_units, bigmul_units, bigxgcd_units, xgcd_fallback_units, Family, Local};
+use sagebrush_arith::zmat::limbs;
 use sagebrush_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
@@ -191,39 +193,55 @@ pub fn det(m: &[Vec<BigInt>]) -> BigInt {
 }
 
 /// det(m) mod p for a square matrix (Gaussian elimination over F_p).
+///
+/// Units (`cost::tally`), counted per column after its work and flushed at
+/// the column's check: the elimination's multiply-adds as MulSchool (they
+/// are reduced lazily, once per column); the input's, the column's and the
+/// pivot row's reductions, the Barrett products and the inverse's Euclid
+/// steps as ModArith.
 pub fn det_mod_p(m: &[Vec<i64>], p: u64) -> u64 {
     let n = m.len();
     assert!(p < 1 << 31 && (n as u128 + 1) * (p as u128) * (p as u128) < 1 << 64);
     let br = Barrett::new(p);
     // entries are reduced lazily: each step adds at most one product < p^2
     let mut a: Vec<Vec<u64>> = m.iter().map(|r| r.iter().map(|&x| x.rem_euclid(p as i64) as u64).collect()).collect();
+    let mut acc = Local::new();
+    acc.n(Family::ModArith, m.iter().map(|r| r.len() as u64).sum());
     let mut pivot = vec![0u64; n];
     let mut det = 1u64;
     for k in 0..n {
+        acc.flush();
         sagebrush_interrupt::check();
         for i in k..n {
             a[i][k] %= p;
         }
+        acc.n(Family::ModArith, (n - k) as u64);
         let Some(piv) = (k..n).find(|&i| a[i][k] != 0) else { return 0 };
         if piv != k {
             a.swap(piv, k);
             det = (p - det) % p;
+            acc.n(Family::ModArith, 1);
         }
         det = br.mul(det, a[k][k]);
-        let inv = crate::arith::invmod(a[k][k], p);
+        let (inv, inv_units) = crate::arith::invmod_units(a[k][k], p);
         for j in k + 1..n {
             pivot[j] = a[k][j] % p;
         }
         let rk = &pivot[k + 1..];
+        let mut rows = 0u64;
         for i in k + 1..n {
             if a[i][k] == 0 {
                 continue;
             }
+            rows += 1;
             let f = p - br.mul(a[i][k], inv);
             for (x, &y) in a[i][k + 1..].iter_mut().zip(rk) {
                 *x += f * y;
             }
         }
+        let w = (n - k - 1) as u64;
+        acc.n(Family::ModArith, 1 + inv_units + w + rows);
+        acc.n(Family::MulSchool, rows * w);
     }
     det
 }
@@ -275,24 +293,43 @@ pub fn det_crt_probable(m: &[Vec<i64>]) -> BigInt {
     det_crt_impl(m, true)
 }
 
+/// Units (`cost::tally`), per prime after its work, flushed at the prime's
+/// check: the prime search as ModArith (a unit per trial division, per
+/// base's reduction and per modular product of Miller-Rabin, the powering's
+/// two reductions included); det_mod_p counts itself; the reductions of the value and the
+/// modulus by p through `bigdiv_units`, the word steps as ModArith, the
+/// products `modulus * t` and `modulus * p` through `bigmul_units`, and the
+/// symmetric-range test (a doubling, a shift, and a comparison) and its
+/// subtraction as AddSub, at the new modulus's size.  The bound's squares
+/// (f64) count as `bigmul_units(1, 1)` each, as zmat's norms do.
 fn det_crt_impl(m: &[Vec<i64>], early: bool) -> BigInt {
     let n = m.len();
     if n == 0 {
         return BigInt::one();
     }
     let log2_bound: f64 = m.iter().map(|r| 0.5 * r.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().log2().max(0.0)).sum::<f64>() + 2.0;
+    let mut acc = Local::new();
+    acc.times(m.iter().map(|r| r.len() as u64).sum(), bigmul_units(1, 1));
     let mut modulus = BigInt::one();
     let mut value = BigInt::zero(); // symmetric residue mod modulus
     let mut stable = 0;
     let mut p: u64 = (1 << det_prime_bits(n)) - 1;
     while (modulus.bits() as f64) < log2_bound && !(early && stable >= 2) {
+        acc.flush();
         sagebrush_interrupt::check();
-        while !crate::relations::is_prime_u64(p) {
+        loop {
+            let (prime, units) = crate::relations::is_prime_u64_units(p);
+            acc.n(Family::ModArith, units);
+            if prime {
+                break;
+            }
             p -= 2;
         }
         let r = det_mod_p(m, p);
         let bp = BigInt::from(p);
+        let lm = limbs(&modulus);
         let vm = value.mod_floor(&bp).to_u64().unwrap();
+        acc.add(bigdiv_units(limbs(&value), 1));
         // (the first prime never counts as stable: the initial 0 agrees with
         // a residue 0 by accident)
         if vm == r && !modulus.is_one() {
@@ -301,13 +338,21 @@ fn det_crt_impl(m: &[Vec<i64>], early: bool) -> BigInt {
             stable = 0;
             // value += modulus * ((r - value) / modulus mod p)
             let mm = modulus.mod_floor(&bp).to_u64().unwrap();
-            let t = crate::arith::mulmod((r + p - vm) % p, crate::arith::invmod(mm, p), p);
+            let (inv, inv_units) = crate::arith::invmod_units(mm, p);
+            let t = crate::arith::mulmod((r + p - vm) % p, inv, p);
             value += &modulus * BigInt::from(t);
+            acc.add(bigdiv_units(lm, 1));
+            acc.n(Family::ModArith, inv_units + 2);
+            acc.add(bigmul_units(lm, 1));
         }
         modulus *= &bp;
+        acc.add(bigmul_units(lm, 1));
+        let lm = limbs(&modulus);
         if &value * 2 > modulus {
             value -= &modulus;
+            acc.n(Family::AddSub, lm as u64);
         }
+        acc.n(Family::AddSub, lm as u64);
         p -= 2;
     }
     value
@@ -505,52 +550,101 @@ pub fn independent_rows(rows: &[Vec<i64>], n: usize) -> Result<Vec<usize>, Vec<u
 /// The Hermite normal form of the lattice spanned by `rows` and d Z^n (d a
 /// multiple of the lattice's determinant): an upper triangular basis whose
 /// diagonal product is the determinant.
+///
+/// Units (`cost::tally`), per row after its work, flushed at the row's
+/// check: the reductions mod d through `bigdiv_units`; per pivot, the
+/// extended gcd as a full gcd at the operands' sizes with the check on its
+/// coefficients (`bigxgcd_units`; its fallback's steps when it ran), the
+/// two exact divisions by it, and the row combinations' four products and
+/// two reductions mod d per entry (`bigmul_units`, `bigdiv_units`; the
+/// products' sums are part of their units, as in zmat); every
+/// 16 rows the determinant's products, its comparison with d (AddSub), and
+/// when it shrinks the re-reductions; copies as Move.  The word-sized finish counts itself.
 pub fn hnf_mod(rows: &[Vec<i64>], n: usize, d0: &BigInt) -> Vec<Vec<BigInt>> {
     // w[i]: a row with w[i][i] the pivot, w[i][j] = 0 for j < i
     let mut d = d0.clone();
     let mut w: Vec<Vec<BigInt>> = (0..n).map(|i| (0..n).map(|j| if i == j { d.clone() } else { BigInt::zero() }).collect()).collect();
+    let mut acc = Local::new();
+    // (d's copy and n of it on the diagonal, the n^2 - n zeros)
+    acc.n(Family::Move, (n * n - n + (n + 1) * limbs(&d)) as u64);
     for (k, r) in rows.iter().enumerate() {
+        acc.flush();
         sagebrush_interrupt::check();
         // the lattice so far has determinant prod w_ii, a multiple of the
         // final one: a smaller modulus (word-sized: finish in i128)
         if k % 16 == 15 {
-            let delta: BigInt = (0..n).map(|i| if w[i][i].is_zero() { d.clone() } else { w[i][i].clone() }).product();
+            let mut delta = BigInt::one();
+            for (i, row) in w.iter().enumerate() {
+                let x = if row[i].is_zero() { &d } else { &row[i] };
+                acc.add(bigmul_units(limbs(&delta), limbs(x)));
+                delta *= x;
+            }
+            acc.n(Family::AddSub, limbs(&d) as u64);
             if delta < d {
                 d = delta;
+                let ld = limbs(&d);
                 for row in w.iter_mut() {
                     for x in row.iter_mut() {
+                        acc.add(bigdiv_units(limbs(x), ld));
                         *x = x.mod_floor(&d);
                     }
                 }
                 for i in 0..n {
                     if w[i][i].is_zero() {
                         w[i][i] = d.clone();
+                        acc.n(Family::Move, ld as u64);
                     }
                 }
                 if d < BigInt::from(1u64 << 62) {
                     let dd: i128 = num_traits::ToPrimitive::to_i128(&d).unwrap();
                     let mut rest: Vec<Vec<i64>> = w.iter().map(|row| row.iter().map(|x| num_traits::ToPrimitive::to_i64(x).unwrap()).collect()).collect();
                     rest.extend(rows[k..].iter().cloned());
-                    return hnf_mod_small(&rest, n, dd).into_iter().map(|r| r.into_iter().map(BigInt::from).collect()).collect();
+                    // (the conversion in and the rows copied; the conversion
+                    // out once it has run)
+                    acc.n(Family::Move, (n * n + (rows.len() - k) * n) as u64);
+                    let h = hnf_mod_small(&rest, n, dd).into_iter().map(|r| r.into_iter().map(BigInt::from).collect()).collect();
+                    acc.n(Family::Move, (n * n) as u64);
+                    return h;
                 }
             }
         }
+        let ld = limbs(&d);
         let mut v: Vec<BigInt> = r.iter().map(|&x| BigInt::from(x).mod_floor(&d)).collect();
+        acc.times(r.len() as u64, bigdiv_units(1, ld));
         for i in 0..n {
             if v[i].is_zero() {
                 continue;
             }
-            let e = w[i][i].extended_gcd(&v[i]); // x w_ii + y v_i = g
+            let (e, fallback) = sagebrush_bigint::extended_gcd_metered(&w[i][i], &v[i]); // x w_ii + y v_i = g
             let g = e.gcd.clone();
             let (wi, vi) = (&w[i][i] / &g, &v[i] / &g);
+            let (lw, lv, lg) = (limbs(&w[i][i]), limbs(&v[i]), limbs(&g));
+            acc.add(bigxgcd_units(lw, lv, lg));
+            acc.add(xgcd_fallback_units(fallback.as_ref()));
+            acc.add(bigdiv_units(lw, lg));
+            acc.add(bigdiv_units(lv, lg));
+            let (lx, ly, lwi, lvi) = (limbs(&e.x), limbs(&e.y), limbs(&wi), limbs(&vi));
             // new w_i = x w_i + y v ; new v = wi_coef * v - vi_coef * w_i
             let mut nw: Vec<BigInt> = vec![BigInt::zero(); n];
             let mut nv: Vec<BigInt> = vec![BigInt::zero(); n];
+            acc.n(Family::Move, 2 * n as u64);
+            // (each helper's one family, summed here and added per pivot)
+            let (mut mul, mut div) = (0u64, 0u64);
             for j in i..n {
                 nw[j] = (&e.x * &w[i][j] + &e.y * &v[j]).mod_floor(&d);
                 nv[j] = (&wi * &v[j] - &vi * &w[i][j]).mod_floor(&d);
+                // (x w + vi w and y v + wi v: the four products)
+                let (a, b) = (limbs(&w[i][j]), limbs(&v[j]));
+                mul = mul.saturating_add(bigmul_units(lx + lvi, a).get(Family::MulSchool));
+                mul = mul.saturating_add(bigmul_units(ly + lwi, b).get(Family::MulSchool));
+                div = div.saturating_add(bigdiv_units((lx + a).max(ly + b), ld).get(Family::Div));
+                div = div.saturating_add(bigdiv_units((lwi + b).max(lvi + a), ld).get(Family::Div));
             }
+            acc.n(Family::MulSchool, mul);
+            acc.n(Family::Div, div);
             nw[i] = g.clone();
+            // (g's two copies)
+            acc.n(Family::Move, 2 * lg as u64);
             w[i] = nw;
             v = nv;
             debug_assert!(v[i].is_zero());
@@ -560,6 +654,7 @@ pub fn hnf_mod(rows: &[Vec<i64>], n: usize, d0: &BigInt) -> Vec<Vec<BigInt>> {
     for i in 0..n {
         if w[i][i].is_zero() {
             w[i][i] = d.clone();
+            acc.n(Family::Move, limbs(&d) as u64);
         }
     }
     w
@@ -573,7 +668,10 @@ pub fn hnf_mod_small(rows: &[Vec<i64>], n: usize, d: i128) -> Vec<Vec<i128>> {
 /// hnf_mod_small, stopping once the determinant (the diagonal product) is
 /// at most `enough` (0: process every row).
 pub fn hnf_mod_small_until(rows: &[Vec<i64>], n: usize, d: i128, enough: f64) -> Vec<Vec<i128>> {
-    hnf_mod_until(rows, n, ModD::new(d as u64), enough).into_iter().map(|r| r.into_iter().map(|x| x as i128).collect()).collect()
+    let h = hnf_mod_until(rows, n, ModD::new(d as u64), enough).into_iter().map(|r| r.into_iter().map(|x| x as i128).collect()).collect();
+    // (Units: the conversion, Move; hnf_mod_until counts the rest)
+    Local::new().n(Family::Move, (n * n) as u64);
+    h
 }
 
 /// Residues modulo d, in [0, d) (d itself is allowed as an HNF diagonal).
@@ -588,6 +686,12 @@ pub trait Modulus: Copy {
 
 /// The HNF of the lattice spanned by `rows` and d Z^n, by rows modulo d,
 /// stopping once the diagonal product is at most `enough` (0: never).
+///
+/// Units (`cost::tally`), per row after its work, flushed at the row's
+/// check: every operation reduced mod d (a reduction, a product or a sum
+/// mod d, a negation, a word division) as ModArith, one each, and the
+/// extended gcd's quotient steps as ModArith; the stopping test's (f64)
+/// products as `bigmul_units(1, 1)` each; the start and the output, Move.
 pub fn hnf_mod_until<M: Modulus>(rows: &[Vec<i64>], n: usize, md: M, enough: f64) -> Vec<Vec<u128>> {
     let du = md.d();
     let d: u128 = du.into();
@@ -596,10 +700,14 @@ pub fn hnf_mod_until<M: Modulus>(rows: &[Vec<i64>], n: usize, md: M, enough: f64
     let mut w: Vec<Vec<M::E>> = (0..n).map(|i| (0..n).map(|j| if i == j { du } else { zero }).collect()).collect();
     let mut v = vec![zero; n];
     let neg = |x: M::E| -> M::E { md.from_u128((d - x.into()) % d) };
+    let mut acc = Local::new();
+    acc.n(Family::Move, (n * n) as u64);
     for (k, r) in rows.iter().enumerate() {
+        acc.flush();
         sagebrush_interrupt::check();
         if enough > 0.0 && k % 8 == 7 && k >= n {
             let delta: f64 = (0..n).map(|i| w[i][i].into() as f64).product();
+            acc.times(n as u64, bigmul_units(1, 1));
             if delta <= enough {
                 break;
             }
@@ -607,6 +715,7 @@ pub fn hnf_mod_until<M: Modulus>(rows: &[Vec<i64>], n: usize, md: M, enough: f64
         for j in 0..n {
             v[j] = md.from_u128((r[j] as i128).rem_euclid(di) as u128);
         }
+        let mut units = n as u64;
         for i in 0..n {
             let vi: u128 = v[i].into();
             if vi == 0 {
@@ -619,9 +728,14 @@ pub fn hnf_mod_until<M: Modulus>(rows: &[Vec<i64>], n: usize, md: M, enough: f64
                 for j in i..n {
                     v[j] = md.add(v[j], md.mul(f, w[i][j]));
                 }
+                units += 3 + 2 * (n - i) as u64;
                 continue;
             }
-            let (g, x, y) = crate::arith::xgcd(wii as i128, vi as i128);
+            let (g, x, y, steps) = crate::arith::xgcd_steps(wii as i128, vi as i128);
+            // (the divisibility test, the two divisions by g, a negation and
+            // the cofactors' two reductions; then six operations an entry,
+            // and g's reduction)
+            units += steps + 6 + 6 * (n - i) as u64;
             let wi = md.from_u128((wii as i128 / g) as u128);
             let nvi = neg(md.from_u128((vi as i128 / g) as u128));
             let (x, y) = (md.from_u128(x.rem_euclid(di) as u128), md.from_u128(y.rem_euclid(di) as u128));
@@ -631,8 +745,11 @@ pub fn hnf_mod_until<M: Modulus>(rows: &[Vec<i64>], n: usize, md: M, enough: f64
                 v[j] = md.add(md.mul(wi, b), md.mul(nvi, a));
             }
             w[i][i] = md.from_u128(g as u128);
+            units += 1;
         }
+        acc.n(Family::ModArith, units);
     }
+    acc.n(Family::Move, (n * n) as u64);
     w.into_iter().map(|r| r.into_iter().map(|x| x.into()).collect()).collect()
 }
 

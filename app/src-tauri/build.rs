@@ -19,6 +19,14 @@ fn main() {
     let agent_sha = std::fs::read(manifest).map(|b| { use sha2::{Digest, Sha256}; Sha256::digest(&b).iter().map(|x| format!("{x:02x}")).collect::<String>() }).unwrap_or_default();
     println!("cargo:rustc-env=SAGEBRUSH_AGENT_MANIFEST_SHA256={agent_sha}");
     println!("cargo:rerun-if-changed=agent/MANIFEST.json");
+    // The native engine the app ships (engine/sagebrush-engine.node, app/engine/bundle.mjs --native-addon): its
+    // SHA-256, which the engine's loader requires of the bytes it loads (SAGEBRUSH_ADDON_SHA256); none where none is
+    // bundled, and the app runs WebAssembly. On macOS the file is signed before it is bundled, so this is the signed
+    // file's hash.
+    let native = std::path::Path::new("engine/sagebrush-engine.node");
+    let native_sha = std::fs::read(native).map(|b| { use sha2::{Digest, Sha256}; Sha256::digest(&b).iter().map(|x| format!("{x:02x}")).collect::<String>() }).unwrap_or_default();
+    println!("cargo:rustc-env=SAGEBRUSH_NATIVE_ADDON_SHA256={native_sha}");
+    println!("cargo:rerun-if-changed=engine/sagebrush-engine.node");
     // A Mac build signed for release: the Team ID it is signed with (not a secret; ten uppercase letters and digits),
     // so the agent's Node is checked by its signature (agent_host.rs node_check); unset: an unsigned build
     let team = std::env::var("SAGEBRUSH_MACOS_TEAM_ID").unwrap_or_default();

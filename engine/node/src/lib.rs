@@ -4,6 +4,7 @@
 //! are BigInts.  Calls are synchronous and use `threads` worker threads
 //! (0 or omitted = all cores).  Invalid arguments throw.
 
+mod engine;
 mod mp;
 
 use sagebrush_modsym::exact::Exact;

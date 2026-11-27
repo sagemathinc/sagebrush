@@ -107,6 +107,18 @@ def _hash_form(s):
             j = b.index(b";", i) + 1
             out.append(b[i:j])
             i = j
+        elif c == b"m":
+            # (a real of RealField(p) by its value: the precision dropped, the
+            # mantissa odd, as the engine compares them)
+            j = b.index(b";", i)
+            out.append(b"m" + _mp_value_key(b[b.index(b":", i) + 1:j]) + b";")
+            i = j + 1
+        elif c == b"w":
+            # (a number of ComplexField(p) by its parts' values, as "m")
+            j = b.index(b";", i)
+            re, im = b[i + 1:j].split(b"|")
+            out.append(b"w" + _mp_value_key(re.split(b":")[1]) + b"|" + _mp_value_key(im.split(b":")[1]) + b";")
+            i = j + 1
         elif c == b"z":
             j = b.index(b";", b.index(b";", i) + 1) + 1
             out.append(b[i:j])
@@ -125,6 +137,16 @@ def _hash_form(s):
             out.append(c)
             i += 1
     return b"".join(out)
+
+def _mp_value_key(body):
+    """The value of a real's wire body (bytes) without its precision."""
+    if body[:1] in (b"+", b"n") or body in (b"0", b"-0", b"-inf"):
+        return body
+    mh, eh = body.split(b"p")
+    m, e = int(mh, 16), int(eh)
+    t = (abs(m) & -abs(m)).bit_length() - 1
+    return b"%xp%d" % (m >> t, e + t) if m > 0 else b"-%xp%d" % (-m >> t, e + t)
+
 
 # The largest integer an expression may hold (the engine's MAX_INT_BITS):
 # expressions cross into the engine as decimal text, so a larger one is
@@ -154,6 +176,78 @@ def _exp_in_own_field(v):
     return any(c.__name__ in _FIELD_ELEMENTS for c in type(v).__mro__)
 
 
+# The bound of the exponents t of the reals of RealField(p) an expression
+# holds, 2^(t-1) <= |x| < 2^t (the engine's mpnum::MAX_EXP)
+_MP_MAX_EXP = 4096
+
+
+def _mp_s(v):
+    """The engine serialization of an element of RealField(p): its own tag
+    m (p != 53), as a double for 53 bits; NotImplementedError where the
+    engine has no form for it."""
+    R = v._R
+    if R._rnd != "RNDN":
+        raise NotImplementedError("an element of %s in a symbolic expression is not available in sagebrush yet "
+                                  "(only rounding to nearest)" % (R,))
+    if R._prec == 53:
+        # (53 bits to nearest is RR: a double when it is one)
+        f = float(v)
+        from _sage_real import RealField_
+        if v._special is None and RealField_(53, "RNDN")(f) != v:
+            raise NotImplementedError("%s, an element of RR past the double range, has no symbolic form in sagebrush yet" % (v,))
+        return _float_s(f)
+    if v._special is not None:
+        body = {"+inf": "+inf", "-inf": "-inf", "nan": "nan"}[v._special]
+    elif not v._m:
+        body = "-0" if v._neg else "0"
+    else:
+        if abs(v._e + abs(v._m).bit_length()) > _MP_MAX_EXP:
+            raise NotImplementedError("%s: a real number of absolute value at least 2^%d or less than 2^-%d in a "
+                                      "symbolic expression is not available in sagebrush yet" % (v, _MP_MAX_EXP, _MP_MAX_EXP + 1))
+        body = ("-%xp%d" if v._m < 0 else "%xp%d") % (abs(v._m), v._e)
+    return "m%d:%s;" % (R._prec, body)
+
+
+def _mp_value(w):
+    """The element of RealField(p) of a wire form "p:body" (the engine's)."""
+    from _sage_real import RealField, RealNumberMP
+    p, body = w.split(":")
+    R = RealField(int(p))
+    if body in ("+inf", "-inf", "nan"):
+        return RealNumberMP(R, 0, 0, body)
+    if body in ("0", "-0"):
+        return RealNumberMP(R, 0, 0, None, body == "-0")
+    mh, eh = body.split("p")
+    return RealNumberMP(R, int(mh, 16), int(eh))
+
+
+def _mpc_s(v):
+    """The engine serialization of an element of ComplexField(p): its own
+    tag w (p != 53), the parts' bodies as _mp_s writes them; a complex of CC
+    for 53 bits."""
+    C = v.parent()
+    if C._prec == 53:
+        z = complex(float(v.real()), float(v.imag()))
+        for x, y in ((v.real(), z.real), (v.imag(), z.imag)):
+            if x._special is None and float(y) in (float("inf"), float("-inf")):
+                raise NotImplementedError("%s, an element of CC past the double range, has no symbolic form in sagebrush yet" % (v,))
+        return "g%s,%s;" % (_bits(z.real), _bits(z.imag))
+    return "w%s|%s;" % (_mp_s(v.real())[1:-1], _mp_s(v.imag())[1:-1])
+
+
+def _mpc_value(w):
+    """The element of ComplexField(p) of a wire form "p:body|p:body"."""
+    from _sage_real import ComplexField, ComplexNumberMP
+    a, b = w.split("|")
+    re, im = _mp_value(a), _mp_value(b)
+    return ComplexNumberMP(ComplexField(re._R._prec), re, im)
+
+
+def _inexact(v):
+    """Whether a value of _py_number is a floating-point number."""
+    return isinstance(v, (float, complex)) or type(v).__name__ in ("RealNumberMP", "ComplexNumberMP")
+
+
 def _to_s(v):
     """The engine serialization of a Python value, or None."""
     if isinstance(v, Expression):
@@ -165,6 +259,10 @@ def _to_s(v):
         return _rat_s(int(v.numerator), int(v.denominator))
     if type(v).__name__ in ("RealDoubleElement", "ComplexDoubleElement"):
         return _double_s(v)
+    if type(v).__name__ == "RealNumberMP":
+        return _mp_s(v)
+    if type(v).__name__ == "ComplexNumberMP":
+        return _mpc_s(v)
     if isinstance(v, float):
         if _rr_args((v,)) == 2:
             # (the engine's real numbers are doubles)
@@ -222,6 +320,10 @@ def _py_number(s):
     if r[0] == "f" and r[3:4] in (["RR"], []):
         from _sage_lang import RealNumber
         return RealNumber(float(r[1]))
+    if r[0] == "m":
+        return _mp_value(r[1])
+    if r[0] == "w":
+        return _mpc_value(r[1])
     return None
 
 
@@ -286,6 +388,8 @@ class Expression:
     def __init__(self, s):
         if _SPECIAL_RE.search(s) and _FLOAT_RE.search(s):
             s = _complete_special(s)
+        if _MP_RE.search(s):
+            s = _complete_mp(s)
         self._s, self._repr, self._fast, self._h = s, None, None, None
 
     def __reduce__(self):
@@ -567,7 +671,7 @@ class Expression:
             sage: SR(2/3).is_numeric(), pi.is_numeric()
             (True, False)
         """
-        return self._s[0] in "nzfgdh"
+        return self._s[0] in "nzfgdhmw"
 
     def is_constant(self):
         """Whether the expression has no variables.
@@ -829,7 +933,7 @@ class Expression:
 
     def _rational_(self):
         v = _py_number(self._s)
-        if v is None or isinstance(v, float):
+        if v is None or _inexact(v):
             raise TypeError("unable to convert %s to a rational" % self)
         return v
 
@@ -1526,7 +1630,7 @@ class Expression:
         cs = []
         for c in self.list(names[0] if names else "x"):
             v = _py_number(c._s)
-            if v is None or isinstance(v, float):
+            if v is None or _inexact(v):
                 raise TypeError("%s is not a polynomial with exact coefficients" % self)
             cs.append(v)
         t, r = ring.gen(), ring(0)
@@ -1641,6 +1745,17 @@ def _real_imag(e, k):
         return e if k == 0 else Expression("n0/1;")
     if r[0] == "z":
         return Expression("n%s;" % r[1 + k])
+    if r[0] == "m":
+        # (a real of RealField(p): itself, or an exact 0, as Sage)
+        return e if k == 0 else Expression("n0/1;")
+    if r[0] == "w":
+        # (a part of an element of ComplexField(p) is one of RealField(p);
+        # with a zero imaginary part it is real, as Sage's numeric: itself
+        # and the exact 0)
+        parts = r[1].split("|")
+        if parts[1].split(":")[1] in ("0", "-0"):
+            return e if k == 0 else Expression("n0/1;")
+        return Expression("m%s;" % parts[k])
     if r[0] == "f" and r[3:4] in (["RDF"], ["CDF"]):
         # (a part of an element of RDF or CDF is one of RDF: SR(CDF(1, 2)).real_part() is 1.0)
         return Expression("d%s;" % _bits(float(r[1 + k])))
@@ -1814,7 +1929,7 @@ class _SeriesExpr(Expression):
     def __pow__(self, k):
         from fractions import Fraction
         kq = _py_number(_expr(k)._s)
-        if kq is None or isinstance(kq, (float, complex)):
+        if kq is None or _inexact(kq):
             raise NotImplementedError("series: only rational powers")
         kq = Fraction(kq)
         if kq.denominator == 1 and kq >= 1:
@@ -2104,6 +2219,9 @@ _SPECIAL_NAMES = ("gamma", "erf", "psi", "log_gamma", "zeta", "zetaderiv", "hurw
                   "erfinv", "exp_integral_e1", "Ei", "dilog", "polylog", "lambert_w", "elliptic_kc", "elliptic_ec")
 _SPECIAL_RE = _re.compile(r"F\d+:(?:%s)\d+\{" % "|".join(_SPECIAL_NAMES))
 _FLOAT_RE = _re.compile(r"\{[fg][0-9a-f]")
+# (a real of RealField(p) as an argument; a name holding the pattern only
+# costs a call)
+_MP_RE = _re.compile(r"(?:^|[{;])[mw]\d+:")
 
 
 class _Keep(Exception):
@@ -2221,6 +2339,11 @@ def _special_raw(name, a):
     if name == "psi":
         return _sf.psi(a[0]) if len(a) == 1 else _sf.polygamma(_int_param(a[0], "n"), a[1])
     if name == "log_gamma":
+        if isinstance(a[0], float) and _m.isfinite(a[0]) and a[0] < 0 and a[0] != _m.floor(a[0]):
+            # (a negative real: RR's own principal branch, correctly rounded as
+            # Sage's, where the double formula lost several units: _sage_real._log_gamma_neg)
+            import sage_all
+            return complex(sage_all.RR(float(a[0])).log_gamma())
         return _sf.loggamma(a[0])
     if name == "zeta":
         if abs(a[0]) < 1e-3:
@@ -2404,6 +2527,290 @@ def _complete_special(s):
             break
         s = _call("subs", s, *rules)[0]
     return s
+
+
+def _bare(s):
+    """The Expression of the serialization s as it is (no call completed:
+    for reading the operator of a call _complete_mp evaluates)."""
+    e = Expression.__new__(Expression)
+    e._s, e._repr, e._fast, e._h = s, None, None, None
+    return e
+
+
+def _complete_mp(s):
+    """s with each call and power of numbers with a real of RealField(p)
+    among them (sin(a), sqrt(a), 2^a, e^a) replaced by its value, as Sage's
+    symbolic ring computes it at once; innermost first, until none is left
+    (each round takes one level of nesting)."""
+    import _sage_real
+    while True:
+        calls = _call("mp_calls", s)
+        if not calls:
+            return s
+        rules = []
+        for c in calls:
+            rules += [c, _mp_call_value(c, _sage_real)]
+        t = _call("subs", s, *rules)[0]
+        if t == s:
+            raise NotImplementedError("the value of %s is not available in sagebrush yet" % _call("str", calls[0])[0])
+        s = t
+
+
+def _mp_call_value(c, sr):
+    """The serialization of the value Sage gives a call or power c of numbers
+    with a real of RealField(p) or a number of ComplexField(p) among them,
+    or NotImplementedError."""
+    op = _call("operator", c)
+    args = [t for t in op[1:] if t != "ce"]
+    tags = [_call("operator", t)[0] for t in args]
+    name = op[0][4:] if op[0].startswith("fun:") else "a power"
+    if len(args) == 1 and name in _MP_AT_ZERO and tags[0] in ("mp", "mpc"):
+        z = _py_number(args[0])
+        parts = (z,) if tags[0] == "mp" else (z.real(), z.imag())
+        if all(t._special is None and not t._m for t in parts):
+            # (a zero of RealField(p) or ComplexField(p): Sage's symbolic
+            # identities at 0, exact, unsigned infinity for a pole, and log's
+            # complex NaN)
+            v = _MP_AT_ZERO[name]
+            return v if v is not None else _mpc_s(sr.ComplexField(z.prec())(float("nan"), float("nan")))
+    if "mpc" in tags or ("complex" in tags and "float" not in tags):
+        return _mpc_call_value(op, args, tags, name, sr)
+    if "float" in tags or "complex" in tags:
+        raise NotImplementedError("%s of a real number of RealField(p) with a double or a complex number "
+                                  "in a symbolic expression is not available in sagebrush yet" % name)
+    vals = [_py_number(t) for t in args]
+    mps = [v for v, g in zip(vals, tags) if g == "mp"]
+    # (a power is computed in the base's field, or the exponent's for a rational
+    # base or e; anything else in the coarsest one's)
+    prec = vals[0].prec() if op[0] == "pow" and op[1] != "ce" and tags[0] == "mp" else min(v.prec() for v in mps)
+    unavailable = NotImplementedError("%s of a real number of RealField(%d) in a symbolic expression is not "
+                                      "available in sagebrush yet" % (name, prec))
+    if any(v._special in ("+inf", "-inf") for v in mps):
+        # (Sage's values at an infinity are its symbolic ones, +Infinity,
+        # NaN + NaN*I, or errors)
+        raise unavailable
+    try:
+        if op[0] == "pow":
+            # (as Sage: in the base's field, the exponent at its own
+            # precision, b^y = b**y; a rational base takes the exponent's
+            # field, e^y is y.exp(); a zero exponent of such a real is the
+            # exact 1, as Sage's 2^0.0 and e^0.0)
+            if tags[-1] == "mp" and vals[-1] == 0:
+                return "n1/1;"
+            if op[1] == "ce":
+                v = vals[0].exp()
+            elif tags[0] == "mp":
+                b, y = vals
+                v = b ** (y if tags[1] == "mp" else b.parent()(y))
+            else:
+                b, y = vals
+                v = y.parent()(b) ** y
+        elif name in _MP_EXACT and len(args) == 1:
+            # (Sage's exact values: sgn, floor, ceil and heaviside are integers,
+            # arg is 0 or pi in the field, factorial is gamma(x + 1) there)
+            x = vals[0]
+            if x._special is not None or (name == "heaviside" and x == 0):
+                raise unavailable
+            return _MP_EXACT[name](x, x.parent())
+        elif name in _MP_HYPERBOLIC and len(args) == 1:
+            # (Sage's symbolic ring computes these from e = e^x and f = e^-x in
+            # the field, each operation rounded once: tanh(x) is (e - f)/(e + f),
+            # coth(x) 1/tanh(x); sinh and tanh are the exact 0 when e - f is 0)
+            x = vals[0]
+            e, f = x.exp(), (-x).exp()
+            v = _MP_HYPERBOLIC[name](e, f)
+            if v is None:
+                return "n0/1;"
+        elif name in _MP_SYMBOLIC and len(args) == 1:
+            # (Sage's symbolic ring evaluates these through their identities:
+            # cot(x) is 1/tan(x), a correctly rounded reciprocal)
+            return _MP_SYMBOLIC[name](Expression(args[0]))._s
+        elif name == "log" and len(args) == 1 and vals[0]._special is None and vals[0] < 0:
+            # (a negative real's logarithm: Sage's symbolic ring evaluates it
+            # as a complex one, each part correctly rounded: log|x| + pi*I)
+            x = vals[0]
+            return _mpc_s(sr._clog_cr(sr.ComplexField(prec)(x)))
+        else:
+            R = sr.RealField(prec)
+            v = sr._ev(c, R, prec)
+    except (TypeError, ValueError, ArithmeticError):
+        raise unavailable
+    real_power = op[0] == "pow" and op[1] != "ce" and tags[0] == "mp"
+    if real_power and isinstance(v, sr.ComplexNumberMP):
+        # (a negative real to a real power that is no integer: Sage's complex
+        # power, exp(log(x) y) in ComplexField(p), RealNumber.__pow__'s)
+        if any(t._special for t in (v.real(), v.imag())):
+            raise NotImplementedError("%s of a real number of RealField(%d) with an infinite or undefined complex value "
+                                      "in a symbolic expression is not available in sagebrush yet" % (name, prec))
+        return _mpc_s(v)
+    if not isinstance(v, sr.RealNumberMP) or (v._special in ("+inf", "-inf") and not real_power) or (
+            v._special == "nan" and all(m._special is None for m in mps)) or (
+            # (a function's value underflowing to 0: Sage's is RR's 0, exp(-2^70);
+            # log's 0 is log(1)'s, exactly)
+            not real_power and name != "log" and v == 0 and v._special is None and all(m != 0 for m in mps)):
+        # (an infinity of a function, a pole, or NaN of finite numbers: Sage's
+        # value is off the real line or symbolic, arcsin(RealField(100)(2)) in
+        # ComplexField(100), log(RealField(100)(0)) NaN + NaN*I, exp of a huge
+        # number +Infinity; a power of such a real overflows to its field's
+        # +infinity, as RealNumber's)
+        raise NotImplementedError("%s of a real number of RealField(%d) with a complex, infinite, undefined "
+                                  "or underflowing value in a symbolic expression is not available in sagebrush yet" % (name, prec))
+    return _mp_s(v)
+
+
+def _mpc_arg(t, tag, C):
+    """The argument serialized t (of tag `tag`) as an element of C."""
+    if tag == "complex":
+        r = _call("number", t)
+        re, im = (_Fraction(*map(int, x.split("/"))) for x in r[1:3])
+        return C(C._R(re), C._R(im))
+    v = _py_number(t)
+    if tag == "mpc":
+        R = C._R
+        return type(v)(C, R(v.real()), R(v.imag()))
+    return C(v)
+
+
+def _mpc_call_value(op, args, tags, name, sr):
+    """The serialization of the value Sage's symbolic ring gives a call or
+    power of numbers with a number of ComplexField(p) among them (or a real
+    of RealField(p) with an exact complex one), or NotImplementedError.
+    Sage's rules (pynac's numeric functions):
+    - exp and log: Arb's balls at p + 15 bits, their midpoints rounded,
+      here each part correctly rounded (_cexp_cr, _clog_cr);
+    - sin, cos, tan, abs and arg: the number's own methods; cot, sec and csc
+      their reciprocals;
+    - sinh, cosh and tanh from E = e^z and F = e^-z with the field's
+      operations, (E - F)/2, (E + F)/2, (E - F)/(E + F); coth, sech, csch
+      their reciprocals;
+    - a power b^y (sqrt is y = 1/2): ComplexNumber's, exp(log(b) y) with the
+      methods, in the coarser field; e^y is exp(y)."""
+    precs = []
+    for t, g in zip(args, tags):
+        if g in ("mp", "mpc"):
+            precs.append(_py_number(t).prec())
+    prec = min(precs)
+    unavailable = NotImplementedError("%s of a complex number of ComplexField(%d) in a symbolic expression is not "
+                                      "available in sagebrush yet" % (name, prec))
+    C = sr.ComplexField(prec)
+    vals = [_mpc_arg(t, g, C) if g in ("mp", "mpc", "complex") else _py_number(t) for t, g in zip(args, tags)]
+    if any(v is None for v in vals):
+        raise unavailable
+    zs = [v for v in vals if isinstance(v, sr.ComplexNumberMP)]
+    if any(x._special for z in zs for x in (z.real(), z.imag())):
+        # (Sage's values at an infinite or undefined part are its symbolic or
+        # complex NaN ones)
+        raise unavailable
+    try:
+        if op[0] == "pow":
+            if op[1] == "ce":
+                if not vals[0]:
+                    # (e^0, the exact 1, as Sage's exp at a numeric zero)
+                    return "n1/1;"
+                v = sr._cexp_cr(vals[0])
+            else:
+                # (each in its own field: the base's logarithm there, then the
+                # product and exp in the coarser one, as ComplexNumber.__pow__;
+                # a real base meets the exponent first, RealNumber's, and a
+                # rational one takes the exponent's field)
+                if "complex" in tags:
+                    raise unavailable
+                b, y = (_py_number(t) for t in args)
+                if isinstance(y, sr.ComplexNumberMP) and not y:
+                    # (a zero exponent: the exact 1, as Sage's z^0)
+                    return "n1/1;"
+                if tags[0] not in ("mp", "mpc"):
+                    b = y.parent()(b)
+                v = b ** y
+        elif len(vals) != 1:
+            raise unavailable
+        else:
+            z = vals[0]
+            if name == "exp":
+                v = sr._cexp_cr(z)
+            elif name == "log":
+                if not z:
+                    raise unavailable
+                v = sr._clog_cr(z)
+            elif name in ("sin", "cos", "tan"):
+                v = getattr(z, name)()
+            elif name in ("cot", "sec", "csc"):
+                v = ~getattr(z, {"cot": "tan", "sec": "cos", "csc": "sin"}[name])()
+            elif name in _MPC_HYPERBOLIC:
+                E, F = sr._cexp_cr(z), sr._cexp_cr(-z)
+                v = _MPC_HYPERBOLIC[name](E, F)
+            elif name in ("abs", "arg"):
+                v = getattr(z, name)()
+            elif name == "sqrt":
+                v = z ** _Fraction(1, 2)
+            else:
+                raise unavailable
+    except (TypeError, ValueError, ArithmeticError):
+        raise unavailable
+    if isinstance(v, sr.RealNumberMP):
+        if v._special:
+            raise unavailable
+        return _mp_s(v)
+    if not isinstance(v, sr.ComplexNumberMP) or v.real()._special or v.imag()._special:
+        # (an infinite or undefined value of finite numbers: a pole, an
+        # overflow; Sage's are its symbolic or complex NaN ones)
+        raise NotImplementedError("%s of a complex number of ComplexField(%d) with an infinite or undefined value in a "
+                                  "symbolic expression is not available in sagebrush yet" % (name, prec))
+    return _mpc_s(v)
+
+
+# Sage's symbolic values of these functions at a numeric zero, even an
+# inexact one (sin(SR(RealField(100)(0))) is the exact 0); None: log's
+# NaN + NaN*I in the zero's complex field
+_MP_AT_ZERO = {"exp": "n1/1;", "sin": "n0/1;", "cos": "n1/1;", "tan": "n0/1;", "sinh": "n0/1;", "cosh": "n1/1;",
+               "tanh": "n0/1;", "sech": "n1/1;", "sec": "n1/1;", "cot": "cu", "csc": "cu", "coth": "cu", "csch": "cu",
+               "log": None}
+
+
+_MPC_HYPERBOLIC = {
+    "sinh": lambda E, F: (E - F) / 2,
+    "cosh": lambda E, F: (E + F) / 2,
+    "tanh": lambda E, F: (E - F) / (E + F),
+    "coth": lambda E, F: ~((E - F) / (E + F)),
+    "sech": lambda E, F: ~((E + F) / 2),
+    "csch": lambda E, F: ~((E - F) / 2),
+}
+
+
+def _mp_fun(name, V):
+    return Expression(_call("fun", name, V._s)[0])
+
+
+_MP_EXACT = {
+    "sgn": lambda x, R: _rat_s((x > 0) - (x < 0)),
+    "floor": lambda x, R: _rat_s(int(x.floor())),
+    "ceil": lambda x, R: _rat_s(int(x.ceil())),
+    "heaviside": lambda x, R: _rat_s(1 if x > 0 else 0),
+    "arg": lambda x, R: _mp_s(R.pi() if x < 0 else R(0)),
+    "factorial": lambda x, R: _mp_s((x + 1).gamma()),
+}
+
+def _mp_ratio(d, s):
+    """d / s, or None for the exact 0 (d is 0: Sage's sinh and tanh of a
+    number whose e^x and e^-x are equal in the field)."""
+    return None if d == 0 else d / s
+
+
+_MP_HYPERBOLIC = {
+    "sinh": lambda e, f: _mp_ratio(e - f, 2),
+    "cosh": lambda e, f: (e + f) / 2,
+    "tanh": lambda e, f: _mp_ratio(e - f, e + f),
+    "coth": lambda e, f: 1 / ((e - f) / (e + f)),
+    "sech": lambda e, f: 1 / ((e + f) / 2),
+    "csch": lambda e, f: 1 / ((e - f) / 2),
+}
+
+_MP_SYMBOLIC = {
+    "cot": lambda V: 1 / _mp_fun("tan", V),
+    "sec": lambda V: 1 / _mp_fun("cos", V),
+    "csc": lambda V: 1 / _mp_fun("sin", V),
+    "arccot": lambda V: _mp_fun("arctan", 1 / V),
+}
 
 
 def _lower_special(s):
@@ -2729,7 +3136,7 @@ def _system_assume(sols, names):
 
 def _is_rational_number(v):
     q = _py_number(v._s)
-    return q is not None and not isinstance(q, float) and not isinstance(q, complex)
+    return q is not None and not _inexact(q)
 
 
 def _certainly_irrational(v):
@@ -2764,7 +3171,7 @@ def _integer_multiple_of_pi(arg):
                     pass
                 return None
             v = _py_number(f._s)
-            if v is None or isinstance(v, float) or getattr(v, "denominator", 1) != 1:
+            if v is None or _inexact(v) or getattr(v, "denominator", 1) != 1:
                 return None
     return q
 
@@ -2833,7 +3240,7 @@ def _sign_of(e):
         # a negative base: only an integer exponent has a sign (int(1/2) is
         # 0: sqrt(x) for x < 0 counted as positive, abs(sqrt(-1)) was I)
         k = _py_number(x._s)
-        if isinstance(k, int) or (getattr(k, "denominator", None) == 1 and not isinstance(k, float)):
+        if isinstance(k, int) or (getattr(k, "denominator", None) == 1 and not _inexact(k)):
             return 1 if int(k) % 2 == 0 else -1
         return None
     if e.is_numeric():
@@ -2947,7 +3354,7 @@ def _assume_rewrite(e):
             k = _py_number(x._s)
         except Exception:
             k = None
-        if k is not None and not isinstance(k, float) and getattr(k, "denominator", 1) == 2:
+        if k is not None and not _inexact(k) and getattr(k, "denominator", 1) == 2:
             # (b)^(m/2): b = c^2 with c of known sign
             bt = b._op()[0]
             if bt == "pow":
@@ -3097,6 +3504,77 @@ def _rr_function(name, args, numeric):
                               % (name, ", ".join(map(str, args))))
 
 
+# (the parts of Sage's values of these functions of CC that are an exact 0:
+# the imaginary part on the real line; on the imaginary axis, the real part
+# of the odd functions and the imaginary part of the even ones)
+# (the functions of an element of CC that are its methods, Sage's)
+_CC_METHOD_FUNCTIONS = frozenset(("exp", "sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh", "coth",
+                                  "sech", "csch"))
+_CC_REAL_ON_REALS = frozenset(("exp", "sin", "cos", "tan", "sinh", "cosh", "tanh", "cot", "sec", "csc", "coth",
+                               "sech", "csch", "arctan", "arcsinh"))
+_CC_IMAGINARY_ON_IMAGINARIES = frozenset(("sin", "tan", "sinh", "tanh", "cot", "csc", "coth", "csch", "arcsin"))
+_CC_REAL_ON_IMAGINARIES = frozenset(("cos", "cosh", "sec", "sech"))
+# (and on the part of the real line where the function is real)
+_CC_REAL_ON_DOMAIN = {"arcsin": lambda x: abs(x) <= 1, "arccos": lambda x: abs(x) <= 1,
+                      "arctanh": lambda x: abs(x) < 1, "arccosh": lambda x: x >= 1, "log": lambda x: x > 0,
+                      "sqrt": lambda x: x >= 0}
+# (an exact 0 real part on a stretch of an axis: on the imaginary axis,
+# lambda y; on the real line, lambda x)
+_CC_IMAGINARY_ON_AXIS = {"arctan": lambda y: abs(y) < 1, "arcsinh": lambda y: abs(y) <= 1,
+                         "arctanh": lambda y: abs(y) <= 1}
+_CC_IMAGINARY_ON_LINE = {"arccos": lambda x: x >= 1, "arccosh": lambda x: abs(x) <= 1}
+
+
+def _cc_function(name, args, r):
+    """The value of name(*args), some of them elements of CC, whose double
+    value is r: r where each part is Sage's (a normal double, or a 0 that
+    is an exact 0 in Sage's value too: _CC_REAL_ON_REALS and the others;
+    anything for an infinite or NaN argument), else Sage's value (the
+    method of the 53-bit MP complex field, MPFR's exponents and all) as an
+    element of CC, or NotImplementedError past the doubles, never a
+    double's infinity or zero."""
+    parts = []
+    for a in args:
+        z = complex(a)
+        parts += [z.real, z.imag]
+    if not all(abs(t) < _INF for t in parts):
+        return r
+    if r is None:
+        # (the engine refused its double value, past the double range)
+        re = im = _INF
+    elif isinstance(r, complex):
+        # (complex's own parts: CC's .real is a callable real)
+        v = complex.__complex__(r)
+        re, im = v.real, v.imag
+    elif isinstance(r, float) and getattr(r, "_mp", None) is None:
+        re, im = float.__float__(r), 0.0
+    else:
+        # (an element of RR past the doubles holds its value already)
+        return r
+    if len(args) == 1:
+        x, y = parts
+        on_axis, on_line = _CC_IMAGINARY_ON_AXIS.get(name), _CC_IMAGINARY_ON_LINE.get(name)
+        re0 = (x == 0 and (name in _CC_IMAGINARY_ON_IMAGINARIES or (on_axis is not None and on_axis(y)))) or (
+            y == 0 and on_line is not None and on_line(x))
+        dom = _CC_REAL_ON_DOMAIN.get(name)
+        im0 = (y == 0 and (name in _CC_REAL_ON_REALS or (dom is not None and dom(x)))) or (
+            x == 0 and name in _CC_REAL_ON_IMAGINARIES)
+    else:
+        re0 = im0 = False
+    if (_NORMAL_MIN <= abs(re) < _INF or (re == 0 and re0)) and (_NORMAL_MIN <= abs(im) < _INF or (im == 0 and im0)):
+        return r
+    import _sage_real
+    f = getattr(_sage_real.ComplexNumberMP, name, None) if len(args) == 1 else None
+    if f is None:
+        raise NotImplementedError("%s(%s): the value in CC, past the double range, is not available in sagebrush yet"
+                                  % (name, ", ".join(map(str, args))))
+    v = f(_sage_real._cc_mp()(args[0]))
+    if isinstance(v, _sage_real.RealNumberMP):
+        import _sage_lang
+        return _sage_lang._rr_from_mp(v)
+    return _sage_real._cc_from_mp(v)
+
+
 def _function(name, numeric=None, cnumeric=None):
     """A Sage function: numerical on floats, exact or symbolic otherwise
     (sin(0) = 0, sin(pi/6) = 1/2, sin(1) stays sin(1))."""
@@ -3122,8 +3600,29 @@ def _function(name, numeric=None, cnumeric=None):
                     if rr and not _rr_exact(r, fl) and name not in ("sgn", "heaviside"):
                         return _rr_function(name, args, numeric)
                     return _RealNumber(r)
-            r = _one("fun", name, *[_to_s(a) for a in args]).n()
+            if len(args) == 1 and not kw and name in _CC_METHOD_FUNCTIONS and type(args[0]).__name__ == "ComplexNumber":
+                # (an element of CC alone: its own method, as in Sage, an
+                # element of CC however real its value)
+                return getattr(args[0], name)()
+            cc = any(type(a).__name__ == "ComplexNumber" for a in args)
+            try:
+                r = _one("fun", name, *[_to_s(a) for a in args]).n()
+            except NotImplementedError:
+                # (an element of CC: the engine's double value was past the
+                # double range, so Sage's is the MP field's, _cc_function)
+                if not cc:
+                    raise
+                r = None
+            if cc:
+                return _cc_function(name, args, r)
             return r
+        if len(args) == 1 and not kw and type(args[0]).__name__ in ("RealNumberMP", "ComplexNumberMP"):
+            # an element of RealField(p) alone: its own method, in its field
+            # or its complex field, as Sage (log(RealField(100)(-2)) is
+            # ComplexField(100)'s), not the symbolic ring's
+            h = getattr(args[0], name, None)
+            if h is not None:
+                return h()
         try:
             ss = [_expr(a)._s for a in args]
         except TypeError:
@@ -3164,8 +3663,15 @@ def _rr_special(name, args):
     field; the other special functions raise NotImplementedError (never a
     double's overflowed infinity or underflowed zero)."""
     import _sage_lang
-    if name in ("gamma", "log_gamma") and len(args) == 1 and not (name == "log_gamma" and args[0] < 0):
-        return _sage_lang._rr_from_mp(getattr(_sage_lang._rr_operand(args[0]), name)())
+    if name in ("gamma", "log_gamma") and len(args) == 1:
+        v = getattr(_sage_lang._rr_operand(args[0]), name)()
+        if name == "log_gamma" and args[0] < 0:
+            # (the principal branch, in CC: refused where a part leaves the doubles)
+            z = complex(v)
+            if _m.isfinite(z.real) and _m.isfinite(z.imag):
+                return v
+        else:
+            return _sage_lang._rr_from_mp(v)
     raise NotImplementedError("%s(%s): the value in RR, past the double range, is not available in sagebrush yet"
                               % (name, ", ".join(map(str, args))))
 
@@ -3797,7 +4303,7 @@ def _small_int(v):
     except TypeError:
         return None
     w = _py_number(e._s)
-    if w is not None and not isinstance(w, float) and w == int(w):
+    if w is not None and not _inexact(w) and w == int(w):
         return int(w)
     return None
 
@@ -4003,7 +4509,12 @@ def log(v, b=None, base=None):
         # (log(RR(2), 0) is -0.000000000000000), in its complex field for
         # x < 0, and NaN for x = 0
         return -(_log1(v) * 0)
-    return _log1(v) / _log1(b)
+    lv = _log1(v)
+    if type(lv).__name__ in ("ComplexNumber", "ComplexDoubleElement") and _numeric_base(b):
+        # (a complex logarithm in CC or CDF: log(b) in that field too, as Sage's
+        # log(RR(-2), 10) is 0.301029995663981 + 1.36437635384184*I, not over log(10))
+        return lv / lv.parent()(_log1(b))
+    return lv / _log1(b)
 
 
 def _is_real_element(v):
@@ -4592,7 +5103,7 @@ def _sr_poly_terms(e, names):
     exact rational coefficients, else None."""
     if not names:
         v = _py_number(e._s)
-        if v is None or isinstance(v, (float, complex)):
+        if v is None or _inexact(v):
             return None
         return {(): v}
     x = names[0]

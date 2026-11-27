@@ -1,0 +1,293 @@
+{
+ "protocol": 4,
+ "commit": "c194d692c64bde66cb9bc594be5b206f1882382e",
+ "dirty": false,
+ "tree_diff": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+ "artifacts": {
+  "python": "428cf57fa2251ae5333c5f56afc400323d37894f4d12c86b0997f675f99437c5",
+  "node": "0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584",
+  "pyjs": "f55038c72543c13283aa475e75e57d69811dd52aaf85d2accf3b816ec3263fec",
+  "native": "53e126324311d7a1a4455ecac4660dd2b8662fd326431812f56d95a3502a31bd",
+  "native-host": "c1052eb9aef2a4681d8f4a00d588a8df228c3a0239e59e8a0696ea5ed01841ba",
+  "wasm-module": "e9441d26b600ab93bf7773f2d807b1efce6b0770c70f3954401c2dc54354c0cd",
+  "flint-rust": "064e0f9835be498b8af2902b06123cce0051e5f8599cb7be66fd8eecaea07885",
+  "magma": null,
+  "engine-wasm": "d8ec3353e6cc4e9c29bc73367560402c7a1be9725b582cbec2783ac48233565f",
+  "sagebrush-wheel": "adeedf305c061bfcb1dce97b099bd513dd6f2d83ea822c728942eafb7782f202",
+  "sagebrush-installed": "07e829a0444148fb9f0ad7c0e59d14b103d644280608b6b2d385d94496f403c8",
+  "python-flint-installed": "a7a7f0425126e8beea034ab4a083654eedc777678c2126c8a6d2c4d0b116cd1a"
+ },
+ "engine_pin": {
+  "sha256": "d8ec3353e6cc4e9c29bc73367560402c7a1be9725b582cbec2783ac48233565f",
+  "pinned": "8c774a1d3aa4c27c9d9ea76fbce0510733eab862ba9c586d59b13c9705702c07",
+  "ok": false,
+  "policy": "track"
+ },
+ "build": {
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1",
+  "rustflags": {
+   "native": "",
+   "native-host": "-C target-cpu=native",
+   "wasm": "",
+   "flint-rust": ""
+  },
+  "profile": "release: opt-level 3, lto, codegen-units 1",
+  "wasm_postprocess": "none"
+ },
+ "machine": {
+  "label": "arm",
+  "cpu": "aarch64",
+  "arch": "aarch64",
+  "flags": [
+   "asimd",
+   "sve",
+   "sve2",
+   "sveaes",
+   "svebf16",
+   "svebitperm",
+   "svei8mm",
+   "svepmull",
+   "svesha3",
+   "svesm4"
+  ],
+  "nproc": 16,
+  "kernel": "7.0.0-1017-gcp"
+ },
+ "versions": {
+  "rust": "1.99.1",
+  "node": "v24.21.0",
+  "python": "Python 3.14.10",
+  "python-flint": "0.9.0",
+  "magma": null
+ },
+ "flags": {
+  "native": "default",
+  "native-host": "-C target-cpu=native",
+  "wasm": "wasm32-wasip1, default target features"
+ },
+ "threads": 16,
+ "mem_cap": 60549425972,
+ "backends": {
+  "native": {
+   "status": "not applicable"
+  },
+  "native-host": {
+   "status": "not applicable"
+  },
+  "native-n": {
+   "status": "not applicable"
+  },
+  "wasm": {
+   "status": "not applicable"
+  },
+  "magma": {
+   "status": "not on host"
+  },
+  "user": {
+   "adapter": "Sage mode (engine/.venv)",
+   "input": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 1.637,
+    "cpu": 1.629,
+    "peak_rss_kib": 50676,
+    "threads": 1,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 41852928,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "input_hash": "802950855"
+   },
+   "check": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 0.224,
+    "cpu": 0.203,
+    "peak_rss_kib": 39512,
+    "threads": 1,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 24915968,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "signature": "100"
+   },
+   "time": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 2.696,
+    "cpu": 2.677,
+    "peak_rss_kib": 54984,
+    "threads": 1,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 39411712,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "seconds": 0.00703983532,
+    "min": 0.00702734529,
+    "max": 0.00704559603,
+    "reps": 34,
+    "samples": 5,
+    "signature": "8:295638450"
+   }
+  },
+  "flint": {
+   "adapter": "python-flint",
+   "input": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 0.362,
+    "cpu": 0.353,
+    "peak_rss_kib": 32072,
+    "threads": 1,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 13336576,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "input_hash": "802950855"
+   },
+   "check": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 0.089,
+    "cpu": 0.077,
+    "peak_rss_kib": 34016,
+    "threads": 1,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 14413824,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "signature": "100"
+   },
+   "time": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 1.798,
+    "cpu": 1.789,
+    "peak_rss_kib": 37564,
+    "threads": 1,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 17252352,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "seconds": 0.00348270469,
+    "min": 0.00347931444,
+    "max": 0.00348674172,
+    "reps": 68,
+    "samples": 5,
+    "signature": "8:295638450"
+   }
+  },
+  "flint-n": {
+   "adapter": "python-flint, 16 threads",
+   "input": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 0.36,
+    "cpu": 0.353,
+    "peak_rss_kib": 32156,
+    "threads": 16,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 17920000,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "input_hash": "802950855"
+   },
+   "check": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 0.088,
+    "cpu": 0.084,
+    "peak_rss_kib": 34868,
+    "threads": 16,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 18423808,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "signature": "100"
+   },
+   "time": {
+    "status": "ok",
+    "exit": 0,
+    "wall": 1.808,
+    "cpu": 4.368,
+    "peak_rss_kib": 37112,
+    "threads": 16,
+    "cgroup": {
+     "limit": 60549425972,
+     "peak": 21716992,
+     "oom_kill": 0,
+     "left": 0,
+     "removed": true,
+     "problems": []
+    },
+    "steal": 0.0,
+    "seconds": 0.00327432071,
+    "min": 0.00327195188,
+    "max": 0.00327869016,
+    "reps": 73,
+    "samples": 5,
+    "signature": "8:295638450"
+   }
+  }
+ },
+ "row": "mat_q_rank_wide",
+ "item": "la1",
+ "category": "linear algebra over Q",
+ "label": "rank, n x 2n of full row rank",
+ "size": "l",
+ "n": 100,
+ "fresh": false,
+ "variants": 8,
+ "expected_input_hash": "802950855",
+ "input_hash": "802950855",
+ "status": "ok",
+ "steal_max": 0.0,
+ "noisy": false,
+ "best_ref": {
+  "backend": "flint",
+  "adapter": "python-flint",
+  "seconds": 0.00348270469
+ },
+ "ratio_user": 2.0214,
+ "complete": true
+}

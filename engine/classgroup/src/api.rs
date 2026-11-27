@@ -417,23 +417,52 @@ pub fn hermite(m: &ZMat) -> ZMat {
     hnf(m)
 }
 
-/// The size from which `hermite` uses `hermite_modular`: where the two meet
-/// in the WebAssembly engine.  Measured with Sage mode's command line (Node
-/// 24.21.0, one core of an AMD EPYC 7B13) on random_matrix(ZZ, n), two
-/// seeds each: the elimination over Z took 0.79 s at n = 100, 1.46 s at
-/// 110 and 2.80 s at 120; the modular form 0.90 s, 1.46 s and 2.40 s.
-/// Below that the elimination is faster; above it the elimination's
-/// entries grow until it doesn't finish (n = 150 ran for over 13 minutes,
-/// the modular form took 8.0 s).
-pub const HERMITE_MODULAR_MIN_N: usize = 110;
+/// The size from which `hermite` uses `hermite_modular`, for the target it
+/// runs on: where the modular form overtakes the elimination over Z
+/// (WebAssembly, [`HERMITE_MODULAR_MIN_N_WASM`]) or the cyclic attempt's
+/// fallback (native, [`HERMITE_MODULAR_MIN_N_NATIVE`]).
+pub const HERMITE_MODULAR_MIN_N: usize = if cfg!(target_arch = "wasm32") { HERMITE_MODULAR_MIN_N_WASM } else { HERMITE_MODULAR_MIN_N_NATIVE };
 
-/// The size from which `hermite` tries `hermite_cyclic` first: below it, the
-/// determinant and solves it costs exceed what it saves.  Measured with Sage
+/// [`HERMITE_MODULAR_MIN_N`] in the WebAssembly engine: where the two meet
+/// there.  Measured with Sage mode's command line (Node 24.21.0, one core of
+/// an AMD EPYC 7B13) on random_matrix(ZZ, n), two seeds each: the
+/// elimination over Z took 0.79 s at n = 100, 1.46 s at 110 and 2.80 s at
+/// 120; the modular form 0.90 s, 1.46 s and 2.40 s.  Below that the
+/// elimination is faster; above it the elimination's entries grow until it
+/// doesn't finish (n = 150 ran for over 13 minutes, the modular form took
+/// 8.0 s).
+pub const HERMITE_MODULAR_MIN_N_WASM: usize = 110;
+
+/// [`HERMITE_MODULAR_MIN_N`] in native builds (x86-64 measured; aarch64 not
+/// yet): where, after a failed cyclic attempt, the modular form overtakes the
+/// elimination over Z.  Measured natively on one pinned core of an idle
+/// Google Cloud n2-standard-8 (Intel Xeon, 2.80 GHz), on Sage mode's
+/// random_matrix(ZZ, n) for seeds 1 to 20 together, the three methods timed
+/// on the same matrices, twice: with the cyclic attempt first, the
+/// elimination fallback took 2.81 s at n = 90 and 5.28 s at 100, the modular
+/// one 3.28 s and 4.84 s.
+pub const HERMITE_MODULAR_MIN_N_NATIVE: usize = 100;
+
+/// The size from which `hermite` tries `hermite_cyclic` first, for the
+/// target it runs on ([`HERMITE_CYCLIC_MIN_N_WASM`],
+/// [`HERMITE_CYCLIC_MIN_N_NATIVE`]): below it, the determinant and solves it
+/// costs exceed what it saves.
+pub const HERMITE_CYCLIC_MIN_N: usize = if cfg!(target_arch = "wasm32") { HERMITE_CYCLIC_MIN_N_WASM } else { HERMITE_CYCLIC_MIN_N_NATIVE };
+
+/// [`HERMITE_CYCLIC_MIN_N`] in the WebAssembly engine.  Measured with Sage
 /// mode's command line (Node 24.21.0, one core of an AMD EPYC 7B13) on
 /// random_matrix(ZZ, n) for seeds 1 to 20 together (7 of them of that form
 /// at n = 50, 10 at 55), twice: without it, 0.54 s at n = 50 and 0.77 s at
 /// 55; with it, 0.55 s and 0.63 s.
-pub const HERMITE_CYCLIC_MIN_N: usize = 55;
+pub const HERMITE_CYCLIC_MIN_N_WASM: usize = 55;
+
+/// [`HERMITE_CYCLIC_MIN_N`] in native builds (x86-64 measured; aarch64 not
+/// yet).  Measured natively on one pinned core of an idle Google Cloud
+/// n2-standard-8 (Intel Xeon, 2.80 GHz), on Sage mode's random_matrix(ZZ, n)
+/// for seeds 1 to 20 together, the methods timed on the same matrices,
+/// twice: without it, 0.089 s at n = 40 and 0.145 s at 45; with it (a failed
+/// attempt then pays the elimination), 0.091 s and 0.113 s.
+pub const HERMITE_CYCLIC_MIN_N_NATIVE: usize = 45;
 
 /// The Hermite normal form of a square nonsingular matrix when it is
 /// [[I, h], [0, d]] (sagebrush_arith::zmat::hermite_cyclic: one Dixon solve
@@ -444,7 +473,11 @@ pub fn hermite_cyclic(m: &ZMat) -> Option<ZMat> {
         return None;
     }
     let a = sagebrush_arith::zmat::ZMat::from_rows(m.to_vec());
+    // (Units: the copies in and out as Move; zmat counts the rest)
+    let mut acc = sagebrush_arith::cost::Local::new();
+    acc.n(sagebrush_arith::cost::Family::Move, m.iter().map(|r| sagebrush_arith::zmat::copy_units(r)).sum());
     let h = sagebrush_arith::zmat::hermite_cyclic(&a)?;
+    acc.n(sagebrush_arith::cost::Family::Move, (0..n).map(|i| sagebrush_arith::zmat::copy_units(h.row(i))).sum());
     Some((0..n).map(|i| h.row(i).to_vec()).collect())
 }
 
@@ -456,27 +489,45 @@ pub fn hermite_cyclic(m: &ZMat) -> Option<ZMat> {
 /// (Domich, Kannan and Trotter, "Hermite normal form computation using
 /// modulo determinant arithmetic", Math. Oper. Res. 12 (1987)).  Its rows are then reduced above each pivot into [0, pivot),
 /// the normalization of `zlin::hnf`: the Hermite form is unique.
+///
+/// Units (`cost::tally`): the conversion to words as Move; det_crt and
+/// hnf_mod count themselves; the reduction above the diagonal, per pivot
+/// after its work and flushed at its check: a quotient per entry
+/// (`bigdiv_units`), and for a nonzero one the row copied (Move) and its
+/// products (`bigmul_units`; a product's accumulation into its row is part
+/// of its units, as in zmat).
 pub fn hermite_modular(m: &ZMat) -> Option<ZMat> {
+    use sagebrush_arith::cost::{bigdiv_units, bigmul_units, Family, Local};
+    use sagebrush_arith::zmat::{copy_units, limbs};
     let n = m.len();
     if n == 0 || m.iter().any(|r| r.len() != n) {
         return None;
     }
     let rows: Vec<Vec<i64>> = m.iter().map(|r| r.iter().map(num_traits::ToPrimitive::to_i64).collect::<Option<Vec<i64>>>()).collect::<Option<Vec<_>>>()?;
+    let mut acc = Local::new();
+    acc.n(Family::Move, (n * n) as u64);
     let d = crate::linalg::det_crt(&rows).abs();
     if d.is_zero() {
         return None;
     }
     let mut w = crate::linalg::hnf_mod(&rows, n, &d);
     for i in 0..n {
+        acc.flush();
         sagebrush_interrupt::check();
         let p = w[i][i].clone();
+        let lp = limbs(&p);
+        let row = copy_units(&w[i][i..]);
+        acc.n(Family::Move, lp as u64);
         for k in 0..i {
             let q = w[k][i].div_floor(&p);
+            acc.add(bigdiv_units(limbs(&w[k][i]), lp));
             if !q.is_zero() {
                 let wi = w[i].clone();
                 for (x, y) in w[k].iter_mut().zip(&wi).skip(i) {
                     *x -= &q * y;
                 }
+                acc.n(Family::Move, copy_units(&wi));
+                acc.add(bigmul_units(limbs(&q), usize::try_from(row).unwrap_or(usize::MAX)));
             }
         }
     }
@@ -485,7 +536,51 @@ pub fn hermite_modular(m: &ZMat) -> Option<ZMat> {
 
 /// The elementary divisors (Smith form diagonal) of an m x n integer matrix:
 /// min(m, n) entries d_1 | d_2 | ..., zeros last.
+///
+/// A square nonsingular matrix goes straight to
+/// `sagebrush_arith::snf::invariants_square` (the determinant, one solve,
+/// then the Smith form modulo d / delta: that module's docs).  Any other
+/// keeps its invariants through two Hermite forms: `hermite` of the rows
+/// (r x n of full row rank, unimodular row operations), then, unless that
+/// is already square, `hermite` of its transpose (r x r, nonsingular: the
+/// column operations).  Their r x r form is upper triangular, so |det| is
+/// the product of its diagonal; its r invariants, then min(m, n) - r zeros.
 pub fn elementary_divisors(m: &ZMat) -> Vec<BigInt> {
+    use sagebrush_arith::snf;
+    use sagebrush_arith::zmat::ZMat as Dense;
+    let rows = m.len();
+    let cols = m.first().map_or(0, |r| r.len());
+    let k = rows.min(cols);
+    if k == 0 {
+        return vec![];
+    }
+    if rows == cols {
+        if let Some(t) = snf::invariants_square(&Dense::from_rows(m.clone())) {
+            return t;
+        }
+    }
+    let h = hermite(m);
+    let r = h.len();
+    let sq = if r == cols {
+        h
+    } else {
+        let ht: ZMat = (0..cols).map(|j| h.iter().map(|row| row[j].clone()).collect()).collect();
+        hermite(&ht)
+    };
+    let mut t = if r == 0 {
+        vec![]
+    } else {
+        let d: BigInt = (0..r).map(|i| sq[i][i].clone()).product();
+        snf::invariants_nonsingular(&Dense::from_rows(sq), &d.abs(), None)
+    };
+    t.extend((r..k).map(|_| BigInt::zero()));
+    t
+}
+
+/// The textbook smallest-pivot Smith form over Z that `elementary_divisors`
+/// replaced, kept for its tests.
+#[cfg(test)]
+fn elementary_divisors_elim(m: &ZMat) -> Vec<BigInt> {
     let rows = m.len();
     let cols = m.first().map_or(0, |r| r.len());
     let k = rows.min(cols);
@@ -562,14 +657,30 @@ thread_local! {
     /// Tests: every LLL refused (a memory refusal), and how many were.
     static REFUSE_LLL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static LLL_REFUSED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Tests: the rank stage's prime (0: `RANK_PRIME`), to force an unlucky one.
+    static RANK_P: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Tests: when set, each of `lll_in`'s own debits is recorded as (its
+    /// site, the work left before it).
+    static LLL_TRACE: std::cell::RefCell<Option<Vec<(&'static str, u64)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Debit `units` at `site` (recorded in tests).
+fn lll_debit(b: &sagebrush_poly::Budget, _site: &'static str, units: Option<u64>) -> sagebrush_poly::budget::FResult<()> {
+    #[cfg(test)]
+    LLL_TRACE.with(|t| {
+        if let Some(v) = t.borrow_mut().as_mut() {
+            v.push((_site, b.work_left()));
+        }
+    });
+    b.debit(units)
 }
 
 /// An LLL-reduced basis ((0.51, 0.99)-reduced, proved) of the lattice
 /// spanned by the rows; dependent rows give zero rows, which come first.
-/// The rows themselves are reduced when independent, else a basis of their
-/// lattice (their Hermite form). The reduction (`sagebrush_poly::lll::reduce`)
-/// is L^2's, with the exact LLL as its fallback, within the default budget; a
-/// refusal is an error starting "LLL:".
+/// The rows themselves are reduced when their rank modulo a prime proves
+/// them independent, else a basis of their lattice (their Hermite form). The
+/// whole call runs within the default budget (`lll_in`); a refusal is an
+/// error starting "LLL:".
 pub fn lll(m: &ZMat) -> Result<ZMat, String> {
     #[cfg(test)]
     if REFUSE_LLL.with(|r| r.get()) {
@@ -577,15 +688,57 @@ pub fn lll(m: &ZMat) -> Result<ZMat, String> {
         let b = sagebrush_poly::Budget::default();
         return Err(b.refuse("memory", 2, 1).message(&sagebrush_poly::budget::LLL));
     }
-    let rows = m.len();
-    let h = hnf(m);
-    let b = if h.len() == rows { m.clone() } else { h };
-    let k = b.len();
-    let budget = sagebrush_poly::Budget::default();
-    let b = sagebrush_poly::lll::reduce(&budget, b).map_err(|e| e.message(&sagebrush_poly::budget::LLL))?;
-    let cols = m.first().map_or(0, |r| r.len());
-    let mut out: ZMat = (0..rows - k).map(|_| vec![BigInt::zero(); cols]).collect();
-    out.extend(b);
+    let b = sagebrush_poly::Budget::default();
+    lll_in(&b, m).map_err(|e| e.message(&sagebrush_poly::budget::LLL))
+}
+
+/// The largest entry's bits in a row.
+fn row_bits(r: &[BigInt]) -> u64 {
+    r.iter().map(|x| x.bits()).max().unwrap_or(0)
+}
+
+/// [`lll`] within `b`, each stage's memory reserved before it is allocated
+/// and its work debited before it is done: the entries' sizes; the rank
+/// modulo a prime (`lll::rank_mod_p`, skipped with more rows than columns);
+/// the Hermite form when that rank is short (`lll::hnf_budgeted`, its
+/// reservation grown before its entries grow); the reduction (`lll::reduce_held`,
+/// handed the rows' reservation); then the zero rows and the outer vector.
+/// Its own copies are debited by their limbs, and the output by its
+/// entries and rows.
+fn lll_in(b: &sagebrush_poly::Budget, m: &ZMat) -> sagebrush_poly::budget::FResult<ZMat> {
+    use sagebrush_poly::lll::{basis_bytes, rank_mod_p, reduce_held, RANK_PRIME};
+    let r = m.len();
+    let n = m.first().map_or(0, |x| x.len());
+    let overflow = || b.refuse("work (overflow)", u64::MAX, b.work_left());
+    let entries = (r as u64).checked_mul(n as u64).and_then(|x| x.checked_add(1)).ok_or_else(overflow)?;
+    // the entries' sizes: the largest, and the limbs a copy reads
+    lll_debit(b, "shape", Some(entries))?;
+    let e = m.iter().map(|x| row_bits(x)).max().unwrap_or(0);
+    let limbs_sum = m.iter().flatten().try_fold(0u64, |s, x| s.checked_add(sagebrush_poly::budget::limbs(x.bits()))).ok_or_else(overflow)?;
+    #[allow(unused_mut)]
+    let mut p = RANK_PRIME;
+    #[cfg(test)]
+    if RANK_P.with(|c| c.get()) != 0 {
+        p = RANK_P.with(|c| c.get());
+    }
+    let independent = r <= n && rank_mod_p(b, m, p)? == r;
+    let (rows, kept) = if independent {
+        let held = b.reserve(basis_bytes(r, n, e))?;
+        lll_debit(b, "copy", limbs_sum.checked_add(entries))?;
+        reduce_held(b, m.clone(), held)?
+    } else {
+        let (h, held, _) = sagebrush_poly::lll::hnf_budgeted(b, m)?;
+        reduce_held(b, h, held)?
+    };
+    let k = rows.len();
+    let z = basis_bytes(r - k, n, 0).and_then(|x| x.checked_add((r as u64).checked_mul(24)?));
+    let zr = b.reserve(z)?;
+    // the zero entries, and a move per row
+    lll_debit(b, "output", ((r - k) as u64).checked_mul(n as u64).and_then(|x| x.checked_add(r as u64 + 1)))?;
+    let mut out: ZMat = Vec::with_capacity(r);
+    out.extend((0..r - k).map(|_| vec![BigInt::zero(); n]));
+    out.extend(rows);
+    drop((kept, zr));
     Ok(out)
 }
 
@@ -775,6 +928,16 @@ mod tests {
         ));
     }
 
+    /// Each target's thresholds are the measured ones, and the build picks
+    /// its own: the WebAssembly engine's are kept when native ones change.
+    #[test]
+    fn hermite_thresholds_per_target() {
+        assert_eq!((HERMITE_CYCLIC_MIN_N_WASM, HERMITE_MODULAR_MIN_N_WASM), (55, 110));
+        assert_eq!((HERMITE_CYCLIC_MIN_N_NATIVE, HERMITE_MODULAR_MIN_N_NATIVE), (45, 100));
+        let want = if cfg!(target_arch = "wasm32") { (55, 110) } else { (45, 100) };
+        assert_eq!((HERMITE_CYCLIC_MIN_N, HERMITE_MODULAR_MIN_N), want);
+    }
+
     /// hermite on both sides of HERMITE_CYCLIC_MIN_N gives the form of U H,
     /// H = [[I, h], [0, d]] and U unimodular (just below: by the elimination
     /// over Z; at it: by hermite_cyclic, which takes it).
@@ -870,6 +1033,43 @@ mod tests {
         assert!(e.starts_with("LLL: resource limit exceeded"), "{e}");
     }
 
+    /// elementary_divisors against the smallest-pivot elimination it
+    /// replaced, on every route: square nonsingular, square singular, tall
+    /// and wide (the two Hermite compressions), zero, empty, and
+    /// relation-like tall matrices with an h* I block appended.
+    #[test]
+    fn elementary_divisors_agree_with_the_elimination() {
+        let mut seed = 0x0123_4567_89ab_cdefu64;
+        let mut next = |m: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % (2 * m as u64 + 1)) as i64 - m
+        };
+        let mut shapes: Vec<ZMat> = vec![vec![], vec![vec![]], vec![vec![]; 3]];
+        for (r, c) in [(1, 1), (2, 2), (3, 3), (5, 5), (7, 7), (2, 5), (5, 2), (4, 7), (7, 4), (1, 6), (6, 1)] {
+            for range in [0, 1, 9, 1000] {
+                let a: ZMat = (0..r).map(|_| (0..c).map(|_| BigInt::from(next(range))).collect()).collect();
+                shapes.push(a);
+            }
+            // rank deficient: a product through an inner dimension of about half
+            let h = (r.min(c) / 2).max(1);
+            let b: Vec<Vec<i64>> = (0..r).map(|_| (0..h).map(|_| next(5)).collect()).collect();
+            let cm: Vec<Vec<i64>> = (0..h).map(|_| (0..c).map(|_| next(5)).collect()).collect();
+            shapes.push((0..r).map(|i| (0..c).map(|j| BigInt::from((0..h).map(|t| b[i][t] * cm[t][j]).sum::<i64>())).collect()).collect());
+        }
+        // relations with h* I appended (the class group's shape)
+        for hs in [12i64, 360, 1_000_003] {
+            let m = 4;
+            let mut a: ZMat = (0..6).map(|_| (0..m).map(|_| BigInt::from(next(50))).collect()).collect();
+            a.extend((0..m).map(|t| (0..m).map(|j| BigInt::from(if j == t { hs } else { 0 })).collect()));
+            shapes.push(a);
+        }
+        for a in shapes {
+            assert_eq!(elementary_divisors(&a), elementary_divisors_elim(&a), "{:?}", a);
+        }
+    }
+
     #[test]
     fn against_sage() {
         // M = matrix(ZZ, [[4,6,2],[3,9,12],[1,1,1]]): Sage's outputs
@@ -885,6 +1085,226 @@ mod tests {
         assert_eq!(factor_integer(&((BigInt::one() << 128usize) + 1)).unwrap(), vec![("59649589127497217".parse().unwrap(), 1), ("5704689200685129054721".parse().unwrap(), 1)]);
     }
 }
+
+#[cfg(test)]
+mod lll_budget_tests {
+    use super::*;
+    use sagebrush_poly::budget::{with_default_limits, Limits, LLL};
+    use sagebrush_poly::lll::{basis_bytes, cap_bits, hnf_budgeted, hnf_bytes, l2_route_plain, lattice_bytes, rank_bytes};
+    use sagebrush_poly::Budget;
+
+    fn z(v: &[&[i64]]) -> ZMat {
+        v.iter().map(|r| r.iter().map(|&x| BigInt::from(x)).collect()).collect()
+    }
+
+    fn bits(m: &ZMat) -> u64 {
+        m.iter().map(|r| row_bits(r)).max().unwrap_or(0)
+    }
+
+    /// Random rows (an xorshift): r rows of n entries of up to `b` bits, signed.
+    fn rand_rows(r: usize, n: usize, b: u32, seed: &mut u64) -> ZMat {
+        let mut word = || {
+            *seed ^= *seed << 13;
+            *seed ^= *seed >> 7;
+            *seed ^= *seed << 17;
+            *seed
+        };
+        (0..r)
+            .map(|_| {
+                (0..n)
+                    .map(|_| {
+                        let mut v = BigInt::zero();
+                        for _ in 0..b.div_ceil(64) {
+                            v = (v << 64usize) + BigInt::from(word());
+                        }
+                        let v = v >> (b.div_ceil(64) * 64 - b) as usize;
+                        if word() & 1 == 1 { -v } else { v }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The reduction's state for k rows of n entries of e bits: L^2's
+    /// (`l2_route_plain`) or the exact LLL's lattice.
+    fn state(k: usize, n: usize, e: u64) -> u64 {
+        l2_route_plain(k, n, e).map_or_else(|| lattice_bytes(k, n, cap_bits(k, e).unwrap()).unwrap(), |rt| rt.state)
+    }
+
+    /// The whole call's peak, from its reservations' lifetimes: independent,
+    /// max(R_rank, I + S, O + Z0); dependent, max(R_rank', H(c_max), H_held
+    /// + S, O + Z), with R_rank' = 0 when r > n. Fewer than 2 rows to reduce
+    /// are handed back as they are: no state S, and O is what they held.
+    fn model(m: &ZMat, out: &ZMat, independent: bool) -> u64 {
+        let (r, n, e) = (m.len(), m[0].len(), bits(m));
+        let red: ZMat = out.iter().filter(|x| x.iter().any(|y| !y.is_zero())).cloned().collect();
+        let k = red.len();
+        let z = basis_bytes(r - k, n, 0).unwrap() + 24 * r as u64;
+        let rank = if r <= n { rank_bytes(r, n).unwrap() } else { 0 };
+        let (held, s, extra) = if independent {
+            let i = basis_bytes(r, n, e).unwrap();
+            (i, if k < 2 { 0 } else { state(r, n, e) }, 0)
+        } else {
+            let (h, _, c) = hnf_budgeted(&Budget::default(), m).unwrap();
+            assert_eq!(h.len(), k);
+            let eh = bits(&h);
+            (basis_bytes(k, n, eh).unwrap(), if k < 2 { 0 } else { state(k, n, eh) }, hnf_bytes(r, n, c).unwrap())
+        };
+        let o = if k < 2 { held } else { basis_bytes(k, n, bits(&red)).unwrap() };
+        rank.max(extra).max(held + s).max(o + z)
+    }
+
+    /// A dependent and an independent input, each of an L^2 and an exact
+    /// shape, more rows than columns, and the hand-off's edge cases (a
+    /// thousand equal rows, all-zero rows, one row): the Budget's peak is the model's exactly; through the public
+    /// route at that memory limit the result is the unlimited one, and one
+    /// byte less refuses with an "LLL:" memory message, short by one byte
+    /// with nothing left reserved.
+    #[test]
+    fn the_whole_call_peaks_where_its_reservations_say() {
+        let mut seed = 0x11c3_0b5e_u64;
+        let mut cases: Vec<(ZMat, bool)> = vec![];
+        for (r, n, b) in [(6, 7, 40), (24, 25, 300)] {
+            cases.push((rand_rows(r, n, b, &mut seed), true));
+            // dependent with r <= n: a combination of two rows appended
+            let mut m = rand_rows(r - 1, n, b, &mut seed);
+            let extra: Vec<BigInt> = m[0].iter().zip(&m[1]).map(|(x, y)| x * BigInt::from(3) - y).collect();
+            m.insert(2, extra);
+            cases.push((m, false));
+        }
+        // more rows than columns
+        cases.push((rand_rows(9, 5, 20, &mut seed), false));
+        // the hand-off's edge cases: a thousand equal rows (rank 1), zero rows
+        // (rank 0), and one row
+        cases.push(((0..1000).map(|_| z(&[&[1, 2]])[0].clone()).collect(), false));
+        cases.push(((0..50).map(|_| vec![BigInt::zero(); 3]).collect(), false));
+        cases.push((z(&[&[3, -5, 7]]), true));
+        let mut routes = vec![];
+        for (m, independent) in cases {
+            let (r, n) = (m.len(), m[0].len());
+            let want = lll(&m).unwrap();
+            let b = Budget::default();
+            assert_eq!(lll_in(&b, &m).unwrap(), want);
+            let p = model(&m, &want, independent);
+            assert_eq!(b.peak(), p, "{r}x{n} independent={independent}: the Budget's peak");
+            assert_eq!(b.live(), 0);
+            routes.push(l2_route_plain(r, n, bits(&m)).is_some());
+            let lim = |memory| Limits { memory, ..Limits::UNLIMITED };
+            assert_eq!(with_default_limits(lim(p), || lll(&m)), Ok(want), "{r}x{n}: at the peak");
+            let e = with_default_limits(lim(p - 1), || lll(&m)).unwrap_err();
+            assert!(e.starts_with("LLL: resource limit exceeded") && e.contains("memory"), "{r}x{n}: {e}");
+            let b = Budget::new(lim(p - 1));
+            let e = lll_in(&b, &m).unwrap_err();
+            assert_eq!((e.what, e.need - e.remaining, b.live()), ("memory", 1, 0), "{r}x{n}");
+        }
+        assert!(routes.contains(&true) && routes.contains(&false), "both routes: {routes:?}");
+    }
+
+    /// The budgeted Hermite form is `zlin::hnf`'s, its reservation handed
+    /// back at the rows' `basis_bytes`.
+    #[test]
+    fn the_budgeted_hermite_form_is_zlins() {
+        let mut seed = 0x4e_a1_7e_u64;
+        for (r, n, b) in [(9, 5, 30), (7, 7, 200), (12, 4, 8), (5, 9, 60)] {
+            let mut m = rand_rows(r, n, b, &mut seed);
+            if r <= n {
+                let extra: Vec<BigInt> = m[0].iter().zip(&m[1]).map(|(x, y)| x - y * BigInt::from(5)).collect();
+                m.push(extra);
+            }
+            let bud = Budget::default();
+            let (h, res, _) = hnf_budgeted(&bud, &m).unwrap();
+            assert_eq!(h, crate::nf::zlin::hnf(&m), "{r}x{n}");
+            assert_eq!(res.bytes(), basis_bytes(h.len(), n, bits(&h)).unwrap());
+        }
+    }
+
+    /// The Hermite stage's growth refuses as memory under the policy, an
+    /// "LLL:" resource limit, with nothing left reserved; a policy with room
+    /// for the final bound admits it.
+    #[test]
+    fn hermite_growth_refuses_as_memory() {
+        let mut seed = 0x0009_e077_u64;
+        let mut m = rand_rows(15, 14, 100, &mut seed);
+        m.push(m[0].iter().zip(&m[1]).map(|(x, y)| x * BigInt::from(2) + y).collect());
+        let (r, n, e) = (m.len(), m[0].len(), bits(&m));
+        let (_, _, c) = hnf_budgeted(&Budget::default(), &m).unwrap();
+        assert!(c > e + 64, "the bound grew from {e} to {c} only");
+        let lim = |memory| Limits { memory, ..Limits::UNLIMITED };
+        let b = Budget::new(lim(hnf_bytes(r, n, (e + c) / 2).unwrap()));
+        let err = hnf_budgeted(&b, &m).map(|_| ()).unwrap_err();
+        assert_eq!(err.what, "memory");
+        assert_eq!(b.live(), 0);
+        let msg = err.message(&LLL);
+        assert!(msg.starts_with("LLL: resource limit exceeded"), "{msg}");
+        assert!(hnf_budgeted(&Budget::new(lim(hnf_bytes(r, n, c).unwrap())), &m).is_ok());
+    }
+
+    /// `lll_in`'s own debits come before their work: with the work limit
+    /// set to what was used just before one, the call refuses there, as
+    /// work, with nothing left reserved; the shape, the independent rows'
+    /// copy and the output are each reached (dependent and independent).
+    #[test]
+    fn lll_in_debits_before_each_step() {
+        let mut seed = 0x51_7e_5d_u64;
+        let ind = rand_rows(5, 6, 70, &mut seed);
+        let mut dep = rand_rows(4, 6, 70, &mut seed);
+        dep.push(dep[0].iter().zip(&dep[2]).map(|(x, y)| x - y).collect());
+        for (m, want_sites) in [(ind, vec!["copy", "output", "shape"]), (dep, vec!["output", "shape"])] {
+            LLL_TRACE.with(|t| *t.borrow_mut() = Some(vec![]));
+            let want = lll_in(&Budget::default(), &m).unwrap();
+            let sites = LLL_TRACE.with(|t| t.borrow_mut().take().unwrap());
+            let mut seen: Vec<&str> = sites.iter().map(|x| x.0).collect();
+            seen.sort();
+            assert_eq!(seen, want_sites);
+            for (k, &(site, left)) in sites.iter().enumerate() {
+                LLL_TRACE.with(|t| *t.borrow_mut() = Some(vec![]));
+                let b = Budget::new(Limits { work: u64::MAX - left, ..Limits::UNLIMITED });
+                let err = lll_in(&b, &m).unwrap_err();
+                let got = LLL_TRACE.with(|t| t.borrow_mut().take().unwrap());
+                assert_eq!((err.what, got.len(), got.last().map(|x| x.0)), ("work", k + 1, Some(site)), "debit {k} ({site})");
+                assert_eq!(b.live(), 0, "debit {k} ({site})");
+            }
+            assert_eq!(lll(&m).unwrap(), want);
+        }
+    }
+
+    /// An unlucky prime (one dividing every maximal minor) sends
+    /// independent rows through the Hermite form: still a reduced basis of
+    /// their lattice, with no zero rows.
+    #[test]
+    fn an_unlucky_prime_still_gives_a_reduced_basis() {
+        let m = z(&[&[7, 14, 0], &[3, 6, 7], &[1, 9, 49]]);
+        assert_eq!(sagebrush_poly::lll::rank_mod_p(&Budget::default(), &m, 7), Ok(1));
+        RANK_P.with(|c| c.set(7));
+        let got = lll(&m);
+        RANK_P.with(|c| c.set(0));
+        let out = got.unwrap();
+        assert!(out.iter().all(|r| r.iter().any(|x| !x.is_zero())));
+        assert_eq!(sagebrush_poly::lll_cert::certify(&m, &out, (51, 100), (99, 100)), Ok(()));
+    }
+
+    /// A finite work limit refuses in the shape, rank or Hermite stage (as
+    /// work) or in the reduction, with nothing left reserved and no fallback.
+    #[test]
+    fn work_limits_refuse_in_every_stage() {
+        let mut seed = 0x3c_0de_u64;
+        let mut m = rand_rows(5, 8, 100, &mut seed);
+        m.push(m[0].iter().zip(&m[4]).map(|(x, y)| x + y).collect());
+        let (r, n) = (m.len() as u64, 8u64);
+        let full = Budget::default();
+        lll_in(&full, &m).unwrap();
+        let used = u64::MAX - full.work_left();
+        for work in [1, r * n + 2, 3 * r * n + 2, used - 1] {
+            let b = Budget::new(Limits { work, ..Limits::UNLIMITED });
+            let e = lll_in(&b, &m).unwrap_err();
+            // the last one runs out in the reduction, L^2's work
+            let want = if work == used - 1 { "l2 work" } else { "work" };
+            assert_eq!(e.what, want, "work {work}: {e}");
+            assert_eq!(b.live(), 0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod decimal_tests {
     use super::*;

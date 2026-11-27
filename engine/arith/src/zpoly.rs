@@ -232,9 +232,18 @@ fn mul_multimodular(a: &[BigInt], b: &[BigInt], bound: u64) -> ZPoly {
     let crt = MultiCrt::new(&primes);
     let words = (max_bits(a).max(max_bits(b)) as usize).div_ceil(64).max(1);
     let pw = crt.word_powers(words);
+    // (Stop is polled about every 2^16 word operations in the residue and
+    // reconstruction loops: a coefficient's residues cost k words, its
+    // reconstruction about k^2.  This bounds only how long a Stop waits:
+    // poly_mul itself admits no work bound yet)
+    let res_every = (1usize << 16) / (k * words).max(1);
+    let crt_every = (1usize << 16) / (k * k).max(1);
     let res = |f: &[BigInt]| -> Vec<Vec<u64>> {
         let mut out = vec![Vec::with_capacity(f.len()); k];
-        for c in f {
+        for (i, c) in f.iter().enumerate() {
+            if i % res_every.max(1) == 0 {
+                sagebrush_interrupt::check_coarse();
+            }
             for (o, r) in out.iter_mut().zip(crt.residues_with(c, &pw)) {
                 o.push(r);
             }
@@ -259,6 +268,9 @@ fn mul_multimodular(a: &[BigInt], b: &[BigInt], bound: u64) -> ZPoly {
     let mut r = vec![0u64; k];
     let out: ZPoly = (0..len)
         .map(|i| {
+            if i % crt_every.max(1) == 0 {
+                sagebrush_interrupt::check_coarse();
+            }
             for j in 0..k {
                 r[j] = conv[j][i];
             }

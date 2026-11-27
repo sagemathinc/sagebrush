@@ -9,7 +9,7 @@
   },
   "pollSites": {
    "crmath.ts": 5,
-   "engine.ts": 1,
+   "engine.ts": 3,
    "format.ts": 4,
    "index.ts": 1,
    "interrupt.ts": 2,
@@ -35,13 +35,13 @@
     "sha": "4478b682d95fb5b3"
    },
    "sage": {
-    "count": 204,
-    "sha": "42de243a74f7f9fa"
+    "count": 207,
+    "sha": "cfab0f2e3dddb68c"
    }
   },
   "libModules": {
-   "count": 184,
-   "sha": "809f6d281bb98877"
+   "count": 187,
+   "sha": "ba626fc562899ed2"
   }
  },
  "entries": [
@@ -113,13 +113,14 @@
    "mode": "sage",
    "s0": 600,
    "smin": 200,
-   "smax": 1024,
+   "smax": 2048,
+   "leak_from": 4,
    "grow": {
     "kind": "scale",
     "p": 3
    },
    "setup": "M = random_matrix(GF(32003), S)",
-   "target": "_r = M.rank()",
+   "target": "_r = [M.rank() for _ in range(5)]",
    "probe": "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1",
    "hosts": [
     "cli",
@@ -143,6 +144,69 @@
    "setup": "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])",
    "target": "_r = I.groebner_basis()",
    "probe": "assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2",
+   "hosts": [
+    "cli",
+    "prompt"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "E9n",
+   "transport": "engineCall:newforms",
+   "owner": "modular symbols",
+   "mode": "sage",
+   "s0": 6000,
+   "smin": 1000,
+   "smax": 200000,
+   "grow": {
+    "kind": "scale",
+    "p": 2
+   },
+   "setup": "from sagebrush import mf",
+   "target": "_r = mf.newforms(389, 4, bound=S)",
+   "probe": "assert len(mf.newforms(11, 2)['newforms']) == 1",
+   "hosts": [
+    "cli",
+    "prompt"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "E15s",
+   "transport": "engineCall:sigma_table",
+   "owner": "series ops",
+   "mode": "sage",
+   "s0": 131072,
+   "smin": 4096,
+   "smax": 262144,
+   "grow": {
+    "kind": "scale",
+    "p": 1
+   },
+   "setup": "from sagebrush import poly",
+   "target": "_r = poly.sigma_table(11, S)",
+   "probe": "assert poly.sigma_table(1, 6) == [1, 3, 4, 7, 6, 12]",
+   "hosts": [
+    "cli",
+    "prompt"
+   ],
+   "status": "case"
+  },
+  {
+   "id": "E15p",
+   "transport": "engineCall:series_pow",
+   "owner": "series ops",
+   "mode": "sage",
+   "s0": 16384,
+   "smin": 256,
+   "smax": 65536,
+   "grow": {
+    "kind": "scale",
+    "p": 2
+   },
+   "setup": "from sagebrush import poly\nf = [1] * S",
+   "target": "_r = poly.series_pow(f, 24, S)",
+   "probe": "assert poly.series_pow([1, 1], 3, 3) == [1, 3, 3]",
    "hosts": [
     "cli",
     "prompt"
@@ -386,6 +450,13 @@
    "status": "cheap-candidate",
    "evidence": null,
    "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "engineCall:cusp_hecke_matrix",
+   "transport": "engineCall:cusp_hecke_matrix",
+   "status": "planned",
+   "family": "E9 modular symbols",
+   "owner": "modular symbols"
   },
   {
    "id": "engineCall:cycle_type_counts",
@@ -654,6 +725,13 @@
    "owner": "linear algebra"
   },
   {
+   "id": "engineCall:mat_smith_form",
+   "transport": "engineCall:mat_smith_form",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
    "id": "engineCall:mat_solve",
    "transport": "engineCall:mat_solve",
    "status": "planned",
@@ -680,13 +758,6 @@
    "status": "planned",
    "family": "E12 elliptic curves / analytic",
    "owner": "analytic"
-  },
-  {
-   "id": "engineCall:newforms",
-   "transport": "engineCall:newforms",
-   "status": "planned",
-   "family": "E9 modular symbols",
-   "owner": "modular symbols"
   },
   {
    "id": "engineCall:newspace",
@@ -843,6 +914,69 @@
    "owner": "groups/Galois"
   },
   {
+   "id": "engineCall:qpoly_add",
+   "transport": "engineCall:qpoly_add",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_clear",
+   "transport": "engineCall:qpoly_clear",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_derivative",
+   "transport": "engineCall:qpoly_derivative",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_divrem",
+   "transport": "engineCall:qpoly_divrem",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_eval",
+   "transport": "engineCall:qpoly_eval",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_integral",
+   "transport": "engineCall:qpoly_integral",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_mul",
+   "transport": "engineCall:qpoly_mul",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_scale",
+   "transport": "engineCall:qpoly_scale",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:qpoly_sub",
+   "transport": "engineCall:qpoly_sub",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
    "id": "engineCall:quadratic_class_group",
    "transport": "engineCall:quadratic_class_group",
    "status": "planned",
@@ -869,6 +1003,20 @@
    "status": "planned",
    "family": "E9 modular symbols",
    "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:series_euler",
+   "transport": "engineCall:series_euler",
+   "status": "planned",
+   "family": "E15 series",
+   "owner": "series ops"
+  },
+  {
+   "id": "engineCall:series_mul",
+   "transport": "engineCall:series_mul",
+   "status": "planned",
+   "family": "E15 series",
+   "owner": "series ops"
   },
   {
    "id": "engineCall:stabilizer",
@@ -911,6 +1059,20 @@
    "status": "planned",
    "family": "E9 modular symbols",
    "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:zpoly_divrem",
+   "transport": "engineCall:zpoly_divrem",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:zpoly_fdiv",
+   "transport": "engineCall:zpoly_fdiv",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
   },
   {
    "id": "symCall:add",
@@ -1114,6 +1276,13 @@
    "status": "planned",
    "family": "E11 symbolics",
    "owner": "symbolic engine"
+  },
+  {
+   "id": "symCall:mp_calls",
+   "transport": "symCall:mp_calls",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
   },
   {
    "id": "symCall:mul",
@@ -1436,6 +1605,34 @@
    "status": "cheap-candidate",
    "evidence": null,
    "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
+   "id": "binCall:nmod_echelon",
+   "transport": "binCall:nmod_echelon",
+   "status": "planned",
+   "family": "E3 dense linear algebra",
+   "owner": "linear algebra"
+  },
+  {
+   "id": "binCall:nmod_poly_divrem",
+   "transport": "binCall:nmod_poly_divrem",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "binCall:nmod_poly_gcd",
+   "transport": "binCall:nmod_poly_gcd",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
+  },
+  {
+   "id": "binCall:nmod_poly_mul",
+   "transport": "binCall:nmod_poly_mul",
+   "status": "planned",
+   "family": "E5 polynomials",
+   "owner": "polynomial factorization"
   },
   {
    "id": "wasm:kernels.ts",

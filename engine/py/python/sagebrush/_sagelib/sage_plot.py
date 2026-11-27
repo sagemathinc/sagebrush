@@ -263,10 +263,23 @@ class Graphics(_InlineFigure):
             p["xlabel"] = _label(al[0]) if al[0] else None
             p["ylabel"] = _label(al[1]) if al[1] else None
         for k in ("title", "xmin", "xmax", "ymin", "ymax", "aspect_ratio", "frame", "axes", "legend_loc", "fit_aspect"):
+            # (axes=False under a frame: the frame keeps its ticks and labels, as
+            # Sage draws it; only the axes through the origin go)
+            if k == "axes" and o.get(k) is False and o.get("frame"):
+                continue
             if o.get(k) is not None:
                 p[k] = _label(o[k]) if k == "title" else o[k]
         if o.get("gridlines"):
             p["grid"] = True
+        # (matrix_plot's: the first row at the top, and integer ticks)
+        if o.get("flip_y"):
+            p["yinvert"] = True
+        if o.get("ticks_integer") and not o.get("ticks"):
+            from sage_plot_fields import _int_ticks
+            bb = Panel(self._primitives).data_bbox()
+            if bb is not None and None not in bb:
+                lims = [float(o[k]) if o.get(k) is not None else float(v) for k, v in zip(("xmin", "xmax", "ymin", "ymax"), bb)]
+                p["xticks"], p["yticks"] = _int_ticks(lims[0], lims[1]), _int_ticks(lims[2], lims[3])
         if o.get("show_legend") is False:
             p["legend"] = False
         sc = o.get("scale")
@@ -303,6 +316,19 @@ class Graphics(_InlineFigure):
 
     def _svg(self, **options):
         panel, (w, h) = self._panel(**options)
+        cb = next((q._colorbar for q in self._primitives if getattr(q, "_colorbar", None)), None)
+        if cb is not None:
+            # (matrix_plot's colorbar=True: the colormap from vmin to vmax in
+            # its own axes at the right, as pyplot's colorbar places it)
+            import numpy as np
+            from _graphics import Image, image_rgba, png_url
+            cmap, lo, hi = cb
+            if not hi > lo:
+                lo, hi = lo - 0.5, hi + 0.5
+            px = image_rgba(np.linspace(hi, lo, 256).reshape(256, 1), cmap, lo, hi)
+            bar = Panel([Image(png_url(px), 0.0, 1.0, lo, hi, first_row_y=hi, what="colorbar")],
+                        xmin=0.0, xmax=1.0, ymin=lo, ymax=hi, margins=0, xticks=[], yaxis_side="right", frame=True)
+            return render_svg([(panel, (0, 0, 0.82, 1)), (bar, (0.85, 0.05, 0.04, 0.9))], w, h)
         return render_svg([(panel, (0, 0, 1, 1))], w, h)
 
     def _sagebrush_svg_(self):

@@ -1,0 +1,1022 @@
+Finite Field in a of size 2^2 | Finite Field in b of size 3^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Vector space of dimension 2 over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+Finite Field in a of size 2^2 | Finite Field in c of size 2^3
+TypeError: unsupported operand parent(s) for *: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Vector space of dimension 2 over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+Finite Field in a of size 2^2 | Finite Field of size 2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 1)
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 0)
+Finite Field in a of size 2^2 | Finite Field of size 3
+TypeError: unsupported operand parent(s) for *: 'Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Finite Field of size 3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Finite Field of size 3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Vector space of dimension 2 over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+Finite Field in a of size 2^2 | Ring of integers modulo 6
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 1)
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 0)
+Finite Field in a of size 2^2 | Ring of integers modulo 12
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 1)
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 0)
+Finite Field in a of size 2^2 | Ring of integers modulo 9
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ambient free module of rank 2 over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+Finite Field in a of size 2^2 | Ring of integers modulo 4
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 1)
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 0)
+Finite Field in a of size 2^2 | Ring of integers modulo 5
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Vector space of dimension 2 over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+Finite Field in a of size 2^2 | Ring of integers modulo 1
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ambient free module of rank 2 over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+Finite Field in a of size 2^2 | Ring of integers modulo 36472996377170786403
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Ambient free module of rank 2 over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+Finite Field in b of size 3^2 | Finite Field in a of size 2^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Vector space of dimension 2 over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+Finite Field in b of size 3^2 | Finite Field in c of size 2^3
+TypeError: unsupported operand parent(s) for *: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Vector space of dimension 2 over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+Finite Field in b of size 3^2 | Finite Field of size 2
+TypeError: unsupported operand parent(s) for *: 'Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Finite Field of size 2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Finite Field of size 2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Vector space of dimension 2 over Finite Field of size 2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+Finite Field in b of size 3^2 | Finite Field of size 3
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Finite Field in b of size 3^2 | Ring of integers modulo 6
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Finite Field in b of size 3^2 | Ring of integers modulo 12
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Finite Field in b of size 3^2 | Ring of integers modulo 9
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Finite Field in b of size 3^2 | Ring of integers modulo 4
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 4' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 4' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Ambient free module of rank 2 over Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 4' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+Finite Field in b of size 3^2 | Ring of integers modulo 5
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Vector space of dimension 2 over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+Finite Field in b of size 3^2 | Ring of integers modulo 1
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Ambient free module of rank 2 over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+Finite Field in b of size 3^2 | Ring of integers modulo 36472996377170786403
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Finite Field in c of size 2^3 | Finite Field in a of size 2^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Vector space of dimension 2 over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+Finite Field in c of size 2^3 | Finite Field in b of size 3^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Vector space of dimension 2 over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+Finite Field in c of size 2^3 | Finite Field of size 2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 1)
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 0)
+Finite Field in c of size 2^3 | Finite Field of size 3
+TypeError: unsupported operand parent(s) for *: 'Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Finite Field of size 3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Finite Field of size 3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Vector space of dimension 2 over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+Finite Field in c of size 2^3 | Ring of integers modulo 6
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 1)
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 0)
+Finite Field in c of size 2^3 | Ring of integers modulo 12
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 1)
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 0)
+Finite Field in c of size 2^3 | Ring of integers modulo 9
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ambient free module of rank 2 over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+Finite Field in c of size 2^3 | Ring of integers modulo 4
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 1)
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 0)
+Finite Field in c of size 2^3 | Ring of integers modulo 5
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Vector space of dimension 2 over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+Finite Field in c of size 2^3 | Ring of integers modulo 1
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ambient free module of rank 2 over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+Finite Field in c of size 2^3 | Ring of integers modulo 36472996377170786403
+TypeError: unsupported operand parent(s) for *: 'Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for -: 'Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Ambient free module of rank 2 over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for *: 'Ambient free module of rank 2 over Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+Finite Field of size 2 | Finite Field in a of size 2^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 1)
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 0)
+Finite Field of size 2 | Finite Field in b of size 3^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2' and 'Vector space of dimension 2 over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 2'
+Finite Field of size 2 | Finite Field in c of size 2^3
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 1)
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 0)
+Finite Field of size 3 | Finite Field in a of size 2^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Vector space of dimension 2 over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+Finite Field of size 3 | Finite Field in b of size 3^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Finite Field of size 3 | Finite Field in c of size 2^3
+TypeError: unsupported operand parent(s) for *: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3' and 'Vector space of dimension 2 over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field of size 3'
+Ring of integers modulo 6 | Finite Field in a of size 2^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 1)
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 0)
+Ring of integers modulo 6 | Finite Field in b of size 3^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Ring of integers modulo 6 | Finite Field in c of size 2^3
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 1)
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 0)
+Ring of integers modulo 12 | Finite Field in a of size 2^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 1)
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 0)
+Ring of integers modulo 12 | Finite Field in b of size 3^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Ring of integers modulo 12 | Finite Field in c of size 2^3
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 1)
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 0)
+Ring of integers modulo 9 | Finite Field in a of size 2^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Vector space of dimension 2 over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+Ring of integers modulo 9 | Finite Field in b of size 3^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Ring of integers modulo 9 | Finite Field in c of size 2^3
+TypeError: unsupported operand parent(s) for *: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9' and 'Vector space of dimension 2 over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9'
+Ring of integers modulo 4 | Finite Field in a of size 2^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 1)
+Vector space of dimension 2 over Finite Field in a of size 2^2
+(1, 0)
+Ring of integers modulo 4 | Finite Field in b of size 3^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4' and 'Vector space of dimension 2 over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4'
+Ring of integers modulo 4 | Finite Field in c of size 2^3
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 0]
+[1 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 0]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[0 1]
+[0 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 1)
+Vector space of dimension 2 over Finite Field in c of size 2^3
+(1, 0)
+Ring of integers modulo 5 | Finite Field in a of size 2^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Vector space of dimension 2 over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+Ring of integers modulo 5 | Finite Field in b of size 3^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Vector space of dimension 2 over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+Ring of integers modulo 5 | Finite Field in c of size 2^3
+TypeError: unsupported operand parent(s) for *: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5' and 'Vector space of dimension 2 over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 5'
+Ring of integers modulo 1 | Finite Field in a of size 2^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Vector space of dimension 2 over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+Ring of integers modulo 1 | Finite Field in b of size 3^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Vector space of dimension 2 over Finite Field in b of size 3^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in b of size 3^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+Ring of integers modulo 1 | Finite Field in c of size 2^3
+TypeError: unsupported operand parent(s) for *: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1' and 'Vector space of dimension 2 over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1'
+Ring of integers modulo 36472996377170786403 | Finite Field in a of size 2^2
+TypeError: unsupported operand parent(s) for *: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Vector space of dimension 2 over Finite Field in a of size 2^2'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in a of size 2^2' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+Ring of integers modulo 36472996377170786403 | Finite Field in b of size 3^2
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[2 1]
+[1 2]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 2]
+[2 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[0 0]
+[0 0]
+Full MatrixSpace of 2 by 2 dense matrices over Finite Field in b of size 3^2
+[1 1]
+[1 1]
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Vector space of dimension 2 over Finite Field in b of size 3^2
+(0, 0)
+Ring of integers modulo 36472996377170786403 | Finite Field in c of size 2^3
+TypeError: unsupported operand parent(s) for *: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for -: 'Full MatrixSpace of 2 by 2 dense matrices over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for *: 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403' and 'Vector space of dimension 2 over Finite Field in c of size 2^3'
+TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field in c of size 2^3' and 'Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36472996377170786403'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 3 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 4'
+TypeError: unsupported operand parent(s) for +: 'Full MatrixSpace of 2 by 3 dense matrices over Finite Field in a of size 2^2' and 'Ring of integers modulo 6'
+Full MatrixSpace of 2 by 3 dense matrices over Finite Field in a of size 2^2
+[1 0 1]
+[0 1 0]
+1 2

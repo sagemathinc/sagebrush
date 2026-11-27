@@ -2,7 +2,7 @@
 // known-good engine, so the first run works offline): run before `tauri build` (or
 // `cargo build`) there, after app/dist is built (node app/build-frontend.mjs).
 //
-//   node app/engine/bundle.mjs [--cache DIR]
+//   node app/engine/bundle.mjs [--cache DIR] [--native-addon FILE]
 //
 // It puts into app/src-tauri/ (all ignored by git):
 //   binaries/sagebrush-node-<target triple>        Node, pinned below by version and SHA-256: the engine's runtime
@@ -11,6 +11,10 @@
 //   engine/*.mjs                                   the engine (app/engine/, its tests and this file left out)
 //   engine/root/                                   the interpreter's files from app/dist: the worker, its
 //                                                  WebAssembly modules, the library's chunks and the packages
+//   engine/sagebrush-engine.node                   with --native-addon: the native engine (engine/node, built for
+//                                                  this platform; on macOS signed before this runs), which the
+//                                                  engine loads instead of WebAssembly; build.rs compiles its
+//                                                  SHA-256 in, and the engine refuses any other bytes
 //   agent/                                         the agent the app hosts, with agent/MANIFEST.json
 //                                                  (app/engine/agent-bundle.mjs; build.rs compiles its SHA-256 in)
 // The download is checked against the pinned SHA-256 before anything is
@@ -39,7 +43,7 @@ export const NODE = {
 export const PATCHELF = { version: "0.19.1", file: "patchelf-0.19.1-x86_64.tar.gz", sha256: "a6818fef80128fb354423234ecacdcca3e993913d774e5d8346bc63f70fed4cf" };
 // the interpreter's files, from app/dist
 const ROOT_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-skltree.wasm", "lib", "pkg", "pkgset", "pkgmeta"];
-const ENGINE_FILES = ["frames.mjs", "files.mjs", "serve.mjs", "thread.mjs", "main.mjs"];
+const ENGINE_FILES = ["frames.mjs", "files.mjs", "serve.mjs", "thread.mjs", "native-load.mjs", "main.mjs"];
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const app = join(here, "..");
@@ -65,10 +69,13 @@ function fetchPinned(cache, file, url, want) {
 
 function main(argv) {
   let cache = join(homedir(), ".cache", "sagebrush-node");
+  let addon = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--cache") cache = argv[++i];
-    else throw new Error(`unknown argument: ${argv[i]} (usage: node app/engine/bundle.mjs [--cache DIR])`);
+    else if (argv[i] === "--native-addon") addon = argv[++i];
+    else throw new Error(`unknown argument: ${argv[i]} (usage: node app/engine/bundle.mjs [--cache DIR] [--native-addon FILE])`);
   }
+  if (addon !== null && !(addon && existsSync(addon))) throw new Error(`--native-addon: no such file: ${addon}`);
   const key = `${process.platform}-${process.arch}`;
   const pin = NODE[key];
   if (!pin) throw new Error(`the app ships its engine on macOS (Apple silicon) and Linux (x64) only, not ${key}`);
@@ -100,12 +107,14 @@ function main(argv) {
   const bin = join(tauri, "binaries", `sagebrush-node-${pin.triple}`);
   copyFileSync(join(unpack, top, "bin", "node"), bin);
   chmodSync(bin, 0o755);
+  let patchelf = null;
   if (pin.patched_sha256) {
     const pe = fetchPinned(cache, PATCHELF.file, `https://github.com/NixOS/patchelf/releases/download/${PATCHELF.version}/${PATCHELF.file}`, PATCHELF.sha256);
     const peDir = join(unpack, "patchelf");
     mkdirSync(peDir, { recursive: true });
     execFileSync("tar", ["-xzf", pe, "-C", peDir, "./bin/patchelf"]);
-    execFileSync(join(peDir, "bin", "patchelf"), ["--set-rpath", "$ORIGIN/../lib", bin]);
+    patchelf = join(peDir, "bin", "patchelf");
+    execFileSync(patchelf, ["--set-rpath", "$ORIGIN/../lib", bin]);
     chmodSync(bin, 0o755);
     const got = sha256(readFileSync(bin));
     if (got !== pin.patched_sha256) throw new Error(`the Node with its RUNPATH: SHA-256 ${got}, not the pinned ${pin.patched_sha256}`);
@@ -123,7 +132,6 @@ function main(argv) {
     npmCli: join(unpack, top, "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     node: { version: NODE.version, sha256: sha256(nodeBytes), size: nodeBytes.length },
   });
-  rmSync(unpack, { recursive: true, force: true });
 
   // the engine, and the interpreter's files
   for (const f of ENGINE_FILES) copyFileSync(join(here, f), join(engine, f));
@@ -131,9 +139,23 @@ function main(argv) {
   // engine's thread loads it as one whatever this says)
   writeFileSync(join(engine, "package.json"), JSON.stringify({ type: "module", private: true }) + "\n");
   for (const f of ROOT_FILES) cpSync(join(dist, f), join(engine, "root", f), { recursive: true });
+  // the native engine, when given: copied as it is (its bytes are what build.rs pins), not writable by group or others
+  // (the engine's loader refuses such a file); without it, any earlier copy is removed, so the app runs WebAssembly
+  const native = join(engine, "sagebrush-engine.node");
+  rmSync(native, { force: true });
+  if (addon !== null) {
+    copyFileSync(addon, native);
+    // (Linux: the AppImage's bundler sets RUNPATH $ORIGIN on every shared library it finds, this one too, after
+    // build.rs has pinned its bytes; so it gets exactly that RUNPATH here first, from the same pinned patchelf as the
+    // Node, and the bundler's patch changes no byte: the .deb, the .rpm and the AppImage ship the bytes build.rs pins)
+    if (patchelf) execFileSync(patchelf, ["--set-rpath", "$ORIGIN", native]);
+    chmodSync(native, 0o755);
+  }
+  rmSync(unpack, { recursive: true, force: true });
   const n = readdirSync(join(engine, "root", "lib")).length;
   console.log(`engine bundled: Node ${NODE.version} (${pin.triple}), ${ENGINE_FILES.length} engine files, the interpreter's files (${n} entries in lib/)`);
   console.log(`agent bundled: ${agent.files} files, MANIFEST.json ${agent.sha256}`);
+  console.log(addon === null ? "native engine: not bundled (the app runs WebAssembly)" : `native engine bundled: ${createHash("sha256").update(readFileSync(native)).digest("hex")}`);
 }
 
 main(process.argv.slice(2));

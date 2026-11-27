@@ -6,7 +6,10 @@
 //! reversed divisor (von zur Gathen and Gerhard, Modern Computer Algebra,
 //! section 9.1).
 
+use crate::cost::Family;
 use crate::nmod::Modulus;
+use crate::cost::FAMILIES;
+use crate::cost::{publish_progress, tally, tally_all};
 use crate::ntt;
 
 pub type Poly = Vec<u64>;
@@ -20,27 +23,77 @@ enum Tabs<'a> {
 }
 
 /// Asks for Stop (check_coarse, which asks the wasm host at every call)
-/// about every 2^16 multiply-adds.
-pub(crate) struct Poll(u64);
+/// about every 2^16 units of work; counts the units by family
+/// ([`cost::tally`](crate::cost::tally)) and publishes a metered region's
+/// progress at each poll.
+pub(crate) struct Poll {
+    since: u64,
+    /// The part of `since` already counted: the rest is multiply-adds
+    /// (MulSchool), so on the hot path the Stop counter is the unit
+    /// counter and a row costs one add, as before metering.
+    mark: u64,
+    /// Units counted since the last flush, per family: flushed to the
+    /// thread's counter at each poll and when the Poll drops (one
+    /// thread-local access per kernel call, not per row).
+    acc: [u64; FAMILIES],
+}
 
 impl Poll {
     pub(crate) fn new() -> Poll {
-        Poll(0)
+        Poll { since: 0, mark: 0, acc: [0; FAMILIES] }
+    }
+    /// `work` units of family `f`, of which `poll` count toward the next
+    /// Stop poll (the poll interval keeps its old weights where a unit is
+    /// cheaper than its weight: an inverse).
+    #[inline]
+    pub(crate) fn add_weighted(&mut self, f: Family, work: usize, poll: usize) {
+        self.settle();
+        self.acc[f as usize] += work as u64;
+        self.since += poll as u64;
+        self.mark = self.since;
+        self.check();
+    }
+    /// `work` multiply-adds (MulSchool), all counting toward the next poll.
+    #[inline]
+    pub(crate) fn mul_adds(&mut self, work: usize) {
+        self.since += work as u64;
+        self.check();
     }
     #[inline]
-    pub(crate) fn add(&mut self, work: usize) {
-        self.0 += work as u64;
-        if self.0 >= 1 << 16 {
-            self.0 = 0;
+    fn settle(&mut self) {
+        self.acc[Family::MulSchool as usize] += self.since - self.mark;
+        self.mark = self.since;
+    }
+    #[inline]
+    fn check(&mut self) {
+        if self.since >= 1 << 16 {
+            self.flush();
+            self.since = 0;
+            self.mark = 0;
             sagebrush_interrupt::check_coarse();
+            publish_progress();
+        }
+    }
+    fn flush(&mut self) {
+        self.settle();
+        if self.acc.iter().any(|&x| x != 0) {
+            tally_all(&self.acc);
+            self.acc = [0; FAMILIES];
         }
     }
 }
 
+impl Drop for Poll {
+    fn drop(&mut self) {
+        // (also while unwinding: work done before a Stop is still counted)
+        self.flush();
+    }
+}
+
 /// Products with a factor shorter than this are schoolbook.
-const MUL_CUTOFF: usize = 40;
+pub const MUL_CUTOFF: usize = 40;
 /// Divisions with divisor and quotient both at least this long use Newton.
-const DIV_CUTOFF: usize = 60;
+pub const DIV_CUTOFF: usize = 60;
 
 pub fn trim(mut v: Poly) -> Poly {
     while v.last() == Some(&0) {
@@ -64,13 +117,76 @@ fn batch(m: &Modulus) -> usize {
     }
 }
 
+/// mul_classical's Stop poll and unit count.  The poll keeps its weight
+/// from before metering, min(la, lb) per output row (a poll at least that
+/// often); the units are the exact multiply-adds of the rows completed,
+/// from their closed form, charged at each poll and at the end (also when
+/// a Stop unwinds: only the rows done), never ahead of the work.
+struct SchoolRows {
+    since: u64,
+    next: u64,
+    w: u64,
+    la: u64,
+    lb: u64,
+    credited: u64,
+    complete: bool,
+}
+
+impl SchoolRows {
+    fn new(la: usize, lb: usize) -> SchoolRows {
+        let w = la.min(lb) as u64;
+        SchoolRows { since: 0, next: 1 << 16, w, la: la as u64, lb: lb as u64, credited: 0, complete: false }
+    }
+    /// The start of an output row (the poll, as before metering).
+    #[inline]
+    fn row(&mut self) {
+        self.since += self.w;
+        if self.since >= self.next {
+            self.next = self.since + (1 << 16);
+            // (the rows before this one are done)
+            self.credit(self.since / self.w - 1);
+            sagebrush_interrupt::check_coarse();
+            publish_progress();
+        }
+    }
+    /// The multiply-adds of output rows 0..rows: row r has
+    /// min(r, la - 1) - max(0, r - (lb - 1)) + 1 of them.
+    fn units(&self, rows: u64) -> u64 {
+        let (c, d) = (self.la - 1, self.lb - 1);
+        let upto_c = if rows <= c + 1 { rows * rows.saturating_sub(1) / 2 } else { c * (c + 1) / 2 + (rows - c - 1) * c };
+        let past_d = if rows <= d + 1 {
+            0
+        } else {
+            let k = rows - d - 1;
+            k * (k + 1) / 2
+        };
+        upto_c - past_d + rows
+    }
+    fn credit(&mut self, rows: u64) {
+        let u = self.units(rows);
+        if u > self.credited {
+            tally(Family::MulSchool, u - self.credited);
+            self.credited = u;
+        }
+    }
+}
+
+impl Drop for SchoolRows {
+    fn drop(&mut self) {
+        // all rows on completion; on an unwind (a Stop at a row's poll) the
+        // rows before that one
+        let started = self.since / self.w;
+        self.credit(if self.complete { started } else { started.saturating_sub(1) });
+    }
+}
+
 fn mul_classical(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
     let len = a.len() + b.len() - 1;
     let k = batch(m);
     let mut c = Vec::with_capacity(len);
-    let mut poll = Poll::new();
+    let mut poll = SchoolRows::new(a.len(), b.len());
     for i in 0..len {
-        poll.add(a.len().min(b.len()));
+        poll.row();
         let lo = i.saturating_sub(b.len() - 1);
         let hi = i.min(a.len() - 1);
         let mut acc = 0u128;
@@ -87,6 +203,7 @@ fn mul_classical(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
         }
         c.push(m.add(r, m.reduce_u128(acc)));
     }
+    poll.complete = true;
     c
 }
 
@@ -143,6 +260,8 @@ fn mullow_t(a: &[u64], b: &[u64], k: usize, m: &Modulus, t: Tabs) -> Poly {
 
 pub fn add(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
     let (long, short) = if a.len() >= b.len() { (a, b) } else { (b, a) };
+    tally(Family::Move, long.len() as u64);
+    tally(Family::ModArith, short.len() as u64);
     let mut c = long.to_vec();
     for (x, &y) in c.iter_mut().zip(short) {
         *x = m.add(*x, y);
@@ -151,6 +270,8 @@ pub fn add(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
 }
 
 pub fn sub(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
+    tally(Family::Move, a.len().max(b.len()) as u64);
+    tally(Family::ModArith, b.len() as u64);
     let mut c = a.to_vec();
     if c.len() < b.len() {
         c.resize(b.len(), 0);
@@ -162,10 +283,12 @@ pub fn sub(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
 }
 
 pub fn scale(a: &[u64], s: u64, m: &Modulus) -> Poly {
+    tally(Family::ModArith, a.len() as u64);
     trim(a.iter().map(|&x| m.mul(x, s)).collect())
 }
 
 pub fn neg(a: &[u64], m: &Modulus) -> Poly {
+    tally(Family::ModArith, a.len() as u64);
     a.iter().map(|&x| m.neg(x)).collect()
 }
 
@@ -173,15 +296,21 @@ pub fn neg(a: &[u64], m: &Modulus) -> Poly {
 pub fn monic(a: &[u64], m: &Modulus) -> Poly {
     match a.last() {
         None => vec![],
-        Some(&l) => scale(a, m.inv(l).expect("leading coefficient not a unit"), m),
+        Some(&l) => {
+            // (the inverse: one ModArith unit; the scaling: a.len())
+            tally(Family::ModArith, 1);
+            scale(a, m.inv(l).expect("leading coefficient not a unit"), m)
+        }
     }
 }
 
 pub fn derivative(a: &[u64], m: &Modulus) -> Poly {
+    tally(Family::ModArith, a.len().saturating_sub(1) as u64);
     trim(a.iter().enumerate().skip(1).map(|(i, &c)| m.mul(m.reduce(i as u64), c)).collect())
 }
 
 pub fn eval(a: &[u64], x: u64, m: &Modulus) -> u64 {
+    tally(Family::MulSchool, a.len() as u64);
     a.iter().rev().fold(0, |acc, &c| m.add(m.mul(acc, x), c))
 }
 
@@ -208,7 +337,15 @@ fn inv_series_t(f: &[u64], k: usize, m: &Modulus, t: Tabs) -> Poly {
     g
 }
 
+/// A copy of a polynomial, counted as Move.
+#[inline]
+fn copy(a: &[u64]) -> Poly {
+    tally(Family::Move, a.len() as u64);
+    a.to_vec()
+}
+
 fn rev(a: &[u64], len: usize) -> Poly {
+    tally(Family::Move, len.max(a.len()) as u64);
     let mut r: Poly = a.iter().rev().cloned().collect();
     r.resize(len, 0);
     r
@@ -229,6 +366,16 @@ fn axpy(dst: &mut [u64], src: &[u64], c: u64, m: &Modulus) {
     }
 }
 
+/// x mod n for x < 2^64 and 2 <= n < 2^32, given v = floor(2^64 / n):
+/// v > 2^64/n - 1, so q = floor(x v / 2^64) > x/n - x/2^64 - 1 > x/n - 2,
+/// hence 0 <= x - q n < 2n, and one masked subtraction reduces it.
+#[inline(always)]
+fn barrett(x: u64, n: u64, v: u64) -> u64 {
+    let q = ((x as u128 * v as u128) >> 64) as u64;
+    let r = x - q * n;
+    r - (n & ((r >= n) as u64).wrapping_neg())
+}
+
 /// r <- r mod b in place, recording the quotient if asked.
 /// (Stop is polled through `poll`, a row of db multiply-adds at a time.)
 fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&mut Poly>, poll: &mut Poll) {
@@ -244,7 +391,7 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
         // the usual Euclid step: both quotient coefficients first, then one
         // fused pass (row by row, each row would wait on the previous one)
         let ql = r.len() - db;
-        poll.add(2 * db);
+        poll.mul_adds(2 * db);
         let q1 = m.mul(r[r.len() - 1], linv);
         let q0 = if ql == 2 { m.mul(m.sub(r[db], m.mul(q1, b[db - 1])), linv) } else { 0 };
         let (q0, q1) = if ql == 2 { (q0, q1) } else { (q1, 0) };
@@ -272,14 +419,37 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
         }
         return;
     }
-    for i in (0..r.len() - db).rev() {
-        poll.add(db + 1);
-        let c = m.mul(r[i + db], linv);
-        if let Some(q) = q.as_deref_mut() {
-            q[i] = c;
+    if m.n >= 2 && m.n < 1 << 32 {
+        // A half-word modulus: every row update x + c' y (x, c', y < n) is
+        // below n + n^2 <= 2^64 and is reduced by one Barrett step with no
+        // division and no data-dependent branch.  The Shoup rows below ran
+        // about 3x slower on varying inputs than on a repeated one (and 5x
+        // slower than these) on an AMD Zen 3; the results are identical.
+        let n = m.n;
+        let v = ((1u128 << 64) / n as u128) as u64;
+        for i in (0..r.len() - db).rev() {
+            poll.mul_adds(db + 1);
+            let c = barrett(r[i + db] * linv, n, v);
+            if let Some(q) = q.as_deref_mut() {
+                q[i] = c;
+            }
+            if c != 0 {
+                let nc = n - c;
+                for (x, &y) in r[i..i + db].iter_mut().zip(&b[..db]) {
+                    *x = barrett(*x + nc * y, n, v);
+                }
+            }
         }
-        if c != 0 {
-            axpy(&mut r[i..i + db], &b[..db], m.neg(c), m);
+    } else {
+        for i in (0..r.len() - db).rev() {
+            poll.mul_adds(db + 1);
+            let c = m.mul(r[i + db], linv);
+            if let Some(q) = q.as_deref_mut() {
+                q[i] = c;
+            }
+            if c != 0 {
+                axpy(&mut r[i..i + db], &b[..db], m.neg(c), m);
+            }
         }
     }
     r.truncate(db);
@@ -290,7 +460,7 @@ fn rem_in_place(r: &mut Poly, b: &[u64], linv: u64, m: &Modulus, mut q: Option<&
 
 fn divrem_classical(a: &[u64], b: &[u64], linv: u64, m: &Modulus) -> (Poly, Poly) {
     let _phase = sagebrush_interrupt::enter("classical-divide");
-    let mut r = a.to_vec();
+    let mut r = copy(a);
     let mut q = vec![];
     rem_in_place(&mut r, b, linv, m, Some(&mut q), &mut Poll::new());
     (trim(q), r)
@@ -304,7 +474,9 @@ fn gcd_euclid(mut a: Poly, mut b: Poly, m: &Modulus) -> Poly {
     let _phase = sagebrush_interrupt::enter("euclid");
     let mut poll = Poll::new();
     while !b.is_empty() {
-        poll.add(128);
+        // (one inverse of the leading coefficient: one ModArith unit, weighted
+        // 128 toward the next Stop poll as before)
+        poll.add_weighted(Family::ModArith, 1, 128);
         let linv = m.inv(*b.last().unwrap()).expect("modulus not prime");
         rem_in_place(&mut a, &b, linv, m, None, &mut poll);
         std::mem::swap(&mut a, &mut b);
@@ -350,9 +522,10 @@ pub fn divrem_table_len(la: usize, lb: usize) -> usize {
 fn divrem_t(a: &[u64], b: &[u64], m: &Modulus, t: Tabs) -> (Poly, Poly) {
     assert!(!b.is_empty(), "division by zero polynomial");
     if a.len() < b.len() {
-        return (vec![], a.to_vec());
+        return (vec![], copy(a));
     }
     let linv = m.inv(*b.last().unwrap()).expect("leading coefficient not a unit");
+    tally(Family::ModArith, 1);
     let ql = a.len() - b.len() + 1;
     if b.len() < DIV_CUTOFF || ql < DIV_CUTOFF {
         return divrem_classical(a, b, linv, m);
@@ -362,15 +535,11 @@ fn divrem_t(a: &[u64], b: &[u64], m: &Modulus, t: Tabs) -> (Poly, Poly) {
 }
 
 /// Division given binv = 1/rev(b) mod x^k with k >= the quotient length.
-fn divrem_with_inverse(a: &[u64], b: &[u64], binv: &[u64], m: &Modulus) -> (Poly, Poly) {
-    divrem_with_inverse_t(a, b, binv, m, Tabs::Shared)
-}
-
 fn divrem_with_inverse_t(a: &[u64], b: &[u64], binv: &[u64], m: &Modulus, t: Tabs) -> (Poly, Poly) {
     let _phase = sagebrush_interrupt::enter("newton-divide");
     sagebrush_interrupt::check_coarse();
     if a.len() < b.len() {
-        return (vec![], a.to_vec());
+        return (vec![], copy(a));
     }
     let ql = a.len() - b.len() + 1;
     let ra = rev(a, a.len());
@@ -391,7 +560,31 @@ pub fn rem(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
 /// The monic gcd (n prime): Euclid for short inputs, otherwise the
 /// half-gcd ([`hgcd`]), O(M(n) log n).
 pub fn gcd(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
-    let (mut a, mut b) = (trim(a.to_vec()), trim(b.to_vec()));
+    gcd_t(copy(a), copy(b), m, Tabs::Shared)
+}
+
+/// [`gcd`] of a and b taken by value, with the caller's transform tables
+/// (for products up to [`gcd_table_len`] of their lengths).
+pub fn gcd_in(a: Poly, b: Poly, m: &Modulus, lt: &ntt::LocalTables) -> Poly {
+    gcd_t(a, b, m, Tabs::Local(lt))
+}
+
+/// The longest product [`gcd_in`] computes for inputs of these lengths (0
+/// when it computes none: Euclid's algorithm alone): the LocalTables to
+/// build.  Every product of the half-gcd and of the remainders between
+/// its calls is shorter than 2 max(la, lb): a division of a polynomial of
+/// length at most L needs tables of 2 max(ql, lb) <= 2 L
+/// ([`divrem_table_len`]), and the matrix products are shorter than 3 L / 2.
+pub fn gcd_table_len(la: usize, lb: usize) -> usize {
+    if la.min(lb) <= GCD_CUTOFF {
+        0
+    } else {
+        2 * la.max(lb)
+    }
+}
+
+fn gcd_t(a: Poly, b: Poly, m: &Modulus, t: Tabs) -> Poly {
+    let (mut a, mut b) = (trim(a), trim(b));
     if a.len() < b.len() {
         std::mem::swap(&mut a, &mut b);
     }
@@ -401,24 +594,25 @@ pub fn gcd(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
             return gcd_euclid(a, b, m);
         }
         if a.len() > b.len() {
-            let n = hgcd(&a, &b, m);
-            let (x, y) = n.apply(&a, &b, m);
+            let _phase = sagebrush_interrupt::enter("half-gcd");
+            let n = hgcd_t(&a, &b, m, t);
+            let (x, y) = n.apply_t(&a, &b, m, t);
             a = x;
             b = y;
             if b.is_empty() {
                 break;
             }
         }
-        let r = rem(&a, &b, m);
+        let r = divrem_t(&a, &b, m, t).1;
         a = std::mem::replace(&mut b, r);
     }
     monic(&a, m)
 }
 
 /// Inputs to the half-gcd shorter than this use Euclid's steps directly.
-const HGCD_CUTOFF: usize = 64;
+pub const HGCD_CUTOFF: usize = 64;
 /// gcds of inputs shorter than this use Euclid's algorithm.
-const GCD_CUTOFF: usize = 1000;
+pub const GCD_CUTOFF: usize = 1000;
 
 /// A 2x2 matrix of polynomials: the product of Euclid steps
 /// (a, b) -> (b, a - q b), acting on column vectors.
@@ -433,25 +627,29 @@ impl Mat2 {
     }
 
     /// self * o.
-    fn mul(&self, o: &Mat2, md: &Modulus) -> Mat2 {
+    fn mul_t(&self, o: &Mat2, md: &Modulus, t: Tabs) -> Mat2 {
         let [a, b, c, d] = &self.m;
         let [e, f, g, h] = &o.m;
-        let p = |x: &Poly, y: &Poly, z: &Poly, w: &Poly| add(&mul(x, y, md), &mul(z, w, md), md);
+        let p = |x: &Poly, y: &Poly, z: &Poly, w: &Poly| add(&mul_t(x, y, md, t), &mul_t(z, w, md, t), md);
         Mat2 { m: [p(a, e, b, g), p(a, f, b, h), p(c, e, d, g), p(c, f, d, h)] }
     }
 
     /// The Euclid step for quotient q, times self.
-    fn step(&self, q: &[u64], md: &Modulus) -> Mat2 {
+    fn step_t(&self, q: &[u64], md: &Modulus, t: Tabs) -> Mat2 {
         let [a, b, c, d] = &self.m;
-        Mat2 { m: [c.clone(), d.clone(), sub(a, &mul(q, c, md), md), sub(b, &mul(q, d, md), md)] }
+        Mat2 { m: [copy(c), copy(d), sub(a, &mul_t(q, c, md, t), md), sub(b, &mul_t(q, d, md, t), md)] }
     }
 
     /// self * (a, b).
     pub fn apply(&self, a: &[u64], b: &[u64], md: &Modulus) -> (Poly, Poly) {
+        self.apply_t(a, b, md, Tabs::Shared)
+    }
+
+    fn apply_t(&self, a: &[u64], b: &[u64], md: &Modulus, t: Tabs) -> (Poly, Poly) {
         let [m11, m12, m21, m22] = &self.m;
         (
-            add(&mul(m11, a, md), &mul(m12, b, md), md),
-            add(&mul(m21, a, md), &mul(m22, b, md), md),
+            add(&mul_t(m11, a, md, t), &mul_t(m12, b, md, t), md),
+            add(&mul_t(m21, a, md, t), &mul_t(m22, b, md, t), md),
         )
     }
 }
@@ -460,7 +658,7 @@ fn shift(a: &[u64], k: usize) -> Poly {
     if a.len() <= k {
         vec![]
     } else {
-        a[k..].to_vec()
+        copy(&a[k..])
     }
 }
 
@@ -469,6 +667,10 @@ fn shift(a: &[u64], k: usize) -> Poly {
 /// of the Euclid steps after which (a', b') = N (a, b) are consecutive
 /// remainders with deg a' >= ceil(n/2) > deg b'.
 pub fn hgcd(a: &[u64], b: &[u64], md: &Modulus) -> Mat2 {
+    hgcd_t(a, b, md, Tabs::Shared)
+}
+
+fn hgcd_t(a: &[u64], b: &[u64], md: &Modulus, t: Tabs) -> Mat2 {
     let n = a.len() - 1;
     let m = n.div_ceil(2);
     if b.len() <= m {
@@ -476,34 +678,34 @@ pub fn hgcd(a: &[u64], b: &[u64], md: &Modulus) -> Mat2 {
     }
     if n < HGCD_CUTOFF {
         // Euclid's steps until the degree drops below m
-        let mut t = Mat2::identity();
-        let (mut x, mut y) = (a.to_vec(), b.to_vec());
+        let mut m2 = Mat2::identity();
+        let (mut x, mut y) = (copy(a), copy(b));
         while y.len() > m {
-            let (q, r) = divrem(&x, &y, md);
-            t = t.step(&q, md);
+            let (q, r) = divrem_t(&x, &y, md, t);
+            m2 = m2.step_t(&q, md, t);
             x = std::mem::replace(&mut y, r);
         }
-        return t;
+        return m2;
     }
-    let r = hgcd(&shift(a, m), &shift(b, m), md);
-    let (a1, b1) = r.apply(a, b, md);
+    let r = hgcd_t(&shift(a, m), &shift(b, m), md, t);
+    let (a1, b1) = r.apply_t(a, b, md, t);
     if b1.len() <= m {
         return r;
     }
-    let (q, d) = divrem(&a1, &b1, md);
-    let qr = r.step(&q, md);
+    let (q, d) = divrem_t(&a1, &b1, md, t);
+    let qr = r.step_t(&q, md, t);
     if d.len() <= m {
         return qr;
     }
     let l = b1.len() - 1;
     let k = 2 * m - l;
-    let s = hgcd(&shift(&b1, k), &shift(&d, k), md);
-    s.mul(&qr, md)
+    let s = hgcd_t(&shift(&b1, k), &shift(&d, k), md, t);
+    s.mul_t(&qr, md, t)
 }
 
 /// (g, s, t) with g = s a + t b the monic gcd (n prime).
 pub fn xgcd(a: &[u64], b: &[u64], m: &Modulus) -> (Poly, Poly, Poly) {
-    let (mut r0, mut r1) = (trim(a.to_vec()), trim(b.to_vec()));
+    let (mut r0, mut r1) = (trim(copy(a)), trim(copy(b)));
     let (mut s0, mut s1) = (vec![1 % m.n], vec![]);
     let (mut t0, mut t1) = (vec![], vec![1 % m.n]);
     while !r1.is_empty() {
@@ -529,49 +731,91 @@ pub fn xgcd(a: &[u64], b: &[u64], m: &Modulus) -> (Poly, Poly, Poly) {
 pub struct PolyModulus {
     pub f: Poly,
     finv: Poly,
+    /// The precision of finv: 1/rev(f) mod x^prec.  finv itself may be
+    /// shorter (its top coefficients zero, as for a sparse f), so the
+    /// branch in reduce reads this, never finv.len(), as reduce_work does.
+    prec: usize,
     pub m: Modulus,
 }
 
 impl PolyModulus {
     pub fn new(f: &[u64], m: &Modulus) -> PolyModulus {
-        let f = trim(f.to_vec());
+        PolyModulus::new_t(f, m, Tabs::Shared)
+    }
+
+    /// [`PolyModulus::new`] with the caller's transform tables (for
+    /// products up to 2 f.len()).
+    pub fn new_in(f: &[u64], m: &Modulus, lt: &ntt::LocalTables) -> PolyModulus {
+        PolyModulus::new_t(f, m, Tabs::Local(lt))
+    }
+
+    fn new_t(f: &[u64], m: &Modulus, t: Tabs) -> PolyModulus {
+        let f = trim(copy(f));
         assert!(!f.is_empty(), "zero modulus");
-        let k = f.len().max(2) - 1;
-        let finv = inv_series(&rev(&f, f.len()), k.max(1), m);
-        PolyModulus { f, finv, m: *m }
+        let prec = f.len().max(2) - 1;
+        let finv = inv_series_t(&rev(&f, f.len()), prec, m, t);
+        PolyModulus { f, finv, prec, m: *m }
     }
 
     /// x mod f, for deg x < 2 deg f.
     pub fn reduce(&self, x: &[u64]) -> Poly {
+        self.reduce_t(x, Tabs::Shared)
+    }
+
+    /// [`PolyModulus::reduce`] with the caller's transform tables.
+    pub fn reduce_in(&self, x: &[u64], lt: &ntt::LocalTables) -> Poly {
+        self.reduce_t(x, Tabs::Local(lt))
+    }
+
+    fn reduce_t(&self, x: &[u64], t: Tabs) -> Poly {
         if x.len() < self.f.len() {
-            return trim(x.to_vec());
+            return trim(copy(x));
         }
         if self.f.len() < DIV_CUTOFF {
             let linv = self.m.inv(*self.f.last().unwrap()).unwrap();
+            tally(Family::ModArith, 1);
             return divrem_classical(x, &self.f, linv, &self.m).1;
         }
-        if x.len() - self.f.len() + 1 > self.finv.len() {
-            return rem(x, &self.f, &self.m);
+        if x.len() - self.f.len() + 1 > self.prec {
+            return divrem_t(x, &self.f, &self.m, t).1;
         }
-        divrem_with_inverse(x, &self.f, &self.finv, &self.m).1
+        divrem_with_inverse_t(x, &self.f, &self.finv, &self.m, t).1
     }
 
     pub fn mulmod(&self, a: &[u64], b: &[u64]) -> Poly {
-        self.reduce(&mul(a, b, &self.m))
+        self.mulmod_t(a, b, Tabs::Shared)
+    }
+
+    /// [`PolyModulus::mulmod`] with the caller's transform tables.
+    pub fn mulmod_in(&self, a: &[u64], b: &[u64], lt: &ntt::LocalTables) -> Poly {
+        self.mulmod_t(a, b, Tabs::Local(lt))
+    }
+
+    fn mulmod_t(&self, a: &[u64], b: &[u64], t: Tabs) -> Poly {
+        self.reduce_t(&mul_t(a, b, &self.m, t), t)
     }
 
     /// a^e mod f, e given as little-endian 64-bit words.
     pub fn powmod(&self, a: &[u64], e: &[u64]) -> Poly {
-        let a = self.reduce(a);
-        let mut r = self.reduce(&[1 % self.m.n]);
+        self.powmod_t(a, e, Tabs::Shared)
+    }
+
+    /// [`PolyModulus::powmod`] with the caller's transform tables.
+    pub fn powmod_in(&self, a: &[u64], e: &[u64], lt: &ntt::LocalTables) -> Poly {
+        self.powmod_t(a, e, Tabs::Local(lt))
+    }
+
+    fn powmod_t(&self, a: &[u64], e: &[u64], t: Tabs) -> Poly {
+        let a = self.reduce_t(a, t);
+        let mut r = self.reduce_t(&[1 % self.m.n], t);
         let bits = e.len() * 64;
         let mut started = false;
         for i in (0..bits).rev() {
             if started {
-                r = self.mulmod(&r, &r);
+                r = self.mulmod_t(&r, &r, t);
             }
             if (e[i / 64] >> (i % 64)) & 1 == 1 {
-                r = if started { self.mulmod(&r, &a) } else { a.clone() };
+                r = if started { self.mulmod_t(&r, &a, t) } else { copy(&a) };
                 started = true;
             }
             if i % 64 == 0 {
@@ -582,7 +826,413 @@ impl PolyModulus {
     }
 }
 
-#[cfg(test)]
+/// The two forms of [`PolyModulus::compose`]'s matrix product C = A B (A:
+/// g's blocks, r by k; B: the powers h^0 .. h^(k-1) mod f, k by n).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComposeRoute {
+    /// C as one dense product, then Horner over its rows (peak: B, the
+    /// product's transposed copy of it, or a row below 2^32, and C).
+    Blocked,
+    /// Each row C_j = A_j B computed just before its Horner step (peak: B
+    /// and O(n)).
+    Streamed,
+}
+
+/// k = ceil(sqrt(lg)) and r = ceil(lg / k): [`PolyModulus::compose`]'s
+/// block length and number of blocks for g of lg coefficients (lg >= 1).
+pub const fn compose_shape(lg: usize) -> (usize, usize) {
+    if lg <= 1 {
+        return (1, lg);
+    }
+    // (the integer square root, rounded up: k^2 >= lg > (k - 1)^2)
+    let r = lg.isqrt();
+    let k = if r * r == lg { r } else { r + 1 };
+    (k, lg.div_ceil(k))
+}
+
+impl PolyModulus {
+    /// g(h) mod f by Brent and Kung's algorithm (Fast algorithms for
+    /// manipulating formal power series, J. ACM 25, 1978): with k about
+    /// sqrt(deg g), the powers h^0 .. h^k mod f (k products mod f), one
+    /// matrix product over Z/n of g's blocks by the powers' coefficients,
+    /// and Horner in h^k over the product's rows (deg g / k products mod
+    /// f).  The route by the lengths ([`compose_route_for`]).
+    pub fn compose(&self, g: &[u64], h: &[u64]) -> Poly {
+        let lg = (degree(g) + 1) as usize;
+        self.compose_t(g, h, compose_route_for(self.f.len(), lg), Tabs::Shared)
+    }
+
+    /// [`PolyModulus::compose`] with the caller's transform tables.
+    pub fn compose_in(&self, g: &[u64], h: &[u64], lt: &ntt::LocalTables) -> Poly {
+        let lg = (degree(g) + 1) as usize;
+        self.compose_t(g, h, compose_route_for(self.f.len(), lg), Tabs::Local(lt))
+    }
+
+    /// [`PolyModulus::compose`] by the given route.  Units: the products mod
+    /// f, the matrix product and the sums count themselves (nmod_poly,
+    /// nmod_mat); this counts the matrices' fills (Move).
+    pub fn compose_route(&self, g: &[u64], h: &[u64], route: ComposeRoute) -> Poly {
+        self.compose_t(g, h, route, Tabs::Shared)
+    }
+
+    fn compose_t(&self, g: &[u64], h: &[u64], route: ComposeRoute, t: Tabs) -> Poly {
+        let lf = self.f.len();
+        let lg = (degree(g) + 1) as usize;
+        if lf == 1 || lg == 0 {
+            return vec![];
+        }
+        let n = lf - 1;
+        let m = self.m;
+        let h = if h.len() < lf.saturating_mul(2) - 1 { self.reduce_t(h, t) } else { divrem_t(h, &self.f, &m, t).1 };
+        if lg == 1 {
+            return self.reduce_t(&g[..1], t);
+        }
+        let (k, r) = compose_shape(lg);
+        // the powers h^0 .. h^(k-1), each written into B (by rows, or by
+        // columns for the streamed route's B^T) as it is computed, then
+        // h^k (only one power held at a time)
+        let mut b = crate::nmod_mat::Mat { rows: 0, cols: 0, m, d: vec![0; k * n] };
+        tally(Family::Move, (k * n) as u64);
+        let mut cur = self.reduce_t(&[1 % m.n], t);
+        for i in 0..k {
+            for (j, &c) in cur.iter().enumerate() {
+                match route {
+                    ComposeRoute::Blocked => b.d[i * n + j] = c,
+                    ComposeRoute::Streamed => b.d[j * k + i] = c,
+                }
+            }
+            if i + 1 < k || r > 1 {
+                cur = self.mulmod_t(&cur, &h, t);
+            }
+        }
+        let big = cur;
+        (b.rows, b.cols) = match route {
+            ComposeRoute::Blocked => (k, n),
+            ComposeRoute::Streamed => (n, k),
+        };
+        // g's block j: coefficients jk .. jk + k (the last one padded)
+        let block = |j: usize| -> Vec<u64> {
+            let mut a = vec![0u64; k];
+            let hi = ((j + 1) * k).min(lg);
+            a[..hi - j * k].copy_from_slice(&g[j * k..hi]);
+            tally(Family::Move, k as u64);
+            a
+        };
+        match route {
+            ComposeRoute::Blocked => {
+                let mut a = crate::nmod_mat::Mat { rows: r, cols: k, m, d: Vec::with_capacity(r * k) };
+                for j in 0..r {
+                    a.d.extend_from_slice(&block(j));
+                }
+                let c = a.mul(&b);
+                drop(b);
+                let row = |j: usize| {
+                    tally(Family::Move, n as u64);
+                    trim(c.d[j * n..(j + 1) * n].to_vec())
+                };
+                let mut acc = row(r - 1);
+                for j in (0..r - 1).rev() {
+                    sagebrush_interrupt::check();
+                    acc = add(&self.mulmod_t(&acc, &big, t), &row(j), &m);
+                }
+                acc
+            }
+            ComposeRoute::Streamed => {
+                let mut acc = trim(b.mul_vec(&block(r - 1)));
+                for j in (0..r - 1).rev() {
+                    sagebrush_interrupt::check();
+                    let cj = trim(b.mul_vec(&block(j)));
+                    acc = add(&self.mulmod_t(&acc, &big, t), &cj, &m);
+                }
+                acc
+            }
+        }
+    }
+}
+
+/// [`PolyModulus::compose`]'s route for a modulus of lf coefficients and g
+/// of lg: the streamed one everywhere.  The two measured the same (within
+/// 1%) at lf = 50 to 10^4, and the streamed one holds less; the lengths
+/// are kept as arguments for a crossover a future measurement may show.
+pub fn compose_route_for(lf: usize, lg: usize) -> ComposeRoute {
+    let _ = (lf, lg);
+    ComposeRoute::Streamed
+}
+
+// ------------------------------------------------------------------ work bounds
+
+// Closed-form bounds on the work of the operations above, in
+// multiply-adds and butterflies, for callers that charge a budget before
+// each call (the units of the web ops' declared work).  Every bound is
+// computed with checked arithmetic: None when it does not fit in a u64,
+// which a caller treats as a refusal.
+
+/// Checked arithmetic in const fns: the value, or None from the function.
+macro_rules! ck {
+    ($e:expr) => {
+        match $e {
+            Some(x) => x,
+            None => return None,
+        }
+    };
+}
+
+/// The linear allowance per transform point of [`product_work`]: the
+/// residues' combination and the linear passes around a product (sums,
+/// differences, copies); also a bound on a schoolbook product per point
+/// of its length, its shorter factor having fewer than MUL_CUTOFF
+/// coefficients.
+const LINEAR: u64 = 40;
+const _: () = assert!(MUL_CUTOFF as u64 <= LINEAR);
+
+/// One inversion modulo n (an extended Euclid on words) and a step's
+/// bookkeeping.
+const INV_WORK: u64 = 129;
+
+/// ceil(log2(x)) (0 for x <= 1).
+const fn clog2(x: u64) -> u64 {
+    if x <= 1 {
+        0
+    } else {
+        64 - (x - 1).leading_zeros() as u64
+    }
+}
+
+/// A bound on one product of length at most `len` (len >= 1), with N =
+/// len padded to a power of two: at most three primes times three
+/// transforms of (N / 2) log2 N butterflies, plus LINEAR N.  P(N) / N
+/// grows with N, so P(N / 2) <= P(N) / 2.
+pub const fn product_work(len: usize) -> Option<u64> {
+    let n = ck!((if len == 0 { 1 } else { len } as u64).checked_next_power_of_two());
+    let log = n.trailing_zeros() as u64;
+    let butterflies = ck!(ck!((n / 2).checked_mul(9)).checked_mul(log));
+    butterflies.checked_add(ck!(n.checked_mul(LINEAR)))
+}
+
+/// [`mul`] (and [`mul_in`]) of factors with la and lb coefficients: the
+/// schoolbook's la lb multiply-adds and its result below MUL_CUTOFF, else
+/// one product ([`product_work`]).
+pub const fn mul_work(la: usize, lb: usize) -> Option<u64> {
+    if la == 0 || lb == 0 {
+        return Some(0);
+    }
+    let len = ck!(ck!(la.checked_add(lb)).checked_sub(1));
+    if la < MUL_CUTOFF || lb < MUL_CUTOFF {
+        return ck!((la as u64).checked_mul(lb as u64)).checked_add(len as u64);
+    }
+    product_work(len)
+}
+
+/// [`inv_series`] to k terms: per doubling step to `len` terms, two
+/// products of factors of at most len coefficients, the linear passes
+/// and a step's bookkeeping; and the inversion of the constant term.
+pub const fn inv_series_work(k: usize) -> Option<u64> {
+    let mut w = INV_WORK;
+    let mut len = 1;
+    while len < k {
+        len = match len.checked_mul(2) {
+            Some(d) if d < k => d,
+            _ => k,
+        };
+        let step = ck!(ck!(ck!(mul_work(len, len)).checked_mul(2)).checked_add(ck!((len as u64).checked_mul(4))));
+        w = ck!(w.checked_add(step));
+    }
+    Some(w)
+}
+
+/// [`divrem`] (and [`divrem_in`]) of a by b with la >= 0 and lb >= 1
+/// coefficients.  Classical: ql rows of lb multiply-adds, the copy of a
+/// and the inversion of b's leading coefficient.  Newton: the inverse
+/// series to ql terms, then the quotient's product (factors of at most
+/// ql coefficients) and the remainder's (at most ql and lb - 1), the
+/// reversed copy and the difference.
+pub const fn divrem_work(la: usize, lb: usize) -> Option<u64> {
+    if lb == 0 {
+        // (a zero divisor: refused, never charged)
+        return None;
+    }
+    if la < lb {
+        return Some(la as u64);
+    }
+    let ql = ck!(ck!(la.checked_sub(lb)).checked_add(1));
+    if lb < DIV_CUTOFF || ql < DIV_CUTOFF {
+        return ck!(ck!((ql as u64).checked_mul(lb as u64)).checked_add(la as u64)).checked_add(INV_WORK);
+    }
+    let products = ck!(ck!(mul_work(ql, ql)).checked_add(ck!(mul_work(ql, lb - 1))));
+    ck!(ck!(inv_series_work(ql)).checked_add(products)).checked_add(ck!((la as u64).checked_mul(2)))
+}
+
+/// Euclid's algorithm on inputs of hi >= lo coefficients (see [`gcd_work`]).
+const fn euclid_work(hi: u64, lo: u64) -> Option<u64> {
+    ck!(ck!(lo.checked_mul(ck!(hi.checked_add(lo)))).checked_add(ck!(lo.checked_mul(INV_WORK)))).checked_add(128)
+}
+
+/// A bound on a half-gcd base case (inputs shorter than HGCD_CUTOFF).
+const HGCD_BASE_WORK: u64 = 1 << 14;
+const _: () = assert!(HGCD_CUTOFF == 64);
+
+/// [`gcd`] (and [`gcd_in`]) of polynomials with la and lb coefficients,
+/// L = max(la, lb), l = min(la, lb).
+/// - l = 0: the monic associate of the other (an inversion, a scale).
+/// - l <= GCD_CUTOFF: Euclid, l (L + l) + 129 l + 128: the quotient rows
+///   of all steps number at most L + l, each at most l multiply-adds; an
+///   inversion per step and the final normalization.
+/// - Otherwise the half-gcd.  With P = [`product_work`] at N = 2 L padded
+///   ([`gcd_table_len`]): a half-gcd node for inputs of length L' does at
+///   most 20 products' work at its own N' (4 applying its first matrix,
+///   6 in its division, 2 in the Euclid step, 8 in the final matrix
+///   product) and calls itself twice on inputs of at most ceil(L' / 2)
+///   coefficients, whose N is at most half its own; so the 2^j nodes of
+///   level j cost at most 20 P(N) together.  The levels whose inputs are
+///   longer than HGCD_CUTOFF number at most ceil(log2(L / HGCD_CUTOFF))
+///   (level j has inputs of at most ceil(L / 2^j) coefficients), and the
+///   base cases below them at most 2^levels < 2 L / HGCD_CUTOFF, each at
+///   most HGCD_BASE_WORK.  The gcd's loop: each turn's half-gcd, its
+///   application and a division (10 products more), on lengths that at
+///   least halve each turn, so at most twice the first turn's bound; then
+///   Euclid's tail on a shorter input of at most GCD_CUTOFF coefficients.
+pub const fn gcd_work(la: usize, lb: usize) -> Option<u64> {
+    let (big, small) = if la >= lb { (la as u64, lb as u64) } else { (lb as u64, la as u64) };
+    if small == 0 {
+        return big.checked_add(INV_WORK);
+    }
+    if small <= GCD_CUTOFF as u64 {
+        return euclid_work(big, small);
+    }
+    let p = ck!(product_work(ck!((big as usize).checked_mul(2))));
+    let cut = HGCD_CUTOFF as u64;
+    let levels = clog2(big.div_ceil(cut));
+    let bases = ck!(HGCD_BASE_WORK.checked_mul(ck!(big.checked_mul(2)).div_ceil(cut)));
+    let turn = ck!(ck!(ck!(ck!(p.checked_mul(20)).checked_mul(levels)).checked_add(bases)).checked_add(ck!(p.checked_mul(10))));
+    ck!(turn.checked_mul(2)).checked_add(ck!(euclid_work(big, GCD_CUTOFF as u64)))
+}
+
+/// The bytes [`gcd`] (and [`gcd_in`]) allocates beyond its inputs (which
+/// it owns), its transform tables and one product's transform buffers,
+/// each polynomial counted by its capacity.  Euclid works in place and
+/// allocates only the monic result (at most l words).  The half-gcd: a
+/// frame for inputs of length L' holds at most 16.5 L' + 33 words, and
+/// 11 L' + 20 while its second call runs, so the recursion holds at most
+/// max(16.5 L + 33, 11 L + 20 + S(ceil(L / 2))) <= 23 L + 1024 words
+/// (1024: a base case); the gcd's loop adds at most 0.5 L + 2 words (its
+/// later operands' capacities): at most 188 L + 8208 bytes <= 320 L for
+/// L > GCD_CUTOFF.
+pub const fn gcd_frame_bytes(la: usize, lb: usize) -> Option<u64> {
+    let (big, small) = if la >= lb { (la as u64, lb as u64) } else { (lb as u64, la as u64) };
+    if small <= GCD_CUTOFF as u64 {
+        // (l = 0: the monic associate of the other, a new vector)
+        let l = if small == 0 { big } else { small };
+        return l.checked_mul(8);
+    }
+    big.checked_mul(320)
+}
+const _: () = assert!(188 * (GCD_CUTOFF as u64 + 1) + 8208 <= 320 * (GCD_CUTOFF as u64 + 1));
+
+/// [`PolyModulus::new`] (and new_in) for a modulus with lf coefficients:
+/// the inverse series of the reversal to k = max(lf - 1, 1) terms, and
+/// the copies.
+pub const fn polymod_new_work(lf: usize) -> Option<u64> {
+    let k = if lf > 2 { lf - 1 } else { 1 };
+    ck!(inv_series_work(k)).checked_add(ck!((lf as u64).checked_mul(2)))
+}
+
+/// [`PolyModulus::reduce`] (and reduce_in) of lx coefficients modulo one
+/// of lf, branch by branch as it runs: a copy; the classical division;
+/// the general division (a quotient longer than the stored inverse); or
+/// the products with the stored inverse (the quotient's, of factors of at
+/// most ql coefficients, and the remainder's, at most ql and lf - 1),
+/// the reversed copy and the difference.
+pub const fn reduce_work(lf: usize, lx: usize) -> Option<u64> {
+    if lf == 0 {
+        // (a zero modulus: refused, never charged)
+        return None;
+    }
+    if lx < lf {
+        return Some(lx as u64);
+    }
+    let ql = ck!(ck!(lx.checked_sub(lf)).checked_add(1));
+    if lf < DIV_CUTOFF {
+        return ck!(ck!((ql as u64).checked_mul(lf as u64)).checked_add(lx as u64)).checked_add(INV_WORK);
+    }
+    let k = if lf > 2 { lf - 1 } else { 1 };
+    if ql > k {
+        return divrem_work(lx, lf);
+    }
+    let products = ck!(ck!(mul_work(ql, ql)).checked_add(ck!(mul_work(ql, lf - 1))));
+    products.checked_add(ck!((lx as u64).checked_mul(2)))
+}
+
+/// [`PolyModulus::mulmod`] (and mulmod_in) of factors with la and lb
+/// coefficients modulo one of lf.
+pub const fn mulmod_work(lf: usize, la: usize, lb: usize) -> Option<u64> {
+    let lp = if la == 0 || lb == 0 { 0 } else { ck!(ck!(la.checked_add(lb)).checked_sub(1)) };
+    ck!(mul_work(la, lb)).checked_add(ck!(reduce_work(lf, lp)))
+}
+
+/// [`PolyModulus::powmod`] (and powmod_in) of a (la coefficients) to an
+/// exponent of `words` words whose highest set bit is bit ebits - 1 (0:
+/// a zero exponent), modulo f with lf >= 1 coefficients: the reductions
+/// of a and of 1; a check per bit of the words; and from the highest set
+/// bit down, per bit at most a squaring and a multiplication of operands
+/// shorter than f.
+pub const fn powmod_work(lf: usize, la: usize, words: usize, ebits: u64) -> Option<u64> {
+    let first = ck!(ck!(reduce_work(lf, la)).checked_add(ck!(reduce_work(lf, 1))));
+    let l = lf.saturating_sub(1);
+    let step = ck!(ck!(ck!(mulmod_work(lf, l, l)).checked_mul(2)).checked_add(1));
+    let scan = ck!((words as u64).checked_mul(64));
+    ck!(first.checked_add(scan)).checked_add(ck!(ebits.checked_mul(step)))
+}
+
+/// [`PolyModulus::compose`] (either route) of g with lg coefficients and h
+/// with lh, modulo f with lf >= 1: h reduced; at most k + r - 1 products mod
+/// f of operands shorter than f ((k, r) = [`compose_shape`]); the matrix
+/// product's r k n multiply-adds and as many reductions, at most (n = lf -
+/// 1); the fills, copies and sums, k n + r k + 3 r n.
+pub const fn compose_work(lf: usize, lg: usize, lh: usize) -> Option<u64> {
+    if lf == 0 {
+        // (a zero modulus: refused, never charged)
+        return None;
+    }
+    let red = if lh < ck!(lf.checked_mul(2)) - 1 { ck!(reduce_work(lf, lh)) } else { ck!(divrem_work(lh, lf)) };
+    if lf == 1 || lg <= 1 {
+        return red.checked_add(lg as u64);
+    }
+    let n = (lf - 1) as u64;
+    let (k, r) = compose_shape(lg);
+    let (k, r) = (k as u64, r as u64);
+    let mulmods = ck!(ck!(k.checked_add(r)).checked_mul(ck!(mulmod_work(lf, lf - 1, lf - 1))));
+    let matrix = ck!(ck!(ck!(r.checked_mul(k)).checked_mul(n)).checked_mul(2));
+    let linear = ck!(ck!(ck!(k.checked_mul(n)).checked_add(ck!(r.checked_mul(k)))).checked_add(ck!(ck!(r.checked_mul(n)).checked_mul(3))));
+    ck!(ck!(red.checked_add(mulmods)).checked_add(matrix)).checked_add(linear)
+}
+
+/// The words [`PolyModulus::compose`] holds at once besides its products'
+/// own transients, by route (n = lf - 1; (k, r) = [`compose_shape`]):
+/// - both: the powers' matrix B (k n); h reduced, the power being computed
+///   or h^k, the running value and a row (4 n); a block (k);
+/// - the blocked route also: the product's transposed copy of B (k n; a
+///   modulus below 2^32 needs one row of n instead), g's blocks A (r k)
+///   and the product C (r n).
+pub const fn compose_words(lf: usize, lg: usize, route: ComposeRoute) -> Option<u64> {
+    if lf <= 1 || lg <= 1 {
+        return (lf as u64).checked_add(1);
+    }
+    let n = (lf - 1) as u64;
+    let (k, r) = compose_shape(lg);
+    let (k, r) = (k as u64, r as u64);
+    let b = ck!(k.checked_mul(n));
+    let common = ck!(ck!(b.checked_add(ck!(n.checked_mul(4)))).checked_add(k));
+    match route {
+        ComposeRoute::Streamed => Some(common),
+        ComposeRoute::Blocked => {
+            let extra = ck!(ck!(b.checked_add(ck!(r.checked_mul(k)))).checked_add(ck!(r.checked_mul(n))));
+            common.checked_add(extra)
+        }
+    }
+}
+
+// (its helpers use dashu's u64-word API: native targets only)
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 
@@ -601,6 +1251,191 @@ mod tests {
             }
         }
         v
+    }
+
+    /// g(h) mod f by Horner in h, one product mod f per coefficient.
+    fn compose_naive(pm: &PolyModulus, g: &[u64], h: &[u64]) -> Poly {
+        let h = if h.len() < 2 * pm.f.len() - 1 { pm.reduce(h) } else { divrem(h, &pm.f, &pm.m).1 };
+        let mut acc: Poly = vec![];
+        for &c in g.iter().rev() {
+            acc = pm.reduce(&add(&pm.mulmod(&acc, &h), &trim(vec![c % pm.m.n]), &pm.m));
+        }
+        acc
+    }
+
+    /// compose against Horner: both routes, f of degree 0 to 60 and a few
+    /// larger, g shorter, as long and longer than f, h longer than f, at
+    /// p = 2, small, 2^32 - 5, 2^62 - 57 and nmod's largest, 2^64 - 59 (the
+    /// matrix product's delayed reduction then sums one product at a time).
+    #[test]
+    fn compose_matches_horner() {
+        let mut s = 0x1234_5678_9abc_def1u64;
+        for &p in &[2u64, 3, 65537, (1 << 32) - 5, (1 << 62) - 57, u64::MAX - 58] {
+            let m = Modulus::new(p);
+            let mut sizes: Vec<usize> = (1..=60).collect();
+            sizes.extend([97, 160, 301]);
+            for &lf in &sizes {
+                let mut f = rand_poly(lf, &m, &mut s);
+                *f.last_mut().unwrap() = 1;
+                let pm = PolyModulus::new(&f, &m);
+                for lg in [0, 1, 2, lf.saturating_sub(1).max(1), lf, 2 * lf + 3] {
+                    if lf > 60 && lg != lf.saturating_sub(1).max(1) {
+                        continue;
+                    }
+                    let g = rand_poly(lg, &m, &mut s);
+                    let h = rand_poly(if lg % 2 == 0 { lf + 2 } else { lf.saturating_sub(1) }, &m, &mut s);
+                    let want = compose_naive(&pm, &g, &h);
+                    for route in [ComposeRoute::Blocked, ComposeRoute::Streamed] {
+                        assert_eq!(pm.compose_route(&g, &h, route), want, "p {} lf {} lg {} {:?}", p, lf, lg, route);
+                    }
+                    assert_eq!(pm.compose(&g, &h), want);
+                }
+            }
+        }
+    }
+
+    /// g -> g(h) mod f is a ring map: (g1 g2)(h) = g1(h) g2(h) and
+    /// (g1 + g2)(h) = g1(h) + g2(h) mod f; x(h) = h and g(x) = g mod f; at
+    /// n = 600 (the NTT products).
+    #[test]
+    fn compose_is_a_ring_map() {
+        let mut s = 7u64;
+        let m = Modulus::new(65537);
+        let mut f = rand_poly(601, &m, &mut s);
+        *f.last_mut().unwrap() = 1;
+        let pm = PolyModulus::new(&f, &m);
+        let (g1, g2, h) = (rand_poly(300, &m, &mut s), rand_poly(300, &m, &mut s), rand_poly(600, &m, &mut s));
+        let g12 = pm.reduce(&mul(&g1, &g2, &m));
+        assert_eq!(pm.compose(&g12, &h), pm.mulmod(&pm.compose(&g1, &h), &pm.compose(&g2, &h)));
+        assert_eq!(pm.compose(&add(&g1, &g2, &m), &h), add(&pm.compose(&g1, &h), &pm.compose(&g2, &h), &m));
+        assert_eq!(pm.compose(&[0, 1], &h), trim(h.clone()));
+        let g = rand_poly(900, &m, &mut s);
+        assert_eq!(pm.compose(&g, &[0, 1]), divrem(&g, &f, &m).1);
+        assert_eq!(pm.compose_route(&g1, &h, ComposeRoute::Blocked), pm.compose_route(&g1, &h, ComposeRoute::Streamed));
+    }
+
+    /// compose_work bounds the units compose does (every family), at many
+    /// sizes and both routes, and refuses instead of overflowing.
+    #[test]
+    fn compose_work_bounds_the_units() {
+        use crate::cost::{metered, Meter};
+        let mut s = 3u64;
+        for &p in &[2u64, 65537, (1 << 62) - 57] {
+            let m = Modulus::new(p);
+            for &lf in &[1usize, 2, 3, 10, 41, 70, 200, 650] {
+                let mut f = rand_poly(lf, &m, &mut s);
+                *f.last_mut().unwrap() = 1;
+                let pm = PolyModulus::new(&f, &m);
+                for lg in [0, 1, 5, lf, 3 * lf] {
+                    let (g, h) = (rand_poly(lg, &m, &mut s), rand_poly(2 * lf + 1, &m, &mut s));
+                    for route in [ComposeRoute::Blocked, ComposeRoute::Streamed] {
+                        let mut meter = Meter::accounting(u64::MAX);
+                        metered(&mut meter, || drop(pm.compose_route(&g, &h, route)));
+                        let w = compose_work(lf, lg, h.len()).unwrap();
+                        assert!(meter.used() <= w, "p {} lf {} lg {} {:?}: {} units > bound {}", p, lf, lg, route, meter.used(), w);
+                    }
+                }
+            }
+        }
+        assert_eq!(compose_work(0, 5, 5), None);
+        // every extreme shape: a value or None, never a panic
+        let big = [0, 1, 2, usize::MAX / 2, usize::MAX / 2 + 1, usize::MAX - 1, usize::MAX];
+        for &lf in &big {
+            for &lg in &big {
+                for &lh in &big {
+                    let _ = compose_work(lf, lg, lh);
+                }
+                for route in [ComposeRoute::Blocked, ComposeRoute::Streamed] {
+                    let _ = compose_words(lf, lg, route);
+                }
+            }
+        }
+        assert_eq!(compose_work(usize::MAX / 2 + 1, 0, 0), None);
+        for lg in [0, 1] {
+            assert_eq!(compose_work(usize::MAX, lg, 0), None);
+            assert_eq!(compose_words(usize::MAX, lg, ComposeRoute::Streamed), None);
+        }
+        for lg in [0, 1, 2, usize::MAX / 2, usize::MAX] {
+            let (k, r) = compose_shape(lg);
+            assert!(k.checked_mul(r).is_none_or(|x| x >= lg), "lg {}", lg);
+        }
+        // the shape's terms: a long g's blocks counted by the blocked route
+        // (A, r k = 10^4 words for g of 10^4 coefficients mod a quadratic)
+        let (k, r) = compose_shape(10000);
+        assert_eq!((k, r), (100, 100));
+        assert_eq!(compose_words(3, 10000, ComposeRoute::Blocked), Some(2 * 100 * 2 + 100 * 100 + 100 * 2 + 4 * 2 + 100));
+        assert_eq!(compose_words(3, 10000, ComposeRoute::Streamed), Some(100 * 2 + 4 * 2 + 100));
+        assert_eq!(compose_work(usize::MAX / 2, usize::MAX / 2, 3), None);
+        assert_eq!(compose_words(usize::MAX, usize::MAX, ComposeRoute::Blocked), None);
+    }
+
+    #[test]
+    fn work_bounds_refuse_instead_of_panicking() {
+        // every bound is None (a refusal) or a number at any lengths, never
+        // an arithmetic overflow: callers debit them before the work.  A
+        // Some is checked against a lower bound of the work it stands for,
+        // so an intermediate that wrapped (release builds don't panic on
+        // overflow) and gave a small number fails here as well
+        let ls = [0usize, 1, 2, 39, 40, 59, 60, 1000, 1 << 32, usize::MAX / 2, usize::MAX / 2 + 1, usize::MAX - 1, usize::MAX];
+        let at_least = |w: Option<u64>, lo: u128, what: &str| {
+            if let Some(w) = w {
+                assert!(w as u128 >= lo, "{what}: {w} < {lo}");
+            }
+        };
+        for &a in &ls {
+            let _ = product_work(a);
+            at_least(product_work(a), a as u128, "product_work");
+            if a > 1 {
+                at_least(inv_series_work(a), 4 * a as u128, "inv_series_work");
+            }
+            at_least(polymod_new_work(a), 2 * a as u128, "polymod_new_work");
+            for &b in &ls {
+                if a > 0 && b > 0 {
+                    at_least(mul_work(a, b), a.max(b) as u128, "mul_work");
+                }
+                at_least(divrem_work(a, b), a as u128, "divrem_work");
+                at_least(gcd_work(a, b), a.max(b) as u128, "gcd_work");
+                let _ = gcd_frame_bytes(a, b);
+                at_least(reduce_work(a, b), b as u128, "reduce_work");
+                for &c in &ls {
+                    if b > 0 && c > 0 {
+                        at_least(mulmod_work(a, b, c), b as u128 + c as u128 - 1, "mulmod_work");
+                    }
+                    for e in [0u64, 1, 64, u64::MAX] {
+                        at_least(powmod_work(a, b, c, e), b as u128, "powmod_work");
+                    }
+                }
+            }
+        }
+        // zero lengths where a nonzero one is required: refused
+        for &x in &ls {
+            assert_eq!(reduce_work(0, x), None, "reduce_work(0, {x})");
+            assert_eq!(divrem_work(x, 0), None, "divrem_work({x}, 0)");
+        }
+        // the extremes that overflowed before
+        assert_eq!(reduce_work(1, usize::MAX), None);
+        assert_eq!(divrem_work(usize::MAX, 1), None);
+        assert_eq!(mulmod_work(usize::MAX, usize::MAX, 2), None);
+        assert_eq!(mulmod_work(1000, usize::MAX, 2), None);
+        assert!(mulmod_work(1000, 999, 999).is_some());
+    }
+
+    #[test]
+    fn barrett_reduction_edges() {
+        let mut s = 5u64;
+        // (powers of two: v = 2^64 / n exactly)
+        for n in [2u64, 3, 1 << 16, 65537, 1 << 31, (1 << 31) - 1, (1 << 32) - 5, (1 << 32) - 1] {
+            let v = ((1u128 << 64) / n as u128) as u64;
+            let mut xs: Vec<u64> = vec![0, 1, n - 1, n, n + 1, 2 * n - 1, u64::MAX, u64::MAX - 1, u64::MAX - n];
+            let top = u64::MAX / n * n;
+            xs.extend([top, top - 1, top.wrapping_add(n - 1)]);
+            xs.extend((0..2000).map(|_| rng(&mut s)));
+            // the row inputs at their largest: (n - 1) + (n - 1)^2
+            xs.push((n - 1) + (n - 1) * (n - 1));
+            for x in xs {
+                assert_eq!(barrett(x, n, v), x % n, "x={x} n={n}");
+            }
+        }
     }
 
     #[test]
@@ -624,6 +1459,50 @@ mod tests {
                 assert_eq!(add(&mul(&u, &a, &m), &mul(&v, &b, &m), &m), g2);
             }
         }
+    }
+
+    #[test]
+    fn gcd_in_its_own_tables() {
+        // gcd_in with tables of exactly gcd_table_len (a product longer
+        // than its tables panics): three-prime moduli, small ones, an NTT
+        // prime's own table; random pairs (gcd 1), common factors, very
+        // unequal lengths, and long quotients (powers of a linear factor)
+        let mut s = 7u64;
+        for p in [2u64, 7, 65537, 1_000_000_007, 4601552919265804289, (1 << 62) - 57, 18446744073709551557] {
+            let m = Modulus::new(p);
+            for (la, lb, lc) in [(1001, 1001, 0), (1500, 1200, 0), (3000, 1001, 0), (2048, 2047, 0), (1200, 1100, 600), (2000, 1500, 1400), (1002, 1001, 1001)] {
+                let (mut a, mut b) = (rand_poly(la, &m, &mut s), rand_poly(lb, &m, &mut s));
+                if lc > 0 {
+                    let c = rand_poly(lc, &m, &mut s);
+                    // (cofactors with leading coefficient 1: lengths exact)
+                    let cut = |x: &[u64], k: usize| -> Poly {
+                        let mut v = x[..k].to_vec();
+                        v[k - 1] = 1;
+                        v
+                    };
+                    let mut c = c;
+                    c[lc - 1] = 1;
+                    a = mul(&cut(&a, la - lc + 1), &c, &m);
+                    b = mul(&cut(&b, lb - lc + 1), &c, &m);
+                    assert_eq!((a.len(), b.len()), (la, lb));
+                }
+                let len = gcd_table_len(a.len(), b.len());
+                assert!(len > 0, "p={p} {la}/{lb}");
+                let lt = ntt::LocalTables::new(&m, len);
+                assert_eq!(gcd_in(a.clone(), b.clone(), &m, &lt), gcd_slow(&a, &b, &m), "p={p} {la}/{lb}/{lc}");
+            }
+            let mut f = vec![1u64];
+            for _ in 0..1500 {
+                f = mul(&f, &[3 % p, 1], &m);
+            }
+            let mut h = rand_poly(400, &m, &mut s);
+            h[399] = 1;
+            let g = mul(&f[..1101], &h, &m);
+            let lt = ntt::LocalTables::new(&m, gcd_table_len(f.len(), g.len()));
+            assert_eq!(gcd_in(f.clone(), g.clone(), &m, &lt), gcd_slow(&f, &g, &m), "p={p} powers");
+        }
+        assert_eq!(gcd_table_len(16384, 1000), 0);
+        assert_eq!(gcd_table_len(1001, 16384), 2 * 16384);
     }
 
     fn gcd_slow(a: &[u64], b: &[u64], m: &Modulus) -> Poly {

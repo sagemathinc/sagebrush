@@ -9,9 +9,14 @@
 // up to that id.  (In Node, where shared memory is always available, it is
 // shared too: the Jupyter kernel interrupts its worker thread through it.)
 const g = globalThis as any;
+// Bytes 8 to 23 of the shared buffer are the native engine's control words
+// (engine/node, design N1 r3.2: VERSION, STOP_UPTO, RUN, reserved), so that a
+// Ctrl-C from any thread holding this buffer also stops the native engine's
+// current call (requestCtrlC below; engine.ts installs and advances them).
+export const NATIVE_CONTROL_BYTE = 8;
 export const INTR: Int32Array =
   typeof SharedArrayBuffer === "function" && (g.crossOriginIsolated || (typeof g.process === "object" && !!g.process.versions?.node && typeof g.window === "undefined" && typeof g.importScripts !== "function"))
-    ? new Int32Array(new SharedArrayBuffer(8))
+    ? new Int32Array(new SharedArrayBuffer(NATIVE_CONTROL_BYTE + 16), 0, 2)
     : new Int32Array(2);
 
 // INTR[0] is a word of named bits, each with its own producer and consumer
@@ -35,6 +40,14 @@ export function takeFlush(intr: Int32Array = INTR): boolean {
 export function requestCtrlC(intr: Int32Array = INTR): void {
   Atomics.or(intr, 0, INTR_CTRL_C);
   if (intr.buffer instanceof SharedArrayBuffer) Atomics.notify(intr, 0);
+  if (intr.buffer instanceof SharedArrayBuffer) stopNativeRun(intr.buffer);
+}
+/** The native engine's Stop of its current run (STOP_UPTO = RUN), when the
+ * buffer carries installed control words (VERSION 1); else nothing. */
+export function stopNativeRun(buffer: SharedArrayBuffer): void {
+  if (buffer.byteLength < NATIVE_CONTROL_BYTE + 16) return;
+  const c = new Uint32Array(buffer, NATIVE_CONTROL_BYTE, 4);
+  if (Atomics.load(c, 0) === 1) Atomics.store(c, 1, Atomics.load(c, 2));
 }
 
 /** Whether a Ctrl-C is pending (bit 0), the others ignored. */

@@ -65,8 +65,11 @@ const CASES = [
   { id: "P1", mode: "python", calibration: "nonterminating", setup: "k = 0", target: "while True:\n    k += 1", probe: "assert sum(range(10)) == 45" },
   { id: "P2a", mode: "python", s0: 3_000_000, smin: 100_000, smax: 25_000_000, leak_s: 3_000_000, leak_measure: "heap+external", grow: (s, r) => Math.round(s * r), setup: "", target: "_r = sorted(range(S), key=lambda v: -v)", probe: "assert sorted([3, 1, 2]) == [1, 2, 3]" },
   { id: "E2", mode: "sage", s0: 22, smin: 12, smax: 44, grow: (s, r) => s + Math.max(1, Math.round(Math.log(r) / 0.18)) * Math.sign(Math.log(r)), setup: "n = next_prime(10**S) * next_prime(3 * 10**S)", target: "_r = factor(n)", probe: "assert len(factor(2**64 + 1)) == 2" },
-  { id: "E3a", mode: "sage", s0: 600, smin: 200, smax: 1024, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = M.rank()", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
+  { id: "E3a", mode: "sage", s0: 600, smin: 200, smax: 2048, leak_from: 4, grow: (s, r) => Math.round(s * Math.cbrt(r)), setup: "M = random_matrix(GF(32003), S)", target: "_r = [M.rank() for _ in range(5)]", probe: "assert matrix(GF(32003), [[1, 2], [2, 4]]).rank() == 1" },
   { id: "E6a", mode: "sage", s0: 6, smin: 4, smax: 9, grow: (s, r) => s + (r > 1 ? 1 : -1), setup: "R = PolynomialRing(GF(32003), 'x', S)\nX = R.gens()\nI = R.ideal([sum(prod(X[(j + t) % S] for t in range(d)) for j in range(S)) for d in range(1, S)] + [prod(X) - 1])", target: "_r = I.groebner_basis()", probe: "assert (X[0] + X[1])**2 - X[0]**2 - X[1]**2 == 2 * X[0] * X[1]\nassert len(I.gens()) == len(X) and I.gens()[0] in R\nR2 = PolynomialRing(GF(32003), 'y', 2)\nassert len(R2.ideal([R2.gen(0)**2 - 1, R2.gen(1) - 1]).groebner_basis()) == 2", retained: true },
+  // newforms' trace forms to a large bound (what hecke_matrix(p) on a weight-4 space asks for): the
+  // divisor counts and the per-prime Heilbronn images, each polled for Stop
+  { id: "E9n", mode: "sage", s0: 6000, smin: 1000, smax: 200000, grow: (s, r) => Math.round(s * Math.sqrt(r)), setup: "from sagebrush import mf", target: "_r = mf.newforms(389, 4, bound=S)", probe: "assert len(mf.newforms(11, 2)['newforms']) == 1" },
   // rank-13 PR 1 (plan-matlab-nocliffs r6 section 3): the column ordering and the sparse LU, each the
   // whole target, Stop counted only after its PHASE marker (pyjs Python loops, polled at back-edges)
   { id: "M1o", mode: "python", leak_measure: "heap+external", s0: 250, smin: 40, smax: 600, grow: (s, r) => Math.round(s * Math.sqrt(r)), phase: "ordering", hosts: ["cli"], setup: "import numpy as np\nimport _matlab_sparse as _sp, _matlab_colamd as _C, _matlab_lu as _L\n_L._phase_hook = lambda name: _p(\"PHASE\", _i, name)\nk = S\nn = k * k\n_pm = [(i * 1999) % n for i in range(n)]\n_r, _c, _v = [], [], []\nfor _x in range(k):\n    for _y in range(k):\n        _t = _x * k + _y\n        for _dx, _dy, _w in ((0, 0, 4.0), (1, 0, -1.0), (-1, 0, -1.0), (0, 1, -1.0), (0, -1, -1.0)):\n            _a, _b = _x + _dx, _y + _dy\n            if 0 <= _a < k and 0 <= _b < k:\n                _r.append(_pm[_a * k + _b]); _c.append(_pm[_t]); _v.append(_w)\nA = _sp.make(n, n, np.array(_r), np.array(_c), np.array(_v))", target: "_L._phase(\"ordering\")\n_q = _C.order_columns(A.m, A.n, A.jc, A.ir)", probe: "assert _L.factor(_sp.make(2, 2, np.array([0, 1]), np.array([0, 1]), np.array([2.0, 4.0])), \"p\").solve(np.ones((2, 1)))[1, 0] == 0.25" },
@@ -349,12 +352,18 @@ async function calibrate(host, c) {
   return { s, T: null, attempts, error: "uncalibrated" + (lo != null && hi != null ? ` (the band lies between s = ${lo} and s = ${hi})` : "") };
 }
 
+// the CI set (r5 §8) per host: everything else is VM-only
+const CI_SET = {
+  prompt: ["P1", "E2", "E9n"],
+  cli: ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c", "M2b", "E9n"],
+};
+const inCi = (host, c) => (CI_SET[host] ?? []).includes(c.id) && (!c.hosts || c.hosts.includes(host));
+
 async function runHost(host) {
   const rows = [];
   for (const c of CASES) {
     if (c.hosts && !c.hosts.includes(host)) continue; // (a case's own hosts, e.g. E13g: the CLI)
-    // the CI set (r5 §8): the CLI's five rows, the prompt's two; everything else is VM-only
-    if (MODE === "ci" && !(host === "prompt" ? ["P1", "E2"] : ["P1", "P2a", "E2", "E3a", "E6a", "M1o", "M1l", "L1c", "M2b"]).includes(c.id)) continue;
+    if (MODE === "ci" && !inCi(host, c)) continue;
     if (overBudget()) {
       rows.push({ case: c.id, host, mode: c.mode, outcome: "INVALID", why: "run budget spent" });
       record(rows.at(-1));
@@ -392,8 +401,10 @@ async function runHost(host) {
       const r = await run("phases", offsets);
       for (const t of r.trials) cells.push({ cell: "phase", delay_ms: offsets[t.i - 1], ...cls(t, offsets[t.i - 1]) });
     }
-    // the leak series, whose repeats are cells too: 20 in --full, 5 (the short check) otherwise
-    const reps = MODE === "full" ? 20 : 5;
+    // the leak series, whose repeats are cells too: 20 in --full, 5 (the short check) otherwise, plus one
+    // per repeat a case's window starts after 3 (leak_from), so its short check still spans two repeats
+    const leakFrom = c.leak_from ?? 3;
+    const reps = MODE === "full" ? 20 : 5 + (leakFrom - 3);
     const d = at("0.5");
     // (a case with leak_s, P2a: the leak series at that smaller fixed size, where one retained list
     // still dwarfs the runner's RSS noise; its delay from the calibration's own attempt at leak_s)
@@ -411,7 +422,7 @@ async function runHost(host) {
     }
     // a process that outlived its session's kill is a leaked worker: the row fails (r4 §1)
     const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
-    const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss");
+    const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss", leakFrom);
     const leak1 = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
     // (a final-drop candidate of the leak series, marked or not, is recorded with a measured leak, and on the row
     // itself (below) either way, so the report prints its end cause and its margin, grader's C1; an unmeasured leak
@@ -470,6 +481,27 @@ if (MODE === "ci" && HOSTS.includes("cli") && (!ROWS || ROWS.split(",").includes
   out.hosts.cli.push({ case: "L1c", host: "cli", outcome: "FAIL", why: "leak control: its row is missing from the CI run" });
   record(out.hosts.cli.at(-1));
 }
+// every case selected for a host in --ci must have produced a row there (no empty success), and a
+// row asked for with --rows must be in the CI set of a selected host
+if (MODE === "ci") {
+  const ran = HOSTS.filter((h) => h !== "browser" && Array.isArray(out.hosts[h]));
+  for (const h of ran) {
+    for (const c of CASES.filter((x) => inCi(h, x))) {
+      if (!out.hosts[h].some((r) => r.case === c.id)) {
+        out.hosts[h].push({ case: c.id, host: h, outcome: "FAIL", why: "selected for the CI run on this host, but it produced no row" });
+        record(out.hosts[h].at(-1));
+      }
+    }
+  }
+  for (const id of ROWS ? ROWS.split(",") : []) {
+    const c = CASES.find((x) => x.id === id);
+    if (!c || !ran.some((h) => inCi(h, c))) {
+      const row = { case: id, host: "*", outcome: "FAIL", why: c ? "asked for with --rows, but in the CI set of no selected host" : "asked for with --rows, but no such case" };
+      (out.selection_rows ??= []).push(row);
+      record(row);
+    }
+  }
+}
 // the waiver registry: a malformed record fails the run; a record no row of this run matched, or whose row
 // now passes, is reported (a stale waiver never hides)
 out.waiver_rows = waiverErrors(WAIVERS).map((e) => ({ case: "*", host: "*", outcome: "FAIL", why: "waiver registry: " + e }));
@@ -492,7 +524,7 @@ console.log("wrote", OUT, "in", out.wall_ms, "ms");
 // row (INCOMPLETE; INVALID: uncalibrated or out of budget), or a FIXED baseline row (remove its
 // entry from web/interrupt-baseline.json in the same change)
 const rowsOf = (h, v) => (Array.isArray(v) ? v : v?.rows?.length ? v.rows : [{ case: "*", host: h, outcome: "INVALID", why: v?.skipped ?? v?.error ?? "no rows" }]);
-const all = [...Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)), ...(out.signals ?? []), ...out.waiver_rows];
+const all = [...Object.entries(out.hosts).flatMap(([h, v]) => rowsOf(h, v)), ...(out.signals ?? []), ...out.waiver_rows, ...(out.selection_rows ?? [])];
 // (WAIVED is not a pass: listed on its own, with its record)
 for (const r of all.filter((x) => x.outcome === "WAIVED")) console.log("WAIVED", r.case ?? r.trial, r.host ?? "", r.waiver, r.why ?? "");
 const bad = ciFailing(all);

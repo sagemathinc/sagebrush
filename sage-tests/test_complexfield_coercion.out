@@ -1,0 +1,236 @@
+C20 zo + RR | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz + RR | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 zo * RR | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 oz * RR | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 zo / RR | 0.66667 + 1.3333*I | Complex Field with 20 bits of precision
+C20 oz / RR | 0.30000 - 0.60000*I | Complex Field with 20 bits of precision
+C20 zo - RR | -0.50000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz - RR | 0.50000 - 2.0000*I | Complex Field with 20 bits of precision
+C20 zo + RDF | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz + RDF | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 zo * RDF | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 oz * RDF | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 zo / RDF | 0.66667 + 1.3333*I | Complex Field with 20 bits of precision
+C20 oz / RDF | 0.30000 - 0.60000*I | Complex Field with 20 bits of precision
+C20 zo - RDF | -0.50000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz - RDF | 0.50000 - 2.0000*I | Complex Field with 20 bits of precision
+C20 zo + CC | 2.5000 + 2.2500*I | Complex Field with 20 bits of precision
+C20 oz + CC | 2.5000 + 2.2500*I | Complex Field with 20 bits of precision
+C20 zo * CC | 1.0000 + 3.2500*I | Complex Field with 20 bits of precision
+C20 oz * CC | 1.0000 + 3.2500*I | Complex Field with 20 bits of precision
+C20 zo / CC | 0.86486 + 1.1892*I | Complex Field with 20 bits of precision
+C20 oz / CC | 0.40000 - 0.55000*I | Complex Field with 20 bits of precision
+C20 zo - CC | -0.50000 + 1.7500*I | Complex Field with 20 bits of precision
+C20 oz - CC | 0.50000 - 1.7500*I | Complex Field with 20 bits of precision
+C20 zo + CDF | 2.5000 + 2.2500*I | Complex Field with 20 bits of precision
+C20 oz + CDF | 2.5000 + 2.2500*I | Complex Field with 20 bits of precision
+C20 zo * CDF | 1.0000 + 3.2500*I | Complex Field with 20 bits of precision
+C20 oz * CDF | 1.0000 + 3.2500*I | Complex Field with 20 bits of precision
+C20 zo / CDF | 0.86486 + 1.1892*I | Complex Field with 20 bits of precision
+C20 oz / CDF | 0.40000 - 0.55000*I | Complex Field with 20 bits of precision
+C20 zo - CDF | -0.50000 + 1.7500*I | Complex Field with 20 bits of precision
+C20 oz - CDF | 0.50000 - 1.7500*I | Complex Field with 20 bits of precision
+C20 zo + float | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz + float | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 zo * float | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 oz * float | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 zo / float | 0.66667 + 1.3333*I | Complex Field with 20 bits of precision
+C20 oz / float | 0.30000 - 0.60000*I | Complex Field with 20 bits of precision
+C20 zo - float | -0.50000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz - float | 0.50000 - 2.0000*I | Complex Field with 20 bits of precision
+C20 zo + complex | 2.5000 + 2.2500*I | Complex Field with 20 bits of precision
+C20 oz + complex | 2.5000 + 2.2500*I | Complex Field with 20 bits of precision
+C20 zo * complex | 1.0000 + 3.2500*I | Complex Field with 20 bits of precision
+C20 oz * complex | 1.0000 + 3.2500*I | Complex Field with 20 bits of precision
+C20 zo / complex | 0.86486 + 1.1892*I | Complex Field with 20 bits of precision
+C20 oz / complex | 0.40000 - 0.55000*I | Complex Field with 20 bits of precision
+C20 zo - complex | -0.50000 + 1.7500*I | Complex Field with 20 bits of precision
+C20 oz - complex | 0.50000 - 1.7500*I | Complex Field with 20 bits of precision
+C20 zo + R53 | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz + R53 | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 zo * R53 | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 oz * R53 | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 zo / R53 | 0.66667 + 1.3333*I | Complex Field with 20 bits of precision
+C20 oz / R53 | 0.30000 - 0.60000*I | Complex Field with 20 bits of precision
+C20 zo - R53 | -0.50000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz - R53 | 0.50000 - 2.0000*I | Complex Field with 20 bits of precision
+C20 zo + C53 | 2.5000 + 2.2500*I | Complex Field with 20 bits of precision
+C20 oz + C53 | 2.5000 + 2.2500*I | Complex Field with 20 bits of precision
+C20 zo * C53 | 1.0000 + 3.2500*I | Complex Field with 20 bits of precision
+C20 oz * C53 | 1.0000 + 3.2500*I | Complex Field with 20 bits of precision
+C20 zo / C53 | 0.86486 + 1.1892*I | Complex Field with 20 bits of precision
+C20 oz / C53 | 0.40000 - 0.55000*I | Complex Field with 20 bits of precision
+C20 zo - C53 | -0.50000 + 1.7500*I | Complex Field with 20 bits of precision
+C20 oz - C53 | 0.50000 - 1.7500*I | Complex Field with 20 bits of precision
+C20 zo + R30 | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz + R30 | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 zo * R30 | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 oz * R30 | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 zo / R30 | 0.66667 + 1.3333*I | Complex Field with 20 bits of precision
+C20 oz / R30 | 0.30000 - 0.60000*I | Complex Field with 20 bits of precision
+C20 zo - R30 | -0.50000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz - R30 | 0.50000 - 2.0000*I | Complex Field with 20 bits of precision
+C20 zo + R200 | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz + R200 | 2.5000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 zo * R200 | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 oz * R200 | 1.5000 + 3.0000*I | Complex Field with 20 bits of precision
+C20 zo / R200 | 0.66667 + 1.3333*I | Complex Field with 20 bits of precision
+C20 oz / R200 | 0.30000 - 0.60000*I | Complex Field with 20 bits of precision
+C20 zo - R200 | -0.50000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz - R200 | 0.50000 - 2.0000*I | Complex Field with 20 bits of precision
+C20 zo + QQ | 1.3333 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz + QQ | 1.3333 + 2.0000*I | Complex Field with 20 bits of precision
+C20 zo * QQ | 0.33333 + 0.66667*I | Complex Field with 20 bits of precision
+C20 oz * QQ | 0.33333 + 0.66667*I | Complex Field with 20 bits of precision
+C20 zo / QQ | 3.0000 + 6.0000*I | Complex Field with 20 bits of precision
+C20 oz / QQ | 0.066667 - 0.13333*I | Complex Field with 20 bits of precision
+C20 zo - QQ | 0.66667 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz - QQ | -0.66667 - 2.0000*I | Complex Field with 20 bits of precision
+C20 zo + ZZ | 3.0000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz + ZZ | 3.0000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 zo * ZZ | 2.0000 + 4.0000*I | Complex Field with 20 bits of precision
+C20 oz * ZZ | 2.0000 + 4.0000*I | Complex Field with 20 bits of precision
+C20 zo / ZZ | 0.50000 + 1.0000*I | Complex Field with 20 bits of precision
+C20 oz / ZZ | 0.40000 - 0.80000*I | Complex Field with 20 bits of precision
+C20 zo - ZZ | -1.0000 + 2.0000*I | Complex Field with 20 bits of precision
+C20 oz - ZZ | 1.0000 - 2.0000*I | Complex Field with 20 bits of precision
+C20 zo + C30 | 1.3333 + 1.0000*I | Complex Field with 20 bits of precision
+C20 oz + C30 | 1.3333 + 1.0000*I | Complex Field with 20 bits of precision
+C20 zo * C30 | 2.3333 - 0.33333*I | Complex Field with 20 bits of precision
+C20 oz * C30 | 2.3333 - 0.33333*I | Complex Field with 20 bits of precision
+C20 zo / C30 | -1.5000 + 1.5000*I | Complex Field with 20 bits of precision
+C20 oz / C30 | -0.33333 - 0.33333*I | Complex Field with 20 bits of precision
+C20 zo - C30 | 0.66667 + 3.0000*I | Complex Field with 20 bits of precision
+C20 oz - C30 | -0.66667 - 3.0000*I | Complex Field with 20 bits of precision
+C20 zo + C200 | 1.3333 + 1.0000*I | Complex Field with 20 bits of precision
+C20 oz + C200 | 1.3333 + 1.0000*I | Complex Field with 20 bits of precision
+C20 zo * C200 | 2.3333 - 0.33333*I | Complex Field with 20 bits of precision
+C20 oz * C200 | 2.3333 - 0.33333*I | Complex Field with 20 bits of precision
+C20 zo / C200 | -1.5000 + 1.5000*I | Complex Field with 20 bits of precision
+C20 oz / C200 | -0.33333 - 0.33333*I | Complex Field with 20 bits of precision
+C20 zo - C200 | 0.66667 + 3.0000*I | Complex Field with 20 bits of precision
+C20 oz - C200 | -0.66667 - 3.0000*I | Complex Field with 20 bits of precision
+C100 zo + RR | 2.50000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz + RR | 2.50000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo * RR | 1.50000000000000 + 3.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz * RR | 1.50000000000000 + 3.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo / RR | 0.666666666666667 + 1.33333333333333*I | Complex Field with 53 bits of precision
+C100 oz / RR | 0.300000000000000 - 0.600000000000000*I | Complex Field with 53 bits of precision
+C100 zo - RR | -0.500000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz - RR | 0.500000000000000 - 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo + RDF | 2.50000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz + RDF | 2.50000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo * RDF | 1.50000000000000 + 3.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz * RDF | 1.50000000000000 + 3.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo / RDF | 0.666666666666667 + 1.33333333333333*I | Complex Field with 53 bits of precision
+C100 oz / RDF | 0.300000000000000 - 0.600000000000000*I | Complex Field with 53 bits of precision
+C100 zo - RDF | -0.500000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz - RDF | 0.500000000000000 - 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo + CC | 2.50000000000000 + 2.25000000000000*I | Complex Field with 53 bits of precision
+C100 oz + CC | 2.50000000000000 + 2.25000000000000*I | Complex Field with 53 bits of precision
+C100 zo * CC | 1.00000000000000 + 3.25000000000000*I | Complex Field with 53 bits of precision
+C100 oz * CC | 1.00000000000000 + 3.25000000000000*I | Complex Field with 53 bits of precision
+C100 zo / CC | 0.864864864864865 + 1.18918918918919*I | Complex Field with 53 bits of precision
+C100 oz / CC | 0.400000000000000 - 0.550000000000000*I | Complex Field with 53 bits of precision
+C100 zo - CC | -0.500000000000000 + 1.75000000000000*I | Complex Field with 53 bits of precision
+C100 oz - CC | 0.500000000000000 - 1.75000000000000*I | Complex Field with 53 bits of precision
+C100 zo + CDF | 2.5 + 2.25*I | Complex Double Field
+C100 oz + CDF | 2.5 + 2.25*I | Complex Double Field
+C100 zo * CDF | 1.0 + 3.25*I | Complex Double Field
+C100 oz * CDF | 1.0 + 3.25*I | Complex Double Field
+C100 zo / CDF | 0.8648648648648649 + 1.1891891891891893*I | Complex Double Field
+C100 oz / CDF | 0.39999999999999997 - 0.5499999999999999*I | Complex Double Field
+C100 zo - CDF | -0.5 + 1.75*I | Complex Double Field
+C100 oz - CDF | 0.5 - 1.75*I | Complex Double Field
+C100 zo + float | 2.50000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz + float | 2.50000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo * float | 1.50000000000000 + 3.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz * float | 1.50000000000000 + 3.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo / float | 0.666666666666667 + 1.33333333333333*I | Complex Field with 53 bits of precision
+C100 oz / float | 0.300000000000000 - 0.600000000000000*I | Complex Field with 53 bits of precision
+C100 zo - float | -0.500000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz - float | 0.500000000000000 - 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo + complex | (2.5+2.25j) | complex
+C100 oz + complex | (2.5+2.25j) | complex
+C100 zo * complex | (1+3.25j) | complex
+C100 oz * complex | (1+3.25j) | complex
+C100 zo / complex | (0.8648648648648648+1.189189189189189j) | complex
+C100 oz / complex | (0.4-0.55j) | complex
+C100 zo - complex | (-0.5+1.75j) | complex
+C100 oz - complex | (0.5-1.75j) | complex
+C100 zo + R53 | 2.50000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz + R53 | 2.50000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo * R53 | 1.50000000000000 + 3.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz * R53 | 1.50000000000000 + 3.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo / R53 | 0.666666666666667 + 1.33333333333333*I | Complex Field with 53 bits of precision
+C100 oz / R53 | 0.300000000000000 - 0.600000000000000*I | Complex Field with 53 bits of precision
+C100 zo - R53 | -0.500000000000000 + 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 oz - R53 | 0.500000000000000 - 2.00000000000000*I | Complex Field with 53 bits of precision
+C100 zo + C53 | 2.50000000000000 + 2.25000000000000*I | Complex Field with 53 bits of precision
+C100 oz + C53 | 2.50000000000000 + 2.25000000000000*I | Complex Field with 53 bits of precision
+C100 zo * C53 | 1.00000000000000 + 3.25000000000000*I | Complex Field with 53 bits of precision
+C100 oz * C53 | 1.00000000000000 + 3.25000000000000*I | Complex Field with 53 bits of precision
+C100 zo / C53 | 0.864864864864865 + 1.18918918918919*I | Complex Field with 53 bits of precision
+C100 oz / C53 | 0.400000000000000 - 0.550000000000000*I | Complex Field with 53 bits of precision
+C100 zo - C53 | -0.500000000000000 + 1.75000000000000*I | Complex Field with 53 bits of precision
+C100 oz - C53 | 0.500000000000000 - 1.75000000000000*I | Complex Field with 53 bits of precision
+C100 zo + R30 | 2.5000000 + 2.0000000*I | Complex Field with 30 bits of precision
+C100 oz + R30 | 2.5000000 + 2.0000000*I | Complex Field with 30 bits of precision
+C100 zo * R30 | 1.5000000 + 3.0000000*I | Complex Field with 30 bits of precision
+C100 oz * R30 | 1.5000000 + 3.0000000*I | Complex Field with 30 bits of precision
+C100 zo / R30 | 0.66666667 + 1.3333333*I | Complex Field with 30 bits of precision
+C100 oz / R30 | 0.30000000 - 0.60000000*I | Complex Field with 30 bits of precision
+C100 zo - R30 | -0.50000000 + 2.0000000*I | Complex Field with 30 bits of precision
+C100 oz - R30 | 0.50000000 - 2.0000000*I | Complex Field with 30 bits of precision
+C100 zo + R200 | 2.5000000000000000000000000000 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz + R200 | 2.5000000000000000000000000000 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo * R200 | 1.5000000000000000000000000000 + 3.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz * R200 | 1.5000000000000000000000000000 + 3.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo / R200 | 0.66666666666666666666666666667 + 1.3333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100 oz / R200 | 0.30000000000000000000000000000 - 0.60000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo - R200 | -0.50000000000000000000000000000 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz - R200 | 0.50000000000000000000000000000 - 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo + QQ | 1.3333333333333333333333333333 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz + QQ | 1.3333333333333333333333333333 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo * QQ | 0.33333333333333333333333333333 + 0.66666666666666666666666666667*I | Complex Field with 100 bits of precision
+C100 oz * QQ | 0.33333333333333333333333333333 + 0.66666666666666666666666666667*I | Complex Field with 100 bits of precision
+C100 zo / QQ | 3.0000000000000000000000000000 + 6.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz / QQ | 0.066666666666666666666666666667 - 0.13333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100 zo - QQ | 0.66666666666666666666666666667 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz - QQ | -0.66666666666666666666666666667 - 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo + ZZ | 3.0000000000000000000000000000 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz + ZZ | 3.0000000000000000000000000000 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo * ZZ | 2.0000000000000000000000000000 + 4.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz * ZZ | 2.0000000000000000000000000000 + 4.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo / ZZ | 0.50000000000000000000000000000 + 1.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz / ZZ | 0.40000000000000000000000000000 - 0.80000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo - ZZ | -1.0000000000000000000000000000 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz - ZZ | 1.0000000000000000000000000000 - 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo + C30 | 1.3333333 + 1.0000000*I | Complex Field with 30 bits of precision
+C100 oz + C30 | 1.3333333 + 1.0000000*I | Complex Field with 30 bits of precision
+C100 zo * C30 | 2.3333333 - 0.33333333*I | Complex Field with 30 bits of precision
+C100 oz * C30 | 2.3333333 - 0.33333333*I | Complex Field with 30 bits of precision
+C100 zo / C30 | -1.5000000 + 1.5000000*I | Complex Field with 30 bits of precision
+C100 oz / C30 | -0.33333333 - 0.33333333*I | Complex Field with 30 bits of precision
+C100 zo - C30 | 0.66666667 + 3.0000000*I | Complex Field with 30 bits of precision
+C100 oz - C30 | -0.66666667 - 3.0000000*I | Complex Field with 30 bits of precision
+C100 zo + C200 | 1.3333333333333333333333333333 + 1.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz + C200 | 1.3333333333333333333333333333 + 1.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 zo * C200 | 2.3333333333333333333333333333 - 0.33333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100 oz * C200 | 2.3333333333333333333333333333 - 0.33333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100 zo / C200 | -1.5000000000000000000000000000 + 1.5000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz / C200 | -0.33333333333333333333333333333 - 0.33333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100 zo - C200 | 0.66666666666666666666666666667 + 3.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+C100 oz - C200 | -0.66666666666666666666666666667 - 3.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+1.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision 1.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision
+1.00000000000000 + 2.00000000000000*I Complex Field with 53 bits of precision 1.00000000000000 + 2.00000000000000*I Complex Field with 53 bits of precision
+1.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision 1.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision
+1.0 + 2.0*I Complex Double Field 1.0 + 2.0*I Complex Double Field
+8.98846567431158e307 + 1.00000000000000*I Complex Field with 53 bits of precision 8.98846567431158e307 + 1.00000000000000*I Complex Field with 53 bits of precision
+8.98846567431158e307 + 2.00000000000000*I Complex Field with 53 bits of precision 8.98846567431158e307 + 2.00000000000000*I Complex Field with 53 bits of precision
+8.98846567431158e307 + 1.00000000000000*I Complex Field with 53 bits of precision 8.98846567431158e307 + 1.00000000000000*I Complex Field with 53 bits of precision
+8.98846567431158e+307 + 2.0*I Complex Double Field 8.98846567431158e+307 + 2.0*I Complex Double Field
+2.00000000000000 - 2.22507385850720e-308*I Complex Field with 53 bits of precision 2.00000000000000 - 2.22507385850720e-308*I Complex Field with 53 bits of precision
+2.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision 2.00000000000000 + 1.00000000000000*I Complex Field with 53 bits of precision
+2.00000000000000 - 2.22507385850720e-308*I Complex Field with 53 bits of precision 2.00000000000000 - 2.22507385850720e-308*I Complex Field with 53 bits of precision
+2.0 + 1.0*I Complex Double Field 2.0 + 1.0*I Complex Double Field

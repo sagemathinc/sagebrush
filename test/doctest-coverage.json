@@ -1,8 +1,9 @@
 {
   "sage_all": 72,
-  "_sage_modular": 172,
+  "_sage_modular": 209,
+  "_sage_modsym": 29,
   "_sage_hmf": 115,
-  "_sage_poly": 65,
+  "_sage_poly": 72,
   "_sage_nf": 85,
   "sage_permgroup": 63,
   "_sage_matrix": 128,
@@ -11,9 +12,10 @@
   "_interact": 24,
   "sage_plot": 42,
   "sage_plot3d": 50,
-  "_sage_ff": 155,
+  "_sage_ff": 216,
   "_sage_ff_inexact": 1,
-  "_sage_ffmat": 93,
+  "_sage_ffmat": 98,
+  "_sage_ffmat_more": 62,
   "_sage_qqbar": 32,
   "_sage_mpoly": 127,
   "_sage_frac": 37,
@@ -44,5 +46,6 @@
   "_sage_ec_ff": 13,
   "_sage_ec_plot": 1,
   "_sage_ec_rr": 6,
-  "_sage_ec_torsion": 10
+  "_sage_ec_torsion": 10,
+  "sagebrush.poly": 4
 }

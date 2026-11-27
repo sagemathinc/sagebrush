@@ -249,9 +249,19 @@ jobs:
           [ "$(grep -c -E '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' /tmp/appimage-tools-after.sha256)" = 3 ] && [ "$(wc -l < /tmp/appimage-tools-after.sha256)" = 3 ] || { echo "FAIL: the expected-after list is not three well-formed lines"; exit 1; }
       # (the engine the app ships on macOS and Linux, before its build and its tests: app/engine/bundle.mjs, Node
       # pinned by its SHA-256 for each; their configurations name these files, so the crate doesn't build without them)
+      # (the native engine, engine/node built for this platform, bundled with it: the app's engine loads it instead
+      # of WebAssembly, after checking its SHA-256, which build.rs compiles in)
+      - name: the native engine the app ships
+        if: runner.os != 'Windows'
+        working-directory: engine
+        run: cargo build --release --locked -p sagebrush-node
       - name: the engine the app ships
         if: runner.os != 'Windows'
-        run: node app/engine/bundle.mjs
+        shell: bash
+        run: |
+          addon=engine/target/release/libsagebrush_node.dylib
+          [ -f "$addon" ] || addon=engine/target/release/libsagebrush_node.so
+          node app/engine/bundle.mjs --native-addon "$addon"
       # (the app's own Rust tests: the engine bridge's bounded queues, its window and its stop; on Linux, which has
       # the WebKitGTK libraries the crate links against, and on macOS after the engine is bundled)
       - name: the app's Rust tests
@@ -385,6 +395,10 @@ jobs:
       # commands after the import and requires CARGO_NET_OFFLINE on the tauri and cargo steps after it.
       - name: the engine the Mac app ships
         run: node app/engine/bundle.mjs
+      # (the native engine, built here before any credential is written; it is signed and bundled after the import)
+      - name: The native engine the Mac app ships
+        working-directory: engine
+        run: cargo build --release --locked -p sagebrush-node
       - name: the app's Rust dependencies
         working-directory: app/src-tauri
         run: cargo fetch --locked
@@ -450,6 +464,19 @@ jobs:
           team=$(printf '%s' "$SIGN_ID" | sed -nE 's/^Developer ID Application: .+ \(([A-Z0-9]{10})\)$/\1/p')
           [ -n "$team" ] || { echo "FAIL: the signing identity's name ends in no Team ID" >&2; exit 1; }
           echo "SAGEBRUSH_MACOS_TEAM_ID=$team" >> "$GITHUB_ENV"
+      # The native engine, signed with the app's identity (hardened runtime, a secure timestamp) BEFORE it is bundled:
+      # build.rs pins the SHA-256 of the signed file, and the engine's loader refuses any other bytes. Tauri seals the
+      # app without re-signing it (checked after the build)
+      - name: Sign and bundle the native engine
+        shell: bash
+        env:
+          SIGN_ID: ${{ secrets.SAGEBRUSH_MACOS_SIGN_ID }}
+        run: |
+          addon=engine/target/release/libsagebrush_node.dylib
+          codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$addon"
+          codesign --verify --strict "$addon"
+          install -m 0755 "$addon" app/src-tauri/engine/sagebrush-engine.node
+          shasum -a 256 app/src-tauri/engine/sagebrush-engine.node
       # Tauri signs the app (hardened runtime, a secure timestamp), notarizes it with the API key and tries to staple it
       # (tauri-bundler's macOS signing: APPLE_SIGNING_IDENTITY, APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_PATH).
       # The app only: the disk image is made below, from the app once its ticket is stapled
@@ -462,6 +489,14 @@ jobs:
           APPLE_API_KEY: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_ISSUER_ID }}
         run: APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app -- --locked
+      # (the native engine in the built app is the file signed above, byte for byte, its signature intact: what
+      # build.rs pinned)
+      - name: The bundled native engine is the signed one
+        shell: bash
+        run: |
+          inside=app/src-tauri/target/release/bundle/macos/Sagebrush.app/Contents/Resources/engine/sagebrush-engine.node
+          cmp app/src-tauri/engine/sagebrush-engine.node "$inside"
+          codesign --verify --strict "$inside"
       # (the engine's Node runs V8, which needs the JIT entitlements in the signature Tauri gave it, each the boolean
       # true: a key that is false or absent fails.  Checked after the Tauri build and before the separate DMG
       # notarization step and the app's self-test, so a mis-signed engine fails there and says why;

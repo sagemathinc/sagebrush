@@ -149,3 +149,48 @@ test("matrix.LLL()'s engine call (lll) runs in the WebAssembly engine and reduce
     assert.equal(rows.reduce((m, r) => (r[d] > m ? r[d] : m), 0n).toString(2).length, Number(bits), `d ${d}: entries of ${bits} bits`);
   }
 });
+
+test("matrix.LLL()'s engine call (lll) on dependent rows: zero rows first, then a reduced basis of their lattice", () => {
+  const e = instance();
+  let seed = 20261119n;
+  const next = (bits: bigint) => {
+    let v = 0n;
+    for (let k = 0n; k < bits; k += 32n) {
+      seed = (seed * 6364136223846793005n + 1442695040888963407n) % (1n << 64n);
+      v = (v << 32n) | (seed >> 32n);
+    }
+    return (v % (1n << (bits - 1n))) + (1n << (bits - 1n));
+  };
+  // a basis of k rows (identity | m big columns), and combinations of its
+  // rows put first: the rows span the basis's lattice, of rank k; with more
+  // rows than columns, and with fewer
+  for (const [k, m, bits] of [
+    [6, 1, 100n],
+    [4, 4, 80n],
+  ] as [number, number, bigint][]) {
+    const basis: bigint[][] = [];
+    for (let i = 0; i < k; i++) {
+      const r = new Array<bigint>(k + m).fill(0n);
+      r[i] = 1n;
+      for (let j = 0; j < m; j++) r[k + j] = j % 2 ? -next(bits) : next(bits);
+      basis.push(r);
+    }
+    const comb = (cs: bigint[]) => basis[0].map((_, j) => cs.reduce((s, c, i) => s + c * basis[i][j], 0n));
+    const extra = [comb([1n, 1n]), comb([0n, 3n, -7n]), comb([2n, 0n, 0n, -1n])].slice(0, m === 1 ? 3 : 2);
+    const rows = [...extra, ...basis];
+    const r = call(e, JSON.stringify({ fn: "lll", m: rows.map((x) => x.join(",")).join(";") }));
+    assert.ok(r.ok, JSON.stringify(r).slice(0, 300));
+    const out: bigint[][] = r.ok.map((x: string[]) => x.map((v) => BigInt(v)));
+    const z = rows.length - k;
+    assert.equal(out.length, rows.length);
+    assert.ok(out.slice(0, z).every((v) => v.every((x) => x === 0n)), `k ${k}: the first ${z} rows are zero`);
+    const red = out.slice(z);
+    assert.ok(red.every((v) => v.some((x) => x !== 0n)), `k ${k}: then ${k} nonzero rows`);
+    const got = reducedExactly(red);
+    assert.ok(got.ok, `k ${k}: not (0.51, 0.99)-reduced`);
+    assert.equal(got.volume2, reducedExactly(basis).volume2, `k ${k}: a lattice of another volume`);
+    // every output row lies in the basis's lattice (its identity part gives
+    // the coefficients); with the same volume, the same lattice
+    for (const v of red) assert.deepEqual(v, comb(v.slice(0, k)), `k ${k}: a row outside the lattice`);
+  }
+});

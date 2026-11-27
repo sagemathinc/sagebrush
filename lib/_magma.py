@@ -1105,10 +1105,25 @@ def _frange(a, b, c):
 _NEST_MAX = 100
 # and a copy that would make more containers than this (a value sharing
 # its parts, x := [x, x], copies to a tree of them) is refused before it
-# starts; with what it copies from, the largest copy admitted fits a 96 MB
-# heap (measured: about 90000 small sequences fit, HARD-756-1)
-_OWN_CONTAINERS_MAX = 5 * 10 ** 4
+# starts, by the collection memory guard: each container the copy makes
+# counts as one collection element (_COLLECT_COST bytes; measured on node
+# 24.21.0 at about 220 bytes live and 500 at the copy's peak, with the
+# count's memo about 40 bytes a part), so the bound is the collection
+# bound, from the heap (set at the end of this module, with _COLLECT_MAX;
+# HARD-756-1)
+_OWN_CONTAINERS_MAX = 0
 _OWN_RECORD_WEIGHT = 8
+
+
+def _own_refusal():
+    """The collection memory guard's refusal of a copy of more than
+    _OWN_CONTAINERS_MAX containers (each one collection element)."""
+    import _capacity
+    e = _memory_error(_memguard.memory_guard(
+        "A copy of a value of more than %d sequences, sets, tuples and records (a record counting as %d)" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT),
+        (_OWN_CONTAINERS_MAX + 1) * _COLLECT_COST, _OWN_CONTAINERS_MAX * _COLLECT_COST, "one collection", fixed=_COLLECT_MAX == 10 ** 6))
+    e.capacity = _capacity.capacity()
+    return e
 
 
 def _is_copied(x):
@@ -1130,7 +1145,7 @@ def _own_size(v, memo, depth=0):
         return 1  # (_own refuses it for its depth)
     got = memo.get(id(v))
     if got is not None:
-        return got[1]
+        return got if type(got) is int else got[1]
     memo[id(v)] = (v, _OWN_CONTAINERS_MAX + 1)  # (in progress: a cycle is too many)
     # (a record, with its fields' dictionary, costs several times a small
     # sequence: it counts as _OWN_RECORD_WEIGHT, so that a refused copy
@@ -1142,7 +1157,10 @@ def _own_size(v, memo, depth=0):
             if n > _OWN_CONTAINERS_MAX:
                 break
     n = min(n, _OWN_CONTAINERS_MAX + 1)
-    memo[id(v)] = (v, n)
+    # (once counted, a part keeps only its count: every part is reachable from
+    # the value being copied while it is counted, so no id is reused, and a
+    # refused copy's count fits a 96 MB heap with the library loaded)
+    memo[id(v)] = n
     return n
 
 
@@ -1158,7 +1176,7 @@ def _own(v, name=None, depth=0):
     if depth == 0 and _is_copied(v) and any(_is_copied(x) for x in _copied_parts(v)):
         # (a value with containers in it: the size of its copy first)
         if _own_size(v, {}) > _OWN_CONTAINERS_MAX:
-            raise MagmaError("a value of more than %d sequences, sets, tuples and records (a record counting as %d) is not supported yet" % (_OWN_CONTAINERS_MAX, _OWN_RECORD_WEIGHT))
+            raise _own_refusal()
     if isinstance(v, MSeq):
         t = MSeq([_own(x, None, depth + 1) for x in v], v.universe, getattr(v, "sample", None))
         _keep_inf(t, v, v[0] if len(v) else _UNDEF)
@@ -3019,6 +3037,10 @@ def _div1(a, b, pos, op):
     if isinstance(a, _sp.Polynomial) and _num(b) and (b == 0 or b not in (1, -1) and a.parent().base_ring() == _sp.ZZ):
         # over the integers a number divides only if it is a unit, and over a field only if it isn't 0
         raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
+    if isinstance(a, _sp.Polynomial) and _num(b) and a.parent().base_ring() == _sp.ZZ:
+        # (by a unit, 1 or -1, an integer or a rational (1/1, 3/3): the polynomial in its own ring over the
+        # integers, as Magma; Sage's x/1 is over QQ)
+        return a if b == 1 else -a
     if isinstance(a, MReal) or isinstance(b, MReal):
         a, b = _real_pair(a, b)
         return a / b
@@ -12285,3 +12307,4 @@ __all__ += _CATEGORIES
 # (the comprehension bound, taken once, now that this module and all it
 # imports are loaded: see _collect_max)
 _COLLECT_MAX, _COLLECT_USED = _collect_max()
+_OWN_CONTAINERS_MAX = _COLLECT_MAX

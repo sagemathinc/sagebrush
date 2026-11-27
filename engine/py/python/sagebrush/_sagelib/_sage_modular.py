@@ -108,7 +108,6 @@ def _cyclotomic(m):
     return f
 
 
-
 def _qfrac(t):
     """t as an exact Fraction (Sage's numerator() methods, or Python's
     numerator attributes: plain ints failed, the systematic review's
@@ -447,9 +446,17 @@ class Gamma0:
         Congruence Subgroup Gamma0(11)
         sage: G.level()
         11
+        sage: Gamma0(0)
+        Traceback (most recent call last):
+        ...
+        ArithmeticError: Congruence groups only defined for positive levels.
+        sage: ModularForms(-5, 2)
+        Traceback (most recent call last):
+        ...
+        ArithmeticError: Congruence groups only defined for positive levels.
     """
     def __init__(self, N):
-        self._N = int(N)
+        self._N = _positive_level(N)
 
     def level(self):
         """The level N.
@@ -463,6 +470,14 @@ class Gamma0:
 
     def __repr__(self):
         return _group_name(self._N)
+
+    def __getattr__(self, name):
+        if name in _MORE_GAMMA0 and _load_modsym():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_GAMMA0)
 
     def __eq__(self, other):
         return isinstance(other, Gamma0) and other._N == self._N
@@ -516,6 +531,7 @@ class Gamma0:
         d = self._dims(k)
         return d["cusp"] + d["eisenstein"]
 
+
     def dimension_new_cusp_forms(self, k=2):
         """The dimension of the new subspace of cusp forms of weight k on Gamma0(N).
 
@@ -529,6 +545,58 @@ class Gamma0:
             5
         """
         return self._dims(k)["new"]
+
+
+# Gamma0's and ModularSymbols' methods that load on first use, from
+# lib/_sage_modsym.py: a session that never calls them (Magma mode's, among
+# others) does not hold them.  The first lookup of one of these names copies
+# them onto the classes.
+_MORE_GAMMA0 = frozenset([
+    "index", "projective_index", "nu2", "nu3", "ncusps", "genus", "cusps", "cusp_width",
+    "is_even", "is_odd", "is_congruence", "sturm_bound",
+])
+_MORE_MODSYM = frozenset([
+    "_exact", "hecke_matrix", "basis", "manin_symbols_basis", "sturm_bound", "_split",
+    "cuspidal_submodule", "eisenstein_submodule", "cuspidal_subspace", "eisenstein_subspace",
+    "is_cuspidal", "is_eisenstein", "new_submodule", "old_submodule",
+])
+
+
+def _load_modsym():
+    """Copy lib/_sage_modsym.py's methods onto Gamma0 and ModularSymbols
+    (once); True when they are there.
+
+    EXAMPLES::
+
+        sage: import _sage_modular  # sagebrush only
+        sage: _sage_modular._load_modsym(), _sage_modular._MORE_MODSYM <= set(dir(_sage_modular.ModularSymbols))  # sagebrush only
+        (True, True)
+    """
+    if "hecke_matrix" not in ModularSymbols.__dict__:
+        import _sage_modsym as m
+        for cls, more, names in ((Gamma0, m.Gamma0Methods, _MORE_GAMMA0), (ModularSymbols, m.ModularSymbolsMethods, _MORE_MODSYM)):
+            got = {k for k in vars(more) if not k.startswith("__")}
+            if got != names:
+                raise AssertionError("_sage_modsym and _MORE_* disagree: %s" % sorted(got ^ names))
+            for k in names:
+                setattr(cls, k, vars(more)[k])
+    return True
+
+
+def Cusp(a, b=None):
+    """A cusp a/b of P^1(Q) (Infinity for b = 0).
+
+    EXAMPLES::
+
+        sage: Cusp(1, 2), Cusp(Infinity), Cusp(3/6), Cusp(4, 0)
+        (1/2, Infinity, 1/2, Infinity)
+        sage: Gamma0(12).cusps()
+        [0, 1/6, 1/4, 1/3, 1/2, Infinity]
+        sage: Gamma0(12).cusps()[0].parent()
+        Set P^1(QQ) of all cusps
+    """
+    import _sage_modsym
+    return _sage_modsym._Cusp(a, b)
 
 
 def _primitive_root(q, p):
@@ -736,6 +804,8 @@ class DirichletCharacter:
     def __repr__(self):
         vals = self._values_repr()
         maps = ", ".join("%d |--> %s" % (g, v) for (g, _), v in zip(self._G._gens, vals))
+        if not maps:  # (modulus 1 or 2: no generators, and Sage says no "mapping")
+            return "Dirichlet character modulo %d of conductor %d" % (self._G._N, self.conductor())
         return "Dirichlet character modulo %d of conductor %d mapping %s" % (self._G._N, self.conductor(), maps)
 
 
@@ -886,12 +956,21 @@ class DirichletGroup:
 
 # ------------------------------------------------------------------ spaces
 
+def _positive_level(N):
+    """N as a level: Sage's ArithmeticError for N <= 0 (an OverflowError
+    from the engine, or a ValueError, leaked before)."""
+    N = int(N)
+    if N <= 0:
+        raise ArithmeticError("Congruence groups only defined for positive levels.")
+    return N
+
+
 def _group_and_char(group):
     if isinstance(group, DirichletCharacter):
         return group.modulus(), group
     if isinstance(group, Gamma0):
         return group.level(), None
-    return int(group), None
+    return _positive_level(group), None
 
 
 def _char_part(chi):
@@ -1037,6 +1116,7 @@ class ModularSymbols:
             return PolynomialRing(ZZ, var)([row[0] for row in c])
         return Polynomial(c, var, m, _field_order(self._chi))
 
+
     def hecke_operator(self, n):
         """The Hecke operator T_n on the space.
 
@@ -1050,6 +1130,14 @@ class ModularSymbols:
         return HeckeOperator(self, int(n))
 
     T = hecke_operator
+
+    def __getattr__(self, name):
+        if name in _MORE_MODSYM and _load_modsym():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_MODSYM)
 
     def __repr__(self):
         if self._chi is None:
@@ -1130,22 +1218,930 @@ class HeckeOperator:
         return _HeckeAlgebra(self._M)
 
     def matrix(self):
-        """The matrix of T_n (on Sagebrush's basis, which need not be Sage's).
+        """The matrix of T_n on Sage's basis.
 
         EXAMPLES::
 
-            sage: ModularSymbols(11).T(2).matrix()  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: Hecke matrices are not exposed by the engine yet; use charpoly()
+            sage: ModularSymbols(11).T(2).matrix()
+            [ 3  0 -1]
+            [ 0 -2  0]
+            [ 0  0 -2]
         """
-        raise NotImplementedError("Hecke matrices are not exposed by the engine yet; use charpoly()")
+        return self._M.hecke_matrix(self._n)
 
     def __repr__(self):
         return "Hecke operator T_%d on %r" % (self._n, self._M)
 
 
-class ModularForms:
+# ------------------------------------------------------------------ q-expansion bases (trivial character)
+#
+# The bases of M_k(Gamma0(N)), its cuspidal and Eisenstein subspaces and their
+# new parts, as q-expansions over QQ, in Sage's convention: each part (cusp
+# forms, Eisenstein series) in reduced echelon form, the cusp forms first.
+# Built from the engine's newform orbits (sagebrush.mf: each orbit's trace
+# form): an orbit's span over QQ is a simple module over the Hecke algebra
+# and its trace form is not 0, so the Hecke translates T_m of the trace form
+# span it; old forms are f(q^d); the Eisenstein series are the E_k^(chi,
+# chibar)(q^t), split into their components over QQ(chi).  Every part's rank
+# is checked against the engine's dimension formula at a precision past the
+# Sturm bound: a mismatch is an internal error, never a returned basis.
+
+from fractions import Fraction as _Fr
+
+_NONTRIVIAL = "spaces with a nontrivial character need the engine's forms over Q(chi); not yet"
+
+
+def _divisors(n):
+    ds = [1]
+    for p, e in _factor(n):
+        ds = [d * p ** i for d in ds for i in range(e + 1)]
+    return sorted(ds)
+
+
+def _gamma0_index(N):
+    m = N
+    for p, _ in _factor(N):
+        m = m // p * (p + 1)
+    return m
+
+
+def _sturm_bound(N, k):
+    """Sage's Sturm bound for M_k(Gamma0(N)): ceil(k m / 12) + 1, m the index
+    of Gamma0(N) in SL(2, Z); forms are determined by their q-expansions to
+    this precision."""
+    return -(-k * _gamma0_index(N) // 12) + 1
+
+
+_BERNOULLI = [_Fr(1)]
+
+
+def _bernoulli(n):
+    """B_n (B_1 = -1/2), by the recurrence sum_{j<=m} C(m+1, j) B_j = 0."""
+    while len(_BERNOULLI) <= n:
+        m = len(_BERNOULLI)
+        s, c = _Fr(0), 1  # c = C(m+1, j)
+        for j in range(m):
+            s += c * _BERNOULLI[j]
+            c = c * (m + 1 - j) // (j + 1)
+        _BERNOULLI.append(-s / (m + 1))
+    return _BERNOULLI[n]
+
+
+def _subs_qd(v, d, prec):
+    """f(q^d) to precision prec, from f's coefficients v."""
+    out = [_Fr(0)] * prec
+    for n in range(0, (prec - 1) // d + 1):
+        out[n * d] = v[n]
+    return out
+
+
+def _hecke_qexp(v, n, N, k, prec):
+    """T_n f to precision prec on M_k(Gamma0(N)), from f's coefficients v
+    (len(v) > (prec - 1) n): a_m(T_n f) = sum over d | (m, n), (d, N) = 1, of
+    d^(k-1) a_(mn/d^2)(f); a_0(T_n f) = sum over d | n, (d, N) = 1, of d^(k-1) a_0(f)."""
+    ds = [d for d in _divisors(n) if _gcd(d, N) == 1]
+    pw = {d: d ** (k - 1) for d in ds}
+    out = [_Fr(0)] * prec
+    out[0] = sum(pw[d] for d in ds) * v[0]
+    for m in range(1, prec):
+        s = 0
+        for d in ds:
+            if m % d == 0:
+                s += pw[d] * v[m * n // (d * d)]
+        out[m] = _Fr(s)
+    return out
+
+
+_WORD_PRIME = (1 << 62) - 57
+
+
+class _ModpEchelon:
+    """Integer rows kept in echelon form modulo a word prime: a row that
+    raises the rank modulo p is independent over QQ too."""
+
+    def __init__(self):
+        self.rows, self.piv = [], []
+
+    def add(self, v):
+        """Add a row; True if it raised the rank modulo p."""
+        p = _WORD_PRIME
+        v = [x % p for x in v]
+        for r, c in zip(self.rows, self.piv):
+            f = v[c]
+            if f:
+                v = [(a - f * b) % p for a, b in zip(v, r)]
+        c = next((i for i, x in enumerate(v) if x), None)
+        if c is None:
+            return False
+        inv = pow(v[c], -1, p)
+        self.rows.append([x * inv % p for x in v])
+        self.piv.append(c)
+        return True
+
+
+def _rref_exact(rows):
+    """The reduced row echelon form over QQ of rows (the engine's exact
+    elimination), without its zero rows."""
+    if not rows:
+        return []
+    from _sagebrush_lib import linalg
+    R, piv = linalg.rref(rows)
+    return [[_Fr(x) for x in R[i]] for i in range(len(piv))]
+
+
+# The primes the engine's cusp_hecke_matrix takes (its domain: below 2^30);
+# for a larger prime factor of n, hecke_matrix takes the q-expansion route.
+_CUSP_HECKE_PRIME_BELOW = 2 ** 30
+
+
+def _cusp_hecke(N, k, n, s, new_only):
+    """T_n on S_k(Gamma0(N)) (or its new subspace) in its reduced echelon
+    basis, as an integer matrix B over a denominator: the engine's T_p for
+    each prime p | n (twisted traces, sagebrush.mf.cusp_hecke_matrix, at
+    precision s), then T_(p^r) by T_(p^(r+1)) = T_p T_(p^r) - p^(k-1)
+    T_(p^(r-1)) (U_p^r for p | N) and the product over the primes, the
+    products of integer matrices in the engine (zmat, metered)."""
+    from _sagebrush_lib.linalg import matmul
+    from sage_all import ZZ
+    d = None
+    out, out_den = None, 1
+    for p, r in ZZ(n).factor():
+        p, r = int(p), int(r)
+        h = _mf.cusp_hecke_matrix(N, k, p, s, new_only=new_only)
+        a, den = h["matrix"], h["den"]
+        d = h["dim"]
+        if d == 0:
+            return [], 1
+        # B_j / den^j = T_(p^j)
+        prev, cur = [[int(i == j) for j in range(d)] for i in range(d)], a
+        for _ in range(r - 1):
+            nxt = matmul(a, cur)
+            if N % p != 0:
+                c = p ** (k - 1) * den * den
+                nxt = [[x - c * y for x, y in zip(rx, ry)] for rx, ry in zip(nxt, prev)]
+            prev, cur = cur, nxt
+        if out is None:
+            out, out_den = cur, den ** r
+        else:
+            out, out_den = matmul(out, cur), out_den * den ** r
+    if out is None:
+        # (n = 1: the identity)
+        d = _part_dim(N, k, "cusp_new" if new_only else "cusp")
+        return [[int(i == j) for j in range(d)] for i in range(d)], 1
+    return out, out_den
+
+
+def _solve_rows(B, V):
+    """X with X B = V exactly (B: independent rows), so X[j] are the
+    coordinates of V[j] in B; ValueError if a row of V is not in B's span."""
+    d = len(B)
+    if d == 0:
+        if any(any(v) for v in V):
+            raise ValueError("not in the span")
+        return [[] for _ in V]
+    from _sagebrush_lib import linalg
+    s = len(B[0])
+    aug = [[B[i][c] for i in range(d)] + [v[c] for v in V] for c in range(s)]
+    R, piv = linalg.rref(aug)
+    if list(piv) != list(range(d)):
+        raise ValueError("not in the span")
+    return [[_Fr(R[i][d + j]) for i in range(d)] for j in range(len(V))]
+
+
+def _mf_engine_dims(N, k):
+    if k % 2 or k < 2:
+        return {"cusp": 0, "eisenstein": 0, "new": 0}
+    return _mf.dims(N, k, None)
+
+
+_NEWROWS = {}
+
+
+def _new_cusp_rows(M, k, prec):
+    """A basis over QQ of S_k^new(Gamma0(M)) to precision prec (not echelon):
+    for each newform orbit, the Hecke translates of its trace form until
+    their rank is the orbit's dimension."""
+    key = (M, k)
+    have = _NEWROWS.get(key)
+    if have is not None and have[0] >= prec:
+        return [r[:prec] for r in have[1]]
+    if k % 2 or k < 2 or _mf_engine_dims(M, k)["new"] == 0:
+        _NEWROWS[key] = (prec, [])
+        return []
+    data = _mf.newforms(M, k, None, bound=prec)
+    orbits = data["newforms"] if isinstance(data, dict) else data
+    # (the translates T_1, ..., T_m of an orbit of dimension r reached rank r
+    # by m = 1.3 r at most on levels 23, 37, 389, weights 2 and 4; the bound
+    # doubles when they don't)
+    r_max = max(int(o["dim"]) for o in orbits)
+    bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1
+    while True:
+        data = _mf.newforms(M, k, None, bound=bound)
+        orbits = data["newforms"] if isinstance(data, dict) else data
+        rows, short = [], False
+        for o in orbits:
+            r = int(o["dim"])
+            t = [0] + [int(x) for x in o["traces"]]
+            ech = _ModpEchelon()
+            m = got = 0
+            while got < r:
+                m += 1
+                if (prec - 1) * m >= len(t):
+                    short = True
+                    break
+                if m > 64 * r + 64:
+                    raise RuntimeError("internal error: the Hecke translates of orbit %s of level %d weight %d stopped at rank %d of %d"
+                                       % (o.get("letter"), M, k, got, r))
+                v = _hecke_qexp(t, m, M, k, prec)
+                if ech.add([int(x) for x in v]):
+                    rows.append(v)
+                    got += 1
+            if short:
+                break
+        if not short:
+            break
+        bound *= 2
+    _NEWROWS[key] = (prec, rows)
+    return [r[:prec] for r in rows]
+
+
+def _char_table(L):
+    """The characters mod L: (gens, orders, exps), exps[x] = the exponents of x
+    in the generators of (Z/L)^* (None when gcd(x, L) > 1)."""
+    gens = _unit_gens(L) if L > 2 else []
+    orders = [o for _, o in gens]
+    exps = [None] * L
+    exps[1 % L] = tuple(0 for _ in gens)
+    todo = [1 % L]
+    while todo:
+        x = todo.pop()
+        for i, (g, o) in enumerate(gens):
+            y = x * g % L
+            if exps[y] is None:
+                e = list(exps[x])
+                e[i] = (e[i] + 1) % o
+                exps[y] = tuple(e)
+                todo.append(y)
+    return gens, orders, exps
+
+
+def _primitive_orbit_reps(L):
+    """One primitive character mod L per Galois orbit, as (m, j): its order m
+    and j[x] (the exponent of zeta_m in chi(x); None when gcd(x, L) > 1)."""
+    if L <= 2:
+        return []
+    gens, orders, exps = _char_table(L)
+    lam = 1
+    for o in orders:
+        lam = _lcm(lam, o)
+
+    def tuples(i):
+        if i == len(orders):
+            yield ()
+            return
+        for a in range(orders[i]):
+            for rest in tuples(i + 1):
+                yield (a,) + rest
+
+    seen, reps = set(), []
+    for a in tuples(0):
+        if a in seen:
+            continue
+        m = 1
+        for ai, o in zip(a, orders):
+            m = _lcm(m, o // _gcd(ai, o))
+        orbit = set()
+        for u in range(1, m):
+            if _gcd(u, m) == 1:
+                orbit.add(tuple(u * ai % o for ai, o in zip(a, orders)))
+        orbit.add(a)
+        seen |= orbit
+        if m == 1:
+            continue
+        # chi(x) = zeta_lam^(sum a_i e_i lam/o_i) = zeta_m^(that / (lam/m))
+        j = [None] * L
+        for x in range(L):
+            e = exps[x]
+            if e is not None:
+                s = sum(ai * ei * (lam // o) for ai, ei, o in zip(a, e, orders)) % lam
+                j[x] = s // (lam // m)
+        # primitive: not trivial on {x = 1 mod L/p} for each prime p | L
+        if all(any(j[x] and x % (L // p) == 1 % (L // p) for x in range(L) if j[x] is not None) for p, _ in _factor(L)):
+            reps.append((m, j))
+    return reps
+
+
+def _eis_components(m, j, L, k, prec):
+    """E_k^(chi, chibar) to precision prec, split over the power basis of
+    QQ(zeta_m): the phi(m) series over QQ spanning its Galois conjugates.
+    a_n = sum over d | n of chibar(d) chi(n/d) d^(k-1); a_0 = 0 (chi is not trivial)."""
+    phi_poly = _cyclotomic(m)
+    deg = len(phi_poly) - 1
+    # zeta^e in the power basis: x^e mod Phi_m
+    powers = []
+    cur = [1] + [0] * (deg - 1)
+    for e in range(m):
+        powers.append(cur)
+        nxt = [0] + cur[:-1]
+        top = cur[-1]
+        if top:
+            nxt = [a - top * b for a, b in zip(nxt, phi_poly[:deg])]
+        cur = nxt
+    comps = [[_Fr(0)] * prec for _ in range(deg)]
+    for n in range(1, prec):
+        acc = [0] * deg
+        for d in _divisors(n):
+            a, b = j[d % L], j[(n // d) % L]
+            if a is None or b is None:
+                continue
+            w = d ** (k - 1)
+            vec = powers[(b - a) % m]
+            for c in range(deg):
+                acc[c] += w * vec[c]
+        for c in range(deg):
+            comps[c][n] = _Fr(acc[c])
+    return comps
+
+
+def _eis_rows(N, k, prec, new=False):
+    """A basis over QQ of E_k(Gamma0(N)) (new=True: its new part) to precision prec."""
+    if k % 2 or k < 2:
+        return []
+    rows = []
+    # the trivial pair
+    if k >= 4:
+        base = [-_bernoulli(k) / (2 * k)] + [_Fr(sum(d ** (k - 1) for d in _divisors(n))) for n in range(1, prec)]
+        ts = [1] if new and N == 1 else ([] if new else _divisors(N))
+        rows += [_subs_qd(base, t, prec) for t in ts]
+    else:
+        e2 = [_Fr(-1, 24)] + [_Fr(sum(_divisors(n))) for n in range(1, prec)]
+        if new:
+            ts = [N] if N > 1 and _factor(N) == [(N, 1)] else []
+        else:
+            ts = [t for t in _divisors(N) if t > 1]
+        rows += [[a - t * b for a, b in zip(e2, _subs_qd(e2, t, prec))] for t in ts]
+    # the pairs (chi, chibar), chi primitive mod L > 1, L^2 t | N
+    for L in _divisors(N):
+        if L < 3 or N % (L * L):
+            continue
+        ts = [1] if new else _divisors(N // (L * L))
+        if new and L * L != N:
+            continue
+        for m, j in _primitive_orbit_reps(L):
+            comps = _eis_components(m, j, L, k, prec)
+            for t in ts:
+                rows += [_subs_qd(c, t, prec) for c in comps]
+    return rows
+
+
+def _part_dim(N, k, part):
+    """The dimension of a part of M_k(Gamma0(N)), from the dimension formulas."""
+    d = _mf_engine_dims(N, k)
+    if part == "cusp":
+        return d["cusp"]
+    if part == "eis":
+        return d["eisenstein"]
+    if part == "cusp_new":
+        return d["new"]
+    return ModularForms(N, k)._new_eisenstein_dim() if k % 2 == 0 and k >= 2 else 0
+
+
+_QBASIS = {}
+
+
+def _qbasis(N, k, which, prec):
+    """The reduced echelon basis (rows of coefficients a_0..a_(prec-1)) of a
+    part of M_k(Gamma0(N)): which is "cusp", "eis", "cusp_new" or "eis_new"."""
+    key = (N, k, which)
+    have = _QBASIS.get(key)
+    if have is not None and have[0] >= prec:
+        return [r[:prec] for r in have[1]]
+    work = max(prec, _sturm_bound(N, k) + 2)
+    d = _mf_engine_dims(N, k)
+    if which == "cusp":
+        rows, want = [], d["cusp"]
+        for M in _divisors(N):
+            new = _new_cusp_rows(M, k, work)
+            for t in _divisors(N // M):
+                rows += [_subs_qd(v, t, work) for v in new]
+    elif which == "cusp_new":
+        rows, want = _new_cusp_rows(N, k, work), d["new"]
+    elif which == "eis":
+        rows, want = _eis_rows(N, k, work), d["eisenstein"]
+    elif which == "eis_new":
+        rows, want = _eis_rows(N, k, work, new=True), _part_dim(N, k, "eis_new")
+    else:
+        raise ValueError(which)
+    basis = _rref_exact(rows)
+    if want is not None and len(basis) != want:
+        raise RuntimeError("internal error: the q-expansion basis of %s of weight %d level %d has rank %d, the dimension is %d"
+                           % (which, k, N, len(basis), want))
+    _QBASIS[key] = (work, basis)
+    return [r[:prec] for r in basis]
+
+
+class _Basis(list):
+    """A basis: a list, which print() shows as Sage does, a bracketed column."""
+
+    def __repr__(self):
+        return "[" + ", ".join(repr(x) for x in self) + "]"
+
+    def __str__(self):
+        return "[\n" + ",\n".join(repr(x) for x in self) + "\n]"
+
+
+def _series(coeffs, prec):
+    from sage_all import QQ
+    from _sage_series import PowerSeriesRing, Series
+    v = next((i for i, x in enumerate(coeffs[:prec]) if x), prec)
+    return Series(PowerSeriesRing(QQ, "q"), v, [QQ(x) for x in coeffs[v:prec]], prec)
+
+
+def _prec_arg(prec):
+    from sage_all import ZZ
+    prec = int(ZZ(prec))
+    if prec < 0:
+        raise ValueError("prec (= %d) must be nonnegative" % prec)
+    return prec
+
+
+class ModularFormElement:
+    """An element of a space of modular forms: its coordinates in the
+    space's basis; its q-expansion to any precision.
+
+    EXAMPLES::
+
+        sage: f = CuspForms(11, 2).0; f
+        q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)
+        sage: f.q_expansion(8)
+        q - 2*q^2 - q^3 + 2*q^4 + q^5 + 2*q^6 - 2*q^7 + O(q^8)
+        sage: f[7], f.coefficients(5)
+        (-2, [1, -2, -1, 2, 1])
+        sage: M = ModularForms(11, 2); f == M(f), M(f).parent() == M
+        (True, True)
+        sage: hash(f)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        TypeError: unhashable type: 'ModularFormElement'
+    """
+
+    def __init__(self, parent, coords):
+        self._P = parent
+        self._c = [_Fr(x) for x in coords]
+
+    def parent(self):
+        """The space this form is an element of.
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).0.parent()
+            Cuspidal subspace of dimension 1 of Modular Forms space of dimension 2 for Congruence Subgroup Gamma0(11) of weight 2 over Rational Field
+        """
+        return self._P
+
+    def level(self):
+        """The level.
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).0.level()
+            11
+        """
+        return self._P.level()
+
+    def weight(self):
+        """The weight.
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).0.weight()
+            2
+        """
+        return self._P.weight()
+
+    def _coeffs(self, prec):
+        rows = self._P._qrows(prec)
+        out = [_Fr(0)] * prec
+        for c, r in zip(self._c, rows):
+            if c:
+                for i in range(prec):
+                    out[i] += c * r[i]
+        return out
+
+    def q_expansion(self, prec=None):
+        """The q-expansion to precision prec (6 by default): a power series over QQ.
+
+        EXAMPLES::
+
+            sage: ModularForms(11, 2).basis()[1].q_expansion(4)
+            1 + 12/5*q + 36/5*q^2 + 48/5*q^3 + O(q^4)
+        """
+        prec = 6 if prec is None else _prec_arg(prec)
+        return _series(self._coeffs(prec), prec)
+
+    qexp = q_expansion
+
+    def __getitem__(self, n):
+        from sage_all import QQ
+        n = _nonneg(n)
+        return QQ(self._coeffs(n + 1)[n])
+
+    def coefficients(self, X):
+        """The coefficients a_1, ..., a_X (X an integer), or a_n for n in X (a list).
+
+        EXAMPLES::
+
+            sage: CuspForms(37, 2).basis()[1].coefficients(6)
+            [0, 1, 2, -2, 1, -3]
+        """
+        from sage_all import QQ
+        ns = list(range(1, int(X) + 1)) if not isinstance(X, (list, tuple)) else [int(n) for n in X]
+        c = self._coeffs((max(ns) if ns else 0) + 1)
+        return [QQ(c[n]) for n in ns]
+
+    def is_cuspidal(self):
+        """Whether the form is a cusp form.
+
+        EXAMPLES::
+
+            sage: [f.is_cuspidal() for f in ModularForms(11, 2).basis()]
+            [True, False]
+        """
+        return self._P._cusp_part(self._c)
+
+    def _common(self, other):
+        if not isinstance(other, ModularFormElement):
+            raise TypeError("unsupported operand: a modular form and %r" % (other,))
+        if other._P is self._P or other._P == self._P:
+            return self._P, self._c, other._c
+        A = self._P.ambient() if not self._P.is_ambient() else self._P
+        if (A.level(), A.weight()) != (other.level(), other.weight()):
+            raise TypeError("the forms are in different spaces: %s and %s" % (self._P, other._P))
+        return A, A._coords_of(self._coeffs), A._coords_of(other._coeffs)
+
+    def __add__(self, other):
+        P, a, b = self._common(other)
+        return ModularFormElement(P, [x + y for x, y in zip(a, b)])
+
+    def __sub__(self, other):
+        P, a, b = self._common(other)
+        return ModularFormElement(P, [x - y for x, y in zip(a, b)])
+
+    def __neg__(self):
+        return ModularFormElement(self._P, [-x for x in self._c])
+
+    def __mul__(self, c):
+        if isinstance(c, ModularFormElement):
+            raise NotImplementedError("products of modular forms: not yet")
+        c = _Fr(_qfrac(c))
+        return ModularFormElement(self._P, [c * x for x in self._c])
+
+    __rmul__ = __mul__
+
+    def __eq__(self, other):
+        if not isinstance(other, ModularFormElement):
+            return NotImplemented
+        try:
+            P, a, b = self._common(other)
+        except TypeError:
+            return False
+        return a == b
+
+    # (unhashable, as Sage's own modular forms are: equality compares forms
+    # across their spaces, f == M(f), so a hash of the coordinates in one
+    # space would differ between equal forms)
+    __hash__ = None
+
+    def __repr__(self):
+        if not any(self._c):
+            return "0"
+        return repr(self.q_expansion(6))
+
+
+class _SpaceHeckeOperator:
+    """T_n on a space of modular forms.
+
+    EXAMPLES::
+
+        sage: T = CuspForms(37, 2).hecke_operator(2); T
+        Hecke operator T_2 on Cuspidal subspace of dimension 2 of Modular Forms space of dimension 3 for Congruence Subgroup Gamma0(37) of weight 2 over Rational Field
+        sage: T.charpoly()
+        x^2 + 2*x
+    """
+
+    def __init__(self, space, n):
+        self._S, self._n = space, n
+
+    def matrix(self):
+        """The matrix of T_n on the space's basis (its rows the images).
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).hecke_operator(3).matrix()
+            [-1]
+        """
+        return self._S.hecke_matrix(self._n)
+
+    def charpoly(self, var="x"):
+        """The characteristic polynomial of T_n.
+
+        EXAMPLES::
+
+            sage: CuspForms(23, 2).hecke_operator(2).charpoly()
+            x^2 + x - 1
+        """
+        return self.matrix().charpoly(var)
+
+    def __repr__(self):
+        return "Hecke operator T_%d on %s" % (self._n, self._S)
+
+
+class _QSpace:
+    """What every space of modular forms (the ambient space and its
+    subspaces) has: its basis as q-expansions, Hecke matrices, the Sturm
+    bound.  Subclasses give _parts(): which parts of the space, in order
+    ("cusp", "eis", "cusp_new", "eis_new"), each in reduced echelon form."""
+
+    def _amb(self):
+        return self if self.is_ambient() else self._A
+
+    def _check_trivial(self):
+        A = self._amb()
+        if A._chi is not None and not A._chi.is_trivial():
+            raise NotImplementedError(_NONTRIVIAL)
+
+    def _qrows(self, prec):
+        self._check_trivial()
+        A = self._amb()
+        rows = []
+        for part in self._parts():
+            rows += _qbasis(A._N, A._k, part, prec)
+        return rows
+
+    def _coords_of(self, coeffs):
+        """The coordinates in this space's basis of the form whose q-expansion
+        coefficients coeffs(prec) gives (ValueError if it is not in the space)."""
+        prec = self.sturm_bound() + 2
+        try:
+            return _solve_rows(self._qrows(prec), [coeffs(prec)])[0]
+        except ValueError:
+            raise ValueError("the form is not in %s" % self)
+
+    def _part_dims(self):
+        A = self._amb()
+        return [(p, _part_dim(A._N, A._k, p)) for p in self._parts()]
+
+    def _cusp_part(self, coords):
+        i = 0
+        for part, n in self._part_dims():
+            if part.startswith("eis") and any(coords[i:i + n]):
+                return False
+            i += n
+        return True
+
+    def basis(self):
+        """The basis: the cusp forms, then the Eisenstein series, each part in
+        reduced echelon form over QQ (as Sage).
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).basis()
+            [q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)]
+            sage: CuspForms(37, 2).basis()
+            [q + q^3 - 2*q^4 + O(q^6), q^2 + 2*q^3 - 2*q^4 + q^5 + O(q^6)]
+            sage: print(ModularForms(11, 2).basis())
+            [
+            q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6),
+            1 + 12/5*q + 36/5*q^2 + 48/5*q^3 + 84/5*q^4 + 72/5*q^5 + O(q^6)
+            ]
+            sage: [f.is_cuspidal() for f in ModularForms(37, 2).basis()]
+            [True, True, False]
+            sage: CuspForms(11, 3).basis(), ModularForms(11, 1).dimension()
+            ([], 0)
+            sage: CuspForms(DirichletGroup(13).0^2, 2).basis()  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: spaces with a nontrivial character need the engine's forms over Q(chi); not yet
+        """
+        n = len(self._qrows(1))
+        return _Basis(ModularFormElement(self, [1 if j == i else 0 for j in range(n)]) for i in range(n))
+
+    def gens(self):
+        """The basis, as a tuple.
+
+        EXAMPLES::
+
+            sage: CuspForms(1, 12).gens()
+            (q - 24*q^2 + 252*q^3 - 1472*q^4 + 4830*q^5 + O(q^6),)
+        """
+        return tuple(self.basis())
+
+    def gen(self, i=0):
+        """The i-th basis element (S.0 is S.gen(0)).
+
+        EXAMPLES::
+
+            sage: CuspForms(23, 2).gen(1)
+            q^2 - 2*q^3 - q^4 + 2*q^5 + O(q^6)
+        """
+        b = self.basis()
+        i = int(i)
+        if not 0 <= i < len(b):
+            raise ValueError("generator %d not defined" % i)
+        return b[i]
+
+    def ngens(self):
+        """The number of basis elements (the dimension).
+
+        EXAMPLES::
+
+            sage: ModularForms(37, 2).ngens()
+            3
+        """
+        return self.dimension()
+
+    def q_expansion_basis(self, prec=None):
+        """The q-expansions of the basis to precision prec (6 by default).
+
+        EXAMPLES::
+
+            sage: print(CuspForms(37, 2).q_expansion_basis(10))
+            [
+            q + q^3 - 2*q^4 - q^7 - 2*q^9 + O(q^10),
+            q^2 + 2*q^3 - 2*q^4 + q^5 - 3*q^6 - 4*q^9 + O(q^10)
+            ]
+            sage: CuspForms(11, 2).q_expansion_basis(1)
+            [O(q^1)]
+        """
+        prec = 6 if prec is None else _prec_arg(prec)
+        return _Basis(_series(r, prec) for r in self._qrows(max(prec, 1)))
+
+    def sturm_bound(self, M=None):
+        """Sage's Sturm bound: forms in the space are determined by their
+        q-expansions to this precision (with M, also those of M).
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).sturm_bound(), CuspForms(37, 2).sturm_bound(), ModularForms(1, 12).sturm_bound()
+            (3, 8, 2)
+        """
+        A = self._amb()
+        b = _sturm_bound(A._N, A._k)
+        return b if M is None else max(b, M.sturm_bound())
+
+    def hecke_matrix(self, n):
+        """The matrix of T_n on the basis: its rows are the images of the basis elements.
+
+        EXAMPLES::
+
+            sage: CuspForms(37, 2).hecke_matrix(2)
+            [ 0  0]
+            [ 1 -2]
+            sage: ModularForms(37, 2).hecke_matrix(2)
+            [ 0  0  0]
+            [ 1 -2  0]
+            [ 0  0  3]
+        """
+        from sage_all import ZZ, QQ, matrix
+        n = int(ZZ(n))
+        if n < 1:
+            raise ValueError("n must be positive")
+        A = self._amb()
+        s = self.sturm_bound() + 2
+        parts = self._parts()
+        if parts in (["cusp"], ["cusp_new"]) and all(int(p) < _CUSP_HECKE_PRIME_BELOW for p, _ in ZZ(n).factor()):
+            # (the cusp forms, or the new ones: T_n from the engine's twisted
+            # traces, to precision s whatever n; a prime of n past the
+            # engine's domain takes the q-expansion route below instead, a
+            # route choice, so no T_n is refused)
+            self._check_trivial()
+            B, den = _cusp_hecke(A._N, A._k, n, s, parts == ["cusp_new"])
+            d = len(B)
+            return matrix(QQ, d, d, [QQ(x) / den for r in B for x in r])
+        return self._hecke_matrix_qexp(n)
+
+    def _hecke_matrix_qexp(self, n):
+        # T_n from the basis's q-expansions to (s - 1) n + 1 (the Eisenstein
+        # parts, and the cusp forms' check in the tests)
+        from sage_all import QQ, matrix
+        A = self._amb()
+        s = self.sturm_bound() + 2
+        rows = self._qrows((s - 1) * n + 1)
+        try:
+            out = _solve_rows([r[:s] for r in rows], [_hecke_qexp(r, n, A._N, A._k, s) for r in rows])
+        except ValueError:
+            raise RuntimeError("internal error: T_%d left the space %s" % (n, self))
+        d = len(rows)
+        return matrix(QQ, d, d, [QQ(x) for r in out for x in r])
+
+    def hecke_operator(self, n):
+        """The Hecke operator T_n on the space.
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).hecke_operator(2)
+            Hecke operator T_2 on Cuspidal subspace of dimension 1 of Modular Forms space of dimension 2 for Congruence Subgroup Gamma0(11) of weight 2 over Rational Field
+        """
+        return _SpaceHeckeOperator(self, int(n))
+
+    T = hecke_operator
+
+    def hecke_polynomial(self, n, var="x"):
+        """The characteristic polynomial of T_n on the space.
+
+        EXAMPLES::
+
+            sage: CuspForms(23, 2).hecke_polynomial(2), ModularForms(37, 2).hecke_polynomial(2)
+            (x^2 + x - 1, x^3 - x^2 - 6*x)
+        """
+        return self.hecke_matrix(n).charpoly(var)
+
+    def group(self):
+        """The group: Gamma0(N).
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).group(), ModularForms(1, 12).group()
+            (Congruence Subgroup Gamma0(11), Modular Group SL(2,Z))
+        """
+        return Gamma0(self._amb()._N)
+
+    def base_ring(self):
+        """The base ring (the rational field, for Gamma0(N)).
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).base_ring()
+            Rational Field
+        """
+        from sage_all import QQ
+        self._check_trivial()
+        return QQ
+
+    def is_cuspidal(self):
+        """Whether the space consists of cusp forms.
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).is_cuspidal(), ModularForms(11, 2).is_cuspidal()
+            (True, False)
+        """
+        return all(n == 0 for p, n in self._part_dims() if p.startswith("eis"))
+
+    def is_eisenstein(self):
+        """Whether the space consists of Eisenstein series.
+
+        EXAMPLES::
+
+            sage: ModularForms(11, 2).eisenstein_subspace().is_eisenstein(), CuspForms(11, 2).is_eisenstein()
+            (True, False)
+        """
+        return all(n == 0 for p, n in self._part_dims() if p.startswith("cusp"))
+
+    def _key(self):
+        A = self._amb()
+        return (A._N, A._k, repr(A._chi), tuple(self._parts()))
+
+    def __eq__(self, other):
+        return isinstance(other, _QSpace) and self._key() == other._key()
+
+    def __ne__(self, other):
+        return not self == other
+
+    def __hash__(self):
+        return hash(self._key())
+
+    def __call__(self, x):
+        """A form of the space (from a form in it, or 0).
+
+        EXAMPLES::
+
+            sage: S = CuspForms(37, 2); S(0)
+            0
+            sage: M = ModularForms(37, 2); S(M.basis()[1]) == S.1
+            True
+        """
+        if isinstance(x, ModularFormElement):
+            return ModularFormElement(self, self._coords_of(x._coeffs))
+        if not isinstance(x, (list, tuple)) and x == 0:
+            return ModularFormElement(self, [0] * self.dimension())
+        raise TypeError("cannot make an element of %s from %r (linear_combination_of_basis takes coordinates)" % (self, x))
+
+    def linear_combination_of_basis(self, v):
+        """The form sum v[i] * basis()[i].
+
+        EXAMPLES::
+
+            sage: CuspForms(37, 2).linear_combination_of_basis([1, 1])
+            q + q^2 + 3*q^3 - 4*q^4 + q^5 + O(q^6)
+        """
+        v = list(v)
+        if len(v) != self.dimension():
+            raise ValueError("%d coordinates for a space of dimension %d" % (len(v), self.dimension()))
+        return ModularFormElement(self, [_qfrac(c) for c in v])
+
+
+class ModularForms(_QSpace):
     """M_k(Gamma_0(N), chi); its dimension and cuspidal and new subspaces.
 
     EXAMPLES::
@@ -1168,8 +2164,40 @@ class ModularForms:
 
     def _dims(self):
         if self._d is None:
-            self._d = _mf.dims(self._N, self._k, self._chi)
+            if self._k <= 0:
+                raise NotImplementedError("weight must be at least 1")
+            if self._k == 1:
+                # (weight 1 needs an odd character: none for Gamma0(N); the
+                # engine's forms start at weight 2)
+                if self._chi is not None:
+                    raise NotImplementedError("weight 1 with a character: not yet")
+                self._d = {"cusp": 0, "eisenstein": 0, "new": 0}
+            else:
+                self._d = _mf.dims(self._N, self._k, self._chi)
         return self._d
+
+    def _parts(self):
+        return ["cusp", "eis"]
+
+    def is_ambient(self):
+        """Whether the space is an ambient space (True).
+
+        EXAMPLES::
+
+            sage: ModularForms(11, 2).is_ambient(), CuspForms(11, 2).is_ambient()
+            (True, False)
+        """
+        return True
+
+    def ambient(self):
+        """The ambient space: the space itself.
+
+        EXAMPLES::
+
+            sage: M = ModularForms(11, 2); M.ambient() is M
+            True
+        """
+        return self
 
     def level(self):
         """The level.
@@ -1312,7 +2340,7 @@ class ModularForms:
         return self._ambient_repr()
 
 
-class _Subspace:
+class _Subspace(_QSpace):
     def __init__(self, ambient, kind, dim, part=None):
         self._A = ambient
         self._kind = kind
@@ -1329,6 +2357,51 @@ class _Subspace:
             2
         """
         return self._dim
+
+    def _parts(self):
+        if self._kind == "Modular Forms subspace":  # (a new subspace)
+            return {"Cuspidal subspace": ["cusp_new"], "Eisenstein subspace": ["eis_new"]}.get(self._part, ["cusp_new", "eis_new"])
+        return {"Cuspidal subspace": ["cusp"], "Eisenstein subspace": ["eis"]}[self._part]
+
+    def is_ambient(self):
+        """Whether the space is an ambient space (False for a subspace).
+
+        EXAMPLES::
+
+            sage: ModularForms(37, 2).cuspidal_subspace().is_ambient()
+            False
+        """
+        return False
+
+    def level(self):
+        """The level.
+
+        EXAMPLES::
+
+            sage: CuspForms(37, 2).level()
+            37
+        """
+        return self._A.level()
+
+    def weight(self):
+        """The weight.
+
+        EXAMPLES::
+
+            sage: CuspForms(37, 4).weight()
+            4
+        """
+        return self._A.weight()
+
+    def character(self):
+        """The character (the trivial character for Gamma0(N)).
+
+        EXAMPLES::
+
+            sage: CuspForms(11, 2).character()
+            Dirichlet character modulo 11 of conductor 1 mapping 2 |--> 1
+        """
+        return self._A.character()
 
     def ambient(self):
         """The ambient space of modular forms.

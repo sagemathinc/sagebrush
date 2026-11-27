@@ -1,0 +1,1016 @@
+[[5, 2], [9, 0]] 6 False
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+[[2, 0], [0, 1]] 2 False
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+[[6, 1], [1, 0]] 11 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[0 1]
+[1 6]
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[0 1]
+[1 6]
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[0 1]
+[1 6]
+[[2, 3], [3, 2]] 7 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[2 3]
+[3 2]
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[2 3]
+[3 2]
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[2 3]
+[3 2]
+[[4, 3], [3, 4]] 7 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[4 3]
+[3 4]
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[4 3]
+[3 4]
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[4 3]
+[3 4]
+[[3]] 3 False
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+ZeroDivisionError: input matrix must be nonsingular
+[[5]] 5 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 12
+[5]
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 12
+[5]
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 12
+[5]
+Full MatrixSpace of 0 by 0 dense matrices over Ring of integers modulo 12
+[]
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[6 1]
+[1 0]
+True
+4 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 4
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 4
+[1]
+4 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 4
+[1]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+4 2 0 3
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4
+[2 3]
+[1 1]
+3 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4
+[1 3]
+[3 0]
+4 2 1 3
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4
+[1 0]
+[1 3]
+3 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 4
+[3 0]
+[3 1]
+4 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 4
+[3 2 3]
+[0 1 3]
+[3 1 3]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+4 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 4
+[2 2 3]
+[1 3 3]
+[0 1 2]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+4 4 0 3
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 4
+[2 3 3 2]
+[0 3 3 3]
+[3 1 0 3]
+[1 1 1 0]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+4 4 1 3
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 4
+[0 1 0 2]
+[0 0 1 0]
+[1 2 3 3]
+[1 3 1 0]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+4 6 0 3
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 4
+[0 2 2 3 1 3]
+[2 2 3 1 3 0]
+[2 0 3 3 2 0]
+[0 2 1 0 2 0]
+[3 1 3 1 3 1]
+[3 0 0 0 1 0]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+4 6 1 3
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 4
+[0 0 0 1 2 3]
+[3 3 0 2 2 1]
+[3 0 2 1 2 1]
+[3 2 2 1 1 3]
+[3 3 2 1 2 3]
+[1 3 1 2 1 3]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+6 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 6
+[1]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+6 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 6
+[1]
+5 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 6
+[5]
+6 2 0 5
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6
+[0 1]
+[1 2]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+6 2 1 5
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 6
+[1 5]
+[1 4]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+6 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 6
+[1 4 4]
+[1 4 3]
+[3 1 4]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+6 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 6
+[3 2 2]
+[4 3 5]
+[5 1 0]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+6 4 0 5
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 6
+[1 1 4 0]
+[5 4 4 4]
+[2 4 5 3]
+[1 3 1 4]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+6 4 1 5
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 6
+[5 3 2 4]
+[3 0 4 2]
+[1 3 5 5]
+[4 4 1 2]
+3 False
+ZeroDivisionError: input matrix must be nonsingular
+6 6 0 5
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 6
+[4 3 2 0 4 5]
+[3 3 3 3 4 1]
+[3 3 4 1 0 2]
+[1 0 1 0 2 3]
+[1 4 2 5 2 4]
+[5 4 2 5 1 2]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+6 6 1 5
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 6
+[4 5 4 4 1 2]
+[4 1 2 2 4 5]
+[3 5 4 0 2 0]
+[2 4 1 0 5 0]
+[3 5 4 1 4 2]
+[5 5 0 3 1 4]
+4 False
+ZeroDivisionError: input matrix must be nonsingular
+8 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 8
+[1]
+3 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 8
+[3]
+8 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 8
+[1]
+3 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 8
+[3]
+8 2 0 7
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 8
+[6 3]
+[1 3]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+8 2 1 7
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 8
+[5 1]
+[1 0]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+8 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 8
+[2 6 1]
+[6 3 7]
+[7 1 0]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+8 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 8
+[2 5 5]
+[5 6 4]
+[2 1 4]
+3 True
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 8
+[1 0 0]
+[7 0 3]
+[4 7 1]
+8 4 0 7
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 8
+[4 6 2 5]
+[7 4 5 2]
+[0 1 3 0]
+[6 0 1 1]
+1 True
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 8
+[1 4 6 3]
+[3 3 7 2]
+[1 4 5 2]
+[6 1 6 1]
+8 4 1 7
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 8
+[0 7 6 3]
+[4 0 3 1]
+[5 1 1 5]
+[1 0 1 5]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+8 6 0 7
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 8
+[3 1 6 5 1 5]
+[0 6 5 3 4 5]
+[6 7 0 6 0 5]
+[6 5 3 3 1 5]
+[1 3 1 1 0 6]
+[5 5 0 1 1 2]
+4 False
+ZeroDivisionError: input matrix must be nonsingular
+8 6 1 7
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 8
+[4 0 1 7 6 6]
+[3 6 4 0 0 7]
+[6 5 2 7 3 3]
+[6 1 7 0 2 0]
+[7 7 7 5 1 0]
+[1 7 3 4 1 1]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+9 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 9
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 9
+[1]
+9 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 9
+[1]
+3 False
+ZeroDivisionError: input matrix must be nonsingular
+9 2 0 8
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9
+[6 1]
+[1 3]
+8 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9
+[5 4]
+[1 6]
+9 2 1 8
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 9
+[0 1]
+[1 4]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+9 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 9
+[3 1 0]
+[2 4 3]
+[7 1 7]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+9 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 9
+[6 3 1]
+[7 3 7]
+[5 1 3]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+9 4 0 8
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 9
+[7 8 7 7]
+[5 1 0 8]
+[1 1 3 8]
+[5 3 1 2]
+2 True
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 9
+[5 6 0 5]
+[5 1 4 3]
+[7 5 5 1]
+[5 8 1 2]
+9 4 1 8
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 9
+[1 5 4 7]
+[5 6 2 2]
+[2 7 6 8]
+[7 4 1 2]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+9 6 0 8
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 9
+[5 2 5 5 8 2]
+[7 7 3 5 8 1]
+[2 8 1 5 3 1]
+[7 7 1 5 6 8]
+[3 2 4 6 4 6]
+[3 1 4 8 1 0]
+5 True
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 9
+[0 8 7 2 5 4]
+[2 1 4 7 5 6]
+[4 1 4 6 8 7]
+[7 6 2 1 7 1]
+[5 8 3 7 2 2]
+[1 7 4 0 4 6]
+9 6 1 8
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 9
+[1 1 8 8 0 1]
+[2 6 4 0 6 0]
+[4 1 0 3 7 7]
+[8 3 4 3 2 3]
+[7 1 7 1 6 5]
+[2 3 6 6 1 3]
+3 False
+ZeroDivisionError: input matrix must be nonsingular
+12 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 12
+[1]
+3 False
+ZeroDivisionError: input matrix must be nonsingular
+12 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 12
+[1]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+12 2 0 11
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[4 5]
+[1 4]
+10 False
+ZeroDivisionError: input matrix must be nonsingular
+12 2 1 11
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 12
+[11 10]
+[ 1  3]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+12 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 12
+[3 6 7]
+[7 6 6]
+[5 1 5]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+12 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 12
+[4 4 9]
+[7 3 8]
+[6 1 9]
+11 True
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 12
+[10  9  2]
+[ 1  3 10]
+[ 1  2 11]
+12 4 0 11
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 12
+[11  5 10  8]
+[ 1  4  1  3]
+[ 8  1  0  7]
+[ 8  5  1  4]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+12 4 1 11
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 12
+[ 3  4  6  0]
+[ 1  1 10  3]
+[ 6  5  1  4]
+[ 6  4  1  2]
+8 False
+ZeroDivisionError: input matrix must be nonsingular
+12 6 0 11
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 12
+[ 5  7  7  1  1  9]
+[ 6  0  6  5 10  0]
+[ 7  1  5  7  7  8]
+[ 9 10  1  3  6  7]
+[11  0  4  1 11  6]
+[ 6  6  8  0  1  5]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+12 6 1 11
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 12
+[11  8  3  1  3  8]
+[ 2  7  9  8  4 11]
+[ 8  2  6  7  8  0]
+[ 5  0  7  7  4  1]
+[ 6  3  6 10  3  7]
+[ 6  8  0  7  1  4]
+8 False
+ZeroDivisionError: input matrix must be nonsingular
+30 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 30
+[1]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+30 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 30
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 30
+[1]
+30 2 0 29
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 30
+[22  3]
+[ 1 26]
+9 False
+ZeroDivisionError: input matrix must be nonsingular
+30 2 1 29
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 30
+[ 1 25]
+[ 1 24]
+27 False
+ZeroDivisionError: input matrix must be nonsingular
+30 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 30
+[11 20  1]
+[22  7 21]
+[ 3  1 23]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+30 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 30
+[ 8 11 19]
+[19  2 15]
+[ 9  1 21]
+11 True
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 30
+[24 14 25]
+[ 3  8  3]
+[11  3 11]
+30 4 0 29
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 30
+[29 13  6 24]
+[11  0 17 10]
+[17  7  2 17]
+[23  3  1 28]
+21 False
+ZeroDivisionError: input matrix must be nonsingular
+30 4 1 29
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 30
+[ 9 25  9 17]
+[19 14  0  8]
+[17 11 10 15]
+[20  1  1 20]
+19 True
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 30
+[23  8 12 12]
+[23 15  0 15]
+[ 2  5 27 17]
+[23 29  5 22]
+30 6 0 29
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 30
+[17 15  9 12 19 28]
+[18 25  4  4 13 21]
+[10 15 25  2 12 18]
+[21 24 15  8 22 20]
+[29 19 25 19  2  0]
+[13 21  7  9  1  2]
+10 False
+ZeroDivisionError: input matrix must be nonsingular
+30 6 1 29
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 30
+[15 19 27 24 26 11]
+[ 5  1 22  7  0 21]
+[26  3 11 11  4  9]
+[19 12 11  1  4 29]
+[16 26 10  1 19  5]
+[18 29 24  0  1 26]
+12 False
+ZeroDivisionError: input matrix must be nonsingular
+36 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 36
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 36
+[1]
+36 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 36
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 36
+[1]
+36 2 0 35
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36
+[ 3 10]
+[ 1 27]
+3 False
+ZeroDivisionError: input matrix must be nonsingular
+36 2 1 35
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 36
+[11 29]
+[ 1 32]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+36 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 36
+[ 9 13  9]
+[ 1  0 19]
+[13  1 24]
+34 False
+ZeroDivisionError: input matrix must be nonsingular
+36 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 36
+[ 6 11 15]
+[ 1  9 29]
+[16  1 24]
+20 False
+ZeroDivisionError: input matrix must be nonsingular
+36 4 0 35
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 36
+[25 19  2 15]
+[30  7  4 28]
+[11 29 19  7]
+[32 28  1 17]
+27 False
+ZeroDivisionError: input matrix must be nonsingular
+36 4 1 35
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 36
+[18 32 25 23]
+[32 23 20 26]
+[ 7 23 14  8]
+[ 9 17  1 34]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+36 6 0 35
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 36
+[ 0  5 33  4 27  0]
+[34 27 24 24 11 14]
+[14 21 11 18  2  1]
+[10 10  6  4  7  6]
+[ 6 32 18 33 20 14]
+[27 10 29 25  1 12]
+18 False
+ZeroDivisionError: input matrix must be nonsingular
+36 6 1 35
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 36
+[ 6 27 13  4 26 12]
+[26 30 34 24 19 22]
+[10 14  7 11 22  1]
+[ 3 12 25  2 26 31]
+[ 3  2 16 28  3 24]
+[23 27 26 21  1 30]
+26 False
+ZeroDivisionError: input matrix must be nonsingular
+72 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 72
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 72
+[1]
+72 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 72
+[1]
+3 False
+ZeroDivisionError: input matrix must be nonsingular
+72 2 0 71
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 72
+[29 45]
+[ 1  4]
+36 False
+ZeroDivisionError: input matrix must be nonsingular
+72 2 1 71
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 72
+[14 37]
+[ 1 18]
+6 False
+ZeroDivisionError: input matrix must be nonsingular
+72 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 72
+[21 69 49]
+[ 9 16 24]
+[68  1 56]
+63 False
+ZeroDivisionError: input matrix must be nonsingular
+72 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 72
+[43 45  9]
+[69 20 28]
+[43  1 16]
+37 True
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 72
+[ 3 35 71]
+[36  0 71]
+[37 36  0]
+72 4 0 71
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 72
+[42 66 21 58]
+[45 39  2 71]
+[ 0 13 66 36]
+[37 22  1 70]
+29 True
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 72
+[68 12 23  5]
+[ 6 49 25 62]
+[69 63 44 67]
+[ 3 71  2  0]
+72 4 1 71
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 72
+[70 64 27 24]
+[37  6 50 22]
+[11 32 59 63]
+[ 8 53  1 35]
+54 False
+ZeroDivisionError: input matrix must be nonsingular
+72 6 0 71
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 72
+[50 23 53 64 51 48]
+[46 71 43 37 54 38]
+[68 54 57 29 71 70]
+[14 15 15 47 49  9]
+[48 49  0 45  2  7]
+[51 27 10 58  1 44]
+63 False
+ZeroDivisionError: input matrix must be nonsingular
+72 6 1 71
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 72
+[66 55 55 42 46 54]
+[13 12 63 51 36  5]
+[59 49 45 24 63 51]
+[55  8 10 63 66 24]
+[39 25 15 21  4 41]
+[67 62  9 41  1 40]
+21 False
+ZeroDivisionError: input matrix must be nonsingular
+1048576 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 1048576
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 1048576
+[1]
+1048576 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 1048576
+[1]
+2 False
+ZeroDivisionError: input matrix must be nonsingular
+1048576 2 0 1048575
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1048576
+[887837 101621]
+[     1 861828]
+1048575 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1048576
+[0 1]
+[1 1]
+1048576 2 1 1048575
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1048576
+[ 17001 403624]
+[     1 430223]
+524289 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1048576
+[524289 524289]
+[524287 524288]
+1048576 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 1048576
+[ 784009  800492  127742]
+[ 699429  338300  178057]
+[  86935       1 1023666]
+524279 True
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 1048576
+[466034      0 233017]
+[873813 524288 174763]
+[291271 524289 407779]
+1048576 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 1048576
+[508562  49168 807773]
+[196849 578026 497260]
+[332696      1 356455]
+524290 False
+ZeroDivisionError: input matrix must be nonsingular
+1048576 4 0 1048575
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 1048576
+[ 720669  184638  794493  160313]
+[ 680697  379002  625824  932125]
+[ 387540  426957   14412 1009292]
+[ 655270  327073       1  973477]
+524285 True
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 1048576
+[ 873814  524288  699052  349523]
+[ 349525       1  174761  873815]
+[ 524288  524288 1048575       1]
+[ 174763  524288  873814  174762]
+1048576 4 1 1048575
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 1048576
+[497897 467004 830589 959601]
+[863170 162956  41797  68497]
+[ 43783  65553 705314  87705]
+[488745 293768      1 116812]
+1048569 True
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 1048576
+[     0 149797 823881 524288]
+[524287 823879 599188 524289]
+[524289 524289 524287      0]
+[     0 599186 674085 524288]
+1048576 6 0 1048575
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 1048576
+[ 726559  474180  246485  717624  500285  219775]
+[ 183017  179876  316236  508190 1044801  332047]
+[ 388197  801863  336050  525290  665518  831081]
+[ 788017   93555  379940  376535  450342  996405]
+[ 913806  370274  709070  776630  101595  582125]
+[ 847961   60857  778555  176303       1  893113]
+524273 True
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 1048576
+[      1  524288  699050 1048575  349525  699051]
+[ 314571  734003  454384  209716  803909  768956]
+[ 209715  838861  594193  838861  768956  803908]
+[ 104855  943719  209716  419434  209715  314573]
+[ 734003  314573  768956  838861   69905  454383]
+[ 314574  209715  803908  209714  454383   69905]
+1048576 6 1 1048575
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 1048576
+[1009009  170931  264371  240748  511840  528375]
+[ 907073  438804  797706  250270  879002  256450]
+[ 951268  648230  172073  930871  900668  861394]
+[  24745   86839  840521 1001826  116419  210800]
+[ 562499  741430  123060  197761  258376  793673]
+[1002480  594812  633696  675344       1  929978]
+1048408 False
+ZeroDivisionError: input matrix must be nonsingular
+18446744073709551616 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 18446744073709551616
+[1]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+18446744073709551616 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 18446744073709551616
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 18446744073709551616
+[1]
+18446744073709551616 2 0 18446744073709551615
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 18446744073709551616
+[  38289117197013905  668513858488306060]
+[                  1 2247013167084258651]
+1 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 18446744073709551616
+[18446744073709551615 18446744073709551614]
+[                   1                    1]
+18446744073709551616 2 1 18446744073709551615
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 18446744073709551616
+[ 9400787183267368383 10745029450273024701]
+[                   1 15604297388149390404]
+18446744073709551612 False
+ZeroDivisionError: input matrix must be nonsingular
+18446744073709551616 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 18446744073709551616
+[ 5864265071178463201 18124434948564200474  2536005515583666462]
+[12761705955803142231  1416781896953198339  3654114532015130653]
+[15623606593354773362                    1  2362432996106006540]
+12 False
+ZeroDivisionError: input matrix must be nonsingular
+18446744073709551616 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 18446744073709551616
+[14535217441400321741  4260897894619822527  4021467053035657403]
+[11396399528679142065   173885992656852856   691422876636206132]
+[15774323066563579658                    1  2622772283457365474]
+9223372036854775808 False
+ZeroDivisionError: input matrix must be nonsingular
+18446744073709551616 4 0 18446744073709551615
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 18446744073709551616
+[17489163338167989490 18324196982041470034 15560564624706564505  8591287156701135615]
+[ 3153036657954293622 10843424765696291958  4336493614873934635  5399004660700919354]
+[17151678360579913088 14693202389933554189   531612314283521114  1412259048051914753]
+[14838562392364442679 12108312183912444638                    1 16453293823087686368]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+18446744073709551616 4 1 18446744073709551615
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 18446744073709551616
+[13847873714238693754  7688191819324512749  5210073996621264801  1742009433563801832]
+[  999131635974620409  6548652128764349764 13149144956791949156 13732852630647422094]
+[ 1196612114083735344 17013639040444737756 14697272797042438133 17077666169979053753]
+[ 9635591203151030034  6801970844128461711                    1  4736081869735926003]
+55 True
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 18446744073709551616
+[10061860403841573609   503093020192078681  3857046488139269883 17440558033325394255]
+[10061860403841573609 11571139464417809650 14925092932365000853 13751209218583483932]
+[ 2515465100960393402  7043302282689101526  7881790649675899327  4360139508331348564]
+[  838488366986797801  7881790649675899327  2012372080768314722  2683162774357752962]
+18446744073709551616 6 0 18446744073709551615
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 18446744073709551616
+[ 3380052297768809091  5665688631575279716  1511546102412367157 11236427889603975820 17614137164039605039 10574611205917383676]
+[16085349581603764131  5698427697506323467  8335563420809335445 11541455946223264663 17390528044318037483  6751817226402228644]
+[ 9410871891501698181 11319355537579997201 11304364123356914654 15714359372984174068 12886304266911373627  5123161341704572884]
+[ 1606754902960398583  2141313927963187330  5535389092503838941  6902835757150279416 12111659880013651038  6143487810190321346]
+[ 8795083764094730128 15435797737120525086  3577712985891687282  3379655478993849889  4025502626698313992 16263870582200734535]
+[ 4171503815781793206 12446795122475754416 17182125115541551346 17395838635612596548                    1  7375164929023251497]
+9223372036854775870 False
+ZeroDivisionError: input matrix must be nonsingular
+18446744073709551616 6 1 18446744073709551615
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 18446744073709551616
+[ 9513283407614661282 13960303244541982483  1956987042221510958 16119293017802320374  1833517097310656182 11507938391736987843]
+[15212183156020491081   527869912556380664  4698643000006369144  2371802465971781929  2298646842301919648  1276202787330160688]
+[17985106405390872415  1675938285427029199 14690476495176164421  1747192034807225155   224524306376144948 18234841467012696380]
+[ 1453449309079976568  3845888688372857086 13466184566142748660  7908230774071290269  4574764112238360238 17378168577982955918]
+[ 9424893852834371636  4204463185680410018 13367874342941342449  9992033547221095777  7801261409384496288 10381792584417135388]
+[ 2806459407587551956  6976018465923873957 17087327964813326020 15891008198709168975                    1  1579556610947555038]
+18446744073709551362 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 55340232221128654854
+[1]
+3 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 55340232221128654854
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 55340232221128654854
+[1]
+55340232221128654854 2 0 55340232221128654853
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 55340232221128654854
+[33213079879296592991 21072719044771912372]
+[                   1 45083941080813893859]
+27670116110564327430 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 2 1 55340232221128654853
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 55340232221128654854
+[41484802560143246021  5946698376712620083]
+[                   1 53952910088423383004]
+3 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 55340232221128654854
+[39640916401702730971 27690854136116841979 26462560209203745882]
+[36672700409374142982 46125247956528481147 32704072214742900249]
+[55226247434336603729                    1 34670026139703918625]
+10 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 55340232221128654854
+[11312917628914666251 16386346700578013431  6716707762857471556]
+[ 3105995864817347614 54087592026225477951 33877263922010320367]
+[49046008149416710289                    1 16510136129883644563]
+27670116110564327421 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 4 0 55340232221128654853
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 55340232221128654854
+[48616208756837020512 19955411379823258753 43447236314375147007 44391533363077802024]
+[ 1555190762627746929 26054435609045202882 39538098867106822210 26338502347592332387]
+[ 7723739729219638747 55096240312655469017 26874317681941802933 26710076121721801386]
+[15014330829814246376 14404095234596896118                    1 12217133799110135326]
+55340232221128654818 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 4 1 55340232221128654853
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 55340232221128654854
+[49240767278986629279 38261397176781869277  8239878744545328195 49737515835310666147]
+[39894448519958405780  7941273183358627283 41443346105565018642 20686576230054785640]
+[ 8897557251718073143 14543104642236245355 38610324967361971510 18622449185673260878]
+[25103728205883926471 37985333291393630252                    1 32223961658414822906]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 6 0 55340232221128654853
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 55340232221128654854
+[18643883100819560681 51959392696747320328 29726730494849546351 31422353279741655025 32380722647043496787 37976685070461567928]
+[36287119591281484389 52642862309617209274 39950441331442306831 41765873724320644583 18575611211771283628 41942286181922043149]
+[19934241444956087754  3895947042865863837 38056816974648700561 38635157860462821950 24152082981776271577  7167220795641191743]
+[ 8843556569439610797   234465119227199793 15707104477475673189 18839379838544723173 30382773035338570783  1513986429369398914]
+[18909902891995175343  3035118662550074047 20311856114046904099 42845005328973102809 47345284824171630428 52441708013314366098]
+[15419429417925674629 19105134797319744762  7174544081949293213  5047701894894463586                    1  7153304257264104538]
+55340232221128654806 False
+ZeroDivisionError: input matrix must be nonsingular
+55340232221128654854 6 1 55340232221128654853
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 55340232221128654854
+[35647604641166105566 31311252637532367045  6591956295658278414 20895161879655112562 47848124967517756289 51727165073094391901]
+[28299770281350083383 51355220817668446790 46888177692808416077  2819925227819644523 33190922412643513766 31293205627183364522]
+[11489579092896265645 30078951651834563813 24625213613616805229 35545439828602713136 21302992979560970543 13860263830859204339]
+[14038968092767502606 14549714367076335758 32108211841168910182 13128174897560717347 47918148813253153953 11367100119049719153]
+[14948717450179276663 44360621631054013635 30887806168315011894 37956093443070705367 10903526221617999568 25968116527990767611]
+[41016866682989028036 39089374495634113198 27638948976574662291 20039383771647124848                    1 53847123738840201945]
+22 False
+ZeroDivisionError: input matrix must be nonsingular
+1000000000000000000000000000000 1 0 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[1]
+1000000000000000000000000000000 1 1 1
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[1]
+1 True
+Full MatrixSpace of 1 by 1 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[1]
+1000000000000000000000000000000 2 0 999999999999999999999999999999
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[822050927817689628532018056452  28964871483601679463021327813]
+[                             1 844325529383853966410810117681]
+500000000000000000000000000003 True
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[500000000000000000000000000001 166666666666666666666666666667]
+[500000000000000000000000000000 166666666666666666666666666667]
+1000000000000000000000000000000 2 1 999999999999999999999999999999
+Full MatrixSpace of 2 by 2 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[513432574411965443817165132142 126631728640142773962167653417]
+[                             1 489524326492226549470673054348]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+1000000000000000000000000000000 3 0 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[578244462606133830153305234867 993116170062442072890052259140 453386129391605089351479819058]
+[ 44767830609257715152139940904  90029292607978548169638117339 727236570269140745811984972691]
+[717508154343157240213338842277                              1  13139331786437922430838957020]
+499999999999999999999999999990 False
+ZeroDivisionError: input matrix must be nonsingular
+1000000000000000000000000000000 3 1 1
+Full MatrixSpace of 3 by 3 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[470501650225386679423707479298  28805751271778730912457531086 449356146810928993181697309097]
+[630171107541767491200756989655 655670269383591546817512214586 929493652354070081293865572459]
+[553199431485157287914162732839                              1 444716644812576594142004405500]
+500000000000000000000000000000 False
+ZeroDivisionError: input matrix must be nonsingular
+1000000000000000000000000000000 4 0 999999999999999999999999999999
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[789244464918744220904213444867 977657125894494926390890408414 429439641495217894003137739612  57655898166581841509087969667]
+[923048986950230107632828467413 727479447607456749548316767491 523547008680358737040756352304 134603602116817402577137308907]
+[486782135448909855526891685276 524059173600533541586917285313 601261789027558136131830860432  48996430868426747636226173817]
+[350723913148663729567981559354 292939566191104543004211438716                              1 351949113264147838308364590311]
+999999999999999999999999999991 True
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[                             0 500000000000000000000000000000 166666666666666666666666666667 500000000000000000000000000000]
+[166666666666666666666666666667 833333333333333333333333333333 111111111111111111111111111111 666666666666666666666666666667]
+[333333333333333333333333333334 166666666666666666666666666667 888888888888888888888888888889 833333333333333333333333333333]
+[833333333333333333333333333333 166666666666666666666666666666 388888888888888888888888888889 333333333333333333333333333333]
+1000000000000000000000000000000 4 1 999999999999999999999999999999
+Full MatrixSpace of 4 by 4 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[ 84704750967516533780255462739 784372422208212408836450444929 917446122810387901213641447451 509377077169841902046729899626]
+[ 15172010021973734491832864897 475218848292731422201698343394 214747743739613872461037416491 919115147742805846197989935498]
+[292692974837619882786072354563 876096341489064107666547388577 729699656521692820799213274214 908221387611029927451468006999]
+[451099527211923648807254081206   2923190811889127379584783984                              1   3164971404259001789042821062]
+0 False
+ZeroDivisionError: input matrix must be nonsingular
+1000000000000000000000000000000 6 0 999999999999999999999999999999
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[622140069820038495281202093680 309857484813641492717946703891 287364846318569105918429336555 270322383277047705300643437820 896228374106474516142067069523 690219132107557930895330168056]
+[936956487856912613913677184014 714962440775727273580902848236 713673736419862949047901525712 902294759630373933796842058625 372640345431539091066630288501 502712412892673602156667674947]
+[214141417140767015170139177977 434201891364002176315625955844 548023143957954964860057221802 165449108815356188032460607607 824742884046043775880465242159 527138806815466027856179527182]
+[996488844470626522981052490956 366762883766234504506110740450 666388869635504181552893684165 194810854451967336965364232638 816236353314396662611310339763  47132501268014780980676865051]
+[936899387949961765642133326066 247264935746066710399141319094 458591425347652778362148958510  47746614216053186386455799889 321494036396953719459850706116 410133271659057547857564105796]
+[336591246721975488560590568120 380727303266170861405665895363 742693575079457699687203717176  17906524910147610275527274068                              1  92042636633104028134068523159]
+499999999999999999999999999988 False
+ZeroDivisionError: input matrix must be nonsingular
+1000000000000000000000000000000 6 1 999999999999999999999999999999
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[737736567957240142880977192402 558019171619901640932862285897 428816813898951746408718624357 347819282200607211173982484696 109171432857019887076252764321 558392610883418659518019539537]
+[820271899579093069270142615010 676943505755951507608594177883 532485958889494574919470989041 373892876905106750041927550933  63790731340025879001978081242  71222490522271920018985736693]
+[689030040816935719346616845485 520886615910432070054831361466 991330275189334098751504219848 385572568901383339944811526428 280748394269452909387895734541 778900559247147290023755044231]
+[147630981929229181924494013646 392387649966654721900673720167 497100959712909868473742572007 309498655109724213162845639067 694542854076261146178912030353 544012881467929845989400296686]
+[   631083625109091380650912928  28346506913516446744280567417 297875603723091172172260802258 735728114100840535040190318581 252896182934191588791796393179 746873146790270040440841720223]
+[363444223010580856888142117154 879415128601373815422436858629 122740289123808381609888601002 970932727005162545871378645020                              1 225438457624385574901060524009]
+499999999999999999999999999947 True
+Full MatrixSpace of 6 by 6 dense matrices over Ring of integers modulo 1000000000000000000000000000000
+[367924528301886792452830188679 415094339622641509433962264151 160377358490566037735849056604 103773584905660377358490566037 490566037735849056603773584906 226415094339622641509433962265]
+[ 18867924528301886792452830189 726415094339622641509433962264 405660377358490566037735849057  56603773584905660377358490567 358490566037735849056603773585 396226415094339622641509433961]
+[377358490566037735849056603774  28301886792452830188679245283 613207547169811320754716981132 132075471698113207547169811321 669811320754716981132075471698 924528301886792452830188679245]
+[726415094339622641509433962264 716981132075471698113207547170 867924528301886792452830188679 679245283018867924528301886792 301886792452830188679245283019 254716981132075471698113207548]
+[698113207547169811320754716981 877358490566037735849056603774   9433962264150943396226415094  94339622641509433962264150942 264150943396226415094339622642 160377358490566037735849056605]
+[132075471698113207547169811321 584905660377358490566037735849 339622641509433962264150943397 396226415094339622641509433964   9433962264150943396226415094 773584905660377358490566037734]
+0 True
+ZeroDivisionError: input matrix must be nonsingular
+Full MatrixSpace of 0 by 0 dense matrices over Ring of integers modulo 1
+[]

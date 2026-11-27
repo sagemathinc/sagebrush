@@ -668,11 +668,58 @@ def _machine_total():
 
 # ------------------------------------------------------------------ the engine's total
 
+_native_engine = False  # pyjs with the native engine addon (engine.ts: _set_native_engine)
+
+
 def _engine_domain():
     """The domain the Sagebrush engine allocates in: its own WebAssembly
     Memory in pyjs; natively, this process's heap (the engine is linked
-    into the interpreter)."""
-    return "wasm-engine" if hasattr(_sys, "_sagebrush_heap_limit") else "cpython-heap"
+    into the interpreter, or, in pyjs, loaded as the native addon)."""
+    return "wasm-engine" if hasattr(_sys, "_sagebrush_heap_limit") and not _native_engine else "cpython-heap"
+
+
+def _set_native_engine():
+    """pyjs's engine is the native addon from now on (engine.ts, before its
+    first call): its allocations are this process's heap, as the CPython
+    extension's are, never a WebAssembly Memory."""
+    global _native_engine, _engine_snap, _rows_snap
+    _native_engine = True
+    _engine_snap = _rows_snap = None
+
+
+# (engine_total's status -> the ledger's status code, as the CPython package's)
+_TOTAL_STATUS = {"observed": 0, "zero": 1, "nominal": 2}
+# (D0's row names -> the ledger row's usage measure, as the CPython package's)
+_MEASURES = {"RLIMIT_AS": "address_space", "RLIMIT_DATA": "data_segment", "MemAvailable": "physical",
+             "windows job": "windows_job", "physical available": "windows_physical"}
+
+
+def native_total_answer():
+    """The native addon's total source (design N1 r3.3), the same answer the
+    CPython package's _capacity_total gives its extension, as JSON text:
+    {"ok": [bytes, status code, joint, [[kind, path or null, figure], ...]]}
+    or {"error": text}.  A KeyboardInterrupt goes to the caller (engine.ts
+    answers {"interrupted": true})."""
+    import json
+    try:
+        t = engine_total()
+        r = engine_rows()
+        dirs = {name: (kind, d) for kind, name, d in (_cgroup_dirs() or [])}
+        rows = []
+        for row in r["rows"]:
+            src, figure = row["source"], int(row["figure"])
+            if src in dirs:
+                kind, d = dirs[src]
+                rows.append(["cgroup", d + ("/memory.current" if kind == "v2" else "/memory.usage_in_bytes"), figure])
+            elif src in _MEASURES:
+                rows.append([_MEASURES[src], None, figure])
+            else:
+                rows.append(["unknown", None, figure])
+        if not r["complete"]:
+            rows.append(["unknown", None, 0])
+        return json.dumps({"ok": [int(t["bytes"]), _TOTAL_STATUS[t["status"]], bool(t["joint"]), rows]})
+    except Exception as e:
+        return json.dumps({"error": "%s: %s" % (type(e).__name__, e)})
 
 
 def engine_total():

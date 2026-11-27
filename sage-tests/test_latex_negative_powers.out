@@ -1,0 +1,52 @@
+2.5e-07 | (2.5e-07)*x | x^(2.5e-07) | x^{2.5 \times 10^{-07}} | x + 2.5e-07
+-3.25e-12 | -(3.25e-12)*x | x^(-3.25e-12) | \frac{1}{x^{3.25 \times 10^{-12}}} | x - 3.25e-12
+1e+20 | (1e+20)*x | x^(1e+20) | x^{1 \times 10^{20}} | x + 1e+20
+1e+20 + 2.5e-07*I | (1e+20 + 2.5e-07*I)*x | x^(1e+20 + 2.5e-07*I) | x^{1 \times 10^{20} + 2.5 \times 10^{-07}i} | x + 1e+20 + 2.5e-07*I
+-2.50000000000000 | -2.50000000000000*x | x^(-2.50000000000000) | \frac{1}{x^{2.50000000000000}} | x - 2.50000000000000
+-2.5 | -2.5*x | x^(-2.5) | \frac{1}{x^{2.5}} | x - 2.5
+-3/2 | -3/2*x | x^(-3/2) | \frac{1}{x^{\frac{3}{2}}} | x - 3/2
+\frac{1}{x^{2}}
+\frac{1}{x^{\frac{3}{2}}}
+\frac{1}{x^{2.50000000000000}}
+\frac{1}{x^{2.5}}
+\frac{1}{x^{a}}
+\frac{1}{x^{2 \, a}}
+\frac{1}{{\left(x + 1\right)}^{\frac{3}{2}}}
+\frac{1}{{\left(x + 1\right)}^{2}}
+\frac{3}{x^{\frac{3}{2}}}
+\frac{a}{\sqrt{x}}
+\frac{1}{\sqrt{x}} + 1
+\frac{1}{\sin\left(x\right)^{\frac{3}{2}}}
+\frac{1}{x}
+x^{-1.0 + 2.0i}
+e^{\left(-\frac{3}{2} \, x\right)}
+\frac{1}{2} \, \sqrt{2}
+\frac{1}{x^{1.00000000000000 \times 10^{-20}}}
+2.5e-07 | \left(2.5 \times 10^{-07}\right) \, x | x^{2} + 2.5 \times 10^{-07}
+1.5e-300 | \left(1.5 \times 10^{-300}\right) \, x | x^{2} + 1.5 \times 10^{-300}
+1e+100 | 1 \times 10^{100} \, x | x^{2} + 1 \times 10^{100}
+-1e-05 | -\left(1 \times 10^{-05}\right) \, x | x^{2} - 1 \times 10^{-05}
+1.50000000000000e-7 | \left(1.50000000000000 \times 10^{-7}\right) \, x | x^{2} + 1.50000000000000 \times 10^{-7}
+1e-07 + 2.0*I | \left(1 \times 10^{-07} + 2.0i\right) \, x | x^{2} + 1 \times 10^{-07} + 2.0i
+\frac{a}{x^{b}}
+\frac{a}{x^{b}}
+\frac{3}{x^{2 \, b}}
+\frac{b}{x^{a}}
+e^{\left(-x\right)}
+e^{\left(-a x\right)}
+\frac{1}{2^{x}}
+x^{-a - 1}
+x^{a - 1}
+\frac{1}{x^{x}}
+\frac{1}{{\left(x + 1\right)}^{a}}
+\frac{1}{{\left(x + 1\right)} x^{2}}
+\frac{\sin\left(x\right)}{x^{\frac{3}{2}}}
+x^{-i}
+\frac{1}{x^{\frac{3}{2}}}
+3 \, e^{\left(-2\right)}
+e^{\left(-2\right)}
+x e^{\left(-x\right)}
+\frac{e^{\left(-2\right)}}{x}
+x e^{\left(-2 \, x\right)}
+e^{\left(-1\right)} \sin\left(x\right)
+x^{2} e^{\left(-\frac{3}{2}\right)}

@@ -12,7 +12,8 @@ import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule, heapLimit } from "./modules";
 import { JS_ENGINE, JS_HOST } from "./js-engine";
-import { INTR, INTR_CTRL_C, consumeCtrlC, requestCtrlC, takeFlush } from "./interrupt";
+import { INTR, INTR_CTRL_C, NATIVE_CONTROL_BYTE, consumeCtrlC, ctrlCPending, requestCtrlC, takeFlush } from "./interrupt";
+import { loadNativeAddon } from "./native-load";
 import { stdout, stderr } from "./builtins";
 import { fullGc } from "./gc";
 import * as P from "./progress";
@@ -26,6 +27,8 @@ interface Engine {
   sb_call(ptr: number, len: number): number;
   sb_sym_call(ptr: number, len: number): number;
   sb_mp_call(ptr: number, len: number): number;
+  // (optional: engines built before the binary entry point lack it)
+  sb_bin_call?(ptr: number, len: number): number;
   sb_last_error(): number;
   sb_reply_len(): number;
   // (optional: engines built before item D0 lack it)
@@ -108,6 +111,183 @@ function interrupted(): number {
 
 function engine(): Engine {
   return E ?? createInstance();
+}
+
+// ---------------------------------------------------------------------------
+// The native backend (#7, design N1 r3 "How the runtime picks"): chosen once
+// per session, before the first engine call, from the installation only.
+// - SAGEBRUSH_ENGINE=wasm never loads the addon; SAGEBRUSH_ENGINE=native
+//   requires a verified addon, and its absence or failure is an error in
+//   words on every engine call (never a silent switch to wasm);
+// - otherwise a verified addon (SAGEBRUSH_ADDON, SAGEBRUSH_ADDON_SHA256:
+//   native-load.ts) means native;
+// - otherwise wasm, with one diagnostic when an addon was given but unusable.
+// The browser has no process: always wasm.  engineInfo() is the choice and
+// its reason (sagebrush.engine_info(), caps.engine).
+// ---------------------------------------------------------------------------
+
+/** The backend in force and why. */
+export interface EngineInfo {
+  backend: "native" | "wasm";
+  why: string;
+}
+// (undefined: not chosen yet; null: wasm)
+let NATIVE: any = undefined;
+// The app's engine threads (app/engine/thread.mjs) decide the load while they still have Node's process and leave
+// only the outcome here: taken as this module loads, before any of the page's code runs, and removed.
+const hosted: { want: string; given: boolean; ok: boolean; addon: any; why: string } | null = (() => {
+  const h = (globalThis as any).__SAGEBRUSH_NATIVE__;
+  if (h === undefined) return null;
+  try {
+    delete (globalThis as any).__SAGEBRUSH_NATIVE__;
+  } catch {}
+  return h && typeof h === "object" ? h : null;
+})();
+let nativeRefusal: Error | null = null;
+let info: EngineInfo = { backend: "wasm", why: "no engine call yet" };
+// the session's control words (interrupt.ts: in INTR's shared buffer) and
+// its RUN: each native call is a run of its own, so a Stop (STOP_UPTO = RUN)
+// ends the call in progress and never a later one
+let control: Uint32Array | null = null;
+let nativeRun = 0xffffffff;
+const CONTROL_VERSION = 1;
+
+/** The backend in force (choosing it if no engine call has yet). */
+export function engineInfo(): EngineInfo {
+  try {
+    native();
+  } catch {
+    // (the refusal is the call's to report; info says why)
+  }
+  return { ...info };
+}
+
+/** The native addon in force, or null for wasm; throws the refusal when
+ * SAGEBRUSH_ENGINE=native can't be honoured. */
+function native(): any {
+  if (nativeRefusal) throw nativeRefusal;
+  if (NATIVE === undefined) chooseBackend();
+  if (nativeRefusal) throw nativeRefusal;
+  return NATIVE;
+}
+
+function chooseBackend(): void {
+  NATIVE = null;
+  const p = (globalThis as any).process;
+  const env: Record<string, string | undefined> = p && typeof p === "object" && p.env ? p.env : {};
+  const want = hosted ? hosted.want : env.SAGEBRUSH_ENGINE || "";
+  const refuse = (why: string) => {
+    info = { backend: "wasm", why };
+    nativeRefusal = new Error(`SAGEBRUSH_ENGINE=native, but ${why}`);
+  };
+  if (want !== "" && want !== "native" && want !== "wasm") {
+    info = { backend: "wasm", why: `SAGEBRUSH_ENGINE is "${want}", not native or wasm` };
+    nativeRefusal = new Error(info.why);
+    return;
+  }
+  if (want === "wasm") {
+    info = { backend: "wasm", why: "SAGEBRUSH_ENGINE=wasm" };
+    return;
+  }
+  const path = hosted ? (hosted.given ? "(the host's)" : "") : env.SAGEBRUSH_ADDON;
+  if (!path) {
+    if (want === "native") return refuse("no native engine is installed (SAGEBRUSH_ADDON is not set)");
+    info = { backend: "wasm", why: "no native engine is installed" };
+    return;
+  }
+  const r = hosted ? (hosted.ok ? { ok: true as const, addon: hosted.addon } : { ok: false as const, why: hosted.why }) : loadNativeAddon(path, env.SAGEBRUSH_ADDON_SHA256 ?? "");
+  let why = r.ok ? "" : r.why;
+  if (r.ok) {
+    try {
+      startNative(r.addon);
+      NATIVE = r.addon;
+      info = { backend: "native", why: "a verified native engine" };
+      return;
+    } catch (err: any) {
+      why = `the native engine could not start (${err?.message ?? err})`;
+    }
+  }
+  if (want === "native") return refuse(why);
+  info = { backend: "wasm", why };
+  // (one diagnostic: an addon was given but is unusable)
+  try {
+    p?.stderr?.write?.(`sagebrush: the native engine is not used: ${why}\n`);
+  } catch {}
+}
+
+/** Claim this process's native session: the control words installed in
+ * INTR's shared buffer, no Stop pending, and the ledger's total source. */
+function startNative(addon: any): void {
+  if (!(INTR.buffer instanceof SharedArrayBuffer) || INTR.buffer.byteLength < NATIVE_CONTROL_BYTE + 16) {
+    throw new Error("no shared memory for the native engine's control words");
+  }
+  const native = new Uint32Array(INTR.buffer, NATIVE_CONTROL_BYTE, 4);
+  native[1] = 0xffffffff;
+  native[2] = 0xffffffff;
+  native[3] = 0;
+  Atomics.store(native, 0, CONTROL_VERSION);
+  // (the capacity module's engine domain: this process's heap from now on)
+  Obj.callObj(Obj.getattr(Obj.hooks.importModule("_capacity"), "_set_native_engine"), []);
+  addon.init(native, CONTROL_VERSION, nativeTotalSource);
+  control = native;
+  nativeRun = 0xffffffff;
+}
+
+/** The ledger's total, asked by the addon on this thread inside a call
+ * (design N1 r3.3): lib/_capacity.py's native_total_answer, a JSON text; the
+ * runtime's KeyboardInterrupt is {"interrupted": true}, any other error
+ * {"error": ...}. */
+function nativeTotalSource(): string {
+  try {
+    const cap = Obj.hooks.importModule("_capacity");
+    const r = Obj.callObj(Obj.getattr(cap, "native_total_answer"), []);
+    return String(r);
+  } catch (err: any) {
+    let ki = false;
+    try {
+      ki = Obj.typeOf(Obj.toPyExc(err)).$mro.includes(Obj.T.KeyboardInterrupt);
+    } catch {}
+    if (ki) return '{"interrupted": true}';
+    return JSON.stringify({ error: String(err?.message ?? err) });
+  }
+}
+
+/** One native call: a run of its own (a Stop already pending applies to
+ * it), the memory share on its cadence, and an interrupted call reported as
+ * the runtime's Ctrl-C. */
+function nativeCall<T>(addon: any, f: () => T): T {
+  nativeRun = (nativeRun + 1) >>> 0;
+  addon.setRun(nativeRun);
+  if (ctrlCPending()) Atomics.store(control!, 1, nativeRun);
+  pushNativeShare(addon);
+  try {
+    return f();
+  } catch (err: any) {
+    // (the addon's errors are "code: message"; an interrupted call is the
+    // Ctrl-C that stopped it, taken by the caller's engineError)
+    const m = String(err?.message ?? "");
+    if (/^interrupted:/.test(m)) {
+      Atomics.or(INTR, 0, INTR_CTRL_C);
+      Atomics.notify(INTR, 0);
+    }
+    // (a fault: the process is faulted for good, every later call refused; in the app's engine the host is told,
+    // and it ends this session's process with the fault frame (design N1 r3: app/engine/serve.mjs))
+    else if (/^engine_fault:/.test(m)) {
+      try {
+        (globalThis as any).postMessage?.({ engineFault: m.slice(0, 4096) });
+      } catch {}
+    }
+    throw err;
+  }
+}
+
+let nativeShareAt = -Infinity;
+function pushNativeShare(addon: any): void {
+  const now = shareClock();
+  if (now - nativeShareAt < SHARE_MAX_AGE_MS) return;
+  const [share, ageMs] = memoryShare();
+  nativeShareAt = now - ageMs;
+  addon.setMemoryShare(share);
 }
 
 // ---------------------------------------------------------------------------
@@ -605,6 +785,8 @@ function callEnded(trapped: boolean) {
 }
 
 export function engineCall(request: string): string {
+  const addon = native();
+  if (addon) return nativeCall(addon, () => addon.engineCall(request));
   const e = engine();
   pushShare(e);
   // an ASCII request (every engine request so far) is written straight
@@ -639,6 +821,20 @@ export function engineCall(request: string): string {
 /** A symbolic-engine call (engine/sym/src/api.rs).  Errors come back in
  *  band ("err\x1fKind\x1fmessage"), also when they abort the instance. */
 export function symCall(request: string): string {
+  const n = native();
+  if (n) {
+    try {
+      return nativeCall(n, () => n.symCall(request));
+    } catch (err) {
+      // (as the wasm path: an aborted call's error, when it left one)
+      let msg = "";
+      try {
+        msg = n.lastError();
+      } catch {}
+      if (msg) return msg;
+      throw err;
+    }
+  }
   const e = engine();
   pushShare(e);
   const req = new TextEncoder().encode(request);
@@ -673,6 +869,8 @@ export function symCall(request: string): string {
 /** A multivariate polynomial call (engine/mpoly): binary request and reply
  *  (sagebrush_mpoly::call_framed); errors come back in band ("er..."). */
 export function mpCall(req: Uint8Array): Uint8Array {
+  const n = native();
+  if (n) return new Uint8Array(nativeCall(n, () => n.mpCall(req)));
   const e = engine();
   pushShare(e);
   const p = e.sb_alloc(req.length);
@@ -694,6 +892,140 @@ export function mpCall(req: Uint8Array): Uint8Array {
   return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
 }
 
+/** A binary call (SBW1, engine/wire): binary request and reply, errors in
+ *  band ("er" records); null when the engine predates the entry point (the
+ *  caller keeps its JSON path). */
+export function binCall(req: Uint8Array): Uint8Array | null {
+  const n = native();
+  if (n) return new Uint8Array(nativeCall(n, () => n.binCall(req)));
+  const e = engine();
+  if (!e.sb_bin_call) return null;
+  pushShare(e);
+  const p = e.sb_alloc(req.length);
+  new Uint8Array(e.memory.buffer, p, req.length).set(req);
+  let r: number;
+  inCall++;
+  try {
+    r = e.sb_bin_call(p, req.length);
+  } catch (err) {
+    // an interrupt (or a bug) trapped: retire the instance
+    inCall--;
+    retire(e);
+    callEnded(true);
+    throw err;
+  }
+  inCall--;
+  callEnded(false);
+  e.sb_free(p, req.length);
+  return new Uint8Array(e.memory.buffer, r, e.sb_reply_len()).slice();
+}
+
+// The run of bytes binCallPieces copies into or out of the engine's memory
+// between two checks for Ctrl-C; the frame cap (engine/wire FRAME_CAP) and
+// the most pieces a request may come in (engine/py src/lib.rs, the same).
+const BIN_CHUNK = 1 << 20;
+export const BIN_FRAME_CAP = 1 << 28;
+export const BIN_MAX_PIECES = 1 << 16;
+
+/** A pieces request refused before anything is allocated: past the frame
+ *  cap, or in too many pieces. */
+export class BinRequestRefused extends Error {}
+
+/** binCall with the request in pieces and the reply in pieces of at most
+ *  BIN_CHUNK bytes (the Sage-mode echelon's frame-sized calls): neither copy
+ *  is one step, and a pending Ctrl-C is seen after each run (before the
+ *  engine runs, or after its reply: the builtin's catch raises it as
+ *  KeyboardInterrupt).  null when the engine predates the entry point. */
+export function binCallPieces(pieces: Uint8Array[]): Uint8Array[] | null {
+  // (before anything is allocated, the engine's memory included: the
+  // pieces' count and their summed size against the frame cap, whatever
+  // they are made of, one array repeated included)
+  const total = admitPieces(pieces, (a) => a.length);
+  const e = engine();
+  if (!e.sb_bin_call) return null;
+  pushShare(e);
+  return binCallPiecesOn(e, pieces, total, BIN_CHUNK);
+}
+
+/** The pieces' summed size, or BinRequestRefused: too many pieces (checked
+ *  first, before any piece is looked at), or a sum past the frame cap
+ *  (checked as it grows: no overflow).  sizeOf may raise for a piece of
+ *  the wrong kind; nothing is allocated per piece. */
+function admitPieces<T>(pieces: T[], sizeOf: (x: T) => number): number {
+  if (pieces.length > BIN_MAX_PIECES) throw new BinRequestRefused(`a request in more than ${BIN_MAX_PIECES} pieces`);
+  let total = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    total += sizeOf(pieces[i]);
+    if (total > BIN_FRAME_CAP) throw new BinRequestRefused(`a request past the frame cap of ${BIN_FRAME_CAP} bytes`);
+  }
+  return total;
+}
+
+/** The views of a pieces request's pieces, made only once the request is
+ *  admitted (the builtin's list: a view per piece is metadata the size of
+ *  the list, so it comes after the count and size checks). */
+function pieceViews<T>(pieces: T[], sizeOf: (x: T) => number, viewOf: (x: T) => Uint8Array): Uint8Array[] {
+  admitPieces(pieces, sizeOf);
+  return pieces.map(viewOf);
+}
+
+/** binCallPieces on engine e, copying in runs of `chunk` bytes. */
+function binCallPiecesOn(e: Engine, pieces: Uint8Array[], total: number, chunk: number): Uint8Array[] {
+  const p = e.sb_alloc(total);
+  try {
+    let at = 0;
+    let since = 0;
+    for (const a of pieces) {
+      for (let i = 0; i < a.length; i += chunk) {
+        const part = a.subarray(i, Math.min(a.length, i + chunk));
+        new Uint8Array(e.memory.buffer, p + at, part.length).set(part);
+        at += part.length;
+        since += part.length;
+        if (since >= chunk) {
+          since = 0;
+          if (INTR[0] & INTR_CTRL_C) throw new Error("interrupted while copying the request");
+        }
+      }
+    }
+  } catch (err) {
+    e.sb_free(p, total);
+    throw err;
+  }
+  let r: number;
+  inCall++;
+  try {
+    r = e.sb_bin_call!(p, total);
+  } catch (err) {
+    // an interrupt (or a bug) trapped: retire the instance
+    inCall--;
+    retire(e);
+    callEnded(true);
+    throw err;
+  }
+  inCall--;
+  callEnded(false);
+  e.sb_free(p, total);
+  const len = e.sb_reply_len();
+  const out: Uint8Array[] = [];
+  for (let i = 0; i < len; i += chunk) {
+    out.push(new Uint8Array(e.memory.buffer, r + i, Math.min(chunk, len - i)).slice());
+    if (INTR[0] & INTR_CTRL_C) throw new Error("interrupted while copying the reply");
+  }
+  return out;
+}
+
+/** For test/ffmat-echelon-bin-copy.test.ts only: the pieces call on a given
+ *  engine (a fake one: memory, sb_alloc, sb_free, sb_bin_call,
+ *  sb_reply_len) with a given run length (the omission mutant: one run of
+ *  the whole buffer), after the same admission. */
+export const binPiecesTest = {
+  run(e: any, pieces: Uint8Array[], chunk: number = BIN_CHUNK): Uint8Array[] {
+    return binCallPiecesOn(e, pieces, admitPieces(pieces, (a) => a.length), chunk);
+  },
+  views: pieceViews,
+  BIN_CHUNK,
+};
+
 // A Stop traps the engine, the instance is retired, and a new one is created
 // (admitted) on the next call; the old one's memory (tens of MB after an F4
 // matrix) is freed only by V8's next major collection, so a run of Stops
@@ -714,6 +1046,9 @@ function reclaimEngine(): void {
 // holder closes it.  While a creation is in progress, none may be opened.
 // ---------------------------------------------------------------------------
 
+/** The native session's instance id in host handles (wasm ids are >= 0). */
+const NATIVE_INSTANCE = -1;
+
 /** An open host obligation (hostReserve), closed by hostRelease. */
 export interface HostHandle {
   readonly instance: number;
@@ -731,6 +1066,17 @@ function hostReply(e: Engine): string {
  * {memory} (the ledger's typed refusal) when it refuses. */
 export function hostReserve(what: string, bytes: number): HostHandle | { memory: any } {
   if (creating !== 0) throw new Error("internal error: a host reservation while an engine instance is being created");
+  const n = native();
+  if (n) {
+    const reply = JSON.parse(n.reserve(what, bytes));
+    if (typeof reply.handle === "number") {
+      oHost++;
+      oHostBytes += bytes;
+      return { instance: NATIVE_INSTANCE, handle: reply.handle, bytes, open: true };
+    }
+    if (reply.memory) return { memory: reply.memory };
+    throw new Error(`internal error: reserve: ${reply.error}`);
+  }
   const e = engine();
   if (typeof e.sb_reserve !== "function") throw new Error("internal error: this engine has no host reservations");
   const w = new TextEncoder().encode(what);
@@ -751,6 +1097,17 @@ export function hostReserve(what: string, bytes: number): HostHandle | { memory:
 /** Grow an open host obligation by `bytes`: null, or {memory} refused. */
 export function hostGrow(t: HostHandle, bytes: number): null | { memory: any } {
   if (creating !== 0) throw new Error("internal error: a host reservation while an engine instance is being created");
+  if (t.instance === NATIVE_INSTANCE) {
+    if (!t.open) throw new Error("internal error: a closed host handle");
+    const reply = JSON.parse(native().grow(t.handle, bytes));
+    if (reply.ok) {
+      t.bytes += bytes;
+      oHostBytes += bytes;
+      return null;
+    }
+    if (reply.memory) return { memory: reply.memory };
+    throw new Error(`internal error: grow: ${reply.error}`);
+  }
   if (!t.open || t.instance !== liveId || E === null) throw new Error("internal error: a host handle of a retired engine instance");
   const s = E.sb_grow!(t.handle, bytes);
   if (s === 0) {
@@ -769,7 +1126,8 @@ export function hostRelease(t: HostHandle): void {
   t.open = false;
   oHost--;
   oHostBytes -= t.bytes;
-  if (t.instance === liveId && E !== null) E.sb_release!(t.handle);
+  if (t.instance === NATIVE_INSTANCE) native().release(t.handle);
+  else if (t.instance === liveId && E !== null) E.sb_release!(t.handle);
 }
 
 /** The memory guards' refusal for a refused creation (lib/_memguard.py). */
@@ -789,7 +1147,7 @@ function creationRefusal(err: CreationRefused): any {
 /** The builtins' catch: a Ctrl-C, a refused creation, or another error. */
 function engineError(err: any): any {
   if (consumeCtrlC()) {
-    reclaimEngine();
+    if (!NATIVE) reclaimEngine();
     return Obj.raise(Obj.T.KeyboardInterrupt);
   }
   if (err instanceof CreationRefused) return Obj.raise(creationRefusal(err));
@@ -877,6 +1235,14 @@ export const retireTest = {
 };
 
 newBuiltinModule("_sbengine", (m) => {
+  // the backend in force and why: {"backend": "native" | "wasm", "why": ...}
+  m.info = Obj.builtin(() => {
+    const i = engineInfo();
+    const d = Obj.newDict();
+    Obj.dictSet(d, "backend", i.backend);
+    Obj.dictSet(d, "why", i.why);
+    return d;
+  }, "info");
   m.mp = Obj.builtin((req: any) => {
     try {
       const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new TextEncoder().encode(String(req));
@@ -885,6 +1251,40 @@ newBuiltinModule("_sbengine", (m) => {
       return engineError(err);
     }
   }, "mp");
+  // None: the engine predates the binary entry point
+  m.bin = Obj.builtin((req: any) => {
+    // (bytes: one reply; a list of bytes pieces: binCallPieces, the reply in
+    // pieces; anything else, a bytearray included, a TypeError)
+    const isBytes = (x: any): boolean => x instanceof Obj.PyBytes && !(x instanceof Obj.PyByteArray);
+    const sizeOf = (x: any): number => (isBytes(x) ? x.n : Obj.raise(Obj.T.TypeError, "bin takes bytes, or a list of bytes pieces"));
+    const bytesOf = (x: any): Uint8Array => {
+      const n = sizeOf(x);
+      return x.a.subarray(0, n);
+    };
+    // (a list, as CPython's binding takes: not a tuple, which this runtime
+    // also keeps as an array, tagged $t; its count, kinds and summed size
+    // admitted before a view of any piece is made)
+    let pieces: Uint8Array[] | null = null;
+    if (Array.isArray(req) && (req as any).$t !== true) {
+      try {
+        pieces = pieceViews(req, sizeOf, bytesOf);
+      } catch (err: any) {
+        if (err instanceof BinRequestRefused) return Obj.raise(Obj.T.ValueError, `bin: ${err.message}`);
+        throw err;
+      }
+    }
+    const a = pieces === null ? bytesOf(req) : null;
+    try {
+      if (pieces !== null) {
+        const r = binCallPieces(pieces);
+        return r === null ? null : r.map((b) => new Obj.PyBytes(b));
+      }
+      const r = binCall(a!);
+      return r === null ? null : new Obj.PyBytes(r);
+    } catch (err: any) {
+      return engineError(err);
+    }
+  }, "bin");
   m.sym = Obj.builtin((req: any) => {
     try {
       return symCall(String(req));

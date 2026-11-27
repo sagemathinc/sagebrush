@@ -369,6 +369,8 @@ jobs:
           python3 test/sage_shim_index.py
           node scripts/pypi-import.mjs --check
           node scripts/tzdata-import.mjs --check
+          node dist/src/cli.js engine/py/test_series_ops.py
+          node dist/src/cli.js engine/py/test_poly_mul.py
           scripts/sync-python-package.sh --check
           node scripts/gen-viewer3d.mjs --check
           node cdn/build.mjs --check
@@ -1940,7 +1942,9 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_cpython == 'true'
     runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/')))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    # (Nov 26 2026: 15 min timed out on every track/math push: a cold maturin build, about 8 min, plus
+    # bench/core about 4 min; a cancelled run never saves the rust cache)
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -1981,6 +1985,11 @@ jobs:
           python3 engine/py/test_sage_names.py
           python3 engine/py/test_limits.py
           python3 engine/py/test_engine_errors.py
+          python3 engine/py/test_series_ops.py
+          python3 engine/py/test_poly_mul.py
+          python3 engine/py/test_modular_forms.py
+          python3 engine/py/test_cusp_hecke.py
+          python3 engine/py/test_factor_callback.py
           python3 engine/py/test_memguard.py
           python3 engine/py/test_capacity.py
           python3 engine/py/test_session_ctrl.py
@@ -1988,7 +1997,14 @@ jobs:
           python3 engine/py/test_python_floor.py --wheel
           python3 engine/py/test_progress.py
           python3 engine/py/test_kedlaya.py
+          # (bench/core: the reference input generator against the Sage-mode driver, the runner's process handling, and the shard driver)
+          BENCH_CI=1 python3 bench/core/test_expected_inputs.py
+          python3 bench/core/test_runner.py
+          python3 bench/core/test_shard.py
           python3 engine/py/test_ffmat_echelon.py
+          python3 engine/py/test_ech_bin.py
+          python3 engine/py/test_mul_bin.py
+          python3 test/ff_poly_bin.py
           python3 sage-tests/run_cpython.py -v
 
   # clippy on sagebrush-py (FU-CI-CLIPPY, plan r4e): no workflow ran clippy, so a deny-level lint in Ctrl-C PR B's test

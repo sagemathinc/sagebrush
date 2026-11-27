@@ -4,8 +4,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 // Every range(), list(), list repetition and loop over a parameter in the
-// matrix and vector code (lib/_sage_matrix.py, lib/_sage_ffmat.py, the
-// matrix part of lib/_sage_padic.py) is a reviewed site, recorded in
+// matrix and vector code (lib/_sage_matrix.py, lib/_sage_ffmat.py, lib/_sage_ffmat_more.py and
+// lib/_sage_ffmat_bin.py, the matrix part of lib/_sage_padic.py) is a
+// reviewed site, recorded in
 // test/matrix-alloc-sites.json: its size is bounded by data that already
 // passed _shape, _bounded_list or _bounded_rows.  A new or changed site
 // fails here until it is reviewed and recorded (the review of

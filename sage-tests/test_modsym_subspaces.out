@@ -1,0 +1,51 @@
+M.cuspidal_submodule().dimension() -> 2
+M.eisenstein_submodule().dimension() -> 1
+M33.new_submodule().dimension() -> 3
+M33.cuspidal_submodule().dimension() -> 6
+M.cuspidal_submodule().is_cuspidal() -> True
+M.is_cuspidal() -> False
+M33.cuspidal_submodule().hecke_matrix(2).charpoly() -> x^6 + 6*x^5 + 9*x^4 - 8*x^3 - 24*x^2 + 16
+M33.eisenstein_submodule().dimension() -> 3
+M33.new_submodule().cuspidal_submodule().dimension() -> 2
+M33.cuspidal_submodule().new_submodule().dimension() -> 2
+M33.eisenstein_submodule().hecke_matrix(2).charpoly() -> x^3 - 9*x^2 + 27*x - 27
+M33.new_submodule().hecke_matrix(2).charpoly() -> x^3 - 5*x^2 + 7*x - 3
+M37.cuspidal_submodule().dimension() -> 2
+M37.eisenstein_submodule().dimension() -> 1
+M37.cuspidal_submodule().hecke_matrix(2).charpoly() -> x^2 + 2*x
+M37.new_submodule().dimension() -> 3
+M1.cuspidal_submodule().dimension() -> 2
+M1.eisenstein_submodule().dimension() -> 1
+M1.cuspidal_submodule().hecke_matrix(2) -> [-24   0]
+[  0 -24]
+M24.new_submodule().dimension() -> 2
+M24.cuspidal_submodule().dimension() -> 2
+M24.eisenstein_submodule().dimension() -> 7
+M.eisenstein_submodule().is_cuspidal() -> False
+M.cuspidal_submodule().is_eisenstein() -> False
+M.eisenstein_submodule().is_eisenstein() -> True
+M.cuspidal_submodule() -> Modular Symbols subspace of dimension 2 of Modular Symbols space of dimension 3 for Gamma_0(11) of weight 2 with sign 0 over Rational Field
+M.eisenstein_submodule() -> Modular Symbols subspace of dimension 1 of Modular Symbols space of dimension 3 for Gamma_0(11) of weight 2 with sign 0 over Rational Field
+M33.new_submodule() -> Modular Symbols subspace of dimension 3 of Modular Symbols space of dimension 9 for Gamma_0(33) of weight 2 with sign 0 over Rational Field
+M.new_submodule() == M -> True
+M.cuspidal_submodule().hecke_matrix(3) -> [-1  0]
+[ 0 -1]
+M33.cuspidal_submodule().sign() -> 0
+M.cuspidal_subspace().dimension() -> 2
+ModularSymbols(25, 2).new_submodule().hecke_matrix(2).charpoly() -> x^3 + 3*x^2 + x + 3
+ModularSymbols(24, 4).new_submodule().dimension() -> 2
+ModularSymbols(36, 2, sign=1).new_submodule().hecke_matrix(5).charpoly() -> x
+M37.new_submodule() == M37 -> True
+ModularSymbols(22, 2).new_submodule().is_cuspidal() -> False
+ModularSymbols(50, 2).cuspidal_submodule().new_submodule().hecke_matrix(3).charpoly() -> x^4 - 2*x^2 + 1
+ModularSymbols(22, 4).new_submodule().hecke_matrix(3).charpoly() -> x^6 + 4*x^5 - 58*x^4 - 68*x^3 + 1073*x^2 - 1736*x + 784
+ModularSymbols(36, 2, sign=-1).new_submodule().dimension() -> 1
+ModularSymbols(45, 2, sign=1).new_submodule().hecke_matrix(2).charpoly() -> x - 1
+ModularSymbols(30, 4, sign=1).new_submodule().hecke_matrix(7).charpoly() -> x^2 - 28*x - 128
+ModularSymbols(26, 2).new_submodule().hecke_matrix(3) -> [ 4  0  0  0  3]
+[ 0 -1  0 -2  2]
+[ 0 -2 -3  2  0]
+[ 0 -2  0 -1  2]
+[ 0  0  0  0  1]
+ModularSymbols(18, 4).new_submodule().dimension() -> 2
+ModularSymbols(20, 6, sign=-1).new_submodule().hecke_matrix(3).charpoly() -> x - 22

@@ -456,30 +456,74 @@ pub fn basis_bytes(d: usize, w: usize, bits: u64) -> Option<u64> {
 }
 
 /// LLL-reduce the rows (independent, of one length) within `b`, for a
-/// caller with no cut: the rows are charged first; on the L^2 route
-/// (`l2_route_plain`), L^2's state is reserved, then L^2 runs on a copy while the
-/// rows stay charged; when it stops on its cap or its proof, its state is
-/// gone and the exact LLL starts over from the rows (its state reserved
-/// before the rows' charge is handed to it). Every other stop ends the call.
+/// caller with no cut: the rows are charged first, then [`reduce_held`].
 pub fn reduce(b: &Budget, rows: Vec<Vec<BigInt>>) -> FResult<Vec<Vec<BigInt>>> {
-    let d = rows.len();
-    if d < 2 {
-        return Ok(rows);
-    }
-    let w = rows[0].len();
+    let (d, w) = (rows.len(), rows.first().map_or(0, |r| r.len()));
     let e = rows.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0);
     let held = b.reserve(basis_bytes(d, w, e))?;
+    Ok(reduce_held(b, rows, held)?.0)
+}
+
+/// Shrink `r` in place to `bytes`: never an unreserved instant, and never a
+/// grow (`Reservation::shrink` saturates when asked to grow, which would
+/// leave memory under-reserved): a target above the reservation is an
+/// internal error.
+pub fn shrink_to(b: &Budget, r: &mut crate::budget::Reservation<'_>, bytes: Option<u64>) -> FResult<()> {
+    match bytes {
+        Some(x) if x <= r.bytes() => {
+            r.shrink(x);
+            Ok(())
+        }
+        _ => Err(b.internal("lll: a reservation asked to grow by shrinking")),
+    }
+}
+
+/// [`reduce`] with the rows already charged by `held` (the caller reserved
+/// them before making them). On the L^2 route (`l2_route_plain`), L^2's state
+/// is reserved, then L^2 runs on a copy while the rows stay charged; when it
+/// stops on its cap or its proof, its state is gone and the exact LLL starts
+/// over from the rows (its state reserved before the rows' charge is handed
+/// to it). Every other stop ends the call. Returns the reduced rows with
+/// their reservation: the route's state, shrunk in place to the rows'
+/// `basis_bytes` (so they stay charged until the caller is done with them).
+pub fn reduce_held<'a>(b: &'a Budget, rows: Vec<Vec<BigInt>>, held: crate::budget::Reservation<'a>) -> FResult<(Vec<Vec<BigInt>>, crate::budget::Reservation<'a>)> {
+    let d = rows.len();
+    if d < 2 {
+        // handed back as they are, their list made exact first
+        let mut rows = rows;
+        compact_rows(b, &mut rows)?;
+        return Ok((rows, held));
+    }
+    let w = rows[0].len();
+    let overflow = || b.refuse("work (overflow)", u64::MAX, b.work_left());
+    let entries = (d as u64).checked_mul(w as u64).and_then(|x| x.checked_add(1)).ok_or_else(overflow)?;
+    // the entries' sizes, and the output's after the reduction
+    b.debit(Some(entries))?;
+    let e = rows.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0);
+    let out = |basis: &Vec<Vec<BigInt>>| -> FResult<Option<u64>> {
+        b.debit(Some(entries))?;
+        Ok(basis_bytes(d, w, basis.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0)))
+    };
     if let Some(rt) = l2_route_plain(d, w, e) {
-        let state = b.reserve(Some(rt.state))?;
+        let mut state = b.reserve(Some(rt.state))?;
+        // L^2 runs on a copy: its limbs
+        let limbs_sum = rows.iter().flatten().try_fold(0u64, |s, x| s.checked_add(limbs(x.bits()))).ok_or_else(overflow)?;
+        b.debit(limbs_sum.checked_add(entries))?;
         let r = crate::l2::l2_budgeted_typed(b, rows.clone(), rt.cap);
-        drop(state);
         match r {
-            Ok(basis) => {
+            Ok(mut basis) => {
                 #[cfg(test)]
                 L2_REDUCED.with(|c| c.set(c.get() + 1));
-                return Ok(basis);
+                // the output rows, their list shrunk to them within L^2's
+                // state, which then shrinks to them (L^2 returns the copy
+                // made above, of exactly d rows: no slack today)
+                compact_rows(b, &mut basis)?;
+                shrink_to(b, &mut state, out(&basis)?)?;
+                drop(held);
+                return Ok((basis, state));
             }
             Err(crate::l2::L2Err::Fallback(_)) => {
+                drop(state);
                 #[cfg(test)]
                 FALLBACKS.with(|c| c.set(c.get() + 1));
             }
@@ -487,11 +531,278 @@ pub fn reduce(b: &Budget, rows: Vec<Vec<BigInt>>) -> FResult<Vec<Vec<BigInt>>> {
         }
     }
     let cap = cap_bits(d, e).ok_or_else(|| b.refuse("lll bits (overflow)", u64::MAX, 0))?;
-    let l = b.reserve(lattice_bytes(d, w, cap))?;
+    let mut l = b.reserve(lattice_bytes(d, w, cap))?;
     drop(held);
-    let r = lll(b, rows, cap)?;
-    drop(l);
-    Ok(r.basis)
+    let mut r = lll(b, rows, cap)?;
+    // the output rows, their list shrunk to them within the lattice's
+    // reservation, which then shrinks to them (the exact LLL works in the
+    // caller's list, which may have room to spare)
+    compact_rows(b, &mut r.basis)?;
+    shrink_to(b, &mut l, out(&r.basis)?)?;
+    Ok((r.basis, l))
+}
+
+/// The prime of [`rank_mod_p`]'s callers: the largest below 2^62.
+pub const RANK_PRIME: u64 = (1 << 62) - 57;
+
+/// Bytes [`rank_mod_p`] reserves for r rows of n entries: the residue rows
+/// (r vectors of n words), the outer vector and the used-row flags.
+pub fn rank_bytes(r: usize, n: usize) -> Option<u64> {
+    let (r, n) = (r as u64, n as u64);
+    r.checked_mul(n.checked_mul(8)?.checked_add(24)?)?.checked_add(24)?.checked_add(r)
+}
+
+/// The rank of the rows modulo the prime `p` (below 2^62), within `b`: a
+/// lower bound for their rank over Q, so rank r proves them independent. The
+/// residue rows, the outer vector and the flags (`rank_bytes`) are reserved
+/// before they are allocated: the elimination works in place in them, with
+/// u128 products in registers. Work, debited before each stage: the
+/// entries' sizes (one per entry), the residues (the rows' limbs, and one
+/// per entry), then the elimination
+/// (r n min(r, n) updates, r n for the pivot searches, 130 per pivot for its
+/// inverse: a word Euclid's steps). An interrupt is checked per pivot.
+pub fn rank_mod_p(b: &Budget, rows: &[Vec<BigInt>], p: u64) -> FResult<usize> {
+    let r = rows.len();
+    let n = rows.first().map_or(0, |x| x.len());
+    if r == 0 || n == 0 {
+        return Ok(0);
+    }
+    let overflow = || b.refuse("work (overflow)", u64::MAX, b.work_left());
+    let (r64, n64) = (r as u64, n as u64);
+    // the metadata scan (bits() per entry) is debited before it runs
+    b.debit(r64.checked_mul(n64).and_then(|x| x.checked_add(1)))?;
+    let limbs_sum = rows.iter().flatten().try_fold(0u64, |s, x| s.checked_add(limbs(x.bits()))).ok_or_else(overflow)?;
+    b.debit(limbs_sum.checked_add(r64.checked_mul(n64).ok_or_else(overflow)?).and_then(|x| x.checked_add(1)))?;
+    let _res = b.reserve(rank_bytes(r, n))?;
+    let mut a: Vec<Vec<u64>> = Vec::with_capacity(r);
+    for row in rows {
+        let mut v = Vec::with_capacity(n);
+        v.extend(row.iter().map(|x| sagebrush_bigint::rem_u64(x, p)));
+        a.push(v);
+    }
+    let mut used = vec![false; r];
+    let k = r64.min(n64);
+    let elim = r64.checked_mul(n64).and_then(|x| x.checked_mul(k)).and_then(|x| x.checked_add(r64.checked_mul(n64)?)).and_then(|x| x.checked_add(k.checked_mul(130)?)).and_then(|x| x.checked_add(1));
+    b.debit(Some(elim.ok_or_else(overflow)?))?;
+    let (pm, mut rank) = (p as u128, 0usize);
+    for c in 0..n {
+        sagebrush_interrupt::check();
+        let Some(piv) = (0..r).find(|&i| !used[i] && a[i][c] != 0) else { continue };
+        used[piv] = true;
+        rank += 1;
+        let inv = inv_mod(a[piv][c], p) as u128;
+        for x in a[piv].iter_mut() {
+            *x = ((*x as u128 * inv) % pm) as u64;
+        }
+        for i in 0..r {
+            if i == piv || a[i][c] == 0 {
+                continue;
+            }
+            let f = a[i][c] as u128;
+            // row i and the pivot row, borrowed apart
+            let (lo, hi) = a.split_at_mut(i.max(piv));
+            let (row, pr) = if i < piv { (&mut lo[i], &hi[0]) } else { (&mut hi[0], &lo[piv]) };
+            for (x, &y) in row.iter_mut().zip(pr.iter()) {
+                let t = (f * y as u128) % pm;
+                *x = ((*x as u128 + pm - t) % pm) as u64;
+            }
+        }
+    }
+    Ok(rank)
+}
+
+/// a^-1 mod p (a nonzero mod p, p prime below 2^62): the extended Euclidean
+/// algorithm on words.
+fn inv_mod(a: u64, p: u64) -> u64 {
+    let (mut r0, mut r1) = (p as i128, a as i128);
+    let (mut t0, mut t1) = (0i128, 1i128);
+    while r1 != 0 {
+        let q = r0 / r1;
+        (r0, r1) = (r1, r0 - q * r1);
+        (t0, t1) = (t1, t0 - q * t1);
+    }
+    t0.rem_euclid(p as i128) as u64
+}
+
+/// Make the rows' list and each row exactly as long as their contents,
+/// before a reservation shrinks to them: a list or row with room to spare
+/// keeps that capacity otherwise. Each goes through a boxed slice, whose
+/// length is exact by type, and every capacity is then checked against its
+/// length (an internal error otherwise), so the bound holds by contract,
+/// not by the allocator's behavior. (The entries need nothing: the default
+/// big-integer backend keeps every value within its compact capacity, which
+/// `big_bytes` covers.) The caller's larger reservation still covers the old
+/// buffers and one new one at a time; the work, a move per entry and per row,
+/// is debited first.
+pub fn compact_rows(b: &Budget, rows: &mut Vec<Vec<BigInt>>) -> FResult<()> {
+    let overflow = || b.refuse("work (overflow)", u64::MAX, b.work_left());
+    let entries = rows.iter().try_fold(0u64, |s, r| s.checked_add(r.len() as u64)).ok_or_else(overflow)?;
+    debit_at(b, "compact", entries.checked_add(rows.len() as u64).and_then(|x| x.checked_add(1)))?;
+    for row in rows.iter_mut() {
+        if row.capacity() != row.len() {
+            *row = std::mem::take(row).into_boxed_slice().into_vec();
+        }
+    }
+    if rows.capacity() != rows.len() {
+        *rows = std::mem::take(rows).into_boxed_slice().into_vec();
+    }
+    if rows.capacity() != rows.len() || rows.iter().any(|r| r.capacity() != r.len()) {
+        return Err(b.internal("lll: a compacted list kept spare capacity"));
+    }
+    Ok(())
+}
+
+/// Bytes [`hnf_budgeted`] holds for r rows of n entries of at most c bits:
+/// the working rows (`basis_bytes`), the pivot row's copy, the quotient, a
+/// product q y and an entry's new value while its old one is live.
+pub fn hnf_bytes(r: usize, n: usize, c: u64) -> Option<u64> {
+    let state = basis_bytes(r, n, c)?;
+    let pivot = (n as u64).checked_mul(big_bytes(c)?)?.checked_add(24)?;
+    state.checked_add(pivot)?.checked_add(big_bytes(c)?.checked_mul(3)?)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: when set, each of [`hnf_budgeted`]'s debits is recorded as
+    /// (its site, the work left before it), so a test can stop at each.
+    pub static HNF_TRACE: std::cell::RefCell<Option<Vec<(&'static str, u64)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Debit `units` at `site` (recorded in tests).
+fn debit_at(b: &Budget, _site: &'static str, units: Option<u64>) -> FResult<()> {
+    #[cfg(test)]
+    HNF_TRACE.with(|t| {
+        if let Some(v) = t.borrow_mut().as_mut() {
+            v.push((_site, b.work_left()));
+        }
+    });
+    b.debit(units)
+}
+
+/// The Hermite form of the rows' lattice (upper triangular, rank many
+/// rows, positive pivots, entries above a pivot reduced to [0, pivot)) within
+/// a budget, for `api::lll`'s dependent inputs: the elimination of the
+/// classgroup crate's `zlin::hnf`. A bound c on the entries' bits starts at
+/// the input's and grows as the elimination needs: before a row update
+/// x -= q y, max(x's row's largest entry, bits(q) + the pivot row's
+/// largest entry) + 1 bounds its products and its entries, and a larger bound
+/// reserves the difference of `hnf_bytes` first (merged into the one
+/// reservation), so growth refuses as memory. Work is debited before each
+/// step, by limb-based estimates of what it reads, copies and multiplies:
+/// the entries' sizes, the
+/// copy of the rows, each pivot search (its comparisons), quotient, bound
+/// check, row update (n (limbs(q) limbs(c) + 3 limbs(c) + 1) at the grown
+/// bound c: the product, the subtraction and the pivot row's copy), sign
+/// normalization and zero-row scan, the compaction and the output's sizes.
+/// Returns the
+/// rows (their list shrunk to them, `compact_rows`), their reservation shrunk
+/// in place to their `basis_bytes`, and the
+/// final bound.
+pub fn hnf_budgeted<'a>(b: &'a Budget, rows: &[Vec<BigInt>]) -> FResult<(Vec<Vec<BigInt>>, crate::budget::Reservation<'a>, u64)> {
+    let (r0, n) = (rows.len(), rows.first().map_or(0, |r| r.len()));
+    let overflow = || b.refuse("work (overflow)", u64::MAX, b.work_left());
+    let entries = (r0 as u64).checked_mul(n as u64).and_then(|x| x.checked_add(1)).ok_or_else(overflow)?;
+    // the entries' sizes (bits() per entry), then a copy of every limb
+    debit_at(b, "sizes", Some(entries))?;
+    let mut c = rows.iter().map(|r| crate::maxbits(r)).max().unwrap_or(0);
+    let limbs_sum = rows.iter().flatten().try_fold(0u64, |s, x| s.checked_add(limbs(x.bits()))).ok_or_else(overflow)?;
+    let mut res = b.reserve(hnf_bytes(r0, n, c))?;
+    debit_at(b, "copy", entries.checked_mul(2).and_then(|x| x.checked_add(limbs_sum)))?;
+    // the nonzero rows, in a list of exactly their number (a scan to count
+    // them, then one to copy them: both in the copy's debit)
+    let nonzero = |r: &&Vec<BigInt>| r.iter().any(|x| !x.is_zero());
+    let mut a: Vec<Vec<BigInt>> = Vec::with_capacity(rows.iter().filter(nonzero).count());
+    a.extend(rows.iter().filter(nonzero).cloned());
+    // a[i] -= q a[piv], the bound grown (reserved) first
+    let mut update = |a: &mut Vec<Vec<BigInt>>, i: usize, piv: usize, q: &BigInt, c: &mut u64| -> FResult<()> {
+        // the two rows' sizes
+        debit_at(b, "bound", (n as u64).checked_mul(2).and_then(|x| x.checked_add(1)))?;
+        // |x - q y| < 2^bits(x) + 2^(bits(q) + bits(y)), for the rows below
+        // the pivot and the upward reduction of the rows above it alike
+        let need = q.bits().checked_add(crate::maxbits(&a[piv])).map(|x| x.max(crate::maxbits(&a[i]))).and_then(|x| x.checked_add(1));
+        let need = need.ok_or_else(|| b.refuse("memory (overflow)", u64::MAX, 0))?;
+        if need > *c {
+            let more = hnf_bytes(r0, n, need).and_then(|x| x.checked_sub(hnf_bytes(r0, n, *c)?));
+            let mut more = b.reserve(more)?;
+            res.merge(&mut more)?;
+            *c = need;
+        }
+        // per entry: the product, the subtraction and the pivot row's copy
+        // (limb-based estimates), and the bound check after
+        let lc = limbs(*c);
+        let per = limbs(q.bits()).checked_mul(lc).and_then(|x| x.checked_add(lc.checked_mul(3)?)).and_then(|x| x.checked_add(1)).ok_or_else(overflow)?;
+        debit_at(b, "update", Some((n as u64).checked_mul(per).ok_or_else(overflow)?))?;
+        let pr = a[piv].clone();
+        for (x, y) in a[i].iter_mut().zip(&pr) {
+            *x -= q * y;
+        }
+        if crate::maxbits(&a[i]) > *c {
+            return Err(b.internal("lll: a Hermite row passed its bound"));
+        }
+        Ok(())
+    };
+    let quotient = |x: &BigInt, d: &BigInt| -> FResult<BigInt> {
+        debit_at(b, "quotient", limbs(x.bits()).checked_mul(limbs(d.bits())).and_then(|u| u.checked_add(1)))?;
+        Ok(x.div_floor(d))
+    };
+    let mut r = 0;
+    for col in 0..n {
+        loop {
+            sagebrush_interrupt::check();
+            // each comparison reads (and copies, as magnitudes, within the
+            // transients of `hnf_bytes`) two entries of at most c bits
+            let below = (a.len() - r.min(a.len())) as u64 + 1;
+            debit_at(b, "pivot search", below.checked_mul(limbs(c).checked_mul(2).ok_or_else(overflow)?.checked_add(1).ok_or_else(overflow)?))?;
+            // the smallest nonzero entry of the column at or below r
+            let best = (r..a.len()).filter(|&i| !a[i][col].is_zero()).min_by(|&i, &j| a[i][col].abs().cmp(&a[j][col].abs()));
+            let Some(bi) = best else { break };
+            a.swap(r, bi);
+            let mut clean = true;
+            for i in r + 1..a.len() {
+                if a[i][col].is_zero() {
+                    continue;
+                }
+                let q = quotient(&a[i][col], &a[r][col])?;
+                update(&mut a, i, r, &q, &mut c)?;
+                if !a[i][col].is_zero() {
+                    clean = false;
+                }
+            }
+            if clean {
+                break;
+            }
+        }
+        if r >= a.len() || a[r][col].is_zero() {
+            continue;
+        }
+        if a[r][col].is_negative() {
+            debit_at(b, "sign", (n as u64).checked_mul(limbs(c)).and_then(|x| x.checked_add(1)))?;
+            for x in a[r].iter_mut() {
+                *x = -&*x;
+            }
+        }
+        for i in 0..r {
+            let q = quotient(&a[i][col], &a[r][col])?;
+            if !q.is_zero() {
+                update(&mut a, i, r, &q, &mut c)?;
+            }
+        }
+        r += 1;
+        debit_at(b, "zero rows", (a.len() as u64).checked_mul(n as u64).and_then(|x| x.checked_add(1)))?;
+        a.retain(|row| row.iter().any(|x| !x.is_zero()));
+        if r >= a.len() {
+            break;
+        }
+    }
+    a.truncate(r);
+    drop(update);
+    // the rows' list shrunk to them (`compact_rows`) while the whole
+    // reservation still covers it, then the rows handed off at their size
+    compact_rows(b, &mut a)?;
+    debit_at(b, "output sizes", (r as u64).checked_mul(n as u64).and_then(|x| x.checked_add(1)))?;
+    let eh = a.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0);
+    shrink_to(b, &mut res, basis_bytes(r, n, eh))?;
+    Ok((a, res, c))
 }
 
 #[cfg(test)]
@@ -660,7 +971,11 @@ mod tests {
         let m = knapsack(16, 120, &mut seed);
         let e = m.iter().flatten().map(|x| x.bits()).max().unwrap();
         assert!(l2_route_plain(16, 17, e).is_some(), "the work witness must take the L^2 route");
-        let b = Budget::new(Limits { work: 10, ..Limits::UNLIMITED });
+        // past reduce_held's own debits (the sizes, the copy's limbs), short
+        // in L^2
+        let entries = 16 * 17 + 1;
+        let copy: u64 = m.iter().flatten().map(|x| limbs(x.bits())).sum::<u64>() + entries;
+        let b = Budget::new(Limits { work: entries + copy + 10, ..Limits::UNLIMITED });
         let fb0 = FALLBACKS.with(|c| c.get());
         let e = reduce(&b, m).unwrap_err();
         assert_eq!(e.what, "l2 work", "{e}");
@@ -739,8 +1054,14 @@ mod tests {
         let rows = |d: usize, w: usize, c: u64| (d as u64).checked_mul(w as u64)?.checked_mul(c / 8 + 32);
         assert_eq!(l2_cap(1, u64::MAX), None);
         assert_eq!(l2_cap(usize::MAX, u64::MAX - 63), None);
+        // (a shape past a 32-bit usize only where usize holds it; the widest
+        // a 32-bit one holds there)
+        #[cfg(target_pointer_width = "64")]
+        const WIDE: &[(usize, usize, u64)] = &[(1 << 32, 1 << 32, 64)];
+        #[cfg(not(target_pointer_width = "64"))]
+        const WIDE: &[(usize, usize, u64)] = &[(usize::MAX, usize::MAX, 64)];
         // (the row length enters only through its logarithm)
-        for (d, w, c) in [(usize::MAX, 1, 1), (1, 1, u64::MAX), (1 << 32, 1 << 32, 64), (1 << 20, 1, u64::MAX / 4)] {
+        for &(d, w, c) in [(usize::MAX, 1, 1), (1, 1, u64::MAX), (1 << 20, 1, u64::MAX / 4)].iter().chain(WIDE) {
             assert_eq!(cut_bytes(d, w, c), None, "{d} {w} {c}");
             assert_eq!(cut_exact_bytes(d, w, c), None, "{d} {w} {c}");
         }
@@ -909,5 +1230,343 @@ mod tests {
             // same lattice volume
             assert_eq!(red.d.last(), gram_dets(&m).last());
         }
+    }
+
+    /// rank_mod_p's residues: x mod p in [0, p) for zero, positive and
+    /// negative multi-limb entries, a negative one with remainder 0 included.
+    #[test]
+    fn rank_residues_of_signed_multi_limb_entries() {
+        use num_integer::Integer;
+        let p = RANK_PRIME;
+        let pb = BigInt::from(p);
+        let big = BigInt::from(3u32).pow(150) + BigInt::from(7u32);
+        for x in [BigInt::zero(), BigInt::from(5u32), big.clone(), -big.clone(), -(&pb << 100u32), &pb * BigInt::from(9u32)] {
+            let want = x.mod_floor(&pb);
+            assert_eq!(BigInt::from(sagebrush_bigint::rem_u64(&x, p)), want, "{x}");
+        }
+        // -(p 2^100) has remainder 0, so this row is zero mod p
+        let m = vec![vec![-(&pb << 100u32), BigInt::zero()], vec![BigInt::zero(), -big]];
+        assert_eq!(rank_mod_p(&Budget::default(), &m, p), Ok(1));
+    }
+
+    /// The rank modulo p: full on independent rows, short on dependent ones
+    /// (with negative and multi-limb entries), and short on an unlucky prime.
+    #[test]
+    fn rank_mod_p_counts_independent_rows() {
+        let b = Budget::default();
+        let mut seed = 0x0dd_ba11_u64;
+        let k = knapsack(6, 300, &mut seed);
+        assert_eq!(rank_mod_p(&b, &k, RANK_PRIME), Ok(6));
+        let mut dep = k.clone();
+        dep.push(dep[0].iter().zip(&dep[3]).map(|(x, y)| x * BigInt::from(-5i64) + y).collect());
+        assert_eq!(rank_mod_p(&b, &dep, RANK_PRIME), Ok(6));
+        assert_eq!(rank_mod_p(&b, &z(&[&[7, 0], &[0, 1]]), 7), Ok(1));
+        assert_eq!(rank_mod_p(&b, &z(&[&[7, 0], &[0, 1]]), RANK_PRIME), Ok(2));
+        assert_eq!(rank_mod_p(&b, &z(&[]), RANK_PRIME), Ok(0));
+    }
+
+    /// rank_mod_p reserves its buffers before allocating them: its
+    /// allocator peak is within `rank_bytes`, the Budget's peak is exactly
+    /// that, one byte less refuses with nothing allocated, and a finite work
+    /// limit refuses before the stage it would not cover.
+    #[test]
+    fn rank_mod_p_stays_within_its_reservation() {
+        let mut seed = 0x7a_11_0c_u64;
+        let m = knapsack(12, 500, &mut seed);
+        let (r, n) = (m.len(), m[0].len());
+        let need = rank_bytes(r, n).unwrap();
+        let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED });
+        let (got, peak) = crate::alloc_spy::peak_during(|| rank_mod_p(&b, &m, RANK_PRIME));
+        assert_eq!(got, Ok(12));
+        assert!(peak as u64 <= need, "allocator peak {peak} above {need}");
+        assert_eq!((b.peak(), b.live()), (need, 0));
+        let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED });
+        let before = crate::alloc_spy::live();
+        let e = rank_mod_p(&b, &m, RANK_PRIME).unwrap_err();
+        assert_eq!((e.what, e.need - e.remaining), ("memory", 1));
+        assert_eq!((b.live(), crate::alloc_spy::live()), (0, before));
+        for work in [1, (r * n) as u64 + 5, (r * n) as u64 * 4] {
+            let b = Budget::new(Limits { work, ..Limits::UNLIMITED });
+            let e = rank_mod_p(&b, &m, RANK_PRIME).unwrap_err();
+            assert_eq!(e.what, "work", "work {work}: {e}");
+            assert_eq!(b.peak(), if work == 1 || work == (r * n) as u64 + 5 { 0 } else { need }, "work {work}");
+        }
+    }
+
+    /// The Hermite stage reserves before it allocates: its allocator peak
+    /// is within `hnf_bytes` at its final bound, the Budget's peak is exactly
+    /// that, it hands back the rows' reservation shrunk to their
+    /// `basis_bytes`, and one byte less refuses as memory (at a growth step
+    /// when the bound grew) with nothing left allocated.
+    #[test]
+    fn hnf_budgeted_stays_within_its_reservation() {
+        let mut seed = 0x4e_a1_7e_u64;
+        let mut grew = 0;
+        for (r, bits) in [(9usize, 30u32), (8, 200), (12, 8), (20, 64)] {
+            // knapsack rows with a dependent one: a combination of the first two
+            let mut m = knapsack(r - 1, bits, &mut seed);
+            let extra: Vec<BigInt> = m[0].iter().zip(&m[1]).map(|(x, y)| x - y * BigInt::from(5)).collect();
+            m.push(extra);
+            let n = m[0].len();
+            let e = m.iter().map(|x| crate::maxbits(x)).max().unwrap();
+            let c = hnf_budgeted(&Budget::default(), &m).map(|x| x.2).unwrap();
+            grew += (c > e) as u32;
+            let need = hnf_bytes(m.len(), n, c).unwrap();
+            let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED });
+            let ((h, held), peak) = crate::alloc_spy::peak_during(|| {
+                let (h, res, _) = hnf_budgeted(&b, &m).unwrap();
+                (h, res.bytes())
+            });
+            assert!(peak as u64 <= need, "r {r}: allocator peak {peak} above {need}");
+            assert_eq!(h.len(), r - 1, "r {r}: the rank");
+            let eh = h.iter().map(|x| crate::maxbits(x)).max().unwrap();
+            assert_eq!(held, basis_bytes(h.len(), n, eh).unwrap());
+            assert_eq!((b.peak(), b.live()), (need, 0));
+            let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED });
+            let before = crate::alloc_spy::live();
+            let err = hnf_budgeted(&b, &m).map(|_| ()).unwrap_err();
+            assert_eq!((err.what, err.need - err.remaining), ("memory", 1), "r {r}");
+            assert_eq!((b.live(), crate::alloc_spy::live()), (0, before));
+        }
+        assert!(grew >= 2, "the bound grew in {grew} cases");
+    }
+
+    /// `compact_rows` makes the list and each row exactly as long as their
+    /// contents (the invariant the hand-offs shrink to), from lists and rows
+    /// with room to spare; and the hand-offs return such lists: the Hermite
+    /// stage's, and `reduce_held`'s on each route and for fewer than 2 rows.
+    #[test]
+    fn compaction_leaves_no_room_to_spare() {
+        let exact = |m: &Vec<Vec<BigInt>>| m.capacity() == m.len() && m.iter().all(|r| r.capacity() == r.len());
+        let mut rows: Vec<Vec<BigInt>> = Vec::with_capacity(4096);
+        for i in 0..5i64 {
+            let mut r = Vec::with_capacity(64);
+            r.extend((0..3).map(|j| BigInt::from(i * 7 + j)));
+            rows.push(r);
+        }
+        let b = Budget::default();
+        compact_rows(&b, &mut rows).unwrap();
+        assert!(exact(&rows));
+        assert_eq!(rows[4], z(&[&[28, 29, 30]])[0]);
+        let mut empty: Vec<Vec<BigInt>> = Vec::with_capacity(16);
+        compact_rows(&b, &mut empty).unwrap();
+        assert!(exact(&empty));
+        let (h, _, _) = hnf_budgeted(&b, &(0..1000).map(|_| z(&[&[1, 2]])[0].clone()).collect::<Vec<_>>()).unwrap();
+        assert!(exact(&h));
+        let mut seed = 0x5ca1_ab1e_u64;
+        let big = BigInt::from(10u32).pow(60);
+        let wide: Vec<Vec<BigInt>> = (0..5u64)
+            .map(|i| {
+                let mut r: Vec<BigInt> = (0..5u64).map(|j| BigInt::from((i == j) as u8)).collect();
+                r.push(&big + BigInt::from(i));
+                r
+            })
+            .collect();
+        for m in [wide, knapsack(30, 400, &mut seed), z(&[&[3, 4, 5]])] {
+            let (d, w) = (m.len(), m[0].len());
+            let e = m.iter().map(|x| crate::maxbits(x)).max().unwrap();
+            // the baseline before the rows handed in are made: what is live
+            // after the call above it is what the call returned
+            let before = crate::alloc_spy::live();
+            let mut spare = Vec::with_capacity(4096);
+            for r in &m {
+                let mut v = Vec::with_capacity(4 * w);
+                v.extend(r.iter().cloned());
+                spare.push(v);
+            }
+            let held = b.reserve(basis_bytes(d, w, e)).unwrap();
+            let (out, res) = reduce_held(&b, spare, held).unwrap();
+            assert!(exact(&out), "d {d}");
+            let live = crate::alloc_spy::live() - before;
+            assert!(live >= 0 && live <= res.bytes() as i64, "d {d}: {live} live bytes, {} held", res.bytes());
+            assert_eq!(b.live(), res.bytes());
+            drop((out, res));
+            assert_eq!((b.live(), crate::alloc_spy::live()), (0, before), "d {d}");
+        }
+    }
+
+    /// What the Hermite stage hands off is all it holds: for rank 0, rank 1
+    /// from a thousand equal rows, and many dependent rows, the live bytes
+    /// left with the returned rows (their list, rows and entries) are within
+    /// the returned reservation, which is all the Budget still holds.
+    #[test]
+    fn hnf_budgeted_hands_off_what_it_holds() {
+        let row = |v: &[i64]| v.iter().map(|&x| BigInt::from(x)).collect::<Vec<BigInt>>();
+        let mut many = vec![];
+        for k in 0..300i64 {
+            // combinations of three rows, with large entries
+            let (x, y, w) = (k % 7 - 3, k % 5 - 2, k % 3 + 1);
+            let big = BigInt::from(1u32) << 200u32;
+            many.push(vec![&big * x + w, BigInt::from(y) * &big, BigInt::from(x + y), BigInt::from(w * 11 - x), &big * w - y]);
+        }
+        // dense signed rows whose bound grows by a limb or more, while the
+        // Hermite form's entries end far below it
+        let mut seed = 0x6a09_e667_f3bc_c908_u64;
+        let mut word = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed >> 32
+        };
+        let mut dense: Vec<Vec<BigInt>> = (0..11).map(|_| (0..10).map(|_| BigInt::from(((word() << 32) | word()) as i64)).collect()).collect();
+        dense.push(dense[0].iter().zip(&dense[1]).map(|(x, y)| x * BigInt::from(3) - y).collect());
+        let cases: Vec<(Vec<Vec<BigInt>>, usize)> = vec![
+            ((0..60).map(|_| row(&[0, 0, 0])).collect(), 0),
+            ((0..1000).map(|_| row(&[1, 2])).collect(), 1),
+            (many, 3),
+            (dense, 10),
+        ];
+        for (m, rank) in cases {
+            let b = Budget::default();
+            let before = crate::alloc_spy::live();
+            let (h, res, c) = hnf_budgeted(&b, &m).unwrap();
+            let live = crate::alloc_spy::live() - before;
+            assert_eq!(h.len(), rank);
+            if rank == 10 {
+                let eh = h.iter().map(|x| crate::maxbits(x)).max().unwrap();
+                assert!(c >= 64 + m.iter().map(|x| crate::maxbits(x)).max().unwrap() && c > 2 * eh, "bound {c}, output {eh} bits");
+            }
+            assert!(live as u64 <= res.bytes(), "rank {rank}: {live} live bytes, {} held", res.bytes());
+            assert_eq!(b.live(), res.bytes());
+            drop((h, res));
+            assert_eq!((b.live(), crate::alloc_spy::live()), (0, before));
+        }
+        // reduce_held's hand-off, on each route (its rows given in a list with
+        // spare room): what it returns lives within the reservation it returns
+        let big = BigInt::from(10u32).pow(60);
+        let wide: Vec<Vec<BigInt>> = (0..5u64)
+            .map(|i| {
+                let mut r: Vec<BigInt> = (0..5u64).map(|j| BigInt::from((i == j) as u8)).collect();
+                r.push(&big + BigInt::from(i));
+                r
+            })
+            .collect();
+        let mut seed = 0x0ff_1ce_u64;
+        for (m, l2) in [(wide, false), (knapsack(30, 400, &mut seed), true)] {
+            let (d, w) = (m.len(), m[0].len());
+            let e = m.iter().map(|x| crate::maxbits(x)).max().unwrap();
+            assert_eq!(l2_route_plain(d, w, e).is_some(), l2);
+            let b = Budget::default();
+            let before = crate::alloc_spy::live();
+            // a list with room to spare: the exact LLL works in it
+            let mut rows = Vec::with_capacity(4096);
+            rows.extend(m.iter().cloned());
+            let held = b.reserve(basis_bytes(d, w, e)).unwrap();
+            let (out, res) = reduce_held(&b, rows, held).unwrap();
+            let live = crate::alloc_spy::live() - before;
+            assert!(live as u64 <= res.bytes(), "L^2 {l2}: {live} live bytes, {} held", res.bytes());
+            assert_eq!(b.live(), res.bytes());
+            drop((out, res));
+            assert_eq!((b.live(), crate::alloc_spy::live()), (0, before));
+        }
+    }
+
+    /// A growth of the bound past a limb (64 bits or more, on dense signed
+    /// dependent rows): the allocator peak is within `hnf_bytes` at the final
+    /// bound, which is the Budget's peak, and one byte less refuses as
+    /// memory with nothing left allocated.
+    #[test]
+    fn hnf_budgeted_grows_past_a_limb_within_its_reservation() {
+        let mut seed = 0x6a09_e667_f3bc_c908_u64;
+        let mut word = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed >> 32
+        };
+        let mut m: Vec<Vec<BigInt>> = (0..11)
+            .map(|_| (0..10).map(|_| BigInt::from(((word() << 32) | word()) as i64)).collect())
+            .collect();
+        m.push(m[0].iter().zip(&m[1]).map(|(x, y)| x * BigInt::from(3) - y).collect());
+        let n = m[0].len();
+        let e = m.iter().map(|x| crate::maxbits(x)).max().unwrap();
+        let c = hnf_budgeted(&Budget::default(), &m).map(|x| x.2).unwrap();
+        assert!(c >= e + 64, "the bound grew from {e} to {c} only");
+        let need = hnf_bytes(m.len(), n, c).unwrap();
+        let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED });
+        let (got, peak) = crate::alloc_spy::peak_during(|| hnf_budgeted(&b, &m).map(|x| x.0.len()));
+        // rank 10: the columns
+        assert_eq!(got, Ok(10));
+        assert!(peak as u64 <= need, "allocator peak {peak} above {need}");
+        assert_eq!((b.peak(), b.live()), (need, 0));
+        let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED });
+        let before = crate::alloc_spy::live();
+        let err = hnf_budgeted(&b, &m).map(|_| ()).unwrap_err();
+        assert_eq!((err.what, err.need - err.remaining), ("memory", 1));
+        assert_eq!((b.live(), crate::alloc_spy::live()), (0, before));
+    }
+
+    /// An update whose products stay short can still carry an entry past
+    /// the bound (x at the bound, x - q y one bit longer): the bound grows
+    /// first, and the result is the Hermite form, not an internal error.
+    #[test]
+    fn hnf_budgeted_grows_for_a_carry_past_the_bound() {
+        // the pivot is row 0's 1, q = 2, and row 1 - 2 row 0 = (0, 257):
+        // 9 bits, past the bound of 8, from a 3-bit q y
+        let m = z(&[&[1, -1], &[2, 255]]);
+        let (h, _, c) = hnf_budgeted(&Budget::default(), &m).unwrap();
+        assert_eq!(h, z(&[&[1, 256], &[0, 257]]));
+        // 9 there; then row 0's upward reduction, q = -1 against the 9-bit
+        // pivot row, bounds its entries by 1 + 9 + 1
+        assert_eq!(c, 11);
+    }
+
+    /// Every work debit of the Hermite stage comes before its work: with
+    /// the work limit set to what was used just before a debit, the call
+    /// refuses there (as work), with nothing left reserved or allocated;
+    /// every site is reached (the sizes, the copy, a pivot search, a
+    /// quotient, a bound check, an update, a sign normalization, a zero-row
+    /// scan, the output's sizes).
+    #[test]
+    fn hnf_budgeted_debits_before_each_step() {
+        // dependent rows with negative pivots
+        let m = z(&[&[-3, 5, 7, 2], &[6, -2, 4, -8], &[-9, 3, 11, 5], &[3, 3, 11, -6], &[0, 7, -1, 4]]);
+        let trace = || {
+            HNF_TRACE.with(|t| *t.borrow_mut() = Some(vec![]));
+            let b = Budget::default();
+            let r = hnf_budgeted(&b, &m).map(|x| x.0);
+            (r, HNF_TRACE.with(|t| t.borrow_mut().take().unwrap()))
+        };
+        let (want, sites) = trace();
+        let want = want.unwrap();
+        let mut seen: Vec<&str> = sites.iter().map(|x| x.0).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen, ["bound", "compact", "copy", "output sizes", "pivot search", "quotient", "sign", "sizes", "update", "zero rows"]);
+        for (k, &(site, left)) in sites.iter().enumerate() {
+            let used = u64::MAX - left;
+            // (the trace's own room allocated before the count starts)
+            HNF_TRACE.with(|t| *t.borrow_mut() = Some(Vec::with_capacity(sites.len() + 1)));
+            let b = Budget::new(Limits { work: used, ..Limits::UNLIMITED });
+            let before = crate::alloc_spy::live();
+            let err = hnf_budgeted(&b, &m).map(|_| ()).unwrap_err();
+            let got = HNF_TRACE.with(|t| t.borrow_mut().take().unwrap());
+            assert_eq!((err.what, got.len(), got.last().map(|x| x.0)), ("work", k + 1, Some(site)), "debit {k} ({site})");
+            assert_eq!((b.live(), crate::alloc_spy::live()), (0, before), "debit {k} ({site})");
+        }
+        let b = Budget::new(Limits { work: u64::MAX - sites.last().unwrap().1 + 10_000, ..Limits::UNLIMITED });
+        assert_eq!(hnf_budgeted(&b, &m).unwrap().0, want);
+    }
+
+    /// A merge keeps the Budget's live bytes, and the merged reservation's
+    /// drop releases nothing; across budgets it is an internal error that
+    /// leaves both reservations, and both Budgets' live bytes, as they were.
+    #[test]
+    fn a_merged_reservation_moves_its_bytes() {
+        let b = Budget::default();
+        let mut x = b.reserve(Some(100)).unwrap();
+        let mut y = b.reserve(Some(30)).unwrap();
+        x.merge(&mut y).unwrap();
+        assert_eq!((x.bytes(), y.bytes(), b.live()), (130, 0, 130));
+        drop(y);
+        assert_eq!(b.live(), 130);
+        x.shrink(10);
+        assert_eq!(b.live(), 10);
+        drop(x);
+        assert_eq!(b.live(), 0);
+        let other = Budget::default();
+        let mut x = b.reserve(Some(5)).unwrap();
+        let mut z = other.reserve(Some(7)).unwrap();
+        assert_eq!(x.merge(&mut z).unwrap_err().kind, crate::budget::Kind::Internal);
+        // both reservations as they were, each still held by its Budget
+        assert_eq!((x.bytes(), z.bytes(), b.live(), other.live()), (5, 7, 5, 7));
+        drop(z);
+        assert_eq!(other.live(), 0);
     }
 }

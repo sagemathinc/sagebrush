@@ -254,6 +254,8 @@ const cpythonPaths = [
   // (web/notebook/test-pair-runner.mjs) and the terminal page (engine/py/remote_terminal_page.mjs), and what they import)
   /^web\/notebook\/(?:pair-tunnel|remote-client|remote-kernel|remote-terminal)\.js$/, /^web\/notebook\/test-pair-runner\.mjs$/,
   /^src\/wave-policy\.ts$/,
+  // (bench/core: its tests run in engine-cpython, test_expected_inputs.py against the engine wheel)
+  /^bench\/core\//,
 ];
 // The WebKit job's inputs (plan-kedlaya-webkit-ci r4: detection, the
 // production refusal and Stop of Kedlaya's Frobenius matrix in Playwright's

@@ -1,0 +1,31 @@
+1.0000000 - +infinity*I | 1.0000000 - +\inftyi
++infinity - +infinity*I | +\infty - +\inftyi
+NaN - +infinity*I | NaN - +\inftyi
+-infinity*I | -\inftyi
+1.0000000 + +infinity*I | 1.0000000 + +\inftyi
+-1.0000000 - 2.0000000*I | -1.0000000 - 2.0000000i
+1.0000000 + NaN*I | 1.0000000 + NaNi
+-infinity - 1.0000000*I | -\infty - 1.0000000i
+-infinity - +infinity*I | -\infty - +\inftyi
+1.00000000000000 - +infinity*I | 1.00000000000000 - +\inftyi
++infinity - +infinity*I | +\infty - +\inftyi
+NaN - +infinity*I | NaN - +\inftyi
+-infinity*I | -\inftyi
+1.00000000000000 + +infinity*I | 1.00000000000000 + +\inftyi
+-1.00000000000000 - 2.00000000000000*I | -1.00000000000000 - 2.00000000000000i
+1.00000000000000 + NaN*I | 1.00000000000000 + NaNi
+-infinity - 1.00000000000000*I | -\infty - 1.00000000000000i
+-infinity - +infinity*I | -\infty - +\inftyi
+1.0000000000000000000000000000 - +infinity*I | 1.0000000000000000000000000000 - +\inftyi
++infinity - +infinity*I | +\infty - +\inftyi
+NaN - +infinity*I | NaN - +\inftyi
+-infinity*I | -\inftyi
+1.0000000000000000000000000000 + +infinity*I | 1.0000000000000000000000000000 + +\inftyi
+-1.0000000000000000000000000000 - 2.0000000000000000000000000000*I | -1.0000000000000000000000000000 - 2.0000000000000000000000000000i
+1.0000000000000000000000000000 + NaN*I | 1.0000000000000000000000000000 + NaNi
+-infinity - 1.0000000000000000000000000000*I | -\infty - 1.0000000000000000000000000000i
+-infinity - +infinity*I | -\infty - +\inftyi
++infinity - +infinity*I +infinity - +infinity*I
+1.0000000 - +infinity*I | 1.0000000 - +\inftyi
+-2.0000000000000000000000000000 - +infinity*I | -2.0000000000000000000000000000 - +\inftyi
+-infinity*I | -\inftyi

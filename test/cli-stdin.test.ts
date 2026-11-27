@@ -26,6 +26,13 @@ test("a program on stdin runs in each mode: Python, Sage, Magma and MATLAB", () 
   }
 });
 
+test("the --sage prompt (-i): `time STATEMENT` times it, as Sage's prompt does; the name time stays usable", () => {
+  const r = run(["--sage", "-i"], "time t = 2^10\nprint(t)\ntime = 5\nprint(time + 1)\n");
+  assert.equal(r.stdout.replace(/Wall time: [\d.]+ (s|ms|µs|ns)/, "WALL"), "sage: WALL\nsage: 1024\nsage: sage: 6\nsage: ", r.stderr);
+  // a Python prompt keeps Python's syntax
+  assert.match(run(["-i"], "time t = 1\n").stderr, /SyntaxError/);
+});
+
 test("a prompt (-i) on piped input runs every line, writes its last prompt, and exits 0 at the input's end, in each mode", () => {
   // (the input ends while its last line runs: the prompt after it is written, not refused by a closed readline)
   const cases: [string[], string, string][] = [

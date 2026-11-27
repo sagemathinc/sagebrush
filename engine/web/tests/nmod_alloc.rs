@@ -140,16 +140,78 @@ fn peaks_within_bounds() {
         eprintln!("nmod_poly_divrem p={} {}/{}: request {} + growth {} <= {}", p, la, lb, req.len(), g, peak_of("nmod_poly_divrem"));
         assert!(req.len() + g <= peak_of("nmod_poly_divrem"));
     }
-    // nmod_poly_gcd: random inputs at the cap (every Euclid step drops the
-    // degree by one: the most steps), and one long step (lb = 2)
-    for lb in [GCD_MAX_LEN, 2] {
-        let (a, b) = (rand_poly(&mut s, GCD_MAX_LEN, P), rand_poly(&mut s, lb, P));
-        let req = format!(r#"{{"fn":"nmod_poly_gcd","p":"{}","a":"{}","b":"{}"}}"#, P, csv(&a), csv(&b));
+    // nmod_poly_gcd: the half-gcd at the cap, with three primes' tables
+    // and with an NTT prime's own (random inputs: gcd 1); just past
+    // Euclid's cutoff (lb = 1001: the most remainders between half-gcds);
+    // a common factor of half the cap; a = b at the cap (the longest
+    // reply); and Euclid's most steps (lb = 1000, every step drops the
+    // degree by one) and one long step (lb = 2)
+    let mut gcd_cases = vec![];
+    for (p, lb) in [(P, GCD_MAX_LEN), (NTT_P, GCD_MAX_LEN), (P, 1001), (P, 1000), (P, 2)] {
+        let (a, b) = (rand_poly(&mut s, GCD_MAX_LEN, p), rand_poly(&mut s, lb, p));
+        gcd_cases.push((p, a, b, "1".to_string()));
+    }
+    for p in [P, NTT_P] {
+        let h = GCD_MAX_LEN / 2;
+        let mut c = rand_poly(&mut s, h + 1, p);
+        c[h] = 1;
+        let (u, v) = (rand_poly(&mut s, h, p), rand_poly(&mut s, h, p));
+        let m = sagebrush_arith::nmod::Modulus::new(p);
+        let (a, b) = (sagebrush_arith::nmod_poly::mul(&c, &u, &m), sagebrush_arith::nmod_poly::mul(&c, &v, &m));
+        assert_eq!((a.len(), b.len()), (GCD_MAX_LEN, GCD_MAX_LEN));
+        // (u and v random: coprime but for a small chance the assert sees)
+        gcd_cases.push((p, a, b, csv(&c)));
+    }
+    for p in [P, NTT_P] {
+        let mut a = rand_poly(&mut s, GCD_MAX_LEN, p);
+        a[GCD_MAX_LEN - 1] = 1;
+        gcd_cases.push((p, a.clone(), a.clone(), csv(&a)));
+    }
+    for (p, a, b, want) in gcd_cases {
+        let req = format!(r#"{{"fn":"nmod_poly_gcd","p":"{}","a":"{}","b":"{}"}}"#, p, csv(&a), csv(&b));
+        let lb = b.len();
         drop((a, b));
         let (g, r) = growth(&req);
-        assert_eq!(r, "{\"ok\":\"1\"}");
-        eprintln!("nmod_poly_gcd {}/{}: request {} + growth {} <= {}", GCD_MAX_LEN, lb, req.len(), g, peak_of("nmod_poly_gcd"));
-        assert!(req.len() + g <= peak_of("nmod_poly_gcd"));
+        assert_eq!(r, format!("{{\"ok\":\"{}\"}}", want), "p={} lb={}", p, lb);
+        eprintln!("nmod_poly_gcd p={} {}/{}: request {} + growth {} <= {}", p, GCD_MAX_LEN, lb, req.len(), g, peak_of("nmod_poly_gcd"));
+        assert!(req.len() + g <= peak_of("nmod_poly_gcd"), "p={} lb={}", p, lb);
+    }
+    // a Stop inside the half-gcd at the cap (in a product's transform, in
+    // a division, in the gcd's own loop) frees everything the call
+    // allocated: its tables and every frame's polynomials
+    {
+        use sagebrush_interrupt::hooks;
+        let (a, b) = (rand_poly(&mut s, GCD_MAX_LEN, P), rand_poly(&mut s, GCD_MAX_LEN, P));
+        let req = format!(r#"{{"fn":"nmod_poly_gcd","p":"{}","a":"{}","b":"{}"}}"#, P, csv(&a), csv(&b));
+        drop((a, b));
+        hooks::reset();
+        hooks::trace();
+        let full = sagebrush_web::call(&req);
+        let (ntt, hg) = (hooks::traced("ntt"), hooks::traced("half-gcd"));
+        hooks::reset();
+        assert!(ntt.len() > 100 && hg.len() > 100, "{} {}", ntt.len(), hg.len());
+        // (one Stop first, unmeasured, on a short request: the panic
+        // machinery's one-time lazy state, so every Stop below must free
+        // exactly what its call allocated)
+        let (c, d) = (rand_poly(&mut s, 1500, P), rand_poly(&mut s, 1200, P));
+        let warm = format!(r#"{{"fn":"nmod_poly_gcd","p":"{}","a":"{}","b":"{}"}}"#, P, csv(&c), csv(&d));
+        hooks::arm_at(1);
+        assert!(sagebrush_interrupt::catch(|| sagebrush_web::call(&warm)).is_err());
+        hooks::reset();
+        sagebrush_interrupt::clear();
+        let stops = [ntt[0], ntt[ntt.len() / 4], ntt[ntt.len() / 2], hg[hg.len() / 2], *ntt.last().unwrap(), *hg.last().unwrap()];
+        for &at in &stops {
+            let base = LIVE.load(Relaxed);
+            hooks::arm_at(at);
+            let stopped = sagebrush_interrupt::catch(|| sagebrush_web::call(&req)).is_err();
+            hooks::reset();
+            sagebrush_interrupt::clear();
+            assert!(stopped, "no Stop at check {}", at);
+            let after = LIVE.load(Relaxed);
+            eprintln!("nmod_poly_gcd Stop at check {}: live {} -> {}", at, base, after);
+            assert_eq!(after, base, "nmod_poly_gcd: a Stop at check {} left {} bytes live", at, after as isize - base as isize);
+        }
+        assert_eq!(sagebrush_web::call(&req), full);
     }
     // refusals: an oversized request allocates only its error message; one
     // count over a cap allocates no more than serde's copy of the request
@@ -185,8 +247,10 @@ fn stats() -> (u64, u64, u64) {
 /// (coefficients of about 2000 bits).
 fn fill_count(s: &mut u64) {
     let c: Vec<String> = (0..16).map(|_| (0..32).map(|_| format!("{:019}", rng(s) % 10_000_000_000_000_000_000)).collect::<String>()).collect();
-    let r = sagebrush_web::call(&format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, c.join(","), c.join(",")));
-    assert!(r.starts_with("{\"ok\""), "{}", &r[..r.len().min(200)]);
+    // (zpoly::mul's multimodular product, through the shared cache: poly_mul
+    // itself builds its own tables)
+    let v: Vec<sagebrush_bigint::BigInt> = c.iter().map(|t| t.parse().unwrap()).collect();
+    assert!(!sagebrush_arith::zpoly::mul(&v, &v).is_empty());
     let st = stats();
     eprintln!("shared cache, count policy: {:?}", st);
     assert_eq!(st.1, 64, "the shared cache at its 64-table policy");
@@ -198,10 +262,9 @@ fn fill_count(s: &mut u64) {
 fn fill_bytes(s: &mut u64) {
     let n = 1 << 19;
     let c: Vec<String> = (0..n).map(|_| (0..4).map(|_| format!("{:019}", rng(s) % 10_000_000_000_000_000_000)).collect::<String>() + "7").collect();
-    let req = format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, c.join(","), c.join(","));
+    let v: Vec<sagebrush_bigint::BigInt> = c.iter().map(|t| t.parse().unwrap()).collect();
     drop(c);
-    let r = sagebrush_web::call(&req);
-    assert!(r.starts_with("{\"ok\""), "{}", &r[..r.len().min(200)]);
+    assert!(!sagebrush_arith::zpoly::mul(&v, &v).is_empty());
     let st = stats();
     eprintln!("shared cache, byte policy: {:?}", st);
     assert_eq!((st.1, st.2), (8, 1 << 28), "the shared cache at its 2^28-byte policy");
@@ -266,8 +329,9 @@ fn abi_frees_the_old_reply_first() {
             (old, base, FIRST_LIVE.load(Relaxed) - FIRST_SIZE.load(Relaxed), peak)
         }
     };
-    let big: Vec<String> = (0..8192).map(|_| (0..5).map(|_| format!("{:019}", rng(&mut s) % 10_000_000_000_000_000_000)).collect::<String>() + "12345").collect();
-    let seed = format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}","wire":"csv"}}"#, big.join(","), big.join(","));
+    // (a large prior reply: a product of hex coefficients, no leading zeros)
+    let big: Vec<String> = (0..8192).map(|_| "1".to_string() + &(0..5).map(|_| format!("{:019}", rng(&mut s) % 10_000_000_000_000_000_000)).collect::<String>() + "12345").collect();
+    let seed = format!(r#"{{"fn":"poly_mul","a":"{}","b":"{}"}}"#, big.join(","), big.join(","));
     drop(big);
     let m: Vec<Vec<u64>> = (0..400).map(|_| (0..401).map(|_| P - 1 - rng(&mut s) % (1 << 40)).collect()).collect();
     let ech = format!(

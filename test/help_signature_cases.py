@@ -22,6 +22,14 @@ else:
 class P:
     def a(self, /, x): pass
     def b(self, x, /, y): pass
-for f in (P().a, P().b, P.b):
+import functools
+def _w(f):
+    @functools.wraps(f)
+    def g(*a, **k): return f(*a, **k)
+    return g
+class W:
+    @_w
+    def m(self, a, b=2): pass
+for f in (P().a, P().b, P.b, W().m):
     if "inspect" in sys.argv: print(str(inspect.signature(f)))
     else: print(_pyjs_help.signature(f))

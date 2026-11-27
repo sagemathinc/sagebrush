@@ -11,10 +11,15 @@ crate-type = ["cdylib"]
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-mp = { path = "../mp" }
-sagebrush-interrupt = { path = "../interrupt" }
+sagebrush-interrupt = { path = "../interrupt", features = ["node-host"] }
 sagebrush-modsym = { path = "../modsym" }
 sagebrush-ap = { path = "../ap" }
 sagebrush-par = { path = "../par", features = ["parallel"] }
+sagebrush-web = { path = "../web" }
+sagebrush-sym = { path = "../sym" }
+sagebrush-mpoly = { path = "../mpoly" }
+sagebrush-ledger = { path = "../ledger" }
+serde_json = "1"
 napi = { version = "2", default-features = false, features = ["napi7"] }
 napi-derive = "2"
 

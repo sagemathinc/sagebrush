@@ -5,12 +5,12 @@
    "dashu-base": {
     "version": "0.6.1",
     "git": "https://github.com/sagemathinc/dashu",
-    "rev": "2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
+    "rev": "36ff7ad5b9225198bf6a322a70f0947e9376cece"
    },
    "dashu-int": {
     "version": "0.6.2",
     "git": "https://github.com/sagemathinc/dashu",
-    "rev": "2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
+    "rev": "36ff7ad5b9225198bf6a322a70f0947e9376cece"
    }
   },
   "no_ledger_dep": [
@@ -86,19 +86,55 @@
    "file": "engine/arith/src/crt.rs",
    "item": "mod tests > mod spy > impl GlobalAlloc for Spy",
    "hash": "4389ee1fd532f0cae6cf031dd79b92022576a0681d0e74701967d2344b23b06e",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/arith/src/nmod_mat.rs",
+   "item": "fn axpy32",
+   "hash": "ad64d86e40bb6436ed2d7c01ed7209bc92347739419e45d89303b090ae810a36",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it calls an AVX2-compiled copy of a safe kernel, only after is_x86_feature_detected!(\"avx2\"), on its own numeric slices (u64 sums of 32-bit residue products). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/arith/src/nmod_mat.rs",
+   "item": "fn axpy32_avx2",
+   "hash": "cbcd4de5e52111be8b301358105b84168ae59040bc63a1abbccc9a3ca08fb8ca",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it is the AVX2-compiled copy of a safe kernel (its body is the safe generic axpy on its own numeric slices), called only by axpy32 after is_x86_feature_detected!(\"avx2\"). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/arith/src/spelim.rs",
    "item": "fn dense_axpy",
    "hash": "29f1da413f5072001e6a33c69c0ad5e47da678884d98dbbc15fc8c24a753be60",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
    "file": "engine/arith/src/spelim.rs",
    "item": "fn dense_axpy_avx2",
    "hash": "9bd049ea46105e1f52d61639a1999441b753031269a3e42ee611903003b7b20c",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par, wire) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/arith/tests/nmod_fast_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (the fast product's peak against its planned words). Token-identical to engine/web/tests/bin_alloc.rs's audited item (same hash)."
+  },
+  {
+   "file": "engine/arith/tests/wire_decode_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/bin_alloc.rs's audited item (same hash)."
+  },
+  {
+   "file": "engine/arith/tests/zmul_admission_targets.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "d3a1238bcc351b761cda2a67e1bdf806619dbc4260378b0f0cd60c5549c30c30",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates one atomic), the audited series_alloc item without its peak. Here it checks that poly_mul's admission refusals leave the heap at its baseline."
+  },
+  {
+   "file": "engine/bigint/tests/ntt_local_peak.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "288c6281672cdb8eef99026977a4bfaa0bc9e73cadbbc361e9ab45e2026bb091",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates two atomics), as engine/web/tests/series_alloc.rs's audited item. Here it measures ntt::mul_words_local's live bytes against mul_words_local_peak, natively and under wasm32-wasip1."
   },
   {
    "file": "engine/flint/src/lib.rs",
@@ -249,6 +285,18 @@
    "item": "fn probe_pages",
    "hash": "934d8c5bcab9750bc51e9111dc0662d069534755c794e403169e045a24a03a28",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-growth-probe (no workspace deps; tests only) does not depend on sagebrush-ledger, so it cannot name those types, and it allocates/frees byte blocks for the host's growth sweep, or reads memory.size. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/interrupt/src/lib.rs",
+   "item": "mod node_host > fn install",
+   "hash": "7ff4d244f064e5510d33c5388d656c7fb6728c3f492fa03fa08467b69e24dc18",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. An unsafe fn whose only operation is storing the control words' pointer (WORDS AtomicU32s that the caller guarantees valid for the process's life: engine/node's init, from a 4-word, 4-aligned Uint32Array over a SharedArrayBuffer it keeps a strong reference to). The words are a Stop request and a run id, read by the interrupt checks; they hold no ledger state."
+  },
+  {
+   "file": "engine/interrupt/src/lib.rs",
+   "item": "mod node_host > fn word",
+   "hash": "b4437dfa5999e14007fc7d40b658703f91e3e336c03959252d3e119e9aa6ae23",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operation derefs install's pointer at index i < WORDS (callers pass the module's VERSION, STOP_UPTO, RUN constants), giving &'static AtomicU32 under install's contract; null before install gives None. Only atomic loads and stores of the Stop/run words follow."
   },
   {
    "file": "engine/interrupt/src/lib.rs",
@@ -497,10 +545,34 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-nd (deps: par, optional and native only) does not depend on sagebrush-ledger, so it cannot name those types; this item is compiled only for wasm32 (where `parallel` is off) and touches f64/u32 memory only. The third export that writes memory (CHOL-1: A = R'R on one thread, chol::potrf). Dynamically checked in safe code (engine/nd/src/boundary.rs check_potrf, native-tested with wasm32's limits, potrf_layouts) before any pointer is read or slice made: the descriptor is 4-aligned and in the host's part of memory; each of the three regions it names (A: f64, 8-aligned; work: f64, 8-aligned; report: 4 u32s, 4-aligned) is, when nonempty, at or above __heap_base (never 0, never the module's statics or linker stack), within memory.size, at most isize::MAX bytes, inside the job's arena, and disjoint from the other two; the descriptor lies outside the arena and the calling thread's frame below it; lda >= max(n, 1) and every length (A's span, work_len f64s) is computed in checked arithmetic; work_len >= chol::potrf_work_len(n) (itself checked, None on overflow). Pointers are made with with_exposed_provenance(_mut) from the checked absolute addresses; empty regions become empty slices. The factorization itself (chol::potrf, through trsm and the GEMM update) is safe Rust on those slices and re-checks the layout and the work. A refused job returns 0 having written nothing, the report included. Trusted-host preconditions (stated on the function, as nd_solve's): the caller's whole stack is disjoint from module-owned memory, the descriptor and the arena; A, work and the report are this call's alone until it returns; nothing writes the descriptor during the call. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
+   "file": "engine/node/src/engine.rs",
+   "item": "fn init",
+   "hash": "49655621648542d582470dd63d66cac64125e75c8d263778d3b3bf9f66b3a6b3",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations: viewing the checked typed array's data (Uint32, exactly WORDS long, byte offset a multiple of 4) as WORDS AtomicU32s, and node_host::install with that pointer after the buffer is strongly referenced (never released). The ledger's total source is registered through register_total_source (its own item); no ledger object is touched here."
+  },
+  {
+   "file": "engine/node/src/engine.rs",
+   "item": "fn register_total_source",
+   "hash": "e278d7041f659dcad4aae823f523a7e90b99f97e52799cd90a0dd67e323cd1ab",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operation is napi_create_reference on this call's env and function value (count 1, never deleted), stored in TOTAL_SOURCE. It then registers total_answer with the ledger through its safe API (set_total_host_asking); the ledger's own objects are never reached through a pointer."
+  },
+  {
+   "file": "engine/node/src/engine.rs",
+   "item": "fn call_total_source",
+   "hash": "4df1c7752074c0a45b29c9f5c85fef914e84e4cb701ababe40b62dd82119fde3",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations are N-API calls on the outermost export's env on this thread (ASK_ENV) with local out-pointers: get the referenced source, call it with no arguments, read its result as a UTF-8 string into a local Vec sized by a first length query, and clear any pending JS exception on each failure path. It returns the text (or None); total_answer parses it and the ledger receives a HostAnswer by value through its safe API."
+  },
+  {
    "file": "engine/poly/src/lib.rs",
    "item": "mod alloc_spy > impl GlobalAlloc for Spy",
    "hash": "5324744e1018309d37f89870d24af343ed9d4964301eac742994ee7bbfe7cc76",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-poly (deps: bigint, interrupt) does not depend on sagebrush-ledger, so it cannot name those types, and it forwards allocator calls to System/dlmalloc/the inner allocator and updates its own counters. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/poly/tests/modp_stop.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it counts the process's live bytes for the Stop test's no-leak check."
   },
   {
    "file": "engine/raster/src/lib.rs",
@@ -667,20 +739,26 @@
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_call",
-   "hash": "ccb657ef5cc34d857fcd6269347e43377c02d872617bc9c09af14a5b1546b90b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
+   "hash": "55deb71d33c1b87ea98907acd56248d206d5db65aea7a54cd5aa8779748c9f3d",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee). Each call starts with new_run(), a safe call (the progress frames' reset and the Smith progress state's reset: stores only, no pointer from the request), before the unsafe reads; its unsafe operations are unchanged."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_sym_call",
-   "hash": "e5362b04bab0bf5d907b7c3fccb4c0fdd6f49003de5c916190f049cf72e134f6",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
+   "hash": "f9851e316a64fe2a6396ef391256a01039ef8541807c996edfbfef7847fe83f8",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee). Each call starts with new_run(), a safe call (the progress frames' reset and the Smith progress state's reset: stores only, no pointer from the request), before the unsafe reads; its unsafe operations are unchanged."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_mp_call",
-   "hash": "5733f186f73275cd07e9acd18d56533634a381469fad273ce40d71ed2758960b",
-   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee)."
+   "hash": "6c3cb3a42ffb7e1eaa17a929ae8f68b391dc78e4f24da04592204ad10beeaf58",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee). Each call starts with new_run(), a safe call (the progress frames' reset and the Smith progress state's reset: stores only, no pointer from the request), before the unsafe reads; its unsafe operations are unchanged."
+  },
+  {
+   "file": "engine/web/src/lib.rs",
+   "item": "fn sb_bin_call",
+   "hash": "07ebba0bc85fbaa266e82f40f95081583662c303c536d2670b5188a6c1f1d0f3",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read host-written request bytes and replace or read the REPLY byte buffer, as sb_mp_call's; the call's reservation is taken inside the safe bin_ops::call_bin through the safe ledger API. Supported boundary for the REPLY argument: wasm's single thread; natively only the one-test ABI binaries call these exports, and any other native caller is unsupported (a restricted boundary, not a general safe-Rust API guarantee). Each call starts with new_run(), a safe call (the progress frames' reset and the Smith progress state's reset: stores only, no pointer from the request), before the unsafe reads; its unsafe operations are unchanged."
   },
   {
    "file": "engine/web/src/lib.rs",
@@ -733,19 +811,19 @@
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_reserve",
-   "hash": "b8bc44e1b87938e7566d4c7ffad2e8cf2f327698210643d2455fb96a8eda5dbf",
+   "hash": "e69931426a440d08ad2c1992d2d7e8773e6223c75e9d48e87507ed99201b66fa",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read the host-written `what` bytes. The Reservation itself is created, grown or dropped through the ledger's safe API (C-2c-ii's capability token gates it), never through unsafe code."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_grow",
-   "hash": "79dd56cb7ec90ea737a349b8b1eb7a264323bea9a98d2f3fcabcede1082d1187",
+   "hash": "dea7e25a5243c06d71f48fe47b44900ab0bfd8175f78b3bd9d4c04e69b941351",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations none: the allow is for no_mangle. The Reservation itself is created, grown or dropped through the ledger's safe API (C-2c-ii's capability token gates it), never through unsafe code."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_release",
-   "hash": "a4cb7a9d9a911ab49ddecbe42847ba38d22b7d37f844f7d978cb73125e39681f",
+   "hash": "cc19bcb69b8bae1105250b2faae40b876b8749c357ae659936c61fa0a4f8cb96",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations none: the allow is for no_mangle. The Reservation itself is created, grown or dropped through the ledger's safe API (C-2c-ii's capability token gates it), never through unsafe code."
   },
   {
@@ -761,6 +839,36 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. It has no unsafe operation: the allow is for no_mangle."
   },
   {
+   "file": "engine/web/tests/bin_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it measures the binary entry point's allocations against its reservations."
+  },
+  {
+   "file": "engine/web/tests/bin_echelon_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator. Token-identical to engine/web/tests/nmod_alloc.rs's audited item (the same hash); here it measures the binary nmod_echelon's peak live memory against its reservation (bin_ops::echelon_reservation) and its largest phase. Test-only, not shipped."
+  },
+  {
+   "file": "engine/web/tests/bin_mat_mul_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (the binary GF(p) product's peak against its reservation). Token-identical to engine/web/tests/bin_alloc.rs's audited item (same hash)."
+  },
+  {
+   "file": "engine/web/tests/divrem_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "3f019520e6ba19c22c010e6d78590c43f0cba957a3e8a8d0a0102e1dd8872e7a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: series_alloc.rs's audited System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates atomics), with test-only additions: it counts allocations (an atomic), and it can refuse one allocation, the first of at least a set size or the one at a set count, by returning null, which GlobalAlloc's contract allows (the caller's try_reserve_exact sees the failure). Here it measures the division ops' live memory against their word ledger's prediction, checks that writing the reply allocates nothing, fails each of a division's allocations in turn, and checks the heap's baseline after each refusal, an allocation failure and a Stop."
+  },
+  {
+   "file": "engine/web/tests/eval_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "3f019520e6ba19c22c010e6d78590c43f0cba957a3e8a8d0a0102e1dd8872e7a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: token-identical to engine/web/tests/scale_alloc.rs's audited item (the same hash): a System-forwarding counting allocator whose accounting is conservative and only updates atomics. Here it measures qpoly_eval's live memory after the lcm against its word ledger's prediction, checks that the reply fills its exact reservation, fails each of a call's allocations in turn, and checks the heap's baseline after each refusal and a Stop."
+  },
+  {
    "file": "engine/web/tests/host_handles.rs",
    "item": "fn reply",
    "hash": "c288fcf5fe0a8e6c439d4c45d20a512b7addf5a5c415e1920342adb5f347131b",
@@ -773,6 +881,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: it calls the C-ABI exports with pointers to live test-owned bytes; any reservation goes through sb_reserve's safe ledger calls."
   },
   {
+   "file": "engine/web/tests/new_run.rs",
+   "item": "fn call",
+   "hash": "1cfe674fce30319fd65b8a33705e8a53f8f29053bcc61d5296993d51f227fa4d",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: one call of a C-ABI entry point (sb_call, sb_sym_call, sb_mp_call or sb_bin_call) with a pointer and length of a live test-owned byte slice; the test binary is the exports' only caller."
+  },
+  {
    "file": "engine/web/tests/nmod_alloc.rs",
    "item": "impl GlobalAlloc for Counting",
    "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
@@ -781,8 +895,26 @@
   {
    "file": "engine/web/tests/nmod_alloc.rs",
    "item": "fn abi_frees_the_old_reply_first",
-   "hash": "92a3fc319fb171b67e311df9a6ae801718960cf7741dc3190748f6c7325fadda",
+   "hash": "7293ba0ac7c55df119a567ab4d70509416dcf774dabc63e02dd80a4e7698e68c",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: it calls the C-ABI exports with pointers to live test-owned bytes; any reservation goes through sb_reserve's safe ledger calls."
+  },
+  {
+   "file": "engine/web/tests/qpoly_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "288c6281672cdb8eef99026977a4bfaa0bc9e73cadbbc361e9ab45e2026bb091",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: token for token engine/web/tests/series_alloc.rs's audited item (the same hash): a System-forwarding counting allocator whose counting only updates two atomics. Here it measures qpoly_mul's peak live memory against its admitted peak and checks that the heap returns to its baseline."
+  },
+  {
+   "file": "engine/web/tests/scale_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "3f019520e6ba19c22c010e6d78590c43f0cba957a3e8a8d0a0102e1dd8872e7a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: token-identical to engine/web/tests/divrem_alloc.rs's audited item (the same hash); here it measures the per-coefficient maps' (qpoly_scale, qpoly_derivative, qpoly_integral) live memory against their word ledger's prediction, checks that writing the reply allocates nothing, fails each of a call's allocations in turn, and checks the heap's baseline after each refusal and a Stop."
+  },
+  {
+   "file": "engine/web/tests/series_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "288c6281672cdb8eef99026977a4bfaa0bc9e73cadbbc361e9ab45e2026bb091",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (alloc, dealloc and realloc pass the caller's own pointer and layout to System unchanged; the counting only updates two atomics). It differs from engine/web/tests/nmod_alloc.rs's audited item only in what it counts: live bytes and their peak, with realloc's old and new blocks counted as coexisting while copying. Here it measures the series ops' peak live memory against their admitted peaks."
   }
  ]
 }

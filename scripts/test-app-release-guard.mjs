@@ -172,6 +172,20 @@ ok(imported > 0, "a step imports the Apple credentials");
 const fetchAt = at(/^\s*(?:run: )?cargo fetch --locked\s*$/m), bundleAt = at(/node app\/engine\/bundle\.mjs/);
 ok(fetchAt >= 0 && fetchAt < imported, "the app's Rust dependencies are fetched (cargo fetch --locked) before the credentials are imported");
 ok(bundleAt >= 0 && bundleAt < imported, "the engine is bundled (its Node downloaded) before the credentials are imported");
+// The native engine: built before the import (its crates fetched then); after it, signed with the app's identity and
+// copied into the bundle's engine folder BEFORE Tauri builds the app (build.rs pins the SHA-256 of the signed file,
+// and the engine's loader refuses any other bytes); after the build, the bundled copy checked to be that signed file
+{
+  const named = (re) => steps.findIndex((st) => re.test(st.name));
+  const builtAt = at(/cargo build --release --locked -p sagebrush-node/), signNativeAt = named(/^Sign and bundle the native engine$/);
+  const tauriBuildAt = at(/tauri build --ci --bundles /), checkedAt = named(/^The bundled native engine is the signed one$/);
+  ok(builtAt >= 0 && builtAt < imported, "the native engine is built before the credentials are imported");
+  ok(signNativeAt > imported && signNativeAt < tauriBuildAt, "the native engine is signed and bundled after the import and before the app is built");
+  const sn = signNativeAt >= 0 ? steps[signNativeAt].text : "";
+  const signAt = sn.search(/codesign --force --sign "\$SIGN_ID" --options runtime --timestamp/), copyAt = sn.search(/install -m 0755 [^\n]* app\/src-tauri\/engine\/sagebrush-engine\.node/);
+  ok(signAt >= 0 && copyAt > signAt, "the native engine is signed (hardened runtime, a secure timestamp) before it is copied into the bundle");
+  ok(checkedAt > tauriBuildAt && /\bcmp app\/src-tauri\/engine\/sagebrush-engine\.node /.test(steps[checkedAt]?.text ?? "") && /codesign --verify --strict/.test(steps[checkedAt]?.text ?? ""), "after the app is built, its native engine is checked to be the signed file, its signature intact");
+}
 // (after the import: none of the known download commands, and every tauri or cargo step offline)
 const DOWNLOADS = /\b(?:cargo fetch|cargo install|rustup|npm (?:install|ci|i)\b|npx|pnpm|yarn|bun (?:install|add)|curl|wget|bundle\.mjs|brew)\b|actions\/(?:checkout|download-artifact|setup-|cache)/;
 // (tauri or cargo as a command: a build, a test, a bundle; not a path such as app/src-tauri)
