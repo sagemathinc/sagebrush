@@ -41,6 +41,7 @@ test("variables nested functions share, and those they don't", () => {
       "fprintf('prec|%s\\n', prec());",
       "fprintf('outname|%g\\n', outname());",
       "fprintf('rec|%g\\n', fact(5));",
+      "fprintf('anon|%g\\n', anoncall());",
       "fprintf('pathfile|%g\\n', acc(4));",
       "try, failing(); catch err, fprintf('error|%s|%s\\n', err.identifier, err.message); end",
       // (a parent's argument, changed by a nested function)
@@ -70,6 +71,8 @@ test("variables nested functions share, and those they don't", () => {
       "function v = outname()", "  function r = g(), r = 5; end", "  g();", "  v = r();", "end",
       "function s = r(), s = 9; end",
       "function r = fact(n)", "  function r = go(k)", "    if k <= 1, r = 1; else, r = k * go(k - 1); end", "  end", "  r = go(n);", "end",
+      // (an anonymous function made in the parent calls a nested function)
+      "function v = anoncall()", "  h = @() g();", "  v = h();", "  function r = g(), r = 3; end", "end",
       "function failing()", "  function boom(), error('nest:boom', 'boom here'); end", "  boom();", "end"),
     "acc.m": lines("function t = acc(n)", "  t = 0;", "  function add(k), t = t + k; end", "  for k = 1:n, add(k); end", "end", "",
       "function unused()", "end"),
@@ -87,6 +90,7 @@ test("variables nested functions share, and those they don't", () => {
   assert.equal(r.got.get("prec"), "nested");
   assert.equal(r.got.get("outname"), "9");
   assert.equal(r.got.get("rec"), "120");
+  assert.equal(r.got.get("anon"), "3");
   assert.equal(r.got.get("pathfile"), "10");
   assert.equal(r.got.get("error"), "nest:boom|boom here");
 });
