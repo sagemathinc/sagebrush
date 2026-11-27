@@ -743,7 +743,7 @@ def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
 
 def _css_alpha(css):
     """(alpha, the opaque color, escaped) of a CSS color that carries its own
-    alpha, rgba(r, g, b, a) or #rrggbbaa; (None, the color, escaped) of any
+    alpha, rgba(r, g, b, a), #rrggbbaa or #rgba; (None, the color, escaped) of any
     other (a pixel marker's color: its alpha is the layers' alpha, as
     alpha= would be)"""
     s = str(css).strip()
@@ -757,6 +757,10 @@ def _css_alpha(css):
             a = int(s[7:9], 16) / 255.0
             if a < 1:
                 return a, _esc(s[:7])
+        elif s.startswith("#") and len(s) == 5:
+            a = int(s[4] * 2, 16) / 255.0
+            if a < 1:
+                return a, _esc("#" + s[1] * 2 + s[2] * 2 + s[3] * 2)
     except ValueError:
         pass
     return None, _esc(s)
