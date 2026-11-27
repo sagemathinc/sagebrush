@@ -171,11 +171,6 @@
    "reason": "the builtin sqrt (A1.2b)",
    "sha256": "ee37fd0b95e4f39b01fb5f9117da7cea09e27f49a0345e00faefb6c1e7046083"
   },
-  "rill-tests/parse/test_1.R#prec-in": {
-   "class": "not-implemented",
-   "reason": "the builtin %in% (A1.2b)",
-   "sha256": "fbebb689e42813ab26855f666a06f94dd95f05fdf36005b70cefc2ba9c152376"
-  },
   "rill-tests/parse/test_2.R#tok-arg-name-backtick": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",

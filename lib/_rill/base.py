@@ -17,8 +17,11 @@ from .access import (as_character, as_complex, as_double, as_integer, as_logical
                      is_integer, is_logical, is_na, is_nan, is_null, is_numeric, is_vector, length_, logical_,
                      names_, options, refuse_raw)
 from .args import DOTS, Closure, Primitive
+from .assign import names_assign, subassign, subassign2
 from .seqrep import rep, rep_len, rev, seq, seq_along, seq_len
 from .summary import max_, mean, min_, prod, sum_
+from .vecops import (all_, any_, cummax, cummin, cumprod, cumsum, diff, duplicated, in_, match, order, range_, sort,
+                     unique, which, which_max, which_min)
 from .eval import NotSupported, RError
 from .values import NULL, RVector
 
@@ -689,6 +692,22 @@ FORMALS = {
     "min": Closure(DOTS, "na.rm"),
     "max": Closure(DOTS, "na.rm"),
     "mean": Closure("x", "trim", "na.rm", DOTS, required=("x",)),
+    "which": Closure("x", required=("x",)),
+    "which.max": Closure("x", required=("x",)),
+    "which.min": Closure("x", required=("x",)),
+    "range": Closure(DOTS, "na.rm"),
+    "cumsum": Primitive("x"),
+    "cumprod": Primitive("x"),
+    "cummax": Primitive("x"),
+    "cummin": Primitive("x"),
+    "diff": Closure("x", "lag", "differences", DOTS, required=("x",)),
+    "unique": Closure("x", required=("x",)),
+    "duplicated": Closure("x", required=("x",)),
+    "any": Closure(DOTS, "na.rm"),
+    "all": Closure(DOTS, "na.rm"),
+    "match": Closure("x", "table", "nomatch", required=("x", "table")),
+    "sort": Closure("x", "decreasing", "na.last", DOTS, required=("x",)),
+    "order": Closure(DOTS, "decreasing"),
     "options": Closure(DOTS),
 }
 for _f in ("as.logical", "as.integer", "as.numeric", "as.double", "as.character", "as.complex"):
@@ -763,8 +782,30 @@ def typeof_(sess, call, args):
 
 
 BUILTINS["typeof"] = typeof_
+# replacement functions, called by eval.py's replacement path (assign.py)
+BUILTINS["[<-"] = subassign
+BUILTINS["[[<-"] = subassign2
+BUILTINS["names<-"] = names_assign
+# vector operations (vecops.py)
+BUILTINS["which"] = which
+BUILTINS["which.max"] = which_max
+BUILTINS["which.min"] = which_min
+BUILTINS["range"] = range_
+BUILTINS["cumsum"] = cumsum
+BUILTINS["cumprod"] = cumprod
+BUILTINS["cummax"] = cummax
+BUILTINS["cummin"] = cummin
+BUILTINS["diff"] = diff
+BUILTINS["unique"] = unique
+BUILTINS["duplicated"] = duplicated
+BUILTINS["any"] = any_
+BUILTINS["all"] = all_
+BUILTINS["%in%"] = in_
+BUILTINS["match"] = match
+BUILTINS["sort"] = sort
+BUILTINS["order"] = order
 # the builtins R writes as functions that dispatch to a method: their errors name the method, and R's
 # "Calls:" line lists both frames (rill-tests/vec/: seq -> seq.default, mean -> mean.default)
-METHODS = {"seq": ("seq", "seq.default"), "mean": ("mean", "mean.default")}
+METHODS = {"seq": ("seq", "seq.default"), "mean": ("mean", "mean.default"), "diff": ("diff", "diff.default")}
 # base's constants (values, not functions)
 VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False])}

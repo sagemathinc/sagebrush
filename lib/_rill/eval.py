@@ -121,6 +121,14 @@ class Session:
                     # (x$name: only x is evaluated; the name is the field's, never a variable)
                     _, e, f = k
                     val = self._apply(f, e, [(None, val)])
+                elif kind == "repl":
+                    _, e, st = k
+                    step, st = self._replace(e, st, val, konts)
+                    if step is not None:
+                        expr, mode = step, "eval"
+                        continue
+                    val = st["value"]
+                    self.visible = False
                 elif kind == "assign":
                     _, e, name, superassign = k
                     self.globals[name] = val
@@ -159,6 +167,69 @@ class Session:
     def _arg(self, e, i):
         return e.args[i][1]
 
+    # ---------------------------------------------------------------- replacement
+
+    def _replace(self, e, st, val, konts):
+        """One step of `f(x, ...) <- value` (R's *tmp* rewrite, design §8.3): st is None when the value has just
+        been evaluated; then each level's arguments are evaluated in turn (the next one returned, its value
+        coming back here); then the getters run inward and the "f<-" builtins outward, and the variable is
+        assigned only at the end, so a failure leaves it as it was.  Returns (the next expression or None, st)."""
+        if st is None:
+            levels, t = [], e.args[0][1]
+            while isinstance(t, Lang):
+                if not isinstance(t.fn, Sym) or not t.args:
+                    raise NotSupported("this replacement target")
+                levels.append(t)
+                t = t.args[0][1]
+            if isinstance(t, Sym):
+                var = t.name
+            elif isinstance(t, RVector) and t.type == "character" and len(t.data) == 1:
+                var = t.data[0]
+            else:
+                raise RError("invalid (do_set) left-hand side to assignment", e)
+            setters = []
+            for lv in levels:
+                f = self.builtins.get(lv.fn.name + "<-")
+                if f is None:
+                    raise RError('could not find function "%s<-"' % lv.fn.name, e)
+                setters.append(f)
+            x = self.lookup(var)
+            pending = [(k, j) for k, lv in enumerate(levels) for j in range(1, len(lv.args))]
+            st = {"value": val, "levels": levels, "setters": setters, "var": var, "x": x,
+                  "pending": pending, "args": [[] for _ in levels], "at": None}
+        else:
+            k, j = st["at"]
+            st["args"][k].append((st["levels"][k].args[j][0], val))
+        nxt = self._repl_next(st)
+        if nxt is not None:
+            konts.append(("repl", e, st))
+            return nxt, st
+        levels, args = st["levels"], st["args"]
+        # the object each level replaces in: the variable for the innermost, a getter's value outward
+        objs = [None] * len(levels)
+        objs[-1] = st["x"]
+        for k in range(len(levels) - 1, 0, -1):
+            getter = self.function(levels[k].fn.name, e)
+            objs[k - 1] = self._apply(getter, e, [(None, objs[k])] + args[k])
+        new = st["value"]
+        for k in range(len(levels)):
+            new = self._apply(st["setters"][k], e, [(None, objs[k])] + args[k] + [("value", new)])
+        self.globals[st["var"]] = new
+        return None, st
+
+    def _repl_next(self, st):
+        """The next replacement argument to evaluate (an empty one, as in x[] <- v, is taken as it is)."""
+        while st["pending"]:
+            k, j = st["pending"].pop(0)
+            a = st["levels"][k].args[j][1]
+            if a is MISSING:
+                st["args"][k].append((st["levels"][k].args[j][0], MISSING))
+                continue
+            st["at"] = (k, j)
+            return a
+        st["at"] = None
+        return None
+
     def _enter(self, e, konts):
         """Start evaluating call e: (mode, expr, val) for the loop."""
         self.depth += 1
@@ -184,7 +255,11 @@ class Session:
             elif isinstance(target, RVector) and target.type == "character" and len(target.data) == 1:
                 tname = target.data[0]
             elif isinstance(target, Lang):
-                raise NotSupported("replacement assignment such as x[i] <- v")
+                if name == "<<-":
+                    raise NotSupported("replacement with <<-")
+                # (the value first, then each level's arguments, then the replacement: _replace)
+                konts.append(("repl", e, None))
+                return "eval", args[1][1], None
             else:
                 raise RError("invalid (do_set) left-hand side to assignment", e)
             konts.append(("assign", e, tname, name == "<<-"))

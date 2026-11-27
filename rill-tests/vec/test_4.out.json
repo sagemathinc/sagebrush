@@ -1,0 +1,121 @@
+{
+ "cases": [
+  {
+   "id": "which",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 4\na c \n1 3 \ninteger(0)\n[1] 2 3\n"
+  },
+  {
+   "id": "which-error",
+   "status": 1,
+   "stderr": "Error in which(1) : argument to 'which' is not logical\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "which-max-min",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n[1] 3\nb \n2 \n[1] 2\ninteger(0)\n[1] 1\na \n2 \n"
+  },
+  {
+   "id": "range",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 9\n[1] NA NA\n[1] 1 3\n[1] \"a\" \"b\"\n[1]  1 10\n"
+  },
+  {
+   "id": "cumsum-cumprod",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1]  1  3  6 10 15 21 28 36 45 55\n[1]   1   2   6  24 120 720\n[1]  1 NA NA\na b \n1 3 \n[1] 1 2\n[1] 2 1 4\n"
+  },
+  {
+   "id": "cum-extended-precision",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.0000000000000000 1.0000000000000000 1.0000000000000002 1.0000000000000002\n[5] 1.0000000000000004\n[1] 0.10000000000000001 0.30000000000000004 0.59999999999999998\n"
+  },
+  {
+   "id": "cum-integer-overflow",
+   "status": 0,
+   "stderr": "Warning message:\ninteger overflow in 'cumsum'; use 'cumsum(as.numeric(.))' \n",
+   "stdout": "[1] 2147483647         NA         NA\n"
+  },
+  {
+   "id": "cummax-cummin",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 3 3 5\n[1] 5 3 3 1\n[1]  1 NA NA\n[1] 2 2 3\nx y \n2 1 \n"
+  },
+  {
+   "id": "diff",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3 5 7\n[1] 2 2 2 2 2 2 2 2\n[1] 2 2\nnumeric(0)\nb c \n2 3 \ninteger(0)\n[1] NA NA\n"
+  },
+  {
+   "id": "diff-error",
+   "status": 1,
+   "stderr": "Error in diff.default(1:3, lag = 0) : \n  'lag' and 'differences' must be integers >= 1\nCalls: diff -> diff.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "unique-duplicated",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3 1 2\n[1] FALSE FALSE  TRUE FALSE  TRUE\n[1] \"b\" \"a\"\n[1] NA  1\n[1] 1\n[1] FALSE  TRUE\n[1] \"a\" NA \nNULL\n"
+  },
+  {
+   "id": "any-all",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n[1] FALSE\n[1] TRUE\n[1] NA\n[1] NA\n[1] FALSE\n[1] FALSE\n[1] TRUE\n[1] FALSE\n[1] TRUE\n[1] TRUE\n"
+  },
+  {
+   "id": "any-coerce",
+   "status": 0,
+   "stderr": "Warning message:\nIn any(1) : coercing argument of type 'double' to logical\n",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "in-match",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n[1]  2 NA\n[1] 2\n[1] 2\n[1] 2 1\n[1] FALSE  TRUE\n[1] 1\n[1] 1\n[1] 2\n[1] FALSE  TRUE\n"
+  },
+  {
+   "id": "sort-order",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 3 5 8\n[1] 4 2 1 3\n[1] 8 5 3 1\n[1] 8 5 3 1\n"
+  },
+  {
+   "id": "sort-na",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 3\n[1]  1  3 NA\n[1] 3 1 2\n[1] 0\n"
+  },
+  {
+   "id": "sort-names-ties",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a b \n1 2 \nc b a \n3 2 1 \n[1] 2 4 1 3\n[1] 1 3 2 4\n[1] 2 1\n"
+  },
+  {
+   "id": "sort-types",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE  TRUE  TRUE\ninteger(0)\n[1] \"integer\"\n[1] 1 2 3\n[1] \"a\" \"b\" \"c\"\n"
+  },
+  {
+   "id": "order-keys",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 3 1\n[1] 2 3 1\n"
+  }
+ ],
+ "file": "rill-tests/vec/test_4.R",
+ "format": "rill-out",
+ "v": 1
+}

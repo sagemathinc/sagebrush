@@ -22,6 +22,10 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:%in%": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:&": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -70,7 +74,23 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:[<-": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:[[<-": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:^": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:all": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:any": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
@@ -118,7 +138,31 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:cummax": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:cummin": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:cumprod": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:cumsum": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:diff": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:double": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:duplicated": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
@@ -186,6 +230,10 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:match": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:max": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -202,6 +250,10 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:names<-": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:numeric": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -210,11 +262,19 @@
    "decision": "internal",
    "why": "sets the session's own print options (digits, scipen), checked as R checks them: no host effect"
   },
+  "builtin:order": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:print": {
    "decision": "internal",
    "why": "writes to the session's output only"
   },
   "builtin:prod": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:range": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
@@ -246,11 +306,31 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:sort": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:sum": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
   "builtin:typeof": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:unique": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:which": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:which.max": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:which.min": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },

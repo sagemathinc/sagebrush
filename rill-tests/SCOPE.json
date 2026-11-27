@@ -17,6 +17,8 @@
   "rill-tests/args/test_1.R",
   "rill-tests/na/test_1.R",
   "rill-tests/vec/test_2.R",
-  "rill-tests/vec/test_3.R"
+  "rill-tests/vec/test_3.R",
+  "rill-tests/vec/test_4.R",
+  "rill-tests/vec/test_5.R"
  ]
 }
