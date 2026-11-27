@@ -937,6 +937,10 @@ class PermutationGroup:
         each class's least element (by its images), the classes by the order
         of their elements, then their length, then their representative.
         The engine enumerates the group, admitted first by the memory guard."""
+        if "classes" not in self._cache and self._n == 0:
+            # (the trivial group on no points: its one class, the identity's;
+            # the engine's binary op takes a degree of at least 1)
+            self._cache["classes"] = [((), 1)]
         if "classes" not in self._cache:
             order, n = int(self.order()), self._n
             _admit_elements(order, _element_bytes(n), "the conjugacy classes", order, _ENUM_FIXED)
@@ -1189,8 +1193,13 @@ class ConjugacyClass:
         if self._set is None:
             G = self._group
             gens = [(g._im, tuple(sorted(range(G._n), key=lambda i: g._im[i]))) for g in G.gens()]
+            # (the class's length isn't known before it is listed: what it
+            # holds is checked as it grows, at 1, 2, 4, .. 4096 elements, then
+            # every 4096 more, and once more at its end, before it is kept)
+            per, order = _held_bytes(G._n), int(G.order())
+            _admit_elements(1, per, "a conjugacy class", order)
             start = tuple(self._rep._im)
-            seen, queue = {start}, [start]
+            seen, queue, at = {start}, [start], 2
             for x in queue:
                 for s, si in gens:
                     # (s^-1 x s, left to right: i -> s[x[si[i]]])
@@ -1198,10 +1207,10 @@ class ConjugacyClass:
                     if y not in seen:
                         seen.add(y)
                         queue.append(y)
-                        # (the class's length isn't known before it is listed:
-                        # what it holds so far is checked as it grows)
-                        if len(queue) % 4096 == 0:
-                            _admit_elements(len(queue), _held_bytes(G._n), "a conjugacy class", int(G.order()))
+                        if len(queue) == at:
+                            _admit_elements(at, per, "a conjugacy class", order)
+                            at += min(at, 4096)
+            _admit_elements(len(queue), per, "a conjugacy class", order)
             self._set = seen
         return self._set
 
@@ -1214,8 +1223,10 @@ class ConjugacyClass:
         return int(self.cardinality())
 
     def __contains__(self, g):
-        im = tuple(_images(g)) + tuple(range(len(_images(g)), self._group._n))
-        return im in self._elements()
+        # (as Sage's: g made an element of the class's group first, which
+        # drops fixed points past its degree, or refuses g if it isn't one)
+        im = self._group(g)._im
+        return tuple(im) + tuple(range(len(im), self._group._n)) in self._elements()
 
     def list(self):
         """The elements, least first (Sagebrush's order, not GAP's)."""

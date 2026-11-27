@@ -218,6 +218,15 @@ run('Alt(4) one byte short', 4 * need - 4, lambda: len(AlternatingGroup(4).conju
 G = SymmetricGroup(10)
 # (the class of a transposition: 45 elements, not the group's 10! charged)
 run('transpositions', 4 * 45 * P._held_bytes(10), lambda: G.conjugacy_class(G('(1,2)')).cardinality())
+# (checked at 1, 2, 4, .. elements and at its end: 45, past the last check at 32, refused one element short;
+# and a heap without room for its first element refuses it before any is listed)
+run('transpositions one element short', 4 * 44 * P._held_bytes(10), lambda: G.conjugacy_class(G('(1,2)')).cardinality())
+_capacity.heap_figure = lambda: 4 * P._held_bytes(10) - 4
+try:
+    G.conjugacy_class(G('(1,2,3)')).cardinality()
+except MemoryError as e:
+    print('a 3-cycle with no room for one refused, need', e.need_bytes == P._held_bytes(10))
+run('3-cycles', 4 * 240 * P._held_bytes(10), lambda: G.conjugacy_class(G('(1,2,3)')).cardinality())
 # (the class of a 10-cycle, 9! elements: refused once it holds 4096 of them, by their exact need)
 _capacity.heap_figure = lambda: 4 * 4096 * P._held_bytes(10) - 4
 try:
@@ -244,6 +253,9 @@ run('Sym(10) one byte short', 4 * need - 4, lambda: len(SymmetricGroup(10).conju
     "Alt(4) at the bound admitted 4",
     "Alt(4) one byte short refused Listing the conjugacy classes of a permutation group of order 12",
     "transpositions admitted 45",
+    "transpositions one element short refused Listing a conjugacy class of a permutation group of order 3628800",
+    "a 3-cycle with no room for one refused, need True",
+    "3-cycles admitted 240",
     "10-cycles refused, need True",
     "output per class 2000 15440",
     "C2^10 at the bound admitted 1024",
