@@ -60,4 +60,6 @@ CASES += [
     ("legacy-btpe-terms", "rs = np.random.RandomState(0); a = rs.binomial(1000, 0.3, size=3000); out = [int(a.sum())] + a[-3:].tolist() + [rs.randint(0, 10**9)]"),
     ("gen-btpe-2pow63", "g = np.random.default_rng(0); out = [str(g.binomial(2**63 - 1, 0.4)) for _ in range(12)] + [int(g.integers(0, 10**9))]"),
     ("legacy-btpe-2pow63", "rs = np.random.RandomState(0); out = [str(rs.binomial(2**63 - 1, 0.4)) for _ in range(12)] + [rs.randint(0, 10**9)]"),
+    # (the Generator's corrected Stirling terms deciding a draw: two cases where the legacy terms would not)
+    ("gen-btpe-terms", "import hashlib\nout = []\nfor s, n, p in ((9, 939333, 0.04826546769231007), (23, 29687, 0.36930816936525596)):\n    g = np.random.default_rng(s); a = g.binomial(n, p, size=3000)\n    out += [int(a.sum()), hashlib.sha256(a.astype(np.int64).tobytes()).hexdigest()[:16], int(g.integers(0, 10**9))]"),
 ]
