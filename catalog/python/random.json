@@ -2,16 +2,36 @@
   {
     "name": "random.seed",
     "kind": "function",
-    "signature": "(a=None)",
-    "summary": "Seeds Python's random generator (Mersenne Twister).",
+    "signature": "(a=None, version=2)",
+    "summary": "Seeds Python's random generator (Mersenne Twister): an int, a float, or a str, bytes or bytearray by all its bits.",
     "examples": [
       {
         "code": "random.seed(1)\nrandom.random()",
         "expected": "0.13436424411240122\n"
+      },
+      {
+        "code": "random.seed('sagebrush')\nrandom.random()",
+        "expected": "0.2683339630548822\n"
       }
     ],
     "differs": [
-      "Does not accept the argument version, which Python 3.14 has (a TypeError).",
+      "Checked against Python 3.14 by its signature and examples, not reviewed line by line."
+    ],
+    "status": "partial",
+    "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "random.randbytes",
+    "kind": "function",
+    "signature": "(n)",
+    "summary": "n random bytes: getrandbits(8 * n) as n little-endian bytes.",
+    "examples": [
+      {
+        "code": "random.seed(1)\nrandom.randbytes(4)",
+        "expected": "b'\\xf5\\xb1e\"'\n"
+      }
+    ],
+    "differs": [
       "Checked against Python 3.14 by its signature and examples, not reviewed line by line."
     ],
     "status": "partial",

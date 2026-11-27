@@ -28,7 +28,12 @@ spec = json.loads(sys.argv[1])
 pid, fd = pty.fork()
 if pid == 0:
     os.environ["TMPDIR"] = spec["tmp"]
-    os.execvp(spec["node"], [spec["node"], spec["launcher"]] + spec["args"])
+    os.environ["TERM"] = "xterm"  # (a real cursor-writing terminal, regardless of the runner's TERM=dumb)
+    if spec.get("inject"):
+        os.environ["SAGEBRUSH_TEST_TERMINAL_ERROR"] = spec["inject"]
+    if spec.get("noWorker"):
+        os.environ["SAGEBRUSH_NO_WORKER"] = "1"
+    os.execvp(spec["node"], [spec["node"]] + spec.get("nodeArgs", []) + [spec["launcher"]] + spec["args"])
 out = b""
 def read_until(pred, limit):
     global out
@@ -53,7 +58,7 @@ busy_ok = prompts() == len(spec["lines"]) if spec["busy"] else True
 t0 = time.time()
 if spec["signal"] == "CLOSE":
     os.close(fd)  # (the terminal goes away: the kernel hangs up the session's foreground group)
-else:
+elif spec["signal"] != "WAIT":
     os.kill(pid, getattr(signal, spec["signal"]))  # (straight to the launcher's process)
 status = None
 while time.time() - t0 < spec["wait"]:
@@ -70,12 +75,34 @@ if status is None:
     os.kill(pid, signal.SIGKILL)
     os.waitpid(pid, 0)
 how = None if status is None else (("signal", os.WTERMSIG(status)) if os.WIFSIGNALED(status) else ("exit", os.WEXITSTATUS(status)))
-print(json.dumps({"how": how, "secs": secs, "busy_ok": busy_ok, "out": out.decode("utf8", "replace")[-400:]}))
+print(json.dumps({"how": how, "secs": secs, "busy_ok": busy_ok, "plotted": b"Saved " in out, "injected": b"TERMINAL_ERROR_INJECTED" in out, "out": out.decode("utf8", "replace")[-400:]}))
 `);
 
-function prompt(lines, signal, { busy = false, wait = 2, args = [] } = {}) {
+// Deterministically take the terminal-close window: readline writes the prompt, then cursorTo. Fail that next
+// write through the stream's normal error event, without closing the real PTY or waiting for a scheduling race.
+// This fixture injects an error; it does not handle it or introduce a delay.
+const injectFile = join(dir, "terminal-error.cjs");
+writeFileSync(injectFile, `
+const { writeSync } = require('node:fs');
+const [stream, code] = (process.env.SAGEBRUSH_TEST_TERMINAL_ERROR || '').split(':');
+const stdout = process.stdout, original = stdout.write;
+let prompts = 0, injected = false;
+stdout.write = function(chunk, ...args) {
+  const text = String(chunk);
+  if (text.includes('>>> ') || text.includes('sage: ')) prompts++;
+  if (!injected && prompts >= 2 && /at cursorTo /.test(new Error().stack || '')) {
+    injected = true;
+    writeSync(2, 'TERMINAL_ERROR_INJECTED\\n');
+    process[stream].destroy(Object.assign(new Error('injected terminal failure'), { code }));
+    return false;
+  }
+  return original.call(this, chunk, ...args);
+};
+`);
+
+function prompt(lines, signal, { busy = false, wait = 2, args = [], inject, noWorker = false } = {}) {
   const tmp = mkdtempSync(join(dir, "tmp-"));
-  const spec = { node: process.execPath, launcher, args, lines, signal, busy, wait, tmp };
+  const spec = { node: process.execPath, launcher, args, lines, signal, busy, wait, tmp, inject, noWorker, nodeArgs: inject ? ["--require", injectFile] : [] };
   const r = spawnSync("python3", [driver, JSON.stringify(spec)], { encoding: "utf8", timeout: 120000 });
   if (r.status !== 0) return { error: r.stderr || String(r.error), tmp };
   return { ...JSON.parse(r.stdout), tmp, figures: readdirSync(tmp).filter((f) => f.startsWith("sagebrush-figures-")) };
@@ -127,5 +154,16 @@ let r = prompt([BUSY], "SIGINT", { busy: true });
 check("SIGINT doesn't kill a computing prompt (its handler stays)", r.busy_ok && r.how === null, r);
 r = prompt([PLOT], "SIGINT");
 check("SIGINT at the prompt removes its figures, as before", r.how?.[0] === "signal" && r.how[1] === SIGNUM.SIGINT && r.figures?.length === 0, r);
+for (const noWorker of [false, true]) {
+  const mode = noWorker ? " (no worker)" : "";
+  for (const stream of ["stdout", "stdin"]) {
+    for (const code of ["EIO", "EPIPE", "ECONNRESET"]) {
+      r = prompt([PLOT], "WAIT", { inject: `${stream}:${code}`, noWorker });
+      check(`${stream} ${code} at cursorTo takes SIGHUP cleanup${mode}`, r.injected && r.plotted && r.how?.[0] === "signal" && r.how[1] === SIGNUM.SIGHUP && r.figures?.length === 0, r);
+    }
+    r = prompt([PLOT], "WAIT", { inject: `${stream}:ENOSPC`, noWorker });
+    check(`${stream} unrelated errors are not swallowed${mode}`, r.injected && r.plotted && r.how?.[0] === "exit" && r.how[1] === 1 && /ENOSPC/.test(r.out), r);
+  }
+}
 if (!existsSync(launcher)) check("the launcher exists", false, launcher);
 process.exit(failed ? 1 : 0);
