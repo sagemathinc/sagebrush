@@ -57,7 +57,8 @@ export async function syncChain(ctx: FleetCtx, entries: readonly string[]): Prom
     // (what fleet-device records as a fork: another hash at the pinned seq, or a head behind it)
     const seen = was.seq > chain.seq ? head : { seq: was.seq, hash: chain.hashes[was.seq] };
     let cause: unknown;
-    try { await advancePin(ctx.fleet, seen); } catch (e) { if (!isFork(e)) throw new StorageFailed(e); cause = e; }
+    // (the conflicting entry's exact text recorded with the fork, beside the pinned one: r4 §2's evidence)
+    try { await advancePin(ctx.fleet, seen, entries[seen.seq] ?? null); } catch (e) { if (!isFork(e)) throw new StorageFailed(e); cause = e; }
     await forkRecorded(ctx.fleet, cause);
     core.refuse("chain_fork", was.seq > chain.seq ? "a device list behind this device's" : "a device list that conflicts with this device's");
   }
@@ -66,7 +67,7 @@ export async function syncChain(ctx: FleetCtx, entries: readonly string[]): Prom
   //  to return this shorter chain)
   let moved: "moved" | "same" | "behind";
   try {
-    moved = await advancePinOnChain(ctx.fleet, chain.hashes, head);
+    moved = await advancePinOnChain(ctx.fleet, chain.hashes, head, entries);
   } catch (e) {
     if (!isFork(e)) throw new StorageFailed(e);
     await forkRecorded(ctx.fleet, e);
