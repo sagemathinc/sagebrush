@@ -256,11 +256,12 @@ def _leaves(x):
 def _unlist_names(x):
     """The names unlist gives x's leaves (R 4.5.3, rill-tests/list/; fitted to the oracle).  An element with a tag
     names its leaves as c() names its arguments' elements (base._c_names); a leaf from an untagged vector keeps
-    its own name, empty if it has none.  A nested list under tag T then names its leaves: T.name for a named one;
-    T and the leaf's position under T for an empty name from a named vector; and, for leaves with no name at all,
-    T alone when there is just one such leaf under T, else T and its position.  By an explicit stack."""
+    its own name, empty if it has none.  A nested list under tag T then names its leaves: T.name for a named one,
+    and for an empty name, T alone when it is the only free leaf under T, else T and its position.  A leaf is free
+    when no list tag lies between T and it, even when its own vector names it: list(d = list(e = 3, 4)) gives
+    d.e and d, list(d = list(c(e = 3), 4)) gives d.e and d2.  By an explicit stack."""
     from .base import _c_names
-    # each frame: [list, next element, items gathered (name, nameless), its tag in its parent]
+    # each frame: [list, next element, items gathered (name, free), its tag in its parent]
     stack = [[x, 0, [], None]]
     while True:
         frame = stack[-1]
@@ -281,7 +282,7 @@ def _unlist_names(x):
             else:
                 inner = names_of(v)
                 if inner is not None:
-                    acc.extend((nm, False) for nm in inner.data)
+                    acc.extend((nm, True) for nm in inner.data)
                 else:
                     acc.extend(("", True) for _ in v.data)
             continue
@@ -291,12 +292,12 @@ def _unlist_names(x):
         if tag is None:
             stack[-1][2].extend(acc)
             continue
-        nameless = sum(1 for _, free in acc if free)
+        free_leaves = sum(1 for _, free in acc if free)
         out = []
         for k, (nm, free) in enumerate(acc):
             if nm:
                 out.append(("%s.%s" % (tag, nm), False))
-            elif free and nameless == 1:
+            elif free and free_leaves == 1:
                 out.append((tag, False))
             else:
                 out.append(("%s%d" % (tag, k + 1), False))
