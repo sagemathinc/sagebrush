@@ -2945,7 +2945,8 @@ def unique(ar, return_index=False, return_inverse=False, return_counts=False, ax
         ax = _normalize_axis_index(axis, ar.ndim)
         if ar.ndim != 1:
             return _unique_axis(ar, ax, return_index, return_inverse, return_counts)
-    if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c":
+    # (the runtime's plain path merges NaNs, so equal_nan=False, each NaN kept, takes the path below)
+    if not (return_index or return_inverse or return_counts) and asarray(ar).dtype.kind != "c" and equal_nan:
         return _np.unique1d(ar)
     a = asarray(ar).ravel()
     # (as NumPy's: a stable sort when the first indices are asked for, its default sort otherwise)
