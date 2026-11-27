@@ -13954,6 +13954,11 @@
   "owner": "NumPy shim",
   "reason": "string arrays: an operation v1 doesn't have, refused in words (NotImplementedError); not a cap"
  },
+ "src/runtime/numpy.ts :: toNum :: if (!(n >= -9223372036854775808 && n < (dt.kind === \"u\" && dt.itemsize >= 4 ? 18446744073709551616 : 9223372036854775808))) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: NumPy's own OverflowError for a Python float past a C long, as int() packs it (#2149)"
+ },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",
   "owner": "NumPy shim",

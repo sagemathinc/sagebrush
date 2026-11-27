@@ -265,6 +265,10 @@ def _int_new(cls, value=0):
             if value < 0 and cls.__name__ == "uint64":
                 raise OverflowError(f"Python integer {value} out of bounds for uint64")
             return int.__new__(cls, value)
+    if isinstance(value, floating):
+        # (a NumPy float scalar is cast, as an array element of its type is: NaN, infinity and out-of-range values
+        # as NumPy's per-element conversion gives them, with its warning, #2149; a Python float goes by int())
+        return array(value, dtype=type(value)).astype(cls)[()]
     r = array(value, dtype=cls)
     return r if r.ndim else r[()]
 
@@ -881,7 +885,7 @@ class ufunc:
         if out is not None:
             if isinstance(out, tuple):
                 out = out[0]
-            out[...] = r
+            _store(out, r, self.__name__)
             return out
         return r
 
@@ -972,7 +976,7 @@ class ufunc:
             _reduce_out_check(self.__name__, asarray(a), axis, keepdims, out)
             if dtype is None:
                 dtype = result_type(asarray(a).dtype, out.dtype)
-            out[...] = asarray(self.reduce(a, axis, dtype, None, keepdims, initial, where))
+            _store(out, self.reduce(a, axis, dtype, None, keepdims, initial, where), "reduce")
             return out
         if initial is _NoValue:
             initial = None
@@ -1029,10 +1033,15 @@ class ufunc:
         if out is not None:
             # (computed in out's dtype unless dtype is given, as NumPy's)
             out = _one_out(out)
-            r = asarray(self.accumulate(a, axis, dtype if dtype is not None else out.dtype))
+            # (its input converted to out's dtype is the accumulation's own conversion: its warning says so)
+            old = _np._cast_label("accumulate")
+            try:
+                r = asarray(self.accumulate(a, axis, dtype if dtype is not None else out.dtype))
+            finally:
+                _np._cast_label(old)
             if r.shape != out.shape:
                 raise ValueError("provided out is the wrong size for the accumulation.")
-            out[...] = r
+            _store(out, r, "accumulate")
             return out
         a = asarray(a)
         if dtype is not None:
@@ -1228,7 +1237,8 @@ def clip(a, a_min=None, a_max=None, out=None, **kw):
         r = maximum(r, a_min)
     if a_max is not None:
         r = minimum(r, a_max)
-    return _out(r, out)
+    # (NumPy's clip with one bound is maximum or minimum, and its warning names that ufunc)
+    return _out(r, out, "clip" if a_min is not None and a_max is not None else "maximum" if a_min is not None else "minimum")
 
 
 def nan_to_num(x, copy=True, nan=0.0, posinf=None, neginf=None):
@@ -1392,9 +1402,19 @@ def _count(a, axis):
     return n
 
 
-def _out(r, out):
+def _store(out, r, op):
+    # (a result written into out: cast as an array, as NumPy's loop writes it, not packed as one value; an invalid
+    # conversion's warning names op as NumPy's does: a ufunc's name, "reduce", "accumulate" or "cast", #2149)
+    old = _np._cast_label(op)
+    try:
+        out[...] = asarray(r)
+    finally:
+        _np._cast_label(old)
+
+
+def _out(r, out, op="cast"):
     if out is not None:
-        out[...] = r
+        _store(out, r, op)
         return out
     return r
 
@@ -1420,7 +1440,7 @@ def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, wh
     r = _np.sum(a, axis, keepdims, dtype, initial is None, m)
     if initial is not None and initial is not _NoValue:
         r = r + initial
-    return _out(r, out)
+    return _out(r, out, "reduce")
 
 
 def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, where=True):
@@ -1434,7 +1454,7 @@ def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, w
     # or initial, in the order NumPy's iterator takes for the input, the result and the mask)
     m = None if where is True else _where_mask(a, where, axis)
     r = _np.prod(a, axis, keepdims, dtype, initial, m)
-    return _out(r, out)
+    return _out(r, out, "reduce")
 
 
 product = _removed_alias(prod, "product", "np.prod")
@@ -1548,7 +1568,7 @@ def mean(a, axis=None, dtype=None, out=None, keepdims=False, *, where=True):
         if not isinstance(out, ndarray):
             raise TypeError("return arrays must be of ArrayType")
         add.reduce(a, axis, dtype, out, keepdims)
-        out[...] = true_divide(out, float64(n) if n else 0.0)
+        _store(out, true_divide(out, float64(n) if n else 0.0), "divide")
         return out
     s = _np.sum(a, axis, keepdims, dtype)
     return s / n if n else s / 0.0
@@ -1586,17 +1606,17 @@ def var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=Tru
     if axis is None and dtype is None and not keepdims:
         r = _np.sqdev_sum(a, arrmean.ravel()[0])  # no temporaries, the same bits
         if r is not None:
-            return _out(float64(r) / _builtins.max(n - ddof, 0), out)
+            return _out(float64(r) / _builtins.max(n - ddof, 0), out, "reduce")
     x = _sq_dev(a, arrmean, False)  # (laid out as NumPy lays them out, #2088)
     r = _np.sum(x, axis, keepdims, dtype)
-    return _out(r / _builtins.max(n - ddof, 0), out)
+    return _out(r / _builtins.max(n - ddof, 0), out, "reduce")
 
 
 def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=True, mean=None, correction=None):
     if where is not True or mean is not None:
         # (as NumPy's _std, #2088: the variance (into out if given), then its root there)
         return _root(var(a, axis, dtype, out, ddof, keepdims, where=where, mean=mean, correction=correction))
-    return _out(sqrt(var(a, axis, dtype, None, ddof, keepdims, correction=correction)), out)
+    return _out(sqrt(var(a, axis, dtype, None, ddof, keepdims, correction=correction)), out, "reduce")
 
 
 def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
@@ -1631,11 +1651,11 @@ def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
 
 
 def amax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
-    return _out(_minmax(a, axis, keepdims, initial, where, True), out)
+    return _out(_minmax(a, axis, keepdims, initial, where, True), out, "reduce")
 
 
 def amin(a, axis=None, out=None, keepdims=False, initial=None, where=True):
-    return _out(_minmax(a, axis, keepdims, initial, where, False), out)
+    return _out(_minmax(a, axis, keepdims, initial, where, False), out, "reduce")
 
 
 max = amax
@@ -1665,19 +1685,19 @@ def ptp(a, axis=None, out=None, keepdims=False):
 
 
 def all(a, axis=None, out=None, keepdims=False, *, where=True):
-    return _out(_np.all(asarray(a), axis, keepdims), out)
+    return _out(_np.all(asarray(a), axis, keepdims), out, "reduce")
 
 
 def any(a, axis=None, out=None, keepdims=False, *, where=True):
-    return _out(_np.any(asarray(a), axis, keepdims), out)
+    return _out(_np.any(asarray(a), axis, keepdims), out, "reduce")
 
 
 def cumsum(a, axis=None, dtype=None, out=None):
-    return _out(_np.cumsum(asarray(a), axis, dtype), out)
+    return _out(_np.cumsum(asarray(a), axis, dtype), out, "accumulate")
 
 
 def cumprod(a, axis=None, dtype=None, out=None):
-    return _out(_np.cumprod(asarray(a), axis, dtype), out)
+    return _out(_np.cumprod(asarray(a), axis, dtype), out, "accumulate")
 
 
 cumulative_sum = cumsum
@@ -1743,8 +1763,8 @@ def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
         if a.size == 0 and _count(a, axis) == 0:
             raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
         r = (_np.amax if is_max else _np.amin)(a, axis, keepdims, None, True)
-        return r if out is None else _out(r, out)
-    return _out(_minmax(a, axis, keepdims, initial, where, is_max, True), out)
+        return r if out is None else _out(r, out, "reduce")
+    return _out(_minmax(a, axis, keepdims, initial, where, is_max, True), out, "reduce")
 
 
 def nanmax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
@@ -3283,26 +3303,80 @@ def select(condlist, choicelist, default=0):
     return res
 
 
-class errstate:
-    def __init__(self, **kw):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def __call__(self, f):
-        return f
+# (the floating-point error modes, as NumPy's seterr keeps them. Sagebrush's only floating-point warning is a cast's
+# 'invalid' one (#2149), so 'invalid' is passed to the runtime; the others are kept and returned, with no effect yet.
+# 'call', 'print' and 'log' for 'invalid' are refused as not supported yet)
+_err = {"divide": "warn", "over": "warn", "under": "ignore", "invalid": "warn"}
 
 
-def seterr(**kw):
-    return geterr()
+def _check_modes(modes):
+    for v in modes:
+        if v is not None and v not in ("ignore", "warn", "raise", "call", "print", "log"):
+            raise ValueError("invalid error mode %r" % (v,))
+
+
+def _set_err(new):
+    _check_modes(new.values())
+    if new["invalid"] not in ("ignore", "warn", "raise"):
+        raise NotImplementedError("np.seterr: invalid=%r is not supported yet" % (new["invalid"],))
+    _err.update(new)
+    _np._set_invalid_mode(new["invalid"])
+
+
+def _err_after(all, divide, over, under, invalid):
+    # (every mode given is checked, all= too when each key is also given, as NumPy's)
+    _check_modes((all, divide, over, under, invalid))
+    new = dict(_err) if all is None else dict.fromkeys(_err, all)
+    for k, v in (("divide", divide), ("over", over), ("under", under), ("invalid", invalid)):
+        if v is not None:
+            new[k] = v
+    return new
+
+
+def seterr(all=None, divide=None, over=None, under=None, invalid=None):
+    old = geterr()
+    _set_err(_err_after(all, divide, over, under, invalid))
+    return old
 
 
 def geterr():
-    return {"divide": "warn", "over": "warn", "under": "ignore", "invalid": "warn"}
+    return dict(_err)
+
+
+class errstate:
+    """np.errstate: the error modes set while in the with block (or a decorated call), restored after"""
+
+    def __init__(self, *, call=_NoValue, all=None, divide=None, over=None, under=None, invalid=None):
+        if call is not _NoValue:
+            raise NotImplementedError("np.errstate(call=) is not supported yet")
+        self._modes = (all, divide, over, under, invalid)
+        self._old = None
+
+    def __enter__(self):
+        # (as NumPy's: an errstate is entered once, even after it was left)
+        if self._old is not None:
+            raise TypeError("Cannot enter `np.errstate` twice.")
+        old = geterr()
+        _set_err(_err_after(*self._modes))
+        self._old = old
+
+    def __exit__(self, *exc):
+        _set_err(self._old)
+
+    def __call__(self, func):
+        def inner(*args, **kwargs):
+            old = geterr()
+            _set_err(_err_after(*self._modes))
+            try:
+                return func(*args, **kwargs)
+            finally:
+                _set_err(old)
+        # (functools.wraps's copy: only the attributes func has, so any callable can be decorated)
+        for k in ("__module__", "__name__", "__qualname__", "__doc__"):
+            if hasattr(func, k):
+                setattr(inner, k, getattr(func, k))
+        inner.__wrapped__ = func
+        return inner
 
 
 # ------------------------------------------------------------------ printing
@@ -3638,7 +3712,7 @@ def nextafter(x1, x2, out=None, **kw):
     step = _nextafter32 if dt == float32 else _math.nextafter
     vals = [step(p, q) for p, q in zip(a.ravel().tolist(), b.ravel().tolist())]
     res = array(vals, dtype=dt).reshape(a.shape)
-    return _out(res[()] if res.ndim == 0 else res, out)
+    return _out(res[()] if res.ndim == 0 else res, out, "nextafter")
 
 
 # ------------------------------------------------------------------ ndarray methods with keyword arguments

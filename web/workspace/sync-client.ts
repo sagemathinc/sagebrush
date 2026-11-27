@@ -35,7 +35,7 @@ import { Outbox, Fenced, switchTo, renewLease, sender, obligate, rebuildKey, wir
 import type * as SealMod from "./sync-seal";
 import { seedLedger, hubOf, driveObsolete, ledgerKeys } from "./sync-ledger";
 import { bytesFor } from "./sync-pins";
-import { cursorOf, applyOps, genPrefix, drainConfirmed } from "./sync-confirmed";
+import { cursorOf, applyOps, genPrefix, drainConfirmed, sealedPullKey } from "./sync-confirmed";
 import { capture as captureAdoption } from "./sync-adopt";
 import { SENDER_HOLD, ReplayHalted, runReplay } from "./sync-replay";
 import { Halt } from "./sync-overlay";
@@ -156,7 +156,9 @@ export type SyncStatus = {
 /** An op of the server's log, as an `index` message carries it. */
 export type IndexOp = WireOp & { seq: number; device: string };
 /** A page of the server's log: step 4's confirmed index takes it (C3); step 3 gives it to no one. */
-export type IndexPage = { ns: string; ops: IndexOp[]; more: boolean };
+/** A page of the server's log; `sealed` (e2e PR 5c): what pull had verified after each sealed op in it, by seq, which
+ * whoever applies the page keeps with the cursor (sync-confirmed.ts applyConfirmed) */
+export type IndexPage = { ns: string; ops: IndexOp[]; more: boolean; sealed?: ReadonlyMap<number, unknown> };
 /** A refusal kept for the Sync panel; `n` counts them, 1, 2, 3, … in the order they came (the panel's "seen" mark is
  * an n: neither a clock nor a dseq, which a rebuild may start again).  Older entries have none. */
 export type Refusal = { dseq: number; code: string; path: string; at: number; n?: number };
@@ -191,7 +193,7 @@ export type ClientOptions = {
    * page gives yet, and the sealing module itself (sync-seal.ts, the `kit`), passed in rather than imported, so a page
    * without end-to-end encryption carries none of its code. Another device's sealed ops halt the pull until they can
    * be verified (5c-2) */
-  e2e?: { keys: SealMod.OpKeys; kit: Pick<typeof SealMod, "sealOps" | "sopsItem" | "envHashOf"> };
+  e2e?: { keys: SealMod.OpKeys; kit: Pick<typeof SealMod, "sealOps" | "sopsItem" | "envHashOf" | "verifyRow" | "PULL_START" | "SealedHalt"> };
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
@@ -299,6 +301,9 @@ export class SyncClient {
   /** the server's log as far as this page has read it: in memory only (step 3, D2) */
   private cursor = 0;
   private cursorNs = "";
+  /** (e2e PR 5c) what pull has verified (sync-seal.ts PullState): kept with the cursor when pages are applied
+   * (applyConfirmed), read back at each connection; in memory only without onIndex, as the cursor is */
+  private pullState: unknown = undefined;
   private subs = new Set<(s: SyncStatus) => void>();
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
@@ -308,7 +313,7 @@ export class SyncClient {
   private barriers = new Map<string, number>();
   private answered: string[] = [];
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, sealedHalt: "" as string, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -487,6 +492,7 @@ export class SyncClient {
     if (this.cursorNs !== ns) {
       // (another namespace: its own log, read from its start)
       this.cursor = 0;
+      this.pullState = undefined;
       this.cursorNs = ns;
       this.paused = null;
     }
@@ -546,6 +552,8 @@ export class SyncClient {
     const start = this.opts.onIndex
       ? Math.min(awaiting ? awaiting.lo - 1 : Infinity, await cursorOf(this.w, ns))
       : awaiting ? awaiting.lo - 1 : this.cursor;
+    // (what pull had verified, as of the durable cursor: read with it, never defaulted below it)
+    if (this.opts.onIndex && this.opts.e2e) this.pullState = await this.metaGet(sealedPullKey(ns));
     // (stopped while this connection was being prepared: no socket is opened)
     if (this.stopped) return "stopped";
     const url = this.origin.replace(/^http/, "ws") + "/api/sync/v1/account";
@@ -797,12 +805,37 @@ export class SyncClient {
       last = o.seq;
       ops.push(o as unknown as IndexOp);
     }
-    // (a sealed op from another device: not read until it can be verified (e2e PR 5c's pull half); the pages stop here)
+    // (sealed ops: none read without the sealing module; with it, every one verified and opened, in the log's order,
+    // before anything of the page is applied (e2e PR 5c): one that doesn't verify stops the pull at it, the cursor where
+    // it was, so every device reading this log against the same verified chain stops at the same op)
     const sealedRow = (o: IndexOp) => typeof (o as unknown as { env?: unknown }).env === "string";
-    if (ops.some((o) => sealedRow(o) && o.device !== this.w.device)) {
-      c.halted = "sealed-unverified";
-      this.showWaiting(c, (await c.ob.status()).count);
-      return;
+    let pullAfter: unknown = this.pullState;
+    const pageStates = new Map<number, unknown>(), opened = new Map<number, WireOp>();
+    if (ops.some(sealedRow)) {
+      if (!this.opts.e2e) {
+        c.halted = "sealed-unverified";
+        this.showWaiting(c, (await c.ob.status()).count);
+        return;
+      }
+      const { keys, kit } = this.opts.e2e;
+      let st = (pullAfter ?? kit.PULL_START) as SealMod.PullState;
+      for (const o of ops) {
+        // (verified already: read again from an earlier cursor to match an echo; what it opened to was applied then)
+        if (!sealedRow(o) || o.seq <= st.seq) continue;
+        try {
+          const r = await kit.verifyRow(keys, c.generation, o as unknown as Record<string, unknown>, st);
+          st = r.state;
+          pageStates.set(o.seq, st);
+          opened.set(o.seq, r.op);
+        } catch (e) {
+          if (!(e instanceof kit.SealedHalt)) throw e;
+          c.halted = "sealed-halt";
+          this.stats.sealedHalt = e.message.slice(0, 300);
+          this.showWaiting(c, (await c.ob.status()).count);
+          return;
+        }
+      }
+      pullAfter = st;
     }
     // (this device's echoes: their records confirmed, if each is the very op of its record; a sealed echo is its record's
     // if it is the envelope this device kept for that dseq, and goes on as the record's own op)
@@ -873,9 +906,14 @@ export class SyncClient {
         }
       }
     }
+    // (another device's sealed ops go on as the ops they opened to, at their place in the log)
+    for (let i = 0; i < ops.length; i++) {
+      const op = opened.get(ops[i].seq);
+      if (op && ops[i].device !== this.w.device) ops[i] = { ...op, seq: ops[i].seq, device: ops[i].device, dseq: ops[i].dseq } as unknown as IndexOp;
+    }
     if (this.opts.onIndex && ops.length) {
       try {
-        await this.opts.onIndex({ ns: c.ns, ops, more: m.more });
+        await this.opts.onIndex({ ns: c.ns, ops, more: m.more, ...(pageStates.size ? { sealed: pageStates } : {}) });
       } catch (e) {
         // (D11: a large move's rewrite stuck, or its view's replay stopped: the pages held (nothing past them is
         // read), sending goes on, the person told; a reload tries once more)
@@ -891,6 +929,7 @@ export class SyncClient {
     // (the view may have queued fetches; and a page is a moment to look at the queue anyway)
     this.fetchKick(c);
     this.cursor = last;
+    this.pullState = pullAfter;
     // (an idle pull's discovery: each page raises the target; a page that ends the log ends it, D8b r2)
     if (c.discover) {
       c.target = Math.max(c.target, last);
@@ -1320,6 +1359,7 @@ export class SyncClient {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
     if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
     if (c.halted === "sealed-unverified") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device can't verify another device's encrypted changes yet" });
+    if (c.halted === "sealed-halt") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "the server's log doesn't verify: sync stopped at the first change that doesn't" });
     if (c.halted === "sealed-rebuild") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device can't rebuild its sync from encrypted changes yet" });
     if (c.halted === "sealed-log-full") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this account's encrypted change log is full" });
     if (c.halted === "not-a-device") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device isn't one of this account's encryption devices any more" });

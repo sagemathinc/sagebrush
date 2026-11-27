@@ -88,7 +88,8 @@ ALL = tuple(n for n, _ in VALUES) + tuple(UNIVERSES)
 ORDER = ("lt", "le", "gt", "ge")
 MUTATE = ("in", "incl", "tin", "append", "insert", "excl", "index", "remincl", "tappend", "tinsert", "trevincl")
 ARITH = ("add", "sub", "mul", "div", "idiv", "mod")
-RING = {"x": "P", "x2": "P", "y": "Q", "z": "P2"}
+# (P and P2 are one ring: PolynomialRing(Integers()) is the session's one ring over the integers, as Magma's)
+RING = {"x": "P", "x2": "P", "y": "Q", "z": "P"}
 GE_TUPLES = "ge of tuples of two lengths (Magma answers true both ways, where lt, le and gt call them incompatible)"
 SEQ_REASON = "a sequence converted into an element of a structure (Magma's coefficient conversion)"
 REFUSED = [

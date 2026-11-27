@@ -4875,22 +4875,47 @@ const e2eId = () => {
 async function sealedFixture(accountId) {
   // (the kit: the sealing module, loaded only here; the workspace's bundle doesn't carry it)
   const kit = await import("./sealkit.js");
-  const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
-  const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
-  const id = e2eId(), account = "e2e-" + e2eId();
+  const account = "e2e-" + e2eId();
   const keys = await kit.deriveEpochKeys(rand32(), account, 1);
-  const server = { head: b64u(rand32()), generation: b64u(rand32()) };
-  let view = { ...server, currentEpoch: 1 };
+  // (the key chain, as auth's verified state gives it: heads at absolute positions from `base`, devices with the
+  // positions they were added and removed at; every device of the fixture reads the same chain)
+  const base = 5;
+  const heads = [b64u(rand32())], generation = b64u(rand32());
+  const devices = new Map(); // id -> { raw, added, removed, privateKey }
+  const server = { get head() { return heads[heads.length - 1]; }, generation };
+  const put = () => ctl("e2eChain", { account: accountId, chain: { account, head: server.head, generation, signers: [...devices].filter(([, d]) => d.removed === null).map(([i, d]) => [i, b64u(d.raw)]) } });
   const refreshes = { n: 0 };
-  const put = () => ctl("e2eChain", { account: accountId, chain: { account, head: server.head, generation: server.generation, signers: [[id, b64u(raw)]] } });
-  await put();
-  const provider = {
-    account,
-    device: { id, sign: async (b) => new Uint8Array(await crypto.subtle.sign("Ed25519", pair.privateKey, b)) },
-    chain: async (refresh) => { if (refresh) { refreshes.n++; view = { ...server, currentEpoch: 1 }; } return view; },
-    epochKeys: async (n) => (n === 1 ? keys : null),
+  const viewOf = (known) => {
+    const position = (h) => { const i = heads.slice(0, known).indexOf(h); return i < 0 ? null : base + i; };
+    return {
+      head: heads[known - 1], generation, currentEpoch: 1, position,
+      signerAt: (h, id) => { const p = position(h), d = devices.get(id); return p !== null && d && d.added <= p && (d.removed === null || d.removed > p) ? d.raw : null; },
+      epochAt: (h) => (position(h) === null ? null : 1),
+      device: (id) => { const d = devices.get(id); return d ? { added: d.added, removed: d.removed } : null; },
+    };
   };
-  return { provider, kit, refreshes, server, move: async () => { server.head = b64u(rand32()); await put(); } };
+  const device = async () => {
+    const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    const id = e2eId();
+    // (a device added moves the head: added at that new head's position)
+    if (devices.size) heads.push(b64u(rand32()));
+    devices.set(id, { raw, added: base + heads.length - 1, removed: null });
+    await put();
+    let known = heads.length;
+    return {
+      account,
+      device: { id, sign: async (b) => new Uint8Array(await crypto.subtle.sign("Ed25519", pair.privateKey, b)) },
+      chain: async (refresh) => { if (refresh) { refreshes.n++; known = heads.length; } return viewOf(known); },
+      epochKeys: async (n) => (n === 1 ? keys : null),
+    };
+  };
+  const provider = await device();
+  return {
+    provider, kit, refreshes, server, device,
+    move: async () => { heads.push(b64u(rand32())); await put(); },
+    remove: async (p) => { heads.push(b64u(rand32())); devices.get(p.device.id).removed = base + heads.length - 1; await put(); },
+  };
 }
 const sealedSends = (log) => log.sent.filter((m) => m.t === "sops");
 const itemsOf = (sends) => sends.flatMap((m) => m.json.map((j) => JSON.parse(j)));
@@ -5004,7 +5029,7 @@ async function sealedEchoMalformed() {
   const cursor0 = c.debug().cursor;
   await ctl("set", { set: { tamperIndexEnvBad: 1 } });
   await w.mkdir("/malformed");
-  check(await until(() => c.debug().halted === "diverged", 15_000), "sealed echo, malformed: halted, diverged: " + J(c.status));
+  check(await until(() => c.debug().halted === "sealed-halt", 15_000), "sealed echo, malformed: halted (it doesn't verify): " + J(c.status));
   check((await outbox(w)) >= 1 && c.debug().cursor === cursor0, "sealed echo, malformed: the record kept, the cursor where it was: " + J({ cursor0, cursor: c.debug().cursor }));
   await stop(c);
 }
@@ -5019,7 +5044,10 @@ async function sealedTamper() {
     check(await until(() => settled(w, c)), `sealed tamper (${via}): synced`);
     await ctl("set", { set: via === "ack" ? { tamperAckHash: 1 } : { tamperIndexEnv: 1 } });
     await w.mkdir(`/t-${via}`);
-    check(await until(() => c.debug().halted === "diverged", 15_000), `sealed tamper (${via}): another envelope's hash named: halted, diverged: ` + J(c.status));
+    // (an ack naming another hash: diverged; an echo serving another envelope: it doesn't verify (pull checks every sealed
+    // op, this device's own too, before matching it): halted at it)
+    const want = via === "ack" ? "diverged" : "sealed-halt";
+    check(await until(() => c.debug().halted === want, 15_000), `sealed tamper (${via}): another envelope's hash named: halted, ${want}: ` + J(c.status));
     await stop(c);
   }
 }
@@ -5121,7 +5149,7 @@ async function sealedLogFull() {
 }
 
 async function sealedForeign() {
-  // (another device's sealed op in the log: this half can't verify it yet (5c-2), so the pull stops there, said)
+  // (another device's sealed ops, read by a device with no sealing module: not read, the pull stops there, said)
   const id = await account();
   const f = await sealedFixture(id);
   const wa = await fresh(), wb = await fresh();
@@ -5129,14 +5157,92 @@ async function sealedForeign() {
   check(await until(() => settled(wa, a)), "sealed foreign: A synced");
   await wa.mkdir("/from-a");
   check(await until(() => settled(wa, a), 15_000), "sealed foreign: A's op in the log");
-  const b = client(wb, { e2e: { keys: f.provider, kit: f.kit } });
-  check(await until(() => b.debug().halted === "sealed-unverified" && /can't verify/.test(b.status.reason ?? ""), 15_000), "sealed foreign: B halts at A's sealed op, saying why: " + J(b.status));
+  const b = client(wb);
+  check(await until(() => b.debug().halted === "sealed-unverified" && /can't verify/.test(b.status.reason ?? ""), 15_000), "sealed foreign: B, without the module, halts at A's sealed op, saying why: " + J(b.status));
   check(!(await wb.stat("/from-a")), "sealed foreign: nothing of it applied on B");
   await stop(a);
   await stop(b);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed };
+async function sealedPull() {
+  // (e2e PR 5c, its pull half: B verifies and opens A's sealed ops, in the log's order, and applies them; its pull's
+  // state is kept with its cursor, so after a reload A's next op still verifies, chained after the last B verified)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const h0 = f.server.head;
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "sealed pull: A synced");
+  await wa.mkdir("/pa");
+  await wa.create("/pa/one.txt", { content: "one" });
+  check(await until(() => settled(wa, a), 15_000), "sealed pull: A's ops in the log: " + J(a.status));
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => !!(await wb.stat("/pa/one.txt")) && settled(wb, b), 15_000), "sealed pull: B verified, opened and applied A's sealed ops: " + J({ status: b.status, halted: b.debug().halted, why: b.stats.sealedHalt }));
+  const ns = nsOf(b);
+  const kept = await metaGet(wb.ws, `sync:${ns}:sealedPull`);
+  const cursor = await metaGet(wb.ws, `sync:${ns}:cursor`);
+  check(kept && kept.seq === cursor && Object.keys(kept.devices).length >= 1, "sealed pull: what B verified is kept with its cursor (the same seq): " + J({ kept: kept && { seq: kept.seq, floor: kept.floor }, cursor }));
+  await stop(b);
+  await wa.create("/pa/two.txt", { content: "two" });
+  check(await until(() => settled(wa, a), 15_000), "sealed pull: A's next op in the log");
+  const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => !!(await wb.stat("/pa/two.txt")), 15_000) && b2.debug().halted === undefined, "sealed pull: after a reload, A's next op verifies (chained after the last B kept) and applies: " + J({ halted: b2.debug().halted, why: b2.stats.sealedHalt }));
+  // (the floor, kept too: A's next op served at a head from before the ones B has verified halts by the floor, before
+  // any other check, so a reload can't lower it)
+  await ctl("set", { set: { tamperIndexHead: h0, tamperFor: wb.device, serverNotices: true } });
+  await wa.create("/pa/three.txt", { content: "three" });
+  check(await until(() => b2.debug().halted === "sealed-halt", 15_000) && /already passed/.test(b2.stats.sealedHalt), "sealed pull: after the reload, an op served at an earlier head halts by the floor B kept: " + J({ why: b2.stats.sealedHalt }));
+  await stop(a);
+  await stop(b2);
+}
+
+async function sealedPullHalt() {
+  // (a sealed op served altered: B halts at it, deterministically, nothing of it applied, the cursor where it was; for
+  // every kind of change, the reference lists' form included (never another error, which would end the connection and
+  // read the op again, untouched))
+  const many = Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0"));
+  const kinds = [
+    ["envelope", { tamperIndexEnv: 1 }],
+    ["an add twice", { tamperIndexField: { field: "adds", value: ["3".repeat(64), "3".repeat(64)], sticky: true } }],
+    ["65 adds", { tamperIndexField: { field: "adds", value: many, sticky: true } }],
+    ["a release twice", { tamperIndexField: { field: "releases", value: ["4".repeat(64), "4".repeat(64)], sticky: true } }],
+    ["65 releases", { tamperIndexField: { field: "releases", value: many, sticky: true } }],
+  ];
+  for (const [kind, set] of kinds) {
+    const id = await account();
+    const f = await sealedFixture(id);
+    const pb = await f.device();
+    const wa = await fresh(), wb = await fresh();
+    const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(wa, a)), `sealed pull halt (${kind}): A synced`);
+    const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+    check(await until(() => settled(wb, b)), `sealed pull halt (${kind}): B synced`);
+    const cursor0 = await metaGet(wb.ws, `sync:${nsOf(b)}:cursor`);
+    await ctl("set", { set: { ...set, tamperFor: wb.device, serverNotices: true } });
+    await wa.mkdir("/tampered");
+    check(await until(() => b.debug().halted === "sealed-halt" && /doesn't verify/.test(b.status.reason ?? ""), 15_000), `sealed pull halt (${kind}): B halted, saying the log doesn't verify: ` + J({ status: b.status, why: b.stats.sealedHalt }));
+    await sleep(300);
+    const ns = nsOf(b);
+    const pull0 = J(await metaGet(wb.ws, `sync:${ns}:sealedPull`) ?? null);
+    check(b.debug().halted === "sealed-halt" && !(await wb.stat("/tampered")) && (await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0, `sealed pull halt (${kind}): still halted, nothing of it applied, B's cursor where it was`);
+    await stop(b);
+    if (set.tamperIndexField?.sticky) {
+      // (a server that keeps serving it: after a reload B halts again at the same op, nothing applied, its cursor and
+      // what it had verified unchanged)
+      const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+      check(await until(() => b2.debug().halted === "sealed-halt", 15_000), `sealed pull halt (${kind}): after a reload, halted again at it: ` + J({ why: b2.stats.sealedHalt }));
+      await sleep(300);
+      check(!(await wb.stat("/tampered")) && (await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0 && J(await metaGet(wb.ws, `sync:${ns}:sealedPull`) ?? null) === pull0,
+        `sealed pull halt (${kind}): after the reload, nothing applied, the cursor and what B verified unchanged`);
+      await stop(b2);
+      await ctl("set", { set: { tamperIndexField: null } });
+    }
+    await stop(a);
+  }
+}
+
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

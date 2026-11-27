@@ -68,6 +68,21 @@ pass, and CI runs them.
     differently).
   - fft (pocketfft).
   - float32 transcendentals.
+- **A float cast to an integer type** (NaN, infinity or a value out of range; `astype`, assignment, `out=`): NumPy
+  leaves these to the C cast, whose x86-64 result Sagebrush gives as a fixed rule, NumPy's per-element (scalar) loop.
+  int8, int16, int32, uint8 and uint16 convert through a 32-bit integer (out of its range, or NaN, gives its least
+  value, whose low bits the narrow types keep: 0); uint32 converts through a 64-bit integer and keeps the low 32
+  bits (NaN, infinity and $|x| \ge 2^{63}$ give 0, -3e9 gives 1294967296). NumPy warns "invalid value encountered in
+  cast" when that conversion is invalid, and so does Sagebrush, once per cast. NumPy's vectorized loop gives some
+  uint32 elements of a contiguous array other values (in blocks of 4: NaN gives 2147483648 there); Sagebrush gives
+  every element the per-element result. A Python float (or a NumPy float scalar) assigned or listed is converted by
+  `int()`, NaN, infinity and out-of-range values refused, as in NumPy. int64 and uint64 keep refusing results past
+  $2^{53}$. The warning names the operation as NumPy's does ("in cast"; "in add" and so on when a ufunc writes into
+  an integer `out=`; "in reduce" for a reduction into one), and `np.errstate`/`np.seterr` set whether it warns, is
+  ignored or raises `FloatingPointError` (their 'call', 'print' and 'log' modes are not supported for 'invalid'
+  yet). Sagebrush gives one warning per call: NumPy casts the first element of `min`/`max` (and of an accumulation,
+  "in accumulate") into `out=` on its own, so it may give a second warning, or say "in cast" when only that element
+  is invalid.
 
 ## What is there
 
