@@ -422,6 +422,9 @@ async def test_detach_reattach_takeover_and_refusals():
         p2 = AgentPage(run, sg)
         r = await p2.open()
         assert r["error"]["message"] == "The agent is already open in another page or tab. Close it there, then connect again here.", r
+        # (both said on the runner's terminal, too: the pairing by kind, and the refusal with its reason)
+        assert "An agent page is paired (default).\n" in run.said, run.said
+        assert "An agent page was refused: The agent is already open in another page or tab. Close it there, then connect again here.\n" in run.said, run.said
         # (a takeover with the secret, the old page's message in flight behind it: the old page told, the same
         # child, and the old message has no effect; the frames' order is forced by writing them together)
         p3 = AgentPage(run, sg)

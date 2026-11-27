@@ -157,6 +157,12 @@ def refused(f, words):
     raise AssertionError("not refused: %s" % words)
 
 
+def teardown_function(f):
+    # (pytest, one test at a time: the module's pins back as the wheel has them, whatever a fake release set; the
+    # __main__ runner below does the same around each test)
+    T.AGENT, T.NODE, T.TREE_PINS = dict(REAL["AGENT"]), dict(REAL["NODE"]), dict(REAL["TREE_PINS"])
+
+
 def ensure(rel, root=None):
     return T.ensure(root or fresh_root(), PLAT, rel.get)
 
@@ -360,6 +366,55 @@ def test_two_ensures_at_once_both_start():
     assert not errs and len(out) == 4 and len(set(out)) == 1, (errs, out)
     assert sum(1 for u in rel.gets if "agents.sagebrush.cloud" in u) == 1, rel.gets  # (built once)
     assert os.path.isfile(os.path.join(root, ".lock"))
+
+
+def test_a_symlinked_folder_inside_the_tree():
+    # (TESTS T1: os.walk doesn't descend into a linked folder, so the manifest's file list can't see it; _walk refuses
+    # the link itself, and ensure() rebuilds, never running that tree)
+    rel = Release()
+    pinned(rel)
+    inst = ensure(rel)
+    pkgdir = os.path.join(inst.root, "package")
+    os.chmod(pkgdir, 0o755)  # (as anything running as this user can)
+    os.symlink("/", os.path.join(pkgdir, "evil"))
+    os.chmod(pkgdir, 0o555)
+    refused(lambda: T.verify(inst.root, PLAT), "has a link")
+    n = len(rel.gets)
+    again = T.ensure(os.path.dirname(inst.root), PLAT, rel.get)
+    assert len(rel.gets) > n and not os.path.lexists(os.path.join(again.root, "package", "evil"))
+
+
+def test_a_state_folder_owned_by_another_user():
+    # (TESTS T2: the owner check, with os.getuid patched to another uid; the page gets the "private" sentence)
+    rel = Release()
+    pinned(rel)
+    real = T.os.getuid
+    T.os.getuid = lambda: real() + 1
+    try:
+        try:
+            T.ensure(fresh_root(), PLAT, rel.get)
+            raise AssertionError("not refused")
+        except T.AgentRuntimeError as e:
+            assert e.kind == "private" and "is owned by another user" in str(e), str(e)
+            assert T.start_failure(e)[1] == T.PAGE_WORDS["private"]
+    finally:
+        T.os.getuid = real
+
+
+def test_the_tree_limits():
+    # (TESTS T3: the tree's file and byte limits, each lowered: refused, and nothing renamed into place)
+    rel = Release()
+    pinned(rel)
+    for key, value in (("files", 2), ("treeBytes", 10)):
+        saved = dict(T.LIMITS)
+        T.LIMITS[key] = value
+        root = fresh_root()
+        try:
+            refused(lambda: T.ensure(root, PLAT, rel.get), "larger than its limits")
+            assert not os.path.lexists(os.path.join(root, T.tree_name(PLAT))), key
+        finally:
+            T.LIMITS.clear()
+            T.LIMITS.update(saved)
 
 
 def test_the_state_folder_must_be_private():
