@@ -48,9 +48,9 @@ const MODES: { id: string; title: string; prefix: string; exact?: string; needs?
   { id: "sage", title: "Sage", prefix: "sage", needs: ["python", "modules"] },
   { id: "matlab", title: "MATLAB", prefix: "matlab", needs: ["python", "scientific", "modules"] },
   { id: "magma", title: "Magma", prefix: "magma", needs: ["python", "sage", "modules"] },
-  // (every Rill group is named rill-*, so this item owns them all: design/rill.md §6.1. Hidden until the page can
-  // run Rill, A2's worker, which removes the flag: @sagebrush's ruling on #847, Nov 8)
-  { id: "rill", title: "R (Rill)", prefix: "rill", needs: ["python", "modules"], hidden: true },
+  // (every Rill group is named rill-*, so this item owns them all: design/rill.md §6.1. Shown now that the page runs
+  // R: notebooks, boards and the Terminal)
+  { id: "rill", title: "R", prefix: "rill", needs: ["python", "modules"] },
   // (every Sprig group is named sprig-*, so this item owns them all: design/sprig-mvp.md §6.1.  Hidden until the page
   // can run Sprig, S7's worker)
   { id: "sprig", title: "Sprig", prefix: "sprig", needs: ["python", "sage", "modules"], hidden: true },

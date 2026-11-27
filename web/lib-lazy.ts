@@ -88,7 +88,7 @@ let onMissing: ((m: OfflineMissing) => void) | null = null;
 export function onOfflineMissing(f: (m: OfflineMissing) => void) {
   onMissing = f;
 }
-const ITEM_NAMES: Record<string, string> = { python: "Python library", scientific: "Scientific Python library", sage: "Sage library", matlab: "MATLAB library", magma: "Magma library", modules: "Python module" };
+const ITEM_NAMES: Record<string, string> = { python: "Python library", scientific: "Scientific Python library", sage: "Sage library", matlab: "MATLAB library", magma: "Magma library", rill: "R library", modules: "Python module" };
 
 function fetchSync(url: string): Uint8Array {
   // (in the runner, which has no network, the page fetches it: web/runner)
@@ -181,7 +181,9 @@ g.__SAGEBRUSH_TZDATA__ = (zone: string): Uint8Array | null => {
   return bytes;
 };
 
-const MODE_NAMES: Record<string, string> = { sage: "Sage", matlab: "MATLAB", magma: "Magma" };
+const MODE_NAMES: Record<string, string> = { sage: "Sage", matlab: "MATLAB", magma: "Magma", r: "R" };
+// (a mode's groups, by the name its library's groups go by: R's interpreter is lib/_rill, the "rill" groups)
+const MODE_GROUPS: Record<string, string> = { r: "rill" };
 const pending = new Map<string, Promise<void>>();
 /** Fetch the groups mode `mode` starts with, if not here yet; `loading` is
  * told when that has to fetch something (with the mode's name), and when it
@@ -192,7 +194,7 @@ const pending = new Map<string, Promise<void>>();
  * run, and the next call starts afresh.  Compiled code that stalled twice is
  * done without: its modules compile from their sources. */
 export function prefetchMode(mode: string, fetchBytes: (url: string) => Promise<ArrayBuffer | Uint8Array>, loading: (what: string | null) => void): Promise<void> {
-  const todo = (M.modes[mode] ?? []).flatMap((group) => (["src", "pre"] as Kind[]).filter((k) => M.chunks[group]?.[k] && !installed.has(group + "." + k)).map((k) => [group, k] as [string, Kind]));
+  const todo = (M.modes[MODE_GROUPS[mode] ?? mode] ?? []).flatMap((group) => (["src", "pre"] as Kind[]).filter((k) => M.chunks[group]?.[k] && !installed.has(group + "." + k)).map((k) => [group, k] as [string, Kind]));
   if (!todo.length) return Promise.resolve();
   const p =
     pending.get(mode) ??

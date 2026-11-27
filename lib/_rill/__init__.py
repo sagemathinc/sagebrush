@@ -76,16 +76,28 @@ def reset():
     _SESSION = None
 
 
+# (whether the last input or cell ended in an error: cell_failed)
+_FAILED = [False]
+
+
 def run_cell(src):
     """Run one input or cell in the shared session, as run does a program; returns 0, or 1 after an error, which
     stops the rest of the input but not the session."""
     sess = session()
     try:
         with mem.reserve(0, "character", extra_bytes=len(src) * mem.PARSE_BYTES_PER_CHAR):
-            return _run(sess, src, sess.write_err)
+            status = _run(sess, src, sess.write_err)
     except _memguard.SagebrushMemoryError as e:
         sess.write_err(_memory_text(e) + "\n")
-        return 1
+        status = 1
+    _FAILED[0] = status != 0
+    return status
+
+
+def cell_failed():
+    """Whether the last run_cell ended in an error (a notebook marks the cell failed); reading it forgets it."""
+    failed, _FAILED[0] = _FAILED[0], False
+    return failed
 
 
 def is_incomplete(src):

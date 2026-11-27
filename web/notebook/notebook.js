@@ -172,7 +172,7 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
  * @param {HTMLElement} root
  * @param {object} [opts]
  * @param {import("./types").Kernel} [opts.kernel] runs code (none: cells cannot run)
- * @param {"python"|"sage"|"magma"|"matlab"} [opts.mode]
+ * @param {"python"|"sage"|"magma"|"matlab"|"r"} [opts.mode]
  * @param {string} [opts.assetBase] where sagebrush-math.js and sagebrush-viewer3d.js are (default: the page)
  * @param {(name: string) => string | undefined} [opts.assetUrl] the URL of one of them, if not under assetBase (a blob: in a downloaded file)
  * @param {boolean} [opts.readOnly]
@@ -201,6 +201,7 @@ export function createNotebook(root, opts = {}) {
   const isSage = () => mode === "sage";
   const isMagma = () => mode === "magma";
   const isMatlab = () => mode === "matlab";
+  const isR = () => mode === "r";
 
   root.classList.add("sbnb");
   root.replaceChildren();
@@ -225,7 +226,8 @@ export function createNotebook(root, opts = {}) {
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
   function paint(cell) {
-    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+    // (R: plain text until it has a highlighter of its own)
+    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : isR() ? esc(cell.ta.value) + "\n" : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
     // (a Markdown cell's blocks: its text changed elsewhere, merged, undone, an agent's)
     if (cell.blocks && cell.ta.value !== cell.blocksText) { cell.blocksText = cell.ta.value; cell.blocks.value = cell.ta.value; }
   }
@@ -1415,7 +1417,7 @@ export function createNotebook(root, opts = {}) {
   // one match or a longer common prefix is inserted, several are listed below
   // the caret and filtered as you type: ↑/↓ choose, Tab/Enter accept, Esc closes.
   let comp = null; // { cell, start, matches, sel }
-  const LANG_NAME = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+  const LANG_NAME = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB", r: "R" };
   let tabAsked = 0; // the latest Tab's number: only its answer takes the loading note away
   function closeCompleter() {
     comp = null;
@@ -1720,7 +1722,7 @@ export function createNotebook(root, opts = {}) {
       const v = ta.value, p = ta.selectionStart, line = v.slice(v.lastIndexOf("\n", p - 1) + 1, p);
       let ind = /^[ \t]*/.exec(line)[0];
       const atEol = ta.selectionEnd === (v.indexOf("\n", p) < 0 ? v.length : v.indexOf("\n", p));
-      if (isMatlab() ? /^\s*(if|for|parfor|while|function|switch|case|otherwise|try|catch|else|elseif)\b(?!.*\bend\b)/.test(line) : !isMagma() && /:\s*(#.*)?$/.test(line)) ind += "    ";
+      if (isMatlab() ? /^\s*(if|for|parfor|while|function|switch|case|otherwise|try|catch|else|elseif)\b(?!.*\bend\b)/.test(line) : isR() ? /\{\s*(#.*)?$/.test(line) : !isMagma() && /:\s*(#.*)?$/.test(line)) ind += isR() ? "  " : "    ";
       else if (atEol && /^\s*(return|pass|break|continue|raise)\b/.test(line)) ind = ind.slice(0, Math.max(0, ind.length - 4));
       document.execCommand("insertText", false, "\n" + ind);
     } else if (e.key === "Backspace" && !mod && !e.altKey && ta.selectionStart === ta.selectionEnd) {
@@ -2596,7 +2598,7 @@ export function createNotebook(root, opts = {}) {
   }
   function setMode(m, notify = true) {
     const before = mode;
-    mode = ["python", "sage", "magma", "matlab"].includes(m) ? m : "python";
+    mode = ["python", "sage", "magma", "matlab", "r"].includes(m) ? m : "python";
     gateCfg = null;
     for (const c of cells()) paint(c);
     if (notify) { emit("mode", mode); schedule(); }

@@ -95,8 +95,8 @@ export function mergeTextAt({ base, local, remote, sel }) {
   const [s, e] = sel;
   return { text, sel: s === e ? [mapPos(d, s, true), mapPos(d, s, true)] : [mapPos(d, s, false), mapPos(d, e, true)] };
 }
-const KERNEL = { python: "python3", sage: "sagemath", magma: "magma", matlab: "matlab" };
-const MODE = { python3: "python", sagemath: "sage", magma: "magma", matlab: "matlab" };
+const KERNEL = { python: "python3", sage: "sagemath", magma: "magma", matlab: "matlab", r: "ir" };
+const MODE = { python3: "python", sagemath: "sage", magma: "magma", matlab: "matlab", ir: "r" };
 
 function cellRecord(c, i) {
   // (a Markdown cell's attachments are part of its content: restored with it)

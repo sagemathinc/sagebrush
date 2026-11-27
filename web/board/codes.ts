@@ -15,7 +15,7 @@ import type { Preview } from "./preview";
 
 /** at most this many interpreters (languages) for one board */
 export const MAX_LANGUAGES = 4;
-const NAMES: Record<BoardMode, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+const NAMES: Record<BoardMode, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB", r: "R" };
 
 type Item = { id: string; code: string; preview?: Preview; mode?: BoardMode };
 

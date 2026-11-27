@@ -75,7 +75,7 @@ export interface Item {
   image?: { key: string; w: number; h: number; src?: string };
 }
 
-const LANG_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+const LANG_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB", r: "R" };
 /** What an item's element shows. */
 export type Content = Pick<Item, "kind" | "title" | "text" | "detail" | "ref" | "shape"> & Partial<Pick<Item, "id" | "code" | "order" | "hideCode" | "lang" | "image" | "inert" | "emoji" | "icon" | "color" | "ask">>;
 

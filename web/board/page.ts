@@ -125,7 +125,7 @@ const q = new URLSearchParams(location.search);
 // language and when last written) so that the notebook's Whiteboard opens
 // its language's latest: `?recent=MODE` (or a new one, if there is none);
 // `?new=MODE`, a new one.
-const LOCAL_LIST = "sagebrush-boards", MODES = ["python", "sage", "magma", "matlab"];
+const LOCAL_LIST = "sagebrush-boards", MODES = ["python", "sage", "magma", "matlab", "r"];
 // (the list's bounds: its newest records, each title cut, HARD-7F9-2)
 const LOCAL_MAX = 200, TITLE_MAX = 200;
 // (why nothing is kept: said, and no board presented as kept, HARD-7F9-1)

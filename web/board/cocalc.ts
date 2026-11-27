@@ -126,7 +126,7 @@ export function fromCocalcBoard(text: string, o: { slides?: boolean } = {}): Con
       // (the board's language: the first code cell's kernel that is not Python's;
       // Sage last, since Sagebrush's own kernels, sagebrush-matlab and sagebrush-magma, have "sage" in them)
       const k = String(e.data?.kernel ?? "");
-      if (!mode) mode = /matlab|octave/i.test(k) ? "matlab" : /magma/i.test(k) ? "magma" : /sage/i.test(k) ? "sage" : undefined;
+      if (!mode) mode = /matlab|octave/i.test(k) ? "matlab" : /magma/i.test(k) ? "magma" : /(^|[\s-])(ir|r)(\s|$)/i.test(k) ? "r" : /sage/i.test(k) ? "sage" : undefined;
       return { id: e.id, code: typeof e.str === "string" ? e.str : "", ...(e.data?.hideInput ? { hideCode: true } : {}), w };
     }
     return { id: e.id, text: markdown(e.str), ...(e.type === "note" ? { color: typeof e.data?.color === "string" ? e.data.color : NOTE_COLOR } : {}), w };

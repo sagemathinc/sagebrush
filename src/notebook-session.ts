@@ -68,6 +68,7 @@ import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 import { startLimits, type LimitsText } from "./limits";
 import { modeOfFlags } from "./modes";
+import { rillCellSource, rillIsIncomplete, rillQuit } from "./rill";
 
 // __pyjs_compile_magma__: Magma for one Python driver, the LaTeX editor's Run (src/magma-builtin.ts)
 installMagmaCompile(R);
@@ -355,6 +356,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     sage: ["from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", "main"],
     magma: ["import _magma\n", "host"],
     matlab: ["import _matlab\n", "host"],
+    r: ["import _rill\n", "host"],
   };
   const modeOf = (m: any) => modeOfFlags(m) ?? "python";
   /** The language's environment: "ready", "interrupted" (a Stop during the
@@ -499,7 +501,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
       if (ask === "warm") return post({ id, warmed: mode, ms: performance.now() - t, mode, modeReady: true });
       if (ask === "check") {
         // Magma's console runs each line as it is entered; MATLAB's waits for the end of an open block
-        return post({ id, more: m.magma ? false : m.matlab ? matlabIsIncomplete(m.check) : needsMore(m.check, { sage: !!m.sage }), mode, modeReady: true });
+        return post({ id, more: m.magma ? false : m.matlab ? matlabIsIncomplete(m.check) : m.r ? rillIsIncomplete(m.check) : needsMore(m.check, { sage: !!m.sage }), mode, modeReady: true });
       }
       const [matches, prefix] = completeIn(mode, main, m.complete, () => [...new Set(moduleNames())]);
       return post({ id, matches, prefix, mode, modeReady: true });
@@ -594,6 +596,14 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         }
         if (py !== null) ok = run(py, main, "exec", "<cell>");
         else ok = false;
+      } else if (m.r && m.repl && rillQuit(m.code) !== null) {
+        // (R's q() at the Console: the session ends, below)
+        exitSeen = true;
+      } else if (m.r) {
+        // R: run on lib/_rill in the session's one R session: variables stay for the next cells; R prints its own
+        // values, and an error is R's message on stderr
+        ok = run(rillCellSource(m.code), main, "exec", "<cell>");
+        if (ok && R.callObj(R.getattr(R.importModule("_rill"), "cell_failed"), []) === true) ok = false;
       } else if (m.matlab && m.repl && matlabQuit(m.code) !== null) {
         // (MATLAB's exit or quit at the Console: the session ends, below)
         exitSeen = true;
