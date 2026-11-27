@@ -12,7 +12,7 @@ import * as FD from "./fdlibm";
 import * as CR from "./crmath";
 import * as PG from "./pygamma";
 import { floatRepr, intDigits } from "./format";
-import { heapLimit } from "./heap";
+import { admitHeap, heapLimit } from "./heap";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -1743,6 +1743,8 @@ newBuiltinModule("types", (m) => {
 
 // ------------------------------------------------------------------ _random: MT19937 exactly as CPython
 
+// (the ASCII codes of the 16 hex digits, for getrandbits's buffer)
+const HEX_DIGITS = Uint8Array.from([48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]);
 export class MT {
   mt = new Uint32Array(624);
   mti = 625;
@@ -1827,18 +1829,26 @@ export class MT {
     } while (v > 0n);
     this.initByArray(key);
   }
-  getrandbits(k: number): number | bigint {
+  getrandbits(k: number, shown: string = String(k)): number | bigint {
     if (k < 0) raise(T.ValueError, "number of bits must be non-negative");
     if (k === 0) return 0;
     if (k <= 32) return this.genrand() >>> (32 - k);
-    let r = 0n, shift = 0n;
-    for (let left = k; left > 0; left -= 32) {
+    // (CPython's words, least significant first, the last one's top bits; made one int at once from their hex, not
+    // OR-ed in one at a time, which copied the growing int at each word: k = 2^20 took 0.4 s. The hex digits go into
+    // one byte buffer, decoded once: no string per word)
+    const n = Math.ceil(k / 32);
+    // (the buffer, k/4 bytes; its one-byte string, k/4; the int, k/8: 5/8 of a byte per bit at the peak, measured at
+    // 0.9 with the buffer counted twice by node's accounting, so 1 byte per bit, admitted before any word is drawn)
+    admitHeap(k, `getrandbits(${shown})`);
+    const buf = new Uint8Array(2 + 8 * n);
+    buf[0] = 48;
+    buf[1] = 120;
+    for (let i = 0, left = k; i < n; i++, left -= 32) {
       let w = this.genrand();
       if (left < 32) w >>>= 32 - left;
-      r |= BigInt(w) << shift;
-      shift += 32n;
+      for (let j = 2 + 8 * (n - 1 - i) + 7, e = j - 8; j > e; j--, w >>>= 4) buf[j] = HEX_DIGITS[w & 15];
     }
-    return O.normBig(r);
+    return O.normBig(BigInt(new TextDecoder("latin1").decode(buf)));
   }
 }
 
@@ -1850,7 +1860,14 @@ newBuiltinModule("_random", (m) => {
   });
   Ty.method(RandomType, "seed", (r: MT, x: any = null) => (r.seed(x), null));
   Ty.method(RandomType, "random", (r: MT) => O.mkfloat(r.random()));
-  Ty.method(RandomType, "getrandbits", (r: MT, k: any) => r.getrandbits(Number(k)));
+  // (k an index, as CPython's uint64_t argument: a float or a str a TypeError, a negative one or one past 64 bits a
+  // ValueError or OverflowError in its words; a large one a MemoryError, getrandbits's admission)
+  Ty.method(RandomType, "getrandbits", (r: MT, k: any) => {
+    const i = O.index(k);
+    if (i < 0) raise(T.ValueError, "Cannot convert negative int");
+    if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, "Python int too large for C uint64_t");
+    return r.getrandbits(Number(i), String(i));
+  });
   Ty.method(RandomType, "getstate", (r: MT) => tuple([3, tuple([...r.mt, r.mti]), null]));
   Ty.method(RandomType, "setstate", (r: MT, st: any) => {
     const inner = O.toArray(st[1]);

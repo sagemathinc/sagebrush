@@ -153,6 +153,9 @@ try {
     await open(P, site + "?fixtures=1#device", notLoading);
     const t = await text(P);
     ok(/This browser/.test(t) && /isn't one of this fleet's devices/.test(t) && /Device list checked up to entry 5 \([A-Za-z0-9_-]{8}\)/.test(t), "P-1: This device: the tier, not enrolled (no key here), and the pin at the verified chain's head", t);
+    const ffp = await P.ev(`document.querySelector("#fleet-fp")?.textContent ?? null`);
+    const want = F.fleet_fingerprints.find((c) => c.fleet === F.ids.fleet && c.genesis === F.objects.chain[0])?.shown;
+    ok(want && ffp === want && /sagebrush-agent host pair --fleet/.test(t), "P-1: This device shows this fleet's fingerprint (the shared vector's), before any host, with how to use it", { ffp, want });
     await open(P, site + "?fixtures=1#hosts", `!!document.querySelector("li.host")`);
     const h = await P.ev(`(() => { const li = document.querySelector("li.host"); return { name: li.querySelector(".name").textContent, fp: li.querySelector(".fp").textContent, grant: li.querySelector(".grant").textContent, host: li.dataset.host }; })()`);
     ok(h.name === "lab-box" && /^[a-z2-7]{4}(-[a-z2-7]{4}){4}$/.test(h.fp) && h.host === HOST, "P-2: Hosts: the verified certificate's name and its fingerprint, recomputed (20 base32 characters in groups of 4)", h);
@@ -245,6 +248,7 @@ try {
     await P.send("Page.addScriptToEvaluateOnNewDocument", { source: `indexedDB.open = () => { const r = {}; setTimeout(() => { r.error = new DOMException("refused", "UnknownError"); r.onerror?.(); }, 0); return r; };` });
     await open(P, site + "?fixtures=1#device", notLoading);
     const t = await text(P);
+    ok(!(await P.ev(`!!document.querySelector("#fleet-fp")`)), "A-2: storage that fails shows no fleet fingerprint");
     ok(/couldn't save its fleet record\. Nothing was trusted\./.test(t) && !/Device list checked/.test(t), "A-2: storage that fails: \"couldn't save its fleet record. Nothing was trusted.\", and no pin shown", t);
     await open(P, site + "?fixtures=1#hosts", notLoading);
     ok(!(await P.ev(`!!document.querySelector("li.host")`)), "A-2: and no host is shown either");
@@ -319,6 +323,7 @@ try {
     await open(P, site + "?fixtures=1#device", notLoading);
     const f = await P.ev(`({ t: document.querySelector("#fleet").innerText, buttons: [...document.querySelectorAll("#fleet button")].map((b) => b.textContent), links: [...document.querySelectorAll("#fleet a")].map((a) => a.textContent) })`);
     ok(/two different device lists/.test(f.t) && f.buttons.join() === "Reset this device", "P-11: a fork: said, and Reset this device is the only action", f);
+    ok(!(await P.ev(`!!document.querySelector("#fleet-fp")`)), "P-11: a forked device shows no fleet fingerprint");
     await P.ev(`(window.confirm = () => true, document.querySelector("#reset").click(), true)`);
     await P.until(`/This device was reset/.test(document.querySelector("#fleet").innerText)`, 10000);
     const pin = await P.ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush-fleet-v1", 1); r.onsuccess = () => { const g = r.result.transaction("pins").objectStore("pins").get(${JSON.stringify(F.ids.fleet)}); g.onsuccess = () => { r.result.close(); ok(g.result ?? null); }; }; })`);
