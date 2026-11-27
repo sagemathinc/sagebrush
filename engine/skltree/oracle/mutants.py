@@ -43,13 +43,15 @@ for name, path, old, new in MUTANTS:
         rc, out = run()
     finally:
         open(p, "w").write(src)
-    red = [l for l in out.splitlines() if l.endswith("FAILED") or "--- FAILED" in l]
+    # (a kill is a failed test: the built tests ran, `test result: FAILED.` and at least one `<name> --- FAILED`;
+    # any other nonzero exit, a compile error with or without a code, a link or setup failure, kills nothing)
+    red = [l for l in out.splitlines() if l.endswith(" --- FAILED")]
     if rc == 0:
         fails += 1
         print(f"SURVIVED {name}")
-    elif "error[" in out and not red:
+    elif not red or not any(l.startswith("test result: FAILED.") for l in out.splitlines()):
         fails += 1
-        print(f"NO-BUILD {name}: {[l for l in out.splitlines() if 'error' in l][:2]}")
+        print(f"NO-TEST-FAILURE {name} (exit {rc}): {[l for l in out.splitlines() if 'error' in l][:2]}")
     else:
         print(f"killed   {name}: {', '.join(sorted(set(l.split()[0] for l in red)))[:200]}")
 rc, _ = run()
