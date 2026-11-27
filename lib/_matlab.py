@@ -2805,6 +2805,9 @@ def index(obj, args):
         return _box(r)
     if t is Cell or t is Struct or t is StrArr or t is HandleArr or t is ObjArr:
         pos, out = _positions(obj.shape, args)
+        if t is ObjArr and pos.size > len(obj.a):
+            # (more objects than the array has, obj(ones(1, n)): each a copy, admitted first)
+            _cd().admit_copies(obj, pos)
         items = [cp(obj.a[int(k)]) for k in pos.reshape(-1)]
         return obj._like(items, out)
     if t is Sparse:
@@ -7529,6 +7532,8 @@ def repelem_(x, *args):
             idx = np.repeat(idx, counts(args[k] if k < len(args) else 1, d[k]), axis=nd - 1 - k)
         shape = tuple(reversed(idx.shape))
     flat = idx.reshape(-1)
+    if t is ObjArr:
+        _cd().admit_copies(x, flat)
     if t is Cell or t is Struct or t is StrArr or t is ObjArr:
         return x._like([cp(x.a[int(k)]) for k in flat], shape)
     out = _arr(x).reshape(-1)[flat].reshape(tuple(reversed(shape)))

@@ -170,3 +170,22 @@ test("MATLAB R2026b's rows for arrays of objects (MATLAB Online, Nov 27 2026), e
   ];
   assert.equal(r.out, rows.join("\n") + "\n#disp\n  1×2 Rc array with properties:\n\n    W\n\n#end\n");
 });
+
+test("an object array's copies are admitted at their measured cost before any is made: growth, an index, repelem", () => {
+  // (Big's constructor makes an 8 MB property: 100000 copies need about 800 GB, which no host here allows, while 8
+  // bytes an element, MATLAB's count, would admit them; the refusal is the memory guard's, before anything is made)
+  const dir = tree({
+    "Big.m": lines("classdef Big", "  properties", "    m", "  end", "  methods", "    function obj = Big()",
+      "      obj.m = zeros(1000);", "    end", "  end", "end"),
+  });
+  const r = run(dir, lines(
+    "b = Big;",
+    "try, x = b; x(100000) = b; disp('grow|made'); catch e, fprintf('grow|%s|%s\\n', e.identifier, strrep(e.message, newline, '/')); end",
+    "try, y = b(ones(1, 100000)); disp('index|made'); catch e, fprintf('index|%s|%s\\n', e.identifier, strrep(e.message, newline, '/')); end",
+    "try, z = repelem(b, 100000); disp('repelem|made'); catch e, fprintf('repelem|%s|%s\\n', e.identifier, strrep(e.message, newline, '/')); end",
+    "x = b; x(3) = b; fprintf('small|%s\\n', mat2str(size(x)));"));
+  assert.equal(r.err, "");
+  const got = new Map(r.out.split("\n").filter((l) => l.includes("|")).map((l) => [l.split("|")[0], l.slice(l.indexOf("|") + 1)] as [string, string]));
+  for (const k of ["grow", "index", "repelem"]) assert.match(got.get(k) ?? "", /^MATLAB:nomem\|Not enough memory for this computation\.\/An array of 100000 Big objects needs about 80\d GB/, k);
+  assert.equal(got.get("small"), "[1 3]");
+});

@@ -451,16 +451,47 @@ def objs(cls, a, shape):
     return ObjArr(cls, a, shape)
 
 
+# the bytes Sagebrush spends on one object of an array beyond its properties' values: the Obj, its dict and its place
+# in the list (measured on node: about 230 bytes an object for a class of one scalar property, its value included, and
+# about 1450 for three properties, 1, [] and 'x'; each property's value is charged as a cell's element holding it)
+_OBJ_ELEMENT_BYTES = 256
+
+
+def _object_bytes(obj):
+    """an object's estimated memory here: its shell, and each property's value as a cell element holding it"""
+    n = _OBJ_ELEMENT_BYTES
+    for v in obj.props.values():
+        t = type(v)
+        n += _object_bytes(v) if t is Obj else sum(_object_bytes(o) for o in v.a) if t is ObjArr else \
+            _m._CELL_ELEMENT_BYTES + _m._bytes(v)
+    return n
+
+
+def _admit_objects(need, n, cls):
+    """n objects of class cls, need bytes, admitted before any is made (_matlab's _admit_bytes)"""
+    _m._admit_bytes(need, "An array of %d %s objects" % (n, cls.name))
+
+
+def admit_copies(arr, pos):
+    """copies of an object array's elements at pos (an index, repelem) admitted before any is made"""
+    costs = _m.np.array([_object_bytes(o) for o in arr.a], dtype=_m.np.float64)
+    _admit_objects(int(costs[pos.reshape(-1)].sum()) if pos.size else 0, pos.size, arr.cls)
+
+
 def resize_array(cur, o, nw, total):
     """an object array grown to nw (from o): the gap's elements one object the class's constructor makes with no
-    arguments, copied into each, as MATLAB's object arrays page says it fills them"""
+    arguments, copied into each, as MATLAB's object arrays page says it fills them; the gap's copies admitted at their
+    measured cost before any is made"""
+    gap = total - len(cur.a)
+    dflt = default_object(cur.cls) if gap else None
+    if gap:
+        _admit_objects(gap * _object_bytes(dflt), total, cur.cls)
     items = [None] * total
     if cur.a:
         vecs = [_m.np.arange(x, dtype=_m.np.int64) for x in o]
         pos = _m._combine(vecs, nw).reshape(-1)
         for k, p in enumerate(pos):
             items[int(p)] = cur.a[k]
-    dflt = default_object(cur.cls) if any(x is None for x in items) else None
     items = [x if x is not None else _m.cp(dflt) for x in items]
     return ObjArr(cur.cls, items, tuple(nw))
 
