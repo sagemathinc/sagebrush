@@ -36,6 +36,23 @@ test("the pixel marker ',' is one pixel of the PNG at any markersize and dpi, an
   assert.equal(run([TEST + "png_pixel_marker_cases.py"]), oracle["png_pixel_marker_cases.py"]);
 });
 
+test("translucent markers, scatter points, bars and pixel markers over each other build up their color, as matplotlib's; one line crossing itself does not", () => {
+  // (each channel within 1, as above; the number of pixels of each color exactly)
+  const parse = (out: string) => out.trim().split("\n").map((l) => ({
+    label: l.slice(0, l.indexOf("[")),
+    px: [...l.matchAll(/(\d+), (\d+), (\d+), (\d+)/g)].map((m) => m.slice(1, 5).map(Number)),
+    counts: [...l.matchAll(/\), (\d+)\)/g)].map((m) => Number(m[1])),
+  }));
+  const got = parse(run([TEST + "png_alpha_stack_cases.py"])), want = parse(oracle["png_alpha_stack_cases.py"]);
+  assert.deepEqual(got.map((g) => g.label), want.map((w) => w.label));
+  for (let i = 0; i < want.length; i++) {
+    const msg = `${want[i].label}: ${JSON.stringify(got[i].px)} against ${JSON.stringify(want[i].px)}`;
+    assert.deepEqual(got[i].counts, want[i].counts, msg);
+    assert.equal(got[i].px.length, want[i].px.length, msg);
+    assert.ok(got[i].px.every((p, j) => p.every((v, k) => Math.abs(v - want[i].px[j][k]) <= 1)), msg);
+  }
+});
+
 test("a color's alpha, and none in any case, in the pixels of a PNG as in matplotlib's (CORR-3D8-1)", () => {
   // (each channel within 1 of matplotlib's: Agg truncates where tiny-skia rounds when it blends)
   const parse = (s: string) => s.trim().split("\n").map((l) => {
