@@ -1605,6 +1605,27 @@ async function deleteCollection(env: ShareEnv, account: string, cid: string): Pr
 }
 
 /**
+ * An account's grants at its purge (grants design d1 §4, d1r1 G2, William's Q3: anonymize, keep the audit trail): every
+ * active grant is revoked, with its audit row; the holder's id becomes the account's hash (as tombstones keep it); and
+ * every free-text field becomes the fixed "removed".  source_ref, the Stripe object id, is kept on purpose: it points at
+ * Stripe's own records, which Stripe keeps under its accounting retention, and nothing beside it here names the person.
+ * The account's id is replaced by its hash wherever it appears as an admin too (created_by, revoked_by, the audit's actor),
+ * and its rate rows go.  In the batch that marks the account deleting, so nothing new can name it after.
+ */
+function grantsPurge(db: D1, account: string, h: string, t: number): D1Stmt[] {
+  return [
+    db.prepare("INSERT INTO grant_audit (grant_id, at, actor, action, detail) SELECT id, ?2, 'purge', 'revoke', NULL FROM grants WHERE account_id = ?1 AND revoked_at IS NULL").bind(account, t),
+    db.prepare("UPDATE grant_audit SET detail = 'removed' WHERE detail IS NOT NULL AND grant_id IN (SELECT id FROM grants WHERE account_id = ?1)").bind(account),
+    db.prepare("UPDATE grant_audit SET actor = ?2 WHERE actor = ?1").bind(account, h),
+    db.prepare(`UPDATE grants SET revoked_at = COALESCE(revoked_at, ?3), revoked_by = COALESCE(revoked_by, 'purge'), revoke_reason = 'removed',
+      note = CASE WHEN note IS NULL THEN NULL ELSE 'removed' END, account_id = ?2 WHERE account_id = ?1`).bind(account, h, t),
+    db.prepare("UPDATE grants SET created_by = ?2 WHERE created_by = ?1").bind(account, h),
+    db.prepare("UPDATE grants SET revoked_by = ?2 WHERE revoked_by = ?1").bind(account, h),
+    db.prepare("DELETE FROM grant_admin_hits WHERE admin = ?1").bind(account),
+  ];
+}
+
+/**
  * Delete everything of an account's.  First, atomically, mark it deleting
  * (no sessions, no writes from now on) and drop its sessions; for an account
  * deleted in CoCalc, also a tombstone, so it never signs in again.  Then its
@@ -1623,6 +1644,7 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
     // (the sessions' admin grants with them: admin-visibility-plan r1h §1.8)
     db.prepare("DELETE FROM admin_grants WHERE account_id = ?1").bind(account),
     ...(admin ? [db.prepare("INSERT OR IGNORE INTO tombstones (account_hash, created) VALUES (?1, ?2)").bind(h, t)] : []),
+    ...grantsPurge(db, account, h, t),
   ]);
   // (the account's remotes, web/remote: their enrolled keys, before the purge advances, so a failure here leaves it
   // running, retried when its lease ends; skipped where 0009 isn't applied yet)

@@ -1,7 +1,9 @@
 -- Grants: what an account may use beyond Sagebrush's free plan, for a time window that always ends (grants design d1,
--- d1r1).  Rows are never edited or deleted by the service: a change is a revocation plus a new grant, and every change
--- writes its grant_audit row in the same batch.  Additive only; read only with AUTH_PROVIDER "workos".  Needs William's
--- per-file OK before it is applied to PROD.
+-- d1r1).  Rows are never deleted, and edited only by a revocation or an account's purge (which anonymizes
+-- them): a change is a revocation plus a new grant, and every change writes its grant_audit row in the same
+-- batch.  Additive only.  Read only with AUTH_PROVIDER "workos", but required before this server is deployed in
+-- EVERY auth mode: an account's purge anonymizes its grants (d1 §4, d1r2).  Needs William's per-file OK before
+-- it is applied to PROD.
 --
 -- The entitlements are typed columns from one closed set; NULL means the grant gives nothing there.  A grant opens
 -- access only: no column raises or bypasses a spending control.  A grant is active at t when revoked_at IS NULL AND
@@ -27,7 +29,8 @@ CREATE TABLE grants (
   revoke_reason TEXT CHECK (revoke_reason IS NULL OR length(revoke_reason) <= 200),
   CHECK (valid_until > valid_from AND valid_until - valid_from <= 63072000),
   CHECK ((revoked_at IS NULL) = (revoked_by IS NULL)),
-  CHECK (storage_bytes IS NOT NULL OR private_links IS NOT NULL OR remote IS NOT NULL OR gpu IS NOT NULL OR seats IS NOT NULL),
+  CHECK (storage_bytes IS NOT NULL OR private_links IS NOT NULL OR remote IS NOT NULL OR gpu IS NOT NULL
+    OR seats IS NOT NULL),
   UNIQUE (source, source_ref)
 );
 CREATE INDEX grants_account ON grants(account_id, valid_until);

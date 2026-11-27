@@ -27,7 +27,7 @@ const ok = (c, what, detail) => { count++; if (!c) { failures++; console.log("FA
 const SITE = "https://sagebrush.test";
 const ADMIN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ADMIN2 = "abababab-abab-4bab-8bab-abababababab";
 // (more admins, so one section's writes never spend another's rate)
-const ADMIN3 = "acacacac-acac-4cac-8cac-acacacacacac", ADMIN4 = "adadadad-adad-4dad-8dad-adadadadadad";
+const ADMIN3 = "acacacac-acac-4cac-8cac-acacacacacac", ADMIN4 = "adadadad-adad-4dad-8dad-adadadadadad", ADMIN5 = "aeaeaeae-aeae-4eae-8eae-aeaeaeaeaeae";
 const USER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", OTHER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const GONE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd", OFF = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const GiB = 1024 ** 3, FREE = 256 * 1024 * 1024;
@@ -42,7 +42,7 @@ rmSync(tmp, { recursive: true, force: true });
 
 const script = execFileSync("bun", ["build", join(here, "test-identity-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
 const base = { AUTH_PROVIDER: "workos", AUTH_ENV: "test", AUTH_ORIGIN: SITE, WORKOS_CLIENT_ID: "client_01TESTCLIENT", WORKOS_ISSUER: "https://api.workos.test/user_management/client_01TESTCLIENT", WORKOS_API_KEY: "sk_test", WORKOS_API: "https://api.workos.test",
-  REFRESH_KEYS: `v1:${Buffer.alloc(32, 7).toString("base64")}`, SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", FILES_ORIGIN: "https://files.test", SAGEBRUSH_ADMINS: ` ${ADMIN} ,, ${ADMIN2} ,${ADMIN3},${ADMIN4}` };
+  REFRESH_KEYS: `v1:${Buffer.alloc(32, 7).toString("base64")}`, SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", FILES_ORIGIN: "https://files.test", SAGEBRUSH_ADMINS: ` ${ADMIN} ,, ${ADMIN2} ,${ADMIN3},${ADMIN4},${ADMIN5}` };
 const worker = (b) => new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "share", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings: b, outboundService: () => new Response("no", { status: 404 }) }] }));
 async function migrate(d, skip = []) {
   for (const { name, path } of migrations()) if (!skip.includes(name))
@@ -276,6 +276,45 @@ const admin = await sessionFor(mf, db, ADMIN, 1000);
   for (const [o, want, what] of rows) ok((await ins(o)) === want, `M ${what}: ${want}`);
   await ins({ ref: "dup" });
   ok((await ins({ ref: "dup" })) === "refused", "M one (source, source_ref) once");
+}
+
+// ---- P: an account's purge anonymizes its grants and keeps the audit trail (d1 §4, d1r1 G2, Q3)
+{
+  const P = "56565656-5656-4656-8656-565656565656";
+  const CANARY = "CANARY-7f3a-person-text";
+  const admin5 = await sessionFor(mf, db, ADMIN5, 1000);
+  const ps = await sessionFor(mf, db, P, 1000);
+  const mk = async (o) => body(await post(mf, "/api/admin/grants", admin5, { request_id: reqId(), account_id: P, valid_until: until(30), ...o }));
+  const live = await mk({ storage_bytes: 3 * GiB, note: `${CANARY} for ${P}` });
+  const ended = await mk({ private_links: true, note: CANARY });
+  await post(mf, `/api/admin/grants/${ended.grant.id}/revoke`, admin5, { reason: `${CANARY} ${P}` });
+  // (a Stripe-sourced grant, as the later webhook writes one: its source_ref is kept)
+  await db.prepare("INSERT INTO grants (id, account_id, storage_bytes, valid_from, valid_until, source, source_ref, note, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5, 'stripe', 'sub_TEST123', ?6, ?4, 'stripe')").bind("s".repeat(25) + "a", P, GiB, nowS() - 10, until(30), CANARY).run();
+  await db.prepare("INSERT INTO grant_audit (grant_id, at, actor, action, detail) VALUES (?1, ?2, 'stripe', 'create', ?3)").bind("s".repeat(25) + "a", nowS(), `${CANARY} ${P}`).run();
+  // (P is also an admin's grantee here; ADMIN5 itself is purged below, as an admin who made grants)
+  const del = await post(mf, "/api/share/delete-everything", ps, { confirm: "delete" });
+  ok(del.status === 200, `P1 the account deletes itself (${del.status})`);
+  const h = sha(`sagebrush-account\n${P}`);
+  const rows = (await db.prepare("SELECT * FROM grants WHERE account_id IN (?1, ?2)").bind(P, h).all()).results;
+  const audit = (await db.prepare("SELECT a.* FROM grant_audit a WHERE a.grant_id IN (SELECT id FROM grants WHERE account_id IN (?1, ?2))").bind(P, h).all()).results;
+  ok(rows.length === 3 && rows.every((r) => r.account_id === h), "P1 its three grants stay, held by the account's hash, never its id", rows.map((r) => r.account_id));
+  ok(rows.every((r) => r.revoked_at !== null), "P1 every one of them is revoked");
+  const liveRow = rows.find((r) => r.id === live.grant.id), endedRow = rows.find((r) => r.id === ended.grant.id), stripe = rows.find((r) => r.source === "stripe");
+  ok(liveRow?.revoked_by === "purge" && endedRow?.revoked_by === ADMIN5, "P1 an active grant is revoked by the purge; one already revoked keeps its revoker", { live: liveRow?.revoked_by, ended: endedRow?.revoked_by });
+  ok(rows.every((r) => (r.note === null || r.note === "removed") && r.revoke_reason === "removed"), "P2 every note and revoke reason is the fixed \"removed\"", rows.map((r) => [r.note, r.revoke_reason]));
+  ok(stripe?.source_ref === "sub_TEST123" && liveRow?.source_ref === live.grant.source_ref, "P2 source_ref, the Stripe object id, is kept on purpose", stripe?.source_ref);
+  const text = JSON.stringify([rows, audit]);
+  ok(!text.includes(P) && !text.includes(CANARY), "P2 no text field of the account's grants or audit rows holds its id or the planted canary");
+  const purgeAudit = audit.filter((a) => a.actor === "purge" && a.action === "revoke");
+  ok(purgeAudit.length === 2 && purgeAudit.every((a) => a.grant_id !== ended.grant.id), "P3 the purge's revocations are audited, one row per grant it revoked", purgeAudit);
+  ok(audit.filter((a) => a.detail !== null).every((a) => a.detail === "removed"), "P3 audit details are \"removed\"");
+  ok((await limitsOf(ps))?.storage_bytes !== 3 * GiB, "P4 the deleted account's session no longer carries the grant");
+  // (an admin's own purge: its id leaves the grants and audit rows it made, which stay)
+  const made = (await db.prepare("SELECT COUNT(*) n FROM grants WHERE created_by = ?1").bind(ADMIN5).first()).n;
+  await post(mf, "/api/share/delete-everything", admin5, { confirm: "delete" });
+  const h5 = sha(`sagebrush-account\n${ADMIN5}`);
+  const after = await db.prepare("SELECT (SELECT COUNT(*) FROM grants WHERE created_by = ?1 OR revoked_by = ?1) a, (SELECT COUNT(*) FROM grant_audit WHERE actor = ?1) b, (SELECT COUNT(*) FROM grants WHERE created_by = ?2) c, (SELECT COUNT(*) FROM grant_admin_hits WHERE admin = ?1) d").bind(ADMIN5, h5).first();
+  ok(made >= 2 && after.a === 0 && after.b === 0 && after.c === made && after.d === 0, "P5 an admin's purge: its id is replaced by its hash in the grants and audit rows it wrote, which all stay; its rate rows go", { made, after });
 }
 
 // ---- N: the grant routes exist only with WorkOS sign-in
