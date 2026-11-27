@@ -16,13 +16,14 @@ export const fileLabel = (id: FileItem) => LABELS[id];
 /** The items, in order; "-" a rule.  New ▸, Recent ▸ and Download ▸ are groups.  Examples… is New ▸ From an
  * example…, also at the top (sim run 12: an agent read the File menu, never saw the word, and wrote a Beamer deck
  * from nothing); it has no key of its own: it clicks From an example…, so the page's handler is the one. */
-export type FileItem = "newNotebook" | "newBoard" | "newLatex" | "newFolder" | "fromExample" | "open" | "examples" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
+export type FileItem = "newNotebook" | "newBoard" | "newLatex" | "newFolder" | "fromExample" | "newWindow" | "open" | "examples" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
 const LABELS: Record<FileItem, string> = {
   newNotebook: "Notebook",
   newBoard: "Board",
   newLatex: "LaTeX document",
   newFolder: "Folder",
   fromExample: "Examples…",
+  newWindow: "New window",
   open: "Open…",
   examples: "Examples…",
   upload: "Upload…",
@@ -33,6 +34,7 @@ const LABELS: Record<FileItem, string> = {
   delete: "Delete",
 };
 const TITLES: Partial<Record<FileItem, string>> = {
+  newWindow: "Another window of the app, for another document beside this one",
   open: "Your notebooks, boards and files in this browser",
   examples: "Worked examples (notebooks, boards, LaTeX): open one as your own copy",
   upload: "Files from this computer: notebooks and boards become documents, anything else is kept as a file",
@@ -40,7 +42,7 @@ const TITLES: Partial<Record<FileItem, string>> = {
   delete: "Move this document to Trash (Trash keeps it until you empty it)",
 };
 /** The keys shown beside items (and handled by the page: fileMenuKey). */
-export const FILE_KEYS: Partial<Record<FileItem, string>> = { newNotebook: "Ctrl+Alt+N", open: "Ctrl+O" };
+export const FILE_KEYS: Partial<Record<FileItem, string>> = { newNotebook: "Ctrl+Alt+N", newWindow: "Ctrl+Shift+N", open: "Ctrl+O" };
 
 export type FileMenuOptions = {
   /** The attribute each item's key is put in (the page's handlers and tests find items by it). */
@@ -63,6 +65,8 @@ export type FileMenuOptions = {
   /** Whether this page has the LaTeX editor (New ▸ LaTeX document): without it the item isn't drawn, as it means
    * nothing in such a build (web/latex/boot.ts latexOn) */
   latex?: boolean;
+  /** New window (the desktop app only, #1541): its key on this page; none: not drawn (a browser has its own). */
+  newWindow?: string;
   /** Extra items the page keeps in the menu, at the end of a section (the desktop app's Open file…, Save as…). */
   extra?: { after: FileItem; key: string; label: string; title?: string; hidden?: boolean }[];
 };
@@ -115,7 +119,7 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
     const b = el("button", { textContent: LABELS[id] });
     b.setAttribute("role", "menuitem");
     b.dataset.item = id;
-    const key = o.keys[id];
+    const key = id === "newWindow" ? o.newWindow : o.keys[id];
     if (key) b.setAttribute(o.attr, key);
     if (TITLES[id]) b.title = TITLES[id]!;
     if (FILE_KEYS[id]) b.append(el("kbd", { textContent: FILE_KEYS[id] }));
@@ -138,6 +142,7 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
   // group is closed: the page's handlers and tests find them)
   const nw = group("New", "new", () => {});
   for (const id of NEW_ITEMS) if (id !== "newLatex" || o.latex) item(id, nw);
+  if (o.newWindow) item("newWindow", menu);
   item("open", menu);
   // (Examples…: From an example…, clicked; disabled where it is)
   const fromExample = nw.querySelector<HTMLButtonElement>("[data-item=fromExample]")!;
@@ -199,10 +204,11 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
   });
 }
 
-/** The item a key press asks for (Ctrl+Alt+N, Ctrl+O), or null. */
+/** The item a key press asks for (Ctrl+Alt+N, Ctrl+Shift+N, Ctrl+O), or null. */
 export function fileMenuKey(e: KeyboardEvent): FileItem | null {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.altKey && (e.key === "n" || e.key === "N" || e.code === "KeyN")) return "newNotebook";
+  if (mod && e.shiftKey && !e.altKey && (e.key === "n" || e.key === "N" || e.code === "KeyN")) return "newWindow";
   if (mod && !e.altKey && !e.shiftKey && (e.key === "o" || e.key === "O")) return "open";
   return null;
 }
