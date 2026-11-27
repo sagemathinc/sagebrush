@@ -1881,8 +1881,11 @@ class Emitter {
         return this.indexExpr(e, scope, "1");
       case "field": {
         const f = this.classCtx ? `_m.cfield(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)}, ${JSON.stringify(this.classCtx)})` : `_m.field(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)})`;
-        // (a class's static method named alone is called: uint8.empty)
-        return e.e.k === "id" && !this.isVar(e.e.name, scope) ? `_m.val(${f})` : f;
+        // (a class's static method named alone is called: uint8.empty; and a namespace's function or class, at any depth:
+        // aa.bb.Name constructs, as aa.bb.Name() does)
+        let root: Expr = e.e;
+        while (root.k === "field") root = root.e;
+        return root.k === "id" && !this.isVar(root.name, scope) ? `_m.val(${f})` : f;
       }
       case "dynfield": return `_m.field(${this.fieldBase(e.e, scope)}, _m.fieldname(${this.expr(e.name, scope)}))`;
       case "matrix": {

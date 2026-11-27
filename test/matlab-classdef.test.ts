@@ -204,6 +204,10 @@ test("files, packages, copies, a method named like a built-in, mfilename('class'
     "@Cl/mm.m": lines("function r = mm(obj)", "  r = [mfilename ' ' mfilename('class')];", "end"),
     "+pk/@Pq/Pq.m": lines("classdef Pq", "  properties", "    y = 2", "  end", "end"),
     "+pk/@Pq/twice.m": lines("function r = twice(obj)", "  r = 2 * obj.y;", "end"),
+    // (nested packages: a class, an @-folder class and a function, named without parentheses)
+    "+aa/+bb/Nc.m": lines("classdef Nc", "  properties", "    v = 3", "  end", "  properties (Constant)", "    K = 9", "  end", "end"),
+    "+aa/+bb/@Nf/Nf.m": lines("classdef Nf", "  properties", "    w = 6", "  end", "end"),
+    "+aa/+bb/nfun.m": lines("function r = nfun()", "  r = 21;", "end"),
     "Bx.m": lines("classdef Bx", "  properties", "    s = struct('a', 1)", "    c = {1}", "  end", "  methods",
       "    function obj = setA(obj, v)", "      obj.s.a = v;", "    end", "  end", "end"),
     "bump.m": lines("function o = bump(o)", "  o.s.a = 99;", "end"),
@@ -224,6 +228,9 @@ test("files, packages, copies, a method named like a built-in, mfilename('class'
     "import pk.*",
     "t2 = Pt(5); fprintf('import|%g\\n', t2.x);",
     "q2 = pk.Pq; fprintf('pkgat|%s|%s\\n', class(q2), mat2str(twice(q2)));",
+    "n1 = aa.bb.Nc; n2 = aa.bb.Nc(); n3 = aa.bb.Nf; y = aa.bb.nfun + 1;",
+    "fprintf('nestedpkg|%s %g|%s|%s %g|%g|%g\\n', class(n1), n1.v, class(n2), class(n3), n3.w, y, aa.bb.Nc.K);",
+    "try, z = aa.bb; fprintf('nsalone|made\\n'); catch e, fprintf('nsalone|%s\\n', e.message), end",
     // (a copy is its own: by assignment, in a cell, as a function's argument, from a method's result)
     "b = Bx; b2 = b; b2.s.a = 5; c = {b}; b.c{1} = 7; b3 = bump(b); b4 = b.setA(3);",
     "fprintf('copies|%g %g %g %g %g %g\\n', b.s.a, b2.s.a, c{1}.c{1}, b.c{1}, b3.s.a, b4.s.a);",
@@ -248,6 +255,8 @@ test("files, packages, copies, a method named like a built-in, mfilename('class'
   assert.deepEqual(got.get("mf"), ["Cl Cl", "mm Cl"]);
   assert.deepEqual(got.get("import"), ["5"]);
   assert.deepEqual(got.get("pkgat"), ["pk.Pq", "4"]);
+  assert.deepEqual(got.get("nestedpkg"), ["aa.bb.Nc 3", "aa.bb.Nc", "aa.bb.Nf 6", "22", "9"]);
+  assert.deepEqual(got.get("nsalone"), ["Unrecognized function or variable 'aa.bb'."]);
   assert.deepEqual(got.get("copies"), ["1 5 1 7 99 3"]);
   assert.deepEqual(got.get("scalar"), ["8 8 8 8 Bx"]);
   assert.deepEqual(got.get("selfhandle"), ["10"]);
