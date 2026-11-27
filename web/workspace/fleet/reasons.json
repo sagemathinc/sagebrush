@@ -240,6 +240,16 @@
       "meaning": "the execution lease is set on, and this release isn't qualified for it"
     },
     {
+      "name": "suspend_gate_stuck",
+      "owner": "host",
+      "meaning": "the execution lease's suspend gate stays closed: the system-sleep hook's post never ran (its pre is older than its budget plus 5 minutes) or the supervisor's acknowledgement is ahead of the hook's; no agent runs until a reboot or the next suspend completes"
+    },
+    {
+      "name": "suspend_gate_exhausted",
+      "owner": "host",
+      "meaning": "the execution lease's suspend gate reached its terminal generation and stays closed until a reboot"
+    },
+    {
       "name": "bad_config",
       "owner": "host",
       "meaning": "the host's own settings file is unreadable or holds an unknown key or value"
