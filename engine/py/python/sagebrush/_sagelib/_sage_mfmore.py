@@ -7,7 +7,7 @@ them, observed as a black box."""
 from fractions import Fraction as _Fr
 from math import gcd as _gcd
 
-from _sage_modular import (_Basis, _series, _rref_exact, _sturm_bound, _divisors, _factor, _bernoulli,
+from _sage_modular import (_Basis, _series, _sturm_bound, _divisors, _factor, _bernoulli,
                            _Subspace, ModularFormElement, DirichletGroup, _nonneg, _NONTRIVIAL)
 
 
@@ -47,6 +47,16 @@ def _basis_bits(k, prec):
 
 def _sigma(n, k):
     return sum(d ** k for d in _divisors(n))
+
+
+def _hadamard_bits(rows):
+    """Bits bounding every minor of the integer matrix rows (Hadamard: the
+    product of the rows' Euclidean norms), hence the entries of its kernel
+    basis and of its Hermite normal form."""
+    total = 0
+    for r in rows:
+        total += (sum(int(x) * int(x) for x in r).bit_length() + 1) // 2
+    return total + 1
 
 
 def _bits_of(r):
@@ -204,11 +214,15 @@ class QSpaceMethods:
         work = max(prec, self.sturm_bound() + 2)
         A = self._amb()
         d = self.dimension()
+        import _sage_modsym as ms
         with _work("The echelon q-expansion basis of %r to precision %d" % (self, work)) as ch:
-            bits = _basis_bits(A._k, work)
-            res = _rows_reserve(ch, 2 * d, work, bits)  # (the rows and their echelon form)
-            rows = _rref_exact(self._qrows(work))
-            _rows_settle(ch, res, rows + rows)
+            # (the basis rows: at an estimate, settled by admission; their echelon
+            # form: by _sage_modsym's integer elimination, each row reserved at
+            # a sound bound before it is computed)
+            res = _rows_reserve(ch, d, work, _basis_bits(A._k, work))
+            q = self._qrows(work)
+            _rows_settle(ch, res, q)
+            rows = ms._echelon(q, work)[0] if q else []
         return rows, work
 
     def q_echelon_basis(self, prec=None):
@@ -287,6 +301,9 @@ class QSpaceMethods:
             res = ms._reserve(ch, (d + m) * m, den.bit_length() + rb, frac=False)
             rows = [[int(den * R[i][j]) for j in others] for i in range(d)] + [[den * int(a == b) for b in range(m)] for a in range(m)]
             ms._settle(ch, res, [x for r in rows for x in r])
+            # (the kernel's basis and its working copies: at most d + m rows of
+            # d + m entries, each a minor of the system, within Hadamard's bound)
+            ch.take(3 * ms._reserve(ch, (d + m) * (d + m), _hadamard_bits(rows), frac=False) // 2)
             K = matrix(ZZ, rows).left_kernel().basis_matrix()
             res = ms._reserve(ch, K.nrows() * d, max((abs(int(x)).bit_length() for x in K.list()), default=0), frac=False)
             gens = [[int(x) for x in list(K.row(i))[:d]] for i in range(K.nrows())]
@@ -299,6 +316,8 @@ class QSpaceMethods:
             v = [int(x) for x in v]
             ms._settle(ch, res, v)
             vecs.append(v)
+        # (the Hermite form and its working copies: entries within Hadamard's bound)
+        ch.take(3 * ms._reserve(ch, len(vecs) * n, _hadamard_bits(vecs), frac=False) // 2)
         H = matrix(ZZ, vecs).echelon_form()
         res = ms._reserve(ch, H.nrows() * prec, max((abs(int(x)).bit_length() for x in H.list()), default=0))
         out = [[_Fr(int(x)) for x in H.row(i)] for i in range(H.nrows()) if any(H.row(i))]
