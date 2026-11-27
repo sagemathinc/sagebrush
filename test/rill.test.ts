@@ -483,7 +483,7 @@ test("§8.1 (A1.1's part): no bare except, no except BaseException or Exception 
   }
 });
 
-test("R mode: --r (or --rill) runs -c, a .R file, stdin and the prompt; -m and --emit are refused; --help lists it", () => {
+test("R mode: --r (or --rill) runs -c, a .R (or .r) file, stdin and the prompt; -m and --emit are refused; --help lists it", () => {
   const dir = mkdtempSync(join(tmpdir(), "rill-flag-"));
   try {
     const run = (args: string[], input = "") => spawnSync(process.execPath, [CLI, ...args], { cwd: dir, encoding: "utf8", input, timeout: 60000 });
@@ -498,13 +498,22 @@ test("R mode: --r (or --rill) runs -c, a .R file, stdin and the prompt; -m and -
     writeFileSync(join(dir, "x.R"), "x <- c(1, 2)\nx * 3\nnot_a_function(1)\ncat('never')\n");
     const f = run(["x.R"]);
     assert.deepEqual([f.status, f.stdout, f.stderr], [1, "[1] 3 6\n", 'Error in not_a_function(1) : could not find function "not_a_function"\n']);
+    // (a lowercase .r file is R's too)
+    writeFileSync(join(dir, "y.r"), "z <- 2\nz\n");
+    assert.deepEqual([run(["y.r"]).status, run(["y.r"]).stdout], [0, "[1] 2\n"]);
     // (R on stdin, and -c)
     assert.equal(run(["--r"], "y <- 1:3\ny + 1\n").stdout, "[1] 2 3 4\n");
     assert.equal(run(["--r", "-c", "2 * 21"]).stdout, "[1] 42\n");
     // (a function R has and Rill doesn't implement yet says so)
     assert.match(run(["--r", "-c", "pbirthday(23)"]).stderr, /could not find function "pbirthday" \(R has it: not implemented in Sagebrush yet\)/);
+    // (and so do R's datasets and the names ls() hides; a name R doesn't have gets no note)
+    for (const name of ["mtcars", "iris", ".Machine", ".libPaths"]) assert.equal(run(["--r", "-c", name]).stderr, `Error: object '${name}' not found (R has it: not implemented in Sagebrush yet)\n`, name);
+    assert.equal(run(["--r", "-c", "zzz"]).stderr, "Error: object 'zzz' not found\n");
     const help = run(["--help"]);
     assert.match(help.stdout, /--r +R: the program is R/);
+    // (the prompt's banner names R, not the Python language)
+    const banner = require("../src/rill").rillBanner("sagebrush 1.2 (Python 3.14 language on a JavaScript runtime)");
+    assert.equal(banner, "sagebrush 1.2 (R, a subset, on a JavaScript runtime: what is not implemented yet says so)\nType q() or Ctrl-D to leave.\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
