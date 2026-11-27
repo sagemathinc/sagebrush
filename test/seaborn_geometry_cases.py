@@ -87,6 +87,35 @@ def band(ax):
             d.setdefault(x, []).append(y)
         out.append(sorted([x, min(ys), max(ys)] for x, ys in d.items()))
     return {"band": out, "line": [[float(v) for v in l.get_ydata()] for l in ax.lines]}
+def pair(g):
+    cells = []
+    for row in g.axes:
+        r = []
+        for a in row:
+            if a is None:
+                r.append(None)
+                continue
+            r.append({"coll": [{k: v for k, v in coll(c).items() if k in ("offsets", "face", "sizes")} for c in a.collections
+                               if type(c).__name__ == "PathCollection" and len(c.get_offsets())],
+                      "lim": [float(v) for v in a.get_xlim() + a.get_ylim()],
+                      # (whether the cell shows x and y tick labels: their values follow the layout, seaborn's tight one)
+                      "ticklabels": [any(t.get_visible() and t.get_text() for t in a.get_xticklabels()),
+                                     any(t.get_visible() and t.get_text() for t in a.get_yticklabels())],
+                      "xlabel": a.get_xlabel() if a.xaxis.label.get_visible() else "",
+                      "ylabel": a.get_ylabel() if a.yaxis.label.get_visible() else ""})
+        cells.append(r)
+    diag = []
+    for a in (g.diag_axes if g.diag_axes is not None else []):
+        ps = [p for p in a.patches if rect(p) != [0.0, 0.0, 0.0, 0.0]]
+        # (each density whole: its 200 x and y values, the curve along the fill's top edge)
+        diag.append({"rects": [rect(p) for p in ps], "axis": bool(a.axison),
+                     "lim": [float(v) for v in a.get_xlim() + a.get_ylim()],
+                     "curves": [np.asarray(c.get_paths()[0].vertices, dtype=float)[202:402][::-1].T.tolist()
+                                for c in a.collections if type(c).__name__ == "FillBetweenPolyCollection"]})
+    leg = getattr(g, "_legend", None)
+    return {"shape": list(g.axes.shape), "cells": cells, "diag": diag,
+            "legend": [t.get_text() for t in leg.get_texts()] if leg else None,
+            "legend_title": leg.get_title().get_text() if leg else None}
 def bars(ax):
     ps = [p for p in ax.patches if rect(p) != [0.0, 0.0, 0.0, 0.0]]  # (not the legend's empty handles)
     return {"rects": [rect(p) for p in ps], "face": [[float(v) for v in p.get_facecolor()] for p in ps],
@@ -164,6 +193,30 @@ def band(ax):
             d.setdefault(float(x), []).append(float(y))
         out.append(sorted([x, min(ys), max(ys)] for x, ys in d.items()))
     return {"band": out, "line": [[float(v) for v in p.ys] for p in _kind(ax, "Line")]}
+def pair(g):
+    cells = []
+    for row in g.axes:
+        r = []
+        for a in row:
+            if a is None:
+                r.append(None)
+                continue
+            r.append({"coll": [{k: v for k, v in coll(p).items() if k in ("offsets", "face", "sizes")} for p in _kind(a, "Points") if p.xs],
+                      "lim": [float(v) for v in tuple(a.get_xlim()) + tuple(a.get_ylim())],
+                      "ticklabels": [any(t.get_text() for t in a.get_xticklabels()),
+                                     any(t.get_text() for t in a.get_yticklabels())],
+                      "xlabel": a.get_xlabel(), "ylabel": a.get_ylabel()})
+        cells.append(r)
+    diag = []
+    for a in g.diag_axes:
+        rs = [list(r) for p in _kind(a, "Rects") for r in p.rects]
+        diag.append({"rects": rs, "axis": a._opts.get("axes", True) is not False,
+                     "lim": [float(v) for v in tuple(a.get_xlim()) + tuple(a.get_ylim())],
+                     "curves": [[[float(v) for v in p.xs], [float(v) for v in p.ys]] for p in _kind(a, "Line")]})
+    leg = g._legend
+    return {"shape": list(g.axes.shape), "cells": cells, "diag": diag,
+            "legend": [s for _, s in leg._opts.get("legend_entries", [])] if leg is not None else None,
+            "legend_title": (leg._opts.get("legend_title") or "") if leg is not None else None}
 def scat(ax):
     return {"coll": [coll(p) for p in _kind(ax, "Points")], "frame": frame(ax), "legend": legend(ax)}
 '''
@@ -313,5 +366,52 @@ out = heat(ax)
     ('heat-default-rocket', r'''
 ax = sns.heatmap(np.array([[1.0, 2.0], [3.0, 4.0]]))
 out = heat(ax)
+'''),
+    ('pair-basic', r'''
+g = sns.pairplot(TIPS[["bill", "tip", "size"]])
+out = pair(g)
+'''),
+    ('pair-hue', r'''
+g = sns.pairplot(TIPS[["bill", "tip", "sex"]], hue="sex")
+out = pair(g)
+'''),
+    ('pair-vars-corner', r'''
+g = sns.pairplot(TIPS, vars=["bill", "tip"], corner=True, diag_kind="hist", height=2)
+out = pair(g)
+'''),
+    # (the hue colors one mapping for the whole grid: the first "A" has no y, so the y-x cell's first level is B)
+    ('pair-hue-missing', r'''
+P = pd.DataFrame({"x": [1.0, 2.0, 3.5, 4.0, 5.5, 6.0], "y": [np.nan, 2.5, 1.0, 4.5, 3.0, 5.0],
+                  "z": [0.5, 1.5, 2.0, 3.5, 2.5, 4.0], "g": ["A", "B", "A", "B", "A", "B"]})
+g = sns.pairplot(P, hue="g")
+out = pair(g)
+'''),
+    ('pair-int-columns', r'''
+g = sns.pairplot(pd.DataFrame(np.array([[1.0, 4.0], [2.0, 3.5], [3.0, 5.0], [4.5, 1.0], [5.0, 2.5]])))
+out = pair(g)
+'''),
+    ('pair-x-vars-only', r'''
+g = sns.pairplot(TIPS[["bill", "tip", "size"]], x_vars="bill")
+out = pair(g)
+'''),
+    ('pair-y-vars-only', r'''
+g = sns.pairplot(TIPS[["bill", "tip", "size"]], y_vars="tip")
+out = pair(g)
+'''),
+    ('pair-rect-overlap', r'''
+g = sns.pairplot(TIPS, x_vars=["bill", "tip"], y_vars=["tip", "size"])
+out = pair(g)
+'''),
+    ('pair-reordered', r'''
+g = sns.pairplot(TIPS, x_vars=["bill", "tip"], y_vars=["tip", "bill"])
+out = pair(g)
+'''),
+    ('pair-diag-none-one', r'''
+g = sns.pairplot(TIPS[["bill"]], diag_kind=None)
+out = pair(g)
+'''),
+    ('pair-diag-none', r'''
+g = sns.pairplot(TIPS[["bill", "tip"]], diag_kind=None)
+out = pair(g)
 '''),
 ]
