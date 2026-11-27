@@ -63,7 +63,7 @@ def _bar_edges(edgecolor, kw, alpha):
     one = lambda c: _opaque(to_color(c)) if alpha is not None else to_color(c)
     out = {}
     if ec is not None:
-        if isinstance(ec, (list, tuple)) and ec and not isinstance(ec[0], (int, float)):
+        if _color_list(ec):
             out["edgecolors"] = [one(c) for c in ec]
         else:
             out["edgecolor"] = one(ec)
@@ -74,6 +74,32 @@ def _bar_edges(edgecolor, kw, alpha):
     else:
         out["linewidth"] = float(lw) * PT
     return out
+
+
+def _color_list(c):
+    """Whether c is a list of colors, one per bar, rather than one color: a color matplotlib reads whole (a name,
+    an RGB(A) tuple, or a (color, alpha) pair such as ("blue", 0.5)) is one"""
+    if not isinstance(c, (list, tuple)) or not c:
+        return False
+    try:
+        _to_rgba(c)
+        return False
+    except (ValueError, TypeError):
+        return True
+
+
+def _hist_edges(edgecolor, kw):
+    """hist's edge options for its one dataset: a list of colors or widths gives one per dataset, as matplotlib's,
+    so the dataset's style (the first) is every bin's"""
+    kw = dict(kw)
+    ec = edgecolor if edgecolor is not None else kw.pop("ec", None)
+    if ec is not None and _color_list(ec):
+        ec = ec[0]
+    for k in ("linewidth", "lw"):
+        v = kw.get(k)
+        if isinstance(v, (list, tuple)) or hasattr(v, "tolist"):
+            kw[k] = _list(v)[0]
+    return ec, kw
 
 
 def _opaque(css):
@@ -576,7 +602,7 @@ class Axes:
             rects = [(edges[i], 0, edges[i + 1] - edges[i], counts[i]) for i in builtin_range(nb)]
             # (matplotlib's: the label on the first bar, and a BarContainer)
             self._add(Rects(rects, color=col, alpha=alpha, label=label,
-                            legend_role="both" if label is not None else "container", **_bar_edges(edgecolor, kw, alpha)))
+                            legend_role="both" if label is not None else "container", **_bar_edges(*_hist_edges(edgecolor, kw), alpha)))
         self._opts.setdefault("_bars", True)
         import sys
         np = sys.modules.get("numpy")

@@ -46,3 +46,11 @@ print("bars, widths per bar", pixels(lambda ax: ax.bar([0.25, 0.75], [0.8, 0.8],
                                      [(50, 25), (50, 13), (50, 6), (50, 64), (50, 56)]))
 # hist: one bin from 0.2 to 0.8, 8 points high (the y limit 10)
 print("hist, edge and width", pixels(lambda ax: (ax.set_ylim(0, 10), ax.hist([0.3] * 8, bins=1, range=(0.2, 0.8), color="r", edgecolor="b", linewidth=8)), AT))
+# a (color, alpha) pair is one color, not two per-bar colors; alpha= replaces its alpha
+print("bar, (color, alpha) edge", pixels(lambda ax: ax.bar([0.5], [0.8], width=0.6, color="r", edgecolor=("b", 0.5), linewidth=8), AT))
+print("bar, (color, alpha) edge and alpha 0.8", pixels(lambda ax: ax.bar([0.5], [0.8], width=0.6, color="r", edgecolor=("b", 0.5), linewidth=8, alpha=0.8), AT))
+print("barh, (color, alpha) edge", pixels(lambda ax: ax.barh([0.5], [0.8], height=0.6, color="r", edgecolor=("b", 0.5), linewidth=8), [(50, 50), (21, 50), (18, 50)]))
+# hist: lists of edge colors and widths are one per dataset, so its one dataset's two bins (x 0.1-0.5 and
+# 0.5-0.9, 0.8 high) both take the first: a red 2-point edge, none blue or 8 points wide
+print("hist, styles per dataset, two bins", pixels(lambda ax: (ax.set_ylim(0, 1.25), ax.hist([0.3, 0.7], bins=[0.1, 0.5, 0.9], color="w", edgecolor=["r", "b"], linewidth=[2, 8])),
+                                                  [(50, 30), (50, 70), (50, 90), (50, 86), (50, 13), (50, 10)]))
