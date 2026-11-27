@@ -57,8 +57,10 @@ const ctrl = async (k, code, vk) => {
 };
 
 try {
-  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-  if (!port) port = await within(devtoolsPort(profile), 30000, "Chrome's DevTools port");
+  // (its process watched from the start: one that can't start (no such executable) fails here, through the cleanup)
+  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  const said = await devtoolsPort(profile, 30000, { child: chrome });
+  if (!port) port = said;
   let targets;
   for (let i = 0; i < 300 && !targets; i++) { try { targets = await within(fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()), 5000, "the targets"); } catch { await sleep(100); } }
   const page = targets?.find((t) => t.type === "page");
@@ -130,14 +132,17 @@ try {
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
-  console.log(process.exitCode ? `FAIL: the Console's copy and paste keys` : `ok: the Console's copy and paste keys, ${checks} checks`);
   fail(new Error("the suite ended"));
   try { ws?.close(); } catch {}
   // (its profile removed once Chrome has exited: a profile removed while Chrome still writes is left behind)
-  if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
+  if (chrome?.pid && chrome.exitCode === null && chrome.signalCode === null) {
     const gone = new Promise((r) => chrome.once("exit", r));
     chrome.kill();
-    await within(gone, 10000, "Chrome's exit").catch(() => chrome.kill("SIGKILL"));
+    try { await within(gone, 10000, "Chrome's exit"); } catch {
+      chrome.kill("SIGKILL");
+      await within(gone, 5000, "Chrome's exit after SIGKILL").catch((e) => ok(false, String(e.message)));
+    }
   }
   try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
+  console.log(process.exitCode ? `FAIL: the Console's copy and paste keys` : `ok: the Console's copy and paste keys, ${checks} checks`);
 }
