@@ -34,6 +34,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { dropRows } from "../notebook/journal-rows.js";
 import { SYNC_NB } from "../notebook/sync-rows.js";
 import { isBoard } from "../board/doc";
+import { copyBoardPictures } from "./board-pictures";
 import { fromNbformat, cellId, kernelMode } from "../notebook/nbformat.js";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
@@ -1999,9 +2000,12 @@ export class Workspace {
   /** `opts.expect`: the source as the caller measured it, by its identity and revision (rename's `expect`): checked
    * holding the lock, on the very record being copied, before the destination is admitted or anything is made; another
    * entry there, or another revision of it, a WorkspaceError("conflict") and nothing copied. */
-  async duplicate(p: string, to?: string, opts: Collect & Admitted & { expect?: RenameExpect } = {}): Promise<Entry> {
+  /** A board's copy also gets copies of its picture files, in its own folder (board-pictures.ts), made as the copy
+   * was and admitted as it was: `picturesLeft`, how many of them couldn't be (the copy shows those as missing). */
+  async duplicate(p: string, to?: string, opts: Collect & Admitted & { expect?: RenameExpect } = {}): Promise<Entry & { picturesLeft?: number }> {
     const collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
-    return this.locked(async () => {
+    let pictures: { from: Entry; names: string[] } | undefined;
+    const made = await this.locked(async () => {
       await this.admitAt(admit, "duplicate", "source", path(p));
       const e = await this.mustStat(p);
       if (e.kind === "folder") throw new WorkspaceError("invalid", "a folder can't be duplicated yet");
@@ -2030,9 +2034,17 @@ export class Workspace {
         return this.make(dest, "notebook", doc, (doc as { mode?: string }).mode ?? e.mode, undefined, e.made);
       }
       // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
-      if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);
+      if (e.kind === "board") {
+        const doc = (c as BoardRecord).doc as { images?: Record<string, unknown> };
+        if (doc?.images && typeof doc.images === "object") pictures = { from: e, names: Object.keys(doc.images) };
+        return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);
+      }
       return this.make(dest, "file", c);
     }, undefined, { collect });
+    if (!pictures || !pictures.names.length || !pictures.from.ref || !made.ref) return made;
+    const src = pictures.from;
+    const left = await copyBoardPictures(this, src.ref!, made.ref, pictures.names, (q, content) => this.createAs(q, { content, collect: opts.collect, admit: opts.admit }, src.made));
+    return left.length ? { ...made, picturesLeft: left.length } : made;
   }
 
   /** `p` (and what's in it) put in Trash, as `/Trash/<its name>` (or the

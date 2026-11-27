@@ -49,6 +49,7 @@ import { localFollow } from "./local-follow";
 import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
 import { Images } from "./images";
 import { boardPictureFiles, copyBoardPictures } from "../workspace/board-pictures";
+import { imageType } from "../workspace/image-store";
 import { BoardHistory, type HistoryModule } from "./history";
 import { BoardRecordStore, boardKind, journalId } from "./journal";
 import { canon, boardMerge3 } from "./merge";
@@ -297,7 +298,7 @@ const PENDING_MAX = 8 * 2 ** 20;
  * page's changes) never more (CORR-30D-1). */
 /** (`as`: its provenance (design/capabilities.md §6): `person`, made by the person here (New board, a first
  * visit's blank board); `copyOf`, a copy of that board, its provenance; else made from elsewhere) */
-async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?: AbortSignal, as: { person?: true; copyOf?: string } = {}): Promise<string> {
+async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?: AbortSignal, as: { person?: true; copyOf?: string; said?: string } = {}): Promise<string> {
   const top = new Set((await w.list("/")).map((e) => e.path));
   const p = freePath("/", safeTitle(d.title), ".board.json", (x) => top.has(x));
   if (!p) throw new Error("no free name for a new board");
@@ -305,7 +306,19 @@ async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?
   const src = as.copyOf ? await w.pathOf("board", as.copyOf).then((q) => (q ? w.stat(q) : undefined)).catch(() => undefined) : undefined;
   const e = as.person ? await w.createByPerson(p, opts) : src ? await w.createCopyOf(src, p, opts) : await w.create(p, opts);
   // (a copy's pictures: copied to its own folder, made as the copy was)
-  if (as.copyOf && e.ref && d.images) await copyBoardPictures(w, as.copyOf, e.ref, Object.keys(d.images), (q, content) => (src ? w.createCopyOf(src, q, { content }) : w.create(q, { content })));
+  // (one that can't be copied as a file is kept in this browser, which the copy shows it from; one neither copied nor
+  // kept, the person is told about before the copy opens: `said`, what the copy is called to them)
+  if (as.copyOf && e.ref && d.images) {
+    const kept = new Images(null);
+    const lost = await copyBoardPictures(w, as.copyOf, e.ref, Object.keys(d.images), (q, content) => (src ? w.createCopyOf(src, q, { content }) : w.create(q, { content })),
+      async (name, bytes) => (await kept.put(new Blob([bytes], { type: imageType(bytes)?.mime ?? "" }))) === name);
+    kept.dispose();
+    if (lost.length) {
+      const n = lost.length === 1 ? "one of its pictures" : `${lost.length} of its pictures`;
+      if (as.said) alert(`${as.said} is made, but without ${n}: they couldn't be copied into its folder or kept in this browser, so it shows them as missing.`);
+      else console.warn(`board copy ${e.ref}: ${lost.length} picture(s) not copied`);
+    }
+  }
   if (here) try { localStorage.setItem(hereKey(e.ref!), "1"); } catch {}
   return e.ref!;
 }
@@ -1553,7 +1566,7 @@ const host: BoardHost = {
   // (boards of their own here, which this one stays beside; not in an exported file)
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
   newBoard: file ? undefined : ws ? (mode) => departFor("A new board", async (signal) => localUrl(await makeInWorkspace(ws, blankBoard(mode), true, signal, { person: true }))) : async (mode) => { if (!(await settled("A new board"))) return; const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "A new board"); },
-  duplicate: file ? undefined : ws ? (d) => departFor("The copy", async (signal) => localUrl(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"), signal, { copyOf: local ? source.slice(6) : undefined }))) : async (d) => { if (!(await settled("The copy"))) return; const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "The copy"); },
+  duplicate: file ? undefined : ws ? (d) => departFor("The copy", async (signal) => localUrl(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"), signal, { copyOf: local ? source.slice(6) : undefined, said: "The copy" }))) : async (d) => { if (!(await settled("The copy"))) return; const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "The copy"); },
   // The File menu's items that are the workspace's (design §3): a new
   // notebook, a folder, Open… (the file browser as a dialog), Recent, and
   // this board to Trash; none without the workspace, or in an exported file

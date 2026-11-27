@@ -25,16 +25,23 @@ export function boardPictureFiles(w: PictureWorkspace, id: string | null | undef
 }
 
 /** Copy the pictures `names` of board `from` to board `to`'s folder (a board's copy: Duplicate, a conflict's), by
- * `create` (the copy's own provenance, never more than the board's); what can't be copied (not there, refused) is
- * left, so the copy shows it from this browser if it can. */
-export async function copyBoardPictures(w: PictureWorkspace, from: string, to: string, names: Iterable<string>, create: (path: string, bytes: Uint8Array) => Promise<unknown>): Promise<void> {
+ * `create` (the copy's own provenance, never more than the board's). What can't be copied as a file (not readable,
+ * refused, a save that threw) is offered to `keep` (with its bytes, if they were read: a page keeps them in this
+ * browser, where the copy shows them); returns the names of the pictures neither copied nor kept, so the caller
+ * tells the person the copy is incomplete. A picture that was never a file (kept in this browser alone) isn't one. */
+export async function copyBoardPictures(w: PictureWorkspace, from: string, to: string, names: Iterable<string>, create: (path: string, bytes: Uint8Array) => Promise<unknown>, keep?: (name: string, bytes: Uint8Array) => Promise<boolean>): Promise<string[]> {
   const a = boardPictureFiles(w, from), b = boardPictureFiles(w, to);
-  if (!a || !b) return;
   const want = new Set(names);
+  if (!a || !b || !want.size) return [];
+  const lost: string[] = [];
+  // (no folder: no picture of the board is a file)
   for (const p of await a.list().catch(() => [] as string[])) {
     const base = p.slice(p.lastIndexOf("/") + 1), name = base.slice(0, base.lastIndexOf("."));
     if (!want.has(name) || p !== `${a.folder}/${base}`) continue;
     const u = await a.read(p).catch(() => null);
-    if (u) await saveImage(create, b.folder, u, { name, read: b.read }).catch(() => {});
+    const r = u ? await saveImage(create, b.folder, u, { name, read: b.read }).catch(() => null) : null;
+    if (r && "path" in r) continue;
+    if (!(u && keep && (await keep(name, u).catch(() => false)))) lost.push(name);
   }
+  return lost;
 }

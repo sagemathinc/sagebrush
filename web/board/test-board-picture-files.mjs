@@ -94,6 +94,18 @@ try {
   const got = await filesIn(copy);
   check(copy !== id && JSON.stringify(got) === JSON.stringify([`${folder(copy)}/${p1}.png`, `${folder(copy)}/${p2}.png`].sort()), "the copy's pictures are in its own folder: " + JSON.stringify(got));
   check(await shows(30) && (await shows(40)), "and it shows them");
+
+  // Files > Duplicate (and an agent's, a shell's cp): the workspace's own duplicate, not the page's; its copy gets the
+  // pictures in its own folder too, and opens showing them with this browser's store gone again
+  const dup = await ev(`window.sagebrush.workspace.list("/").then((l) => l.find((e) => e.kind === "board" && e.ref === ${JSON.stringify(copy)})).then((e) => window.sagebrush.workspace.duplicate(e.path)).then((x) => ({ ref: x.ref, left: x.picturesLeft ?? 0 }))`);
+  const got2 = await filesIn(dup.ref);
+  check(dup.ref !== copy && dup.left === 0 && JSON.stringify(got2) === JSON.stringify([`${folder(dup.ref)}/${p1}.png`, `${folder(dup.ref)}/${p2}.png`].sort()), "the workspace's Duplicate copies the pictures to the copy's folder: " + JSON.stringify({ dup, got2 }));
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/board/` });
+  await until("!!window.sagebrush?.workspace");
+  check(await ev(`new Promise((res) => { const r = indexedDB.deleteDatabase("sagebrush-board-images"); r.onsuccess = () => res(true); r.onerror = () => res(false); r.onblocked = () => res(false); })`), "this browser's picture store deleted again");
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/board/?doc=local:${dup.ref}` });
+  check(await ready(), "the workspace's copy opens");
+  check(await shows(30) && (await shows(40)), "and shows both pictures, from its own files");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
