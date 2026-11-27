@@ -13,11 +13,12 @@ export { reserve, reserved, RESERVE_BYTES } from "./reserve";
 export { IdbStore, IdbPatchStore, openHistoryDb, openBoardHistoryDb, setSaveGate, ownedByWorkspace, LOCK_WAIT, HISTORY_BACKLOG, JOURNAL_TX_HOOK, historyBacklog, onHistoryRefused } from "../notebook/stores.js";
 export { Outbox, OUTBOX, Fenced, switchTo, currentLease, sender, wireOf, recordBytes, chargeOf, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
 export { PINS, RELEASE_COST, VDUE, VOVER, BACKFILL, GONE, syncOff, cleanPins, scheduleClean, bytesFor, capNow, pinTotal, liveLease, epochOf, newEpoch, metaWrite, type Pin, type Pending, type NsState, type Skipped } from "./sync-pins";
-export { SyncClient, CLIENT, READY, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";
+export { SyncClient, CLIENT, READY, SWEEP, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";
 export { applyOps, applyConfirmed, confirmedIndex, cursorOf, confirmedEntry, genPrefix, genKey, cursorKey, idbStore } from "./sync-confirmed";
 export { applyView, VIEW_STORES, listedSummary, type ListedWhy, type JournalRecord } from "./sync-view";
 export { REBUILD, passOf, obligationOf, cleanKey, journalKey, floorKey, journalPrefix, cleanStep, stage, stageEchoes, logDone, captureStep, done as rebuildDone, viewStep, retireStep, acked as rebuiltAcked, type Pass } from "./sync-rebuild";
 export { obligate, rebuildKey, type Obligation } from "./sync-outbox";
+export { REFS } from "./sync-refs";
 export { ADOPT, adoptPrefix, capture as captureAdoption } from "./sync-adopt";
 // (D11: large moves in chunks, for tests)
 export { D11, D11_CEILING, configureD11, RW, MAPS, STAGE, FENCE_READ, entriesOf, rewriting, MapSet, type ERecord, type Mapping } from "./sync-rewrite";
