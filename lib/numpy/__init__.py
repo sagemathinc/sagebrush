@@ -768,6 +768,23 @@ def _wraps_in(op, dt):
 
 
 
+class _UFuncTypeError(TypeError):
+    """NumPy's UFuncTypeError (numpy._core._exceptions), a TypeError: a ufunc's output its casting rule refuses"""
+
+
+_UFuncTypeError.__name__ = _UFuncTypeError.__qualname__ = "UFuncTypeError"
+
+
+def _out_cast(name, dt, out, casting):
+    """A ufunc's out= refused, before computing, where its loop's dtype dt can't be cast to out's under the casting
+    rule, in NumPy's words (UFuncTypeError: a float result into an int out is refused under the default same_kind)"""
+    if out is None:
+        return
+    o = out[0] if isinstance(out, tuple) else out
+    if isinstance(o, ndarray) and not _can_cast_rule(dt, o.dtype, casting):
+        raise _UFuncTypeError("Cannot cast ufunc '%s' output from %r to %r with casting rule '%s'" % (name, dt, o.dtype, casting))
+
+
 def _out_writeable(out):
     """A ufunc's out=, refused before any computing where it is read-only,
     in NumPy's words"""
@@ -867,10 +884,15 @@ class ufunc:
             # in it; but a comparison's dtype names only its output, bool)
             dt = self._loop(dtype)
             if self._op not in _BOOL_OUT:
-                r = self._apply_cast([self._cast_in(x, i, dt, casting) for i, x in enumerate(args)])
+                pairs = [self._cast_in(x, i, dt, casting) for i, x in enumerate(args)]
+                _out_cast(self.__name__, dt, out, casting)
+                r = self._apply_cast(pairs)
             else:
+                _out_cast(self.__name__, _dtype_of("bool"), out, casting)
                 r = self._apply(args)
         else:
+            if out is not None:
+                _out_cast(self.__name__, self._result_dtype(args), out, casting)
             r = self._apply(args)
         if dtype is not None:
             r = asarray(r)
@@ -888,6 +910,16 @@ class ufunc:
             _store(out, r, self.__name__)
             return out
         return r
+
+    def _result_dtype(self, args):
+        """The dtype the ufunc's loop gives for args, found before computing (no value is computed, so nothing warns):
+        each operand as an empty array of its dtype, a Python scalar kept as it is (weak) beside an array"""
+        weak = _builtins.any(isinstance(x, ndarray) for x in args)
+        def dummy(x):
+            if weak and isinstance(x, (_builtins.bool, _builtins.int, _builtins.float, _builtins.complex)) and not isinstance(x, generic):
+                return x
+            return empty((0,), asarray(x).dtype)
+        return asarray(self._apply([dummy(x) for x in args])).dtype
 
     def _loop(self, dtype):
         """dtype's loop, or NumPy's TypeError where the ufunc has none (a
@@ -927,7 +959,7 @@ class ufunc:
         if self._op == "absolute" and src == _dtype_of("complex128") and dt == _dtype_of("float64"):
             dt = src  # (its loop of complex128 to float64)
         if not _can_cast_rule(src, dt, casting):
-            raise TypeError("Cannot cast ufunc '%s' input %sfrom %r to %r with casting rule '%s'"
+            raise _UFuncTypeError("Cannot cast ufunc '%s' input %sfrom %r to %r with casting rule '%s'"
                             % (self.__name__, "" if self.nin == 1 else "%d " % i, src, dt, casting))
         x = asarray(x)
         # (a Python scalar cast now; an array, if it is not already of dt,
@@ -1115,6 +1147,7 @@ for _name in _BINARY:
 for _name in _UNARY:
     _g[_name] = ufunc(_name, 1)
 divide = true_divide
+true_divide.__name__ = "divide"  # (NumPy's true_divide is divide, by that name; its loop stays true_divide)
 mod = remainder
 abs = absolute
 fabs = ufunc("fabs", 1)
@@ -1231,14 +1264,20 @@ def clip(a, a_min=None, a_max=None, out=None, **kw):
         a_min = kw["min"]
     if a_max is None and "max" in kw:
         a_max = kw["max"]
+    casting = kw.get("casting", "same_kind")
+    if casting not in _CASTINGS:
+        raise ValueError("casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got %r)" % (casting,))
     # (strings refused: NumPy has no clip loop for them, even with no bounds)
     r = _np.numeric(a)
     if a_min is not None:
         r = maximum(r, a_min)
     if a_max is not None:
         r = minimum(r, a_max)
-    # (NumPy's clip with one bound is maximum or minimum, and its warning names that ufunc)
-    return _out(r, out, "clip" if a_min is not None and a_max is not None else "maximum" if a_min is not None else "minimum")
+    # (NumPy's clip with one bound is maximum or minimum, and its warning and refusal name that ufunc)
+    name = "clip" if a_min is not None and a_max is not None else "maximum" if a_min is not None else "minimum"
+    # (out= takes the result's dtype only under the casting rule, as NumPy's clip ufunc's output; min and max don't warn)
+    _out_cast(name, asarray(r).dtype, out, casting)
+    return _out(r, out, name)
 
 
 def nan_to_num(x, copy=True, nan=0.0, posinf=None, neginf=None):
@@ -1468,13 +1507,6 @@ def _count_where(a, axis, keepdims, where):
     return sum(broadcast_to(where, a.shape), axis, intp, None, keepdims)
 
 
-class _UFuncTypeError(TypeError):
-    """NumPy's UFuncTypeError (numpy._core._exceptions), a TypeError: a ufunc's output its casting rule refuses"""
-
-
-_UFuncTypeError.__name__ = _UFuncTypeError.__qualname__ = "UFuncTypeError"
-
-
 def _root(r):
     # (std's root of the variance, as NumPy's: in place for an array (sqrt(r, out=r), refused for an integer one by
     # same_kind casting), a scalar's in its own type)
@@ -1681,7 +1713,11 @@ def argmin(a, axis=None, out=None, *, keepdims=False):
 
 
 def ptp(a, axis=None, out=None, keepdims=False):
-    return amax(a, axis, keepdims=keepdims) - amin(a, axis, keepdims=keepdims)
+    if out is None:
+        return amax(a, axis, keepdims=keepdims) - amin(a, axis, keepdims=keepdims)
+    # (NumPy's: the maximum reduced into out, then out minus the minimum written into out by subtract, under its
+    # same_kind rule, so a float array's range into an int out is refused after out holds the maximum)
+    return subtract(amax(a, axis, out=out, keepdims=keepdims), amin(a, axis, keepdims=keepdims), out=out)
 
 
 def all(a, axis=None, out=None, keepdims=False, *, where=True):
