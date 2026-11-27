@@ -1,6 +1,6 @@
 {
-  "$comment": "The one closed registry of reason and refusal codes (O6/O7 r2.3 §5.4, §5.5). Closed per release: a verifier refuses a name not listed. Lanes add entries by a reviewed change to this file. Host codes come from grader's host r2 and are local (no HTTP status).",
-  "freeze": "db905c9d72ba5d4e18620d3267ea9214992d3a82c735289dda4088970dddc7e3",
+  "$comment": "The one closed registry of reason and refusal codes (O6/O7 r2.3 §5.4, §5.5). Closed per release: a verifier refuses a name not listed. Lanes add entries by a reviewed change to this file. Host codes come from the host design's r2 and are local (no HTTP status).",
+  "freeze": "589730708dbc76d742f67831e2772e8f4a85fac51650640eb76fb0747c1a1bd3",
   "reasons": [
     {
       "name": "bad_form",
@@ -129,6 +129,12 @@
       "meaning": "the sign-in is more than 5 minutes old, for a change of the fleet's shape"
     },
     {
+      "name": "unauthenticated",
+      "owner": "service",
+      "status": 401,
+      "meaning": "no live account session, or a relay token that is missing, unknown, used or expired (one code, no hint which)"
+    },
+    {
       "name": "rate",
       "owner": "service",
       "status": 429,
@@ -191,7 +197,7 @@
     {
       "name": "preflight_missing",
       "owner": "host",
-      "meaning": "a required unit, Landlock or path-contract control is missing at start"
+      "meaning": "a required host platform, privilege, account, unit, adapter, Landlock or path-contract control is missing at start"
     },
     {
       "name": "landlock_abi",
@@ -219,6 +225,36 @@
       "meaning": "the host keys don't match this machine id; re-pair"
     },
     {
+      "name": "identity_broken",
+      "owner": "host",
+      "meaning": "the host identity or ownership layout is invalid: its identity files are in no closed state, or its trusted parents, ownership lock, directory ownership, links, or restore-root separation fail their checks; nothing is served"
+    },
+    {
+      "name": "host_ended",
+      "owner": "host",
+      "meaning": "this host's certificate no longer verifies against its pinned chain; nothing is served until a reset"
+    },
+    {
+      "name": "lease_unqualified",
+      "owner": "host",
+      "meaning": "the execution lease is set on, and this release isn't qualified for it"
+    },
+    {
+      "name": "suspend_gate_stuck",
+      "owner": "host",
+      "meaning": "the execution lease's suspend gate stays closed: the system-sleep hook's post never ran (its pre is older than its budget plus 5 minutes) or the supervisor's acknowledgement is ahead of the hook's; no agent runs until a reboot or the next suspend completes"
+    },
+    {
+      "name": "suspend_gate_exhausted",
+      "owner": "host",
+      "meaning": "the execution lease's suspend gate reached its terminal generation and stays closed until a reboot"
+    },
+    {
+      "name": "bad_config",
+      "owner": "host",
+      "meaning": "the host's own settings file is unreadable or holds an unknown key or value"
+    },
+    {
       "name": "qualify_required",
       "owner": "host",
       "meaning": "the qualification report is missing, or invalidated by a change"
@@ -237,6 +273,41 @@
       "name": "audit_full",
       "owner": "host",
       "meaning": "a durable intent couldn't be appended (full); refused fail-closed"
+    },
+    {
+      "name": "profile_identity",
+      "owner": "host",
+      "meaning": "a profile directory or one of its session mountpoints differs from its record; the turn didn't run, and the profile is quarantined for repair"
+    },
+    {
+      "name": "turn_preflight",
+      "owner": "host",
+      "meaning": "a turn failed before the CLI exec, at its unit, namespace, turn file, session store, stdio, setid, capability drop, no_new_privs, Landlock, filter or exec step, as a complete failure record proves; nothing ran"
+    },
+    {
+      "name": "no_profile",
+      "owner": "host",
+      "meaning": "no bound profile of the harness is in the agent's pool"
+    },
+    {
+      "name": "all_blocked",
+      "owner": "host",
+      "meaning": "every candidate profile is rate-limited until its reset"
+    },
+    {
+      "name": "busy",
+      "owner": "host",
+      "meaning": "the conversation already has an active turn, or a lease bound is reached, or another process owns the host's identity (its ownership lock)"
+    },
+    {
+      "name": "agent_fenced",
+      "owner": "host",
+      "meaning": "the agent is fenced, so no turn is admitted"
+    },
+    {
+      "name": "source_unavailable",
+      "owner": "host",
+      "meaning": "the profile a pinned (none-continuity) conversation needs is gone"
     },
     {
       "name": "program_mismatch",

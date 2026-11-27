@@ -6,6 +6,7 @@ ClassGroup
 ClassNumber
 Codomain
 CoefficientRing
+Coercion
 Conductor
 CremonaReference
 CuspForms

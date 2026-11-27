@@ -8,8 +8,11 @@ computation of class groups" (Math. Comp. 1999); Bach's averaging;
 Belabas, Diaz y Diaz and Friedman; Grenié and Molteni (arXiv:1507.00602,
 1607.02430, 2212.09461). PARI was used only as an oracle and benchmark.*
 
-Like PARI's `quadclassunit` and `bnfinit`, everything here assumes GRH,
-which makes the bound on the generators small.
+Like PARI's `quadclassunit` and `bnfinit`, the default results assume GRH,
+which makes the bound on the generators small. For small discriminants, an
+unconditional certificate (`nf/proof.rs`, Sage's `proof=True`) plays the
+role of PARI's `bnfcertify`; beyond its limits it refuses rather than
+return the GRH value.
 
 The certificates combine exact integer arithmetic with floating-point
 estimates, such as the analytic lower bound for $hR$ and the regulator's
@@ -51,10 +54,12 @@ so $\det L$ is $h$ once it falls below $\sqrt 2$ times the estimate.
   replaced the big-integer HNF when $h > 2^{62}$: 1–4.6 s became about
   0.1 s.
 
-**Results.** All 405 random discriminants up to $10^{30}$ and a 42-entry
-benchmark agree with PARI. We are slower below $10^{17}$, equal at
-$10^{17}$, and faster above: 22–44× faster at $10^{37}$–$10^{47}$. At
-$10^{47}$ PARI takes 219 s and we take 5.4 s.
+**Results.** All 405 random discriminants up to $10^{30}$ and a 64-entry
+benchmark agree with PARI. The default call also certifies the result
+under GRH, which costs 75–150 ms below $10^{25}$. Certified, we are faster
+than PARI from about $10^{27}$, and 18–32× faster at $10^{41}$–$10^{47}$;
+uncertified, from about $10^{15}$, and 38–58× faster. At $10^{47}$ PARI
+takes 284 s and we take 8.8 s (5.2 s uncertified).
 
 ## Real quadratic fields: the regulator
 
@@ -72,9 +77,10 @@ number formula bounds $hR$, so multiples $h^*$ and $R^*$ with $h^* R^* <
 - **Negative-norm relations** are included, so that units of norm $-1$
   appear.
 
-At $D \approx 10^{41}$, PARI takes 4.6 s and we take 1.4 s. All 51
-benchmark discriminants, 200 random and 29 small ones agree with PARI, to
-at least 15 digits of the regulator.
+At $D \approx 10^{41}$, PARI takes 5.9 s and we take 2.5 s with the default
+certificate (1.2 s without it); certified, we are slower below about
+$10^{35}$. All 36 benchmark discriminants, 200 random and 29 small ones
+agree with PARI, to at least 15 digits of the regulator.
 
 ## General number fields: `bnfinit`
 
@@ -98,10 +104,10 @@ faster.
 
 Result: 900 random cubic and quartic fields agree with PARI 2.17.
 
-- **Cubic fields** beat PARI from discriminants around $10^{25}$, by
-  2–5×.
-- **Quartic fields** are still 1–4× slower, because products of prime
-  ideals dominate.
+- **Cubic fields** beat PARI from discriminants around $10^{20}$, by
+  about 6× at $10^{32}$–$10^{36}$.
+- **Quartic fields** beat PARI from about $10^{33}$ (3.6× at $10^{41}$),
+  and are slower below, because products of prime ideals dominate.
 
 ## The bugs that taught the most
 

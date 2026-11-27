@@ -62,6 +62,13 @@ def mask_positions(key, n, index=None, what="Item"):
     return [i for i, b in enumerate(vals) if b]
 
 
+def refuse_categorical_key(key):
+    # (pandas labels the result with a CategoricalIndex)
+    from ._pd_category import Categorical, refuse
+    if isinstance(key, Categorical):
+        raise refuse("indexing with a Categorical")
+
+
 def _is_int(k):
     return isinstance(k, (int, np.integer)) and not isinstance(k, (bool, np.bool_))
 
@@ -72,6 +79,7 @@ def iloc_positions(key, n, axis=0):
     if isinstance(key, tuple):
         from .errors import IndexingError
         raise IndexingError("Too many indexers")
+    refuse_categorical_key(key)
     if _is_int(key):
         k = int(key)
         if k < -n or k >= n:
@@ -171,6 +179,7 @@ def label_slice_positions(index, key):
 def loc_positions(index, key):
     """Positions for .loc[key] on an axis with this index."""
     Index, Series = _ns()
+    refuse_categorical_key(key)
     if isinstance(key, slice):
         return label_slice_positions(index, key), False
     if is_bool_key(key):
@@ -197,7 +206,9 @@ def getitem_slice_positions(index, key):
 
 def is_scalar_key(key):
     Index, Series = _ns()
-    return not isinstance(key, (slice, list, tuple, np.ndarray, Index, Series, range, dict, set))
+    from ._pd_category import Categorical
+    # (a Categorical is an array of values, as a list is)
+    return not isinstance(key, (slice, list, tuple, np.ndarray, Index, Series, range, dict, set, Categorical))
 
 
 def missing(v):

@@ -14,8 +14,8 @@ worker (`web/shell/worker-boot.js`), which can't reach the network or eval.
 - shell: `echo printf pwd basename dirname env true false seq`
 
 Every other command answers 127, "command not found". That includes network
-commands (`curl`, `wget`), runtimes (`python3`, `node`, `js-exec`,
-`sqlite3`), and whatever §8 defers (`tee`, `xargs`, `tar`, `gzip`, `ln`,
+commands (`curl`, `wget`), runtimes (`node`, `js-exec`, `sqlite3`, and `python3`
+unless the page registers the Terminal commands below), and whatever §8 defers (`tee`, `xargs`, `tar`, `gzip`, `ln`,
 `split`, `rg`, `yq`, ...).
 
 **The interpreter's builtins.** These are part of the shell itself, so they

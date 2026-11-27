@@ -1427,13 +1427,13 @@ export class SyncClient {
     // (checked: what this connection hasn't asked about, in pages of at most 1,000)
     // (a blob's address and its bytes' SHA-256 are the same here: the bytes are stored as they are, until end-to-end
     // encryption (design/e2e-encryption.md §3.3), whose addresses are keyed and whose bytes are ciphertext)
-    const ask: { sha256: string; ct_sha256: string; size: number }[] = [];
+    const ask: { address: string; ct_sha256: string; size: number }[] = [];
     const seen = new Set<string>();
     for (const r of files) {
       const sha = r.op.sha256!;
       if (known(sha) || c.missing.has(sha) || seen.has(sha)) continue;
       seen.add(sha);
-      ask.push({ sha256: sha, ct_sha256: sha, size: r.op.size ?? 0 });
+      ask.push({ address: sha, ct_sha256: sha, size: r.op.size ?? 0 });
     }
     for (let i = 0; i < ask.length && this.conn === c; i += CLIENT.checkItems) {
       // (a check timer, persisted, maybe from before a reload: woken at its end, CORR-PR58-2)
@@ -1459,7 +1459,7 @@ export class SyncClient {
         await this.blobConflict(c);
         break;
       }
-      for (const b of page) (missing.has(b.sha256) ? c.missing : c.have).add(b.sha256);
+      for (const b of page) (missing.has(b.address) ? c.missing : c.have).add(b.address);
     }
     // (uploads: those missing, in the records' order, at most CLIENT.uploadsAtOnce at once)
     const todo: OutboxRecord[] = [];

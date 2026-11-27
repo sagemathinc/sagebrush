@@ -33,7 +33,14 @@ import { readPage } from "../../scripts/notebook-page.mjs";
 // surface, the line and output requests' checks, and a line or paste admitted whole against what its statement has
 // left, measured 471 393 / 131 554 on master 05e75348's 468 049 / 130 575 (+3 344 / +979); the ceilings at that
 // measurement + 64)
-const LIMIT_RAW = 471457, LIMIT_GZIP = 131618;
+// (the page's terminals showing every colour at a contrast of at least 4.5:1, and the light theme's bright white as a
+// grey that reads (web/term/xterm-view.ts, shared with this chunk): measured by CI 471 459 / 131 578 against 471 393 /
+// 131 554 (+66 / +24); the ceilings at that measurement + 64)
+// (an optional package's distribution in the package-set index (src/pkgset.ts admitIndex: the name checked as a PyPI
+// project name, its version the package's own, one package per name), which the loader's set admission runs in this
+// chunk: measured 472 124 / 131 769 merged on master 747e6748's 471 459 / 131 578 (+665 / +191, bun 1.4.4, Node
+// 24.21.0's gzip -9); the ceilings at that measurement + 64)
+const LIMIT_RAW = 472188, LIMIT_GZIP = 131833;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];

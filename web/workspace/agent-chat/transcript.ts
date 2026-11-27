@@ -1,7 +1,7 @@
 // A chat as Markdown, for the person to copy and paste elsewhere (decided Nov 19 2026): what the person wrote and what
 // the agent answered, each of the agent's tool calls on one line (its name and what it worked on), and the files it
 // wrote as links. The agent's thinking is left out; a permission prompt is one line, with its answer.
-import { own, type Artifact, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
+import { errorLine, own, type Artifact, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
 
 export interface TranscriptOptions {
   /** the agent's name, as the chat shows it ("Claude") */
@@ -58,7 +58,7 @@ export function turnMarkdown(thread: Thread, turn: Turn, o: TranscriptOptions): 
       if (a) push(`- asked: ${oneLine(a.title)} (${a.state === "approved" ? "allowed" : a.state === "denied" ? "denied" : "no answer"})`);
     }
   }
-  if (turn.error) push(`Error: ${oneLine(turn.error.message)}`);
+  if (turn.error) push(oneLine(errorLine(turn.error.code, turn.error.message)));
   return blocks.join("\n\n");
 }
 

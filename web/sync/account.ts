@@ -19,10 +19,11 @@ import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
 import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
-import { verifyStrict } from "../workspace/fleet/core/ed25519.mjs";
-import { sha256b64, unb64 } from "../workspace/fleet/core/bytes.mjs";
+import { e2eCore } from "../workspace/e2e/core-ready.ts";
+import { sha256b64, unb64, verifyStrict } from "../workspace/e2e/core/sealed-prims.mjs";
 import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
-import { TRASH, normPath, within } from "../workspace/paths.ts";
+import { TRASH, within } from "../workspace/paths.ts";
+import { reserved, scopeCheck } from "../workspace/agent-scope.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
 import { IX, SCHEMA as IX_SCHEMA, IX_TABLES, Budget, BudgetStop, Entangled, applyOp, jobGet, jobNew, jobPut, jobStep } from "./entries.ts";
 import type { SyncEntry, SyncOp } from "../workspace/sync-reduce.ts";
@@ -43,11 +44,17 @@ interface Attachment {
   device?: string;
 }
 
+/** The index's own references (e2e PR 5d): one row per address an accepted sealed op added, keyed by that op's seq, and
+ * the seq of the op that released it once one has.  Apart from holdings.refs, which document pins and chunked files'
+ * manifests raise too: a release must end a live add here, so no other kind of reference can be released as one. */
+const INDEX_REFS = "CREATE TABLE IF NOT EXISTS index_refs (address TEXT NOT NULL, add_seq INTEGER NOT NULL, released_seq INTEGER, PRIMARY KEY (address, add_seq))";
+
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)",
   "CREATE TABLE IF NOT EXISTS devices (device TEXT PRIMARY KEY, name TEXT, created INTEGER, last_seen INTEGER, session_hash TEXT, next_dseq INTEGER NOT NULL)",
   "CREATE TABLE IF NOT EXISTS ops (seq INTEGER PRIMARY KEY, device TEXT NOT NULL, dseq INTEGER NOT NULL, t INTEGER, by TEXT, op TEXT, path TEXT, \"to\" TEXT, kind TEXT, ref TEXT, fid TEXT, sha256 TEXT, size INTEGER, base TEXT, recv INTEGER, parent TEXT, env TEXT, head TEXT, adds TEXT, releases TEXT, chain_gen TEXT, signer TEXT, sig TEXT, env_sha256 TEXT, UNIQUE (device, dseq))",
   "CREATE TABLE IF NOT EXISTS refused (device TEXT NOT NULL, dseq INTEGER NOT NULL, code TEXT NOT NULL, PRIMARY KEY (device, dseq))",
+  INDEX_REFS,
   "CREATE TABLE IF NOT EXISTS docs (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, created INTEGER, bytes INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 1, head_seq INTEGER NOT NULL DEFAULT 0, deleted INTEGER)",
   "CREATE TABLE IF NOT EXISTS holdings (sha256 TEXT PRIMARY KEY, key TEXT NOT NULL, size INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER, ct_sha256 TEXT)",
   "CREATE INDEX IF NOT EXISTS holdings_key ON holdings (key)",
@@ -90,7 +97,7 @@ const MAX_HOLDS = LIMITS.liveBatches;
 /** A held blob's identity: its address, its stored bytes' SHA-256 and its size (e2e PR 3a). */
 /** A sealed op's answer: decided (accepted, with the hash of the envelope the log holds; or refused), or undecided. */
 export type SealedAck = { dseq: number; seq: number; env_sha256?: string } | { dseq: number; code: string } | { dseq: number; undecided: true };
-export type Held = { sha256: string; ct_sha256: string; size: number };
+export type Held = { address: string; ct_sha256: string; size: number };
 export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number; verify_bytes_per_day?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 /** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
@@ -135,8 +142,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private e2eResets = new Bucket(E2E.resetsPerMinute, E2E.resetsPerMinute / 60);
   private e2eResetWork = new Bucket(E2E.resetWorkPerMinute, E2E.resetWorkPerMinute / 60);
   private e2eStore: E2EStore | null = null;
-  /** tests only: the mailbox's clock, shifted (ms); and the next E2E write's transaction made to fail after its writes */
+  /** tests only: the E2E clock (the rate buckets' and the mailbox's), shifted (ms) or frozen at a moment; and the next E2E
+   * write's transaction made to fail after its writes */
   private e2eShift = 0;
+  private e2eFrozen: number | null = null;
   private e2eFailCommit = false;
   private e2eHold = 0;
   private ticketsAll = new Bucket(TICKETS_PER_MINUTE_ACCOUNT, TICKETS_PER_MINUTE_ACCOUNT / 60);
@@ -183,6 +192,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ops'")) {
         const have = new Set(this.sql.exec("PRAGMA table_info(ops)").toArray().map((c) => String((c as Row).name)));
         for (const c of ["env", "head", "adds", "releases", "chain_gen", "signer", "sig", "env_sha256"]) if (!have.has(c)) this.sql.exec(`ALTER TABLE ops ADD COLUMN ${c} TEXT`);
+        // (and the index's references, e2e PR 5d: no sealed op was accepted before it, so it starts empty)
+        this.sql.exec(INDEX_REFS);
       }
       // (an object made before blobs had a ciphertext hash gains the column: e2e PR 3a; its old rows keep NULL, read as
       // ct = the address they were checked against, and every new row has one)
@@ -589,7 +600,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * - the new ops must fit the log's cap (resends don't count).
    * The signatures are checked before the transaction, and the transaction checks that the head and the device's next
    * dseq are still the ones they were checked against.  Then each op: every address it adds must be held, and gains a
-   * reference; every address it releases must be held with a reference to give back.
+   * reference, an index add keyed by this op's seq; every release must end a live index add, the one its `add` names
+   * (an earlier accepted sealed op whose adds named this address, not released yet), and gives back that reference.
+   * Never the blob's shared count alone: a document's pin or a manifest raises that too, and is no index add.
    *
    * An accepted op is answered with its seq and its envelope's hash (env_sha256), the first time and on every resend, so
    * a device whose answer was lost learns which bytes the log holds for that dseq.  The first refusal of an op ends the
@@ -626,6 +639,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // for the whole message; a malformed one is left to its own refusal below.  And each one's envelope hash, for its ack,
     // kept by its place in the message, not its dseq: two ops naming one dseq are two envelopes)
     const envHash = new Map<number, string>();
+    e2eCore(); // (the fleet core's backend installed, once, before any signature is checked or hash taken)
     for (const [at, raw] of list.entries()) {
       if (!fresh(raw, next0)) continue;
       let op: SealedOp;
@@ -679,10 +693,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         if (dseq > next) throw new SyncError("order", "a gap in this device's ops", { next_dseq: next });
         try {
           const op = checkSealedOp(raw);
-          for (const a of op.adds) if (!this.held(a)) throw new SyncError("missing", "upload the blob before the op that names it", { sha256: a });
-          for (const a of op.releases) {
-            const h = this.one("SELECT refs FROM holdings WHERE sha256 = ?", a);
-            if (!h || Number(h.refs) < 1) throw new SyncError("invalid", "a release of a reference that isn't held", { sha256: a });
+          for (const a of op.adds) if (!this.held(a)) throw new SyncError("missing", "upload the blob before the op that names it", { address: a });
+          for (const r of op.releases) {
+            if (!this.one("SELECT 1 AS x FROM index_refs WHERE address = ? AND add_seq = ? AND released_seq IS NULL", r.address, r.add)) {
+              throw new SyncError("invalid", "a release of an index reference that isn't live: no accepted op added it there, or it was released", { address: r.address, add: r.add });
+            }
           }
           // (its hash was taken with its signature, before the transaction: every op that gets here was checked there)
           const h = envHash.get(at);
@@ -691,10 +706,19 @@ export class SyncAccount extends DurableObject<SyncEnv> {
             "INSERT INTO ops (device, dseq, recv, size, env, head, adds, releases, chain_gen, signer, sig, env_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             device, dseq, Date.now(), op.env.length, toB64(op.env), op.head, JSON.stringify(op.adds), JSON.stringify(op.releases), op.chainGen, op.signer, op.sig, h,
           );
-          out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n), env_sha256: h });
+          const seq = Number(this.one("SELECT last_insert_rowid() AS n")!.n);
+          out.push({ dseq, seq, env_sha256: h });
           this.set("sealed_ops", Number(this.get("sealed_ops") ?? 0) + 1);
-          for (const a of op.adds) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", a);
-          for (const a of op.releases) this.sql.exec("UPDATE holdings SET refs = refs - 1 WHERE sha256 = ?", a);
+          for (const a of op.adds) {
+            this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", a);
+            this.sql.exec("INSERT INTO index_refs (address, add_seq) VALUES (?, ?)", a, seq);
+          }
+          for (const r of op.releases) {
+            // (the index's ledger only: every blob an op names is held until the account is purged
+            // (design/e2e-encryption.md, version retention), so a release never gives its shared reference back, and
+            // the day-old sweep never takes a blob an index op named, nor a reference a document's pin holds)
+            this.sql.exec("UPDATE index_refs SET released_seq = ? WHERE address = ? AND add_seq = ? AND released_seq IS NULL", seq, r.address, r.add);
+          }
         } catch (e) {
           if (!(e instanceof SyncError)) throw e;
           if (refusedCount() >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
@@ -769,7 +793,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const keys: PinKey[] = [];
       for (const e of b.patches)
         for (const sha of e.blobs ?? []) {
-          if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) throw new SyncError("missing", "upload this blob first", { sha256: sha });
+          if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) throw new SyncError("missing", "upload this blob first", { address: sha });
           const k = { doc, epoch, ref: patchRef(e), sha256: sha };
           const had = this.one("SELECT state FROM pins WHERE doc = ? AND epoch = ? AND ref = ? AND sha256 = ?", doc, epoch, k.ref, sha);
           if (!had) {
@@ -1467,6 +1491,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   /** The alarm's part of the budget: give back slack beyond 2 chunks, or write a release D1 missed. */
   private async tendClaim(): Promise<void> {
+    if (testMode(this.env) && this.holdSlack) return;
     const cached = this.get("limits");
     if (!cached) return;
     const C = this.chunk((JSON.parse(cached) as Limits).storage_bytes);
@@ -1782,7 +1807,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * uploads of the same bytes at once), this upload's object goes to the
    * outbox instead; a reservation already reaped can't be finalized.
    */
-  async finalize(a: { account: string; id: string; size: number }): Promise<Result<{ sha256: string }>> {
+  async finalize(a: { account: string; id: string; size: number }): Promise<Result<{ address: string }>> {
     // (during a purge: the upload's object is the purge's to delete, handed over in a transaction of its
     // own, which a refusal can't roll back, CORR-5E2-2)
     if (this.exists() && this.state() === "deleting") {
@@ -1802,7 +1827,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (!res) {
         // (finalized already: the same answer for the same size, a conflict for another)
         const f = this.one("SELECT sha256, size FROM finalized WHERE id = ?", a.id);
-        if (f && Number(f.size) === a.size) return { sha256: String(f.sha256) };
+        if (f && Number(f.size) === a.size) return { address: String(f.sha256) };
         if (f) throw new SyncError("conflict", "this upload was finalized with another size");
         throw new SyncError("busy", "this upload took too long; send it again");
       }
@@ -1822,14 +1847,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.sql.exec("INSERT OR IGNORE INTO outbox (key, created) VALUES (?, ?)", res.key, Date.now());
         this.addUsed(-Number(res.bytes));
         if (a.size !== Number(res.bytes)) throw new SyncError("invalid", "the stored size isn't the declared one");
-        return { sha256: sha };
+        return { address: sha };
       }
       this.sql.exec("INSERT INTO holdings (sha256, key, size, refs, created, ct_sha256) VALUES (?, ?, ?, 0, ?, ?)", sha, res.key, res.bytes, Date.now(), ct);
-      return { sha256: sha };
+      return { address: sha };
     }));
     this.wakeBy(Date.now() + 5000);
     if ("ok" in r && "conflict" in r.ok) return { error: { code: "conflict", message: "the server holds other bytes under this address", detail: { held: r.ok.conflict } } };
-    return r as Result<{ sha256: string }>;
+    return r as Result<{ address: string }>;
   }
 
   /** An upload that failed before finalize: its object and its reservation go now. */
@@ -1875,7 +1900,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
-  async missing(a: { account: string; blobs: { sha256: string; ct_sha256: string; size: number }[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[]; conflicts: Held[] }>> {
+  async missing(a: { account: string; blobs: { address: string; ct_sha256: string; size: number }[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[]; conflicts: Held[] }>> {
     return attempt(() => {
       this.admit(a.account, false);
       this.bound(a.bind?.account, a.bind?.generation);
@@ -1883,7 +1908,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // file already there?": held as a verified manifest, or being verified, which the client then drives)
       const files = tieredOn(this.env) && this.hasFiles();
       const missing: string[] = [], verifying: string[] = [], conflicts: Held[] = [];
-      for (const { sha256: sha, ct_sha256: ct, size } of a.blobs) {
+      for (const { address: sha, ct_sha256: ct, size } of a.blobs) {
         // (held is "there" only as exactly these bytes: held otherwise is a conflict, so no caller sends an op naming
         // an address whose bytes aren't the ones it means)
         const h = this.held(sha);
@@ -1895,7 +1920,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         if (f && f.state !== "verifying") {
           // (a chunked file, verified or live: held as its address (which its verification checked the chunks' bytes
           // make; ct = address, the bridge until end-to-end encryption) and its size, under the same exact rule)
-          const fh: Held = { sha256: sha, ct_sha256: sha, size: Number(f.size) };
+          const fh: Held = { address: sha, ct_sha256: sha, size: Number(f.size) };
           if (fh.ct_sha256 !== ct || fh.size !== size) conflicts.push(fh);
           continue;
         }
@@ -1910,7 +1935,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * column has NULL, read as its address, which R2 checked them against then) and its size; undefined if not held. */
   private held(address: string): Held | undefined {
     const h = this.one("SELECT sha256, COALESCE(ct_sha256, sha256) AS ct, size FROM holdings WHERE sha256 = ?", address);
-    return h ? { sha256: String(h.sha256), ct_sha256: String(h.ct), size: Number(h.size) } : undefined;
+    return h ? { address: String(h.sha256), ct_sha256: String(h.ct), size: Number(h.size) } : undefined;
   }
   private static blobConflict(h: Held): SyncError {
     return new SyncError("conflict", "the server holds other bytes under this address", { held: h });
@@ -2278,7 +2303,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only (SYNC_TEST_PIN_MS bound): a holding's refs and the pins on it. */
-  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; fences_due: number; reservations: number; leases: number; outbox: number; doc?: Row; alarm: number | null } | null> {
+  async inspect(a: { sha256?: string; doc?: string }): Promise<{ refs: number | null; pins: Row[]; used: number; alarms: number; fences_due: number; reservations: number; leases: number; outbox: number; doc?: Row; alarm: number | null; index_refs: Row[] } | null> {
     if (!testMode(this.env) || !this.exists()) return null;
     const h = a.sha256 ? this.one("SELECT refs FROM holdings WHERE sha256 = ?", a.sha256) : undefined;
     return {
@@ -2292,6 +2317,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       outbox: Number(this.one("SELECT COUNT(*) AS n FROM outbox")!.n),
       ...(a.doc ? { doc: this.one("SELECT head_seq, epoch, bytes FROM docs WHERE doc = ?", a.doc) } : {}),
       alarm: await this.ctx.storage.getAlarm(),
+      // (the index's references, e2e PR 5d: every add and its release, if any)
+      index_refs: this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'index_refs'")
+        ? (this.sql.exec("SELECT address, add_seq, released_seq FROM index_refs ORDER BY add_seq, address").toArray() as Row[])
+        : [],
     };
   }
   /** Tests only: R2 keys put in the outbox, and the alarm set to now (an alarm earlier than what is pending). */
@@ -2331,6 +2360,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   /** Tests only: make the budget's D1 writes fail, as an unreachable D1 would (§6.1). */
   async setFailClaim(a: { on: boolean }): Promise<void> {
     if (testMode(this.env)) this.failClaim = a.on;
+  }
+  private holdSlack = false;
+  /** Tests only: the alarm leaves the claim alone (no slack given back, no missed release written) while this is on, so
+   * a test can observe an unused claim for as long as it needs, however loaded the host is.  A give-back that sharing
+   * asks for (releaseClaim) still runs. */
+  async testHoldSlack(a: { on: boolean }): Promise<void> {
+    if (testMode(this.env)) this.holdSlack = a.on;
   }
   /** Tests only: the budget as this object holds it. */
   async budget(): Promise<{ claim: number; blob_cap: number; files: number; documents: number; held: number; holds: number; dirty: boolean; calls: number; writes: number; alarm: number | null } | null> {
@@ -2401,6 +2437,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!testMode(this.env)) return false;
     for (const t of ["holdings", "reservations"]) this.sql.exec(`ALTER TABLE ${t} DROP COLUMN ct_sha256`);
     return this.sql.exec("PRAGMA table_info(holdings)").toArray().every((c) => (c as Row).name !== "ct_sha256");
+  }
+  /** Tests only: this object as one made before the index's references (e2e PR 5d): the table dropped. */
+  async testOldIndexRefs(): Promise<boolean> {
+    if (!testMode(this.env)) return false;
+    this.sql.exec("DROP TABLE IF EXISTS index_refs");
+    return !this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'index_refs'");
   }
   /** Tests only: a holding's stored ct_sha256, as stored (null for a row from before the column). */
   async testHeldCt(a: { sha256: string }): Promise<string | null | undefined> {
@@ -2491,7 +2533,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const hold = tieredOn(this.env) && this.hasFiles() ? this.one("SELECT MIN(hold_until) AS t FROM files WHERE refs <= 0 AND state <> 'live'")?.t : null;
     if (hold !== null && hold !== undefined) t.push(Number(hold) + 1);
     // (the agents' index while it builds: its next step at once)
-    if (agentOn(this.env) && this.get("ix_state") === "building") t.push(now + 1);
+    if (agentOn(this.env) && this.get("ix_state") === "building" && !this.encrypted()) t.push(now + 1);
     // (the next live grant's expiry, when the dead ones past AGENT.deadGrants are trimmed)
     const exp = this.hasGrants() ? this.one("SELECT MIN(expires) AS t FROM grants WHERE revoked IS NULL AND expires > ?", now)?.t : null;
     if (exp !== null && exp !== undefined) t.push(Number(exp) + 1);
@@ -2555,16 +2597,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       let claimed: unknown = null;
       try { claimed = typeof a.entry === "string" ? (JSON.parse(a.entry) as { body?: { op?: unknown } })?.body?.op : null; } catch { /* (the checks refuse it) */ }
       if (claimed !== "reset") {
-        const wait = this.e2eAppends.take();
+        const wait = this.e2eAppends.take(1, this.e2eNow());
         if (wait) throw new SyncError("rate", "too many key-chain changes; wait", { retry_after: wait });
       }
       return store.append(a, {
         work: () => {
-          const wait = this.e2eResetWork.take();
+          const wait = this.e2eResetWork.take(1, this.e2eNow());
           if (wait) throw new SyncError("rate", "too many reset attempts; wait", { retry_after: wait });
         },
         verified: () => {
-          const wait = this.e2eResets.take();
+          const wait = this.e2eResets.take(1, this.e2eNow());
           if (wait) throw new SyncError("rate", "too many resets; wait", { retry_after: wait });
         },
       });
@@ -2599,9 +2641,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async e2eMailPost(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown; msg: unknown }): Promise<Result<{ expires: number }>> {
     return attempt(() => {
       const store = this.e2e(a.account, a.bind);
-      const wait = this.e2eMail.take();
+      const wait = this.e2eMail.take(1, this.e2eNow());
       if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
-      return store.post(a.session, a.phase, a.msg, Date.now() + this.e2eShift);
+      return store.post(a.session, a.phase, a.msg, this.e2eNow());
     });
   }
 
@@ -2609,20 +2651,29 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async e2eMailRead(a: { account: string; bind?: { account?: string; generation?: number }; session: unknown; phase: unknown }): Promise<Result<{ msg: string; expires: number }>> {
     return attempt(() => {
       const store = this.e2e(a.account, a.bind);
-      const wait = this.e2eMail.take();
+      const wait = this.e2eMail.take(1, this.e2eNow());
       if (wait) throw new SyncError("rate", "too many enrollment messages; wait", { retry_after: wait });
-      const m = store.read(a.session, a.phase, Date.now() + this.e2eShift);
+      const m = store.read(a.session, a.phase, this.e2eNow());
       if (!m) throw new SyncError("missing", "no such message");
       return m;
     });
   }
 
-  /** Tests only: shift the mailbox's clock, and count the E2E rows. */
-  async testE2E(a: { sealedCap?: number; sealedHold?: number; shift?: number; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
+  /** The E2E clock: now, except in tests, where a seam may shift it or freeze it (so a rate test's buckets don't refill). */
+  private e2eNow(): number {
+    return (this.e2eFrozen ?? Date.now()) + this.e2eShift;
+  }
+
+  /** Tests only: shift or freeze the E2E clock (freeze: true holds it at this moment, false lets it run), and count the
+   * E2E rows. */
+  async testE2E(a: { sealedCap?: number; sealedHold?: number; shareRefs?: { sha256: string; n: number }; shift?: number; freeze?: boolean; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
     if (a.sealedCap !== undefined) this.sealedCap = a.sealedCap;
     if (a.sealedHold !== undefined) this.sealedHold = a.sealedHold;
+    // (a blob's shared count raised as a document's pin or a chunked file's manifest raises it: no index add)
+    if (a.shareRefs && this.exists()) this.sql.exec("UPDATE holdings SET refs = refs + ? WHERE sha256 = ?", a.shareRefs.n, a.shareRefs.sha256);
     if (a.shift !== undefined) this.e2eShift = a.shift;
+    if (a.freeze !== undefined) this.e2eFrozen = a.freeze ? Date.now() : null;
     if (a.failCommit !== undefined) this.e2eFailCommit = a.failCommit;
     if (a.hold !== undefined) this.e2eHold = a.hold;
     if (a.bounds !== undefined && this.e2eStore) Object.assign(this.e2eStore.bounds, a.bounds);
@@ -2752,7 +2803,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.wakeBy(now + (days as number) * this.agentBounds.dayMs + 1);
       this.trimDead(now);
       // (an account's first grant starts its index, so it is likely ready before the agent's first list)
-      if (this.get("ix_state") === undefined) this.indexStart();
+      if (this.get("ix_state") === undefined && !this.encrypted()) this.indexStart();
       return this.grantView(this.one("SELECT * FROM grants WHERE id = ?", id)!);
     }));
     if ("error" in made) return made;
@@ -2907,16 +2958,21 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // it doesn't know, or one of the wrong type, is refused before any path is read)
       const bad = checkCall("workspace." + verb, p);
       if (bad) return answer(400, "invalid", null, { message: bad.slice(0, 200) });
-      let path: string;
-      try {
-        path = normPath((p as Record<string, unknown>)[key]);
-      } catch {
-        return answer(400, "invalid", null, { message: `${key}: not a workspace path` });
-      }
       const need = READS.has(verb) ? "read" : "write";
       const scopes = JSON.parse(String(g.scopes)) as Scope[];
+      // (the shared scope rule, web/workspace/agent-scope.ts: the path normalized first, then the agents' reserved
+      // folder, then the scopes)
+      const sc = scopeCheck(scopes, (p as Record<string, unknown>)[key], need);
+      if (sc.verdict === "invalid") return answer(400, "invalid", null, { message: `${key}: not a workspace path` });
+      const path = sc.path;
       // (Trash is reached by any grant, and shows only what came from its scope: by each entry's trashed_from, below)
-      if (!within(path, TRASH) && !inScope(scopes, path, need)) return answer(403, "scope", [path], { path, access: need });
+      // (the agents' reserved folder answers as a path that isn't there, below, never as a scope refusal: so a call can't
+      // tell what is in it, or whether it exists)
+      if (sc.verdict === "out" && !within(path, TRASH)) return answer(403, "scope", [path], { path, access: need });
+      // (an encrypted account, e2e PR 5d: its log carries ops the server can't read, so the index derived from it is
+      // wrong, not just behind; refused before it is read, before and after the first sealed op, until a device of the
+      // person's answers through the relay)
+      if (this.encrypted()) return answer(409, "conflict", [path], { reason: "encrypted", message: "this account's files are end-to-end encrypted: an online device of the person's answers this" });
       // the index: ready and caught up with the log, in this same read, or 503 (never a partial index)
       const ixst = this.get("ix_state");
       if (ixst === undefined) this.indexStart();
@@ -3075,9 +3131,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       this.wakeBy(Date.now() + 1);
     }
   }
+  /** Whether this account's files are end-to-end encrypted (e2e PR 5d): its key chain exists, durably (the chain survives
+   * "Delete my synced data"). From then on the server derives no index from the log and serves none. */
+  private encrypted(): boolean {
+    return !!this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'e2e_head'") && !!this.one("SELECT 1 AS x FROM e2e_head WHERE id = 1");
+  }
   /** After ops are accepted: a ready index applies them, all under one budget; any failure fails the index, never the ops. */
   private indexLive() {
-    if (!agentOn(this.env) || !this.exists() || this.get("ix_state") !== "ready" || this.ixNoLive) return;
+    if (!agentOn(this.env) || !this.exists() || this.get("ix_state") !== "ready" || this.ixNoLive || this.encrypted()) return;
     const done = { n: 0 };
     try {
       // (one budget for the whole batch, whatever it holds (PERF P1 on #913): past it, nothing is kept, and the alarm's
@@ -3102,6 +3163,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * over the steps after, its cursor published when it is whole.
    */
   private indexStep(manual = false) {
+    if (this.encrypted()) return;
     if (!agentOn(this.env) || !this.exists() || this.get("ix_state") !== "building" || ((this.ixManual || (testMode(this.env) && Number(this.get("ix_test_manual")) === 1)) && !manual)) return;
     if (Number(this.get("ix_reset") ?? 0) === 1) return this.indexResetStep();
     if (jobGet(this.sql)) return this.indexJobStep();
@@ -3200,6 +3262,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
   private indexStat(path: string, scopes: Scope[]) {
     if (within(path, TRASH) && !this.trashVisible(path, scopes, new Map())) return null;
+    if (reserved(path)) return null;
     const e = this.entryAt(path);
     return e ? this.entryView(e) : null;
   }
@@ -3213,6 +3276,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const missing = { status: 404, error: "missing", extra: { path: folder } };
     // (a folder in Trash the grant can't see answers as one that isn't there: its visibility first, then whether it is)
     if (within(folder, TRASH) && folder !== TRASH && !this.trashVisible(folder, scopes, new Map())) return missing;
+    // (the agents' reserved folder, and everything in it, as a folder that isn't there)
+    if (reserved(folder)) return missing;
     // (the folder as stored: its children's paths extend that spelling, whatever form, NFC or not, the call gave)
     if (folder !== "/" && folder !== TRASH) {
       const f = this.entryAt(folder);
@@ -3238,7 +3303,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       examined++;
       const path = String(r.path);
       last = path;
-      if (inTrash ? !this.trashVisible(path, scopes, tops) : within(path, TRASH)) continue;
+      if (inTrash ? !this.trashVisible(path, scopes, tops) : within(path, TRASH) || reserved(path)) continue;
       out.push(this.entryView(JSON.parse(String(r.data)) as SyncEntry));
     }
     if (!(rows.length > examined) || last === null) return { entries: out, cursor: null };
@@ -3257,6 +3322,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return attempt(() => this.ctx.storage.transactionSync(() => {
       if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
       this.admit(a.account, false);
+      if (this.encrypted()) throw new SyncError("conflict", "this account's files are end-to-end encrypted: the server keeps no index of them", { reason: "encrypted" });
       if (this.get("ix_state") !== "building") this.indexStart();
       return { state: String(this.get("ix_state")) };
     }));
