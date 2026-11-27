@@ -1,0 +1,241 @@
+{
+ "cases": [
+  {
+   "id": "seq-one-number",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3 4 5\n[1] 1 0\n[1]  1  0 -1 -2 -3\n[1] 1 2\n"
+  },
+  {
+   "id": "seq-one-vector",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n[1] 1\n"
+  },
+  {
+   "id": "seq-from-to-types",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"integer\"\n[1] \"double\"\n[1] 1.5 2.5 3.5\n [1] 10  9  8  7  6  5  4  3  2  1\n"
+  },
+  {
+   "id": "seq-by",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.0 1.3 1.6 1.9\n[1] 5 3 1\n[1] 0.00 0.25 0.50 0.75 1.00\n[1] 1.0 3.5 6.0 8.5\n"
+  },
+  {
+   "id": "seq-by-types",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"double\"\n[1] \"integer\"\n[1] \"double\"\n[1] \"double\"\n"
+  },
+  {
+   "id": "seq-by-digits",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1] 1.0000000000000000 1.1000000000000001 1.2000000000000000 1.3000000000000000\n [5] 1.3999999999999999 1.5000000000000000 1.6000000000000001 1.7000000000000002\n [9] 1.8000000000000000 1.8999999999999999 2.0000000000000000\n"
+  },
+  {
+   "id": "seq-by-step-tolerance",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n[1] 4\n[1] 0.00000000000000000 0.25000000000000000 0.50000000000000000\n[4] 0.75000000000000000 0.99999999999900002\n"
+  },
+  {
+   "id": "seq-by-from-equals-to",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 3\n"
+  },
+  {
+   "id": "seq-length-out",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  1  4  7 10\n[1] 0.0 0.5 1.0\n[1] 10.0  7.5  5.0  2.5  0.0\n[1]  1.0  5.5 10.0\n"
+  },
+  {
+   "id": "seq-length-out-digits",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.29999999999999999 0.50000000000000000 0.70000000000000007\n[4] 0.90000000000000002\n [1] 0.00000000000000000 0.10000000000000001 0.20000000000000001\n [4] 0.30000000000000004 0.40000000000000002 0.50000000000000000\n [7] 0.60000000000000009 0.70000000000000007 0.80000000000000004\n[10] 0.90000000000000002 1.00000000000000000\n"
+  },
+  {
+   "id": "seq-length-out-one-end",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5 6 7\n[1] 3 4 5\n[1] 1 3 5 7\n[1]  6  8 10\n"
+  },
+  {
+   "id": "seq-length-out-types",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"double\"\n[1] \"integer\"\n[1] 1 2 3\ninteger(0)\n"
+  },
+  {
+   "id": "seq-length-partial",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  1  4  7 10\n[1]  2  5  8 11\n"
+  },
+  {
+   "id": "seq-along-with",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n[1] 2 3 4\n"
+  },
+  {
+   "id": "seq-error-sign",
+   "status": 1,
+   "stderr": "Error in seq.default(1, 10, by = -1) : wrong sign in 'by' argument\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-error-by-zero",
+   "status": 1,
+   "stderr": "Error in seq.default(1, 10, by = 0) : invalid '(to - from)/by'\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-error-to-na",
+   "status": 1,
+   "stderr": "Error in seq.default(1, NA) : 'to' must be a finite number\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-error-from-length",
+   "status": 1,
+   "stderr": "Error in seq.default(1:2, 5) : 'from' must be of length 1\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-error-length-out",
+   "status": 1,
+   "stderr": "Error in seq.default(1, 10, length.out = -2) : \n  'length.out' must be a non-negative number\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-error-too-many",
+   "status": 1,
+   "stderr": "Error in seq.default(1, 2, 3, 4) : too many arguments\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-error-too-many-named",
+   "status": 1,
+   "stderr": "Error in seq.default(1, 10, by = 3, length.out = 2) : too many arguments\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-len",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3 4 5\ninteger(0)\n[1] 1 2 3\n[1] \"integer\"\n"
+  },
+  {
+   "id": "seq-len-first-used",
+   "status": 0,
+   "stderr": "Warning message:\nIn seq_len(c(2, 5)) : first element used of 'length.out' argument\n",
+   "stdout": "[1] 1 2\n"
+  },
+  {
+   "id": "seq-len-error",
+   "status": 1,
+   "stderr": "Error in seq_len(-1) : argument must be coercible to non-negative integer\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-len-error-na",
+   "status": 1,
+   "stderr": "Error in seq_len(NA) : argument must be coercible to non-negative integer\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-along",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\ninteger(0)\n[1] 1 2\n"
+  },
+  {
+   "id": "rep-times",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3 1 2 3\n[1] 1 2 3 1 2 3\n[1] \"x\" \"x\" \"x\"\n[1] TRUE TRUE\n"
+  },
+  {
+   "id": "rep-times-vector",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"x\" \"x\" \"y\" \"y\" \"y\"\n[1] 2 2 2\n"
+  },
+  {
+   "id": "rep-each",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 1 2 2 3 3\n [1] 1 1 2 2 3 3 1 1 2 2 3 3\n[1] \"a\" \"a\" \"a\" \"b\" \"b\" \"b\"\n"
+  },
+  {
+   "id": "rep-length-out",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3 1 2 3 1\n[1] 1 2 1\n[1] 1 1 2 2 3\ninteger(0)\n"
+  },
+  {
+   "id": "rep-names",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a b a b \n1 2 1 2 \na a b b \n1 1 2 2 \na b a \n1 2 1 \n"
+  },
+  {
+   "id": "rep-empty",
+   "status": 0,
+   "stderr": "",
+   "stdout": "character(0)\nNULL\ncharacter(0)\n"
+  },
+  {
+   "id": "rep-error-times",
+   "status": 1,
+   "stderr": "Error in rep(1:3, times = -1) : invalid 'times' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-error-times-length",
+   "status": 1,
+   "stderr": "Error in rep(1:3, times = c(1, 2)) : invalid 'times' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-error-each",
+   "status": 1,
+   "stderr": "Error in rep(1:3, each = -1) : invalid 'each' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-len",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3 1 2\n[1] 1 2 1\n[1] \"z\" \"z\"\n[1] 1 2\n"
+  },
+  {
+   "id": "rep-len-error",
+   "status": 1,
+   "stderr": "Error in rep_len(1:3, -1) : invalid 'length.out' value\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rev",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5 4 3 2 1\nc b a \n3 2 1 \n[1] \"y\" \"x\"\nNULL\nnumeric(0)\n"
+  },
+  {
+   "id": "rev-na",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  3 NA  1\n[1]   NA TRUE\n"
+  }
+ ],
+ "file": "rill-tests/vec/test_2.R",
+ "format": "rill-out",
+ "v": 1
+}

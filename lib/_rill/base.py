@@ -17,6 +17,8 @@ from .access import (as_character, as_complex, as_double, as_integer, as_logical
                      is_integer, is_logical, is_na, is_nan, is_null, is_numeric, is_vector, length_, logical_,
                      names_, options, refuse_raw)
 from .args import DOTS, Closure, Primitive
+from .seqrep import rep, rep_len, rev, seq, seq_along, seq_len
+from .summary import max_, mean, min_, prod, sum_
 from .eval import NotSupported, RError
 from .values import NULL, RVector
 
@@ -675,6 +677,18 @@ FORMALS = {
     "character": Closure("length"),
     "complex": Closure("length.out", "real", "imaginary", "modulus", "argument"),
     "is.vector": Closure("x", "mode", required=("x",)),
+    "typeof": Closure("x", required=("x",)),
+    "seq": Closure("from", "to", "by", "length.out", "along.with", DOTS),
+    "seq_len": Primitive("length.out"),
+    "seq_along": Primitive("along.with"),
+    "rep": Closure("x", "times", "length.out", "each"),
+    "rep_len": Closure("x", "length.out", required=("x", "length.out")),
+    "rev": Closure("x", required=("x",)),
+    "sum": Closure(DOTS, "na.rm"),
+    "prod": Closure(DOTS, "na.rm"),
+    "min": Closure(DOTS, "na.rm"),
+    "max": Closure(DOTS, "na.rm"),
+    "mean": Closure("x", "trim", "na.rm", DOTS, required=("x",)),
     "options": Closure(DOTS),
 }
 for _f in ("as.logical", "as.integer", "as.numeric", "as.double", "as.character", "as.complex"):
@@ -727,5 +741,30 @@ BUILTINS["is.vector"] = is_vector
 BUILTINS["options"] = options
 BUILTINS["raw"] = refuse_raw
 BUILTINS["as.raw"] = refuse_raw
+# A3: sequences and repetition (seqrep.py), summaries (summary.py)
+BUILTINS["seq"] = seq
+BUILTINS["seq_len"] = seq_len
+BUILTINS["seq_along"] = seq_along
+BUILTINS["rep"] = rep
+BUILTINS["rep_len"] = rep_len
+BUILTINS["rev"] = rev
+BUILTINS["sum"] = sum_
+BUILTINS["prod"] = prod
+BUILTINS["min"] = min_
+BUILTINS["max"] = max_
+BUILTINS["mean"] = mean
+def typeof_(sess, call, args):
+    x = args[0][1]
+    if x is NULL:
+        return RVector("character", ["NULL"])
+    if isinstance(x, RVector):
+        return RVector("character", [x.type])
+    raise NotSupported("typeof() of this kind of value")
+
+
+BUILTINS["typeof"] = typeof_
+# the builtins R writes as functions that dispatch to a method: their errors name the method, and R's
+# "Calls:" line lists both frames (rill-tests/vec/: seq -> seq.default, mean -> mean.default)
+METHODS = {"seq": ("seq", "seq.default"), "mean": ("mean", "mean.default")}
 # base's constants (values, not functions)
 VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False])}

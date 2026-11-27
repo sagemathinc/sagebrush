@@ -184,6 +184,16 @@
    "cases": 30,
    "out_sha256": "41dd7ec8cb0920a43d6c4f6792332ed064248e6305d603252383d4c3239f8d7e",
    "r_sha256": "602642aa56993754d3de7eb2a484407ee5ea2f81eef1e3133634064cdeeb57c1"
+  },
+  "rill-tests/vec/test_2.R": {
+   "cases": 39,
+   "out_sha256": "0f3a4736e32112da6fdd760655aa80d7c5715419b6fcc5513d8774d3f5ce6594",
+   "r_sha256": "feb9a16b0346f941c6d7fe4136f5939722f7f71657a0e22cc62958f1182b8e4d"
+  },
+  "rill-tests/vec/test_3.R": {
+   "cases": 26,
+   "out_sha256": "c8c46918ed9797287aed4e73d909910d8f96ddcbb2913f11f89646e1f5c15458",
+   "r_sha256": "e7f8fac6c25ab07c63031b353760bb3b598a48e833476ae4114f8803a292e67f"
   }
  },
  "format": "rill-provenance",

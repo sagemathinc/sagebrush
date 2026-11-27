@@ -168,13 +168,8 @@
   },
   "rill-tests/parse/test_1.R#pipe": {
    "class": "not-implemented",
-   "reason": "the builtins sum and sqrt (A1.2b)",
-   "sha256": "0dc3a6e900c55a349fb849ee62f1bd143202c28746033ace6ee7f35c01800045"
-  },
-  "rill-tests/parse/test_1.R#pipe-placeholder": {
-   "class": "not-implemented",
-   "reason": "the builtin rep (A1.2b)",
-   "sha256": "947c6963a4811915e950d8e0947ccc04157574ba0922a73f4790caa82924a096"
+   "reason": "the builtin sqrt (A1.2b)",
+   "sha256": "ee37fd0b95e4f39b01fb5f9117da7cea09e27f49a0345e00faefb6c1e7046083"
   },
   "rill-tests/parse/test_1.R#prec-in": {
    "class": "not-implemented",
