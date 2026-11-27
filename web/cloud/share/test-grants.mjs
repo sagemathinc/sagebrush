@@ -215,6 +215,7 @@ const admin = await sessionFor(mf, db, ADMIN, 1000);
   const aud = (await db.prepare("SELECT COUNT(*) n FROM grant_audit WHERE grant_id = ?1 AND action = 'revoke'").bind(b.grant.id).first()).n;
   ok(again.grant.revoked_at === rb.grant.revoked_at && again.grant.revoke_reason === "ended early" && aud === 1, "L3 revoking again: the first revocation stands, one audit row", { again: again.grant, aud });
   ok((await post(mf, `/api/admin/grants/${"a".repeat(26)}/revoke`, admin3, { reason: "x" })).status === 404, "L3 revoking a grant that doesn't exist: 404");
+  ok((await post(mf, "/api/admin/grants/%E0%A4%A/revoke", admin3, { reason: "x" })).status === 404, "L3 a malformed escape in the grant id: 404, never 500");
   ok((await post(mf, `/api/admin/grants/${a.grant.id}/revoke`, admin3, { reason: "" })).status === 400, "L3 a revocation without a reason: 400");
   // (the window: valid_from inclusive, valid_until exclusive, on the server's clock)
   await db.prepare("UPDATE grants SET valid_from = ?2 WHERE id = ?1").bind(a.grant.id, nowS() + 60).run();
@@ -285,7 +286,8 @@ const admin = await sessionFor(mf, db, ADMIN, 1000);
   const admin5 = await sessionFor(mf, db, ADMIN5, 1000);
   const ps = await sessionFor(mf, db, P, 1000);
   const mk = async (o) => body(await post(mf, "/api/admin/grants", admin5, { request_id: reqId(), account_id: P, valid_until: until(30), ...o }));
-  const live = await mk({ storage_bytes: 3 * GiB, note: `${CANARY} for ${P}` });
+  // (the canary also as the admin's request_id: an admin grant's source_ref is free text the admin typed)
+  const live = await mk({ storage_bytes: 3 * GiB, note: `${CANARY} for ${P}`, request_id: CANARY });
   const ended = await mk({ private_links: true, note: CANARY });
   await post(mf, `/api/admin/grants/${ended.grant.id}/revoke`, admin5, { reason: `${CANARY} ${P}` });
   // (a Stripe-sourced grant, as the later webhook writes one: its source_ref is kept)
@@ -302,7 +304,9 @@ const admin = await sessionFor(mf, db, ADMIN, 1000);
   const liveRow = rows.find((r) => r.id === live.grant.id), endedRow = rows.find((r) => r.id === ended.grant.id), stripe = rows.find((r) => r.source === "stripe");
   ok(liveRow?.revoked_by === "purge" && endedRow?.revoked_by === ADMIN5, "P1 an active grant is revoked by the purge; one already revoked keeps its revoker", { live: liveRow?.revoked_by, ended: endedRow?.revoked_by });
   ok(rows.every((r) => (r.note === null || r.note === "removed") && r.revoke_reason === "removed"), "P2 every note and revoke reason is the fixed \"removed\"", rows.map((r) => [r.note, r.revoke_reason]));
-  ok(stripe?.source_ref === "sub_TEST123" && liveRow?.source_ref === live.grant.source_ref, "P2 source_ref, the Stripe object id, is kept on purpose", stripe?.source_ref);
+  ok(stripe?.source_ref === "sub_TEST123", "P2 a Stripe grant's source_ref, the Stripe object id, is kept on purpose", stripe?.source_ref);
+  ok(rows.filter((r) => r.source === "admin").every((r) => r.source_ref === `purged-${r.id}`), "P2 an admin grant's source_ref (the admin's request id) becomes purged-<grant id>", rows.map((r) => r.source_ref));
+  ok(rows.every((r) => r.request_hash === null), "P2 every request hash goes");
   const text = JSON.stringify([rows, audit]);
   ok(!text.includes(P) && !text.includes(CANARY), "P2 no text field of the account's grants or audit rows holds its id or the planted canary");
   const purgeAudit = audit.filter((a) => a.actor === "purge" && a.action === "revoke");

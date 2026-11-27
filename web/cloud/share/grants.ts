@@ -125,7 +125,10 @@ export async function handleGrantsAdmin(req: Request, url: URL, db: D1, adminsRa
     db.prepare("INSERT INTO grant_admin_hits (admin, t, id) SELECT ?1, ?2, ?3 WHERE (SELECT COUNT(*) FROM grant_admin_hits WHERE admin = ?1 AND t > ?4) < ?5").bind(s.id, tS, newGrantId(), tS - ADMIN_RATE.windowS, ADMIN_RATE.limit),
   ]);
   if (Number((hit[1] as { meta?: { changes?: number } })?.meta?.changes ?? 0) !== 1) return json(429, { error: "too many grant changes; wait a minute", retry_after_s: ADMIN_RATE.windowS });
-  return revoke ? revokeGrant(db, s.id, decodeURIComponent(revoke[1]), b, tS) : createGrant(db, s.id, b, tS, deps);
+  if (!revoke) return createGrant(db, s.id, b, tS, deps);
+  let id: string;
+  try { id = decodeURIComponent(revoke[1]); } catch { return json(404, { error: "no such grant" }); }
+  return revokeGrant(db, s.id, id, b, tS);
 }
 
 /** A new grant from an admin request, or the same grant again for an exact retry of its request_id. */

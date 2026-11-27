@@ -1607,8 +1607,10 @@ async function deleteCollection(env: ShareEnv, account: string, cid: string): Pr
 /**
  * An account's grants at its purge (grants design d1 §4, d1r1 G2, William's Q3: anonymize, keep the audit trail): every
  * active grant is revoked, with its audit row; the holder's id becomes the account's hash (as tombstones keep it); and
- * every free-text field becomes the fixed "removed".  source_ref, the Stripe object id, is kept on purpose: it points at
- * Stripe's own records, which Stripe keeps under its accounting retention, and nothing beside it here names the person.
+ * every free-text field becomes the fixed "removed".  A Stripe grant's source_ref, the Stripe object id, is kept on
+ * purpose: it points at Stripe's own records, which Stripe keeps under its accounting retention, and nothing beside it
+ * here names the person.  An admin grant's source_ref is the admin's own request id, free text, so it becomes
+ * "purged-<grant id>" (still unique), and every request hash (of the raw account id) goes.
  * The account's id is replaced by its hash wherever it appears as an admin too (created_by, revoked_by, the audit's actor),
  * and its rate rows go.  In the batch that marks the account deleting, so nothing new can name it after.
  */
@@ -1618,7 +1620,8 @@ function grantsPurge(db: D1, account: string, h: string, t: number): D1Stmt[] {
     db.prepare("UPDATE grant_audit SET detail = 'removed' WHERE detail IS NOT NULL AND grant_id IN (SELECT id FROM grants WHERE account_id = ?1)").bind(account),
     db.prepare("UPDATE grant_audit SET actor = ?2 WHERE actor = ?1").bind(account, h),
     db.prepare(`UPDATE grants SET revoked_at = COALESCE(revoked_at, ?3), revoked_by = COALESCE(revoked_by, 'purge'), revoke_reason = 'removed',
-      note = CASE WHEN note IS NULL THEN NULL ELSE 'removed' END, account_id = ?2 WHERE account_id = ?1`).bind(account, h, t),
+      note = CASE WHEN note IS NULL THEN NULL ELSE 'removed' END, account_id = ?2,
+      source_ref = CASE WHEN source = 'admin' THEN 'purged-' || id ELSE source_ref END, request_hash = NULL WHERE account_id = ?1`).bind(account, h, t),
     db.prepare("UPDATE grants SET created_by = ?2 WHERE created_by = ?1").bind(account, h),
     db.prepare("UPDATE grants SET revoked_by = ?2 WHERE revoked_by = ?1").bind(account, h),
     db.prepare("DELETE FROM grant_admin_hits WHERE admin = ?1").bind(account),
