@@ -576,14 +576,15 @@ def invisible(sess, call, args):
 
 def _cat_reservation(args, sep):
     """cat's peak: an element string per element (numbers at most 24 characters, strings their own length) and
-    the output they are joined into, reserved before either is built (§8.5)."""
+    the output they are joined into, with its final newline when sep has one, reserved before either is built
+    (§8.5)."""
     count, chars = 0, 0
     for name, v in args:
         # (every argument but sep is printed: a named one went to `...`, e.g. cat(1, se = "-"))
         if name != "sep" and isinstance(v, RVector):
             count += len(v.data)
             chars += sum(len(e) for e in v.data if e is not None) if v.type == "character" else 24 * len(v.data)
-    return mem.reserve(0, "character", (count, "character"), extra_bytes=chars + count * len(sep))
+    return mem.reserve(0, "character", (count, "character"), extra_bytes=chars + count * len(sep) + ("\n" in sep))
 
 
 def cat(sess, call, args):
@@ -608,6 +609,9 @@ def _cat(sess, args):
         elif v is not NULL:
             if not isinstance(v, RVector) or v.type == "complex":
                 raise NotSupported("cat() of this type")
+            # (a zero-length vector, unlike NULL, is an empty item between its separators: cat("a", character(0), "b") is "a  b")
+            if not v.data:
+                items.append("")
             for e in v.data:
                 if e is None:
                     items.append("NA")
@@ -617,7 +621,8 @@ def _cat(sess, args):
                     items.append("TRUE" if e else "FALSE")
                 else:
                     items.append(str(e))
-    sess.write_out(sep.join(items))
+    # (a sep with a newline in it ends the output with one, as R's cat documents: cat("a", "b", sep = "\n") is "a\nb\n")
+    sess.write_out(sep.join(items) + ("\n" if "\n" in sep else ""))
 
 
 # the shapes of calls Rill refuses, checked after R's matching (args.match: `plan`, the formal each actual
