@@ -15,6 +15,7 @@ import sys as _sys_limit
 # session's memory, admitted before any copy: src/runtime/format.ts)
 _sys_limit.set_int_max_str_digits(0)
 from fractions import Fraction as _Fraction
+from copy import copy, deepcopy  # (globals in Sage)
 
 __all__ = [
     # permutation groups (Sagebrush's engine)
@@ -35,7 +36,7 @@ __all__ = [
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "block_matrix", "block_diagonal_matrix", "column_matrix", "kernel",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
-    "PolynomialRing", "polygen", "parent",
+    "PolynomialRing", "polygen", "parent", "copy", "deepcopy",
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "prime_powers", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",

@@ -13165,6 +13165,11 @@
   "owner": "finite fields + configuration",
   "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
  },
+ "lib/_sage_ff.py :: IntegerModRing_._units_field :: raise NotImplementedError(\"%s of %r (not a field) is not supported yet\" % (what, self)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: the unit-group and roots-of-unity methods of Z/n with n composite (Sage's values there are not modelled), and lift_centered of a vector over a non-prime field; not a size or work limit"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
   "owner": "finite fields + configuration"
@@ -13271,6 +13276,11 @@
   "class": "none",
   "owner": "matrices over inexact fields (@sagebrush-sage2)",
   "reason": "Sage's refusal (TypeError) of a vector divided by anything that has no inverse (a str, a list, an object with its own __rtruediv__), in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_ffmat.py :: FFVector.lift_centered :: raise NotImplementedError(\"lift_centered of a vector over %r is not supported yet\" % self._base) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: the unit-group and roots-of-unity methods of Z/n with n composite (Sage's values there are not modelled), and lift_centered of a vector over a non-prime field; not a size or work limit"
  },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
