@@ -228,7 +228,9 @@ try {
     e.send({ to: "nb1", m: { files: [["/data.txt", new TextEncoder().encode("hello from the page\n")]] } });
     const ready = (await e.wait(from("nb1", (m) => m.ready), 60000, "ready")).m;
     ok(ready.interrupt === null && ready.interruptible === true && ready.epoch === null && ready.epochShared === true && ready.progress === null, "ready: the shared words stay in the engine, the page told they are held for it");
-    ok(ready.engine?.threads === true && ready.engine?.native === false, "ready: says it is the engine's interpreter");
+    // (the native engine when one is installed and not refused, SAGEBRUSH_ADDON: app/engine/serve.mjs; the browser's otherwise)
+    const wantNative = !!process.env.SAGEBRUSH_ADDON && process.env.SAGEBRUSH_ENGINE !== "wasm";
+    ok(ready.engine?.threads === true && ready.engine?.native === wantNative, `ready: says it is the engine's interpreter, native ${wantNative}: ${ready.engine?.why ?? ""}`);
     const run = async (id, m, what) => {
       e.send({ to: "nb1", m: { id, ...m } });
       await e.wait(from("nb1", (x) => x.id === id && x.done), 120000, what);

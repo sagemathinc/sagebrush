@@ -400,7 +400,9 @@
   "src/runtime/wasm-asset.ts :: assetBytes :: new Uint8Array ( fs . readFileSync ( f ) ) #0": {"decl":"a4773d6249ca0e24","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
   "src/runtime/wasm-asset.ts :: assetBytes :: new Uint8Array ( x . response ) #0": {"decl":"a4773d6249ca0e24","class":"view","reason":"new Uint8Array(ArrayBuffer): the same function sets x.responseType = \"arraybuffer\" before send: a view of the response's store"},
   "src/runtime/wasm-asset.ts :: assetBytes :: read x . response #0": {"decl":"a4773d6249ca0e24","class":"allocates","reason":"x.response after x.responseType = \"arraybuffer\" in the same function: a new ArrayBuffer"},
-  "web/term-sync.ts :: PageChannel.onMessage :: new Uint8Array ( length ) #0": {"decl":"d78edc35ce62ec3c","class":"allocates","reason":"new Uint8Array(length): an admitted write's body buffer on the page's side of a Terminal command's file channel; length is a checked count of at most 2^31 - 1 (the protocol's cap) that the page's handler admitted, under the run's written_bytes, before any body moved"}
+  "web/term-sync.ts :: PageChannel.onMessage :: new Uint8Array ( length ) #0": {"decl":"d78edc35ce62ec3c","class":"allocates","reason":"new Uint8Array(length): an admitted write's body buffer on the page's side of a Terminal command's file channel; length is a checked count of at most 2^31 - 1 (the protocol's cap) that the page's handler admitted, under the run's written_bytes, before any body moved"},
+  "src/runtime/engine.ts :: binCall :: new Uint8Array ( nativeCall ( n , ( ) => n . binCall ( req ) ) ) #0": {"decl":"5f52b44d2e44dea0","class":"allocates","reason":"new Uint8Array(reply): the native engine's reply (a Node Buffer the addon made, its own store) copied into a new backing store, so the caller holds a plain Uint8Array as the wasm path's slice gives it"},
+  "src/runtime/engine.ts :: mpCall :: new Uint8Array ( nativeCall ( n , ( ) => n . mpCall ( req ) ) ) #0": {"decl":"5e63a6513753520a","class":"allocates","reason":"new Uint8Array(reply): the native engine's reply (a Node Buffer the addon made, its own store) copied into a new backing store, so the caller holds a plain Uint8Array as the wasm path's slice gives it"}
  },
 "deltas": [
   {"key":"src/rename.ts :: forwardRefers :: parse ( mode === \"sage\" ? preparse ( code ) : code , \"exec\" ) #0","before":"opaque","after":"absent","replacement":["src/rename.ts :: forwardRefers :: parse ( mode === \"sage\" ? preparse ( masked ) : masked , \"exec\" ) #0"],"reason":"The cell's IPython line magics and shell lines are masked for the parse (maskMagics: each a statement of its own indentation and length), so that a cell with %autoreload can be renamed: the same parse, of the masked text"},
@@ -714,7 +716,9 @@
   {"key":"src/runtime/kernels.ts :: rlayout :: read mem . buffer #2","before":"store","after":"absent","replacement":["src/runtime/wasm_room.ts :: growTo :: read mem . buffer #0"],"reason":"no automatic fallback (#2147 N2): every grow of a kernel's memory goes through wasm_room.ts's growTo, which reads the memory's buffer length there; the same read, moved"},
   {"key":"src/runtime/kernels.ts :: rlayout :: read mem . buffer #3","before":"store","after":"absent","replacement":["src/runtime/wasm_room.ts :: growTo :: read mem . buffer #0"],"reason":"no automatic fallback (#2147 N2): every grow of a kernel's memory goes through wasm_room.ts's growTo, which reads the memory's buffer length there; the same read, moved"},
   {"key":"src/runtime/kernels.ts :: wasmUnary :: read mem . buffer #2","before":"store","after":"absent","replacement":["src/runtime/wasm_room.ts :: growTo :: read mem . buffer #0"],"reason":"no automatic fallback (#2147 N2): every grow of a kernel's memory goes through wasm_room.ts's growTo, which reads the memory's buffer length there; the same read, moved"},
-  {"key":"src/runtime/kernels.ts :: wasmUnary :: read mem . buffer #3","before":"store","after":"absent","replacement":["src/runtime/wasm_room.ts :: growTo :: read mem . buffer #0"],"reason":"no automatic fallback (#2147 N2): every grow of a kernel's memory goes through wasm_room.ts's growTo, which reads the memory's buffer length there; the same read, moved"}
+  {"key":"src/runtime/kernels.ts :: wasmUnary :: read mem . buffer #3","before":"store","after":"absent","replacement":["src/runtime/wasm_room.ts :: growTo :: read mem . buffer #0"],"reason":"no automatic fallback (#2147 N2): every grow of a kernel's memory goes through wasm_room.ts's growTo, which reads the memory's buffer length there; the same read, moved"},
+  {"key":"src/runtime/interrupt.ts :: <module> :: new Int32Array ( new SharedArrayBuffer ( 8 ) ) #0","before":"store","after":"absent","replacement":["src/runtime/interrupt.ts :: <module> :: new Int32Array ( new SharedArrayBuffer ( NATIVE_CONTROL_BYTE + 16 ) , 0 , 2 ) #0"],"reason":"the shared interrupt words grew by the native engine's four control words (#7, design N1 r3: version, stop-upto, run, reserved, at byte NATIVE_CONTROL_BYTE): the same one module-time SharedArrayBuffer, now 24 bytes, its first two words still the Int32Array view"},
+  {"key":"src/runtime/interrupt.ts :: <module> :: new SharedArrayBuffer ( 8 ) #0","before":"store","after":"absent","replacement":["src/runtime/interrupt.ts :: <module> :: new SharedArrayBuffer ( NATIVE_CONTROL_BYTE + 16 ) #0"],"reason":"the shared interrupt words grew by the native engine's four control words (#7, design N1 r3: version, stop-upto, run, reserved, at byte NATIVE_CONTROL_BYTE): the same one module-time SharedArrayBuffer, now 24 bytes, its first two words still the Int32Array view"}
 ],
 "parity": {
   "src/compile.ts :: compile :: analyze ( mod ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
@@ -1530,7 +1534,7 @@
   "45b5dc73eda552c5": {"decl":"src/runtime/complex.ts :: M","class":"allocates","via":"src/runtime/types.ts :: method"},
   "b0aa1f6fe074a90f": {"decl":"src/runtime/engine.ts :: BinRequestRefused.class","class":"no-new-store"},
   "b5921701c50c6bab": {"decl":"src/runtime/engine.ts :: CreationRefused.class","class":"no-new-store"},
-  "1a081917c82d41e7": {"decl":"src/runtime/engine.ts :: binCall","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
+  "5f52b44d2e44dea0": {"decl":"src/runtime/engine.ts :: binCall","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
   "4b596a143d9859fa": {"decl":"src/runtime/engine.ts :: binCallPieces","class":"allocates","via":"src/runtime/engine.ts :: admitPieces"},
   "840572ed917804b6": {"decl":"src/runtime/engine.ts :: binCallPiecesOn","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
   "c71d44e8643fd433": {"decl":"src/runtime/engine.ts :: bytesOf","class":"allocates","via":"web/lib-lazy.ts :: get"},
@@ -1539,10 +1543,12 @@
   "f96195190c211759": {"decl":"src/runtime/engine.ts :: creationRefusal","class":"allocates","via":"src/runtime/object.ts :: getattr"},
   "c99daee63951512d": {"decl":"src/runtime/engine.ts :: engine","class":"allocates","via":"src/runtime/engine.ts :: createInstance"},
   "0d90b109e1422ecd": {"decl":"src/runtime/engine.ts :: engineBytes","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
-  "db9ae4bf0906d0a8": {"decl":"src/runtime/engine.ts :: engineError","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
+  "9d3c1e33bcd733d6": {"decl":"src/runtime/engine.ts :: engineError","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "bcd225ad837ef683": {"decl":"src/runtime/engine.ts :: frameView","class":"no-new-store"},
   "a30165178a6a0930": {"decl":"src/runtime/engine.ts :: get","class":"allocates","via":"src/runtime/object.ts :: getattr"},
-  "4908f6179e0e1690": {"decl":"src/runtime/engine.ts :: mpCall","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
+  "5e63a6513753520a": {"decl":"src/runtime/engine.ts :: mpCall","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"},
+  "22084e9e2afe2e83": {"decl":"src/runtime/engine.ts :: native","class":"allocates","via":"src/runtime/engine.ts :: chooseBackend"},
+  "c628eace97521ddf": {"decl":"src/runtime/engine.ts :: nativeCall","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "83a0aa1d77af37c9": {"decl":"src/runtime/engine.ts :: only","class":"allocates","via":"src/runtime/object.ts :: tuple"},
   "f03a877cfb507c3b": {"decl":"src/runtime/engine.ts :: pieceViews","class":"allocates","via":"src/runtime/engine.ts :: admitPieces"},
   "008af92fb68a8e6a": {"decl":"src/runtime/engine.ts :: refuse","class":"no-new-store"},
@@ -1658,6 +1664,7 @@
   "3c2997e2c4d5d7dc": {"decl":"src/runtime/mpcore.ts :: operand","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "70d6320e1f931d7a": {"decl":"src/runtime/mpcore.ts :: out","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "9eb029452b8d8f3f": {"decl":"src/runtime/mpcore.ts :: res","class":"no-new-store"},
+  "a21c46689af41af1": {"decl":"src/runtime/native-load.ts :: loadNativeAddon","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "5cf2aa341dba788a": {"decl":"src/runtime/nd-crew.ts :: Crew.class","class":"no-new-store"},
   "39b6b1b0e463c3ea": {"decl":"src/runtime/nd-helper.ts :: post","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "60c3f67dc9b4dc93": {"decl":"src/runtime/nd-helper.ts :: stop","class":"allocates","via":"web/lib-lazy.ts :: get"},

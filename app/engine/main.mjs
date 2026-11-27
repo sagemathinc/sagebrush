@@ -39,6 +39,7 @@ serve({
   outMax: o.outMax,
   write: (b) => out.write(b),
   queued: () => out.writableLength,
+  onDrain: (f) => out.on("drain", f),
   // (once what was written is out, so the last frame, a protocol error say, reaches the app; or at once, when the app
   // isn't reading)
   exit: (code, now) => (now ? process.exit(code) : out.write(new Uint8Array(0), () => process.exit(code))),

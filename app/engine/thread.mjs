@@ -14,6 +14,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { engineRoot, localFile } from "./files.mjs";
+import { loadNativeAddon } from "./native-load.mjs";
 
 const where = engineRoot(workerData.root);
 const bundle = where.base;
@@ -53,6 +54,18 @@ registerHooks({
   },
   load: (url, context, next) => (url === bundle ? { ...next(url, context), format: "module" } : next(url, context)),
 });
+// The native engine (#7, design N1 r3), decided here while this thread still has Node's process: the bundle can't
+// read the environment or load an addon once process is gone below. The interpreter gets only the outcome, read and
+// removed by src/runtime/engine.ts as its module loads (before any of the page's code runs): what the installation
+// asked for (SAGEBRUSH_ENGINE), whether an addon was given, and the checked addon or why not.
+{
+  const env = process.env, want = env.SAGEBRUSH_ENGINE ?? "", path = env.SAGEBRUSH_ADDON ?? "";
+  const r = want !== "wasm" && path ? loadNativeAddon(path, env.SAGEBRUSH_ADDON_SHA256 ?? "", process) : null;
+  g.__SAGEBRUSH_NATIVE__ = Object.freeze({ want, given: !!path, ok: !!r?.ok, addon: r?.ok ? r.addon : null, why: r && !r.ok ? r.why : "" });
+  // (the host's own notice of the outcome, before the interpreter's first message: app/engine/serve.mjs reports it
+  // in the session's ready as engine {backend, why})
+  port.postMessage({ nativeEngine: { loaded: !!r?.ok, why: r ? (r.ok ? "a verified native engine" : r.why) : (want === "wasm" ? "SAGEBRUSH_ENGINE=wasm" : "no native engine is installed") } });
+}
 // (Node's globals, which no browser worker has: the bundle's shims (web/shims/process.ts) stand in for process)
 for (const k of ["process", "Buffer", "global", "setImmediate", "clearImmediate"]) delete g[k];
 // (and the network a browser worker would have: the interpreter's own fetch above reads only the engine's files; Node's

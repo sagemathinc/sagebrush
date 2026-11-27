@@ -133,6 +133,16 @@ export interface EngineInfo {
 }
 // (undefined: not chosen yet; null: wasm)
 let NATIVE: any = undefined;
+// The app's engine threads (app/engine/thread.mjs) decide the load while they still have Node's process and leave
+// only the outcome here: taken as this module loads, before any of the page's code runs, and removed.
+const hosted: { want: string; given: boolean; ok: boolean; addon: any; why: string } | null = (() => {
+  const h = (globalThis as any).__SAGEBRUSH_NATIVE__;
+  if (h === undefined) return null;
+  try {
+    delete (globalThis as any).__SAGEBRUSH_NATIVE__;
+  } catch {}
+  return h && typeof h === "object" ? h : null;
+})();
 let nativeRefusal: Error | null = null;
 let info: EngineInfo = { backend: "wasm", why: "no engine call yet" };
 // the session's control words (interrupt.ts: in INTR's shared buffer) and
@@ -165,7 +175,7 @@ function chooseBackend(): void {
   NATIVE = null;
   const p = (globalThis as any).process;
   const env: Record<string, string | undefined> = p && typeof p === "object" && p.env ? p.env : {};
-  const want = env.SAGEBRUSH_ENGINE || "";
+  const want = hosted ? hosted.want : env.SAGEBRUSH_ENGINE || "";
   const refuse = (why: string) => {
     info = { backend: "wasm", why };
     nativeRefusal = new Error(`SAGEBRUSH_ENGINE=native, but ${why}`);
@@ -179,13 +189,13 @@ function chooseBackend(): void {
     info = { backend: "wasm", why: "SAGEBRUSH_ENGINE=wasm" };
     return;
   }
-  const path = env.SAGEBRUSH_ADDON;
+  const path = hosted ? (hosted.given ? "(the host's)" : "") : env.SAGEBRUSH_ADDON;
   if (!path) {
     if (want === "native") return refuse("no native engine is installed (SAGEBRUSH_ADDON is not set)");
     info = { backend: "wasm", why: "no native engine is installed" };
     return;
   }
-  const r = loadNativeAddon(path, env.SAGEBRUSH_ADDON_SHA256 ?? "");
+  const r = hosted ? (hosted.ok ? { ok: true as const, addon: hosted.addon } : { ok: false as const, why: hosted.why }) : loadNativeAddon(path, env.SAGEBRUSH_ADDON_SHA256 ?? "");
   let why = r.ok ? "" : r.why;
   if (r.ok) {
     try {
@@ -255,7 +265,15 @@ function nativeCall<T>(addon: any, f: () => T): T {
   } catch (err: any) {
     // (the addon's errors are "code: message"; an interrupted call is the
     // Ctrl-C that stopped it, taken by the caller's engineError)
-    if (/^interrupted:/.test(String(err?.message ?? ""))) Atomics.or(INTR, 0, INTR_CTRL_C);
+    const m = String(err?.message ?? "");
+    if (/^interrupted:/.test(m)) Atomics.or(INTR, 0, INTR_CTRL_C);
+    // (a fault: the process is faulted for good, every later call refused; in the app's engine the host is told,
+    // and it ends this session's process with the fault frame (design N1 r3: app/engine/serve.mjs))
+    else if (/^engine_fault:/.test(m)) {
+      try {
+        (globalThis as any).postMessage?.({ engineFault: m.slice(0, 4096) });
+      } catch {}
+    }
     throw err;
   }
 }

@@ -17,8 +17,7 @@ export type NativeLoad = { ok: true; addon: any } | { ok: false; why: string };
 const g = globalThis as any;
 
 /** Load the addon at `path` (absolute) whose sha256 must be `sha256` (64 hex digits), or say why not. */
-export function loadNativeAddon(path: string, sha256: string): NativeLoad {
-  const p = g.process;
+export function loadNativeAddon(path: string, sha256: string, p: any = g.process): NativeLoad {
   const fs = p?.getBuiltinModule?.("node:fs"), crypto = p?.getBuiltinModule?.("node:crypto");
   const os = p?.getBuiltinModule?.("node:os"), pathMod = p?.getBuiltinModule?.("node:path");
   if (!fs || !crypto || typeof p?.dlopen !== "function") return { ok: false, why: "native engines need Node" };

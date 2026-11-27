@@ -16,6 +16,8 @@
 //        {close: sid}           stop it
 //   out: {from: sid, m}         its message to the page
 //        {error: sid, message}  it failed (an exception that ended its thread)
+//        {error: sid, message, fault: true, code: "engine_fault"}  its native engine faulted: its process ends
+//                               nonzero after this, and {closed: sid} follows (design N1 r3)
 //        {closed: sid}          it stopped (closed, or its thread ended)
 //        {protocolError: text}  a message this engine doesn't take: the engine exits (never dropped silently)
 //
@@ -29,6 +31,8 @@
 // stored before the policy goes on.  This thread never runs Python, so a Stop
 // is acted on as soon as its frame is read.
 import { Worker } from "node:worker_threads";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { totalmem } from "node:os";
@@ -53,8 +57,9 @@ export function defaultHeapMb(total, cap) {
 }
 
 /** The engine on a pair of streams: `input` (frames in), `write(bytes)` (frames out), `queued()` (the bytes written
- * and not yet taken by the reader), `exit(code, now)` (`now`: at once, without waiting for what is queued). */
-export function serve({ root, memory, input, write, queued, exit, outMax = OUT_MAX }) {
+ * and not yet taken by the reader), `exit(code, now)` (`now`: at once, without waiting for what is queued),
+ * `onDrain(f)` (f called whenever what was queued has gone out). */
+export function serve({ root, memory, input, write, queued, exit, onDrain, outMax = OUT_MAX }) {
   const worker = join(root, "sagebrush-worker.js");
   if (!existsSync(worker)) throw new Error(`no sagebrush-worker.js in ${root} (build it: bun web/build.ts)`);
   root = realpathSync(root);
@@ -86,22 +91,104 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
     if (ended) return;
     if (why) send({ protocolError: why });
     ended = true;
-    for (const s of sessions.values()) s.thread.terminate();
+    for (const s of sessions.values()) s.terminate();
     sessions.clear();
     exit(code, now);
   };
 
+  // The native engine (#7, design N1 r3 S2): one session per OS process, as the addon's claim requires. With an
+  // addon installed (SAGEBRUSH_ADDON, and SAGEBRUSH_ENGINE not wasm), each session runs in a child engine of its own,
+  // this same program, whose frames are relayed both ways unchanged; the child (SAGEBRUSH_SESSION_PROCESS=1) runs its
+  // one session in a thread as before. A child that ends unexpectedly ends its session with {error}, then {closed}.
+  const perProcess = !!process.env.SAGEBRUSH_ADDON && process.env.SAGEBRUSH_ENGINE !== "wasm" && process.env.SAGEBRUSH_SESSION_PROCESS !== "1";
+  // (backpressure: while the app has a relay's worth unread, the children's output waits in the children, bounded
+  // there by the same outMax; a child that stops for it, status 4, means the app isn't reading, and this engine stops)
+  const RELAY_HIGH = Math.min(outMax, 2 ** 20);
+  const held = new Set();
+  if (perProcess) onDrain?.(() => { for (const c of held) c.resume(); held.clear(); });
+
+  function openChild(sid, name) {
+    const args = [fileURLToPath(new URL("./main.mjs", import.meta.url)), "--stdio", "--root", root, "--out-max", String(outMax / 2 ** 20)];
+    if (Number.isFinite(memory) && memory > 0) args.push("--memory", String(Math.floor(memory)));
+    const child = spawn(process.execPath, args, { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, SAGEBRUSH_SESSION_PROCESS: "1" } });
+    // (the page's messages wait until the child has its session open: it answers hello first)
+    const s = { child, relay: true, fault: false, pending: [] };
+    const toChild = (msg) => { try { child.stdin.write(frame(encode(msg))); } catch {} };
+    const finish = (why) => {
+      if (sessions.get(sid) !== s) return;
+      sessions.delete(sid);
+      if (why) send({ error: sid, message: why });
+      send({ closed: sid });
+    };
+    const reader = frameReader((p) => {
+      if (sessions.get(sid) !== s) return;
+      let msg;
+      try {
+        msg = decode(p);
+      } catch (e) {
+        child.kill();
+        return finish(`the session's engine sent a malformed frame: ${String(e?.message ?? e)}`);
+      }
+      if (msg.hello) {
+        toChild({ open: sid, name });
+        for (const d of s.pending) toChild({ to: sid, m: d });
+        s.pending = null;
+        return;
+      }
+      if (msg.from === sid) return send(msg);
+      if (msg.error === sid) {
+        if (msg.fault) s.fault = true;
+        return send(msg);
+      }
+      if (msg.closed === sid) { finish(null); child.kill(); return; }
+      // (the child's own refusal: its session can't go on)
+      child.kill();
+      return finish(`the session's engine stopped: ${JSON.stringify(msg).slice(0, 1000)}`);
+    });
+    child.stdout.on("data", (c) => {
+      try {
+        reader.push(c);
+      } catch (e) {
+        child.kill();
+        finish(`the session's engine sent a malformed frame: ${String(e?.message ?? e)}`);
+      }
+      if (onDrain && queued() > RELAY_HIGH && !ended) { child.stdout.pause(); held.add(child.stdout); }
+    });
+    child.stdin.on("error", () => {});
+    child.on("error", (e) => finish(`the session's engine could not start: ${String(e?.message ?? e)}`));
+    child.on("exit", (code, signal) => {
+      held.delete(child.stdout);
+      if (code === 4 && sessions.get(sid) === s) return end(4, null, true);
+      finish(s.fault ? null : `the session's engine ended (${signal ?? `status ${code}`})`);
+    });
+    s.post = (d) => (s.pending ? s.pending.push(d) : toChild({ to: sid, m: d }));
+    s.terminate = () => { toChild({ close: sid }); child.kill(); };
+    sessions.set(sid, s);
+    toChild({ hello: { protocol: PROTOCOL } });
+  }
+
   function open(sid, name) {
+    if (perProcess) return openChild(sid, name);
     // (the runner frame's state, per interpreter: web/runner/index.html)
     // (ask: the one refused change asked while its run waits (web/worker.ts fsAsk), {key, buffer}, as the runner's frame
     // keeps it: an allow's epoch is stored in the shared word BEFORE its answer is written; anything else answers no)
-    const s = { thread: null, flag: null, epoch: null, inputs: new Map(), lives: new Map(), ask: null };
+    const s = { thread: null, flag: null, epoch: null, inputs: new Map(), lives: new Map(), ask: null, engine: null };
+    s.post = (d) => toSession(s, d);
+    s.terminate = () => s.thread.terminate();
     s.askNo = () => { if (s.ask) { giveInput(s.ask.buffer, null); s.ask = null; } };
     s.thread = new Worker(new URL("./thread.mjs", import.meta.url), { workerData: { root, name, memory: heapMb }, resourceLimits: { maxOldGenerationSizeMb: heapMb }, stdout: false, stderr: false });
     const retire = (map, id) => { for (const [k, e] of map) if (id === undefined || e.id === id) map.delete(k); };
     s.retire = (id) => { retire(s.inputs, id); retire(s.lives, id); };
     s.thread.on("message", (d) => {
       if (sessions.get(sid) !== s || !d || typeof d !== "object") return;
+      // (the thread's own notice of its native engine: kept for ready, not the page's)
+      if (d.nativeEngine && typeof d.nativeEngine === "object") { s.engine = d.nativeEngine; return; }
+      // (the native engine faulted: this process is faulted for good (the addon refuses every later call), so the
+      // session ends with the fault frame and the process exits nonzero once it is written (design N1 r3))
+      if (typeof d.engineFault === "string") {
+        send({ error: sid, message: d.engineFault, fault: true, code: "engine_fault" });
+        return end(5);
+      }
       if (d.liveData && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength === LIVE_BYTES) {
         // (a key already open keeps its destination: the duplicate goes no further)
         if (typeof d.liveData.key !== "string" || s.lives.has(d.liveData.key)) return;
@@ -124,7 +211,7 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
         if (d.interrupt instanceof SharedArrayBuffer) s.flag = new Int32Array(d.interrupt);
         if (d.epoch instanceof SharedArrayBuffer) s.epoch = new Int32Array(d.epoch);
         // (the words stay here; the page is told they are held for it, as by the runner's frame)
-        d = { ...d, interrupt: null, interruptible: !!s.flag, epoch: null, epochShared: !!s.epoch, progress: null, engine: { native: false, threads: true } };
+        d = { ...d, interrupt: null, interruptible: !!s.flag, epoch: null, epochShared: !!s.epoch, progress: null, engine: { native: !!s.engine?.loaded, threads: true, why: String(s.engine?.why ?? "") } };
       }
       send({ from: sid, m: d });
     });
@@ -197,12 +284,12 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
     if (msg.to !== undefined && keys.length === 2 && keys.includes("m")) {
       const s = sessions.get(msg.to);
       // (a message for an interpreter that has just stopped: its {closed} is on its way, and the page restarts it)
-      if (s) toSession(s, msg.m);
+      if (s) s.post(msg.m);
       return;
     }
     if (msg.close !== undefined && keys.length === 1) {
       const s = sessions.get(msg.close);
-      if (s) { sessions.delete(msg.close); s.thread.terminate(); send({ closed: msg.close }); }
+      if (s) { sessions.delete(msg.close); s.terminate(); send({ closed: msg.close }); }
       return;
     }
     return end(2, `an unknown message (${keys.slice(0, 4).join(", ").slice(0, 200)})`);
