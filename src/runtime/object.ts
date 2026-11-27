@@ -1084,10 +1084,15 @@ export function genericDelattr(o: any, name: string, t: PyType): void {
       return;
     }
   }
+  // (a session's module, Sage mode's __main__: `del __main__.X` deletes X for good, as `del X` does, index.ts delName;
+  // a Sage name not loaded yet deletes as a bound one does)
+  const lazy = hasInstanceDict(o) ? o[NS_LAZY] : undefined;
+  const unloaded = lazy !== undefined && callObj(getattr(lazy, "_delete"), [name]) === true;
   if (hasInstanceDict(o) && ownAttr(o, name)) {
     delete o[name];
     return;
   }
+  if (unloaded) return;
   raise(T.AttributeError, `'${(t as any).$tpName ?? t.$name}' object has no attribute '${name}'`);
 }
 
