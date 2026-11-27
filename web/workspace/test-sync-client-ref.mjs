@@ -37,7 +37,7 @@ const accountId2 = (i) => `c2c2c2c2-${String(i).padStart(4, "0")}-4c2c-8c2c-c2c2
 // (the cloud's fake CoCalc gives FULL a small storage and SMALL small files; the reference server has no plan limits,
 // so the two cases that use them are skipped here, by name)
 const FULL = accountId(87), SMALL = accountId(88);
-const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), ...Array.from({ length: 30 }, (_, i) => accountId2(i)), FULL, SMALL];
+const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), ...Array.from({ length: 40 }, (_, i) => accountId2(i)), FULL, SMALL];
 // (the control pages' accounts: their own, so no case of the main run sees a control's log)
 // (each control page takes its own 3 of them, by its place in CONTROL_PAGES)
 const CTL_ACCOUNTS = Array.from({ length: 30 }, (_, i) => `d0d0d0d0-${String(i).padStart(4, "0")}-4d0d-8d0d-d0d0d0d0d0${String(i).padStart(2, "0")}`);
@@ -1619,7 +1619,7 @@ try {
     // (e2e PR 5c: the sealing module and an epoch's keys, a bundle of their own that only the sealed cases load, so the
     // workspace's bundle carries none of it, as a page without end-to-end encryption doesn't)
     const kitEntry = join(site, "sealkit-entry.ts");
-    writeFileSync(kitEntry, `export * from ${J(join(here, "sync-seal.ts"))};\nexport { deriveEpochKeys } from ${J(join(here, "e2e", "keys.ts"))};\nexport { openIndexOp } from ${J(join(here, "e2e", "index-op.ts"))};\n`);
+    writeFileSync(kitEntry, `export * from ${J(join(here, "sync-seal.ts"))};\nexport { deriveEpochKeys } from ${J(join(here, "e2e", "keys.ts"))};\nexport { openIndexOp } from ${J(join(here, "e2e", "index-op.ts"))};\nexport { mintDocCek } from ${J(join(here, "e2e", "doc-cek.ts"))};\n`);
     const kb = await bounded(Bun.build({ entrypoints: [kitEntry], outdir: site, naming: "sealkit.js", target: "browser", format: "esm" }), "the sealed cases' kit", 120_000);
     if (!kb.success) throw new Error("the sealed cases' kit: " + kb.logs.map(String).join("\n"));
     copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));

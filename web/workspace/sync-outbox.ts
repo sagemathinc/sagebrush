@@ -31,6 +31,7 @@ import { LedgerTx, isWire, queueObsolete, cleanObsoleteStep, hubOf } from "./syn
 import { PROTO, PROTO_KEY, OLD_SYNC_HOOK, OldSyncError, detectOldSync } from "./sync-old";
 import type { Sealed } from "./sync-seal";
 import { RELEASE_OP, REFS, historyUnder, type RefPair } from "./sync-refs";
+import { DOC_KEY_OP } from "./sync-dockeys";
 
 export const OUTBOX = {
   /** ops read per scan page */
@@ -55,7 +56,7 @@ export class Fenced extends Error {
 const CURRENT = "sync:current";
 
 /** An op as the server takes it (design/sync-server.md §5.2's `ops` item). */
-export type WireOp = { dseq: number; t: number; by: string; op: string; path: string; to?: string; kind: Kind; ref?: string; fid?: string; parent?: string; sha256?: string; size?: number; base?: string ; releases?: { address: string; add: number }[] };
+export type WireOp = { dseq: number; t: number; by: string; op: string; path: string; to?: string; kind: Kind; ref?: string; fid?: string; parent?: string; sha256?: string; size?: number; base?: string ; releases?: { address: string; add: number }[]; document?: string; cekId?: string; keyEpoch?: number; wrappedCek?: string };
 /** An outbox record: its op, fixed when made, and its decision so far.  `lseq`: the local op it was made from;
  * `id`: the identity it is for (the index byIdent's key); `accepted`: the server's seq, once acked; `heldSeq`: a
  * successor's, the held write it carries (its ledger row is that one's, task #14). */
@@ -78,6 +79,8 @@ export type ReleaseRefused = { pairs: RefPair[]; retried: boolean; person: boole
 /** A checked refusal's outcome, for releaseChecked: the pairs to send again (none: done), with what they were. */
 export type ReleaseResend = { pairs: RefPair[]; retried: boolean; person: boolean; at: number };
 const isRelease = (r: OutboxRecord) => r.op.op === RELEASE_OP;
+/** A document key declaration (sync-dockeys.ts): like a release, an index-only record no logged op made. */
+const isDocKey = (r: OutboxRecord) => r.op.op === DOC_KEY_OP;
 /** A record's sealed form (sync-seal.ts), kept in meta beside it until its record goes: the bytes every resend sends. */
 const sealedKey = (ns: string, dseq: number) => `sync:${ns}:sealed:${String(dseq).padStart(16, "0")}`;
 /** This device's newest accepted envelope (the per-device chain's last link): its dseq and hash. */
@@ -645,7 +648,7 @@ export class Outbox {
             const next = { ...r, accepted: d.seq };
             out.put(next);
             t.bytes += recordBytes(next) - recordBytes(r);
-            if (!isRelease(r)) await this.decided(tx, r, "accepted", scanned);
+            if (!isRelease(r) && !isDocKey(r)) await this.decided(tx, r, "accepted", scanned);
             const own = ownedSeq(r);
             if (own !== undefined) await lg.decide(own, r.dseq, "accepted");
           }
@@ -663,6 +666,8 @@ export class Outbox {
             if (((await req(meta.get(key(this.ns, "releaseOut")))) as number | undefined) === r.dseq) meta.delete(key(this.ns, "releaseOut"));
             continue;
           }
+          // (a declaration refused: its declare told (sync-client.ts), nothing to rebuild; the provider mints again)
+          if (isDocKey(r)) continue;
           await this.decided(tx, r, "refused", scanned);
           const own = ownedSeq(r);
           if (own !== undefined) await lg.decide(own, r.dseq, "refused", { code: d.code.slice(0, 64) });
@@ -716,6 +721,7 @@ export class Outbox {
           if (((await req(meta.get(key(this.ns, "releaseOut")))) as number | undefined) === r.dseq) meta.delete(key(this.ns, "releaseOut"));
           continue;
         }
+        if (isDocKey(r)) continue;
         await this.decided(tx, r, "confirmed", scanned);
         // (an echo first: accepted and confirmed at once; the row moves from local or accepted to confirmed)
         const own = ownedSeq(r);
@@ -758,6 +764,26 @@ export class Outbox {
       meta.put(t, key(this.ns, "outbox"));
       meta.put(last, key(this.ns, "releaseOut"));
       return last;
+    });
+  }
+  /** A document key declaration's record (sync-dockeys.ts docKeyOp, without its dseq), at the next dseq, under the lease;
+   * its dseq, or null while the outbox has no room for it (the declare waits and tries again). */
+  async addDocKey(op: (dseq: number) => WireOp): Promise<number | null> {
+    return inTx(this.w.ws, ["outbox", "meta"], "readwrite", async (tx) => {
+      const out = tx.objectStore("outbox"), meta = tx.objectStore("meta");
+      await fence(meta, this.lease);
+      const dseq = ((await req(meta.get(key(this.ns, "dseq")))) as number | undefined) ?? 1;
+      const t = { ...NONE, ...((await req(meta.get(key(this.ns, "outbox")))) as Totals | undefined) };
+      const at = ((await req(meta.get(cursorKey(this.ns)))) as number | undefined) ?? 0;
+      const r: OutboxRecord = { ns: this.ns, dseq, lseq: 0, id: `dockey:${dseq}`, op: op(dseq), at };
+      if (t.count + 1 > OUTBOX.maxRecords || t.charged + chargeOf(r) > OUTBOX.maxBytes) return null;
+      out.add(r);
+      t.count++;
+      t.bytes += recordBytes(r);
+      t.charged += chargeOf(r);
+      meta.put(dseq + 1, key(this.ns, "dseq"));
+      meta.put(t, key(this.ns, "outbox"));
+      return dseq;
     });
   }
   /** The release refusals waiting for their check (none: an empty list). */

@@ -4877,6 +4877,9 @@ async function sealedFixture(accountId) {
   const kit = await import("./sealkit.js");
   const account = "e2e-" + e2eId();
   const keys = await kit.deriveEpochKeys(rand32(), account, 1);
+  // (the epochs: epoch 1 from the chain's base; `epoch()` begins the next at a new head (as a device removal does), its
+  // keys held by every device of the fixture)
+  const keyset = { 1: keys }, epochs = [{ n: 1, at: 5 }];
   // (the key chain, as auth's verified state gives it: heads at absolute positions from `base`, devices with the
   // positions they were added and removed at; every device of the fixture reads the same chain)
   const base = 5;
@@ -4888,9 +4891,9 @@ async function sealedFixture(accountId) {
   const viewOf = (known) => {
     const position = (h) => { const i = heads.slice(0, known).indexOf(h); return i < 0 ? null : base + i; };
     return {
-      head: heads[known - 1], generation, currentEpoch: 1, position,
+      head: heads[known - 1], generation, currentEpoch: epochs.filter((e) => e.at <= base + known - 1).at(-1).n, position,
       signerAt: (h, id) => { const p = position(h), d = devices.get(id); return p !== null && d && d.added <= p && (d.removed === null || d.removed > p) ? d.raw : null; },
-      epochAt: (h) => (position(h) === null ? null : 1),
+      epochAt: (h) => { const p = position(h); return p === null ? null : epochs.filter((e) => e.at <= p).at(-1).n; },
       device: (id) => { const d = devices.get(id); return d ? { added: d.added, removed: d.removed } : null; },
     };
   };
@@ -4907,13 +4910,21 @@ async function sealedFixture(accountId) {
       account,
       device: { id, sign: async (b) => new Uint8Array(await crypto.subtle.sign("Ed25519", pair.privateKey, b)) },
       chain: async (refresh) => { if (refresh) { refreshes.n++; known = heads.length; } return viewOf(known); },
-      epochKeys: async (n) => (n === 1 ? keys : null),
+      epochKeys: async (n) => keyset[n] ?? null,
     };
   };
   const provider = await device();
   return {
     provider, kit, refreshes, server, device,
     move: async () => { heads.push(b64u(rand32())); await put(); },
+    epoch: async () => {
+      heads.push(b64u(rand32()));
+      const n = epochs.at(-1).n + 1;
+      keyset[n] = await kit.deriveEpochKeys(rand32(), account, n);
+      epochs.push({ n, at: base + heads.length - 1 });
+      await put();
+      return n;
+    },
     remove: async (p) => { heads.push(b64u(rand32())); devices.get(p.device.id).removed = base + heads.length - 1; await put(); },
   };
 }
@@ -5777,7 +5788,156 @@ async function releaseRoom() {
   await stop(b);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid };
+// ---- document key declarations (sync-dockeys.ts; design notes e2e-doc-key-declarations r2)
+
+const hex32 = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+/** A declaration as a device's document keys make one: a fresh CEK for `doc` in `epoch`, wrapped under that epoch's keys. */
+async function declFor(f, P, doc, epoch, head) {
+  const cekId = hex32();
+  const { wrapped } = await f.kit.mintDocCek(await P.epochKeys(epoch), { account: P.account, document: doc, cekId, keyEpoch: epoch });
+  return { document: doc, cekId, keyEpoch: epoch, wrappedCek: wrapped, head: head ?? (await P.chain(true)).head };
+}
+/** How a promise has ended within `ms`: its value, its code, or still pending. */
+const outcome = (p, ms) => Promise.race([p.then((v) => ({ ok: v }), (e) => ({ code: e?.code ?? String(e) })), sleep(ms).then(() => ({ pending: true }))]);
+
+async function docKeyDeclare() {
+  // (A declares a document's key: confirmed, it answers its own; current and exact read it on A; B, started only now,
+  // reads it from the log it verifies then (its verdict computed on that pull, never stored); two declares of one
+  // (document, epoch) while the first is pending join it: one record)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "doc key declare: A synced");
+  const doc = crypto.randomUUID(), D = await declFor(f, f.provider, doc, 1);
+  const da = a.docDeclarations();
+  const r = await outcome(da.declare(D), 15_000);
+  check(r.ok?.cekId === D.cekId && r.ok.keyEpoch === 1 && sameBytes(r.ok.wrappedCek, D.wrappedCek) && r.ok.head === f.server.head, "doc key declare: confirmed, it answers its own declaration, with its envelope's head: " + J({ r: r.ok ? { ...r.ok, wrappedCek: r.ok.wrappedCek.length } : r }));
+  const cur = await da.current(doc, f.server.head);
+  check(cur?.cekId === D.cekId && sameBytes(cur.wrappedCek, D.wrappedCek), "doc key declare: current on A is it");
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wb, b), 15_000), "doc key declare: B synced, after");
+  const db = b.docDeclarations();
+  const curB = await db.current(doc, f.server.head), exB = await db.exact(doc, D.cekId, 1);
+  check(curB?.cekId === D.cekId && sameBytes(exB?.wrappedCek, D.wrappedCek), "doc key declare: B, reading the log afresh, has it current and exactly");
+  // (join: a second declare for the same (document, epoch) while the first waits is the same promise; one record)
+  const doc2 = crypto.randomUUID(), X = await declFor(f, f.provider, doc2, 1), Y = await declFor(f, f.provider, doc2, 1);
+  await ctl("log", { reset: true });
+  const p1 = da.declare(X), p2 = da.declare(Y);
+  const r2 = await outcome(p2, 15_000);
+  const items = itemsOf(sealedSends(await ctl("log")));
+  check(p1 === p2 && r2.ok?.cekId === X.cekId && items.length === 1, "doc key declare: a second declare of a (document, epoch) already waiting joins it: one record, the first's answer: " + J({ same: p1 === p2, cek: r2.ok?.cekId === X.cekId, items: items.length }));
+  // (a declaration the server refuses: its declare rejects "refused", nothing to rebuild, sync goes on)
+  const next = await metaGet(wa.ws, `sync:${nsOf(a)}:dseq`);
+  await ctl("refuseSealed", { dseq: next, code: "invalid" });
+  const doc3 = crypto.randomUUID(), Z = await declFor(f, f.provider, doc3, 1);
+  const rz = await outcome(da.declare(Z), 15_000);
+  await wa.mkdir("/dk-after-refusal");
+  check(rz.code === "refused" && (await da.current(doc3, f.server.head)) === null && await until(() => settled(wa, a), 15_000) && a.debug().halted === undefined,
+    "doc key declare: a declaration the server refuses: its declare rejects \"refused\", it declares nothing, and sync goes on: " + J({ rz, halted: a.debug().halted }));
+  // (the op's own head: a declare answers for the head and epoch its op was sealed under; once the chain begins
+  // another epoch, current at the new head is none, until one is declared there)
+  const headBefore = f.server.head;
+  await f.epoch();
+  const after = (await f.provider.chain(true)).head;
+  check(r.ok?.head === headBefore && (await da.current(doc, after)) === null && (await da.current(doc, headBefore))?.cekId === D.cekId,
+    "doc key declare: the declare answered for its op's own head and epoch; at a head of the next epoch, none is current (its provider declares anew)");
+  check(a.debug().halted === undefined && b.debug().halted === undefined, "doc key declare: neither device halted");
+  await stop(a);
+  await stop(b);
+}
+
+async function docKeyRace() {
+  // (A and B declare one document in one epoch at once: both answer the same generation, the log's first; each device
+  // finds both exactly)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } }), b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "doc key race: A and B synced");
+  await ctl("set", { set: { serverNotices: true } });
+  const doc = crypto.randomUUID(), DA = await declFor(f, f.provider, doc, 1), DB = await declFor(f, pb, doc, 1);
+  const [ra, rb] = await Promise.all([outcome(a.docDeclarations().declare(DA), 20_000), outcome(b.docDeclarations().declare(DB), 20_000)]);
+  check(ra.ok && rb.ok && ra.ok.cekId === rb.ok.cekId && [DA.cekId, DB.cekId].includes(ra.ok.cekId), "doc key race: both declares answer the same generation (one of the two): " + J({ a: ra.ok?.cekId ?? ra, b: rb.ok?.cekId ?? rb, DA: DA.cekId, DB: DB.cekId }));
+  check(await until(async () => !!(await a.docDeclarations().exact(doc, DA.cekId, 1)) && !!(await a.docDeclarations().exact(doc, DB.cekId, 1)) && !!(await b.docDeclarations().exact(doc, DA.cekId, 1)), 15_000), "doc key race: both declarations found exactly on each device");
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(a);
+  await stop(b);
+}
+
+async function docKeyEpoch() {
+  // (offline: an epoch-1 declare waits, never rejected; the chain begins epoch 2; an epoch-2 declare of the same
+  // document isn't joined to it. Back online: the epoch-1 one goes up sealed under an epoch-2 head, is void everywhere,
+  // and its declare rejects "stale"; the epoch-2 one answers itself; no device halts)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "doc key epoch: A synced");
+  const da = a.docDeclarations(), doc = crypto.randomUUID();
+  await ctl("set", { set: { closeOnOpen: 1000 } });
+  await ctl("closeAll");
+  check(await until(() => a.status.state !== "synced", 10_000), "(doc key epoch: A offline)");
+  const D1 = await declFor(f, f.provider, doc, 1);
+  const p1 = da.declare(D1);
+  check((await outcome(p1, 1500)).pending === true, "doc key epoch: offline, a declare waits (neither answered nor rejected)");
+  await f.epoch();
+  const D2 = await declFor(f, f.provider, doc, 2);
+  const p2 = da.declare(D2);
+  check(p2 !== p1, "doc key epoch: a declare of the same document under another epoch isn't joined to the waiting one");
+  await ctl("set", { set: { closeOnOpen: 0 } });
+  const [r1, r2] = await Promise.all([outcome(p1, 20_000), outcome(p2, 20_000)]);
+  check(r1.code === "stale" && r2.ok?.cekId === D2.cekId && r2.ok.keyEpoch === 2, "doc key epoch: back online, the epoch-1 declare rejects \"stale\" and the epoch-2 one answers itself: " + J({ r1, r2: r2.ok?.cekId ?? r2 }));
+  const now = (await f.provider.chain(true)).head;
+  check((await da.current(doc, now))?.cekId === D2.cekId && (await da.exact(doc, D1.cekId, 1)) === null, "doc key epoch: current at the new head is the epoch-2 one; the stale declaration declared nothing");
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wb, b), 15_000) && (await b.docDeclarations().current(doc, now))?.cekId === D2.cekId && (await b.docDeclarations().exact(doc, D1.cekId, 1)) === null, "doc key epoch: B reads the same: the void declaration nothing, the epoch-2 one current");
+  check(a.debug().halted === undefined && b.debug().halted === undefined, "doc key epoch: no device halted on the void declaration");
+  await stop(a);
+  await stop(b);
+}
+
+async function docKeyExact() {
+  // (B hasn't read A's declaration yet: exact catches up once and finds it; two misses at once share one catch-up; a
+  // true miss is null after one catch-up. Offline, a miss waits; sync stopped, it rejects "ended". At a halt, "halted")
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } }), b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "doc key exact: A and B synced");
+  const doc = crypto.randomUUID(), D = await declFor(f, f.provider, doc, 1);
+  check((await outcome(a.docDeclarations().declare(D), 15_000)).ok?.cekId === D.cekId, "(doc key exact: A declared)");
+  const db = b.docDeclarations(), n0 = b.stats.dkCatchUps;
+  const [hit, miss] = await Promise.all([db.exact(doc, D.cekId, 1), db.exact(doc, hex32(), 1)]);
+  check(sameBytes(hit?.wrappedCek, D.wrappedCek) && miss === null && b.stats.dkCatchUps === n0 + 1, "doc key exact: a miss catches up once and finds it; a true miss at the same time shares that catch-up and is null after it: " + J({ hit: !!hit, miss, catchUps: b.stats.dkCatchUps - n0 }));
+  // (offline: waits, never null)
+  await ctl("set", { set: { closeOnOpen: 1000 } });
+  await ctl("closeAll");
+  check(await until(() => b.status.state !== "synced", 10_000), "(doc key exact: B offline)");
+  const pending = db.exact(doc, hex32(), 1);
+  check((await outcome(pending, 1500)).pending === true, "doc key exact: offline, a miss waits (no null on a transport failure)");
+  await stop(b);
+  check((await outcome(pending, 3000)).code === "ended", "doc key exact: sync stopped while it waits: rejected \"ended\"");
+  await ctl("set", { set: { closeOnOpen: 0 } });
+  // (a halt: B stops at a tampered op, and a waiting miss rejects "halted")
+  const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wb, b2), 15_000), "(doc key exact: B again)");
+  // (A's op up first, with no notice to B: B's catch-up is what reads it, and halts at it while the miss waits)
+  await ctl("set", { set: { tamperIndexEnv: 1, tamperFor: wb.device, serverNotices: false } });
+  await wa.mkdir("/dk-tampered");
+  check(await until(() => settled(wa, a), 15_000) && b2.debug().halted === undefined, "(doc key exact: A's op up; B not halted yet)");
+  const halted = b2.docDeclarations().exact(doc, hex32(), 1);
+  const ho = await outcome(halted, 15_000);
+  check(ho.code === "halted" && b2.debug().halted === "sealed-halt", "doc key exact: a miss waiting when the client halts rejects \"halted\": " + J({ ho, halted: b2.debug().halted, why: b2.stats.sealedHalt }));
+  await stop(a);
+  await stop(b2);
+}
+
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

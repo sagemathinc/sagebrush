@@ -330,5 +330,110 @@ const ROUNDS = Number(process.env.FUZZ_ROUNDS ?? 40);
   ok(agreed === ROUNDS && mismatched.length === 0, `V7: ${ROUNDS} random logs (three devices, head moves, one tamper of nine kinds or none), each read by two devices in different pages with different views of the chain: the same verdict, stop, state and opened ops every time (${halted} halted)`, mismatched.slice(0, 3));
 }
 
+// ---- V9 (document key declarations; design notes e2e-doc-key-declarations r2): exactly its form; a keyEpoch newer
+// than its head's halts; one of its head's epoch is eligible only if its wrap opens there (its own account, document,
+// cekId and epoch, whole); an older one is never unwrapped and never eligible, and never halts; the verdict goes with
+// the op, never in it, and is the same each time the row is verified
+{
+  const { mintDocCek } = await import(join(here, "e2e", "doc-cek.ts"));
+  const C = await chainOf();
+  const a = await C.device();
+  const DOC = "0123456789ab", CEK = "ab".repeat(16);
+  const wrapFor = async (place, keys) => b64u((await mintDocCek(keys ?? C.keys[place.keyEpoch], place)).wrapped);
+  const home = { account: C.account, document: DOC, cekId: CEK, keyEpoch: 1 };
+  const D = async (extra = {}, place = home, keys) => ({ t: 1, by: "person", op: "doc-key", path: "/", kind: "folder", document: DOC, cekId: CEK, keyEpoch: 1, wrappedCek: await wrapFor(place, keys), ...extra });
+  // (each case's row verified alone, after one ordinary op of the device: its verdict, or its halt)
+  const one = async (op, opts = {}) => {
+    const rows = await logOf(C, { a }, [{ dev: "a" }, { dev: "a", op, ...(opts.then ? { then: opts.then } : {}) }]);
+    const P = opts.P ?? C.provider(a);
+    let st = K.PULL_START;
+    try {
+      st = (await K.verifyRow(P, SYNC_GEN, wire(rows[0]), st)).state;
+      const v = await K.verifyRow(P, SYNC_GEN, wire(rows[1]), st);
+      return { verdict: "ok", docKey: v.docKey, op: v.op, row: rows[1], st };
+    } catch (e) {
+      if (!(e instanceof K.SealedHalt)) throw e;
+      return { verdict: "halt", why: e.why };
+    }
+  };
+  const good = await one(await D());
+  ok(good.verdict === "ok" && good.docKey?.eligible === true && good.docKey.head === good.row.head && !("eligible" in good.op) && good.op.op === "doc-key",
+    "V9: a declaration of its head's epoch whose wrap opens: eligible, with its envelope's head; the verdict beside the op, not in it", { verdict: good.verdict, docKey: good.docKey });
+  // (E1: verified again from the same state, as a resumed pull or a page read again does: the same verdict, from the bytes)
+  const again = await K.verifyRow(C.provider(a), SYNC_GEN, wire(good.row), good.st);
+  ok(again.docKey?.eligible === true && again.docKey.head === good.docKey.head, "V9: the same row verified again (a resumed pull): the same verdict, computed again", again.docKey);
+  // (C1, D2: a wrap that doesn't open here: another document, cekId, account or epoch in its place, another account's or
+  // epoch's keys, a byte flipped: ineligible, never a halt)
+  const other = await deriveEpochKeys(rand32(), "e2e-" + e2eId(), 1);
+  const otherAcct = { ...home, account: "e2e-" + e2eId() };
+  // (a wrap made by hand under this epoch's own K_wrap, with doc-cek's AAD layout written out over `place`: what a device
+  // holding the key could make for any place)
+  const { LABELS } = await import(join(here, "e2e", "labels.ts"));
+  const BY = await import(join(here, "e2e", "bytes.ts"));
+  const forge = async (place) => {
+    const aad = BY.concat(BY.utf8(LABELS.docCekWrap), BY.name(place.account, "a"), BY.name(place.document, "d"), BY.name(place.cekId, "c"), BY.u64(place.keyEpoch));
+    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: aad }, C.keys[1].wrap, rand32()));
+    return b64u(BY.concat(nonce, ct));
+  };
+  ok((await one({ ...(await D()), wrappedCek: await forge(home) })).docKey?.eligible === true, "V9: (the hand-made wrap, for its own place, is eligible: the forge is doc-cek's layout)");
+  const flipped = async () => { const w = Buffer.from(await wrapFor(home), "base64url"); w[30] ^= 1; return b64u(w); };
+  const bad = {
+    "another document's wrap": await D({}, { ...home, document: "ba9876543210" }),
+    "another cekId's wrap": await D({}, { ...home, cekId: "cd".repeat(16) }),
+    "another account's wrap": await D({}, otherAcct, await deriveEpochKeys(rand32(), otherAcct.account, 1)),
+    "another account's keys, this place": { ...(await D()), wrappedCek: b64u((await mintDocCek(other, { ...home, account: (await import(join(here, "e2e", "keys.ts"))).mintedEpoch(other).account })).wrapped) },
+    "another epoch's wrap": await D({}, { ...home, keyEpoch: 2 }),
+    "a flipped byte": { ...(await D()), wrappedCek: await flipped() },
+    // (C1: under this account's own epoch key, so only the AAD differs: one naming another account, one another cekId)
+    "this key, an AAD naming another account": { ...(await D()), wrappedCek: await forge({ ...home, account: "e2e-" + e2eId() }) },
+    "this key, an AAD naming another cekId": { ...(await D()), wrappedCek: await forge({ ...home, cekId: "ef".repeat(16) }) },
+  };
+  const ineligible = {};
+  for (const [name, op] of Object.entries(bad)) {
+    const r = await one(op);
+    ineligible[name] = r.verdict === "ok" && r.docKey?.eligible === false ? "ineligible" : r;
+  }
+  ok(Object.values(ineligible).every((x) => x === "ineligible"), "V9: a wrap for another document, cekId, account or epoch, made with another account's keys, or with a byte flipped: ineligible, not a halt", ineligible);
+  // (D1: a keyEpoch newer than its head's: halts)
+  const future = await one(await D({ keyEpoch: 2 }, { ...home, keyEpoch: 2 }));
+  ok(future.verdict === "halt" && /epoch its head doesn't have/.test(future.why), "V9: a declaration under an epoch newer than its head's halts", future);
+  // (E1: an older keyEpoch (sealed under a head of epoch 2): never unwrapped, never eligible, never a halt, even on a
+  // device that doesn't hold epoch 1's keys any more)
+  const old = await D();
+  const C2 = await chainOf();
+  const a2 = await C2.device();
+  C2.epoch(2);
+  const asked = [];
+  const P2 = Object.assign(C2.provider(a2), { epochKeys: async (n) => { asked.push(n); return n === 1 ? null : C2.keys[n]; } });
+  const rows2 = await logOf(C2, { a: a2 }, [{ dev: "a", op: { ...old, wrappedCek: b64u((await mintDocCek(C2.keys[1], { ...home, account: C2.account })).wrapped) } }]);
+  let older;
+  try {
+    const v = await K.verifyRow(P2, SYNC_GEN, wire(rows2[0]), K.PULL_START);
+    older = { verdict: "ok", docKey: v.docKey };
+  } catch (e) {
+    older = { verdict: "halt", why: e.why };
+  }
+  ok(older.verdict === "ok" && older.docKey?.eligible === false && !asked.includes(1), "V9: a declaration of an older epoch than its head's: not a halt, never eligible, its epoch's keys never asked for (unwrapped only under the head's epoch)", { older, asked });
+  // (C2 and the form: an `eligible` the op claims, an inner head, a field missing, a cekId or document that isn't one, a
+  // wrap of the wrong length: each halts)
+  const forms = {
+    "an eligible it claims": await D({ eligible: true }),
+    "an inner head": await D({ head: good.row.head }),
+    "no cekId": (({ cekId, ...rest }) => rest)(await D()),
+    "a cekId that isn't 32 hex": await D({ cekId: "AB".repeat(16) }),
+    "a document that isn't a document id": await D({ document: "/a/path" }),
+    "a wrap of 59 bytes": await D({ wrappedCek: b64u(new Uint8Array(59)) }),
+    "a keyEpoch that isn't a number": await D({ keyEpoch: "1" }),
+    "another path": await D({ path: "/x" }),
+  };
+  const halts = {};
+  for (const [name, op] of Object.entries(forms)) {
+    const r = await one(op);
+    halts[name] = r.verdict === "halt" && /only a declaration/.test(r.why) ? "halt" : r;
+  }
+  ok(Object.values(halts).every((x) => x === "halt"), "V9: a declaration claiming eligible, with an inner head, a field missing, a cekId, document, wrap or keyEpoch that isn't one, or another path: halts at it", halts);
+}
+
 console.log(failures ? `${failures} of ${count} FAILED` : `all ${count} passed`);
 process.exit(failures ? 1 : 0);

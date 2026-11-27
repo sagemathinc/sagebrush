@@ -16,6 +16,8 @@ import { OP_REFS_MAX, opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, ve
 import type { EpochKeys } from "./e2e/keys.ts";
 import type { WireOp } from "./sync-outbox";
 import { RELEASE_OP as RELEASE, refsOf } from "./sync-refs";
+import { DOC_KEY_OP, bytesOf, isDocKeyForm, type DocKeyVerdict } from "./sync-dockeys";
+import { unwrapDocCek } from "./e2e/doc-cek.ts";
 
 /** The key chain as this device last verified it: what a sealed op commits to, and what pull checks one against. Every
  * position is the chain's ABSOLUTE seq (its base plus the head's index), and anything about a head this verified chain
@@ -151,9 +153,12 @@ const sameReleases = (a: readonly OpRelease[], b: readonly OpRelease[]) => a.len
  * 5. its dseq is past its device's last verified one;
  * 6. it opens under that epoch's index key at its place, naming its device's previous verified envelope (none for the
  *    device's first in this sync generation) and exactly its visible references, which are the op's own (refsOf).
+ * A document key declaration (sync-dockeys.ts) is exactly its form, and its keyEpoch no newer than its head's epoch;
+ * one of its head's epoch is unwrapped here, under that epoch's K_wrap, and is eligible if its wrap opens (an older
+ * one is never unwrapped, and never eligible). The verdict goes with the op, never into it, and is never stored.
  * Returns the op and the state after it; any failure is a SealedHalt.
  */
-export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Record<string, unknown>, st: PullState): Promise<{ op: WireOp; state: PullState }> {
+export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Record<string, unknown>, st: PullState): Promise<{ op: WireOp; state: PullState; docKey?: DocKeyVerdict }> {
   const seq = Number.isSafeInteger(row.seq) ? (row.seq as number) : -1;
   const halt = (why: string): never => { throw new SealedHalt(seq, why); };
   const str = (k: string) => (typeof row[k] === "string" ? (row[k] as string) : halt(`no ${k}`));
@@ -256,6 +261,25 @@ export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Recor
   if (!refsMatch) halt("visible references that aren't its op's");
   // (a release op is exactly its form: no content, nothing else it could change; e2e PR 5d)
   if (op.op === RELEASE && !isReleaseForm(op as unknown as Record<string, unknown>)) halt("a release op that isn't only a release");
+  // (a document key declaration: exactly its form (an `eligible` it claims is one more field, and halts), under no
+  // epoch its head doesn't have; eligible only under its head's epoch and only if its wrap opens there)
+  let docKey: DocKeyVerdict | undefined;
+  if (op.op === DOC_KEY_OP) {
+    const d = op as unknown as Record<string, unknown>;
+    if (!isDocKeyForm(d)) halt("a doc-key op that isn't only a declaration");
+    const ke = d.keyEpoch as number;
+    if (ke > n) halt("a declaration under an epoch its head doesn't have");
+    let eligible = false;
+    if (ke === n) {
+      try {
+        await unwrapDocCek(epoch!, { account: keys.account, document: d.document as string, cekId: d.cekId as string, keyEpoch: ke }, bytesOf(d.wrappedCek as string));
+        eligible = true;
+      } catch {
+        eligible = false;
+      }
+    }
+    docKey = Object.freeze({ eligible, head });
+  }
   const hash = b64url(await opHash(env));
-  return { op, state: Object.freeze({ seq, floor: p!, chainGen: chain.generation, devices: Object.freeze({ ...st.devices, [device]: { dseq: dseq as number, hash } }) }) };
+  return { op, state: Object.freeze({ seq, floor: p!, chainGen: chain.generation, devices: Object.freeze({ ...st.devices, [device]: { dseq: dseq as number, hash } }) }), ...(docKey ? { docKey } : {}) };
 }
