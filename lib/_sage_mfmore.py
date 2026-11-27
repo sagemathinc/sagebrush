@@ -11,8 +11,47 @@ from _sage_modular import (_Basis, _series, _rref_exact, _sturm_bound, _divisors
                            _Subspace, ModularFormElement, DirichletGroup, _nonneg, _NONTRIVIAL)
 
 
+# ---- admission, as lib/_sage_modsym.py's (its _Charge, one ledger): each
+# entry point runs inside a charge (joining the caller's when there is one)
+# and reserves each list of coefficients before it is built, at a bound on
+# its bits, settling to its size after (growth past the bound admitted,
+# refused past the allowance)
+
+def _work(what):
+    import _sage_modsym as ms
+    return ms._Charging(ms._CUR[0] or ms._Charge(what))
+
+
+def _rows_reserve(ch, rows, cols, bits):
+    """Reserve rows x cols rational coefficients of at most bits bits."""
+    import _sage_modsym as ms
+    return ms._reserve(ch, rows * cols, bits)
+
+
+def _rows_settle(ch, reserved, rows):
+    import _sage_modsym as ms
+    d = reserved - sum(ms._row_bytes(r) for r in rows)
+    if d >= 0:
+        ch.give(d)
+    else:
+        ch.take(-d)
+
+
+def _basis_bits(k, prec):
+    # (the echelon q-expansion rows come from the space's basis machinery:
+    # no a priori bound on their heights; this one, which Deligne's bound
+    # d(n) n^((k-1)/2) and a generous denominator allowance give, is an
+    # estimate, settled by admission to the rows' real size)
+    return (k + 1) * max(prec, 2).bit_length() + 256
+
+
 def _sigma(n, k):
     return sum(d ** k for d in _divisors(n))
+
+
+def _bits_of(r):
+    import _sage_modsym as ms
+    return ms._maxbits(r)
 
 
 def _real_characters(N):
@@ -92,9 +131,44 @@ def _primes_upto(B):
     return out
 
 
+def _zero_subspace(A, kind):
+    """The zero subspace of A, printed as a subspace of that kind: no parts,
+    so no basis rows (the cuspidal part of an Eisenstein subspace, or the
+    reverse)."""
+    Z = _Subspace(A, kind, 0)
+    Z._parts = lambda: []
+    return Z
+
+
 class QSpaceMethods:
     """The spaces' methods loaded on first use (copied onto _QSpace by
-    _sage_modular._load_mfmore; not instantiated)."""
+    _sage_modular._load_mfmore; not instantiated).
+
+    Admission: each entry point reserves its coefficients before it builds
+    them; with too little memory it is refused, and works again with more::
+
+        sage: import sys  # sagebrush only
+        sage: old = getattr(sys, "_sagebrush_heap_limit", None); sys._sagebrush_heap_limit = 4 * 200000  # sagebrush only
+        sage: for f in (lambda: ModularForms(11, 2).q_echelon_basis(5000), lambda: ModularForms(144, 2).eisenstein_series(),  # sagebrush only
+        ....:           lambda: Newforms(11, names='a')[0].qexp(10**6)):
+        ....:     try:
+        ....:         f()
+        ....:     except MemoryError as e:
+        ....:         print(type(e).__name__, e.need_bytes > e.limit_bytes)
+        SagebrushMemoryError True
+        SagebrushMemoryError True
+        SagebrushMemoryError True
+        sage: M = ModularForms(11, 2); built = []; rows = M._qrows  # sagebrush only
+        sage: M._qrows = lambda p: (built.append(p), rows(p))[1]  # sagebrush only
+        sage: try:  # sagebrush only
+        ....:     M._echelon_rows(5000)
+        ....: except MemoryError as e:
+        ....:     print(e.what.split(" of ")[0], built)
+        The echelon q-expansion basis []
+        sage: sys._sagebrush_heap_limit = old  # sagebrush only
+        sage: len(ModularForms(11, 2).q_echelon_basis(8)), len(ModularForms(144, 2).eisenstein_series()), Newforms(11, names='a')[0].qexp(4)  # sagebrush only
+        (2, 23, q - 2*q^2 - q^3 + O(q^4))
+    """
 
     def _all_cusp(self):
         return all(p.startswith("cusp") for p in self._parts())
@@ -109,10 +183,18 @@ class QSpaceMethods:
 
             sage: CuspForms(11, 2).hecke_bound(), ModularForms(11, 2).hecke_bound(), ModularForms(24, 4).hecke_bound()
             (3, 9, 37)
+            sage: ModularForms(DirichletGroup(4).0, 3).hecke_bound()  # sagebrush only (Sage: 7)
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: hecke_bound of a space with a nontrivial character is not supported yet
         """
+        A = self._amb()
+        if A._chi is not None and not A._chi.is_trivial():
+            raise NotImplementedError("hecke_bound of a space with a nontrivial character is not supported yet")
         s = self.sturm_bound()
         if self.dimension() == 0:
-            return s - 1
+            # (a zero ambient space: one less; a zero subspace: the Sturm bound)
+            return s - 1 if self.is_ambient() else s
         if self._all_cusp():
             return s
         A = self._amb()
@@ -120,7 +202,13 @@ class QSpaceMethods:
 
     def _echelon_rows(self, prec):
         work = max(prec, self.sturm_bound() + 2)
-        rows = _rref_exact(self._qrows(work))
+        A = self._amb()
+        d = self.dimension()
+        with _work("The echelon q-expansion basis of %r to precision %d" % (self, work)) as ch:
+            bits = _basis_bits(A._k, work)
+            res = _rows_reserve(ch, 2 * d, work, bits)  # (the rows and their echelon form)
+            rows = _rref_exact(self._qrows(work))
+            _rows_settle(ch, res, rows + rows)
         return rows, work
 
     def q_echelon_basis(self, prec=None):
@@ -133,8 +221,13 @@ class QSpaceMethods:
             [1 + 12*q^2 + 12*q^3 + 12*q^4 + 12*q^5 + O(q^6), q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)]
         """
         prec = 6 if prec is None else int(prec)
-        rows, _ = self._echelon_rows(prec)
-        return _Basis(_series(r[:prec], prec) for r in rows)
+        with _work("The echelon q-expansion basis of %r to precision %d" % (self, prec)) as ch:
+            rows, _ = self._echelon_rows(prec)
+            # (the series: prec coefficients of each row, reserved first)
+            res = _rows_reserve(ch, len(rows), prec, max((_bits_of(r) for r in rows), default=0))
+            out = _Basis(_series(r[:prec], prec) for r in rows)
+            _rows_settle(ch, res, [r[:prec] for r in rows])
+        return out
 
     def echelon_basis(self):
         """The reduced echelon basis of the whole space, as modular forms.
@@ -164,6 +257,13 @@ class QSpaceMethods:
         from sage_all import matrix, ZZ
         from math import lcm
         prec = 6 if prec is None else int(prec)
+        with _work("The integral q-expansion basis of %r to precision %d" % (self, prec)) as ch:
+            return self._q_integral(prec, ch)
+
+    def _q_integral(self, prec, ch):
+        from sage_all import matrix, ZZ
+        from math import lcm
+        import _sage_modsym as ms
         R, work = self._echelon_rows(prec)
         d = len(R)
         if not d:
@@ -177,19 +277,34 @@ class QSpaceMethods:
                 den = lcm(den, _Fr(x).denominator)
         # c in Z^d with sum c_i R_i integral: (c, y) [M; den I] = 0, M_ij = den R_i[others_j]
         m = len(others)
+        rb = max((_bits_of(r) for r in R), default=0)
         if den == 1 or not m:
             gens = [[int(i == j) for j in range(d)] for i in range(d)]
         else:
+            # (the integer system, reserved before it is built: d + m rows of
+            # m entries of at most bits(den) + bits(R) bits; Sage mode's ZZ
+            # matrices admit their own storage)
+            res = ms._reserve(ch, (d + m) * m, den.bit_length() + rb, frac=False)
             rows = [[int(den * R[i][j]) for j in others] for i in range(d)] + [[den * int(a == b) for b in range(m)] for a in range(m)]
+            ms._settle(ch, res, [x for r in rows for x in r])
             K = matrix(ZZ, rows).left_kernel().basis_matrix()
+            res = ms._reserve(ch, K.nrows() * d, max((abs(int(x)).bit_length() for x in K.list()), default=0), frac=False)
             gens = [[int(x) for x in list(K.row(i))[:d]] for i in range(K.nrows())]
+            ms._settle(ch, res, [x for g in gens for x in g])
         vecs = []
         for c in gens:
+            # (a sum of d products: the bits of all its terms)
+            res = ms._reserve(ch, n, ms._sum_bits([(abs(x).bit_length(), rb) for x in c if x], d), frac=False)
             v = [sum(c[i] * R[i][j] for i in range(d)) for j in range(n)]
-            vecs.append([int(x) for x in v])
+            v = [int(x) for x in v]
+            ms._settle(ch, res, v)
+            vecs.append(v)
         H = matrix(ZZ, vecs).echelon_form()
+        res = ms._reserve(ch, H.nrows() * prec, max((abs(int(x)).bit_length() for x in H.list()), default=0))
         out = [[_Fr(int(x)) for x in H.row(i)] for i in range(H.nrows()) if any(H.row(i))]
-        return _Basis(_series(r[:prec], prec) for r in out)
+        series = _Basis(_series(r[:prec], prec) for r in out)
+        _rows_settle(ch, res, [r[:prec] for r in out])
+        return series
 
     def eisenstein_series(self):
         """Sage's Eisenstein series of the space: for the nontrivial (real)
@@ -220,10 +335,19 @@ class QSpaceMethods:
             pairs += [(psi, t) for t in reversed(_divisors(N // (f * f)))]
         pairs += [(None, t) for t in _divisors(N) if k > 2 or t > 1]
         E = A.eisenstein_subspace()
+        prec = E.sturm_bound() + 2
         out = []
-        for psi, t in pairs:
-            coords = E._coords_of(lambda p, psi=psi, t=t: _eis_series(N, k, psi, t, p))
-            out.append(ModularFormElement(E, coords))
+        with _work("The Eisenstein series of %r" % (A,)) as ch:
+            # (the space's rows the coordinates are solved against, and each
+            # series' prec coefficients: |a_n| <= sigma_(k-1)(n) <= n^k, the
+            # constant term -B_k / 2k or (t - 1)/24)
+            res = _rows_reserve(ch, E.dimension(), prec, _basis_bits(k, prec))
+            for psi, t in pairs:
+                r = _rows_reserve(ch, 1, prec, k * prec.bit_length() + abs(_bernoulli(k).numerator).bit_length() + abs(_bernoulli(k).denominator).bit_length() + 2 * k.bit_length() + 8)
+                coords = E._coords_of(lambda p, psi=psi, t=t: _eis_series(N, k, psi, t, p))
+                _rows_settle(ch, r, [coords])
+                out.append(ModularFormElement(E, coords))
+            _rows_settle(ch, res, [])
         return _Basis(out)
 
     def cuspidal_submodule(self):
@@ -239,7 +363,7 @@ class QSpaceMethods:
         if self._all_cusp():
             return self
         if self._kind == "Eisenstein subspace":
-            return _Subspace(self._A, "Cuspidal subspace", 0)
+            return _zero_subspace(self._A, "Cuspidal subspace")
         raise NotImplementedError("the cuspidal part of %s is not supported yet" % self)
 
     def eisenstein_submodule(self):
@@ -255,7 +379,7 @@ class QSpaceMethods:
         if all(p.startswith("eis") for p in self._parts()):
             return self
         if self._kind == "Cuspidal subspace":
-            return _Subspace(self._A, "Eisenstein subspace", 0)
+            return _zero_subspace(self._A, "Eisenstein subspace")
         raise NotImplementedError("the Eisenstein part of %s is not supported yet" % self)
 
 
@@ -284,7 +408,8 @@ class NewformMethods:
             sage: Newforms(11, names='a')[0].character()
             Dirichlet character modulo 11 of conductor 1 mapping 2 |--> 1
         """
-        return DirichletGroup(self.level())[0]
+        chi = self._o._chi
+        return chi if chi is not None else DirichletGroup(self.level())[0]
 
     def padded_list(self, n):
         """[a_0, a_1, ..., a_(n-1)] (a_0 = 0).
@@ -307,7 +432,14 @@ class NewformMethods:
             sage: Newforms(11, names='a')[0].qexp(6)
             q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)
         """
-        return self.q_expansion(prec)
+        k, p = self.weight(), int(prec)
+        # (prec coefficients reserved before they are computed, at Deligne's
+        # bound |a_n| <= d(n) n^((k-1)/2), d(n) <= n)
+        with _work("The q-expansion of a newform of level %d to precision %d" % (self.level(), p)) as ch:
+            res = _rows_reserve(ch, 1, max(p, 1), (k + 1) * max(p, 2).bit_length() // 2 + 2)
+            s = self.q_expansion(prec)
+            _rows_settle(ch, res, [[0] * max(p - 1, 0)])
+        return s
 
     def _cm_disc(self):
         # the fundamental discriminant D < 0 with |D| | N for which f is its
@@ -374,6 +506,9 @@ class NewformMethods:
         """
         from sage_all import Integer
         N, k = self.level(), self.weight()
+        if self._o._chi is not None:
+            # (Sage's refusal: the eigenvalue needs a square root it cannot take)
+            raise ValueError("Unable to compute square root. Try specifying an embedding into a larger ring")
         d = N if d is None else int(d)
         if d <= 0 or N % d:
             raise ValueError("d should divide N")

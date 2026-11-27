@@ -566,7 +566,7 @@ _MORE_MODSYM = frozenset([
 # lib/_sage_mfmore.py (as _MORE_GAMMA0 and _MORE_MODSYM from _sage_modsym)
 _MORE_QSPACE = frozenset([
     "hecke_bound", "q_echelon_basis", "q_integral_basis", "echelon_basis", "eisenstein_series",
-    "cuspidal_submodule", "eisenstein_submodule", "_all_cusp", "_echelon_rows",
+    "cuspidal_submodule", "eisenstein_submodule", "_all_cusp", "_echelon_rows", "_q_integral",
 ])
 _MORE_NEWFORM = frozenset([
     "coefficient", "character", "padded_list", "qexp", "_cm_disc", "has_cm", "cm_discriminant",

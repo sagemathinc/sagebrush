@@ -14357,6 +14357,21 @@
   "owner": "modular forms",
   "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
  },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: ....: print(type(e).__name__, e.need_bytes > e.limit_bytes) #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 200000 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
  "lib/_sage_mfmore.py :: QSpaceMethods.cuspidal_submodule :: raise NotImplementedError(\"the cuspidal part of %s is not supported yet\" % self) #0": {
   "class": "none",
   "owner": "modular forms",
@@ -14371,6 +14386,21 @@
   "class": "none",
   "owner": "modular forms",
   "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.hecke_bound :: NotImplementedError: hecke_bound of a space with a nontrivial character is not supported yet #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "domain refusal: hecke_bound of a space with a nontrivial character (Sage's rule there not yet pinned); not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.hecke_bound :: raise NotImplementedError(\"hecke_bound of a space with a nontrivial character is not supported yet\") #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "domain refusal: hecke_bound of a space with a nontrivial character (Sage's rule there not yet pinned); not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: _bits_of :: return ms._maxbits(r) #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "bit-size bounds of the coefficients about to be built, reserved against the allowance before they are built (the admission's need), not a limit"
  },
  "lib/_sage_mfmore.py :: _real_characters :: DirichletGroup order; NotImplementedError if one is not real (its #0": {
   "class": "none",
