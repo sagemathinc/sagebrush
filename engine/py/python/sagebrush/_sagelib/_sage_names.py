@@ -738,6 +738,7 @@ SHIM_NAMES = {
     'ComplexField_': '_sage_real',
     'ComplexNumber': '_sage_matrix',
     'ComplexNumberMP': '_sage_real',
+    'ConjugacyClass': 'sage_permgroup',
     'ConwayBudgetExceeded': '_sage_ff',
     'Crystal': '_sage_crystals',
     'CrystalElement': '_sage_crystals',

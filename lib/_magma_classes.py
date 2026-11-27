@@ -260,6 +260,33 @@ def _element_bytes(n):
     return 4 * n + 24
 
 
+# what a class's output certainly takes once the engine has listed them,
+# wherever Sagebrush runs: its representative kept for the output (4n bytes
+# and a 12-byte header), its images written in the output's string and in
+# the string serialized from it (2 bytes a point at least: a digit and a
+# comma), and its length and order (two values of 24 bytes) (LIMIT-CLS-1)
+def _class_output_bytes(n):
+    return 8 * n + 60
+
+
+def _engine_count(G):
+    """The number of G's classes, the engine's (kept there for
+    _engine_classes), its order times its degree admitted first."""
+    import _magma_groups as gr
+    n, order = G.n, gr.order(G)
+    _admit_classes(order * _element_bytes(n), "The conjugacy classes of a permutation group of order %d" % order)
+    return gr._engine_group(G, "conjugacy_class_count")
+
+
+def _admit_classes(need, what):
+    allow = _m._COLLECT_MAX * _m._COLLECT_COST
+    if need > allow:
+        import _capacity
+        e = _m._memory_error(_m._memguard.memory_guard(what, need, allow, "one computation", fixed=_m._COLLECT_MAX == 10 ** 6))
+        e.capacity = _capacity.capacity()
+        raise e
+
+
 def _engine_classes(G):
     """The conjugacy classes of any other permutation group, from the group
     engine: Sagebrush's canonical order and representatives (each class's
@@ -268,16 +295,17 @@ def _engine_classes(G):
     Magma's, whose representatives come from its own algorithm.  The
     elements are enumerated, admitted first by the memory guard."""
     import _magma_groups as gr
-    n, order = G.n, gr.order(G)
-    need, allow = order * _element_bytes(n), _m._COLLECT_MAX * _m._COLLECT_COST
-    if need > allow:
-        import _capacity
-        e = _m._memory_error(_m._memguard.memory_guard("The conjugacy classes of a permutation group of order %d" % order, need, allow,
-                                                       "one computation", fixed=_m._COLLECT_MAX == 10 ** 6))
-        e.capacity = _capacity.capacity()
-        raise e
-    rows = [MTuple([c["order"], c["length"], _MPerm(G, tuple(x + 1 for x in c["rep"]))])
-            for c in gr._engine_group(G, "conjugacy_classes")]
+    n = G.n
+    count = _engine_count(G)
+    # (then their output, by their number, before the engine writes it)
+    try:
+        _admit_classes(count * _class_output_bytes(n), "The %d conjugacy classes of a permutation group of order %d" % (count, gr.order(G)))
+    except BaseException:
+        gr._engine_group(G, "conjugacy_classes_clear")
+        raise
+    r = gr._engine_group(G, "conjugacy_classes")
+    pts = [int(x) + 1 for x in r["reps"].split(",")]
+    rows = [MTuple([o, k, _MPerm(G, tuple(pts[i * n:(i + 1) * n]))]) for i, (o, k) in enumerate(zip(r["orders"], r["lengths"]))]
     C = _MClasses(rows)
     C._G, C._classes_table = G, True
     return C
@@ -308,7 +336,10 @@ def number_of_classes(G):
     counted for any n; another group's, listed by the engine."""
     if isinstance(G, _MSymGroup) or (isinstance(G, _MDihedralGroup) and G.n == 3):
         return _partition_number(G.n)
-    return len(_engine_classes(G))
+    import _magma_groups as gr
+    count = _engine_count(G)
+    gr._engine_group(G, "conjugacy_classes_clear")
+    return count
 
 
 def conjugacy_classes(G):

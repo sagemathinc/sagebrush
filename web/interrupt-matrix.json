@@ -438,8 +438,22 @@
    "owner": "polynomial factorization"
   },
   {
+   "id": "engineCall:conjugacy_class_count",
+   "transport": "engineCall:conjugacy_class_count",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
    "id": "engineCall:conjugacy_classes",
    "transport": "engineCall:conjugacy_classes",
+   "status": "planned",
+   "family": "E10 permutation groups",
+   "owner": "groups/Galois"
+  },
+  {
+   "id": "engineCall:conjugacy_classes_clear",
+   "transport": "engineCall:conjugacy_classes_clear",
    "status": "planned",
    "family": "E10 permutation groups",
    "owner": "groups/Galois"

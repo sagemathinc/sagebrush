@@ -220,6 +220,23 @@ G = SymmetricGroup(10)
 run('transpositions', 4 * 45 * P._element_bytes(10), lambda: G.conjugacy_class(G('(1,2)')).cardinality())
 # (the class of a 10-cycle, 9! elements: refused once it holds 4096 of them)
 run('10-cycles', 4 * 4096 * P._element_bytes(10) - 4, lambda: G.conjugacy_class(G('(1,2,3,4,5,6,7,8,9,10)')).cardinality())
+# (the output, admitted by the classes' number once the engine has counted them: C2^10 on 20 points has 1024,
+# whose output, 1024 * 220 bytes, outweighs their enumeration, 1024 * 104)
+E = PermutationGroup(['(%d,%d)' % (2 * i + 1, 2 * i + 2) for i in range(10)])
+run('C2^10 at the bound', 4 * 1024 * P._class_output_bytes(20), lambda: len(E.conjugacy_classes()))
+E = PermutationGroup(['(%d,%d)' % (2 * i + 1, 2 * i + 2) for i in range(10)])
+run('C2^10 one byte short', 4 * 1024 * P._class_output_bytes(20) - 4, lambda: len(E.conjugacy_classes()))
+run('then Alt(4)', 4 * 12 * P._element_bytes(4), lambda: len(AlternatingGroup(4).conjugacy_classes()))
+# (the 10-cycles' refusal is at the first 4096 held: its need is theirs)
+_capacity.heap_figure = lambda: 4 * 4096 * P._element_bytes(10) - 4
+try:
+    G.conjugacy_class(G('(1,2,3,4,5,6,7,8,9,10)')).cardinality()
+except MemoryError as e:
+    print('10-cycles need', e.need_bytes == 4096 * P._element_bytes(10))
+# (SymmetricGroup(n)'s classes, one for each partition of n, admitted by their number before any is made)
+need = P._partitions_count(10) * P._element_bytes(10)
+run('Sym(10) at the bound', 4 * need, lambda: len(SymmetricGroup(10).conjugacy_classes()))
+run('Sym(10) one byte short', 4 * need - 4, lambda: len(SymmetricGroup(10).conjugacy_classes()))
 `);
   assert.deepEqual(out.trim().split("\n"), [
     "per element 40 64",
@@ -227,5 +244,11 @@ run('10-cycles', 4 * 4096 * P._element_bytes(10) - 4, lambda: G.conjugacy_class(
     "Alt(4) one byte short refused Listing the conjugacy classes of a permutation group of order 12",
     "transpositions admitted 45",
     "10-cycles refused Listing a conjugacy class of a permutation group of order 3628800",
+    "C2^10 at the bound admitted 1024",
+    "C2^10 one byte short refused Listing the 1024 conjugacy classes of a permutation group of order 1024",
+    "then Alt(4) admitted 4",
+    "10-cycles need True",
+    "Sym(10) at the bound admitted 42",
+    "Sym(10) one byte short refused Listing the conjugacy classes of a permutation group of order 3628800",
   ]);
 });

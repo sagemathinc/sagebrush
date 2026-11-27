@@ -938,10 +938,18 @@ class PermutationGroup:
         of their elements, then their length, then their representative.
         The engine enumerates the group, admitted first by the memory guard."""
         if "classes" not in self._cache:
-            order = int(self.order())
-            _admit_elements(order, self._n, "the conjugacy classes", order)
+            order, n = int(self.order()), self._n
+            _admit_elements(order, n, "the conjugacy classes", order)
+            count = self._q("conjugacy_class_count")
+            # (then their output, by their number, before the engine writes it)
+            try:
+                _admit_output(count, n, "the %d conjugacy classes" % count, order)
+            except BaseException:
+                self._q("conjugacy_classes_clear")
+                raise
             r = self._q("conjugacy_classes")
-            self._cache["classes"] = [(tuple(c["rep"]), c["length"]) for c in r]
+            pts = [int(x) for x in r["reps"].split(",")]
+            self._cache["classes"] = [(tuple(pts[i * n:(i + 1) * n]), k) for i, k in enumerate(r["lengths"])]
         return self._cache["classes"]
 
     def conjugacy_classes_representatives(self):
@@ -1067,6 +1075,27 @@ def _admit_elements(count, n, what, order):
     don't fit a quarter of the heap, the share of one computation."""
     import _capacity
     need, limit = count * _element_bytes(n), _capacity.heap_figure() // 4
+    if need > limit:
+        import _memguard
+        e = _memguard.memory_guard("Listing %s of a permutation group of order %d" % (what, order), need, limit, "one computation")
+        e.capacity = _capacity.capacity()
+        raise e
+
+
+# what a class's output certainly takes once the engine has listed them,
+# wherever Sagebrush runs: its representative kept for the output (4n bytes
+# and a 12-byte header), its images in the output's string and in the string
+# serialized from it (2 bytes a point at least), and its length and order
+# (two values of 24 bytes) (LIMIT-CLS-1)
+def _class_output_bytes(n):
+    return 8 * n + 60
+
+
+def _admit_output(count, n, what, order):
+    """The memory guard's refusal when the engine's output for count classes
+    of degree n doesn't fit a quarter of the heap."""
+    import _capacity
+    need, limit = count * _class_output_bytes(n), _capacity.heap_figure() // 4
     if need > limit:
         import _memguard
         e = _memguard.memory_guard("Listing %s of a permutation group of order %d" % (what, order), need, limit, "one computation")

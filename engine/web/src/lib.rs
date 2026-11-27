@@ -1109,12 +1109,36 @@ fn perm_json(gs: &[sagebrush_group::Perm]) -> Value {
     json!(gs.iter().map(|g| g.0.clone()).collect::<Vec<_>>())
 }
 
+thread_local! {
+    /// The last group's conjugacy classes, by its degree and generators,
+    /// between conjugacy_class_count and conjugacy_classes: the caller
+    /// admits their output by their number before fetching them, and the
+    /// group is enumerated once.  One entry; conjugacy_classes and
+    /// conjugacy_classes_clear take it out.
+    static CLASSES: std::cell::RefCell<Option<(usize, Vec<sagebrush_group::Perm>, std::rc::Rc<Vec<sagebrush_group::classes::Class>>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The classes of g (degree n, generators gens): the cached ones when they
+/// are this group's, else computed and cached.
+fn group_classes(n: usize, gens: &[sagebrush_group::Perm], g: &sagebrush_group::Group) -> std::rc::Rc<Vec<sagebrush_group::classes::Class>> {
+    if let Some(cs) = CLASSES.with(|c| c.borrow().as_ref().filter(|(m, k, _)| *m == n && k.as_slice() == gens).map(|(_, _, cs)| cs.clone())) {
+        return cs;
+    }
+    // (the previous group's dropped first: one group's classes at a time)
+    CLASSES.with(|c| *c.borrow_mut() = None);
+    let cs = std::rc::Rc::new(sagebrush_group::classes::conjugacy_classes(g));
+    CLASSES.with(|c| *c.borrow_mut() = Some((n, gens.to_vec(), cs.clone())));
+    cs
+}
+
 /// {"fn": "perm_group", "n": n, "gens": [images...], "what": [...]} -> one
 /// answer per requested property (points are 0..n-1).
 fn perm_group(v: &Value) -> Result<Value, String> {
     use sagebrush_group::{Group, Rng};
     let n = size(v, "n", None, 1 << 20)?;
     let gens = perms(n, v.get("gens"))?;
+    let key = gens.clone();
     let g = Group::new(n, gens)?;
     let what: Vec<String> = match v.get("what") {
         Some(Value::String(s)) => vec![s.clone()],
@@ -1190,12 +1214,32 @@ fn perm_group(v: &Value) -> Result<Value, String> {
                 let sub = Group::new(n, perms(n, v.get("sub"))?)?;
                 json!(g.contains_group(&sub))
             }
+            "conjugacy_class_count" => {
+                // (the classes computed and kept for conjugacy_classes: the
+                // caller admits the group's order times its degree first,
+                // then the output by this number)
+                json!(group_classes(n, &key, &g).len())
+            }
             "conjugacy_classes" => {
                 // (each class's least element, its length and its elements'
-                // order, by (order, length, representative); the caller
-                // admits the group's order times its degree first)
-                let cs = sagebrush_group::classes::conjugacy_classes(&g);
-                json!(cs.iter().map(|c| json!({"rep": c.rep.0, "length": c.length, "order": c.order})).collect::<Vec<_>>())
+                // order, by (order, length, representative), as columns: the
+                // representatives' images in one string, n a class, so the
+                // output is a few bytes a point, not a value each; the cache
+                // is emptied)
+                let cs = group_classes(n, &key, &g);
+                CLASSES.with(|c| *c.borrow_mut() = None);
+                let mut reps = String::new();
+                for (i, x) in cs.iter().flat_map(|c| c.rep.0.iter()).enumerate() {
+                    if i > 0 {
+                        reps.push(',');
+                    }
+                    reps.push_str(&x.to_string());
+                }
+                json!({"reps": reps, "lengths": cs.iter().map(|c| c.length).collect::<Vec<_>>(), "orders": cs.iter().map(|c| c.order).collect::<Vec<_>>()})
+            }
+            "conjugacy_classes_clear" => {
+                CLASSES.with(|c| *c.borrow_mut() = None);
+                Value::Null
             }
             "base" => json!(g.chain.base()),
             "strong_gens" => perm_json(&g.chain.strong_gens()),

@@ -11761,27 +11761,27 @@
   "owner": "Magma compatibility",
   "reason": "the point count over GF(p) for p >= 2^64 is not available (Sage mode's counting, which needs SEA there): turned into Magma mode's refusal in words; an unsupported case, not a cap"
  },
+ "lib/_magma_classes.py :: _admit_classes :: allow = _m._COLLECT_MAX * _m._COLLECT_COST #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_classes.py :: _admit_classes :: e = _m._memory_error(_m._memguard.memory_guard(what, need, allow, \"one computation\", fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
  "lib/_magma_classes.py :: _classes_refusal :: fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "memguard"
-   }
-  },
-  "explained": true,
-  "owner": "Magma compatibility/runtime memory"
- },
- "lib/_magma_classes.py :: _engine_classes :: \"one computation\", fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "memguard"
-   }
-  },
-  "explained": true,
-  "owner": "Magma compatibility/runtime memory"
- },
- "lib/_magma_classes.py :: _engine_classes :: need, allow = order * _element_bytes(n), _m._COLLECT_MAX * _m._COLLECT_COST #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -16952,6 +16952,36 @@
   "owner": "Sage permutation groups/runtime memory"
  },
  "lib/sage_permgroup.py :: _admit_elements :: need, limit = count * _element_bytes(n), _capacity.heap_figure() // 4 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_output :: e = _memguard.memory_guard(\"Listing %s of a permutation group of order %d\" % (what, order), need, limit, \"one computation\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_output :: if need > limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_output :: need, limit = count * _class_output_bytes(n), _capacity.heap_figure() // 4 #0": {
   "class": "2",
   "disposition": {
    "2": {

@@ -1820,9 +1820,24 @@ test("ConjugacyClasses of a group other than Sym(n) is admitted at its boundary:
     "run('Alt(4) at the bound', lambda: len(c._engine_classes(g.alt(4))))",
     "m._COLLECT_COST -= 1",
     "run('Alt(4) one byte past it', lambda: len(c._engine_classes(g.alt(4))))",
+    // (the output, admitted by the classes' number once the engine has counted them: an abelian group's are as
+    // many as its elements, 1024 of 20 points here, whose output outweighs their enumeration, 106496 bytes)
+    "def swap(i):",
+    "    im = list(range(1, 21)); im[2 * i], im[2 * i + 1] = im[2 * i + 1], im[2 * i]",
+    "    return tuple(im)",
+    "E = g.MPermGroup(20, [swap(i) for i in range(10)])",
+    "print('output per class', c._class_output_bytes(20), 'enumeration', 1024 * c._element_bytes(20))",
+    "m._COLLECT_MAX, m._COLLECT_COST = 1, 1024 * c._class_output_bytes(20)",
+    "run('C2^10, output at the bound', lambda: len(c._engine_classes(E)))",
+    "m._COLLECT_COST -= 1",
+    "run('C2^10, output one byte past it', lambda: len(c._engine_classes(E)))",
+    "run('C2^10, its number of classes (no output)', lambda: c.number_of_classes(E))",
+    "run('then another group', lambda: len(c._engine_classes(g.alt(4))))",
   ].join("\n");
   const r = spawnSync(process.execPath, [cli, "-c", py], { encoding: "utf8", timeout: WALL(120000) });
-  assert.equal(r.stdout, ["per element 40 4024", "Alt(4) at the bound admitted 4", "Alt(4) one byte past it refused True", ""].join("\n"), r.stderr);
+  assert.equal(r.stdout, ["per element 40 4024", "Alt(4) at the bound admitted 4", "Alt(4) one byte past it refused True",
+    "output per class 220 enumeration 106496", "C2^10, output at the bound admitted 1024", "C2^10, output one byte past it refused True",
+    "C2^10, its number of classes (no output) admitted 1024", "then another group admitted 4", ""].join("\n"), r.stderr);
 });
 
 test("ConjugacyClasses of a group other than Sym(n): Sagebrush's canonical representatives (each class's least element) and order (element order, length, representative), pinned", () => {
