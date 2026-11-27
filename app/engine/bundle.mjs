@@ -107,12 +107,14 @@ function main(argv) {
   const bin = join(tauri, "binaries", `sagebrush-node-${pin.triple}`);
   copyFileSync(join(unpack, top, "bin", "node"), bin);
   chmodSync(bin, 0o755);
+  let patchelf = null;
   if (pin.patched_sha256) {
     const pe = fetchPinned(cache, PATCHELF.file, `https://github.com/NixOS/patchelf/releases/download/${PATCHELF.version}/${PATCHELF.file}`, PATCHELF.sha256);
     const peDir = join(unpack, "patchelf");
     mkdirSync(peDir, { recursive: true });
     execFileSync("tar", ["-xzf", pe, "-C", peDir, "./bin/patchelf"]);
-    execFileSync(join(peDir, "bin", "patchelf"), ["--set-rpath", "$ORIGIN/../lib", bin]);
+    patchelf = join(peDir, "bin", "patchelf");
+    execFileSync(patchelf, ["--set-rpath", "$ORIGIN/../lib", bin]);
     chmodSync(bin, 0o755);
     const got = sha256(readFileSync(bin));
     if (got !== pin.patched_sha256) throw new Error(`the Node with its RUNPATH: SHA-256 ${got}, not the pinned ${pin.patched_sha256}`);
@@ -130,7 +132,6 @@ function main(argv) {
     npmCli: join(unpack, top, "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     node: { version: NODE.version, sha256: sha256(nodeBytes), size: nodeBytes.length },
   });
-  rmSync(unpack, { recursive: true, force: true });
 
   // the engine, and the interpreter's files
   for (const f of ENGINE_FILES) copyFileSync(join(here, f), join(engine, f));
@@ -144,8 +145,13 @@ function main(argv) {
   rmSync(native, { force: true });
   if (addon !== null) {
     copyFileSync(addon, native);
+    // (Linux: the AppImage's bundler sets RUNPATH $ORIGIN on every shared library it finds, this one too, after
+    // build.rs has pinned its bytes; so it gets exactly that RUNPATH here first, from the same pinned patchelf as the
+    // Node, and the bundler's patch changes no byte: the .deb, the .rpm and the AppImage ship the bytes build.rs pins)
+    if (patchelf) execFileSync(patchelf, ["--set-rpath", "$ORIGIN", native]);
     chmodSync(native, 0o755);
   }
+  rmSync(unpack, { recursive: true, force: true });
   const n = readdirSync(join(engine, "root", "lib")).length;
   console.log(`engine bundled: Node ${NODE.version} (${pin.triple}), ${ENGINE_FILES.length} engine files, the interpreter's files (${n} entries in lib/)`);
   console.log(`agent bundled: ${agent.files} files, MANIFEST.json ${agent.sha256}`);
