@@ -158,3 +158,16 @@ test("an anonymous function made in an anonymous function resolves functions and
   assert.equal(r.err, "");
   assert.equal(r.out, "pi|3.1416\nnumel|3\nmax|4\nreturned|3.1416\nstruct|4\nvar|6\nparam|6.1416\ndeep|7\n");
 });
+
+test("an anonymous function made after clear of a variable named like a function or constant: the function", () => {
+  // (the variable while it exists, its value kept by the anonymous function made then; once cleared, the name's)
+  const r = run({ "main.m": lines(
+    "pi = 3; clear pi",
+    "f = @() pi; g = @() sin(pi/2); h = @() feval(@() pi);",
+    "fprintf('cleared|%.5f %g %.5f\\n', f(), g(), h());",
+    "pi = 3; k = @() pi; clear pi; fprintf('snapshot|%g\\n', k());",
+    "y = 2; m = @(t) t + y; clear y; fprintf('captured|%g\\n', m(1));",
+    "x = 5; clear x; try, q = @() x; q(); catch e, fprintf('gone|%s\\n', e.message); end") });
+  assert.equal(r.err, "");
+  assert.equal(r.out, "cleared|3.14159 1 3.14159\nsnapshot|3\ncaptured|3\ngone|Unrecognized function or variable 'x'.\n");
+});
