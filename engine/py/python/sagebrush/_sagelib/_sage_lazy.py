@@ -282,4 +282,3 @@ def lazy_has(ns, name):
     that isn't a session's."""
     s = _session_of(ns)
     return s is not None and s._has(name)
-
