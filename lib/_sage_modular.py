@@ -108,7 +108,6 @@ def _cyclotomic(m):
     return f
 
 
-
 def _qfrac(t):
     """t as an exact Fraction (Sage's numerator() methods, or Python's
     numerator attributes: plain ints failed, the systematic review's
@@ -472,6 +471,14 @@ class Gamma0:
     def __repr__(self):
         return _group_name(self._N)
 
+    def __getattr__(self, name):
+        if name in _MORE_GAMMA0 and _load_modsym():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_GAMMA0)
+
     def __eq__(self, other):
         return isinstance(other, Gamma0) and other._N == self._N
 
@@ -524,6 +531,7 @@ class Gamma0:
         d = self._dims(k)
         return d["cusp"] + d["eisenstein"]
 
+
     def dimension_new_cusp_forms(self, k=2):
         """The dimension of the new subspace of cusp forms of weight k on Gamma0(N).
 
@@ -537,6 +545,58 @@ class Gamma0:
             5
         """
         return self._dims(k)["new"]
+
+
+# Gamma0's and ModularSymbols' methods that load on first use, from
+# lib/_sage_modsym.py: a session that never calls them (Magma mode's, among
+# others) does not hold them.  The first lookup of one of these names copies
+# them onto the classes.
+_MORE_GAMMA0 = frozenset([
+    "index", "projective_index", "nu2", "nu3", "ncusps", "genus", "cusps", "cusp_width",
+    "is_even", "is_odd", "is_congruence", "sturm_bound",
+])
+_MORE_MODSYM = frozenset([
+    "_exact", "hecke_matrix", "basis", "manin_symbols_basis", "sturm_bound", "_split",
+    "cuspidal_submodule", "eisenstein_submodule", "cuspidal_subspace", "eisenstein_subspace",
+    "is_cuspidal", "is_eisenstein", "new_submodule", "old_submodule",
+])
+
+
+def _load_modsym():
+    """Copy lib/_sage_modsym.py's methods onto Gamma0 and ModularSymbols
+    (once); True when they are there.
+
+    EXAMPLES::
+
+        sage: import _sage_modular  # sagebrush only
+        sage: _sage_modular._load_modsym(), _sage_modular._MORE_MODSYM <= set(dir(_sage_modular.ModularSymbols))  # sagebrush only
+        (True, True)
+    """
+    if "hecke_matrix" not in ModularSymbols.__dict__:
+        import _sage_modsym as m
+        for cls, more, names in ((Gamma0, m.Gamma0Methods, _MORE_GAMMA0), (ModularSymbols, m.ModularSymbolsMethods, _MORE_MODSYM)):
+            got = {k for k in vars(more) if not k.startswith("__")}
+            if got != names:
+                raise AssertionError("_sage_modsym and _MORE_* disagree: %s" % sorted(got ^ names))
+            for k in names:
+                setattr(cls, k, vars(more)[k])
+    return True
+
+
+def Cusp(a, b=None):
+    """A cusp a/b of P^1(Q) (Infinity for b = 0).
+
+    EXAMPLES::
+
+        sage: Cusp(1, 2), Cusp(Infinity), Cusp(3/6), Cusp(4, 0)
+        (1/2, Infinity, 1/2, Infinity)
+        sage: Gamma0(12).cusps()
+        [0, 1/6, 1/4, 1/3, 1/2, Infinity]
+        sage: Gamma0(12).cusps()[0].parent()
+        Set P^1(QQ) of all cusps
+    """
+    import _sage_modsym
+    return _sage_modsym._Cusp(a, b)
 
 
 def _primitive_root(q, p):
@@ -1056,6 +1116,7 @@ class ModularSymbols:
             return PolynomialRing(ZZ, var)([row[0] for row in c])
         return Polynomial(c, var, m, _field_order(self._chi))
 
+
     def hecke_operator(self, n):
         """The Hecke operator T_n on the space.
 
@@ -1069,6 +1130,14 @@ class ModularSymbols:
         return HeckeOperator(self, int(n))
 
     T = hecke_operator
+
+    def __getattr__(self, name):
+        if name in _MORE_MODSYM and _load_modsym():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_MODSYM)
 
     def __repr__(self):
         if self._chi is None:
@@ -1149,16 +1218,16 @@ class HeckeOperator:
         return _HeckeAlgebra(self._M)
 
     def matrix(self):
-        """The matrix of T_n (on Sagebrush's basis, which need not be Sage's).
+        """The matrix of T_n on Sage's basis.
 
         EXAMPLES::
 
-            sage: ModularSymbols(11).T(2).matrix()  # sagebrush only
-            Traceback (most recent call last):
-            ...
-            NotImplementedError: Hecke matrices are not exposed by the engine yet; use charpoly()
+            sage: ModularSymbols(11).T(2).matrix()
+            [ 3  0 -1]
+            [ 0 -2  0]
+            [ 0  0 -2]
         """
-        raise NotImplementedError("Hecke matrices are not exposed by the engine yet; use charpoly()")
+        return self._M.hecke_matrix(self._n)
 
     def __repr__(self):
         return "Hecke operator T_%d on %r" % (self._n, self._M)

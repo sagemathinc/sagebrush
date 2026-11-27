@@ -22,7 +22,7 @@ __all__ = [
     "PermutationGroup", "PermutationGroupElement", "SymmetricGroup", "AlternatingGroup",
     "CyclicPermutationGroup", "DihedralGroup", "MathieuGroup", "PSL", "PGL", "KleinFourGroup", "TransitiveGroup", "TransitiveGroups",
     # modular forms and elliptic curves (Sagebrush's engines)
-    "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "DirichletGroup", "EllipticCurve",
+    "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "Cusp", "DirichletGroup", "EllipticCurve",
     "Newforms", "newform_orbits",
     # Hilbert modular forms over Q(sqrt(5)) (engine/hmf; PSAGE's names)
     "HilbertModularForms",
@@ -141,7 +141,7 @@ def show(obj, *more, **options):
 
 
 _RICH_DISPLAY = ("_repr_svg_", "_repr_png_", "_repr_html_", "_repr_mimebundle_", "_ipython_display_")
-from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
+from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, Cusp, DirichletGroup,
                            EllipticCurve, Newforms, newform_orbits)
 from _sage_hmf import HilbertModularForms
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
