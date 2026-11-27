@@ -13,7 +13,7 @@ const names = (ms) => ms.map((m) => m.name).join(",");
 // (the repository's own: core's 0001-0005, then this directory's 0006-0015, then core's 0016 (the generic budget claims),
 // contiguous)
 const real = migrations();
-ok(names(real) === "0001_init.sql,0002_purge_indexes.sql,0003_sync_accounts.sql,0004_version_titles.sql,0005_upload_receipts.sql,0006_admin_visibility.sql,0007_client_floor.sql,0008_activity.sql,0009_remotes.sql,0010_remote_usage.sql,0011_remote_agents.sql,0012_identities.sql,0013_session_refresh.sql,0014_identity_email.sql,0015_session_idle.sql,0016_budget_claims.sql,0017_admin_view_targets.sql", `the repository's order: ${names(real)}`);
+ok(names(real) === "0001_init.sql,0002_purge_indexes.sql,0003_sync_accounts.sql,0004_version_titles.sql,0005_upload_receipts.sql,0006_admin_visibility.sql,0007_client_floor.sql,0008_activity.sql,0009_remotes.sql,0010_remote_usage.sql,0011_remote_agents.sql,0012_identities.sql,0013_session_refresh.sql,0014_identity_email.sql,0015_session_idle.sql,0016_budget_claims.sql,0017_admin_view_targets.sql,0018_session_reauth.sql", `the repository's order: ${names(real)}`);
 const core = (m) => m.path.includes(join("web", "share", "migrations")) && !m.path.includes(join("cloud", "share"));
 ok(real.slice(0, 5).every(core) && real.slice(5, 15).every((m) => m.path.includes(join("web", "cloud", "share", "migrations"))) && core(real[15]), "each from its own directory");
 
