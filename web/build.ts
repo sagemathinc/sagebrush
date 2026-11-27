@@ -916,6 +916,9 @@ if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-do
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });
+// (the 3D view's page, /space/: its viewer, chunks, examples and the small project, with its own policy in _headers)
+if (hasSite) rmSync(join(siteDir, "public", "space"), { recursive: true, force: true });
+if (hasSite) cpSync(join(here, "dist", "space"), join(siteDir, "public", "space"), { recursive: true });
 // (the articles, the blog and the examples gallery, and the sitemap of them all: web/build-sitemap.ts)
 if (hasSite) await (await import("./build-sitemap.ts")).buildSitemap();
 // (the service worker's test hook is in no deployable directory: web/sw-hook.mts)
