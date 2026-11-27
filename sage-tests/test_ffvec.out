@@ -1,0 +1,32 @@
+v.inner_product(w) -> 2
+v.pairwise_product(w) -> (2, 0, 0)
+v.outer_product(w) -> [ 2  5  0]
+[ 0  0  0]
+[ 6 15  0]
+v.support() -> [0, 2]
+w.monic() -> (1, 53, 0)
+v.monic() -> (1, 0, 3)
+z.monic() -> (0, 0, 0)
+v.lift() -> (1, 0, 3)
+w.lift_centered() -> (2, 5, 0)
+vector(F, [100, 51, 50, 0]).lift_centered() -> (-1, -50, 50, 0)
+v.concatenate(w) -> (1, 0, 3, 2, 5, 0)
+z.support() -> []
+v.normalized() -> ArithmeticError: absolute value not defined on integers modulo n.
+w.normalized() -> ArithmeticError: absolute value not defined on integers modulo n.
+u9.inner_product(u9) -> a + 2
+u9.pairwise_product(u9) -> (0, a + 1, 1)
+u9.monic() -> (0, 1, a + 2)
+u9.outer_product(u9) -> [    0     0     0]
+[    0 a + 1     a]
+[    0     a     1]
+u9.concatenate(v) -> TypeError: unable to find a common ring for all elements
+v.concatenate(u9) -> TypeError: unable to find a common ring for all elements
+b2.inner_product(b2) -> 0
+b2.lift() -> (1, 0, 1)
+b2.lift_centered() -> (1, 0, 1)
+v.pairwise_product(vector(F, [1, 2])) -> TypeError: no common canonical parent for objects with parents: 'Vector space of dimension 3 over Finite Field of size 101' and 'Vector space of dimension 2 over Finite Field of size 101'
+v.inner_product(vector(F, [1, 2])) -> ArithmeticError: degrees (3 and 2) must be the same
+v.lift().parent() -> Ambient free module of rank 3 over the principal ideal domain Integer Ring
+w.lift_centered().parent() -> Ambient free module of rank 3 over the principal ideal domain Integer Ring
+v.concatenate(w).parent() -> Vector space of dimension 6 over Finite Field of size 101

@@ -1,7 +1,8 @@
 """The iteration and allocation sites of Sagebrush's matrix and vector code,
 for test/matrix-alloc.test.ts: a change detector.
 
-In lib/_sage_matrix.py, lib/_sage_matrix_sr.py, lib/_sage_ffmat.py (with its binary
+In lib/_sage_matrix.py, lib/_sage_matrix_sr.py, lib/_sage_ffmat.py (with its methods
+loaded on first use, lib/_sage_ffmat_more.py, and its binary
 route, lib/_sage_ffmat_bin.py) and the matrix part of
 lib/_sage_padic.py it lists, by function, conservatively:
 
@@ -33,7 +34,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FULL = ["lib/_sage_matrix.py", "lib/_sage_matrix_sr.py", "lib/_sage_ffmat.py", "lib/_sage_ffmat_bin.py", "lib/_sage_padic.py"]
+FULL = ["lib/_sage_matrix.py", "lib/_sage_matrix_sr.py", "lib/_sage_ffmat.py", "lib/_sage_ffmat_more.py", "lib/_sage_ffmat_bin.py", "lib/_sage_padic.py"]
 # lib/_sage_padic.py: only its matrix section
 PADIC_FROM = "# ------------------------------------------------------------------ matrices"
 MATERIALIZERS = {

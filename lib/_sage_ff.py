@@ -182,6 +182,103 @@ class IntegerModRing_:
     def __reduce__(self):
         return (GF if self._is_gf else IntegerModRing, (self._n,))
 
+    # ---- the unit group, roots of unity, squares (fields only here)
+    def _units_field(self, what):
+        if not self.is_field():
+            raise NotImplementedError("%s of %r (not a field) is not supported yet" % (what, self))
+
+    def factored_order(self):
+        """The order q, factored.
+
+        EXAMPLES::
+
+            sage: GF(101).factored_order(), GF(9, 'a').factored_order()
+            (101, 3^2)
+        """
+        self._units_field("factored_order")
+        return _sa().factor(self.order())
+
+    def factored_unit_order(self):
+        """(q - 1, factored,): the order of the unit group, in a tuple.
+
+        EXAMPLES::
+
+            sage: GF(101).factored_unit_order()
+            (2^2 * 5^2,)
+        """
+        self._units_field("factored_unit_order")
+        return (_sa().factor(self.order() - 1),)
+
+    def unit_group_exponent(self):
+        """q - 1 (the unit group is cyclic).
+
+        EXAMPLES::
+
+            sage: GF(101).unit_group_exponent()
+            100
+        """
+        self._units_field("unit_group_exponent")
+        return _Integer(int(self.order()) - 1)
+
+    def zeta_order(self):
+        """q - 1: the order of the largest group of roots of unity.
+
+        EXAMPLES::
+
+            sage: GF(101).zeta_order(), GF(2).zeta_order()
+            (100, 1)
+        """
+        self._units_field("zeta_order")
+        return _Integer(int(self.order()) - 1)
+
+    def zeta(self, n=None):
+        """A primitive n-th root of unity: g^((q - 1)/n) for the
+        multiplicative generator g (n = q - 1 by default: g itself).
+
+        EXAMPLES::
+
+            sage: GF(101).zeta(5), GF(101).zeta(4), GF(101).zeta()
+            (95, 10, 2)
+            sage: GF(101).zeta(3)
+            Traceback (most recent call last):
+            ...
+            ValueError: no 3th root of unity in Finite Field of size 101
+        """
+        self._units_field("zeta")
+        N = int(self.order()) - 1
+        n = N if n is None else int(n)
+        if n <= 0 or N % n:
+            raise ValueError("no %dth root of unity in %r" % (n, self))
+        return self.multiplicative_generator() ** (N // n)
+
+    def quadratic_nonresidue(self):
+        """The first element, in the field's order, that is not a square
+        (None in characteristic 2, where every element is).
+
+        EXAMPLES::
+
+            sage: GF(101).quadratic_nonresidue(), GF(9, 'a').quadratic_nonresidue(), GF(2).quadratic_nonresidue()
+            (2, a, None)
+        """
+        self._units_field("quadratic_nonresidue")
+        if int(self.characteristic()) == 2:
+            return None
+        for x in self:
+            if x and not x.is_square():
+                return x
+
+    def is_conway(self):
+        """False: a prime field has no Conway modulus to be defined by.
+
+        EXAMPLES::
+
+            sage: GF(101).is_conway()
+            False
+        """
+        if not self._is_gf:
+            raise AttributeError("'IntegerModRing_generic_with_category' object has no attribute 'is_conway'")
+        return False
+
     # ---- structure
     def order(self):
         """The number of elements.
@@ -1934,6 +2031,99 @@ class FiniteField_ext:
             True
         """
         return True
+
+    # ---- the unit group, roots of unity, squares (fields only here)
+    def _units_field(self, what):
+        pass  # (always a field)
+
+    def factored_order(self):
+        """The order q, factored.
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').factored_order()
+            3^2
+        """
+        self._units_field("factored_order")
+        return _sa().factor(self.order())
+
+    def factored_unit_order(self):
+        """(q - 1, factored,): the order of the unit group, in a tuple.
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').factored_unit_order()
+            (2^3,)
+        """
+        self._units_field("factored_unit_order")
+        return (_sa().factor(self.order() - 1),)
+
+    def unit_group_exponent(self):
+        """q - 1 (the unit group is cyclic).
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').unit_group_exponent()
+            8
+        """
+        self._units_field("unit_group_exponent")
+        return _Integer(int(self.order()) - 1)
+
+    def zeta_order(self):
+        """q - 1: the order of the largest group of roots of unity.
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').zeta_order()
+            8
+        """
+        self._units_field("zeta_order")
+        return _Integer(int(self.order()) - 1)
+
+    def zeta(self, n=None):
+        """A primitive n-th root of unity: g^((q - 1)/n) for the
+        multiplicative generator g (n = q - 1 by default: g itself).
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').zeta(4), GF(9, 'a').zeta()
+            (a + 1, a)
+        """
+        self._units_field("zeta")
+        N = int(self.order()) - 1
+        n = N if n is None else int(n)
+        if n <= 0 or N % n:
+            raise ValueError("no %dth root of unity in %r" % (n, self))
+        return self.multiplicative_generator() ** (N // n)
+
+    def quadratic_nonresidue(self):
+        """The first element, in the field's order, that is not a square
+        (in characteristic 2 every element is: Sage's ValueError).
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').quadratic_nonresidue()
+            a
+            sage: GF(4, 'b').quadratic_nonresidue()
+            Traceback (most recent call last):
+            ...
+            ValueError: there are no non-squares in finite fields of even order
+        """
+        if self._p == 2:
+            raise ValueError("there are no non-squares in finite fields of even order")
+        for x in self:
+            if x and not x.is_square():
+                return x
+
+    def is_conway(self):
+        """Whether the modulus is the Conway polynomial.
+
+        EXAMPLES::
+
+            sage: GF(9, 'a').is_conway(), GF(9, 'b', modulus=GF(3)['t']([1, 0, 1])).is_conway()
+            (True, False)
+        """
+        return list(self._f) == list(_conway(self._p, self._n))
 
     def is_finite(self):
         """True.
@@ -3785,15 +3975,22 @@ class PolynomialRing_ff_:
 
     def irreducible_element(self, n, algorithm=None):
         """An irreducible polynomial of degree n (the Conway polynomial over a
-        prime field when available, else the least irreducible one).
+        prime field when available, else the least irreducible one; with
+        algorithm='first_lexicographic', the first in monics() order).
 
         EXAMPLES::
 
             sage: GF(5)['x'].irreducible_element(3)
             x^3 + 3*x + 3
+            sage: GF(5)['x'].irreducible_element(3, algorithm='first_lexicographic')
+            x^3 + x + 1
         """
         B = self._base
-        if isinstance(B, IntegerModRing_) and B.is_field():
+        if int(n) < 1:
+            raise ValueError("degree must be at least 1")
+        if algorithm not in (None, "first_lexicographic"):
+            raise NotImplementedError("irreducible_element with algorithm=%r is not supported yet (only 'first_lexicographic')" % algorithm)
+        if algorithm is None and isinstance(B, IntegerModRing_) and B.is_field():
             try:
                 return self(_conway(B._n, int(n)))
             except NotImplementedError:
@@ -3802,6 +3999,72 @@ class PolynomialRing_ff_:
             if f.is_irreducible():
                 return f
         raise ArithmeticError("no irreducible polynomial")
+
+    def monics(self, of_degree=None, max_degree=None):
+        """The monic polynomials of one degree, or of every degree up to a
+        bound, in Sage's order (by degree; then the coefficients from x^(n-1)
+        down, each in the field's own order).
+
+        EXAMPLES::
+
+            sage: T.<z> = GF(2)[]; list(T.monics(of_degree=2))
+            [z^2, z^2 + 1, z^2 + z, z^2 + z + 1]
+            sage: list(GF(3)['u'].monics(max_degree=1))
+            [1, u, u + 1, u + 2]
+        """
+        if (of_degree is None) == (max_degree is None):
+            raise ValueError("you should pass exactly one of of_degree and max_degree")
+        lo, hi = (int(of_degree), int(of_degree)) if of_degree is not None else (0, int(max_degree))
+        for d in range(lo, hi + 1):
+            for f in self._monic_polys(d):
+                yield f
+
+    def lagrange_polynomial(self, points):
+        """The polynomial of least degree through the points (x_i, y_i).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; R.lagrange_polynomial([(1, 2), (2, 5), (3, 10)]), R.lagrange_polynomial([])
+            (x^2 + 1, 0)
+        """
+        B = self._base
+        pts = [(B(a), B(b)) for a, b in points]
+        x = self.gen()
+        r = self(0)
+        for i, (xi, yi) in enumerate(pts):
+            num, den = self(1), B.one()
+            for j, (xj, _) in enumerate(pts):
+                if j != i:
+                    num = num * (x - xj)
+                    den = den * (xi - xj)
+            r = r + num * (yi / den)
+        return r
+
+    def cyclotomic_polynomial(self, n):
+        """The n-th cyclotomic polynomial, prod over d | n of (x^d - 1)^mu(n/d),
+        in this ring.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; R.cyclotomic_polynomial(12), R.cyclotomic_polynomial(1)
+            (x^4 + 100*x^2 + 1, x + 100)
+            sage: GF(2)['z'].cyclotomic_polynomial(12)
+            z^4 + z^2 + 1
+        """
+        n = int(n)
+        if n <= 0:
+            raise ArithmeticError("n=%d must be positive" % n)
+        x = self.gen()
+        num, den = self(1), self(1)
+        for d in range(1, n + 1):
+            if n % d:
+                continue
+            mu = _moebius(n // d)
+            if mu == 1:
+                num = num * (x ** d - 1)
+            elif mu == -1:
+                den = den * (x ** d - 1)
+        return num // den
 
     def _monic_polys(self, n):
         els = list(self._base)
@@ -4648,6 +4911,295 @@ class Polynomial_ff:
         # (as Sage: the coefficient at m's degree, whatever m's other terms)
         return self[max(m.degree(), 0)] if m else self._ring._base.zero()
 
+    def compose_mod(self, other, modulus):
+        """self(other) modulo modulus, by Horner's rule reducing as it goes.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; f = x^5 + 3*x + 1; (x^3 + 1).compose_mod(x + 2, f)
+            x^3 + 6*x^2 + 12*x + 9
+            sage: f.compose_mod(x^2, x^3 + x + 1), (x^3 + 1).compose_mod(x + 2, x^2)
+            (x^2 + 3*x + 4, 12*x + 9)
+        """
+        g, m = self._coerce(other), self._coerce(modulus)
+        if g is None or m is None:
+            raise TypeError("compose_mod needs polynomials over the same ring")
+        g = g % m
+        r = Polynomial_ff(self._ring, [])
+        for c in reversed(self._c):
+            r = (r * g + self._ring(c)) % m
+        return r
+
+    def modular_composition(self, other, modulus):
+        """self(other) modulo modulus: the same as compose_mod.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^3 + 1).modular_composition(x + 2, x^5 + 3*x + 1)
+            x^3 + 6*x^2 + 12*x + 9
+        """
+        return self.compose_mod(other, modulus)
+
+    def minpoly_mod(self, other):
+        """The minimal polynomial of self modulo other (of its image in
+        R/(other)): the first linear relation among its powers.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; f = x^5 + 3*x + 1; (x^2).minpoly_mod(f)
+            x^5 + 6*x^3 + 9*x + 100
+            sage: R(5).minpoly_mod(f), (x^2 + 1).minpoly_mod(x^2 + 1)
+            (x + 96, x)
+        """
+        self._need_field("minpoly_mod")
+        m = self._coerce(other)
+        n = m.degree()
+        B = self._ring._base
+        a = self % m
+        # (reduced rows: each power's coordinates, eliminated against the
+        # ones before, with the combination of powers that produced it)
+        basis = []  # (pivot, row, combo)
+        p = self._ring(1)
+        for k in range(n + 1):
+            row = p.padded_list(n)
+            combo = [B.zero()] * k + [B.one()]
+            for piv, brow, bcombo in basis:
+                c = row[piv]
+                if c:
+                    row = [x - c * y for x, y in zip(row, brow)]
+                    combo = [x - c * y for x, y in zip(combo, bcombo + [B.zero()] * (len(combo) - len(bcombo)))]
+            piv = next((i for i, x in enumerate(row) if x), None)
+            if piv is None:
+                return Polynomial_ff(self._ring, combo)
+            inv = 1 / row[piv]
+            basis.append((piv, [x * inv for x in row], [x * inv for x in combo]))
+            p = (p * a) % m
+        raise ArithmeticError("no relation among the powers")
+
+    def any_root(self):
+        """A root in the base field (ValueError when there is none); Sage
+        picks one at random, so only membership is guaranteed.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^2 - 4).any_root() in [2, 99], x.any_root()
+            (True, 0)
+        """
+        rs = self.roots(multiplicities=False) if self.degree() > 0 else []
+        if not rs:
+            raise ValueError("no root of polynomial %s can be computed" % self)
+        return rs[0]
+
+    def any_irreducible_factor(self, degree=None):
+        """An irreducible factor (of the given degree); Sage picks one at
+        random among them, so only membership is guaranteed.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^4 + 1).any_irreducible_factor(degree=2).degree()
+            2
+            sage: ((x + 1)*(x^2 + 2)).any_irreducible_factor()
+            x + 1
+        """
+        if self.degree() <= 0:
+            raise ValueError("there are no irreducible factors of %s" % self)
+        fs = [g for g, _ in self.factor()]
+        if degree is not None:
+            fs = [g for g in fs if g.degree() == int(degree)]
+            if not fs:
+                raise ValueError("polynomial %s has no irreducible factor of degree %d" % (self, int(degree)))
+        return min(fs, key=lambda g: g.degree())
+
+    def nth_root(self, n):
+        """The n-th root, when self is an n-th power and the root is unique
+        (n prime to q - 1: no n-th roots of unity but 1). Where several roots
+        exist, Sage's choice comes from its element nth_root, which is not
+        modelled: NotImplementedError.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; ((x + 3)^3).nth_root(3), (2*(x + 1)^3).nth_root(3)
+            (x + 3, 26*x + 26)
+            sage: T.<z> = GF(2)[]; (z^4 + 1).nth_root(2)
+            z^2 + 1
+            sage: (x^2 + 1).nth_root(2)
+            Traceback (most recent call last):
+            ...
+            ValueError: not a 2nd power
+            sage: U.<u> = GF(3)[]; ((u + 1)^2).nth_root(2)  # sagebrush only (Sage: u + 1)
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: nth_root of degree 2 of a polynomial over a field with several such roots is not supported yet
+        """
+        self._need_field("nth_root")
+        n = int(n)
+        if n <= 0:
+            raise ValueError("n (=%d) must be positive" % n)
+        if n == 1 or not self._c:
+            return self
+        q = int(self._ring._base.order())
+        g = _m.gcd(n, q - 1)
+        # (Sage's checks, in its order: the power of x, the constant term
+        # left after it, then the rest)
+        v = self.valuation()
+        if v % n:
+            raise ValueError("not a %s power" % _ordinal(n))
+        c0 = self._c[v]
+        if g != 1 and c0 ** ((q - 1) // g) != 1:
+            raise ValueError("no nth root")
+        F = self.factor()
+        u = F.unit()
+        if any(e % n for _, e in F) or (g != 1 and u ** ((q - 1) // g) != 1):
+            raise ValueError("not a %s power" % _ordinal(n))
+        if g != 1:
+            raise NotImplementedError("nth_root of degree %d of a polynomial over a field with several such roots is not supported yet" % n)
+        r = self._ring(u.nth_root(n))
+        for g, e in F:
+            r = r * g ** (e // n)
+        return r
+
+    def is_primitive(self):
+        """Whether self is irreducible and x generates the multiplicative
+        group of GF(q)[x]/(self).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x + 3).is_primitive(), (x^2 + 1).is_primitive(), R(5).is_primitive()
+            (True, False, False)
+            sage: T.<z> = GF(2)[]; (z^3 + z + 1).is_primitive(), (z^4 + z^3 + z^2 + z + 1).is_primitive()
+            (True, False)
+        """
+        self._need_field("is_primitive")
+        n = self.degree()
+        if n <= 0 or not self.is_irreducible():
+            return False
+        q = int(self._ring._base.order())
+        N = q ** n - 1
+        x = self._ring.gen()
+        if n == 1 and not self._c[0]:
+            # (Sage asks for the order of x mod x, which is 0)
+            raise ValueError("The order of P(=0) does not divide %d" % N)
+        for r, _ in _factor_int(N):
+            # (x^(N/r) mod self by repeated squaring, reducing as it goes)
+            if pow(x, N // r, self) == self._ring(1):
+                return False
+        return True
+
+    def sylvester_matrix(self, other, variable=None):
+        """The Sylvester matrix of self and other: deg(other) rows of self's
+        coefficients, then deg(self) rows of other's, highest first.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^2 + 1).sylvester_matrix(x + 2)
+            [1 0 1]
+            [1 2 0]
+            [0 1 2]
+        """
+        g = self._coerce(other)
+        m, n = self.degree(), g.degree()
+        N = m + n
+        rows = []
+        for k in range(n - 1, -1, -1):
+            rows.append(list(reversed(self.shift(k).padded_list(N))))
+        for k in range(m - 1, -1, -1):
+            rows.append(list(reversed(g.shift(k).padded_list(N))))
+        from _sage_ffmat import matrix
+        return matrix(self._ring._base, N, N, [c for r in rows for c in r])
+
+    def subresultants(self, other):
+        """The nonzero subresultants S_0, ..., S_{d-1} of self and other (d
+        the smaller degree), each by its determinant formula.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^3 + 2*x + 1).subresultants(x^2 + 1)
+            [2, x + 1]
+            sage: (x^2 + 1).subresultants(x^2 + 1)
+            []
+        """
+        self._need_field("subresultants")
+        f, g = self, self._coerce(other)
+        if f.degree() < g.degree():
+            f, g = g, f
+        m, n = f.degree(), g.degree()
+        B = self._ring._base
+        from _sage_ffmat import matrix
+        out = []
+        for j in range(n):
+            L = m + n - j
+            rows = [list(reversed(f.shift(k).padded_list(L))) for k in range(n - j - 1, -1, -1)]
+            rows += [list(reversed(g.shift(k).padded_list(L))) for k in range(m - j - 1, -1, -1)]
+            N = m + n - 2 * j
+            c = []
+            for i in range(j + 1):
+                M = matrix(B, N, N, [x for r in rows for x in (r[:N - 1] + [r[L - 1 - i]])])
+                c.append(M.det())
+            s = Polynomial_ff(self._ring, c)
+            if s:
+                out.append(s)
+        return out
+
+    def inverse_series_trunc(self, prec):
+        """self^-1 as a power series, modulo x^prec (Newton's iteration).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (1 + x).inverse_series_trunc(6)
+            100*x^5 + x^4 + 100*x^3 + x^2 + 100*x + 1
+        """
+        prec = int(prec)
+        if prec <= 0:
+            raise ValueError("the precision must be positive, got %d" % prec)
+        c0 = self[0]
+        if not c0 or not c0.is_unit():
+            raise ValueError("constant term %s is not a unit" % c0)
+        r = self._ring(1 / c0)
+        k = 1
+        while k < prec:
+            k = min(2 * k, prec)
+            r = (r * (self._ring(2) - self.truncate(k) * r)).truncate(k)
+        return r
+
+    def power_trunc(self, n, prec):
+        """self^n modulo x^prec.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).power_trunc(3, 4)
+            27*x^3 + 27*x^2 + 9*x + 1
+        """
+        n, prec = int(n), int(prec)
+        if n < 0:
+            raise ValueError("n must be nonnegative")
+        r = self._ring(1).truncate(prec)
+        b = self.truncate(prec)
+        while n:
+            if n & 1:
+                r = (r * b).truncate(prec)
+            b = (b * b).truncate(prec)
+            n >>= 1
+        return r
+
+    def multiplication_trunc(self, other, n):
+        """self * other modulo x^n.
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(101)[]; (x^5 + 3*x + 1).multiplication_trunc(x^2 + 1, 4)
+            3*x^3 + x^2 + 3*x + 1
+        """
+        n = int(n)
+        B = self._ring._base
+        if n <= 0:
+            # (Sage's classes differ here: over GF(p), p odd, and Z/n a
+            # ValueError; over GF(2) and GF(p^k), k > 1, 0 for n = 0 and the
+            # whole product for n < 0)
+            if isinstance(B, IntegerModRing_) and B._n != 2:
+                raise ValueError("length must be > 0")
+            return self * self._coerce(other) if n < 0 else Polynomial_ff(self._ring, [])
+        return (self.truncate(n) * self._coerce(other).truncate(n)).truncate(n)
+
     def is_irreducible(self):
         """Whether irreducible (Ben-Or / Rabin test over GF(q)).
 
@@ -4910,6 +5462,23 @@ def _sort_key(c):
     if isinstance(c, FiniteFieldElement):
         return int(c.to_integer())
     return 0
+
+
+def _ordinal(n):
+    """'1st', '2nd', '3rd', '4th', ... as Sage writes them."""
+    if 10 <= n % 100 <= 20:
+        return "%dth" % n
+    return "%d%s" % (n, {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th"))
+
+
+def _moebius(n):
+    """The Moebius function of n >= 1."""
+    r = 1
+    for p, e in _factor_int(n):
+        if e > 1:
+            return 0
+        r = -r
+    return r
 
 
 def _sqf_items(f):

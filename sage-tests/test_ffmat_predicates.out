@@ -1,0 +1,39 @@
+S.is_symmetric() -> True
+A.is_symmetric() -> False
+R.is_symmetric() -> False
+E.is_symmetric() -> True
+B.is_diagonal() -> False
+matrix.diagonal(F, [2, 3]).is_diagonal() -> True
+R.is_diagonal() -> False
+E.is_diagonal() -> True
+matrix(F, 2, 2, 3).is_scalar() -> True
+matrix.diagonal(F, [2, 3]).is_scalar() -> False
+matrix(F, 2, 2, 3).is_scalar(3) -> True
+matrix(F, 2, 2, 3).is_scalar(4) -> False
+matrix(F, 2, 2, 0).is_scalar() -> True
+R.is_scalar() -> False
+N.is_nilpotent() -> True
+A.is_nilpotent() -> False
+matrix(F, 2, 2, 0).is_nilpotent() -> True
+E.is_nilpotent() -> True
+matrix(F, [[1, 0], [0, 0]]).is_idempotent() -> True
+A.is_idempotent() -> False
+N.is_singular() -> True
+A.is_singular() -> False
+R.is_singular() -> ValueError: self must be a square matrix
+E.is_singular() -> False
+B.is_triangular() -> False
+B.is_triangular('lower') -> False
+B.is_triangular('upper') -> True
+N.is_triangular() -> False
+N.is_triangular('lower') -> False
+N.transpose().is_triangular('lower') -> True
+R.is_triangular() -> False
+A.is_triangular('sideways') -> False
+matrix.identity(F, 2).is_one() -> True
+A.is_one() -> False
+R.is_one() -> False
+E.is_one() -> True
+M9.is_triangular() -> False
+M9.is_symmetric() -> False
+M9.is_singular() -> False

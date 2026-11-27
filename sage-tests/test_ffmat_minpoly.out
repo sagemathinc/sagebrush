@@ -1,0 +1,15 @@
+A.minimal_polynomial() -> x^3 + 85*x^2 + 89*x + 3
+B.minimal_polynomial() -> x^3 + 94*x^2 + 16*x + 89
+N.minimal_polynomial() -> x^3
+matrix.identity(F, 3).minpoly() -> x + 100
+E.minpoly() -> 1
+B.minpoly().divides(B.charpoly()) -> True
+D.minimal_polynomial() -> x^2 + 91*x + 25
+C.minimal_polynomial() -> x^4 + 100
+S.minimal_polynomial() -> x^2 + 99*x + 98
+B.minimal_polynomial('t') -> t^3 + 94*t^2 + 16*t + 89
+M9.minimal_polynomial() -> x^2 + (a + 2)*x + 2*a + 1
+T2.minimal_polynomial() -> x^3 + x^2 + x
+matrix(F, 3, 3, 0).minpoly() -> x
+R.minimal_polynomial() -> ValueError: minimal polynomial not defined for non-square matrices
+D.minimal_polynomial().parent() -> Univariate Polynomial Ring in x over Finite Field of size 101
