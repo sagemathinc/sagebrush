@@ -39,10 +39,17 @@ function fakeKeys() {
       it.spent = true;
       const id = "dev-" + p.session;
       k.signed.push(id);
-      devices.push({ id, name: p.name, kind: "provisioned", addedAtStart: true, reservation: p.reservation, fingerprint: p.fingerprint, current: false });
+      k.chainAdd(id, p, k.signsAs);
       return { ok: true, device: id };
     },
-    async approve(p) { const id = "dev-" + p.session; k.signed.push(id); return { device: id }; },
+    async approve(p) { const id = "dev-" + p.session; k.signed.push(id); k.chainAdd(id, p, "card"); return { device: id }; },
+    // the replayed chain: kind, addedAtStart and reservation come only from the signed add's `provisioned` field
+    signsAs: "start",
+    chainAdd(id, p, approved) {
+      const provisioned = { reservation: p.reservation, instance: p.instance, retire_on: approved === "start" ? "reservation-retired" : null, approved };
+      devices.push({ id, name: p.name, kind: "provisioned", fingerprint: p.fingerprint, current: false, provisioned,
+        get addedAtStart() { return this.provisioned?.approved === "start"; }, get reservation() { return this.provisioned?.reservation ?? null; } });
+    },
     async removeDevice(id, opts) { k.removed.push({ id, ...opts }); },
     onTokenUsed(cb) { usedCbs.add(cb); return () => usedCbs.delete(cb); },
     deliver(p) { for (const cb of pendingCbs) cb(p); },
@@ -73,6 +80,14 @@ const api = (answer = { machineId: "m1", reservation: "res1" }) => {
   keys.deliver(pend({ session: "s2" }));
   await tick();
   ok(g.state.phase === "warning" && g.state.text === SECOND_KEY && keys.signed.length === 1, "a second key for the machine: a warning, nothing signed");
+}
+{ // the notice reads the replayed chain, not the enroll answer
+  const keys = fakeKeys(), g = new GpuStart(keys, api());
+  keys.signsAs = "card";
+  await g.start("A40");
+  keys.deliver(pend());
+  await tick();
+  ok(g.state.phase === "ready" && g.state.added?.atStart === false, "a chain add not approved at Start: no \"added at Start\" notice");
 }
 { // a key that lands before Start's answer is held, then added
   const keys = fakeKeys();

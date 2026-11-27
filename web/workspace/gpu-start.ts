@@ -155,7 +155,8 @@ export class GpuStart {
     if (r.ok) {
       this.#decided = true;
       this.#intent = null;
-      this.#set({ phase: "ready", machineId, reservation: this.#reservation, added: { device: r.device, name: p.name, fingerprint: p.fingerprint, atStart: true } });
+      const atStart = await this.#addedAtStart(r.device);
+      this.#set({ phase: "ready", machineId, reservation: this.#reservation, added: { device: r.device, name: p.name, fingerprint: p.fingerprint, atStart } });
       return;
     }
     if (r.why === "not-bound") {
@@ -175,7 +176,15 @@ export class GpuStart {
     const s = this.state;
     if (s.phase !== "approve") throw new Error("nothing to approve");
     const { device } = await this.#keys!.approve(s.pending);
-    this.#set({ phase: "ready", machineId: s.machineId, reservation: s.reservation, added: { device, name: s.pending.name, fingerprint: s.pending.fingerprint, atStart: false } });
+    const atStart = await this.#addedAtStart(device);
+    this.#set({ phase: "ready", machineId: s.machineId, reservation: s.reservation, added: { device, name: s.pending.name, fingerprint: s.pending.fingerprint, atStart } });
+  }
+
+  /** "Added at Start" is what this device's replayed chain says (the signed add's provisioned.approved and
+   *  reservation), never the Start answer or a server field. */
+  async #addedAtStart(device: string): Promise<boolean> {
+    const d = (await this.#keys!.devices()).find((x) => x.id === device);
+    return d != null && d.addedAtStart && d.reservation === this.#reservation;
   }
 
   /** The notice's Remove: the device leaves the chain with a new epoch. */
