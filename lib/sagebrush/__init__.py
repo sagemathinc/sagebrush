@@ -17,7 +17,15 @@ from . import modsym, ap, mf, poly, nf, linalg
 from _graphics import figures
 
 __all__ = ["modsym", "ap", "mf", "poly", "nf", "linalg", "capabilities", "limit", "stop_points", "progress_snapshot",
-           "figures"]
+           "figures", "engine_info"]
+
+
+def engine_info():
+    """The engine backend in force and why: {"backend": "native" or "wasm",
+    "why": ...} (design N1: the native engine when the installation has a
+    verified one, else WebAssembly; the browser is always WebAssembly)."""
+    import _sbengine
+    return _sbengine.info()
 
 
 # ---- the agent API (estimates plan r3 §1.1): what this build provides,

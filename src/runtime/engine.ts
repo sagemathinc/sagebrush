@@ -12,7 +12,8 @@ import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule, heapLimit } from "./modules";
 import { JS_ENGINE, JS_HOST } from "./js-engine";
-import { INTR, INTR_CTRL_C, consumeCtrlC, requestCtrlC, takeFlush } from "./interrupt";
+import { INTR, INTR_CTRL_C, NATIVE_CONTROL_BYTE, consumeCtrlC, ctrlCPending, requestCtrlC, takeFlush } from "./interrupt";
+import { loadNativeAddon } from "./native-load";
 import { stdout, stderr } from "./builtins";
 import { fullGc } from "./gc";
 import * as P from "./progress";
@@ -110,6 +111,162 @@ function interrupted(): number {
 
 function engine(): Engine {
   return E ?? createInstance();
+}
+
+// ---------------------------------------------------------------------------
+// The native backend (#7, design N1 r3 "How the runtime picks"): chosen once
+// per session, before the first engine call, from the installation only.
+// - SAGEBRUSH_ENGINE=wasm never loads the addon; SAGEBRUSH_ENGINE=native
+//   requires a verified addon, and its absence or failure is an error in
+//   words on every engine call (never a silent switch to wasm);
+// - otherwise a verified addon (SAGEBRUSH_ADDON, SAGEBRUSH_ADDON_SHA256:
+//   native-load.ts) means native;
+// - otherwise wasm, with one diagnostic when an addon was given but unusable.
+// The browser has no process: always wasm.  engineInfo() is the choice and
+// its reason (sagebrush.engine_info(), caps.engine).
+// ---------------------------------------------------------------------------
+
+/** The backend in force and why. */
+export interface EngineInfo {
+  backend: "native" | "wasm";
+  why: string;
+}
+// (undefined: not chosen yet; null: wasm)
+let NATIVE: any = undefined;
+let nativeRefusal: Error | null = null;
+let info: EngineInfo = { backend: "wasm", why: "no engine call yet" };
+// the session's control words (interrupt.ts: in INTR's shared buffer) and
+// its RUN: each native call is a run of its own, so a Stop (STOP_UPTO = RUN)
+// ends the call in progress and never a later one
+let control: Uint32Array | null = null;
+let nativeRun = 0xffffffff;
+const CONTROL_VERSION = 1;
+
+/** The backend in force (choosing it if no engine call has yet). */
+export function engineInfo(): EngineInfo {
+  try {
+    native();
+  } catch {
+    // (the refusal is the call's to report; info says why)
+  }
+  return { ...info };
+}
+
+/** The native addon in force, or null for wasm; throws the refusal when
+ * SAGEBRUSH_ENGINE=native can't be honoured. */
+function native(): any {
+  if (nativeRefusal) throw nativeRefusal;
+  if (NATIVE === undefined) chooseBackend();
+  if (nativeRefusal) throw nativeRefusal;
+  return NATIVE;
+}
+
+function chooseBackend(): void {
+  NATIVE = null;
+  const p = (globalThis as any).process;
+  const env: Record<string, string | undefined> = p && typeof p === "object" && p.env ? p.env : {};
+  const want = env.SAGEBRUSH_ENGINE || "";
+  const refuse = (why: string) => {
+    info = { backend: "wasm", why };
+    nativeRefusal = new Error(`SAGEBRUSH_ENGINE=native, but ${why}`);
+  };
+  if (want !== "" && want !== "native" && want !== "wasm") {
+    info = { backend: "wasm", why: `SAGEBRUSH_ENGINE is "${want}", not native or wasm` };
+    nativeRefusal = new Error(info.why);
+    return;
+  }
+  if (want === "wasm") {
+    info = { backend: "wasm", why: "SAGEBRUSH_ENGINE=wasm" };
+    return;
+  }
+  const path = env.SAGEBRUSH_ADDON;
+  if (!path) {
+    if (want === "native") return refuse("no native engine is installed (SAGEBRUSH_ADDON is not set)");
+    info = { backend: "wasm", why: "no native engine is installed" };
+    return;
+  }
+  const r = loadNativeAddon(path, env.SAGEBRUSH_ADDON_SHA256 ?? "");
+  let why = r.ok ? "" : r.why;
+  if (r.ok) {
+    try {
+      startNative(r.addon);
+      NATIVE = r.addon;
+      info = { backend: "native", why: "a verified native engine" };
+      return;
+    } catch (err: any) {
+      why = `the native engine could not start (${err?.message ?? err})`;
+    }
+  }
+  if (want === "native") return refuse(why);
+  info = { backend: "wasm", why };
+  // (one diagnostic: an addon was given but is unusable)
+  try {
+    p?.stderr?.write?.(`sagebrush: the native engine is not used: ${why}\n`);
+  } catch {}
+}
+
+/** Claim this process's native session: the control words installed in
+ * INTR's shared buffer, no Stop pending, and the ledger's total source. */
+function startNative(addon: any): void {
+  if (!(INTR.buffer instanceof SharedArrayBuffer) || INTR.buffer.byteLength < NATIVE_CONTROL_BYTE + 16) {
+    throw new Error("no shared memory for the native engine's control words");
+  }
+  const c = new Uint32Array(INTR.buffer, NATIVE_CONTROL_BYTE, 4);
+  c[1] = 0xffffffff;
+  c[2] = 0xffffffff;
+  c[3] = 0;
+  Atomics.store(c, 0, CONTROL_VERSION);
+  // (the capacity module's engine domain: this process's heap from now on)
+  Obj.callObj(Obj.getattr(Obj.hooks.importModule("_capacity"), "_set_native_engine"), []);
+  addon.init(c, CONTROL_VERSION, nativeTotalSource);
+  control = c;
+  nativeRun = 0xffffffff;
+}
+
+/** The ledger's total, asked by the addon on this thread inside a call
+ * (design N1 r3.3): lib/_capacity.py's native_total_answer, a JSON text; the
+ * runtime's KeyboardInterrupt is {"interrupted": true}, any other error
+ * {"error": ...}. */
+function nativeTotalSource(): string {
+  try {
+    const cap = Obj.hooks.importModule("_capacity");
+    const r = Obj.callObj(Obj.getattr(cap, "native_total_answer"), []);
+    return String(r);
+  } catch (err: any) {
+    let ki = false;
+    try {
+      ki = Obj.typeOf(Obj.toPyExc(err)).$mro.includes(Obj.T.KeyboardInterrupt);
+    } catch {}
+    if (ki) return '{"interrupted": true}';
+    return JSON.stringify({ error: String(err?.message ?? err) });
+  }
+}
+
+/** One native call: a run of its own (a Stop already pending applies to
+ * it), the memory share on its cadence, and an interrupted call reported as
+ * the runtime's Ctrl-C. */
+function nativeCall<T>(addon: any, f: () => T): T {
+  nativeRun = (nativeRun + 1) >>> 0;
+  addon.setRun(nativeRun);
+  if (ctrlCPending()) Atomics.store(control!, 1, nativeRun);
+  pushNativeShare(addon);
+  try {
+    return f();
+  } catch (err: any) {
+    // (the addon's errors are "code: message"; an interrupted call is the
+    // Ctrl-C that stopped it, taken by the caller's engineError)
+    if (/^interrupted:/.test(String(err?.message ?? ""))) Atomics.or(INTR, 0, INTR_CTRL_C);
+    throw err;
+  }
+}
+
+let nativeShareAt = -Infinity;
+function pushNativeShare(addon: any): void {
+  const now = shareClock();
+  if (now - nativeShareAt < SHARE_MAX_AGE_MS) return;
+  const [share, ageMs] = memoryShare();
+  nativeShareAt = now - ageMs;
+  addon.setMemoryShare(share);
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +764,8 @@ function callEnded(trapped: boolean) {
 }
 
 export function engineCall(request: string): string {
+  const addon = native();
+  if (addon) return nativeCall(addon, () => addon.engineCall(request));
   const e = engine();
   pushShare(e);
   // an ASCII request (every engine request so far) is written straight
@@ -641,6 +800,20 @@ export function engineCall(request: string): string {
 /** A symbolic-engine call (engine/sym/src/api.rs).  Errors come back in
  *  band ("err\x1fKind\x1fmessage"), also when they abort the instance. */
 export function symCall(request: string): string {
+  const n = native();
+  if (n) {
+    try {
+      return nativeCall(n, () => n.symCall(request));
+    } catch (err) {
+      // (as the wasm path: an aborted call's error, when it left one)
+      let msg = "";
+      try {
+        msg = n.lastError();
+      } catch {}
+      if (msg) return msg;
+      throw err;
+    }
+  }
   const e = engine();
   pushShare(e);
   const req = new TextEncoder().encode(request);
@@ -675,6 +848,8 @@ export function symCall(request: string): string {
 /** A multivariate polynomial call (engine/mpoly): binary request and reply
  *  (sagebrush_mpoly::call_framed); errors come back in band ("er..."). */
 export function mpCall(req: Uint8Array): Uint8Array {
+  const n = native();
+  if (n) return new Uint8Array(nativeCall(n, () => n.mpCall(req)));
   const e = engine();
   pushShare(e);
   const p = e.sb_alloc(req.length);
@@ -700,6 +875,8 @@ export function mpCall(req: Uint8Array): Uint8Array {
  *  band ("er" records); null when the engine predates the entry point (the
  *  caller keeps its JSON path). */
 export function binCall(req: Uint8Array): Uint8Array | null {
+  const n = native();
+  if (n) return new Uint8Array(nativeCall(n, () => n.binCall(req)));
   const e = engine();
   if (!e.sb_bin_call) return null;
   pushShare(e);
@@ -848,6 +1025,9 @@ function reclaimEngine(): void {
 // holder closes it.  While a creation is in progress, none may be opened.
 // ---------------------------------------------------------------------------
 
+/** The native session's instance id in host handles (wasm ids are >= 0). */
+const NATIVE_INSTANCE = -1;
+
 /** An open host obligation (hostReserve), closed by hostRelease. */
 export interface HostHandle {
   readonly instance: number;
@@ -865,6 +1045,17 @@ function hostReply(e: Engine): string {
  * {memory} (the ledger's typed refusal) when it refuses. */
 export function hostReserve(what: string, bytes: number): HostHandle | { memory: any } {
   if (creating !== 0) throw new Error("internal error: a host reservation while an engine instance is being created");
+  const n = native();
+  if (n) {
+    const reply = JSON.parse(n.reserve(what, bytes));
+    if (typeof reply.handle === "number") {
+      oHost++;
+      oHostBytes += bytes;
+      return { instance: NATIVE_INSTANCE, handle: reply.handle, bytes, open: true };
+    }
+    if (reply.memory) return { memory: reply.memory };
+    throw new Error(`internal error: reserve: ${reply.error}`);
+  }
   const e = engine();
   if (typeof e.sb_reserve !== "function") throw new Error("internal error: this engine has no host reservations");
   const w = new TextEncoder().encode(what);
@@ -885,6 +1076,17 @@ export function hostReserve(what: string, bytes: number): HostHandle | { memory:
 /** Grow an open host obligation by `bytes`: null, or {memory} refused. */
 export function hostGrow(t: HostHandle, bytes: number): null | { memory: any } {
   if (creating !== 0) throw new Error("internal error: a host reservation while an engine instance is being created");
+  if (t.instance === NATIVE_INSTANCE) {
+    if (!t.open) throw new Error("internal error: a closed host handle");
+    const reply = JSON.parse(native().grow(t.handle, bytes));
+    if (reply.ok) {
+      t.bytes += bytes;
+      oHostBytes += bytes;
+      return null;
+    }
+    if (reply.memory) return { memory: reply.memory };
+    throw new Error(`internal error: grow: ${reply.error}`);
+  }
   if (!t.open || t.instance !== liveId || E === null) throw new Error("internal error: a host handle of a retired engine instance");
   const s = E.sb_grow!(t.handle, bytes);
   if (s === 0) {
@@ -903,7 +1105,8 @@ export function hostRelease(t: HostHandle): void {
   t.open = false;
   oHost--;
   oHostBytes -= t.bytes;
-  if (t.instance === liveId && E !== null) E.sb_release!(t.handle);
+  if (t.instance === NATIVE_INSTANCE) native().release(t.handle);
+  else if (t.instance === liveId && E !== null) E.sb_release!(t.handle);
 }
 
 /** The memory guards' refusal for a refused creation (lib/_memguard.py). */
@@ -923,7 +1126,7 @@ function creationRefusal(err: CreationRefused): any {
 /** The builtins' catch: a Ctrl-C, a refused creation, or another error. */
 function engineError(err: any): any {
   if (consumeCtrlC()) {
-    reclaimEngine();
+    if (!NATIVE) reclaimEngine();
     return Obj.raise(Obj.T.KeyboardInterrupt);
   }
   if (err instanceof CreationRefused) return Obj.raise(creationRefusal(err));
@@ -1011,6 +1214,14 @@ export const retireTest = {
 };
 
 newBuiltinModule("_sbengine", (m) => {
+  // the backend in force and why: {"backend": "native" | "wasm", "why": ...}
+  m.info = Obj.builtin(() => {
+    const i = engineInfo();
+    const d = Obj.newDict();
+    Obj.dictSet(d, "backend", i.backend);
+    Obj.dictSet(d, "why", i.why);
+    return d;
+  }, "info");
   m.mp = Obj.builtin((req: any) => {
     try {
       const a = req instanceof Obj.PyBytes ? req.a.subarray(0, req.n) : new TextEncoder().encode(String(req));

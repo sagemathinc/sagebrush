@@ -29,7 +29,9 @@ export function loadNativeAddon(path: string, sha256: string): NativeLoad {
     fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
     const st = fs.fstatSync(fd);
     if (!st.isFile()) return { ok: false, why: "the native engine is not a regular file" };
-    if (typeof p.getuid === "function" && st.uid !== p.getuid()) return { ok: false, why: "the native engine is not owned by this user" };
+    // (this user's, or root's: an app installed by an administrator or MDM is root's; either way no one
+    // else can write it, which the mode check below completes)
+    if (typeof p.getuid === "function" && st.uid !== p.getuid() && st.uid !== 0) return { ok: false, why: "the native engine is owned by neither this user nor root" };
     if ((st.mode & 0o022) !== 0) return { ok: false, why: "the native engine is writable by others" };
     const bytes = fs.readFileSync(fd);
     if (crypto.createHash("sha256").update(bytes).digest("hex") !== sha256) return { ok: false, why: "the native engine's sha256 does not match the manifest" };

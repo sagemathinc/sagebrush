@@ -288,6 +288,18 @@
   },
   {
    "file": "engine/interrupt/src/lib.rs",
+   "item": "mod node_host > fn install",
+   "hash": "7ff4d244f064e5510d33c5388d656c7fb6728c3f492fa03fa08467b69e24dc18",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. An unsafe fn whose only operation is storing the control words' pointer (WORDS AtomicU32s that the caller guarantees valid for the process's life: engine/node's init, from a 4-word, 4-aligned Uint32Array over a SharedArrayBuffer it keeps a strong reference to). The words are a Stop request and a run id, read by the interrupt checks; they hold no ledger state."
+  },
+  {
+   "file": "engine/interrupt/src/lib.rs",
+   "item": "mod node_host > fn word",
+   "hash": "b4437dfa5999e14007fc7d40b658703f91e3e336c03959252d3e119e9aa6ae23",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operation derefs install's pointer at index i < WORDS (callers pass the module's VERSION, STOP_UPTO, RUN constants), giving &'static AtomicU32 under install's contract; null before install gives None. Only atomic loads and stores of the Stop/run words follow."
+  },
+  {
+   "file": "engine/interrupt/src/lib.rs",
    "item": "fn poll_host",
    "hash": "498e2ae89c8735cb0ba87f3c274698ef0f748a095577f198acee075133618a4f",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-interrupt (no workspace deps) does not depend on sagebrush-ledger, so it cannot name those types, and it calls the host import `interrupted()` (no arguments, returns a flag). (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
@@ -531,6 +543,24 @@
    "item": "fn nd_potrf",
    "hash": "34b156d404fc295c1553ee8b8763304f37fe0dac9cb05565e21c4b0c450bf360",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-nd (deps: par, optional and native only) does not depend on sagebrush-ledger, so it cannot name those types; this item is compiled only for wasm32 (where `parallel` is off) and touches f64/u32 memory only. The third export that writes memory (CHOL-1: A = R'R on one thread, chol::potrf). Dynamically checked in safe code (engine/nd/src/boundary.rs check_potrf, native-tested with wasm32's limits, potrf_layouts) before any pointer is read or slice made: the descriptor is 4-aligned and in the host's part of memory; each of the three regions it names (A: f64, 8-aligned; work: f64, 8-aligned; report: 4 u32s, 4-aligned) is, when nonempty, at or above __heap_base (never 0, never the module's statics or linker stack), within memory.size, at most isize::MAX bytes, inside the job's arena, and disjoint from the other two; the descriptor lies outside the arena and the calling thread's frame below it; lda >= max(n, 1) and every length (A's span, work_len f64s) is computed in checked arithmetic; work_len >= chol::potrf_work_len(n) (itself checked, None on overflow). Pointers are made with with_exposed_provenance(_mut) from the checked absolute addresses; empty regions become empty slices. The factorization itself (chol::potrf, through trsm and the GEMM update) is safe Rust on those slices and re-checks the layout and the work. A refused job returns 0 having written nothing, the report included. Trusted-host preconditions (stated on the function, as nd_solve's): the caller's whole stack is disjoint from module-owned memory, the descriptor and the arena; A, work and the report are this call's alone until it returns; nothing writes the descriptor during the call. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/node/src/engine.rs",
+   "item": "fn init",
+   "hash": "49655621648542d582470dd63d66cac64125e75c8d263778d3b3bf9f66b3a6b3",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations: viewing the checked typed array's data (Uint32, exactly WORDS long, byte offset a multiple of 4) as WORDS AtomicU32s, and node_host::install with that pointer after the buffer is strongly referenced (never released). The ledger's total source is registered through register_total_source (its own item); no ledger object is touched here."
+  },
+  {
+   "file": "engine/node/src/engine.rs",
+   "item": "fn register_total_source",
+   "hash": "e278d7041f659dcad4aae823f523a7e90b99f97e52799cd90a0dd67e323cd1ab",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operation is napi_create_reference on this call's env and function value (count 1, never deleted), stored in TOTAL_SOURCE. It then registers total_answer with the ledger through its safe API (set_total_host_asking); the ledger's own objects are never reached through a pointer."
+  },
+  {
+   "file": "engine/node/src/engine.rs",
+   "item": "fn call_total_source",
+   "hash": "4df1c7752074c0a45b29c9f5c85fef914e84e4cb701ababe40b62dd82119fde3",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations are N-API calls on the outermost export's env on this thread (ASK_ENV) with local out-pointers: get the referenced source, call it with no arguments, read its result as a UTF-8 string into a local Vec sized by a first length query, and clear any pending JS exception on each failure path. It returns the text (or None); total_answer parses it and the ledger receives a HostAnswer by value through its safe API."
   },
   {
    "file": "engine/poly/src/lib.rs",
@@ -781,19 +811,19 @@
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_reserve",
-   "hash": "b8bc44e1b87938e7566d4c7ffad2e8cf2f327698210643d2455fb96a8eda5dbf",
+   "hash": "e69931426a440d08ad2c1992d2d7e8773e6223c75e9d48e87507ed99201b66fa",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations only read the host-written `what` bytes. The Reservation itself is created, grown or dropped through the ledger's safe API (C-2c-ii's capability token gates it), never through unsafe code."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_grow",
-   "hash": "79dd56cb7ec90ea737a349b8b1eb7a264323bea9a98d2f3fcabcede1082d1187",
+   "hash": "dea7e25a5243c06d71f48fe47b44900ab0bfd8175f78b3bd9d4c04e69b941351",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations none: the allow is for no_mangle. The Reservation itself is created, grown or dropped through the ledger's safe API (C-2c-ii's capability token gates it), never through unsafe code."
   },
   {
    "file": "engine/web/src/lib.rs",
    "item": "fn sb_release",
-   "hash": "a4cb7a9d9a911ab49ddecbe42847ba38d22b7d37f844f7d978cb73125e39681f",
+   "hash": "cc19bcb69b8bae1105250b2faae40b876b8749c357ae659936c61fa0a4f8cb96",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Its unsafe operations none: the allow is for no_mangle. The Reservation itself is created, grown or dropped through the ledger's safe API (C-2c-ii's capability token gates it), never through unsafe code."
   },
   {
