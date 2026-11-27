@@ -15,6 +15,7 @@ plain text, deterministic, and self-describing:
 """
 
 import math
+import sys
 
 # ------------------------------------------------------------------ colors
 
@@ -139,12 +140,42 @@ def _finite(v):
     return v
 
 
-def _fmt(v):
+def _fmt_printf(v):
     """Coordinates in the SVG: two decimals, no trailing zeros."""
     s = "%.2f" % v
     if "." in s:
         s = s.rstrip("0").rstrip(".")
     return "0" if s == "-0" else s
+
+
+def _fmt_int(v):
+    """_fmt_printf's text, from the number of hundredths as an integer: in
+    Sagebrush's Python an integer's digits cost a fraction of a float's.
+    Within a hair of half a hundredth (where the rounding of v * 100 could
+    decide), and for the huge, it is _fmt_printf's own."""
+    n = v * 100.0
+    if not -1e15 < n < 1e15:
+        return _fmt_printf(v)
+    f = math.floor(n)
+    d = n - f
+    if -1e-6 < d - 0.5 < 1e-6:
+        return _fmt_printf(v)
+    r = f + 1 if d > 0.5 else f
+    if r == 0:
+        return "0"
+    a = -r if r < 0 else r
+    q, m = a // 100, a % 100
+    if m == 0:
+        s = str(q)
+    elif m < 10:
+        s = str(q) + ".0" + str(m)
+    else:
+        s = str(q) + "." + (str(m // 10) if m % 10 == 0 else str(m))
+    return "-" + s if r < 0 else s
+
+
+# (CPython's printf is the faster there)
+_fmt = _fmt_printf if sys.implementation.name == "cpython" else _fmt_int
 
 
 def _esc(s):
@@ -611,13 +642,12 @@ class Line(Primitive):
 
     def svg(self, P):
         o = self.options
-        parts, pen = [], False
-        for x, y in zip(self.xs, self.ys):
-            p = P.map(x, y)
+        parts, pen, f = [], False, _fmt
+        for p in P.map_all(self.xs, self.ys) if hasattr(P, "map_all") else [P.map(x, y) for x, y in zip(self.xs, self.ys)]:
             if p is None:
                 pen = False
                 continue
-            parts.append(("L" if pen else "M") + _fmt(p[0]) + " " + _fmt(p[1]))
+            parts.append(("L" if pen else "M") + f(p[0]) + " " + f(p[1]))
             pen = True
         color = to_color(o.get("color"), "#1f77b4")
         out = ""
@@ -661,14 +691,37 @@ class Points(Primitive):
 def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
     out = []
     many = isinstance(color, list)
-    for i, (x, y) in enumerate(zip(xs, ys)):
-        p = P.map(x, y)
-        if p is None:
-            continue
-        px, py = p
-        rr = sizes[i] if sizes is not None else r
-        c = color[i % len(color)] if many else color
-        out.append(_marker(marker, px, py, rr, c, edge))
+    pts = P.map_all(xs, ys) if hasattr(P, "map_all") else [P.map(x, y) for x, y in zip(xs, ys)]
+    if not many and sizes is None and marker in (",", "o", ".", None, True, "circle", "s", "square"):
+        # (the markers a plot of many points uses, each the same text as
+        # _marker's, built from the parts all the points share)
+        f, c = _fmt, _esc(color)
+        st = ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""
+        if marker == ",":
+            # (one path of whole pixels, numbered: the pixel a point is in, as _marker's)
+            u, d = _PIXEL, []
+            for p in pts:
+                if p is not None:
+                    d.append("M" + str(math.floor(p[0] / u + 1e-6)) + " " + str(math.floor(p[1] / u + 1e-6)) + "h1v1h-1z")
+            if d:
+                out.append('<path transform="scale(%.9g)" fill="%s" d="%s"/>' % (u, c, "".join(d)))
+        elif marker in ("s", "square"):
+            tail = '" width="%s" height="%s" fill="%s"%s/>' % (f(2 * r), f(2 * r), c, st)
+            for p in pts:
+                if p is not None:
+                    out.append('<rect x="' + f(p[0] - r) + '" y="' + f(p[1] - r) + tail)
+        else:
+            tail = '" r="%s" fill="%s"%s/>' % (f(max(1.0, r * 0.45)) if marker == "." else f(r), c, st)
+            for p in pts:
+                if p is not None:
+                    out.append('<circle cx="' + f(p[0]) + '" cy="' + f(p[1]) + tail)
+    else:
+        for i, p in enumerate(pts):
+            if p is None:
+                continue
+            rr = sizes[i] if sizes is not None else r
+            c = color[i % len(color)] if many else color
+            out.append(_marker(marker, p[0], p[1], rr, c, edge))
     if not out:
         return ""
     a = ' opacity="%s"' % _fmt(alpha) if alpha is not None else ""
@@ -1195,6 +1248,23 @@ class _Placed:
             px = max(-1e5, min(1e5, px))
             py = max(-1e5, min(1e5, py))
         return px, py
+
+    def map_all(self, xs, ys):
+        """map(x, y) of each point, clamped, in one loop (the same numbers:
+        a plot of many points spends its time here)."""
+        if self.xlog or self.ylog:
+            return [self.map(x, y) for x, y in zip(xs, ys)]
+        left, w, x0, dx = self.left, self.w, self._x0, self._x1 - self._x0
+        bottom, h, y0, dy = self.top + self.h, self.h, self._y0, self._y1 - self._y0
+        out = []
+        for x, y in zip(xs, ys):
+            if x is None or y is None:
+                out.append(None)
+                continue
+            px = left + (x - x0) / dx * w
+            py = bottom - (y - y0) / dy * h
+            out.append((-1e5 if px < -1e5 else 1e5 if px > 1e5 else px, -1e5 if py < -1e5 else 1e5 if py > 1e5 else py))
+        return out
 
 
 def _range(lo, hi, log):

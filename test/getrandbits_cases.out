@@ -1,0 +1,13 @@
+0 a473baa92c598faf
+1 26144e3caad21cb2
+109 ce69ba85c6bec6fb
+1180591620717411303427 dcf40d3a6ef9d446
+-5 3ca05ff05dda99dd
+1048574 0x2f35f9d2fcdf14d1c4 c8cd4792c102
+-1 ValueError Cannot convert negative int
+-1180591620717411303424 ValueError Cannot convert negative int
+2.5 TypeError 'float' object cannot be interpreted as an integer
+'3' TypeError 'str' object cannot be interpreted as an integer
+18446744073709551616 OverflowError Python int too large for C uint64_t
+1267650600228229401496703205376 OverflowError Python int too large for C uint64_t
+True 0
