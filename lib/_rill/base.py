@@ -12,6 +12,7 @@ Each builtin is called as f(session, call, args) with args a list of
 import math
 
 from . import fmt, lists, mem
+from .lists import double_bracket, is_list, list_, unlist_
 from .access import (as_character, as_complex, as_double, as_integer, as_logical, character_, complex_, dollar,
                      double_, index, integer_, is_character, is_complex, is_double, is_finite, is_infinite,
                      is_integer, is_logical, is_na, is_nan, is_null, is_numeric, is_vector, length_, logical_,
@@ -780,13 +781,16 @@ BUILTINS["is.infinite"] = is_infinite
 BUILTINS["is.vector"] = is_vector
 BUILTINS["options"] = options
 # A3: lists (lists.py)
-BUILTINS["list"] = lists.list_
-BUILTINS["is.list"] = lists.is_list
-BUILTINS["[["] = lists.double_bracket
-BUILTINS["unlist"] = lists.unlist_
+BUILTINS["list"] = list_
+BUILTINS["is.list"] = is_list
+BUILTINS["[["] = double_bracket
+BUILTINS["unlist"] = unlist_
 BUILTINS["raw"] = refuse_raw
 BUILTINS["as.raw"] = refuse_raw
 # base's constants (values, not functions)
-VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False]),
-          "letters": RVector("character", [chr(c) for c in range(ord("a"), ord("z") + 1)]),
-          "LETTERS": RVector("character", [chr(c) for c in range(ord("A"), ord("Z") + 1)])}
+VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False])}
+# (base's letters and LETTERS: the 26 lowercase and uppercase Latin letters)
+LOWER_LETTERS = RVector("character", list("abcdefghijklmnopqrstuvwxyz"))
+UPPER_LETTERS = RVector("character", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+VALUES["letters"] = LOWER_LETTERS
+VALUES["LETTERS"] = UPPER_LETTERS

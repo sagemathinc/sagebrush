@@ -70,6 +70,10 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:[[": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:^": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -154,6 +158,10 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:is.list": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:is.logical": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -182,6 +190,10 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:list": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:logical": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -205,6 +217,10 @@
   "builtin:raw": {
    "decision": "refused",
    "why": "raw vectors are deferred (A1.2's scope note): an R-level refusal before any effect (gate:raw vectors)"
+  },
+  "builtin:unlist": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
   },
   "builtin:|": {
    "decision": "internal",
@@ -290,7 +306,15 @@
    "decision": "internal",
    "why": "a constant R value"
   },
+  "value:LETTERS": {
+   "decision": "internal",
+   "why": "a constant R value"
+  },
   "value:T": {
+   "decision": "internal",
+   "why": "a constant R value"
+  },
+  "value:letters": {
    "decision": "internal",
    "why": "a constant R value"
   },
