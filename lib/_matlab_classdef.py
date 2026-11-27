@@ -11,7 +11,7 @@ Abstract members, and property get and set methods.
 import os as _os
 
 import _matlab as _m
-from _matlab import _err, Obj, Char, Cell, Builtin, NOVAL
+from _matlab import _err, Obj, ObjArr, Char, Cell, Builtin, NOVAL
 
 
 class ClassDef:
@@ -228,8 +228,43 @@ def get(obj, name, ctx, call):
     raise _err("Unrecognized method, property, or field '%s' for class '%s'." % (name, cd.name), "MATLAB:noSuchMethodOrField")
 
 
+def default_object(cd):
+    """an object the class's constructor makes with no arguments: a grown array's gap, as MATLAB fills it"""
+    return _construct(cd, ())
+
+
+def get_array(arr, name, ctx, call):
+    """arr.name for an array of objects: a property's values, the first as one value (all of them as arr.name in a
+    comma-separated list, _m.field_cs); a method called with the array"""
+    cd = arr.cls
+    if name in cd.props or name in cd.consts:
+        if not arr.a:
+            raise _err("Expected one output from a curly brace or dot indexing expression, but there were 0 results.")
+        return get(arr.a[0], name, ctx, True)
+    m = cd.methods.get(name)
+    if m is not None:
+        fn, attrs, static_ = m
+        _check_method(cd, name, attrs, ctx)
+        if static_:
+            return fn.call(1, []) if call else fn
+        return fn.call(1, [arr]) if call else Builtin(lambda nargout, *a: fn.call(nargout, [arr] + list(a)), name, (0, None))
+    raise _err("Unrecognized method, property, or field '%s' for class '%s'." % (name, cd.name), "MATLAB:noSuchMethodOrField")
+
+
 def static(cd, name, call, ctx=None):
-    """Name.name: a static method (called, or as a callable) or a Constant property, with the access of class ctx"""
+    """Name.name: a static method (called, or as a callable) or a Constant property, with the access of class ctx;
+    Name.empty, an empty array of the class (Name.empty(m, n, ...): of that size, one of whose dimensions is 0)"""
+    if name == "empty" and name not in cd.methods:
+        def empty(nargout, *dims):
+            shape = tuple(int(_m._scalar(d)) for d in dims) if len(dims) > 1 else \
+                (tuple(int(x) for x in _m._farr(dims[0]).real.reshape(-1)) if dims else (0, 0))
+            if len(shape) == 1:
+                shape = (shape[0], shape[0])
+            if 0 not in shape:
+                raise _err("At least one dimension must be zero.", "MATLAB:class:emptyMustBeZero")
+            return ObjArr(cd, [], shape)
+        b = Builtin(empty, "empty", (0, None))
+        return b.call(1, []) if call else b
     if name in cd.consts:
         _check_get(cd, name, ctx)
         _defaults(cd)
@@ -238,8 +273,6 @@ def static(cd, name, call, ctx=None):
     if m is not None and m[2]:
         _check_method(cd, name, m[1], ctx)
         return m[0].call(1, []) if call else m[0]
-    if name == "empty":
-        raise _err("Arrays of objects are not supported in Sagebrush yet: %s.empty comes with them." % cd.name)
     raise _err("The class %s has no Constant property or Static method named '%s'." % (cd.name, name),
                "MATLAB:subscripting:classHasNoPropertyOrMethod")
 
@@ -277,7 +310,7 @@ def dispatcher(name, top, imports, cls=None):
     if d is None:
         def call(nargout, *args):
             for a in args:
-                if type(a) is Obj:
+                if type(a) is Obj or type(a) is ObjArr:
                     m = a.cls.methods.get(name)
                     if m is not None and not m[2]:
                         # (a private method: only in its class's own methods, cls)
@@ -300,6 +333,10 @@ def blocks(obj):
     cd = obj.cls
     names = _public(cd)
     short = cd.name.split(".")[-1]
+    if type(obj) is ObjArr:
+        # (an array: its size and class, then its properties' names, as MATLAB shows it)
+        head = "  %s %s array with %s" % (_m._dimstr(obj.shape), short, "properties:" if names else "no properties.")
+        return [head], ["\n".join("    " + n for n in names)] if names else []
     if not names:
         return ["  %s with no properties." % short], []
     return ["  %s with properties:" % short], [_m._struct_fields_text(obj.props, names)]
@@ -379,22 +416,6 @@ def _ones(args):
     return True
 
 
-def index_scalar(obj, args):
-    """obj(1), obj(1, 1), obj(:): the object itself (arrays of objects are not supported yet)"""
-    if _ones(args):
-        return obj
-    raise _err("Index exceeds the number of array elements. Index must not exceed 1.", "MATLAB:badsubscript")
-
-
-def assign_scalar(cur, args, v):
-    """x(1) = obj, or obj(1) = v: one object (arrays of objects are not supported yet)"""
-    if _ones(args) and type(v) is Obj and (cur is None or type(cur) is not Obj or cur.cls is v.cls):
-        return v
-    if type(cur) is Obj and type(v) is not Obj:
-        raise _err("Conversion to %s from %s is not possible." % (cur.cls.name, _m.class_(v)), "MATLAB:invalidConversion")
-    raise _err("Arrays of objects are not supported in Sagebrush yet: one object, at index 1.")
-
-
 def fieldnames(obj):
     names = _public(obj.cls)
     return Cell([Char(n) for n in names], (len(names), 1))
@@ -409,7 +430,85 @@ def to_struct(obj):
 
 
 def isequal(a, b, eq):
-    """two objects are equal when of the same class with equal properties (eq: the elements' comparison)"""
+    """two objects are equal when of the same class with equal properties (eq: the elements' comparison); two arrays
+    of them, when of one size with equal elements"""
+    if type(a) is ObjArr or type(b) is ObjArr:
+        if type(a) is not ObjArr or type(b) is not ObjArr or a.cls is not b.cls or tuple(a.shape) != tuple(b.shape):
+            return False
+        return all(isequal(x, y, eq) for x, y in zip(a.a, b.a))
     if type(a) is not Obj or type(b) is not Obj or a.cls is not b.cls:
         return False
     return all(eq(a.props[k], b.props[k]) for k in a.props)
+
+
+# ---------------------------------------------------------------- arrays of objects (_m.ObjArr), loaded with classes
+
+
+def objs(cls, a, shape):
+    """objects of class cls as one MATLAB value: an Obj when there is one, 1-by-1"""
+    if len(a) == 1 and tuple(_m._canon_dims(shape)) == (1, 1):
+        return a[0]
+    return ObjArr(cls, a, shape)
+
+
+def resize_array(cur, o, nw, total):
+    """an object array grown to nw (from o): the gap's elements one object the class's constructor makes with no
+    arguments, copied into each, as MATLAB's object arrays page says it fills them"""
+    items = [None] * total
+    if cur.a:
+        vecs = [_m.np.arange(x, dtype=_m.np.int64) for x in o]
+        pos = _m._combine(vecs, nw).reshape(-1)
+        for k, p in enumerate(pos):
+            items[int(p)] = cur.a[k]
+    dflt = default_object(cur.cls) if any(x is None for x in items) else None
+    items = [x if x is not None else _m.cp(dflt) for x in items]
+    return ObjArr(cur.cls, items, tuple(nw))
+
+
+def assign_array(cur, pos, v, nv):
+    """arr(...) = v: objects of the array's class, each element its own copy"""
+    tv = type(v)
+    if (tv is not Obj and tv is not ObjArr) or v.cls is not cur.cls:
+        raise _err("Unable to perform assignment because value of type '%s' is not convertible to '%s'."
+                   % (_m.class_(v), cur.cls.name), "MATLAB:UnableToConvert")
+    items = [v] if tv is Obj else v.a
+    for k, p in enumerate(pos):
+        cur.a[int(p)] = _m.cp(items[0 if nv == 1 else k])
+    return objs(cur.cls, cur.a, cur.shape)
+
+
+def cat_class(vals):
+    """a concatenation with objects in it: objects, of the leftmost object's class"""
+    return "objects"
+
+
+def _converted(oc, v):
+    """v as an object of class oc for a concatenation: the class's constructor called with it, as MATLAB converts to
+    the dominant (leftmost) object's class; its error, if it fails, after MATLAB's line naming the conversion"""
+    try:
+        return _construct(oc, [v])
+    except _m.MatlabError as e:
+        raise _err("The following error occurred converting from %s to %s:\n%s" % (_m.class_(v), oc.name, e.message),
+                   "MATLAB:UnableToConvert")
+
+
+def cat_objects(vals, parts, dim):
+    """[a b] or [a; b] with objects: each value of another class converted to the leftmost object's class (an empty
+    double, [], is left out)"""
+    oc = next(v.cls for v in vals if type(v) is Obj or type(v) is ObjArr)
+    items = []
+    for v in parts:
+        if (type(v) is Obj or type(v) is ObjArr) and v.cls is oc:
+            items.append(ObjArr(oc, [v], (1, 1)) if type(v) is Obj else v)
+        elif not _m._isempty_double(v):
+            c = _converted(oc, v)
+            items.append(ObjArr(oc, [c], (1, 1)) if type(c) is Obj else c)
+    if not items:
+        return ObjArr(oc, [], (0, 0))
+    r = _m._cat_containers(items, dim, Cell)
+    return objs(oc, r.a, r.shape)
+
+
+def isprop_array(x, name):
+    """isprop of an object array: the class's answer, for each element"""
+    return _m._box(_m.np.full(tuple(reversed(x.shape)), bool(len(x.a)) and isprop_(x.a[0], name), dtype=bool))

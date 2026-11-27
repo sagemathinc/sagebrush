@@ -77,7 +77,7 @@
     "kind": "function",
     "signature": "tf = isprop(obj, name)",
     "summary": "Whether an object has a property of that name, whatever its access.",
-    "doc": "True when the object's class defines the property, public or not, Constant properties included; a method's name is not a property. For a value that is not an object it is false, element by element: `isprop([1 2 3], 'x')` is a 1-by-3 false array. Sagebrush supports value classes defined by classdef files (on the path, in @-folders with method files, and in +package folders); handle classes, inheritance, operator overloading, events, enumerations and property validation are not supported yet, and refused when the class loads.",
+    "doc": "True when the object's class defines the property, public or not, Constant properties included; a method's name is not a property. For an array of objects it is true or false for each element; for a value that is not an object it is false, element by element: `isprop([1 2 3], 'x')` is a 1-by-3 false array. Sagebrush supports value classes defined by classdef files (on the path, in @-folders with method files, and in +package folders); handle classes, inheritance, operator overloading, events, enumerations and property validation are not supported yet, and refused when the class loads.",
     "examples": [
       {
         "code": "isprop([1 2 3], 'x')",
@@ -85,7 +85,7 @@
       }
     ],
     "differs": [
-      "Arrays of objects are not supported yet."
+      "Objects of handle classes and of MATLAB's own classes are not objects here: isprop is false for them."
     ],
     "status": "partial",
     "see_also": [

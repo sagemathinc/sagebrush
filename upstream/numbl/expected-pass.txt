@@ -177,6 +177,7 @@ builtins/test_isequal_type_coercion.m
 builtins/test_isequal_types.m
 builtins/test_isequaln.m
 builtins/test_isnan_isinf_complex.m
+builtins/test_isprop.m
 builtins/test_isscalar_types.m
 builtins/test_legendre.m
 builtins/test_logical_functions.m
@@ -288,6 +289,13 @@ classes/method_local_func/method_local_func.m
 classes/method_local_name_conflict/method_local_name_conflict.m
 classes/method_subfunction_scope/method_subfunction_scope.m
 classes/namevalue_method_call/namevalue_method_call.m
+classes/num2cell_objects.m
+classes/object_array_cow.m
+classes/object_array_empty_grow/object_array_empty_grow.m
+classes/object_array_member_and_end.m
+classes/object_array_repelem/object_array_repelem.m
+classes/object_array_repmat/object_array_repmat.m
+classes/object_array_transpose/object_array_transpose.m
 classes/object_transpose_no_method/object_transpose_no_method.m
 classes/prop_method_overlap/prop_method_overlap.m
 classes/prop_method_same_name/prop_method_same_name.m
@@ -297,6 +305,7 @@ classes/static_method_args/test_static_method_args.m
 classes/static_method_csl_args.m
 classes/test_builtin_subsasgn_bypass.m
 classes/test_chained_cell_asgn_bypass_subsasgn.m
+classes/test_class_instance_array.m
 classes/test_classdef_local_func_resolution.m
 classes/test_compound_index_member_assign_class.m
 classes/test_compound_subsasgn_member.m
@@ -306,6 +315,7 @@ classes/test_feval_class_constructor.m
 classes/test_feval_class_instance.m
 classes/test_indexed_member_assign.m
 classes/test_paren_asgn_bypass_subsasgn.m
+classes/test_scalar_class_multi_index.m
 classes/test_simple_constructor.m
 classes/test_static_method_external.m
 classes/test_static_method_no_parens_subsref.m
@@ -438,6 +448,7 @@ indexing/test_loop_slice_write.m
 indexing/test_loop_slice_write_var_src.m
 indexing/test_loop_vconcat_grow.m
 indexing/test_nd_grow_assign.m
+indexing/test_object_array_indexing.m
 indexing/test_onebyone_tensor_broadcast_assign.m
 indexing/test_scalar_empty_range_indexing.m
 indexing/test_scalar_multidim_index_replicate.m

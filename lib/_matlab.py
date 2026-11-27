@@ -473,7 +473,7 @@ def _dims(v):
         return tuple(reversed(v.shape))
     if t is Char:
         return tuple(reversed(v.a.shape))
-    if t is Cell or t is Struct or t is StrArr or t is HandleArr:
+    if t is Cell or t is Struct or t is StrArr or t is HandleArr or t is ObjArr:
         return v.shape
     if t is Sparse:
         return (v.m, v.n)
@@ -490,7 +490,7 @@ def _numel(v):
         return v.size
     if t is Char:
         return v.a.size
-    if t is Cell or t is Struct or t is StrArr or t is HandleArr:
+    if t is Cell or t is Struct or t is StrArr or t is HandleArr or t is ObjArr:
         return len(v.a)
     if t is Sparse:
         return v.m * v.n
@@ -1548,7 +1548,7 @@ def transpose(a):
         return np.array(a.T)
     if t is Char:
         return Char(np.array(a.a.T))
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is ObjArr:
         if len(a.shape) > 2:
             raise _err("Transpose on ND array is not defined. Use PERMUTE instead.")
         r, c = a.shape
@@ -1735,7 +1735,7 @@ def columns(v):
             col = flat[j * r:(j + 1) * r].reshape((1, r)).copy()
             yield Char(col) if t is Char else _box(col)
         return
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is ObjArr:
         for j in range(ncol):
             yield v._like([cp(x) for x in v.a[j * r:(j + 1) * r]], (r, 1))
         return
@@ -1939,6 +1939,24 @@ class Obj:
         return Obj(self.cls, {k: cp(x) for k, x in self.props.items()})
 
 
+class ObjArr:
+    """An array of objects of one classdef class, other than 1-by-1 (that is an Obj): its class, its elements in
+    column-major order, and its shape, as a struct array's; an assignment copies it"""
+    __slots__ = ("cls", "a", "shape")
+    _value_class = True
+
+    def __init__(self, cls, a, shape):
+        self.cls = cls
+        self.a = a
+        self.shape = _canon_dims(shape)
+
+    def _like(self, a, shape):
+        return _cd().objs(self.cls, a, shape)
+
+    def copy(self):
+        return ObjArr(self.cls, [cp(x) for x in self.a], self.shape)
+
+
 # (the classdef classes loaded: each constructor, a built-in, to its class; the names a loaded class defines as
 # methods, which resolution dispatches on; and a generation raised as each class loads, so a resolution cached
 # before then, a function handle's, is made again)
@@ -1968,6 +1986,8 @@ def mfield(obj, name, ctx=None):
     t = type(obj)
     if t is Obj:
         return _cd().get(obj, name, ctx, False)
+    if t is ObjArr:
+        return _cd().get_array(obj, name, ctx, False)
     if t is Builtin and obj in _CD_CTORS:
         return _cd().static(_CD_CTORS[obj], name, False, ctx)
     return field(obj, name)
@@ -1977,6 +1997,8 @@ def cfield(obj, name, ctx):
     """obj.name in a class's methods: with that class's access"""
     if type(obj) is Obj:
         return _cd().get(obj, name, ctx, True)
+    if type(obj) is ObjArr:
+        return _cd().get_array(obj, name, ctx, True)
     if type(obj) is Builtin and obj in _CD_CTORS:
         return _cd().static(_CD_CTORS[obj], name, True, ctx)
     return field(obj, name)
@@ -2747,7 +2769,11 @@ def index(obj, args):
     """obj(args)"""
     t = type(obj)
     if t is Obj:
-        return _cd().index_scalar(obj, args)
+        # (one object: obj(1) is itself; obj([1 1 1]) an array of it)
+        if _cd()._ones(args):
+            return obj
+        obj = ObjArr(obj.cls, [obj], (1, 1))
+        t = ObjArr
     # fast paths: one or two scalar subscripts of an array
     if t is np.ndarray and len(args) <= 2 and type(args[0]) is float and (len(args) == 1 or type(args[1]) is float):
         if len(args) == 1:
@@ -2777,7 +2803,7 @@ def index(obj, args):
         if t is Char:
             return Char(r)
         return _box(r)
-    if t is Cell or t is Struct or t is StrArr or t is HandleArr:
+    if t is Cell or t is Struct or t is StrArr or t is HandleArr or t is ObjArr:
         pos, out = _positions(obj.shape, args)
         items = [cp(obj.a[int(k)]) for k in pos.reshape(-1)]
         return obj._like(items, out)
@@ -2881,6 +2907,9 @@ def fieldname(v):
 def field_cs(obj, name, ctx=None):
     if type(obj) is Obj:
         return [_cd().get(obj, name, ctx, True)]
+    if type(obj) is ObjArr:
+        # (arr.p: a comma-separated list, one value an element)
+        return [_cd().get(o, name, ctx, True) for o in obj.a]
     if type(obj) is Builtin and obj in _CD_CTORS:
         return [_cd().static(_CD_CTORS[obj], name, True, ctx)]
     if type(obj) is Builtin or type(obj) is Function:
@@ -2913,6 +2942,8 @@ def field_cs(obj, name, ctx=None):
 def field(obj, name):
     if type(obj) is Obj:
         return _cd().get(obj, name, None, True)
+    if type(obj) is ObjArr:
+        return _cd().get_array(obj, name, None, True)
     if type(obj) is Builtin and obj in _CD_CTORS:
         return _cd().static(_CD_CTORS[obj], name, True)
     if type(obj) is Builtin or type(obj) is Function:
@@ -3053,6 +3084,9 @@ def _asg(cur, path, i, v):
     last = i == len(path) - 1
     if kind == "f" and type(cur) is Obj:
         return _cd().set_member(cur, arg, path, i, v, _CD_CTX[0])
+    if kind == "f" and type(cur) is ObjArr:
+        raise _err("Assigning to %d elements using a simple assignment statement is not supported. Consider using "
+                   "comma-separated list assignment." % len(cur.a), "MATLAB:index:expected_one_output_for_assignment")
     if kind == "f" and isinstance(cur, HandleObj):
         # (a handle: its property is set, every variable holding it sees the change)
         if last:
@@ -3238,6 +3272,8 @@ def _resize(cur, dims):
     total = _prod(nw)
     if t is HandleArr:
         raise _err("Unable to grow an array of graphics objects with gaps: assign every element in order.")
+    if t is ObjArr:
+        return _cd().resize_array(cur, o, nw, total)
     if t is Struct:
         items = [{f: _empty_double() for f in cur.fields} for _ in range(total)]
     elif t is StrArr:
@@ -3253,9 +3289,14 @@ def _resize(cur, dims):
 
 
 def _assign_paren(cur, args, v, brace=False):
-    if not brace and (type(cur) is Obj or (type(v) is Obj and (cur is None or (type(cur) is np.ndarray and cur.size == 0)))):
-        # (an object at x(1), or x(1) = obj for an x that is new: one object, until object arrays)
-        return _cd().assign_scalar(cur, args, v)
+    if not brace:
+        tv = type(v)
+        if type(cur) is Obj:
+            # (one object: an array of it, to index into)
+            cur = ObjArr(cur.cls, [cur], (1, 1))
+        elif (tv is Obj or tv is ObjArr) and (cur is None or isinstance(cur, Undef) or _isempty_double(cur)):
+            # (objects into a new variable, or into []: an empty array of their class first)
+            cur = ObjArr(v.cls, [], (0, 0))
     return _assign_paren_any(cur, args, v, brace)
 
 
@@ -3350,6 +3391,8 @@ def _assign_paren_any(cur, args, v, brace=False):
                             src.setdefault(f, _empty_double())
             cur.a[int(p)] = dict(src) if nv == 1 and pos.size > 1 else src
         return cur
+    if tc is ObjArr:
+        return _cd().assign_array(cur, pos, v, nv)
     if tc is HandleArr:
         items = _handles(v)
         for k, p in enumerate(pos):
@@ -3548,7 +3591,7 @@ def class_(v):
         return "function_handle"
     if t is MException:
         return "MException"
-    if t is Obj:
+    if t is Obj or t is ObjArr:
         return v.cls.name
     if isinstance(v, HandleObj):
         return v._mclass
@@ -3601,11 +3644,10 @@ def vcat(rows):
 
 def _cat_class(vals):
     """the class of a concatenation"""
-    if any(type(v) is Obj for v in vals):
-        raise _err("Arrays of objects are not supported in Sagebrush yet: [a b] of classdef objects, repmat and "
-                   "Name.empty come with them.")
     if any(isinstance(v, HandleObj) or type(v) is HandleArr for v in vals):
         return "handle"
+    if any(type(v) is Obj or type(v) is ObjArr for v in vals):
+        return _cd().cat_class(vals)
     classes = [class_(v) for v in vals]
     if "cell" in classes:
         return "cell"
@@ -3644,6 +3686,8 @@ def _cat(vals, dim, narrow=True):
         # omitted when another empty shape is present; all [] inputs must stay
         # to retain, for example, cat(3, [], [])'s 0-by-0-by-2 result.
         parts = [v for v in vals if _dims(v) != (0, 0)] or list(vals)
+    if cls == "objects":
+        return _cd().cat_objects(vals, parts, dim)
     if cls == "handle":
         items = [v if type(v) is HandleArr else HandleArr([v], (1, 1)) for v in parts]
         r = _cat_containers(items, dim, Cell)
@@ -4363,7 +4407,7 @@ def _blocks(v):
     if t is Struct:
         h, b = _struct_blocks(v)
         return h, b, True
-    if t is Obj:
+    if t is Obj or t is ObjArr:
         h, b = _cd().blocks(v)
         return h, b, True
     if t is Anon or t is Handle or t is Function or t is Builtin:
@@ -4463,6 +4507,9 @@ def display(name, v):
     blocks = head + body
     if _format["spacing"] == "loose":
         _write("\n%s =%s\n\n%s\n\n" % (name, " " if obj else "", "\n\n".join(blocks)))
+    elif type(v) is ObjArr:
+        # (an array of objects keeps its blank lines in format compact too, as MATLAB's)
+        _write("%s = \n%s\n\n" % (name, "\n\n".join(blocks)))
     elif (type(v) is Struct and len(v.a) == 1 and v.fields) or (type(v) is Obj and body):
         # (format compact still separates a struct's header from its fields, and an object's from its properties)
         _write("%s = \n%s\n\n%s\n" % (name, "\n".join(head), "\n".join(body)))
@@ -4482,6 +4529,8 @@ def _disp_text(v):
     if t is Str:
         return v.s + "\n"
     head, body, obj = _blocks(v)
+    if t is ObjArr:
+        return "\n\n".join(head + body) + "\n\n"
     if t is Obj:
         # (an object's disp keeps its class line: "  Rect with properties:")
         return "\n\n".join(head + body) + ("\n\n" if _format["spacing"] == "loose" else "\n")
@@ -5210,7 +5259,7 @@ def class_b(x):
 def isa_(x, name):
     n = _text(name)
     c = class_(x)
-    if type(x) is Obj:
+    if type(x) is Obj or type(x) is ObjArr:
         return _cd().isa(x, n)
     if n == c:
         return True
@@ -7311,6 +7360,7 @@ def trapz_(*args):
 
 @_bs("reshape")
 def reshape_(x, *args):
+    x = ObjArr(x.cls, [x], (1, 1)) if type(x) is Obj else x
     n = _numel(x)
     if not args:
         raise _err("Not enough input arguments.")
@@ -7344,7 +7394,7 @@ def reshape_(x, *args):
         raise _err("Number of elements must not change. Use [] as one of the size inputs to automatically calculate the appropriate size for that dimension.", "MATLAB:getReshapeDims:notSameNumel")
     d = _canon_dims(d)
     t = type(x)
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is ObjArr:
         return x._like([cp(e) for e in x.a], d)
     r = _arr(x).reshape(_stored(d)).copy()
     return Char(r) if t is Char else _box(r)
@@ -7382,6 +7432,7 @@ _REPMAT_OBJECT_MAX = 200_000
 
 @_bs("repmat")
 def repmat_(x, *args):
+    x = ObjArr(x.cls, [x], (1, 1)) if type(x) is Obj else x
     # (the replication factors: integers, a negative one counting as 0, as repmat's page says)
     if len(args) == 1:
         v = _farr(args[0]).reshape(-1)
@@ -7406,7 +7457,7 @@ def repmat_(x, *args):
     total = 1
     for a, b in zip(d, r):
         total *= a * b
-    if t in (Cell, Struct, StrArr):
+    if t in (Cell, Struct, StrArr, ObjArr):
         if total > _REPMAT_OBJECT_MAX:
             raise _err("repmat: a result of %d elements is not supported in Sagebrush: at most %d for a %s array." % (total, _REPMAT_OBJECT_MAX, class_(x)), "MATLAB:array:SizeLimitExceeded")
     else:
@@ -7419,11 +7470,11 @@ def repmat_(x, *args):
     if 0 in r or 0 in d:
         # (an empty result, of the input's kind and the product of the sizes)
         out_d = tuple(a * b for a, b in zip(d, r))
-        if t is Cell or t is Struct or t is StrArr:
+        if t is Cell or t is Struct or t is StrArr or t is ObjArr:
             return x._like([], out_d)
         z = np.zeros(tuple(reversed(out_d)), dtype=_arr(x).dtype)
         return Char(_canon(z)) if t is Char else _box(_canon(z))
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is ObjArr:
         idx = np.arange(len(x.a), dtype=np.int64).reshape(tuple(reversed(d)))
         big = _canon(np.tile(idx, reps))
         return x._like([cp(x.a[int(k)]) for k in big.reshape(-1)], tuple(reversed(big.shape)))
@@ -7439,6 +7490,7 @@ def repelem_(x, *args):
     v (the result oriented as v, a row for a scalar); repelem(A, r1, ..., rN)
     repeats the elements of A along dimension k r_k times each, r_k a scalar
     or one count per index of that dimension"""
+    x = ObjArr(x.cls, [x], (1, 1)) if type(x) is Obj else x
     if not args:
         raise _err("Not enough input arguments.")
     if type(x) is Str:
@@ -7477,7 +7529,7 @@ def repelem_(x, *args):
             idx = np.repeat(idx, counts(args[k] if k < len(args) else 1, d[k]), axis=nd - 1 - k)
         shape = tuple(reversed(idx.shape))
     flat = idx.reshape(-1)
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is ObjArr:
         return x._like([cp(x.a[int(k)]) for k in flat], shape)
     out = _arr(x).reshape(-1)[flat].reshape(tuple(reversed(shape)))
     out = _canon(_contig(out))
@@ -7500,8 +7552,10 @@ def vertcat_(*args):
 
 
 def _flip(x, dim):
+    if type(x) is Obj:
+        return x
     t = type(x)
-    if t is Cell or t is Struct or t is StrArr:
+    if t is Cell or t is Struct or t is StrArr or t is ObjArr:
         idx = np.arange(len(x.a), dtype=np.int64).reshape(_stored(x.shape))
         ax = idx.ndim - dim
         if ax < 0:
@@ -10217,6 +10271,10 @@ def orderfields_(s):
 @_bs("num2cell")
 def num2cell_(x):
     t = type(x)
+    if t is Obj:
+        return Cell([x], (1, 1))
+    if t is ObjArr:
+        return Cell(list(x.a), x.shape)
     if t is Cell:
         return Cell([Cell([cp(e)], (1, 1)) for e in x.a], x.shape)
     if t is Struct:
@@ -10358,6 +10416,10 @@ def _size_key(d):
 
 def _element(a, k):
     t = type(a)
+    if t is ObjArr:
+        return a.a[k]
+    if t is Obj:
+        return a
     if t is Cell:
         return Cell([a.a[k]], (1, 1))
     if t is Struct:
@@ -10444,7 +10506,7 @@ def deal_(nargout, *args):
 
 def _isequal2(a, b, nan_equal):
     ta, tb = type(a), type(b)
-    if ta is Obj or tb is Obj:
+    if ta is Obj or tb is Obj or ta is ObjArr or tb is ObjArr:
         return _cd().isequal(a, b, lambda x, y: _isequal2(x, y, nan_equal))
     if ta is Cell or tb is Cell:
         if ta is not tb or a.shape != b.shape:
@@ -10495,12 +10557,14 @@ def methods_b(nargout, x):
 
 @_bs("isobject")
 def isobject_(x):
-    return type(x) is Obj
+    return type(x) is Obj or type(x) is ObjArr
 
 
 @_bs("isprop")
 def isprop_b(x, name):
     # (not an object: false for each element, as MATLAB's isprop gives)
+    if type(x) is ObjArr:
+        return _cd().isprop_array(x, name)
     return _cd().isprop_(x, name) if type(x) is Obj else _box(np.zeros(tuple(reversed(_dims(x))), dtype=bool))
 
 

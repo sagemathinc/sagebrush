@@ -17087,10 +17087,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "lib/_matlab_classdef.py :: index_scalar :: raise _err(\"Index exceeds the number of array elements. Index must not exceed 1.\", \"MATLAB:badsubscript\") #0": {
-  "class": "none",
-  "owner": "matlab (@sagebrush-matlab)",
-  "reason": "refuses nothing by size: MATLAB's error for an index past an object's one element (MATLAB:badsubscript); arrays of objects are the next stage"
  }
 }

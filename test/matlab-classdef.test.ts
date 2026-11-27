@@ -265,10 +265,9 @@ test("files, packages, copies, a method named like a built-in, mfilename('class'
     assert.match(g[0], what, k);
     assert.match(g[0], /not supported in Sagebrush yet/, k);
   }
-  // (arrays of objects: the next stage, refused with a message that says so)
-  assert.equal(got.get("array")![0], "refused");
-  assert.match(got.get("array")![1], /Arrays of objects are not supported in Sagebrush yet/);
-  assert.match(got.get("empty")![1], /Arrays of objects are not supported in Sagebrush yet: Rect\.empty/);
+  // (arrays of objects: test/matlab-classdef-arrays.test.ts)
+  assert.deepEqual(got.get("array"), ["made"]);
+  assert.deepEqual(got.get("empty"), ["made"]);
   assert.deepEqual(got.get("mfclass"), ["[]"]);
   assert.deepEqual(got.get("endchain"), ["[1 9 3 4]", "3"]);
 });
