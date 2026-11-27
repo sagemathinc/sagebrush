@@ -133,6 +133,26 @@ export async function spendRequestNonce(db: D1, d: { fleet: string; host: string
   return (res[1]?.meta?.changes ?? 0) === 1;
 }
 
+// ---- the grant read (the grant-read note r0.4 §4): a host's accepted grant with its stored pairs, from ONE statement
+
+/**
+ * A host's accepted grant at `gen` (null: its newest) with the stored result of the request that applied it, from ONE
+ * statement, so the grant and its pairs come from one snapshot (the writer stores both in one batch). `n` counts the
+ * stored results naming this grant's hash: the writer makes it at most 1, and the core's handler refuses more (a store
+ * fault). null when no such accepted grant exists. Nothing here or in the writers deletes a grant or a result: both are
+ * kept for the fleet's life, which is what lets a host read every generation it missed.
+ */
+export async function grantRead(db: D1, fleet: string, host: string, gen: number | null): Promise<{ gen: number; bytes: string; result: string | null; n: number } | null> {
+  const rows = (await db.prepare("SELECT g.gen AS gen, g.bytes AS bytes, r.result AS result," +
+    " (SELECT COUNT(*) FROM fleet_transfer_results x WHERE x.fleet = g.fleet AND x.grant_hash = g.hash) AS n" +
+    " FROM fleet_grants g LEFT JOIN fleet_transfer_results r ON r.fleet = g.fleet AND r.grant_hash = g.hash" +
+    " WHERE g.fleet = ?1 AND g.host = ?2 AND g.gen = COALESCE(?3, (SELECT MAX(gen) FROM fleet_grants WHERE fleet = ?1 AND host = ?2))")
+    .bind(fleet, host, gen).all<{ gen: number; bytes: string; result: string | null; n: number }>()).results;
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  return { gen: r.gen, bytes: r.bytes, result: r.result, n: Math.max(r.n, rows.length) };
+}
+
 /**
  * One page of a fleet's chain, from ONE statement: the head (the highest seq, -1 before genesis) from an always-one-row
  * select, LEFT JOINed to the first `max` entries after `after`, so an empty page still carries the true head.

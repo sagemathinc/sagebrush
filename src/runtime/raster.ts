@@ -3,7 +3,7 @@
 //   render(svg, scale, width, height, background (CSS), dpi, text) -> (png bytes,
 //          characters the font lacks); width x height pixels, 0 x 0 for the drawing's size
 //   decode(png bytes) -> (width, height, channels, float32 bytes)
-// The WebAssembly module (wasm/sagebrush-raster.wasm, about 750 KB) is
+// The WebAssembly module (wasm/sagebrush-raster.wasm, about 900 KB) is
 // compiled the first time a PNG is written or read, from wherever the host
 // keeps it (src/runtime/wasm-asset.ts, key RASTER).
 
