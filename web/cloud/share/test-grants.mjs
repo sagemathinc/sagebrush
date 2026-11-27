@@ -326,6 +326,51 @@ const admin = await sessionFor(mf, db, ADMIN, 1000);
   ok(made >= 2 && after.a === 0 && after.b === 0 && after.c === made && after.d === 0, "P5 an admin's purge: its id is replaced by its hash in the grants and audit rows it wrote, which all stay; its rate rows go", { made, after });
 }
 
+// ---- F: every write is fenced to the acting admin's live session (an admin purged after its checks writes nothing)
+{
+  const ADMINX = "afafafaf-afaf-4faf-8faf-afafafafafaf";
+  await db.prepare("INSERT OR IGNORE INTO accounts (account_id, created, last_login) VALUES (?1, 1, 1)").bind(ADMINX).run();
+  // (the session the checks saw, then deleted, as the admin's purge deletes it in its first batch)
+  const deps = { session: async () => ({ kind: "ok", id: ADMINX, session: "f".repeat(64), reauthMs: Date.now() }), now: () => Date.now(), sha256Hex: async (x) => sha(x) };
+  const call = (path, body) => G.handleGrantsAdmin(new Request(SITE + path, { method: "POST", headers: { "content-type": "application/json", "content-length": String(JSON.stringify(body).length) }, body: JSON.stringify(body) }), new URL(SITE + path), db, ADMINX, deps);
+  const rid = reqId();
+  const r1 = await call("/api/admin/grants", { request_id: rid, account_id: USER, storage_bytes: GiB, valid_until: until(3) });
+  const wrote = await db.prepare("SELECT (SELECT COUNT(*) FROM grants WHERE source_ref = ?1) g, (SELECT COUNT(*) FROM grant_admin_hits WHERE admin = ?2) h, (SELECT COUNT(*) FROM grant_audit WHERE actor = ?2) a").bind(rid, ADMINX).first();
+  ok(r1.status === 401 && wrote.g === 0 && wrote.h === 0 && wrote.a === 0, `F1 an admin whose session is gone after its checks: 401, and no grant, rate or audit row (${r1.status})`, wrote);
+  const target = await body(await post(mf, "/api/admin/grants", await sessionFor(mf, db, ADMIN4, 1000), { request_id: reqId(), account_id: USER, storage_bytes: GiB, valid_until: until(3) }));
+  const r2 = await call(`/api/admin/grants/${target.grant.id}/revoke`, { reason: "late" });
+  const after = await db.prepare("SELECT revoked_at, revoked_by FROM grants WHERE id = ?1").bind(target.grant.id).first();
+  ok(r2.status === 401 && after.revoked_at === null && after.revoked_by === null, `F2 a revocation by an admin whose session is gone: 401, the grant unrevoked (${r2.status})`, after);
+  // (the race itself: the session is live through every check and the rate write, then the admin's purge deletes it
+  // just before the grant's own write)
+  const live = await sessionFor(mf, db, ADMINX, 1000);
+  const liveHash = sha(live.slice(live.indexOf("=") + 1));
+  const purgeNow = async () => { await db.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(liveHash).run(); };
+  const racing = { ...deps, session: async () => ({ kind: "ok", id: ADMINX, session: liveHash, reauthMs: Date.now() }), beforeWrite: purgeNow };
+  const callR = (path, b) => G.handleGrantsAdmin(new Request(SITE + path, { method: "POST", headers: { "content-type": "application/json", "content-length": String(JSON.stringify(b).length) }, body: JSON.stringify(b) }), new URL(SITE + path), db, ADMINX, racing);
+  const rid3 = reqId();
+  const r3 = await callR("/api/admin/grants", { request_id: rid3, account_id: USER, storage_bytes: GiB, valid_until: until(3) });
+  const g3 = (await db.prepare("SELECT COUNT(*) n FROM grants WHERE source_ref = ?1").bind(rid3).first()).n;
+  ok(r3.status === 401 && g3 === 0, `F3 the admin's session deleted between the rate write and the grant's write: 401, no grant (${r3.status})`, { g3 });
+  const live2 = await sessionFor(mf, db, ADMINX, 1000);
+  const liveHash2 = sha(live2.slice(live2.indexOf("=") + 1));
+  const racing2 = { ...racing, session: async () => ({ kind: "ok", id: ADMINX, session: liveHash2, reauthMs: Date.now() }), beforeWrite: async () => { await db.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(liveHash2).run(); } };
+  const r4 = await G.handleGrantsAdmin(new Request(SITE + `/api/admin/grants/${target.grant.id}/revoke`, { method: "POST", headers: { "content-type": "application/json", "content-length": "16" }, body: JSON.stringify({ reason: "late" }) }), new URL(SITE + `/api/admin/grants/${target.grant.id}/revoke`), db, ADMINX, racing2);
+  const after4 = await db.prepare("SELECT revoked_at FROM grants WHERE id = ?1").bind(target.grant.id).first();
+  ok(r4.status === 401 && after4.revoked_at === null, `F4 the admin's session deleted just before a revocation's write: 401, the grant unrevoked (${r4.status})`, after4);
+}
+
+// ---- T: an exact retry is the same grant even after the grant's window has ended
+{
+  const s = await sessionFor(mf, db, ADMIN4, 1000);
+  const req = { request_id: reqId(), account_id: OTHER, storage_bytes: GiB, valid_until: nowS() + 2 };
+  const first = await body(await post(mf, "/api/admin/grants", s, req));
+  await new Promise((r) => setTimeout(r, 3100));
+  const again = await post(mf, "/api/admin/grants", s, req);
+  const ab = await body(again);
+  ok(again.status === 200 && ab?.retried === true && ab.grant.id === first.grant.id, `T1 the same request after its valid_until: the same grant, not 400 (${again.status})`, ab);
+}
+
 // ---- N: the grant routes exist only with WorkOS sign-in
 {
   const legacy = worker({ SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", FILES_ORIGIN: "https://files.test", SAGEBRUSH_ADMINS: ADMIN });

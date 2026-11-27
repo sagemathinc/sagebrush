@@ -64,12 +64,22 @@ export async function entitlements(db: D1, account: string, t: number): Promise<
 }
 
 /** The admin's session, as the mounting code resolves it: the account, and its re-authentication (ms) or null. */
-export type AdminSession = { kind: "ok"; id: string; reauthMs: number | null } | { kind: "none" } | { kind: "unavailable" };
+export type AdminSession = { kind: "ok"; id: string; session: string; reauthMs: number | null } | { kind: "none" } | { kind: "unavailable" };
+/** The acting admin: the account and the token hash of the session it was checked with. */
+type Actor = { id: string; session: string };
+/** SQL: the actor's own session still exists and its account isn't being deleted (?s session hash, ?a account). Every
+ * write carries it, so an admin purged after its checks writes nothing: the purge deletes its sessions in the batch
+ * that anonymizes, and a write either commits before that batch (and is anonymized by it) or matches no session. */
+const ACTOR_LIVE = (s: string, a: string) => `EXISTS (SELECT 1 FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ${s} AND s.account_id = ${a} AND a.deleting IS NULL)`;
+const actorLive = async (db: D1, actor: Actor) => !!(await db.prepare(`SELECT 1 AS x WHERE ${ACTOR_LIVE("?1", "?2")}`).bind(actor.session, actor.id).first());
+const signedOut = () => json(401, { error: "sign in first" });
 export interface AdminDeps {
   session(req: Request): Promise<AdminSession>;
   /** the Worker's clock (ms); tests replace it */
   now(): number;
   sha256Hex(s: string): Promise<string>;
+  /** tests only (the deployed route sets none): runs just before a grant's write batch, after every check */
+  beforeWrite?: () => Promise<void>;
 }
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" };
@@ -120,19 +130,23 @@ export async function handleGrantsAdmin(req: Request, url: URL, db: D1, adminsRa
   try { b = JSON.parse(text); } catch { return json(400, { error: "a JSON object is required" }); }
   if (!b || typeof b !== "object" || Array.isArray(b)) return json(400, { error: "a JSON object is required" });
   // 5. the admin's rate
+  const actor: Actor = { id: s.id, session: s.session };
   const hit = await db.batch([
     db.prepare("DELETE FROM grant_admin_hits WHERE admin = ?1 AND t <= ?2").bind(s.id, tS - ADMIN_RATE.windowS),
-    db.prepare("INSERT INTO grant_admin_hits (admin, t, id) SELECT ?1, ?2, ?3 WHERE (SELECT COUNT(*) FROM grant_admin_hits WHERE admin = ?1 AND t > ?4) < ?5").bind(s.id, tS, newGrantId(), tS - ADMIN_RATE.windowS, ADMIN_RATE.limit),
+    db.prepare(`INSERT INTO grant_admin_hits (admin, t, id) SELECT ?1, ?2, ?3 WHERE (SELECT COUNT(*) FROM grant_admin_hits WHERE admin = ?1 AND t > ?4) < ?5 AND ${ACTOR_LIVE("?6", "?1")}`)
+      .bind(s.id, tS, newGrantId(), tS - ADMIN_RATE.windowS, ADMIN_RATE.limit, s.session),
   ]);
-  if (Number((hit[1] as { meta?: { changes?: number } })?.meta?.changes ?? 0) !== 1) return json(429, { error: "too many grant changes; wait a minute", retry_after_s: ADMIN_RATE.windowS });
-  if (!revoke) return createGrant(db, s.id, b, tS, deps);
+  if (Number((hit[1] as { meta?: { changes?: number } })?.meta?.changes ?? 0) !== 1)
+    return (await actorLive(db, actor)) ? json(429, { error: "too many grant changes; wait a minute", retry_after_s: ADMIN_RATE.windowS }) : signedOut();
+  if (!revoke) return createGrant(db, actor, b, tS, deps);
   let id: string;
   try { id = decodeURIComponent(revoke[1]); } catch { return json(404, { error: "no such grant" }); }
-  return revokeGrant(db, s.id, id, b, tS);
+  return revokeGrant(db, actor, id, b, tS, deps);
 }
 
 /** A new grant from an admin request, or the same grant again for an exact retry of its request_id. */
-async function createGrant(db: D1, admin: string, b: Record<string, unknown>, t: number, deps: AdminDeps): Promise<Response> {
+async function createGrant(db: D1, actor: Actor, b: Record<string, unknown>, t: number, deps: AdminDeps): Promise<Response> {
+  const admin = actor.id;
   const bad = (what: string) => json(400, { error: what });
   const known = new Set(["request_id", "account_id", "storage_bytes", "private_links", "remote", "gpu", "seats", "valid_from", "valid_until", "note"]);
   const extra = Object.keys(b).find((k) => !known.has(k));
@@ -144,10 +158,9 @@ async function createGrant(db: D1, admin: string, b: Record<string, unknown>, t:
   const storage = b.storage_bytes ?? null, seats = b.seats ?? null;
   if (storage !== null && !(Number.isSafeInteger(storage) && (storage as number) >= 0 && (storage as number) <= GRANT_STORAGE_MAX)) return bad(`storage_bytes: a whole number, 0 to ${GRANT_STORAGE_MAX}`);
   if (seats !== null && !(Number.isSafeInteger(seats) && (seats as number) >= 1 && (seats as number) <= 1000)) return bad("seats: 1 to 1000");
-  const from = b.valid_from ?? t, until = b.valid_until;
-  if (!Number.isSafeInteger(from) || (from as number) < 0 || !Number.isSafeInteger(until)) return bad("valid_from, valid_until: whole seconds");
-  if (!((until as number) > (from as number) && (until as number) - (from as number) <= GRANT_WINDOW_MAX_S)) return bad("valid_until: after valid_from, and at most 2 years after it");
-  if (!((until as number) > t)) return bad("valid_until: in the future");
+  // (the request's own shape: what doesn't depend on the clock, so an exact retry is judged the same at any time)
+  const until = b.valid_until;
+  if ((b.valid_from !== undefined && b.valid_from !== null && !(Number.isSafeInteger(b.valid_from) && (b.valid_from as number) >= 0)) || !Number.isSafeInteger(until)) return bad("valid_from, valid_until: whole seconds");
   if (b.note !== undefined && b.note !== null && !(typeof b.note === "string" && b.note.length <= 500)) return bad("note: at most 500 characters, and no personal data");
   const pl = b.private_links === true ? 1 : null, rm = b.remote === true ? 1 : null, gp = b.gpu === true ? 1 : null;
   if (storage === null && pl === null && rm === null && gp === null && seats === null) return bad("a grant gives at least one thing");
@@ -157,14 +170,19 @@ async function createGrant(db: D1, admin: string, b: Record<string, unknown>, t:
   const hash = await deps.sha256Hex(JSON.stringify([b.account_id, storage, pl, rm, gp, seats, b.valid_from ?? null, until, note]));
   const prior = await db.prepare(`SELECT ${GRANT_COLS}, request_hash FROM grants WHERE source = 'admin' AND source_ref = ?1`).bind(b.request_id).first<Record<string, unknown>>();
   if (prior) return prior.request_hash === hash ? json(200, { grant: strip(prior), retried: true }) : json(409, { error: "this request_id was used for another grant" });
+  // (a new grant only: its window, from now when valid_from is absent, must still be ahead)
+  const from = (b.valid_from ?? t) as number;
+  if (!((until as number) > from && (until as number) - from <= GRANT_WINDOW_MAX_S)) return bad("valid_until: after valid_from, and at most 2 years after it");
+  if (!((until as number) > t)) return bad("valid_until: in the future");
   const id = newGrantId();
+  if (deps.beforeWrite) await deps.beforeWrite();
   try {
     await db.batch([
       // (the holder exists, isn't being deleted and isn't disabled: checked by the insert itself)
       db.prepare(`INSERT INTO grants (id, account_id, storage_bytes, private_links, remote, gpu, seats, valid_from, valid_until, source, source_ref, request_hash, note, created_at, created_by)
         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'admin', ?10, ?11, ?12, ?13, ?14
-        WHERE EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND deleting IS NULL AND disabled IS NULL)`)
-        .bind(id, b.account_id, storage, pl, rm, gp, seats, from, until, b.request_id, hash, note, t, admin),
+        WHERE EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND deleting IS NULL AND disabled IS NULL) AND ${ACTOR_LIVE("?15", "?14")}`)
+        .bind(id, b.account_id, storage, pl, rm, gp, seats, from, until, b.request_id, hash, note, t, admin, actor.session),
       db.prepare("INSERT INTO grant_audit (grant_id, at, actor, action, detail) SELECT ?1, ?2, ?3, 'create', NULL WHERE EXISTS (SELECT 1 FROM grants WHERE id = ?1)").bind(id, t, admin),
     ]);
   } catch {
@@ -174,20 +192,24 @@ async function createGrant(db: D1, admin: string, b: Record<string, unknown>, t:
     return json(503, { error: "the grant couldn't be written; try again" });
   }
   const row = await db.prepare(`SELECT ${GRANT_COLS} FROM grants WHERE id = ?1`).bind(id).first();
-  return row ? json(201, { grant: row }) : json(404, { error: "no such account, or it can't hold a grant" });
+  if (row) return json(201, { grant: row });
+  return (await actorLive(db, actor)) ? json(404, { error: "no such account, or it can't hold a grant" }) : signedOut();
 }
 
 /** Revoke a grant, first revocation wins: a second one answers the grant as the first left it. */
-async function revokeGrant(db: D1, admin: string, id: string, b: Record<string, unknown>, t: number): Promise<Response> {
+async function revokeGrant(db: D1, actor: Actor, id: string, b: Record<string, unknown>, t: number, deps: AdminDeps): Promise<Response> {
+  const admin = actor.id;
   if (!GRANT_ID.test(id)) return json(404, { error: "no such grant" });
   const extra = Object.keys(b).find((k) => k !== "reason");
   if (extra !== undefined) return json(400, { error: `unknown field: ${extra.slice(0, 40)}` });
   if (!(typeof b.reason === "string" && b.reason.length >= 1 && b.reason.length <= 200)) return json(400, { error: "reason: 1 to 200 characters, and no personal data" });
+  if (deps.beforeWrite) await deps.beforeWrite();
   await db.batch([
-    db.prepare("UPDATE grants SET revoked_at = ?2, revoked_by = ?3, revoke_reason = ?4 WHERE id = ?1 AND revoked_at IS NULL").bind(id, t, admin, b.reason),
+    db.prepare(`UPDATE grants SET revoked_at = ?2, revoked_by = ?3, revoke_reason = ?4 WHERE id = ?1 AND revoked_at IS NULL AND ${ACTOR_LIVE("?5", "?3")}`).bind(id, t, admin, b.reason, actor.session),
     // (the audit row only for the revocation that took effect: the grant's revoked_at is this one's)
     db.prepare("INSERT INTO grant_audit (grant_id, at, actor, action, detail) SELECT ?1, ?2, ?3, 'revoke', NULL WHERE EXISTS (SELECT 1 FROM grants WHERE id = ?1 AND revoked_at = ?2 AND revoked_by = ?3) AND NOT EXISTS (SELECT 1 FROM grant_audit WHERE grant_id = ?1 AND action = 'revoke')").bind(id, t, admin),
   ]);
+  if (!(await actorLive(db, actor))) return signedOut();
   const row = await db.prepare(`SELECT ${GRANT_COLS} FROM grants WHERE id = ?1`).bind(id).first();
   return row ? json(200, { grant: row }) : json(404, { error: "no such grant" });
 }

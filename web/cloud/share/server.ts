@@ -1950,7 +1950,7 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
       const g = await handleGrantsAdmin(req, url, env.SHARE_DB, env.SAGEBRUSH_ADMINS, {
         session: async (q) => {
           const r = await sessionResult(q, env, ctx);
-          return r.kind === "ok" ? { kind: "ok", id: r.id, reauthMs: r.reauthMs } : r;
+          return r.kind === "ok" ? { kind: "ok", id: r.id, session: r.session, reauthMs: r.reauthMs } : r;
         },
         now: () => Date.now(),
         sha256Hex,
