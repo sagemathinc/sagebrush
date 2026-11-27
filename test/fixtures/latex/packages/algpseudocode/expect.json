@@ -1,0 +1,6 @@
+{
+ "recall": 0.499,
+ "stray": 15,
+ "problems": 24,
+ "note": "the baseline on master (Nov 27 2026); a change that shows more raises it"
+}

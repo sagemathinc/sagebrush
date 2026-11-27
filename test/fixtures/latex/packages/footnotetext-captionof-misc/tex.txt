@@ -1,0 +1,12 @@
+We use WidgetSys in tests and WidgetSys. First 1 and second 2 .
+
+Figure 1: A floating-free figure
+Table 1: A table caption
+Figure 1 is free. Done now.
+
+2 Explained here.
+1 The first one.
+
+1
+
+

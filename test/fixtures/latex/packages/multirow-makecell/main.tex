@@ -1,0 +1,16 @@
+\documentclass{article}
+\usepackage{multirow,makecell}
+\begin{document}
+\begin{tabular}{|l|c|c|}
+\hline
+\multirow{2}{*}{Method} & \multicolumn{2}{c|}{Score} \\
+\cline{2-3}
+ & Top1 & Top5 \\
+\hline
+\multirow{2}{2cm}{Base line} & 71.2 & 90.1 \\
+ & 72.0 & 90.5 \\
+\hline
+\makecell{Two\\lines} & \makecell[l]{Left\\cell} & \thead{Head} \\
+\hline
+\end{tabular}
+\end{document}

@@ -1,0 +1,26 @@
+\documentclass{article}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\begin{document}
+\begin{algorithm}
+\caption{Widget search}\label{alg:ws}
+\begin{algorithmic}[1]
+\Require a list $L$ and a key $k$
+\Ensure the index of $k$
+\State $i \gets 0$
+\For{each $x$ in $L$}
+  \If{$x = k$}
+    \State \Return $i$
+  \ElsIf{$x > k$}
+    \State \textbf{break}
+  \Else
+    \State $i \gets i + 1$
+  \EndIf
+\EndFor
+\While{$i > 0$} \State $i \gets i - 1$ \EndWhile
+\Function{Find}{$L, k$} \State \Call{Search}{$L$} \EndFunction
+\State \Comment{done}
+\end{algorithmic}
+\end{algorithm}
+Algorithm~\ref{alg:ws} searches.
+\end{document}

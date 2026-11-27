@@ -1,0 +1,20 @@
+Widget Networks
+Ada Example
+
+Bob Sample
+
+Dept. of Widgets
+Acme Institute
+Springfield, USA
+ada@example.org
+
+Example Labs
+Freedonia
+
+Abstract—Networks of widgets.
+Index Terms—widgets, networks
+
+I. INTRODUCTION
+Widgets connect.
+
+

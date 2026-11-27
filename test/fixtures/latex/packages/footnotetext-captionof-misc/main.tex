@@ -1,0 +1,16 @@
+\documentclass{article}
+\usepackage{caption,needspace,xspace}
+\newcommand{\sys}{WidgetSys\xspace}
+\begin{document}
+We use \sys in tests and \sys.
+First\footnotemark{} and second\footnotemark.
+\footnotetext{Explained here.}
+\addtocounter{footnote}{-1}\footnotetext{The first one.}
+\Needspace{5\baselineskip}
+\begin{center}
+\rule{2cm}{1cm}
+\captionof{figure}{A floating-free figure}\label{fig:free}
+\captionof{table}{A table caption}
+\end{center}
+Figure~\ref{fig:free} is free.\space Done\spacefactor=1000{} now.
+\end{document}

@@ -1,0 +1,10 @@
+(a) Left panel
+
+(b) Right panel
+
+Figure 1: Two panels
+See Figure 1, panels 1a and b.
+
+1
+
+
