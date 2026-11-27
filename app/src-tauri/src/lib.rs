@@ -638,7 +638,7 @@ mod tests {
         // (none focused)
         assert_eq!(super::files_target(vec![w("doc-3", "/index.html", false)]), "doc-3");
         assert_eq!(super::files_target(vec![w("doc-3", "/index.html", true)]), "doc-3");
-        // (main on a board, a board focused: the notebook window, never main (astra2's row))
+        // (main on a board, a board focused: the notebook window, never main (a review's row))
         assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-1", "/board/", true), w("doc-2", "/", false)]), "doc-2");
         // (main gone: another notebook window; only boards: kept for main)
         assert_eq!(super::files_target(vec![w("doc-4", "/board/", true), w("doc-5", "/", false)]), "doc-5");
