@@ -31,11 +31,15 @@ def _exp_mul(a, f):
     engine's num::exp_mul, bit for bit: in 192-bit fixed point, a = k ln 2 +
     r, e^r by its Taylor series, ln 2 from sum 1/(j 2^j), then one rounding
     (Python's integer division is correctly rounded).  Past a = 1455 every
-    nonzero f overflows (e^1455 2^-1074 > 2^1024)."""
+    nonzero f overflows (e^1455 2^-1074 > 2^1024).  A NaN or an infinity in a
+    or f is IEEE's f * e^a (NaN, an infinity or 0), never the fixed point's."""
     if f == 0:
         return f
-    if a <= 709:
-        return f * math.exp(a)
+    if not math.isfinite(a) or not math.isfinite(f) or a <= 709:
+        try:
+            return f * math.exp(a)
+        except OverflowError:
+            return f * float("inf")
     if a > 1455:
         return math.copysign(float("inf"), f)
     P = 192
@@ -59,14 +63,26 @@ def _exp_mul(a, f):
     return math.copysign(v, f)
 
 
+def _cos(y):
+    """cos y, NaN for an infinite y (math.cos raises ValueError), as IEEE's."""
+    return math.cos(y) if math.isfinite(y) else float("nan")
+
+
+def _sin(y):
+    """sin y, NaN for an infinite y, as IEEE's."""
+    return math.sin(y) if math.isfinite(y) else float("nan")
+
+
 def _cexp(z):
     """e^z for a complex double, as C99's cexp (IEEE): e^x (cos y + i sin y)
     with each part overflowing on its own, so e^(710 + 3i)'s imaginary part
-    is a double, and e^1000 is +infinity with imaginary part 0."""
+    is a double, and e^1000 is +infinity with imaginary part 0; an infinite
+    imaginary part with a finite real one is NaN + NaN*I, as Sage's (cmath
+    raises ValueError there)."""
     try:
         return cmath.exp(z)
-    except OverflowError:
-        return complex(_exp_mul(z.real, math.cos(z.imag)), _exp_mul(z.real, math.sin(z.imag)))
+    except (OverflowError, ValueError):
+        return complex(_exp_mul(z.real, _cos(z.imag)), _exp_mul(z.real, _sin(z.imag)))
 
 
 def _csinh_cosh(z, cosh):
@@ -82,11 +98,11 @@ def _csinh_cosh(z, cosh):
         s = math.copysign(1.0, x)
         big = lambda f: _exp_mul(abs(x), f / 2)
         if cosh:
-            return complex(big(math.cos(y)), s * big(math.sin(y)))
-        return complex(s * big(math.cos(y)), big(math.sin(y)))
+            return complex(big(_cos(y)), s * big(_sin(y)))
+        return complex(s * big(_cos(y)), big(_sin(y)))
     if cosh:
-        return complex(ch * math.cos(y), sh * math.sin(y))
-    return complex(sh * math.cos(y), ch * math.sin(y))
+        return complex(ch * _cos(y), sh * _sin(y))
+    return complex(sh * _cos(y), ch * _sin(y))
 
 
 def _double(x):
@@ -1345,13 +1361,15 @@ class ComplexDoubleElement:
         try:
             sx = math.sinh(x)
         except OverflowError:
+            if not math.isfinite(y):
+                return ComplexDoubleElement(float("nan"), float("nan"))
             return ComplexDoubleElement(math.copysign(1.0, x), math.copysign(0.0, math.sin(2 * y)))
-        c = math.cos(y)
+        c = _cos(y)
         d = c * c + sx * sx
         if abs(x) < 1.0:
-            return ComplexDoubleElement(sx * math.cosh(x) / d, 0.5 * math.sin(2 * y) / d)
+            return ComplexDoubleElement(sx * math.cosh(x) / d, 0.5 * _sin(2 * y) / d)
         f = 1 + (c / sx) * (c / sx)
-        return ComplexDoubleElement(1.0 / (math.tanh(x) * f), 0.5 * math.sin(2 * y) / d)
+        return ComplexDoubleElement(1.0 / (math.tanh(x) * f), 0.5 * _sin(2 * y) / d)
 
     def log(self):
         """The principal logarithm.

@@ -750,8 +750,12 @@ fn ccosh(a: C) -> C {
     (a.0.cosh() * a.1.cos(), a.0.sinh() * a.1.sin())
 }
 // tanh past |x| = 709 (sinh x past the doubles): +-1 with a signed 0
-// imaginary part, as Sage's formula (sin 2y/(2D), D infinite) gives it
+// imaginary part, as Sage's formula (sin 2y/(2D), D infinite) gives it; an
+// infinite or NaN y is NaN there (Sage's CDF: NaN + NaN*I)
 fn ctanh(a: C) -> C {
+    if a.0.abs() > 709.0 && !a.1.is_finite() {
+        return (f64::NAN, f64::NAN);
+    }
     if a.0.abs() > 709.0 {
         return (1f64.copysign(a.0), 0f64.copysign((2.0 * a.1).sin()));
     }

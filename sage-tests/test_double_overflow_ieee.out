@@ -19,3 +19,23 @@ SR sinh(CDF(710.5+i pi/3)) | 9.208086724008932e+307 + 1.5948874046483924e+308*I
 SR sinh(CDF(-710.5+i pi/3)) | -9.208086724008932e+307 + 1.5948874046483924e+308*I
 CDF cosh(710.5+i pi/3) | 9.208086724008932e+307 + 1.5948874046483924e+308*I
 SR cosh(CDF(-710.5+i pi/3)) | 9.208086724008932e+307 - 1.5948874046483924e+308*I
+SR exp (1000, inf) | NaN + NaN*I
+SR sinh (1000, inf) | NaN + NaN*I
+SR cosh (1000, inf) | NaN + NaN*I
+SR tanh (1000, inf) | NaN + NaN*I
+SR exp (1000, nan) | NaN + NaN*I
+SR sinh (1000, nan) | NaN + NaN*I
+SR cosh (1000, nan) | NaN + NaN*I
+SR tanh (1000, nan) | NaN + NaN*I
+SR exp (nan, 1) | NaN + NaN*I
+SR sinh (nan, 1) | NaN + NaN*I
+SR cosh (nan, 1) | NaN + NaN*I
+SR tanh (nan, 1) | NaN + NaN*I
+SR exp (inf, 1) | +infinity + +infinity*I
+SR sinh (inf, 1) | +infinity + +infinity*I
+SR cosh (inf, 1) | +infinity + +infinity*I
+SR tanh (inf, 1) | 1.0
+SR exp (710, inf) | NaN + NaN*I
+SR sinh (710, inf) | NaN + NaN*I
+SR cosh (710, inf) | NaN + NaN*I
+SR tanh (710, inf) | NaN + NaN*I

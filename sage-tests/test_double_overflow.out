@@ -112,3 +112,35 @@ tanh (100, 2) | 1.0 - 2.0946726893646755e-87*I
 sinh (710, 3) | -1.1058190279723804e+308 + 1.5763067970322092e+307*I
 cosh (710, 3) | -1.1058190279723804e+308 + 1.5763067970322092e+307*I
 tanh (710, 3) | 1.0
+exp (1000, inf) | NaN + NaN*I
+sinh (1000, inf) | NaN + NaN*I
+cosh (1000, inf) | NaN + NaN*I
+tanh (1000, inf) | NaN + NaN*I
+exp (1000, nan) | NaN + NaN*I
+sinh (1000, nan) | NaN + NaN*I
+cosh (1000, nan) | NaN + NaN*I
+tanh (1000, nan) | NaN + NaN*I
+exp (nan, 1) | NaN + NaN*I
+sinh (nan, 1) | NaN + NaN*I
+cosh (nan, 1) | NaN + NaN*I
+tanh (nan, 1) | NaN + NaN*I
+exp (inf, 1) | +infinity + +infinity*I
+sinh (inf, 1) | +infinity + +infinity*I
+cosh (inf, 1) | +infinity + +infinity*I
+tanh (inf, 1) | 1.0
+exp (-inf, 1) | 0.0
+sinh (-inf, 1) | -infinity + +infinity*I
+cosh (-inf, 1) | +infinity - +infinity*I
+tanh (-inf, 1) | -1.0
+exp (710, inf) | NaN + NaN*I
+sinh (710, inf) | NaN + NaN*I
+cosh (710, inf) | NaN + NaN*I
+tanh (710, inf) | NaN + NaN*I
+exp (1000, -inf) | NaN + NaN*I
+sinh (1000, -inf) | NaN + NaN*I
+cosh (1000, -inf) | NaN + NaN*I
+tanh (1000, -inf) | NaN + NaN*I
+exp (5, inf) | NaN + NaN*I
+sinh (5, inf) | NaN + NaN*I
+cosh (5, inf) | NaN + NaN*I
+tanh (5, inf) | NaN + NaN*I

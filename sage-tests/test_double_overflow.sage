@@ -30,3 +30,9 @@ for z in [(1000, 1), (-1000, 1), (2000, -2), (746, 2), (1000, -1), (-746, 1), (7
 for z in [(1, 1), (0.5, -2), (-3, 0.25), (20, 1), (-0.25, 7), (100, 2), (710, 3)]:
     for f in ["sinh", "cosh", "tanh"]:
         show("%s %s" % (f, z), lambda: getattr(CDF(*z), f)())
+# a NaN or an infinity in a part: Sage's CDF (an infinite or NaN imaginary
+# part with a finite real one is NaN + NaN*I)
+i_, n_ = float('inf'), float('nan')
+for z in [(1000, i_), (1000, n_), (n_, 1), (i_, 1), (-i_, 1), (710, i_), (1000, -i_), (5, i_)]:
+    for f in ["exp", "sinh", "cosh", "tanh"]:
+        show("%s %s" % (f, z), lambda: getattr(CDF(*z), f)())

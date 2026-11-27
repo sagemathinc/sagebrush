@@ -40,3 +40,9 @@ show("SR sinh(CDF(710.5+i pi/3))", lambda: sinh(SR(CDF(710.5, y))))
 show("SR sinh(CDF(-710.5+i pi/3))", lambda: sinh(SR(CDF(-710.5, y))))
 show("CDF cosh(710.5+i pi/3)", lambda: CDF(710.5, y).cosh())
 show("SR cosh(CDF(-710.5+i pi/3))", lambda: cosh(SR(CDF(-710.5, y))))
+# a NaN or an infinity in a part, in SR: as plain CDF (Sage's SR gives 0,
+# 0.0, OverflowError or ValueError here, by GiNaC's formulas)
+i_, n_ = float('inf'), float('nan')
+for z in [(1000, i_), (1000, n_), (n_, 1), (i_, 1), (710, i_)]:
+    for name, f in [("exp", exp), ("sinh", sinh), ("cosh", cosh), ("tanh", tanh)]:
+        show("SR %s %s" % (name, z), lambda: f(SR(CDF(*z))))

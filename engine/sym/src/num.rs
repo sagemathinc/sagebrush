@@ -51,11 +51,13 @@ pub fn check_q_bits(x: &Q) {
 /// series, ln 2 from sum 1/(j 2^j); the truncations are under 2^-180
 /// relative, so the one rounding is the correct one but within that of a
 /// tie.  Past a = 1455 every nonzero f overflows (e^1455 2^-1074 > 2^1024).
+/// A NaN or an infinity in a or f is IEEE's f * e^a (NaN, an infinity or
+/// 0), never the fixed point's.
 pub fn exp_mul(a: f64, f: f64) -> f64 {
     if f == 0.0 {
         return f;
     }
-    if a <= 709.0 {
+    if !a.is_finite() || !f.is_finite() || a <= 709.0 {
         return f * a.exp();
     }
     if a > 1455.0 {
@@ -1844,6 +1846,14 @@ mod tests {
         assert_eq!(exp_mul(1500.0, 5e-324), f64::INFINITY);
         assert!(exp_mul(1000.0, -0.0).is_sign_negative() && exp_mul(1000.0, -0.0) == 0.0);
         assert_eq!(exp_mul(1.0, 2.0), 2.0 * 1f64.exp());
+        // (a NaN or an infinity is IEEE's f * e^a, never the fixed point's:
+        // a NaN a once reached k.to_i64().unwrap() and trapped)
+        assert!(exp_mul(f64::NAN, 2.0).is_nan());
+        assert!(exp_mul(1000.0, f64::NAN).is_nan());
+        assert_eq!(exp_mul(1000.0, f64::INFINITY), f64::INFINITY);
+        assert_eq!(exp_mul(1000.0, f64::NEG_INFINITY), f64::NEG_INFINITY);
+        assert_eq!(exp_mul(f64::INFINITY, 2.0), f64::INFINITY);
+        assert_eq!(exp_mul(f64::NEG_INFINITY, 2.0), 0.0);
     }
 
     #[test]
