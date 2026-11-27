@@ -266,26 +266,31 @@ test("files, packages, copies, a method named like a built-in, mfilename('class'
 
 test("private methods and private Constant properties: refused outside the class, in either form; allowed in its methods", () => {
   // (MathWorks' method and property attribute pages: Access = private is the class's own methods only)
-  const dir = tree({
-    "Priv.m": lines("classdef Priv",
+  // (the class, named by its own methods as `self`: Priv, or pk.Priv in a package)
+  const priv = (self: string) => lines("classdef Priv",
       "  properties (Constant, Access = private)", "    hidden = 42", "  end",
       "  properties (Constant)", "    open = 5", "  end",
       "  methods",
       "    function r = inside(obj)", "      r = secret(obj);", "    end",
       "    function r = insideDot(obj)", "      r = obj.secret();", "    end",
-      "    function r = ownconst(obj)", "      r = [obj.hidden, Priv.hidden];", "    end",
-      "    function r = ownconst2(obj)", "      r = Priv.hidden;", "    end",
-      "    function r = ownstatic(obj)", "      r = Priv.staticsecret();", "    end",
+      "    function r = ownconst(obj)", `      r = [obj.hidden, ${self}.hidden];`, "    end",
+      "    function r = ownconst2(obj)", `      r = ${self}.hidden;`, "    end",
+      "    function r = ownstatic(obj)", `      r = ${self}.staticsecret();`, "    end",
       "    function r = viaHandle(obj)", "      h = @secret;", "      r = h(obj);", "    end",
       "    function r = pub(obj)", "      r = 3;", "    end",
       "  end",
       "  methods (Access = private)", "    function r = secret(obj)", "      r = 7;", "    end", "  end",
       "  methods (Static, Access = private)", "    function r = staticsecret()", "      r = 11;", "    end", "  end",
-      "end"),
+      "end");
+  const pf = lines("classdef Pf", "  properties (Access = private)", "    hid = 6", "  end",
+    "  methods (Access = private)", "    function r = sec(obj)", "      r = 8;", "    end", "  end", "end");
+  const peek = lines("function r = peek(obj)", "  r = [obj.hid, sec(obj), obj.sec()];", "end");
+  const dir = tree({
+    "Priv.m": priv("Priv"),
+    // (the same classes in a package: their own access by their package-qualified names)
+    "+pk/Priv.m": priv("pk.Priv"), "+pk/@Pf/Pf.m": pf, "+pk/@Pf/peek.m": peek,
     // (an @-folder's method file is one of the class's methods: the class's access)
-    "@Pf/Pf.m": lines("classdef Pf", "  properties (Access = private)", "    hid = 6", "  end",
-      "  methods (Access = private)", "    function r = sec(obj)", "      r = 8;", "    end", "  end", "end"),
-    "@Pf/peek.m": lines("function r = peek(obj)", "  r = [obj.hid, sec(obj), obj.sec()];", "end"),
+    "@Pf/Pf.m": pf, "@Pf/peek.m": peek,
     // (a Constant read through a captured class name: no object is made, so this constructor never runs)
     "Kc.m": lines("classdef Kc", "  properties (Constant)", "    K = 4", "  end", "  methods", "    function obj = Kc()", "      error('constructed');", "    end", "  end", "end"),
   });
@@ -301,17 +306,26 @@ test("private methods and private Constant properties: refused outside the class
     "row('folder_outside_prop', @() q.hid); row('folder_outside_method', @() sec(q));",
     "h = @secret; row('handle_outside', @() h(p));",
     "row('const_in_anon', @() Kc.K);",
+    "pp = pk.Priv; pq = pk.Pf;",
+    "row('pk_inside', @() pp.inside()); row('pk_insideDot', @() pp.insideDot()); row('pk_ownconst', @() mat2str(pp.ownconst()));",
+    "row('pk_ownconst2', @() pp.ownconst2()); row('pk_ownstatic', @() pp.ownstatic()); row('pk_viaHandle', @() pp.viaHandle());",
+    "row('pk_folder', @() mat2str(peek(pq))); row('pk_pub', @() pp.pub());",
+    "row('pk_private_dot', @() pp.secret()); row('pk_private_function', @() secret(pp)); row('pk_private_const_class', @() pk.Priv.hidden);",
+    "row('pk_private_static_class', @() pk.Priv.staticsecret()); row('pk_folder_outside_prop', @() pq.hid); row('pk_handle_outside', @() h(pp));",
   ) + ROW);
   assert.equal(r.err, "");
   const got = new Map(r.out.split("\n").filter((l) => l.includes("|")).map((l) => [l.split("|")[0], l.slice(l.indexOf("|") + 1)] as [string, string]));
   const allowed: Record<string, string> = { inside: "double:7", insideDot: "double:7", ownconst: "[42 42]", ownconst2: "double:42", ownstatic: "double:11",
-    viaHandle: "double:7", folder: "[6 8 8]", const_in_anon: "double:4", pub_fn: "double:3", pub_dot: "double:3", open_inst: "double:5", open_class: "double:5" };
+    viaHandle: "double:7", folder: "[6 8 8]", const_in_anon: "double:4", pub_fn: "double:3", pub_dot: "double:3", open_inst: "double:5", open_class: "double:5",
+    pk_inside: "double:7", pk_insideDot: "double:7", pk_ownconst: "[42 42]", pk_ownconst2: "double:42", pk_ownstatic: "double:11",
+    pk_viaHandle: "double:7", pk_folder: "[6 8 8]", pk_pub: "double:3" };
   for (const [k, w] of Object.entries(allowed)) assert.equal(got.get(k), w, k);
   const method = "ERROR|MATLAB:class:MethodRestricted|Cannot access method";
   const prop = "ERROR|MATLAB:class:GetProhibited|No public property";
-  for (const k of ["private_dot", "private_function", "private_static_instance", "private_static_class", "folder_outside_method", "handle_outside"])
+  for (const k of ["private_dot", "private_function", "private_static_instance", "private_static_class", "folder_outside_method", "handle_outside",
+    "pk_private_dot", "pk_private_function", "pk_private_static_class", "pk_handle_outside"])
     assert.ok(got.get(k)?.startsWith(method), `${k}: ${got.get(k)}`);
-  for (const k of ["private_const_instance", "private_const_class", "folder_outside_prop"]) assert.ok(got.get(k)?.startsWith(prop), `${k}: ${got.get(k)}`);
+  for (const k of ["private_const_instance", "private_const_class", "folder_outside_prop", "pk_private_const_class", "pk_folder_outside_prop"]) assert.ok(got.get(k)?.startsWith(prop), `${k}: ${got.get(k)}`);
 });
 
 test("a handle made before a class loads: called with its object, the method; with a number, the function it was", () => {

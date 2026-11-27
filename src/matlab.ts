@@ -1278,12 +1278,12 @@ class Emitter {
   /** a classdef file (lib/_matlab_classdef.py): its local functions, its methods under their own Python names (never
    * the file's local functions: a method named like a built-in doesn't take its calls), its properties' defaults as
    * functions evaluated once, when the class is first used, and the class defined from all of it */
-  classFile(cd: ClassDefAst, path: string): string {
+  classFile(cd: ClassDefAst, path: string, qual = cd.name): string {
     this.emit("import _matlab as _m");
     for (const f of cd.locals) this.funcDef(f);
     const methods: string[] = [];
     cd.methods.forEach((m, k) => {
-      this.classCtx = cd.name;
+      this.classCtx = qual;
       const self = m.f.name === cd.name && m.f.outs.length ? m.f.outs[0] : undefined;
       this.funcDef(m.f, { py: `_cdm${k}`, self });
       this.classCtx = null;
@@ -2305,7 +2305,11 @@ export function matlabPathFileToPython(src: string, name: string, path = ""): st
     const em = new Emitter(cd.locals, name);
     // (mfilename('class') there: the class's name)
     em.mfile = `${JSON.stringify(path)}, ${JSON.stringify(cd.name)}`;
-    return `#class ${cd.name}\n` + checkPython(em.classFile(cd, path));
+    // (its methods' access context: the class's name as it is registered, package-qualified: +a/+b/Name.m and
+    // +a/+b/@Name/Name.m are class a.b.Name, as for an @-folder's method files below)
+    const pk = /((?:[\\/]\+[^\\/]+)*)(?:[\\/]@[^\\/]+)?[\\/][^\\/]+$/.exec(path);
+    const pkgs = pk ? pk[1].split(/[\\/]/).filter((x) => x).map((x) => x.slice(1)) : [];
+    return `#class ${cd.name}\n` + checkPython(em.classFile(cd, path, [...pkgs, cd.name].join(".")));
   }
   const stmts = p.program();
   checkTreeDepth(stmts, p.functions);
