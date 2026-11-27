@@ -8,6 +8,7 @@ import { gateInputs } from "./size-measure.mjs";
 import { headers } from "./web-tests.mjs";
 import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
 import { listExamples, select as selectExamples, shardCount } from "./examples-lib.mjs";
+import { onTrack, runRefs } from "./pin-policy.mjs";
 
 const event = process.env.GITHUB_EVENT_NAME ?? "local";
 const ref = process.env.GITHUB_REF ?? "";
@@ -32,6 +33,14 @@ function hasCommit(commit) {
 // select nothing)
 function changedFiles() {
   if (event === "workflow_dispatch" || event === "schedule") return [];
+  if (event === "merge_group") {
+    const ev = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+    const { base_sha: base, head_sha: groupHead } = ev.merge_group ?? {};
+    if (!/^[0-9a-f]{40}$/.test(base ?? "") || !/^[0-9a-f]{40}$/.test(groupHead ?? "") || base === groupHead || git("rev-parse", head) !== groupHead)
+      throw new Error("merge_group needs its exact base_sha and checked-out head_sha");
+    git("merge-base", "--is-ancestor", base, groupHead);
+    return git("diff", "--name-only", "--no-renames", base, groupHead).split("\n").filter(Boolean);
+  }
   if (event === "pull_request") {
     const base = `origin/${process.env.GITHUB_BASE_REF}`;
     const mergeBase = git("merge-base", base, head);
@@ -61,10 +70,34 @@ const files = process.env.CI_PATHS_FILES
 const matches = (patterns) => files.some((file) => patterns.some((pattern) => pattern.test(file)));
 const every = (patterns) => files.length > 0 && files.every((file) => patterns.some((pattern) => pattern.test(file)));
 
+// The LaTeX group's inputs and its measure (latexBudgetPaths): they select the full tier on a pull request (fullTierPaths),
+// and keep web-artifacts, whose suite checks the group's caps, under PR CI light too (latex_budget below): #1702 grew the
+// group 45 B past its raw cap on a light pull request, and 4 merge_group runs failed on it, Nov 24 2026.
+const latexBudgetPaths = [
+  // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
+  // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
+  // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
+  // That suite checks every input of the two bundles is matched here)
+  /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
+  // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
+  // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
+  // chunk's kept views (view-state.ts, design/view-state.md); and an entry's page address, which the pairing adds to
+  // its answers (entry-url.ts, with the code page's languages and address))
+  // (the agent pairing chunk's doc-protocol.ts: also a sync path, fullTierPaths, but listed here for latex_budget)
+  /^web\/sync-protocol\/doc-protocol\.ts$/,
+  /^web\/workspace\/(?:agent-ui|agent-pair|agent-made-tex|pair-link|notebook-edit|notebook-form|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state|entry-url)\.ts$/, /^src\/modes\.ts$/,
+  /^web\/code\/(?:langs|url)\.ts$/,
+  // (and the highlighting chunk's highlighter, the notebook's)
+  /^web\/notebook\/highlight\.js$/,
+  // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
+  // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
+  // request in six: a bun or node bump carries the full-ci label instead)
+  /^web\/build(?:-[^/]+)?\.(?:ts|mts|mjs)$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
+];
 // The two tiers (CI speed plan option 2, William, Nov 2 2026): a pull request runs the fast tier, unless it has the
 // `full-ci` label or changes a path where a bug loses data or trust: sync, sharing and security (CSP, HTML
-// sanitizing), and data loss (save, Trash, export, purge).  Then it runs the full suite, as every master push, the
-// nightly schedule and a dispatch do.  A save or Trash change inside web/index.html is not seen here: its author adds
+// sanitizing), and data loss (save, Trash, export, purge). Then it runs the full suite, as every master or track/**
+// integration push, the nightly schedule and a dispatch do. A save or Trash change inside web/index.html is not seen here: its author adds
 // the label.  (test/ci-paths.test.ts has a case for each path class)
 const fullTierPaths = [
   // sync and its journals and merges
@@ -72,8 +105,12 @@ const fullTierPaths = [
   /^web\/notebook\/(?:sync-rows|journal|journal-rows|db-merge3|p2c-merge|merge3)[^/]*$/, /^web\/board\/(?:syncdb|journal|merge)\.ts$/,
   // sharing and security
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
-  // (the hosted service's sharing and remotes, MS-RSL: their suites run only in web-sync's full-tier shards)
-  /^web\/cloud\/share\//, /^web\/cloud\/remote\//,
+  // (the account at the top right, which reads the share dialog's first check: the share dialog's suite, below)
+  /^web\/workspace\/account\.ts$/,
+  // (the hosted service's sharing, remotes, log mirror, LTI tool and support Worker, MS-RSL: their suites run only in
+  // web-sync's full-tier shards; and the mirror's format, which its Worker validates uploads with)
+  /^web\/cloud\/share\//, /^web\/cloud\/remote\//, /^web\/cloud\/mirror\//, /^web\/cloud\/lti\//, /^web\/cloud\/support\//,
+  /^web\/workspace\/agent-chat\/mirror-format\.ts$/,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
   /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/,
@@ -88,22 +125,8 @@ const fullTierPaths = [
   /^web\/miniflare-dispatch\.mjs$/,
   // (a document's checkpoints, the client's side (BH-0b-2): sync, whose suite runs only in web-sync.1)
   /^web\/workspace\/checkpoint(?:-types)?\.ts$/,
-  // (the LaTeX group's absolute ceiling and its lazy chunks' caps, checked only in web-artifacts (scripts/test-latex-group-budget.mjs): the
-  // inputs of sagebrush-latex.js and its worker, as the build's metafile lists them (build/latex-metafile.json):
-  // web/latex's own sources (not its suites), core/ and engine/, web/workspace/paths.ts; and the group's measure.
-  // That suite checks every input of the two bundles is matched here)
-  /^web\/latex\/(?!test-)[^/]+\.(?:ts|mts|js|mjs)$/, /^web\/latex\/(?:core|engine)\//, /^web\/workspace\/paths\.ts$/, /^scripts\/latex-group\.mjs$/,
-  // (and the LaTeX editor's example list, web/examples/legacy.ts (#543). The build fills it from the corpus's LaTeX
-  // examples, but a change to one of them selects that example, not the full tier: its own run checks it)
-  /^web\/examples\/legacy\.ts$/,
-  // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
-  // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
-  // chunk's kept views (view-state.ts, design/view-state.md))
-  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state)\.ts$/, /^src\/modes\.ts$/,
-  // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
-  // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
-  // request in six: a bun or node bump carries the full-ci label instead)
-  /^web\/build(?:-[^/]+)?\.(?:ts|mts|mjs)$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
+  // (the LaTeX group's inputs and its measure: latexBudgetPaths, below)
+  ...latexBudgetPaths,
 ];
 // A changed suite runs on its own pull request (#565: web/sw.js and test-sw-read-stall.mjs, `ci: web-sync.2`, ran
 // neither): its `// ci:` header names its job, read as scripts/web-tests.mjs reads it, from the checkout (or
@@ -112,6 +135,21 @@ const fullTierPaths = [
 const fullOnlyJobs = ["web-sync", "web-sync-ops", "web-runner-sync", "web-artifacts"];
 const suitePaths = [/^web\/(?:.*\/)?test-[^/]*\.mjs$/, /^scripts\/test-[^/]*\.mjs$/];
 const suiteRoot = process.env.CI_PATHS_ROOT ?? ".";
+// Some wheel tests also run through the CLI in checks. Derive those inputs
+// from the workflow so a test-only change cannot skip its own checks run.
+const changedPythonTests = files.filter((file) => /^engine\/py\/test_[^/]*\.py$/.test(file));
+let checksPythonTest = false;
+if (changedPythonTests.length) {
+  const workflow = readFileSync(join(suiteRoot, ".github/workflows/ci.yml"), "utf8");
+  const checks = workflow.split("\n  checks:\n")[1]?.split(/\n  [a-z][a-z0-9-]*:\n/)[0];
+  if (checks === undefined) throw new Error("ci-paths: cannot find the checks job");
+  const code = checks.split("\n").map((line) => line.split("#")[0])
+    // Wrappers and continued commands still invoke their test. Prefer an extra
+    // checks run to silently skipping one; exclude only explicit prose output.
+    .filter((line) => !/^\s*(?:-\s+run:\s*)?(?:echo|printf)\b/.test(line)).join("\n");
+  const invoked = new Set([...code.matchAll(/\bengine\/py\/test_[A-Za-z0-9_.-]+\.py\b/g)].map((m) => m[0]));
+  checksPythonTest = changedPythonTests.some((file) => invoked.has(file));
+}
 const suiteTargets = files.filter((file) => suitePaths.some((pattern) => pattern.test(file))).flatMap((file) => {
   let text;
   try {
@@ -126,8 +164,17 @@ const suiteGroups = new Set(suiteTargets.filter((target) => target.startsWith("w
 const labels = (process.env.CI_PR_LABELS ?? "").split(",").map((label) => label.trim());
 const fullTier = event === "pull_request" &&
   (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
-const full = event === "workflow_dispatch" || event === "schedule" ||
-  (event === "push" && ref === "refs/heads/master") || fullTier;
+const integrationPush = event === "push" &&
+  (ref === "refs/heads/master" || ref.startsWith("refs/heads/track/"));
+// Queue payloads carry no PR labels: a merge group runs the full tier, including every full-ci request.
+const full = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
+  integrationPush || fullTier;
+// The long tier (the test audit's option (a), decided Nov 17 2026): the second, slower passes of suites the full tier
+// already runs once (the engine's full passes off master and engine-building pull requests, mpmath's Python backend,
+// the share dialog's part 2, the Numbl corpus, the agents artifacts' LaTeX-off and LaTeX-test builds, the slow node
+// tests, and the export's and lookalike report's controls).  The nightly schedule, and a dispatch that asks for it (its
+// `long` input, as before a release); never a pull request, a label, a master push or a plain dispatch.
+const long = event === "schedule" || (event === "workflow_dispatch" && process.env.CI_LONG === "true");
 
 // Only these paths are certified as prose-only.  In particular, examples/*.md
 // is executable board input and must not be treated as documentation.
@@ -137,6 +184,13 @@ const docsPaths = [
   /^CONTRIBUTING(?:\.[^/]*)?$/,
   /^SECURITY(?:\.[^/]*)?$/,
   /^LICENSE(?:[-.][^/]*)?$/,
+  // (the other top-level prose (not NOTICE.md, which the notices' and imports' scripts read and the packages ship),
+  // docs/'s own pages (not docs/schemas/, which lib/sagebrush/records.py and
+  // test/records.test.ts read) and the friction notes: read by no code, only named in comments, as
+  // test/ci-paths.test.ts checks; the CI capacity ruling, Nov 22 2026, item 2)
+  /^(?:DEVELOPMENT|DOCTESTS|NUMPY|PLAN|PLOTTING|PRODUCT|SECURITY-MODEL)\.md$/,
+  /^docs\/[^/]+\.md$/,
+  /^notes\//,
 ];
 const docsOnly = !full && every(docsPaths);
 
@@ -162,17 +216,20 @@ const runtimePaths = [
 ];
 // (the app's engine subprocess, app/engine/, is the page's worker on a pipe: its suite, web/test-app-engine.mjs, runs
 // in checks; app/ is otherwise the app workflow's alone)
-const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//, /^app\/engine\//];
+// (the site's articles and blog: the site's build reads them, web/build-articles.ts and web/build-blog.ts, and
+// scripts/architecture-article.mjs, in checks; web's core, not the unknown-path fallback, which ran the engine's
+// jobs too: the CI capacity ruling, Nov 22 2026, item 2)
+const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//, /^app\/engine\//, /^articles\//, /^blog\//];
 const modePaths = [
   /^sage-tests\//, /^magma-tests\//, /^matlab-tests\//,
   /^numpy-tests\//, /^scipy-tests\//, /^pypi-tests\//, /^bench\/mpmath\//,
 ];
 const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/, /^scripts\/build-raster\.mjs$/, /^scripts\/build-mp\.mjs$/,
+  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/, /^scripts\/build-raster\.mjs$/, /^scripts\/build-mp\.mjs$/, /^scripts\/build-skltree\.mjs$/,
 ];
 // What the modules' bytes, their pins and their handling depend on (design/wasm-artifacts.md section 4): a change
-// here builds the four modules once (the wasm-modules job), and every job that reads wasm/ installs that run's
+// here builds the five modules once (the wasm-modules job), and every job that reads wasm/ installs that run's
 // artifact instead of fetching the published modules, whose pins this change may not have published yet.
 const wasmBuildPaths = [
   ...enginePaths,
@@ -219,6 +276,8 @@ const webkitPaths = [
   // (which browsers run code in the sandboxed runner, and the headers that let Firefox load it: its Firefox leg,
   // web/share/test-runner-engines.mjs)
   /^web\/notebook\/runner-(?:browser|worker)\.js$/, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/share\/test-runner-engines\.mjs$/,
+  // (the LaTeX source pane's textarea and the lines behind it, wrapping alike in WebKit)
+  /^web\/latex\/(?:editor|style|highlight|component)\.ts$/, /^web\/latex\/test-latex-webkit-wrap\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
@@ -232,7 +291,8 @@ const runtime = matches(runtimePaths);
 const webChange = matches(webPaths);
 const modeChange = matches(modePaths);
 // (the CPython package's own Python, its sources under engine/py/python/ and its tests engine/py/test_*.py, is
-// built and run by engine-cpython alone (cpythonPaths): a change to only those compiles nothing the engine's Rust,
+// built and run by engine-cpython (cpythonPaths), plus checks when named there:
+// a change to only those compiles nothing the engine's Rust,
 // wasm, NEON or interrupt jobs build or run, so it doesn't select them.  The files stay known paths (enginePaths),
 // never the fallback; anything else under engine/ (Rust, manifests, build.rs, the pyo3 crate's engine/py/src)
 // still selects them.  #862 changed only those and ran engine-rust for 624 s.)
@@ -248,16 +308,22 @@ const optionalOnly = !full && every(optionalPaths);
 const examplesPaths = [/^examples\//, /^test\/fixtures\/examples\//];
 const knownPaths = [...examplesPaths, ...docsPaths, ...workflowOrBuildPaths, ...runtimePaths, ...webPaths, ...modePaths, ...enginePaths, ...appPaths, ...optionalPaths];
 const fallback = files.some((file) => !knownPaths.some((pattern) => pattern.test(file)));
-const node = full || workflowOrBuild || runtime || webChange || fallback;
+const node = full || workflowOrBuild || runtime || webChange || checksPythonTest || fallback;
 const web = full || workflowOrBuild || runtime || webChange || fallback;
 const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
-// (every run that isn't a pull request builds: a master push publishes its own build (wasm-publish), and a push whose
-// run GitHub replaced by a newer one never ran, so a later push's own file list can miss an engine change; a dispatch
-// and the schedule have no file list)
-const wasmBuild = event !== "pull_request" || fallback || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
+// (every run that isn't a pull request builds: a master push publishes its own build, a track/** push uses its
+// same-run artifact without publishing, and a
+// push whose run GitHub replaced by a newer one never ran, so a later push's own file list can miss an engine change;
+// a dispatch and the schedule have no file list)
+// (and a pull request into a track always builds: a track's pin lags its engine until the track's pull into master
+// (scripts/pin-policy.mjs), so the published modules its pins name may not be its engine)
+// (the CPython package's own Python, enginePythonOnlyPaths, is in no module: engine/py is its own crate, not one of
+// the four builds (engine/web, engine/nd, engine/raster, engine/mp); the CI capacity ruling, Nov 22 2026, item 2)
+const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) ||
+  files.some((file) => wasmBuildPaths.some((p) => p.test(file)) && !enginePythonOnlyPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
-const webkit = event === "workflow_dispatch" || event === "schedule" ||
+const webkit = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
   (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));
 // The limits census (test/limit_sites.py --check, also asserted by
 // test/limits.test.ts) scans lib/, engine/ and src/.  Its own light job runs
@@ -290,22 +356,28 @@ const unsafeSweepPaths = [
   /^\.github\/workflows\/ci\.yml$/,
 ];
 const unsafeSweep = full || matches(unsafeSweepPaths);
-// The engine's full tier (engine-node, engine-language, engine-modes): master pushes, the nightly schedule and a
-// dispatch, and a pull request that touches the engine's runtime (src/runtime/), whose Magma, MATLAB and engine tests
-// otherwise first ran on master (@sagebrush, Oct 30).  Those jobs need engine-wasm, which engine_smoke selects.
-const engineFull = full || matches([/^src\/runtime\//]);
+// The engine's full passes (engine-node, engine-language, engine-modes: the Node, language and mode suites again, on the
+// engine built in this run): every master or track/** integration push, a pull request whose changes rebuild the engine (wasm_build), and the
+// long tier.  Another pull request's engine is byte-identical to the published pin its ordinary suites already ran on,
+// so the pass would repeat them.  engine-wasm, which they need, still runs where it did (engine_smoke: the engine's
+// changes, the full tier and a pull request touching the engine's runtime, src/runtime/); a pull request's passes only
+// where it runs (the modules' fetcher sets wasm_build, but builds no engine engine-wasm would test).
+const engineRuntime = full || matches([/^src\/runtime\//]);
+const engineFull = event === "merge_group" || long || integrationPush || (event === "pull_request" && wasmBuild && (engineSmoke || engineRuntime));
 
 // The web jobs by area (CI speed plan option 7): a pull request whose web changes are all inside one area's
 // directories runs that area's suites, not every web job.  Anything else under web/ (web/index.html, the build, the
 // worker, the shims, the runner, ...) is the core every page depends on: it runs them all, as do the full tier, a
 // workflow or build change, the runtime (src/, lib/, the engine artifacts, ...) and an unknown path.  The runtime
 // alone skips the export and lookalike jobs, which test the workspace's files, not what the engine computes.
-// (the corpus's boards are the board page's examples; its notebooks and LaTeX documents are inlined in the notebook
-// page and the LaTeX editor, web/examples/legacy.ts, so they are the core, until the old menus go: U7 PR 6)
+// (the corpus's boards are the board page's documents (dist/board/examples/, web/examples/boards.ts); its Welcome and
+// Sage notebooks are the notebook page's first visit, inlined by web/examples/welcome.ts, so they are the core)
 const webAreas = {
   board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\/board\//, /^packages\/sagebrush-board\//],
   shell: [/^web\/shell\//],
   workspace: [/^web\/workspace\//],
+  // (a space in 3D, /space/: the viewer and its suites; its page loads nothing of the others')
+  space: [/^web\/space\//],
   // (the engine and its suite: checks only, no browser group)
   "app-engine": [/^app\/engine\//, /^web\/test-app-engine\.mjs$/],
 };
@@ -332,55 +404,42 @@ const webGroups = [
   ["board-unit", webRuntime || inArea("board") || inArea("workspace") || suiteGroups.has("board-unit")],
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
+  ["space", webRuntime || inArea("space") || suiteGroups.has("space")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
+// (the web-browser jobs: the selected groups packed into at most four, the CI capacity ruling, Nov 22 2026, the org's 60
+// concurrent jobs; 13 before, most of each its setup.  A job runs its groups in this order, every one even after one
+// failed.  latex is alone: its build has the editor on loopback hosts.  terminal is last in its job: it rebuilds
+// web/dist with the bash set.  notebook and remote-preview are apart since Nov 24 2026: notebook, remote-preview, space
+// and terminal in one job took 21.5 min (10.1 + 7.6 + 0.5 + 3.3), the longest job of a merge_group run; split, notebook
+// with space and remote-preview with terminal are about 11 each.  Every group is in exactly one job:
+// test/ci-paths.test.ts)
+export const WEB_BUCKETS = [
+  ["board", ["board-a", "board-b", "board-c", "board-unit", "preload"]],
+  ["notebook", ["notebook", "space"]],
+  ["remote-terminal", ["remote-preview", "terminal"]],
+  ["latex", ["latex"]],
+];
+const webMatrix = WEB_BUCKETS
+  .map(([name, groups]) => ({ name, groups: groups.filter((g) => webGroups.includes(g)).join(" ") }))
+  .filter((job) => job.groups);
 // (web-runner: the runner, the workspace, the board frame and the notebook's merges)
 const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
 const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
 const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
-// The share dialog's browser suite (web-sync.3, about 8.5 min alone, its own web-sync shard): in the full tier, but on a
-// pull request only when it changes sharing (web/share/, web/share-client/, web/cloud/share/, the suites among them) or has the full-ci
+// The share dialog's browser suite (web-sync.3, about 8.5 min, in web-sync's client shard): in the full tier, but on a
+// pull request only when it changes sharing (web/share/, web/share-client/, web/cloud/share/, the suites among them) or the
+// account at the top right (web/workspace/account.ts, which reads the same first check as Share), or has the full-ci
 // label; a master push, the schedule and a dispatch always run it (grader's web-sync CI-time plan, Nov 9: PR CI <= 10 min)
-const webShare = full && (event !== "pull_request" || labels.includes("full-ci") || matches([/^web\/share\//, /^web\/share-client\//, /^web\/cloud\/share\//]));
+const webShare = full && (event !== "pull_request" || labels.includes("full-ci") || matches([/^web\/share\//, /^web\/share-client\//, /^web\/cloud\/share\//, /^web\/workspace\/account\.ts$/]));
 
 // The slow node tests (test/slow-tests.ts: skipped in place unless SAGEBRUSH_SLOW_TESTS=1; William, Nov 4, his pick
-// of option B): they run nightly and on a dispatch (test/slow-tests.ts reads the event itself), with the full-ci label,
-// and on a pull request that changes what one of them tests.  Not on a master push, whose CI is to stay within 15
-// minutes: the nightly run is their master check.  (test/ci-paths.test.ts has a case for each path class)
-// tsc 7's parity with the arraybuffer census (test/arraybuffer-sites-parity.test.ts) and the census's train-16
-// (test/arraybuffer-sites.test.ts): a change to the census's scripts and tables runs those two alone (slow_scope
-// "arraybuffer"), not every slow test, since a routine re-binding of the table is common and touches nothing else
-const arraybufferSlowPaths = [/^scripts\/arraybuffer-sites[^/]*\.mjs$/, /^test\/arraybuffer-sites[^/]*\.(?:json|test\.ts)$/];
-const slowTestPaths = [
-  // the same two, for the TypeScript and tsc 7 versions and the compiler options, which reach every slow test too
-  /^tsconfig[^/]*\.json$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
-  // the whole kedlaya grid (test/kedlaya.test.ts, kedlaya_cases.py full)
-  /^lib\/_sage_padic_lseries\.py$/, /^test\/kedlaya[^/]*$/,
-  // the local gateway's 10,000-record cap (test/local-gateway.test.ts L29a)
-  /^src\/local-gateway\.ts$/, /^test\/local-gateway\.test\.ts$/,
-  // the nmod ops' peaks in wasm (test/nmod-fp-wasm.test.ts): the engine artifact and the nmod kernels
-  /^wasm\/sagebrush-engine\.wasm$/, /^engine\/web\/src\/nmod[^/]*\.rs$/, /^engine\/arith\/src\/nmod[^/]*\.rs$/,
-  /^engine\/bigint\/src\/nmod\.rs$/, /^test\/nmod-fp-wasm\.test\.ts$/,
-  // the two zoneinfo sweeps over every zone (test/stdlib-zoneinfo.test.ts)
-  /^lib\/zoneinfo\//, /^lib\/_zoneinfo\.py$/, /^lib\/_tzrules\.py$/, /^lib\/tzdata\//, /^tzdata\//,
-  /^test\/zoneinfo_sweep_cases\.py$/, /^test\/stdlib-zoneinfo\.test\.ts$/,
-  // every Magma index example (test/magma-examples.test.ts; a pull request runs a fixed sample): the examples, their
-  // Magma 2.18 table and the suite
-  /^lib\/_magma_docsearch\.py$/, /^test\/magma-examples\.(?:json|test\.ts)$/,
-  // catalog gate 3 for every Magma example (test/magma-catalog.test.ts; a pull request runs a fixed sample)
-  /^catalog\/magma\//, /^test\/magma-catalog\.test\.ts$/,
-  // the finite-field limits' ceiling and GF(2^18) pair (test/ff-limits.test.ts), and plan-c0's unlimited completion
-  // (test/limits.test.ts): their suites (a pull request runs the rest of each)
-  /^test\/ff-limits\.test\.ts$/, /^test\/limits\.test\.ts$/,
-  // and the list itself
-  /^test\/slow-tests\.ts$/,
-];
-const slowAll = event === "workflow_dispatch" || event === "schedule" ||
-  (event === "pull_request" && (labels.includes("full-ci") || matches(slowTestPaths)));
-const slowArraybuffer = event === "pull_request" && matches(arraybufferSlowPaths);
-const slowTests = slowAll || slowArraybuffer;
-// (the value of SAGEBRUSH_SLOW_TESTS in node-tests: "1" every slow test, a group's name its tests alone; test/slow-tests.ts)
-const slowScope = slowAll ? "1" : slowArraybuffer ? "arraybuffer" : "";
+// of option B), and the GF(p) echelon admission's memory cases (test/ffmat-echelon-admission.test.ts): the long tier
+// only (the test audit's option (a), decided Nov 17 2026).  Neither the full-ci label nor a change to what one of them
+// tests turns them on for a pull request; their fixed pull-request samples run there.
+const slowTests = long;
+// (the value of SAGEBRUSH_SLOW_TESTS in node-tests: "1" every slow test; test/slow-tests.ts)
+const slowScope = long ? "1" : "";
 
 // The examples gallery: the full tier, a dispatch and a schedule run every example; a pull request the ones
 // its changes select (the trigger table in scripts/examples-lib.mjs). (CI_EXAMPLES_ROOT: another corpus, for
@@ -394,12 +453,19 @@ const outputs = {
   node,
   web,
   modes,
-  engine_smoke: engineSmoke || engineFull,
+  engine_smoke: engineSmoke || engineRuntime || engineFull,
   engine_full: engineFull,
+  long,
+  // (mpmath's suite: the core backend always; the Python backend, a rollback path, the long tier's)
+  mpmath_backends: JSON.stringify(long ? ["sagebrush", "python"] : ["sagebrush"]),
+  // (web-sync's shards: lti and lti-b, the hosted LTI tool's suites, web-sync.8 and .9; the share dialog's part 2, its
+  // big listing and upload leaks, the long tier's)
+  web_sync_shards: JSON.stringify(["core", "client", "pwa", "lti", "lti-b", ...(long ? ["share-dialog-2"] : [])]),
   wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,
   web_groups: JSON.stringify(webGroups),
+  web_matrix: JSON.stringify(webMatrix),
   web_runner: webRunner,
   web_export: webExport,
   web_lookalike: webLookalike,
@@ -408,13 +474,54 @@ const outputs = {
   unsafe_sweep: unsafeSweep,
   slow_tests: slowTests,
   slow_scope: slowScope,
-  // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
+  // (the size comparison's own inputs: never docs-only)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
-  size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,
+  // (on a track the engine ships as built, not as pinned (scripts/pin-policy.mjs), so an engine source moves the
+  // measured bytes there and is a gate input too)
+  size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0 ||
+    (onTrack(runRefs(process.env)) && files.some((file) => enginePaths.some((p) => p.test(file)))),
   files: files.length,
-  // (the examples job: the ids it runs and its shard matrix, at most 16 examples a shard (SHARD_MAX); plan U7 section 2)
+  // (the examples job: the ids it runs and its shard matrix, at most 64 examples a shard (SHARD_MAX); plan U7 section 2)
   examples_ids: JSON.stringify(exampleSelection),
   examples_matrix: JSON.stringify(Array.from({ length: shardCount(exampleSelection.length) }, (_, i) => i + 1)),
 };
+// A master push of the very commit the merge queue's run tested and passed (scripts/ci-queue-tested.mjs, which sets
+// CI_QUEUE_TESTED in ci.yml's changes job): that run was the full tier on this exact commit, so no test runs again.
+// Only what a push alone does still runs: the modules' build and their publication (wasm_build, which a push always
+// sets), the size gate's docs-only record and the ci summary.  Every other selection is off, whatever it was (the CI
+// capacity ruling's second cut, Nov 22 2026; test/ci-paths.test.ts checks each output).
+const queueTested = event === "push" && ref === "refs/heads/master" && process.env.CI_QUEUE_TESTED === "true";
+if (queueTested) {
+  for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests", "size_inputs"]) outputs[key] = false;
+  Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
+}
+outputs.queue_tested = queueTested;
+// PR CI light (the checked-in switch .github/pr-ci-light, exactly "true", set by William while the merge queue is starved
+// of runners; ci.yml's changes job passes its first line as CI_PR_LIGHT, a file so that a fork's pull request reads it
+// too): a pull request runs only checks and the size gate (with its
+// size-base), as an ordinary pull request does when checks runs, and the modules' build when it needs one; every other
+// suite is left to its merge_group run, which is the full tier and gates the merge.  Never a queue group, a push, the
+// schedule or a dispatch; and a pull request labelled full-ci still runs everything it selected.  (@sagebrush's go,
+// Nov 23 2026: 44 of 53 running jobs were pull requests', and the merge queue had none)
+const prLight = event === "pull_request" && process.env.CI_PR_LIGHT === "true" && !labels.includes("full-ci");
+if (prLight) {
+  const checksRan = outputs.node === true || outputs.web === true || outputs.size_inputs === true;
+  for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
+    "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests"]) outputs[key] = false;
+  Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
+  // (checks and size-base run on size_inputs; where checks would have run, they still do, and the gate measures)
+  outputs.size_inputs = checksRan;
+}
+// (the LaTeX group's caps, checked only in web-artifacts: a pull request changing the group's inputs keeps that job,
+// light or not; elsewhere it follows the full tier, as before)
+outputs.latex_budget = event === "pull_request" && matches(latexBudgetPaths);
+outputs.pr_light = prLight;
+// The desktop app's build in app.yml (its page, then Linux, macOS and Windows: about 27 job-minutes) under PR CI light:
+// a light pull request builds it only when it changes the app itself (app/, the pins it bundles, app.yml); its merge
+// group always builds it, on all three, and gates the merge.  Every other run builds it as before.  (CI job cuts, cut
+// 4b, William Nov 24 2026: 344 of 383 job-minutes an hour of pull requests' app builds touched no app/ file)
+const appBuildPaths = [/^app\//, /^wasm\/pins\.json$/, /^\.github\/workflows\/app\.yml$/];
+outputs.app_build = !prLight || matches(appBuildPaths);
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
 console.error(`ci paths (${event}, ${files.length} files): ${JSON.stringify(outputs)}`);

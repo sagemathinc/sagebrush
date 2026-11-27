@@ -13,16 +13,24 @@ import { TRASH, freePath, join, nameOf, parentOf, splitExt, within, type DocKind
 import { fileHead, openableAsFile } from "./upload";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 import { SyncOwner } from "./sync-owner";
-import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./sync-panel";
+import { readNotebooks, sidebarLine, sidebarTitle, type Notebooks, type ReadUnacked } from "./sync-panel";
 import { rowIcons, ROWICON } from "./sync-rows";
-import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
+import { fileRowMeta, fileRowTitle, fmtSize, isElsewhere } from "./row-meta";
 import { fileLabel, NEW_ITEMS } from "./filemenu";
+import { agentsIcon, modeSwitch } from "./mode-switch";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hooks fold away)
 declare const __SB_LATEX__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
+
+/** Empty Trash's question.  In the desktop app, whose Trash is a folder on the computer (.Trash in Sagebrush's
+ * folder), it says that everything in it goes, a file changed by another program while it was there too. */
+export const emptyTrashQuestion = (desktop: boolean) =>
+  desktop
+    ? "Delete everything in Trash for good, including files changed outside Sagebrush while they were in Trash? This can't be undone: their histories and old versions go too."
+    : "Delete everything in Trash for good? This can't be undone: their histories and old versions go too.";
 
 export type BrowserHost = {
   ws: Workspace;
@@ -53,6 +61,16 @@ export type BrowserHost = {
   readUnacked?: ReadUnacked;
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
+  /** To the agents page (Agents… at the foot, and the switch's Agents): the page leaves the way it leaves for any
+   * other page, its own saves made first; none (the Open… dialog, the desktop app): no Agents…, and no Files | Agents
+   * switch. */
+  agents?(): void;
+  /** Show in folder (the desktop app, whose workspace is real files on the computer: #1539): the system's file
+   * manager at this workspace path ("/" the workspace's own folder); none: not offered. */
+  reveal?(path: string): Promise<unknown>;
+  /** Where the workspace's files are on the computer (the desktop app's folder), for the Storage panel to say;
+   * none or undefined: not said. */
+  where?(): string | undefined;
   /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
   exportUrl?: (file: string) => string;
@@ -73,7 +91,13 @@ export type BrowserHost = {
 export type TrashMoved = { entry: Entry; dropped(name: string, open: () => Promise<unknown>): void };
 
 const OPEN_KEY = "sagebrush-files-open";
-const RECENT = 5;
+/** Recent's lengths to choose from (clicking Recent), the first the default; kept in this browser. */
+export const RECENT_CHOICES = [5, 10, 20, 50];
+const RECENT_KEY = "sagebrush-files-recent";
+const recentCount = () => { const n = Number(localStorage.getItem(RECENT_KEY)); return RECENT_CHOICES.includes(n) ? n : RECENT_CHOICES[0]; };
+/** Files' order in a folder: by name, or by last modified (newest first); folders first either way.  Kept in this browser. */
+const sortBy = (): "name" | "modified" => { try { return localStorage.getItem("sagebrush-files-sort") === "modified" ? "modified" : "name"; } catch { return "name"; } };
+const setSortBy = (v: "name" | "modified") => { try { localStorage.setItem("sagebrush-files-sort", v); } catch {} };
 /** At most this many rows drawn at once; past it, a row says how many more (LIMIT-0B0-2). */
 const MAX_ROWS = 1000;
 
@@ -92,6 +116,11 @@ const iconOf = (e: Entry) => {
   if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(ext)) return ICONS.image;
   return ICONS.file;
 };
+/** The narrowest list (px) that shows each row's last-modified time, measured: a row's fixed parts take 135 px of a
+ * 271 px list and the time 60 more, so a 24-character name ("Number theory (10).ipynb", 169 px) keeps all its room
+ * from 364 px on.  The page's default left sidebar (272 px) shows names only; the side panel (380 px) shows times. */
+const TIME_MIN_WIDTH = 364;
+const fmtExact = (t: number) => new Date(t).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const fmtWhen = (t: number) => {
   const d = Date.now() - t;
   if (d < 60e3) return "just now";
@@ -103,6 +132,7 @@ const fmtWhen = (t: number) => {
 const STYLE = `
 .sbfiles { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--sbf-bg, #f6f5f0); color: var(--sbf-fg, #1f2421); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .sbfiles .fh { display: flex; gap: 4px; padding: 10px 10px 6px; align-items: center; }
+.sbfiles .fh .sb-mode { margin-left: 4px; }
 .sbfiles .fh b { flex: 1; }
 .sbfiles .ib { border: 0; background: none; padding: 3px 7px; border-radius: 5px; color: #5d645f; font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .sbfiles .ib:hover, .sbfiles .ib:focus-visible { background: #e6e5de; }
@@ -113,8 +143,17 @@ const STYLE = `
 .sbfiles .ftop > * { grid-area: 1 / 1; min-width: 0; }
 .sbfiles.selecting .fsearch { visibility: hidden; }
 .sbfiles .fsearch { margin: 0; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
-.sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; }
+.sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; container-type: inline-size; }
 .sbfiles .fgrp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d645f; padding: 8px 8px 3px; }
+/* (Recent's heading a button: how many it shows, a menu; its open chevron as the folders' and the dropdowns') */
+.sbfiles button.fgrp { display: flex; align-items: center; gap: 6px; border: 0; background: none; font-family: inherit; cursor: pointer; border-radius: 4px; }
+.sbfiles button.fgrp:hover { color: var(--sbf-fg, #1f2421); }
+.sbfiles button.fgrp::after { content: ""; width: 5px; height: 5px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+/* (a recent file whose name another recent one has too: its folder after the name, so the two can be told apart) */
+/* (its folder small, on the line above the name (William: the path first is clearer), so neither is cut short) */
+.sbfiles .frow .n.withdir { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.sbfiles .frow .n .nm, .sbfiles .frow .n .rdir { overflow: hidden; text-overflow: ellipsis; }
+.sbfiles .frow .n .rdir { color: #5d645f; font-size: 11px; font-weight: 400; }
 .sbfiles .frow { display: flex; align-items: center; gap: 7px; padding: 3px 4px 3px 8px; border-radius: 6px; white-space: nowrap; cursor: pointer; user-select: none; }
 .sbfiles .frow:hover { background: #ecebe4; }
 .sbfiles .frow:focus-visible { outline: 2px solid #4a6b49; outline-offset: -2px; }
@@ -123,9 +162,17 @@ const STYLE = `
 .sbfiles .frow.missing .n, .sbfiles .frow.elsewhere .n { color: #8a8f8b; font-style: italic; }
 .sbfiles .frow .ic { width: 16px; height: 16px; flex: none; display: inline-flex; }
 .sbfiles .frow .ic svg { width: 16px; height: 16px; }
-.sbfiles .frow .chev { width: 10px; color: #8a8f8b; font-size: 10px; flex: none; }
+.sbfiles .frow .chev { display: inline-grid; place-items: center; width: 14px; height: 14px; color: #6b716c; flex: none; }
+.sbfiles .frow .chev.folder::before { content: ""; width: 6px; height: 6px; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateX(-1px) rotate(-45deg); }
+.sbfiles .frow .chev.folder.open::before { transform: translateY(-2px) rotate(45deg); }
 .sbfiles .frow .n { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .sbfiles .frow .m { color: #5d645f; font-size: 11.5px; }
+/* (a row's last-modified time, beside its kind: only where the list is wide enough that the names keep their room;
+   a phone's list, or one dragged narrow, shows names only; the exact time is on the name's hover either way) */
+.sbfiles .frow .t { color: #5d645f; font-size: 11.5px; flex: none; width: 4.6em; text-align: right; font-variant-numeric: tabular-nums; }
+@container (max-width: ${TIME_MIN_WIDTH - 1}px) { .sbfiles .frow .t { display: none; } }
+/* (a phone's layout: names only, whatever the width) */
+@media (max-width: 640px) { .sbfiles .frow .t { display: none; } }
 .sbfiles .frow .si { color: #5d645f; font-size: 11.5px; }
 .sbfiles .fsync { font-size: 12px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sbfiles .frow .more { visibility: hidden; }
@@ -144,6 +191,12 @@ const STYLE = `
 .sbfiles .fsel .sp { flex: 1; }
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
 .sbfiles .ffoot .sp { flex: 1; }
+/* (Agents…, one big button above the foot: a person in their files finds the agents chat without knowing the small
+   switch at the top) */
+.sbfiles .fagents { flex: none; display: flex; align-items: center; gap: 10px; margin: 8px 10px; padding: 10px 12px; border: 1px solid #d4d4cb; border-radius: 10px; background: #fff; color: inherit; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+.sbfiles .fagents:hover { border-color: #b9b6a8; }
+.sbfiles .fagents:focus-visible { outline: 2px solid #4a6b49; outline-offset: 1px; }
+.sbfiles .fagents svg { width: 20px; height: 20px; flex: none; }
 .sbfiles .fempty { padding: 12px; color: #5d645f; font-size: 13px; }
 .sbfiles .ftoastslot { flex: none; }
 .sbfiles .ftoast { margin: 6px 10px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
@@ -157,11 +210,28 @@ const STYLE = `
 .sbfmenu button:hover, .sbfmenu button:focus-visible { background: #e6eedf; }
 .sbfmenu button.danger { color: #b3261e; }
 .sbfmenu hr { border: 0; border-top: 1px solid #d4d4cb; margin: 4px; }
+.sbfmenu button.danger:hover, .sbfmenu button.danger:focus-visible { background: #fbe9e7; }
+/* (dark: the site's own theme when chosen, else the system's, as index.html's colours are; the focused item as the
+   hovered one, never the light theme's pale green under light text) */
+:root[data-theme="dark"] .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
+:root[data-theme="dark"] .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
+:root[data-theme="dark"] .sbfiles .frow:hover { background: #262b27; } :root[data-theme="dark"] .sbfiles .frow.cur, :root[data-theme="dark"] .sbfiles .frow.picked { background: #2b3a29; }
+:root[data-theme="dark"] .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+:root[data-theme="dark"] .sbfmenu button:hover, :root[data-theme="dark"] .sbfmenu button:focus-visible { background: #34452f; color: #f4f6f1; }
+:root[data-theme="dark"] .sbfmenu button.danger { color: #ff8a80; }
+:root[data-theme="dark"] .sbfmenu button.danger:hover, :root[data-theme="dark"] .sbfmenu button.danger:focus-visible { background: #4a2724; }
+:root[data-theme="dark"] .sbfmenu hr { border-top-color: #39403a; }
+:root[data-theme="dark"] .sbfiles .fagents { background: #262b27; border-color: #39403a; }
 @media (prefers-color-scheme: dark) {
-  .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
-  .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
-  .sbfiles .frow:hover { background: #262b27; } .sbfiles .frow.cur, .sbfiles .frow.picked { background: #2b3a29; }
-  .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; } .sbfmenu button:hover { background: #2b3a29; }
+  :root:not([data-theme="light"]) .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
+  :root:not([data-theme="light"]) .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
+  :root:not([data-theme="light"]) .sbfiles .frow:hover { background: #262b27; } :root:not([data-theme="light"]) .sbfiles .frow.cur, :root:not([data-theme="light"]) .sbfiles .frow.picked { background: #2b3a29; }
+  :root:not([data-theme="light"]) .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  :root:not([data-theme="light"]) .sbfmenu button:hover, :root:not([data-theme="light"]) .sbfmenu button:focus-visible { background: #34452f; color: #f4f6f1; }
+  :root:not([data-theme="light"]) .sbfmenu button.danger { color: #ff8a80; }
+  :root:not([data-theme="light"]) .sbfmenu button.danger:hover, :root:not([data-theme="light"]) .sbfmenu button.danger:focus-visible { background: #4a2724; }
+  :root:not([data-theme="light"]) .sbfmenu hr { border-top-color: #39403a; }
+  :root:not([data-theme="light"]) .sbfiles .fagents { background: #262b27; border-color: #39403a; }
 }
 `;
 let styled = false;
@@ -211,12 +281,19 @@ function popup(at: HTMLElement, items: Item[]) {
   const close = () => { menu.remove(); removeEventListener("pointerdown", away, true); removeEventListener("keydown", esc, true); };
   const away = (ev: Event) => { if (!menu.contains(ev.target as Node)) close(); };
   const esc = (ev: KeyboardEvent) => { if (ev.key === "Escape") { close(); at.focus(); } };
+  // (the arrow keys move between the items, wrapping, Home and End to the first and last, as a menu's do)
+  menu.onkeydown = (ev) => {
+    const bs = [...menu.querySelectorAll("button")].filter((b) => !b.disabled && !b.hidden), i = bs.indexOf(document.activeElement as HTMLButtonElement);
+    const to = ev.key === "ArrowDown" ? (i + 1) % bs.length : ev.key === "ArrowUp" ? (i <= 0 ? bs.length - 1 : i - 1) : ev.key === "Home" ? 0 : ev.key === "End" ? bs.length - 1 : -1;
+    if (to < 0 || !bs.length) return;
+    ev.preventDefault(); ev.stopPropagation(); bs[to].focus();
+  };
   (menu as any).sbClose = close;
   setTimeout(() => { if (menu.isConnected) { addEventListener("pointerdown", away, true); addEventListener("keydown", esc, true); } });
   return menu;
 }
 
-export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast; `sticky`: kept until closed (✕), as an upload's refusals are. */ say(text: string, sticky?: boolean): void;
+export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** Tests: the minute's refresh, as its timer runs it (true if one started: shown, and none running); how many it started so far. */ minute(): boolean; minutes(): number; /** A message in the file browser's toast; `sticky`: kept until closed (✕), as an upload's refusals are. */ say(text: string, sticky?: boolean): void; /** The Storage panel, with its sync section (the page's account menu). */ storage(): void;
   /** "Export all current files (.zip)": the Storage panel, its export started (File ▸ Download ▸ Everything) */ exportAll(): void };
 
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
@@ -236,11 +313,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   upBtn.setAttribute("aria-label", "Upload");
   moreBtn.setAttribute("aria-label", "More");
   head.append(newBtn, upBtn, moreBtn);
-  if (host.close) {
-    const x = h("button", { className: "ib", textContent: "✕", title: "Hide the files" });
-    x.setAttribute("aria-label", "Hide the files");
-    x.onclick = () => host.close!();
-    head.append(x);
+  // (the page's side panel: the Files | Agents switch where its ✕ was; the corner toggle hides the panel, William Nov 12.
+  // Only where the page gives a way to the agents page: none (the desktop app, which has no agents page yet, #1542),
+  // no switch, as no Agents… below)
+  if (host.close && host.agents) {
+    const sw = modeSwitch("files");
+    // (its Agents, as Agents… below: the page's own way out)
+    const a = sw.querySelector<HTMLButtonElement>('[data-mode="agents"]');
+    if (a) a.onclick = () => host.agents!();
+    head.append(sw);
   }
   const search = h("input", { className: "fsearch", placeholder: "Search files", type: "search" });
   search.setAttribute("aria-label", "Search files");
@@ -267,7 +348,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const selBar = h("div", { className: "fsel", hidden: true }, selAll, selCount, h("span", { className: "sp" }), selDownload, selClear);
   selBar.setAttribute("role", "toolbar");
   selBar.setAttribute("aria-label", "Selected files");
-  root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, foot, picker);
+  // (Agents…, above the foot, where the page gives a way to the agents page)
+  const agentsBtn = host.agents ? h("button", { className: "fagents", type: "button", title: "Chat with an agent (Claude, Codex) about your files" }, agentsIcon(), "Agents…") : null;
+  if (agentsBtn) agentsBtn.onclick = () => host.agents!();
+  root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, ...(agentsBtn ? [agentsBtn] : []), foot, picker);
   container.append(root);
 
   // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
@@ -313,6 +397,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const o = SyncOwner.of(w), v = o.view().s, gen = ++syncGen;
     const draw = (nb: Notebooks | undefined) => {
       syncEl.textContent = sidebarLine(v, Date.now(), nb);
+      syncEl.title = sidebarTitle(v) ?? "Sync: opens the Storage panel";
       syncEl.hidden = !syncEl.textContent;
     };
     draw(sideNb?.state === v.state ? sideNb.nb : undefined);
@@ -350,7 +435,17 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (P0 #1: the documents whose content is in this browser, read at each refresh, so another device's that hasn't
   // arrived reads "on another device", and stops as soon as it is here)
   let here: { notebook: Set<string>; board: Set<string> } = { notebook: new Set(), board: new Set() };
-  async function refresh() {
+  // (one refresh at a time: one asked for while another runs is made once more after it, so an older list, answered
+  // late, never draws over a newer one, and each caller's promise ends after a list read since its call. `refreshing`
+  // is cleared in the same step as the last `again` is read, never a microtask later: one asked for in between
+  // would get a promise no read follows)
+  let refreshing: Promise<void> | null = null, again = false;
+  function refresh(): Promise<void> {
+    if (refreshing) { again = true; return refreshing; }
+    refreshing = (async () => { try { do { again = false; await refreshOnce(); } while (again); } finally { refreshing = null; } })();
+    return refreshing;
+  }
+  async function refreshOnce() {
     try { entries = await w.list(trashView ? TRASH : "/", { recursive: true }); } catch (e) { fail(e); }
     if (entries.some((e) => e.remote && (e.kind === "notebook" || e.kind === "board"))) here = await w.contentIds().catch(() => here);
     byParent = new Map();
@@ -360,7 +455,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (!l) byParent.set(p, (l = []));
       l.push(e);
     }
-    for (const l of byParent.values()) l.sort((a, b) => (a.kind === "folder" ? 0 : 1) - (b.kind === "folder" ? 0 : 1) || a.path.localeCompare(b.path));
+    const byTime = sortBy() === "modified";
+    for (const l of byParent.values()) l.sort((a, b) => (a.kind === "folder" ? 0 : 1) - (b.kind === "folder" ? 0 : 1) || (byTime && a.kind !== "folder" ? b.updated - a.updated : 0) || a.path.localeCompare(b.path));
     const cur = host.current?.();
     curPath = cur ? entries.find((e) => e.kind === cur.kind && e.ref === cur.ref)?.path : undefined;
     render();
@@ -375,7 +471,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const elsewhere = (e: Entry) => isElsewhere(e, here);
   const metaOf = (e: Entry) => fileRowMeta(e, here);
 
-  function row(e: Entry, depth: number, opts: { recent?: boolean } = {}) {
+  function row(e: Entry, depth: number, opts: { recent?: boolean; dir?: boolean } = {}) {
     const r = h("div", { className: "frow", tabIndex: 0 });
     r.setAttribute("role", "treeitem");
     r.dataset.path = e.path;
@@ -385,9 +481,16 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (elsewhere(e)) r.classList.add("elsewhere");
     const isOpen = e.kind === "folder" && (open.has(e.path) || query !== "");
     if (e.kind === "folder") r.setAttribute("aria-expanded", String(isOpen));
-    const chev = h("span", { className: "chev", textContent: e.kind === "folder" ? (isOpen ? "▾" : "▸") : "" });
+    const chev = h("span", { className: e.kind === "folder" ? (isOpen ? "chev folder open" : "chev folder") : "chev" });
     const ic = h("span", { className: "ic", innerHTML: iconOf(e) });
-    const name = h("span", { className: "n", textContent: nameOf(e.path), title: elsewhere(e) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${nameOf(e.renamed.from)}: another device has one with that name` : e.path });
+    const name = h("span", { className: "n", textContent: nameOf(e.path) });
+    // (the name's hover: why it reads as it does, and its exact last-modified time: row-meta.ts)
+    name.title = fileRowTitle(e, here, fmtExact);
+    if (opts.dir) {
+      const d = parentOf(e.path);
+      name.classList.add("withdir");
+      name.replaceChildren(h("span", { className: "rdir", textContent: d === "/" ? "/" : d.replace(/^\//, "") + "/" }), h("span", { className: "nm", textContent: nameOf(e.path) }));
+    }
     const meta = h("span", { className: "m", textContent: opts.recent ? fmtWhen(e.updated) : metaOf(e) });
     const more = h("button", { className: "ib more", textContent: "⋯", title: "More" });
     more.setAttribute("aria-label", `More: ${nameOf(e.path)}`);
@@ -414,7 +517,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       });
       r.addEventListener("dragend", () => { dragging = null; tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop")); });
     }
-    r.append(chev, ic, name, si, meta, more);
+    // (its last-modified time, in the folder list: Recent's kind line shows it already)
+    const when = opts.recent ? null : h("span", { className: "t", textContent: e.kind === "folder" ? "" : fmtWhen(e.updated) });
+    r.append(chev, ic, name, si, meta, ...(when ? [when] : []), more);
     if (!trashView) drawnRows.push({ e, si });
     r.onclick = (ev) => {
       if ((ev.target as HTMLElement).closest("input")) return;
@@ -550,10 +655,16 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       for (const e of top) if (!q || nameOf(e.path).toLowerCase().includes(q)) tree.append(row(e, 0));
     } else {
       if (!q) {
-        const recent = entries.filter((e) => e.kind !== "folder" && !e.missing).sort((a, b) => b.updated - a.updated).slice(0, RECENT);
+        const recent = entries.filter((e) => e.kind !== "folder" && !e.missing).sort((a, b) => b.updated - a.updated).slice(0, recentCount());
         if (recent.length > 1) {
-          tree.append(h("div", { className: "fgrp", textContent: "Recent" }));
-          for (const e of recent) tree.append(row(e, 0, { recent: true }));
+          const head = h("button", { className: "fgrp", textContent: "Recent", title: "How many recent files to show" });
+          head.setAttribute("aria-haspopup", "menu");
+          head.onclick = () => popup(head, RECENT_CHOICES.map((n): Item => [(n === recentCount() ? "✓ " : "\u2003") + `${n} recent files`, () => { localStorage.setItem(RECENT_KEY, String(n)); refresh(); }]));
+          tree.append(head);
+          // (two with the same name, in different folders: each says its folder)
+          const names = new Map<string, number>();
+          for (const e of recent) names.set(nameOf(e.path), (names.get(nameOf(e.path)) ?? 0) + 1);
+          for (const e of recent) tree.append(row(e, 0, { recent: true, dir: names.get(nameOf(e.path))! > 1 }));
         }
         tree.append(h("div", { className: "fgrp", textContent: "This browser" }));
       }
@@ -597,7 +708,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     paintSel();
   }
   async function emptyAll() {
-    if (!confirm("Delete everything in Trash for good? This can't be undone: their histories and old versions go too.")) return;
+    if (!confirm(emptyTrashQuestion((window as any).__SB_DESKTOP_APP__ === true))) return;
     try { const n = await w.emptyTrash(); say(`${n} item${n === 1 ? "" : "s"} deleted for good`); } catch (e) { fail(e); }
     refresh();
   }
@@ -612,7 +723,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     meterEl.textContent = est ? `${fmtBytes(est.usage)} of ${fmtBytes(est.quota)}` : "Storage";
   }
   const preview = (e: Entry) => openPreview(w, e, { say, fail }).then(() => meter());
-  const storage = (startExport = false) => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen, startExport }).then(() => meter());
+  // (Show in folder: refused (not on disk yet, or the file manager didn't start) said, never thrown)
+  const reveal = (p: string) => void Promise.resolve(host.reveal?.(p)).catch(fail);
+  const storage = (startExport = false) => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen, startExport, where: host.where?.(), reveal: host.reveal ? () => reveal("/") : undefined }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
 
   async function rowMenu(at: HTMLElement, e: Entry) {
@@ -635,12 +748,13 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
-    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX document here", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
+    if (e.kind === "folder") items.push(["New notebook", () => make(e.path, "notebook")], ["New board", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)], ["Move to…", () => void moveTo(at, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
     if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
-    items.push(["Copy path", () => navigator.clipboard?.writeText(e.path).then(() => say("Path copied"), () => say(e.path))]);
+    items.push(["Copy path name", () => navigator.clipboard?.writeText(e.path).then(() => say(`Copied path '${e.path}'`), () => say(e.path))]);
+    if (host.reveal) items.push(["Show in folder", () => reveal(e.path)]);
     // (only a person deletes old versions, §2.5)
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
     items.push("-", ["Move to Trash", () => toTrash(e), "danger"]);
@@ -949,7 +1063,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }));
   upBtn.onclick = () => pick("/");
   // (Download everything: the Storage panel's export, offered here too, where a person looks for it)
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()], ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
+  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(host.reveal ? [["Show in folder", () => reveal("/")] as [string, () => unknown]] : []), ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {
@@ -960,6 +1074,24 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (changes from this tab, other tabs and agents: shown, at most a few times a second)
   let pending: ReturnType<typeof setTimeout> | null = null;
   const unwatch = w.watch(() => { if (!pending) pending = setTimeout(() => { pending = null; refresh(); }, 150); });
+  // (each minute while shown (the panel and every element around it visible, and the tab): the rows' times, and
+  // last-modified times stamped without a change told (Workspace.touch).  One refresh at a time; a minute missed while
+  // hidden is made up once, when the panel shows again)
+  const shownNow = () => !document.hidden && root.isConnected && (typeof root.checkVisibility === "function" ? root.checkVisibility() : root.getClientRects().length > 0);
+  let ticking: Promise<void> | null = null, missed = false, minutes = 0;
+  const tick = (): boolean => {
+    if (!shownNow()) { missed = true; return false; }
+    missed = false;
+    if (ticking) return false;
+    minutes++;
+    ticking = refresh().finally(() => { ticking = null; });
+    return true;
+  };
+  const minute = setInterval(tick, 60_000);
+  const shownAgain = () => { if (missed && shownNow()) tick(); };
+  const seen = typeof ResizeObserver === "function" ? new ResizeObserver(shownAgain) : null;
+  seen?.observe(root);
+  document.addEventListener("visibilitychange", shownAgain);
   // (sync, step 5: the foot's line, from the page's sync owner; the rows' icons on its transitions too, at most every
   // ROWICON.minGapMs)
   const owner = NO_SYNC ? null : SyncOwner.of(w);
@@ -973,8 +1105,15 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   return {
     el: root,
     refresh,
-    destroy() { unwatch(); unowner(); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
+    destroy() {
+      unwatch(); unowner(); clearInterval(minute); seen?.disconnect(); document.removeEventListener("visibilitychange", shownAgain); if (iconTimer) clearTimeout(iconTimer);
+      root.remove();
+    },
+    minute: tick,
+    minutes: () => minutes,
     say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
     exportAll: () => { if (host.exportUrl) void storage(true); else say("Export all isn't offered here"); },
+    // (the Storage panel, with its sync section: the page's account menu, workspace/account.ts)
+    storage: () => void storage(),
   };
 }

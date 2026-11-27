@@ -1,6 +1,6 @@
 // The cases of web/workspace/test-workspace-journal.mjs, run in the page (real IndexedDB and Web Locks): the
 // journal's activation (plan-sync-slice2-client r4 §1a).  W and S are this build's workspace and notebook
-// stores; OW and OS the pinned pre-journal build's (master f8976bfe).  Each case has databases of its own,
+// stores; OW and OS the pinned pre-journal build's (master 35eab193).  Each case has databases of its own,
 // but for the notebooks' history and the boards' history, one each for the whole origin: their fences are
 // dropped before each case (in a browser there is only ever one workspace).
 import * as W from "./ws.js";

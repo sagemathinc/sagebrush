@@ -15,6 +15,7 @@ import { IdbPatchStore, openHistoryDb, tellHistory, tellAcked } from "../noteboo
 import { makeClientId } from "patchflow";
 import { chainStart, hex, fromHex, verifyChainPage, type ChainedBatch, type ChainState } from "../sync-protocol/doc-protocol";
 import { toB64, fromB64, LIMITS } from "../sync-protocol/protocol";
+import { openSlice, sealSlice, whereOf, type DocKeys } from "./doc-seal.ts";
 
 /** What the account connection gives document sync: a request and its answer (an `ack`, a `batches`, or an `error`). */
 export interface DocLink {
@@ -32,6 +33,11 @@ export type Stopped = { code: string; detail?: string; at: number };
 const TRANSIENT = new Set(["rate", "busy", "storage_full", "readonly", "unavailable"]);
 const enc = new TextEncoder(), dec = new TextDecoder();
 
+/** How long a document request waits for its answer before it is taken as a transient `busy` (sent again later): a
+ * request lost on a socket gone dead is retried this soon, while the account socket's liveness check replaces the
+ * socket (sync-client.ts CLIENT.liveMs). */
+export const DOC_ASK_MS = 10_000;
+
 export class DocSync {
   private link: DocLink | null = null;
   private hdb: IDBDatabase | null = null;
@@ -48,12 +54,18 @@ export class DocSync {
   readonly stopped = new Map<string, Stopped>();
   /** what happened, for tests and the driver: acks, refusals, applied pages */
   readonly events: Record<string, unknown>[] = [];
-  constructor(private opts: { now?: () => number; retryMs?: number; askMs?: number } = {}) {}
+  /** `onPage`: told after a pulled page that stored patches committed: the document, how many, and the newest batch's
+   * receive time (ms), for the page's Files entry (its last-modified time).  Called synchronously and not awaited;
+   * an exception it throws synchronously is caught. */
+  /** `keys`: end-to-end encryption of every patch on the wire (doc-seal.ts), only when given: no page gives it yet, so
+   * patches go as they always have.  A pulled page then opens in full before any of it is applied, and a slice that
+   * doesn't open stops the notebook ("e2e"). */
+  constructor(private opts: { now?: () => number; retryMs?: number; askMs?: number; onPage?: (p: { doc: string; applied: number; at: number }) => void; keys?: DocKeys } = {}) {}
   // (a request and its answer, or, if none comes in time (a lost answer on a live socket), a transient `busy`: the
   // flight never waits for good, and what it sent is sent again later (its rows stay until an ack))
   private ask(link: DocLink, req: number, m: Record<string, unknown>): Promise<Record<string, unknown>> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<Record<string, unknown>>((r) => { timer = setTimeout(() => r({ t: "error", code: "busy", detail: { message: "no answer in time" } }), this.opts.askMs ?? 30_000); });
+    const late = new Promise<Record<string, unknown>>((r) => { timer = setTimeout(() => r({ t: "error", code: "busy", detail: { message: "no answer in time" } }), this.opts.askMs ?? DOC_ASK_MS); });
     return Promise.race([link.ask(req, m), late]).finally(() => clearTimeout(timer));
   }
 
@@ -173,7 +185,16 @@ export class DocSync {
         const env = stored[i]?.env;
         if (!env) return this.stop(id, "invalid", "an unsent patch isn't stored", conn);
         const { time: _t, parents, ...payload } = env;
-        const b = enc.encode(JSON.stringify(payload));
+        const plain = enc.encode(JSON.stringify(payload));
+        // (sealed for its place when keys are given: a refusal (one too large to seal) stops the notebook, its rows kept)
+        let b: Uint8Array = plain;
+        if (this.opts.keys) {
+          try {
+            b = await sealSlice(this.opts.keys, { doc: id, epoch, client: slot.client, cseq: rows[i].cseq, id: rows[i].time, parents: parents ?? [] }, plain);
+          } catch (e) {
+            return this.stop(id, (e as { code?: string })?.code === "limit" ? "limit" : "e2e", (e as Error)?.message ?? String(e), conn);
+          }
+        }
         if (bytes + b.length > LIMITS.batchBytes && envs.length) break;
         if (b.length > LIMITS.batchBytes) return this.stop(id, "limit", "a patch over 1 MiB (blobs are 2c-4's)", conn);
         bytes += b.length;
@@ -260,9 +281,19 @@ export class DocSync {
       const rows: { time: string; env: Record<string, unknown> }[] = [];
       for (let i = 0; i < items.length; i++) {
         let at = 0;
-        for (const e of items[i].patches as { id: string; parents: string[]; size: number }[]) {
-          const payload = JSON.parse(dec.decode(page[i].body.subarray(at, at + e.size)));
+        for (const e of items[i].patches as { id: string; cseq: number; parents: string[]; size: number }[]) {
+          let bytes = page[i].body.subarray(at, at + e.size);
           at += e.size;
+          // (every slice of the page opened before anything of it is applied: one that doesn't stops the notebook)
+          if (this.opts.keys) {
+            if (!Number.isSafeInteger(e.cseq)) return this.stop(id, "e2e", "a sealed patch's envelope has no cseq", conn);
+            try {
+              bytes = await openSlice(this.opts.keys, whereOf(id, epoch, e), bytes);
+            } catch (err) {
+              return this.stop(id, "e2e", (err as Error)?.message ?? String(err), conn);
+            }
+          }
+          const payload = JSON.parse(dec.decode(bytes));
           if (payload && ("time" in payload || "parents" in payload)) return this.stop(id, "invalid", "a payload with its own time or parents", conn);
           rows.push({ time: e.id, env: { ...payload, time: e.id, parents: e.parents } });
         }
@@ -271,6 +302,11 @@ export class DocSync {
       const out = await this.tx(id, start?.n ?? 1, (st) => applyPage(st, id, { expect: cursor, next, rows, start: start ? undefined : { client: makeClientId() } }));
       for (const r of rows) tellHistory(syncedKey(id, start?.n ?? 1), r.env);
       this.events.push({ t: "page", doc: id, through: next.after, applied: out.applied });
+      if (out.applied > 0 && this.opts.onPage) {
+        try {
+          this.opts.onPage({ doc: id, applied: out.applied, at: Math.max(...page.map((b) => b.recv)) });
+        } catch {}
+      }
       if (!a.more) return true;
     }
     return true;

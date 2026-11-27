@@ -6,11 +6,12 @@
 // is the page's fault, and it fails closed).
 
 import { canon, permissionDigest } from "./agent-canon";
+import { egressOf, egressText, turnInputOf } from "./agent-egress";
 
 type Gate = { acquire(bytes: number, live: () => boolean): Promise<(() => void) | null>; sweep(): void };
 /** What the cards need of the pairing: its child, whether it's over a runner, and its notify. */
-export type CardPairing = { readonly state: string; readonly link: unknown; readonly hello: { child?: string } | null; notify(method: string, params: unknown): boolean };
-type Card = { pairing: CardPairing; turn: string; instance: string; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
+export type CardPairing = { readonly state: string; readonly link: unknown; readonly hello: { child?: string; features?: string[] } | null; notify(method: string, params: unknown): boolean };
+type Card = { pairing: CardPairing; turn: string; instance: string; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; turnInput?: unknown; claimed: boolean };
 
 /** A card's identities and tool, each at most this many bytes as canonical text (permissionText's bound). A kept card
  * is then at most 16 KiB of input and 4 KiB of identities as UTF-8, so the cards kept hold at most CARDS_MAX times
@@ -47,18 +48,33 @@ function codexSummary(tool: string, i: Record<string, unknown>): string {
   return cwd ? `${command} (in ${cwd})` : command;
 }
 
+/** A card's added words, for actions whose consequence the path alone doesn't show. */
+export const CARD_NOTE = {
+  branchRemove: "This also removes the branch's review history.",
+} as const;
 /** A card's words from its action, exactly as the agent words them (sagebrush-agent's askPerson): the tool's name,
  * what the call is for (its address, query or path), and all of its arguments. */
 export function cardText(tool: string, input: unknown): { title: string; summary: string; detail: string } {
-  const name = tool.startsWith("mcp__sagebrush__") ? tool.slice("mcp__sagebrush__".length) : tool;
+  const name = tool.startsWith("mcp__sagebrush_page__") ? tool.slice("mcp__sagebrush_page__".length) : tool.startsWith("mcp__sagebrush__") ? tool.slice("mcp__sagebrush__".length) : tool;
   const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const codex = CODEX_TITLES[tool];
   if (codex) return { title: codex, summary: codexSummary(tool, i), detail: JSON.stringify(input, null, 2) };
   const target = [i.url, i.query, i.path, i.from && i.to ? `${i.from} → ${i.to}` : undefined].find((v) => typeof v === "string") as string | undefined;
-  return { title: `Allow ${name}?`, summary: target ?? "(no address or query given)", detail: JSON.stringify(input, null, 2) };
+  // (removing a branch's own folder, /Branches/<name>: its review history goes with it, said on the card)
+  const branchRoot = name === "workspace_remove" && typeof i.path === "string" && /^\/Branches\/[^/]+\/?$/.test(i.path);
+  return { title: `Allow ${name}?`, summary: target === undefined ? "(no address or query given)" : branchRoot ? `${target}\n${CARD_NOTE.branchRemove}` : target, detail: JSON.stringify(input, null, 2) };
 }
+/** A kept card's words: a web card's from its checked request, any other's as cardText makes them. */
+function cardView(c: { tool?: string; input?: unknown; turnInput?: unknown }): Record<string, unknown> {
+  const eg = egressOf(c.tool!, c.input);
+  if (eg === null) return { ...cardText(c.tool!, c.input), buttons: "two", allow: "Allow" };
+  const t = egressText(eg, c.turnInput !== undefined);
+  return { title: t.title, body: t.body, summary: t.summary, detail: "", reason: t.reason ?? "", buttons: t.buttons, allow: t.allow, turn_label: t.turnLabel ?? "" };
+}
+/** The event as the chat keeps it: a web card's without its action or turn action (only what it shows goes on, S6). */
+const shown = (e: any, c: { tool?: string; input?: unknown }) => { if (egressOf(c.tool ?? "", c.input) === null) return e; const { action, turn_action, ...rest } = e; return rest; };
 // (an answer's event keeps the words its question was shown with)
-const c2 = (e: any, c: { tool?: string; input?: unknown }) => (c.tool === undefined ? e : { ...e, ...cardText(c.tool, c.input) });
+const c2 = (e: any, c: { tool?: string; input?: unknown; turnInput?: unknown }) => (c.tool === undefined ? e : { ...shown(e, c), ...cardView(c) });
 
 export class PermissionCards {
   private cards = new Map<string, Card>();
@@ -66,7 +82,9 @@ export class PermissionCards {
   //  it's remembered. Not what keeps a click on the card it was shown for: that's the card's own instance token)
   private spent = new Set<string>();
   private o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest };
-  constructor(o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest }) { this.o = o; }
+  private egressTurn: boolean;
+  /** `egressTurn`: this page offers egress.turn (the "for this turn" button), as its page.features say. */
+  constructor(o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest; egressTurn?: boolean }) { this.o = o; this.egressTurn = !!o.egressTurn; }
 
   get size() { return this.cards.size; }
   clear() { this.cards.clear(); this.spent.clear(); this.o.gate.sweep(); }
@@ -98,12 +116,19 @@ export class PermissionCards {
       if (!c.ok || !ids) { p.notify("chat.permission", { request_id: e.id.slice(0, ID_MAX), behavior: "deny" }); return false; }
       input = c.value;
     }
+    // (a web card's "for this turn" action: kept only where both sides offer egress.turn and it matches the request's
+    //  own origin or provider exactly; else the card has no such button and that answer can't be sent)
+    let turnInput: unknown;
+    if (has && this.egressTurn && p.hello?.features?.includes("egress.turn")) {
+      const eg = egressOf(e.action.tool, input);
+      if (eg && eg !== "bad") turnInput = turnInputOf(eg, e.turn_action) ?? undefined;
+    }
     const h = idHash(e.id);
     if (this.spent.has(h)) { p.notify("chat.permission", { request_id: e.id, behavior: "deny" }); return false; }
     this.spent.add(h);
     while (this.spent.size > SPENT_MAX) this.spent.delete(this.spent.values().next().value!);
     while (this.cards.size >= CARDS_MAX) this.cards.delete(this.cards.keys().next().value!);
-    this.cards.set(e.id, { pairing: p, turn, instance: token(), conversation: turnConversation, request_id: e.id, claimed: false, ...(has ? { child: e.child, tool: e.action.tool, input } : {}) });
+    this.cards.set(e.id, { pairing: p, turn, instance: token(), conversation: turnConversation, request_id: e.id, claimed: false, ...(has ? { child: e.child, tool: e.action.tool, input } : {}), ...(turnInput !== undefined ? { turnInput } : {}) });
     this.o.gate.sweep();
     return true;
   }
@@ -122,7 +147,7 @@ export class PermissionCards {
     if (e.state === "open") {
       if (kept || !this.admit(turnConversation, e, turn)) return null;
       const c = this.cards.get(e.id)!;
-      return { ...(c.child === undefined ? e : { ...e, ...cardText(c.tool!, c.input) }), instance: c.instance };
+      return { ...(c.child === undefined ? e : { ...shown(e, c), ...cardView(c) }), instance: c.instance };
     }
     if (!kept || kept.conversation !== turnConversation || kept.turn !== turn) return null;
     this.settled(e.id);
@@ -132,11 +157,15 @@ export class PermissionCards {
   /** The page's token for a kept card (for a caller that renders it); undefined if none is kept under `id`. */
   instanceOf(id: string): string | undefined { return this.cards.get(id)?.instance; }
 
-  /** The person's click on a card shown in `conversation`: true if it claimed the card (the first click on either
-   * button), false if it was already claimed, or is another conversation's, or isn't a card of this pairing.
-   * Synchronous up to the claim; Allow's digest follows. */
-  answer(id: string, approve: boolean, conversation?: string, turn?: string, instance?: string): boolean {
+  /** The person's click on a card shown in `conversation`: true if it claimed the card (the first click on any
+   * button), false if it was already claimed, or is another conversation's, or isn't a card of this pairing, or offers
+   * no such answer (an Allow on a web card in a form the page can't show; "turn" on a card without that action).
+   * Synchronous up to the claim; Allow's digest follows. `approve`: true (Allow this request), false (Deny), or "turn"
+   * (Allow for this turn: its own action and digest, answered allow_turn). */
+  answer(id: string, approve: boolean | "turn", conversation?: string, turn?: string, instance?: string): boolean {
     const c = this.cards.get(id), p = this.o.current();
+    if (c && approve !== false && egressOf(c.tool ?? "", c.input) === "bad") return false;
+    if (c && approve === "turn" && c.turnInput === undefined) return false;
     // (the card clicked must be this very card: its page-made token, which a card asked again under the same id never
     //  shares, whatever the ids remembered; a click without one, or an empty one, answers nothing)
     if (!c || c.claimed || (conversation !== undefined && c.conversation !== conversation) || (turn !== undefined && c.turn !== turn) || typeof instance !== "string" || instance === "" || c.instance !== instance) return false;
@@ -145,25 +174,27 @@ export class PermissionCards {
     if (!approve) { p.notify("chat.permission", { request_id: id, behavior: "deny" }); return true; }
     // (an agent that binds no digest (no child on its card) is one that asks none: loopback only)
     if (c.child === undefined) { p.notify("chat.permission", { request_id: id, behavior: p.link ? "deny" : "allow" }); return true; }
-    void this.allow(p, c);
+    void this.allow(p, c, approve === "turn");
     return true;
   }
 
   /** The Allow, with its digest; resolves when it was sent or dropped (for the rows). */
   pending: Promise<void> = Promise.resolve();
-  private allow(p: CardPairing, c: Card) {
+  private allow(p: CardPairing, c: Card, turnScope = false) {
     const run = async () => {
       // (the card itself still kept: cleared, settled or evicted, its Allow is dropped, waiting or not)
       const live = () => this.cards.get(c.request_id) === c && this.o.current() === p && p.state === "granted" && p.hello?.child === c.child;
       const release = await this.o.gate.acquire(this.o.charge, live);
       if (!release) return;
       let d: string | null = null;
-      try { d = await (this.o.digest ?? permissionDigest)({ child: c.child, conversation: c.conversation, request: c.request_id, tool: c.tool, input: c.input }); }
+      // (for this turn: the digest of the turn action, never the request's, and the reverse: neither answers for the other)
+      const action = turnScope ? { tool: "egress.turn", input: c.turnInput } : { tool: c.tool, input: c.input };
+      try { d = await (this.o.digest ?? permissionDigest)({ child: c.child, conversation: c.conversation, request: c.request_id, ...action }); }
       catch { d = null; }
       finally { release(); }
       if (!live()) return;
       if (d === null) { p.notify("chat.permission", { request_id: c.request_id, behavior: "deny" }); return; }
-      p.notify("chat.permission", { request_id: c.request_id, behavior: "allow", digest: d });
+      p.notify("chat.permission", { request_id: c.request_id, behavior: turnScope ? "allow_turn" : "allow", digest: d });
     };
     this.pending = run();
     return this.pending;

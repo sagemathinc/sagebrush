@@ -141,21 +141,38 @@ export const writerLock = (Base) => class extends Base {
       }).catch(() => decided(false));
     }).then((got) => {
       if (got || stale()) return got;
-      // (waiting in the lock's queue: granted when the writer's tab lets go, in turn; then this tab writes, once its
-      // reload has recovered (load): told by onTakeover, now or whenever it is asked (astra's CORR-215-3))
-      this.readOnly = "other";
-      this.waiting = new AbortController();
-      this.lockDone = locks.request(name, { signal: this.waiting.signal }, (lock) => {
-        this.waiting = null;
-        if (stale()) return null;
-        const held = hold();
-        if (this.ontakeover) { const f = this.ontakeover; queueMicrotask(() => f()); }
-        else this.takeoverDue = true;
-        return held;
-      }).catch(() => { this.waiting = null; });
+      this.enqueue();
       return false;
     });
     return this.acquiring;
+  }
+  // (waiting in the lock's queue: granted when the writer's tab lets go, in turn; then this tab writes, once its
+  // reload has recovered (load): told by onTakeover, now or whenever it is asked (astra's CORR-215-3).  Granted while
+  // another tab was used more recently than this one and wants it (`passOn`, the page's focus takeover, which may ask
+  // that tab again first, the lock held meanwhile): passed on, nothing loaded or written, and this tab back in the queue)
+  enqueue() {
+    const locks = globalThis.navigator?.locks;
+    if (this.writer || this.waiting || !locks) return;
+    const name = this.kind.lockPrefix + this.id, gen = this.lockGen;
+    const stale = () => gen !== this.lockGen || this.released;
+    this.readOnly = "other";
+    this.waiting = new AbortController();
+    this.lockDone = locks.request(name, { signal: this.waiting.signal }, async (lock) => {
+      this.waiting = null;
+      if (stale()) return null;
+      // (a passOn that fails (throws, or rejects): not passed on; this tab takes the lock it was granted, as without one,
+      // never left with neither the lock nor a place in its queue. While it asks (up to 500 ms, handover.ts), this tab
+      // holds the lock without writing, so no tab writes: a write that waits for the lock (an agent's) waits that long)
+      let pass = false;
+      try { pass = !!this.passOn && (await this.passOn()); } catch (e) { console.warn(`${this.kind.noun}: the focus takeover's passOn failed; this tab keeps the lock:`, e); }
+      if (pass) { queueMicrotask(() => { if (!stale()) this.enqueue(); }); return null; }
+      if (stale()) return null;
+      this.writer = true; this.readOnly = null;
+      const held = new Promise((done) => { this.unlock = done; });
+      if (this.ontakeover) { const f = this.ontakeover; queueMicrotask(() => f()); }
+      else this.takeoverDue = true;
+      return held;
+    }).catch(() => { this.waiting = null; });
   }
   // (let go: the lock, or the place in its queue, and any grant still on its way; resolves once the browser has it back)
   letGo() {
@@ -172,7 +189,8 @@ export const writerLock = (Base) => class extends Base {
 /** What the page shows and allows for a store (the page's controls; a plain store: everything). */
 export function pageControls(store) {
   const why = store?.journaled ? store.viewOnly : null;
-  return { readOnly: !!why, bar: why, name: !why, mode: !why, repro: !why, rename: !why, trash: !why, history: !why };
+  // (a tab that follows another (focus takeover) says nothing: it shows every change, and takes over when used)
+  return { readOnly: !!why, bar: store?.readOnly === "nolocks" ? why : null, name: !why, mode: !why, repro: !why, rename: !why, trash: !why, history: !why };
 }
 /** The store the page now uses, `next`, after `prev`: `prev` let go (its lock, its history) only if it is another
  * store; the same store reattached (a takeover's reload) is kept as it is. */
@@ -373,16 +391,58 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   // only once nothing of it can still commit: its load's writes (recovery's catch-up, T2 and prune), every save running
   // (T1, T2, prune) and its history's queue, each waited for until none is left (astra's CORR-215-5, CORR-215-6))
   async drain() {
-    for (;;) {
-      const a = this.patches.appending, l = this.loading, m = this.mutating;
-      await Promise.allSettled([a, l, m]);
-      if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
-      if (a === this.patches.appending && l === this.loading && m === this.mutating) break;
-    }
+    await this.settle();
     if (!this.released) return;
     this.unwatchRemote?.(); this.unwatchRemote = null; clearTimeout(this.remoteTimer);
     this.history.close();
     return this.letGo();
+  }
+  // (nothing of this store still able to commit: its load's writes (recovery's catch-up, T2 and prune), every save
+  // running (T1, T2, prune) and its history's queue, each waited for until none is left; drain's wait, and a yield's)
+  // (resolves what it waited for last: {a, l, m}, for a caller that checks nothing new began since)
+  async settle() {
+    for (;;) {
+      const a = this.patches.appending, l = this.loading, m = this.mutating;
+      await Promise.allSettled([a, l, m]);
+      if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
+      if (a === this.patches.appending && l === this.loading && m === this.mutating) return { a, l, m };
+    }
+  }
+  /** Another tab of this browser is being used and wants to write this document (focus takeover, web/page/handover.ts):
+   * no change from elsewhere merged here from now on, `quiesce()` (the page's: what was typed, saved), every write
+   * still running done (settle), then the lock let go and asked for again, in the queue.  This store then follows
+   * (read-only, its history kept) until it is granted again.  `still()`, if given, is asked once more just before
+   * letting go: false keeps the lock.  Resolves true once let go; false if it wasn't the writer, the page's save failed,
+   * or `still()` said no (then it stays the writer, and merges again). */
+  async yieldLock(quiesce, still) {
+    if (!this.writer || !this.ready || this.released || this.yielding) return false;
+    this.yielding = true;
+    const client = this.synced ? this.history.clientId : null;
+    this.unwatchRemote?.(); this.unwatchRemote = null; clearTimeout(this.remoteTimer);
+    try {
+      try { await quiesce?.(); } catch (e) {
+        console.warn(`${this.kind.noun}: not handed to the other tab, a save failed:`, e);
+        if (client && !this.released) this.watchRemote(client);
+        return false;
+      }
+      // (settled, and still so when letting go: nothing begun in the moment since (read with no await in between))
+      for (;;) {
+        const mark = await this.settle();
+        if (this.released || !this.writer) return false;
+        if (!this.inflight && this.patches.appending === mark.a && this.loading === mark.l && this.mutating === mark.m) break;
+      }
+      // (`still()`, the page's, asked last with nothing in between: no want stands any more (this tab used since, later
+      // than every want): kept, merging again)
+      if (still && !still()) {
+        if (client && !this.released) this.watchRemote(client);
+        return false;
+      }
+      await this.letGo();
+      if (!this.released) this.enqueue();
+      return true;
+    } finally {
+      this.yielding = false;
+    }
   }
   // (the codec's text of a document's versioned records: an intent's value)
   textOf(doc) { return this.history.codec.toString(this.kind.toRecords(doc)); }
@@ -596,6 +656,14 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       await this.useSynced();
       this.viewed = false;
       await this.history.init();
+      // (a record the history hasn't taken in yet, with something it would take in wrongly (a notebook's cells without
+      // ids): the kind's normalization written first, as the workspace makes a record, so recovery takes in that one.
+      // A record changed under its compare and swap is read and normalized again, a bounded number of times, as
+      // recovery is: never taken in unnormalized)
+      for (let i = 0; ; i++) {
+        if ((await this.normalizeStored()) !== "conflict") break;
+        if (i >= 4) throw new Error(this.T.BUSY);
+      }
       for (let i = 0; ; i++) {
         const out = await this.recover(await super.loadRecord());
         if (out || i >= 4) { this.recovered = out ?? { row: "busy" }; break; }
@@ -622,6 +690,23 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     } finally {
       this.recovering = false;
     }
+  }
+  /** The kind's normalization (kind.normalize) of the stored record, written back before the history first takes the
+   * record in: only for a record still marked unjournaled with no proof (as the workspace makes one: nothing of it in
+   * any version yet), under the record's compare and swap.  "conflict": the record changed between the read and the
+   * write, nothing written (the caller reads it again); "written", or "left" (nothing to do). */
+  async normalizeStored() {
+    if (!this.kind.normalize) return "left";
+    const rec = await super.loadRecord();
+    if (!rec || rec.unjournaled !== true || rec.proof) return "left";
+    const fixed = this.kind.normalize(rec);
+    if (!fixed) return "left";
+    // (`normalizeHold`, tests only: between the read and the compare and swap, where another writer's save may land)
+    if (this.normalizeHold) await this.normalizeHold(this);
+    const { j: _j, hash: _h, unjournaled: _u, at: _a, from: _f, proof: _p, rev, ...plain } = fixed;
+    const out = await super.save({ ...plain, baseRev: rev }, { journal: { keep: true, hash: "", unjournaled: true } });
+    if (typeof out === "string") throw new Error(out);
+    return out?.conflict ? "conflict" : "written";
   }
   /** The editor's merge of an unsaved edit with a change from elsewhere (notebook.js applyRemote): the kind's history
    * module's mergeTextAt (cocalc-ai's mergeText, the selection mapped), or undefined for a kind without one (a board's

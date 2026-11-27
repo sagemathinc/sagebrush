@@ -13,6 +13,7 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { dispatch } from "../miniflare-dispatch.mjs";
+import { SCOPE_CASES } from "../workspace/agent-scope-cases.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const units = execFileSync("bun", ["build", join(here, "test-agent-units.ts"), "--format", "esm", "--target", "node"], { encoding: "utf8" });
@@ -84,6 +85,18 @@ await section("units", async () => {
   ok(U.inScope(sco, "/Algebra", "write") && U.inScope(sco, "/Algebra/x.tex", "write") && !U.inScope(sco, "/Algebra2", "read") && !U.inScope(sco, "/Algebra2/x", "read"), "/Algebra covers itself and what's under it, never /Algebra2");
   ok(U.inScope(sco, "/Notes/a", "read") && !U.inScope(sco, "/Notes/a", "write") && !U.inScope(sco, "/", "read"), "read access is read only, and a scope doesn't cover its parent");
   ok(U.inScope(sc([s("/")]), "/Trash/x", "read") && !U.inScope(sc([s("/")]), "/x", "write"), "/ covers the whole workspace");
+  // (the agents' reserved folder, /.agents: no scope reaches into it, "/" included, and none may be made in it)
+  const all = sc([s("/", "write")]);
+  ok(!U.inScope(all, "/.agents", "read") && !U.inScope(all, "/.agents/memory/agent/x/n.md", "read") && !U.inScope(all, "/.agents/x", "write"), "/ doesn't cover /.agents or anything in it");
+  ok(U.inScope(all, "/.agentsX", "write") && U.inScope(all, "/.Agents/x", "write") && U.inScope(all, "/x/.agents/y", "write"), "only the exact top-level /.agents is reserved: /.agentsX, /.Agents and a nested .agents are ordinary");
+  ok(sc([s("/.agents")]) === "refused" && sc([s("/.agents/memory", "write")]) === "refused" && sc([s("/A"), s("/.agents/x")]) === "refused" && Array.isArray(sc([s("/.agentsX"), s("/.Agents")])), "a scope at or under /.agents is refused when the grant is made, others alike are not");
+  ok(U.inScope === U.sharedInScope && U.RESERVED === "/.agents" && U.reserved("/.agents/x") && !U.reserved("/.agentsX"), "the server's scope check is the shared module's (web/workspace/agent-scope.ts), the one a device's check of a relayed verb imports");
+  // (the shared table, web/workspace/agent-scope-cases.mjs: the server's call site here and in test-index; a device's
+  // check of a relayed verb runs the same table when it exists)
+  for (const c of SCOPE_CASES) {
+    const v = U.scopeCheck(c.scopes.map(([path, access]) => ({ path, access })), c.path, c.need).verdict;
+    ok(v === c.verdict, `scope table: ${JSON.stringify(c.scopes)} ${JSON.stringify(c.path)} ${c.need}: ${c.verdict}`, v);
+  }
   const nm = (v) => {
     try {
       return U.checkAgentName(v);
@@ -111,7 +124,7 @@ const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOK
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
-const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
+const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
 const RO = "a9a9a9a9-0009-4a9a-8a9a-a9a9a9a9a909"; // read-only
 const FA = "a9a9a9a9-000b-4a9a-8a9a-a9a9a9a9a90b"; // the first logged row's alarm
 const FB = "a9a9a9a9-000c-4a9a-8a9a-a9a9a9a9a90c"; // a grant's expiry armed by its make
@@ -122,10 +135,10 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("3001") },
     { ...base, name: "off", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["off.test/*"], outboundService: cocalc, ratelimits: ratelimits("3002") },
     { ...base, name: "nokey", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nokey.test/*"], outboundService: cocalc, ratelimits: ratelimits("3003") },
-    { ...base, name: "noip", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["noip.test/*"], outboundService: cocalc, ratelimits: { ...ratelimits("3004"), SYNC_PREAUTH: { namespace_id: "3004", simple: { limit: 2, period: 60 } } } },
+    { ...base, name: "noip", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["noip.test/*"], outboundService: cocalc, ratelimits: { ...ratelimits("3004"), SYNC_PREAUTH: { namespace_id: "3004", simple: { limit: 2, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "83004", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "93004", simple: { limit: 1000000, period: 60 } } } },
     // (§7's 10 failed authentications a minute per IP, on its own Worker; and a Worker without that binding)
     { ...base, name: "fail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["fail.test/*"], outboundService: cocalc, ratelimits: ratelimits("3005", 10) },
-    { ...base, name: "nofail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nofail.test/*"], outboundService: cocalc, ratelimits: { SYNC_PREAUTH: { namespace_id: "3006", simple: { limit: 1_000_000, period: 60 } } } },
+    { ...base, name: "nofail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nofail.test/*"], outboundService: cocalc, ratelimits: { SYNC_PREAUTH: { namespace_id: "3006", simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "83006", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "93006", simple: { limit: 1000000, period: 60 } } } },
   ],
 }));
 {
@@ -172,6 +185,16 @@ async function enabled(id, origin = SITE) {
   return s;
 }
 const answer = async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) });
+/**
+ * Miniflare's emulated per-IP limits use wall-clock windows, with epoch =
+ * floor(now / period). These short test bursts can miss the expected 429 if
+ * split across a minute boundary. If fewer than `need` ms remain, wait until
+ * 50 ms after the next boundary before starting the burst.
+ */
+async function clearOfMinuteEdge(need = 10_000) {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < need) await new Promise((r) => setTimeout(r, left + 50));
+}
 
 await section("the switch", async () => {
   for (const origin of ["https://off.test", "https://nokey.test", "https://nofail.test"]) {
@@ -234,6 +257,7 @@ await section("before any object: the Worker", async () => {
   const t = await answer(await agent(tA, "stat", big));
   ok(t.status === 413 && t.limit === "body_bytes", "a body over 64 KiB is refused before the object: " + t.status);
   // the IP's pre-authentication limit comes first (2 a minute on this Worker)
+  await clearOfMinuteEdge();
   const n = [];
   for (let i = 0; i < 3; i++) n.push((await agent("x", "stat", {}, {}, "https://noip.test")).status);
   ok(n[0] === 401 && n[1] === 401 && n[2] === 429, "the IP's pre-authentication limit stops a flood: " + n);
@@ -450,6 +474,7 @@ await section("10 failed authentications a minute per IP", async () => {
   const g = await make(s, [{ path: "/", access: "read" }], {}, F);
   ok(g.status === 201, "a grant on this Worker");
   const wrongSecret = ["sbg1", ...parts(g.token).slice(1, 3), b64url(Buffer.alloc(32, 3)), parts(g.token)[4]].join(".");
+  await clearOfMinuteEdge();
   const codes = [];
   // (failures at the Worker, a bad tag, and at the object, a wrong secret, count alike)
   for (let i = 0; i < 11; i++) codes.push((await agent(i % 2 ? wrongSecret : "x", "stat", { path: "/x" }, {}, F)).status);
@@ -569,12 +594,26 @@ await section("making a grant arms its expiry", async () => {
   ok(a1 !== null && Math.abs(a1 - (g1.grant.expires + 1)) <= 1, "a grant made sets the alarm to its own expiry: " + (a1 === null ? null : a1 - g1.grant.expires));
   // (a day of 0.3 s here, so a 1-day grant expires 0.3 s after it is made)
   await seam(FB, { dayMs: 300 });
+  // (an alarm read by `after`, once a grant's expiry has passed by then (a loaded runner: the make and the read can
+  //  take longer than such a day), may have fired and moved on: due at the earliest expiry, or at a later one whose
+  //  earlier ones have all passed; while none has passed, exactly as before)
+  const dueAt = (al, expiries, after) => {
+    for (const e of [...expiries].sort((x, y) => x - y)) {
+      if (al !== null && Math.abs(al - (e + 1)) <= 1) return true;
+      if (e + 1 > after) return false;
+    }
+    return false;
+  };
   const g2 = await make(s, [{ path: "/", access: "read" }], { days: 1 });
   const a2 = (await (await seam(FB, {})).json()).alarm;
-  ok(a2 !== null && Math.abs(a2 - (g2.grant.expires + 1)) <= 1 && g2.grant.expires - t0 < 5000, "a shorter-lived grant made later brings it forward to that expiry: " + (a2 === null ? null : a2 - g2.grant.expires));
+  const after2 = Date.now();
+  const passed2 = after2 >= g2.grant.expires + 1;
+  ok((passed2 ? dueAt(a2, [g1.grant.expires, g2.grant.expires], after2) : a2 !== null && Math.abs(a2 - (g2.grant.expires + 1)) <= 1) && g2.grant.expires - t0 < 5000, "a shorter-lived grant made later brings it forward to that expiry: " + (a2 === null ? null : a2 - g2.grant.expires) + (passed2 ? " (that expiry passed before the read)" : ""));
   const g3 = await make(s, [{ path: "/", access: "read" }], { days: 2 });
   const a3 = (await (await seam(FB, {})).json()).alarm;
-  ok(a3 === a2 || a3 === null || a3 <= g2.grant.expires + 1, "a later-expiring one doesn't push it back");
+  const after3 = Date.now();
+  const passed3 = after3 >= g2.grant.expires + 1;
+  ok(passed3 ? dueAt(a3, [g1.grant.expires, g2.grant.expires, g3.grant.expires], after3) : a3 === a2 || a3 === null || a3 <= g2.grant.expires + 1, "a later-expiring one doesn't push it back" + (passed3 ? ` (the shorter one's expiry passed before the read: due at ${a3 === null ? null : a3 - g2.grant.expires} from it)` : ""));
 });
 
 await section("a read-only account: reads pass, writes are refused", async () => {

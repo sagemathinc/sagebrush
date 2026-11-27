@@ -10,6 +10,8 @@
 //   kernel.start();
 
 const STOPPED = "\nStopped: it did not stop when interrupted, so the interpreter was restarted; variables are gone.\n";
+// the flush request's bit in the interrupt word (src/runtime/interrupt.ts INTR_FLUSH), and how often it is set
+const INTR_FLUSH = 16, FLUSH_MS = 200;
 
 // A fast 53-bit hash of a run's output messages (cyrb53, fed incrementally),
 // for TimeTravel replay to check that a replayed run printed the same.
@@ -167,7 +169,7 @@ export class WorkerKernel {
     this.started = Promise.resolve();
     this.startError = null;
     this.interruptFlag = null;
-    // id -> a sink {start(), out(text, isErr), display(bundle), interact(spec),
+    // id -> a sink {start(), out(text, isErr), display(bundle, metadata), interact(spec),
     // clear(), done(ms), stopped(message), skipped()} for running code, or
     // {reply(message)} for a question
     this.pending = new Map();
@@ -187,6 +189,12 @@ export class WorkerKernel {
     this.readyInfo = null; // the worker's ready message (seeded, startup clock)
     // input() questions shown and not yet answered: reply -> its run's id
     this.inputs = new Map();
+    // changes a run waits on (web/worker.ts fsAsk), each admitted here only as a request of the run in flight in the
+    // current worker: key -> {m, id, w, gen}; retired, answered no, at a Stop, the run's end or a new interpreter. The
+    // keys this interpreter has asked with (answered once, never again) and the last run a Stop reached
+    this.asks = new Map();
+    this.askKeys = new Set();
+    this.stoppedThrough = 0;
     // live data's admission (web/notebook/live-data.js): one for every worker this kernel starts
     this.live = live ?? NO_LIVE_DATA;
     // where output addressed to an @interact goes (set by the notebook)
@@ -255,6 +263,8 @@ export class WorkerKernel {
     });
     const handle = (ev) => {
       const m = ev.data;
+      // (a change a run waits on: admitted here, before the page sees it, or answered no)
+      if (m && m.fsAsk !== undefined) return this.takeAsk(m, w);
       if (this.onMessage?.(m, w)) return;
       if (m.initFailed !== undefined) {
         this.emit("status", `error: This engine's settings are invalid: ${String(m.initFailed).slice(0, 300)}; ask the site's administrator.`);
@@ -264,6 +274,21 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
+        // (what is in flight is asked, every FLUSH_MS, for the output it has written: its compiled loops
+        // and the engine's polls send it (src/runtime/interrupt.ts, INTR_FLUSH), so a long computation
+        // shows what it printed before it.  This page's timer asks, whoever holds the word: a runner frame
+        // is asked by message (runner-worker.js flush), as its own timers are throttled while it is hidden;
+        // nothing is asked while nothing is in flight)
+        clearInterval(this.flushTimer);
+        const frameFlush = this.interruptFlag ? undefined : w.flush;
+        // (notified, as every producer of the word is: a time.sleep waiting on it wakes, sees no Ctrl-C, and waits on)
+        this.flushTimer = this.interruptFlag || frameFlush ? setInterval(() => {
+          if (!this.pending.size || w !== this.worker) return;
+          if (this.interruptFlag) {
+            Atomics.or(this.interruptFlag, 0, INTR_FLUSH);
+            Atomics.notify(this.interruptFlag, 0);
+          } else frameFlush();
+        }, FLUSH_MS) : 0;
         // (the epoch word of what this document may change, a plain worker's: setPolicy stores it at once; a runner's
         // stays in its frame, which stores it as the policy passes through)
         this.epochWord = m.epoch ? new Int32Array(m.epoch) : null;
@@ -337,19 +362,20 @@ export class WorkerKernel {
       }
       if (dest) {
         if (m.stream) dest.out(m.text, m.stream === "stderr");
-        if (m.display) dest.display(m.display);
+        if (m.display) dest.display(m.display, m.metadata);
         if (m.interact) dest.interact(m.interact);
         if (m.clear) dest.clear();
       }
       if (m.done) {
         this.retireInputs(m.id);
+        this.retireAsks((e) => e.id === m.id);
         this.live.abort((c) => c.id === m.id);
         this.pending.delete(m.id);
         // (Stop: it ended with the KeyboardInterrupt it was sent)
         const interrupted = this.interrupted.has(m.id) && !!m.error;
         if (r) this.finishRun(m, r);
         else this.interrupted.delete(m.id);
-        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.exited === true ? { exited: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
+        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.exited === true ? { exited: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}), ...(typeof m.shown === "boolean" ? { shown: m.shown } : {}) });
       }
     };
     // (while a hold is pending, holdMessages, this worker's messages wait behind it, in order: a run's
@@ -385,14 +411,14 @@ export class WorkerKernel {
     this.retryStart();
     const id = this.nextId++;
     this.pending.set(id, sink);
-    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}) };
-    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...forget };
+    const forget = { ...(opts.forget?.length ? { forget: [...opts.forget] } : {}), ...(opts.mangle && opts.cell ? { mangle: String(opts.cell).replace(/[^A-Za-z0-9]/g, "") } : {}), ...(opts.seed ? { seed: opts.seed } : {}), ...(opts.scoped && Object.keys(opts.scoped).length ? { scoped: { ...opts.scoped } } : {}), ...(Array.isArray(opts.above) ? { above: [...opts.above] } : {}) };
+    const run = { kind: "code", code, mode: opts.mode, ...(opts.repl ? { repl: true } : {}), ...(opts.cell ? { cell: opts.cell } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget };
     // (what the run is, and the document version its code is from, are taken
     // now ("execute"); it goes to the worker once the start is done, and into
     // the journal when it is done ("run"))
     this.track(id, run);
     this.claim(id, opts.mode);
-    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...forget }));
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, code, sage: opts.mode === "sage", magma: opts.mode === "magma", matlab: opts.mode === "matlab", ...(opts.repl ? { repl: true } : {}), ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}), ...forget }));
   }
 
   // after the start, in the order asked, if this is still pending in the same worker
@@ -494,8 +520,8 @@ export class WorkerKernel {
     this.pending.set(id, sink);
     // (a copy: the journal's document freezes what it is given, and the
     // notebook keeps changing its own values object)
-    this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)) });
-    this.whenStarted(id, sink, () => this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}) }));
+    this.track(id, { kind: "interact", iid, values: JSON.parse(JSON.stringify(values)), ...(opts.figures ? { figures: opts.figures } : {}) });
+    this.whenStarted(id, sink, () => this.worker.postMessage({ id, interact: iid, values, ...(opts.clock ? { clock: opts.clock } : {}), ...(opts.figures ? { figures: opts.figures } : {}) }));
   }
 
   /**
@@ -548,6 +574,58 @@ export class WorkerKernel {
     if (this.epochWord) Atomics.store(this.epochWord, 0, p.epoch);
     this.post({ fsWrite: p });
   }
+  /** The answer to a worker's {fsAsk, buffer} (web/worker.ts: a change it waits on): `policy` ({epoch, state, trees})
+   * allows it, null doesn't. A plain worker's buffer is here: the epoch stored in this page's word FIRST, then the
+   * answer written, and only for the current worker; a runner's or the engine's buffer is with its holder, which does
+   * the same on {runnerAsk} (web/runner/index.html, app/engine/serve.mjs). Answered once per request. */
+  answerAsk(m, w, policy) {
+    const key = m?.fsAsk?.key, e = typeof key === "string" ? this.asks.get(key) : undefined;
+    if (!e || e.m !== m || e.w !== w) return;
+    const live = this.askLive(m);
+    this.asks.delete(key);
+    this.answerRaw(m, w, live ? policy : null);
+  }
+  /** Whether `m`, an {fsAsk} this kernel admitted, is still a request of the run in flight in the current worker: not
+   * answered, not retired, its run neither stopped nor over, the same interpreter. The page asks it when the request
+   * arrives and again before it grants or widens anything for it. */
+  askLive(m) {
+    const key = m?.fsAsk?.key, e = typeof key === "string" ? this.asks.get(key) : undefined;
+    return !!e && e.m === m && e.w === this.worker && e.gen === this.generation && e.id > this.stoppedThrough && !!this.pending.get(e.id) && !this.pending.get(e.id).reply;
+  }
+  // (an {fsAsk} arriving: its fields checked and bounded, then admitted only as the one open request of the run in
+  // flight in the current worker, one no Stop reached and with a key never seen; anything else, and one the page
+  // doesn't take, answered no at once)
+  takeAsk(m, w) {
+    const a = m.fsAsk;
+    const valid = !!a && typeof a === "object" && typeof a.key === "string" && a.key.length >= 1 && a.key.length <= 64 && Number.isInteger(a.id) && a.id >= 1
+      && typeof a.path === "string" && a.path.length <= 4096 && (a.what === undefined || (typeof a.what === "string" && a.what.length <= 32))
+      && Number.isInteger(a.epoch) && a.epoch >= 1 && a.epoch <= 2 ** 31 - 2;
+    const fresh = valid && w === this.worker && !this.askKeys.has(a.key) && this.askKeys.size < 1 << 20;
+    if (fresh) this.askKeys.add(a.key);
+    const p = fresh ? this.pending.get(a.id) : undefined;
+    if (!p || p.reply || a.id <= this.stoppedThrough || this.asks.size) return this.answerRaw(m, w, null);
+    this.asks.set(a.key, { m, id: a.id, w, gen: this.generation });
+    if (!this.onMessage?.(m, w)) this.retireAsks((e) => e.m === m);
+  }
+  // (requests waiting, those `which` picks or all: retired, answered no; the page's prompt for one closes)
+  retireAsks(which = () => true) {
+    for (const [key, e] of [...this.asks]) {
+      if (!which(e)) continue;
+      this.asks.delete(key);
+      this.answerRaw(e.m, e.w, null);
+      this.emit("ask-retired", key);
+    }
+  }
+  answerRaw(m, w, policy) {
+    const key = m?.fsAsk?.key;
+    if (typeof key !== "string") { if (typeof SharedArrayBuffer === "function" && m?.buffer instanceof SharedArrayBuffer) answerInput(m.buffer, () => {})(null); return; }
+    const answer = policy ? JSON.stringify({ key, policy }) : null;
+    if (typeof SharedArrayBuffer === "function" && m.buffer instanceof SharedArrayBuffer) {
+      const allow = !!answer && w === this.worker && !!this.epochWord;
+      if (allow) Atomics.store(this.epochWord, 0, policy.epoch);
+      answerInput(m.buffer, () => {})(allow ? answer : null);
+    } else w?.postMessage({ runnerAsk: key, epoch: policy ? policy.epoch : null, answer });
+  }
   /** Whether a run in flight sees a new epoch at once (a word shared with this page, or with the runner's frame); false
    * without SharedArrayBuffer, where only ending the interpreter stops a run's changes at once. */
   get sharesEpoch() { return !!this.epochShared; }
@@ -566,6 +644,9 @@ export class WorkerKernel {
     this.retireInputs();
     // (live data asked for before the Stop: aborted, never answered)
     this.live.abort();
+    // (a change asked about by a run the Stop reaches, now or arriving later: answered no)
+    this.stoppedThrough = Math.max(this.stoppedThrough, this.nextId - 1);
+    this.retireAsks();
     if ((!this.interruptFlag && !this.worker.interrupt) || this.pending.size === 0) return this.restart(message);
     const waiting = [...this.pending.keys()];
     for (const id of waiting) if (this.runs.has(id)) this.interrupted.add(id); // (the journal: not exactly replayable)
@@ -602,6 +683,8 @@ export class WorkerKernel {
     this.live.abort();
     this.worker?.terminate();
     this.retireInputs();
+    this.retireAsks();
+    this.askKeys.clear();
     const pending = [...this.pending.values()];
     this.pending.clear();
     this.runs.clear();
@@ -613,10 +696,13 @@ export class WorkerKernel {
 
   /** Stop for good: what was running or queued is told `message`. */
   close(message = "\nThe interpreter was stopped.\n") {
+    clearInterval(this.flushTimer);
     this.live.abort();
     this.worker?.terminate();
     this.worker = null;
     this.retireInputs();
+    this.retireAsks();
+    this.askKeys.clear();
     pkgPins.delete(this.uid);
     const pending = [...this.pending.values()];
     this.pending.clear();

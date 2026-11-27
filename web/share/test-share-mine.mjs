@@ -45,7 +45,7 @@ const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) fai
 const J = JSON.stringify;
 const MINE = {
   empty: "You haven't shared anything yet.",
-  signIn: "Sign in with CoCalc to see your shares.",
+  signIn: "Sign in to see your shares.",
   cantLoad: "Couldn't load your shares. Try again in a moment.",
   deleteFailed: "Couldn't delete it. Try again in a moment.",
   none: "You have no shares now.",
@@ -82,7 +82,7 @@ try {
   const items = await ev("[...document.querySelectorAll('#filemenu [data-f]')].filter((b) => !b.hidden).map((b) => b.dataset.f)");
   ok(items.indexOf("mine") === items.indexOf("share") + 1 && (await ev("document.querySelector('#filemenu [data-f=\"mine\"]').textContent")) === "Your shares…", "File has Your shares… right under Share… (" + J(items) + ")");
   await openFromMenu();
-  ok((await status()) === MINE.signIn && (await ev("document.querySelector('#sbminedlg a.btn')?.textContent")) === "Sign in with CoCalc", "signed out: board's line, and Sign in with CoCalc");
+  ok((await status()) === MINE.signIn && (await ev("document.querySelector('#sbminedlg a.btn')?.textContent")) === "Sign in", "signed out: board's line, and Sign in");
   ok((await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: ${J(J({ token: "dev-token", account_id: A }))} }).then((r) => r.status)`)) === 200, "(signs in: dev)");
 
   // ---- 2. none yet
@@ -198,12 +198,29 @@ try {
   await ev("(document.querySelector('#sbminedlg').close(), true)");
   await until("!document.querySelector('#shareupload').classList.contains('busy')", 60000);
 
+  // ---- 11b. the header's Share (William, round 2): shown, and it opens the same Share dialog, hanging under it at
+  // its right edge (File ▸ Share… opens it centred, as before)
+  ok(await ev("!document.querySelector('#sharebtn').hidden"), "the header's Share is shown where File ▸ Share… is");
+  await ev("(document.querySelector('#sharebtn').click(), true)");
+  await until("document.querySelector('#sharedlg').open");
+  await sleep(300);
+  const an = await ev("(() => { const d = document.querySelector('#sharedlg'), r = d.getBoundingClientRect(), b = document.querySelector('#sharebtn').getBoundingClientRect(); return { anchored: d.classList.contains('sb-anchored'), below: r.top >= b.bottom, right: Math.abs(r.right - b.right) <= 2 }; })()");
+  ok(an.anchored && an.below && an.right, "…and opens the Share dialog under it, at its right edge (" + J(an) + ")");
+  await ev("(document.querySelector('#sharedlg').close(), true)");
+  await ev("(document.querySelector('#sharemenu').click(), true)");
+  await until("document.querySelector('#sharedlg').open");
+  await sleep(300);
+  ok(!(await ev("document.querySelector('#sharedlg').classList.contains('sb-anchored')")), "File ▸ Share… still opens it centred");
+  await ev("(document.querySelector('#sharedlg').close(), true)");
+
   // ---- 12. the CLI's local page has no share server: no Your shares in File
   await send("Page.enable");
   const loc = (await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__SAGEBRUSH_LOCAL__ = { path: "/tmp/sb-mine.ipynb", name: "sb-mine.ipynb" };` })).identifier;
   await send("Page.navigate", { url: dev.site + "/" });
   await until("!!document.querySelector('#filemenu [data-f=\"mine\"]')", 90000);
   ok(await ev("document.querySelector('#filemenu [data-f=\"mine\"]').hidden"), "the CLI's local page: no Your shares in File (local: " + J(await ev("!!window.__SAGEBRUSH_LOCAL__")) + ")");
+  const lb = await ev("(() => { const i = document.querySelector('#sharemenu'); return { btn: document.querySelector('#sharebtn').hidden, item: !i || i.hidden || i.disabled }; })()");
+  ok(lb.btn === lb.item, "…and the header's Share is shown exactly when File ▸ Share… is (" + J(lb) + ")");
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: loc });
 } catch (e) {
   ok(false, "the test failed: " + (e?.stack ?? e));

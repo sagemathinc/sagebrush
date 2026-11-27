@@ -11,6 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { expectedLoadError } from "./test-load-errors-lib.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 // (the DevTools port: CDP_PORT, so that runs of several agents do not collide)
@@ -26,10 +27,14 @@ let n = 0; const waiting = new Map(); const errors = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  // (the control below: the account's path answered 500, any other path 404)
+  if (m.method === "Fetch.requestPaused") send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: new URL(m.params.request.url).pathname === "/api/share/me" ? 500 : 404 }).catch(() => {});
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "")) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
+  // (a static host's 404 for the sync status or the site's account is expected: test-load-errors-lib.mjs)
+  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !expectedLoadError(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
 };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+// (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
+const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
 const fails = [];
@@ -138,7 +143,7 @@ try {
   await dblAt("plain");
   check(await until("!!document.querySelector('.board-editing .be-title')", 5000), "a note is being edited where it is");
   const partNames = await ev("[...document.querySelectorAll('.board-editing .be-title, .board-editing .be-text, .board-editing .be-codepart, .board-editing .be-detail, .board-editing .be-ref, .ip-bar > button')].filter((e) => e.offsetParent).map((e) => e.classList[0])");
-  check(JSON.stringify(partNames) === JSON.stringify(["be-title", "mb", "ip-image", "ip-code", "ip-detail", "ip-link", "ip-color", "ip-delete"]), "a plain note: its title and text, and a toolbar with + image, + code, + detail, + link, color and delete: " + JSON.stringify(partNames));
+  check(JSON.stringify(partNames) === JSON.stringify(["be-title", "mb", "ip-image", "ip-code", "ip-detail", "ip-link", "ip-drawer", "ip-color", "ip-delete"]), "a plain note: its title and text, and a toolbar with + image, + code, + detail, + link, the drawer, color and delete: " + JSON.stringify(partNames));
   // its text is Markdown, highlighted as in the notebook (headings, math, emphasis), under a clear textarea
   // (its text is blocks: a click on one writes in it)
   await ev("document.querySelector('.board-editing .mb-block').click(), 1");
@@ -466,6 +471,16 @@ try {
     check(await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].output === 'cos(x)\\n')", 60000), "a Sage board runs: " + JSON.stringify(await outputs()));
     await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "MATLAB", mode: "matlab", nodes: [{ id: "m", code: "t = 2*pi", x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
     check(await until("window.sagebrush.board.outputs().then((os) => os.length === 1 && os[0].state === '' && /6\\.2832/.test(os[0].output))", 60000), "then a MATLAB board in the same page: 2*pi is MATLAB's: " + JSON.stringify(await outputs()));
+  }
+  // the allowance is that 404 only: a 500 from the account's path, or a 404 from another path, is still an error
+  {
+    const before = errors.length;
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/share/me*" }] });
+    await ev(`Promise.all(["/api/share/me", "/api/share/me-not"].map((u) => fetch(u).catch(() => 0))).then(() => 1)`);
+    await send("Fetch.disable");
+    for (let i = 0; i < 100 && errors.length < before + 2; i++) await sleep(50);
+    const seen = errors.splice(before);
+    check(seen.length === 2 && seen.some((e) => /status of 500\b/.test(e) && /\/api\/share\/me$/.test(e)) && seen.some((e) => /status of 404\b/.test(e) && /\/api\/share\/me-not$/.test(e)), "control: a 500 from /api/share/me and a 404 from another path are errors: " + JSON.stringify(seen));
   }
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {

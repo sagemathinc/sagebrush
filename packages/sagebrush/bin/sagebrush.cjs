@@ -14,6 +14,46 @@
 // loads the bundle then: only the worker does, once. Everything else (the
 // interactive prompt, the notebook, the Jupyter kernel, board, --help) runs
 // here as before; so does a program when SAGEBRUSH_NO_WORKER is set.
+// Linux kernels with a small user virtual-address range (including browser
+// Linux guests and 39-bit arm64 kernels) cannot reserve V8's roughly 10 GiB
+// guard region for each wasm memory. This is not a JS heap/RAM limit. A low
+// highest mapping is a conservative compatibility hint, not a measurement of
+// free RAM: use inline wasm bounds checks there, before loading any engine.
+// Keep the flag in NODE_OPTIONS so later Node subprocesses inherit it too.
+function smallLinuxAddressSpace() {
+  if (process.platform !== "linux") return false;
+  try {
+    let top = 0n;
+    for (const line of require("node:fs").readFileSync("/proc/self/maps", "utf8").trim().split("\n")) {
+      const match = /^[0-9a-f]+-([0-9a-f]+)\s/i.exec(line);
+      if (!match) return false; // unknown format: do not infer a small range
+      const end = BigInt("0x" + match[1]);
+      if (end > top) top = end;
+    }
+    return top > 0n && top < 2n ** 40n;
+  } catch {
+    return false; // /proc may be absent or unreadable
+  }
+}
+const trapFlag = "--disable-wasm-trap-handler";
+if (require("node:worker_threads").isMainThread && !process.versions.bun && !process.versions.deno &&
+    process.allowedNodeEnvironmentFlags?.has(trapFlag) &&
+    !process.execArgv.includes(trapFlag) &&
+    !String(process.env.NODE_OPTIONS || "").split(/\s+/).includes(trapFlag) && smallLinuxAddressSpace()) {
+  const env = { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, trapFlag].filter(Boolean).join(" ") };
+  const args = [process.execPath, ...process.execArgv, ...process.argv.slice(1)];
+  // execve preserves the PID, terminal, descriptors and signal semantics.
+  // Older Node 22 releases lack it; their synchronous wrapper never loads
+  // the bundle or retries a program and preserves the child's exit status.
+  if (typeof process.execve === "function") process.execve(process.execPath, args, env);
+  const child = require("node:child_process").spawnSync(process.execPath, args.slice(1), { env, stdio: "inherit" });
+  if (child.error) {
+    process.stderr.write(`sagebrush: cannot restart Node with ${trapFlag}: ${child.error.message}\n`);
+    process.exit(1);
+  }
+  if (child.signal) process.kill(process.pid, child.signal);
+  process.exit(child.status ?? 1);
+}
 try {
   require("node:module").enableCompileCache?.();
 } catch {}
@@ -149,7 +189,17 @@ if (!runsProgram(argv)) {
   // worker writes to fds 1 and 2 itself, cliWorker in src/cli.ts)
   // (entry: the bundle's path, for the CLI to find the files beside it and to start itself again, `sagebrush latex`:
   // in this worker, its main module and process.argv are not the bundle's)
-  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv, limits, entry: bundle } } });
+  // (the program's heap: all of the computer's memory, the person's own computer with no cap of ours, the operating
+  // system the limit; on Node, as Bun and Deno take no resourceLimits; and not where the person set
+  // --max-old-space-size, which the worker then takes as Node gives it)
+  const heapFlag = [...process.execArgv, ...String(process.env.NODE_OPTIONS ?? "").split(/\s+/)].some((a) => /^--max[-_](old[-_]space|heap)[-_]size/.test(a));
+  const onNode = !!process.versions.node && !process.versions.bun && !process.versions.deno;
+  // (the computer's memory as this process may have it: a container's limit (constrainedMemory) where there is one, and
+  // never past it; at least 1 GiB where there is none; as app/engine/serve.mjs defaultHeapMb)
+  const total = require("node:os").totalmem(), cap = Number(process.constrainedMemory?.() || 0);
+  const mine = Math.floor((cap > 0 ? Math.min(total, cap) : total) / 2 ** 20);
+  const heap = onNode && !heapFlag ? { resourceLimits: { maxOldGenerationSizeMb: cap > 0 ? Math.max(1, mine) : Math.max(1024, mine) } } : {};
+  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv, limits, entry: bundle } }, ...heap });
   worker.on("message", (m) => {
     if (m && m.interrupt) intr = new Int32Array(m.interrupt);
     if (m && m.keyboardInterrupt) interrupted = true;

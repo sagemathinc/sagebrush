@@ -735,8 +735,9 @@ async function controls() {
   await v.load();
   const cw = N.pageControls(st), cv = N.pageControls(v), cp = N.pageControls(new W.IdbStore(w.main, newId()));
   const all = (c) => c.name && c.mode && c.repro && c.rename && c.trash && c.history && !c.readOnly && c.bar === null;
-  const none = (c) => !c.name && !c.mode && !c.repro && !c.rename && !c.trash && !c.history && c.readOnly && c.bar === N.READ_ONLY.other;
-  check(all(cw) && all(cp) && none(cv) && typeof N.TAKEOVER === "string" && N.TAKEOVER.length > 0, "the page's controls: all for the writer and a plain store; none (and the bar) for a read-only store");
+  // (a store that follows another tab's (focus takeover) says nothing in the bar: it takes over when used)
+  const none = (c) => !c.name && !c.mode && !c.repro && !c.rename && !c.trash && !c.history && c.readOnly && c.bar === null;
+  check(all(cw) && all(cp) && none(cv) && v.readOnly === "other" && typeof N.TAKEOVER === "string" && N.TAKEOVER.length > 0, "the page's controls: all for the writer and a plain store; none for one that follows another tab's, with no bar");
   await close(st, v, w);
   hdb.close();
 }
@@ -2177,7 +2178,63 @@ async function keptT1Base() {
   await close(w);
   hdb.close();
 }
-const CASES = [unknownSlotIsForeign, otherTagNoProof, catchUpMarkedKeepsProof, markedAtProofRead, recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+// ---- a stored notebook whose cells have no ids (as an older version's workspace made one: marked unjournaled, no
+// proof): given ids before the history first takes it in (the journal store's normalizeStored, the notebook kind's
+// normalize), so the history doesn't take its cells in as one (they'd share one key there): every cell's text kept
+async function idlessGetsIdsBeforeHistory() {
+  const { w, hdb } = await active();
+  const id = newId();
+  await rawPut(w.main, "notebooks", { id, name: "t", mode: "python", cells: [{ code: "first" }, { code: "second" }], rev: 1, updated: Date.now(), j: 0, hash: "", unjournaled: true });
+  const s = store(w, hdb, id);
+  const d = await s.load();
+  await close(s);
+  const p = await persisted(w, hdb, id);
+  const ids = p.rec.cells.map((c) => c.id);
+  check(J(p.rec.cells.map((c) => c.code)) === J(["first", "second"]) && ids.every((x) => /^[0-9a-f]{12}$/.test(x ?? "")) && new Set(ids).size === 2 && codes(d) === p.codes && p.hashOk && p.jOk, "a stored notebook without cell ids: given ids before its history takes it in, both cells' text kept, the record its history's: " + J({ codes: p.codes, hashOk: p.hashOk, jOk: p.jOk }));
+  await close(w);
+  hdb.close();
+}
+// ---- the normalization's compare and swap refused (another writer's save, still without ids and not yet in the
+// history, landed between its read and its write): read and normalized again before recovery, never taken in
+// unnormalized: both cells' new text kept, two different ids, the record its history's
+async function idlessConflictNormalizedAgain() {
+  const { w, hdb } = await active();
+  const id = newId();
+  const base = { id, name: "t", mode: "python", updated: Date.now(), j: 0, hash: "", unjournaled: true };
+  await rawPut(w.main, "notebooks", { ...base, rev: 1, cells: [{ code: "first" }, { code: "second" }] });
+  const s = store(w, hdb, id);
+  let held = 0;
+  s.normalizeHold = async () => {
+    if (held++) return;
+    await rawPut(w.main, "notebooks", { ...base, rev: 2, cells: [{ code: "first, changed" }, { code: "second, changed" }] });
+  };
+  const d = await s.load();
+  await close(s);
+  const p = await persisted(w, hdb, id);
+  const ids = p.rec.cells.map((c) => c.id);
+  check(held === 2 && J(p.rec.cells.map((c) => c.code)) === J(["first, changed", "second, changed"]) && ids.every((x) => /^[0-9a-f]{12}$/.test(x ?? "")) && new Set(ids).size === 2 && codes(d) === p.codes && p.hashOk && p.jOk, "another writer's save between the normalization's read and its write: normalized again before recovery, both cells' new text kept, two ids, the record its history's: " + J({ held, codes: p.codes, hashOk: p.hashOk, jOk: p.jOk }));
+  await close(w);
+  hdb.close();
+}
+// ---- the same normalization never for a record the history has already taken in (its proof): nothing written, its
+// revision and proof kept
+async function idlessWithHistoryLeft() {
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"], ["b", "B"]]);
+  await st.save({ ...d, cells: [{ id: "a", code: "A1" }, { id: "b", code: "B" }], baseRev: d.rev });
+  await close(st);
+  const rec = await rawGet(w.main, "notebooks", id);
+  const stripped = { ...rec, cells: rec.cells.map(({ id: _i, ...c }) => c) };
+  await rawPut(w.main, "notebooks", stripped);
+  const s = store(w, hdb, id);
+  await s.normalizeStored();
+  await close(s);
+  const after = await rawGet(w.main, "notebooks", id);
+  check(!!rec.proof && after.rev === stripped.rev && after.proof === rec.proof && after.unjournaled === stripped.unjournaled && J(after.cells) === J(stripped.cells), "a record its history has taken in (its proof): the normalization writes nothing, its revision and proof kept: " + J({ proof: rec.proof, rev: [stripped.rev, after.rev], afterProof: after.proof ?? null, marked: after.unjournaled ?? null }));
+  await close(w);
+  hdb.close();
+}
+const CASES = [idlessGetsIdsBeforeHistory, idlessConflictNormalizedAgain, idlessWithHistoryLeft, unknownSlotIsForeign, otherTagNoProof, catchUpMarkedKeepsProof, markedAtProofRead, recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
   arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {

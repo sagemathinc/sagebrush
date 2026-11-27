@@ -33,14 +33,19 @@ const policyOf = (mts) => {
   return [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("; ");
 };
 const appServes = (rs, policy) => !!policy && /const SHELL_WORKER_CSP: &str = "([^"]*)";/.exec(rs)?.[1] === policy &&
-  rs.includes(`if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {\n                        response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);`);
+  rs.includes(`if path == "/shell/worker-boot.js" {\n                headers.retain(|(h, _)| *h != "Content-Security-Policy");\n                headers.push(("Content-Security-Policy", SHELL_WORKER_CSP.into()));`);
 const libRs = readFileSync(join(here, "..", "app", "src-tauri", "src", "lib.rs"), "utf8");
 const policyMts = readFileSync(join(here, "csp-policy.mts"), "utf8");
 const policy = policyOf(policyMts);
 ok(policyOf(policyMts.replace(`"connect-src 'none'",`, "CONNECT,")) === null && policyOf(policyMts.replace(`"connect-src 'none'",`, "`connect-src 'none'`,")) === null &&
   policyOf(policyMts.replace(`"connect-src 'none'",`, `"connect-src 'none'", ...more,`)) === null, "a shell worker policy with an element other than a string literal: no policy read (a constant, a template, a spread)");
 ok(!!policy && /connect-src 'none'/.test(policy) && appServes(libRs, policy), "the app serves shell/worker-boot.js with the site's shell worker policy (lib.rs = csp-policy.mts)");
-ok(!appServes(libRs.replace("connect-src 'none'; ", ""), policy) && !appServes(libRs.replace(`Some("/shell/worker-boot.js")`, `Some("/shell/worker.js")`), policy),
+// (an example's page in File > Examples…'s sandboxed iframe, an opaque origin, loads KaTeX cross-origin: the app's
+// server gives /katex/* and /examples/* CORP, as web/_headers does on the site)
+const corp = (rs) => /if path\.starts_with\("\/katex\/"\) \|\| path\.starts_with\("\/examples\/"\) \{\s*headers\.push\(\("Cross-Origin-Resource-Policy", "cross-origin"\.into\(\)\)\);/.test(rs);
+ok(corp(libRs) && /^\/katex\/\*\n  Cross-Origin-Resource-Policy: cross-origin$/m.test(readFileSync(join(here, "_headers"), "utf8")), "the app serves /katex/* and /examples/* with Cross-Origin-Resource-Policy: cross-origin, as the site does /katex/* (web/_headers)");
+ok(!corp(libRs.replace('"/katex/"', '"/kat/"')) && !corp(libRs.replace('"cross-origin".into()', '"same-origin".into()')), "a lib.rs rule on another path, or another policy: refused");
+ok(!appServes(libRs.replace("connect-src 'none'; ", ""), policy) && !appServes(libRs.replace(`path == "/shell/worker-boot.js"`, `path == "/shell/worker.js"`), policy),
   "a lib.rs policy other than the site's, or on another path: refused");
 
 // (each change on a copy, undone after)
@@ -80,9 +85,22 @@ try {
   ok(r.status === 1 && r.out.includes("lib/other: in app/dist but not the worker's"), "a directory in lib/ the worker does not name: refused");
   rmSync(join(copy, "lib", "other"), { recursive: true });
 
+  // the examples gallery (app/build-examples.ts), File > Examples…'s only list: its catalog and each example's
+  // files.json, each refused when the copy leaves it out
+  ok(/the examples gallery with [1-9]\d*\)/.test(check().out), "the examples gallery is in app/dist and checked");
+  renameSync(join(copy, "examples", "index.json"), join(dir, "index.json"));
+  r = check();
+  ok(r.status === 1 && r.out.includes("examples/index.json: missing from app/dist"), "the gallery's catalog left out: refused");
+  renameSync(join(dir, "index.json"), join(copy, "examples", "index.json"));
+  const ex0 = JSON.parse(readFileSync(join(copy, "examples", "index.json"), "utf8")).examples[0].id;
+  renameSync(join(copy, "examples", ex0, "files.json"), join(dir, "files.json"));
+  r = check();
+  ok(r.status === 1 && r.out.includes(`examples/${ex0}/files.json: missing from app/dist`), "an example's files.json left out: refused");
+  renameSync(join(dir, "files.json"), join(copy, "examples", ex0, "files.json"));
+
   // the Terminal (William, Oct 30: in the desktop and Android apps): the page's module, its worker and the bash set,
   // each refused when the copy leaves it out (#358 shipped the menu item without them)
-  ok(/checked, [1-9]\d* by a relative path; the Terminal's set with [1-9]\d* packages?\)/.test(check().out), "the Terminal's module, worker and set are in app/dist and checked");
+  ok(/checked, [1-9]\d* by a relative path; the Terminal's set with [1-9]\d* packages?[;)]/.test(check().out), "the Terminal's module, worker and set are in app/dist and checked");
   const page = join(copy, "index.html");
   const html = readFileSync(page, "utf8");
   // (the page's script is its own file, sagebrush-app.js (web/build.ts): the import is there, and the check reads it too)
@@ -101,7 +119,9 @@ try {
   r = check();
   ok(r.status === 1 && r.out.includes(`pkgset/${S}.json: missing from app/dist`), "the set's index left out: refused");
   back();
-  const pkg = readdirSync(join(copy, "pkg"))[0];
+  // (the package the Terminal's set pins: pkg/ holds other sets' packages too, so not merely its first file)
+  const shellSet = JSON.parse(readFileSync(join(copy, "pkgset", `${S}.json`), "utf8"));
+  const pkg = `${Object.values(shellSet.packages)[0].js.sha256}.json`;
   back = moveAway(`pkg/${pkg}`);
   r = check();
   ok(r.status === 1 && r.out.includes(`pkg/${pkg} (`) && r.out.includes("missing from app/dist"), "the set's package left out: refused");

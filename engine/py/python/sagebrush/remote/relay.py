@@ -28,6 +28,19 @@ unmasked, text only, no extensions), over `ssl` (and an HTTP CONNECT proxy from 
   - revoked ({"relay":"revoked"} or close 4403), or replaced by another runner with this key (4009): every kernel
     stopped by the tree rule, and the command ends.  4429 (the account's day budget): back off the longest.
 
+The engine channel (remote r3.3, design/remote-r3.md; step P2a): a notebook's kernel page for one kernel entry, bound by
+the relay (P1) to the account, this remote, the notebook (nb), the entry, the notebook's session generation (sgen) and
+the remote's connection generation (cgen).  It is offered only when the runner has kernels to give (a kernel factory),
+and then the upgrade says x-sb-remote-caps: engine/1; a runner without one is never sent an engine page.  Here:
+  - page-open carries the identity; a page whose cgen is below the highest this runner has seen, or whose sgen isn't
+    above its notebook's last, is refused (its page only, close {gen}); a higher cgen ({"relay":"cgen"}, or a page-open)
+    detaches every engine page of the older one: their kernels keep running, unreachable until a page of the new
+    generation opens them (H2, H5);
+  - one kernel per (notebook, entry), kept across page loss and reconnects; a page for the notebook with another entry
+    stops the notebook's other kernel (H4); the notebook's newer page detaches the older one;
+  - engine messages are text (the kernel's control JSON) or binary (the kernel's byte stream), each with its page's
+    generation prefix, at most ENGINE_FRAME after it; what a kernel does with them is the kernel's (P2c, P2d).
+
 The agent channel (--serve-agents, off by default): a page on channel "agent" chats with the person's own agent, a
 child process of this runner (agent_child.py), at most one per kind the runner offers (--agent NAME=COMMAND, at most
 AGENT_KINDS; --agent-cmd is the kind "default").  The hello's "agent" names the kind (none: the first one given), checked
@@ -92,12 +105,19 @@ RELAY_LIMITS = {
     # the largest; with it, the agent channel's 4 MiB less 2 KiB)
     "inbound": PAIR_LIMITS["frame"] + 17,
     "inboundAgents": max(PAIR_LIMITS["frame"], AGENT_FRAME) + 17,
+    # (with the engine channel: its frame, 4 MiB less 2 KiB, the relay's RUNNER_ENGINE_FRAME)
+    "inboundEngine": max(PAIR_LIMITS["frame"], AGENT_FRAME, 4 * 1024 * 1024 - 2048) + 17,
     "fragments": 1024,
     "outData": PAIR_LIMITS["outData"],
     "outTotal": PAIR_LIMITS["outTotal"],
 }
 _SAFE = 2 ** 53 - 1
-CHANNELS = ("kernel", "terminal", "agent")  # (terminal addendum T1.4 §T2; terminal pages by default since T-3; agent pages with --serve-agents)
+CHANNELS = ("kernel", "terminal", "agent", "engine")  # (terminal addendum T1.4 §T2; terminal pages by default since T-3; agent pages with --serve-agents; engine pages with a kernel factory, r3 P2a)
+ENGINE_FRAME = 4 * 1024 * 1024 - 2048  # (an engine page's message after its prefix, either way: the relay's RUNNER_ENGINE_FRAME)
+ENGINE_CAP = "engine/1"  # (x-sb-remote-caps: what this runner says it speaks, when it serves engine pages)
+# (the kernel entries a notebook's engine page may name: r3.3 D1, refined; the relay's ENGINE_ENTRIES, in order)
+ENGINE_ENTRIES = ("sagebrush-python", "sagebrush-sage", "sagebrush-magma", "sagebrush-matlab", "python")
+_NB = re.compile(r"[A-Za-z0-9_-]{1,43}")
 AGENT_NAME = re.compile(r"[a-z][a-z0-9-]{0,15}\Z")  # (an agent kind's name: --agent NAME=COMMAND, the hello's "agent")
 AGENT_KINDS = 4  # (the most kinds one runner offers, so the most agent children it has at once)
 AGENT_START_WAIT_S = 10  # (at the runner's exit: how long a start under way is given, then again after its cancel)
@@ -113,7 +133,11 @@ _IN_OPS = {
     "revoked": (),
     "dropped": ("gen", "bytes"),
     "pong": (),
+    "cgen": ("cgen",),
 }
+# (an engine page's page-open: the same op, with its identity after the generation; only for chan "engine", and the
+# plain form never for it)
+_ENGINE_OPEN = ("conn", "kind", "chan", "gen", "nb", "entry", "sgen", "cgen")
 _CHECK = {
     "conn": lambda v: isinstance(v, str) and bool(_CONN.fullmatch(v)),
     "kind": lambda v: v in ("runner", "agent"),
@@ -122,6 +146,10 @@ _CHECK = {
     "r": lambda v: isinstance(v, str) and bool(_TOKEN.fullmatch(v)),
     "upto": lambda v: type(v) is int and 0 <= v <= _SAFE,
     "bytes": lambda v: type(v) is int and 0 <= v <= _SAFE,
+    "nb": lambda v: isinstance(v, str) and bool(_NB.fullmatch(v)),
+    "entry": lambda v: v in ENGINE_ENTRIES,
+    "sgen": lambda v: type(v) is int and 1 <= v <= _SAFE,
+    "cgen": lambda v: type(v) is int and 1 <= v <= _SAFE,
 }
 
 
@@ -160,9 +188,14 @@ def parse_control(text):
     fields = _IN_OPS.get(op)
     if fields is None:
         raise ControlError("an unknown op")
-    if [k for k, _ in v] != ["relay", *fields]:
+    keys = [k for k, _ in v]
+    if op == "page-open" and keys == ["relay", *_ENGINE_OPEN]:
+        fields = _ENGINE_OPEN
+    if keys != ["relay", *fields]:
         raise ControlError("the op's keys, in order")
     d = dict(v)
+    if op == "page-open" and (fields is _ENGINE_OPEN) != (d["chan"] == "engine"):
+        raise ControlError("an engine page's identity, and only an engine page's")
     for f in fields:
         if not _CHECK[f](d[f]):
             raise ControlError("a bad %s" % f)
@@ -181,6 +214,26 @@ def split_prefix(text):
     if gen > _SAFE:
         raise ControlError("a generation over 2^53 - 1")
     return gen, text[m.end():]
+
+
+def split_prefix_bytes(data):
+    """(gen, payload) of a binary application message: the same ASCII prefix, read from its first 17 bytes at most,
+    then the exact bytes; or ControlError."""
+    m = _GEN_PREFIX.match(bytes(data[:17]).decode("latin-1"))
+    if m is None:
+        raise ControlError("an application message without its generation prefix")
+    gen = int(m.group(1))
+    if gen > _SAFE:
+        raise ControlError("a generation over 2^53 - 1")
+    return gen, bytes(data[m.end():])
+
+
+def _human_s(s):
+    return "%dd" % (s // 86400) if s % 86400 == 0 else "%dh" % (s // 3600) if s % 3600 == 0 else "%dm" % (s // 60)
+
+
+IDLE_PASS_S = 30  # (how often the idle stop looks: a kernel is stopped at most this long after its --idle)
+IDLE_OMITTED = object()  # (RelayRunner's idle_s when not given: the default, never confused with None, "never")
 
 
 def ping_text():
@@ -296,10 +349,12 @@ class Leg:
     """One connection to the relay: the upgrade, then frames.  on_text(text) gets each whole message; on_end(code,
     reason) once, when it ends however it ends."""
 
-    def __init__(self, reader, writer, on_text, on_end, inbound=None):
+    def __init__(self, reader, writer, on_text, on_end, inbound=None, on_binary=None):
         self.r, self.w = reader, writer
         self.inbound = RELAY_LIMITS["inbound"] if inbound is None else inbound
         self.on_text, self.on_end = on_text, on_end
+        self.on_binary = on_binary  # (binary messages: an engine runner's only; without it, 1003 as before)
+        self.binary = False  # (the message being read is binary)
         self.buf = bytearray()
         self.parts, self.parts_len, self.in_msg, self.fragments = [], 0, False, 0
         self.closed = False
@@ -335,6 +390,9 @@ class Leg:
 
     def send_text(self, text, kind="data"):
         return self.write(client_frame(0x1, text.encode("utf-8", "surrogatepass")), kind)
+
+    def send_bytes(self, data, kind="data"):
+        return self.write(client_frame(0x2, bytes(data)), kind)
 
     def close(self, code, reason=""):
         if self.closed:
@@ -444,12 +502,12 @@ class Leg:
                 continue
             if op == 0xA:
                 continue
-            if op == 0x2:
+            if op == 0x2 and self.on_binary is None:
                 return self.close(1003, "text frames only")
-            if op == 0x1:
+            if op in (0x1, 0x2):
                 if self.in_msg:
                     return self.close(1002, "a new message inside a fragmented one")
-                self.in_msg, self.fragments = True, 0
+                self.in_msg, self.fragments, self.binary = True, 0, op == 0x2
             elif op == 0x0:
                 if not self.in_msg:
                     return self.close(1002, "a continuation with nothing to continue")
@@ -465,6 +523,9 @@ class Leg:
                 continue
             whole = b"".join(self.parts)
             self.parts, self.parts_len, self.in_msg, self.fragments = [], 0, False, 0
+            if self.binary:
+                self.on_binary(whole)
+                continue
             try:
                 text = whole.decode("utf-8")
             except UnicodeDecodeError:
@@ -491,7 +552,7 @@ def _close_quietly(sock):
         pass
 
 
-async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, inbound=None, agents=None):
+async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, inbound=None, agents=None, on_binary=None):
     """A fresh challenge, signed; the connection (proxy, TLS); the upgrade.  A Leg, running, or Retry / Fatal.
     agents: the agent kinds this runner offers, in order, sent on the upgrade as x-sb-remote-agents so the account's
     computer list can name them before a page connects (a hint there only: a page's hello decides); none, no header."""
@@ -529,6 +590,8 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, in
         wskey = base64.b64encode(os.urandom(16)).decode("ascii")
         hostport = host if u.port is None else "%s:%d" % (host, u.port)
         kinds = "x-sb-remote-agents: %s\r\n" % ",".join(agents) if agents else ""
+        if on_binary is not None:
+            kinds += "x-sb-remote-caps: %s\r\n" % ENGINE_CAP  # (engine pages: only with a kernel factory)
         writer.write(("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                       "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: %s\r\n"
                       "x-sb-remote-challenge: %s\r\nx-sb-remote-signature: %s\r\n%s\r\n"
@@ -566,7 +629,7 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, in
     except BaseException:
         writer.transport.abort()
         raise
-    leg = Leg(reader, writer, on_text, on_end, inbound=inbound)
+    leg = Leg(reader, writer, on_text, on_end, inbound=inbound, on_binary=on_binary)
     leg.first = rest  # (read by start(): the caller starts the leg once it holds it, so no message comes before)
     return leg
 
@@ -601,6 +664,8 @@ class RelayPage:
         self.jtis = {}     # (a terminal page's (and an agent page's) proofs' jtis: once each)
         self.nonce = None  # (an agent page's DPoP nonce, for its life)
         self.slot = None   # (an agent page's kind, an AgentSlot, from its hello)
+        self.engine = None  # (an engine page's identity: {nb, entry, sgen, cgen}; its kernel, while attached)
+        self.kernel = None
 
     # ---- an agent page, as agent_child.AgentChild sees it
     def deliver(self, text):
@@ -625,10 +690,22 @@ class RelayPage:
     def fits(self, n, kind):
         return not self.closed and self.leg.fits(n + len(self.prefix), kind)
 
+    def over_engine_cap(self, n):
+        """An engine page's outgoing message over ENGINE_FRAME (n: its payload's bytes, after the prefix): that page
+        ends (1009), before anything is written, never the leg (the relay's cap would close the whole leg, every other
+        notebook's page with it).  True when refused."""
+        if self.chan == "engine" and n > ENGINE_FRAME:
+            self.close(1009, "a message over the engine page's cap")
+            return True
+        return False
+
     def send_text(self, text, kind):
         if self.closed:
             return False
-        data = (self.prefix + text).encode("utf-8", "surrogatepass")
+        payload = text.encode("utf-8", "surrogatepass")
+        if self.over_engine_cap(len(payload)):
+            return False
+        data = self.prefix.encode("ascii") + payload
         if not self.leg.fits(len(data), kind):
             # (this page's answers aren't leaving: this page ends, 1013; the leg and any next page go on)
             self.close(1013, "the page isn't reading its answers")
@@ -637,6 +714,16 @@ class RelayPage:
 
     def send(self, obj):
         return self.send_text(json.dumps(obj, separators=(",", ":")), "data")
+
+    def send_bytes(self, data, kind="data"):
+        """An engine page's binary message (the kernel's stream), with its generation prefix; as send_text otherwise."""
+        if self.closed or self.over_engine_cap(len(data)):
+            return False
+        frame = self.prefix.encode("ascii") + bytes(data)
+        if not self.leg.fits(len(frame), kind):
+            self.close(1013, "the page isn't reading its answers")
+            return False
+        return self.leg.write(client_frame(0x2, frame), kind)
 
     def close(self, code, reason=""):
         """This page only: ended here, and {"relay":"close","gen":n} to the relay, which closes the page's leg and
@@ -677,13 +764,80 @@ def agent_kinds(kinds):
     return kinds
 
 
+class EngineKernels:
+    """The engine channel's kernels, one per (notebook, entry), made by `factory(nb, entry, on_end, charge)` (P2c's
+    engine, P2d's Native (Python); tests: a double).  A kernel has attach(page, fresh), detach(page), page_text(page,
+    text), page_bytes(page, data) and stop(why), and an `idle` IdleClock it tells of its cells' starts and ends; it
+    calls charge.started() when its process tree exists, ledger.reconcile(charge) once ready, and charge.reaped() once
+    its tree is gone (charge.ended_unreaped() before that, if it stopped or failed).  A new kernel is admitted by the
+    ledger first (admission.py); a page reattaching to a kernel is never charged again.  The table outlives pages and
+    legs; the runner's exit stops every kernel."""
+
+    def __init__(self, factory, ledger=None, idle_s=None, clock=time.monotonic):
+        self.factory = factory
+        self.ledger = ledger
+        self.idle_s, self.clock = idle_s, clock
+        self.by_key = {}
+
+    def get(self, nb, entry):
+        return self.by_key.get((nb, entry))
+
+    def start(self, nb, entry):
+        """A new kernel, admitted first: the kernel, or Refused (admission.py) with the words to show."""
+        charge = self.ledger.admit(entry) if self.ledger is not None else None
+        try:
+            k = self.factory(nb, entry, lambda: self.ended(nb, entry, k), charge)
+        except BaseException:
+            # (refunded here only if nothing was spawned (the factory never called charge.started()); once something
+            # was, the factory's own teardown reports the reap (charge.reaped()), and until then the charge is held)
+            if charge is not None:
+                if charge.started_at is None:
+                    charge.reaped()
+                else:
+                    charge.ended_unreaped()
+            raise
+        from sagebrush.remote.admission import IdleClock
+        k.idle = IdleClock(self.idle_s, self.clock)
+        self.by_key[(nb, entry)] = k
+        return k
+
+    def idle_due(self):
+        """The kernels idle has come for (quiescent past --idle): stopped by the caller."""
+        return [(key, k) for key, k in self.by_key.items() if getattr(k, "idle", None) is not None and k.idle.due()]
+
+    def ended(self, nb, entry, k):
+        if self.by_key.get((nb, entry)) is k:
+            del self.by_key[(nb, entry)]
+
+    def stop_other_entries(self, nb, entry, why):
+        """H4: a notebook's page for one entry ends the notebook's kernels of every other entry."""
+        for (n, e), k in list(self.by_key.items()):
+            if n == nb and e != entry:
+                del self.by_key[(n, e)]
+                k.stop(why)
+
+    def stop_all(self, why):
+        for k in list(self.by_key.values()):
+            k.stop(why)
+        self.by_key.clear()
+
+
 class RelayRunner:
     """The gateway's host on the relay: its pages, its leg, and dialing again."""
 
     def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None,
                  terminals=True, agents=False, agent_cmd=None, agent_grace_ms=AGENT_GRACE_MS, agent_log=None,
-                 now_ms=None, agent_cmds=None):
+                 now_ms=None, agent_cmds=None, kernels=None, ledger=None, idle_s=IDLE_OMITTED):
         self.key = key
+        # (engine pages (r3 P2a): only with a kernel factory, kernels(nb, entry, on_end) -> a kernel; the connection
+        # generation is the highest seen, across legs; each notebook's session generation likewise)
+        from sagebrush.remote.admission import IDLE_DEFAULT_S
+        # (idle_s: seconds, None for never (parse_idle("never")), or omitted for the default; never isn't the default)
+        self.engine = EngineKernels(kernels, ledger, IDLE_DEFAULT_S if idle_s is IDLE_OMITTED else idle_s) if kernels is not None else None
+        self.idle_task = None
+        self.cgen = 0
+        self.nb_sgen = {}
+        self.nb_page = {}  # (each notebook's attached engine page)
         # (agent pages (agent_child.py): off unless --serve-agents, with each kind's command: agent_cmds [(name, argv)],
         # in the order given, the first the default; agent_cmd alone is the one kind "default")
         kinds = agent_kinds(agent_cmds if agent_cmds else [("default", agent_cmd)] if agent_cmd else [])
@@ -737,9 +891,16 @@ class RelayRunner:
             return self.violation("a page's message for no page this runner holds")
         if page.closed:
             return  # (a page this runner ended (close {gen}) or replaced, whose page-close is still to come)
-        if not page.paired and len(text.encode("utf-8", "surrogatepass")) > PAIR_LIMITS["preHello"]:
-            return page.close(1009, "message too big")
         n = len(text.encode("utf-8", "surrogatepass"))
+        if page.chan == "engine":
+            # (the kernel's control JSON, exactly as sent: never parsed here)
+            if n > ENGINE_FRAME:
+                return page.close(1009, "message too big")
+            if page.kernel is not None:
+                page.kernel.page_text(page, text)
+            return
+        if not page.paired and n > PAIR_LIMITS["preHello"]:
+            return page.close(1009, "message too big")
         if page.chan == "terminal" and n > TERMINAL_FRAME:
             return page.close(1009, "message too big")
         # (the leg reads up to the largest channel's cap; each page is held to its own channel's)
@@ -756,8 +917,28 @@ class RelayRunner:
             return self.violation("a page's message with a relay key")
         self.page_message(page, msg)
 
+    def on_binary(self, data):
+        """A binary message on the leg: an engine page's only (the kernel's stream)."""
+        try:
+            gen, payload = split_prefix_bytes(data)
+        except ControlError as e:
+            return self.violation(str(e))
+        page = self.pages.get(gen)
+        if page is None:
+            return self.violation("a page's message for no page this runner holds")
+        if page.closed:
+            return
+        if page.chan != "engine":
+            return self.violation("a binary message for a page that isn't an engine page")
+        if len(payload) > ENGINE_FRAME:
+            return page.close(1009, "message too big")
+        if page.kernel is not None:
+            page.kernel.page_bytes(page, payload)
+
     def control(self, c):
         op = c["relay"]
+        if op == "cgen":
+            return self.advance_cgen(c["cgen"])
         if op == "pong":
             self.pings_unanswered = 0
         elif op == "receipt":
@@ -770,6 +951,8 @@ class RelayRunner:
             if c["gen"] <= self.last_gen:
                 return self.violation("a page's generation went back")
             self.last_gen = c["gen"]
+            if c["chan"] == "engine":
+                return self.open_engine(c)
             self.open_page(c["conn"], c["gen"], c["chan"])
         elif op == "page-close":
             p = self.pages.get(c["gen"])
@@ -813,6 +996,64 @@ class RelayRunner:
                 p.close(1008, "no hello in time")
         p.hello_timer = self.timers.set_timeout(no_hello, PAIR_LIMITS["helloMs"])
 
+    # ---- engine pages (r3 P2a)
+    def idle_pass(self):
+        """The idle stop's pass (every IDLE_PASS_S while the runner runs): each quiescent kernel past --idle stopped by
+        its tree rule; its charge refunded only once reaped (the kernel's own)."""
+        if self.engine is None:
+            return []
+        due = self.engine.idle_due()
+        for (nb, entry), k in due:
+            if self.engine.by_key.get((nb, entry)) is k:
+                del self.engine.by_key[(nb, entry)]
+            k.stop("idle for %s with no page and no running cell" % _human_s(k.idle.limit))
+        return due
+
+    def advance_cgen(self, cgen):
+        """The relay's connection generation went up (a disconnect, sync off or reset): every engine page of an older
+        one is detached; their kernels go on, unreachable until a page of this generation opens them."""
+        if cgen <= self.cgen:
+            return
+        self.cgen = cgen
+        for p in list(self.pages.values()):
+            if p.chan == "engine" and not p.closed and p.engine["cgen"] < cgen:
+                p.close(4412, "the connection's generation went up")
+
+    def open_engine(self, c):
+        p = RelayPage(self, self.leg, c["conn"], c["gen"], "engine")
+        p.engine = {k: c[k] for k in ("nb", "entry", "sgen", "cgen")}
+        self.pages[c["gen"]] = p
+        nb, entry = c["nb"], c["entry"]
+        if self.engine is None:
+            return p.close(1008, "this runner doesn't offer engine pages")
+        if c["cgen"] < self.cgen:
+            return p.close(4409, "an older connection generation")
+        if c["sgen"] <= self.nb_sgen.get(nb, 0):
+            return p.close(4409, "an older page for this notebook")
+        self.advance_cgen(c["cgen"])
+        self.nb_sgen[nb] = c["sgen"]
+        old = self.nb_page.get(nb)
+        if old is not None and not old.closed:
+            old.close(4009, "the notebook was opened in another page")
+        self.engine.stop_other_entries(nb, entry, "the notebook's kernel changed")
+        k = self.engine.get(nb, entry)
+        fresh = k is None
+        if fresh:
+            from sagebrush.remote.admission import Refused
+            try:
+                k = self.engine.start(nb, entry)
+            except Refused as e:
+                # (said to the page in words, then that page ends; nothing else changes)
+                p.paired = True
+                p.send({"engine": "refused", "why": str(e)})
+                return p.close(1008, "refused: %s" % str(e)[:80])
+        p.paired = True  # (no hello: the relay bound the page's identity (H1); the kernel speaks first)
+        p.kernel = k
+        self.nb_page[nb] = p
+        if getattr(k, "idle", None) is not None:
+            k.idle.attach()
+        k.attach(p, fresh)
+
     def terminals(self):
         if self.terms is None:
             from sagebrush.remote.terminal import Terminals
@@ -840,6 +1081,15 @@ class RelayRunner:
             return
         p.closed = True
         self.timers.clear_timeout(p.hello_timer)
+        if p.chan == "engine":
+            k, p.kernel = p.kernel, None
+            if p.engine is not None and self.nb_page.get(p.engine["nb"]) is p:
+                del self.nb_page[p.engine["nb"]]
+            if k is not None:
+                if getattr(k, "idle", None) is not None and k.page is p:
+                    k.idle.detach()
+                k.detach(p)  # (the kernel goes on, detached; a later page of its notebook and entry finds it)
+            return
         if p.chan == "terminal":
             if self.terms is not None:
                 self.terms.page_gone(p)  # (its grant ends; its session goes on, detached)
@@ -1087,11 +1337,14 @@ class RelayRunner:
 
     def inbound_limit(self):
         """The largest message this runner takes from the relay: its largest channel's cap plus the generation prefix."""
+        if self.engine is not None:
+            return RELAY_LIMITS["inboundEngine"]
         return RELAY_LIMITS["inboundAgents" if self.serve_agents else "inbound"]
 
     def channels(self):
         """The page channels this runner serves (T6: the page offers Terminal when it is listed)."""
-        return ["kernel"] + (["terminal"] if self.serve_terminals else []) + (["agent"] if self.serve_agents else [])
+        return (["kernel"] + (["terminal"] if self.serve_terminals else []) + (["agent"] if self.serve_agents else [])
+                + (["engine"] if self.engine is not None else []))
 
     # ---- the leg's life
     def on_end(self, code, reason):
@@ -1121,8 +1374,29 @@ class RelayRunner:
             self.stats["pings"] += 1
             leg.send_text(ping_text(), "control")
 
+    async def idle_loop(self):
+        """The idle stop's pass every IDLE_PASS_S, for the runner's whole life: through legs, losses and backoffs alike
+        (kernels outlive legs); cancelled when run() ends."""
+        while True:
+            await self.sleep(IDLE_PASS_S)
+            self.idle_pass()
+
     async def run(self, stop):
         """Dial, serve, dial again, until stop is set or a Fatal; returns the exit status."""
+        if self.engine is not None and self.idle_task is None:
+            self.idle_task = asyncio.ensure_future(self.idle_loop())
+        try:
+            return await self._run(stop)
+        finally:
+            if self.idle_task is not None:
+                self.idle_task.cancel()
+                try:
+                    await self.idle_task
+                except BaseException:
+                    pass
+                self.idle_task = None
+
+    async def _run(self, stop):
         attempt = 0
         first = True
         while not stop.is_set():
@@ -1136,7 +1410,8 @@ class RelayRunner:
                 # socket it makes later is closed (_in_thread))
                 opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post,
                                                          inbound=self.inbound_limit(),
-                                                         agents=list(self.slots) if self.serve_agents else None))
+                                                         agents=list(self.slots) if self.serve_agents else None,
+                                                         on_binary=self.on_binary if self.engine is not None else None))
                 stopped = asyncio.ensure_future(stop.wait())
                 await asyncio.wait([opening, stopped], return_when=asyncio.FIRST_COMPLETED)
                 stopped.cancel()
@@ -1153,7 +1428,7 @@ class RelayRunner:
                 self.leg.start()
                 self.stats["legs"] += 1
                 up_at = time.monotonic()
-                self.err("Connected to %s as %s. Pick it in a notebook's \"Run on\" menu.\n" % (self.origin, self.key.name)
+                self.err("Connected to %s as %s. In a notebook, choose \"Remote: %s\" in the menu next to Run all, or open Terminal on your computer from its ... menu.\n" % (self.origin, self.key.name, self.key.name)
                          if first else "Reconnected.\n")
                 first = False
                 ping = asyncio.ensure_future(self.pinger(self.leg))
@@ -1224,6 +1499,8 @@ async def run_relay(key, err=None, cwd=None, agents=False, agent_cmds=None):
         code = await runner.run(stop)
     finally:
         runner.stop_agent("the runner stopped")
+        if runner.engine is not None:
+            runner.engine.stop_all("the runner stopped")
         await finish_agent_starts(runner)  # (it says so when it cancels a start)
         runner.gateway.shutdown()
         if runner.terms is not None:
@@ -1244,7 +1521,7 @@ USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND | --serve
   --serve-agents       also serve agent pages: the person's own agent, chatting beside their notebooks.  The agent
                        runs as you, in the folder this command was started in, and can change files there.
   --agent-cmd COMMAND  how to start the agent (split like a shell's words, never run through a shell), for example
-                       --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.5.0.tgz --stdio"
+                       --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz --stdio"
                        It's required with --serve-agents unless --agent is given: the runner never chooses or
                        fetches an agent by itself.  Its name is "default".
   --agent NAME=COMMAND another agent the page can pick by NAME (a lowercase letter, then up to 15 lowercase letters,
@@ -1303,12 +1580,14 @@ def main(argv):
         return 2
     try:
         key = _keys.load()
+    except _keys.OldKeyFile:
+        key = None  # (an older release's key file: enrolled again below, as with none; login keeps the old one aside)
     except _keys.KeyFileError as e:
         sys.stderr.write("sagebrush remote: %s\n" % e)
         return 1
     if key is None:
         from sagebrush.remote.enroll import main as login_main
-        code = login_main([])
+        code = login_main([], continuing=True)
         if code:
             return code
         key = _keys.load()

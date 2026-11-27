@@ -13,6 +13,7 @@ import { chmodSync } from "node:fs";
 import { cmpVersion, cpuChoice, measure, measuredEnv, measureTree, median, order, paired, parseVersion, prepareSteps, resolveRef, resolveSides, selectBase, summary, ROUNDS } from "./install-timing.mjs";
 import { parsePack, runNpm } from "./npm-pack-metrics.mjs";
 import { targetsOf } from "./web-tests.mjs";
+import { fileURLToPath } from "node:url";
 
 let passed = 0, failures = 0;
 function check(name, ok, detail = "") {
@@ -36,7 +37,7 @@ function withEnv(vars, fn) {
     }
   }
 }
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 try {
   // ---- a side's build steps: a commit with wasm/pins.json fetches its modules by those pins before anything
   // builds (they aren't tracked from it on); a commit without the file has them committed and fetches nothing

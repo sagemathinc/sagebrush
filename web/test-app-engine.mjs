@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encode, decode, frame, frameReader, FRAME_MAX } from "../app/engine/frames.mjs";
 import { engineRoot, localFile } from "../app/engine/files.mjs";
+import { defaultHeapMb } from "../app/engine/serve.mjs";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -25,6 +26,15 @@ const throws = (f, re, what) => {
     ok(re.test(String(e?.message ?? e)), `${what}: ${e?.message}`);
   }
 };
+
+// ---- an interpreter's heap by default: the computer's memory, a container's limit where there is one, never past it
+{
+  const G = 2 ** 30, M = 2 ** 20;
+  ok(defaultHeapMb(16 * G, 0) === 16384, "heap: all of the computer's memory, with no container limit");
+  ok(defaultHeapMb(16 * G, 2 * G) === 2048, "heap: a 2 GiB container on a 16 GiB computer gets 2 GiB");
+  ok(defaultHeapMb(16 * G, 512 * M) === 512, "heap: a 512 MiB container gets 512 MiB, never past its limit");
+  ok(defaultHeapMb(512 * M, 0) === 1024, "heap: at least 1 GiB where there is no container limit");
+}
 
 // ---- frames
 {
@@ -107,13 +117,9 @@ const throws = (f, re, what) => {
   }
 }
 
-// ---- the engine
-if (!existsSync(join(root, "sagebrush-worker.js"))) {
-  console.log(`FAIL no ${join(root, "sagebrush-worker.js")}: build it (bun web/build.ts)`);
-  process.exit(1);
-}
-function engine(extra = []) {
-  const p = spawn(process.execPath, [join(here, "..", "app", "engine", "main.mjs"), "--stdio", "--root", root, "--memory", "2048", ...extra], { stdio: ["pipe", "pipe", "pipe"] });
+// (the engine on a pipe, its worker the one in `dir`)
+function engineAt(dir, extra = []) {
+  const p = spawn(process.execPath, [join(here, "..", "app", "engine", "main.mjs"), "--stdio", "--root", dir, "--memory", "2048", ...extra], { stdio: ["pipe", "pipe", "pipe"] });
   const msgs = [], waiters = [];
   let err = "";
   p.stderr.on("data", (d) => (err += d));
@@ -140,6 +146,106 @@ function engine(extra = []) {
   };
 }
 const HELLO = { hello: { protocol: { min: 1, max: 1 }, client: "test", want: [] } };
+
+// ---- {state}: what an interpreter is doing, for a client that comes back to it (the remote host's reattach). The rows
+// run a stub worker, which says what the test tells it to ({stub: [messages]}), so they need no web/dist
+{
+  const t = mkdtempSync(join(tmpdir(), "sb-engine-state-"));
+  try {
+    mkdirSync(join(t, "root"));
+    writeFileSync(join(t, "root", "sagebrush-worker.js"), "self.onmessage = (e) => { const d = e.data; if (d && Array.isArray(d.stub)) for (const m of d.stub) postMessage(m); if (d && d.unsendable) postMessage({ x: new Float64Array(1) }); };\n");
+    const e = engineAt(join(t, "root"));
+    e.send(HELLO);
+    const h = (await e.wait((m) => m.hello, 20000, "hello")).hello;
+    ok(h.caps.includes("state"), "state: the hello's caps name it");
+    // (answers come in stream order: the n-th {state} answer is the n-th asked)
+    let n = 0;
+    const answers = () => e.msgs.filter((m) => m.state !== undefined);
+    const state = async (sid) => {
+      const tag = ++n;
+      e.send({ state: sid });
+      await e.wait(() => answers().length >= tag, 20000, "a state answer");
+      return answers()[tag - 1];
+    };
+    const said = async (sid, msgs) => {
+      const last = msgs[msgs.length - 1];
+      e.send({ to: sid, m: { stub: msgs } });
+      await e.wait((m) => m.from === sid && JSON.stringify(m.m) === JSON.stringify(last), 20000, "the stub's message");
+    };
+    ok((await state("nope")).open === false && Object.keys(await state("nope2")).join() === "state,open", "state: a well-formed sid that was never opened: {state, open: false}, nothing more");
+    e.send({ open: "s1" });
+    let s = await state("s1");
+    ok(s.open === true && s.busy === null && s.queued.length === 0 && s.seq === 0, `state: just opened, nothing run: idle, seq 0 (${JSON.stringify(s)})`);
+    e.send({ to: "s1", m: { id: 1, code: "a" } });
+    e.send({ to: "s1", m: { id: 2, interact: "w", values: {} } });
+    e.send({ to: "s1", m: { id: 3, evaluate: { code: "c", answer: 1 } } });
+    e.send({ to: "s1", m: { id: 4, check: "x" } });
+    e.send({ to: "s1", m: { id: 5, complete: "x" } });
+    e.send({ to: "s1", m: { id: 6, warm: true } });
+    s = await state("s1");
+    ok(s.busy === null && s.queued.join() === "1,2,3", `state: code, interact and evaluate are runs, queued in order; check, complete and warm aren't tracked (${JSON.stringify(s)})`);
+    await said("s1", [{ id: 1, start: true }, { id: 1, target: null, stream: "stdout", text: "hi" }]);
+    s = await state("s1");
+    ok(s.busy === 1 && s.queued.join() === "2,3" && s.seq === 2, `state: a run's start makes it busy, and seq counts the {from} messages before the answer (${JSON.stringify(s)})`);
+    e.send({ to: "s1", m: { runnerInterrupt: 1 } });
+    s = await state("s1");
+    ok(s.busy === 1 && s.queued.join() === "2,3", "state: a Stop by itself changes nothing (the skipped and done that follow do)");
+    await said("s1", [{ id: 1, done: true, ms: 1 }, { id: 2, skipped: true }, { id: 3, skipped: true }]);
+    s = await state("s1");
+    ok(s.busy === null && s.queued.length === 0 && s.seq === 5, `state: done ends the busy run; runs skipped before they started leave queued too, in order (${JSON.stringify(s)})`);
+    e.send({ to: "s1", m: { id: 7, code: "b" } });
+    e.send({ to: "s1", m: { id: 8, code: "c" } });
+    await said("s1", [{ id: 7, skipped: true }]);
+    s = await state("s1");
+    ok(s.queued.join() === "8", `state: the first of two queued runs skipped: the second stays, then...`);
+    await said("s1", [{ id: 8, skipped: true }]);
+    ok((await state("s1")).queued.length === 0, "...it clears too");
+    e.send({ close: "s1" });
+    await e.wait((m) => m.closed === "s1", 20000, "closed");
+    ok((await state("s1")).open === false, "state: a closed sid: open: false");
+    e.send({ open: "s1" });
+    s = await state("s1");
+    ok(s.open === true && s.seq === 0 && s.busy === null && s.queued.length === 0, "state: the same sid opened again starts from 0");
+    e.send({ to: "s1", m: { unsendable: true } });
+    await e.wait((m) => m.error === "s1", 20000, "the unsendable message's error");
+    ok((await state("s1")).seq === 0, "state: a message that can't be sent goes out as {error}, which seq doesn't count");
+    // (one run at a time is the worker's rule: a second start while one is busy ends the engine, loudly)
+    e.send({ to: "s1", m: { id: 9, code: "a" } });
+    e.send({ to: "s1", m: { id: 10, code: "b" } });
+    e.send({ to: "s1", m: { stub: [{ id: 9, start: true }, { id: 10, start: true }] } });
+    const pe = await e.wait((m) => m.protocolError, 20000, "protocolError");
+    ok(/run 10 started in s1 while run 9 is busy/.test(pe.protocolError) && (await e.exited) === 5, `state: a second run's start while one is busy: a protocolError and exit 5 (${pe.protocolError})`);
+  } finally {
+    rmSync(t, { recursive: true, force: true });
+  }
+}
+{
+  // a malformed sid is a protocol error, as open's is (each needs its own engine: one is enough for the rule)
+  const t = mkdtempSync(join(tmpdir(), "sb-engine-state-"));
+  try {
+    mkdirSync(join(t, "root"));
+    writeFileSync(join(t, "root", "sagebrush-worker.js"), "");
+    for (const sid of ["a/b", 5]) {
+      const e = engineAt(join(t, "root"));
+      e.send(HELLO);
+      await e.wait((m) => m.hello, 20000, "hello");
+      e.send({ state: sid });
+      const m = await e.wait((m) => m.protocolError, 20000, "protocolError");
+      ok(/state: a session id is 1 to 64/.test(m.protocolError) && (await e.exited) === 2, `state: a malformed sid (${JSON.stringify(sid)}): a protocol error, exit 2`);
+    }
+  } finally {
+    rmSync(t, { recursive: true, force: true });
+  }
+}
+
+// ---- the engine
+if (!existsSync(join(root, "sagebrush-worker.js"))) {
+  console.log(`FAIL no ${join(root, "sagebrush-worker.js")}: build it (bun web/build.ts)`);
+  process.exit(1);
+}
+function engine(extra = []) {
+  return engineAt(root, extra);
+}
 
 try {
   // the handshake
@@ -272,6 +378,12 @@ try {
     e.send({ to: "nb2", m: { id: 1, code: "print('x' in globals())" } });
     await e.wait(from("nb2", (m) => m.id === 1 && m.done), 30000, "nb2 run");
     ok(e.msgs.filter((x) => x.from === "nb2" && x.m.stream).map((x) => x.m.text).join("").trim() === "False", "a second interpreter has its own variables");
+    // (the memory the engine gives an interpreter (--memory 2048 here) is what its heap guards see: the old space it may
+    // grow to, read by sys's size budgets; not the browser's nominal 1 GiB, which the interpreter takes when it can't ask)
+    e.send({ to: "nb2", m: { id: 2, code: "import sys\nprint(sys._sagebrush_heap_limit)" } });
+    await e.wait(from("nb2", (m) => m.id === 2 && m.done), 30000, "nb2 heap limit");
+    const heapSeen = e.msgs.filter((x) => x.from === "nb2" && x.m.id === 2 && x.m.stream).map((x) => x.m.text).join("").trim();
+    ok(heapSeen === String(2048 * 2 ** 20), `an interpreter's heap limit is the engine's --memory (${heapSeen})`);
     e.send({ close: "nb2" });
     await e.wait((m) => m.closed === "nb2", 10000, "closed");
     ok(true, "close: the interpreter stops, {closed}");

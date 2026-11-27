@@ -317,6 +317,19 @@ for (const ret of ["/\t/evil.example/proof", "/\n/evil.example/", "/\r/evil.exam
   const { cb } = await signIn(A, { ret: "/s/abc?x=1#y" });
   ok(cb.headers.get("location") === "/s/abc?x=1#y", "an ordinary return path is kept");
 }
+{
+  // (an account of its own: its sign-ins don't evict A's sessions, SESSIONS_MAX)
+  const R = "52525252-5252-4252-8252-525252525252";
+  const { r, cb } = await signIn(R, { ret: "/?share#m=sage&z=abc-_123" });
+  // (the sign-in's state cookie, its payload before the MAC: base64url JSON, whose `ret` is the return kept)
+  const oauth = (r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_oauth=")) ?? "").split(";")[0].slice("__Host-sb_oauth=".length);
+  const kept = JSON.parse(Buffer.from(oauth.split(".")[0], "base64url").toString("utf8")).ret;
+  ok(kept === "/?share" && cb.headers.get("location") === "/?share", `a quick link's cells in the return are dropped: not in the sign-in's cookie (${JSON.stringify(kept)}), nor in the redirect back`);
+  for (const [ret, want] of [["/?share#c=eyJ4", "/?share"], ["/docs/storage#leaves", "/docs/storage#leaves"], ["/#m=sage", "/#m=sage"]]) {
+    const { cb: c2 } = await signIn(R, { ret });
+    ok(c2.headers.get("location") === want, `the return ${ret}: ${want}`);
+  }
+}
 
 // ---- validation and limits
 {
@@ -866,24 +879,36 @@ async function purgeStatus(rid) {
     const young = (await db.prepare("SELECT COUNT(*) AS n FROM upload_receipts WHERE owner = 'old-0' AND retired >= ?1").bind(t - 30 * 86400).first()).n;
     ok(a0 === 12_000 && a1 === 2000 && a2 === 0 && young === 5, `S10 12,000 receipts past their days: 10,000 removed by one run (20 pages of 500), the rest by the next; 5 younger ones stay (${a0} -> ${a1} -> ${a2}, young ${young})`);
   }
+  // S12: the admin log's retention: a view past ADMIN_RECORD_DAYS (365) goes with its targets, in one run; a younger
+  // view and its targets stay
+  {
+    const t = Math.floor(Date.now() / 1000), old = t - 366 * 86400, young = t - 364 * 86400;
+    const view = async (at) => (await db.prepare("INSERT INTO admin_views (at, admin_id, view) VALUES (?1, 'adm', 'accounts') RETURNING id").bind(at).first()).id;
+    const v1 = await view(old), v2 = await view(young);
+    for (const [v, h] of [[v1, "h1"], [v1, "h2"], [v2, "h3"]]) await db.prepare("INSERT INTO admin_view_targets (view_id, target_hash) VALUES (?1, ?2)").bind(v, h).run();
+    await tick();
+    const views = (await db.prepare("SELECT id FROM admin_views WHERE id IN (?1, ?2) ORDER BY id").bind(v1, v2).all()).results.map((r) => r.id);
+    const targets = (await db.prepare("SELECT target_hash FROM admin_view_targets WHERE view_id IN (?1, ?2) ORDER BY target_hash").bind(v1, v2).all()).results.map((r) => r.target_hash);
+    ok(JSON.stringify(views) === JSON.stringify([v2]) && JSON.stringify(targets) === JSON.stringify(["h3"]), `S12 the admin log past 365 days goes with its targets; a younger view keeps its own (${JSON.stringify({ views, targets })})`);
+  }
 
-  // S11 (daybreak3's S2): a Worker rolled back to before this change (b06b01b7's share server, from git history),
+  // S11 (daybreak3's S2): a Worker rolled back to before this change (07b50cf5's share server, from git history),
   // and this change's page client (uploadCollection, bundled as the page is): the upload fails, and the old server
   // never makes an empty collection, as nothing reaches the path that would.  Without that history (a shallow
   // clone, as in CI) it is skipped, saying so; test-upload.mjs's U5 checks the same against the old routes' answers.
   {
     let dir = null;
     try {
-      execFileSync("git", ["cat-file", "-e", "b06b01b7^{commit}"], { cwd: here, stdio: "ignore" });
+      execFileSync("git", ["cat-file", "-e", "07b50cf5^{commit}"], { cwd: here, stdio: "ignore" });
       const { mkdtempSync, writeFileSync } = await import("node:fs");
       const { tmpdir } = await import("node:os");
       dir = mkdtempSync(join(tmpdir(), "share-old-"));
-      for (const f of ["server.ts", "files.ts", "test-entry.ts"]) writeFileSync(join(dir, f), execFileSync("git", ["show", `b06b01b7:web/share/${f}`], { cwd: here }));
+      for (const f of ["server.ts", "files.ts", "test-entry.ts"]) writeFileSync(join(dir, f), execFileSync("git", ["show", `07b50cf5:web/share/${f}`], { cwd: here }));
     } catch { dir = null; }
     // (and only with this change's page client: in a two-phase rollout's first phase, the page is still the older one)
     const newClient = readFileSync(join(here, "../../share-client/upload.ts"), "utf8").includes("/api/share/first-upload");
     if (!newClient) console.log("SKIP S11: the page client here predates /api/share/first-upload (the rollout's server-first phase)");
-    else if (!dir) console.log("SKIP S11: no git history for b06b01b7 here (a shallow clone); U5 in test-upload.mjs covers the client against the old routes");
+    else if (!dir) console.log("SKIP S11: no git history for 07b50cf5 here (a shallow clone); U5 in test-upload.mjs covers the client against the old routes");
     else {
       const oldScript = execFileSync("bun", ["build", join(dir, "test-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
       const m3 = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "old-share", modules: true, script: oldScript, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings, outboundService: cocalc }] }));
@@ -906,7 +931,7 @@ async function purgeStatus(rid) {
       globalThis.location = realLocation;
       const n = (await d3.prepare("SELECT COUNT(*) AS n FROM collections WHERE owner = ?1").bind(O).first()).n;
       await m3.dispose();
-      ok(dev.status === 200 && !!cookie && e instanceof Error && n === 0 && !paths.includes("POST /api/share/collections") && paths.includes("POST /api/share/first-upload"), `S11 this page's client against b06b01b7's server (a rolled-back Worker): the upload fails (${e?.message}), and no collection is made (${n}); requests: ${paths.join(", ")}`);
+      ok(dev.status === 200 && !!cookie && e instanceof Error && n === 0 && !paths.includes("POST /api/share/collections") && paths.includes("POST /api/share/first-upload"), `S11 this page's client against 07b50cf5's server (a rolled-back Worker): the upload fails (${e?.message}), and no collection is made (${n}); requests: ${paths.join(", ")}`);
     }
   }
 

@@ -11,12 +11,15 @@
 //   1. a talk asked for by ?f= whose chunk arrives after the reader opened the notebook: never opened;
 //   2. opening a talk: the notebook's interpreter is stopped first; openShared gets the talk's path and text, its
 //      results (parsed), the runner's classes and /runner/, and every file of the collection as mounted for notebooks;
+//      its read() (for \input) gives a listed file's checked bytes, null for one not listed, and refuses one listed past
+//      4 MiB unfetched and bytes that aren't the listed ones;
 //      the talk's bar replaces the notebook's;
 //   3. Run/Stop follow the view's onRunning; Present calls present();
 //   4. back to the notebook: the talk is disposed, and the notebook runs (its interpreter starts again);
 //   5. a talk whose openShared finishes after the reader went elsewhere is disposed at once and never shown;
 //   6. a talk or results file that doesn't match its SHA-256 is refused: openShared isn't called; a chunk that
-//      doesn't load says so; a talk without a results file gets results null;
+//      doesn't load says so; a talk without a results file gets results null; a talk opened from the list, below the
+//      window, is scrolled to (its bar at the window's top) with focus on its name;
 //   7. "Copy to my workspace": the talk, its results and its folder's files (no others) in the reader's files, opened
 //      in the LaTeX editor (/?tex=<id>); the next visit's button reads "Open my copy" and opens that same copy.
 // With TALKS_OFF=1, on the site's build (no LaTeX on loopback): a talk is a file like any other, listed with its download
@@ -79,6 +82,7 @@ export async function openShared(root, o) {
     classes: !!o.sandbox && typeof o.sandbox.WorkerKernel === "function" && typeof o.sandbox.RunnerWorker === "function",
     workerAtCall: !!(window.shared && window.shared.kernel.worker), aliveAtCall: window.__alive ?? 0, calls: [] };
   (window.__talks ??= []).push(rec);
+  window.__talkRead = o.read;
   window.__alive = (window.__alive ?? 0) + 1;
   root.textContent = "STUB VIEW " + o.path;
   if (window.__talkHold) {
@@ -100,6 +104,9 @@ const ID = "talkscollect", V = "0123456789abcdef".repeat(4);
 const sha = Object.fromEntries(Object.entries(FILES).map(([p, t]) => [p, createHash("sha256").update(t).digest("hex")]));
 const bySha = Object.fromEntries(Object.entries(FILES).map(([p, t]) => [sha[p], t]));
 const files = Object.entries(FILES).map(([path, t]) => ({ path, sha256: sha[path], size: Buffer.byteLength(t) }));
+// (a file listed past the LaTeX editor's limit, 4 MiB: in the listing only, never served)
+const HUGE = { path: "other/huge.bin", sha256: "ab".repeat(32), size: 5 * 2 ** 20 };
+files.push(HUGE);
 const collection = { id: ID, version: V, latest: V, files_origin: site, manifest: { title: "Talks", license: "MIT", created: "2026-11-12T00:00:00Z", files } };
 const link = `${site}/s/${ID}`;
 const PAGE = readFileSync(join(web, "dist", "s", "index.html"));
@@ -166,6 +173,15 @@ try {
     ok(t.classes && t.runnerUrl === "/runner/", "…the runner's kernel classes, and /runner/");
     const expectMount = files.map((f) => [f.path, { url: `${site}/c/${ID}/${f.sha256}`, sha256: f.sha256, size: f.size }]);
     ok(J(t.mount) === J(expectMount), "…every file of the collection, as the notebook mounts them (the view keeps to the talk's folder)");
+    // (\input and \include: read() gives a listed file's checked bytes; the view keeps it to the talk's folder)
+    ok((await ev(`window.__talkRead("talks/data.csv").then((b) => new TextDecoder().decode(b))`)) === "x\n1\n", "…read(): a listed file's bytes, checked as every file here is (for \\input)");
+    ok((await ev(`window.__talkRead("talks/nothere.tex")`)) === null, "…read(): null for a path the collection doesn't list");
+    const askedHuge = () => ev(`performance.getEntriesByType("resource").filter((e) => e.name.includes(${J(HUGE.sha256)})).length`);
+    ok(/too large/.test(await ev(`window.__talkRead(${J(HUGE.path)}).then(() => "read", (e) => String(e.message))`)) && (await askedHuge()) === 0, "…read(): a file listed past 4 MiB is refused, never fetched");
+    bySha[sha["talks/data.csv"]] = "tampered\n";
+    const tampered = await ev(`window.__talkRead("talks/data.csv").then(() => "read", (e) => String(e.message))`);
+    bySha[sha["talks/data.csv"]] = FILES["talks/data.csv"];
+    ok(/talks\/data\.csv could not be loaded/.test(tampered), "…read(): bytes that aren't the listed ones are refused");
     ok(t.workerAtCall === false, "the notebook's interpreter was stopped before the talk's view was opened (one interpreter in the page)");
     ok(!(await shown("nbbar")) && !(await shown("nb")) && (await shown("talkbar")) && (await shown("talk")), "the talk's bar and view replace the notebook's");
     ok((await ev("document.querySelector('#talkname').textContent")) === "talks/st.tex" && /STUB VIEW talks\/st\.tex/.test(await ev("document.querySelector('#talk').textContent")), "…named, the view drawn in the page");
@@ -302,6 +318,21 @@ try {
     await until(`(window.__talks ?? []).length === ${n1 + 1}`);
     t = (await talks()).at(-1);
     ok(t.path === "solo.tex" && t.results === null, "a talk without a results file: openShared gets results null");
+    // (a talk opened from the list, where it opens below the window: in a window 420 pixels tall, a long list stood in
+    // for by space below it, and room below the page so its bar can reach the top; checked once its open has finished)
+    await click("nb.ipynb");
+    await until("!document.querySelector('#nb').hidden");
+    await send("Emulation.setDeviceMetricsOverride", { width: 1000, height: 420, deviceScaleFactor: 1, mobile: false });
+    await ev(`document.querySelector('#files').after(Object.assign(document.createElement('div'), { id: 'spaceabove', style: 'height: 900px' })); document.body.append(Object.assign(document.createElement('div'), { id: 'spacebelow', style: 'height: 2000px' })); scrollTo(0, 0); 1`);
+    const nList = (await talks()).length;
+    await click("solo.tex");
+    await until(`(window.__talks ?? []).length === ${nList + 1} && !document.querySelector('#talkbar').hidden`);
+    for (let i = 0; i < 50 && (await ev("document.activeElement?.id")) !== "talkname"; i++) await sleep(100);
+    const at = await ev(`({ top: document.querySelector('#talkbar').getBoundingClientRect().top, y: scrollY, focus: document.activeElement?.id })`);
+    ok(at.y > 0 && at.top >= 0 && at.top < 2, "a talk opened from the list is scrolled to: its bar at the top of the window " + J(at));
+    ok(at.focus === "talkname", "…and focus on its name (for a keyboard and a screen reader) " + J(at));
+    await ev("document.querySelector('#spaceabove').remove(); document.querySelector('#spacebelow').remove(); 1");
+    await send("Emulation.clearDeviceMetricsOverride");
     // (a chunk that doesn't load: a fresh page, the chunk answered 404)
     route = async (p) => (/sagebrush-latex-share\.js/.test(p.request.url) ? fulfill(p, 404, "text/plain", "no") : normal(p));
     await send("Page.navigate", { url: link + "?f=talks/st.tex" });

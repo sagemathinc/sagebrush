@@ -15,7 +15,7 @@ points, labels) and shows two ways at once:
 import json as _json
 import math
 
-from _graphics import _esc, _fmt, nice_ticks, _num, show as _show, describe_svg, to_color, colormap
+from _graphics import _esc, _fmt, nice_ticks, _num, show as _show, describe_svg, to_color, colormap, CSS_COLORS as _CSS
 
 __all__ = ["Graphics3d", "plot3d", "parametric_plot3d", "implicit_plot3d", "spherical_plot3d",
            "cylindrical_plot3d", "revolution_plot3d", "sphere", "point3d", "line3d", "text3d",
@@ -43,7 +43,7 @@ _DEFAULT = (0.27, 0.45, 0.9)  # "automatic": a lighter blue than pure blue, whic
 
 
 def _rgb(c, default=_DEFAULT):
-    """(r, g, b) in [0, 1] from a name, '#rrggbb', a tuple or Sage's Color."""
+    """(r, g, b) in [0, 1] from a name (Sage's: the CSS names), '#rrggbb', a tuple or Sage's Color."""
     if c is None or c == "automatic":
         return default
     if hasattr(c, "rgb"):
@@ -55,6 +55,8 @@ def _rgb(c, default=_DEFAULT):
         s = s.strip().lower()
         if s in _NAMED:
             return _NAMED[s]
+        if s in _CSS:  # (every other CSS name, as Sage takes them: seagreen, aliceblue, ...)
+            s = _CSS[s]
         if s.startswith("#") and len(s) == 7:
             return tuple(int(s[k:k + 2], 16) / 255 for k in (1, 3, 5))
         if s.startswith("#") and len(s) == 4:

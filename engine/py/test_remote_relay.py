@@ -166,6 +166,10 @@ class RelaySide:
                             await self.inbox.put(("window", self.sent_to_page))
                             continue
                         await self.inbox.put(("text", t))
+                    elif op == 0x2:
+                        # (an engine page's binary message: its prefix, then the kernel's bytes (r3 P2a))
+                        i = payload.index(b"\n")
+                        await self.inbox.put(("binary", (int(payload[:i]), payload[i + 1:])))
                     elif op == 0x8:
                         self.closed_code = int.from_bytes(payload[:2], "big") if len(payload) >= 2 else 1005
                         await self.inbox.put(("close", self.closed_code))
@@ -219,7 +223,8 @@ class RelaySide:
     def control(self, **kw):
         op = kw.pop("relay")
         if op == "page-open":
-            kw = {"conn": kw["conn"], "kind": kw["kind"], "chan": kw.get("chan", "kernel"), "gen": kw["gen"]}
+            extra = {k: kw[k] for k in ("nb", "entry", "sgen", "cgen") if k in kw}
+            kw = {"conn": kw["conn"], "kind": kw["kind"], "chan": kw.get("chan", "kernel"), "gen": kw["gen"], **extra}
             self.gen = kw["gen"]
         self.send_text(json.dumps({"relay": op, **kw}, separators=(",", ":")))
 
@@ -314,7 +319,8 @@ class FakeRelay:
             raw = base64.urlsafe_b64decode(sig + "=" * (-len(sig) % 4))
             ok = _native.es256_verify(self.key.x, self.key.y, ("sb-remote-chal/1\n" + c).encode(), raw)
             self.challenges[c] = True  # (single use)
-        self.upgrades.append({"ok": ok, "challenge": c, "agent": h.get("user-agent"), "agents": h.get("x-sb-remote-agents")})
+        self.upgrades.append({"ok": ok, "challenge": c, "agent": h.get("user-agent"), "agents": h.get("x-sb-remote-agents"),
+                              "caps": h.get("x-sb-remote-caps")})
         if not ok or self.upgrade_status != 101:
             writer.write(b"HTTP/1.1 %d No\r\ncontent-length: 0\r\n\r\n" % (403 if not ok else self.upgrade_status))
             await writer.drain()
@@ -966,6 +972,66 @@ async def test_cli_ctrl_c():
             await asyncio.sleep(0.05)
         err = (await p.stderr.read()).decode()
         assert "Connected to %s as test-box" % relay.origin in err and K.b64url(key._d) not in err, err
+    finally:
+        if p.returncode is None:
+            p.kill()
+        relay.stop()
+        sg.close()
+        shutil.rmtree(home, ignore_errors=True)
+
+
+# (a kernel whose fork has left its process group and still holds the kernel's pipes, as a GPU library's helper
+# process can: the kernel's group ends at the revoke, but its stdout pipe sees no end of file while that process lives)
+SLOW_TO_END = ("import os, time\n"
+               "if os.fork() == 0:\n"
+               "    os.setsid(); time.sleep(4); os._exit(0)\n"
+               "x = 6 * 7\nprint(x)")
+
+
+@aio
+async def test_cli_revoked_exits_quietly():
+    """The command as a process, revoked while a kernel runs: it says why and exits 3 (a service's
+    RestartPreventExitStatus), the kernel subprocess transport closed before the event loop closes, so nothing is reported
+    after the exit (no "Exception ignored ... Event loop is closed" from a subprocess transport collected late)."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    relay = await FakeRelay(None).start()
+    key = enrolled(relay.origin)
+    relay.key = key
+    home = tempfile.mkdtemp(prefix="sb-relay-")
+    env = dict(os.environ, XDG_CONFIG_HOME=home)
+    old = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = home
+    try:
+        K.save(key)
+    finally:
+        if old is None:
+            os.environ.pop("XDG_CONFIG_HOME")
+        else:
+            os.environ["XDG_CONFIG_HOME"] = old
+    p = await asyncio.create_subprocess_exec(sys.executable, "-m", "sagebrush.cli", "remote", env=env, cwd=HERE,
+                                             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        leg = await relay.leg(60)
+        page, _ = await paired(leg, sg)
+        await page.answer(await page.request("g.bind", {}, {}))
+        await page.answer(await page.request("g.run", {"b": "b1"}, {"request": "r2", "epoch": 1,
+                                                                     "payload": {"code": SLOW_TO_END, "mode": "python"}}))
+        rid = await page.request("g.events", {"b": "b1", "r": "r2", "after": 0})
+        printed = ""
+        while "42\n" not in printed:
+            m = await leg.json(60)
+            if m.get("id") == rid and "chunk" in m:
+                e = json.loads(m["chunk"].split("data: ", 1)[1])
+                if e["type"] == "stream":
+                    printed += e["text"]
+        leg.control(relay="revoked")
+        assert await asyncio.wait_for(p.wait(), 30) == 3
+        err = (await p.stderr.read()).decode()
+        assert "enrollment was revoked" in err, err
+        assert "Exception ignored" not in err and "Event loop is closed" not in err and "Traceback" not in err, err
     finally:
         if p.returncode is None:
             p.kill()

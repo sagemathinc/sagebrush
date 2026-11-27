@@ -5,17 +5,22 @@
 //
 //   POST /api/sync/v1/enable             turn sync on for this account (allowlisted on dev)
 //   GET  /api/sync/v1/account            the account socket (upgrade; Origin checked)
-//   POST /api/sync/v1/blobs/check        {blobs: [{sha256, size}]} -> {missing}
-//   PUT  /api/sync/v1/blob/<sha256>      the bytes (R2 checks the hash)
-//   GET  /api/sync/v1/blob/<sha256>      303 to a signed URL on the user-content domain
+//   POST /api/sync/v1/blobs/check        {blobs: [{address, ct_sha256, size}]} -> {missing, conflicts?}
+//   PUT  /api/sync/v1/blob/<address>     the bytes, with x-sb-ct-sha256: their SHA-256, which R2 checks
+//   GET  /api/sync/v1/blob/<address>     303 to a signed URL on the user-content domain
+//
+// (a blob's `address` is 64 hex: today the bytes' own hash, under end-to-end encryption a keyed address
+// (design/e2e-encryption.md §3.3).  So the server never assumes it is the bytes' hash: it checks the declared
+// ct_sha256, and holds one (ct_sha256, size) per address, the first; another at that address is a 409 conflict
+// naming what is held.  The account object's tables still call the address column sha256)
 //
 // and, with chunked files on (SYNC_TIERED, DEV only; design/tiered-files.md §4.1):
 //
 //   POST /api/sync/v1/manifest                   {manifest} -> {state, position, chunks}
-//   POST /api/sync/v1/manifest/<sha256>/verify   one step of the server's check -> {state, position}
+//   POST /api/sync/v1/manifest/<address>/verify   one step of the server's check -> {state, position}
 //     (each call debits at least 64 MiB from the day's verification meter, so at most verify_bytes_per_day / 64 MiB
 //     calls start a day, each with at most 8 R2 gets; the cross-day assumption and its production gate: design/tiered-files.md §6)
-//   GET  /api/sync/v1/manifest/<sha256>          a verified file's manifest
+//   GET  /api/sync/v1/manifest/<address>         a verified file's manifest
 //
 // and, with agents on (SYNC_AGENT, DEV only; design/agent-endpoint.md, fs-sync step 1a):
 //
@@ -31,13 +36,14 @@
 // and, on the user-content Worker (web/files), /p/<key>: a signed read (§5.4).
 //
 // Without the sync bindings (production today), every route is a 404:
-// the bindings are the flag (§11).  Before authentication, an IP limit
-// (SYNC_PREAUTH, Cloudflare's rate-limiting binding) comes first (§2).
+// the bindings are the flag (§11).  Before authentication, a raw ingress limit per IP (SYNC_INGRESS_IP); requests
+// refused before they authenticate count against a failure limit per IP (SYNC_PREAUTH); authenticated ones against
+// their account's ingress (SYNC_ACCOUNT_INGRESS): Cloudflare's rate-limiting bindings (§2).
 
 import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
-import { agentOn, allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { e2eOn, agentOn, allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { AGENT, tokenOf } from "./agent-token.ts";
 import { TIERED } from "./manifest.ts";
 import { Sha256 } from "./sha256.ts";
@@ -58,7 +64,7 @@ export type Env = SyncEnv & ShareEnv & {
   /** tests only: CoCalc's purge of this account id fails to reach its account object */
   SYNC_TEST_FAIL_PURGE?: string;
   /** a test seam: the Worker's immediate delete after a failed finalize is off, so durability is shown without it */
-  SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_AGENT_FAIL?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
+  SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_INGRESS_IP?: RateLimit; SYNC_ACCOUNT_INGRESS?: RateLimit; SYNC_AGENT_FAIL?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
 
 /** An admin call's body: at most this many bytes (LIMIT-5E2-1). */
 const ADMIN_BODY = 4096;
@@ -194,17 +200,30 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (sp && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncPurgeStatus(req, env, sp[1], sp[2]);
   if (p.startsWith("/api/agent/")) return handleAgent(req, env);
   if (!p.startsWith("/api/sync/")) return null;
-  // (the pre-authentication limit is part of the flag: without it, sync is off, LIMIT-321-1)
-  if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
-  // before anything that reads a session: one limit per IP, whatever the request claims
+  // (the three limits are part of the flag: without any of them, sync is off, LIMIT-321-1)
+  if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH || !env.SYNC_INGRESS_IP || !env.SYNC_ACCOUNT_INGRESS) return err(404, "sync is not enabled here");
+  // (each limit counts a minute: a refused page waits that long, LIMIT-SYNC-STATUS-1)
+  const limited = (limit: string) => err(429, "rate", { limit, retry_after: 60_000 });
+  // first, before anything that reads a session: the raw ingress per IP, whatever the request claims (1,000,000 a
+  // minute where deployed, meant to leave room for ordinary classroom traffic behind one address).  A well-formed but
+  // unknown session cookie costs one session lookup, and failures are charged after that lookup: this cap is what
+  // bounds that work per IP
   const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
-  // (the limit counts a minute: a refused page waits that long, LIMIT-SYNC-STATUS-1)
-  if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests", { retry_after: 60_000 });
+  if (!(await env.SYNC_INGRESS_IP.limit({ key: ip })).success) return limited("ingress_per_ip");
+  // a request refused before it is known whose it is (cross-site, even with a valid cookie; or no valid session)
+  // counts against its IP's failure limit, and past it is refused with 429.  A valid same-site session skips this
+  // limit (it still counts against the raw ingress).  (The binding can't be read without counting: only failures
+  // call it.)
+  const failed = async (r: Response) => ((await env.SYNC_PREAUTH!.limit({ key: ip })).success ? r : limited("failed_sync_per_ip"));
   const m = req.method;
   // every sync request is state-changing or a socket: both come only from this site's pages
-  if (!sameSite(req)) return err(403, "cross-site request");
+  if (!sameSite(req)) return failed(err(403, "cross-site request"));
   const who = await sessionOf(req, env);
-  if (!who) return err(401, "sign in first");
+  if (!who) return failed(err(401, "sign in first"));
+  // then the account's own ingress, keyed by the account of this request's session (never one the request names),
+  // before any object: every request of every device of the account, status included; the account object's own
+  // limits (ops, batches, tickets, reads, uploads at once) still apply after it
+  if (!(await env.SYNC_ACCOUNT_INGRESS.limit({ key: await accountHash(who.id) })).success) return limited("account_ingress_per_minute");
   // the page's question, whether this account may turn sync on and how it is: it never creates or
   // registers anything.  Off the allowlist it is answered here, before any object is asked (the page
   // hides its switch then: the reason is for the page's logic, not to show)
@@ -268,24 +287,67 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
     const text = await req.text();
     if (text.length > 128 << 10) return err(413, "limit");
-    let blobs: string[];
+    let blobs: { address: string; ct_sha256: string; size: number }[];
     try {
       const b = fields(JSON.parse(text), ["blobs"], "check");
       if (!Array.isArray(b.blobs) || b.blobs.length > LIMITS.checkItems) throw new SyncError("limit", "at most " + LIMITS.checkItems);
       blobs = b.blobs.map((x) => {
-        const o = fields(x, ["sha256", "size"], "blob");
-        if (!isSha(o.sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
-        return o.sha256;
+        const o = fields(x, ["address", "ct_sha256", "size"], "blob");
+        if (!isSha(o.address) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
+        return { address: o.address, ct_sha256: o.ct_sha256, size: o.size };
       });
     } catch (e) {
       return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
     }
-    return answer(await stub.missing({ account: who.id, blobs, bind }), (v) => json(v.verifying.length ? v : { missing: v.missing }));
+    return answer(await stub.missing({ account: who.id, blobs, bind }), (v) => json({ missing: v.missing, ...(v.verifying.length ? { verifying: v.verifying } : {}), ...(v.conflicts.length ? { conflicts: v.conflicts } : {}) }));
   }
   // the agents' index, rebuilt by the person (fs-sync 1a2: a failed index stays failed until this; single-flight)
   if (p === "/api/sync/v1/index/rebuild" && m === "POST") {
     if (!agentOn(env)) return err(404, "not found");
     return answer(await stub.indexRebuild({ account: who.id }), json);
+  }
+  // the E2E key chain and the enrollment mailbox (design/e2e-encryption.md §2, PR 2c), from the person's devices: a
+  // 404 while the switch is off. Every route carries the client's binding (x-sync-account, x-sync-generation).
+  if (p.startsWith("/api/sync/v1/e2e/")) {
+    if (!e2eOn(env)) return err(404, "not found");
+    if (p === "/api/sync/v1/e2e/chain" && m === "GET") {
+      const from = url.searchParams.get("from") ?? "0";
+      if (!/^\d{1,15}$/.test(from)) return err(400, "invalid", { message: "from" });
+      return answer(await stub.e2eChain({ account: who.id, bind, from: Number(from) }), json);
+    }
+    if (p === "/api/sync/v1/e2e/chain" && m === "POST") {
+      if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+      const text = await readBounded(req, 1 << 20);
+      if (text === null) return err(413, "limit", { limit: "body_bytes", max: 1 << 20 });
+      let b: Record<string, unknown>;
+      try {
+        b = fields(JSON.parse(text), ["entry", "keyring", "wrappers"], "append");
+      } catch {
+        return err(400, "invalid", { message: "send {entry, keyring?, wrappers}" });
+      }
+      return answer(await stub.e2eAppend({ account: who.id, bind, entry: b.entry, keyring: b.keyring, wrappers: b.wrappers }), (v) => json(v, 201));
+    }
+    if (p === "/api/sync/v1/e2e/wrapper" && m === "GET") {
+      const kind = url.searchParams.get("kind"), id = url.searchParams.get("id");
+      return answer(await stub.e2eWrapper({ account: who.id, bind, kind, ...(id !== null ? { id } : {}) }), json);
+    }
+    const kr = p.match(/^\/api\/sync\/v1\/e2e\/keyring\/(\d{1,15})$/);
+    if (kr && m === "GET") return answer(await stub.e2eKeyring({ account: who.id, bind, epoch: Number(kr[1]) }), json);
+    const mb = p.match(/^\/api\/sync\/v1\/e2e\/enroll\/([a-z2-7]{25}[aeimquy4])\/([1-5])$/);
+    if (mb && m === "GET") return answer(await stub.e2eMailRead({ account: who.id, bind, session: mb[1], phase: Number(mb[2]) }), json);
+    if (mb && m === "POST") {
+      if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+      const text = await readBounded(req, 32 << 10);
+      if (text === null) return err(413, "limit", { limit: "body_bytes", max: 32 << 10 });
+      let b: Record<string, unknown>;
+      try {
+        b = fields(JSON.parse(text), ["msg"], "message");
+      } catch {
+        return err(400, "invalid", { message: "send {msg}" });
+      }
+      return answer(await stub.e2eMailPost({ account: who.id, bind, session: mb[1], phase: Number(mb[2]), msg: b.msg }), (v) => json(v, 201));
+    }
+    return err(404, "not found");
   }
   // agents' grants, from the person's session (design/agent-endpoint.md §2, the grant dialog's calls; §8, the log): a
   // 404 while the switch is off
@@ -650,9 +712,12 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   const len = req.headers.get("content-length");
   if (!len || !/^\d{1,12}$/.test(len)) return err(411, "Content-Length is required");
   const size = Number(len);
-  const r = await stub.reserve({ account, sha256, size, bind });
+  // (the bytes' own SHA-256, declared: R2 checks the body against it, never against the address)
+  const ct = req.headers.get("x-sb-ct-sha256") ?? "";
+  if (!isSha(ct)) return err(400, "invalid", { message: "x-sb-ct-sha256: the bytes' SHA-256 is required" });
+  const r = await stub.reserve({ account, sha256, ct_sha256: ct, size, bind });
   if ("error" in r) return answer(r, json);
-  if ("have" in r.ok) return json({ sha256, have: true });
+  if ("have" in r.ok) return json({ address: sha256, have: true });
   const { id, key, expires } = r.ok;
   // The reservation's end is enforced on the upload itself (CORR-5E2-2): the body streams to R2
   // through a stream that is aborted a margin before it, and R2 makes an object only from a put that
@@ -666,7 +731,7 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   try {
     const fixed = new FixedLengthStream(size);
     req.body!.pipeTo(fixed.writable, { signal: ac.signal }).catch(() => {});
-    stored = await env.SHARE_BUCKET!.put(key, fixed.readable, { sha256 });
+    stored = await env.SHARE_BUCKET!.put(key, fixed.readable, { sha256: ct });
   } catch {
     stored = null;
   } finally {

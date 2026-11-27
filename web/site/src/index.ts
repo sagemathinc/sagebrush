@@ -4,7 +4,9 @@ import { handleShare, scheduled, type ShareEnv } from "../../share/server.ts";
 import { handleEngines, handleLibChunk, handlePkg, type EnginesEnv } from "../../engines.ts";
 import { syncScheduled, type Env as SyncSiteEnv } from "../../sync/server.ts";
 import { BUILD } from "./build-id.ts";
-import { handleSharePage } from "./preview.ts";
+import * as BUILD_ID from "./build-id.ts";
+import { handleVersion } from "../../version.ts";
+import { handleGhPage, handleSharePage } from "./preview.ts";
 
 // Static assets are served before this runs.  The atlas's pages are
 // rendered here from its static data (web/atlas), and kept in the edge
@@ -16,6 +18,9 @@ import { handleSharePage } from "./preview.ts";
 export default {
   async fetch(request, _env, ctx) {
     const url = new URL(request.url);
+    // (which build this is, for the stamp the site's pages show: web/version.ts; a build with no release answers nothing)
+    const version = handleVersion(request, BUILD_ID);
+    if (version) return version;
     const shared = await handleShare(request, env as ShareEnv, ctx);
     if (shared) return shared;
     // engines by their content, from R2 (web/engines.ts)
@@ -31,6 +36,10 @@ export default {
     // a shared collection's page (web/share-client/view.html, at /s/), with its link preview (./preview.ts)
     const share = await handleSharePage(request, url, env as any);
     if (share) return share;
+    // a notebook or folder of a public GitHub repository (/gh/<owner>/<repo>/...): the same page, which reads GitHub
+    // from the reader's browser (web/gh/source.ts); this Worker never fetches GitHub
+    const gh = handleGhPage(request, url, env as any);
+    if (gh) return gh;
     if (url.pathname === "/atlas" || url.pathname.startsWith("/atlas/")) {
       const cache = caches.default;
       // JSON and HTML differ by Accept for the same URL

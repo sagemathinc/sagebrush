@@ -24,7 +24,8 @@ const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebugge
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
 ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+// (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
+const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
 const until = async (expr, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
 let failures = 0;
@@ -84,7 +85,10 @@ try {
   ok(await editing(), "Esc while typing in a field keeps its own meaning: still in Edit");
   await ev("document.getElementById('probe').remove(), 1");
   // (Esc with a note selected: the editor's (the selection goes), still in Edit; then Esc: View)
-  const r = await ev("(() => { const r = window.board.clientRect('n1'); return { x: r.left + r.width / 2, y: r.top + 10 }; })()");
+  // (the note in the middle of the view, clear of the top bar and the Edit toolbar, then a click on its middle)
+  await ev("(window.board.focus(['n1']), 1)");
+  await sleep(400);
+  const r = await ev("(() => { const r = window.board.clientRect('n1'); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()");
   for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
   await sleep(250);
   ok(await ev("window.board.grip === 'n1'"), "(a click selects the note)");

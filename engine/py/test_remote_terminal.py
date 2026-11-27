@@ -345,6 +345,10 @@ async def test_session_lifecycle():
         fields = st[st.rfind(b")") + 2:].split()
         assert int(fields[3]) == s.leader and int(fields[4]) != 0, fields[:6]  # (session, tty_nr)
         assert os.getsid(s.leader) == s.leader and os.getpgid(s.leader) == s.leader
+        # (no signal ignored that the runner's Python ignores at its start: SIGPIPE and SIGXFSZ at their default)
+        with open("/proc/%d/status" % s.leader) as f:
+            ign = int(next(l for l in f if l.startswith("SigIgn:")).split()[1], 16)
+        assert not ign & (1 << (signal.SIGPIPE - 1)) and not ign & (1 << (signal.SIGXFSZ - 1)), hex(ign)
         # (resize: the size applied, SIGWINCH delivered)
         p.send({"t": "resize", "rows": 30, "cols": 100})
         assert await until(lambda: "30 100" in ring_text(s)), ring_text(s)

@@ -7,10 +7,12 @@
 //  - images: only names in the caller's allowlist map (opts.images), never a document-supplied URL;
 //  - no eval / new Function anywhere.
 // KaTeX's renderToString is given by the host (setKatex): on the site, the shared sagebrush-math.js's copy
-let renderToString = null;
-export function setKatex(f) { renderToString = f; }
+let renderToString = null, renderToHTMLTree = null;
+// (renderToHTMLTree, optional: KaTeX's layout, read for the sizes of TikZ node text; without it they are estimated)
+export function setKatex(f, tree) { renderToString = f; renderToHTMLTree = tree || null; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
+import { renderTikz, TikzError, TIKZ_LIMITS, utf8Len, designWidth } from "./tikz.mjs";
 import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, staleTitle, STALE_TITLE, tookMs, TOOK, isPy, isMagma, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
@@ -25,6 +27,31 @@ const safeUrl = (u) => { const s = String(u).trim(); return /^(https?:\/\/|mailt
 const roman = (n) => { if (n <= 0) return ""; if (n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
 const alph = (n) => (n >= 1 && n <= 26 ? String.fromCharCode(96 + n) : String(n));
 const Alph = (n) => alph(n).toUpperCase();
+// enumitem's key=value options on a list, \begin{enumerate}[label=(T\arabic*),start=6,leftmargin=*]: its label and
+// reference templates and its start, the other keys (spacing, alignment, fonts) accepted and not drawn. A part without
+// "=" counts only if it is one of enumitem's own keys (nosep, wide, ...): otherwise (a beamer overlay, the enumerate
+// package's [(a)] shorthand) the argument isn't enumitem's, and null leaves it as before
+const ENUMITEM_FLAGS = new Set(["nosep", "noitemsep", "nolistsep", "wide", "resume", "resume*", "first", "first*", "before", "after"]);
+function splitTop(s) {
+  const out = []; let d = 0, cur = "";
+  for (const ch of s) { if (ch === "{") d++; else if (ch === "}") d--; if (ch === "," && d === 0) { out.push(cur); cur = ""; } else cur += ch; }
+  out.push(cur);
+  return out;
+}
+function enumitemOpts(s) {
+  const o = {};
+  for (const part of splitTop(s)) {
+    const m = /^\s*([A-Za-z]+\*?)\s*(?:=([\s\S]*))?$/.exec(part);
+    if (!m) { if (part.trim() === "") continue; return null; }
+    if (m[2] === undefined) { if (!ENUMITEM_FLAGS.has(m[1])) return null; continue; }
+    let v = m[2].trim();
+    if (v.startsWith("{") && v.endsWith("}")) v = v.slice(1, -1);
+    o[m[1]] = v;
+  }
+  return o;
+}
+// (a label or reference template with the item's number in place of \arabic*, \alph*, \Alph*, \roman*, \Roman*)
+const labelFill = (t, n) => t.replace(/\\(arabic|alph|Alph|roman|Roman) *\*/g, (_, f) => f === "arabic" ? String(n) : f === "alph" ? alph(n) : f === "Alph" ? Alph(n) : f === "roman" ? roman(n) : roman(n).toUpperCase());
 // a TeX dimension -> CSS (fixed units only), or null; rel = the length of 1\textwidth in CSS (a percentage)
 const OV_STEPS_MAX = 100;   // (a frame's steps, at most)
 // beamer's frames, blocks and overlay commands are engine/beamer.mjs, installed by the host (installBeamer): the worker
@@ -53,11 +80,14 @@ const dimPt = (s) => { const m = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*(pt|mm|cm|in|em|
 export function buildTree(events, items = []) {
   const root = { t: "g", kids: [] }; const st = [root];
   let pos = -1, last = -1;   // (last: the latest marker, kept: a code item's source position, it.at)
+  // (an \input file's line, {k:"fpos", file, line}, or back in the main file, {file: null}: on the next node as n.fp)
+  let fp;
   const top = () => st[st.length - 1];
   for (const e of events) {
     const before = top().kids.length, at = top();
-    if (typeof e === "number") { top().kids.push({ t: "x", v: e }); if (pos >= 0) { at.kids[before].p = pos; pos = -1; } continue; }
+    if (typeof e === "number") { top().kids.push({ t: "x", v: e }); if (pos >= 0) { at.kids[before].p = pos; pos = -1; } if (fp !== undefined) { at.kids[before].fp = fp; fp = undefined; } continue; }
     if (e.k === "pos") { pos = last = e.at; continue; }
+    if (e.k === "fpos") { fp = e.file ? { file: e.file, line: e.line } : null; continue; }
     switch (e.k) {
       case "o": { const g = { t: "g", kids: [] }; top().kids.push(g); st.push(g); break; }
       case "c": if (st.length > 1 && top().t === "g") st.pop(); break;
@@ -77,14 +107,16 @@ export function buildTree(events, items = []) {
       // (PythonTeX: a stale result read back begins (on) or ends; what is drawn in between is faded, R3-4)
       case "z": top().kids.push({ t: "Z", on: e.on }); break;
       case "label": top().kids.push({ t: "L", key: e.key }); break;
-      case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
+      case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt, star: !!e.star }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
+      case "natbib": top().kids.push({ t: "natbib", opt: e.opt }); break;
       // (a Magma name the document defines itself: ours is off for it, said once by check and the editor)
       case "own": top().kids.push({ t: "own", name: e.name }); break;
       case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
       default: break;
     }
+    if (fp !== undefined && at.kids.length > before) { at.kids[before].fp = fp; fp = undefined; }
     if (pos >= 0 && at.kids.length > before) { at.kids[before].p = pos; pos = -1; }
   }
   return root.kids;
@@ -100,6 +132,8 @@ function styleOpen(s) {
   if (!cls.length && !s.color) return null;
   return "<span" + (cls.length ? ' class="' + cls.join(" ") + '"' : "") + (s.color ? ' style="color:' + s.color + '"' : "") + ">";
 }
+// (a bibliography label's width in em, roughly a serif font's: wide for capitals, narrow for brackets; errs wide)
+function labelEm(t) { let w = 0.56 + 0.5; for (const c of String(t)) w += /[A-Z]/.test(c) ? 0.75 : /[a-z0-9]/.test(c) ? 0.52 : 0.4; return w; }
 function typo(s) {   // TeX's ligatures for text (not typewriter)
   return s.replace(/!`/g, "¡").replace(/\?`/g, "¿").replace(/---/g, "—").replace(/--/g, "–").replace(/``/g, "“").replace(/''/g, "”")
     .replace(/`/g, "‘").replace(/'/g, "’");
@@ -183,9 +217,134 @@ class Flow {
   inlineHtml() { return this.finish().join(""); }
 }
 
+// ------------------------------------------------------------------ TikZ node text (for tikz.mjs: opts.label)
+// A node's text, one line of it, as KaTeX's HTML and its size in pt at 10pt (TeX's text box: width, height, depth):
+// text as \text{...} in the node's family (KaTeX's fonts are Computer Modern-based, as TeX's are), $...$ as math. The size is
+// read from KaTeX's layout tree: each symbol's advance width (a run of text KaTeX merged into one symbol, character by
+// character), the spaces it puts between atoms, a script's or a fraction's widest row, scaled by its size class.
+const FAMILY = { bold: "textbf", italic: "textit", sans: "textsf", mono: "texttt" };
+const SIZE_CLASS = [0, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.44, 1.728, 2.074, 2.488];
+const CHAR_W = new Map();
+/** (how many characters charWidth has typeset alone: each distinct one once, while kept; for the tests) */
+export const charWidthRenders = { n: 0 };
+export function tikzLabel(text, font = {}, macros = {}, macroSig = "", stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0 }) {
+  const fam = FAMILY[font.family] || "text";
+  let src = "", i = 0, buf = "";
+  const flushText = () => { if (buf.trim()) src += "\\" + fam + "{" + buf + "}"; else if (buf) src += "\\ "; buf = ""; };
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\" && i + 1 < text.length) { buf += c + text[i + 1]; i += 2; continue; }
+    if (c === "$") {
+      const j = text.indexOf("$", i + 1);
+      if (j < 0) throw new TikzError("a node's text with a $ not closed");
+      flushText(); src += "{" + text.slice(i + 1, j) + "}"; i = j + 1; continue;
+    }
+    buf += c; i++;
+  }
+  flushText();
+  if (!src) return { html: "", w: 0, h: 0, d: 0 };
+  const html = texMath(src, false, macros, macroSig, stats);
+  if (html.includes("katex-error")) throw new TikzError("a node's text KaTeX can't typeset: " + text.slice(0, 60));
+  if (!renderToHTMLTree) {
+    // (no layout tree: an estimate that errs large, half an em a character, a full line's height and depth)
+    return { html, w: 5.5 * [...text.replace(/[$\\{}]/g, "")].length, h: 7.5, d: 2.5 };
+  }
+  let tree;
+  try { tree = renderToHTMLTree(src, { displayMode: false, throwOnError: true, trust: false, maxSize: 20, maxExpand: 1000, strict: "ignore", macros: Object.assign({}, macros) }); }
+  catch { throw new TikzError("a node's text KaTeX can't typeset: " + text.slice(0, 60)); }
+  return { html, w: 10 * treeWidth(tree), h: 10 * Math.max(0, tree.height), d: 10 * Math.max(0, tree.depth) };
+}
+const em = (v) => (typeof v === "string" && /em$/.test(v) ? parseFloat(v) || 0 : 0);
+function treeWidth(n, depth = 0) {
+  if (!n || depth > 60) return 0;
+  const cls = n.classes || [];
+  if (cls.includes("katex-mathml")) return 0;
+  const st = n.style || {};
+  let w;
+  if (typeof n.text === "string") {
+    const chars = [...n.text];
+    w = chars.length <= 1 ? n.width || 0 : chars.reduce((a, c) => a + charWidth(c, cls), 0);
+    // (a math letter's box includes its italic correction in TeX, as KaTeX's advance doesn't: errs wide before a subscript)
+    if (cls.includes("mathnormal") && n.italic > 0) w += n.italic;
+  } else {
+    const kids = (n.children || []).map((k) => treeWidth(k, depth + 1));
+    w = cls.includes("vlist") ? Math.max(0, ...kids) : kids.reduce((a, b) => a + b, 0);
+    const reset = cls.find((c) => /^reset-size\d+$/.test(c)), size = cls.find((c) => /^size\d+$/.test(c));
+    if (reset && size) { const f = SIZE_CLASS[+size.slice(4)] / SIZE_CLASS[+reset.slice(10)]; w *= f * (f < 1 ? designWidth(f) : 1); }
+  }
+  if (cls.includes("nulldelimiter")) w += 0.12;
+  w = Math.max(w, em(st.width), em(st.minWidth));
+  return w + em(st.marginLeft) + em(st.marginRight) + em(st.paddingLeft) + em(st.paddingRight);
+}
+// (one character's width in a run KaTeX merged: rendered alone in the run's font, kept)
+function charWidth(c, cls) {
+  if (c === " " || c === "\u00a0") return 0.3333;
+  const fam = ["textbf", "textit", "textsf", "texttt", "mathbf", "mathit"].find((f) => cls.includes(f)) || (cls.includes("mathnormal") ? "mathnormal" : "text");
+  const key = fam + c;
+  let w = CHAR_W.get(key);
+  if (w === undefined) {
+    const esc1 = /[#$%&_{}]/.test(c) ? "\\" + c : c === "\\" ? "\\textbackslash " : c === "^" ? "\\textasciicircum " : c === "~" ? "\\textasciitilde " : c;
+    charWidthRenders.n++;
+    try {
+      const t = renderToHTMLTree(fam === "mathnormal" ? esc1 : "\\" + (fam.startsWith("math") ? fam : fam === "text" ? "text" : fam) + "{" + esc1 + "}", { throwOnError: true, strict: "ignore" });
+      w = treeWidth(t);
+    } catch { w = 0; }
+    if (!(w > 0)) w = 0.6;   // (a character KaTeX has no metrics for: an estimate that errs large)
+    // (every character kept, so each distinct one is typeset once: a picture's are at most its NODE_TEXT; cleared when
+    //  large, between documents' worth)
+    if (CHAR_W.size >= 200000) CHAR_W.clear();
+    CHAR_W.set(key, w);
+  }
+  return w;
+}
+
 // ------------------------------------------------------------------ KaTeX
 const KCACHE = new Map();
+// (an accent before a font command with its own argument, unbraced, \bar\mathbb F: KaTeX refuses it ("Unexpected end
+//  of input in a macro argument"). It comes most often from a macro, \bar\F with \newcommand{\F}{\mathbb F}, which TeX
+//  takes as \bar{\mathbb F} (the macro is the accent's one-token argument) and the preview has expanded before KaTeX;
+//  written out, plain LaTeX takes it too (amsmath refuses it). Braced here, before KaTeX: the font command's argument is
+//  read as TeX reads it, a group or one token, and a font command as that token brings its own (\mathbf\mathit x); the
+//  argument is rewritten in turn (\bar\mathrm{\hat\mathcal O}), at most ACCENT_NEST groups deep, past which it is left
+//  as written. Anything else, and a source TeX would refuse, is left as written)
+const ACCENT_CS = "bar|hat|tilde|vec|dot|ddot|check|breve|acute|grave|mathring|widehat|widetilde|overline|underline";
+const FONT_CS = "mathbb|mathcal|mathrm|mathbf|mathit|mathsf|mathtt|mathfrak|mathscr|boldsymbol|bm|operatorname";
+const ACCENT_FONT = new RegExp("\\\\(" + ACCENT_CS + ")(?![A-Za-z])\\s*\\\\(" + FONT_CS + ")(?![A-Za-z])\\s*", "g");
+const FONT_TOKEN = new RegExp("^\\\\(?:" + FONT_CS + ")(?![A-Za-z])\\s*");
+export const ACCENT_NEST = 16;
+// (the argument starting at j, as TeX reads it, made explicit for KaTeX: [end, its text braced], or null. A group has the
+//  pairs inside it braced in turn; a font command as the token takes its own argument ({\mathit{x}} for \mathit x);
+//  one token otherwise. depth: how many arguments deep, at most ACCENT_NEST)
+function accentArg(src, j, depth) {
+  if (depth > ACCENT_NEST) return null;
+  if (src[j] === "{") {
+    let d = 0;
+    for (let k = j; k < src.length; k++) { const c = src[k]; if (c === "\\") { k++; continue; } if (c === "{") d++; else if (c === "}" && --d === 0) return [k + 1, "{" + braceAccentFonts(src.slice(j + 1, k), depth + 1) + "}"]; }
+    return null;
+  }
+  if (src[j] === "\\") {
+    const f = FONT_TOKEN.exec(src.slice(j));
+    if (f) { const r = accentArg(src, j + f[0].length, depth + 1); return r && [r[0], "{" + f[0].trimEnd() + r[1] + "}"]; }
+    const w = /^\\([A-Za-z]+|.)/.exec(src.slice(j)); return w ? [j + w[0].length, "{" + w[0] + "}"] : null;
+  }
+  if (j >= src.length || /[}\s^_&]/.test(src[j])) return null;
+  const e = j + String.fromCodePoint(src.codePointAt(j)).length;
+  return [e, "{" + src.slice(j, e) + "}"];
+}
+export function braceAccentFonts(src, depth = 0) {
+  if (!src.includes("\\")) return src;
+  const re = new RegExp(ACCENT_FONT.source, "g");
+  let out = "", at = 0, m;
+  while ((m = re.exec(src))) {
+    const r = accentArg(src, m.index + m[0].length, depth);
+    if (!r) continue;
+    out += src.slice(at, m.index) + "\\" + m[1] + "{\\" + m[2] + r[1] + "}";
+    at = r[0]; re.lastIndex = r[0];
+  }
+  return at ? out + src.slice(at) : src;
+}
 function texMath(src, display, macros, macroSig, stats) {
+  src = braceAccentFonts(src);
   const key = (display ? "D" : "I") + macroSig + "\u0000" + src;
   const hit = KCACHE.get(key);
   if (hit !== undefined) { if (hit.includes("katex-error")) { stats.katexErrors++; if (stats.katexErrorSamples.length < 5) stats.katexErrorSamples.push(src.slice(0, 120)); } return hit; }
@@ -232,7 +391,7 @@ const CREF_CAP = { "eq.": "Equation", "eqs.": "Equations", "fig.": "Figure", "fi
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
-  DeclareGraphicsRule: [0, 4], lstdefinelanguage: [1, 1], lstdefinestyle: [0, 2], geometry: [0, 1], usetikzlibrary: [0, 1], tikzset: [0, 1], pgfplotsset: [0, 1],
+  DeclareGraphicsRule: [0, 4], lstdefinelanguage: [1, 1], lstdefinestyle: [0, 2], geometry: [0, 1], usetikzlibrary: [0, 1], pgfplotsset: [0, 1],
   sisetup: [0, 1], captionsetup: [1, 1], setlist: [1, 1], newgeometry: [0, 1], titleformat: [1, 5], titlespacing: [0, 4], fancyhead: [1, 1], fancyfoot: [1, 1],
   fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
   floatstyle: [0, 1], newfloat: [1, 3], floatname: [0, 2], DeclareUnicodeCharacter: [0, 2], colorlet: [0, 2], pdfbookmark: [1, 2],
@@ -245,10 +404,10 @@ class Renderer {
   constructor(opts) {
     this.opts = opts || {};
     this.images = this.opts.images || {}; this.imageRefs = new Set(); this.inputMisses = [];
-    this.cls = "article"; this.book = false; this.clsOpt = "";
+    this.cls = "article"; this.book = false; this.clsOpt = ""; this.nat = null;
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
-    this.frameList = []; this.problems = []; this.lastPos = -1; this.ov = null;
+    this.frameList = []; this.problems = []; this.lastPos = -1; this.lastFile = null; this.ov = null;
     this.ctr = { part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0, paragraph: 0, subparagraph: 0, equation: 0, figure: 0, table: 0, footnote: 0 };
     this.appendix = false;
     this.thmCtr = {}; this.thms = {}; this.thmStyle = "plain"; this.eqWithin = null;
@@ -276,7 +435,9 @@ class Renderer {
     flow.html('<span class="unk" title="not supported in this prototype">\\' + esc(name) + "</span>", st);
   }
 
-  problem(kind, name) { if (!this.inPreamble && this.problems.length < 500) this.problems.push({ kind, name: String(name), at: this.lastPos }); }
+  // (where a problem is: the main file's offset, and, inside an \input file, that file and its line)
+  where() { return this.lastFile ? { at: this.lastPos, file: this.lastFile.file, fline: this.lastFile.line } : { at: this.lastPos }; }
+  problem(kind, name) { if (!this.inPreamble && this.problems.length < 500) this.problems.push({ kind, name: String(name), ...this.where() }); }
 
   // ---- argument readers over a sibling list
   isSp(n) { return n && n.t === "x" && !isCs(n.v) && catOf(n.v) === CAT.SPACE; }
@@ -318,6 +479,16 @@ class Renderer {
     }
     return s;
   }
+  // (a picture's source for tikz.mjs: as str, with its environments kept, so it can name what it doesn't draw: axis, ...)
+  tikzStr(nodes) {
+    let s = "";
+    for (const n of nodes) {
+      if (n.t === "e") s += "\\begin{" + n.env + "}" + this.tikzStr(n.kids) + "\\end{" + n.env + "}";
+      else if (n.t === "g") s += "{" + this.tikzStr(n.kids) + "}";
+      else s += this.str([n]);
+    }
+    return s;
+  }
   inline(nodes, ctx) { const f = new Flow(true); this.walk(nodes, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), f); return f.inlineHtml(); }
 
   // ---- math source from nodes (expanded tokens back to TeX for KaTeX)
@@ -351,7 +522,7 @@ class Renderer {
         case "L": this.label(n.key); break;
         case "R": { const ref = this.resolveRef(n, true); s += "\\text{" + ref.replace(/[\\{}$&#^_%~]/g, "") + "}"; break; }
         case "S": {
-          const st = stateOf(this.sageStates, n.n, n.it);
+          const st = stateOf(this.sageStates, n.n, n.it, this.opts.run);
           this.sageSeen(n.n); this.magmaUsed(n.it);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
           else if (st.s === "stale" && n.it.mode === "sage") this.mathStale ||= staleTitle(st);
@@ -366,6 +537,20 @@ class Renderer {
     return s;
   }
   math(src, display) {
+    // (amsthm's \qedhere: in a proof, the end-of-proof symbol here, and not again at the proof's end. In a display, KaTeX's
+    //  \tag* where it stands, so the symbol is at the right of the very row it is in (an align*'s first, or last, as
+    //  amsthm places it); in a display already numbered or tagged, which can't take a second tag, the symbol stays at the
+    //  proof's end and check says so. After a formula in the text: after it. Outside a proof: nothing. KaTeX never sees
+    //  \qedhere itself)
+    let after = "";
+    if (src.includes("qedhere") && /\\qedhere(?![A-Za-z@])/.test(src)) {
+      const re = /\\qedhere(?![A-Za-z@])/g;
+      if (!this.qed || this.qed.here) src = src.replace(re, "");
+      else if (!display) { src = src.replace(re, ""); this.qed.here = true; after = '<span class="qed">∎</span>'; }
+      else if (/\\(tag|notag|nonumber)(?![A-Za-z@])/.test(src)) { src = src.replace(re, ""); this.problem("not-rendered", "\\qedhere in a numbered display (the end-of-proof symbol is at the proof's end)"); }
+      else { let first = true; src = src.replace(re, () => (first ? ((first = false), "\\tag*{$\\blacksquare$}") : "")); this.qed.here = true; }
+    }
+    if (after) return this.math(src, display) + after;
     const h = texMath(src, display, this.macros, this.macroSig, this.stats);
     if (h.includes("katex-error")) this.problem("math", String(src).slice(0, 120));
     // (a region holding a stale \sage value: the whole of it marked stale, as one value can't be marked inside KaTeX)
@@ -383,6 +568,7 @@ class Renderer {
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       if (n.p !== undefined) { this.lastPos = n.p; if (!flow.inline) flow.pos = n.p; }
+      if (n.fp !== undefined) this.lastFile = n.fp;
       switch (n.t) {
         case "x": i = this.tok(nodes, i, ctx, flow); break;
         case "g": this.walk(n.kids, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), flow); break;
@@ -402,19 +588,19 @@ class Renderer {
           break;
         }
         case "V":
-          if (n.it) { this.sageSeen(n.n); this.magmaUsed(n.it, n.env); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
+          if (n.it) { this.sageSeen(n.n); this.magmaUsed(n.it, n.env); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it, this.opts.run), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
           if (n.env !== "comment" && !n.env.startsWith("filecontents")) flow.block('<pre class="verbatim' + (n.env === "lstlisting" || n.env === "minted" ? " code" : "") + '">' + esc(n.text) + "</pre>"); break;
         case "L": this.label(n.key); break;
         case "R": flow.html(this.refPh(n), ctx.st); break;
-        case "S": this.sageSeen(n.n); this.magmaUsed(n.it); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
+        case "S": this.sageSeen(n.n); this.magmaUsed(n.it); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it, this.opts.run), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
         case "own": this.problem("own", n.name); break;
         case "U": flow.html('<span class="sagechip s-notrun">' + esc(n.msg ?? "\\" + n.name + " is not supported in this preview: not run") + "</span>", ctx.st); break;
         case "Z": Z?.on(n.on); break;
         case "err":
           // (an \input or \include not read: its name and why, never silent; in the preamble too, listed for the page's note)
           if (n.code === "input") {
-            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), at: this.lastPos, why: String(n.text || "") });
+            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), ...this.where(), why: String(n.text || "") });
             if (this.inPreamble) { if (this.inputMisses.length < 50) this.inputMisses.push({ name: String(n.name), why: String(n.text || "") }); }
             else flow.html('<span class="unk errchip" title="\\input or \\include: the file is not in the preview">[input: ' + esc(n.name) + ": " + esc(n.text || "not found") + "]</span>", ctx.st);
             break;
@@ -423,6 +609,9 @@ class Renderer {
           this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
           flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
+        // (natbib's options: numbers (its entries numbered, whatever label BibTeX gave), sort and compress (a citation's
+        //  numbers in order, and a run of three or more as a range))
+        case "natbib": { const o = String(n.opt || "").split(",").map((x) => x.trim()); this.nat = { numbers: o.includes("numbers"), sort: o.includes("sort") || o.includes("sort&compress"), compress: o.includes("compress") || o.includes("sort&compress") }; break; }
         case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = depthOf(n.cls); break;
         default: break;
       }
@@ -592,15 +781,25 @@ class Renderer {
         const b = flow.open("div", ' class="' + env + '"'); this.walk(n.kids, c2, flow); flow.close(b); return;
       }
       case "quote": case "quotation": case "verse": { const b = flow.open("blockquote", ' class="' + env + '"'); this.walk(n.kids, c2, flow); flow.close(b); return; }
-      case "abstract": { const b = flow.open("div", ' class="abstract"', '<div class="abshead">Abstract</div>'); this.walk(n.kids, c2, flow); flow.close(b); return; }
+      case "abstract": {
+        // (in the AMS classes an abstract before \maketitle is printed by it, after the title: here kept, and put in the
+        //  title block if one is printed; otherwise where it was written)
+        if (this.ams() && !this.titleSeen) {
+          const f = new Flow(false), b = f.open("div", ' class="abstract"', '<div class="abshead">Abstract</div>'); this.walk(n.kids, c2, f); f.close(b);
+          (this.abstracts ??= []).push(f.finish().join("")); flow.block("\u0001A" + (this.abstracts.length - 1) + "\u0002"); return;
+        }
+        const b = flow.open("div", ' class="abstract"', '<div class="abshead">Abstract</div>'); this.walk(n.kids, c2, flow); flow.close(b); return;
+      }
       case "proof": {
         let kids = n.kids; let head = "Proof";
         const [o, j] = this.opt(kids, -1); if (o) { head = this.inline(o, ctx); kids = kids.slice(j + 1); }
         const b = flow.open("div", ' class="proof"');
         flow.html('<span class="proofhead">' + head + ".</span> ", c2.st);
-        this.walk(kids, c2, flow);
-        flow.ensure(c2.st);
-        flow.html('<span class="qed">∎</span>', c2.st);
+        // (\qedhere inside puts the symbol where it is, and then it isn't put at the end too: math(), qedhere)
+        const outer = this.qed; this.qed = { here: false };
+        let here = false;
+        try { this.walk(kids, c2, flow); } finally { here = this.qed.here; this.qed = outer; }
+        if (!here) { flow.ensure(c2.st); flow.html('<span class="qed">∎</span>', c2.st); }
         flow.close(b); return;
       }
       case "multicols": case "multicols*": {
@@ -637,7 +836,18 @@ class Renderer {
         if (env === "itshape") c2.st.i = true; if (env === "bfseries") c2.st.b = true; if (Object.hasOwn(SIZES, env)) c2.st.size = SIZES[env];
         const b = flow.open("div", ' class="env-' + esc(env) + '"'); this.walk(n.kids, c2, flow); flow.close(b); return;
       }
-      case "tikzpicture": case "tikzcd": case "axis": case "pspicture": {
+      case "tikzpicture": {
+        // (TikZ's drawing: tikz.mjs: paths, styles, transforms, \foreach; what it doesn't draw, a placeholder
+        //  naming it, and check's problem says it)
+        try { flow.html(renderTikz(this.tikzStr(n.kids), { styles: this.tikzStyles || "", label: (t, f) => tikzLabel(t, f, this.macros, this.macroSig, this.stats) }, this), c2.st); }
+        catch (e) {
+          if (!(e instanceof TikzError)) throw e;
+          this.problem("not-rendered", "tikzpicture (" + e.why + ")");
+          flow.block('<div class="placeholder">[tikzpicture: ' + esc(e.why) + "]</div>");
+        }
+        return;
+      }
+      case "tikzcd": case "axis": case "pspicture": {
         this.problem("not-rendered", env);
         flow.block('<div class="placeholder">[' + esc(env) + ": not rendered in this prototype]</div>"); return;
       }
@@ -731,6 +941,12 @@ class Renderer {
     // (beamer: itemize[<+->] gives every item that spec, an item's own <..> instead)
     let lead = kids.slice(0, first), dflt = null;
     if (this.ov) { const [o, oj] = this.opt(lead, -1); if (o && this.isChar(o[0], 60)) { dflt = this.str(o).trim().replace(/^<|>$/g, ""); lead = lead.slice(oj + 1); } }
+    // (enumitem's options: read, not shown; label= and ref= give each item's label and what \ref names it by)
+    let eo = null;
+    if (dflt === null) { const [o, oj] = this.opt(lead, -1); if (o && !this.isChar(o[0], 60)) { eo = enumitemOpts(this.str(o)); if (eo) lead = lead.slice(oj + 1); } }
+    const tpl = eo ? eo.label ?? eo["label*"] ?? null : null;
+    L.refTpl = eo?.ref ?? tpl;
+    if (eo && kind === "enum" && eo.start !== undefined && /^\s*-?\d+\s*$/.test(eo.start)) L.n = parseInt(eo.start, 10) - 1;
     this.walk(lead, ctx, flow);
     i = first;
     while (i < kids.length) {
@@ -746,10 +962,17 @@ class Renderer {
         const nums = this.lists.filter((x) => x.kind === "enum").map((x) => x.n);
         const d = depth;
         lbl = d === 1 ? nums[0] + "." : d === 2 ? "(" + alph(nums[1]) + ")" : d === 3 ? roman(nums[2]) + "." : Alph(nums[3]) + ".";
-        const ref = nums[0] + (d >= 2 ? (d === 2 ? alph(nums[1]) : "(" + alph(nums[1]) + ")") : "") + (d >= 3 ? roman(nums[2]) : "") + (d >= 4 ? Alph(nums[3]) : "");
         lbl = esc(lbl);
-        this.setTarget(ref, "", "item");
-      } else if (kind === "item") lbl = ["•", "–", "∗", "·"][Math.min(depth, 4) - 1];
+        if (tpl !== null) { lbl = this.labelHtml(labelFill(tpl, L.n), false); }
+        // (what \ref gives, as LaTeX composes it, \p@enumN\theenumN: each level's \theenum is enumitem's ref= or
+        //  label= filled in, else LaTeX's own (1, a, i, A); the prefix is LaTeX's, from the levels above: none, then
+        //  \theenumi, then \theenumi(\theenumii), then that and \theenumiii. So T1) above a default list's (a) above i
+        //  gives T1)(a)i, and T1) above Sa) above i gives T1)(Sa))i, as pdflatex with enumitem does)
+        const t = this.lists.filter((x) => x.kind === "enum").map((x) => this.theOf(x));
+        const pre = d === 1 ? "" : d === 2 ? t[0] : t[0] + "(" + t[1] + ")" + (d >= 4 ? t[2] : "");
+        // (an item of a list with its own label= or ref= is that alone, as enumitem gives it: Sa), not T1)Sa))
+        this.setTarget(L.refTpl != null ? t[t.length - 1] : pre + t[t.length - 1], "", "item");
+      } else if (kind === "item") lbl = tpl !== null ? this.labelHtml(tpl, false) : ["•", "–", "∗", "·"][Math.min(depth, 4) - 1];
       else lbl = "";
       const id = this.nid("it"); if (kind === "enum" && !o) this.target.id = id;
       L.li = flow.open("li", ' id="' + id + '"' + (spec ? ' class="ov" data-ov="' + esc(spec) + '" data-ovm="uncover"' : ""), kind === "desc" ? (lbl ? '<span class="dlabel">' + lbl + "</span> " : "") : '<span class="lbl">' + lbl + "</span>");
@@ -834,17 +1057,24 @@ class Renderer {
   }
   arrayEnv(n, ctx, flow) { flow.html(this.math("\\begin{array}" + this.mathStr(n.kids) + "\\end{array}", false), ctx.st); }
   bibliography(n, ctx, flow) {
-    const [, j] = this.arg(n.kids, -1);
+    const [w, j] = this.arg(n.kids, -1);
     const kids = n.kids.slice(j + 1);
     flow.block('<h2 class="bibhead">' + (this.book ? "Bibliography" : "References") + "</h2>");
     const b = flow.open("ol", ' class="bib"');
-    let li = null;
+    // (the labels' column as wide as the widest label, or the {widest} argument's, as LaTeX sizes it: the page's 2.6em
+    //  unless a label needs more, as [BM03] does)
+    let li = null, widest = labelEm(this.str(w).trim());
     for (let i = 0; i < kids.length; i++) {
       if (this.csName(kids[i]) === "bibitem") {
         const [o, j1] = this.opt(kids, i); const [k, j2] = this.arg(kids, j1);
         if (li) flow.close(li);
-        const key = this.str(k).trim(); const num = ++this.bibN; const lab = o ? this.inline(o, ctx) : String(num);
-        this.bib.set(key, { lab, id: "bib-" + num });
+        // (under natbib's numbers, an entry is its number whatever label BibTeX gave it, "Knuth(1984)": the label's
+        //  author, before its "(", is what \citet names)
+        const key = this.str(k).trim(); const num = ++this.bibN, nn = !!this.nat?.numbers;
+        const lab = o && !nn ? this.inline(o, ctx) : String(num);
+        widest = Math.max(widest, labelEm(o && !nn ? this.str(o) : String(num)));
+        const who = nn && o ? this.inline(o, ctx).replace(/\(.*$/, "").trim() : "";
+        this.bib.set(key, { lab, id: "bib-" + num, num, who });
         li = flow.open("li", ' id="bib-' + num + '"', '<span class="biblab">[' + lab + "]</span> ");
         i = j2; continue;
       }
@@ -852,6 +1082,7 @@ class Renderer {
       this.walk(kids.slice(start, end), ctx, flow); i = end - 1;
     }
     if (li) flow.close(li);
+    if (widest > 2.6) b.attrs += ' style="padding-left:' + widest.toFixed(2) + 'em"';
     flow.close(b);
   }
 
@@ -861,10 +1092,60 @@ class Renderer {
     flow.html(P.render(), ctx.st);
   }
 
+  ams() { return /^ams(art|book|proc)$/.test(this.cls || ""); }
+  authorInfo(nodes, i, ctx, kind) {
+    const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0);
+    (this.meta.info ??= []).push({ who: this.meta.authN ?? 0, kind, h: this.inline(a, ctx) });
+    return j;
+  }
+  // (the authors' addresses as amsart prints them, after everything else: each author's, in the order given)
+  authorInfoHtml() {
+    const info = this.meta.info || []; if (!info.length) return "";
+    const LAB = { curraddr: "Current address", email: "Email address", urladdr: "URL" };
+    const by = new Map(); for (const x of info) { if (!by.has(x.who)) by.set(x.who, []); by.get(x.who).push(x); }
+    // (each author's in amsart's order, whatever the source's: address, current address, email, URL)
+    const ORDER = { address: 0, curraddr: 1, email: 2, urladdr: 3 };
+    for (const xs of by.values()) xs.sort((a, b) => ORDER[a.kind] - ORDER[b.kind]);
+    return '<div class="amsaddr">' + [...by.values()].map((xs) => '<div class="p">' + xs.map((x) => x.kind === "address" ? '<span style="font-variant:small-caps">' + x.h + "</span>" : "<i>" + LAB[x.kind] + "</i>: " + x.h).join("<br>") + "</div>").join("") + "</div>";
+  }
+  amsShort(nodes, i) { return this.ams() ? this.opt(nodes, i) : [null, i]; }
+  // (a list's \theenumN for its item now: enumitem's ref= or label= filled in, else LaTeX's own for its depth)
+  theOf(X) { return X.refTpl != null ? this.labelHtml(labelFill(X.refTpl, X.n), true) : X.depth === 1 ? String(X.n) : X.depth === 2 ? alph(X.n) : X.depth === 3 ? roman(X.n) : Alph(X.n); }
+  // (a list label from enumitem's template, its number put in: the shape switches \textup, \upshape, \normalfont and the
+  //  like dropped, \textbf and \textit or \emph kept, the rest as a citation's note is typeset; plain: the text alone)
+  labelHtml(t, plain) {
+    t = t.replace(/\\(?:upshape|normalfont|rmfamily|mdseries|itshape|bfseries|scshape|small|footnotesize)(?![A-Za-z]) */g, "").replace(/\\(?:textup|textnormal|textrm|textmd) *\{([^{}]*)\}/g, "$1");
+    const parts = t.split(/(\\(?:textbf|textit|emph) *\{[^{}]*\})/);
+    return parts.map((p) => {
+      const m = /^\\(textbf|textit|emph) *\{([^{}]*)\}$/.exec(p);
+      if (!m) return this.noteHtml(p, plain);
+      const inner = this.noteHtml(m[2], plain);
+      return plain ? inner : (m[1] === "textbf" ? "<b>" + inner + "</b>" : "<i>" + inner + "</i>");
+    }).join("");
+  }
+  // (a citation's note, \cite[\S B]{key}: its text with TeX's text symbols, ties and dashes, its $...$ as math)
+  noteHtml(s, plain) {
+    let out = "";
+    const parts = String(s).split(/(\$[^$]*\$)/);
+    for (const p of parts) {
+      if (/^\$[^$]*\$$/.test(p)) { out += plain ? p.slice(1, -1) : this.math(p.slice(1, -1), false); continue; }
+      const t = p.replace(/\\([A-Za-z]+) ?|\\(.)|[{}]|~/g, (m, name, sym) => {
+        if (m === "~") return "\u00a0";
+        if (m === "{" || m === "}") return "";
+        const k = name ?? sym;
+        return Object.hasOwn(TEXT_SYMBOLS, k) ? TEXT_SYMBOLS[k] : m;
+      });
+      out += plain ? typo(t) : esc(typo(t));
+    }
+    return out;
+  }
   resolveRef(r, plain) {
+    // (a starred reference, \ref*{key}: the same text, without its link)
+    if (r.star && !plain) return this.resolveRef(Object.assign({}, r, { star: false }), false).replace(/<a\b[^>]*>|<\/a>/g, "");
+    if ((r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") && this.nat?.numbers) return this.natCite(r, plain);
     if (r.cmd === "cite" || r.cmd === "citep" || r.cmd === "citet") {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });
-      return "[" + parts.join(", ") + (r.opt ? ", " + esc(r.opt) : "") + "]";
+      return "[" + parts.join(", ") + (r.opt ? ", " + this.noteHtml(r.opt, plain) : "") + "]";
     }
     if (r.cmd === "cref" || r.cmd === "Cref") return this.cref(r, plain);
     const L = this.labels.get(r.key);
@@ -887,6 +1168,27 @@ class Renderer {
     }
     if (plain) return txt;
     return L.id ? '<a class="ref" href="#' + L.id + '">' + esc(txt) + "</a>" : esc(txt);
+  }
+  // (natbib's numbers, as TeX Live's natbib sets them: [3, 1] in the order given; with sort, in order; with compress, a
+  //  run of three or more as a range, [1–3] (two stay [1, 2]); a missing key as "?"; \citet as each entry's author then
+  //  its number, "Ann [1]"; a note last, inside the brackets)
+  natCite(r, plain) {
+    const link = (b) => (plain ? String(b.num) : '<a href="#' + b.id + '">' + b.num + "</a>");
+    const note = r.opt ? ", " + this.noteHtml(r.opt, plain) : "";
+    const keys = r.key.split(",").map((k) => k.trim()).filter(Boolean);
+    const miss = (k) => (plain ? "?" : '<span class="missing">' + esc(k) + "</span>");
+    if (r.cmd === "citet") return keys.map((k, n) => { const b = this.bib.get(k); if (!b) return miss(k); const w = plain ? b.who.replace(/<[^>]*>/g, "") : b.who; return (w ? w + " " : "") + "[" + link(b) + (n === keys.length - 1 ? note : "") + "]"; }).join(", ");
+    const found = keys.map((k) => ({ k, b: this.bib.get(k) }));
+    if (this.nat.sort) found.sort((x, y) => (x.b ? x.b.num : Infinity) - (y.b ? y.b.num : Infinity));
+    const out = [];
+    for (let i = 0; i < found.length; i++) {
+      const { k, b } = found[i];
+      if (!b) { out.push(miss(k)); continue; }
+      let j = i;
+      if (this.nat.compress) while (j + 1 < found.length && found[j + 1].b && found[j + 1].b.num === found[j].b.num + 1) j++;
+      if (j - i >= 2) { out.push(link(b) + "\u2013" + link(found[j].b)); i = j; } else out.push(link(b));
+    }
+    return "[" + out.join(", ") + note + "]";
   }
   // (a label's \nameref text: its title with the references in it resolved, as text (no link inside the link): the final
   //  pass replaces each placeholder once, so one \nameref brings in is resolved here (daybreak3, #682); null if the title
@@ -982,9 +1284,10 @@ class Renderer {
   titleHtml() {
     const m = this.meta;
     if (!m.title && !m.author) return "";
-    const date = m.date !== null ? m.date : esc(new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }));
+    const date = m.date !== null ? m.date : this.ams() ? "" : esc(new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }));
+    const notes = (m.subjclass ? "<div><i>" + m.subjclass.year + " Mathematics Subject Classification.</i> " + m.subjclass.h + "</div>" : "") + (m.keywords ? "<div><i>Key words and phrases.</i> " + m.keywords + "</div>" : "");
     return '<div class="titleblock">' + (m.title ? '<div class="title">' + m.title + "</div>" : "") + (m.author ? '<div class="author">' + m.author + "</div>" : "") + (m.institute ? '<div class="institute">' + m.institute + "</div>" : "") + (date ? '<div class="date">' + date + "</div>" : "") +
-      (m.thanks.length ? '<div class="thanks">' + m.thanks.map((t) => "<div>* " + t + "</div>").join("") + "</div>" : "") + "</div>";
+      (m.thanks.length || notes ? '<div class="thanks">' + m.thanks.map((t) => "<div>* " + t + "</div>").join("") + notes + "</div>" : "") + "</div>" + (this.absInTitle || "");
   }
 
   run(events, I) {
@@ -1023,9 +1326,14 @@ class Renderer {
     if (hidden.length) this.chunkPos.unshift(-1);
     if (hidden.length) chunks.unshift('<div class="sagestate"><span class="sagechip s-error">' + esc(hidden.length + (hidden.some(isNonSage) ? " code item" : " Sage code item") + (hidden.length === 1 ? "" : "s") + " can't be run: " + whyRejected({ err: "hidden" })) + "</span></div>");
     // resolve references, the table of contents and the title block
+    // (the AMS classes' abstracts written before \maketitle: in the title block when it is printed, else where written;
+    //  the authors' addresses at the end)
+    const titled = chunks.some((c) => c.includes("\u0001TITLE\u0002")) && (this.meta.title || this.meta.author);
+    this.absInTitle = titled ? (this.abstracts || []).join("") : "";
+    if (this.ams() && this.meta.info?.length) { chunks.push(this.authorInfoHtml()); this.chunkPos.push(-1); }
     const toc = this.tocHtml(), title = this.titleHtml();
     // eslint-disable-next-line no-control-regex
-    chunks = chunks.map((c) => c.replace(/\u0001TOC\u0002/g, () => toc).replace(/\u0001TITLE\u0002/g, () => title).replace(/\u0001R(\d+)\u0002/g, (_, k) => this.resolveRef(this.refs[+k], false))
+    chunks = chunks.map((c) => c.replace(/\u0001A(\d+)\u0002/g, (_, k) => (titled ? "" : this.abstracts[+k])).replace(/\u0001TOC\u0002/g, () => toc).replace(/\u0001TITLE\u0002/g, () => title).replace(/\u0001R(\d+)\u0002/g, (_, k) => this.resolveRef(this.refs[+k], false))
       // (beamer's headline (h), footline (f) or sidebar (s) of frame k: engine/beamer.mjs, once every section is known)
       .replace(/\u0001B([hfs])(\d+)\u0002/g, (_, w, k) => this.furnish(w, +k)));
     return chunks;
@@ -1064,14 +1372,30 @@ const CMDS = {
   LaTeXe: function (nodes, i, ctx, flow) { flow.html('<span class="latex">L<span class="a">a</span>T<span class="e">e</span>X&thinsp;2<sub>&epsilon;</sub></span>', ctx.st); return i; },
   TeX: function (nodes, i, ctx, flow) { flow.html('<span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
   BibTeX: function (nodes, i, ctx, flow) { flow.html('<span class="sc">Bib</span><span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
-  title: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); [this.meta.title, this.metaSage.title] = this.captured(() => this.inline(a, ctx)); return j; },
+  // (\title[short]{long} and \author[short]{long} in the AMS classes, amsart's: the short form is for running heads,
+  //  not shown. In the article class TeX reads the [ as the argument, as here; this handling is the AMS classes' only)
+  title: function (nodes, i, ctx) { const [, j0] = this.amsShort(nodes, i); const [a, j] = this.arg(nodes, j0); [this.meta.title, this.metaSage.title] = this.captured(() => this.inline(a, ctx)); return j; },
   author: function (nodes, i, ctx) {
-    const [a, j] = this.arg(nodes, i);
+    const [, j0] = this.amsShort(nodes, i);
+    const [a, j] = this.arg(nodes, j0);
     const parts = [[]]; for (const x of a) { if (this.csName(x) === "and") parts.push([]); else parts[parts.length - 1].push(x); }
-    [this.meta.author, this.metaSage.author] = this.captured(() => parts.map((p) => '<span class="auth">' + this.inline(p, ctx) + "</span>").join("")); return j;
+    const [h, keys] = this.captured(() => parts.map((p) => '<span class="auth">' + this.inline(p, ctx) + "</span>").join(""));
+    // (in the AMS classes each \author adds one, as amsart's do; in the article class the last one is the author, as TeX's is)
+    if (this.ams() && this.meta.author) { this.meta.author += h; this.metaSage.author = [...this.metaSage.author, ...keys]; }
+    else { this.meta.author = h; this.metaSage.author = keys; }
+    this.meta.authN = (this.ams() ? this.meta.authN ?? 0 : 0) + 1;
+    return j;
   },
+  // (amsart's author data: printed at the article's end, by the author it follows; \keywords and \subjclass, the
+  //  first page's notes)
+  address: function (nodes, i, ctx) { return this.authorInfo(nodes, i, ctx, "address"); },
+  curraddr: function (nodes, i, ctx) { return this.authorInfo(nodes, i, ctx, "curraddr"); },
+  email: function (nodes, i, ctx) { return this.authorInfo(nodes, i, ctx, "email"); },
+  urladdr: function (nodes, i, ctx) { return this.authorInfo(nodes, i, ctx, "urladdr"); },
+  keywords: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); this.meta.keywords = this.inline(a, ctx); return j; },
+  subjclass: function (nodes, i, ctx) { const [o, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); this.meta.subjclass = { year: o ? esc(this.str(o).trim()) : "2020", h: this.inline(a, ctx) }; return j; },
   date: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); [this.meta.date, this.metaSage.date] = this.captured(() => this.inline(a, ctx)); return j; },
-  maketitle: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },
+  maketitle: function (nodes, i, ctx, flow) { this.titleSeen = true; flow.block("\u0001TITLE\u0002"); return i; },
   titlepage: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },   // (beamer's title frame)
   alert: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="alert">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   structure: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="structure">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
@@ -1151,6 +1475,9 @@ const CMDS = {
   //  line where it does. \newpage, \clearpage: the paragraph ends, then the page. \pagebreak in a paragraph: the page
   //  breaks after it, the paragraph kept whole (TeX: after its line); [n] below 4 is only a hint: nothing. Within an
   //  inline flow (a box): nothing. A beamer frame's: none (style.ts))
+  // (amsthm's \qedhere in a proof's text or list: the end-of-proof symbol here, not again at the proof's end; outside a
+  //  proof, nothing. In math: math())
+  qedhere: function (nodes, i, ctx, flow) { if (this.qed && !this.qed.here) { this.qed.here = true; flow.html('<span class="qed">∎</span>', ctx.st); } return i; },
   newpage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },
   clearpage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },
   cleardoublepage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },
@@ -1166,6 +1493,8 @@ const CMDS = {
   color: function (nodes, i, ctx) { const [o, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); const c = this.colorOf(this.str(a).trim(), o ? this.str(o) : null); if (c) ctx.st.color = c; return j; },
   textcolor: function (nodes, i, ctx, flow) { const [o, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); const [b, j2] = this.arg(nodes, j); const c = this.colorOf(this.str(a).trim(), o ? this.str(o) : null); const c2 = Object.assign({}, ctx, { st: Object.assign({}, ctx.st, c ? { color: c } : {}) }); this.walk(b, c2, flow); return j2; },
   colorbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const [b, j2] = this.arg(nodes, j); const c = this.colorOf(this.str(a).trim(), null); flow.html('<span class="cbox"' + (c ? ' style="background:' + c + '"' : "") + ">" + this.inline(b, ctx) + "</span>", ctx.st); return j2; },
+  // (TikZ's styles for the document's pictures, kept for tikz.mjs; at most TIKZ_LIMITS.TIKZSET bytes of them, in UTF-8)
+  tikzset: function (nodes, i) { const [a, j] = this.arg(nodes, i); const t = this.str(a); const n = (this.tikzStyles ? this.tikzBytes + 1 : 0) + utf8Len(t); if (n <= TIKZ_LIMITS.TIKZSET) { this.tikzStyles = (this.tikzStyles ? this.tikzStyles + "," : "") + t; this.tikzBytes = n; } else this.problem("not-rendered", "\\tikzset past " + TIKZ_LIMITS.TIKZSET / 1024 + " KiB"); return j; },
   definecolor: function (nodes, i) { const [a, j] = this.arg(nodes, i); const [m, j2] = this.arg(nodes, j); const [v, j3] = this.arg(nodes, j2); const c = this.parseColor(this.str(m).trim(), this.str(v)); if (c) this.colors[this.str(a).trim()] = c; return j3; },
   newtheorem: function (nodes, i, ctx) {
     const [star, j0] = this.star(nodes, i);

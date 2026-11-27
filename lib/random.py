@@ -3,7 +3,8 @@ sequences match CPython exactly."""
 
 import _random
 
-__all__ = ["Random", "seed", "random", "getrandbits", "randrange", "randint", "choice", "shuffle", "uniform", "sample", "gauss", "choices"]
+__all__ = ["Random", "seed", "random", "getrandbits", "randbytes", "randrange", "randint", "choice", "shuffle", "uniform", "sample",
+           "gauss", "choices"]
 
 
 def _cell_entropy():
@@ -18,13 +19,36 @@ def _cell_entropy():
     return (s[0] << 32) + s[2][0]
 
 
+def _seed_value(a, version):
+    # (CPython's Random.seed: a str, bytes or bytearray seeds by all its bits, int.from_bytes(a + sha512(a)) (version
+    # 2, the default), or by the older string hash (version 1); an int, a float and None go to the generator as
+    # they are; anything else is refused)
+    if version == 1 and isinstance(a, (str, bytes)):
+        a = a.decode("latin-1") if isinstance(a, bytes) else a
+        x = ord(a[0]) << 7 if a else 0
+        for c in map(ord, a):
+            x = ((1000003 * x) ^ c) & 0xFFFFFFFFFFFFFFFF
+        x ^= len(a)
+        a = -2 if x == -1 else x
+    elif version == 2 and isinstance(a, (str, bytes, bytearray)):
+        from hashlib import sha512
+        if isinstance(a, str):
+            a = a.encode()
+        a = int.from_bytes(a + sha512(a).digest())
+    elif not isinstance(a, (type(None), int, float, str, bytes, bytearray)):
+        raise TypeError("The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.")
+    return a
+
+
 class Random:
     def __init__(self, x=None):
-        self._r = _random.Random(_cell_entropy() if x is None else x)
+        # (seeded by self.seed, as CPython's: a subclass's own seed runs; then gauss_next cleared, whatever it did)
+        self._r = _random.Random(0)
+        self.seed(x)
         self.gauss_next = None
 
-    def seed(self, a=None):
-        self._r.seed(_cell_entropy() if a is None else a)
+    def seed(self, a=None, version=2):
+        self._r.seed(_cell_entropy() if a is None else _seed_value(a, version))
         self.gauss_next = None
 
     def random(self):
@@ -32,6 +56,10 @@ class Random:
 
     def getrandbits(self, k):
         return self._r.getrandbits(k)
+
+    def randbytes(self, n):
+        """Generate n random bytes."""
+        return self._r.getrandbits(n * 8).to_bytes(n, "little")
 
     def _randbelow(self, n):
         k = n.bit_length()
@@ -136,6 +164,7 @@ _inst = Random(_cell_seed())
 seed = _inst.seed
 random = _inst.random
 getrandbits = _inst.getrandbits
+randbytes = _inst.randbytes
 randrange = _inst.randrange
 randint = _inst.randint
 choice = _inst.choice

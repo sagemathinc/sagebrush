@@ -2,9 +2,11 @@
 // desktop: started by the page (engine_start), which then sends it frames
 // (engine_send) and receives its frames on a channel, in order.  This side
 // only carries frames: their length is checked, their content is the page's
-// and the engine's (app/engine/frames.mjs).  One engine for the app; starting
-// it again (a reloaded page) ends the one before.  When it ends, the page is
-// told with one last message of this side's own, {"engineExit": why}.
+// and the engine's (app/engine/frames.mjs).  One engine per window (#1541): each
+// command acts on the engine of the window that asks, by its label, never on
+// another's; starting it again (a reloaded page) ends that window's one before,
+// and a window that closes ends its own.  When an engine ends, its page is told
+// with one last message of this side's own, {"engineExit": why}.
 //
 // What may wait, both ways, is bounded:
 // - to the engine: engine_send only queues the frame (it never blocks the app
@@ -26,11 +28,15 @@
 // refused) and is charged its payload and its 4-byte length; at most ITEMS_MAX
 // frames wait for the writer.
 //
-// Which engine: SAGEBRUSH_APP_ENGINE, the engine's main.mjs, run by Node
-// (SAGEBRUSH_APP_ENGINE_NODE, or `node` on the PATH) with
-// SAGEBRUSH_APP_ENGINE_ROOT as its root (the page's worker and its files).
-// Without them there is no engine, and the page runs Python as before.
-use std::collections::VecDeque;
+// Which engine:
+// - SAGEBRUSH_APP_ENGINE=off: none (the page runs Python itself, as before);
+// - SAGEBRUSH_APP_ENGINE=<main.mjs>: that engine, run by Node
+//   (SAGEBRUSH_APP_ENGINE_NODE, or `node` on the PATH) with
+//   SAGEBRUSH_APP_ENGINE_ROOT as its root (development, tests);
+// - otherwise, on macOS and Linux, the one the app ships (app/engine/bundle.mjs):
+//   its Node beside the app's executable (externalBin), the engine and its root
+//   in the app's resources; where the app has none, none.
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
@@ -127,27 +133,61 @@ struct Running {
     window: Arc<Shared<Window>>,
 }
 
+/// Each window's engine, by the window's label (#1541: a second window never touches the first's interpreters).
 #[derive(Default)]
-pub struct Engine(Mutex<Option<Running>>);
+pub struct Engine(Mutex<HashMap<String, Running>>);
+
+/// Ends one engine: the writer stops and closes the engine's stdin (the engine stops its interpreters and exits by
+/// itself; the kill is for one that doesn't); the reader, if waiting for the page, is released.
+fn end(mut r: Running) {
+    r.send.state.lock().unwrap().close();
+    r.send.cv.notify_all();
+    r.window.state.lock().unwrap().closed = true;
+    r.window.cv.notify_all();
+    let _ = r.child.kill();
+    let _ = r.child.wait();
+}
 
 impl Engine {
-    /// Ends the engine, if one runs (the app is quitting, or a new one starts).
+    /// Ends every window's engine (the app is quitting).
     pub fn stop(&self) {
-        if let Some(mut r) = self.0.lock().unwrap().take() {
-            // (the writer stops and closes the engine's stdin: the engine stops its interpreters and exits by itself;
-            // the kill is for one that doesn't; the reader, if waiting for the page, is released)
-            r.send.state.lock().unwrap().close();
-            r.send.cv.notify_all();
-            r.window.state.lock().unwrap().closed = true;
+        // (taken out of the map first: no lock held while an engine is waited for)
+        let all: Vec<Running> = self.0.lock().unwrap().drain().map(|(_, r)| r).collect();
+        all.into_iter().for_each(end);
+    }
+    /// A frame for window `label`'s engine, and only its: none running for that window is an error, whatever other
+    /// windows run.
+    pub fn send_for(&self, label: &str, payload: Vec<u8>, urgent: bool) -> Result<(), String> {
+        let guard = self.0.lock().unwrap();
+        let r = guard.get(label).ok_or("no engine is running")?;
+        r.send.state.lock().unwrap().push(payload, urgent)?;
+        r.send.cv.notify_all();
+        Ok(())
+    }
+    /// Window `label`'s page has taken `bytes` more of what its engine gave it (no other window's count changes).
+    pub fn ack_for(&self, label: &str, bytes: usize) {
+        if let Some(r) = self.0.lock().unwrap().get(label) {
+            r.window.state.lock().unwrap().ack(bytes);
             r.window.cv.notify_all();
-            let _ = r.child.kill();
-            let _ = r.child.wait();
+        }
+    }
+    /// Ends the engine of window `label`, if it has one (its window closed, or it starts a new one).
+    pub fn stop_window(&self, label: &str) {
+        let r = self.0.lock().unwrap().remove(label);
+        if let Some(r) = r {
+            end(r);
         }
     }
 }
 
-fn command() -> Option<Command> {
-    let main = std::env::var_os("SAGEBRUSH_APP_ENGINE").filter(|s| !s.is_empty())?;
+fn command(app: &tauri::AppHandle) -> Option<Command> {
+    let main = std::env::var_os("SAGEBRUSH_APP_ENGINE").filter(|s| !s.is_empty());
+    if main.as_deref() == Some(std::ffi::OsStr::new("off")) {
+        return None;
+    }
+    let Some(main) = main else {
+        return shipped(app);
+    };
     let root = std::env::var_os("SAGEBRUSH_APP_ENGINE_ROOT").filter(|s| !s.is_empty())?;
     let node = std::env::var_os("SAGEBRUSH_APP_ENGINE_NODE")
         .filter(|s| !s.is_empty())
@@ -155,6 +195,28 @@ fn command() -> Option<Command> {
     let mut c = Command::new(node);
     c.arg(main).arg("--stdio").arg("--root").arg(root);
     Some(c)
+}
+
+/// The engine the app ships, if it has one.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn shipped(app: &tauri::AppHandle) -> Option<Command> {
+    use tauri::Manager;
+    let node = crate::agent_host::shipped_node()?;
+    let engine = app.path().resource_dir().ok()?.join("engine");
+    if !node.is_file() || !engine.join("main.mjs").is_file() {
+        return None;
+    }
+    let mut c = Command::new(node);
+    c.arg(engine.join("main.mjs"))
+        .arg("--stdio")
+        .arg("--root")
+        .arg(engine.join("root"));
+    Some(c)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn shipped(_app: &tauri::AppHandle) -> Option<Command> {
+    None
 }
 
 /// A message of this side's own, as app/engine/frames.mjs encodes one: its JSON's length, then the JSON.
@@ -240,24 +302,32 @@ fn spawn_engine(mut cmd: Command, deliver: impl Fn(Vec<u8>) -> bool + Send + 'st
     Ok(Running { child, send, window })
 }
 
-/// Starts the engine (ending one already running); false if this app has none.
+/// Starts the asking window's engine (ending that window's one already running); false if this app has none.
 #[tauri::command]
 pub fn engine_start(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
     state: tauri::State<Engine>,
     on_frame: Channel<InvokeResponseBody>,
 ) -> Result<bool, String> {
-    state.stop();
-    let Some(cmd) = command() else {
+    let label = webview.label().to_string();
+    state.stop_window(&label);
+    let Some(cmd) = command(&app) else {
         return Ok(false);
     };
     let running = spawn_engine(cmd, move |p| on_frame.send(InvokeResponseBody::Raw(p)).is_ok())?;
-    *state.0.lock().unwrap() = Some(running);
+    // (a start racing another of the same window: the later one stays, the earlier ended)
+    let before = state.0.lock().unwrap().insert(label, running);
+    if let Some(r) = before {
+        end(r);
+    }
     Ok(true)
 }
 
-/// One frame's payload, the request's raw body, queued for the engine; urgent with a Sagebrush-Urgent header.
+/// One frame's payload, the request's raw body, queued for the asking window's engine; urgent with a Sagebrush-Urgent
+/// header.
 #[tauri::command]
-pub fn engine_send(state: tauri::State<Engine>, request: Request) -> Result<(), String> {
+pub fn engine_send(webview: tauri::Webview, state: tauri::State<Engine>, request: Request) -> Result<(), String> {
     let InvokeBody::Raw(payload) = request.body() else {
         return Err("a frame is sent as bytes".into());
     };
@@ -265,26 +335,19 @@ pub fn engine_send(state: tauri::State<Engine>, request: Request) -> Result<(), 
         return Err("a frame past the limit".into());
     }
     let urgent = request.headers().get("sagebrush-urgent").is_some();
-    let guard = state.0.lock().unwrap();
-    let r = guard.as_ref().ok_or("no engine is running")?;
-    r.send.state.lock().unwrap().push(payload.clone(), urgent)?;
-    r.send.cv.notify_all();
-    Ok(())
+    state.send_for(webview.label(), payload.clone(), urgent)
 }
 
-/// The page has taken `bytes` more of what it was given.
+/// The asking window's page has taken `bytes` more of what its engine gave it.
 #[tauri::command]
-pub fn engine_ack(state: tauri::State<Engine>, bytes: usize) {
-    if let Some(r) = state.0.lock().unwrap().as_ref() {
-        r.window.state.lock().unwrap().ack(bytes);
-        r.window.cv.notify_all();
-    }
+pub fn engine_ack(webview: tauri::Webview, state: tauri::State<Engine>, bytes: usize) {
+    state.ack_for(webview.label(), bytes);
 }
 
-/// Ends the engine.
+/// Ends the asking window's engine.
 #[tauri::command]
-pub fn engine_stop(state: tauri::State<Engine>) {
-    state.stop();
+pub fn engine_stop(webview: tauri::Webview, state: tauri::State<Engine>) {
+    state.stop_window(webview.label());
 }
 
 #[cfg(test)]
@@ -364,7 +427,7 @@ mod tests {
         assert_eq!(got.len(), 1, "only the engine's end is passed on");
         assert!(String::from_utf8_lossy(&got[0]).contains("shorter than a message"));
         let e = Engine::default();
-        *e.0.lock().unwrap() = Some(r);
+        e.0.lock().unwrap().insert("main".into(), r);
         e.stop();
     }
 
@@ -384,12 +447,55 @@ mod tests {
         send.cv.notify_all();
         std::thread::sleep(Duration::from_millis(300));
         let e = Engine::default();
-        *e.0.lock().unwrap() = Some(r);
+        e.0.lock().unwrap().insert("main".into(), r);
         let t = std::time::Instant::now();
         e.stop();
         assert!(t.elapsed() < Duration::from_secs(5), "stop took {:?}", t.elapsed());
-        assert!(e.0.lock().unwrap().is_none());
+        assert!(e.0.lock().unwrap().is_empty());
         assert_eq!(send.state.lock().unwrap().push(vec![1; 4], true), Err("the engine stopped"));
+    }
+
+    // Each window's engine is its own (#1541): ending one window's (its window closed, or its page started another)
+    // leaves every other window's running, and the app's stop ends them all.
+    #[cfg(unix)]
+    #[test]
+    fn one_windows_engine_ends_alone() {
+        let start = || {
+            let mut cmd = Command::new("sleep");
+            cmd.arg("30");
+            spawn_engine(cmd, |_| true).unwrap()
+        };
+        let e = Engine::default();
+        let (a, b) = (start(), start());
+        let (qa, qb) = (a.send.clone(), b.send.clone());
+        e.0.lock().unwrap().insert("main".into(), a);
+        e.0.lock().unwrap().insert("doc-1".into(), b);
+        e.stop_window("main");
+        assert_eq!(qa.state.lock().unwrap().push(vec![1; 4], false), Err("the engine stopped"), "main's engine ended");
+        assert_eq!(qb.state.lock().unwrap().push(vec![1; 4], false), Ok(()), "doc-1's engine still running");
+        {
+            let m = e.0.lock().unwrap();
+            assert!(m.contains_key("doc-1") && !m.contains_key("main"));
+        }
+        // (a frame and an acknowledgement for a window reach that window's engine only, and a window without one is
+        //  refused even while another runs)
+        assert_eq!(e.send_for("doc-1", vec![7; 4], false), Ok(()));
+        assert_eq!(e.send_for("main", vec![7; 4], false), Err("no engine is running".to_string()));
+        {
+            let m = e.0.lock().unwrap();
+            m["doc-1"].window.state.lock().unwrap().sent(64);
+        }
+        e.ack_for("main", 64);
+        assert_eq!(e.0.lock().unwrap()["doc-1"].window.state.lock().unwrap().unacked, 64, "main's ack changed nothing of doc-1's");
+        e.ack_for("doc-1", 64);
+        assert_eq!(e.0.lock().unwrap()["doc-1"].window.state.lock().unwrap().unacked, 0);
+        // (a window with no engine: nothing happens)
+        e.stop_window("main");
+        e.stop_window("doc-9");
+        assert!(e.0.lock().unwrap().contains_key("doc-1"));
+        e.stop();
+        assert_eq!(qb.state.lock().unwrap().push(vec![1; 4], false), Err("the engine stopped"), "the app's stop ends every window's");
+        assert!(e.0.lock().unwrap().is_empty());
     }
 
     // A page that stops taking frames: the reader passes on only a window's worth, however many valid frames the
@@ -433,7 +539,7 @@ mod tests {
         let more = settle(&got);
         assert!(more > given && more <= given + WINDOW, "after the acknowledgement: {more}");
         let e = Engine::default();
-        *e.0.lock().unwrap() = Some(r);
+        e.0.lock().unwrap().insert("main".into(), r);
         e.stop();
     }
 

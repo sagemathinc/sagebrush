@@ -118,11 +118,32 @@ try {
       check(!(await shown()), `${at}: a click hides them`);
     }
   }
+  // ---- the first paint: once the page's HTML is parsed (readyState "interactive"), before its workspace is open, the
+  // files are already shown as they were left, and the placeholder notebook (its name and cells) is hidden
+  {
+    await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await ev(`(localStorage.setItem("sagebrush-files-sidebar", "1"), 1)`);
+    const { identifier } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `document.addEventListener("readystatechange", () => {
+      if (document.readyState !== "interactive" || window.__firstPaint) return;
+      const side = document.getElementById("wssidebar"), cells = document.getElementById("cells"), name = document.getElementById("nbname");
+      window.__firstPaint = { files: document.body.classList.contains("wsfiles") && !!side && !side.hidden,
+        cells: cells ? getComputedStyle(cells).visibility : null, name: name ? getComputedStyle(name).visibility : null };
+    });` });
+    await go(base);
+    await until(`!!window.sagebrush?.notebook && !!document.querySelector(".cell textarea")`, 60000);
+    const fp = await ev("window.__firstPaint ?? null");
+    check(!!fp && fp.files === true, "first paint: the files shown as they were left, before the workspace is open", fp);
+    check(!!fp && fp.cells === "hidden" && fp.name === "hidden", "first paint: the placeholder notebook's name and cells hidden while the page opens its document", fp);
+    check(await until(`!document.body.classList.contains("opening") && getComputedStyle(document.getElementById("cells")).visibility === "visible"`, 30000), "the document opened: its cells shown");
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+
   // ---- the shortcut's near misses, on the notebook page at a desktop width (the files hidden to begin with)
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await ev(`(localStorage.setItem("sagebrush-files-sidebar", "0"), 1)`);
   await go(base);
-  await until(`!!window.sagebrush?.notebook && !!${B} && !${B}.hidden && !!document.querySelector(".cell textarea")`, 60000);
+  // (the document opened: until then the placeholder's cells are hidden, and a focus() on one does nothing)
+  await until(`!!window.sagebrush?.notebook && !!${B} && !${B}.hidden && !!document.querySelector(".cell textarea") && !document.body.classList.contains("opening")`, 60000);
   // (a code cell's editor, visible: the caret at its end)
   const ta = `[...document.querySelectorAll(".cell textarea")].find((t) => t.offsetParent)`;
   const v0 = await ev(`(() => { const t = ${ta}; t.focus(); t.setSelectionRange(t.value.length, t.value.length); return t.value; })()`);
@@ -147,8 +168,15 @@ try {
   await ev(`(window.__tPrevented = null, addEventListener("keydown", (e) => { if (e.key === "b") window.__tPrevented = e.defaultPrevented; }, { once: true }), 1)`);
   await ctrlB();
   check((await shown()) && (await ev(`window.__tPrevented`)) === true, "Ctrl+B shows them, and the browser's own Ctrl+B is prevented");
+  // (the focus in the files as they hide: it goes to the button, not left in the hidden files)
+  check(await ev(`(() => { const f = ${S}.querySelector("button, [tabindex], a[href], input"); if (!f) return false; f.focus(); return document.activeElement === f; })()`), "a control in the files has the focus");
   await ctrlB();
   check(!(await shown()) && (await ev(`document.activeElement === ${B}`)), "Ctrl+B hides them, and the focus goes to the button (not left in the hidden files)");
+  // (the focus in the document as they hide: it stays there, never moved to the button)
+  await ctrlB();
+  const cell = await ev(`(() => { const t = ${ta}; t.focus(); return document.activeElement === t; })()`);
+  await ctrlB();
+  check(cell && !(await shown()) && (await ev(`document.activeElement === ${ta}`)), "Ctrl+B from a cell hides them and leaves the focus in the cell");
   await ev(`(${B}.hidden = true, 1)`);
   const hid = await ev(`getComputedStyle(${B}).display`);
   await ctrlB();

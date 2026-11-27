@@ -2,7 +2,7 @@
  "comment": "plan-interrupt-harness r5: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
  "fingerprints": {
   "backedges": {
-   "check": "if (INTR[0] & 1) interrupted();",
+   "check": "if (INTR[0] & 17) interrupted();",
    "valid": true,
    "sites": 4,
    "sha": "57c7557f9fa52a8b"
@@ -16,22 +16,23 @@
    "json.ts": 3,
    "modules.ts": 8,
    "mpcore.ts": 7,
-   "numpy.ts": 2,
+   "numpy.ts": 5,
    "numpy_linalg.ts": 4,
    "ops.ts": 3,
    "raster.ts": 2,
    "re.ts": 2,
+   "skltree.ts": 3,
    "strpos.ts": 1,
    "types.ts": 14
   },
   "registries": {
    "magma": {
-    "count": 184,
-    "sha": "b17e39e27d2d7de5"
+    "count": 188,
+    "sha": "df37ab5bf261b5bd"
    },
    "matlab": {
-    "count": 263,
-    "sha": "878782c0cf97f799"
+    "count": 264,
+    "sha": "4478b682d95fb5b3"
    },
    "sage": {
     "count": 204,
@@ -39,8 +40,8 @@
    }
   },
   "libModules": {
-   "count": 179,
-   "sha": "909f8115f097f4b2"
+   "count": 184,
+   "sha": "809f6d281bb98877"
   }
  },
  "entries": [
@@ -597,6 +598,13 @@
    "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
   },
   {
+   "id": "engineCall:li",
+   "transport": "engineCall:li",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
    "id": "engineCall:lll",
    "transport": "engineCall:lll",
    "status": "planned",
@@ -791,6 +799,20 @@
    "status": "planned",
    "family": "E5 polynomials",
    "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:prime_pi",
+   "transport": "engineCall:prime_pi",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
+  },
+  {
+   "id": "engineCall:primes",
+   "transport": "engineCall:primes",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
   },
   {
    "id": "engineCall:primes_above",
