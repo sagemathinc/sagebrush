@@ -370,6 +370,7 @@ Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted.
     - **the signed grant** is one canonical object, signed by the approving device's chain key at a named chain head. It binds the protocol and version, the account, the grant id and its generation, the agent's name and static key, the scopes, `run_code`, the outward authority and the expiry. The answering device enforces every one of them from the signed grant, never from the server's copy;
     - **each request runs Noise_IK_25519_AESGCM_SHA256** (§6.2's suite and test vectors) between the agent and an online device, through the relay. The device checks that the agent's static key is the one a current, unexpired, unrevoked grant names. The agent checks that the device's static key is current in the account's chain;
     - **the Noise prologue binds** "sagebrush.agent.v1", the account, the grant id, the agent's and the device's static keys, the chain head each side verified, and a fresh session id;
+    - **a request is bound to one device:** IK fixes the answering device's static key in the first message, so a request relayed to the person's other device fails at that device's handshake, before anything is read;
     - **each request is accepted once** (SEC). It carries a request id, chosen by the agent inside the encrypted channel, and an expiry of at most 5 minutes:
       - the answering device records the id before acting, persistently and through the expiry, so it survives a restart;
       - a repeat returns the recorded answer without running the request again, or is refused once the record is gone. So a relay that replays a whole old handshake gets no second execution;
@@ -377,8 +378,17 @@ Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted.
       - the answer is bound to the request id;
     - **revocation is in the key chain** (SEC). Revoking a grant, or raising its generation, is a chain entry signed by a current device. An answering device refuses a grant whose revocation is in the chain it has verified, so the server can't undo a revocation;
     - **the limit, stated plainly:** a server can withhold a revocation entry from a device that hasn't seen it yet. That device keeps answering the revoked agent until it sees the entry, or until the grant's signed expiry, whichever comes first. Checkpoints detect the withholding later (§4.1). Short expiries bound it;
-    - **what the agent trusts:** the grant comes with the chain head its device signed at. The agent pins that head, and refuses a later chain that rolls back or forks from it. Before pairing it has nothing to check against: first use, as for any new device (§2.1);
+    - **what the agent trusts:** the grant comes with the chain head its device signed at, and with a MAC under the pairing key, so the agent pins nothing the server could have made (SEC):
+      - the approving device returns `grant_mac = HMAC-SHA256(K, "sagebrush.agent.pair.grant.v1\n" || SHA-256(signed grant) || chain head)`, with `K` the pairing key above, which only the agent and a device that was given `k` hold;
+      - the agent pins the grant and the head only if `grant_mac` verifies under its own `K`; otherwise it refuses the pairing and pins nothing. A server answering the pairing with its own grant and chain (devices it holds) can't make that MAC without `k`;
+      - once pinned, the agent refuses a later chain that rolls back or forks from that head;
     - **what the relay still sees:** which grant talks to which device, when, and how much. Not the paths, the content or the answers;
+    - **tests (rows):**
+      - a pairing answered with a grant and chain the server made, with no valid `grant_mac`: refused, nothing pinned;
+      - a `grant_mac` over another grant, another head, or under another `k`: refused;
+      - the honest pairing: verifies and pins;
+      - a request's handshake relayed to the person's other device: fails at the handshake;
+      - mutants that skip the `grant_mac` check, or MAC the grant without the head, must each fail a row;
   - with no device online, the endpoint answers "waiting for one of your devices", and the agent sends the request again when one is. It never decrypts, and it holds no request content.
 
 ### 6.1 Autonomous VM custody (SEC)
