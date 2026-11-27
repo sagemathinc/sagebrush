@@ -102,6 +102,10 @@
    "decision": "refused",
    "why": "raw vectors are deferred (A1.2's scope note): an R-level refusal before any effect (gate:raw vectors)"
   },
+  "builtin:as.vector": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:c": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -118,7 +122,19 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:cut": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:double": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:droplevels": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:factor": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
@@ -139,6 +155,10 @@
    "why": "computes on R values only: no host effect"
   },
   "builtin:is.double": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:is.factor": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
@@ -174,11 +194,19 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:is.ordered": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:is.vector": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
   "builtin:length": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:levels": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
@@ -190,6 +218,10 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:nlevels": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:numeric": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -197,6 +229,10 @@
   "builtin:options": {
    "decision": "internal",
    "why": "sets the session's own print options (digits, scipen), checked as R checks them: no host effect"
+  },
+  "builtin:ordered": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
   },
   "builtin:print": {
    "decision": "internal",

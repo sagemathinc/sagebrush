@@ -1,0 +1,169 @@
+{
+ "cases": [
+  {
+   "id": "fac-print-na",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] b    <NA> a   \nLevels: a b\n"
+  },
+  {
+   "id": "fac-numbers",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3 1 2 3\nLevels: 1 2 3\n[1] 10 2  33 2 \nLevels: 2 10 33\n[1] -1    0.5   1e+06 1e-20\nLevels: -1 1e-20 0.5 1e+06\n[1] 1 3\nLevels: 1 3\n"
+  },
+  {
+   "id": "fac-logical",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE  FALSE\nLevels: FALSE TRUE\n"
+  },
+  {
+   "id": "fac-empty",
+   "status": 0,
+   "stderr": "",
+   "stdout": "factor()\nLevels: \n"
+  },
+  {
+   "id": "fac-levels-given",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] a b\nLevels: b a z\n[1] a    <NA> a   \nLevels: a\n"
+  },
+  {
+   "id": "fac-labels",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] one two one\nLevels: one two\n[1] L1 L2\nLevels: L1 L2\n"
+  },
+  {
+   "id": "fac-labels-wrong-length",
+   "status": 1,
+   "stderr": "Error in factor(c(\"a\", \"b\"), labels = c(\"x\", \"y\", \"z\")) : \n  invalid 'labels'; length 3 should be 1 or 2\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "fac-exclude",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] <NA> b   \nLevels: b\n[1] 1.5  2.25 <NA>\nLevels: 1.5 2.25\n"
+  },
+  {
+   "id": "fac-ordered",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] a b\nLevels: a < b\n[1] lo hi\nLevels: lo < hi\n"
+  },
+  {
+   "id": "fac-ordered-subset",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] a b\nLevels: a < b\n"
+  },
+  {
+   "id": "fac-subset",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] v\nLevels: u v\n[1] v u\nLevels: u v\n[1] u u\nLevels: u v\n[1] <NA>\nLevels: u v\nfactor()\nLevels: u v\n[1] 3\n"
+  },
+  {
+   "id": "fac-coerce",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"a\" \"b\" \"a\"\n[1] \"a\" \"b\" \"a\"\n[1] 1 2 1\n[1] 2 1\n[1] TRUE   NA\n"
+  },
+  {
+   "id": "fac-tests",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n[1] FALSE\n[1] FALSE\n[1] FALSE\n[1] FALSE\n[1] FALSE\n[1] TRUE\n"
+  },
+  {
+   "id": "fac-levels-of-vector",
+   "status": 0,
+   "stderr": "",
+   "stdout": "NULL\n[1] 0\n"
+  },
+  {
+   "id": "fac-droplevels-order",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] a c\nLevels: c a\n"
+  },
+  {
+   "id": "fac-names",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   p    q   rr \n   a  bbb <NA> \nLevels: a bbb\n"
+  },
+  {
+   "id": "fac-collation",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] b B a A\nLevels: a A b B\n[1] a1  a10 a2  _x  1   Z  \nLevels: _x 1 a1 a10 a2 Z\n"
+  },
+  {
+   "id": "fac-long",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1] north south east  west  north south east  west  north south east  west \n[13] north south east \nLevels: east north south west\n"
+  },
+  {
+   "id": "cut-breaks",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] (0,3]  (3,6]  (6,10]\nLevels: (0,3] (3,6] (6,10]\n"
+  },
+  {
+   "id": "cut-number",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] (0.992,3.67] (3.67,6.33]  (6.33,9.01] \nLevels: (0.992,3.67] (3.67,6.33] (6.33,9.01]\n"
+  },
+  {
+   "id": "cut-right-false",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] [0,5)  [5,10) [5,10)\nLevels: [0,5) [5,10)\n"
+  },
+  {
+   "id": "cut-labels",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] lo lo hi\nLevels: lo hi\n[1] 1 1 2\n"
+  },
+  {
+   "id": "cut-outside",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] <NA> <NA>\nLevels: (0,5] (5,10]\n"
+  },
+  {
+   "id": "cut-include-lowest",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] [0,5] [0,5]\nLevels: [0,5] (5,10]\n[1] [5,10] [5,10]\nLevels: [0,5) [5,10]\n"
+  },
+  {
+   "id": "cut-decimals",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] (0,1.25] (1.25,3]\nLevels: (0,1.25] (1.25,3]\n[1] (1.001,1.002] (1.002,1.003] (1.002,1.003]\nLevels: (1.001,1.002] (1.002,1.003]\n"
+  },
+  {
+   "id": "cut-ordered",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] (0,5]  (5,10]\nLevels: (0,5] < (5,10]\n"
+  },
+  {
+   "id": "cut-unsorted-breaks",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] (0,5]  (5,10]\nLevels: (0,5] (5,10]\n"
+  }
+ ],
+ "file": "rill-tests/fac/test_2.R",
+ "format": "rill-out",
+ "v": 1
+}

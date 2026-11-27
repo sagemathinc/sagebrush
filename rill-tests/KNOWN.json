@@ -96,6 +96,36 @@
    "reason": "files: cat(file =) is refused until Rill's files go through the file gate (A1.7)",
    "sha256": "edf4b5f6a469f742e6bf8c35f6fee42d44e23108b80eeb02f898a5672e966310"
   },
+  "rill-tests/fac/test_1.R#fac-12": {
+   "class": "not-implemented",
+   "reason": "replacement assignment levels(f)[2] <- (A3: replacement forms)",
+   "sha256": "d289d42f55940bb2be481e12e9dc2a82529dcf8272cb1b9f7013a6cd8f3d8e84"
+  },
+  "rill-tests/fac/test_1.R#fac-3": {
+   "class": "not-implemented",
+   "reason": "table() (A3, after lists: a table's dimnames are a list)",
+   "sha256": "12a6b8c74743e137f979359e1748a3fc53f0dbb6ac7b0bf1bfe2b38b58339a13"
+  },
+  "rill-tests/fac/test_1.R#fac-4": {
+   "class": "not-implemented",
+   "reason": "summary() of a factor (A3: summary)",
+   "sha256": "6392001defea63e5a0ec7efd3aae5244a2aa97adc44fd3a1b8c2f17ece35625e"
+  },
+  "rill-tests/fac/test_1.R#fac-5": {
+   "class": "not-implemented",
+   "reason": "table() (A3, after lists: a table's dimnames are a list)",
+   "sha256": "3d57152254aaf295d5312e522f67802ff677dac9f8f4a491cc93a80fdb5f94aa"
+  },
+  "rill-tests/fac/test_1.R#fac-6": {
+   "class": "not-implemented",
+   "reason": "table() (A3, after lists: a table's dimnames are a list)",
+   "sha256": "baa61fecb29bead9f90e19127c7b93aaa44d6564e34065031cf367f34ce0e81c"
+  },
+  "rill-tests/fac/test_1.R#fac-9": {
+   "class": "not-implemented",
+   "reason": "tapply() (A3: merge and aggregate)",
+   "sha256": "e2ed06d09245e771f1999f1cb1fb2cfabdb8bff090e1ab11be32a3dbf11cfca0"
+  },
   "rill-tests/parse/test_1.R#arg-empty-name": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",
