@@ -254,10 +254,13 @@ def _leaves(x):
 
 
 def _unlist_names(x):
-    """The names unlist gives x's leaves: each list's elements named as c() names its arguments' elements
-    (base._c_names), and a nested list's flattened names then named under its own tag, by an explicit stack."""
+    """The names unlist gives x's leaves (R 4.5.3, rill-tests/list/; fitted to the oracle).  An element with a tag
+    names its leaves as c() names its arguments' elements (base._c_names); a leaf from an untagged vector keeps
+    its own name, empty if it has none.  A nested list under tag T then names its leaves: T.name for a named one;
+    T and the leaf's position under T for an empty name from a named vector; and, for leaves with no name at all,
+    T alone when there is just one such leaf under T, else T and its position.  By an explicit stack."""
     from .base import _c_names
-    # each frame: (list, next element, names gathered so far for this list's elements, its tag in its parent)
+    # each frame: [list, next element, items gathered (name, nameless), its tag in its parent]
     stack = [[x, 0, [], None]]
     while True:
         frame = stack[-1]
@@ -273,11 +276,28 @@ def _unlist_names(x):
             if isinstance(v, RList):
                 stack.append([v, 0, [], t])
                 continue
-            acc.extend(_c_names(t, v))
+            if t is not None:
+                acc.extend((nm, False) for nm in _c_names(t, v))
+            else:
+                inner = names_of(v)
+                if inner is not None:
+                    acc.extend((nm, False) for nm in inner.data)
+                else:
+                    acc.extend(("", True) for _ in v.data)
             continue
         stack.pop()
         if not stack:
-            return acc
-        # (the nested list's flattened names, as one vector named under the tag it had in its parent)
-        flat = RVector("logical", [None] * len(acc), {"names": RVector("character", acc)} if any(acc) else None)
-        stack[-1][2].extend(_c_names(tag, flat))
+            return [nm for nm, _ in acc]
+        if tag is None:
+            stack[-1][2].extend(acc)
+            continue
+        nameless = sum(1 for _, free in acc if free)
+        out = []
+        for k, (nm, free) in enumerate(acc):
+            if nm:
+                out.append(("%s.%s" % (tag, nm), False))
+            elif free and nameless == 1:
+                out.append((tag, False))
+            else:
+                out.append(("%s%d" % (tag, k + 1), False))
+        stack[-1][2].extend(out)
