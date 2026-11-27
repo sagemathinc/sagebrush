@@ -91,10 +91,11 @@ impl Leave {
         if self.quitting {
             return vec![];
         }
+        // (quitting from here on, the exit too: no window may open while it is applied, begin_open)
+        self.quitting = true;
         if windows.is_empty() && self.opening == 0 {
             return vec![Act::Exit];
         }
-        self.quitting = true;
         if windows.is_empty() {
             // (only windows being built: opened or open_failed exits)
             return vec![];
@@ -189,6 +190,10 @@ mod tests {
         assert_eq!(l.opened("doc-1"), vec![]);
         l.quit(w(&["main", "doc-1"]));
         assert!(!l.begin_open());
+        // (a quit with no window at all exits, and is quitting too: an open already on its way is refused)
+        let mut e = Leave::default();
+        assert_eq!(e.quit(vec![]), vec![Act::Exit]);
+        assert!(!e.begin_open());
         assert_eq!(l.done("doc-1"), vec![]);
         assert_eq!(l.done("main"), vec![Act::Exit]);
     }
