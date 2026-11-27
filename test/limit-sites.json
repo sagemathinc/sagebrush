@@ -16988,7 +16988,7 @@
   "explained": true,
   "owner": "Sage permutation groups/runtime memory"
  },
- "lib/sage_permgroup.py :: ConjugacyClass._elements :: cap = (limit - per) // per #0": {
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: cap = (limit - 2 * per) // per #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -17118,7 +17118,7 @@
   "explained": true,
   "owner": "Sage permutation groups/runtime memory"
  },
- "lib/sage_permgroup.py :: _refuse_class :: e = _memguard.memory_guard(\"Listing a conjugacy class of a permutation group of order %d\" % order, (k + 1) * per, limit, \"one computation\") #0": {
+ "lib/sage_permgroup.py :: _refuse_class :: e = _memguard.memory_guard(\"Listing a conjugacy class of a permutation group of order %d\" % order, (k + 2) * per, limit, \"one computation\") #0": {
   "class": "2",
   "disposition": {
    "2": {

@@ -1162,10 +1162,10 @@ def _admit_output(count, n, what, order):
 
 def _refuse_class(k, held, per, limit, order):
     """The memory guard's refusal of a conjugacy class's k-th element: k
-    elements and one candidate's charge, per bytes each, past the allowance
+    elements and two candidates' charges, per bytes each, past the allowance
     limit read when the listing began; held: the elements it holds."""
     import _capacity, _memguard
-    e = _memguard.memory_guard("Listing a conjugacy class of a permutation group of order %d" % order, (k + 1) * per, limit, "one computation")
+    e = _memguard.memory_guard("Listing a conjugacy class of a permutation group of order %d" % order, (k + 2) * per, limit, "one computation")
     e.capacity = _capacity.capacity()
     e.held_count = held
     raise e
@@ -1206,12 +1206,13 @@ class ConjugacyClass:
             gens = [(g._im, tuple(sorted(range(G._n), key=lambda i: g._im[i]))) for g in G.gens()]
             # (the class's length isn't known before it is listed: each new
             # element is admitted before it is held, against the allowance
-            # read once, a quarter of the heap, less one element's charge for
-            # the candidate conjugate built and tested beside those held)
+            # read once, a quarter of the heap, less two elements' charges for
+            # the candidate conjugate built and tested beside those held: the
+            # one being built and, until it is, the one before it)
             import _capacity
             per, order = _held_bytes(G._n), int(G.order())
             limit = _capacity.heap_figure() // 4
-            cap = (limit - per) // per
+            cap = (limit - 2 * per) // per
             if cap < 1:
                 _refuse_class(1, 0, per, limit, order)
             start = tuple(self._rep._im)
@@ -1225,6 +1226,7 @@ class ConjugacyClass:
                             _refuse_class(cap + 1, cap, per, limit, order)
                         seen.add(y)
                         queue.append(y)
+                    y = None
             self._set = seen
         return self._set
 
