@@ -743,6 +743,25 @@ try {
     const keptS = await ev(`T.ws.agentGrants().then((a) => Object.keys(a).join(","))`);
     ok(mine && at(hs, port2) === 0 && keptS === "000000000000,zzzzzzzzzzzz", `unusable session (superseded): the late refusal leaves the person's connection the page's, the second remembered agent never asked, nothing forgotten (mine ${mine}, ${at(hs, port2)} hellos to the second, kept ${keptS})`);
     await ev(`(async () => { for (const id of Object.keys(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, null); [...document.querySelectorAll(".sbag-box")].forEach((b) => b.remove()); return true; })()`);
+
+    // (superseded during the cleanup itself: the stale record's delete held, a connection adopted on the cleanup's own
+    //  completion notice (before that, adopting is refused: cleanup pending), then the delete let go. The reconnect,
+    //  resuming after its awaited cleanup, must see it no longer owns the page: the stale record forgotten, the second
+    //  remembered agent never asked)
+    ok(await open(""), "unusable session (superseded at its cleanup): a fresh page, nothing remembered");
+    await drive({ op: "slow", s: 0 });
+    ok(await plant() === "000000000000,zzzzzzzzzzzz", "unusable session (superseded at its cleanup): the two remembered agents again");
+    await ev(`(() => { const put = T.ws.putAgentGrant.bind(T.ws); window.__letGo = null; const held = new Promise((r) => (window.__letGo = r)); T.ws.putAgentGrant = async (id, g) => { if (id === "000000000000" && g === null) await held; return put(id, g); }; return true; })()`);
+    await drive({ op: "hellos" });
+    await ev("(T.ui.useRemembered(), 1)");
+    ok(await until(`T.ui.pairing?.cleanup === "revoking"`, 10000), "unusable session (superseded at its cleanup): refused, its cleanup's delete held");
+    ok(await ev(`(() => { const p = T.ui.pairing; const link = { socket: () => ({ readyState: 0, send() {}, close() {} }), ready: () => undefined, send: () => "ok", owe: () => true, answer() {}, disconnect: async () => {} }; window.__mine = null; const off = p.onChange(() => { if (!p.cleanup && !window.__mine) { off(); window.__mine = T.ui.adopt(link, "this browser"); } }); window.__letGo(); return true; })()`), "unusable session (superseded at its cleanup): a connection adopted at the cleanup's completion");
+    await sleep(2500);
+    const hz = await drive({ op: "hellos" });
+    const mineZ = await ev(`!!window.__mine && T.ui.pairing === window.__mine`);
+    const keptZ = await ev(`T.ws.agentGrants().then((a) => Object.keys(a).join(","))`);
+    ok(mineZ && at(hz, PORT) === 1 && at(hz, port2) === 0 && keptZ === "zzzzzzzzzzzz", `unusable session (superseded at its cleanup): the adopted connection stays the page's, the stale record forgotten, the second remembered agent never asked (mine ${mineZ}, ${at(hz, PORT)} and ${at(hz, port2)} hellos, kept ${keptZ})`);
+    await ev(`(async () => { for (const id of Object.keys(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, null); return true; })()`);
   }
 
   // ---- a spent code (A5): the agent refuses it, and the dialog says so, with no local-network advice; Connect shows
