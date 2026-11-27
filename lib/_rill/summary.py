@@ -5,13 +5,17 @@ What R prints, observed:
 
 - sum and prod accumulate doubles in extended precision (R's help: "extended-
   precision accumulators"): here a 64-bit significand, rounded to nearest
-  even after each step (_LD), then once to a double.  An integer sum is exact,
-  and a double when it leaves the integer range.  Of NA and NaN, the first one
-  met is the result.
+  even after each step (_LD), then once to a double.  Each argument is summed
+  (or multiplied) on its own and the results combined in double, so
+  sum(0.1, 0.2, 0.3) is not sum(c(0.1, 0.2, 0.3)).  An integer sum is exact,
+  and a double when it, or one argument's sum, leaves the integer range.  Of
+  NA and NaN, the first one met is the result.
 - min and max: NA if any element is NA, else NaN if any is NaN; integer for
   logical and integer arguments, double with any double, character (compared
   as strings) with any string.  No elements: Inf or -Inf, with R's warning.
-- mean: the exact mean, rounded once; NA if any element is NA, else NaN.  R's
+- mean: the extended-precision sum divided by n, corrected by the mean of the
+  residuals (also in extended precision), then rounded once; NA if any
+  element is NA, else NaN.  R's
   mean is a function that dispatches to mean.default, which its errors and
   warnings name (Calls: mean -> mean.default).
 """
@@ -52,6 +56,29 @@ class _LD:
 
     def mul(self, o):
         return _LD(self.num * o.num, self.exp + o.exp)
+
+    def neg(self):
+        r = _LD()
+        r.num, r.exp = -self.num, self.exp
+        return r
+
+    def div_int(self, n):
+        """self / n, rounded to the 64-bit significand."""
+        return _LD.of_fraction(self.fraction() / n)
+
+    def fraction(self):
+        return fractions.Fraction(self.num) * (fractions.Fraction(2) ** self.exp)
+
+    @staticmethod
+    def of_fraction(f):
+        if f == 0:
+            return _LD()
+        a = abs(f)
+        e = a.numerator.bit_length() - a.denominator.bit_length() - _LD.BITS - 1
+        m = a / (fractions.Fraction(2) ** e)
+        # (at least 64 bits before the point: rounding to an integer is rounding to the significand)
+        q = round(m)
+        return _LD(q if f > 0 else -q, e)
 
     def to_double(self):
         v = fractions.Fraction(self.num) * (fractions.Fraction(2) ** self.exp)
@@ -115,35 +142,46 @@ def _top(vs):
 
 
 def sum_(sess, call, args):
+    """Each argument summed on its own (exactly for integers, in extended precision for doubles), then the
+    arguments' sums added in a double, or as integers while every sum and running total fits (R 4.5.3:
+    sum(0.1, 0.2, 0.3) is not 0.6, sum(1L, 2147483647L, -5L) is a double)."""
     na_rm = _na_rm(args, call)
     vs = _values(args, "sum")
     t = _top(vs)
     if t == "character":
         raise RError("invalid 'type' (character) of argument", call)
     if t in ("logical", "integer"):
-        s = 0
+        total, wide = 0, False
         for v in vs:
+            s = 0
             for e in v.data:
                 if e is None:
                     if na_rm:
                         continue
                     return RVector("integer", [None])
                 s += int(e)
-        return RVector("integer", [s]) if -INT_MAX <= s <= INT_MAX else RVector("double", [float(s)])
+            total += s
+            if not (-INT_MAX <= s <= INT_MAX and -INT_MAX <= total <= INT_MAX):
+                wide = True
+        return RVector("double", [float(total)]) if wide else RVector("integer", [total])
     if t == "complex":
-        re, im = [], []
+        re = im = 0.0
         for v in vs:
+            rs, ims = [], []
             for e in v.data:
                 if e is None:
                     if na_rm:
                         continue
                     return RVector("complex", [None])
                 z = complex(e)
-                re.append(z.real)
-                im.append(z.imag)
-        return RVector("complex", [complex(_ld_sum(re), _ld_sum(im))])
-    xs = []
+                rs.append(z.real)
+                ims.append(z.imag)
+            re += _ld_sum(rs)
+            im += _ld_sum(ims)
+        return RVector("complex", [complex(re, im)])
+    total = 0.0
     for v in vs:
+        xs = []
         for e in v.data:
             if _is_na(e):
                 if na_rm:
@@ -151,7 +189,8 @@ def sum_(sess, call, args):
                 # (of NA and NaN, the first one met)
                 return RVector("double", [None if e is None else math.nan])
             xs.append(float(e))
-    return RVector("double", [_ld_sum(xs)])
+        total += float(sum(int(x) for x in xs)) if v.type in ("logical", "integer") else _ld_sum(xs)
+    return RVector("double", [total])
 
 
 def _ld_sum(xs):
@@ -168,6 +207,8 @@ def _ld_sum(xs):
 
 
 def prod(sess, call, args):
+    """Each argument's product on its own, in extended precision, then the arguments' products multiplied in a
+    double (R 4.5.3: prod(1e200, 1e200, 1e-200) is Inf)."""
     na_rm = _na_rm(args, call)
     vs = _values(args, "prod")
     t = _top(vs)
@@ -175,27 +216,33 @@ def prod(sess, call, args):
         raise RError("invalid 'type' (character) of argument", call)
     if t == "complex":
         raise NotSupported("prod() of complex numbers")
-    xs = []
+    total = 1.0
     for v in vs:
+        xs = []
         for e in v.data:
             if _is_na(e):
                 if na_rm:
                     continue
                 return RVector("double", [None if e is None else math.nan])
             xs.append(float(e))
+        total *= _ld_prod(xs)
+    return RVector("double", [total])
+
+
+def _ld_prod(xs):
     if any(math.isinf(x) for x in xs):
         if any(x == 0 for x in xs):
-            return RVector("double", [math.nan])
+            return math.nan
         sign = -1 if sum(1 for x in xs if x < 0) % 2 else 1
-        return RVector("double", [sign * math.inf])
+        return sign * math.inf
     if any(x == 0 for x in xs):
         # (a zero: zero, signed by the parity of the factors' signs)
         neg = sum(1 for x in xs if math.copysign(1.0, x) < 0) % 2
-        return RVector("double", [-0.0 if neg else 0.0])
+        return -0.0 if neg else 0.0
     p = _LD(1, 0)
     for x in xs:
         p = p.mul(_LD.of(x))
-    return RVector("double", [p.to_double()])
+    return p.to_double()
 
 
 # ---------------------------------------------------------------- min and max
@@ -315,6 +362,8 @@ def _median(xs):
 
 
 def _exact_mean(xs):
+    """R's mean of doubles: the sum in extended precision divided by n, then corrected by the extended-precision
+    mean of the residuals (R 4.5.3: mean(c(1e20, 1, -1e20)) is 0)."""
     if not xs:
         return math.nan
     pos = any(x == math.inf for x in xs)
@@ -323,5 +372,13 @@ def _exact_mean(xs):
         return math.nan
     if pos or neg:
         return math.inf if pos else -math.inf
-    s = sum((fractions.Fraction(x) for x in xs), fractions.Fraction(0)) / len(xs)
-    return float(s)
+    n = len(xs)
+    s = _LD()
+    for x in xs:
+        s = s.add(_LD.of(x))
+    s = s.div_int(n)
+    t = _LD()
+    for x in xs:
+        t = t.add(_LD.of(x).add(s.neg()))
+    s = s.add(t.div_int(n))
+    return s.to_double()

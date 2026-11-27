@@ -51,3 +51,17 @@ mean(1:10, trim = 0.1); mean(c(1, 100, 2, 3), trim = 0.25); mean(1:10, trim = 0.
 mean("a")
 #-- mean-missing
 mean()
+#-- sum-several-arguments
+sum(0.1, 0.2, 0.3) == 0.6; sum(c(0.1, 0.2), 0.3) == 0.6; sum(c(0.1, 0.2, 0.3)) == 0.6; print(sum(0.1, 0.2, 0.3), digits = 17)
+sum(1e308, 1e308, -1e308); sum(c(1e308, 1e308), -1e308); sum(1L, 2.5, c(1e308, 1e308, -1e308))
+#-- sum-integer-range
+typeof(sum(2147483646L, 1L)); x <- sum(1L, 2147483647L, -5L); typeof(x); x; typeof(sum(c(1L, 2147483647L, -5L))); typeof(sum(-2147483647L, -1L, 5L)); typeof(sum(TRUE, 2147483647L))
+#-- prod-several-arguments
+prod(1e200, 1e200, 1e-200); prod(c(1e200, 1e200, 1e-200)); 1/prod(-1, 0)
+#-- mean-trim-fraction
+mean(c(1:9, 100), trim = 0.15)
+#-- mean-two-pass
+mean(c(1e20, 1, -1e20)); mean(c(-1e308, 1e308, 1e308)); print(mean(c(0.1, 0.2, 0.3)), digits = 17)
+print(mean(c(3, 0.3, 1e16, 1e16, 1e16, 0.7, 0.2, 3, 0.2, 0.1)), digits = 17)
+#-- sum-integer-low-edge
+x <- sum(-2147483647L, -1L); typeof(x); print(x, digits = 15)
