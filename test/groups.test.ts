@@ -215,24 +215,40 @@ print('per element', P._element_bytes(4), P._element_bytes(10), 'fixed', P._ENUM
 need = 12 * P._element_bytes(4) + P._ENUM_FIXED
 run('Alt(4) at the bound', 4 * need, lambda: len(AlternatingGroup(4).conjugacy_classes()))
 run('Alt(4) one byte short', 4 * need - 4, lambda: len(AlternatingGroup(4).conjugacy_classes()))
+# (a class's elements, admitted one by one before each is held, against the allowance read when its listing
+# begins, less one element's charge for the candidate conjugate: a class of k elements fits a quarter of a heap
+# of (k + 1) elements' charges exactly, and one byte less refuses its k-th element before it is held, its
+# elements uncached; k = 3 (S3's transpositions), 45 (S10's, not 10! charged), 5040 (S8's 8-cycles, past the
+# first 4096); the same class then listed in full at its bound)
+def fit(label, G, g, k):
+    per = P._held_bytes(G.degree())
+    C = G.conjugacy_class(G(g))
+    _capacity.heap_figure = lambda: 4 * (k + 1) * per - 4
+    try:
+        C.cardinality()
+    except MemoryError as e:
+        print(label, 'one byte short refused', e.need_bytes // per, 'held', e.held_count, 'cached', C._set is not None)
+    _capacity.heap_figure = lambda: 4 * (k + 1) * per
+    print(label, 'at the bound admitted', C.cardinality())
+fit('S3 transpositions', SymmetricGroup(3), '(1,2)', 3)
+fit('S10 transpositions', SymmetricGroup(10), '(1,2)', 45)
+fit('S8 8-cycles', SymmetricGroup(8), '(1,2,3,4,5,6,7,8)', 5040)
 G = SymmetricGroup(10)
-# (the class of a transposition: 45 elements, not the group's 10! charged)
-run('transpositions', 4 * 45 * P._held_bytes(10), lambda: G.conjugacy_class(G('(1,2)')).cardinality())
-# (checked at 1, 2, 4, .. elements and at its end: 45, past the last check at 32, refused one element short;
-# and a heap without room for its first element refuses it before any is listed)
-run('transpositions one element short', 4 * 44 * P._held_bytes(10), lambda: G.conjugacy_class(G('(1,2)')).cardinality())
-_capacity.heap_figure = lambda: 4 * P._held_bytes(10) - 4
+# (the 9! 10-cycles in room for 44: the 45th refused with 44 held, not after any later count; no room for one:
+# refused before any is held)
+for k in [44, 0]:
+    _capacity.heap_figure = lambda: 4 * (k + 1) * P._held_bytes(10)
+    try:
+        G.conjugacy_class(G('(1,2,3,4,5,6,7,8,9,10)')).cardinality()
+    except MemoryError as e:
+        print('10-cycles in room for', k, 'refused', e.need_bytes // P._held_bytes(10), 'held', e.held_count)
+# (the allowance is the one read when the listing began: a heap figure grown afterwards admits no more)
+reads = []
+_capacity.heap_figure = lambda: (reads.append(1), 4 * 4 * P._held_bytes(10) if len(reads) == 1 else 1 << 40)[1]
 try:
-    G.conjugacy_class(G('(1,2,3)')).cardinality()
+    G.conjugacy_class(G('(1,2)')).cardinality()
 except MemoryError as e:
-    print('a 3-cycle with no room for one refused, need', e.need_bytes == P._held_bytes(10))
-run('3-cycles', 4 * 240 * P._held_bytes(10), lambda: G.conjugacy_class(G('(1,2,3)')).cardinality())
-# (the class of a 10-cycle, 9! elements: refused once it holds 4096 of them, by their exact need)
-_capacity.heap_figure = lambda: 4 * 4096 * P._held_bytes(10) - 4
-try:
-    G.conjugacy_class(G('(1,2,3,4,5,6,7,8,9,10)')).cardinality()
-except MemoryError as e:
-    print('10-cycles refused, need', e.need_bytes == 4096 * P._held_bytes(10))
+    print('a grown heap refused', e.need_bytes // P._held_bytes(10), 'held', e.held_count, 'allowance', e.limit_bytes // P._held_bytes(10))
 # (the output, admitted by the classes' number once the engine has counted them: an abelian group's are as
 # many as its elements; C2^10 on 20 points, and C(300), whose images pass 256)
 print('output per class', P._class_output_bytes(20), P._class_output_bytes(300))
@@ -252,11 +268,15 @@ run('Sym(10) one byte short', 4 * need - 4, lambda: len(SymmetricGroup(10).conju
     "per element 288 336 fixed 4096 row 1424 held 1184",
     "Alt(4) at the bound admitted 4",
     "Alt(4) one byte short refused Listing the conjugacy classes of a permutation group of order 12",
-    "transpositions admitted 45",
-    "transpositions one element short refused Listing a conjugacy class of a permutation group of order 3628800",
-    "a 3-cycle with no room for one refused, need True",
-    "3-cycles admitted 240",
-    "10-cycles refused, need True",
+    "S3 transpositions one byte short refused 4 held 2 cached False",
+    "S3 transpositions at the bound admitted 3",
+    "S10 transpositions one byte short refused 46 held 44 cached False",
+    "S10 transpositions at the bound admitted 45",
+    "S8 8-cycles one byte short refused 5041 held 5039 cached False",
+    "S8 8-cycles at the bound admitted 5040",
+    "10-cycles in room for 44 refused 46 held 44",
+    "10-cycles in room for 0 refused 2 held 0",
+    "a grown heap refused 5 held 3 allowance 4",
     "output per class 2000 15440",
     "C2^10 at the bound admitted 1024",
     "C2^10 one byte short refused Listing the 1024 conjugacy classes of a permutation group of order 1024",

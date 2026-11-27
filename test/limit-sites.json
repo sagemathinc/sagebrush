@@ -16968,6 +16968,66 @@
   "owner": "permutation groups (@sagebrush-sage2)",
   "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
  },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: _refuse_class(1, 0, per, limit, order) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: _refuse_class(cap + 1, cap, per, limit, order) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: cap = (limit - per) // per #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: if cap < 1: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: if len(queue) == cap: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: limit = _capacity.heap_figure() // 4 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
  "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic :: if n > _ISO_MAX: #0": {
   "class": "coverage",
   "owner": "permutation groups (@sagebrush-sage2)",
@@ -17039,6 +17099,36 @@
   "owner": "Sage permutation groups/runtime memory"
  },
  "lib/sage_permgroup.py :: _admit_output :: need, limit = count * _class_output_bytes(n), _capacity.heap_figure() // 4 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _refuse_class :: def _refuse_class(k, held, per, limit, order): #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _refuse_class :: e = _memguard.memory_guard(\"Listing a conjugacy class of a permutation group of order %d\" % order, (k + 1) * per, limit, \"one computation\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _refuse_class :: limit read when the listing began; held: the elements it holds.\"\"\" #0": {
   "class": "2",
   "disposition": {
    "2": {

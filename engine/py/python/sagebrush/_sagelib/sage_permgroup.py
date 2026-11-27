@@ -1160,6 +1160,17 @@ def _admit_output(count, n, what, order):
         raise e
 
 
+def _refuse_class(k, held, per, limit, order):
+    """The memory guard's refusal of a conjugacy class's k-th element: k
+    elements and one candidate's charge, per bytes each, past the allowance
+    limit read when the listing began; held: the elements it holds."""
+    import _capacity, _memguard
+    e = _memguard.memory_guard("Listing a conjugacy class of a permutation group of order %d" % order, (k + 1) * per, limit, "one computation")
+    e.capacity = _capacity.capacity()
+    e.held_count = held
+    raise e
+
+
 class ConjugacyClass:
     """A conjugacy class of a permutation group (Sage's ConjugacyClass): its
     representative, its cardinality, membership and its elements.
@@ -1193,24 +1204,27 @@ class ConjugacyClass:
         if self._set is None:
             G = self._group
             gens = [(g._im, tuple(sorted(range(G._n), key=lambda i: g._im[i]))) for g in G.gens()]
-            # (the class's length isn't known before it is listed: what it
-            # holds is checked as it grows, at 1, 2, 4, .. 4096 elements, then
-            # every 4096 more, and once more at its end, before it is kept)
+            # (the class's length isn't known before it is listed: each new
+            # element is admitted before it is held, against the allowance
+            # read once, a quarter of the heap, less one element's charge for
+            # the candidate conjugate built and tested beside those held)
+            import _capacity
             per, order = _held_bytes(G._n), int(G.order())
-            _admit_elements(1, per, "a conjugacy class", order)
+            limit = _capacity.heap_figure() // 4
+            cap = (limit - per) // per
+            if cap < 1:
+                _refuse_class(1, 0, per, limit, order)
             start = tuple(self._rep._im)
-            seen, queue, at = {start}, [start], 2
+            seen, queue = {start}, [start]
             for x in queue:
                 for s, si in gens:
                     # (s^-1 x s, left to right: i -> s[x[si[i]]])
                     y = tuple(s[x[si[i]]] for i in range(G._n))
                     if y not in seen:
+                        if len(queue) == cap:
+                            _refuse_class(cap + 1, cap, per, limit, order)
                         seen.add(y)
                         queue.append(y)
-                        if len(queue) == at:
-                            _admit_elements(at, per, "a conjugacy class", order)
-                            at += min(at, 4096)
-            _admit_elements(len(queue), per, "a conjugacy class", order)
             self._set = seen
         return self._set
 
