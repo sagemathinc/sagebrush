@@ -4206,9 +4206,9 @@ function objSpec(x: any): boolean {
   if (x === T.object || (objScalarType !== null && x === objScalarType)) return true;
   return typeof x === "string" && (x === "O" || x === "|O" || x === "=O" || x === "<O" || x === "object" || x === "object_" || x === "O8");
 }
-// (an object array's admission: Sagebrush caps object arrays at 2**27 elements, in addition to the array and
-// heap admission limits; a larger request raises the same MemoryError as the array admission's)
-const OBJ_MAX_ITEMS = 2 ** 27;
+// (an object array's references: a plain JS array, one 8-byte slot an element, admitted against the session's heap
+// before it is made)
+const OBJ_REF_BYTES = 8;
 // (the discovery walk's memory per item of a level: its reference in the level's JS array (8 bytes), its flag
 // (1), its slot in the result's references at the end (8), and V8's holey-array and growth overhead. Measured
 // Nov 24 2026 on Node 24 (the CLI), each in a fresh process: np.array of nested shared lists, 2**24 elements,
@@ -4223,17 +4223,42 @@ const OBJ_VIEW_BYTES = 512;
 // Measured the same way, np.array([np.zeros(262144)], dtype=object): 40.4 bytes an element retained, 8 of
 // them its reference in the result (charged by the array admission); 32 for the value)
 const OBJ_VALUE_BYTES = 32;
-function admitObjects(shape: number[]): void {
+// (an object array's admission: the array admission, then its references against the heap the session has free; no
+// count of its own)
+export function admitObjects(shape: number[]): void {
   admitArray(shape, OBJ_DT as unknown as DType);
+  admitHeap(OBJ_REF_BYTES * prod(shape), `an object array of shape (${shape.join(", ")}${shape.length === 1 ? "," : ""})`);
+}
+// (an object array's references are a dense JS array, whose length the JS engine bounds, not Sagebrush. V8's bound is
+// FixedArray::kMaxLength, 2**27 in its standard builds (deps/v8/src/objects/fixed-array.h in Node 24.21.0), and V8
+// meets a longer array only after building most of it (2**27 + 1 references: 1.4 GB and 6 s before its RangeError,
+// measured on Node 24.21.0), so there a longer one is refused before. Elsewhere (JavaScriptCore, SpiderMonkey, V8's
+// lower-limits builds, whose bound is 2**24) the engine's own RangeError is the bound, read where it is met. Either
+// way a MemoryError naming the engine's storage bound; a sparse array grown past it is never made (V8 can't survive
+// that). denseLimit and makeRefs are replaceable by tests)
+export const objBackend = { denseLimit: v8DenseLength(), makeRefs: (n: number): any[] => new Array(n).fill(null) };
+function v8DenseLength(): number | null {
+  const g: any = globalThis;
+  const v8 = (typeof g.process?.versions?.v8 === "string" && !g.process.versions.bun) || typeof g.Deno?.version?.v8 === "string" || /\bChrom(e|ium)\/\d/.test(String(g.navigator?.userAgent ?? ""));
+  return v8 ? 2 ** 27 : null;
+}
+function objRefs(shape: number[]): any[] {
   const n = prod(shape);
-  if (n > OBJ_MAX_ITEMS) {
+  const refuse = (): never => {
     const dims = shape.map(String);
-    raise(T.MemoryError, `Unable to allocate ${sizeString(BigInt(n) * 8n)} for an array with shape (${dims.join(", ")}${dims.length === 1 ? "," : ""}) and data type object`);
+    return raise(T.MemoryError, `Unable to allocate ${sizeString(BigInt(n) * 8n)} for an array with shape (${dims.join(", ")}${dims.length === 1 ? "," : ""}) and data type object: more elements than this JavaScript engine's largest dense array holds (its storage bound, not Sagebrush's)`);
+  };
+  if (objBackend.denseLimit !== null && n > objBackend.denseLimit) refuse();
+  try {
+    return objBackend.makeRefs(n);
+  } catch (e) {
+    if (!(e instanceof RangeError)) throw e;
+    return refuse();
   }
 }
 export function objEmpty(shape: number[]): ObjArray {
   admitObjects(shape);
-  return new ObjArray(OBJ_DT, new Array(prod(shape)).fill(null), shape.slice(), cStrides(shape));
+  return new ObjArray(OBJ_DT, objRefs(shape), shape.slice(), cStrides(shape));
 }
 // a C-ordered copy (of the references: the objects are shared, as NumPy's)
 export function objCopy(a: ObjArray): ObjArray {
@@ -4336,7 +4361,7 @@ function objFromPy(x: any, discovered = false): ObjArray {
     const count = prod(shape);
     admitObjects(shape);
     admitHeap(OBJ_WALK_ITEM_BYTES * (level.length + count) + OBJ_VIEW_BYTES * views + OBJ_VALUE_BYTES * values + rangeBytes, `making an object array of shape (${shape.join(", ")}${shape.length === 1 ? "," : ""}) from nested data`);
-    const next: any[] = new Array(count), nextIn = new Uint8Array(count);
+    const next: any[] = objRefs(shape), nextIn = new Uint8Array(count);
     let at = 0;
     for (const v of level) {
       if (anyArray(v)) {

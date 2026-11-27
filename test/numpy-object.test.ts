@@ -147,6 +147,78 @@ test("object arrays: discovery's own memory is admitted by the heap at its measu
   assert.equal(await run("print(np.array(x, dtype=object).size)"), `${2 ** 22}\n`);
 });
 
+// (an object array has no element count of Sagebrush's own (daybreak2's LIMITS rulings on #1894): its references are
+// admitted by the heap, and their dense JS array is bounded only by the JS engine, whose refusal (a RangeError before
+// the store is made) is the MemoryError. With the engine's bound stubbed to 10 elements: 10 made, 11 refused naming
+// the engine's storage bound; with the heap shown full, refused by the heap before any store is asked for)
+test("object arrays: no count of Sagebrush's own; the heap, then the JS engine's dense-array bound, refuse", () => {
+  const np = require("../src/runtime/numpy");
+  const H = require("../src/runtime/heap");
+  const R = require("../src/runtime/index.js");
+  const msg = (f: () => any) => {
+    try {
+      f();
+      return "made";
+    } catch (e) {
+      return R.formatException(e).trim();
+    }
+  };
+  const saved = { ...H.heapProbe }, make = np.objBackend.makeRefs, limit = np.objBackend.denseLimit;
+  const refused = "MemoryError: Unable to allocate 88 bytes for an array with shape (11,) and data type object: more elements than this JavaScript engine's largest dense array holds (its storage bound, not Sagebrush's)";
+  let asked = 0;
+  try {
+    np.objBackend.makeRefs = (n: number) => {
+      asked++;
+      if (n > 10) throw new RangeError("Invalid array length");
+      return make(n);
+    };
+    // (an engine whose bound is met where the array is made: its RangeError)
+    np.objBackend.denseLimit = null;
+    assert.equal(msg(() => np.objEmpty([10])), "made");
+    assert.equal(msg(() => np.objEmpty([2, 5])), "made");
+    assert.equal(msg(() => np.objEmpty([11])), refused);
+    // (V8, whose bound is known: refused before the array is asked for)
+    np.objBackend.denseLimit = 10;
+    asked = 0;
+    assert.equal(msg(() => np.objEmpty([10])), "made");
+    assert.equal(msg(() => np.objEmpty([11])), refused);
+    assert.equal(asked, 1);
+    // (the heap first: shown full, a large request is refused before the engine is asked for its store)
+    H.heapProbe.collect = () => false;
+    H.heapProbe.used = () => H.heapLimit();
+    asked = 0;
+    assert.match(msg(() => np.objEmpty([2 ** 26])), /^MemoryError: an object array of shape \(67108864,\) needs about 512 MiB/);
+    assert.equal(asked, 0);
+  } finally {
+    np.objBackend.makeRefs = make;
+    np.objBackend.denseLimit = limit;
+    Object.assign(H.heapProbe, saved);
+  }
+});
+
+// (on V8 itself, the standard build's bound, 2**27 (fixed-array.h's kMaxFixedArrayCapacity): 2**27 + 1 references,
+// with the heap shown to have room, are refused before any array is asked for (V8 would build most of it first), so
+// nothing of that size is allocated)
+test("object arrays: on V8, 2**27 + 1 elements are refused by the engine's dense-array bound, as a MemoryError", (t) => {
+  if (typeof (globalThis as any).process?.versions?.v8 !== "string" || (globalThis as any).process.versions.bun) return t.skip("not V8");
+  const np = require("../src/runtime/numpy");
+  const H = require("../src/runtime/heap");
+  const R = require("../src/runtime/index.js");
+  const need = 8 * (2 ** 27 + 1);
+  if (H.heapLimit() <= need + 2 ** 21) return t.skip(`this host's heap limit (${H.heapLimit()} bytes) is below one such array`);
+  const saved = { ...H.heapProbe }, make = np.objBackend.makeRefs;
+  try {
+    H.heapProbe.collect = () => false;
+    H.heapProbe.used = () => H.heapLimit() - need - 2 ** 21;
+    np.objBackend.makeRefs = () => assert.fail("the array was asked for");
+    assert.equal(np.objBackend.denseLimit, 2 ** 27);
+    assert.throws(() => np.objEmpty([2 ** 27 + 1]), (e: any) => /^MemoryError: Unable to allocate 1\.00 GiB for an array with shape \(134217729,\) and data type object: more elements than this JavaScript engine's largest dense array holds/.test(R.formatException(e).trim()));
+  } finally {
+    np.objBackend.makeRefs = make;
+    Object.assign(H.heapProbe, saved);
+  }
+});
+
 // (at the default limits, nested shared lists 40 levels deep are refused by that admission with MemoryError,
 // never run the process out of memory: slow, about 11 s and 1.8 GB on the CLI, so CI's long tier)
 test("object arrays: at the default limits, 40 levels of shared lists are refused with MemoryError", { skip: slowSkip, timeout: 120_000 }, () => {

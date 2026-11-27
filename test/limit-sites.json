@@ -13279,11 +13279,6 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
- },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -13326,6 +13321,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",
@@ -13794,15 +13794,10 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), checked before any storage is admitted, as NumPy checks the dimensions before allocating; NumPy's semantics, not a Sagebrush limit"
  },
- "src/runtime/numpy.ts :: admitObjects :: if (n > OBJ_MAX_ITEMS) { #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "numpy-array-admission"
-   }
-  },
+ "src/runtime/numpy.ts :: admitObjects :: export const objBackend = { denseLimit: v8DenseLength(), makeRefs: (n: number): any[] => new Array(n).fill(null) }; #0": {
+  "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "an object array's admission: Sagebrush caps object arrays at 2**27 elements, in addition to the array and heap admission limits; a larger request raises the array admission's MemoryError, before anything is allocated (objEmpty and the discovery walk's levels)"
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (daybreak2, #1894); admitHeap first; chunking is #2304"
  },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
@@ -13959,16 +13954,6 @@
   "owner": "python",
   "reason": "object arrays: operations not in sagebrush's numpy yet (arithmetic, ufuncs, an inner array cut off by the result's shape) refuse with NotImplementedError rather than compute something else"
  },
- "src/runtime/numpy.ts :: objSpec :: const OBJ_MAX_ITEMS = 2 ** 27; #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "numpy-array-admission"
-   }
-  },
-  "owner": "python (@sagebrush-python)",
-  "reason": "an object array's admission: Sagebrush caps object arrays at 2**27 elements, in addition to the array and heap admission limits; a larger request raises the array admission's MemoryError, before anything is allocated (objEmpty and the discovery walk's levels)"
- },
  "src/runtime/numpy.ts :: plainOperand :: const i = normAxis(Number(x), a.ndim, \"axis1\"), j = normAxis(Number(y), a.ndim, \"axis2\"); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13988,6 +13973,11 @@
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: refuse :: if (objBackend.denseLimit !== null && n > objBackend.denseLimit) refuse(); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (daybreak2, #1894); admitHeap first; chunking is #2304"
  },
  "src/runtime/numpy.ts :: scalarDtype :: const MAX_DIMS = 64; #0": {
   "class": "none",

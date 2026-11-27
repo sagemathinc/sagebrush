@@ -52,11 +52,6 @@
    "id": "skltree-footprint",
    "kind": "memory",
    "where": "src/runtime/skltree.ts::check"
-  },
-  {
-   "id": "numpy-array-admission",
-   "kind": "memory",
-   "where": "src/runtime/numpy.ts::admitArray"
   }
  ]
 }
