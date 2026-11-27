@@ -27,11 +27,48 @@ unmasked, text only, no extensions), over `ssl` (and an HTTP CONNECT proxy from 
   - a lost leg leaves the bindings and their kernels running (R1); dialing again backs off 1, 2, 4 ... 60 s, +-20%;
   - revoked ({"relay":"revoked"} or close 4403), or replaced by another runner with this key (4009): every kernel
     stopped by the tree rule, and the command ends.  4429 (the account's day budget): back off the longest.
+
+The engine channel (remote r3.3, design/remote-r3.md; step P2a): a notebook's kernel page for one kernel entry, bound by
+the relay (P1) to the account, this remote, the notebook (nb), the entry, the notebook's session generation (sgen) and
+the remote's connection generation (cgen).  It is offered only when the runner has kernels to give (a kernel factory),
+and then the upgrade says x-sb-remote-caps: engine/1; a runner without one is never sent an engine page.  Here:
+  - page-open carries the identity; a page whose cgen is below the highest this runner has seen, or whose sgen isn't
+    above its notebook's last, is refused (its page only, close {gen}); a higher cgen ({"relay":"cgen"}, or a page-open)
+    detaches every engine page of the older one: their kernels keep running, unreachable until a page of the new
+    generation opens them (H2, H5);
+  - one kernel per (notebook, entry), kept across page loss and reconnects; a page for the notebook with another entry
+    stops the notebook's other kernel (H4); the notebook's newer page detaches the older one;
+  - engine messages are text (the kernel's control JSON) or binary (the kernel's byte stream), each with its page's
+    generation prefix, at most ENGINE_FRAME after it; what a kernel does with them is the kernel's (P2c, P2d).
+
+The agent channel (--serve-agents, off by default): a page on channel "agent" chats with the person's own agent, a
+child process of this runner (agent_child.py), at most one per kind the runner offers (--agent NAME=COMMAND, at most
+AGENT_KINDS; --agent-cmd is the kind "default").  The hello's "agent" names the kind (none: the first one given), checked
+before anything changes; the answer's "agent" and "agents" say which one is attached and which are offered.  Each kind
+has its own child, resume secret, grace and page: a resume secret is good for its own kind only, and a page's messages
+reach only its own kind's child while that child has it attached.  This assumes the relay forwards messages as written,
+as the kernel and terminal channels already do: what this adds is that every page message after the hello is bound to the paired page's
+key, this runner, this page's generation and its exact bytes, and can't be replayed:
+  - the hello is an envelope {"a": "", "p": proof, "m": hello-text}, self-signed by the page's key: htu
+    "sb-agent-hello:<remote_id>#<sha256 of hello-text>", jti and iat as dpop.py checks them;
+  - every later message is {"a": "DPoP <token>", "p": proof, "m": payload}: htu
+    "sb-agent:<remote_id>/<incarnation>/<gen>#<sha256 of payload>"; the runner checks it, then forwards the payload's
+    exact bytes and a newline to the child, never re-serialized ({"unpair":true} and {"interrupt":true} it handles);
+  - the hello's result carries limits.frame (AGENT_FRAME), the bound on the whole serialized envelope the page sends: a
+    page must measure each envelope against it and refuse in words over it (the relay would close it 1009, wordless).
+    maxFrameBytes (4 MiB less 4 KiB) is a payload that fits only when JSON escapes nothing in it: quotes and
+    backslashes double inside the envelope's "m" string;
+  - asked to remember, the hello's result carries a resume secret (kept as its SHA-256,
+    bound to the page key's thumbprint): a later page with it takes the chat over (one transition, no await), and a
+    detached child (no page) is kept AGENT_GRACE_MS for that;
+  - memory: the leg reads one message at most max(kernel frame, AGENT_FRAME) = 4 MiB less 2 KiB, and each message is
+    checked against its own page's channel cap after the generation prefix; agent_child.py states the child's bounds.
 """
 
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import os
 import random
@@ -43,7 +80,9 @@ import time
 import urllib.parse
 import urllib.request
 
+from sagebrush.remote import dpop as _dpop
 from sagebrush.remote import keys as _keys
+from sagebrush.remote.agent_child import AGENT_ADVERTISED, AGENT_FRAME, AGENT_GRACE_MS, AgentChild, AgentLog
 from sagebrush.remote.enroll import USER_AGENT, EnrollError, _post, check_origin
 from sagebrush.remote.gateway import Gateway
 from sagebrush.remote.pair import GUID, PAIR_LIMITS, RealTimers, _close_status_ok, b64url, page_key_error, strict_json
@@ -61,13 +100,27 @@ RELAY_LIMITS = {
     "stableMs": 60_000,         # a leg up this long resets the backoff
     "connectMs": 30_000,        # TCP, proxy, TLS and the upgrade's answer
     "head": 8 * 1024,           # the upgrade's (or the proxy's) answer head
-    "inbound": PAIR_LIMITS["frame"],  # a message from the relay: the page's largest (2.25 MiB + 64 KiB)
+    # (a message from the relay: the largest channel this runner serves plus its `<gen>\n` prefix (at most 17 bytes);
+    # each page is then held to its own channel's cap, after the prefix. Without --serve-agents the kernel's frame is
+    # the largest; with it, the agent channel's 4 MiB less 2 KiB)
+    "inbound": PAIR_LIMITS["frame"] + 17,
+    "inboundAgents": max(PAIR_LIMITS["frame"], AGENT_FRAME) + 17,
+    # (with the engine channel: its frame, 4 MiB less 2 KiB, the relay's RUNNER_ENGINE_FRAME)
+    "inboundEngine": max(PAIR_LIMITS["frame"], AGENT_FRAME, 4 * 1024 * 1024 - 2048) + 17,
     "fragments": 1024,
     "outData": PAIR_LIMITS["outData"],
     "outTotal": PAIR_LIMITS["outTotal"],
 }
 _SAFE = 2 ** 53 - 1
-CHANNELS = ("kernel", "terminal")  # (terminal addendum T1.4 §T2; terminal pages served by default since T-3)
+CHANNELS = ("kernel", "terminal", "agent", "engine")  # (terminal addendum T1.4 §T2; terminal pages by default since T-3; agent pages with --serve-agents; engine pages with a kernel factory, r3 P2a)
+ENGINE_FRAME = 4 * 1024 * 1024 - 2048  # (an engine page's message after its prefix, either way: the relay's RUNNER_ENGINE_FRAME)
+ENGINE_CAP = "engine/1"  # (x-sb-remote-caps: what this runner says it speaks, when it serves engine pages)
+# (the kernel entries a notebook's engine page may name: r3.3 D1, refined; the relay's ENGINE_ENTRIES, in order)
+ENGINE_ENTRIES = ("sagebrush-python", "sagebrush-sage", "sagebrush-magma", "sagebrush-matlab", "python")
+_NB = re.compile(r"[A-Za-z0-9_-]{1,43}")
+AGENT_NAME = re.compile(r"[a-z][a-z0-9-]{0,15}\Z")  # (an agent kind's name: --agent NAME=COMMAND, the hello's "agent")
+AGENT_KINDS = 4  # (the most kinds one runner offers, so the most agent children it has at once)
+AGENT_START_WAIT_S = 10  # (at the runner's exit: how long a start under way is given, then again after its cancel)
 TERMINAL_FRAME = 65_536  # (a terminal message's whole serialization, either way: T2's terminal row, T12-CAP-1)
 _GEN_PREFIX = re.compile(r"([1-9][0-9]{0,15})\n")
 _CONN = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -80,7 +133,11 @@ _IN_OPS = {
     "revoked": (),
     "dropped": ("gen", "bytes"),
     "pong": (),
+    "cgen": ("cgen",),
 }
+# (an engine page's page-open: the same op, with its identity after the generation; only for chan "engine", and the
+# plain form never for it)
+_ENGINE_OPEN = ("conn", "kind", "chan", "gen", "nb", "entry", "sgen", "cgen")
 _CHECK = {
     "conn": lambda v: isinstance(v, str) and bool(_CONN.fullmatch(v)),
     "kind": lambda v: v in ("runner", "agent"),
@@ -89,6 +146,10 @@ _CHECK = {
     "r": lambda v: isinstance(v, str) and bool(_TOKEN.fullmatch(v)),
     "upto": lambda v: type(v) is int and 0 <= v <= _SAFE,
     "bytes": lambda v: type(v) is int and 0 <= v <= _SAFE,
+    "nb": lambda v: isinstance(v, str) and bool(_NB.fullmatch(v)),
+    "entry": lambda v: v in ENGINE_ENTRIES,
+    "sgen": lambda v: type(v) is int and 1 <= v <= _SAFE,
+    "cgen": lambda v: type(v) is int and 1 <= v <= _SAFE,
 }
 
 
@@ -127,9 +188,14 @@ def parse_control(text):
     fields = _IN_OPS.get(op)
     if fields is None:
         raise ControlError("an unknown op")
-    if [k for k, _ in v] != ["relay", *fields]:
+    keys = [k for k, _ in v]
+    if op == "page-open" and keys == ["relay", *_ENGINE_OPEN]:
+        fields = _ENGINE_OPEN
+    if keys != ["relay", *fields]:
         raise ControlError("the op's keys, in order")
     d = dict(v)
+    if op == "page-open" and (fields is _ENGINE_OPEN) != (d["chan"] == "engine"):
+        raise ControlError("an engine page's identity, and only an engine page's")
     for f in fields:
         if not _CHECK[f](d[f]):
             raise ControlError("a bad %s" % f)
@@ -148,6 +214,26 @@ def split_prefix(text):
     if gen > _SAFE:
         raise ControlError("a generation over 2^53 - 1")
     return gen, text[m.end():]
+
+
+def split_prefix_bytes(data):
+    """(gen, payload) of a binary application message: the same ASCII prefix, read from its first 17 bytes at most,
+    then the exact bytes; or ControlError."""
+    m = _GEN_PREFIX.match(bytes(data[:17]).decode("latin-1"))
+    if m is None:
+        raise ControlError("an application message without its generation prefix")
+    gen = int(m.group(1))
+    if gen > _SAFE:
+        raise ControlError("a generation over 2^53 - 1")
+    return gen, bytes(data[m.end():])
+
+
+def _human_s(s):
+    return "%dd" % (s // 86400) if s % 86400 == 0 else "%dh" % (s // 3600) if s % 3600 == 0 else "%dm" % (s // 60)
+
+
+IDLE_PASS_S = 30  # (how often the idle stop looks: a kernel is stopped at most this long after its --idle)
+IDLE_OMITTED = object()  # (RelayRunner's idle_s when not given: the default, never confused with None, "never")
 
 
 def ping_text():
@@ -263,9 +349,12 @@ class Leg:
     """One connection to the relay: the upgrade, then frames.  on_text(text) gets each whole message; on_end(code,
     reason) once, when it ends however it ends."""
 
-    def __init__(self, reader, writer, on_text, on_end):
+    def __init__(self, reader, writer, on_text, on_end, inbound=None, on_binary=None):
         self.r, self.w = reader, writer
+        self.inbound = RELAY_LIMITS["inbound"] if inbound is None else inbound
         self.on_text, self.on_end = on_text, on_end
+        self.on_binary = on_binary  # (binary messages: an engine runner's only; without it, 1003 as before)
+        self.binary = False  # (the message being read is binary)
         self.buf = bytearray()
         self.parts, self.parts_len, self.in_msg, self.fragments = [], 0, False, 0
         self.closed = False
@@ -301,6 +390,9 @@ class Leg:
 
     def send_text(self, text, kind="data"):
         return self.write(client_frame(0x1, text.encode("utf-8", "surrogatepass")), kind)
+
+    def send_bytes(self, data, kind="data"):
+        return self.write(client_frame(0x2, bytes(data)), kind)
 
     def close(self, code, reason=""):
         if self.closed:
@@ -377,7 +469,7 @@ class Leg:
             control = op >= 0x8
             if control and (n > 125 or not fin):
                 return self.close(1002, "bad control frame")
-            if not control and self.parts_len + n > RELAY_LIMITS["inbound"]:
+            if not control and self.parts_len + n > self.inbound:
                 return self.close(1009, "message too big")
             if len(self.buf) < at + n:
                 return
@@ -410,12 +502,12 @@ class Leg:
                 continue
             if op == 0xA:
                 continue
-            if op == 0x2:
+            if op == 0x2 and self.on_binary is None:
                 return self.close(1003, "text frames only")
-            if op == 0x1:
+            if op in (0x1, 0x2):
                 if self.in_msg:
                     return self.close(1002, "a new message inside a fragmented one")
-                self.in_msg, self.fragments = True, 0
+                self.in_msg, self.fragments, self.binary = True, 0, op == 0x2
             elif op == 0x0:
                 if not self.in_msg:
                     return self.close(1002, "a continuation with nothing to continue")
@@ -431,6 +523,9 @@ class Leg:
                 continue
             whole = b"".join(self.parts)
             self.parts, self.parts_len, self.in_msg, self.fragments = [], 0, False, 0
+            if self.binary:
+                self.on_binary(whole)
+                continue
             try:
                 text = whole.decode("utf-8")
             except UnicodeDecodeError:
@@ -457,8 +552,10 @@ def _close_quietly(sock):
         pass
 
 
-async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
-    """A fresh challenge, signed; the connection (proxy, TLS); the upgrade.  A Leg, running, or Retry / Fatal."""
+async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, inbound=None, agents=None, on_binary=None):
+    """A fresh challenge, signed; the connection (proxy, TLS); the upgrade.  A Leg, running, or Retry / Fatal.
+    agents: the agent kinds this runner offers, in order, sent on the upgrade as x-sb-remote-agents so the account's
+    computer list can name them before a page connects (a hint there only: a page's hello decides); none, no header."""
     connect_ms = connect_ms or RELAY_LIMITS["connectMs"]
     try:
         status, d = await _in_thread(post, origin, "/api/remote/v1/challenge", {"remote_id": key.remote_id})
@@ -492,10 +589,13 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
     try:
         wskey = base64.b64encode(os.urandom(16)).decode("ascii")
         hostport = host if u.port is None else "%s:%d" % (host, u.port)
+        kinds = "x-sb-remote-agents: %s\r\n" % ",".join(agents) if agents else ""
+        if on_binary is not None:
+            kinds += "x-sb-remote-caps: %s\r\n" % ENGINE_CAP  # (engine pages: only with a kernel factory)
         writer.write(("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                       "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: %s\r\n"
-                      "x-sb-remote-challenge: %s\r\nx-sb-remote-signature: %s\r\n\r\n"
-                      % (RELAY_PATH, hostport, wskey, USER_AGENT, c, sig)).encode("ascii"))
+                      "x-sb-remote-challenge: %s\r\nx-sb-remote-signature: %s\r\n%s\r\n"
+                      % (RELAY_PATH, hostport, wskey, USER_AGENT, c, sig, kinds)).encode("ascii"))
         head = b""
         while b"\r\n\r\n" not in head:
             chunk = await asyncio.wait_for(reader.read(4096), left())
@@ -529,9 +629,24 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
     except BaseException:
         writer.transport.abort()
         raise
-    leg = Leg(reader, writer, on_text, on_end)
+    leg = Leg(reader, writer, on_text, on_end, inbound=inbound, on_binary=on_binary)
     leg.first = rest  # (read by start(): the caller starts the leg once it holds it, so no message comes before)
     return leg
+
+
+def agent_envelope(msg):
+    """An agent page's message, (auth, proof, payload) or None: an object with exactly "a", "p" and "m", each a string,
+    the payload one line (no line feed or carriage return: it goes to the child as one)."""
+    if not (isinstance(msg, dict) and sorted(msg) == ["a", "m", "p"]):
+        return None
+    a, pr, m = msg["a"], msg["p"], msg["m"]
+    if not (isinstance(a, str) and isinstance(pr, str) and isinstance(m, str)) or "\n" in m or "\r" in m:
+        return None
+    return a, pr, m
+
+
+def _sha(text):
+    return b64url(hashlib.sha256(text.encode("utf-8", "surrogatepass")).digest())
 
 
 class RelayPage:
@@ -546,15 +661,51 @@ class RelayPage:
         self.jkt = None
         self.hello_timer = None
         self.grant = None  # (a terminal page's attachment grant, terminal.py)
-        self.jtis = {}     # (a terminal page's proofs' jtis: once each)
+        self.jtis = {}     # (a terminal page's (and an agent page's) proofs' jtis: once each)
+        self.nonce = None  # (an agent page's DPoP nonce, for its life)
+        self.slot = None   # (an agent page's kind, an AgentSlot, from its hello)
+        self.engine = None  # (an engine page's identity: {nb, entry, sgen, cgen}; its kernel, while attached)
+        self.kernel = None
+
+    # ---- an agent page, as agent_child.AgentChild sees it
+    def deliver(self, text):
+        """One message from the agent; False if the leg has no room for it yet (the caller holds it and retries)."""
+        if self.closed:
+            return True  # (gone: the child's pump looks again and finds no page)
+        n = len(text.encode("utf-8", "surrogatepass"))
+        if not self.leg.fits(n + len(self.prefix), "data"):
+            return False
+        return self.send_text(text, "data") or True
+
+    def told(self, text, code):
+        """The agent's end, said to this page in words, then the page closed."""
+        if not self.closed:
+            self.send({"jsonrpc": "2.0", "method": "agent.ended", "params": {"text": text}})
+            self.close(code, text[:100])
+
+    def notice(self, text):
+        if not self.closed:
+            self.send({"jsonrpc": "2.0", "method": "agent.notice", "params": {"text": text}})
 
     def fits(self, n, kind):
         return not self.closed and self.leg.fits(n + len(self.prefix), kind)
 
+    def over_engine_cap(self, n):
+        """An engine page's outgoing message over ENGINE_FRAME (n: its payload's bytes, after the prefix): that page
+        ends (1009), before anything is written, never the leg (the relay's cap would close the whole leg, every other
+        notebook's page with it).  True when refused."""
+        if self.chan == "engine" and n > ENGINE_FRAME:
+            self.close(1009, "a message over the engine page's cap")
+            return True
+        return False
+
     def send_text(self, text, kind):
         if self.closed:
             return False
-        data = (self.prefix + text).encode("utf-8", "surrogatepass")
+        payload = text.encode("utf-8", "surrogatepass")
+        if self.over_engine_cap(len(payload)):
+            return False
+        data = self.prefix.encode("ascii") + payload
         if not self.leg.fits(len(data), kind):
             # (this page's answers aren't leaving: this page ends, 1013; the leg and any next page go on)
             self.close(1013, "the page isn't reading its answers")
@@ -563,6 +714,16 @@ class RelayPage:
 
     def send(self, obj):
         return self.send_text(json.dumps(obj, separators=(",", ":")), "data")
+
+    def send_bytes(self, data, kind="data"):
+        """An engine page's binary message (the kernel's stream), with its generation prefix; as send_text otherwise."""
+        if self.closed or self.over_engine_cap(len(data)):
+            return False
+        frame = self.prefix.encode("ascii") + bytes(data)
+        if not self.leg.fits(len(frame), kind):
+            self.close(1013, "the page isn't reading its answers")
+            return False
+        return self.leg.write(client_frame(0x2, frame), kind)
 
     def close(self, code, reason=""):
         """This page only: ended here, and {"relay":"close","gen":n} to the relay, which closes the page's leg and
@@ -574,12 +735,120 @@ class RelayPage:
         self.leg.send_text(close_text(self.gen), "control")
 
 
+class AgentSlot:
+    """One agent kind this runner offers: its name and command, and its child (if any) with that child's resume secret's
+    SHA-256 and the page key it is bound to."""
+
+    def __init__(self, name, cmd):
+        self.name, self.cmd = name, list(cmd)
+        self.child = None
+        self.resume = None
+        self.resume_jkt = None
+        self.log = None  # (its AgentLog, made at its first child)
+
+
+def agent_kinds(kinds):
+    """[(name, argv)], checked as the runner takes them: valid unique names, each with a command, at most AGENT_KINDS;
+    or raises ValueError with the reason."""
+    kinds = [(name, list(cmd)) for name, cmd in kinds]
+    names = [name for name, _ in kinds]
+    for name, cmd in kinds:
+        if not isinstance(name, str) or not AGENT_NAME.match(name):
+            raise ValueError("an agent's name is a lowercase letter, then up to 15 lowercase letters, digits or -: %r" % (name,))
+        if not cmd or not all(isinstance(a, str) for a in cmd):
+            raise ValueError("--agent %s needs the agent's command" % name)
+    if len(set(names)) != len(names):
+        raise ValueError("an agent's name is given twice: %s" % ", ".join(sorted(n for n in set(names) if names.count(n) > 1)))
+    if len(kinds) > AGENT_KINDS:
+        raise ValueError("at most %d agents per runner" % AGENT_KINDS)
+    return kinds
+
+
+class EngineKernels:
+    """The engine channel's kernels, one per (notebook, entry), made by `factory(nb, entry, on_end, charge)` (P2c's
+    engine, P2d's Native (Python); tests: a double).  A kernel has attach(page, fresh), detach(page), page_text(page,
+    text), page_bytes(page, data) and stop(why), and an `idle` IdleClock it tells of its cells' starts and ends; it
+    calls charge.started() when its process tree exists, ledger.reconcile(charge) once ready, and charge.reaped() once
+    its tree is gone (charge.ended_unreaped() before that, if it stopped or failed).  A new kernel is admitted by the
+    ledger first (admission.py); a page reattaching to a kernel is never charged again.  The table outlives pages and
+    legs; the runner's exit stops every kernel."""
+
+    def __init__(self, factory, ledger=None, idle_s=None, clock=time.monotonic):
+        self.factory = factory
+        self.ledger = ledger
+        self.idle_s, self.clock = idle_s, clock
+        self.by_key = {}
+
+    def get(self, nb, entry):
+        return self.by_key.get((nb, entry))
+
+    def start(self, nb, entry):
+        """A new kernel, admitted first: the kernel, or Refused (admission.py) with the words to show."""
+        charge = self.ledger.admit(entry) if self.ledger is not None else None
+        try:
+            k = self.factory(nb, entry, lambda: self.ended(nb, entry, k), charge)
+        except BaseException:
+            # (refunded here only if nothing was spawned (the factory never called charge.started()); once something
+            # was, the factory's own teardown reports the reap (charge.reaped()), and until then the charge is held)
+            if charge is not None:
+                if charge.started_at is None:
+                    charge.reaped()
+                else:
+                    charge.ended_unreaped()
+            raise
+        from sagebrush.remote.admission import IdleClock
+        k.idle = IdleClock(self.idle_s, self.clock)
+        self.by_key[(nb, entry)] = k
+        return k
+
+    def idle_due(self):
+        """The kernels idle has come for (quiescent past --idle): stopped by the caller."""
+        return [(key, k) for key, k in self.by_key.items() if getattr(k, "idle", None) is not None and k.idle.due()]
+
+    def ended(self, nb, entry, k):
+        if self.by_key.get((nb, entry)) is k:
+            del self.by_key[(nb, entry)]
+
+    def stop_other_entries(self, nb, entry, why):
+        """H4: a notebook's page for one entry ends the notebook's kernels of every other entry."""
+        for (n, e), k in list(self.by_key.items()):
+            if n == nb and e != entry:
+                del self.by_key[(n, e)]
+                k.stop(why)
+
+    def stop_all(self, why):
+        for k in list(self.by_key.values()):
+            k.stop(why)
+        self.by_key.clear()
+
+
 class RelayRunner:
     """The gateway's host on the relay: its pages, its leg, and dialing again."""
 
     def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None,
-                 terminals=True):
+                 terminals=True, agents=False, agent_cmd=None, agent_grace_ms=AGENT_GRACE_MS, agent_log=None,
+                 now_ms=None, agent_cmds=None, kernels=None, ledger=None, idle_s=IDLE_OMITTED):
         self.key = key
+        # (engine pages (r3 P2a): only with a kernel factory, kernels(nb, entry, on_end) -> a kernel; the connection
+        # generation is the highest seen, across legs; each notebook's session generation likewise)
+        from sagebrush.remote.admission import IDLE_DEFAULT_S
+        # (idle_s: seconds, None for never (parse_idle("never")), or omitted for the default; never isn't the default)
+        self.engine = EngineKernels(kernels, ledger, IDLE_DEFAULT_S if idle_s is IDLE_OMITTED else idle_s) if kernels is not None else None
+        self.idle_task = None
+        self.cgen = 0
+        self.nb_sgen = {}
+        self.nb_page = {}  # (each notebook's attached engine page)
+        # (agent pages (agent_child.py): off unless --serve-agents, with each kind's command: agent_cmds [(name, argv)],
+        # in the order given, the first the default; agent_cmd alone is the one kind "default")
+        kinds = agent_kinds(agent_cmds if agent_cmds else [("default", agent_cmd)] if agent_cmd else [])
+        self.slots = {name: AgentSlot(name, cmd) for name, cmd in kinds}
+        self.agent_default = kinds[0][0] if kinds else None
+        self.serve_agents = bool(agents and kinds)
+        self.agent_grace_ms = agent_grace_ms
+        self.agent_log = agent_log  # (the first kind's log, if given; every other kind's is its own file in that folder)
+        self.agent_starts = set()   # (children's starts under way: the runner's exit waits for them, bounded)
+        self.hello_jtis = {}        # (agent hellos' proofs' jtis, runner-wide)
+        self.now_ms = now_ms or (lambda: int(time.time() * 1000))
         # (terminal pages (terminal.py): on by default (terminal addendum T6, William Nov 6: a kernel on this runner can
         # already run any shell command as the box user, so a terminal adds no capability); terminals=False refuses
         # them at once, with no PTY opened)
@@ -622,9 +891,22 @@ class RelayRunner:
             return self.violation("a page's message for no page this runner holds")
         if page.closed:
             return  # (a page this runner ended (close {gen}) or replaced, whose page-close is still to come)
-        if not page.paired and len(text.encode("utf-8", "surrogatepass")) > PAIR_LIMITS["preHello"]:
+        n = len(text.encode("utf-8", "surrogatepass"))
+        if page.chan == "engine":
+            # (the kernel's control JSON, exactly as sent: never parsed here)
+            if n > ENGINE_FRAME:
+                return page.close(1009, "message too big")
+            if page.kernel is not None:
+                page.kernel.page_text(page, text)
+            return
+        if not page.paired and n > PAIR_LIMITS["preHello"]:
             return page.close(1009, "message too big")
-        if page.chan == "terminal" and len(text.encode("utf-8", "surrogatepass")) > TERMINAL_FRAME:
+        if page.chan == "terminal" and n > TERMINAL_FRAME:
+            return page.close(1009, "message too big")
+        # (the leg reads up to the largest channel's cap; each page is held to its own channel's)
+        if page.chan == "kernel" and n > PAIR_LIMITS["frame"]:
+            return page.close(1009, "message too big")
+        if page.chan == "agent" and n > AGENT_FRAME:
             return page.close(1009, "message too big")
         try:
             msg = strict_json(text)
@@ -635,8 +917,28 @@ class RelayRunner:
             return self.violation("a page's message with a relay key")
         self.page_message(page, msg)
 
+    def on_binary(self, data):
+        """A binary message on the leg: an engine page's only (the kernel's stream)."""
+        try:
+            gen, payload = split_prefix_bytes(data)
+        except ControlError as e:
+            return self.violation(str(e))
+        page = self.pages.get(gen)
+        if page is None:
+            return self.violation("a page's message for no page this runner holds")
+        if page.closed:
+            return
+        if page.chan != "engine":
+            return self.violation("a binary message for a page that isn't an engine page")
+        if len(payload) > ENGINE_FRAME:
+            return page.close(1009, "message too big")
+        if page.kernel is not None:
+            page.kernel.page_bytes(page, payload)
+
     def control(self, c):
         op = c["relay"]
+        if op == "cgen":
+            return self.advance_cgen(c["cgen"])
         if op == "pong":
             self.pings_unanswered = 0
         elif op == "receipt":
@@ -649,6 +951,8 @@ class RelayRunner:
             if c["gen"] <= self.last_gen:
                 return self.violation("a page's generation went back")
             self.last_gen = c["gen"]
+            if c["chan"] == "engine":
+                return self.open_engine(c)
             self.open_page(c["conn"], c["gen"], c["chan"])
         elif op == "page-close":
             p = self.pages.get(c["gen"])
@@ -677,6 +981,8 @@ class RelayRunner:
         self.pages[gen] = p
         if chan == "terminal" and self.serve_terminals:
             pass  # (any number the relay admits (4 per remote); each its own generation and grant)
+        elif chan == "agent":
+            pass  # (its hello decides: refused, with how to start it, when this runner doesn't serve agents)
         elif chan != "kernel":
             # (a channel this runner doesn't serve: that page ended at once, nothing opened for it)
             return p.close(1008, "this runner doesn't offer %s pages" % chan)
@@ -690,20 +996,109 @@ class RelayRunner:
                 p.close(1008, "no hello in time")
         p.hello_timer = self.timers.set_timeout(no_hello, PAIR_LIMITS["helloMs"])
 
+    # ---- engine pages (r3 P2a)
+    def idle_pass(self):
+        """The idle stop's pass (every IDLE_PASS_S while the runner runs): each quiescent kernel past --idle stopped by
+        its tree rule; its charge refunded only once reaped (the kernel's own)."""
+        if self.engine is None:
+            return []
+        due = self.engine.idle_due()
+        for (nb, entry), k in due:
+            if self.engine.by_key.get((nb, entry)) is k:
+                del self.engine.by_key[(nb, entry)]
+            k.stop("idle for %s with no page and no running cell" % _human_s(k.idle.limit))
+        return due
+
+    def advance_cgen(self, cgen):
+        """The relay's connection generation went up (a disconnect, sync off or reset): every engine page of an older
+        one is detached; their kernels go on, unreachable until a page of this generation opens them."""
+        if cgen <= self.cgen:
+            return
+        self.cgen = cgen
+        for p in list(self.pages.values()):
+            if p.chan == "engine" and not p.closed and p.engine["cgen"] < cgen:
+                p.close(4412, "the connection's generation went up")
+
+    def open_engine(self, c):
+        p = RelayPage(self, self.leg, c["conn"], c["gen"], "engine")
+        p.engine = {k: c[k] for k in ("nb", "entry", "sgen", "cgen")}
+        self.pages[c["gen"]] = p
+        nb, entry = c["nb"], c["entry"]
+        if self.engine is None:
+            return p.close(1008, "this runner doesn't offer engine pages")
+        if c["cgen"] < self.cgen:
+            return p.close(4409, "an older connection generation")
+        if c["sgen"] <= self.nb_sgen.get(nb, 0):
+            return p.close(4409, "an older page for this notebook")
+        self.advance_cgen(c["cgen"])
+        self.nb_sgen[nb] = c["sgen"]
+        old = self.nb_page.get(nb)
+        if old is not None and not old.closed:
+            old.close(4009, "the notebook was opened in another page")
+        self.engine.stop_other_entries(nb, entry, "the notebook's kernel changed")
+        k = self.engine.get(nb, entry)
+        fresh = k is None
+        if fresh:
+            from sagebrush.remote.admission import Refused
+            try:
+                k = self.engine.start(nb, entry)
+            except Refused as e:
+                # (said to the page in words, then that page ends; nothing else changes)
+                p.paired = True
+                p.send({"engine": "refused", "why": str(e)})
+                return p.close(1008, "refused: %s" % str(e)[:80])
+        p.paired = True  # (no hello: the relay bound the page's identity (H1); the kernel speaks first)
+        p.kernel = k
+        self.nb_page[nb] = p
+        if getattr(k, "idle", None) is not None:
+            k.idle.attach()
+        k.attach(p, fresh)
+
     def terminals(self):
         if self.terms is None:
             from sagebrush.remote.terminal import Terminals
             self.terms = Terminals(self, asyncio.get_running_loop(), cwd=self.cwd)
         return self.terms
 
+    # (the first kind's child and resume secret: on a runner with one kind, its only ones)
+    @property
+    def agent(self):
+        slot = self.slots.get(self.agent_default)
+        return slot.child if slot is not None else None
+
+    @property
+    def agent_resume(self):
+        slot = self.slots.get(self.agent_default)
+        return slot.resume if slot is not None else None
+
+    @property
+    def agent_resume_jkt(self):
+        slot = self.slots.get(self.agent_default)
+        return slot.resume_jkt if slot is not None else None
+
     def page_gone(self, p):
         if p.closed:
             return
         p.closed = True
         self.timers.clear_timeout(p.hello_timer)
+        if p.chan == "engine":
+            k, p.kernel = p.kernel, None
+            if p.engine is not None and self.nb_page.get(p.engine["nb"]) is p:
+                del self.nb_page[p.engine["nb"]]
+            if k is not None:
+                if getattr(k, "idle", None) is not None and k.page is p:
+                    k.idle.detach()
+                k.detach(p)  # (the kernel goes on, detached; a later page of its notebook and entry finds it)
+            return
         if p.chan == "terminal":
             if self.terms is not None:
                 self.terms.page_gone(p)  # (its grant ends; its session goes on, detached)
+            p.token = None
+            return
+        if p.chan == "agent":
+            a = p.slot.child if p.slot is not None else None
+            if a is not None and a.page is p:
+                a.detach()  # (the child stays for its grace; its page may come back)
             p.token = None
             return
         if p.paired:
@@ -722,6 +1117,8 @@ class RelayRunner:
             return self.hello(p, msg)
         if p.chan == "terminal":
             return self.terminals().page_message(p, msg)
+        if p.chan == "agent":
+            return self.agent_message(p, msg)
         plain = isinstance(msg, dict)
         if plain and msg.get("unpair") is True and len(msg) == 1:
             self.gateway.shutdown()
@@ -733,6 +1130,15 @@ class RelayRunner:
         return p.close(1002, "not a message of this protocol")
 
     def hello(self, p, msg):
+        envelope = None
+        if p.chan == "agent":
+            envelope = agent_envelope(msg)
+            if envelope is None:
+                return self._refuse(p, None, "protocol", "the first message must be the hello, signed")
+            try:
+                msg = strict_json(envelope[2])
+            except (ValueError, RecursionError):
+                return self._refuse(p, None, "protocol", "the first message must be the hello")
         ok = (isinstance(msg, dict) and msg.get("jsonrpc") == "2.0" and isinstance(msg.get("id"), str)
               and msg.get("method") == "hello" and isinstance(msg.get("params"), dict))
         rid = msg.get("id") if isinstance(msg, dict) else None
@@ -755,10 +1161,23 @@ class RelayRunner:
         bad = page_key_error(q, self.stats)
         if bad:
             return self._refuse(p, rid, "refused", bad)
+        if p.chan == "agent":
+            if not self.serve_agents:
+                return self._refuse(p, rid, "refused", "This computer's runner doesn't offer agent pages. "
+                                    "Start it with: sagebrush remote --serve-agents --agent-cmd \"<your agent's command>\"")
+            why = self.agent_proof(envelope, q["jkt"], "", None, "sb-agent-hello:%s" % self.key.remote_id, self.hello_jtis)
+            if why:
+                return self._refuse(p, rid, "refused", why)
+            slot, why = self.agent_slot(q)
+            if why:
+                return self._refuse(p, rid, "refused", why)
+            p.slot = slot
         self.timers.clear_timeout(p.hello_timer)
         p.paired = True
         p.jkt = q["jkt"]
         p.token = b64url(os.urandom(32))  # (this page's and this key's; never written anywhere)
+        if p.chan == "agent":
+            return self.agent_hello(p, rid, q)
         if p.chan == "terminal":
             # (its token is good for this page's terminal opens only: no kernel binding, nothing in the gateway)
             return p.send({"jsonrpc": "2.0", "id": rid, "result": {
@@ -773,9 +1192,159 @@ class RelayRunner:
             "protocol": 1, "purpose": "kernel", "via": "relay", "token": p.token, "nonce": self.gateway.current_nonce(),
             "limits": {"frame": PAIR_LIMITS["frame"]}, "incarnation": self.incarnation, "channels": self.channels()}})
 
+    # ---- the agent channel (agent_child.py)
+    def agent_proof(self, envelope, jkt, token, nonce, htu_base, jtis):
+        """Why an agent page's signed message is refused, or None: dpop.py's check, with htu bound to this runner (and
+        the page's generation, after the hello) and to the payload's SHA-256."""
+        auth, proof, payload = envelope
+        bad = _dpop.check(auth, proof, token=token, jkt=jkt, method="AGENT", htu="%s#%s" % (htu_base, _sha(payload)),
+                          now_ms=self.now_ms(), jtis=jtis, nonce=nonce)
+        if bad is None:
+            return None
+        if bad[0] == 503:
+            return "Too many messages at once. Wait a moment, then try again."
+        return "a message this runner can't verify (%s)" % bad[2]
+
+    def agent_slot(self, q):
+        """(the kind a hello asks for, None) or (None, why it's refused): its "agent", or the first kind when it names
+        none.  Nothing changes here, for any kind."""
+        if "agent" not in q:
+            return self.slots[self.agent_default], None
+        name, offered = q["agent"], ", ".join(self.slots)
+        if not isinstance(name, str) or not AGENT_NAME.match(name):
+            return None, "That isn't an agent's name. This computer's runner offers: %s." % offered
+        if name not in self.slots:
+            return None, "This computer's runner doesn't offer %s. It offers: %s." % (name, offered)
+        return self.slots[name], None
+
+    def agent_hello(self, p, rid, q):
+        """The hello's verdict for its own kind, one transition with no await: take over, attach, start a fresh child,
+        or refuse.  Another kind's child, page and resume secret are never looked at."""
+        slot = p.slot
+        resume, fresh, remember = q.get("resume"), q.get("fresh") is True, q.get("remember") is True
+        a = slot.child if slot.child is not None and not slot.child.ended else None
+        matches = (a is not None and isinstance(resume, str) and slot.resume is not None
+                   and hmac.compare_digest(hashlib.sha256(resume.encode("utf-8", "surrogatepass")).digest(), slot.resume)
+                   and hmac.compare_digest(p.jkt, slot.resume_jkt or ""))
+        secret = None
+        if matches:
+            old = a.page
+            if old is not None and old is not p and not old.closed:
+                old.told("This chat is now open in another tab. Open it here again to bring it back.", 1000)
+            a.attach(p)
+        elif a is not None and a.page is not None and not a.page.closed:
+            return self._refuse(p, rid, "refused", "The agent is already open in another page or tab. Close it there, then connect again here.")
+        elif a is not None and not fresh:
+            if isinstance(resume, str):
+                return self._refuse(p, rid, "refused", "This agent session has ended. Connect again to start a new one.")
+            return self._refuse(p, rid, "refused", "A chat is running on this runner. Reopen it from its tab, or start a new chat here, which ends that one.")
+        else:
+            if a is not None:
+                a.stop("the person started a new chat")
+            a = slot.child = AgentChild(slot.cmd, cwd=self.cwd, log=self.slot_log(slot), grace_ms=self.agent_grace_ms,
+                                        on_exit=self._agent_exited)
+            slot.resume = slot.resume_jkt = None
+            if remember:
+                secret = b64url(os.urandom(32))
+                slot.resume = hashlib.sha256(secret.encode("ascii")).digest()
+                slot.resume_jkt = p.jkt
+            a.attach(p)
+            t = asyncio.ensure_future(self._agent_start(slot, a))
+            self.agent_starts.add(t)
+            t.add_done_callback(self.agent_starts.discard)
+        p.paired = True
+        p.nonce = b64url(os.urandom(16))
+        result = {"protocol": 1, "purpose": "agent", "via": "relay", "token": p.token, "nonce": p.nonce,
+                  "maxFrameBytes": AGENT_ADVERTISED, "limits": {"frame": AGENT_FRAME}, "gen": p.gen,
+                  "incarnation": self.incarnation, "remote_id": self.key.remote_id, "channels": self.channels(),
+                  "resumed": bool(matches), "agent": slot.name, "agents": list(self.slots)}
+        if secret is not None:
+            result["resume"] = secret
+        p.send({"jsonrpc": "2.0", "id": rid, "result": result})
+
+    def slot_log(self, slot):
+        """A kind's log: the first kind's is agent.log (the given one, if any); every other kind's is its own file in
+        the same folder, agent-<name>.log, whatever its name ("default" included), so no two kinds share one."""
+        if slot.log is None:
+            base = self.agent_log
+            if slot.name == self.agent_default:
+                slot.log = base if base is not None else AgentLog()
+            else:
+                slot.log = AgentLog(base.folder if base else None, **({"max_bytes": base.max} if base else {}), name=slot.name)
+        return slot.log
+
+    async def _agent_start(self, slot, a):
+        try:
+            await a.start()
+        except (OSError, ValueError) as e:
+            a.ended = True
+            if slot.child is a:
+                slot.child = None
+                slot.resume = slot.resume_jkt = None
+            page = a.page
+            if page is not None and not page.closed:
+                how = "--agent-cmd" if slot.name == "default" else "--agent %s=..." % slot.name
+                page.told("The agent couldn't start (%s). Check the runner's %s." % (type(e).__name__, how), 1011)
+
+    def _agent_exited(self, a):
+        for slot in self.slots.values():
+            if slot.child is a:  # (a replaced child's exit changes nothing for its kind's new one)
+                slot.child = None
+                slot.resume = slot.resume_jkt = None
+
+    def stop_slot(self, slot, why):
+        a, slot.child = slot.child, None
+        slot.resume = slot.resume_jkt = None
+        if a is not None:
+            a.stop(why)
+
+    def stop_agent(self, why):
+        """Every kind's child, a start under way included (its stop ends the group once it exists)."""
+        for slot in self.slots.values():
+            self.stop_slot(slot, why)
+
+    def agent_message(self, p, msg):
+        """A paired agent page's message: verified before anything, then handled (unpair, interrupt) or forwarded."""
+        env = agent_envelope(msg)
+        if env is None:
+            return p.close(1002, "not a message of this protocol")
+        slot = p.slot
+        a = slot.child if slot is not None else None
+        if a is None or a.page is not p:
+            return  # (a page its kind's child no longer has attached: its message has no effect)
+        why = self.agent_proof(env, p.jkt, p.token, p.nonce,
+                               "sb-agent:%s/%s/%d" % (self.key.remote_id, self.incarnation, p.gen), p.jtis)
+        if why:
+            return p.notice(why)
+        payload = env[2]
+        try:
+            inner = strict_json(payload)
+        except (ValueError, RecursionError):
+            return p.notice("a message that isn't JSON")
+        if not isinstance(inner, dict) or "relay" in inner:
+            return p.notice("a message this connection doesn't carry")
+        if inner == {"unpair": True}:
+            self.stop_slot(slot, "the person disconnected it")  # (its own kind's only)
+            return p.close(1000, "unpaired")
+        if inner == {"interrupt": True}:
+            return a.interrupt()
+        if not a.send(payload):
+            text = "The agent isn't reading messages right now. Try again in a moment."
+            if isinstance(inner.get("id"), (str, int)) and "method" in inner:
+                return p.send({"jsonrpc": "2.0", "id": inner["id"], "error": {"code": -32002, "message": text,
+                                                                              "data": {"code": "busy"}}})
+            return p.notice(text)
+
+    def inbound_limit(self):
+        """The largest message this runner takes from the relay: its largest channel's cap plus the generation prefix."""
+        if self.engine is not None:
+            return RELAY_LIMITS["inboundEngine"]
+        return RELAY_LIMITS["inboundAgents" if self.serve_agents else "inbound"]
+
     def channels(self):
         """The page channels this runner serves (T6: the page offers Terminal when it is listed)."""
-        return ["kernel", "terminal"] if self.serve_terminals else ["kernel"]
+        return (["kernel"] + (["terminal"] if self.serve_terminals else []) + (["agent"] if self.serve_agents else [])
+                + (["engine"] if self.engine is not None else []))
 
     # ---- the leg's life
     def on_end(self, code, reason):
@@ -788,6 +1357,8 @@ class RelayRunner:
             self.fatal = Fatal("this computer's enrollment was revoked: it no longer runs code for the account", 3)
         elif code == 4009 and self.fatal is None:
             self.fatal = Fatal("another `sagebrush remote` with this computer's key took over", 4)
+        if code in (4403, 4009):
+            self.stop_agent("this runner's enrollment was revoked or replaced")  # (before anything could re-attach)
         if self.leg_ended is not None and not self.leg_ended.done():
             self.leg_ended.set_result(code)
 
@@ -803,8 +1374,29 @@ class RelayRunner:
             self.stats["pings"] += 1
             leg.send_text(ping_text(), "control")
 
+    async def idle_loop(self):
+        """The idle stop's pass every IDLE_PASS_S, for the runner's whole life: through legs, losses and backoffs alike
+        (kernels outlive legs); cancelled when run() ends."""
+        while True:
+            await self.sleep(IDLE_PASS_S)
+            self.idle_pass()
+
     async def run(self, stop):
         """Dial, serve, dial again, until stop is set or a Fatal; returns the exit status."""
+        if self.engine is not None and self.idle_task is None:
+            self.idle_task = asyncio.ensure_future(self.idle_loop())
+        try:
+            return await self._run(stop)
+        finally:
+            if self.idle_task is not None:
+                self.idle_task.cancel()
+                try:
+                    await self.idle_task
+                except BaseException:
+                    pass
+                self.idle_task = None
+
+    async def _run(self, stop):
         attempt = 0
         first = True
         while not stop.is_set():
@@ -816,7 +1408,10 @@ class RelayRunner:
                 self.last_gen, self.page, self.pages = 0, None, {}  # (generations are the leg's)
                 # (Stop while connecting returns at once: the challenge or the dial in its thread is let go, and a
                 # socket it makes later is closed (_in_thread))
-                opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post))
+                opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post,
+                                                         inbound=self.inbound_limit(),
+                                                         agents=list(self.slots) if self.serve_agents else None,
+                                                         on_binary=self.on_binary if self.engine is not None else None))
                 stopped = asyncio.ensure_future(stop.wait())
                 await asyncio.wait([opening, stopped], return_when=asyncio.FIRST_COMPLETED)
                 stopped.cancel()
@@ -833,7 +1428,7 @@ class RelayRunner:
                 self.leg.start()
                 self.stats["legs"] += 1
                 up_at = time.monotonic()
-                self.err("Connected to %s as %s. Pick it in a notebook's \"Run on\" menu.\n" % (self.origin, self.key.name)
+                self.err("Connected to %s as %s. In a notebook, choose \"Remote: %s\" in the menu next to Run all, or open Terminal on your computer from its ... menu.\n" % (self.origin, self.key.name, self.key.name)
                          if first else "Reconnected.\n")
                 first = False
                 ping = asyncio.ensure_future(self.pinger(self.leg))
@@ -872,9 +1467,26 @@ class RelayRunner:
         return 0
 
 
-async def run_relay(key, err=None, cwd=None):
+async def finish_agent_starts(runner, wait_s=None):
+    """At the runner's exit, after stop_agent: a start still under way.  Its process, if it exists, was already ended
+    with its group (its pid is known from the spawn on); the start is given wait_s to tidy up, then cancelled, which
+    tidies up the same way (the group ended, the process reaped), before drain_groups looks.  Returns the starts that
+    were cancelled."""
+    wait_s = AGENT_START_WAIT_S if wait_s is None else wait_s
+    if not runner.agent_starts:
+        return set()
+    _, pending = await asyncio.wait(list(runner.agent_starts), timeout=wait_s)
+    for t in pending:
+        t.cancel()
+    if pending:
+        runner.err("An agent start still under way at the exit was cancelled after %g s.\n" % wait_s)
+        await asyncio.wait(pending, timeout=wait_s)
+    return pending
+
+
+async def run_relay(key, err=None, cwd=None, agents=False, agent_cmds=None):
     """`sagebrush remote`: until Ctrl-C or SIGTERM (close 1001, the kernels' groups stopped: R8), or a Fatal."""
-    runner = RelayRunner(key, err=err, cwd=cwd)
+    runner = RelayRunner(key, err=err, cwd=cwd, agents=agents, agent_cmds=agent_cmds)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     import signal
@@ -886,6 +1498,10 @@ async def run_relay(key, err=None, cwd=None):
     try:
         code = await runner.run(stop)
     finally:
+        runner.stop_agent("the runner stopped")
+        if runner.engine is not None:
+            runner.engine.stop_all("the runner stopped")
+        await finish_agent_starts(runner)  # (it says so when it cancels a start)
         runner.gateway.shutdown()
         if runner.terms is not None:
             runner.terms.stop_all()
@@ -900,19 +1516,78 @@ async def run_relay(key, err=None, cwd=None):
     return code
 
 
+USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND | --serve-agents --agent NAME=COMMAND ...]
+
+  --serve-agents       also serve agent pages: the person's own agent, chatting beside their notebooks.  The agent
+                       runs as you, in the folder this command was started in, and can change files there.
+  --agent-cmd COMMAND  how to start the agent (split like a shell's words, never run through a shell), for example
+                       --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz --stdio"
+                       It's required with --serve-agents unless --agent is given: the runner never chooses or
+                       fetches an agent by itself.  Its name is "default".
+  --agent NAME=COMMAND another agent the page can pick by NAME (a lowercase letter, then up to 15 lowercase letters,
+                       digits or -), started with COMMAND as --agent-cmd's is; repeat it for each, at most 4 in all.
+                       Of --agent-cmd and the --agent options, the first given is the one a page gets when it names none.
+
+The agent gets one JSON message per line on stdin and answers on stdout. The runner's own lines start with
+{"relay": ...}: first {"relay":{"start":{"frame":F,"protocol":1,"epoch":0}}}, where F is the largest message in
+bytes either way, then {"relay":{"page":"detached",...}} and {"relay":{"page":"attached",...}} as pages go and
+come. An agent must ignore a relay line it doesn't know, and must never send one: an agent that does is stopped.
+"""
+
+
+def parse_args(argv):
+    """(agents, [(name, argv)]) in the order given, or raises ValueError with the reason."""
+    import shlex
+    agents, kinds, default = False, [], False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--serve-agents":
+            agents = True
+        elif a == "--agent-cmd":
+            if i + 1 >= len(argv) or not shlex.split(argv[i + 1]):
+                raise ValueError("--agent-cmd needs the agent's command")
+            if default:
+                raise ValueError("--agent-cmd is given twice")
+            default = True
+            kinds.append(("default", shlex.split(argv[i + 1])))
+            i += 1
+        elif a == "--agent":
+            if i + 1 >= len(argv) or "=" not in argv[i + 1]:
+                raise ValueError("--agent needs NAME=COMMAND")
+            name, cmd = argv[i + 1].split("=", 1)
+            kinds.append((name, shlex.split(cmd)))
+            i += 1
+        else:
+            raise ValueError("unknown argument %s" % a)
+        i += 1
+    if agents and not kinds:
+        raise ValueError("--serve-agents needs --agent-cmd or --agent")
+    if kinds and not agents:
+        raise ValueError("--agent-cmd and --agent need --serve-agents")
+    return agents, agent_kinds(kinds)
+
+
 def main(argv):
     """`sagebrush remote`: enroll first if this computer isn't, then serve its account's pages through the relay."""
-    if argv:
-        sys.stderr.write("sagebrush remote: unknown argument %s\n" % argv[0])
+    if argv and argv[0] in ("-h", "--help"):
+        sys.stdout.write(USAGE)
+        return 0
+    try:
+        agents, agent_cmds = parse_args(argv)
+    except ValueError as e:
+        sys.stderr.write("sagebrush remote: %s\n%s" % (e, USAGE))
         return 2
     try:
         key = _keys.load()
+    except _keys.OldKeyFile:
+        key = None  # (an older release's key file: enrolled again below, as with none; login keeps the old one aside)
     except _keys.KeyFileError as e:
         sys.stderr.write("sagebrush remote: %s\n" % e)
         return 1
     if key is None:
         from sagebrush.remote.enroll import main as login_main
-        code = login_main([])
+        code = login_main([], continuing=True)
         if code:
             return code
         key = _keys.load()
@@ -921,4 +1596,4 @@ def main(argv):
     except EnrollError as e:
         sys.stderr.write("sagebrush remote: the key file's origin: %s\n" % e)
         return 1
-    return asyncio.run(run_relay(key))
+    return asyncio.run(run_relay(key, agents=agents, agent_cmds=agent_cmds))

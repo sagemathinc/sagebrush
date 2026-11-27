@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Mode registry (design/rill.md 5.1, no behaviour change), measured with bun 1.4.4 (size-gate script, CI build order) on the probe merge of the head onto master 51e04c6d. src/modes.ts is plain data and three flag helpers: the mode names and each consumer's subset (document, flag, translated, CLI prompt and kernel modes), plus KERNEL_SPECS moved verbatim from src/kernel.ts. cli/pyjs.cjs +409: the module's arrays and helpers, minus the inline copies they replace in kernel, reactive-session, rename, dataflow, board-run, local-gateway and notebook-session, and the embedded web build (the gzipped board frame +32 B and the analyze bundle -28 B, in base64); web/board/ and the notebook's setMode keep their own lists (the board package compiles web/ alone; a census plants a fault in setMode's text). engine/sagebrush-worker.js -13 and engine/sagebrush-analyze.js -21 shrink; no lazy group or lib bundle changes.",
- "bytes": {
-  "cli/pyjs.cjs": 409
- }
-}

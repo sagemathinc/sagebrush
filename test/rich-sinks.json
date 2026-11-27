@@ -1,5 +1,17 @@
 {
  "readers": {
+  "web/notebook/notebook.js :: offerDefiner :: if (opts.readOnly || cell.out.querySelector(\".definer\")) return; #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
+  "web/notebook/notebook.js :: offerDefiner :: const m = /NameError: name '([^']+)' is not defined\\s*$/.exec(cell.out.textContent); #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
+  "web/notebook/notebook.js :: offerDefiner :: if (!found || !cell.el.isConnected || !/NameError/.test(cell.out.textContent)) return; #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
   "web/board/code.ts :: text :: return c ? this.nb.outputText(c.out) : \"\"; #0": {
    "owner": "phase-4",
    "role": "board"
@@ -16,7 +28,7 @@
    "owner": "phase-2",
    "role": "agent-text"
   },
-  "web/index.html :: until :: const out = cells().map((c) => c.out.textContent).join(\"\\n\"); #0": {
+  "web/index.html :: run :: const out = cells().map((c) => c.out.textContent).join(\"\\n\"); #0": {
    "owner": "phase-2",
    "role": "selftest"
   },
@@ -33,6 +45,10 @@
    "role": "host"
   },
   "web/notebook/notebook.js :: done :: live.out.replaceChildren(...cell.out.childNodes); #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
+  "web/notebook/notebook.js :: markEdited :: cell.el.classList.toggle(\"edited\", cell.type === \"code\" && !!cell.out.firstChild && cell.ranText != null && cell.ta.value != cell.ranText); #0": {
    "owner": "phase-2",
    "role": "host"
   },
@@ -68,10 +84,6 @@
    "owner": "phase-2",
    "role": "pixels"
   },
-  "web/notebook/notebook.js :: renderMd :: if (cell.md.querySelector(\".math\")) { #0": {
-   "owner": "phase-2",
-   "role": "host"
-  },
   "web/notebook/notebook.js :: settle :: for (const row of cell.out.querySelectorAll(\".stdin\")) row.remove(); #0": {
    "owner": "phase-2",
    "role": "host"
@@ -87,14 +99,22 @@
   "web/output-shell/shell.js :: render :: await Promise.race([Promise.all([document.fonts.ready, pictures()]), deadline(READY_MS)]); #0": {
    "owner": "host",
    "role": "host"
+  },
+  "web/notebook/notebook.js :: renderMd :: if (cell.md.querySelector(\".math\")) typesetMath(cell.md); #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
+  "web/notebook/gradescope/render.ts :: cellSources :: for (const k of c.md.children) { #0": {
+   "owner": "phase-4",
+   "role": "print"
+  },
+  "web/notebook/gradescope/render.ts :: cellSources :: if (outputs) for (const k of c.out.children as HTMLCollectionOf<HTMLElement>) { #0": {
+   "owner": "phase-4",
+   "role": "print"
   }
  },
  "sinks": {
-  "web/agents/page.ts :: changed :: saved.insertAdjacentHTML(\"afterend\", ` <a class=\"open-full\" href=\"/w${esc(path)}\" target=\"_blank\" rel=\"noopener\">Open in Sagebrush</a>`); #0": {
-   "kind": "host",
-   "owner": "host"
-  },
-  "web/agents/page.ts :: keepFocus :: h.el.innerHTML = `<div class=\"file-path\">${esc(a.path)} <span class=\"saved\"></span> <a class=\"open-full\" href=\"/w${esc(a.path)}\" target=\"_blank\" rel=\"noopener\">Open in Sagebrush</a></div><div class=\"file-body\"></div>`; #0": {
+  "web/agents/page.ts :: keepFocus :: h.el.innerHTML = `<div class=\"file-path\">${esc(a.path)} <span class=\"saved\"></span> </div><div class=\"file-body\"></div>`; #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -143,10 +163,6 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/agents/page.ts :: renderHeader :: who.innerHTML = `<span class=\"conn wait\"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`; #0": {
-   "kind": "host",
-   "owner": "host"
-  },
   "web/agents/page.ts :: renderHeader :: who.innerHTML = `<span class=\"conn\"></span>Claude <small>not connected</small>`; #0": {
    "kind": "host",
    "owner": "host"
@@ -155,7 +171,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/workspace/agent-chat/view.ts :: turnNode :: div.innerHTML = `<div class=\"who\"><span class=\"avatar\">✳</span>${esc(turn.agent ?? \"Claude\")} ${tag}</div>${parts.join(\"\")}${status}`; #0": {
+  "web/workspace/agent-chat/view.ts :: turnNode :: div.innerHTML = `<div class=\"who\"><span class=\"avatar\">✳</span>${esc(turn.agent ?? \"Claude\")} ${tag}</div>${info ? `<div class=\"who-info\">${esc(info)}</div>` : \"\"}${parts.join(\"\")}${status}`; #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -269,7 +285,7 @@
    "kind": "renderer",
    "owner": "renderer"
   },
-  "web/build.ts :: build0 :: const r = await build0({ ...o, plugins: [...(o.plugins ?? []), examplesLegacyPlugin], define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list), __SB_OUTPUT_SHELL__: JSON.stringify(outputShell.srcdoc) } }); #0": {
+  "web/build.ts :: build0 :: const r = await build0({ ...o, plugins: [...(o.plugins ?? []), examplesWelcomePlugin], define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list), __SB_OUTPUT_SHELL__: JSON.stringify(outputShell.srcdoc) } }); #0": {
    "kind": "renderer",
    "owner": "renderer"
   },
@@ -298,9 +314,14 @@
    "owner": "terminal",
    "readers": []
   },
-  "web/index.html :: showDocList :: docList.innerHTML = docHits.length #0": {
+  "web/index.html :: showDocList :: docList.innerHTML = area + (docHits.length #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/latex/build.ts :: install :: for (const it of items) { const w = ws[it.g]; if (!w) continue; const p = document.createElement(\"div\"); p.className = \"pc\"; p.innerHTML = it.h; w.appendChild(p); } #0": {
+   "kind": "rich",
+   "owner": "phase-5",
+   "readers": []
   },
   "web/latex/editor.ts :: yieldNow :: const piece = document.createElement(\"div\"); piece.className = \"pc\"; piece.innerHTML = h; w.appendChild(piece); #0": {
    "kind": "rich",
@@ -316,7 +337,7 @@
    "owner": "phase-3",
    "readers": []
   },
-  "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale === \"1\"); #0": {
+  "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale || false); #0": {
    "kind": "rich",
    "owner": "phase-3",
    "readers": []
@@ -358,6 +379,11 @@
     "web/board/code.ts :: text"
    ]
   },
+  "web/share-client/view.ts :: relative :: box.innerHTML = renderMarkdown(md, { remote: \"click\", pixels: new PixelBudget() }); #0": {
+   "kind": "rich",
+   "owner": "phase-2",
+   "readers": []
+  },
   "web/notebook/notebook.js :: ids :: const doc = new DOMParser().parseFromString(svg, \"image/svg+xml\"); #0": {
    "kind": "rich",
    "owner": "phase-3",
@@ -372,7 +398,7 @@
     "web/board/code.ts :: text"
    ]
   },
-  "web/notebook/notebook.js :: paint :: cell.hl.innerHTML = cell.type === \"code\" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === \"markdown\" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + \"\\n\"; #0": {
+  "web/notebook/notebook.js :: paint :: cell.hl.innerHTML = cell.type === \"code\" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === \"markdown\" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + \"\\n\"; #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -538,7 +564,7 @@
     "web/board/code.ts :: text"
    ]
   },
-  "web/share-client/list-view.ts :: rowEl :: el.innerHTML = `<label><input type=\"checkbox\"><span class=\"name\"></span><span class=\"size\"></span></label><div class=\"why\"></div>`; #0": {
+  "web/share-client/list-view.ts :: rowEl :: el.innerHTML = `<label><input type=\"checkbox\"><span class=\"lock\" title=\"Always included\" aria-label=\"Always included\" hidden><svg width=\"11\" height=\"13\" viewBox=\"0 0 11 13\" aria-hidden=\"true\"><rect x=\"0.5\" y=\"5.5\" width=\"10\" height=\"7\" rx=\"1.5\" fill=\"currentColor\"/><path d=\"M2.5 5.5V3.8a3 3 0 0 1 6 0v1.7\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/></svg></span><span class=\"name\"></span><span class=\"size\"></span></label><div class=\"why\"></div>`; #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -595,6 +621,64 @@
   "web/latex/boot.ts :: commentMarkdown :: box.innerHTML = markdown(text, { remote: \"click\" }); #0": {
    "kind": "rich",
    "owner": "phase-2",
+   "readers": []
+  },
+  "web/latex/page.ts :: agentFailed :: shareBtn.innerHTML = '<svg viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/></svg>'; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/workspace/persist-probe.ts :: on :: f.srcdoc = probe; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: crumbs :: ui.title.innerHTML = all.map((s, k) => (k < all.length - 1 ? `<a href=\"#\" data-k=\"${k}\">${esc(labelOf(s))}</a>` : `<span>${esc(labelOf(s))}</span>`)).join(\" › \"); #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: embed :: if (!again) ui.space.innerHTML = `<option selected>${esc(name)}</option>`; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: last :: if (box) box.querySelector<HTMLElement>(\".output\").innerHTML = `<pre class=\"out err\">${esc(\"couldn't start Sagebrush's engine: \" + (e?.message ?? e))}</pre>`; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: last :: if (box) box.querySelector<HTMLElement>(\".output\").innerHTML = outputHtml(nd); #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: links :: ui.overlay.innerHTML = `<div class=\"grip\" title=\"Drag to resize\"></div><button class=\"close\" title=\"Close (Esc)\">×</button><h2>${esc(nd.title)}</h2>${body}${links(outL, nd._out)}${links(inL, nd._in)}`; #0": {
+   "kind": "rich",
+   "owner": "phase-5",
+   "readers": []
+  },
+  "web/space/src/main.ts :: renderTours :: sel.innerHTML = `<option value=\"\">${tour ? \"On a tour: \" + esc(tour.t.title ?? \"\") : \"Guided tours…\"}</option>` + #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: runNode :: update: (r) => { const box = shownRunner(nd); if (box) box.querySelector<HTMLElement>(\".output\").innerHTML = liveHtml(r); }, #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: search :: if (!q || !space) { ul.innerHTML = \"\"; return; } #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: search :: ul.innerHTML = hits.map((h) => { #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: start :: sel.innerHTML = list.map((f) => `<option${f === want ? \" selected\" : \"\"}>${esc(f)}</option>`).join(\"\"); #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/space/src/main.ts :: tourPill :: el.innerHTML = `<span>On a tour: ${esc(tour.t.title ?? \"Tour\")} · stop ${tour.i + 1} of ${tour.t.steps.length}</span>` + #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/workspace/review/proposal-view.ts :: say :: if (md) await rendered(body, a, b, stale, \"md-rendered\", async () => md, (render, el, t) => { el.innerHTML = render(t); return null; }); #0": {
+   "kind": "rich",
+   "owner": "phase-5",
    "readers": []
   }
  }

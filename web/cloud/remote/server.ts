@@ -10,20 +10,25 @@
 //   GET  /remote/activate[?code=]    the approval page (signed in)
 //   POST /remote/activate            code [, decision=approve|deny] (a form, same site, signed in)
 //   POST /api/remote/v1/challenge    {remote_id}             -> {challenge, expires_in}
-//   GET  /api/remote/v1/peers                                -> {peers: [{remote_id, kind, name, jwk, jkt, created}]}
+//   GET  /api/remote/v1/peers                                -> {peers: [{remote_id, kind, name, jwk, jkt, created, agents,
+//                                                                agents_at}]}
 //   POST /api/remote/v1/revoke       {remote_id}             -> {ok}
-//   GET  /api/remote/v1/runner       (WebSocket) a runner's leg: x-sb-remote-challenge, x-sb-remote-signature (b2a)
-//   GET  /api/remote/v1/page?remote=&chan=   (WebSocket) a page's leg, signed in, same site (b2a)
+//   GET  /api/remote/v1/runner       (WebSocket) a runner's leg: x-sb-remote-challenge, x-sb-remote-signature (b2a),
+//                                    and x-sb-remote-agents, its agent kinds (agentKinds())
+//   GET  /api/remote/v1/page?remote=&chan=   (WebSocket) a page's leg, signed in, same site (b2a); chan=engine
+//                                    (remote r3.3 P1) also &nb=&entry=&attempt=[&cgen=]: a notebook's kernel page
+//   POST /api/remote/v1/disconnect   {remote_id}             -> {ok, cgen}: the workspace switched away from this remote
+//                                    (H2): its engine pages end, and a page presenting the old generation is refused
 //
 // The relay's routes (b2a, relay.ts) are inert also until REMOTE_RELAY (the RemoteRelay Durable Object binding) is
 // bound, at b4.
 //
 // Inert until bound: every route answers 404 unless REMOTE_CHAL_KEY (the challenge key, a secret) and REMOTE_ACCOUNTS
-// (who may enroll: comma-separated account ids, a secret; empty, nobody) are set, so merging this changes no deployment
-// until the bindings are added (step b4, by @sagebrush).  Unauthenticated routes are rate-limited per IP
-// (REMOTE_PREAUTH) before any D1 work, when that binding is present.
-import { sessionOf, sha256Hex, hmac, same, accountHash, type ShareEnv, type Ctx, type D1Stmt } from "../share/server.ts";
-import { capsFor } from "./relay-caps.ts";
+// (who may enroll: comma-separated account ids, a secret; empty, nobody; REMOTE_TIERS adds CoCalc tiers) are set, so
+// merging this changes no deployment until the bindings are added (step b4, by @sagebrush).  Unauthenticated routes
+// are rate-limited per IP (REMOTE_PREAUTH) before any D1 work, when that binding is present.
+import { sessionResult, authTier, sha256Hex, hmac, same, accountHash, type ShareEnv, type Ctx, type D1Stmt } from "../share/server.ts";
+import { capsFor, ENGINE_CAP, ENGINE_ENTRIES } from "./relay-caps.ts";
 
 export interface RemoteEnv extends ShareEnv {
   /** the challenge key (HMAC-SHA-256): a secret */
@@ -33,6 +38,10 @@ export interface RemoteEnv extends ShareEnv {
   REMOTE_CHAL_DERIVE?: string;
   /** who may enroll a remote: comma-separated CoCalc account ids (a secret; unset or empty: nobody) */
   REMOTE_ACCOUNTS?: string;
+  /** who else may: comma-separated CoCalc membership tiers, matched exactly against the account's tier as authTier()
+   * reads it (fresh from CoCalc, or cached within LIMITS_TTL, 600 s); unset or empty: none.  So who has such a tier is
+   * decided in CoCalc, without a deploy, and a tier taken away there stops counting here within 600 s */
+  REMOTE_TIERS?: string;
   /** per IP, before authentication */
   REMOTE_PREAUTH?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   /** the relay: a RemoteRelay Durable Object per remote (relay.ts), bound at b4 */
@@ -41,7 +50,7 @@ export interface RemoteEnv extends ShareEnv {
 }
 
 export const REMOTE_LIMITS = Object.freeze({
-  deviceSeconds: 600, // a device flow's life
+  deviceSeconds: 86400, // a device flow's life: a day, so a person can approve when they next look (Nov 12)
   interval: 5, // seconds between polls (closer: slow_down)
   registered: 4, // per account and kind, not revoked
   wrongCodes: 5, // wrong user codes per account per window
@@ -77,7 +86,8 @@ function enabled(env: RemoteEnv): boolean {
 // SESSION_KEY's own uses (sign-in's "oauth\n" HMAC, sessions) are unchanged.  Which key is configuration only (the
 // bindings), never the request's: a configured REMOTE_CHAL_KEY is the key, always, and one configured but empty or not
 // a string is inert (404), never a fall back to the derived key; nothing ever retries with another key (astra's b4b
-// design conditions).  Deriving a key authorizes no account: REMOTE_ACCOUNTS still gates approval and admission.
+// design conditions).  Deriving a key authorizes no account: allowed() (REMOTE_ACCOUNTS, REMOTE_TIERS) still gates
+// approval and admission.
 // Assumed: SESSION_KEY stays a high-entropy secret; rotating it changes the derived key, so outstanding challenges
 // (30 s) fail.
 export const CHAL_DERIVE = "session-hkdf-v1";
@@ -95,8 +105,15 @@ async function chalKey(env: RemoteEnv): Promise<string> {
   const bits = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: enc.encode(CHAL_INFO) }, ikm, 256);
   return b64url(new Uint8Array(bits));
 }
-function allowed(env: RemoteEnv, account: string): boolean {
-  return (env.REMOTE_ACCOUNTS ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(account);
+const listOf = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+/** Whether this signed-in account may enroll and use remotes: listed in REMOTE_ACCOUNTS, or holding a tier listed in
+ * REMOTE_TIERS (authTier(): never a stale or client-given tier; no tier, or CoCalc not answering, is no) */
+async function allowed(env: RemoteEnv, s: { id: string; session: string }): Promise<boolean> {
+  if (listOf(env.REMOTE_ACCOUNTS).includes(s.id)) return true;
+  const tiers = listOf(env.REMOTE_TIERS);
+  if (!tiers.length) return false;
+  const tier = await authTier(env, s);
+  return tier !== null && tiers.includes(tier);
 }
 async function preauth(req: Request, env: RemoteEnv): Promise<boolean> {
   if (!env.REMOTE_PREAUTH) return false;
@@ -248,7 +265,10 @@ function page(title: string, inner: string, status = 200): Response {
       "cache-control": "no-store",
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
       "x-frame-options": "DENY",
-      "referrer-policy": "no-referrer",
+      // (same-origin, not no-referrer: under no-referrer a browser's form POST carries `Origin: null`, which sameSite()
+      // refuses, so no approval could ever be made; same-origin still sends nothing, the code in the URL included, to
+      // any other origin)
+      "referrer-policy": "same-origin",
       ...NOSNIFF,
     },
   });
@@ -266,16 +286,44 @@ function normCode(v: unknown): string | null {
   return s.length === 8 && [...s].every((c) => USER_ALPHABET.includes(c)) ? s : null;
 }
 
+/** The words for an account that may not connect a computer here (web/workspace/remote-runners.ts says the same). */
+export const NOT_ENABLED = "Connecting a computer isn't enabled for your account yet.";
+
+/** The signed-in session, null when signed out, or "unavailable": a WorkOS session past its grace while WorkOS can't
+ * be asked (answered 503, "retry", never as signed out). */
+async function signedIn(req: Request, env: RemoteEnv, ctx: Ctx): Promise<{ id: string; session: string; expires: number; created: number } | null | "unavailable"> {
+  const r = await sessionResult(req, env, ctx);
+  return r.kind === "ok" ? r : r.kind === "unavailable" ? "unavailable" : null;
+}
+const UNAVAILABLE = "sign-in can't be checked right now; try again soon";
+
+/** GET /remote/connect: where a person starts connecting a computer.  Whether this account may comes first and alone:
+ *  signed out, a sign-in link; not allowed, NOT_ENABLED and nothing to run; allowed, the commands for this site. */
+async function connectPage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return page("Connect a computer", `<p>${esc(UNAVAILABLE)}</p>`, 503);
+  if (!s) return page("Connect a computer", `<p>Sign in to connect a computer.</p><p><a href="/auth/login?return=${encodeURIComponent("/remote/connect")}">Sign in</a></p>`);
+  if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
+  const origin = new URL(req.url).origin;
+  // (the published command enrolls with sagebrush.space by default; any other site is named)
+  const cmds = origin === "https://sagebrush.space" ? ["uvx sagebrush@latest remote"] : [`uvx sagebrush@latest remote login --origin ${origin}`, "uvx sagebrush@latest remote"];
+  return page("Connect a computer", `<p>On the computer, in a terminal, run:</p><pre>${esc(cmds.join("\n"))}</pre>
+<p>It prints a link and a code: open the link here, signed in, check the code, and approve. Keep that terminal open: Ctrl+C disconnects.</p>
+<p>No uv? <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code> (on a bare Debian or Ubuntu image, install curl first: <code>apt-get install -y curl</code>).</p>
+<p>Then, on a notebook page, ⋯ → “Terminal on your computer…”.</p>`);
+}
+
 async function activatePage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return page("Connect a computer", `<p>${esc(UNAVAILABLE)}</p>`, 503);
   const url = new URL(req.url);
   const code = (url.searchParams.get("code") ?? "").slice(0, 16);
   if (!s) {
     const back = "/remote/activate" + (code ? "?code=" + encodeURIComponent(code) : "");
-    return page("Connect a remote", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in with CoCalc</a></p>`);
+    return page("Connect a computer", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in</a></p>`);
   }
-  if (!allowed(env, s.id)) return page("Connect a remote", "<p>Remotes aren't available for this account yet.</p>", 403);
-  return page("Connect a remote", codeForm("", code));
+  if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
+  return page("Connect a computer", codeForm("", code));
 }
 
 async function tooManyWrong(env: RemoteEnv, account: string, t: number): Promise<boolean> {
@@ -291,14 +339,15 @@ async function wrongCode(env: RemoteEnv, account: string, t: number): Promise<bo
 
 async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   if (!sameSite(req)) return err(403, "cross-site request");
-  const s = await sessionOf(req, env, ctx);
-  if (!s) return page("Connect a remote", "<p>Your session ended: sign in again.</p>", 401);
-  if (!allowed(env, s.id)) return page("Connect a remote", "<p>Remotes aren't available for this account yet.</p>", 403);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return page("Connect a computer", `<p>${esc(UNAVAILABLE)}</p>`, 503);
+  if (!s) return page("Connect a computer", "<p>Your session ended: sign in again.</p>", 401);
+  if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   const text = await boundedText(req);
   if (text === null) return err(413, "too large");
   const f = new URLSearchParams(text);
   const t = now();
-  const tooMany = () => page("Connect a remote", "<p>Too many wrong codes: wait ten minutes, then try again.</p>", 429);
+  const tooMany = () => page("Connect a computer", "<p>Too many wrong codes: wait ten minutes, then try again.</p>", 429);
   if (await tooManyWrong(env, s.id, t)) return tooMany();
   const code = normCode(f.get("code"));
   const db = env.SHARE_DB!;
@@ -308,24 +357,24 @@ async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Respons
     : null;
   if (!d || d.expires < t || d.state !== "pending") {
     if (await wrongCode(env, s.id, t)) return tooMany();
-    return page("Connect a remote", codeForm("That code isn't valid (or it expired). Check the code the command shows."), 400);
+    return page("Connect a computer", codeForm("That code isn't valid (or it expired). Check the code the command shows."), 400);
   }
   const decision = f.get("decision");
   if (decision === "deny") {
     await db.prepare("UPDATE remote_devices SET state = 'denied' WHERE device_hash = ?1 AND state = 'pending'").bind(d.device_hash).run();
-    return page("Connect a remote", "<p>Denied. The command will stop.</p>");
+    return page("Connect a computer", "<p>Denied. The command will stop.</p>");
   }
   if (decision !== "approve") {
     // (the confirmation: what is asking, in words, with its stable identity; the name is its own claim)
     const short = d.jkt.slice(0, 4) + " " + d.jkt.slice(4, 8);
-    return page("Connect a remote", `<p>Approve this remote for your account?</p>
+    return page("Connect a computer", `<p>Approve this remote for your account?</p>
 <p>${esc(d.name)} <span class="k">(as it says)</span><br>${KIND_WORDS[d.kind]}<br><span class="k">key ${esc(short)}</span></p>
 <form method="post" action="/remote/activate"><input type="hidden" name="code" value="${esc(code!)}"><button name="decision" value="approve">Approve</button><button name="decision" value="deny">Deny</button></form>`);
   }
   // (the slots: at most `registered` per account and kind, not revoked.  This read only words the answer; the cap
   // itself is the INSERT's own guard below, in the batch's one transaction (astra's B106-SLOT-1: two approvals that
   // both read registered - 1 here can't both insert))
-  const full = () => page("Connect a remote", `<p>This account already has ${REMOTE_LIMITS.registered} ${d.kind}s: revoke one first.</p>`, 409);
+  const full = () => page("Connect a computer", `<p>This account already has ${REMOTE_LIMITS.registered} ${d.kind}s: revoke one first.</p>`, 409);
   const n = await db.prepare("SELECT COUNT(*) AS n FROM remotes WHERE account = ?1 AND kind = ?2 AND revoked IS NULL").bind(s.id, d.kind).first<{ n: number }>();
   if ((n?.n ?? 0) >= REMOTE_LIMITS.registered) return full();
   const id = "r" + b64url(random(15)); // (120 bits)
@@ -346,9 +395,9 @@ async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Respons
     const again = await db.prepare("SELECT state FROM remote_devices WHERE device_hash = ?1").bind(d.device_hash).first<{ state: string }>();
     const m = await db.prepare("SELECT COUNT(*) AS n FROM remotes WHERE account = ?1 AND kind = ?2 AND revoked IS NULL").bind(s.id, d.kind).first<{ n: number }>();
     if (again?.state === "pending" && (m?.n ?? 0) >= REMOTE_LIMITS.registered) return full();
-    return page("Connect a remote", codeForm("That code was just used or expired. Run the command again."), 409);
+    return page("Connect a computer", codeForm("That code was just used or expired. Run the command again."), 409);
   }
-  return page("Connect a remote", `<p>Approved. <b>${esc(d.name)}</b> is now one of your remotes; the command continues by itself.</p>`);
+  return page("Connect a computer", `<p>Approved. <b>${esc(d.name)}</b> is now one of your remotes; the command continues by itself.</p>`);
 }
 
 // ---- the challenge (the relay's admission, b2: verified in the Worker before any Durable Object is touched)
@@ -414,16 +463,82 @@ export async function verifyChallenge(env: RemoteEnv, c: unknown, sig: unknown):
 // ---- the account's peers, and revoke
 
 async function peers(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return err(503, UNAVAILABLE);
   if (!s) return err(401, "not signed in");
-  const r = await env.SHARE_DB!.prepare("SELECT remote_id, kind, name, jwk, jkt, created FROM remotes WHERE account = ?1 AND revoked IS NULL ORDER BY created").bind(s.id)
-    .all<{ remote_id: string; kind: Kind; name: string; jwk: string; jkt: string; created: number }>();
-  return json({ peers: (r.results ?? []).map((p) => ({ ...p, jwk: JSON.parse(p.jwk) })) });
+  type Row = { remote_id: string; kind: Kind; name: string; jwk: string; jkt: string; created: number; agents?: string | null; agents_at?: number | null };
+  const db = env.SHARE_DB!;
+  let rows: Row[];
+  try {
+    rows = (await db.prepare("SELECT remote_id, kind, name, jwk, jkt, created, agents, agents_at FROM remotes WHERE account = ?1 AND revoked IS NULL ORDER BY created")
+      .bind(s.id).all<Row>()).results ?? [];
+  } catch {
+    // (a database before the agents columns' migration: the list as before, every computer with no agents)
+    rows = (await db.prepare("SELECT remote_id, kind, name, jwk, jkt, created FROM remotes WHERE account = ?1 AND revoked IS NULL ORDER BY created")
+      .bind(s.id).all<Row>()).results ?? [];
+  }
+  // (available: whether this account may enroll and use a computer here, allowed(); the notebook page offers its
+  // terminal only when it is true.  Visibility only: enroll and the relay legs check it again at use.  agents: the
+  // runner's last admitted report, a hint for the page's list; its hello decides)
+  return json({
+    peers: rows.map(({ agents, agents_at, ...p }) => ({ ...p, jwk: JSON.parse(p.jwk), ...storedAgents(p.kind, agents, agents_at) })),
+    available: await allowed(env, s),
+  });
+}
+
+/** The agent kinds a runner's leg reports (x-sb-remote-agents): the whole header as one list, at most AGENTS_HEADER
+ *  ASCII bytes, at most AGENT_KINDS unique names, each matching the runner's own pattern (relay.py AGENT_NAME), in
+ *  order; anything else, a missing header included, is null.  Never a prefix, a part of a list or a folded case. */
+export const AGENT_KINDS = 4;
+export const AGENTS_HEADER = 100;
+const AGENT_NAME = /^[a-z][a-z0-9-]{0,15}$/;
+export function agentKinds(h: string | null): string[] | null {
+  if (h === null || h.length > AGENTS_HEADER || !/^[\x21-\x7e]+$/.test(h)) return null;
+  const names = h.split(",");
+  if (names.length > AGENT_KINDS || new Set(names).size !== names.length || !names.every((n) => AGENT_NAME.test(n))) return null;
+  return names;
+}
+
+/** A peer's stored agents, checked again as it is read: a runner's valid list and its time, else [] and null. */
+function storedAgents(kind: Kind, agents: string | null | undefined, at: number | null | undefined): { agents: string[]; agents_at: number | null } {
+  let list: unknown = null;
+  try {
+    list = typeof agents === "string" ? JSON.parse(agents) : null;
+  } catch {
+    list = null;
+  }
+  // (each element on its own, never the list joined back into a header: a stored element with a comma in it is not a name)
+  const ok = kind === "runner" && Array.isArray(list) && list.length >= 1 && list.length <= AGENT_KINDS
+    && list.every((n) => typeof n === "string" && AGENT_NAME.test(n)) && new Set(list).size === list.length;
+  return ok ? { agents: list as string[], agents_at: Number.isSafeInteger(at) && (at as number) >= 0 ? (at as number) : null } : { agents: [], agents_at: null };
+}
+
+/** What a runner's leg says it speaks (x-sb-remote-caps): a comma-separated list, at most 100 ASCII bytes; only the
+ *  versions this site knows are kept (engine/1), anything else is dropped, never passed on. */
+export function runnerCaps(kind: string, h: string | null): string[] {
+  if (kind !== "runner" || h === null || h.length > 100 || !/^[\x21-\x7e]*$/.test(h)) return [];
+  return [...new Set(h.split(","))].filter((c) => c === ENGINE_CAP);
+}
+
+/** After the relay admitted a runner's leg: its reported agent kinds (null clears them) and the time, together, on its
+ *  own live row only (the admitted remote and account; not revoked, not an account being deleted or deleted).  It
+ *  never makes a row, and a failure here (a database before the agents columns, say) leaves the admitted leg alone. */
+async function recordAgents(env: RemoteEnv, rid: string, account: string, kinds: string[] | null): Promise<void> {
+  try {
+    await env.SHARE_DB!.prepare(
+      "UPDATE remotes SET agents = ?3, agents_at = ?4 WHERE remote_id = ?1 AND account = ?2 AND kind = 'runner' AND revoked IS NULL"
+      + " AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.account_id = ?2 AND a.deleting IS NOT NULL)"
+      + " AND NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?5)")
+      .bind(rid, account, kinds === null ? null : JSON.stringify(kinds), Date.now(), await accountHash(account)).run();
+  } catch {
+    // (the list is a hint: the leg is admitted either way)
+  }
 }
 
 async function revoke(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   if (!sameSite(req)) return err(403, "cross-site request");
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return err(503, UNAVAILABLE);
   if (!s) return err(401, "not signed in");
   const b = await body(req);
   if (!b || typeof b.remote_id !== "string") return err(400, "invalid_request");
@@ -452,18 +567,26 @@ async function peerLeg(req: Request, env: RemoteEnv, kind: "runner" | "agent"): 
   if (!v.ok) return err(v.why === "unknown_remote" ? 404 : 403, v.why);
   if (v.chal.kind !== kind) return err(403, "kind");
   const relay = env.REMOTE_RELAY.get(env.REMOTE_RELAY.idFromName(v.chal.rid));
-  return relay.fetch("https://relay/peer", {
-    headers: { upgrade: "websocket", "x-r-account": v.account, "x-r-remote": v.chal.rid, "x-r-kind": v.chal.kind, "x-r-chal": v.chal.n, "x-r-exp": String(v.chal.exp) },
+  const res = await relay.fetch("https://relay/peer", {
+    headers: {
+      upgrade: "websocket", "x-r-account": v.account, "x-r-remote": v.chal.rid, "x-r-kind": v.chal.kind, "x-r-chal": v.chal.n, "x-r-exp": String(v.chal.exp),
+      "x-r-caps": runnerCaps(kind, req.headers.get("x-sb-remote-caps")).join(","),
+    },
   });
+  // (only once the relay has admitted it: a used challenge, a revoked remote, a full account or a superseded leg is
+  // refused there, and changes nothing here)
+  if (kind === "runner" && res.status === 101) await recordAgents(env, v.chal.rid, v.account, agentKinds(req.headers.get("x-sb-remote-agents")));
+  return res;
 }
 
 async function pageLeg(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   if (!env.REMOTE_RELAY) return err(404, "not found");
   if (!isUpgrade(req)) return err(426, "upgrade required");
   if (!sameSite(req)) return err(403, "cross-site request");
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return err(503, UNAVAILABLE);
   if (!s) return err(401, "not signed in");
-  if (!allowed(env, s.id)) return err(403, "not available for this account");
+  if (!(await allowed(env, s))) return err(403, "not available for this account");
   const url = new URL(req.url);
   const rid = url.searchParams.get("remote") ?? "";
   const chan = url.searchParams.get("chan") ?? "kernel";
@@ -473,7 +596,40 @@ async function pageLeg(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response
   if (!r || r.account !== s.id) return err(404, "unknown_remote");
   if (!capsFor(r.kind, chan)) return err(400, "unknown channel");
   const relay = env.REMOTE_RELAY.get(env.REMOTE_RELAY.idFromName(rid));
-  return relay.fetch("https://relay/page", { headers: { upgrade: "websocket", "x-r-account": s.id, "x-r-remote": rid, "x-r-kind": r.kind, "x-r-chan": chan } });
+  const headers: Record<string, string> = { upgrade: "websocket", "x-r-account": s.id, "x-r-remote": rid, "x-r-kind": r.kind, "x-r-chan": chan };
+  if (chan === "engine") {
+    // (remote r3.3 H1, H4: the notebook, its kernel entry, a single-use attempt id and the connection generation the
+    // page last had, checked for form here and again in the relay, which binds them; the account's sync namespace is
+    // derived here, never the page's)
+    const nb = url.searchParams.get("nb") ?? "";
+    const entry = url.searchParams.get("entry") ?? "";
+    const attempt = url.searchParams.get("attempt") ?? "";
+    const cgen = url.searchParams.get("cgen");
+    if (!/^[A-Za-z0-9_-]{1,43}$/.test(nb) || !(ENGINE_ENTRIES as readonly string[]).includes(entry) || !/^[A-Za-z0-9_-]{22}$/.test(attempt)
+      || (cgen !== null && !/^[1-9][0-9]{0,15}$/.test(cgen))) {
+      return err(400, "invalid_request");
+    }
+    Object.assign(headers, { "x-r-nb": nb, "x-r-entry": entry, "x-r-attempt": attempt, "x-r-sync": "acct:" + (await accountHash(s.id)) });
+    if (cgen !== null) headers["x-r-cgen"] = cgen;
+  }
+  return relay.fetch("https://relay/page", { headers });
+}
+
+/** POST /api/remote/v1/disconnect {remote_id}: the workspace switched away from this remote, or disconnected it (r3.3
+ *  H2): same site, signed in, the account's own live remote; the relay advances its connection generation. */
+async function disconnect(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
+  if (!env.REMOTE_RELAY) return err(404, "not found");
+  if (!sameSite(req)) return err(403, "cross-site request");
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return err(503, UNAVAILABLE);
+  if (!s) return err(401, "not signed in");
+  const b = await body(req);
+  if (!b || typeof b.remote_id !== "string" || !/^r[A-Za-z0-9_-]{20}$/.test(b.remote_id)) return err(400, "invalid_request");
+  const r = await liveRemote(env, b.remote_id);
+  if (!r || r.account !== s.id) return err(404, "unknown_remote");
+  const res = await env.REMOTE_RELAY.get(env.REMOTE_RELAY.idFromName(b.remote_id)).fetch("https://relay/disconnect", { method: "POST" });
+  if (!res.ok) return err(503, "try again");
+  return json(await res.json());
 }
 
 // ---- routing
@@ -481,20 +637,22 @@ async function pageLeg(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response
 /** The remotes routes' response to req, or null if req is not for them. */
 export async function handleRemote(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response | null> {
   const p = new URL(req.url).pathname;
-  if (!p.startsWith("/api/remote/") && p !== "/remote/activate") return null;
+  if (!p.startsWith("/api/remote/") && p !== "/remote/activate" && p !== "/remote/connect") return null;
   if (!enabled(env)) return err(404, "not found");
   const m = req.method;
+  if (p === "/remote/connect") return m === "GET" ? connectPage(req, env, ctx) : err(405, "method not allowed");
   if (p === "/remote/activate") {
     if (m === "GET") return activatePage(req, env, ctx);
     if (m === "POST") {
       // (the code's guess rate: the per-IP limit too, before the session or any D1 work (B106-PREAUTH-3 follow-up))
-      if (!(await preauth(req, env))) return page("Connect a remote", "<p>Too many attempts from here: wait a minute, then try again.</p>", 429);
+      if (!(await preauth(req, env))) return page("Connect a computer", "<p>Too many attempts from here: wait a minute, then try again.</p>", 429);
       return activate(req, env, ctx);
     }
     return err(405, "method not allowed");
   }
   if (p === "/api/remote/v1/peers" && m === "GET") return peers(req, env, ctx);
   if (p === "/api/remote/v1/revoke" && m === "POST") return revoke(req, env, ctx);
+  if (p === "/api/remote/v1/disconnect" && m === "POST") return disconnect(req, env, ctx);
   if (p === "/api/remote/v1/runner" && m === "GET") return peerLeg(req, env, "runner");
   if (p === "/api/remote/v1/page" && m === "GET") return pageLeg(req, env, ctx);
   if (m !== "POST") return err(404, "not found");

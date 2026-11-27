@@ -37,6 +37,11 @@
 //     after them (src/notebook-graph.ts).
 //   - Files: the files each run read and wrote give writer-to-reader edges;
 //     readers of a file just written, or changed outside (filesChanged), rerun.
+//   - Output names: a cell reading `_`, `__` or `___` follows the 1st, 2nd or
+//     3rd nearest cell above it that showed a value in its last run (the
+//     graph's setShown); when a cell starts or stops showing one, every
+//     reader below whose names now come from other cells reruns, unless it
+//     ran after it (a deleted or moved cell, too).
 //   - Page-order scoping (with host.rename): a name defined by several cells
 //     and read is, for each cell, its nearest definition above it, as when a
 //     Jupyter notebook is read from the top.  The code that runs is renamed
@@ -181,6 +186,8 @@ export interface ExecResult {
   stopped?: boolean;
   interrupted?: boolean;
   files?: { reads: string[]; writes: string[] };
+  /** whether it showed a value (its last expression's): undefined when the kernel doesn't say (a remote one) */
+  shown?: boolean;
   notRun?: "skip" | "wait";
   note?: string;
 }
@@ -229,8 +236,10 @@ export class Reactive {
   private scoped = new Map<string, string>();
   /** the files each cell read and wrote in its last run */
   files = new Map<string, { reads: string[]; writes: string[] }>();
+  /** the cells that showed a value in their last run (the output names' edges) */
+  shown = new Set<string>();
   /** ms of automatic runs allowed after an action; Infinity = autorun, 0 = lazy */
-  budget = 2000;
+  budget = 10000;
   /** cells run because a widget moved, and what depends on them: their
    * outputs are for the widgets' values now, which their keys don't say, so
    * they are not cached (design/outputs.md) until the interpreter restarts */
@@ -383,6 +392,7 @@ export class Reactive {
       this.stale.clear();
       this.outcome.clear();
       this.files.clear();
+      this.shown.clear();
       this.widgetDriven.clear();
       this.graph = new NotebookGraph();
       this.scoped = new Map();
@@ -415,8 +425,60 @@ export class Reactive {
    * budget.  `budget` overrides the notebook's for this action (an agent
    * wanting everything up to date: Infinity).
    */
-  run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown } = {}): Promise<RunReport> {
-    return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent));
+  run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown; pending?: string[] } = {}): Promise<RunReport> {
+    return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent, opts.pending ?? []));
+  }
+
+  /**
+   * What running `ids` needs run first, in page order, nothing run: the cells above it that it depends on,
+   * transitively, by the code as now in the editor, that are stale (registered) or never run (`pending`: never run in this interpreter,
+   * their text not yet submitted).  For the page's word on it and its ask before a slow run.
+   */
+  plan(ids: string[], pending: string[] = []): Promise<string[]> {
+    return this.serial(async () => {
+      const { pending: p, stale } = await this.upstream(ids, pending, this.host.cells());
+      const want = new Set([...p, ...stale]);
+      return this.host.cells().map((c) => c.id).filter((id) => want.has(id) && !ids.includes(id));
+    });
+  }
+
+  // The cells `ids` depend on, transitively, as a run from the top would have it: each name a cell reads resolves to
+  // its nearest definition above it in page order (none below: a run from the top hasn't reached it), by the code as written: the
+  // registered cells' as registered (the stale ones collected), the `pending` cells' as now in the editor (collected).
+  // Cells with errors are left out.
+  private async upstream(ids: string[], pending: string[], cells: CellInfo[]): Promise<{ pending: string[]; stale: string[] }> {
+    const pend = new Set(pending.filter((id) => !ids.includes(id) && !this.errors.has(id)));
+    const order = cells.map((c) => c.id), at = new Map(order.map((id, k) => [id, k]));
+    const text = new Map<string, string>();
+    for (const c of cells) {
+      if (ids.includes(c.id) || pend.has(c.id)) text.set(c.id, c.code);
+      else if (this.registered.has(c.id) && !this.errors.has(c.id)) text.set(c.id, this.registered.get(c.id)!.source);
+    }
+    const an = new Map<string, CellAnalysis | null>();
+    for (const [id, src] of text) { const a = await this.host.analyze(src); an.set(id, "error" in a ? null : a); }
+    // (each name's definers, by position in the page: made once; the cell a name read at `pos` resolves to is the
+    //  nearest definer above it)
+    const definedAt = new Map<string, number[]>();
+    for (const [id, a] of an) for (const n of a?.defs ?? []) (definedAt.get(n) ?? definedAt.set(n, []).get(n)!).push(at.get(id)!);
+    const resolve = (n: string, pos: number): string | undefined => {
+      let above: number | undefined;
+      for (const k of definedAt.get(n) ?? []) if (k < pos && (above === undefined || k > above)) above = k;
+      return above === undefined ? undefined : order[above];
+    };
+    const outPending = new Set<string>(), outStale = new Set<string>(), seen = new Set<string>(ids);
+    const queue = [...ids];
+    while (queue.length) {
+      const id = queue.shift()!;
+      for (const n of an.get(id)?.refs ?? []) {
+        const d = resolve(n, at.get(id)!);
+        if (d === undefined || seen.has(d)) continue;
+        seen.add(d);
+        if (pend.has(d)) outPending.add(d);
+        else if (this.stale.has(d)) outStale.add(d);
+        queue.push(d);
+      }
+    }
+    return { pending: [...outPending], stale: [...outStale] };
   }
 
   /** Delete cells (already gone from the page): their names go, and the cells reading them rerun. */
@@ -632,16 +694,20 @@ export class Reactive {
     return { ran, stale, failed, cancelled, errors: Object.fromEntries(this.errors) };
   }
 
-  private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown): Promise<RunReport> {
+  private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown, pending: string[] = []): Promise<RunReport> {
     // (a person's consent: checked first, before anything is registered; the host keeps its state)
     this.consent = consent;
     if (consent !== undefined) this.host.consent?.("beforeRegistration", consent);
     const cells = this.host.cells();
     const present = new Set(cells.map((c) => c.id));
     ids = ids.filter((id) => present.has(id));
+    // (never-run cells the cells run need, by their text now: submitted with them, so that they run first)
+    if (pending.length && ids.length) ids = [...ids, ...(await this.upstream(ids, pending, cells)).pending];
     const before = new Set(this.graph.ids);
     const errorsBefore = new Set(this.errors.keys());
     const definersBefore = new Map([...this.graph.definers].map(([n, ds]) => [n, ds.length]));
+    // (where each reader's `_`, `__`, `___` come from: a deleted or moved cell that showed a value moves them)
+    const providersBefore = this.graph.outputProviders();
     // children of the cells whose registration changes, before it does
     const oldChildren = new Set<string>();
     const forgetNow = new Set<string>();
@@ -689,7 +755,9 @@ export class Reactive {
       this.times.delete(id);
       this.outcome.delete(id);
       this.files.delete(id);
+      this.shown.delete(id);
     }
+    this.graph.setShown(this.shown);
     for (const id of ids) if (!this.registered.has(id)) changed.add(id);
     await this.registerAll(sources, cells.filter((c) => present.has(c.id)), eff, versions);
     // (and again once registered: what runs is what the person ran)
@@ -740,6 +808,7 @@ export class Reactive {
     const roots = new Set(ids.filter((id) => !errors.has(id)));
     const auto = new Set<string>([...oldChildren, ...noLongerErrors, ...rescoped]);
     for (const id of transitioned) for (const c of this.graph.children(id)) if (!errors.has(c)) auto.add(c);
+    for (const c of this.movedReaders(providersBefore)) auto.add(c);
     // #1477: a name whose definers dropped to one: that one reruns
     for (const [n, k] of definersBefore) {
       const ds = this.graph.definers.get(n);
@@ -911,6 +980,7 @@ export class Reactive {
           if (reader !== id && (!order.includes(reader) || ran.includes(reader)) && !this.errors.has(reader)) followUp.add(reader);
         }
       }
+      this.noteShown(id, r, order, ran, followUp);
       this.times.set(id, r.ms);
       if (isAuto) autoMs += r.ms;
       if (r.stopped) {
@@ -1039,6 +1109,7 @@ export class Reactive {
           if (reader !== id && (!order.includes(reader) || ran.includes(reader)) && !this.errors.has(reader)) followUp.add(reader);
         }
       }
+      this.noteShown(id, r, order, ran, followUp);
       this.times.set(id, r.ms);
       if (isAuto) autoMs += r.ms;
       if (r.stopped) {
@@ -1109,5 +1180,28 @@ export class Reactive {
 
   private cancelDescendants(id: string, block: { by: string; why: "exception" | "error" | "interrupted" }, blockedBy: Map<string, typeof block>, order: string[]): void {
     for (const d of this.graph.closure([id], { inclusive: false })) if (order.includes(d) && !blockedBy.has(d)) blockedBy.set(d, block);
+  }
+
+  // Whether the cell showed a value this time (a kernel that doesn't say: one that completed may have), in the graph's
+  // facts.  A cell that starts or stops showing one moves `_`, `__`, `___` for the readers below it, its children or
+  // not (a `___` two showing cells further down): every reader whose names now come from other cells and that
+  // didn't run after this in the action reruns (a follow-up, as the readers of a file written).
+  private noteShown(id: string, r: ExecResult, order: string[], ran: string[], followUp: Set<string>): void {
+    const now = r.shown ?? (r.ok && !r.stopped);
+    if (now === this.shown.has(id)) return;
+    const before = this.graph.outputProviders();
+    if (now) this.shown.add(id);
+    else this.shown.delete(id);
+    this.graph.setShown(this.shown);
+    for (const c of this.movedReaders(before)) {
+      if (c !== id && (!order.includes(c) || ran.includes(c)) && !this.errors.has(c)) followUp.add(c);
+    }
+  }
+
+  // The readers of output names whose names come from other cells than in `before` (graph.outputProviders()).
+  private movedReaders(before: ReadonlyMap<string, string>): string[] {
+    const out: string[] = [];
+    for (const [c, from] of this.graph.outputProviders()) if (before.has(c) && before.get(c) !== from) out.push(c);
+    return out;
   }
 }

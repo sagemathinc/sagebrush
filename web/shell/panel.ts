@@ -9,7 +9,7 @@
 // compositionend; a phone keyboard's from the textarea's insertText input after a 229 keydown.  A submitted command is
 // always the editor's line, never text read back from the screen.
 import css from "./panel.css" with { type: "text" };
-import type { HostOutcome, ShellHost } from "./host.ts";
+import type { HostOutcome, ShellHost, PromptSurface } from "./host.ts";
 import { FitAddon, Terminal, KEYS, TOOLBAR_CSS, BUTTON_CSS, ensureXtermCss, extraKeysRow, safeTerminal } from "../term/xterm-view.ts";
 import { LineEditor, History, HISTORY, utf8Len, type Act, type Key } from "./line-editor.ts";
 import { TermWriter, zeroWidthOf, ITEM_MAX } from "./term-writer.ts";
@@ -20,6 +20,16 @@ export const SCROLLBACK = 6000;
 export const MAX_COLS = 500, MAX_ROWS = 200;
 /** S1 (E5.4), kept: UTF-8 bytes of a command's output shown, stdout then stderr, with 64 KiB kept for stderr */
 export const OUTPUT = Object.freeze({ inBytes: 1 << 20, errReserve: 65536 });
+/** The commands that open a prompt when typed alone (term-prompt design r1 §2), and the name each prompt says. */
+const PROMPT_NAMES = new Map([["python", "Python"], ["python3", "Python"], ["sage", "Sage"], ["matlab", "MATLAB"], ["magma", "Magma"]]);
+/** A prompt's input: at most this many lines (and the shell's source bytes) per input (r1 §7.1). */
+const PROMPT_LINES = 10_000;
+/** What lines cost against a prompt's line request (web/term-prompt-wire.ts): their UTF-8 bytes and a newline each. */
+const cost = (lines: readonly string[]) => {
+  let bytes = 0;
+  for (let i = 0; i < lines.length; i++) bytes += utf8Len(lines[i]) + 1;
+  return { bytes, lines: lines.length };
+};
 // (the editor's line is drawn in full up to this size; past it, as one summary line)
 const SHOW_UNITS = 4096, SHOW_LINES = 100;
 /** an exit line's text at most (UTF-16 units): a shell's reason included */
@@ -179,6 +189,88 @@ export function words(line: string): string[] | null {
   return out;
 }
 
+/** A line's top-level shell operators and words (outside quotes, `$( )`, `${ }`, backticks and parentheses), as
+ * offsets; null if anything is left open (a quote, a substitution) or a backslash ends the line.  Conservative:
+ * the pager takes a line only when this reads it with certainty. */
+function topLevel(line: string): { ops: [number, string][]; words: [number, number][] } | null {
+  const ops: [number, string][] = [], ws: [number, number][] = [], st: string[] = [];
+  let w = -1;
+  const word = (i: number) => {
+    if (!st.length && w < 0) w = i;
+  };
+  const end = (i: number) => {
+    if (w >= 0) ws.push([w, i]), (w = -1);
+  };
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i], top = st[st.length - 1];
+    if (top === "'") {
+      if (c === "'") st.pop();
+      continue;
+    }
+    if (c === "\\") {
+      if (i + 1 >= line.length) return null;
+      word(i++);
+      continue;
+    }
+    if (top === '"' || top === "`" || top === "${") {
+      if (c === (top === "${" ? "}" : top)) st.pop();
+      else if (c === "$" && line[i + 1] === "(") st.push("$("), i++;
+      else if (top === "`" && (c === "'" || c === '"')) st.push(c);
+      continue;
+    }
+    if (c === "'" || c === '"' || c === "`" || (c === "$" && (line[i + 1] === "(" || line[i + 1] === "{"))) {
+      word(i);
+      if (c === "$") st.push(line[++i] === "(" ? "$(" : "${");
+      else st.push(c);
+      continue;
+    }
+    if (st.length) {
+      if (c === "(") st.push("(");
+      else if (c === ")") st.pop();
+      continue;
+    }
+    if (c === " " || c === "\t") {
+      end(i);
+      continue;
+    }
+    if ("|&;<>(){}\n".includes(c) || (c === "#" && w < 0)) {
+      end(i);
+      const two = line.slice(i, i + 2);
+      const op = ["||", "|&", "&&", ">>", "<<", ">&", "<&", "&>"].includes(two) ? two : c;
+      ops.push([i, op]);
+      if (op === "(") st.push("(");
+      i += op.length - 1;
+      continue;
+    }
+    word(i);
+  }
+  if (st.length) return null;
+  end(line.length);
+  return { ops, words: ws };
+}
+
+type Paged = { script: string; mode: "more" | "less"; file: boolean };
+
+/** What a line pages, or null if it stays bash's.  `CMD | more` (or `| less`) at its end: CMD runs, then its
+ * output pages.  `more ARGS` (or `less`) alone: `cat --` with the rest of the line as typed, never expanded here. */
+export function pagerOf(line: string): Paged | null {
+  const t = topLevel(line);
+  if (!t || !t.words.length) return null;
+  const at = (k: number) => line.slice(t.words[k][0], t.words[k][1]);
+  const first = at(0), n = t.words.length;
+  if ((first === "more" || first === "less") && t.words[0][0] === line.search(/\S/)) {
+    if (t.ops.length || n < 2) return null;
+    for (let k = 1; k < n; k++) if (line[t.words[k][0]] === "-") return null;
+    return { script: "cat --" + line.slice(t.words[0][1]), mode: first, file: true };
+  }
+  const last = at(n - 1), pipe = t.ops[t.ops.length - 1];
+  if ((last !== "more" && last !== "less") || !pipe || pipe[1] !== "|" || t.words[n - 2]?.[0] > pipe[0]) return null;
+  // (a pipeline's last stage: before it only stages and redirections, a word before every operator)
+  if (t.ops.some(([, o]) => !["|", "<", ">", ">>", ">&", "<&", "&>"].includes(o))) return null;
+  for (const [i] of t.ops) if (!t.words.some(([s, e]) => e <= i && !t.ops.some(([j]) => j >= e && j < i))) return null;
+  return { script: line.slice(0, pipe[0]).trimEnd(), mode: last, file: false };
+}
+
 // (the extra keys' bytes, as the editor's keys)
 const EXTRA: Record<string, Key> = { Escape: { key: "Escape" }, Tab: { key: "Tab" }, "Control+C": { key: "c", ctrl: true }, Backtick: { key: "`" }, "Left arrow": { key: "ArrowLeft" }, "Up arrow": { key: "ArrowUp" }, "Down arrow": { key: "ArrowDown" }, "Right arrow": { key: "ArrowRight" } };
 const DIM = (s: string) => `\x1b[2;3m${s}\x1b[0m`;
@@ -199,7 +291,21 @@ export class TerminalPanel {
   term!: Terminal;
   private fit!: FitAddon;
   private observer: ResizeObserver | null = null;
-  readonly editor: LineEditor;
+  editor: LineEditor;
+  /** an open prompt (a bare python, sage, matlab or magma at this panel's line): its language, the line it asks for
+   * now (null while a statement runs), the lines a paste queued, and the language's interrupt the bridge bound */
+  private pr: null | {
+    mode: string;
+    name: string;
+    shell: LineEditor;
+    ask: null | { args: { kind: "prompt" | "input"; cont: boolean; prompt: string; bytes: number; lines: number }; resolve: (a: { line: string } | { eof: true } | { refused: "too-long" } | { interrupt: true }) => void };
+    queue: string[];
+    interrupt: (() => void) | null;
+    /** an {interrupt} was answered and the worker hasn't asked again: a Ctrl+C now sends and draws nothing */
+    answered: boolean;
+  } = null;
+  /** each language's prompt editor, its history kept for the panel's life (cleared at its end) */
+  private promptEditors = new Map<string, LineEditor>();
   readonly writer: TermWriter;
   /** where the prompt being edited starts (an xterm marker: it follows the line through reflow and scrolling) */
   private start: { line: number; isDisposed: boolean; dispose(): void } | null = null;
@@ -270,10 +376,13 @@ export class TerminalPanel {
         localStorage.setItem("sagebrush-term-intro", "1");
       };
     }
+    // (the row's Esc, then Tab, leaves too: no key event to move the focus, so the Terminal lets it go, and a phone's
+    //  keyboard goes down, instead of taking it back: daybreak3's TERM-TAB-TOUCH-1)
+    let left: boolean | void = false;
     const row = extraKeysRow("sb-term-keys", (data) => {
       const k = KEYS.find((x) => x.data === data);
-      if (k && EXTRA[k.title]) this.onKey(EXTRA[k.title], null);
-    }, () => this.term?.focus());
+      left = k && EXTRA[k.title] && this.onKey(EXTRA[k.title], null);
+    }, () => (left ? this.term?.blur() : this.term?.focus()));
     if (row) root.appendChild(row);
     this.body = root.appendChild(el("div", "sb-term-body"));
     // (the note under the screen: polite; the screen's input names it: TP-6)
@@ -457,6 +566,7 @@ export class TerminalPanel {
   /** Ends the session: a running command is stopped first; the scrollback and history are dropped. */
   end() {
     this.stop();
+    this.promptEditors.clear();
     this.opts.tab?.reset();
     this.ended = true;
     this.hide();
@@ -559,7 +669,7 @@ export class TerminalPanel {
   private view(line?: string): { lines: [string, string][]; at: [number, number] } {
     // (every part bounded before it is drawn: the cwd's last PATH_UNITS, the line or query within SHOW_UNITS, else its
     // summary; so a redraw is made within its lazy write's room, never cut after: SEC r4 materialization)
-    const ed = this.editor, ps = `${this.cwd.length > PATH_UNITS ? "\u2026" + this.cwd.slice(-PATH_UNITS) : this.cwd} $ `;
+    const ed = this.editor, ps = this.pr ? (this.pr.ask?.args.prompt ?? "") : `${this.cwd.length > PATH_UNITS ? "\u2026" + this.cwd.slice(-PATH_UNITS) : this.cwd} $ `;
     if (line !== undefined) {
       const text = this.small(line) ? line : this.summary(line);
       const parts = text.split("\n");
@@ -664,14 +774,30 @@ export class TerminalPanel {
 
   // ---------------------------------------------------------------- keys (E5.2)
   /** A key from the keyboard (or the extra keys row): the editor's, or the panel's (Ctrl-C, Enter while running). */
-  private onKey(k: Key, e: KeyboardEvent | null): void {
+  /** true: Esc, then Tab, the way out (the caller moves the focus where there is no key event to) */
+  private onKey(k: Key, e: KeyboardEvent | null): boolean | void {
     if (this.ended) return;
     const lower = k.key.length === 1 ? k.key.toLowerCase() : k.key;
     if (lower !== "Tab") this.opts.tab?.reset();
+    // (the way out: Esc, then Tab, is the browser's focus move; Tab alone stays here, below.  Shift-Tab is always the
+    //  browser's: line-editor.ts)
+    const out = this.esc && lower === "Tab";
+    this.esc = lower === "Escape";
+    if (out) return true;
     // (a selection on the screen: Ctrl-C (or Cmd-C) copies it, the browser's own copy, even while a command runs)
     if ((k.ctrl || k.meta) && !k.shift && !k.alt && lower === "c" && this.term.hasSelection()) return;
     // (Ctrl-V and Cmd-V: the browser's paste, which the paste listener takes)
     if ((k.ctrl || k.meta) && lower === "v") return;
+    // (the pager open (the command's end): its keys, the rest ignored, so a stray key runs nothing; Tab stays here and
+    //  does nothing, as at the prompt, and Esc then Tab still leaves, above)
+    if (this.paging) {
+      e?.preventDefault();
+      if (lower === "Tab") return;
+      this.term.scrollToBottom();
+      return this.paging.key(k, lower);
+    }
+    // (a prompt open: its keys, r1b's table)
+    if (this.pr) return this.promptKey(k, e, lower);
     // (Enter, in the line or in a reverse search: the one admission, before the editor takes the line)
     let id: number | null = null;
     if (k.key === "Enter" && !k.shift) {
@@ -687,11 +813,144 @@ export class TerminalPanel {
     if (id !== null && a.t !== "submit") this.end_();
     if (a.t === "pass") return; // (the browser's own: no preventDefault)
     if (a.t === "tab") {
-      const taken = !this.running && !!this.opts.tab?.key(this.tabInput(), this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }));
-      if (taken) { e?.preventDefault(); this.term.scrollToBottom(); }
+      // (Tab stays in the Terminal, as in a terminal: the completion's where it applies, else nothing; never the
+      //  browser's focus move, which is Esc then Tab, above)
+      e?.preventDefault();
+      if (!this.running && this.opts.tab?.key(this.tabInput(), this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }))) this.term.scrollToBottom();
       return;
     }
     e?.preventDefault();
+    this.act(a);
+  }
+
+  // ---------------------------------------------------------------- a prompt (term-prompt design r1 §1, §3; r1b §2)
+  /** A prompt's statement bounds other than the defaults (the shell's line, PROMPT_LINES): small ones for tests. */
+  promptLimits: { sourceBytes: number; lines: number } | null = null;
+  /** The panel's side of a prompt: what the bridge asks of it while the command runs. */
+  private promptSurface(name: string): PromptSurface {
+    const shell = this.editor;
+    const lim = this.promptLimits;
+    return {
+      bounds: { sourceBytes: lim?.sourceBytes ?? shell.maxBytes, lines: lim?.lines ?? PROMPT_LINES, inBytes: OUTPUT.inBytes, reserve: OUTPUT.errReserve },
+      begin: (mode) => {
+        if (this.ended) return;
+        let ed = this.promptEditors.get(mode);
+        if (!ed) this.promptEditors.set(mode, (ed = new LineEditor(shell.maxBytes, new History(HISTORY))));
+        // (what was typed while the prompt started is kept for its first line)
+        ed.reset(shell.buf);
+        this.pr = { mode, name, shell, ask: null, queue: [], interrupt: this.pr?.interrupt ?? null, answered: false };
+        this.editor = ed;
+        this.titleEl.textContent = name;
+        this.stopBtn.title = `Stop ${name}`;
+      },
+      out: async (segs) => {
+        if (this.ended) return;
+        // (in the order written, stderr in the theme's red, as a command's: through the writer's own ledger)
+        for (const g of segs) await this.writer.write(g.fd === 2 ? "\x1b[31m" + g.text + "\x1b[39m" : g.text, "output");
+      },
+      line: (args) =>
+        new Promise((resolve) => {
+          const pr = this.pr;
+          if (!pr || this.ended) return resolve({ eof: true });
+          // (a line a paste queued: shown after its prompt, answered at once, while what is queued still fits what the
+          //  input has left (r1 §7.1: the paste was admitted whole against it); one that doesn't is refused whole, all
+          //  of its tail dropped; input() takes only its one line, the rest staying queued for the prompt after it)
+          if (pr.queue.length) {
+            const c = cost(args.kind === "input" ? pr.queue.slice(0, 1) : pr.queue);
+            if (c.bytes > args.bytes || c.lines > args.lines) {
+              pr.queue = [];
+              if (args.kind === "prompt") return resolve({ refused: "too-long" });
+            } else {
+              const next = pr.queue.shift()!;
+              void this.writer.write(visible(args.prompt) + visible(next) + "\r\n");
+              return resolve({ line: next });
+            }
+          }
+          pr.ask = { args, resolve };
+          pr.answered = false;
+          this.root.classList.remove("running");
+          this.prompt();
+        }),
+      bindInterrupt: (f) => {
+        if (this.pr) this.pr.interrupt = f;
+        else this.pendingInterrupt = f;
+      },
+      end: () => {
+        const pr = this.pr;
+        if (!pr) return;
+        pr.ask?.resolve({ eof: true });
+        this.pr = null;
+        this.editor = pr.shell;
+        this.editor.reset();
+        this.titleEl.textContent = "";
+        this.stopBtn.title = "";
+        this.pendingInterrupt = null;
+      },
+    };
+  }
+  private pendingInterrupt: (() => void) | null = null;
+
+  /** A key while a prompt is open: r1b §2's table. */
+  private promptKey(k: Key, e: KeyboardEvent | null, lower: string): boolean | void {
+    const pr = this.pr!;
+    pr.interrupt ??= this.pendingInterrupt;
+    const ctrlC = k.ctrl && !k.meta && !k.alt && lower === "c";
+    if (!pr.ask) {
+      // (a statement runs: Ctrl+C is the language's interrupt; Enter is refused with the prompt's own words; other
+      //  keys edit one next line, shown at the next prompt, as the shell's running state keeps one)
+      e?.preventDefault();
+      // (right after a Ctrl+C was answered: nothing more until the worker asks again)
+      if (ctrlC) return void (pr.answered || pr.interrupt?.());
+      if (k.key === "Enter" && !k.shift) return this.say(`${pr.name} is still running: wait, or press Ctrl+C to interrupt it.`);
+      const a = this.editor.key(k);
+      if (a.t === "refused") this.act(a);
+      return;
+    }
+    const ask = pr.ask;
+    if (k.key === "Enter" && !k.shift) e?.preventDefault();
+    const a = this.editor.key(k);
+    if (a.t === "pass") return;
+    e?.preventDefault();
+    if (a.t === "tab") return;
+    if (a.t === "submit") {
+      this.leave("", a.line);
+      this.say("");
+      const lines = a.line.split("\n");
+      // (a prompt's line or paste counts whole against what its statement has left, the lines it would queue too:
+      //  past it, refused whole, nothing of it sent; input() answers with its first line, the rest queued for after)
+      const c = cost(ask.args.kind === "input" ? lines.slice(0, 1) : lines);
+      if (c.bytes > ask.args.bytes || c.lines > ask.args.lines) {
+        pr.ask = null;
+        pr.queue = [];
+        this.root.classList.add("running");
+        return ask.resolve({ refused: "too-long" });
+      }
+      pr.queue.push(...lines.slice(1));
+      pr.ask = null;
+      this.root.classList.add("running");
+      return ask.resolve({ line: lines[0] });
+    }
+    if (a.t === "interrupt") {
+      this.leave("^C");
+      this.editor.reset();
+      // (a fresh ps1: the editor's own, the same request stays; a continuation or input(): the worker's, answered once)
+      if (ask.args.kind === "input" || ask.args.cont) {
+        pr.ask = null;
+        pr.queue = [];
+        pr.answered = true;
+        this.root.classList.add("running");
+        return ask.resolve({ interrupt: true });
+      }
+      void this.writer.write("KeyboardInterrupt\r\n");
+      this.prompt();
+      return;
+    }
+    if (a.t === "eof") {
+      this.leave("");
+      pr.ask = null;
+      this.root.classList.add("running");
+      return ask.resolve({ eof: true });
+    }
     this.act(a);
   }
 
@@ -699,6 +958,9 @@ export class TerminalPanel {
   private get busy_(): boolean {
     return this.writer.pressed;
   }
+
+  /** the last key was Esc: a Tab now leaves the Terminal */
+  private esc = false;
 
   /** the command admitted (its writer id), from its Enter until its end; null between commands */
   private cmd: number | null = null;
@@ -733,7 +995,8 @@ export class TerminalPanel {
     switch (a.t) {
       case "redraw":
         this.say("");
-        if (!this.running) this.redraw();
+        // (a prompt asking for a line is drawn while its command runs)
+        if (!this.running || this.pr?.ask) this.redraw();
         return;
       case "refused": {
         const max = this.editor.maxBytes;
@@ -784,6 +1047,7 @@ export class TerminalPanel {
   }
 
   stop() {
+    if (this.paging) return this.paging.quit();
     this.running?.ctl.abort();
   }
 
@@ -803,6 +1067,10 @@ export class TerminalPanel {
     // something was pasted by mistake)
     if (word === "clear") return void this.end_(), this.clear(), this.prompt();
     if (word === "reset") return void this.reset();
+    // (a bare python, python3, sage, matlab or magma typed here, alone: its prompt, in a session of its own)
+    if (PROMPT_NAMES.has(word)) return void this.submit(line, line, undefined, this.promptSurface(PROMPT_NAMES.get(word)!));
+    const pg = pagerOf(word);
+    if (pg) return void this.submit(line, pg.script, pg);
     const argv = words(word), via = this.opts.tab?.route(argv, line);
     if (via) return void this.submit(line, via);
     if (argv && argv.length && Object.hasOwn(this.opts.commands ?? {}, argv[0])) return void this.builtin(line, argv);
@@ -884,6 +1152,118 @@ export class TerminalPanel {
     return c.omitted;
   }
 
+  /** A paged command's end: its stderr first, red (cat's errors in more's or less's words), then its stdout, paged
+   * when longer than the screen.  The status is the pipeline's last stage's, 0, or cat's for `more FILE`; null when
+   * Stop or the panel's end came while stderr was drawn: no pager then, nothing more written (SEC). */
+  private async page(out: string, err: string, pg: Paged, code: number, signal: AbortSignal): Promise<number | null> {
+    if (pg.file) err = err.replace(/^cat: (.*): No such file or directory$/gm, pg.mode === "more" ? "more: cannot open $1: No such file or directory" : "$1: No such file or directory").replace(/^cat: /gm, pg.mode + ": ");
+    const c = capOutput(out, err);
+    if (c.err) await this.writer.write("\x1b[31m" + c.err + "\x1b[39m", "output");
+    if (signal.aborted || this.ended) return null;
+    if (c.out) await new Promise<void>((done) => this.pager(c.out, pg.mode, done));
+    await this.end_(c.omitted);
+    return pg.file ? code : 0;
+  }
+
+  /** the pager open: its keys and its end (Stop, the panel's end) */
+  private paging: { key(k: Key, lower: string): void; quit(): void } | null = null;
+
+  /** The pager.  Display rows are made as needed at the screen's width, as xterm wraps them (a resize re-wraps,
+   * keeping the logical lines on screen); a screen is the rows less one, the prompt on the last.  Output that fits
+   * is written at once.  more ends after its last screen; less shows (END) and waits for q, and goes back (b, Up)
+   * by redrawing the screen. */
+  private pager(text: string, mode: "more" | "less", done: () => void): void {
+    const src = (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
+    let rows: string[] = [], ends: boolean[] = [], from: number[] = [], next = 0, cols = this.term.cols, top = 0, bottom = 0;
+    const h = () => Math.max(1, this.term.rows - 1);
+    const fill = (n: number) => {
+      while (rows.length < n && next < src.length) {
+        const l = src[next];
+        let row = "", w = 0;
+        for (let j = 0; j < l.length; ) {
+          if (l[j] === "\x1b") {
+            // (an escape sequence takes no cells)
+            const m = /^\x1b(\[[0-?]*[ -/]*[@-~]|[^[])/.exec(l.slice(j, j + 64));
+            row += m ? m[0] : "\x1b";
+            j += m ? m[0].length : 1;
+            continue;
+          }
+          const ch = String.fromCodePoint(l.codePointAt(j)!);
+          const cw = ch === "\t" ? 8 - (w % 8) : this.width(ch);
+          if (w + cw > cols && w > 0) rows.push(row), ends.push(false), from.push(next), (row = ""), (w = 0);
+          row += ch;
+          w += cw;
+          j += ch.length;
+        }
+        rows.push(row), ends.push(true), from.push(next++);
+      }
+      return rows.length;
+    };
+    // (rows a to b: a wrapped row's line ends only where the screen does)
+    const show = (a: number, b: number) => {
+      let s = "";
+      for (let i = a; i < b; i++) s += rows[i] + (ends[i] || i === b - 1 ? "\r\n" : "");
+      return s;
+    };
+    const atEnd = () => fill(bottom + 1) <= bottom;
+    const prompt = () => {
+      const pct = Math.floor((100 * (from[bottom - 1] + 1)) / src.length);
+      return mode === "less" ? (atEnd() ? "\x1b[7m(END)\x1b[27m" : ":") : `\x1b[7m--More--(${pct}%)\x1b[27m`;
+    };
+    const ERASE = "\r\x1b[2K";
+    const quit = () => {
+      // (once: its erase and its settle)
+      if (!this.paging) return;
+      this.paging = null;
+      void this.writer.write(ERASE, "output");
+      done();
+    };
+    const forward = (n: number) => {
+      if (atEnd()) return;
+      const b = Math.min(fill(bottom + n), bottom + n);
+      void this.writer.write(ERASE + show(bottom, b), "output");
+      bottom = b;
+      top = Math.max(0, bottom - h());
+      if (mode === "more" && atEnd()) return quit();
+      void this.writer.write(prompt(), "output");
+    };
+    const back = (n: number) => {
+      top = Math.max(0, top - n);
+      bottom = Math.min(fill(top + h()), top + h());
+      // (the screen pushed up first: what was on it stays in the scrollback)
+      void this.writer.write(ERASE + "\n".repeat(h()) + "\x1b[H\x1b[J" + show(top, bottom) + prompt(), "output");
+    };
+    const rewrap = () => {
+      const keepTop = from[top] ?? 0, keepEnd = from[bottom - 1] ?? 0;
+      rows = [], ends = [], from = [], next = 0, cols = this.term.cols;
+      // (each fill one more logical line, to the one after the last shown)
+      while (next <= keepEnd + 1 && next < src.length) fill(rows.length + 1);
+      top = Math.max(0, from.indexOf(keepTop));
+      const after = from.indexOf(keepEnd + 1);
+      bottom = after < 0 ? rows.length : after;
+    };
+    if (fill(h() + 1) <= h()) {
+      void this.writer.write(show(0, rows.length), "output");
+      return done();
+    }
+    bottom = h();
+    void this.writer.write(show(0, bottom) + prompt(), "output");
+    this.status.textContent = "";
+    this.status.textContent = `Paging: Space for more, ${mode === "less" ? "b to go back, " : ""}Enter for a line, q to quit`;
+    this.paging = {
+      quit,
+      key: (k, lower) => {
+        if (cols !== this.term.cols) rewrap();
+        if ((lower === "q" && !k.ctrl && !k.meta && !k.alt) || k.key === "Escape" || (k.ctrl && lower === "c")) return quit();
+        if (k.ctrl || k.meta || k.alt) return;
+        if (k.key === " ") forward(h());
+        else if (k.key === "Enter" || k.key === "ArrowDown") forward(1);
+        else if (mode === "less" && lower === "b") back(h());
+        else if (mode === "less" && k.key === "ArrowUp") back(1);
+      },
+    };
+  }
+
   /** open, ps and top: run in the page, Stop-able (top). */
   private async builtin(line: string, argv: string[]) {
     const ctl = this.begin();
@@ -952,7 +1332,7 @@ export class TerminalPanel {
   private exitText = "";
 
   /** `script` runs; `line`, what was typed (help NAME's), is what history keeps. */
-  private async submit(line: string, script = line) {
+  private async submit(line: string, script = line, pg?: Paged, prompt?: PromptSurface) {
     if (!this.ready) {
       // (the first command while bash loads: says so, under its prompt, until the shell is up)
       void this.writer.write(DIM("Starting the shell\u2026"));
@@ -964,11 +1344,11 @@ export class TerminalPanel {
     const ctl = this.begin();
     let r: HostOutcome;
     try {
-      r = await this.opts.host.exec({ kind: "person" }, wrap(script), { cwd: this.cwd, signal: ctl.signal });
+      r = await this.opts.host.exec({ kind: "person" }, wrap(script), { cwd: this.cwd, signal: ctl.signal, ...(prompt ? { prompt } : {}) });
     } catch (e) {
       r = { kind: "unavailable", row: 2, reason: String((e as Error)?.message ?? e), ops: [] };
     }
-    let status: string;
+    let status: string, code: number | null = null;
     if (r.kind === "exit") {
       let out = r.stdout;
       const k = out.lastIndexOf("\x1e");
@@ -980,10 +1360,14 @@ export class TerminalPanel {
         }
       }
       if (script === line && this.opts.tab) out = await this.opts.tab.colour(line, out, this.cwd);
-      await this.end_(await this.output(out, r.stderr));
-      if (r.code !== 0) await this.exitLine(`exit ${r.code}`);
-      status = r.code === 0 ? "done" : `exit ${r.code}`;
-    } else if (r.kind === "interrupted") {
+      code = pg ? await this.page(out, r.stderr, pg, r.code, ctl.signal) : r.code;
+      if (!pg) await this.end_(await this.output(out, r.stderr));
+    }
+    if (code !== null) {
+      if (code !== 0) await this.exitLine(`exit ${code}`);
+      status = code === 0 ? "done" : `exit ${code}`;
+    } else if (r.kind === "exit" || r.kind === "interrupted") {
+      // (an exit here: Stop or the panel's end while a paged command's stderr was drawn)
       await this.end_();
       await this.exitLine("^C (stopped)");
       status = "stopped";

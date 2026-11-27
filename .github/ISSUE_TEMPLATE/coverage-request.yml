@@ -1,0 +1,40 @@
+name: Request a function
+description: Ask for a function, a feature or an area that Sagebrush doesn't have yet, or has only in part, in any of its languages.
+title: "[Request] "
+labels: ["coverage-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for asking. We read every request, and requests decide what Sagebrush adds next.
+        This is a public issue: don't paste anything private.
+  - type: input
+    id: mode
+    attributes:
+      label: Language
+      description: Sage, Python, Magma, MATLAB, R or Sprig.
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Function or feature
+      description: Its name as the real system writes it (for example `fir1`, `EllipticCurve`, `scipy.optimize.minimize`), or a few words.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: What you tried
+      description: A short piece of code you'd like to run, and what Sagebrush did.
+      render: text
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What the real system prints, or what you need it for.
+  - type: textarea
+    id: why
+    attributes:
+      label: Anything else
+      description: Why it matters to you, a link to its documentation, or other functions you need with it.

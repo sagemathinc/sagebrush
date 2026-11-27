@@ -107,7 +107,7 @@ test("np.linalg.solve from n = 256 on engine/nd: the loader's bits, the oracle; 
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
   // (the CLI asks for the warm-up at numpy's import but has no idle moment for it: the first call compiles)
-  const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n, warm: "unused" });
+  const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n, warm: "unused", memory_max: 2 ** 32 });
   assert.deepEqual(kernels, { cholesky: k(48), solve: k(256), det: k(256), slogdet: k(256), inv: k(256) });
   // det is slogdet's sign times exp of its log (NumPy's own formula), and agrees with the older LU's
   const ts = seededCalls({ SAGEBRUSH_NO_WASM: "1" }).det;
@@ -121,8 +121,8 @@ test("without WebAssembly: the older LU, within the oracle, and _kernels() sayin
   const { X, inv, kernels } = seededCalls({ SAGEBRUSH_NO_WASM: "1" });
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
-  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused" });
-  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused" });
+  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused", memory_max: 0 });
+  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused", memory_max: 0 });
 });
 
 test("both paths: a singular matrix is NumPy's LinAlgError for solve and inv, det 0 and slogdet (0, -inf); P's sign", () => {
@@ -262,7 +262,9 @@ test("a non-contiguous view or an integer matrix gives its contiguous float64 co
   assert.deepEqual(run(code), ["False True True True", "True True", "engine/nd"]);
 });
 
-test("a module memory that can't grow is a MemoryError with its message, and the session goes on", async () => {
+// (no automatic fallback, William Nov 25 2026, #2147 N2: a module memory that can't grow is a MemoryError naming the
+// workspace, not the TypeScript LU; nothing is kept, so the next call runs on engine/nd)
+test("a module memory that can't grow: inv, det and solve each a MemoryError naming the workspace, and the session goes on", async () => {
   const { notebookSession } = require("../src/notebook-session");
   const Obj = require("../src/runtime/object");
   const s = notebookSession(() => {}, { captureStreams: true });
@@ -273,14 +275,16 @@ test("a module memory that can't grow is a MemoryError with its message, and the
     proto.grow = () => {
       throw new RangeError("WebAssembly.Memory.grow(): Maximum memory size exceeded");
     };
-    await s.handle({ id: 2, code: "R = []\nfor f in (np.linalg.inv, np.linalg.det, lambda M: np.linalg.solve(M, np.ones(700))):\n    try:\n        f(B)\n        R.append('ran')\n    except MemoryError as e:\n        R.append(str(e))" });
+    await s.handle({ id: 2, code: "R = []\nfor f in (lambda M: np.linalg.inv(M)[699, 699], lambda M: bool(np.isclose(np.linalg.det(M), 2.0 ** 700, rtol=1e-9)), lambda M: np.linalg.solve(M, np.ones(700))[699]):\n    try:\n        R.append(str(f(B)))\n    except MemoryError as e:\n        R.append(str(e))" });
   } finally {
     proto.grow = grow;
   }
   await s.handle({ id: 3, code: "OK = float(np.linalg.inv(B)[0, 0])" });
   const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
   const v = (name: string) => Obj.callObj(Obj.getattr(main, "__getitem__"), [name]);
-  assert.deepEqual(require("../src/runtime").R.toArray(v("R")), ["inv", "det", "solve"].map((w) => `${w} of a 700 x 700 matrix needs more working memory than WebAssembly can have here`));
+  const R = require("../src/runtime").R.toArray(v("R"));
+  assert.equal(R.length, 3);
+  for (const r of R) assert.match(r, /^WebAssembly kernel workspace: could not grow by \d+ bytes \(more than the computer could give\); use the native app on a computer with more memory$/);
   assert.equal(v("OK"), 0.5);
 });
 

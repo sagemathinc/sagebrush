@@ -5,6 +5,7 @@
 import { RenderGate, type Token } from "./gate";
 import { Highlighter } from "./highlight";
 import { mark } from "./marks";
+import { watchdog } from "./watchdog";
 import { autoClose } from "./envclose";
 
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -34,6 +35,8 @@ export type EditorOpts = {
   // the code items' saved results (`sagebrush latex run`'s file, page.ts): the same object is sent with every request;
   // the host fills it and calls request(); the worker checks its wrapper version, the renderer each result
   sage?: { wrapper: string | null; saved: unknown[] };
+  /** The page can run the document's code (Run): a code item not run yet says how */
+  run?: boolean;
   onEdit?(): void;                // after each edit by the person (not setText), once the request for it is made
 };
 
@@ -69,7 +72,8 @@ export function createEditor(o: EditorOpts) {
   // ---- the preview: engine worker, gate, patching
   const gate = new RenderGate();
   gate.load(); gate.loaded(gate.token());
-  let worker: Worker | null = null, inflight: Token | null = null, queued = false, watchdog: any = null, restartedAt = -1;
+  let worker: Worker | null = null, inflight: Token | null = null, queued = false, restartedAt = -1;
+  const dog = watchdog();
   let groups: HTMLElement[] = [], groupHtml: string[] = [];
   let groupPos: number[] = [];   // per group, the source offset where it begins (-1: unknown), from the shown reply
   // (the shown reply's positions sorted, as [offset, group] pairs, ties by group: built once per installed reply)
@@ -96,17 +100,17 @@ export function createEditor(o: EditorOpts) {
     if (inflight) { queued = true; return; }
     const t = gate.token();
     inflight = t; queued = false;
-    clearTimeout(watchdog);
-    // (the watchdog: 15 s, then the worker is replaced; once per source revision, then it stays stopped)
-    watchdog = setTimeout(() => {
+    // (the watchdog, watchdog.ts: 15 s, then the worker is replaced, but a timer the page's own blocking made late
+    //  waits once more for a reply already queued; once per source revision, then it stays stopped)
+    dog.start(() => {
       inflight = null;
       if (restartedAt === t.rev) { say("stopped: this document takes too long"); return; }
       restartedAt = t.rev; startWorker(); request();
-    }, 15000);
+    });
     mark("tex-request", { rev: t.rev });
     const inputs = o.inputs && o.inputs.version !== inputsSent ? { docPath: o.inputs.docPath, known: [...o.inputs.known], version: o.inputs.version } : undefined;
     if (o.inputs) inputsSent = o.inputs.version;
-    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(inputs ? { inputs } : {}), ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}) });
+    worker.postMessage({ doc: t.doc, rev: t.rev, text: src.value, images, ...(inputs ? { inputs } : {}), ...(o.sage?.saved.length ? { sage: { wrapper: o.sage.wrapper, saved: o.sage.saved } } : {}), ...(o.run ? { run: 1 } : {}) });
   };
   // (the latest current reply's check data, check.ts, and the source it is of: latex_check's, agent-tools.ts)
   let lastCheck: { text: string; rev: number; check: any } | null = null;
@@ -114,7 +118,7 @@ export function createEditor(o: EditorOpts) {
     if (destroyed) return;
     const tReply = performance.now();
     mark("tex-parse-done", { rev: r.rev });
-    clearTimeout(watchdog);
+    dog.stop();
     inflight = null;
     if (queued) request();
     const ok = gate.accept(r);
@@ -128,6 +132,8 @@ export function createEditor(o: EditorOpts) {
     if (ok.current) { o.onImageRefs?.(r.imageRefs as string[], gate.token()); o.onInputRefs?.((r.inputRefs ?? []) as string[], gate.token()); }
   };
 
+  // (a group hidden takes no room: the page's ".page .ch { display: block }" would show it, beside its replacement)
+  const hide = (w: HTMLElement, h: boolean) => { w.hidden = h; w.style.display = h ? "none" : ""; };
   // patching: one wrapper per chunk (group); changed groups are built hidden across frames under the budget, then
   // swapped in one step (old removed, new shown): never two versions of a group at once
   // (the patch loop's own longest step and swap, and the most UTF-8 bytes parsed in one step: preview.dataset)
@@ -150,7 +156,7 @@ export function createEditor(o: EditorOpts) {
       const t0 = performance.now(); let count = 0, bytesIn = 0;
       const yieldNow = () => { stepMax = Math.max(stepMax, performance.now() - t0); stepBytesMax = Math.max(stepBytesMax, bytesIn); requestAnimationFrame(step); };
       while (g < next.length - s) {
-        if (k === 0) { const w = el("div", "ch"); w.hidden = true; staged.push(w); preview.appendChild(w); }
+        if (k === 0) { const w = el("div", "ch"); hide(w, true); staged.push(w); preview.appendChild(w); }
         const pieces = html[g], w = staged[staged.length - 1];
         while (k < pieces.length) {
           const h = pieces[k], b = sizes[g][k];
@@ -168,8 +174,22 @@ export function createEditor(o: EditorOpts) {
       const kids = groups;
       const before = kids[groupHtml.length - s] ?? null;
       const old = kids.slice(p, groupHtml.length - s);
-      for (const w of old) w.hidden = true;
-      for (const w of staged) { preview.insertBefore(w, before); w.hidden = false; }
+      // (the view kept (William's L3, Nov 10: Shift+Enter moved the preview by a page): the first group that begins in
+      //  view keeps its place on the screen, whatever this patch changed above it or in it; one replaced, its replacement
+      //  takes its place. The new groups replacing those in or within a screen of the view are laid out now (contained,
+      //  as content-visibility's pieces are), not a frame later at their own heights, so the place is exact)
+      const sc = preview.parentElement!, R = (e: Element) => e.getBoundingClientRect(), v = R(sc), now: HTMLElement[] = [];
+      const ai = kids.findIndex((w) => R(w).top >= v.top), y0 = R(kids[ai] ?? sc).top;
+      const near = old.map((w) => { const r = R(w); return r.bottom > v.top - v.height && r.top < v.bottom + v.height; });
+      for (const w of old) hide(w, true);
+      staged.forEach((w, i) => {
+        if (near[i]) for (const c of w.children as HTMLCollectionOf<HTMLElement>) { c.style.cssText = "content-visibility:visible;contain:content"; now.push(c); }
+        preview.insertBefore(w, before); hide(w, false);
+      });
+      const a = ai < p || ai >= p + old.length ? kids[ai] : staged[ai - p] ?? before;
+      if (a) sc.scrollTop += R(a).top - y0;
+      // (released as laid out: a piece content-visibility skips keeps that height, not the 600 px a new one is given)
+      requestAnimationFrame(() => { const h = now.map((c) => c.offsetHeight); now.forEach((c, i) => { c.style.cssText = `contain-intrinsic-size:auto ${h[i]}px`; }); });
       groups = kids.slice(0, p).concat(staged, kids.slice(groupHtml.length - s));
       groupHtml = next;
       groupPos = pos; posTok = tok;
@@ -306,6 +326,6 @@ export function createEditor(o: EditorOpts) {
     // the check data of the preview now shown, if it is of the source now in the editor (else null: one is coming)
     lastCheck: () => (lastCheck && lastCheck.text === src.value ? lastCheck.check : null),
     onRendered: (f: () => void) => { rendered.add(f); return () => { rendered.delete(f); }; },
-    destroy: () => { destroyed = true; clearTimeout(watchdog); worker?.terminate(); worker = null; fitObs.disconnect(); rendered.clear(); },
+    destroy: () => { destroyed = true; dog.stop(); worker?.terminate(); worker = null; fitObs.disconnect(); rendered.clear(); },
   };
 }

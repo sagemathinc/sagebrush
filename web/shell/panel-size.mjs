@@ -8,13 +8,42 @@
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { readPage } from "../../scripts/notebook-page.mjs";
 
 // (daybreak2 rules the ceilings from the landing measurement with CI's bun 1.4.4: PR 2 r4 (e8153082) measured 459 209 B
 // raw and 127 554 B gzip -9 (Node 24.21.0's zlib); daybreak2 approved 460 600 / 127 970 on r4, headroom 1 391 / 416,
 // about 0.3%.  r3's were 457 400 / 126 790 for 456 001 / 126 381.  The Terminal commands' hook (ShellHost's commands
 // and size options, each command's narrow port into its run) measured 462 055 / 128 381 on master 7ebd72f4's
-// 460 540 / 127 822 (+1 515 / +559); daybreak2 ruled the ceilings at that measurement + 64)
-const LIMIT_RAW = 462119, LIMIT_GZIP = 128445;
+// 460 540 / 127 822 (+1 515 / +559); daybreak2 ruled the ceilings at that measurement + 64.  Tab staying in the
+// Terminal, with Esc then Tab as the way out (the key row's too), measured 462 134 / 128 412 merged on master 760c4bdd:
+// the ceilings at that measurement + 64)
+// (the Terminal's more and less, the pager and its line scan: measured 466 305 / 130 005 on master f5e10d8b's
+// 462 134 / 128 412 (+4 171 / +1 593, bun 1.4.4, Node 24.21.0's gzip -9); daybreak2 ruled the ceilings at that
+// measurement + 64.  With no pager opened after Stop or the end during a paged command's stderr, and less's back
+// keeping the replaced screen in the scrollback: 466 427 / 130 041 merged on master 06ebf6d5's 462 134 / 128 412
+// (+4 293 / +1 629); the ceilings at that measurement + 64)
+// (cp copying notebooks and boards, each measured, then duplicated under a snapshot: measured 467 816 / 130 499 merged on
+// master 30ee6c33's 466 427 / 130 041 (+1 389 / +458); the ceilings at that measurement + 64)
+// (the review page's run note and the branch store's listing by blob id, reached through the workspace: measured by
+// CI 467 929 / 130 508 against 467 816 / 130 499 (+113 / +9); the ceilings at that measurement + 64)
+// (help's first lines saying the Terminal is its own shell, not a full Unix system, and `cmd 2>&1` for the order of
+// errors: measured 468 049 / 130 575 on master e67b0a8c's 467 929 / 130 508 (+120 / +67); the ceilings at that
+// measurement + 64)
+// (a prompt in the Terminal (a bare python, sage, matlab or magma at the panel's line): the panel's prompt mode, its
+// surface, the line and output requests' checks, and a line or paste admitted whole against what its statement has
+// left, measured 471 393 / 131 554 on master 05e75348's 468 049 / 130 575 (+3 344 / +979); the ceilings at that
+// measurement + 64)
+// (the page's terminals showing every colour at a contrast of at least 4.5:1, and the light theme's bright white as a
+// grey that reads (web/term/xterm-view.ts, shared with this chunk): measured by CI 471 459 / 131 578 against 471 393 /
+// 131 554 (+66 / +24); the ceilings at that measurement + 64)
+// (an optional package's distribution in the package-set index (src/pkgset.ts admitIndex: the name checked as a PyPI
+// project name, its version the package's own, one package per name), which the loader's set admission runs in this
+// chunk: measured 472 124 / 131 769 merged on master 747e6748's 471 459 / 131 578 (+665 / +191, bun 1.4.4, Node
+// 24.21.0's gzip -9); the ceilings at that measurement + 64)
+// (document key declarations in the sealed index (web/workspace/sync-dockeys.ts: the op's form and the ledger's page,
+// which the outbox and the confirmed index reach in this chunk): measured by CI 472 522 / 131 940 against 472 124 /
+// 131 769 (+398 / +171); the ceilings at that measurement + 64)
+const LIMIT_RAW = 472586, LIMIT_GZIP = 132004;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
@@ -32,7 +61,8 @@ if (!(gz > 0) || gz > LIMIT_GZIP) fails.push(`${gz} B gzipped is over ${LIMIT_GZ
 if (!/export\s*\{[^}]*\bopenTerminal\b/.test(js.toString("utf8"))) fails.push("the chunk doesn't export openTerminal");
 
 // lazy: the page names the chunk only as a dynamic import's specifier, never as a script or a static import
-const page = readFileSync(join(dist, "index.html"), "utf8");
+// (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
+const page = readPage(join(dist, "index.html")).toString("utf8");
 if (!page.includes('"./shell/terminal.js"')) fails.push("index.html no longer names ./shell/terminal.js for its dynamic import");
 if (/<script[^>]*src=["']?\.?\/?shell\/terminal\.js/.test(page) || /import\s[^;(]*from\s*["']\.?\/?shell\/terminal\.js/.test(page) || /<link[^>]*shell\/terminal\.js/.test(page))
   fails.push("index.html loads shell/terminal.js at first paint (a script, a static import or a preload)");

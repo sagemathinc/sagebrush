@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": ["binaries/sagebrush-node"],
+    "resources": {
+      "engine/": "engine/",
+      "agent/": "agent/"
+    },
+    "macOS": {
+      "entitlements": "entitlements.plist"
+    }
+  }
+}

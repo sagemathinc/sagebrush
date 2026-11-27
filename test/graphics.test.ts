@@ -70,6 +70,39 @@ test("interact runs once with its defaults without a notebook", () => {
   assert.equal(out2, "0.3 5\n");
 });
 
+test("interact: a tuple given as a control, and also as the parameter's default, is a slider from its middle", () => {
+  // (min, max) and (min, max, step); a tuple of ints is an int slider, as ipywidgets' IntSlider; one of floats a float slider
+  const prog = (imp: string) => `${imp}
+import _interact
+def show(f, **kw):
+    interact(f, **kw)
+    print({k: _interact._interacts[max(_interact._interacts)].controls[k].spec() for k in kw})
+def a(x=(0, 10)): print('a', x)
+def b(x=(0, 10, 2)): print('b', x)
+def c(x=(0.0, 1.0)): print('c', x)
+def d(x=(0.0, 1.0, 0.25)): print('d', x)
+show(a, x=(0, 10))
+show(b, x=(0, 10, 2))
+show(c, x=(0.0, 1.0))
+show(d, x=(0.0, 1.0, 0.25))
+@interact(x=(1, 9))
+def e(x=(1, 9)): print('e', x)
+`;
+  const want = [
+    "a 5",
+    "{'x': {'kind': 'slider', 'min': 0.0, 'max': 10.0, 'step': 1.0, 'value': 5.0, 'ints': True}}",
+    "b 5",
+    "{'x': {'kind': 'slider', 'min': 0.0, 'max': 10.0, 'step': 2.0, 'value': 5.0, 'ints': True}}",
+    "c 0.5",
+    "{'x': {'kind': 'slider', 'min': 0.0, 'max': 1.0, 'step': 0.01, 'value': 0.5, 'ints': False}}",
+    "d 0.5",
+    "{'x': {'kind': 'slider', 'min': 0.0, 'max': 1.0, 'step': 0.25, 'value': 0.5, 'ints': False}}",
+    "e 5",
+  ].join("\n") + "\n";
+  assert.equal(cli("-c", prog("from ipywidgets import interact")), want);
+  assert.equal(cli("--sage", "-c", prog("")), want);
+});
+
 test("animations: Sage animate and matplotlib FuncAnimation give animated SVG", () => {
   const out = cli("--sage", "-c", `
 a = animate([plot(sin(x + k), (x, 0, 2*pi)) for k in srange(0, 2*pi, 0.5)])
@@ -176,4 +209,65 @@ for g in [contour_plot(x^2 - y^2, (x, -2, 2), (y, -2, 2)), density_plot(sin(x*y)
   assert.match(lines[3], /^Plot: region where x\^2 \+ y\^2 < 1; x from -2 to 2, y from -2 to 2$/);
   assert.match(lines[4], /^Plot: vector field \(-y, x\) at 400 points; x from -2 to 2, y from -2 to 2$/);
   assert.match(lines[5], /^Plot: slope field of y' = x - y at 400 points; x from -3 to 3, y from -3 to 3$/);
+});
+
+test("an SVG's numbers are printf's two decimals, from integers in Sagebrush's Python (their text the same, tie by tie)", () => {
+  const out = cli("-c", `
+import random, _graphics as g
+random.seed(5)
+vals = [k / 1000 for k in range(-30000, 30000)] + [k / 200 + d for k in range(-4000, 4000) for d in (0.0, 1e-9, -1e-9)]
+vals += [random.uniform(-1e5, 1e5) for _ in range(20000)] + [random.uniform(-1, 1) for _ in range(20000)]
+vals += [0.0, -0.0, 0.005, -0.005, 0.015, 2.675, 1.005, 99999.995, -99999.995, 1e-12, -1e-12, 1e14, -1e14, 1e300, -1e300]
+bad = [v for v in vals if g._fmt_int(v) != g._fmt_printf(v)]
+print(g._fmt is g._fmt_int, len(vals) > 100000, bad[:3])
+`);
+  assert.equal(out.trim(), "True True []");
+});
+
+test("many points: the pixel marker ',' is one path of whole pixels, and the other markers are _marker's text", () => {
+  const out = cli("-c", `
+import random, re, _graphics as g
+import matplotlib.pyplot as plt
+random.seed(2)
+xs = [random.random() for _ in range(2000)]
+ys = [random.random() for _ in range(2000)]
+fig, ax = plt.subplots()
+ax.plot(xs, ys, ",k")
+s = fig._svg(background=False)
+plt.close(fig)
+print(s.count('<path transform="scale(1)" fill="#000000" d="M'), s.count("h1v1h-1z"), s.count('width="1" height="1"'))
+P = g._Placed(10, 20, 600, 400, 0.0, 1.0, 0.0, 1.0, False, False)
+for m in ("o", ".", "s"):
+    fast = g._markers(P, xs, ys, m, 3.5, "#1f77b4", 0.5, None, "#000000")
+    each = "".join(g._marker(m, *P.map(x, y), 3.5, "#1f77b4", "#000000") for x, y in zip(xs, ys))
+    print(m, fast == '<g opacity="0.5">' + each + "</g>")
+`);
+  // (one path, a pixel for each of the 2000 points, and no rect of a pixel)
+  assert.deepEqual(out.trim().split("\n"), ["1 2000 0", "o True", ". True", "s True"]);
+});
+
+test("many points: the fast path maps as map() does on log axes and clamps points far outside the limits", () => {
+  const out = cli("-c", `
+import math, random, _graphics as g
+random.seed(3)
+lin = [random.uniform(-1e7, 1e7) for _ in range(200)] + [1e7, -1e7, 0.5, 1e12, -1e12]
+pos = [10 ** random.uniform(-3, 6) for _ in range(200)] + [1e-9, 1e9, 2.5, 1e300, 0.0, -1.0]
+cases = [((0.0, 1.0, 0.0, 1.0, False, False), lin, lin[::-1]),
+         ((1.0, 100.0, 0.0, 1.0, True, False), pos, lin[:len(pos)]),
+         ((0.0, 1.0, 1e-2, 1e4, False, True), lin[:len(pos)], pos),
+         ((1.0, 10.0, 1.0, 10.0, True, True), pos, pos[::-1])]
+u = g.pixel_size(1.0)
+for lims, xs, ys in cases:
+    P = g._Placed(10, 20, 600, 400, *lims)
+    each = [P.map(x, y) for x, y in zip(xs, ys)]
+    fast = g._markers(P, xs, ys, "o", 3.5, "#1f77b4", None)
+    circles = "".join(g._marker("o", p[0], p[1], 3.5, "#1f77b4") for p in each if p is not None)
+    pixels = "".join("M%d %dh1v1h-1z" % (math.floor(p[0] + 1e-6), math.floor(p[1] + 1e-6)) for p in each if p is not None)
+    print(P.map_all(xs, ys) == each, fast == "<g>" + circles + "</g>",
+          ('d="%s"' % pixels) in g._markers(P, xs, ys, ",", 1.0, "#000000", None),
+          max(abs(c) for p in each if p is not None for c in p) == 1e5)
+g.pixel_size(u)
+`);
+  // (each: the fast mapping is map()'s, the circles and the pixels are the per-point ones, and some point clamped)
+  assert.deepEqual(out.trim().split("\n"), Array(4).fill("True True True True"));
 });

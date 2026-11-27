@@ -5,8 +5,9 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// The Numbl corpus ratchet (upstream/numbl/README.md): where CI runs it, and its own tests.  The corpus runs on the
-// full tier only, through scripts/test-numbl-corpus.mjs's `// ci: web-runner-sync` header; these keep it there.
+// The Numbl corpus ratchet (upstream/numbl/README.md): where CI runs it, and its own tests.  The corpus runs in the
+// long tier only, through scripts/test-numbl-corpus.mjs's `// ci: web-runner-sync.2` header and web-runner-sync's own
+// step for that target; these keep it there.
 const root = join(__dirname, "..", "..");
 const HOOK = "scripts/test-numbl-corpus.mjs";
 const workflows = readdirSync(join(root, ".github", "workflows")).filter((f) => /\.ya?ml$/.test(f));
@@ -21,26 +22,28 @@ function job(workflow: string, name: string): string {
   return lines.slice(start, end).join("\n");
 }
 
-test("the Numbl ratchet's hook is discovered, and runs in web-runner-sync, a full-tier-only job, and nowhere else", () => {
+test("the Numbl ratchet's hook is discovered, and runs in web-runner-sync's long-tier step, and nowhere else", () => {
   const r = spawnSync(process.execPath, [join(root, "scripts", "web-tests.mjs"), "plan", "--json"], { cwd: root, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   const runs = (JSON.parse(r.stdout) as { target: string; command: string }[]).filter((p) => p.command.split(" ").includes(HOOK));
-  assert.deepEqual(runs, [{ target: "web-runner-sync", command: `node ${HOOK}` }]);
+  assert.deepEqual(runs, [{ target: "web-runner-sync.2", command: `node ${HOOK}` }]);
   // (the full tier's own list in ci-paths, and ci.yml's gate on that job)
   const paths = readFileSync(join(root, "scripts", "ci-paths.mjs"), "utf8");
   assert.ok((JSON.parse(/const fullOnlyJobs = (\[[^\]]*\]);/.exec(paths)![1]) as string[]).includes("web-runner-sync"));
   const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
   const sync = job(ci, "web-runner-sync");
-  assert.match(sync, /^    if: .*needs\.changes\.outputs\.full == 'true'$/m);
+  // (the full tier's gate is the condition's last term; a reader of wasm/ wraps it, `${{ ... && (...) }}`)
+  assert.match(sync, /^    if: .*needs\.changes\.outputs\.full == 'true'(?:\) \}\})?$/m);
   // (what the hook needs there: Python, the CLI build, and the target's run)
   assert.match(sync, /actions\/setup-python@/);
   assert.match(sync, /node scripts\/build-cli\.mjs/);
-  assert.match(sync, /node scripts\/web-tests\.mjs run web-runner-sync$/m);
+  // (its target in a step of its own, run only where the changes job says long)
+  assert.match(sync, /^      - name: the Numbl corpus\n {8}if: needs\.changes\.outputs\.long == 'true'\n {8}run: node scripts\/web-tests\.mjs run web-runner-sync\.2$/m);
   // (the target runs in that job only, and no workflow runs the ratchet or the hook another way)
   for (const f of workflows) {
     const text = readFileSync(join(root, ".github", "workflows", f), "utf8");
     const elsewhere = f === "ci.yml" ? text.replace(sync, "") : text;
-    assert.doesNotMatch(elsewhere, /web-tests\.mjs run web-runner-sync\b/, f);
+    assert.doesNotMatch(elsewhere, /web-tests\.mjs run web-runner-sync\.2\b/, f);
     assert.doesNotMatch(text, /numbl-ratchet\.py|test-numbl-corpus\.mjs|NUMBL_CORPUS_/, f);
   }
 });

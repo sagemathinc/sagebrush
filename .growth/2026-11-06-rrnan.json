@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "RR and RDF NaN and infinities in symbolic expressions stay real (engine/sym/src/num.rs: a real float multiplies and inverts as a real; an exact zero absorbs any float; print.rs: (+infinity)*x, -infinity*x, as Sage). Measured with bun 1.4.4 (size-record.sh) on master b960770f vs this PR's head 1692f12e (CI's fresh engine committed): cli/pyjs.cjs +1324, engine/sagebrush-engine.wasm +995; no other row grows.",
- "bytes": {
-  "cli/pyjs.cjs": 1324,
-  "engine/sagebrush-engine.wasm": 995
- }
-}

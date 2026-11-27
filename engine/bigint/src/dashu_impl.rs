@@ -110,6 +110,11 @@ impl From<BigUint> for BigInt {
 #[cfg_attr(not(target_pointer_width = "64"), allow(dead_code))]
 pub const NTT_MUL_WORDS: usize = 4096;
 
+/// The wasm32 threshold is in 32-bit Dashu words.  It is kept separate
+/// from the native threshold and is renewed from wasm measurements.
+#[cfg(target_pointer_width = "32")]
+pub const NTT_MUL_WORDS32: usize = 4096;
+
 /// a * b, by the NTT for huge operands (64-bit targets).
 pub fn mul_ubig(a: &UBig, b: &UBig) -> UBig {
     #[cfg(target_pointer_width = "64")]
@@ -119,6 +124,18 @@ pub fn mul_ubig(a: &UBig, b: &UBig) -> UBig {
             // (dashu's Word is u64 on 64-bit targets)
             let (x, y): (&[u64], &[u64]) = (x, y);
             let z = if std::ptr::eq(a, b) { crate::ntt::mul_words(x, x) } else { crate::ntt::mul_words(x, y) };
+            return UBig::from_words(&z);
+        }
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        let (x, y) = (a.as_words(), b.as_words());
+        if x.len().min(y.len()) >= NTT_MUL_WORDS32 && crate::ntt32::supports_words(x.len(), y.len()) {
+            let z = if std::ptr::eq(a, b) {
+                crate::ntt32::mul_words(x, x)
+            } else {
+                crate::ntt32::mul_words(x, y)
+            };
             return UBig::from_words(&z);
         }
     }
@@ -132,6 +149,16 @@ pub fn mul_ibig(a: &IBig, b: &IBig) -> IBig {
         let (sa, wa) = a.as_sign_words();
         let (sb, wb) = b.as_sign_words();
         if wa.len().min(wb.len()) >= NTT_MUL_WORDS {
+            let mag = mul_ubig(&UBig::from_words(wa), &UBig::from_words(wb));
+            let neg = (sa == dashu_int::Sign::Negative) != (sb == dashu_int::Sign::Negative);
+            return IBig::from_parts(if neg { dashu_int::Sign::Negative } else { dashu_int::Sign::Positive }, mag);
+        }
+    }
+    #[cfg(target_pointer_width = "32")]
+    {
+        let (sa, wa) = a.as_sign_words();
+        let (sb, wb) = b.as_sign_words();
+        if wa.len().min(wb.len()) >= NTT_MUL_WORDS32 && crate::ntt32::supports_words(wa.len(), wb.len()) {
             let mag = mul_ubig(&UBig::from_words(wa), &UBig::from_words(wb));
             let neg = (sa == dashu_int::Sign::Negative) != (sb == dashu_int::Sign::Negative);
             return IBig::from_parts(if neg { dashu_int::Sign::Negative } else { dashu_int::Sign::Positive }, mag);

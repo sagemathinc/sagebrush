@@ -13,11 +13,17 @@
 #[cfg(feature = "num-backend")]
 pub use num_bigint::{BigInt, BigUint, Sign};
 
+/// Exact constants shared by the engines: the Bernoulli numbers.
+pub mod exact;
 /// Arithmetic modulo a word (also used by sagebrush-arith).
 pub mod nmod;
 /// Number-theoretic transforms: products of huge integers here, and of
 /// polynomials modulo n in sagebrush-arith.
 pub mod ntt;
+mod ntt_core;
+/// The 32-bit-limb form of the shared NTT, used by wasm big integers.
+#[cfg(any(test, target_pointer_width = "32"))]
+pub(crate) mod ntt32;
 
 #[cfg(not(feature = "num-backend"))]
 mod dashu_impl;
@@ -132,11 +138,63 @@ pub fn from_limbs(neg: bool, limbs: &[u64]) -> BigInt {
     BigInt::from_biguint(if neg { Sign::Minus } else { Sign::Plus }, m)
 }
 
+/// x += a b, accumulating the product into x's own buffer (no temporary
+/// for the product when x already holds a large value).
+#[cfg(not(feature = "num-backend"))]
+#[inline]
+pub fn add_mul_assign(x: &mut BigInt, a: &BigInt, b: &BigInt) {
+    x.0.add_mul_assign(&a.0, &b.0);
+}
+
+/// x += a b.
+#[cfg(feature = "num-backend")]
+#[inline]
+pub fn add_mul_assign(x: &mut BigInt, a: &BigInt, b: &BigInt) {
+    *x += a * b;
+}
+
+/// x -= a b, subtracting the product from x's own buffer (no temporary for
+/// the product when x already holds a large value).
+#[cfg(not(feature = "num-backend"))]
+#[inline]
+pub fn sub_mul_assign(x: &mut BigInt, a: &BigInt, b: &BigInt) {
+    x.0.sub_mul_assign(&a.0, &b.0);
+}
+
+/// x -= a b.
+#[cfg(feature = "num-backend")]
+#[inline]
+pub fn sub_mul_assign(x: &mut BigInt, a: &BigInt, b: &BigInt) {
+    *x -= a * b;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use num_integer::Integer;
     use num_traits::{FromPrimitive, Num, One, Signed, ToPrimitive, Zero};
+
+    #[test]
+    fn fused_multiply_add_matches_the_operators() {
+        // small and large accumulators, sign flips and exact cancellation
+        let big = BigInt::from(3u64).pow(200);
+        let vals = [BigInt::from(0), BigInt::from(5), BigInt::from(-7), big.clone(), -big.clone(), &big * &big + BigInt::from(1)];
+        for x in &vals {
+            for a in &vals {
+                for b in &vals {
+                    let mut f = x.clone();
+                    add_mul_assign(&mut f, a, b);
+                    assert_eq!(f, x + a * b);
+                    let mut g = x.clone();
+                    sub_mul_assign(&mut g, a, b);
+                    assert_eq!(g, x - a * b);
+                }
+            }
+        }
+        let mut z = &big * &big;
+        sub_mul_assign(&mut z, &big, &big);
+        assert!(z.is_zero());
+    }
 
     #[test]
     fn the_limb_stream_matches_the_digits() {

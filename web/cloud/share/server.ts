@@ -1,7 +1,8 @@
 // Shared collections: the API on sagebrush.space (design/sharing.md).
 //
-//   GET  /auth/login?return=/path      sign in with CoCalc (code + PKCE)
-//   GET  /auth/callback                CoCalc sends the user back here
+//   GET  /auth/login?return=/path      sign in with CoCalc (code + PKCE); with AUTH_PROVIDER "workos", with
+//                                      WorkOS AuthKit instead (and CoCalc is then no authority here at all)
+//   GET  /auth/callback                the provider sends the user back here
 //   POST /auth/logout
 //   POST /auth/dev                     dev only: a session for a test account
 //   GET  /api/share/me                 who you are, your usage and limits
@@ -14,6 +15,7 @@
 //   POST /api/share/check              {blobs: [{sha256, size}]} -> {missing}
 //   PUT  /api/share/blob/<sha256>      the bytes (R2 checks the hash)
 //   POST /api/share/collections/<id>/versions   {title, license, files} -> {version}
+//   GET  /api/share/collections/<id>/versions   yours: its versions, oldest first -> {versions: [{hash, created, size, title}]}
 //   GET  /api/share/c/<id>[?at=hash]   a collection's (latest) manifest
 //   DELETE /api/share/collections/<id> delete a collection and its files
 //   POST /api/share/delete-everything  {confirm: "delete"}: all of yours
@@ -48,6 +50,9 @@
 // through a collection: /c/<collection>/<sha256>, for files of its versions.
 
 import { purgeRemotes, remoteDeletes } from "../remote/server.ts";
+import { purgeMirror, mirrorGone } from "../mirror/server.ts";
+import { authorizeUrl, exchangeCode, refreshSession, revokeSession, sidOf, verifyAccessToken, type WorkosConfig, type WorkosUser } from "../../share/identity/workos.ts";
+import { seal, sealKeys, unseal } from "../../share/identity/seal.ts";
 import { periods } from "./periods.ts";
 
 export interface D1Result<T> { results: T[]; meta?: { changes?: number } }
@@ -69,6 +74,9 @@ export interface R2 {
 export interface ShareEnv {
   SHARE_DB?: D1;
   SHARE_BUCKET?: R2;
+  /** "on" once migration 0016 (budget_claims) is applied here: a holder (the log mirror) may then write its claim on the
+   *  storage budget (claimsWritable).  Counting claims doesn't depend on it: wherever the table exists, they count */
+  BUDGET_CLAIMS?: string;
   /** e.g. https://cocalc.ai; with no origin, sign-in is off */
   COCALC_ORIGIN?: string;
   COCALC_CLIENT_SECRET?: string;
@@ -81,6 +89,33 @@ export interface ShareEnv {
   /** dev deployments only: "1" enables /auth/dev and default limits */
   SHARE_DEV?: string;
   DEV_AUTH_TOKEN?: string;
+  /**
+   * "workos": sign-in is WorkOS AuthKit's and accounts are Sagebrush's own.  CoCalc is then no
+   * authority here: its sign-in, its purge call, its plan lookups and its tiers are all off, and only this mode's
+   * sessions count.  Unset: CoCalc sign-in, as before.  "local": sessions of kind 'local' only, made by a sign-in this
+   * code doesn't have (a deployment's own, outside this repository); CoCalc is no authority, as with "workos", and
+   * limits are DEFAULT_LIMITS or an account_limits row.  Any other value: no session counts at all (fail closed).
+   */
+  AUTH_PROVIDER?: string;
+  /** with AUTH_PROVIDER "local": every account's limits unless account_limits has its own row, as JSON
+   * {"storage_bytes": n, "max_file_bytes": n}; missing or invalid, no uploads (fail closed) */
+  DEFAULT_LIMITS?: string;
+  /** this deployment's name in identity configuration ("id-dev"): no two environments share a key cache */
+  AUTH_ENV?: string;
+  /** the one origin sign-in runs on (the callback's): a request for another origin is refused */
+  AUTH_ORIGIN?: string;
+  WORKOS_CLIENT_ID?: string;
+  /** the exact issuer this environment's WorkOS tokens carry, established independently */
+  WORKOS_ISSUER?: string;
+  WORKOS_API_KEY?: string;
+  /** tests only: WorkOS's API origin */
+  WORKOS_API?: string;
+  /** tests only (with DEV's gates): a smaller AUTH_STATES_MAX */
+  AUTH_STATES_MAX?: string;
+  /** the keys that seal WorkOS refresh tokens at rest (web/share/identity/seal.ts): "<version>:<base64>", current first */
+  REFRESH_KEYS?: string;
+  /** tests only (with DEV's gates): a smaller REVOKE_CAPACITY */
+  REVOKE_CAPACITY?: string;
   /**
    * The sync service's account objects, when sync is on here: one storage
    * budget covers both (design/sync-server.md §6.1), so sharing counts the
@@ -124,7 +159,39 @@ export const MAX_PUT = 95 * 1024 * 1024;
 export const MAX_FILES = 10000;
 export const MAX_COLLECTIONS = 1000;
 export const MAX_VERSIONS = 1000;
+// (a version's byline, as its publisher typed it: at most this many characters)
+export const MAX_AUTHOR = 200;
 const DEV_LIMITS: Limits = { tier: "dev", storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, private_links: false };
+/** Sagebrush's own free plan, the only plan with AUTH_PROVIDER "workos" until grants arrive (no CoCalc tier counts) */
+export const FREE_LIMITS: Limits = { tier: "free", storage_bytes: 256 * 1024 * 1024, max_file_bytes: MAX_PUT, private_links: false };
+/**
+ * A WorkOS session's life here (identity plan, sessions):
+ * - It ends SESSION_DAYS after it began (abs_expires), whatever else happens; nothing moves that end.
+ * - It is good for WORKOS_VALID_S after its last validation (WorkOS's check at sign-in, or a refresh WorkOS accepted).
+ *   A request after that first refreshes it with WorkOS, before it is served: WorkOS refusing ends it then.  So while
+ *   WorkOS can be asked, a session WorkOS has ended stops working here at its next use, within the hour.
+ * - While WorkOS can't be asked, it keeps working until GRACE_S after its last validation (never after a failed
+ *   attempt), then answers "unavailable" (its row and the user's work are kept: signing in again can't help then).
+ *   A failed attempt isn't retried for REFRESH_RETRY_S.  A local sign-out, sign-out everywhere or disable ends it at
+ *   once, grace or not.
+ */
+const WORKOS_VALID_S = 3600;
+const GRACE_S = 24 * 3600;
+const REFRESH_RETRY_S = 60;
+/**
+ * Every WorkOS session must be revocable: pending exchanges + sessions holding a provider sid + revoke outbox rows
+ * never exceed REVOKE_CAPACITY.  A sign-in reserves its slot before its code is sent to WorkOS (at capacity it is
+ * refused and WorkOS is never asked); every later move (a session made, ended, evicted, swept) turns a slot into
+ * another in the same batch, so local revocation always fits.  A pending exchange lasts PENDING_S; one that never
+ * finished is kept as an outbox row whose sid is unknown.  A queued revoke is tried REVOKE_ATTEMPTS times, with
+ * backoff, then kept (exhausted) until an admin resolves it: an obligation is never dropped.
+ */
+const REVOKE_CAPACITY = 100_000;
+const PENDING_S = 120;
+const REVOKE_ATTEMPTS = 8;
+/** D1's clock in milliseconds: sign-in attempts' starts and the sign-out-everywhere barrier are on this one clock */
+const D1_NOW_MS = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
+const SLOTS_USED = "((SELECT COUNT(*) FROM pending_exchanges) + (SELECT COUNT(*) FROM sessions WHERE provider_sid IS NOT NULL) + (SELECT COUNT(*) FROM revoke_outbox))";
 const HEX64 = /^[0-9a-f]{64}$/;
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -188,6 +255,8 @@ function cookies(req: Request): Map<string, string> {
   return m;
 }
 const SESSION = "__Host-sb_session";
+/** A session token as this site makes it: 32 random bytes, base64url without padding (43 characters). */
+export const SESSION_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const OAUTH = "__Host-sb_oauth";
 const cookie = (name: string, value: string, maxAge: number) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 
@@ -201,7 +270,9 @@ export function returnPath(p: string | null, origin: string): string {
   try {
     const u = new URL(p, origin);
     // (and checked again as normalized: /%2e%2e//host is //host, another site, SEC-SHARE-1)
-    const out = u.pathname + u.search + u.hash;
+    // (a quick link's cells, a z= or c= fragment, are never kept, as signInUrl drops them in the page: not in the state
+    // cookie, nor in the redirect back)
+    const out = u.pathname + u.search + (/[zc]=[\w-]/.test(u.hash) ? "" : u.hash);
     return u.origin === origin && out.startsWith("/") && !out.startsWith("//") ? out : "/";
   } catch {
     return "/";
@@ -311,47 +382,257 @@ function touch(env: ShareEnv, ctx: Ctx | undefined, id: string, session: string,
   })().catch(() => { touchStats.failed++; }));
 }
 
-/** Who a request is; with `ctx`, its activity counts toward last_active (not a sign-out's). */
-async function account(req: Request, env: ShareEnv, ctx?: Ctx): Promise<Who | null> {
-  const t = cookies(req).get(SESSION);
-  if (!t || !env.SHARE_DB) return null;
-  const session = await sha256Hex(t);
-  const row = await env.SHARE_DB.prepare("SELECT s.account_id, a.last_active FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string; last_active: number | null }>();
-  if (!row) return null;
-  touch(env, ctx, row.account_id, session, row.last_active, country(req));
-  return { id: row.account_id, session };
+/**
+ * The sessions a deployment accepts: only its own mode's kinds, in both directions (a WorkOS sign-in's never counts with
+ * CoCalc sign-in, nor a CoCalc sign-in's with WorkOS's), /auth/dev's only while DEV's gates are configured, and never
+ * one whose account is disabled or that is past its absolute end.  (?2: now, as every caller binds it.)
+ */
+export function sessionKinds(env: ShareEnv): string {
+  // (an unknown provider name accepts no session at all, never a fallback to another mode's)
+  if (!knownProvider(env)) return " AND 0";
+  const dev = devGates(env);
+  // (a 'local' row is valid only whole: a bounded idle limit, its last activity and an absolute end, so its expires is
+  // the idle check; a partial or invalid row counts as no session)
+  if (localMode(env)) return ` AND s.kind = 'local' AND s.idle_s >= ${IDLE_MIN_S} AND s.idle_s <= ${IDLE_MAX_S} AND s.last_used IS NOT NULL AND s.last_used <= ?2 AND s.abs_expires IS NOT NULL AND s.expires <= s.abs_expires AND s.expires <= s.last_used + s.idle_s AND a.disabled IS NULL AND s.abs_expires > ?2`;
+  const k = workosMode(env) ? (dev ? "'workos', 'dev'" : "'workos'") : dev ? "'legacy', 'dev'" : "'legacy'";
+  return ` AND s.kind IN (${k}) AND a.disabled IS NULL AND (s.abs_expires IS NULL OR s.abs_expires > ?2)`;
 }
+const kinds = sessionKinds;
+/** DEV's test sign-in, /auth/dev: on only with both of its gates, never with AUTH_PROVIDER "local" or an unknown one;
+ * its sessions count only while they are on */
+const devGates = (env: ShareEnv) => env.SHARE_DEV === "1" && !!env.DEV_AUTH_TOKEN && knownProvider(env) && !localMode(env);
+/** AUTH_PROVIDER "local": sessions of kind 'local', made outside this code (see ShareEnv.AUTH_PROVIDER) */
+export const localMode = (env: ShareEnv) => env.AUTH_PROVIDER === "local";
+/** unset (CoCalc's sign-in), "workos" or "local"; anything else is no mode: nothing counts */
+const knownProvider = (env: ShareEnv) => env.AUTH_PROVIDER === undefined || env.AUTH_PROVIDER === "" || env.AUTH_PROVIDER === "workos" || localMode(env);
+/** CoCalc's sign-in, purge call, plan lookups and tiers are authorities only with no AUTH_PROVIDER */
+const cocalcOff = (env: ShareEnv) => workosMode(env) || localMode(env) || !knownProvider(env);
+
+/** Who a request is; with `ctx`, its activity counts toward last_active (not a sign-out's).  "unavailable": a WorkOS
+ * session past its grace while WorkOS can't be asked (the caller answers 503, never "signed out"). */
+async function account(req: Request, env: ShareEnv, ctx?: Ctx): Promise<Who | null | "unavailable"> {
+  const r = await sessionResult(req, env, ctx);
+  return r.kind === "ok" ? { id: r.id, session: r.session } : r.kind === "unavailable" ? "unavailable" : null;
+}
+
+export type SessionResult =
+  | { kind: "ok"; id: string; session: string; expires: number; created: number }
+  | { kind: "none" }
+  | { kind: "unavailable" };
 
 /**
  * The session a request carries, with its expiry and when it was made (seconds), for the sync service
  * (web/sync/server.ts), which authenticates exactly as sharing does, and the admin page (web/site/src/admin).
- * With `ctx`, the request's activity counts toward last_active.
+ * With `ctx`, the request's activity counts toward last_active.  Fails closed: a session that is "unavailable"
+ * (see sessionResult) is none here; a caller that can say "retry" uses sessionResult.
  */
 export async function sessionOf(req: Request, env: ShareEnv, ctx?: Ctx): Promise<{ id: string; session: string; expires: number; created: number } | null> {
-  const t = cookies(req).get(SESSION);
-  if (!t || !env.SHARE_DB) return null;
-  const session = await sha256Hex(t);
-  const row = await env.SHARE_DB.prepare("SELECT s.account_id, s.expires, s.created, a.last_active FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string; expires: number; created: number; last_active: number | null }>();
-  if (!row) return null;
+  const r = await sessionResult(req, env, ctx);
+  return r.kind === "ok" ? { id: r.id, session: r.session, expires: r.expires, created: r.created } : null;
+}
+
+interface SessionRow {
+  account_id: string; expires: number; created: number; last_active: number | null; kind: string;
+  validated: number | null; abs_expires: number | null; refresh_ct: string | null; key_version: string | null;
+  refresh_failed: number | null; identity_id: string | null; provider_sid: string | null; generation: number;
+  agen: number; subject: string | null; idle_s: number | null; last_used: number | null;
+}
+const SESSION_ROW = `SELECT s.account_id, s.expires, s.created, a.last_active, s.kind, s.validated, s.abs_expires, s.refresh_ct, s.key_version, s.idle_s, s.last_used,
+  s.refresh_failed, s.identity_id, s.provider_sid, s.generation, a.generation AS agen, i.subject
+  FROM sessions s JOIN accounts a ON a.account_id = s.account_id LEFT JOIN identities i ON i.identity_id = s.identity_id`;
+
+/**
+ * The session a request carries.  A WorkOS session last validated WORKOS_VALID_S ago or more is refreshed with WorkOS
+ * first (see WORKOS_VALID_S): "ok" once WorkOS accepts, or while WorkOS can't be asked and it is within its grace;
+ * "none" when WorkOS refuses (the session is then ended) or there is no session; "unavailable" past the grace.
+ */
+export async function sessionResult(req: Request, env: ShareEnv, ctx?: Ctx): Promise<SessionResult> {
+  const tok = cookies(req).get(SESSION);
+  // (a token not of the shape this site makes is none, before any hash or D1 read: the sync service's failure
+  // limit counts it with no database work)
+  if (!tok || !SESSION_TOKEN.test(tok) || !env.SHARE_DB) return { kind: "none" };
+  const session = await sha256Hex(tok);
+  // (a WorkOS row past its hour is still read: whether it may be used is decided below, by refreshing)
+  const read = () => env.SHARE_DB!.prepare(`${SESSION_ROW} WHERE s.token_hash = ?1 AND (s.kind = 'workos' OR s.expires > ?2) AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<SessionRow>();
+  let row = await read();
+  // (every decision is made on a row read now and on the clock now: after any await (a refresh, its D1 writes) the
+  // row is read again and decided afresh, so a grace or an absolute end that passed meanwhile is never let through)
+  let usable = !!row && row.kind !== "workos";
+  for (let pass = 0; row && !usable && pass < 3; pass++) {
+    const d = decide(row, now());
+    if (d === "ok") {
+      usable = true;
+      break;
+    }
+    if (d !== "refresh") return { kind: d };
+    const out = await refreshOnce(env, session, row);
+    if (out === "refused") return { kind: "none" };
+    row = await read();
+  }
+  if (!row) return { kind: "none" };
+  if (!usable && decide(row, now()) !== "ok") return { kind: row.kind === "workos" && now() < (row.abs_expires ?? 0) ? "unavailable" : "none" };
   touch(env, ctx, row.account_id, session, row.last_active, country(req));
-  return { id: row.account_id, session, expires: row.expires, created: row.created };
+  // (a session with an idle limit: this request is its holder's activity, which moves its end; the end returned is the
+  // stored one after the touch, read again with this mode's whole check when another touch won)
+  let expires = row.expires;
+  if (row.idle_s !== null) {
+    const t = await touchIdle(env.SHARE_DB!, session, row);
+    if (t.won) expires = t.expires;
+    else if (t.raced) {
+      const again = await read();
+      if (!again) return { kind: "none" };
+      expires = again.expires;
+    }
+    // (decided afresh after the await, on the clock now: a touch that took long, or failed, never lets a request
+    // through past the session's stored end)
+    if (!(expires > now())) return { kind: "none" };
+  }
+  return { kind: "ok", id: row.account_id, session, expires, created: row.created };
+}
+
+/** How often a session with an idle limit records its holder's activity (seconds): at most once an hour, and always
+ * well inside its limit (half of it), so a holder active at least that often, whose touches succeed, keeps the session
+ * until its absolute end (abs_expires), which no touch moves */
+export const IDLE_TOUCH_S = 3600;
+/** The idle limits a 'local' session may carry (seconds): 10 minutes to 90 days */
+export const IDLE_MIN_S = 600, IDLE_MAX_S = 90 * 86400;
+export const touchEvery = (idle_s: number) => Math.min(IDLE_TOUCH_S, Math.max(1, Math.floor(idle_s / 2)));
+/**
+ * A session with an idle limit (sessions.idle_s, set by whoever made it) keeps `expires` at
+ * MIN(abs_expires, last_used + idle_s), so every check of `expires` is also its idle check.  Its holder's activity (a
+ * request it authenticates, here; a message on one of its sync sockets is planned to be the other, not yet a caller)
+ * moves last_used, at most once every touchEvery(idle_s), in a compare-and-set: two concurrent touches write once, and
+ * nothing else (another session, a timer) ever moves it.  The session's end, as stored after the touch (seconds).
+ */
+export async function touchIdle(db: D1, session: string, row: { idle_s: number | null; last_used: number | null; expires: number }): Promise<{ won: boolean; raced: boolean; expires: number }> {
+  const t = now();
+  if (row.idle_s === null || !Number.isSafeInteger(row.idle_s) || row.idle_s <= 0 || (row.last_used ?? 0) > t - touchEvery(row.idle_s)) return { won: false, raced: false, expires: row.expires };
+  try {
+    const r = await db.prepare(`UPDATE sessions SET last_used = ?2, expires = MIN(abs_expires, ?2 + idle_s) WHERE token_hash = ?1 AND idle_s >= ${IDLE_MIN_S} AND idle_s <= ${IDLE_MAX_S} AND last_used IS ?3 AND last_used <= ?2 AND abs_expires IS NOT NULL AND expires > ?2 AND expires <= abs_expires AND expires <= last_used + idle_s RETURNING expires`).bind(session, t, row.last_used).first<{ expires: number }>();
+    // (lost: another touch won the compare-and-set, or the session ended meanwhile; the caller reads the row again,
+    // with its whole check, and uses what is stored)
+    return r ? { won: true, raced: false, expires: r.expires } : { won: false, raced: true, expires: row.expires };
+  } catch {
+    // (a touch that failed extends nothing: the stored end is still the one before it)
+    return { won: false, raced: false, expires: row.expires };
+  }
+}
+
+/**
+ * The session a sign-out names, read as it is, without refreshing: a sign-out is decided locally and never asks WorkOS
+ * (the sync service records its socket revocation with this before the session goes).
+ */
+export async function sessionForSignOut(req: Request, env: ShareEnv): Promise<{ id: string; session: string } | null> {
+  const tok = cookies(req).get(SESSION);
+  if (!tok || !env.SHARE_DB) return null;
+  const session = await sha256Hex(tok);
+  const row = await env.SHARE_DB.prepare(`SELECT s.account_id FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND (s.kind = 'workos' OR s.expires > ?2) AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<{ account_id: string }>();
+  return row ? { id: row.account_id, session } : null;
+}
+
+/**
+ * What a WorkOS session row allows at time t: "ok" inside its validation hour, or within its grace after a refresh
+ * failed for want of WorkOS less than REFRESH_RETRY_S ago; "refresh" when WorkOS should be asked now; "unavailable"
+ * past its grace while WorkOS was just found unreachable; "none" at its absolute end.
+ */
+function decide(row: SessionRow, t: number): "ok" | "refresh" | "unavailable" | "none" {
+  if (row.abs_expires === null || row.abs_expires <= t) return "none";
+  const validated = row.validated ?? 0;
+  if (validated + WORKOS_VALID_S > t && row.expires > t) return "ok";
+  if (row.refresh_failed !== null && t - row.refresh_failed < REFRESH_RETRY_S) return t < validated + GRACE_S ? "ok" : "unavailable";
+  return "refresh";
+}
+
+type RefreshOutcome = "ok" | "refused" | "unavailable" | "raced";
+/** one refresh at a time per session in this isolate: concurrent requests share it (across isolates, the fence below) */
+const refreshing = new Map<string, Promise<RefreshOutcome>>();
+function refreshOnce(env: ShareEnv, session: string, row: SessionRow): Promise<RefreshOutcome> {
+  let p = refreshing.get(session);
+  if (!p) {
+    p = refreshSessionRow(env, session, row).finally(() => refreshing.delete(session));
+    refreshing.set(session, p);
+  }
+  return p;
+}
+
+/**
+ * The fence every refresh outcome is written under: the row still exists with exactly the refresh token this attempt
+ * started from, its generation and its account's are unchanged, the account isn't disabled or being deleted, and its
+ * absolute end hasn't passed.  So a refresh that lost a race, or that finishes after a sign-out, sign-out everywhere
+ * or disable, changes nothing (and can't recreate the row), and a stale refusal for a rotated-away token never ends
+ * the session that rotated it.  ?1 token hash, ?2 refresh_ct, ?3 generation, ?4 account, ?5 account generation, ?6 now
+ * (taken when the write is made, after every await), ?7 key_version.
+ */
+const REFRESH_FENCE = "token_hash = ?1 AND refresh_ct IS ?2 AND key_version IS ?7 AND generation = ?3 AND abs_expires > ?6 AND EXISTS (SELECT 1 FROM accounts WHERE account_id = ?4 AND generation = ?5 AND disabled IS NULL AND deleting IS NULL)";
+
+async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow): Promise<RefreshOutcome> {
+  const c = workosConfig(env);
+  const keys = await sealKeys(env.REFRESH_KEYS);
+  const db = env.SHARE_DB!;
+  // (the fence's values, with the clock read when each write is made)
+  const fence = () => [session, row.refresh_ct, row.generation, row.account_id, row.agen, now(), row.key_version] as const;
+  // (WorkOS can't be asked from here at all: as an outage, never as a refusal)
+  if (!c || !keys) return markUnavailable(db, fence, row);
+  const ctxSeal = { env: c.env, identity: row.identity_id ?? "", session };
+  const plain = await unseal(keys, ctxSeal, row.key_version, row.refresh_ct);
+  // (its key retired, or the sealed token doesn't open in this row: the session can't be kept valid, so it ends)
+  if (plain === null) return endFenced(db, fence, "refresh-key");
+  // (this answer's place among the identity's email observations, taken before WorkOS is asked; without one, as an
+  // outage: the stored address stays as it is)
+  const ticket = await emailTicket(db);
+  if (ticket === null) return markUnavailable(db, fence, row);
+  const r = await refreshSession(c, plain);
+  if (!r.ok) return r.kind === "refused" ? endFenced(db, fence, "refused") : markUnavailable(db, fence, row);
+  const v = await verifyAccessToken(c, r.accessToken);
+  if (!v.ok) return v.kind === "unavailable" ? markUnavailable(db, fence, row) : endFenced(db, fence, "refresh-invalid");
+  // (a refresh never moves a session to another identity, or onto another WorkOS session)
+  if (v.subject !== row.subject || v.sid !== row.provider_sid) return endFenced(db, fence, "refresh-mismatch");
+  const sealed = await seal(keys, ctxSeal, r.refreshToken);
+  // (the identity's verified email, as this refresh's answer gives it for this very subject: anything else, a missing,
+  // unverified or malformed address or another user's, clears it.  Updated on a successful fenced refresh, in the same
+  // batch and only if the session update took, and only if no newer answer (a later ticket) was written already; an
+  // outage leaves the stored address unchanged)
+  const t = now();
+  const rs = await db.batch([
+    db.prepare(`UPDATE sessions SET refresh_ct = ?8, key_version = ?9, validated = ?6, expires = MIN(?6 + ${WORKOS_VALID_S}, abs_expires), refresh_failed = NULL WHERE ${REFRESH_FENCE}`).bind(session, row.refresh_ct, row.generation, row.account_id, row.agen, t, row.key_version, sealed.ct, sealed.version),
+    db.prepare(`UPDATE identities SET email = ?3, email_at = ?4, email_obs = ?7 WHERE identity_id = ?1 AND subject = ?2 AND ${emailNewer(7)} AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?5 AND identity_id = ?1 AND refresh_ct = ?6 AND validated = ?4)`).bind(row.identity_id, v.subject, verifiedEmail(r.user, v.subject), t, session, sealed.ct, ticket),
+  ]);
+  return Number((rs[0] as D1Result<unknown>).meta?.changes ?? 0) === 1 ? "ok" : "raced";
+}
+
+/** WorkOS couldn't be asked: the session may be used until its grace ends; validated never moves. */
+async function markUnavailable(db: D1, fence: () => readonly unknown[], _row: SessionRow): Promise<RefreshOutcome> {
+  const res = await db.prepare(`UPDATE sessions SET refresh_failed = ?6, expires = MIN(COALESCE(validated, 0) + ${GRACE_S}, abs_expires) WHERE ${REFRESH_FENCE}`).bind(...fence()).run();
+  return Number(res.meta?.changes ?? 0) === 1 ? "unavailable" : "raced";
+}
+
+/** The session ends, under the fence, its WorkOS session queued for revoking in the same batch. */
+async function endFenced(db: D1, fence: () => readonly unknown[], reason: string): Promise<RefreshOutcome> {
+  const f = fence();
+  const rs = await db.batch([
+    db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, ?8, ?6, ?6 FROM sessions WHERE provider_sid IS NOT NULL AND ${REFRESH_FENCE}`).bind(...f, reason),
+    db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE ${REFRESH_FENCE})`).bind(...f),
+    db.prepare(`DELETE FROM sessions WHERE ${REFRESH_FENCE}`).bind(...f),
+  ]);
+  return Number((rs[2] as D1Result<unknown>).meta?.changes ?? 0) === 1 ? "refused" : "raced";
 }
 
 /** A session cookie, and when it ends, or null if the account is being deleted or was deleted in CoCalc.
  * `ttl` (seconds): SESSION_DAYS unless given (only /auth/dev, on DEV, gives one). */
-async function startSession(env: ShareEnv, who: { account_id: string; email?: string; name?: string }, ttl = SESSION_DAYS * DAY): Promise<{ cookie: string; expires: number; hash: string } | null> {
+async function startSession(env: ShareEnv, who: { account_id: string; email?: string; name?: string }, ttl = SESSION_DAYS * DAY, ident?: SessionIdentity): Promise<{ cookie: string; expires: number; hash: string } | null> {
   const db = env.SHARE_DB!;
   const token = b64url(random(32));
   const t = now();
   const h = await accountHash(who.account_id);
   const hash = await sha256Hex(token);
+  if (workosMode(env)) return startIdentitySession(env, who.account_id, ttl, ident ?? { kind: "dev" }, token, hash, h, t);
   try {
     await db.batch([
       ...guard(db, `NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?1) AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND deleting IS NOT NULL)`, h, who.account_id),
       // (active users, r2 §1.1: a new account counts on its day, only while no account row exists yet)
       db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) SELECT ?1, 'account', 'all', 1 WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day, who.account_id),
       db.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(account_id) DO UPDATE SET email = ?2, name = ?3, last_login = ?4").bind(who.account_id, who.email ?? null, who.name ?? null, t),
-      db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires) VALUES (?1, ?2, ?3, ?4)").bind(hash, who.account_id, t, t + ttl),
+      db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind) VALUES (?1, ?2, ?3, ?4, ?5)").bind(hash, who.account_id, t, t + ttl, ident?.kind === "dev" ? "dev" : "legacy"),
       // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3)
       db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
     ]);
@@ -359,6 +640,319 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
     return null;
   }
   return { cookie: cookie(SESSION, token, ttl), expires: t + ttl, hash };
+}
+
+/**
+ * A session's identity, with AUTH_PROVIDER "workos": a WorkOS sign-in's, or /auth/dev's (DEV only).  A WorkOS one
+ * carries its refresh token (sealed here, bound to the new session), when its attempt started (D1 ms, for the
+ * sign-out-everywhere barrier) and the slot its callback reserved (pending_exchanges), which becomes the session.
+ */
+type SessionIdentity = { kind: "workos"; identity_id: string; sid: string; refreshToken: string; started: number; pending: string; email: string | null; ticket: number } | { kind: "dev" };
+
+/** The address to store for the identity of a verified token's subject: WorkOS's verified one for that same user, or null. */
+const verifiedEmail = (u: WorkosUser | null, subject: string) => (u && u.id === subject ? u.email : null);
+
+/**
+ * A ticket for one /authenticate answer, taken before the request: the next n of identity_email_clock, strictly
+ * increasing across every sign-in and refresh; null if D1 can't give one.  An identity's address is written only with a
+ * ticket greater than its email_obs (emailNewer, in the same UPDATE), so answers land in the order they were asked for.
+ */
+async function emailTicket(db: D1): Promise<number | null> {
+  try {
+    const r = await db.prepare("UPDATE identity_email_clock SET n = n + 1 WHERE id = 1 RETURNING n").first<{ n: number }>();
+    return r && Number.isSafeInteger(r.n) ? r.n : null;
+  } catch {
+    return null;
+  }
+}
+/** the UPDATE's condition that its ticket, parameter ?n, is newer than the identity's last written one */
+const emailNewer = (n: number) => `(email_obs IS NULL OR email_obs < ?${n})`;
+
+/** the sessions of account ?1 beyond the newest SESSIONS_MAX (?2): those an insert evicts */
+const EVICTED = "SELECT rowid FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)";
+
+/**
+ * A session with AUTH_PROVIDER "workos": refused for an account being deleted, tombstoned or disabled, and a WorkOS
+ * session also for an attempt that started before the account's last sign-out everywhere.  A WorkOS session's expiry
+ * is its validation hour (WORKOS_VALID_S), never past its absolute end; a /auth/dev session's, as asked.  A WorkOS
+ * session takes over its callback's reserved slot, and the sessions it evicts move into the revoke outbox, all in the
+ * same batch.
+ */
+async function startIdentitySession(env: ShareEnv, account: string, ttl: number, ident: SessionIdentity, token: string, hash: string, h: string, t: number): Promise<{ cookie: string; expires: number; hash: string } | null> {
+  const db = env.SHARE_DB!;
+  const abs = t + SESSION_DAYS * DAY;
+  const expires = ident.kind === "workos" ? Math.min(t + WORKOS_VALID_S, abs) : Math.min(t + ttl, abs);
+  let sealed: { version: string; ct: string } | null = null;
+  if (ident.kind === "workos") {
+    const c = workosConfig(env);
+    const keys = await sealKeys(env.REFRESH_KEYS);
+    if (!c || !keys) return null;
+    sealed = await seal(keys, { env: c.env, identity: ident.identity_id, session: hash }, ident.refreshToken);
+  }
+  try {
+    await db.batch([
+      ...guard(db, `NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?1) AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND (deleting IS NOT NULL OR disabled IS NOT NULL))`, h, account),
+      // (the barrier: only an attempt that started after the account's last sign-out everywhere stands)
+      ...(ident.kind === "workos" ? guard(db, "NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?1 AND signed_out_all_at IS NOT NULL AND signed_out_all_at >= ?2)", account, ident.started) : []),
+      db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) SELECT ?1, 'account', 'all', 1 WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day, account),
+      db.prepare("INSERT INTO accounts (account_id, created, last_login) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET last_login = ?2").bind(account, t),
+      ...(ident.kind === "workos"
+        ? [
+            // (the callback's reserved slot becomes this session's, only while the reservation still holds it: one the
+            // sweep has already turned into a sid-unknown row makes no session, and is settled by the caller)
+            ...guard(db, "EXISTS (SELECT 1 FROM pending_exchanges WHERE id = ?1)", ident.pending),
+            db.prepare("DELETE FROM pending_exchanges WHERE id = ?1").bind(ident.pending),
+            db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, identity_id, provider_sid, abs_expires, validated, refresh_ct, key_version, generation) SELECT ?1, ?2, ?3, ?4, 'workos', ?5, ?6, ?7, ?3, ?8, ?9, (SELECT generation FROM accounts WHERE account_id = ?2) WHERE EXISTS (SELECT 1 FROM identities WHERE identity_id = ?5 AND account_id = ?2)").bind(hash, account, t, expires, ident.identity_id, ident.sid, abs, sealed!.ct, sealed!.version),
+          ]
+        : [db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, 'dev', ?5, ?3)").bind(hash, account, t, expires, abs)]),
+      // (the session must exist: a WorkOS session whose identity isn't this account's inserted nothing above)
+      ...guard(db, "EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?1)", hash),
+      // (the identity's verified email, as this sign-in's WorkOS answer gave it, or null: in the session's own batch, so
+      // a sign-in that stands has always offered it, and one refused wrote nothing; a newer answer already written wins)
+      ...(ident.kind === "workos" ? [db.prepare(`UPDATE identities SET email = ?2, email_at = ?3, email_obs = ?4 WHERE identity_id = ?1 AND ${emailNewer(4)}`).bind(ident.identity_id, ident.email, t, ident.ticket)] : []),
+      // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking)
+      db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
+      db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${EVICTED}))`).bind(account, SESSIONS_MAX),
+      db.prepare(`DELETE FROM sessions WHERE rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX),
+    ]);
+  } catch {
+    return null;
+  }
+  // (a WorkOS session's cookie lasts to its absolute end: past each validation hour the browser must still send it,
+  // so the server can refresh; whether it is usable stays the server's decision)
+  return { cookie: cookie(SESSION, token, (ident.kind === "workos" ? abs : expires) - t), expires, hash };
+}
+
+// ---- sign in with WorkOS AuthKit (AUTH_PROVIDER "workos")
+
+export const workosMode = (env: ShareEnv) => env.AUTH_PROVIDER === "workos";
+/** The WorkOS configuration, or null when any part is missing: sign-in is then unavailable, never CoCalc's. */
+function workosConfig(env: ShareEnv): WorkosConfig | null {
+  if (!env.AUTH_ENV || !env.AUTH_ORIGIN || !env.WORKOS_CLIENT_ID || !env.WORKOS_ISSUER || !env.WORKOS_API_KEY || !env.REFRESH_KEYS || !env.SESSION_KEY || !env.SHARE_DB) return null;
+  return { env: env.AUTH_ENV, clientId: env.WORKOS_CLIENT_ID, issuer: env.WORKOS_ISSUER, apiKey: env.WORKOS_API_KEY, ...(env.WORKOS_API ? { api: env.WORKOS_API } : {}) };
+}
+/** sign-in responses: never cached, and never sending this URL (its code or state) on as a referrer */
+const AUTH_HEADERS = { "cache-control": "no-store", "referrer-policy": "no-referrer" } as const;
+const authErr = (status: number, error: string) => json({ error }, status, { "referrer-policy": "no-referrer" });
+const STATE_MAX = 2048;
+const CODE_MAX = 512;
+/**
+ * Sign-in states used once are remembered until they can no longer be accepted (their exp has passed, plus
+ * STATE_SKEW_S), then deleted: by each callback (a few) and by the scheduled job (all).  At most AUTH_STATES_MAX are
+ * kept; a callback finding the table full is refused before anything is asked of WorkOS, and no unexpired record is
+ * ever removed to make room.
+ */
+const AUTH_STATES_MAX = 100_000;
+const STATE_SKEW_S = 60;
+const statesMax = (env: ShareEnv) => (devGates(env) && env.AUTH_STATES_MAX ? Number(env.AUTH_STATES_MAX) : AUTH_STATES_MAX);
+const STATES_EXPIRED = "DELETE FROM auth_states WHERE rowid IN (SELECT rowid FROM auth_states WHERE expires < ?1 LIMIT ?2)";
+
+async function workosLogin(req: Request, env: ShareEnv): Promise<Response> {
+  const c = workosConfig(env);
+  const url = new URL(req.url);
+  // (no usable refresh-token keys: a session couldn't be kept valid, so sign-in is unavailable before WorkOS is asked)
+  if (!c || !(await sealKeys(env.REFRESH_KEYS))) return authErr(503, "sign-in is unavailable");
+  if (url.origin !== env.AUTH_ORIGIN) return authErr(404, "not found");
+  const state = b64url(random(16));
+  const nonce = b64url(random(16));
+  const verifier = b64url(random(32));
+  const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(verifier))));
+  // (when this attempt started, on D1's clock: a session from it stands only if it started after the account's last
+  // sign-out everywhere, which is on the same clock)
+  const d = await env.SHARE_DB!.prepare(`SELECT ${D1_NOW_MS} AS t`).first<{ t: number }>().catch(() => null);
+  if (!d || !Number.isSafeInteger(d.t)) return authErr(503, "sign-in is unavailable; try again soon");
+  const payload = b64url(enc.encode(JSON.stringify({ state, nonce, verifier, ret: returnPath(url.searchParams.get("return"), url.origin), exp: now() + 600, started: d.t })));
+  const signed = `${payload}.${await hmac(env.SESSION_KEY!, "workos-oauth\n" + payload)}`;
+  const to = authorizeUrl(c, { redirectUri: `${env.AUTH_ORIGIN}/auth/callback`, state, challenge, signUp: url.searchParams.get("screen") === "sign-up" });
+  return new Response(null, { status: 302, headers: { location: to, "set-cookie": cookie(OAUTH, signed, 600), ...AUTH_HEADERS } });
+}
+
+/**
+ * The account for a WorkOS identity: the existing one, or a new account made with it in one batch.  The identity
+ * insert has no ON CONFLICT: if a parallel sign-in made the same identity first, it fails on UNIQUE(issuer, subject),
+ * the whole batch rolls back (so no account is left without its identity), and the winner's is read instead.
+ */
+export async function identityAccount(db: D1, issuer: string, subject: string): Promise<{ identity_id: string; account_id: string } | null> {
+  const find = () => db.prepare("SELECT identity_id, account_id FROM identities WHERE issuer = ?1 AND subject = ?2").bind(issuer, subject).first<{ identity_id: string; account_id: string }>();
+  const found = await find();
+  if (found) return found;
+  const account_id = crypto.randomUUID(), identity_id = crypto.randomUUID(), t = now();
+  try {
+    await db.batch([
+      db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) VALUES (?1, 'account', 'all', 1) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day),
+      db.prepare("INSERT INTO accounts (account_id, created, last_login) VALUES (?1, ?2, ?2)").bind(account_id, t),
+      db.prepare("INSERT INTO identities (identity_id, issuer, subject, account_id, created, last_used) VALUES (?1, ?2, ?3, ?4, ?5, ?5)").bind(identity_id, issuer, subject, account_id, t),
+    ]);
+    return { identity_id, account_id };
+  } catch {
+    return await find();
+  }
+}
+
+// ---- the revoke outbox: every WorkOS session we hold, or held, stays revocable
+
+const revokeCapacity = (env: ShareEnv) => (devGates(env) && env.REVOKE_CAPACITY ? Number(env.REVOKE_CAPACITY) : REVOKE_CAPACITY);
+
+/**
+ * A reserved exchange settled without a session.  The exchange owns exactly one counted slot: its pending row, or,
+ * once the sweep has found it stale, the sid-unknown outbox row that took the pending row's place (same exchange id).
+ * Settling acts on whichever holds it, in one batch, and never makes a second one:
+ * - "none" (WorkOS answered and refused the code, so it made no session): the slot is freed;
+ * - a sid, or sid unknown: the slot becomes (or stays, now naming the sid) that exchange's outbox row.
+ */
+async function settleExchange(db: D1, pending: string, then: "none" | { sid: string | null; account?: string; reason: string }): Promise<void> {
+  const t = now();
+  const held = "EXISTS (SELECT 1 FROM pending_exchanges WHERE id = ?1)";
+  await db.batch(
+    then === "none"
+      ? [
+          db.prepare(`DELETE FROM revoke_outbox WHERE exchange_id = ?1 AND sid_unknown = 1 AND NOT ${held}`).bind(pending),
+          db.prepare("DELETE FROM pending_exchanges WHERE id = ?1").bind(pending),
+        ]
+      : [
+          db.prepare(`INSERT INTO revoke_outbox (sid, account_id, sid_unknown, reason, created, next_at, exchange_id) SELECT ?2, ?3, ?4, ?5, ?6, ?6, ?1 WHERE ${held}`).bind(pending, then.sid, then.account ?? null, then.sid ? 0 : 1, then.reason, t),
+          // (swept already: the exchange's sid-unknown row now names the sid, in the same slot)
+          ...(then.sid ? [db.prepare(`UPDATE revoke_outbox SET sid = ?2, account_id = ?3, sid_unknown = 0, reason = ?4, next_at = ?5 WHERE exchange_id = ?1 AND sid_unknown = 1 AND NOT ${held}`).bind(pending, then.sid, then.account ?? null, then.reason, t)] : []),
+          db.prepare("DELETE FROM pending_exchanges WHERE id = ?1").bind(pending),
+        ],
+  ).catch(() => {});
+}
+
+/** how long a drain's claim on a row lasts: longer than one revoke's deadline plus its D1 writes */
+const CLAIM_S = 30;
+
+/**
+ * Ask WorkOS to end up to `n` queued sessions that are due, one at a time, stopping once `budgetMs` of wall time has
+ * passed (so a request's waitUntil or the scheduled run is bounded: at most n revokes, each with its 3 s deadline).
+ * Each row is claimed first, atomically (a claim token, valid CLAIM_S): another drain, in this isolate or another,
+ * skips a claimed row, and every completion is written only for the exact row and claim it started from (row ids are
+ * never reused), so a drain finishing late can't delete or update a newer obligation.  Delivered: the row goes,
+ * freeing its slot.  Not delivered: tried again later, with backoff (a minute, doubling), and after REVOKE_ATTEMPTS
+ * kept as exhausted.
+ */
+export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): Promise<{ delivered: number; failed: number }> {
+  const out = { delivered: 0, failed: 0 };
+  const c = workosMode(env) ? workosConfig(env) : null;
+  if (!c) return out;
+  const db = env.SHARE_DB!;
+  const start = Date.now();
+  const due = (await db.prepare("SELECT id, sid, attempts FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0 AND next_at <= ?1 AND (claim IS NULL OR claim_until < ?1) ORDER BY next_at LIMIT ?2").bind(now(), n).all<{ id: number; sid: string; attempts: number }>()).results;
+  for (const r of due) {
+    if (Date.now() - start > budgetMs) break;
+    const claim = b64url(random(12));
+    const t = now();
+    const got = await db.prepare("UPDATE revoke_outbox SET claim = ?2, claim_until = ?3 WHERE id = ?1 AND sid = ?4 AND attempts = ?5 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?6)").bind(r.id, claim, t + CLAIM_S, r.sid, r.attempts, t).run();
+    if (Number(got.meta?.changes ?? 0) !== 1) continue;
+    if ((await revokeSession(c, r.sid)) === "revoked") {
+      await db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND claim = ?2").bind(r.id, claim).run();
+      out.delivered++;
+    } else {
+      const a = r.attempts + 1;
+      await db.prepare("UPDATE revoke_outbox SET attempts = ?3, next_at = ?4, exhausted = ?5, claim = NULL, claim_until = NULL WHERE id = ?1 AND claim = ?2").bind(r.id, claim, a, now() + 60 * 2 ** Math.min(a, 12), a >= REVOKE_ATTEMPTS ? 1 : 0).run();
+      out.failed++;
+    }
+  }
+  return out;
+}
+
+/** What the outbox holds: queued, exhausted, sid unknown (the admin page's numbers), and the slots in use. */
+export async function outboxCounts(db: D1): Promise<{ queued: number; exhausted: number; unknown: number; used: number }> {
+  return (await db.prepare(`SELECT (SELECT COUNT(*) FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0) AS queued, (SELECT COUNT(*) FROM revoke_outbox WHERE exhausted = 1) AS exhausted, (SELECT COUNT(*) FROM revoke_outbox WHERE sid_unknown = 1) AS unknown, ${SLOTS_USED} AS used`).first<{ queued: number; exhausted: number; unknown: number; used: number }>())!;
+}
+
+/**
+ * Every session of an account ends now, its WorkOS sessions queued for revoking, in one batch with the account's
+ * generation bumped (a refresh started before can't write) and, for a sign-out everywhere, the barrier set on D1's
+ * clock (a sign-in started before can't make a session).  With `disable`, the account also can't sign in again.
+ */
+async function endAllSessions(db: D1, account: string, reason: "everywhere" | "disabled" | "deleted", disable = false): Promise<void> {
+  const t = now();
+  await db.batch([
+    db.prepare(`UPDATE accounts SET generation = generation + 1, signed_out_all_at = ${D1_NOW_MS}${disable ? ", disabled = ?2" : ""} WHERE account_id = ?1`).bind(account, ...(disable ? [t] : [])),
+    db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, ?2, ?3, ?3 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, reason, t),
+    db.prepare("DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE account_id = ?1)").bind(account),
+    db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
+  ]);
+}
+
+/** Disable an account: no sign-in, every session ended at once (the admin action that needs I3's proof calls this). */
+export async function disableAccount(env: ShareEnv, account: string): Promise<void> {
+  await endAllSessions(env.SHARE_DB!, account, "disabled", true);
+}
+
+async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response> {
+  const c = workosConfig(env);
+  const url = new URL(req.url);
+  if (!c || !(await sealKeys(env.REFRESH_KEYS))) return authErr(503, "sign-in is unavailable");
+  if (url.origin !== env.AUTH_ORIGIN) return authErr(404, "not found");
+  const db = env.SHARE_DB!;
+  const raw = cookies(req).get(OAUTH) ?? "";
+  const [payload, sig] = raw.length <= STATE_MAX ? raw.split(".") : [];
+  if (!payload || !sig || !same(sig, await hmac(env.SESSION_KEY!, "workos-oauth\n" + payload))) return authErr(400, "sign-in expired; try again");
+  let st: { state?: unknown; nonce?: unknown; verifier?: unknown; ret?: unknown; exp?: unknown; started?: unknown };
+  try {
+    st = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0))));
+  } catch {
+    return authErr(400, "sign-in expired; try again");
+  }
+  const clear = cookie(OAUTH, "", 0);
+  if (typeof st.exp !== "number" || st.exp < now() || typeof st.state !== "string" || typeof st.nonce !== "string" || typeof st.verifier !== "string" || typeof st.started !== "number" || !Number.isSafeInteger(st.started) || !same(st.state, url.searchParams.get("state") ?? "")) return authErr(400, "sign-in expired; try again");
+  // (checked again: the cookie was written by this code, but never trust a path twice removed)
+  const ret = returnPath(typeof st.ret === "string" ? st.ret : null, url.origin);
+  const code = url.searchParams.get("code");
+  const failed = url.searchParams.get("error") !== null;
+  // (a callback with neither a code nor an error is refused before its state is spent)
+  if (!failed && (!code || code.length > CODE_MAX)) return authErr(400, "sign-in didn't finish; try again");
+  // (each state once: a replayed callback, even with its own cookie, is refused; the table is bounded, see AUTH_STATES_MAX)
+  await db.prepare(STATES_EXPIRED).bind(now() - STATE_SKEW_S, 20).run().catch(() => {});
+  let spent: number;
+  try {
+    const r = await db.prepare("INSERT INTO auth_states (nonce_hash, expires) SELECT ?1, ?2 WHERE (SELECT COUNT(*) FROM auth_states) < ?3").bind(await sha256Hex(st.nonce), st.exp, statesMax(env)).run();
+    spent = Number(r.meta?.changes ?? 0);
+  } catch {
+    return authErr(400, "sign-in expired; try again");
+  }
+  if (spent !== 1) return authErr(503, "sign-in is busy; try again soon");
+  if (failed) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear, ...AUTH_HEADERS } });
+  if (!code) return authErr(400, "sign-in didn't finish; try again");
+  // (this answer's email ticket, taken before WorkOS is asked: without one, refused here, before any WorkOS session)
+  const ticket = await emailTicket(db);
+  if (ticket === null) return authErr(503, "sign-in is busy; try again soon");
+  // (this sign-in's slot, reserved before WorkOS is asked: at capacity it is refused and WorkOS makes no session)
+  const pending = crypto.randomUUID();
+  const tr = now();
+  const reserved = await db.prepare(`INSERT INTO pending_exchanges (id, started, expires) SELECT ?1, ?2, ?3 WHERE ${SLOTS_USED} < ?4`).bind(pending, tr, tr + PENDING_S, revokeCapacity(env)).run().catch(() => null);
+  if (Number(reserved?.meta?.changes ?? 0) !== 1) return authErr(503, "sign-in is busy; try again soon");
+  const x = await exchangeCode(c, code, st.verifier);
+  if (!x.ok) {
+    // (WorkOS answered: no session was made, the slot is free again; no answer: a session may exist, so the slot is
+    // kept as an outbox row whose sid is unknown)
+    await settleExchange(db, pending, x.definite ? "none" : { sid: null, reason: "exchange-lost" });
+    return x.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(400, "sign-in failed; try again");
+  }
+  const v = await verifyAccessToken(c, x.accessToken);
+  if (!v.ok || !x.refreshToken) {
+    // (WorkOS made a session we won't keep: its revocation is queued in the reserved slot)
+    await settleExchange(db, pending, { sid: v.ok ? v.sid : sidOf(x.accessToken), reason: "refused-token" });
+    ctx.waitUntil(drainRevokes(env, 5, 6000));
+    return !v.ok && v.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(401, "sign-in failed; try again");
+  }
+  const ident = await identityAccount(db, c.issuer, v.subject);
+  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid, refreshToken: x.refreshToken, email: verifiedEmail(x.user, v.subject), ticket, started: st.started, pending }));
+  if (!ident || !session) {
+    // (refused here: the account disabled or being deleted, the sign-out-everywhere barrier, no account could be made,
+    // or the exchange took so long that the sweep counted it as unknown; WorkOS's session is queued for revoking in
+    // the slot the exchange holds)
+    const swept = !(await db.prepare("SELECT 1 AS x FROM pending_exchanges WHERE id = ?1").bind(pending).first().catch(() => ({ x: 1 })));
+    await settleExchange(db, pending, { sid: v.sid, account: ident?.account_id, reason: swept ? "late-sign-in" : "refused-sign-in" });
+    ctx.waitUntil(drainRevokes(env, 5, 6000));
+    return swept ? authErr(503, "sign-in took too long; try again") : ident ? authErr(403, "this account can't sign in") : authErr(503, "sign-in is unavailable; try again soon");
+  }
+  await db.batch(activityBatch(db, ident.account_id, session.hash, touchClock(), country(req))).catch(() => {});
+  const h = new Headers({ location: ret, ...AUTH_HEADERS });
+  h.append("set-cookie", clear);
+  h.append("set-cookie", session.cookie);
+  return new Response(null, { status: 302, headers: h });
 }
 
 // ---- sign in with CoCalc (authorization code with PKCE)
@@ -389,7 +983,7 @@ async function callback(req: Request, env: ShareEnv): Promise<Response> {
   const ret = returnPath(st.ret, url.origin);
   if (url.searchParams.get("error")) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear } });
   const code = url.searchParams.get("code");
-  if (!code) return err(400, "no code");
+  if (!code) return err(400, "sign-in didn't finish; try again");
   const r = await fetch(new URL("/api/v2/auth/oauth/token", env.COCALC_ORIGIN), {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) },
@@ -410,28 +1004,80 @@ async function callback(req: Request, env: ShareEnv): Promise<Response> {
 
 // ---- limits, from CoCalc's membership tiers
 
-async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
+/** With AUTH_PROVIDER "local": the account's own account_limits row, else DEFAULT_LIMITS; neither valid, null (no uploads) */
+async function localLimits(env: ShareEnv, id: string): Promise<Limits | null> {
+  // (safe integers, nonnegative, a file no larger than the whole allowance; an invalid row fails closed, never falling
+  // back to the default)
+  const ok = (v: unknown): v is { storage_bytes: number; max_file_bytes: number } =>
+    !!v && typeof v === "object" && Number.isSafeInteger((v as Limits).storage_bytes) && (v as Limits).storage_bytes >= 0 && Number.isSafeInteger((v as Limits).max_file_bytes) && (v as Limits).max_file_bytes >= 0 && (v as Limits).max_file_bytes <= (v as Limits).storage_bytes;
+  const row = await env.SHARE_DB!.prepare("SELECT storage_bytes, max_file_bytes FROM account_limits WHERE account_id = ?1").bind(id).first<{ storage_bytes: number; max_file_bytes: number }>();
+  let v: unknown = row;
+  if (!row) {
+    try {
+      v = JSON.parse(env.DEFAULT_LIMITS ?? "null");
+    } catch {
+      return null;
+    }
+  }
+  return ok(v) ? { tier: "local", storage_bytes: v.storage_bytes, max_file_bytes: Math.min(v.max_file_bytes, MAX_PUT), private_links: false } : null;
+}
+
+export async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
+  // (no CoCalc plan counts with WorkOS sign-in: Sagebrush's free plan, until grants)
+  if (workosMode(env)) return FREE_LIMITS;
+  if (localMode(env)) return localLimits(env, who.id);
+  if (!knownProvider(env)) return null;
   const db = env.SHARE_DB!;
-  const id = who.id;
-  const c = await db.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(id).first<{ limits: string; fetched: number }>();
+  const c = await db.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(who.id).first<{ limits: string; fetched: number }>();
   if (c && c.fetched > now() - LIMITS_TTL) return JSON.parse(c.limits);
   if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : null;
   try {
-    const u = new URL("/api/v2/sagebrush/limits", env.COCALC_ORIGIN);
-    u.searchParams.set("account_id", id);
-    const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
-    if (r.status === 404) return null; // no such account: no uploads
-    if (!r.ok) throw new Error(String(r.status));
-    const v = (await r.json()) as Limits;
-    if (!Number.isSafeInteger(v.storage_bytes) || !Number.isSafeInteger(v.max_file_bytes)) throw new Error("bad limits");
-    const l: Limits = { tier: String(v.tier ?? ""), storage_bytes: v.storage_bytes, max_file_bytes: v.max_file_bytes, private_links: v.private_links === true };
-    // (cached only while the session is live: never a row for a deleted account)
-    await db.batch([...live(db, who), db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3").bind(id, JSON.stringify(l), now())]).catch(() => {});
-    return l;
+    return await fetchLimits(env, who);
   } catch {
     // CoCalc is unreachable: keep what we had, never read it as zero
     return c ? JSON.parse(c.limits) : null;
   }
+}
+
+/** CoCalc's limits for the account, asked now (and cached while the session is live), or null when CoCalc says there is
+ * no such account; throws when CoCalc can't be asked or doesn't answer properly. */
+async function fetchLimits(env: ShareEnv, who: Who): Promise<Limits | null> {
+  const db = env.SHARE_DB!;
+  const u = new URL("/api/v2/sagebrush/limits", env.COCALC_ORIGIN);
+  u.searchParams.set("account_id", who.id);
+  const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
+  if (r.status === 404) return null; // no such account: no uploads
+  if (!r.ok) throw new Error(String(r.status));
+  const v = (await r.json()) as Limits;
+  if (!Number.isSafeInteger(v.storage_bytes) || !Number.isSafeInteger(v.max_file_bytes)) throw new Error("bad limits");
+  // (a tier only as CoCalc's own string: anything else is no tier, never coerced ("admin" from ["admin"]), so no cached
+  // row holds one authTier() would trust; the quota fields' handling is as before)
+  const l: Limits = { tier: typeof v.tier === "string" ? v.tier : "", storage_bytes: v.storage_bytes, max_file_bytes: v.max_file_bytes, private_links: v.private_links === true };
+  // (cached only while the session is live: never a row for a deleted account)
+  await db.batch([...live(db, who), db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3").bind(who.id, JSON.stringify(l), now())]).catch(() => {});
+  return l;
+}
+
+/** The account's CoCalc tier for an authorization decision (web/cloud/remote: who may enroll a computer): from a cache
+ * row fetched within LIMITS_TTL, or from CoCalc's own answer now.  Anything else is null: CoCalc unreachable or
+ * answering badly, no such account, no tier, CoCalc not configured.  Unlike limits() (whose quota fallback keeps any
+ * cached row, however old, while CoCalc can't be asked), an older row never counts, and DEV_LIMITS never does; so a tier
+ * CoCalc takes away stops counting within LIMITS_TTL at most.  (at: the time it's judged at, now; a test's own clock) */
+export async function authTier(env: ShareEnv, who: { id: string; session: string }, at: number = now()): Promise<string | null> {
+  // (no CoCalc tier is an authority with WorkOS sign-in)
+  if (!env.SHARE_DB || cocalcOff(env)) return null;
+  const c = await env.SHARE_DB.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(who.id).first<{ limits: string; fetched: number }>();
+  let l: Limits | null;
+  if (c && c.fetched > at - LIMITS_TTL) l = JSON.parse(c.limits) as Limits;
+  else {
+    if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return null;
+    try {
+      l = await fetchLimits(env, who);
+    } catch {
+      return null;
+    }
+  }
+  return l && typeof l.tier === "string" && l.tier !== "" ? l.tier : null;
 }
 
 // (SQL: what sharing holds for account ?1, reservations still running at ?2 included; the sync
@@ -439,6 +1085,29 @@ async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
 export const SHARING_USED = `(SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1)
   + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1)
   + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2)`;
+/**
+ * Whether other holders' claims on the budget can exist here: whether the database has budget_claims (migration
+ * 0016).  One way: asked of the database until it says yes, never again after (a table is never dropped).  So a
+ * database without 0016 is never read for claims, and once it has the table every check counts every claim in it,
+ * whatever the bindings say: turning BUDGET_CLAIMS off (which only lets a holder such as the log mirror write) can
+ * never leave a claim uncounted.
+ */
+let claimsTable = false;
+export async function budgetClaims(env: { SHARE_DB?: D1 }): Promise<boolean> {
+  if (claimsTable) return true;
+  if (!env.SHARE_DB) return false;
+  const found = !!(await env.SHARE_DB.prepare("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'budget_claims'").first());
+  // (only ever to true: an older probe's "no" that answers after a newer "yes" changes nothing)
+  if (found) claimsTable = true;
+  return claimsTable;
+}
+/** Whether a holder may write a claim here: BUDGET_CLAIMS "on" (a deployment's word that 0016 is applied), and the table there. */
+export async function claimsWritable(env: { SHARE_DB?: D1; BUDGET_CLAIMS?: string }): Promise<boolean> {
+  return env.BUDGET_CLAIMS === "on" && (await budgetClaims(env));
+}
+/** SHARING_USED, and every other holder's claim wherever there can be any (budgetClaims). */
+export const sharingUsed = async (env: { SHARE_DB?: D1 }) =>
+  SHARING_USED + ((await budgetClaims(env)) ? `\n  + (SELECT COALESCE(SUM(bytes), 0) FROM budget_claims WHERE account_id = ?1)` : "");
 /** sharing's clock, in seconds (reservations' expiry) */
 export const nowSeconds = () => now();
 // (the bytes sync has claimed of account ?8's budget (its hash): every byte of it may be in use, so
@@ -446,11 +1115,12 @@ export const nowSeconds = () => now();
 // and refuses, §6.1)
 const CLAIM = ` + (SELECT COALESCE(SUM(claim_bytes), 0) FROM sync_accounts WHERE account_hash = ?8 AND state <> 'purged')`;
 // (without sync, ?8 is still named, adding nothing, so every caller binds the same parameters)
-const used = (env: ShareEnv) => SHARING_USED + (env.SYNC_ACCOUNT ? CLAIM : " + 0 * COALESCE(length(?8), 0)");
+const used = async (env: ShareEnv) => (await sharingUsed(env)) + (env.SYNC_ACCOUNT ? CLAIM : " + 0 * COALESCE(length(?8), 0)");
 
 /** What the account's budget has in use: sharing's bytes, and sync's claim where sync is on. */
 async function usage(env: ShareEnv, id: string): Promise<number> {
-  const r = await env.SHARE_DB!.prepare(`SELECT ${used(env)} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
+  const u = await used(env);
+  const r = await env.SHARE_DB!.prepare(`SELECT ${u} AS n`).bind(id, now(), null, null, null, null, null, await accountHash(id)).first<{ n: number }>();
   return r?.n ?? 0;
 }
 
@@ -461,11 +1131,11 @@ async function usage(env: ShareEnv, id: string): Promise<number> {
  * claim (above).  If the account object can't be reached, sync's claim stands
  * in for its parts.
  */
-async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; usage_breakdown: { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number }; sync_retention?: { state: string; readonly_since: number | null; purge_after: number | null } }> {
+async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; usage_breakdown: { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number; claims?: number }; sync_retention?: { state: string; readonly_since: number | null; purge_after: number | null } }> {
   const db = env.SHARE_DB!;
   const t = now();
   const s = await db.prepare("SELECT (SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1) + (SELECT COALESCE(SUM(bytes), 0) FROM reservations WHERE account_id = ?1 AND expires > ?2) AS files, (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1) AS versions").bind(id, t).first<{ files: number; versions: number }>();
-  const parts = { sharing_files: s?.files ?? 0, sharing_versions: s?.versions ?? 0, sync_files: 0, sync_documents: 0 } as { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number };
+  const parts = { sharing_files: s?.files ?? 0, sharing_versions: s?.versions ?? 0, sync_files: 0, sync_documents: 0 } as { sharing_files: number; sharing_versions: number; sync_files: number; sync_documents: number; sync_claim?: number; claims?: number };
   let retention: { state: string; readonly_since: number | null; purge_after: number | null } | undefined;
   if (env.SYNC_ACCOUNT) {
     const h = await accountHash(id);
@@ -484,7 +1154,10 @@ async function breakdown(env: ShareEnv, id: string): Promise<{ usage: number; us
       }
     }
   }
-  return { usage: parts.sharing_files + parts.sharing_versions + parts.sync_files + parts.sync_documents + (parts.sync_claim ?? 0), usage_breakdown: parts, ...(retention ? { sync_retention: retention } : {}) };
+  // (other holders' claims on the budget, budget_claims: the log mirror's; named only when there are any)
+  const claims = (await budgetClaims(env)) ? ((await db.prepare("SELECT COALESCE(SUM(bytes), 0) AS n FROM budget_claims WHERE account_id = ?1").bind(id).first<{ n: number }>())?.n ?? 0) : 0;
+  if (claims > 0) parts.claims = claims;
+  return { usage: parts.sharing_files + parts.sharing_versions + parts.sync_files + parts.sync_documents + (parts.sync_claim ?? 0) + claims, usage_breakdown: parts, ...(retention ? { sync_retention: retention } : {}) };
 }
 
 /**
@@ -512,7 +1185,8 @@ async function reserve(env: ShareEnv, who: Who, bytes: number, limit: number, ke
   const t = now();
   const h = await accountHash(who.id);
   try {
-    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${used(env)} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
+    const u = await used(env);
+    const r = (await db.batch([...live(db, who), db.prepare(`INSERT INTO reservations (id, account_id, bytes, key, expires) SELECT ?3, ?1, ?4, ?5, ?6 WHERE ${u} + ?4 <= ?7`).bind(who.id, t, rid, bytes, key, t + RESERVE_SECONDS, limit, h)])) as D1Result<unknown>[];
     if (r[2]?.meta?.changes === 1) return { id: rid, expires: t + RESERVE_SECONDS };
   } catch {
     return null;
@@ -542,7 +1216,7 @@ async function check(req: Request, env: ShareEnv, who: Who): Promise<Response> {
   const blobs = body?.blobs;
   if (!Array.isArray(blobs) || blobs.length > MAX_FILES || !blobs.every((b) => b && HEX64.test(b.sha256) && Number.isSafeInteger(b.size) && b.size >= 0)) return err(400, "bad request");
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   const max = Math.min(lim.max_file_bytes, MAX_PUT);
   const big = blobs.find((b) => b.size > max);
   if (big) return json({ error: "file too large", sha256: big.sha256, max_file_bytes: max }, 413);
@@ -568,7 +1242,7 @@ async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Prom
   if (!cl || !/^\d{1,12}$/.test(cl)) return err(411, "content-length required");
   const size = Number(cl);
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   if (size > Math.min(lim.max_file_bytes, MAX_PUT)) return err(413, "file too large");
   const db = env.SHARE_DB!;
   if (await db.prepare("SELECT 1 AS x FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(id, sha).first()) return json({ ok: true });
@@ -601,7 +1275,7 @@ async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Prom
     ]);
   } catch {
     await abandon(env, key, rid);
-    return err(403, "uploads need a CoCalc account in good standing");
+    return err(403, "uploads need an account in good standing");
   }
   return json({ ok: true });
 }
@@ -610,7 +1284,7 @@ async function createCollection(env: ShareEnv, who: Who, body: { title?: unknown
   const id = who.id;
   const title = typeof body?.title === "string" ? body.title.trim().slice(0, 200) : "";
   if (!title) return err(400, "a title is required");
-  if (!(await limits(env, who))) return err(403, "uploads need a CoCalc account in good standing");
+  if (!(await limits(env, who))) return err(403, "uploads need an account in good standing");
   const cid = newId();
   const t = now();
   const db = env.SHARE_DB!;
@@ -664,7 +1338,7 @@ async function replay(env: ShareEnv, owner: string, attemptHash: string, digest:
   return json({ version: r.version, collection: r.collection, ...shareUrls(r.collection, r.version) }, 200);
 }
 
-type CommitBody = { title?: unknown; license?: unknown; files?: unknown };
+type CommitBody = { title?: unknown; license?: unknown; author?: unknown; files?: unknown };
 
 /** A version: of collection `cidIn`, or (cidIn null) of a new one, made by `attempt`. */
 async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, cidIn: string | null, attempt: string | null): Promise<Response> {
@@ -685,18 +1359,27 @@ async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, c
   }
   const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : col!.title;
   if (body?.license !== undefined && !(typeof body.license === "string" && LICENSE.test(body.license))) return err(400, "license: an SPDX identifier");
+  // (who it's by, as the publisher typed it, shown on the page as "by <it>": any names, or none (empty), never taken
+  // from an account and never checked against one; plain text on one line, at most MAX_AUTHOR characters)
+  let author: string | undefined;
+  if (body?.author !== undefined && body.author !== null) {
+    if (typeof body.author !== "string" || /[\u0000-\u001f\u007f]/.test(body.author)) return err(400, "author: plain text on one line");
+    const a = body.author.trim();
+    if (a.length > MAX_AUTHOR) return err(400, `author: at most ${MAX_AUTHOR} characters`);
+    author = a || undefined;
+  }
   const listed = files.map((f: { path: string; sha256: string; size: number }) => ({ path: f.path, sha256: f.sha256, size: f.size })).sort((a, b) => (a.path < b.path ? -1 : 1));
   // (a first upload's receipt: its attempt, and what it asked for, exactly the manifest's own fields)
   let attemptHash: string | null = null, digest: string | null = null;
   if (attempt !== null) {
     attemptHash = await sha256Hex("sagebrush-attempt\n" + attempt);
-    digest = await sha256Hex(canonical({ title, license: body?.license ?? null, files: listed }));
+    digest = await sha256Hex(canonical({ title, license: body?.license ?? null, author, files: listed }));
     const again = await replay(env, id, attemptHash, digest);
     if (again) return again;
   }
   // (after the receipt: a retry's answer needs no limits, and what follows may wait on CoCalc's)
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   // every file must be one this account has uploaded, at its stated size
   // (a held file's size can't change: it is the size of bytes with that hash)
   const shas = [...new Set(files.map((f: { sha256: string }) => f.sha256))];
@@ -716,6 +1399,7 @@ async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, c
     created: new Date(t * 1000).toISOString(),
     title,
     license: body?.license,
+    author,
     parent: col?.latest ?? undefined,
     files: listed,
   };
@@ -818,6 +1502,15 @@ async function getCollection(env: ShareEnv, cid: string, at: string | null): Pro
   return json({ id: cid, version: v.results[0].hash, latest: col.latest, files_origin: env.FILES_ORIGIN ?? null, manifest: JSON.parse(await new Response(o.body).text()) });
 }
 
+/** one of the account's collections, its versions oldest first (the n-th is version n); 404 for a collection that isn't theirs */
+async function versionsOf(env: ShareEnv, id: string, cid: string): Promise<Response> {
+  const db = env.SHARE_DB!;
+  const c = await db.prepare("SELECT owner, latest FROM collections WHERE id = ?1").bind(cid).first<{ owner: string; latest: string | null }>();
+  if (!c || c.owner !== id) return err(404, "no such collection");
+  const r = await db.prepare("SELECT hash, created, size, title FROM versions WHERE collection = ?1 ORDER BY created, rowid").bind(cid).all();
+  return json({ latest: c.latest, versions: r.results });
+}
+
 async function mine(env: ShareEnv, id: string): Promise<Response> {
   const r = await env.SHARE_DB!.prepare("SELECT id, title, created, updated, latest FROM collections WHERE owner = ?1 ORDER BY updated DESC").bind(id).all();
   return json({ collections: r.results });
@@ -865,6 +1558,8 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
   const h = await accountHash(account);
   await db.batch([
     db.prepare("INSERT INTO accounts (account_id, created, deleting) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET deleting = ?2, email = NULL, name = NULL, last_active = NULL").bind(account, t),
+    // (with WorkOS sign-in: the account's WorkOS sessions queued for revoking, in the batch that drops them)
+    ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'deleted', ?2, ?2 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, t)] : []),
     db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
     // (the sessions' admin grants with them: admin-visibility-plan r1h §1.8)
     db.prepare("DELETE FROM admin_grants WHERE account_id = ?1").bind(account),
@@ -873,6 +1568,9 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
   // (the account's remotes, web/remote: their enrolled keys, before the purge advances, so a failure here leaves it
   // running, retried when its lease ends; skipped where 0009 isn't applied yet)
   await purgeRemotes(env, account);
+  // (the account's log mirror, web/cloud/mirror: its keys and index now, its objects by its own alarm; a failure here
+  // leaves the purge running, retried when its lease ends)
+  await purgeMirror(env, account);
   const counts = await db.prepare(`SELECT (SELECT COUNT(*) FROM collections WHERE owner = ?1) AS c, (SELECT COALESCE(SUM(size), 0) FROM holdings WHERE account_id = ?1) + (SELECT COALESCE(SUM(manifest_bytes), 0) FROM versions WHERE owner = ?1) AS b`).bind(account).first<{ c: number; b: number }>();
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO r2_deletes (key, prefix, account_id, purge, created) VALUES (?1, 1, ?2, ?3, ?4)").bind(await prefixOf(account), account, rid, t),
@@ -926,6 +1624,8 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
       const left = await bucket.list({ prefix: r.key, limit: 1 });
       const uploading = r.account_id ? await db.prepare("SELECT 1 AS x FROM reservations WHERE account_id = ?1 AND expires > ?2 LIMIT 1").bind(r.account_id, now()).first() : null;
       if (left.objects.length || uploading) continue; // (again next time)
+      // (the log mirror's objects gone too, before its claim goes in the batch below)
+      if (!(await mirrorGone(env, r.account_id!))) continue;
       // done: every purge of this account (they coalesce) is.  An account deleted
       // in CoCalc (it has a tombstone, whichever purge got here first) is gone;
       // one that only deleted its shared data can share again.  (Which one is
@@ -940,6 +1640,8 @@ export async function drain(env: ShareEnv, budget = 50): Promise<void> {
         db.prepare("DELETE FROM accounts WHERE account_id = ?1 AND EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1 AND NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?2)").bind(r.account_id, h),
         db.prepare("DELETE FROM limits_cache WHERE account_id = ?1").bind(r.account_id),
+        // (other holders' claims on the budget, last: each holder's own data went before this batch)
+        ...((await budgetClaims(env)) ? [db.prepare("DELETE FROM budget_claims WHERE account_id = ?1").bind(r.account_id)] : []),
         db.prepare("UPDATE purges SET status = 'done', finished = ?2, account_id = NULL, lease = NULL WHERE account_hash = ?1 AND status <> 'done' AND kind <> 'collection'").bind(h, now()),
       ]);
     } catch {
@@ -1047,9 +1749,38 @@ export async function scheduled(env: ShareEnv): Promise<void> {
   ]);
   await drain(env, 500);
   await reconcile(env);
-  await db.prepare("DELETE FROM sessions WHERE expires < ?1").bind(t).run();
-  // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4)
-  await db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY).run();
+  if (workosMode(env)) {
+    // (a WorkOS session isn't removed when its hour passes: it may be refreshed at its next use.  It goes at its
+    // absolute end, its revocation queued in the same batch, so it holds its slot until then; a pending exchange that
+    // never finished becomes an outbox row whose sid is unknown, never a freed slot)
+    await db.prepare("DELETE FROM sessions WHERE expires < ?1 AND kind != 'workos'").bind(t).run();
+    const past = "SELECT rowid FROM sessions WHERE kind = 'workos' AND abs_expires <= ?1 ORDER BY rowid LIMIT 500";
+    const stale = "SELECT id FROM pending_exchanges WHERE expires < ?1 ORDER BY id LIMIT 500";
+    for (let i = 0; i < 20; i++) {
+      const rs = (await db.batch([
+        db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'expired', ?1, ?1 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${past})`).bind(t),
+        db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${past}))`).bind(t),
+        db.prepare(`DELETE FROM sessions WHERE rowid IN (${past})`).bind(t),
+        db.prepare(`INSERT INTO revoke_outbox (sid, account_id, sid_unknown, reason, created, next_at, exchange_id) SELECT NULL, NULL, 1, 'exchange-stale', ?1, ?1, id FROM pending_exchanges WHERE id IN (${stale})`).bind(t),
+        db.prepare(`DELETE FROM pending_exchanges WHERE id IN (${stale})`).bind(t),
+      ])) as D1Result<unknown>[];
+      if (Number(rs[2].meta?.changes ?? 0) < 500 && Number(rs[4].meta?.changes ?? 0) < 500) break;
+    }
+    await drainRevokes(env, 100, 20_000);
+  } else {
+    await db.prepare("DELETE FROM sessions WHERE expires < ?1").bind(t).run();
+  }
+  // sign-in states that can no longer be accepted (STATE_SKEW_S past their exp), in pages, until none is left
+  for (let i = 0; i < 50; i++) {
+    const r = await db.prepare(STATES_EXPIRED).bind(t - STATE_SKEW_S, 1000).run().catch(() => null);
+    if (!r || Number(r.meta?.changes ?? 0) < 1000) break;
+  }
+  // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4): a view's targets with it, in
+  // one batch, the targets first (they reference the view)
+  await db.batch([
+    db.prepare("DELETE FROM admin_view_targets WHERE view_id IN (SELECT id FROM admin_views WHERE at < ?1)").bind(t - ADMIN_RECORD_DAYS * DAY),
+    db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY),
+  ]);
   // expired admin grants (r1h §1.8)
   await db.prepare("DELETE FROM admin_grants WHERE expires_at < ?1").bind(t).run();
   // records of finished deletions, after their time (HARD-SHARE-3, HARD-E55-2):
@@ -1091,43 +1822,96 @@ function sameSite(req: Request): boolean {
   return req.headers.get("origin") === new URL(req.url).origin;
 }
 
-/** The share API's response to req, or null if req is not for it. */
+/** What every share answer says to search engines: a share is reached by its link only, never through a search (its page,
+ * its API, its files; errors and redirects too).  Its link previews (og/twitter cards) are still fetched and shown. */
+export const NOINDEX = "noindex, nofollow";
+/** `r`, saying NOINDEX (a copy: a redirect's or a fetched response's own headers can't be changed). */
+export function noindex(r: Response): Response {
+  const headers = new Headers(r.headers);
+  headers.set("x-robots-tag", NOINDEX);
+  return new Response(r.body, { status: r.status, statusText: r.statusText, headers });
+}
+
+/** The share API (/auth/, /api/share/, /api/admin/), or null for any other path; every answer says NOINDEX. */
 export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | null> {
+  const r = await route(req, env, ctx);
+  return r && noindex(r);
+}
+
+async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | null> {
   const url = new URL(req.url);
   const p = url.pathname;
   if (!p.startsWith("/auth/") && !p.startsWith("/api/share/") && !p.startsWith("/api/admin/")) return null;
   if (!env.SHARE_DB || !env.SHARE_BUCKET) return err(404, "sharing is not enabled here");
   const m = req.method;
-  if (p === "/auth/login" && m === "GET") return login(req, env);
-  if (p === "/auth/callback" && m === "GET") return callback(req, env);
-  if (p === "/api/admin/purge" && m === "POST") return adminPurge(req, env, ctx);
-  let g = p.match(/^\/api\/admin\/purge\/([0-9a-f-]{8,64})$/i);
-  if (g && m === "GET") return adminPurgeStatus(req, env, g[1]);
+  let g: RegExpMatchArray | null;
+  if (localMode(env) || !knownProvider(env)) {
+    // (sign-in is a deployment's own, outside this code, or there is no valid mode: CoCalc's sign-in and its signed
+    // purge call are gone, and no other mode's is a fallback)
+    if (p === "/auth/login" || p === "/auth/callback" || p.startsWith("/api/admin/")) return err(404, "not found");
+  } else if (workosMode(env)) {
+    // (CoCalc is no authority here: its sign-in and its signed purge call are gone; never a fallback to them)
+    if (p === "/auth/login" && m === "GET") return workosLogin(req, env);
+    if (p === "/auth/callback" && m === "GET") return workosCallback(req, env, ctx);
+    if (p.startsWith("/api/admin/")) return err(404, "not found");
+  } else {
+    if (p === "/auth/login" && m === "GET") return login(req, env);
+    if (p === "/auth/callback" && m === "GET") return callback(req, env);
+    if (p === "/api/admin/purge" && m === "POST") return adminPurge(req, env, ctx);
+    g = p.match(/^\/api\/admin\/purge\/([0-9a-f-]{8,64})$/i);
+    if (g && m === "GET") return adminPurgeStatus(req, env, g[1]);
+  }
   g = p.match(/^\/api\/share\/c\/([a-z2-7]{12})$/);
   if (g && m === "GET") return getCollection(env, g[1], url.searchParams.get("at"));
   if (m !== "GET" && !sameSite(req)) return err(403, "cross-site request");
   if (p === "/auth/dev" && m === "POST") {
-    if (env.SHARE_DEV !== "1" || !env.DEV_AUTH_TOKEN) return err(404, "not found");
+    if (!devGates(env)) return err(404, "not found");
     const b = (await req.json().catch(() => null)) as { token?: string; account_id?: string; ttl?: unknown } | null;
     if (!b || typeof b.token !== "string" || !same(b.token, env.DEV_AUTH_TOKEN) || typeof b.account_id !== "string" || !/^[0-9a-f-]{36}$/.test(b.account_id)) return err(403, "no");
     // (a short session if asked, whole seconds DEV_TTL_MIN to DEV_TTL_MAX: the sync fuzz harness's scratch sessions,
     // which end by themselves even if nothing revokes them, plan-fuzz-F3b A1; none asked: SESSION_DAYS, as before)
     if (b.ttl !== undefined && !(Number.isSafeInteger(b.ttl) && (b.ttl as number) >= DEV_TTL_MIN && (b.ttl as number) <= DEV_TTL_MAX)) return err(400, `ttl: whole seconds, ${DEV_TTL_MIN} to ${DEV_TTL_MAX}`);
-    const s = await startSession(env, { account_id: b.account_id, email: "dev@example.com", name: "Dev" }, b.ttl === undefined ? undefined : (b.ttl as number));
+    const s = await startSession(env, { account_id: b.account_id, email: "dev@example.com", name: "Dev" }, b.ttl === undefined ? undefined : (b.ttl as number), { kind: "dev" });
     return s ? json({ ok: true, expires: s.expires }, 200, { "set-cookie": s.cookie }) : err(403, "this account can't sign in to share files");
   }
   // (a sign-out isn't activity: it doesn't count toward last_active)
-  const who = await account(req, env, p === "/auth/logout" ? undefined : ctx);
-  const id = who?.id;
   if (p === "/auth/logout" && m === "POST") {
+    // (a sign-out is decided locally, never by asking WorkOS first, and isn't activity: no last_active)
     const t = cookies(req).get(SESSION);
     // (and the session's admin grant, if any: admin-visibility-plan r1h §1.8)
-    if (t) { const h = await sha256Hex(t); await env.SHARE_DB.batch([env.SHARE_DB.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(h), env.SHARE_DB.prepare("DELETE FROM admin_grants WHERE session = ?1").bind(h)]); }
+    if (t) {
+      const h = await sha256Hex(t);
+      const db = env.SHARE_DB;
+      // (a WorkOS session: deleted here, its revocation queued in the same batch; WorkOS is then asked, and a failure
+      // stays queued: the answer is never claimed as done)
+      await db.batch([
+        ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'logout', ?2, ?2 FROM sessions WHERE token_hash = ?1 AND provider_sid IS NOT NULL").bind(h, now())] : []),
+        db.prepare("DELETE FROM admin_grants WHERE session = ?1").bind(h),
+        db.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(h),
+      ]);
+      if (workosMode(env)) ctx.waitUntil(drainRevokes(env, 5, 6000));
+    }
     return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
   }
+  if (p === "/auth/logout-everywhere" && m === "POST" && workosMode(env)) {
+    // (a revocation, decided locally like a sign-out: the session that asks is identified as it is stored, without
+    // asking WorkOS, so it works past the hour, past the grace and while WorkOS is down; same-origin was checked above)
+    const s = await sessionForSignOut(req, env);
+    if (!s) return err(401, "sign in first");
+    await endAllSessions(env.SHARE_DB, s.id, "everywhere");
+    ctx.waitUntil(drainRevokes(env, 25, 6000));
+    return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
+  }
+  const acct = await account(req, env, ctx);
+  if (acct === "unavailable") return err(503, "sign-in can't be checked right now; try again soon");
+  const who = acct;
+  const id = who?.id;
   if (!who || !id) return err(401, "sign in first");
   if (p === "/api/share/me" && m === "GET") {
-    const a = await env.SHARE_DB.prepare("SELECT email, name FROM accounts WHERE account_id = ?1").bind(id).first();
+    // (who you are, for the account menu: the account's own address where it has one (a DEV test session's), else the
+    //  newest verified address of one of its identities: WorkOS's own answer, stored at sign-in and each refresh, never
+    //  anything a page sent; none, and the menu says only "Your account")
+    const a = await env.SHARE_DB.prepare("SELECT name, COALESCE(email, (SELECT i.email FROM identities i WHERE i.account_id = accounts.account_id AND i.email IS NOT NULL ORDER BY i.email_at DESC LIMIT 1)) AS email FROM accounts WHERE account_id = ?1").bind(id).first();
     return json({ account_id: id, ...a, ...(await breakdown(env, id)), limits: await limits(env, who) });
   }
   if (p === "/api/share/mine" && m === "GET") return mine(env, id);
@@ -1147,6 +1931,7 @@ export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promis
   if (g && m === "PUT") return putBlob(req, env, who, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})\/versions$/);
   if (g && m === "POST") return commit(req, env, who, g[1]);
+  if (g && m === "GET") return versionsOf(env, id, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})$/);
   if (g && m === "DELETE") {
     const c = await env.SHARE_DB.prepare("SELECT owner FROM collections WHERE id = ?1").bind(g[1]).first<{ owner: string }>();

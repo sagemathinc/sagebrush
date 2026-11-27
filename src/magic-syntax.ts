@@ -41,6 +41,76 @@ const CODE_MAGICS = new Set(["time", "timeit"]);
 export const MAGIC_PRE = "import sys as _s\n_a = _s.modules.get('_pyjs_magic')\nif _a is not None: _a.pre_run_cell()\n";
 // (after code that imported sys as _s)
 export const MAGIC_POST = "_a = _s.modules.get('_pyjs_magic')\nif _a is not None: _a.post_run_cell()\n";
+// IPython's output history, for a notebook and the Jupyter kernel (never a script or the REPL, where CPython's
+// builtins._ stays): _, __ and ___, the last three values shown ('' at first), and with an execution count, _N
+// and Out[N] (Out, also _oh).  As IPython's displayhook: None and Out itself are not recorded, and once the user
+// assigns _, __ or ___ (or a builtin _ exists, as gettext.install makes) the namespace's three are left alone.
+// The displayhooks call builtins.__pyjs_record_output__(value[, count]).
+// A reactive notebook's run (src/notebook-session.ts) also calls begin(above) and end(key): each cell's last shown
+// value is kept by its key, and before a run _, __ and ___ are the values shown by the 1st, 2nd and 3rd nearest
+// cells above it that showed one (`above`: the keys of the cells above, nearest first), whatever ran in between.
+export const outputHistory = (counted: boolean) =>
+  [
+    "import builtins as _b, __main__ as _m",
+    // (IPython's DisplayHook output cache, get_ipython().displayhook: cache_size 1000 and cull_fraction 0.2 as
+    // IPython 9's; cache_size 0 turns it off; full, the oldest fifth of Out and their _N go, with IPython's warning)
+    "class _sb_OutputCache:",
+    "    cache_size = 1000",
+    "    cull_fraction = 0.2",
+    "    def __init__(self, ns, counted):",
+    "        self.ns, self.counted, self.shown = ns, counted, ['', '', '']",
+    "        self.by_cell, self.run_shown = {}, None",
+    "        ns['_'] = ns['__'] = ns['___'] = ''",
+    "        if counted:",
+    "            ns['Out'] = ns['_oh'] = {}",
+    "    def __call__(self, value, count=None):",
+    "        ns, shown = self.ns, self.shown",
+    "        if value is None or (self.counted and value is ns.get('_oh')):",
+    "            return",
+    "        self.run_shown = [value]",
+    "        if not self.cache_size:",
+    "            return",
+    "        if count is not None and len(ns.get('_oh', ())) >= self.cache_size:",
+    "            self.cull_cache()",
+    "        mine = all(ns.get(u, s) is s for u, s in zip(('_', '__', '___'), shown))",
+    "        shown[2], shown[1], shown[0] = shown[1], shown[0], value",
+    "        if mine and '_' not in __import__('builtins').__dict__:",
+    "            ns['_'], ns['__'], ns['___'] = shown",
+    "        if count is not None:",
+    "            ns['_%d' % count] = value",
+    "            ns.setdefault('_oh', {})[count] = value",
+    "    def begin(self, above):",
+    "        self.run_shown = None",
+    "        if above is None or not self.cache_size or '_' in __import__('builtins').__dict__:",
+    "            return",
+    "        ns, by = self.ns, self.by_cell",
+    "        if not all(ns.get(u, s) is s for u, s in zip(('_', '__', '___'), self.shown)):",
+    "            return",
+    "        vals = [by[k] for k in above if k in by][:3]",
+    "        self.shown[:] = vals + [''] * (3 - len(vals))",
+    "        ns['_'], ns['__'], ns['___'] = self.shown",
+    "    def end(self, key):",
+    "        r, self.run_shown = self.run_shown, None",
+    "        if r is None:",
+    "            self.by_cell.pop(key, None)",
+    "            return False",
+    "        self.by_cell[key] = r[0]",
+    "        return True",
+    "    def cull_cache(self):",
+    "        oh = self.ns.get('_oh', {})",
+    "        sz = len(oh)",
+    "        cull_count = max(int(sz * self.cull_fraction), 2)",
+    "        __import__('warnings').warn('Output cache limit (currently {sz} entries) hit.\\nFlushing oldest {cull_count} entries.'.format(sz=sz, cull_count=cull_count))",
+    "        for i, n in enumerate(sorted(oh)):",
+    "            if i >= cull_count:",
+    "                break",
+    "            self.ns.pop('_%i' % n, None)",
+    "            oh.pop(n, None)",
+    `_b.__pyjs_record_output__ = _sb_OutputCache(_m.__dict__, ${counted ? "True" : "False"})`,
+    "del _b, _m, _sb_OutputCache",
+    "",
+  ].join("\n");
+
 export const GET_IPYTHON = "import builtins as _b\ndef get_ipython():\n    from _pyjs_magic import get_ipython as _g\n    return _g()\n_b.get_ipython = get_ipython\ndel _b, get_ipython\n";
 
 // Python string literals as JSON gives them, which Python reads the same
@@ -418,4 +488,28 @@ export function classCellReport(src: string): Record<string, boolean> | null {
   };
   visit(tree.body);
   return out;
+}
+
+// CPython's site gives every interactive session exit() and quit(): their repr says how to leave, a call raises
+// SystemExit with its code.  A prompt (the page's Console, the command line's and the Terminal's) has them, as builtins,
+// unless already there.
+export const QUITTERS = `import builtins as _b
+class Quitter:
+    def __init__(self, name, eof):
+        self.name = name
+        self.eof = eof
+    def __repr__(self):
+        return 'Use %s() or %s to exit' % (self.name, self.eof)
+    def __call__(self, code=None):
+        raise SystemExit(code)
+for _n in ('exit', 'quit'):
+    if not hasattr(_b, _n):
+        setattr(_b, _n, Quitter(_n, 'Ctrl-D (i.e. EOF)'))
+del _n
+`;
+
+/** MATLAB's exit and quit typed at a prompt (a status and a comment may follow): the status, else null. */
+export function matlabQuit(src: string): number | null {
+  const q = /^\s*(?:exit|quit)\s*(?:\(\s*(\d*)\s*\))?\s*;?\s*(?:%.*)?$/.exec(src);
+  return q ? Number(q[1] || 0) : null;
 }

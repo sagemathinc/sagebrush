@@ -29,7 +29,10 @@ export function pageSession(p: PageContext) {
       if (!p.ttEl.hidden) p.ttRefresh(true);
       return;
     }
-    p.historyQueue = [p.nb.snapshot()]; // the notebook as it opened
+    // (the notebook as it opened: the history caught up to the store's document, from the history's own head, the one
+    // version made from the head (this browser's local history, which no other device writes); every later one from
+    // the page's base (index.html's "change"))
+    p.historyQueue = [{ doc: p.nb.snapshot(), base: "head" }];
     const hdb = await p.historyDbReady;
     if (!hdb) {
       p.ttUnavailable = "TimeTravel needs this browser's storage, which is not available here (a private window of some browsers?).";
@@ -43,33 +46,42 @@ export function pageSession(p: PageContext) {
     await h.init();
     if (p.current.id !== id) return h.close(); // another notebook opened meanwhile
     p.nbHistory = h;
-    for (const doc of p.historyQueue.splice(0)) h.record(doc); // (nothing for one that is the last version)
+    // (nothing for one that is the last version; one with no base is not recorded: said, never guessed)
+    for (const { doc, base } of p.historyQueue.splice(0)) {
+      if (base) h.record(doc, base === "head" ? h.docOfHead() : base);
+      else console.warn("history: a change with no base, not recorded");
+    }
     p.kernels.get(id)?.journal?.flushPending(id);
     h.on(() => { if (!p.ttEl.hidden) p.ttRefresh(false); });
     if (!p.ttEl.hidden) p.ttRefresh(true); // opened while the history was loading
   }
-  // (a read-only tab that became the writer: reopened as it, said, the reader's place kept: the scroll, and the cell
-  // that had the focus (board's 2))
+  // (a read-only tab that became the writer: reopened as it, quietly (focus takeover: the tab in use writes), the
+  // reader's place kept: the scroll, the cell that had the focus and where in it (board's 2); then what was typed
+  // meanwhile typed again there (web/page/handover.ts))
   async function takeOver(store: any, id: string) {
     if (p.current.id !== id || p.nb.store !== store) return;
-    const at = p.anchorOf(p.nb), focused = (document.activeElement?.closest?.("#cells .cell") as any)?.cell?.id ?? null;
+    const ta = document.activeElement as HTMLTextAreaElement | null;
+    const at = p.anchorOf(p.nb), focused = (ta?.closest?.("#cells .cell") as any)?.cell?.id ?? null;
+    const sel = focused && ta?.tagName === "TEXTAREA" ? [ta.selectionStart, ta.selectionEnd] : null;
     try { await p.open(store, id); } catch (e) {
       // (it couldn't be reopened as the writer here: the lock let go at once, so another tab (or this one, reloaded) can
       // take it, rather than held by a tab that never writes; and said (board's C))
       console.warn("notebook:", e);
       await store.release();
+      // (and the input kept for this takeover, which can't be applied now: said with it, never dropped without a word)
+      const lost = p.handover?.failed?.() ?? 0;
       p.writerBar.hidden = false;
-      p.writerBar.textContent = p.journalPage.TAKEOVER_FAILED;
+      p.writerBar.textContent = p.journalPage.TAKEOVER_FAILED + (lost && p.inputNotApplied ? " " + p.inputNotApplied(lost) : "");
       p.writerBarHeight();
       return;
     }
     p.restoreAnchor(p.nb, at);
-    if (focused) ([...document.querySelectorAll("#cells .cell")].find((el: any) => el.cell?.id === focused) as any)?.cell?.ta?.focus({ preventScroll: true });
-    // (said in the bar itself for a few seconds, where the reason was (the status line is also the interpreter's))
-    p.writerBar.hidden = false;
-    p.writerBar.textContent = p.journalPage.TAKEOVER;
-    p.writerBarHeight();
-    p.writerBarTimer = setTimeout(() => { if (!p.nb.store?.viewOnly) { p.writerBar.hidden = true; p.writerBar.textContent = ""; p.writerBarHeight(); } }, 6000);
+    if (focused) {
+      const back = ([...document.querySelectorAll("#cells .cell")].find((el: any) => el.cell?.id === focused) as any)?.cell?.ta as HTMLTextAreaElement | undefined;
+      back?.focus({ preventScroll: true });
+      if (back && sel) try { back.setSelectionRange(sel[0], sel[1]); } catch {}
+    }
+    p.handover?.taken(store);
   }
   // (DEV's switch, after the journal's activation: the notebook shown, if one was opened before it, opened again through
   // the journal, its synced history started (DOC_SYNC is on by then).  Whether it is: a failure lets go of the new store

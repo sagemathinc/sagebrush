@@ -23,11 +23,11 @@ import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_B
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
 import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
-import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
+import { checkResult, checkText, lineOf, type CheckResult, type ImageReport } from "../web/latex/check";
 import { applyStep } from "../web/latex/overlay";
 import { splitChunk, tooLargeProblem } from "../web/latex/split";
 
-setKatex(katex.renderToString);
+setKatex(katex.renderToString, (katex as any).__renderToHTMLTree);
 // (beamer's code: in the browser a chunk the worker fetches when a document needs it; here, always)
 installBeamer(beamerCode);
 installPythontex(pythontexCode);
@@ -38,6 +38,10 @@ const TEX_MAX = 4 * 2 ** 20;
 const PAGES_MAX = 60;
 /** The most PNGs one render writes (--steps: every step of every frame). */
 const SHOTS_MOST = 400;
+/** The PDF's paper for a document that isn't beamer's: Letter, its width and margins in inches. */
+const LETTER_W = 8.5, LETTER_MARGIN = 0.4;
+/** The most displays wider than the text that one render reports. */
+const OVERFULL_MOST = 50;
 /** A beamer slide's width in the HTML and the PNGs, in CSS pixels (its height follows the aspect ratio). */
 const SLIDE_W = 1024;
 
@@ -48,6 +52,9 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       session here, and keep the results beside it in FILE.tex.results.json: check and render show them
       (a result counts while its item and every item before it are unchanged). The code runs in the file's
       folder, so it can read and write files there. An item that fails stops the rest. Exits 1 if one failed.
+      What an item prints (print() in a sageblock or sagesilent) isn't drawn in the document, as in SageTeX
+      (\\sage{} or \\sagestr{} puts a value there); run reports it: each item's output in --json, its last
+      lines here.
       PythonTeX's \\py{}, pycode and pyblock run too, as plain Python, in a session of their own.
 
   sagebrush latex check FILE.tex [--json]
@@ -55,13 +62,18 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       environments, math KaTeX can't typeset, missing images, code not run, expansion stopped. Exits 1 if
       there is an error (a warning alone exits 0).
 
-  sagebrush latex render FILE.tex [-o OUT.html] [--png DIR [--steps]] [--pdf OUT.pdf] [--json]
+  sagebrush latex render FILE.tex [-o OUT.html] [--png DIR [--steps]] [--pdf OUT.pdf] [--timeout SECONDS] [--json]
       The preview as one self-contained HTML file (default: FILE.html beside FILE.tex). With --png DIR, one
       PNG per beamer frame (frame-01.png, ...) or per page of another document, and a report of each frame
       whose content overflows its slide. PNGs need Chrome, Chromium, Edge or Brave on this computer (or
       CHROME=/path/to/browser); nothing is installed. --steps: each frame at each of its overlay steps
       (\\pause, <2->, \\only, \\uncover), frame-02-1.png, frame-02-2.png, ..., as the editor's Present shows them.
       --pdf: the preview printed to a PDF by the same browser (a beamer document one page per frame).
+      --timeout: how long --png or --pdf waits for the browser to load the HTML (default 30 s, and 10 s more for
+      each MiB of it, at most 600 s).
+      In a document that isn't beamer's, --png or --pdf reports each display more than 1px wider than the
+      text (up to 50) as a warning (TeX's Overfull \\hbox), its line found from the start of its TeX where it
+      can be; printed, such a display runs on into the margin. (A beamer frame's overflow is its PNG's report.)
 
 Look at the PNGs after every change: they are what the reader sees.
 `;
@@ -72,12 +84,13 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   if (cmd === undefined || cmd === "-h" || cmd === "--help" || cmd === "help") { process.stdout.write(HELP); return cmd === undefined ? 2 : 0; }
   if (cmd !== "check" && cmd !== "render" && cmd !== "run") { process.stderr.write(`sagebrush latex: no command ${JSON.stringify(cmd)} (check, run or render)\n\n${HELP}`); return 2; }
   const args = argv.slice(1);
-  let file: string | null = null, out: string | null = null, png: string | null = null, pdf: string | null = null, json = false, timeout = 120, steps = false;
+  let file: string | null = null, out: string | null = null, png: string | null = null, pdf: string | null = null, json = false, timeout = 120, steps = false, loadTimeout: number | null = null;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--json") json = true;
     else if ((a === "-o" || a === "--out") && cmd === "render") { out = args[++i] ?? null; if (out === null) return usage(`${a} needs a file name`); }
     else if (a === "--timeout" && cmd === "run") { timeout = Number(args[++i]); if (!(timeout > 0 && timeout <= 3600)) return usage("--timeout needs a number of seconds, at most 3600"); }
+    else if (a === "--timeout" && cmd === "render") { loadTimeout = Number(args[++i]); if (!(loadTimeout > 0 && loadTimeout <= 3600)) return usage("--timeout needs a number of seconds, at most 3600"); }
     else if (a === "--steps" && cmd === "render") steps = true;
     else if (a === "--pdf" && cmd === "render") { pdf = args[++i] ?? null; if (pdf === null) return usage("--pdf needs a file name"); }
     else if (a === "--png" && cmd === "render") { png = args[++i] ?? null; if (png === null) return usage("--png needs a folder"); }
@@ -105,7 +118,17 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   const report: any = { html: htmlPath, check: result };
   let code = 0;
   if (png !== null || pdf !== null) {
-    try { const b = await screenshots(htmlPath, png, result, steps, pdf); if (png !== null) report.png = b; if (pdf !== null) report.pdf = b.pdf; }
+    try {
+      const { overfull, ...b } = await screenshots(htmlPath, png, result, steps, pdf, loadTimeout ?? loadWait(Buffer.byteLength(html)));
+      if (png !== null) report.png = b;
+      if (pdf !== null) report.pdf = b.pdf;
+      // (a display wider than the text, as TeX's "Overfull \hbox" warns of it: a warning in the check's problems, its
+      //  line where its TeX is found in the source)
+      for (const o of overfull) {
+        const at = texAt(text, o.tex);
+        result.problems.push({ severity: "warning", kind: "overfull", name: o.tex.slice(0, 80), line: at < 0 ? null : lineOf(text, at), message: `a display is ${o.px}px wider than the text (TeX's Overfull \\hbox): ${pdf !== null ? "in the PDF it runs on into the right margin, and past the paper's edge if it is wider than that" : "the PNG shows only its start"}; break it over lines (multline, split, align)` });
+      }
+    }
     catch (e: any) { report[png !== null ? "png_error" : "pdf_error"] = String(e?.message ?? e); code = 1; }
   }
   if (json) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
@@ -115,10 +138,24 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
     if (report.pdf) process.stdout.write(`wrote ${report.pdf.file} (${report.pdf.pages} page${report.pdf.pages === 1 ? "" : "s"})\n`);
     if (report.png_error) process.stderr.write(`sagebrush latex: no PNGs: ${report.png_error}\n`);
     if (report.pdf_error) process.stderr.write(`sagebrush latex: no PDF: ${report.pdf_error}\n`);
-    const n = result.problems.length;
+    // (a display wider than the text is found by drawing the page, so check can't list it: said here)
+    for (const p of result.problems) if (p.kind === "overfull") process.stdout.write(`warning${p.line ? ` (line ${p.line})` : ""}: ${p.message}: ${p.name}\n`);
+    const n = result.problems.filter((p) => p.kind !== "overfull").length;
     if (n) process.stdout.write(`${n} problem${n === 1 ? "" : "s"} (sagebrush latex check ${file} lists them)\n`);
   }
   return code;
+}
+
+/** Where a display's TeX, as KaTeX's annotation has it (spaced its own way: "\sup \left \{"), starts in the source:
+ * its first 24 characters that aren't spaces, found among the source's, or -1. */
+function texAt(text: string, tex: string): number {
+  const want = tex.replace(/\s+/g, "").slice(0, 24);
+  if (!want) return -1;
+  let squeezed = "";
+  const at: number[] = [];
+  for (let i = 0; i < text.length; i++) if (!/\s/.test(text[i])) { squeezed += text[i]; at.push(i); }
+  const k = squeezed.indexOf(want);
+  return k < 0 ? -1 : at[k];
 }
 
 function usage(why: string): number { process.stderr.write(`sagebrush latex: ${why}\n\n${HELP}`); return 2; }
@@ -143,7 +180,7 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   //  it by their real paths), until it asks for no new one; a .tex outside the folder reads none)
   const known = new Map<string, Known>();
   let inputBytes = 0;
-  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), version: known.size } }; };
+  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), jobname: ei.jobname, version: known.size } }; };
   let first: any;
   for (let round = 0; ; round++) {
     const { ei, opt } = inputsNow();
@@ -213,7 +250,7 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   // (results not used, a helper they imported having changed since: said, the items shown as not run)
   const stale = saved.stale === null ? [] : [{ kind: "stale", name: saved.stale, at: -1 }];
   const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems.concat(tooLarge, stale), frames: r.frames,
-    sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);
+    sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport, doc ?? undefined);
   return { result, html: pageHtml(basename(file), pieces.join("\n"), !!r.beamer) };
 }
 
@@ -325,6 +362,7 @@ with open(_sbtx_in) as _sbtx_f:
 _sbtx_g = dict(globals())
 # (PythonTeX's items: plain Python, not preparsed, in a namespace of their own, as PythonTeX's own session)
 _sbtx_pg = {}
+_sbtx_mg = {}
 _sbtx_out = []
 _sbtx_failed = False
 for _sbtx_it in _sbtx_items:
@@ -339,7 +377,7 @@ for _sbtx_it in _sbtx_items:
         _sbtx_py = _sbtx_m[:2] == "py"
         _sbtx_ev = "eval" if _sbtx_m in ("sage", "plot", "py") else "cell" if _sbtx_m == "block" and _sbtx_cs else "exec"
         _sbtx_s = _sbtx_it["code"].strip() if _sbtx_ev == "eval" else _sbtx_it["code"]
-        _sbtx_code = compile(_sbtx_s, "<pythontex>", _sbtx_ev) if _sbtx_py else _sbtx_cs(_sbtx_s, "<sagetex>", _sbtx_ev) if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
+        _sbtx_code = __pyjs_compile_magma__("print " + _sbtx_s.strip() + ";" if _sbtx_m == "magma" else _sbtx_s, "<magma>", "exec") if _sbtx_m[:5] == "magma" else compile(_sbtx_s, "<pythontex>", _sbtx_ev) if _sbtx_py else _sbtx_cs(_sbtx_s, "<sagetex>", _sbtx_ev) if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
         if _sbtx_m == "sage":
             _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
         elif _sbtx_m == "py":
@@ -349,6 +387,9 @@ for _sbtx_it in _sbtx_items:
             if not hasattr(_sbtx_v, "_repr_svg_"):
                 raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
             _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
+        elif _sbtx_m[:5] == "magma":
+            exec(_sbtx_code, _sbtx_mg)
+            _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()}
         else:
             _sbtx_lv = []
             if _sbtx_ev == "cell":
@@ -362,6 +403,12 @@ for _sbtx_it in _sbtx_items:
             _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_py else {"s": "ok"}
             if _sbtx_lv and hasattr(_sbtx_lv[-1], "_repr_svg_"):
                 _sbtx_r["svg"] = _sbtx_lv[-1]._repr_svg_()
+    except SystemExit as _sbtx_e:
+        # (Magma's ending, as magma's hook raises it: 0 (quit;, exit;) keeps going, else a failure whose message is what
+        #  Magma printed; any other item's SystemExit is an error, as before)
+        _sbtx_mok = _sbtx_m[:5] == "magma" and _sbtx_e.code in (0, None)
+        _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_mok else {"s": "error", "msg": _sbtx_buf.getvalue() if _sbtx_m[:5] == "magma" else traceback.format_exc()}
+        _sbtx_failed = _sbtx_failed or not _sbtx_mok
     except BaseException:
         _sbtx_r = {"s": "error", "msg": traceback.format_exc()}
         _sbtx_failed = True
@@ -451,7 +498,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
     if (!g) { states.push({ key, s: "error", msg: done.timedOut ? `not finished: the run stopped at the ${timeout} s timeout` : "not run: the session ended before it (" + (sessionError(done.err) || "exit " + done.code) + ")" }); failed = true; continue; }
     if (g.s === "error") { states.push({ key, s: "error", msg: msgOf(g) }); failed = true; continue; }
     if (g.s === "blocked") { states.push({ key, s: "blocked", msg: BLOCKED }); failed = true; continue; }
-    if (it.mode === "sage" || /^py/.test(it.mode)) {
+    if (it.mode === "sage" || /^(py|magma)/.test(it.mode)) {
       const l = String(g.latex ?? "");
       if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; }
       states.push({ key, s: "ok", latex: l });
@@ -464,12 +511,17 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   }
   const rp = resultsPath(file);
   writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: states, ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n");
-  const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}) }));
+  // (what an item printed (the last MSG_MAX characters, the session script's own record of it): reported for the agent,
+  //  never drawn, as in SageTeX, where a sageblock's print shows nowhere; a PythonTeX or Magma item's printed output is
+  //  its result already, so not again)
+  const printed = (k: number) => { const o = got[k]?.out; return typeof o === "string" && o && !/^(py|magma)/.test(String(items[k].mode)) ? o : null; };
+  const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}), ...(printed(k) !== null ? { output: printed(k) } : {}) }));
   const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
   if (!json) {
     // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
-    const what = items.some((it) => /^py/.test(it.mode)) ? "code item" : "SageTeX item";
+    const what = items.some((it) => /^(py|magma)/.test(it.mode)) ? "code item" : "SageTeX item";
     process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} ${what}${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
+    for (const l of lines) if (l.output) process.stdout.write(`${file}:${l.line ?? "-"}: ${what} ${l.n} (${l.mode}) printed (not drawn in the document):\n${l.output.trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n")}\n`);
     for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: ${what} ${l.n} (${l.mode})${l.state === "error" ? " failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : ": " + BLOCKED}\n`);
   }
   return report({ file, results: rp, ms, items: lines }, bad ? 1 : 0);
@@ -502,6 +554,7 @@ body { margin: 0; background: #eef0f2; }
 .sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
 @media print {
   body { background: #fff; }
+  .sb-standalone .dmath { overflow: visible; }
   .sb-standalone .page.beamer { padding: 0; }
   .sb-standalone .page.beamer > .slide { margin: 0; border: none; box-shadow: none; break-after: page; break-inside: avoid; }
   .sb-standalone .page:not(.beamer) { box-shadow: none; margin: 0 auto; }
@@ -564,10 +617,10 @@ class Cdp {
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
-  once(method: string, ms: number): Promise<void> {
-    return new Promise((ok, no) => {
-      const t = setTimeout(() => no(new Error(`the browser sent no ${method} in ${ms / 1000} s`)), ms);
-      const f = (m: any) => { if (m.method === method) { clearTimeout(t); this.events = this.events.filter((g) => g !== f); ok(); } };
+  /** The next `method` event (its deadline the caller's). */
+  once(method: string): Promise<void> {
+    return new Promise((ok) => {
+      const f = (m: any) => { if (m.method === method) { this.events = this.events.filter((g) => g !== f); ok(); } };
       this.events.push(f);
     });
   }
@@ -580,7 +633,13 @@ class Cdp {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function screenshots(htmlPath: string, dir: string | null, check: CheckResult, steps = false, pdf: string | null = null) {
+/** How long --png or --pdf waits for the browser to load the HTML, in seconds: LOAD_WAIT_MIN, and LOAD_WAIT_PER_MIB more
+ * for each MiB of it (a long article's 40 MB, each formula as KaTeX's HTML and MathML, took 195 s to load on a
+ * computer busy far past its cores), at most LOAD_WAIT_MAX; render's --timeout sets it instead. */
+export const LOAD_WAIT_MIN = 30, LOAD_WAIT_PER_MIB = 10, LOAD_WAIT_MAX = 600;
+export const loadWait = (bytes: number): number => Math.min(LOAD_WAIT_MAX, LOAD_WAIT_MIN + Math.ceil(bytes / 2 ** 20) * LOAD_WAIT_PER_MIB);
+
+async function screenshots(htmlPath: string, dir: string | null, check: CheckResult, steps = false, pdf: string | null = null, wait = LOAD_WAIT_MIN) {
   const browser = findBrowser();
   if (!browser) throw new Error("no Chrome, Chromium, Edge or Brave found (set CHROME=/path/to/it); the HTML is written: open it in a browser");
   if (typeof (globalThis as any).WebSocket !== "function") throw new Error(`this JavaScript runtime has no WebSocket (Node 22 or newer has it)`);
@@ -607,10 +666,35 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
     const beamer = check.class === "beamer";
     const width = beamer ? SLIDE_W + 32 : 900;
     await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
-    const loaded = cdp.once("Page.loadEventFired", 30000);
-    await cdp.send("Page.navigate", { url: pathToFileURL(resolve(htmlPath)).href });
-    await loaded;
+    // (the navigation and its load awaited together under the one deadline, from the start: a navigate the browser
+    //  answers late or never ends there too, and the finally below closes the browser. A load that doesn't end in time
+    //  is said with the HTML's size and what to do, the HTML itself kept)
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((ok) => { timer = setTimeout(() => ok("late"), wait * 1000); });
+    const loading = Promise.all([cdp.once("Page.loadEventFired"), cdp.send("Page.navigate", { url: pathToFileURL(resolve(htmlPath)).href })]).then(() => "loaded" as const);
+    let how: "loaded" | "late";
+    try { how = await Promise.race([loading, late]); } finally { clearTimeout(timer); }
+    if (how === "late") {
+      const mb = (statSync(htmlPath).size / 2 ** 20).toFixed(1);
+      throw new Error(`the browser didn't finish loading the HTML (${mb} MiB) in ${wait} s; a long document loads slowly on a busy computer: try again with a longer --timeout (at most 3600 s), or open ${htmlPath} in a browser`);
+    }
     await cdp.eval("document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => null)))).then(() => 1)");
+    // (a display wider than the text: on paper it runs on into the margin (STANDALONE_CSS's print rules), as TeX's
+    //  overfull box does, rather than being cut off at its box's edge, and it is reported, with its TeX; measured as
+    //  printed, at the PDF's text width, when there is a PDF, else as the PNGs show it. A beamer frame's own overflow is
+    //  its PNG's overflow_px)
+    let overfull: { px: number; tex: string }[] = [];
+    if (!beamer) {
+      if (pdf !== null) {
+        await cdp.send("Emulation.setEmulatedMedia", { media: "print" });
+        await cdp.send("Emulation.setDeviceMetricsOverride", { width: Math.round((LETTER_W - 2 * LETTER_MARGIN) * 96), height: 800, deviceScaleFactor: 1, mobile: false });
+      }
+      overfull = await cdp.eval(`[...document.querySelectorAll(".dmath")].map((d) => ({ px: Math.ceil(d.scrollWidth - d.clientWidth), tex: (d.querySelector("annotation")?.textContent ?? d.textContent ?? "").trim().replace(/\\s+/g, " ") })).filter((x) => x.px > 1).slice(0, ${OVERFULL_MOST})`);
+      if (pdf !== null) {
+        await cdp.send("Emulation.setEmulatedMedia", { media: "" });
+        await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      }
+    }
     const boxes: { x: number; y: number; w: number; h: number; over: number }[] = await cdp.eval(beamer
       ? `[...document.querySelectorAll("section.slide")].map((s) => { const r = s.getBoundingClientRect(), b = s.querySelector(".slide-body");
           const over = b ? Math.max(0, Math.ceil(b.scrollHeight - b.clientHeight), Math.ceil(b.scrollWidth - b.clientWidth)) : 0;
@@ -622,7 +706,7 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
     //  Letter paper; the print rules are STANDALONE_CSS's)
     let pdfOut: { file: string; pages: number } | undefined;
     if (pdf !== null) {
-      const sz = beamer && boxes.length ? { paperWidth: boxes[0].w / 96, paperHeight: boxes[0].h / 96, marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 } : { paperWidth: 8.5, paperHeight: 11, marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 };
+      const sz = beamer && boxes.length ? { paperWidth: boxes[0].w / 96, paperHeight: boxes[0].h / 96, marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 } : { paperWidth: LETTER_W, paperHeight: 11, marginTop: LETTER_MARGIN, marginBottom: LETTER_MARGIN, marginLeft: LETTER_MARGIN, marginRight: LETTER_MARGIN };
       const r = await cdp.send("Page.printToPDF", { printBackground: true, ...sz });
       const bytes = Buffer.from(r.data, "base64");
       writeFileSync(pdf, bytes);
@@ -644,7 +728,7 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
         pages.push({ file: f, ...(fr ? { frame: fr.n, ...(steps ? { step: s } : {}), title: fr.title } : {}), ...(b.over ? { overflow_px: b.over } : {}) });
       }
     }
-    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages, ...(pdfOut ? { pdf: pdfOut } : {}) };
+    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages, ...(pdfOut ? { pdf: pdfOut } : {}), overfull };
   } finally {
     try { ws?.close(); } catch {}
     if (proc && proc.exitCode === null) { proc.kill(); await new Promise((r) => { proc!.once("exit", r); setTimeout(r, 3000); }); }

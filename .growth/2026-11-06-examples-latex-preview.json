@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "The Examples panel's LaTeX previews (William, Nov 6: blank on DEV and PROD). The CLI's `sagebrush notebook` serves the site's _headers and the panel chunk, so both grow it: two Cross-Origin-Resource-Policy rules in _headers (/katex/* and /alpha-banner.js, which an example's page loads from inside the panel's sandbox, an opaque origin, under the site's COEP) with their comment, and the panel framing a LaTeX example's rendered document (preview.html) instead of its page, with its comment. No new module, dependency or loading boundary.",
- "bytes": {
-  "cli/pyjs.cjs": 480
- }
-}

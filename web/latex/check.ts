@@ -2,7 +2,9 @@
 // (src/latex-cli.ts) and the LaTeX page's latex_check tool (agent-tools.ts) build the same report from the engine's
 // result (render.mjs: problems {kind, name, at}, frames {n, title, at}, the SageTeX items) and the images'.
 
-export interface Problem { severity: "error" | "warning"; kind: string; name: string; line: number | null; message: string }
+/** A problem; one found in an \input or \include file names it (`file`, relative to the main file's folder), its `line` is
+ * that file's, and `input_line` is the main file's line the reading came from. */
+export interface Problem { severity: "error" | "warning"; kind: string; name: string; line: number | null; message: string; file?: string; input_line?: number | null }
 export interface ImageReport { name: string; found: boolean; path?: string; why?: string }
 export interface CheckResult {
   file: string; ok: boolean; class: "beamer" | "other"; outcome: string;
@@ -14,7 +16,7 @@ export interface CheckResult {
 /** The engine's result, as render.mjs gives it (and the worker passes on). */
 export interface EngineCheck {
   outcome: string; beamer: boolean;
-  problems: { kind: string; name: string; at: number }[];
+  problems: { kind: string; name: string; at: number; file?: string; fline?: number }[];
   frames: { n: number; title: string; at: number; steps?: number }[];
   /** The code items in order: refused (err), and their state if they were run (s: ok, error, blocked; msg). */
   sage: { mode: string; err?: string | null; at?: number; s?: string; msg?: string }[];
@@ -40,6 +42,10 @@ const MESSAGES: Record<string, (name: string) => string> = {
   runaway: (n) => `\\${n}: the paragraph ended before its argument was complete (a missing "}"?)`,
   redefined: (n) => `\\newcommand: \\${n} is already defined (LaTeX would stop here; use \\renewcommand)`,
   toolarge: (n) => `${n}: the preview and Present show a placeholder instead (make it smaller, or split it)`,
+  toolong: (n) => `${n}: past the preview's 16 MiB, so the preview stops there (sagebrush latex render shows all of it)`,
+  // (Magma, a Sagebrush extension: a name the document defines itself turns ours off; each of ours used, said once)
+  own: (n) => (n === "magma" ? "This document defines its own \\magma, so Sagebrush's \\magma{} is off here." : `This document defines its own ${n} environment, so Sagebrush's ${n} is off here.`),
+  sbonly: (n) => (n === "magma" ? "Sagebrush only: real LaTeX reports \\magma as an undefined control sequence (no package defines it)." : `Sagebrush only: real LaTeX reports environment ${n} as undefined (no package defines it).`),
 };
 const ERRORS = new Set(["math", "runaway", "redefined", "image", "expansion", "input"]);
 
@@ -49,16 +55,37 @@ function lineFind(text: string, name: string): number | null {
   return i < 0 ? null : lineOf(text, i);
 }
 
-/** The report for `file` (its source `text`), from the engine's result and the images' resolution. */
-export function checkResult(file: string, text: string, r: EngineCheck, images: ImageReport[]): CheckResult {
+/** `key` (an \input file's path from the top folder, "/a/sec/x.tex") as named from the main file's folder (`docPath`'s),
+ * then as the main file is named (`file`, as given): "paper/main.tex" and "/paper/sec/x.tex" give "paper/sec/x.tex". */
+export function inputFileName(key: string, docPath: string, file: string): string {
+  const from = docPath.split("/").slice(1, -1), to = key.split("/").slice(1);
+  let k = 0; while (k < from.length && k < to.length - 1 && from[k] === to[k]) k++;
+  const rel = [...from.slice(k).map(() => ".."), ...to.slice(k)].join("/");
+  const dir = file.includes("/") ? file.slice(0, file.lastIndexOf("/") + 1) : "";
+  return dir + rel;
+}
+
+/** The report for `file` (its source `text`), from the engine's result and the images' resolution. `docPath`: the main
+ * file's path from the top folder, as the engine's inputs name files, for naming a problem's \input file. */
+export function checkResult(file: string, text: string, r: EngineCheck, images: ImageReport[], docPath?: string): CheckResult {
   const problems: Problem[] = [];
+  // (a problem found in an \input file: that file and its line, and the main file's line it was read from)
+  const inFile = (p: { at: number; file?: string; fline?: number }) => p.file && typeof p.fline === "number" && docPath
+    ? { line: p.fline, file: inputFileName(p.file, docPath, file), input_line: lineOf(text, p.at) } : null;
   if (r.outcome !== "ok") problems.push({ severity: "error", kind: "expansion", name: String(r.outcome), line: null, message: `expansion stopped (${r.outcome}): the preview shows the document only up to that point` });
   for (const p of r.problems) {
     const m = MESSAGES[p.kind];
     // (an \input or \include not read: where it was looked for, the renderer's reason)
-    if (p.kind === "input") { problems.push({ severity: "error", kind: "input", name: p.name, line: lineFind(text, p.name) ?? lineOf(text, p.at), message: `\\input{${p.name}}: ${(p as any).why || "not found"}` }); continue; }
-    problems.push({ severity: ERRORS.has(p.kind) ? "error" : "warning", kind: p.kind, name: p.name, line: lineOf(text, p.at), message: m ? m(p.name) : `${p.kind}: ${p.name}` });
+    const f = inFile(p);
+    if (p.kind === "input") { problems.push({ severity: "error", kind: "input", name: p.name, line: lineFind(text, p.name) ?? lineOf(text, p.at), message: `\\input{${p.name}}: ${(p as any).why || "not found"}`, ...(f ?? {}) }); continue; }
+    problems.push({ severity: ERRORS.has(p.kind) ? "error" : "warning", kind: p.kind, name: p.name, line: lineOf(text, p.at), message: m ? m(p.name) : `${p.kind}: ${p.name}`, ...(f ?? {}) });
   }
+  // (a Magma name the document took over, while another is still ours: the last such note says which still run Magma,
+  //  listing exactly those (H6b))
+  const owned = new Set(r.problems.filter((p) => p.kind === "own").map((p) => p.name));
+  const stillOn = [["magma", "\\magma{}"], ["magmablock", "magmablock"], ["magmasilent", "magmasilent"]].filter(([n]) => !owned.has(n)).map(([, w]) => w);
+  const lastOwn = problems.filter((x) => x.kind === "own").pop();
+  if (lastOwn && stillOn.length) lastOwn.message += ` ${stillOn.length > 1 ? stillOn.slice(0, -1).join(", ") + " and " + stillOn[stillOn.length - 1] : stillOn[0]} still run${stillOn.length === 1 ? "s" : ""} Magma.`;
   for (const im of images) if (!im.found) problems.push({ severity: "error", kind: "image", name: im.name, line: lineFind(text, im.name), message: `\\includegraphics{${im.name}}: ${im.why}` });
   // (the code items: one refused or failed is an error at its line; one after a failed one (BLOCKED, board's M4, as
   //  the editor and the CLI say it), a warning;
@@ -67,15 +94,18 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   const code = r.sage.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: lineOf(text, it.at ?? -1),
     state: it.err ? `refused: ${it.err}` : it.s === "ok" ? "ok" : it.s === "error" ? `error: ${last(it.msg)}` : it.s === "blocked" ? "blocked" : "not run" }));
   let notRun = 0;
-  // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
-  const what = code.some((c) => /^py/.test(c.mode)) ? "code item" : "SageTeX item";
+  // (with any PythonTeX or Magma item, "code item": board's rule, as the preview's banner)
+  const what = code.some((c) => /^(py|magma)/.test(c.mode)) ? "code item" : "SageTeX item";
   for (const c of code) {
     if (c.state.startsWith("refused") || c.state.startsWith("error")) problems.push({ severity: "error", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}) ${c.state.startsWith("refused") ? "can't be run" : "failed"}: ${c.state.replace(/^(refused|error): /, "")}` });
     else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}): ${BLOCKED}` });
     else if (c.state === "not run") notRun++;
   }
   if (notRun) problems.push({ severity: "warning", kind: "code", name: String(notRun), line: null, message: `${notRun} ${what}${notRun === 1 ? " is" : "s are"} not run yet: \`sagebrush latex run ${file}\` runs them and keeps their results beside it` });
-  problems.sort((a, b) => (a.line ?? 1e9) - (b.line ?? 1e9));
+  // (by the main file's line, an \input file's problems at the line that read it; on one line, in reading order, as the
+  //  engine gives them: the sort is stable)
+  const mainLine = (p: Problem) => (p.file ? p.input_line : p.line) ?? 1e9;
+  problems.sort((a, b) => mainLine(a) - mainLine(b));
   return {
     file, ok: !problems.some((p) => p.severity === "error"), class: r.beamer ? "beamer" : "other", outcome: String(r.outcome),
     frames: r.frames.map((f) => ({ n: f.n, title: f.title, line: lineOf(text, f.at), steps: f.steps ?? 1 })),
@@ -87,6 +117,6 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
 export function checkText(r: CheckResult): string {
   const lines: string[] = [];
   lines.push(`${r.file}: ${r.class === "beamer" ? `beamer, ${r.frames.length} frame${r.frames.length === 1 ? "" : "s"}` : "a document"}; ${r.problems.length ? `${r.problems.length} problem${r.problems.length === 1 ? "" : "s"}` : "no problems"}`);
-  for (const p of r.problems) lines.push(`${r.file}:${p.line ?? "-"}: ${p.severity}: ${p.message}`);
+  for (const p of r.problems) lines.push(`${p.file ?? r.file}:${p.line ?? "-"}: ${p.severity}: ${p.message}`);
   return lines.join("\n") + "\n";
 }

@@ -25,6 +25,7 @@ import sys
 import time
 import mpmath
 from mpmath import mp, mpf, mpc
+from tuples import digest
 
 PASSES = int(sys.argv[1]) if len(sys.argv) > 1 else 7
 
@@ -36,29 +37,6 @@ def fresh_mpmath():
         del sys.modules[name]
     import mpmath
     mp, mpf, mpc = mpmath.mp, mpmath.mpf, mpmath.mpc
-
-
-def canon(r, f64=False):
-    if isinstance(r, mpmath.matrix):
-        return "matrix(%d,%d:%s)" % (r.rows, r.cols, ",".join(canon(r[i, j]) for i in range(r.rows) for j in range(r.cols)))
-    if hasattr(r, "_mpf_"):
-        s, m, e, b = r._mpf_
-        return "mpf(%d,%x,%d,%d)" % (s, m, e, b)
-    if hasattr(r, "_mpc_"):
-        return "mpc(%s,%s)" % (canon(mp.make_mpf(r._mpc_[0])), canon(mp.make_mpf(r._mpc_[1])))
-    if isinstance(r, float):
-        return "f64(%.12g)" % r if f64 else "float(%s)" % r.hex()
-    if isinstance(r, complex):
-        return "complex(%s,%s)" % (canon(r.real, f64), canon(r.imag, f64))
-    if isinstance(r, int):
-        return "int(%x)" % r
-    if isinstance(r, (list, tuple)):
-        return "(%s)" % ",".join(canon(x, f64) for x in r)
-    raise TypeError("no canonical form for %r" % type(r))
-
-
-def digest(r, f64=False):
-    return hashlib.sha256(canon(r, f64).encode()).hexdigest()
 
 
 def at(dps, f):

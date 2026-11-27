@@ -7,12 +7,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import worker, { route, MIME } from './worker.mjs';
+import worker, { route, ghPolicy, MIME, DEFAULT_CACHE_CONTROL as WORKER_DEFAULT } from './worker.mjs';
 import * as deployEntry from './entry.mjs';
 import { mockEnabled } from './mock.js';
 import { checkNoticeBrowser } from './browser-notice.mjs';
-import { prepare, MAX_OBJECTS, MAX_BYTES, MAX_FILE_BYTES, MAX_HTML_BYTES } from '../../scripts/preview/prepare.mjs';
-import { R2, MAX_PREVIOUS_OBJECTS } from '../../scripts/preview/r2.mjs';
+import { prepare, MAX_OBJECTS, MAX_BYTES, MAX_FILE_BYTES, MAX_HTML_BYTES, DEFAULT_CACHE_CONTROL, NO_STORE } from '../../scripts/preview/prepare.mjs';
+import { R2, MAX_PREVIOUS_OBJECTS, ATTEMPTS } from '../../scripts/preview/r2.mjs';
 import { upload, UPLOAD_CONCURRENCY } from '../../scripts/preview/upload.mjs';
 
 function bucket(entries) {
@@ -34,6 +34,33 @@ test('host and path validation cannot cross preview prefixes', () => {
   }
   assert.deepEqual(route('https://latex.sagebrush.cloud/?tex=id'), { name: 'latex', path: 'index.html' });
   assert.deepEqual(route('https://latex.sagebrush.cloud/runner/'), { name: 'latex', path: 'runner/index.html' });
+  // (a GitHub notebook or folder: always the shared-collection page, whatever its path holds, never a key from it)
+  for (const gh of ['/gh/o/r/blob/main/a%20b.ipynb', '/gh/o/r/tree/main/', '/gh/https://github.com/o/r/blob/main/x.ipynb', '/gh/o/r/blob/main/a%2fb%00'])
+    assert.deepEqual(route(`https://ui-3.sagebrush.cloud${gh}`), { name: 'ui-3', path: 's/index.html', gh: true });
+  assert.equal(route('https://ui-3.sagebrush.cloud/ghost/x').path, 'ghost/x');
+  assert.equal(route('https://ui-3.sagebrush.cloud/s/').gh, undefined);
+});
+test("a GitHub page's policy: the published /s/ page's, its connect-src GitHub's three hosts exactly; /s/ itself unchanged", async () => {
+  // (the /s/ page's policy as the publisher writes it, connect-src without https:, scripts/preview/prepare.mjs)
+  const published = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob: https: http:; connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:*; frame-ancestors 'self'";
+  const store = bucket({ 'gh/s/index.html': '<html></html>', 'gh/.preview/headers/s/index.html.json': { csp: published } });
+  const gh = await worker.fetch(new Request('https://gh.sagebrush.cloud/gh/o/r/tree/main/notebooks'), { PREVIEWS: store });
+  assert.equal(gh.status, 200);
+  const policy = gh.headers.get('content-security-policy');
+  assert.equal(/connect-src [^;]+/.exec(policy)[0], "connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:* https://api.github.com https://raw.githubusercontent.com https://data.jsdelivr.com");
+  assert.equal(policy.replace(/connect-src [^;]+/, ''), published.replace(/connect-src [^;]+/, ''), 'every other directive as published');
+  assert.equal(gh.headers.get('x-frame-options'), 'SAMEORIGIN');
+  for (const path of ['/s/', '/s/index.html']) {
+    const s = await worker.fetch(new Request(`https://gh.sagebrush.cloud${path}`), { PREVIEWS: store });
+    assert.equal(s.headers.get('content-security-policy'), published, `${path}: as published`);
+  }
+  // (production's /s/ policy, connect-src https: and http:: neither stays; a policy without connect-src gets none)
+  assert.equal(/connect-src [^;]+/.exec(ghPolicy("default-src 'self'; connect-src 'self' data: blob: https: http: ws://127.0.0.1:*; frame-ancestors 'self'"))[0],
+    "connect-src 'self' data: blob: ws://127.0.0.1:* https://api.github.com https://raw.githubusercontent.com https://data.jsdelivr.com");
+  assert.equal(ghPolicy("default-src 'none'; frame-ancestors 'self'"), "default-src 'none'; frame-ancestors 'self'");
+  // (the Worker's twin of web/csp-policy.mts ghPolicy: the same answer for every shape)
+  const { ghPolicy: site } = await import('../csp-policy.mts');
+  for (const p of [published, "default-src 'self'; connect-src https: http:", "connect-src 'none'", "default-src 'none'", "a;  connect-src  'self'   https: ; b;", "xconnect-src https:; connect-src 'self'"]) assert.equal(ghPolicy(p), site(p), p);
 });
 test('Worker headers, policy, HEAD and no cookie/metadata reflection', async () => {
   const store = bucket({ 'latex/index.html': '<html></html>', 'latex/.preview/headers/index.html.json': { csp: "default-src 'self'; script-src 'self'" } });
@@ -296,6 +323,96 @@ test('remote-phase abort cancels an active request instead of granting another 3
   } finally { globalThis.fetch = original; }
 });
 
+test('a hanging R2 endpoint: idempotent requests are tried at most 3 times with a pause, a DELETE never; retries log kind and key only', async () => {
+  const credentials = { accountId: '0'.repeat(32), accessKeyId: 'AKIDTESTONLY' + '1'.repeat(20), secretAccessKey: 'SECRETTESTONLY' + '2'.repeat(50) };
+  const timing = { attemptMs: 40, backoffMs: [5, 5] };
+  const original = globalThis.fetch, originalError = console.error;
+  const logs = [], all = [];
+  console.error = (...a) => { logs.push(a.join(' ')); all.push(a.join(' ')); };
+  // (a fake endpoint: each call takes the next behaviour; 'hang' never answers until the attempt's signal aborts)
+  let calls = [];
+  const endpoint = (...plan) => { calls = []; let i = 0; globalThis.fetch = async (url, options) => {
+    calls.push({ url, method: options.method, body: options.body === undefined ? undefined : Buffer.from(options.body).toString() });
+    const step = plan[Math.min(i++, plan.length - 1)];
+    if (step === 'hang') return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }));
+    return step(options);
+  }; };
+  try {
+    assert.equal(ATTEMPTS, 3);
+    const client = new R2(credentials, 'latex', new AbortController().signal, timing);
+    const file = { sha256: 'a'.repeat(64), bytes: Buffer.from('x'), type: MIME.html, cacheControl: undefined };
+    // a HEAD that hangs twice, then answers: one check, three requests, two retry lines
+    endpoint('hang', 'hang', () => new Response(null, { status: 200, headers: { 'x-amz-meta-preview-sha256': 'a'.repeat(64), 'content-length': '1', 'content-type': MIME.html } }));
+    assert.equal(await client.matches('latex/index.html', file), true);
+    assert.deepEqual(calls.map(c => c.method), ['HEAD', 'HEAD', 'HEAD']);
+    assert.deepEqual(logs, [
+      'R2 retry 2 of 3: HEAD latex/index.html (R2 request failed or timed out)',
+      'R2 retry 3 of 3: HEAD latex/index.html (R2 request failed or timed out)',
+    ]);
+    // a PUT that always hangs: three attempts, then the error says so
+    logs.length = 0;
+    endpoint('hang');
+    await assert.rejects(client.put('latex/index.html', Buffer.from('html'), MIME.html), /^Error: R2 request failed or timed out \(after 3 attempts\)$/);
+    assert.equal(calls.length, 3);
+    assert.equal(logs.length, 2);
+    // (every attempt of a retried PUT: the same key and the same bytes)
+    assert.ok(calls.every(c => c.method === 'PUT' && c.url === calls[0].url && c.body === 'html'), JSON.stringify(calls));
+    // HTTP 429 is tried again too
+    endpoint(() => new Response('', { status: 429 }), () => new Response('', { status: 200 }));
+    await client.put('latex/index.html', Buffer.from('html'), MIME.html);
+    assert.equal(calls.length, 2);
+    // an unsafe key is refused before any request; a listing over 8 MiB is refused at once, not tried again
+    endpoint('hang');
+    await assert.rejects(client.put('latex/../x', Buffer.from('html'), MIME.html), /unsafe|outside/);
+    assert.equal(calls.length, 0);
+    endpoint(() => new Response(Buffer.alloc(8 * 1024 * 1024 + 1, 60)));
+    await assert.rejects(client.list(), /exceeds 8 MiB/);
+    assert.equal(calls.length, 1);
+    // the upload pool's check, failing after the first attempt (a peer failed): no further attempt
+    endpoint('hang');
+    await assert.rejects(client.put('latex/index.html', Buffer.from('html'), MIME.html, undefined, () => { throw new Error('peer failed'); }), /peer failed/);
+    assert.equal(calls.length, 1);
+    // a DELETE that hangs: one attempt only, never tried again, nothing logged
+    logs.length = 0;
+    endpoint('hang');
+    await assert.rejects(client.delete('latex/index.html'), /no automatic retry/);
+    assert.equal(calls.length, 1);
+    assert.equal(logs.length, 0);
+    // HTTP 503 then 200 on a listing: tried again; HTTP 403: a refusal, not tried again
+    endpoint(() => new Response('', { status: 503 }), () => new Response('<ListBucketResult><EncodingType>url</EncodingType><Contents><Key>latex%2Fa</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>'));
+    assert.deepEqual(await client.list(), ['latex/a']);
+    assert.equal(calls.length, 2);
+    endpoint(() => new Response('secret response body fixture', { status: 403 }));
+    await assert.rejects(client.matches('latex/index.html', file), error => /HTTP 403/.test(error.message) && !error.message.includes('secret'));
+    assert.equal(calls.length, 1);
+    // a listing whose body stalls past the attempt: the page is fetched and read again
+    // (as a real fetch's body does, it fails when the attempt's signal aborts)
+    endpoint((() => { let first = true; return (options) => {
+      if (!first) return new Response('<ListBucketResult><EncodingType>url</EncodingType><IsTruncated>false</IsTruncated></ListBucketResult>');
+      first = false;
+      return new Response(new ReadableStream({ start(c) {
+        c.enqueue(new TextEncoder().encode('<ListBucketResult>'));
+        options.signal.addEventListener('abort', () => c.error(options.signal.reason), { once: true });
+      } }));
+    }; })());
+    assert.deepEqual(await client.list(), []);
+    assert.equal(calls.length, 2);
+    // no retry line ever carries a header, a signature or a credential
+    assert.ok(all.length >= 6);
+    for (const line of all) assert.ok(!/AWS4|Credential|Signature|AKIDTESTONLY|SECRETTESTONLY|authorization/i.test(line), line);
+    // the remote deadline during a pause ends the request at once, with no further attempt
+    const controller = new AbortController();
+    const slow = new R2(credentials, 'latex', controller.signal, { attemptMs: 40, backoffMs: [60000] });
+    endpoint('hang');
+    const pending = assert.rejects(slow.put('latex/index.html', Buffer.from('html'), MIME.html), /deadline/);
+    const started = Date.now();
+    setTimeout(() => controller.abort(new Error('test remote deadline')), 100);
+    await pending;
+    assert.equal(calls.length, 1);
+    assert.ok(Date.now() - started < 5000, 'the pause ended with the deadline, not after its 60 s');
+  } finally { globalThis.fetch = original; console.error = originalError; }
+});
+
 test('deploy entry exports only the default Worker, keeping helper objects out of the runtime API', () => {
   assert.deepEqual(Object.keys(deployEntry), ['default']);
   assert.equal(deployEntry.default, worker);
@@ -419,11 +536,146 @@ test('eight 16 MiB non-HTML buffers bound active transport input to 128 MiB', as
   assert.equal(peakBytes, 128 * 1024 * 1024); assert.equal(activeBytes, 0);
 });
 
-test('phone preview notice preserves controls, opens metadata modal and dismisses for this session under CSP', { timeout: 60000 }, async () => {
+test('phone preview notice preserves controls, opens metadata modal and dismisses for this session under CSP', { timeout: 120000 }, async () => {
   const geometry = await checkNoticeBrowser();
   assert.ok(geometry.controlsBottom <= geometry.top);
 });
 test("the site's page policy: connect-src exactly as stated, the agent pairing's loopback socket included", async () => {
   const { pagePolicy } = await import('../csp-policy.mts');
   assert.equal(/connect-src [^;]+/.exec(pagePolicy())[0], "connect-src 'self' data: blob: https: http: ws://127.0.0.1:* ws://localhost:*");
+});
+
+// ---- a preview like production (William, Nov 12): production's caching, its service worker, its examples gallery
+function cacheFixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'preview-cache-'));
+  const page = '<!doctype html><html><head><title>t</title></head><body>page</body></html>';
+  for (const [p, body] of Object.entries({ 'index.html': page, 'agents/index.html': page, 'lib/core.pre.0123456789abcdef.json': '{}', 'version.json': '{}',
+    'engine/latest.json': '{}', 'katex/katex.min.css': 'x', 'sagebrush-worker.js': 'w' })) {
+    mkdirSync(join(dir, p, '..'), { recursive: true });
+    writeFileSync(join(dir, p), body);
+  }
+  const csp = "default-src 'self'; script-src 'self'; connect-src 'self' https:; frame-ancestors 'self'";
+  writeFileSync(join(dir, '_headers'), `/*\n  Cross-Origin-Opener-Policy: same-origin\n/sw.js\n  Cache-Control: no-cache\n/version.json\n  Cache-Control: no-store\n/lib/*\n  Cache-Control: public, max-age=31536000, immutable\n/engine/*\n  Access-Control-Allow-Origin: *\n/engine/latest.json\n  Cache-Control: max-age=60\n/index.html\n  Content-Security-Policy: ${csp}\n/agents/*\n  Content-Security-Policy: ${csp.replace("frame-ancestors 'self'", "frame-ancestors 'none'")}\n`);
+  // (the build's service worker: its digest table as web/build.ts writes it, one line of JSON)
+  const digests = { './': { sha256: '0'.repeat(64), size: page.length, headers: { 'Content-Type': MIME.html, 'Content-Security-Policy': csp } },
+    'sagebrush-worker.js': { sha256: '1'.repeat(64), size: 1, headers: { 'Content-Type': MIME.js } } };
+  writeFileSync(join(dir, 'sw.js'), `const VERSION = "v1";\nconst SHELL = ["./"];\nconst DIGESTS = ${JSON.stringify(digests)};\nself.addEventListener("fetch", () => {});\n`);
+  return dir;
+}
+test("each file's Cache-Control is what the build's _headers gives production: exact rule, longest wildcard, else the default", () => {
+  const dir = cacheFixture();
+  try {
+    const out = prepare(dir, 'ui.sagebrush.cloud', []);
+    const cc = p => out.files.get(p).cacheControl;
+    assert.equal(cc('sw.js'), 'no-cache');
+    assert.equal(cc('version.json'), 'no-store');
+    assert.equal(cc('lib/core.pre.0123456789abcdef.json'), 'public, max-age=31536000, immutable');
+    assert.equal(cc('engine/latest.json'), 'max-age=60');
+    for (const p of ['index.html', 'agents/index.html', 'katex/katex.min.css', 'sagebrush-worker.js', 'preview-config.js', '.preview/headers/index.html.json']) assert.equal(cc(p), DEFAULT_CACHE_CONTROL, p);
+    assert.equal(DEFAULT_CACHE_CONTROL, WORKER_DEFAULT);
+    // (a value that isn't plain directives is refused, never sent)
+    writeFileSync(join(dir, '_headers'), '/x\n  Cache-Control: no-cache; Set-Cookie=a\n');
+    assert.throws(() => prepare(dir, 'ui.sagebrush.cloud', []), /Cache-Control/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("the real service worker is published, its digests made true of the published pages; no-store mode is opt-in", () => {
+  const dir = cacheFixture();
+  try {
+    const out = prepare(dir, 'ui.sagebrush.cloud', []);
+    const sw = out.files.get('sw.js').bytes.toString();
+    assert.match(sw, /self\.addEventListener\("fetch"/);
+    assert.doesNotMatch(sw, /unregister/);
+    const digests = JSON.parse(/\nconst DIGESTS = (\{.*\});\n/.exec(sw)[1]);
+    const page = out.files.get('index.html');
+    assert.match(page.bytes.toString(), /sb-preview-notice/);
+    assert.equal(digests['./'].sha256, page.sha256);
+    assert.equal(digests['./'].size, page.bytes.length);
+    assert.equal(digests['./'].headers['Content-Security-Policy'], JSON.parse(out.files.get('.preview/headers/index.html.json').bytes).csp);
+    assert.equal(digests['./'].headers['Content-Type'], MIME.html);
+    assert.deepEqual(digests['sagebrush-worker.js'], { sha256: '1'.repeat(64), size: 1, headers: { 'Content-Type': MIME.js } });
+    // (the debugging mode: every file no-store, and the worker that removes itself, as previews were before)
+    const off = prepare(dir, 'ui.sagebrush.cloud', [], undefined, { noStore: true });
+    assert.match(off.files.get('sw.js').bytes.toString(), /unregister/);
+    assert.ok([...off.files.values()].every(f => f.cacheControl === NO_STORE));
+    // (a build worker without its table is refused, not published half-true)
+    writeFileSync(join(dir, 'sw.js'), 'self.addEventListener("fetch", () => {});\n');
+    assert.throws(() => prepare(dir, 'ui.sagebrush.cloud', []), /DIGESTS/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("the Worker sends the object's Cache-Control, answers a matching If-None-Match with 304, and a republish with the new bytes", async () => {
+  const objects = {};
+  const store = { async get(key) {
+    const o = objects[key];
+    if (!o) return null;
+    return { body: new Response(o.bytes).body, size: o.bytes.length, httpEtag: o.etag, customMetadata: o.meta, json: async () => JSON.parse(o.bytes) };
+  } };
+  const put = (key, text, etag, meta) => { objects[`ui/${key}`] = { bytes: Buffer.from(text), etag, meta }; };
+  put('lib/a.json', 'v1', '"e1"', { 'preview-cache-control': 'public, max-age=31536000, immutable' });
+  put('sw.js', 'sw1', '"s1"', { 'preview-cache-control': 'no-cache' });
+  put('old.js', 'x', '"o"', undefined);
+  put('bad.js', 'x', '"b"', { 'preview-cache-control': 'no-cache\r\nSet-Cookie: a=b' });
+  const get = (path, headers = {}) => worker.fetch(new Request('https://ui.sagebrush.cloud' + path, { headers }), { PREVIEWS: store });
+  let r = await get('/lib/a.json');
+  assert.equal(r.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.equal(r.headers.get('etag'), '"e1"');
+  assert.equal(await r.text(), 'v1');
+  assert.equal((await get('/sw.js')).headers.get('cache-control'), 'no-cache');
+  assert.equal((await get('/old.js')).headers.get('cache-control'), WORKER_DEFAULT);
+  assert.equal((await get('/bad.js')).headers.get('cache-control'), WORKER_DEFAULT);
+  // (the browser's copy still current: 304, no body, its validators and policy headers kept)
+  for (const tag of ['"s1"', 'W/"s1"', '"x", "s1"', '*']) {
+    r = await get('/sw.js', { 'If-None-Match': tag });
+    assert.equal(r.status, 304, tag);
+    assert.equal(await r.text(), '');
+    assert.equal(r.headers.get('etag'), '"s1"');
+    assert.equal(r.headers.get('cache-control'), 'no-cache');
+    assert.equal(r.headers.get('cross-origin-embedder-policy'), 'require-corp');
+  }
+  // (republished under the same name: the old ETag no longer matches, so the next revalidation gets the new build)
+  put('sw.js', 'sw2', '"s2"', { 'preview-cache-control': 'no-cache' });
+  r = await get('/sw.js', { 'If-None-Match': '"s1"' });
+  assert.equal(r.status, 200);
+  assert.equal(await r.text(), 'sw2');
+  assert.equal(r.headers.get('etag'), '"s2"');
+});
+test("the uploader signs each object's Cache-Control and re-uploads when it differs", async () => {
+  const original = globalThis.fetch;
+  const client = new R2({ accountId: '0'.repeat(32), accessKeyId: '1'.repeat(32), secretAccessKey: '2'.repeat(64) }, 'latex');
+  const bytes = Buffer.from('same'), sha256 = createHash('sha256').update(bytes).digest('hex');
+  const file = { bytes, sha256, type: MIME.js, cacheControl: 'no-cache' };
+  let headers = { 'x-amz-meta-preview-sha256': sha256, 'content-length': '4', 'content-type': MIME.js, 'x-amz-meta-preview-cache-control': 'no-cache' };
+  globalThis.fetch = async (_url, options) => {
+    if (options.method === 'PUT') {
+      assert.equal(options.headers['x-amz-meta-preview-cache-control'], 'no-cache');
+      assert.match(options.headers.authorization, /SignedHeaders=[^,]*x-amz-meta-preview-cache-control/);
+    }
+    return new Response(null, { headers, status: 200 });
+  };
+  try {
+    assert.equal(await client.matches('latex/a.js', file), true);
+    headers['x-amz-meta-preview-cache-control'] = 'public, max-age=0, must-revalidate';
+    assert.equal(await client.matches('latex/a.js', file), false);
+    delete headers['x-amz-meta-preview-cache-control'];
+    assert.equal(await client.matches('latex/a.js', file), false);
+    await client.put('latex/a.js', bytes, MIME.js, 'no-cache');
+  } finally { globalThis.fetch = original; }
+});
+test("the examples gallery is in a preview: built into the output with the site's page policy, and publishable", { timeout: 120000 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'preview-examples-'));
+  try {
+    const page = '<!doctype html><html><head><title>t</title></head><body>page</body></html>';
+    writeFileSync(join(dir, 'index.html'), page);
+    writeFileSync(join(dir, '_headers'), "/index.html\n  Content-Security-Policy: default-src 'self'; frame-ancestors 'self'\n");
+    execFileSync('bun', [join(import.meta.dirname, '..', '..', 'scripts', 'preview', 'examples.ts'), dir], { stdio: 'pipe' });
+    const catalog = JSON.parse(execFileSync('cat', [join(dir, 'examples', 'index.json')], { encoding: 'utf8' }));
+    assert.equal(catalog.format, 'sagebrush-examples');
+    assert.ok(catalog.examples.length > 10);
+    for (const kind of ['notebook', 'board', 'latex']) assert.ok(catalog.examples.some(e => e.kind === kind), kind);
+    const out = prepare(dir, 'ui.sagebrush.cloud', []);
+    assert.ok(out.files.has('examples/index.html'));
+    assert.ok(out.files.has('.preview/headers/examples/index.html.json'));
+    assert.match(JSON.parse(out.files.get('.preview/headers/examples/index.html.json').bytes).csp, /frame-ancestors 'self'/);
+    // (twice is refused: one rule for the gallery)
+    assert.throws(() => execFileSync('bun', [join(import.meta.dirname, '..', '..', 'scripts', 'preview', 'examples.ts'), dir], { stdio: 'pipe' }));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

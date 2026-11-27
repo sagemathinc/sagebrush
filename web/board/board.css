@@ -86,8 +86,8 @@
 [data-sbb=top] > * { pointer-events: auto; }
 /* (its ⋯ menu open: above the Edit toolbar and its panel, which are below the bar) */
 [data-sbb=top]:has(.menu:not([hidden])) { z-index: 6; }
-[data-sbb=home] { color: var(--board-accent); font-weight: 600; text-decoration: none; }
-[data-sbb=title] { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+[data-sbb=home] { color: var(--board-accent); font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; }
+[data-sbb=title] { font-size: 16px; font-weight: 600; margin-left: 10px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 /* in Edit, the title is renamed by a click (an untitled board says so) */
 .sbb-editing [data-sbb=title] { pointer-events: auto; cursor: text; }
 .sbb-editing [data-sbb=title]:hover { text-decoration: underline dotted var(--board-underline); }
@@ -107,7 +107,7 @@
 :where(.sbb, .sbb-layer) .menu button { border: 0; text-align: left; padding: 6px 10px; border-radius: 5px; background: none; }
 :where(.sbb, .sbb-layer) .menu button:hover { background: var(--board-hover); }
 /* (which Sagebrush runs the board's code, at the ⋯ menu's foot: round 0's 17) */
-:where(.sbb, .sbb-layer) .menu .ver { border-top: 1px solid var(--board-hairline-soft); margin-top: 4px; padding: 6px 10px 2px; font-size: 11px; color: var(--board-version-ink); }
+:where(.sbb, .sbb-layer) dialog .ver { border-top: 1px solid var(--board-hairline-soft); margin: 12px 0 8px; padding: 8px 0 0; font-size: 11px; color: var(--board-version-ink); }
 :where(.sbb, .sbb-layer) .menu button[hidden] { display: none; }
 [data-sbb=lang] { display: flex; align-items: center; gap: 4px; padding: 4px 10px; color: var(--board-ink-soft); }
 [data-sbb=lang] button { padding: 3px 9px; border: 1px solid var(--board-border); border-radius: 5px; }
@@ -277,22 +277,16 @@
 .be-row { display: flex; gap: 6px; }
 .be-row span { flex: 1; }
 .be-done { background: var(--board-accent); color: var(--board-on-accent); border-color: var(--board-accent); }
-.board-edge-editor select { font: inherit; border: 1px solid var(--board-border-strong); border-radius: 6px; padding: 4px 6px; background: var(--board-surface); }
+.board-edge-editor select { font: inherit; border: 1px solid var(--board-border-strong); border-radius: 6px; padding: 4px 28px 4px 8px; background: var(--board-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5l4.5 4.5 4.5-4.5' fill='none' stroke='%237a807b' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center / 11px 7px; -webkit-appearance: none; appearance: none; }
 .board-edge-editor .be-rev.on { background: var(--board-hover); border-color: var(--board-accent); }
 @media (max-width: 600px) { [data-sbb=help] { display: none; } }
-[data-sbb=exdlg] { border: 1px solid var(--board-border); border-radius: 12px; padding: 16px 18px; max-width: min(560px, calc(100% - 32px)); box-shadow: 0 10px 40px var(--board-shadow-dialog); }
-[data-sbb=exdlg] h3 { margin: 0 0 10px; }
-[data-sbb=exlist] a { display: block; padding: 8px 10px; margin: 0 -10px; border-radius: 8px; color: inherit; text-decoration: none; }
-[data-sbb=exlist] a:hover, [data-sbb=exlist] a.current { background: var(--board-hover); }
-[data-sbb=exlist] b { color: var(--board-accent); }
-[data-sbb=exlist] span { display: block; color: var(--board-ink-soft); font-size: 13px; }
-[data-sbb=exdlg] form { text-align: right; margin-top: 8px; }
 [data-sbb=pages] { display: flex; align-items: center; gap: 4px; }
 [data-sbb=pages][hidden] { display: none; }
-[data-sbb=pgsel] { font: inherit; max-width: 34vw; border: 1px solid var(--board-border-strong); border-radius: 6px; padding: 3px 4px; background: var(--board-surface); }
+[data-sbb=pgsel] { font: inherit; max-width: 34vw; border: 1px solid var(--board-border-strong); border-radius: 6px; padding: 3px 28px 3px 8px; background: var(--board-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5l4.5 4.5 4.5-4.5' fill='none' stroke='%237a807b' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center / 11px 7px; -webkit-appearance: none; appearance: none; }
+.sb-caret { display: inline-block; width: .38em; height: .38em; margin: 0 .15em 0 .55em; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateY(-.22em) rotate(45deg); vertical-align: middle; }
 [data-sbb=pages] button { padding: 4px 8px; }
-:is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg], [data-sbb=helpdlg]) { border: 1px solid var(--board-border); border-radius: 12px; padding: 16px 18px; width: min(520px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px var(--board-shadow-dialog); }
-:is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg], [data-sbb=helpdlg]) h3 { margin: 0 0 10px; }
+:is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg], [data-sbb=helpdlg], [data-sbb=sharedlg]) { border: 1px solid var(--board-border); border-radius: 12px; padding: 16px 18px; width: min(520px, calc(100% - 32px)); box-sizing: border-box; box-shadow: 0 10px 40px var(--board-shadow-dialog); }
+:is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg], [data-sbb=helpdlg], [data-sbb=sharedlg]) h3 { margin: 0 0 10px; }
 :is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg]) fieldset { border: 0; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 :is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg]) legend { font-weight: 600; margin-bottom: 4px; padding: 0; }
 :is([data-sbb=prdlg], [data-sbb=htmldlg], [data-sbb=pgdlg]) fieldset:first-of-type label { flex-basis: 100%; }
@@ -460,3 +454,40 @@
 .board-ask-own { font-style: italic; color: var(--board-ink-soft); }
 /* (the way to a chosen option's next step: a link in the card's own type, not the item's monospace link line) */
 .board-ask-decide a.board-ref { display: inline; margin: 0; font: inherit; text-decoration: underline; white-space: normal; }
+
+/* (Share at the top right, as the notebook page's: a labelled button) */
+:where(.sbb, .sbb-layer) [data-sbb=sharebtn] { display: inline-flex; align-items: center; gap: 6px; }
+:where(.sbb, .sbb-layer) [data-sbb=sharebtn][hidden] { display: none; }
+:where(.sbb, .sbb-layer) [data-sbb=sharebtn] svg { width: 14px; height: 14px; }
+/* (on a phone, the top bar's one line with room for its title: no Share button, since what it offers is File ▸ Download
+   ▸ HTML, there too; the name a size down) */
+@media (max-width: 600px) { :where(.sbb, .sbb-layer) [data-sbb=sharebtn] { display: none; } [data-sbb=home] { font-size: 17px; } }
+/* The drawer (drawer.ts): a note's whole content beside the board, its card keeping its size; its left edge resizes
+   it.  On a board under 600 px wide, a sheet at the bottom, its top edge resizing it.  The tour's caption and the Edit
+   toolbar are centered in the board's clear part beside it, or above the sheet. */
+.sbb-drawer { position: absolute; top: 44px; right: 0; bottom: 0; z-index: 3; box-sizing: border-box; display: flex; flex-direction: column; width: 480px; max-width: 80%; background: var(--board-surface); color: var(--board-ink); border-left: 1px solid var(--board-border-strong); box-shadow: -6px 0 18px var(--board-shadow-soft); }
+.sbb-drawer[hidden] { display: none; }
+.sbb-drawer-grip { position: absolute; left: -5px; top: 0; bottom: 0; width: 10px; z-index: 1; cursor: ew-resize; touch-action: none; }
+.sbb-drawer-grip:hover, .sbb-drawer-grip:focus-visible, .sbb-drawer-resizing .sbb-drawer-grip { background: var(--board-accent); opacity: .45; outline: none; }
+.sbb-drawer-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--board-hairline-soft); }
+.sbb-drawer-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.sbb-drawer-head h2:focus { outline: none; }
+.sbb-drawer-head h2:focus-visible { outline: 2px solid var(--board-accent); outline-offset: 2px; }
+:where(.sbb) .sbb-drawer-close { border: 0; background: none; font-size: 22px; line-height: 1; padding: 2px 8px; }
+.sbb-drawer-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px 14px 24px; user-select: text; -webkit-user-select: text; }
+.sbb-drawer-body:focus { outline: none; }
+.sbb-drawer-body > .board-item { position: static; width: auto; height: auto; overflow: visible; contain: none; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; font-size: 15px; }
+.sbb-drawer-body > .board-item::before, .sbb-drawer-body > .board-item::after { display: none; }
+.sbb-drawer-body > .board-shape { text-align: start; }
+.sbb-drawer-body .board-detail { opacity: 1; font-size: 13px; }
+.sbb-drawer-body .board-code-out { margin: 0; }
+.sbb-drawer-body .board-img { display: block; max-width: 100%; height: auto; }
+.sbb-drawer-gone { margin: 0; font-style: italic; color: var(--board-detail-ink); }
+.sbb.sbb-drawer-open:not(.sbb-sheet-open) [data-sbb=tour] { left: calc((100% - var(--sbb-drawer-w, 0px)) / 2); width: min(720px, calc(100% - var(--sbb-drawer-w, 0px) - 24px)); }
+.sbb.sbb-drawer-open:not(.sbb-sheet-open) .board-toolbar { left: calc((100% - var(--sbb-drawer-w, 0px)) / 2); }
+.sbb-drawer.sbb-sheet { top: auto; left: 0; width: auto; max-width: none; height: 45%; border-left: 0; border-top: 1px solid var(--board-border-strong); border-radius: 12px 12px 0 0; box-shadow: 0 -6px 18px var(--board-shadow-popover); }
+.sbb-drawer.sbb-sheet .sbb-drawer-grip { left: 0; right: 0; top: 0; bottom: auto; width: auto; height: 18px; cursor: ns-resize; background: none; }
+.sbb-drawer.sbb-sheet .sbb-drawer-grip::after { content: ""; position: absolute; left: 50%; top: 6px; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--board-border-strong); }
+.sbb-drawer.sbb-sheet .sbb-drawer-head { padding-top: 16px; }
+.sbb.sbb-sheet-open [data-sbb=tour] { bottom: calc(var(--sbb-sheet-h, 0px) + 8px); }
+.sbb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

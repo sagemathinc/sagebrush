@@ -29,8 +29,14 @@ export type Grant = {
   client: string; // "claude-code", "codex", …, as it says
   folders: string[]; // normalized, "/" for everything
   write: boolean;
-  run: false; // (running code comes later: board.run, notebook.run)
+  /** "May run code" (design/workspace-files.md §8.3; chat plan PR 4): the run verbs, in Sagebrush's sandbox. A grant
+   * kept without it (made before PR 4) is false: never promoted until the person grants again */
+  run: boolean;
   expires: number | null; // ms since the epoch; null: until this page closes
+  /** The Delegate switch (design/workspace-agent-protocol.md §6.2: "Allow Delegate tasks on this computer"): present,
+   * and true, only while the person has it on for this pairing; never kept with a remembered grant or a reload record,
+   * so a new pairing starts with it off */
+  delegate?: true;
   created: number;
   lastUsed: number;
 };

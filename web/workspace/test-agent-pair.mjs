@@ -4,8 +4,9 @@
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
-import { failHint, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
-import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
+import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
+import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
+import { AgentPairing, AgentError, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RETURN_MS } from "./agent-pair.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -24,6 +25,7 @@ function server(answerHello) {
         const m = JSON.parse(String(data));
         S.got.push(m);
         if (m.method === "hello") return void answerHello(ws, m);
+        if (typeof m.method === "string" && m.method.startsWith("tasks.") && S.onTask) return void S.onTask(ws, m);
         if (m.id && S.pending.has(m.id)) { S.pending.get(m.id)(m); S.pending.delete(m.id); }
       },
       close(ws, code, reason) { S.closed = { code, reason }; },
@@ -53,7 +55,7 @@ function fakeWs() {
     const v = {
       list: async (f) => [...files.keys()].filter((p) => p.startsWith(f + "/")).map(entry),
       stat: async (p) => (files.has(p) ? entry(p) : null),
-      read: async (p) => { if (W.hang) await new Promise(() => {}); W.reads = (W.reads ?? 0) + 1; if (W.readHold) await W.readHold; if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: 1 }; },
+      read: async (p) => { if (W.hang) await new Promise(() => {}); W.reads = (W.reads ?? 0) + 1; if (W.readHold) await W.readHold; if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: W.rev ?? 1 }; },
       write: async (p, c) => { if (W.conflictOn.has(p)) throw Object.assign(new Error("changed elsewhere"), { code: "conflict" }); files.set(p, c); return { entry: entry(p), rev: 2 }; },
       create: async (p) => { files.set(p, ""); return entry(p); }, mkdir: async (p) => ({ path: p, kind: "folder" }),
       rename: async (a, b) => { files.set(b, files.get(a)); files.delete(a); return entry(b); }, duplicate: async (p) => entry(p),
@@ -327,6 +329,108 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(e8.error?.data?.code === "limit" && /as a message/.test(e8.error.data.message), "an answer whose message would pass 12 MiB (escaping) is refused, not sent");
   S.srv.stop(true);
 }
+// ---- an image read (workspace.image): exactly {entry, rev, image: {base64}}, by the file's bytes, to an agent that said so
+{
+  const withImage = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code" }, wants: { write: true }, features: ["workspace.image", "no.such"] } }));
+  const bytes = (head, n = 64) => { const u = new Uint8Array(n).fill(7); u.set(head); return u; };
+  const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+  const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const kinds = { "/A/a.png": PNG, "/A/b.jpg": [0xff, 0xd8, 0xff, 0xe0], "/A/c.gif": ascii("GIF87a"), "/A/d.gif": ascii("GIF89a"), "/A/e.webp": [...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WEBP")] };
+  const fill = (W) => {
+    for (const [p, h] of Object.entries(kinds)) W.files.set(p, bytes(h));
+    W.files.set("/A/png-named.txt", bytes(PNG));
+    W.files.set("/A/text.png", "not an image");
+    W.files.set("/A/wave.webp", bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WAVE")]));
+    W.files.set("/A/half.png", bytes(PNG.slice(0, 7)));
+    W.files.set("/A/half.jpg", bytes([0xff, 0xd8]));
+    W.files.set("/A/half.gif", bytes(ascii("GIF89")));
+    W.files.set("/A/half.webp", bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WEB")]));
+    W.files.set("/A/buf.png", bytes(PNG).buffer);
+    W.files.set("/A/exact.png", bytes(PNG, 3_750_000));
+    W.files.set("/A/over.png", bytes(PNG, 3_750_001));
+  };
+  const S = server(withImage), W = fakeWs(), P = mk(S, W);
+  fill(W);
+  await P.paired();
+  ok(P.hello.features.join() === "workspace.image", "a hello that lists workspace.image keeps it (FEATURES); an unknown feature is dropped");
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  const w = { wait: 8000 };
+  let all = true;
+  for (const [p, h] of Object.entries(kinds)) {
+    const r = await S.request("workspace.read", { path: p }, w);
+    const got = r.result?.image?.base64 ? Uint8Array.from(atob(r.result.image.base64), (c) => c.charCodeAt(0)) : null;
+    const exact = r.result && Object.keys(r.result).sort().join() === "entry,image,rev" && Object.keys(r.result.image).join() === "base64" && r.result.rev === 1 && r.result.entry?.path === p;
+    if (!exact || !got || got.length !== 64 || !h.every((b, i) => got[i] === b)) { all = false; console.log("  ", p, r.result ? Object.keys(r.result).join() : r.error?.data?.code, r.result?.rev, r.result?.image?.base64?.length); }
+  }
+  ok(all, "PNG, JPEG, GIF87a, GIF89a and WebP: exactly {entry, rev, image: {base64}}, the file's bytes, no type or size");
+  const n1 = await S.request("workspace.read", { path: "/A/png-named.txt" }, w);
+  const n2 = await S.request("workspace.read", { path: "/A/text.png" }, w);
+  ok(typeof n1.result?.image?.base64 === "string" && n2.result?.content?.text === "not an image" && !("image" in n2.result), "judged by the bytes, not the name: a PNG named .txt is an image, text named .png is text");
+  const n3 = await S.request("workspace.read", { path: "/A/wave.webp" }, w);
+  const n4 = await S.request("workspace.read", { path: "/A/half.png" }, w);
+  ok(n3.result?.content !== undefined && !("image" in n3.result) && typeof n4.result?.content?.base64 === "string" && !("image" in n4.result), "RIFF that isn't WEBP, and a cut PNG signature: read as before ({content})");
+  const cut = [];
+  for (const p of ["/A/half.jpg", "/A/half.gif", "/A/half.webp"]) cut.push(await S.request("workspace.read", { path: p }, w));
+  ok(cut.every((r) => r.result?.content !== undefined && !("image" in r.result)), "a cut JPEG, GIF or WebP signature: not an image");
+  const ab = await S.request("workspace.read", { path: "/A/buf.png" }, w);
+  ok(ab.result?.image?.base64?.length === 88, "an image held as an ArrayBuffer: sent as an image too");
+  const n5 = await S.request("workspace.read", { path: "/A/x.txt" }, w);
+  const n6 = await S.request("workspace.read", { path: "/A/doc.ipynb" }, w);
+  ok(n5.result?.content?.text === "hello" && n6.result?.content?.json?.cells !== undefined, "text and documents are read as before");
+  const x1 = await S.request("workspace.read", { path: "/A/exact.png" }, w);
+  ok(x1.result?.image?.base64?.length === 5_000_000, "an image of exactly 3,750,000 bytes is sent: 5,000,000 base64 characters");
+  const x2 = await S.request("workspace.read", { path: "/A/over.png" }, w);
+  const said = JSON.stringify(x2);
+  ok(x2.error?.data?.code === "limit" && /3750001 bytes/.test(x2.error.data.message) && /3750000/.test(x2.error.data.message) && !said.includes("iVBORw0KGgo") && said.length < 600, "one byte over: refused with its size, and none of its bytes in the error");
+  W.rev = -1;
+  const v1 = await S.request("workspace.read", { path: "/A/a.png" }, w);
+  W.rev = 2 ** 53;
+  const v2 = await S.request("workspace.read", { path: "/A/a.png" }, w);
+  delete W.rev;
+  ok(v1.error?.data?.code === "storage" && v2.error?.data?.code === "storage" && !JSON.stringify([v1, v2]).includes("iVBORw0KGgo"), "a revision that isn't a safe whole number from 0: refused, no image sent");
+  W.files.set("/B/b.png", bytes(PNG));
+  const reads = W.calls.filter((c) => c === "read").length;
+  const g1 = await S.request("workspace.read", { path: "/B/b.png" }, w);
+  ok(g1.error?.data?.code === "invalid" && W.calls.filter((c) => c === "read").length === reads && !JSON.stringify(g1).includes("iVBORw0KGgo"), "an image outside the grant: refused before the workspace, as any read");
+  W.conflictOn.add("/A/a.png");
+  const c1 = await S.request("workspace.write", { path: "/A/a.png", content: { text: "x" }, base: 1 }, w);
+  ok(c1.error?.data?.code === "conflict" && !("current" in c1.error.data) && c1.error.data.currentOmitted === "its current contents are an image: read it" && !JSON.stringify(c1).includes("iVBORw0KGgo"), "a conflict on an image: said without its contents (read it as an image), none of its bytes");
+  W.conflictOn.add("/A/x.txt");
+  const c2 = await S.request("workspace.write", { path: "/A/x.txt", content: { text: "x" }, base: 1 }, w);
+  ok(c2.error?.data?.current?.content?.text === "hello", "a conflict on text still carries its current contents");
+  W.versionBytes = bytes(PNG);
+  const vv = await S.request("workspace.version", { path: "/A/a.png", index: 0 }, w);
+  ok(typeof vv.result?.content?.base64 === "string" && Object.keys(vv.result).join() === "content", "workspace.version is as before (only workspace.read gives images)");
+  S.srv.stop(true);
+  // (the grant checked after the read's wait: one that expired meanwhile gets no image)
+  {
+    let t = 7_000_000;
+    const S3 = server(withImage), W3 = fakeWs(), P3 = mk(S3, W3, { code: "x" }, () => t);
+    fill(W3);
+    await P3.paired();
+    await P3.allow({ folders: ["/A"], write: true, expires: t + 60_000 }, false);
+    const go = W3.holdReads();
+    const pending = S3.request("workspace.read", { path: "/A/a.png" }, { wait: 5000 });
+    await until(() => W3.reads === 1);
+    t += 61_000;
+    go();
+    const late = await pending;
+    ok(late.error?.data?.code === "invalid" && !("result" in late) && !JSON.stringify(late).includes("iVBORw0KGgo"), "an image read whose grant expired while it read: refused, none of its bytes");
+    S3.srv.stop(true);
+  }
+  // (an agent that didn't say workspace.image gets the bytes as before: it would pass {image} on as text)
+  const S2 = server(pairOk), W2 = fakeWs(), P2 = mk(S2, W2);
+  fill(W2);
+  await P2.paired();
+  await P2.allow({ folders: ["/A"], write: true, expires: null }, false);
+  const o1 = await S2.request("workspace.read", { path: "/A/a.png" }, w);
+  const o2 = await S2.request("workspace.read", { path: "/A/over.png" }, w);
+  ok(typeof o1.result?.content?.base64 === "string" && !("image" in o1.result) && typeof o2.result?.content?.base64 === "string", "without workspace.image: an image is {content: {base64}} as before, and the image cap doesn't apply");
+  W2.conflictOn.add("/A/a.png");
+  const o3 = await S2.request("workspace.write", { path: "/A/a.png", content: { text: "x" }, base: 1 }, w);
+  ok(typeof o3.error?.data?.current?.content?.base64 === "string", "without workspace.image: a conflict on an image carries its contents as before");
+  S2.srv.stop(true);
+}
 // ---- after the LAST wait, before anything is said: the same grant, in force now
 {
   const S = server(pairOk), W = fakeWs();
@@ -421,18 +525,24 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
     "not-json": "{", "array": "[]", "big": js({ ...good, page: "x".repeat(5000) }), "extra-key": js({ ...good, x: 1 }), "missing-key": js({ ...noLeft, port: undefined }),
     "v": js({ ...good, v: 2 }), "pairingId": js({ ...good, pairingId: "zz" }), "session": js({ ...good, session: "short" }), "port-0": js({ ...good, port: 0 }), "port-str": js({ ...good, port: "4321" }),
     "agent-missing": js({ ...good, agent: undefined }), "agent-extra": js({ ...good, agent: { ...good.agent, v: "1" } }), "agent-long": js({ ...good, agent: { name: "n".repeat(81), client: "c" } }),
-    "grant-extra": js({ ...good, grant: { ...good.grant, run: true } }), "folders-empty": js({ ...good, grant: { ...good.grant, folders: [] } }), "folder-relative": js({ ...good, grant: { ...good.grant, folders: ["notes"] } }),
+    "grant-extra": js({ ...good, grant: { ...good.grant, x: true } }), "grant-run-false": js({ ...good, grant: { ...good.grant, run: false } }), "folders-empty": js({ ...good, grant: { ...good.grant, folders: [] } }), "folder-relative": js({ ...good, grant: { ...good.grant, folders: ["notes"] } }),
     "write-str": js({ ...good, grant: { ...good.grant, write: "true" } }), "expires-str": js({ ...good, grant: { ...good.grant, expires: "3600000" } }), "expires-inf": js({ ...good, grant: { ...good.grant, expires: 1 } }).replace('"expires":1', '"expires":1e999'),
     "leftAt-str": js({ ...good, leftAt: "1000" }), "leftAt-inf": js(good).replace('"leftAt":1000', '"leftAt":1e999'), "workspace-empty": js({ ...good, workspace: "" }), "dup-key": js(good).replace('"v":1', '"v":1,"v":1'),
   };
   for (const [id, raw] of Object.entries(bad)) ok(parseReloadRecord(raw) === null, `U-3.${id}: malformed, so no record`);
   ok(parseReloadRecord(null) === null, "U-3.null: no stored value, no record");
   const d = (r, navType, now) => reloadDecision(r, { scope, navType, now });
-  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS) === "silent", "U-7.silent: a reload, fresh (age = 30 s), same scope: silent");
-  ok(d(good, "reload", 1000 + RELOAD_FRESH_MS + 1) === "click", "U-7.stale: older than 30 s: kept for one click");
-  ok(d(good, "reload", 999) === "click", "U-7.future: a leftAt in the future fails freshness: kept for one click");
-  ok(d(good, "navigate", 1500) === "click", "U-7.nav: not a reload: kept for one click (R1-a)");
-  ok(d(noLeft, "reload", 1500) === "click", "U-7.noleft: no leftAt (a copy taken while the original lived): kept for one click");
+  ok(RETURN_MS === 10 * 60 * 1000, "U-7.window: one constant, 10 minutes, for a grant with no end (A5 item 2; kept by the Nov 22 2026 ruling)");
+  ok(d(good, "reload", 1000 + RETURN_MS) === "silent", "U-7.silent: a reload, fresh (age = 10 min), same scope: silent");
+  ok(d(good, "reload", 1000 + RETURN_MS + 1) === "click", "U-7.stale: a grant with no end, older than 10 min: kept for one click");
+  ok(d(good, "reload", 999) === "discard", "U-7.future: a leftAt in the future: discarded, nothing kept for a click (SEC, Nov 22 2026)");
+  ok(d(good, "navigate", 1500) === "silent" && d(good, "back_forward", 1000 + RETURN_MS) === "silent", "U-7.return: a navigation back (Files and back, or Back) within 10 min, same scope: silent (A5 item 2)");
+  ok(d(good, "navigate", 1000 + RETURN_MS + 1) === "discard" && d(good, "back_forward", 1000 + RETURN_MS + 1) === "discard", "U-7.return-stale: a grant with no end, a navigation back older than 10 min: discarded, nothing kept for a click");
+  ok(d(good, "navigate", 999) === "discard", "U-7.return-future: a navigation with a leftAt in the future: discarded");
+  ok(d(good, "prerender", 1500) === "discard" && d(good, "", 1500) === "discard", "U-7.other-nav: any other navigation type: discarded");
+  ok(d(noLeft, "navigate", 1500) === "discard", "U-7.return-noleft: a navigation with no leftAt: discarded");
+  ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "navigate", 1500) === "discard", "U-7.return-scope: a navigation to another page: discarded");
+  ok(d(noLeft, "reload", 1500) === "discard", "U-7.noleft: no leftAt (a copy taken while the original lived, as a new tab's): discarded");
   ok(d({ ...good, workspace: "other" }, "reload", 1500) === "discard", "U-7.scope-ws: another workspace: discarded, nothing kept for a click (R1-d)");
   ok(d({ ...good, page: "http://127.0.0.1:1/other/" }, "reload", 1500) === "discard", "U-7.scope-page: another page: discarded (R1-d)");
   const timed = { ...good, grant: { ...good.grant, expires: 5000 } };
@@ -440,17 +550,51 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5000) === "discard", "U-8.at: now = expires: discarded (R1-e)");
   ok(d({ ...timed, leftAt: 4990 }, "reload", 5001) === "discard", "U-8.after: now = expires + 1: discarded");
   ok(d({ ...timed, leftAt: 4990 }, "navigate", 5000) === "discard", "U-8.click: an expired record is never kept for a click");
+  // (a grant with an end: a return is silent for as long as it lasts, however long ago the page left (#1620))
+  const long = { ...good, grant: { ...good.grant, expires: 1000 + 3 * RETURN_MS } };
+  ok(d(long, "navigate", 1000 + 2 * RETURN_MS) === "silent" && d(long, "back_forward", 1000 + 2 * RETURN_MS) === "silent" && d(long, "reload", 1000 + 2 * RETURN_MS) === "silent", "U-8.grant-window: a grant with an end, a return 20 min after leaving and before it ends: silent (#1620)");
+  ok(d(long, "navigate", 1000 + 3 * RETURN_MS) === "discard" && d(long, "reload", 1000 + 3 * RETURN_MS) === "discard", "U-8.grant-over: the same return as the grant ends (never extended): discarded");
+  ok(d({ ...long, leftAt: 1000 + RETURN_MS }, "navigate", 1000 + RETURN_MS - 1) === "discard" && d({ ...long, leftAt: 1000 + RETURN_MS }, "reload", 1000 + RETURN_MS - 1) === "discard", "U-8.grant-future: a grant with an end, a leftAt in the future: discarded, a reload too");
+  // take with this page's scope (A5): another page's record is left where it is; this page's own, or one that can't be
+  // read, is taken as before
+  {
+    const m = new Map();
+    const st = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) };
+    m.set(RELOAD_KEY, js(good));
+    const other = takeReloadRecord(st, { workspace: scope.workspace, page: "http://127.0.0.1:1/" });
+    ok(other.kind === "none" && m.has(RELOAD_KEY), "U-9.other-page: another page's record, taken with this page's scope: left where it is", other);
+    const mine = takeReloadRecord(st, scope);
+    ok(mine.kind === "ok" && !m.has(RELOAD_KEY), "U-9.own: this page's record: taken and removed");
+    m.set(RELOAD_KEY, "{not json");
+    const bad = takeReloadRecord(st, scope);
+    ok(bad.kind === "bad" && !m.has(RELOAD_KEY), "U-9.bad: a record that can't be read: taken (removed), as before");
+    m.set(RELOAD_KEY, js({ ...good, workspace: "other" }));
+    const ws2 = takeReloadRecord(st, scope);
+    ok(ws2.kind === "ok" && !m.has(RELOAD_KEY), "U-9.workspace: this page's address, another workspace: taken (the decision discards it)");
+  }
   // take/put/markLeft over a Storage-like map; and storage that throws
   const store = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
-  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777);
+  const own = { workspace: noLeft.workspace, page: noLeft.page };
+  const s1 = store(); putReloadRecord(s1, noLeft); markReloadLeft(s1, 777, own);
   ok(parseReloadRecord(s1.getItem(RELOAD_KEY))?.leftAt === 777, "U-1.leftAt: pagehide writes leftAt onto the held record");
+  // (A5: another page's pagehide (a board passed through on the way) leaves the record byte for byte; so does this
+  //  page's address in another workspace)
+  {
+    const sx = store(); putReloadRecord(sx, { ...noLeft, leftAt: 5 }); const raw0 = sx.getItem(RELOAD_KEY);
+    markReloadLeft(sx, 999, { ...own, page: own.page + "board/" });
+    ok(sx.getItem(RELOAD_KEY) === raw0, "U-1.other-page: another page's pagehide leaves the record byte for byte (its leftAt never renewed)");
+    markReloadLeft(sx, 999, { ...own, workspace: own.workspace + "-other" });
+    ok(sx.getItem(RELOAD_KEY) === raw0, "U-1.other-workspace: the same page in another workspace leaves it byte for byte too");
+    markReloadLeft(sx, 999, own);
+    ok(parseReloadRecord(sx.getItem(RELOAD_KEY))?.leftAt === 999, "U-1.own-again: its own page's pagehide renews it");
+  }
   const taken = takeReloadRecord(s1);
   ok(taken.kind === "ok" && taken.record.leftAt === 777 && s1.getItem(RELOAD_KEY) === null, "R1-c: take returns the record and removes it before any attempt");
   ok(takeReloadRecord(s1).kind === "none", "R1-c: a second take finds nothing (this page's next reload makes no attempt)");
   const s2 = store(); s2.setItem(RELOAD_KEY, "{bad"); ok(takeReloadRecord(s2).kind === "bad" && s2.getItem(RELOAD_KEY) === null, "U-3.take-bad: a malformed stored record is removed and is \"bad\" (not absent: no silent fallback)");
   const thrower = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
   ok(takeReloadRecord(thrower).kind === "bad" && takeReloadRecord(null).kind === "none", "U-3.storage: storage that throws on read is \"bad\"; no storage is \"none\"");
-  putReloadRecord(thrower, good); markReloadLeft(thrower, 1); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
+  putReloadRecord(thrower, good); markReloadLeft(thrower, 1, own); ok(true, "U-3.storage-write: writing to storage that throws doesn't throw");
   // S1: a record that reads but can't be removed is never used (consumed before any attempt, or not at all)
   const s3 = store(); s3.setItem(RELOAD_KEY, JSON.stringify(good)); s3.removeItem = () => { throw new Error("denied"); };
   const t3 = takeReloadRecord(s3);
@@ -470,7 +614,7 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const pair43 = (agent = { name: "Claude Code", client: "claude-code" }) => (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { ...agent, version: "2.0" }, wants: { write: true, run: false }, ...("code" in m.params ? { session: SESSION } : {}) } }));
   const memStore = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => void m.set(k, String(v)), removeItem: (k) => void m.delete(k) }; };
   const scope = { workspace: "sagebrush-workspace/0123456789abcdef", page: "http://127.0.0.1:1/agents/" };
-  const mkR = (S, W, store, o = {}) => new AgentPairing(S.port, o.how ?? { code: "abcd" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, ...(o.now ? { now: o.now } : {}), reload: { storage: store, scope, leaving: o.leaving ?? (() => false) } });
+  const mkR = (S, W, store, o = {}) => new AgentPairing(S.port, o.how ?? { code: "abcd" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, ...(o.now ? { now: o.now } : {}), ...(o.WebSocketImpl ? { WebSocketImpl: o.WebSocketImpl } : {}), reload: { storage: store, scope, leaving: o.leaving ?? (() => false) } });
   const held = (store) => parseReloadRecord(store.getItem(RELOAD_KEY));
   const NOW = 1_800_000_000_000;
 
@@ -563,6 +707,23 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
     const r = await P.paired().then(() => "paired", (e) => e.code);
     await until(() => S.closed !== null, 3000);
     ok(r === "identity" && P.state === "closed" && S.closed !== null && P.grant === null && st.m.size === 0, `${id}: a hello from another agent's ${id.split(".")[1]} on this page's session is discarded closed`, { r, state: P.state });
+    S.srv.stop(true);
+  }
+  // (U-6.order: the same, with a socket whose close is heard at once, as Bun 1.3's is (a browser's comes later): the
+  //  answer is still why it was closed, said before the close; and an agent's refusal of the hello keeps its own code)
+  class HeardAtOnce extends WebSocket { close(code, reason) { super.close(code, reason); this.onclose?.({ code: code ?? 1005, reason: reason ?? "" }); } }
+  {
+    const S = server(pair43({ name: "Other Agent", client: "claude-code" })), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { WebSocketImpl: HeardAtOnce, how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const r = await P.paired().then(() => "paired", (e) => e.code);
+    ok(r === "identity" && P.state === "closed", "U-6.order: with a close heard at once, another agent's answer is still refused as identity, not as a plain close", { r, state: P.state });
+    S.srv.stop(true);
+  }
+  {
+    const S = server((ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32001, message: "no", data: { code: "expired", message: "this session expired" } } }))), W = fakeWs(), st = memStore();
+    const P = mkR(S, W, st, { WebSocketImpl: HeardAtOnce, how: { session: SESSION, pairingId: "0123456789abcdef01234567", agent: { name: "Claude Code", client: "claude-code" } } });
+    const r = await P.paired().then(() => "paired", (e) => e.code);
+    ok(r === "expired" && P.state === "closed", "U-6.order: with a close heard at once, the agent's refusal of the hello keeps its own code", { r, state: P.state });
     S.srv.stop(true);
   }
   {
@@ -687,6 +848,44 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(/not a verb/.test(nv.error?.data?.message ?? ""), "a page without git_branch: not a verb there");
   S3.srv.stop(true);
 }
+// ---- the branch history's verbs (git_commit, git_status, git_wait): routed to the page's own module (gitVerbs, served as
+// the run verbs are); a git_commit that succeeds is one of the agent's changes, counted and told once; nothing else is
+{
+  const S = server(pairOk), W = fakeWs();
+  const calls = [];
+  let refuse = false;
+  const gitVerbs = { async serve(method, params, side) {
+    calls.push(method);
+    if (refuse) return side.fail("conflict", "refused by the page's module");
+    side.reply({ method });
+  } };
+  const P = new AgentPairing(S.port, { code: "abcd" }, { verbsFor: (actor) => W.verbsFor(actor), gitVerbs, store: W.storeApi, trashEntry: W.trashEntry, page });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, expires: null }, false);
+  let told = 0;
+  P.onChange(() => told++);
+  const c0 = P.changes, t0 = told;
+  const r1 = await S.request("workspace.git_commit", { name: "b", message: "m" });
+  ok(r1.result?.method === "workspace.git_commit" && P.changes === c0 + 1 && told === t0 + 1, `git_commit through the pairing: the page's module answers; one change, counted and told once (${P.changes - c0}, ${told - t0})`);
+  const r2 = await S.request("workspace.git_status", { name: "b" });
+  const r3 = await S.request("workspace.git_wait", { name: "b" });
+  ok(r2.result?.method === "workspace.git_status" && r3.result?.method === "workspace.git_wait" && P.changes === c0 + 1 && told === t0 + 1, "git_status and git_wait: answered, nothing counted or told");
+  refuse = true;
+  const r4 = await S.request("workspace.git_commit", { name: "b", message: "m" });
+  ok(r4.error?.data?.code === "conflict" && P.changes === c0 + 1 && told === t0 + 1, "a git_commit the page's module refuses: said, nothing counted");
+  refuse = false;
+  ok(calls.join() === "workspace.git_commit,workspace.git_status,workspace.git_wait,workspace.git_commit", `each routed to the page's module (${calls.join()})`);
+  const r5 = await S.request("workspace.git_branchx", { name: "b" });
+  ok(/not a verb/.test(r5.error?.data?.message ?? "") && calls.length === 4, "a method of another name: not routed there");
+  S.srv.stop(true);
+  // (a page that doesn't offer branches: the three are no verb there, and nothing is counted)
+  const S2 = server(pairOk), P2 = new AgentPairing(S2.port, { code: "abcd" }, { verbsFor: (actor) => W.verbsFor(actor), store: W.storeApi, trashEntry: W.trashEntry, page });
+  await P2.paired();
+  await P2.allow({ folders: ["/"], write: true, expires: null }, false);
+  const n1 = await S2.request("workspace.git_commit", { name: "b", message: "m" });
+  ok(/not a verb/.test(n1.error?.data?.message ?? "") && P2.changes === 0, "a page without branches: git_commit is no verb there, nothing counted");
+  S2.srv.stop(true);
+}
 // (the reload record keeps the grant's id; one without an id is still read (a new owner on restore), a bad one isn't)
 {
   // (written by allow(): the record holds the very id of the grant in force)
@@ -713,5 +912,441 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(failHint("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36 Edg/149.0") === CHROME_ALLOW, "in Edge: Chrome's permission");
   ok(![SAFARI, CHROME_ALLOW, OTHER_FAIL].some((t) => t.length > 110 || /\n/.test(t)), "each is one short line");
 }
+{
+  // Connect's one field (decided Nov 19 2026): the agent's link as pasted, with or without https://, or "CODE PORT" /
+  // "CODE:PORT"; a code alone only with the port its ?pair link came with, else: ask the agent for its link
+  const C = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const is = (r, code, port) => !("error" in r) && r.code === code && r.port === port;
+  ok(is(readConnect(`https://sagebrush.space/board/?pair=${C}&port=49589`), C, 49589), "the link, pasted");
+  ok(is(readConnect(`  sagebrush.space/board/?pair=${C}&port=49589 `), C, 49589), "the link without https://, spaces around it");
+  ok(is(readConnect(`https://sagebrush.space/board/?port=7&pair=${C}`), C, 7), "the link, its parameters in either order");
+  ok(is(readConnect(`${C} 49589`), C, 49589) && is(readConnect(`${C}:49589`), C, 49589) && is(readConnect(`${C} : 49589`), C, 49589), "CODE PORT and CODE:PORT");
+  ok(is(readConnect(C, "49589"), C, 49589), "a code alone, with the port its ?pair link came with");
+  ok(readConnect(C).error === ONLY_CODE && /link/.test(ONLY_CODE) && !/port/i.test(ONLY_CODE), "a code alone, no port: ask the agent for its link (no port to find)");
+  ok(/no port/.test(readConnect(`https://sagebrush.space/board/?pair=${C}`).error ?? ""), "a link with no port: ask for it again");
+  ok(/port isn't right/.test(readConnect(`${C} 70000`).error ?? "") && /port isn't right/.test(readConnect(`https://x/board/?pair=${C}&port=0`).error ?? ""), "a port out of range");
+  let threw = null;
+  const bad = ["https://sagebrush.space/board/?pair=%&port=7", "https://sagebrush.space/board/?pair=%E0%A4&port=7"].map((l) => { try { return readConnect(l); } catch (e) { threw = e; return null; } });
+  ok(!threw && bad.every((r) => /isn't right/.test(r?.error ?? "")), "a malformed %-escape in the code: the inline error, nothing thrown", { threw: String(threw), bad });
+  ok(/Paste/.test(readConnect("  ").error ?? "") && /isn't the agent's link/.test(readConnect("https://sagebrush.space/agents/").error ?? ""), "nothing, or another link");
+}
+{
+  // (the grant dialog's name for the agent: its program only when it differs from the name, never the same word twice)
+  ok(agentSays("claude-code", "claude-code") === "claude-code (as it says)", "one name for both: said once", agentSays("claude-code", "claude-code"));
+  ok(agentSays("Claude Code", "claude-code") === "Claude Code (as it says, claude-code)", "a name and a different program: both");
+  ok(agentSays("Codex", "") === "Codex (as it says)", "no program: the name alone");
+}
+{
+  // the board page's handover of a bare pairing link to the notebook page (pair-handoff.ts): within the tab, once, fresh
+  const mem = new Map();
+  globalThis.sessionStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => void mem.set(k, String(v)), removeItem: (k) => void mem.delete(k) };
+  const L = { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: "49589" };
+  ok(handOver(L, 1000) && mem.has(HANDOFF_KEY), "handed over: stored in the tab");
+  ok(takeHandoff("/board/", 1001) === null && mem.has(HANDOFF_KEY), "a page other than the notebook page neither takes nor deletes it");
+  const got = takeHandoff("/", 1001);
+  ok(got?.code === L.code && got?.port === L.port && !mem.has(HANDOFF_KEY), "the notebook page takes it, deleting it as it reads");
+  ok(takeHandoff("/", 1002) === null, "once only: a second read (a reload) finds nothing");
+  handOver(L, 1000);
+  ok(takeHandoff("/", 1000 + HANDOFF_MS) === null && !mem.has(HANDOFF_KEY), "a stale one is deleted, never used");
+  mem.set(HANDOFF_KEY, JSON.stringify({ code: "<x>", port: "1", at: 1000 }));
+  ok(takeHandoff("/", 1001) === null && !mem.has(HANDOFF_KEY), "a malformed one is deleted, never used");
+  globalThis.sessionStorage = { getItem: () => null, setItem: () => { throw new Error("refused"); }, removeItem: () => {} };
+  ok(handOver(L, 1000) === false, "storage refused: not handed over (the board page keeps the link and pairs there)");
+  globalThis.sessionStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  ok(handOver(L, 1000) === false, "storage that doesn't keep it: not handed over either");
+  delete globalThis.sessionStorage;
+}
+{
+  // (a creation is told to the page only by the pairing the page has adopted: an older or superseded one's never is)
+  const told = [], P1 = { n: 1 }, P2 = { n: 2 };
+  let cur = P1;
+  const cb = onlyCurrent(() => cur, (c, p) => told.push([c.op, p.n]));
+  cb({ op: "a" }, P1);
+  cur = P2;
+  cb({ op: "b" }, P1);
+  cb({ op: "c" }, P2);
+  cur = null;
+  cb({ op: "d" }, P2);
+  ok(JSON.stringify(told) === JSON.stringify([["a", 1], ["c", 2]]), "a creation reaches the page only from the pairing it has adopted then", told);
+}
+// ---- what an agent creates, and whether it may run once by itself (the conditions decided Nov 18 2026): only the last
+// document this pairing created, under the grant still in force, with May run code and Everything
+{
+  const S = server(pairOk), W = fakeWs();
+  let now = Date.now();
+  const told = [];
+  const P = new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, now: () => now, onCreated: (c) => told.push(c) });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, run: true, expires: now + 60_000 }, false);
+  const r = await S.request("workspace.create", { path: "/A/new.ipynb" });
+  const c = told[0];
+  ok(r.result && told.length === 1 && c === P.created && c.kind === "notebook" && c.ref === "INTERNAL" && /^[A-Za-z0-9_-]{8,}$/.test(c.op) && c.grant === P.grant.id && c.updated === 2, "a create under the grant: told to the page once, with its op, identity, grant and revision", c);
+  ok(P.mayRunCreated(c), "Everything and May run code, the grant in force: it may run");
+  ok(!P.mayRunCreated({ ...c }), "a copy of the record, not the pairing's own: never");
+  await S.request("workspace.mkdir", { path: "/A/sub" });
+  ok(told.length === 1 && P.created === c, "a folder made: nothing told, nothing kept");
+  await S.request("workspace.create", { path: "/A/two.ipynb" });
+  const c2 = told[1];
+  ok(c2 && !P.mayRunCreated(c) && P.mayRunCreated(c2), "a later creation: only the last may run");
+  now += 61_000;
+  ok(!P.mayRunCreated(c2), "the grant expired: never");
+  now -= 61_000;
+  await P.noRun();
+  ok(!P.mayRunCreated(c2), "May run code turned off: never");
+  await P.revoke();
+  ok(!P.mayRunCreated(c2), "revoked: never");
+  S.srv.stop(true);
+}
+for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], write: true, run: true, expires: null }], ["no May run code", { folders: ["/"], write: true, run: false, expires: null }]]) {
+  const S = server(pairOk), W = fakeWs();
+  const P = mk(S, W);
+  await P.paired();
+  await P.allow(grant, false);
+  const r = await S.request("workspace.create", { path: "/A/n.ipynb" });
+  ok(r.result && P.created && !P.mayRunCreated(P.created), `${what}: never runs by itself`);
+  await P.revoke();
+  S.srv.stop(true);
+}
+// ---- a local pairing's port: 1 to 65535, an integer, refused otherwise before anything is made, whether or not this
+// runtime has BroadcastChannel (the editors' channel is made only after; a regression: it once took the port check's
+// place, so with BroadcastChannel every port was admitted)
+{
+  const W = fakeWs();
+  const make = (port) => { try { new AgentPairing(port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, WebSocketImpl: class { constructor() { throw new Error("no socket for a refused port"); } } }); return "admitted"; } catch (e) { return e instanceof AgentError && e.code === "invalid" && /1 to 65535/.test(e.message) ? "refused" : "other: " + e.message; } };
+  const bad = [0, -1, 65536, 1.5, NaN];
+  const BC = globalThis.BroadcastChannel;
+  ok(typeof BC === "function" && bad.every((p) => make(p) === "refused"), "with BroadcastChannel: ports 0, -1, 65536, 1.5 and NaN are refused", bad.map(make));
+  try {
+    delete globalThis.BroadcastChannel;
+    ok(typeof globalThis.BroadcastChannel === "undefined" && bad.every((p) => make(p) === "refused"), "without BroadcastChannel: the same ports refused", bad.map(make));
+  } finally { globalThis.BroadcastChannel = BC; }
+  // (over a runner's link there is no local port: none is checked, with or without BroadcastChannel)
+  const viaLink = () => { try { const P = new AgentPairing(0, { link: { socket: () => ({ send() {}, close() {}, addEventListener() {}, removeEventListener() {} }), ready: () => undefined, send: () => "ok", owe: () => true, answer() {}, disconnect: async () => {} }, computer: "box" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page }); P.drop?.("test"); return "admitted"; } catch (e) { return "refused: " + e.message; } };
+  const withBc = viaLink();
+  let withoutBc;
+  try { delete globalThis.BroadcastChannel; withoutBc = viaLink(); } finally { globalThis.BroadcastChannel = BC; }
+  ok(withBc === "admitted" && withoutBc === "admitted", "a pairing over a runner's link: no port is checked (port 0 admitted), with or without BroadcastChannel", { withBc, withoutBc });
+}
+// ---- a .tex this agent made runs once by itself in the editor that shows it (decided Nov 19 2026,
+// agent-made-tex.ts): an editor asks over the site's channel whether the file at a revision may; the pairing says
+// yes once, for the .tex it last created or built (done, unchanged since), at that revision, under mayRunCreated's
+// conditions; and tells the editors when it made one
+{
+  const S = server(pairOk), W = fakeWs();
+  const revs = new Map(), base = W.verbsFor;
+  W.verbsFor = (actor) => { const v = base(actor); return { ...v, create: async (p, ...a) => ({ ...(await v.create(p, ...a)), rev: revs.get(p) ?? 0 }), stat: async (p) => { const e = await v.stat(p); return e && { ...e, rev: revs.get(p) ?? 0 }; } }; };
+  let builds = 0, during = null;
+  const runVerbs = { serve: async (method, params, ctx) => { builds++; during?.(); ctx.reply({ ok: true, ended: "done" }); } };
+  let now = Date.now();
+  const P = new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, now: () => now, runVerbs });
+  const ed = new BroadcastChannel("sagebrush-agent-made"), heard = [];
+  ed.onmessage = (e) => heard.push(e.data);
+  let n = 0;
+  const ask = async (fid, rev) => { const id = "q" + ++n; ed.postMessage({ t: "tex-may-run", id, fid, rev }); await sleep(120); return heard.some((m) => m.t === "tex-may-run" && m.id === id && m.ok === true); };
+  const told = (rev) => heard.some((m) => m.t === "tex-made" && m.fid === "FID" && m.rev === rev);
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, run: true, expires: now + 60_000 }, false);
+  await S.request("workspace.create", { path: "/A/paper.tex" });
+  ok(await until(() => told(0)) && P.created?.fid === "FID" && P.created.rev === 0, "a .tex created: the editors told its fid and revision", heard);
+  ok(!(await ask("FID", 1)) && !(await ask("OTHER", 0)), "another revision, another file: no answer");
+  ok(await ask("FID", 0), "the revision it created, the grant in force with Everything and May run code: yes");
+  ok(!(await ask("FID", 0)), "asked again: no answer, its one run spent");
+  // (built: done, and the file unchanged meanwhile; then a build during which it changed: nothing kept)
+  revs.set("/A/paper.tex", 3);
+  const b = await S.request("workspace.latex_build", { path: "/A/paper.tex" });
+  ok(b.result?.ok === true && builds === 1 && await until(() => told(3)) && P.built?.rev === 3 && P.built.fid === "FID", "a .tex built (done, unchanged since): kept at its revision, the editors told", { built: P.built, heard });
+  ok(await ask("FID", 3) && !(await ask("FID", 3)), "built: yes once, then spent");
+  during = () => revs.set("/A/paper.tex", 4);
+  const kept = P.built;
+  await S.request("workspace.latex_build", { path: "/A/paper.tex" });
+  await sleep(150);
+  ok(builds === 2 && P.built === kept && !told(4) && !(await ask("FID", 4)), "a build during which the file changed: nothing kept, nothing told, no answer");
+  during = null;
+  revs.set("/A/paper.tex", 5);
+  await S.request("workspace.latex_build", { path: "/A/paper.tex" });
+  await until(() => told(5));
+  now += 61_000;
+  ok(!(await ask("FID", 5)), "the grant expired: no answer");
+  // (expired by the clock, its timer not fired yet: a latex_build reads nothing for a run by itself)
+  const stats = () => W.calls.filter((c) => c === "stat").length;
+  const st0 = stats(), served0 = builds;
+  await S.request("workspace.latex_build", { path: "/A/paper.tex" });
+  ok(stats() === st0, "the grant expired (its timer not fired yet): a latex_build reads nothing for the .tex's run by itself", { stats: stats() - st0, served: builds - served0 });
+  now -= 61_000;
+  await P.noRun();
+  ok(!(await ask("FID", 5)), "May run code turned off: no answer");
+  await P.revoke();
+  ok(!(await ask("FID", 5)), "revoked: no answer");
+  ed.close();
+  S.srv.stop(true);
+}
+// ---- edit.turn: a notebook.edit carries the turn it came from, added by the agent's server; taken out before the edit's
+// grammar is checked and handed to the page's apply beside the edit; only when both ends said it
+{
+  const S = server(pairOk), W = fakeWs();
+  const seen = [];
+  const P = new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, notebookEdit: async (e, may, hold, turnId) => { seen.push({ e, turnId }); return { ok: true, inserted: [] }; } });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, expires: null }, false);
+  await until(() => S.got.some((m) => m.method === "page.features"));
+  ok(S.got.find((m) => m.method === "page.features").params.features.includes("edit.turn"), "a page that edits notebooks offers edit.turn (page.features)");
+  const edit = (extra = {}) => ({ conversation: "c", path: "/A/doc.ipynb", ref: "r", base: 1, insert: [{ source: "1", after: null }], was: {}, ...extra });
+  const send = async (params) => { const n = seen.length; const r = await S.request("notebook.edit", params); return { r, got: seen.length > n ? seen.at(-1) : null }; };
+  P.hello.features = ["notebook.edit"];
+  const b0 = await send(edit({ turn_id: "t1" }));
+  ok(b0.got === null && b0.r.error?.data?.code === "invalid", "the agent didn't say edit.turn: an edit with turn_id is refused by the edit's grammar, nothing applied", b0.r);
+  P.hello.features = ["notebook.edit", "edit.turn"];
+  const b1 = await send(edit({ turn_id: "t1" }));
+  ok(b1.got?.turnId === "t1" && !("turn_id" in b1.got.e) && b1.r.result?.ok === true, "both said it: the turn taken out of the edit and handed beside it", b1.got);
+  const b2 = await send(edit());
+  ok(b2.got === null && b2.r.error?.data?.code === "invalid", "both said it: an edit without turn_id is refused, nothing applied (it can't pass the turn's check by leaving it out)", b2.r);
+  P.hello.features = ["notebook.edit"];
+  const b3 = await send(edit());
+  ok(b3.got && b3.got.turnId === undefined, "an agent that didn't say edit.turn: an edit without turn_id as before, no turn handed", b3.got);
+  P.hello.features = ["notebook.edit", "edit.turn"];
+  for (const bad of [5, "", "x".repeat(129), null]) {
+    const b = await send(edit({ turn_id: bad }));
+    ok(b.got === null && b.r.error?.data?.code === "invalid", `a turn_id that isn't an id (${JSON.stringify(bad).slice(0, 20)}): refused, nothing applied`, b.r);
+  }
+  await P.revoke();
+  S.srv.stop(true);
+}
+// ---- run.context: a run verb's call carries the chat and the turn it came from, added by the agent's server; taken out
+// before the params are checked and handed to the run beside them, both or neither; only when both ends said it
+{
+  const S = server(pairOk), W = fakeWs();
+  const seen = [];
+  const runVerbs = { serve: async (method, params, ctx) => { seen.push({ params, context: ctx.context }); ctx.reply({ ok: true, ended: "done" }); } };
+  const P = new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, runVerbs });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, run: true, expires: null }, false);
+  await until(() => S.got.some((m) => m.method === "page.features"));
+  ok(S.got.find((m) => m.method === "page.features").params.features.includes("run.context"), "a page with run verbs offers run.context (page.features)");
+  {
+    // (A2-1: said before the grant, so a server never takes the grant from a page whose features it doesn't know yet)
+    await until(() => S.got.some((m) => m.method === "grant.changed"));
+    const at = (method) => S.got.findIndex((m) => m.method === method);
+    ok(at("page.features") >= 0 && at("page.features") < at("grant.changed"), "page.features is sent before grant.changed", S.got.map((m) => m.method));
+  }
+  const run = async (params) => { const n = seen.length; const r = await S.request("workspace.run_notebook", params); return { r, got: seen.length > n ? seen.at(-1) : null }; };
+  const a0 = await run({ path: "/A/doc.ipynb", conversation: "c1", turn_id: "t1" });
+  ok(a0.got?.params.conversation === "c1" && a0.got.context === undefined, "the agent didn't say run.context: its params as they are, no context (the run's own check refuses them)", a0.got);
+  P.hello.features = ["run.context"];
+  const a1 = await run({ path: "/A/doc.ipynb", timeout_s: 5, conversation: "c1", turn_id: "t1" });
+  ok(JSON.stringify(a1.got?.params) === JSON.stringify({ path: "/A/doc.ipynb", timeout_s: 5 }) && a1.got.context?.conversation === "c1" && a1.got.context.turnId === "t1", "both said it: the chat and the turn taken out of the params and handed beside them", a1.got);
+  const a2 = await run({ path: "/A/doc.ipynb", conversation: "c1" });
+  ok(JSON.stringify(a2.got?.params) === JSON.stringify({ path: "/A/doc.ipynb" }) && a2.got.context === undefined, "the chat without the turn: taken out, no context", a2.got);
+  const a3 = await run({ path: "/A/doc.ipynb" });
+  ok(a3.got && a3.got.context === undefined, "neither: no context", a3.got);
+  for (const bad of [{ conversation: 5, turn_id: "t1" }, { conversation: "c1", turn_id: "" }, { conversation: "c1", turn_id: "x".repeat(129) }]) {
+    const b = await run({ path: "/A/doc.ipynb", ...bad });
+    ok(b.got === null && b.r.error?.data?.code === "invalid", `a chat or turn that isn't an id (${JSON.stringify(bad).slice(0, 60)}): refused, nothing run`, b.r);
+  }
+  await P.revoke();
+  S.srv.stop(true);
+}
+{
+  // (a folder, not Everything: told nothing to run, and no answer)
+  const S = server(pairOk), W = fakeWs(), base = W.verbsFor;
+  W.verbsFor = (actor) => { const v = base(actor); return { ...v, create: async (p, ...a) => ({ ...(await v.create(p, ...a)), rev: 0 }) }; };
+  const P = mk(S, W);
+  const ed = new BroadcastChannel("sagebrush-agent-made"), heard = [];
+  ed.onmessage = (e) => heard.push(e.data);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, run: true, expires: null }, false);
+  await S.request("workspace.create", { path: "/A/p.tex" });
+  await until(() => heard.length > 0);
+  ed.postMessage({ t: "tex-may-run", id: "qa", fid: "FID", rev: 0 });
+  await sleep(150);
+  ok(P.created?.rev === 0 && !heard.some((m) => m.id === "qa"), "a folder's grant, not Everything: a created .tex never runs by itself (no answer)", heard);
+  await P.revoke();
+  ed.close();
+  S.srv.stop(true);
+}
+// ---- U-9: a single entry's answer has its page's address (url), from that very entry, the one the verb returned under
+// the grant: no other read, and nothing once the grant has changed
+{
+  const S = server(pairOk), W = fakeWs();
+  W.files.set("/A/p.tex", "\\begin{document}\\end{document}");
+  W.files.set("/A/d.csv", "1,2");
+  // (the verb's own entry carries one fid, a stat another: the url must be the verb's)
+  const base = W.verbsFor;
+  W.verbsFor = (actor) => { const v = base(actor); return { ...v, read: async (p) => { const r = await v.read(p); return { ...r, entry: { ...r.entry, fid: "AUTHFID" } }; }, stat: async (p) => { const e = await v.stat(p); return e && { ...e, fid: p === "/A/p.tex" && W.otherFid ? "OTHER" : e.fid }; } }; };
+  const P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  W.calls.length = 0;
+  W.otherFid = true;
+  const rd = (await S.request("workspace.read", { path: "/A/p.tex" })).result;
+  ok(rd?.entry?.url === page.origin + "/?tex=AUTHFID" && W.calls.join() === "read" && !("fid" in rd.entry) && !("ref" in rd.entry), "U-9a: read's entry has url, from the very entry the read returned (no stat, no other read); still no fid or ref of its own", { entry: rd?.entry, calls: W.calls });
+  W.otherFid = false;
+  const nb = (await S.request("workspace.stat", { path: "/A/doc.ipynb" })).result;
+  const mk1 = (await S.request("workspace.create", { path: "/A/new.ipynb" })).result;
+  const ls = (await S.request("workspace.list", { folder: "/A" })).result;
+  const csv = (await S.request("workspace.stat", { path: "/A/d.csv" })).result;
+  const dir = (await S.request("workspace.mkdir", { path: "/A/sub" })).result;
+  ok(nb?.entry?.url === page.origin + "/?nb=INTERNAL" && mk1?.entry?.url === page.origin + "/?nb=INTERNAL" && ls?.entries?.every((e) => !("url" in e)) && !("url" in (csv?.entry ?? {})) && !("url" in (dir?.entry ?? {})),
+    "U-9b: stat and create have it (a notebook: its page by ref); list's entries, a data file and a folder have none", { nb: nb?.entry, made: mk1?.entry, csv: csv?.entry, dir: dir?.entry });
+  S.srv.stop(true);
+}
+{
+  // (the grant revoked while the read runs: nothing of it is sent, no url either, and nothing more is read for one)
+  const S = server(pairOk), W = fakeWs();
+  W.files.set("/A/p.tex", "x");
+  const P = mk(S, W);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  W.calls.length = 0;
+  const go = W.holdReads();
+  const r = S.request("workspace.read", { path: "/A/p.tex" }, { wait: 1500 });
+  await until(() => W.reads === 1);
+  await P.revoke();
+  go();
+  const a = await r;
+  ok(!JSON.stringify(a ?? null).includes("url") && !JSON.stringify(a ?? null).includes("FID") && W.calls.join() === "read", "U-9c: revoked while the read runs: no url and nothing of it sent, and no stat or second read after", { a, calls: W.calls });
+  S.srv.stop(true);
+}
+{
+  // (the grant expired while the read ran: the answer is CHANGED_WHILE_RUNNING, with no url, and no stat)
+  const S = server(pairOk), W = fakeWs();
+  W.files.set("/A/p.tex", "x");
+  let t = 9_000_000;
+  const P = mk(S, W, { code: "x" }, () => t);
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: t + 60_000 }, false);
+  W.calls.length = 0;
+  const go = W.holdReads();
+  const r = S.request("workspace.read", { path: "/A/p.tex" }, { wait: 3000 });
+  await until(() => W.reads === 1);
+  t += 120_000;
+  go();
+  const a = await r;
+  ok(a?.error?.data?.code === "invalid" && a.error.data.message === CHANGED_WHILE_RUNNING && !JSON.stringify(a).includes("url") && W.calls.join() === "read", "U-9d: expired once the read resolved: CHANGED_WHILE_RUNNING, no url, no stat", { err: a?.error?.data, calls: W.calls });
+  S.srv.stop(true);
+}
 console.log(failures ? `${failures} failed` : "all passed");
+// ---- Delegate's requests (tasks-client.ts, pair-delegate-plan-r3.3 §2.5, over AgentPairing.own): the page asks, the
+// agent answers by id; only with a negotiated hello that lists delegate.1 (the agent's hello over the wire, never set by
+// hand), once granted, only tasks.*; at most TASK_REQUESTS.pending; each request, and each answer's raw frame, at most
+// TASK_REQUESTS.frameBytes; each within its timeout; all ended with the pairing
+{
+  const { TASK_REQUESTS, DELEGATE_FEATURE, TaskClient } = await import("./tasks-client.ts");
+  // (an agent whose hello offers Delegate, and one whose hello doesn't)
+  const pairDelegate = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code", version: "2.0" }, wants: { write: true, run: false }, session: "SECRET", features: [DELEGATE_FEATURE, "chat.resume"] } }));
+  const why = async (p) => { try { await p; return "resolved"; } catch (e) { return e?.code ?? String(e); } };
+  {
+    const S = server(pairOk), W = fakeWs();
+    const heard = [];
+    S.onTask = (ws, m) => heard.push(m);
+    const P = mk(S, W);
+    await P.paired();
+    await P.allow({ folders: ["/"], write: true, expires: null }, false);
+    ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0 && !(P.hello.features ?? []).includes(DELEGATE_FEATURE), "an agent whose negotiated hello doesn't list delegate.1: refused (forbidden), nothing sent");
+    const grants = S.got.filter((m) => m.method === "grant.changed").length;
+    ok(P.setDelegate(true) === false && !P.grant.delegate && S.got.filter((m) => m.method === "grant.changed").length === grants, "the Delegate switch for an agent that doesn't offer delegate.1: not turned on, nothing sent");
+    await P.revoke();
+    S.srv.stop(true);
+  }
+  const S = server(pairDelegate), W = fakeWs();
+  const heard = [];
+  let answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [], echo: m.method } }));
+  S.onTask = (ws, m) => { heard.push(m); answer(ws, m); };
+  const P = mk(S, W);
+  await P.paired();
+  ok(P.hello.features.includes(DELEGATE_FEATURE) && TaskClient.of(P).offered(), "a hello that lists delegate.1 keeps it through the page's negotiation (FEATURES), and the client sees it offered", P.hello.features);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "closed" && heard.length === 0, "before the grant: refused (closed), nothing sent");
+  await P.allow({ folders: ["/"], write: true, run: true, expires: Date.now() + 3600_000 }, true);
+  // (the Delegate switch, AgentPairing.setDelegate: off until the person turns it on, apart from Pair's grant)
+  const grantsSent = () => S.got.filter((m) => m.method === "grant.changed").map((m) => m.params);
+  await until(() => grantsSent().length > 0);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === 0 && !("delegate" in grantsSent().at(-1)), "granted, the switch off: refused (forbidden), nothing sent; the grant sent has no delegate");
+  ok(P.setDelegate(true) === true && P.grant.delegate === true, "the switch turned on");
+  await until(() => grantsSent().at(-1)?.delegate === true);
+  ok(grantsSent().at(-1).delegate === true && grantsSent().at(-1).folders.join() === "/" && grantsSent().at(-1).run === true, "on: the server told at once, the same grant with delegate: true", grantsSent().at(-1));
+  ok(P.setDelegate(true) === false, "turning it on again: nothing sent");
+  await P.allow({ folders: ["/A"], write: true, run: true, expires: Date.now() + 3600_000 }, true);
+  await until(() => grantsSent().at(-1)?.folders?.join() === "/A");
+  ok(grantsSent().at(-1).delegate === true && P.grant.delegate === true, "a new Pair grant from the person keeps the switch as it was", grantsSent().at(-1));
+  await P.noRun();
+  await until(() => grantsSent().at(-1)?.run === false);
+  ok(grantsSent().at(-1).delegate === true, "May run code turned off: the switch kept", grantsSent().at(-1));
+  const kept = [...W.store.values()].at(-1);
+  ok(kept && kept.grant.folders.join() === "/A" && !("delegate" in kept.grant), "a remembered grant is kept without the switch: a new pairing starts with it off", kept?.grant);
+  const r1 = await TaskClient.of(P).request("tasks.list", {});
+  const r2 = await TaskClient.of(P).request("tasks.get", { task: "a".repeat(32), after: 0 });
+  ok(r1?.echo === "tasks.list" && r2?.echo === "tasks.get" && heard.map((m) => m.id).join() === "p2,p3", "negotiated delegate.1, granted: answered by id, the page's ids p2, p3, ... (the hello was p1)", heard.map((m) => m.id));
+  ok(heard.every((m) => m.jsonrpc === "2.0" && typeof m.params === "object"), "each a JSON-RPC 2.0 request with its params");
+  ok((await why(TaskClient.of(P).request("workspace.read", { path: "/A/x.txt" }))) === "bad_request" && heard.length === 2, "a method not in TASK_METHODS: refused (bad_request), nothing sent");
+  answer = (ws, m) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "the task moved on", data: { code: "stale" } } }));
+  ok((await why(TaskClient.of(P).request("tasks.close", { task: "a".repeat(32), proposal: null, seq: 1 }))) === "stale", "an error answer: rejected with the agent's code (data.code)");
+  // (an outgoing request over TASK_REQUESTS.frameBytes: refused before sending)
+  const big = await why(TaskClient.of(P).request("tasks.start", { title: "t", prompt: "x".repeat(TASK_REQUESTS.frameBytes), target: "local", run: false, docs: [] }));
+  ok(big === "too_large" && heard.length === 3, "a request over TASK_REQUESTS.frameBytes (4 MiB, under the connection's own 12 MiB): refused (too_large), nothing sent");
+  // (an incoming answer: its raw frame, as received, at most TASK_REQUESTS.frameBytes, else refused before its result or
+  //  error reaches the caller; the envelope, whitespace and multibyte characters all counted)
+  const L = TASK_REQUESTS.frameBytes, enc = new TextEncoder();
+  const frameOf = (id, n, { error = false, ch = "x", pad = 0 } = {}) => {
+    const shell = (fill) => JSON.stringify(error ? { jsonrpc: "2.0", id, error: { code: -32000, message: fill, data: { code: "stale" } } } : { jsonrpc: "2.0", id, result: { tasks: [], fill } });
+    const base = enc.encode(shell("")).length + pad;
+    const per = enc.encode(ch).length, k = Math.floor((n - base) / per);
+    let t = shell(ch.repeat(k)) + " ".repeat(pad);
+    const got = enc.encode(t).length;
+    return got < n ? t + " ".repeat(n - got) : t;
+  };
+  const sizes = [];
+  const sendSized = (n, o) => { answer = (ws, m) => { const t = frameOf(m.id, n, o); sizes.push(enc.encode(t).length); ws.send(t); }; };
+  sendSized(L);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "resolved" && sizes.at(-1) === L, "an answer whose raw frame is exactly 4 MiB (all of it JSON): taken", sizes.at(-1));
+  // (the JSON itself exactly 4 MiB, then one space: only the raw frame as received is over, not the message re-encoded)
+  sendSized(L + 1, { pad: 1 });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large" && sizes.at(-1) === L + 1, "an answer whose JSON is exactly 4 MiB, plus one space after it: refused (too_large), the raw frame is what counts", sizes.at(-1));
+  sendSized(L + 40, { ch: "漢" });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "a result over 4 MiB in UTF-8 but under it in characters (漢): refused (too_large)");
+  sendSized(L + 40, { error: true });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB (ASCII): refused (too_large), its code not handed on");
+  sendSized(L + 40, { error: true, ch: "é" });
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "too_large", "an error over 4 MiB in UTF-8 (é): refused (too_large)");
+  ok(P.state === "granted", "after the over-limit answers the pairing is still up (its own 12 MiB frames unchanged)");
+  // (the switch turned off: the server told at once, the grant without delegate; every request refused, nothing sent)
+  {
+    const n = heard.length;
+    ok(P.setDelegate(false) === true && !("delegate" in P.grant), "the switch turned off");
+    await until(() => !("delegate" in grantsSent().at(-1)));
+    ok(!("delegate" in grantsSent().at(-1)) && grantsSent().at(-1).folders.join() === "/A", "off: the server told at once, the same grant without delegate", grantsSent().at(-1));
+    ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "forbidden" && heard.length === n, "off: a request is refused (forbidden), nothing sent");
+    ok(P.setDelegate(true) === true, "and on again");
+  }
+  // (the limit: at most TASK_REQUESTS.pending at once; unanswered ones end with the pairing)
+  answer = () => {};
+  const before = heard.length;
+  const held = Array.from({ length: TASK_REQUESTS.pending }, () => why(TaskClient.of(P).request("tasks.list", {})));
+  await until(() => heard.length === before + TASK_REQUESTS.pending);
+  ok((await why(TaskClient.of(P).request("tasks.list", {}))) === "busy" && heard.length === before + TASK_REQUESTS.pending, `at most ${TASK_REQUESTS.pending} pending: the next is refused (busy), not sent`);
+  // (an answer to an id the page never used, or no longer waits for: dropped, the connection kept)
+  S.sock.send(JSON.stringify({ jsonrpc: "2.0", id: "p999", result: { tasks: [] } }));
+  await sleep(100);
+  ok(P.state === "granted" && S.closed === null, "an answer to an unknown id: dropped, the connection kept");
+  await P.revoke();
+  const ended = await Promise.all(held);
+  ok(ended.every((c) => c === "closed"), "the pairing ended: every pending request rejected (closed)", ended);
+  S.srv.stop(true);
+  {
+    // (a timeout: rejected; its late answer dropped)
+    const S2 = server(pairDelegate), W2 = fakeWs();
+    let late = null;
+    S2.onTask = (ws, m) => { late = () => ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { tasks: [] } })); };
+    const P2 = mk(S2, W2);
+    await P2.paired();
+    await P2.allow({ folders: ["/"], write: true, expires: null }, false);
+    P2.setDelegate(true);
+    let code = null;
+    try { await TaskClient.of(P2).request("tasks.list", {}, { timeoutMs: 150 }); } catch (e) { code = e.code; }
+    late?.();
+    await sleep(100);
+    ok(code === "timeout" && P2.state === "granted", "no answer in time: rejected (timeout); its late answer is dropped, the connection kept", { code, state: P2.state });
+    await P2.revoke();
+    S2.srv.stop(true);
+  }
+}
+
 process.exit(failures ? 1 : 0);

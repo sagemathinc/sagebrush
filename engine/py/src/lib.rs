@@ -8,6 +8,7 @@ use pyo3::exceptions::{PyKeyboardInterrupt, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+mod mp;
 mod remote;
 
 /// The thread that imported the module: Python's main thread, the one that
@@ -878,6 +879,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     raster.add_function(wrap_pyfunction!(raster_decode, &raster)?)?;
     m.add_submodule(&raster)?;
     remote::register(m)?;
+    mp::register(m)?;
     m.add_function(wrap_pyfunction!(set_memory_share_source, m)?)?;
     m.add_function(wrap_pyfunction!(set_memory_total_source, m)?)?;
     m.add_function(wrap_pyfunction!(ledger_snapshot, m)?)?;

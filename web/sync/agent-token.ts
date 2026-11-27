@@ -6,7 +6,8 @@
 // HMAC-SHA256(GRANT_TAG_KEY, "sbg1." + hash + "." + id), its first 16 bytes in base64url (§2).  Only the server can
 // make a tag, so a made-up token is refused by the Worker; the account object stores only SHA-256(secret).
 
-import { normPath, within } from "../workspace/paths.ts";
+import { normPath } from "../workspace/paths.ts";
+import { RESERVED, reserved, type Access, type Scope } from "../workspace/agent-scope.ts";
 import { enc, same, sha256Hex } from "../sync-protocol/protocol.ts";
 
 export const AGENT = {
@@ -84,8 +85,8 @@ export async function tokenOf(authorization: string | null, key: string): Promis
   return { hash: t[1], id: t[2], secret: t[3] };
 }
 
-export type Access = "read" | "write";
-export type Scope = { path: string; access: Access };
+export type { Access, Scope };
+export { RESERVED, inScope } from "../workspace/agent-scope.ts";
 
 /**
  * A grant's scopes as the person gave them, checked and normalized (§1): 1 to 32, each `{path, access}` with nothing
@@ -107,14 +108,10 @@ export function checkScopes(v: unknown): Scope[] {
       throw new Error("a scope's path: " + JSON.stringify(String(path)).slice(0, 80));
     }
     if (out.some((o) => o.path === p)) throw new Error("a path twice: " + p);
+    if (reserved(p)) throw new Error(`a scope in ${RESERVED} (reserved for agents' own folders): ${p}`);
     out.push({ path: p, access });
   }
   return out;
-}
-
-/** Whether `path` (normalized) is inside a scope with `need`: whole segments, so "/Algebra" never covers "/Algebra2". */
-export function inScope(scopes: Scope[], path: string, need: Access): boolean {
-  return scopes.some((s) => within(path, s.path) && (need === "read" || s.access === "write"));
 }
 
 /** An agent's name as the person sees it: 1 to 64 characters, no control characters. */

@@ -8,6 +8,7 @@
 // set 0644, then renamed onto dst: a failed or interrupted write never leaves
 // a partial dst (CORR-213-1), and the temp is removed on failure.
 import * as fs from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 export function installWasm(src, dst, io = fs) {
@@ -24,4 +25,40 @@ export function installWasm(src, dst, io = fs) {
     throw e;
   }
   return bytes.length;
+}
+
+// A module without its custom sections (names, producers, debug info): what
+// ships of a wasm module built for size (scripts/build-mp.mjs).
+export function stripCustomSections(b) {
+  const parts = [b.subarray(0, 8)];
+  let i = 8;
+  while (i < b.length) {
+    const start = i;
+    const id = b[i++];
+    let size = 0, shift = 0, byte;
+    do {
+      byte = b[i++];
+      size |= (byte & 0x7f) << shift;
+      shift += 7;
+    } while (byte & 0x80);
+    i += size;
+    if (id !== 0) parts.push(b.subarray(start, i));
+  }
+  return Buffer.concat(parts);
+}
+
+// The modules' panic messages name the registry and git crates' source files, by the Cargo home's absolute path.
+// Written as CI's, a build anywhere gives CI's bytes (and so its pins); the Cargo home itself stays where it is.
+export const CI_CARGO_HOME = "/home/runner/.cargo";
+export const cargoHome = (env = process.env) => env.CARGO_HOME || join(homedir(), ".cargo");
+/** RUSTFLAGS with the Cargo home remapped to CI's, first, and the caller's own flags after it (once). */
+export function remappedRustflags(env = process.env) {
+  const remap = `--remap-path-prefix=${cargoHome(env)}=${CI_CARGO_HOME}`;
+  const own = env.RUSTFLAGS ?? "";
+  return own.split(/\s+/).includes(remap) ? own : own ? `${remap} ${own}` : remap;
+}
+/** Whether a built module names this machine's Cargo home (when it isn't CI's): a build that wasn't remapped. */
+export function namesLocalCargoHome(bytes, env = process.env) {
+  const home = cargoHome(env);
+  return home !== CI_CARGO_HOME && Buffer.from(bytes).includes(Buffer.from(home + "/"));
 }

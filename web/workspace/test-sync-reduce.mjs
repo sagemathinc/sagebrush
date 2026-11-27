@@ -162,6 +162,42 @@ check(applied > 10000 && skippedN > 1000, `random logs exercise both: ${applied}
   check([bad, ren, rem, fg].every((x) => x.grew < 64 && x.kept < 24), `…each op's memory under its ceiling (64 MiB grown, 24 MiB kept): ${report}`);
 }
 
+// the holder (e2e PR 5d): the data file whose current bytes became the op's, by the op itself, never by equal bytes
+{
+  const ix = new SyncIndex(), D1 = "d1d1d1d1d1d1d1d1", D2 = "d2d2d2d2d2d2d2d2", F = "f0f0f0f0f0f0f0f0", G = "f1f1f1f1f1f1f1f1", NB = "0123456789ab";
+  const A = "a".repeat(64), B = "b".repeat(64), C = "c".repeat(64);
+  let seq = 0;
+  const run = (o) => reduce(ix, { seq: ++seq, dseq: seq, device: D1, t: 1000 + seq, by: "person", ...o });
+  const h = {};
+  h.create = run({ op: "create", path: "/a.txt", kind: "file", fid: F, sha256: A, size: 1 }).holder;
+  h.writeB = run({ op: "write", path: "/a.txt", kind: "file", fid: F, sha256: B, base: A, size: 1 }).holder;
+  // (A again: its holder is the file, though an earlier op added the same bytes)
+  const backToA = run({ op: "write", path: "/a.txt", kind: "file", fid: F, sha256: A, base: B, size: 1 });
+  h.backToA = backToA.holder;
+  // (the same bytes again: nothing changes, no holder)
+  h.sameAgain = run({ op: "write", path: "/a.txt", kind: "file", fid: F, sha256: A, base: A, size: 1 }).holder ?? null;
+  // (another base: a conflict copy beside it holds the bytes)
+  const conflict = run({ op: "write", path: "/a.txt", kind: "file", fid: F, sha256: C, base: B, size: 1, device: D2 });
+  h.conflict = conflict.holder !== undefined && conflict.holder !== F && ix.byId.get(conflict.holder)?.sha256 === C ? "the copy" : conflict.holder;
+  // (out of Trash with the same bytes: moved, but no holder)
+  run({ op: "remove", path: "/a.txt", to: "/Trash/a.txt", kind: "file", fid: F });
+  const backSame = run({ op: "write", path: "/Trash/a.txt", kind: "file", fid: F, sha256: A, base: A, size: 1 });
+  h.trashSame = backSame.changed.includes(F) && !ix.at("/Trash/a.txt") ? backSame.holder ?? null : "not moved back";
+  // (a write to an identity never seen: a create, which holds it)
+  h.writeNew = run({ op: "write", path: "/n.txt", kind: "file", fid: G, sha256: B, base: A, size: 1 }).holder;
+  // (forgotten for good: a write is a copy where it last was, which holds it)
+  run({ op: "forget", path: "/n.txt", kind: "file", fid: G });
+  const afterForget = run({ op: "write", path: "/n.txt", kind: "file", fid: G, sha256: C, base: B, size: 1 });
+  h.afterForget = afterForget.holder !== undefined && afterForget.holder !== G ? "a copy" : afterForget.holder;
+  // (no data file, or nothing done: no holder)
+  h.notebook = run({ op: "create", path: "/x.ipynb", kind: "notebook", ref: NB }).holder ?? null;
+  h.mkdir = run({ op: "mkdir", path: "/d", kind: "folder", fid: "e0e0e0e0e0e0e0e0" }).holder ?? null;
+  h.skipped = run({ op: "write", path: "/a.txt", kind: "file", fid: F, sha256: "nope", base: A }).holder ?? null;
+  h.rename = run({ op: "rename", path: "/a.txt", to: "/b.txt", kind: "file", fid: F }).holder ?? null;
+  const want = { create: F, writeB: F, backToA: F, sameAgain: null, conflict: "the copy", trashSame: null, writeNew: G, afterForget: "a copy", notebook: null, mkdir: null, skipped: null, rename: null };
+  check(same(h, want), `the holder: a create, a write applied (A, B, A again: each its own), a conflict copy, a write that is a create, a copy after a forget hold the op's bytes; the same bytes again (out of Trash too), a document, a folder, a skipped op and a rename hold none: ${JSON.stringify(h)}`);
+}
+
 // no DOM, IndexedDB or clock: only paths' rules and the synchronous SHA-256, so a Worker and the server bundle it
 {
   const src = readFileSync(here + "sync-reduce.ts", "utf8"), imports = [...src.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]);

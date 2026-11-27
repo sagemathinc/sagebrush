@@ -12,13 +12,15 @@
 // - The exit status is CPython's rule (src/exit-status.ts); Magma's is 0, as Magma 2.18's (plan §1, ruled).
 import { R, execModule } from "../src/compile";
 import { guarded } from "../src/exit-status";
-import { TermOutput } from "../src/term-output";
-import { raise, T, builtin } from "../src/runtime/object";
+import { TermOutput, PromptOutput, utf8Prefix } from "../src/term-output";
+import { PromptSession } from "../src/repl-step";
+import { raise, T, builtin, getattr } from "../src/runtime/object";
 import { stdinReadline } from "../src/runtime/builtins";
 import { magmaToPython, MagmaSyntaxError } from "../src/magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage } from "../src/matlab";
 import type { RunPlan, Source } from "../src/term-command";
-import { WorkerChannel, CONTROL_BYTES, WINDOW, CAP } from "./term-sync";
+import { WorkerChannel, CONTROL_BYTES, WINDOW, CAP, Cancelled, ProtocolError, Refused } from "./term-sync";
+import { encodeSegments, lineAnswer, SEGS_MAX, PROMPT_MAX, type LineAnswer } from "./term-prompt-wire";
 import { __hooks, mediate, setStdin, startIn, readFileSync, existsSync, statSync } from "./shims/fs";
 
 export type TermMessage = {
@@ -29,6 +31,9 @@ export type TermMessage = {
   env: { COLUMNS?: number; LINES?: number };
   out: { allowance: number; backstop: number };
   sync: { control: SharedArrayBuffer; data: SharedArrayBuffer };
+  /** a prompt plan's bounds, the page's (term-prompt r1 §5, §7.1): one input's source and lines; a statement's
+   * output bytes and stderr's reserve within them */
+  prompt?: { sourceBytes: number; lines: number; inBytes: number; reserve: number };
 };
 export type TermDone = { gen: number; code: number; stdout: string; stderr: string; output: ReturnType<TermOutput["result"]>["output"] };
 
@@ -49,7 +54,7 @@ function sourceOk(s: any, mode: string): boolean {
   if (!s || typeof s !== "object") return false;
   if (s.kind === "file") return canonical(s.path) && str(s.shown) && str(s.typed) || (mode === "magma" && s.path === "-" && s.shown === "-" && s.typed === "-");
   if (s.kind === "code") return str(s.code);
-  return s.kind === "stdin";
+  return s.kind === "stdin" || s.kind === "prompt";
 }
 export function termMessageOf(m: any): TermMessage | null {
   // (gen is an Int32 slot of the channel: 0..CAP, or it would alias)
@@ -64,6 +69,10 @@ export function termMessageOf(m: any): TermMessage | null {
   if (p.noBytecode !== undefined && p.noBytecode !== true) return null;
   if (p.startIn !== undefined && !canonical(p.startIn)) return null;
   if (p.more !== undefined && (!Array.isArray(p.more) || p.mode !== "magma" || !p.more.every((s: any) => s?.kind === "file" && sourceOk(s, p.mode)))) return null;
+  // (a prompt plan comes with its bounds, and only a prompt plan does)
+  const q = m.prompt;
+  if ((p.source.kind === "prompt") !== (q !== undefined)) return null;
+  if (q !== undefined && (typeof q !== "object" || q === null || Object.keys(q).length !== 4 || ![q.sourceBytes, q.lines, q.inBytes, q.reserve].every(nat) || q.sourceBytes < 1 || q.lines < 1 || q.reserve > q.inBytes)) return null;
   if (p.vars !== undefined && (!Array.isArray(p.vars) || p.mode !== "magma" || !p.vars.every((v: any) => Array.isArray(v) && v.length === 2 && /^[A-Za-z_]\w*$/.test(String(v[0])) && str(v[1])))) return null;
   return m as TermMessage;
 }
@@ -213,12 +222,167 @@ function magmaFiles(plan: RunPlan, stdin: Uint8Array): number {
   return 0;
 }
 
+// ------------------------------------------------------------------ a prompt (term-prompt design r1, r1a, r1b)
+
+// (the language's lines before the first prompt: one line, then the keys, in the board's words)
+const PROMPT_NAME: Record<string, string> = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma" };
+const PROMPT_LEAVE: Record<string, string> = { python: "exit()", sage: "exit()", matlab: "exit", magma: "quit;" };
+
+/**
+ * A prompt: one input at a time asked of the page (`line`), run by the CLI REPL's own step (src/repl-step.ts) in this
+ * session's __main__, its output sent in the order written (`out`, which blocks until the page has taken it).  Its
+ * status: EOF 0; exit()'s by each language's rule; a Stop 130 (the channel's Cancelled).  A Ctrl+C sets only the
+ * runtime's interrupt flag: the statement's KeyboardInterrupt is printed and the prompt goes on, unless CLOSED is set,
+ * which is a Stop's and ends it.
+ */
+function runPrompt(t: TermMessage, ch: WorkerChannel): number {
+  const plan = t.plan, bounds = t.prompt!, sage = plan.mode === "sage";
+  // (the first fault in the page's answers, latched: raised inside a statement (its output, or input()), Python's code
+  //  could catch it, so every request after it fails at once, the next prompt's line request too, which ends the prompt)
+  let fault: ProtocolError | Refused | null = null;
+  const note = (e: unknown): never => {
+    if (e instanceof ProtocolError || e instanceof Refused) fault ??= e;
+    throw e;
+  };
+  const out = new PromptOutput(bounds.inBytes, bounds.reserve, SEGS_MAX, (segs) => {
+    if (fault) throw fault;
+    try {
+      const body = encodeSegments(segs);
+      const a = ch.request({ op: "out", args: { segs: segs.length, bytes: body.length } }, { body, max: 64 });
+      if (!("json" in a) || JSON.stringify(a.json) !== '{"ok":true}') throw new ProtocolError("an out answered other than ok");
+    } catch (e) {
+      note(e);
+    }
+  });
+  __hooks.write = (fd, text) => out.write(fd === 2 ? 2 : 1, text);
+  const flushAll = () => {
+    R.stdout.flush();
+    R.stderr.flush();
+    out.flush();
+  };
+  // (one line asked of the page, with what this input may still take, `room` bytes (a newline each) and `left` lines;
+  //  its answer checked against them: a line's text at most room - 1 bytes)
+  const ask = (kind: "prompt" | "input", cont: boolean, prompt: string, room: number, left: number): LineAnswer => {
+    if (fault) throw fault;
+    try {
+      const p = prompt.slice(0, utf8Prefix(prompt, PROMPT_MAX).end);
+      // (a JSON string is at most 6 bytes for each of its UTF-8 bytes, \uXXXX)
+      const a = ch.request({ op: "line", args: { kind, cont, prompt: p, bytes: room, lines: left } }, { max: 6 * room + 64 });
+      const v = "json" in a ? lineAnswer(a.json, room - 1) : null;
+      if (v === null) throw new ProtocolError("a line answered with something that isn't one");
+      if (kind === "input" && "refused" in v) throw new ProtocolError("a refusal answered to input()");
+      return v;
+    } catch (e) {
+      return note(e);
+    }
+  };
+  // input(): asked of the person through the same channel; its own prompt is output, sent first
+  R.builtins.input = builtin((...args: any[]) => {
+    if (args.length > 1) raise(T.TypeError, `input expected at most 1 argument, got ${args.length}`);
+    if (args.length) R.stdout.write(String(R.str(args[0])));
+    flushAll();
+    // (its own bound, one line of at most sourceBytes: never the statement's, which it neither takes from nor resets)
+    const v = ask("input", false, "", bounds.sourceBytes + 1, 1);
+    if ("line" in v) return v.line;
+    if ("eof" in v) raise(T.EOFError, "EOF when reading a line");
+    if ("interrupt" in v) raise(T.KeyboardInterrupt);
+    throw new ProtocolError("a refusal answered to input()"); // (not reached: ask latches it)
+  }, "input");
+  const name = PROMPT_NAME[plan.mode];
+  let interrupted = false;
+  const main = mainModule("<stdin>", sage);
+  const session = new PromptSession(main, sage ? "python" : (plan.mode as "python" | "matlab" | "magma"), sage, {
+    guarded: (fn) => guarded(fn, () => (interrupted = true)),
+    out: (s) => R.stdout.write(s),
+    err: (s) => R.stderr.write(s),
+    flushFiles: () => {
+      // no Python import here: a program may have replaced __import__
+      const o = R.sysModules.$m.get("_pyjs_open");
+      if (o) guarded(() => R.callObj(getattr(o, "_flush_all"), []));
+    },
+  });
+  out.begin();
+  R.stdout.write(`${name}, in a session of its own (not any notebook's), with your workspace's files.\nCtrl+D or ${PROMPT_LEAVE[plan.mode]} leaves; Ctrl+C interrupts.\n`);
+  session.start();
+  out.end();
+  for (;;) {
+    // one input: its lines while they go on, within the bounds (r1 §7.1)
+    let lines: string[] = [], bytes = 0;
+    let src: string | null = null;
+    const tooLong = () => {
+      // (the whole input dropped, back to ps1)
+      lines = [];
+      bytes = 0;
+      out.begin();
+      R.stderr.write(`input too long (the limit is ${bounds.sourceBytes} bytes, ${bounds.lines} lines)\n`);
+      out.end();
+    };
+    while (src === null) {
+      flushAll();
+      // (a continuation with no room left for even one more line: refused here, never asked of the page)
+      if (lines.length >= bounds.lines || bytes >= bounds.sourceBytes) {
+        tooLong();
+        continue;
+      }
+      const v = ask("prompt", lines.length > 0, lines.length ? session.ps2() : session.ps1(), bounds.sourceBytes - bytes, bounds.lines - lines.length);
+      if ("eof" in v) {
+        flushAll();
+        return 0;
+      }
+      if ("refused" in v) {
+        // (a line or paste past what the input has left, refused whole by the page)
+        tooLong();
+        continue;
+      }
+      if ("interrupt" in v) {
+        // (a continuation interrupted: the whole input is dropped, back to ps1)
+        lines = [];
+        bytes = 0;
+        out.begin();
+        R.stderr.write("KeyboardInterrupt\n");
+        out.end();
+        continue;
+      }
+      // (a Ctrl+C pressed while no statement ran (between an answer and this request) never reaches the next one)
+      Atomics.and(R.INTR, 0, ~1);
+      // (within its bounds by the answer's own check: the request said what was left)
+      lines.push(v.line);
+      bytes += utf8Prefix(v.line, Infinity).bytes + 1;
+      const s = lines.join("\n");
+      if (!session.incomplete(s)) src = s;
+    }
+    if (src.trim() === "") continue;
+    out.begin();
+    interrupted = false;
+    const r = session.run(src);
+    // (a Ctrl+C the statement never polled for (it came while the page answered a file request, and nothing after it
+    //  looked): the statement's KeyboardInterrupt all the same, reported at its end, as the person asked)
+    if (!interrupted && !ch.closed() && Atomics.load(R.INTR, 0) & 1) {
+      R.stderr.write("KeyboardInterrupt\n");
+      interrupted = true;
+    }
+    R.stdout.flush();
+    R.stderr.flush();
+    out.end();
+    if (interrupted) {
+      // (a Stop's KeyboardInterrupt: CLOSED is set, and the prompt ends; a Ctrl+C's: the flag cleared, the prompt goes on)
+      if (ch.closed()) throw new Cancelled();
+      Atomics.and(R.INTR, 0, ~1);
+      continue;
+    }
+    if ("end" in r) return r.end;
+    if (r.code !== null && r.code !== 1) return r.code;
+  }
+}
+
 /** Run one command: set the worker up for it, run it, and answer.  `post` is the worker's postMessage. */
 export function runCommand(t: TermMessage, post: (m: unknown) => void): void {
   const plan = t.plan;
   const sink = new TermOutput(t.out.allowance, t.out.backstop);
   __hooks.write = (fd, text) => sink.write(fd === 2 ? 2 : 1, text);
   const ch = new WorkerChannel({ control: t.sync.control, data: t.sync.data, gen: t.gen, post });
+  const prompting = plan.source.kind === "prompt";
+  let promptFault: string | null = null;
   mediate(ch, () => raise(T.KeyboardInterrupt));
   setStdin(t.stdin);
   startIn(plan.startIn ?? t.cwd);
@@ -243,17 +407,39 @@ export function runCommand(t: TermMessage, post: (m: unknown) => void): void {
   }, "input");
   let code = 0;
   try {
-    // (the setup too, reading FILE and the rest, under CPython's rule: a Stop while the page answers is a
-    // KeyboardInterrupt with its traceback, and 130, wherever it lands)
-    const outer = guarded(() => {
-      code = plan.mode === "matlab" ? runMatlab(plan, t.stdin, t.cwd) : plan.mode === "magma" ? runMagma(plan, t.stdin) : runPython(plan, t.stdin);
-    });
-    if (outer !== null) code = outer;
+    if (prompting) {
+      // (a prompt: every byte of output went to the page by `out` as it was flushed, charged there; a Stop is the
+      // channel's Cancelled, 130; a broken protocol ends it with the reason, sent in the answer below)
+      try {
+        code = runPrompt(t, ch);
+      } catch (e) {
+        if (e instanceof Cancelled || ch.closed()) code = 130;
+        else if (e instanceof ProtocolError || e instanceof Refused) {
+          // (the page refused one of the prompt's own requests, or answered one that isn't the protocol's)
+          code = 1;
+          promptFault = `the prompt stopped: ${String(e.message).slice(0, 200)}`;
+        } else throw e;
+      }
+    } else {
+      // (the setup too, reading FILE and the rest, under CPython's rule: a Stop while the page answers is a
+      // KeyboardInterrupt with its traceback, and 130, wherever it lands)
+      const outer = guarded(() => {
+        code = plan.mode === "matlab" ? runMatlab(plan, t.stdin, t.cwd) : plan.mode === "magma" ? runMagma(plan, t.stdin) : runPython(plan, t.stdin);
+      });
+      if (outer !== null) code = outer;
+    }
   } finally {
     try {
       R.stdout.flush();
       R.stderr.flush();
     } catch {}
+  }
+  if (prompting) {
+    // (nothing left: what the prompt wrote went by `out`, charged as it arrived; a fault's reason is the one line here)
+    const stderr = promptFault ? promptFault + "\n" : "";
+    const n = utf8Prefix(stderr, Infinity).bytes;
+    post({ termDone: { gen: t.gen, code, stdout: "", stderr, output: { producedBytes: n, deliveredBytes: n, exceeded: false, truncated: false } } satisfies TermDone });
+    return;
   }
   const r = sink.result();
   post({ termDone: { gen: t.gen, code, stdout: r.stdout, stderr: r.stderr, output: r.output } satisfies TermDone });

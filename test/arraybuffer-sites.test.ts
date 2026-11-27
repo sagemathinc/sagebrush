@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { slowSkip } from "./slow-tests";
+import { slowSkipFor } from "./slow-tests";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -91,7 +91,7 @@ const REFERENCE_CASES: [string, Record<string, string>, Record<string, string>, 
 ];
 const generatedKeys = (c: any) => G.gate(null, { table: {}, cur: c }).problems.filter((p: any) => p.problem === "generated");
 // (128 s on master: a slow test, test/slow-tests.ts)
-test("train-16: the census reads the tracked tree only: whatever references build/, a build changes nothing, and only a reviewed generated module passes the gate", { skip: slowSkip }, () => {
+test("train-16: the census reads the tracked tree only: whatever references build/, a build changes nothing, and only a reviewed generated module passes the gate", { skip: slowSkipFor("arraybuffer") }, () => {
   for (const [name, tracked, built, want] of REFERENCE_CASES) {
     const without = fixture(tracked);
     const withBuild = fixture({ ...tracked, ...built });
@@ -875,8 +875,10 @@ test("V1, isolated: a () => void function that returns a function installs an ob
 
 test("E1.1: typescript-api is named only by the gates' scripts and their tests (arraybuffer-sites; line 3 of the site asset budget); it has no install scripts", () => {
   const out = execFileSync("git", ["grep", "-l", "typescript-api", "--", ":!pnpm-lock.yaml", ":!package.json"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").sort();
-  // (test/local-gateway.test.ts: test-only static analysis with the pinned typescript-api, its L41 import-closure check)
-  assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "scripts/site-asset-budget.mjs", "scripts/test-line3-measure.mjs", "scripts/test-line3-size.mjs", "test/arraybuffer-sites.test.ts", "test/local-gateway.test.ts"]);
+  // (test/local-gateway.test.ts: test-only static analysis with the pinned typescript-api, its L41 import-closure check;
+  // scripts/test-blob-census.mjs: test-only too, the workspace blob stores' static census;
+  // test/magma-malformed.test.ts: the same, the Magma parser's recursion audit)
+  assert.deepEqual(out, ["scripts/arraybuffer-sites.mjs", "scripts/site-asset-budget.mjs", "scripts/test-blob-census.mjs", "scripts/test-line3-measure.mjs", "scripts/test-line3-size.mjs", "test/arraybuffer-sites.test.ts", "test/local-gateway.test.ts", "test/magma-malformed.test.ts"]);
   const pkg = JSON.parse(readFileSync(join(ROOT, "node_modules/typescript-api/package.json"), "utf8"));
   assert.equal(pkg.version, "5.9.3");
   for (const k of ["preinstall", "install", "postinstall", "prepare"]) assert.equal(pkg.scripts?.[k], undefined, k);

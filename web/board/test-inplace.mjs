@@ -29,7 +29,8 @@ ws.onmessage = (ev) => {
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
 };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+// (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
+const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
 const until = async (expr, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
 const fails = [];
@@ -85,7 +86,7 @@ try {
   check(await ev("(() => { const t = document.querySelector('.board-editing .be-title'); return t.selectionStart > 0 && t.selectionStart < t.value.length; })()"), "...where it was clicked: " + await ev("document.activeElement.selectionStart"));
   check(await ev("getComputedStyle(document.querySelector('.board-editing .be-title')).fontWeight >= 600"), "the title is written as a title");
   // the toolbar: over it, with a plain note's tools
-  check((await bar()) === "ip-image ip-code ip-detail ip-link ip-color ip-delete", "a note's toolbar: " + await bar());
+  check((await bar()) === "ip-image ip-code ip-detail ip-link ip-drawer ip-color ip-delete", "a note's toolbar: " + await bar());
   const b0 = await elRect(".ip-bar");
   check(b0 && b0.bottom <= e0.top + 1 && b0.left >= e0.left - 1, "the toolbar floats above the item: " + JSON.stringify([b0, e0]));
   // keys in a field are the field's: arrows do not move the item, Delete does not delete it
@@ -127,7 +128,7 @@ try {
   const src = await elRect("[data-code=c] .board-code-src");
   await dblclick(src.left + 8 + 4.3 * 7.5, src.top + 10); // (on line 1, after "x = ")
   check(await until("window.board.editing === 'c'", 3000), "a double-click edits a code item");
-  check((await bar()) === "ip-run ip-hide ip-image ip-detail ip-link ip-color ip-delete", "a code item's toolbar: run and { } instead of + code: " + await bar());
+  check((await bar()) === "ip-run ip-hide ip-image ip-detail ip-link ip-drawer ip-color ip-delete", "a code item's toolbar: run and { } instead of + code: " + await bar());
   check(await ev("document.activeElement === document.querySelector('.board-editing .be-code')"), "the code, double-clicked, has the caret");
   check(await ev("Math.abs(document.activeElement.selectionStart - 4) <= 1"), "...where it was clicked: " + await ev("document.activeElement.selectionStart"));
   check(await ev("(() => { const e = document.querySelector('.board-editing .be-codebox pre'), s = getComputedStyle(e); return !!e.querySelector('span') && s.fontFamily.includes('monospace'); })()"), "the code is highlighted, in its box");

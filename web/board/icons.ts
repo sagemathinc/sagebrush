@@ -26,6 +26,7 @@ const ICONS: Record<string, Shape[]> = {
   title: [["path", "M5 7.5V5h14v2.5M12 5v14M9 19h6"]],
   text: [["path", "M5 7h14M5 11h14M5 15h14M5 19h9"]],
   trash: [["path", "M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"]],
+  drawer: [["rect", 3, 4, 18, 16, 2], ["path", "M14 4v16M16.5 9h2M16.5 12h2"]],
 };
 
 const NS = "http://www.w3.org/2000/svg";

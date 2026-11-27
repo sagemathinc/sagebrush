@@ -1,0 +1,5 @@
+# the engine the Mac app ships, made by app/engine/bundle.mjs
+/binaries/
+/engine/
+# the agent the app hosts, made by app/engine/bundle.mjs (app/engine/agent-bundle.mjs)
+/agent/

@@ -6,7 +6,7 @@
 #   android-report.py), with the COI diagnosis read (coi-reading.py);
 # - release: the same file in the same place must NOT be picked up (no
 #   report, the notebook unchanged, the app still running): the debug-only
-#   boundary in lib.rs, shown at run time (astra's R-IOS-1).
+#   boundary in lib.rs, shown at run time.
 # There are no secrets, no signing and no upload here.  Never a required check.
 #
 # Pinned, each failing by name when absent (never a fallback):
@@ -53,6 +53,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four WebAssembly modules wasm/pins.json names, published: design/wasm-artifacts.md section 6)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: "false"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"

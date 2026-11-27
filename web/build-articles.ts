@@ -11,8 +11,9 @@ import { mathExtensions } from "./markdown-math";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const SITE = "https://sagebrush.space";
 const REPO = "https://github.com/sagemathinc/sagebrush/blob/master";
@@ -24,7 +25,7 @@ const out = join(siteDir, "public");
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-function renderer(): Marked {
+export function renderer(): Marked {
   const m = new Marked({ gfm: true });
   m.use({
     extensions: [
@@ -90,9 +91,9 @@ function gitDate(file: string): string {
 
 // What Sagebrush shares with other systems (on /articles/)
 const INDEPENDENT = `<h2 id="independent">Independent code: what Sagebrush shares with other systems</h2>
-<p><b>No code.</b> Sagebrush contains and links no code from Magma, PARI, Sage, Singular, GAP, FLINT, GMP, NTL, msolve, eclib or smalljac. Every engine was written from papers and books, with one engine following another system's method: the a_p engine is an independent Rust implementation of standard methods (baby-step giant-step and related techniques), following the genus-1 strategy of Andrew Sutherland's smalljac. No smalljac code is copied or shared, smalljac 4.1.3 was run as an oracle and benchmark, and on 2026-10-02 Sutherland gave permission to read smalljac's source and port it under any license Sagebrush chooses (<a href="https://github.com/sagemathinc/sagebrush/blob/master/engine/ap/PROVENANCE.md">engine/ap/PROVENANCE.md</a>). The other systems were used only from the outside: as oracles to compare answers with, and as benchmarks. The engines link only general-purpose Rust libraries. Big integers come from dashu, not from GMP, the library almost every other system builds on. FLINT is linked only by some tests, as a reference, and by no shipped package. The details are in <a href="https://github.com/sagemathinc/sagebrush/blob/master/NOTICE.md">NOTICE.md</a>.</p>
-<p><b>Why it matters.</b> When Sagebrush and Magma, PARI, Sage or Hecke compute the same class group, Galois group or newform and agree, the two answers come from independent implementations. That rules out a shared implementation bug, in a common library or in borrowed code, making both wrong in the same way. It does not rule out correlated mistakes from what the two still share: the algorithm, assumptions such as GRH, or reference data. So agreement is strong evidence, not a guarantee, and it is weaker where Sagebrush follows the other system's own method, as the a_p engine follows smalljac's.</p>
-<p><b>What is shared</b> is the mathematics: the published algorithms (for a_p, smalljac's own strategy), and hypotheses such as GRH where both systems assume them. Small exceptions are data, not code: Cremona's table of elliptic curves of conductor below 1000 is bundled for curve labels. Code also comes from CPython (its standard library, for the Python runtime) and NumPy (array printing and random-number streams); neither is mathematical research code.</p>
+<p><b>No code from these systems.</b> Sagebrush contains and links no code from Magma, PARI, Sage, Singular, GAP, FLINT, GMP, NTL, msolve, eclib or smalljac. Every engine was written from papers and books, with two exceptions. Two parts are ported, with his permission, from William Stein's PSAGE, code he wrote himself and first distributed under the GPL: the Hilbert modular forms engine's part over Q(√5) (<a href="https://github.com/sagemathinc/sagebrush/blob/master/engine/hmf/PROVENANCE.md">engine/hmf/PROVENANCE.md</a>) and the modular symbol map of elliptic curves (<code>engine/modsym</code>). And one engine follows another system's method: the a_p engine is an independent Rust implementation of standard methods (baby-step giant-step and related techniques), following the genus-1 strategy of Andrew Sutherland's smalljac. No smalljac code is copied or shared, smalljac 4.1.3 was run as an oracle and benchmark, and on 2026-10-02 Sutherland gave permission to read smalljac's source and port it under any license Sagebrush chooses (<a href="https://github.com/sagemathinc/sagebrush/blob/master/engine/ap/PROVENANCE.md">engine/ap/PROVENANCE.md</a>). The other systems were used only from the outside: as oracles to compare answers with, and as benchmarks. The engines link only general-purpose Rust libraries. Big integers come from dashu, not from GMP, the library almost every other system builds on. FLINT is linked only by some tests, as a reference, and by no shipped package. The details are in <a href="https://github.com/sagemathinc/sagebrush/blob/master/NOTICE.md">NOTICE.md</a>.</p>
+<p><b>Why it matters.</b> When Sagebrush and Magma, PARI, Sage or Hecke compute the same class group, Galois group or newform and agree, the two answers come from independent implementations. That rules out a shared implementation bug, in a common library or in borrowed code, making both wrong in the same way. It does not rule out correlated mistakes from what the two still share: the algorithm, assumptions such as GRH, or reference data. So agreement is strong evidence, not a guarantee, and it is weaker where Sagebrush follows another implementation: the a_p engine follows smalljac's method, and the parts ported from PSAGE follow PSAGE's code.</p>
+<p><b>What is shared</b> is the mathematics: the published algorithms (for a_p, smalljac's own strategy), and hypotheses such as GRH where both systems assume them. Besides the parts ported from PSAGE above, the exceptions are data, not code: Cremona's table of elliptic curves of conductor below 1000 is bundled for curve labels. Code also comes from CPython (its standard library, for the Python runtime) and NumPy (array printing and random-number streams); neither is mathematical research code.</p>
 `;
 
 // Honest disclosure on every page; a file may replace it with a comment
@@ -100,7 +101,7 @@ const INDEPENDENT = `<h2 id="independent">Independent code: what Sagebrush share
 // from code that this model did not write)
 const DISCLOSURE = "Written by Claude Opus 5.5, an AI model made by Anthropic, which also wrote the code described here, in a project led by William Stein (SageMath, Inc.). Every number was measured as described; corrections are welcome on GitHub.";
 
-const CSS = `
+export const CSS = `
 :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fff; --muted: #666; --rule: #ddd; --link: #2a6f2f; --code: #f4f4f2; --warn-rule: #b45309; --warn-bg: #fff4e0; }
 @media (prefers-color-scheme: dark) { :root { --fg: #e8e8e6; --bg: #161616; --muted: #9a9a9a; --rule: #333; --link: #8fd18f; --code: #222; --warn-rule: #f59e0b; --warn-bg: #2b1f0c; } }
 * { box-sizing: border-box; }
@@ -166,12 +167,14 @@ function page(p: Page): string {
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="/icons/icon-192.png">
 <link rel="stylesheet" href="/katex/katex.min.css">
+<link rel="preload" href="/katex/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/katex/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin>
 <style>${CSS}</style>
 <script type="application/ld+json">${JSON.stringify(ld).replace(/</g, "\\u003c")}</script>
 <script src="/alpha-banner.js" defer></script>
 </head>
 <body>
-<header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/articles/">Articles</a>${p.index ? "" : ` · <a href="/articles/${p.series}/">${esc(p.seriesTitle)}</a>`}</header>
+<header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/blog/">Blog</a> · <a href="/articles/">Articles</a>${p.index ? "" : ` · <a href="/articles/${p.series}/">${esc(p.seriesTitle)}</a>`}</header>
 <main>
 ${p.html.replace(/<\/h1>\n?(<aside class="disclaimer"[\s\S]*?<\/aside>\n)?/, (_m, box) => `</h1>\n${box ?? ""}<p class="ai">${esc(p.disclosure ?? DISCLOSURE)}</p>\n`)}
 ${p.index ? "" : `<p class="meta">Updated ${p.date} · <a href="${REPO}/${p.source}">source on GitHub</a></p>`}
@@ -244,7 +247,7 @@ const list = seriesList.map((s) => `<h2><a href="/articles/${s.slug}/">${esc(s.t
 writeFileSync(join(out, "articles", "index.html"), page({
   url: "/articles/", title: "Articles", description: "How Sagebrush's mathematics engines are implemented, algorithm by algorithm: what worked, what did not, and why.",
   date: new Date().toISOString().slice(0, 10), source: "articles", series: "", seriesTitle: "Articles", index: true,
-  html: `<h1>Articles</h1>\n<p>How Sagebrush's mathematics engines are implemented, algorithm by algorithm, top to bottom: what worked, what did not and why, and what would have saved time. The engines are written from the literature and are open source under the permissive MIT and Apache-2.0 licenses, unlike the GPL or closed systems they are measured against.</p>\n${list}\n${INDEPENDENT}`,
+  html: `<h1>Articles</h1>\n<p>How Sagebrush's mathematics engines are implemented, algorithm by algorithm, top to bottom: what worked, what did not and why, and what would have saved time. The engines are written from the literature, or ported with the copyright owner's permission, and are open source under the permissive MIT and Apache-2.0 licenses, unlike the GPL or closed systems they are measured against.</p>\n${list}\n${INDEPENDENT}`,
 }));
 urls.push({ url: "/articles/", date: new Date().toISOString().slice(0, 10) });
 console.log(`articles: ${urls.length - 4} pages in ${seriesList.length} series`);

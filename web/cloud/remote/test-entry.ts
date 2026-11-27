@@ -2,17 +2,37 @@
 // remotes routes, plus test-only hooks: a header that unbinds the remotes (the inert case), one that makes the per-IP
 // limiter refuse, /__verify (verifyChallenge, as the relay's upgrade will call it) and /__purge (purgeRemotes);
 // /__bindpurge and /__scheduled (web/share's own purge, to its end); /__stream (a route fed a counted body stream);
+// /__authtier (authTier() at a given time); x-test-tiers (REMOTE_TIERS, as given); x-test-unbound "cocalc" (no CoCalc);
 // and two wrappers of the database (x-test-remotes-fail "schema" also hides the tables from sqlite_master): x-test-barrier (the approval's slot read waits until N requests have made it, so
 // a race is deterministic), x-test-at-count (at that same read, with the approval past its session check: mark the
 // account deleting, or run an admin purge of it to its end) and x-test-remotes-fail (the remotes' purge batch fails:
-// "operational" or "schema"); /__limiter (how often the per-IP limiter was asked).
-import { handleShare, bindPurge, scheduled, type ShareEnv } from "../share/server.ts";
+// "operational" or "schema"); /__limiter (how often the per-IP limiter was asked); x-test-at-admit (a revoke, a
+// deletion or a tombstone written as the relay admits a leg).
+import { handleShare, bindPurge, scheduled, authTier, type ShareEnv } from "../share/server.ts";
 import { handleRemote, verifyChallenge, purgeRemotes, remoteDeletes, body, type RemoteEnv } from "./server.ts";
 // (the relay's Durable Object, bound in test-relay.mjs's Miniflare only (test-remote.mjs runs without it: inert))
-import { RemoteRelay, type RelayEnv } from "./relay.ts";
-import { RemoteAccount } from "./account.ts";
+import { RemoteRelay, RELAY_SYNC, type RelayEnv } from "./relay.ts";
+import { ENGINE_BUDGET_DEFAULTS, ENGINE_BUDGET_RANGE, ENGINE_ENVELOPE, ENGINE_ENTRIES, envelopeOf } from "./relay-caps.ts";
+import { RemoteAccount, leaseBytes } from "./account.ts";
 import type { Kind } from "./relay-caps.ts";
 export { RemoteRelay, RemoteAccount };
+import { DurableObject } from "cloudflare:workers";
+// (remote r3.3 P1: the sync account objects as the relay reads them (H5), bound as SYNC_ACCOUNT in
+// test-relay-engine.mjs only: one answer for every account, set by /__sync (?state=&gen= | ?reason= | ?throw=1),
+// and every read counted with the object's name and the account asked about (/__synccalls))
+let syncAnswer: { available: boolean; reason?: string; state: string; generation?: number } | "throw" = { available: true, state: "active", generation: 1 };
+const syncCalls: { name: string; account: string }[] = [];
+export class TestSyncAccount extends DurableObject {
+  async status(a: { account: string }) {
+    syncCalls.push({ name: (await this.ctx.storage.get<string>("name")) ?? "", account: a.account });
+    if (syncAnswer === "throw") throw new Error("the sync Worker is unreachable");
+    return syncAnswer;
+  }
+  async fetch(req: Request) {
+    await this.ctx.storage.put("name", new URL(req.url).searchParams.get("name") ?? "");
+    return Response.json({ ok: true });
+  }
+}
 // (both test objects run on one logical clock, ahead of the real one, so an alarm set from it never fires by itself:
 // the tests run alarms through /__alarm)
 let clock = Date.UTC(2030, 0, 15, 12, 0, 0);
@@ -39,6 +59,17 @@ export class TestRemoteRelay extends RemoteRelay {
   private failSend = false;
   private heldPuts = 0;
   private madeQueues: { frames: unknown[]; bytes: number; draining: boolean }[] = [];
+  private failPut: string | null = null;
+  private skipStale = false;
+  // (/__skipstale?on=1: the next end of stale engine pages doesn't happen, as if the object stopped right after the
+  // advance's write; the next definitive read must finish it)
+  protected async endStale(code: number, reason: string, tell = false): Promise<void> {
+    if (this.skipStale) {
+      this.skipStale = false;
+      return;
+    }
+    return super.endStale(code, reason, tell);
+  }
   constructor(ctx: DurableObjectState, env: RelayEnv) {
     super(ctx, env);
     const self = this as unknown as { consume(n: number, l: unknown[]): Promise<void>; queues: Map<WebSocket, unknown> };
@@ -66,6 +97,11 @@ export class TestRemoteRelay extends RemoteRelay {
               } finally {
                 this.heldPuts--;
               }
+            }
+            // (/__failput?key=cgen: the next write that includes that key fails once, nothing of it written)
+            if (this.failPut && (key === this.failPut || (key && typeof key === "object" && Object.hasOwn(key, this.failPut)))) {
+              this.failPut = null;
+              throw new Error("a storage write failed (test)");
             }
             return (store.put as (...a: unknown[]) => Promise<unknown>).call(store, key, ...rest);
           };
@@ -187,6 +223,22 @@ export class TestRemoteRelay extends RemoteRelay {
       else if (env.__saved) env.REMOTE_ACCOUNT = env.__saved;
       return Response.json({ bound: !!env.REMOTE_ACCOUNT });
     }
+    if (u.pathname === "/__failput") return Response.json({ key: (this.failPut = u.searchParams.get("key")) });
+    if (u.pathname === "/__skipstale") return Response.json({ on: (this.skipStale = u.searchParams.get("on") === "1") });
+    if (u.pathname === "/__nosync") {
+      // (this relay without the sync binding, as production today: /__nosync?on=1, back with on=0)
+      const env = this.env as { SYNC_ACCOUNT?: unknown; __savedSync?: unknown };
+      if (u.searchParams.get("on") === "1") { env.__savedSync ??= env.SYNC_ACCOUNT; env.SYNC_ACCOUNT = undefined; }
+      else if (env.__savedSync) env.SYNC_ACCOUNT = env.__savedSync;
+      return Response.json({ bound: !!env.SYNC_ACCOUNT });
+    }
+    if (u.pathname === "/__enginebudget") {
+      // (this relay's engine budget variables, as a deployment would set them: ?pages=&queue=&attempts= (each "" unsets it))
+      const env = this.env as Record<string, string | undefined>;
+      for (const [q, k] of [["pages", "REMOTE_ENGINE_PAGES"], ["queue", "REMOTE_ENGINE_QUEUE_BYTES"], ["attempts", "REMOTE_ENGINE_ATTEMPTS"]])
+        if (u.searchParams.has(q)) env[k] = u.searchParams.get(q) || undefined;
+      return Response.json({ ok: true });
+    }
     if (u.pathname === "/__alarm") {
       await this.alarm();
       return Response.json({ alarm: await this.ctx.storage.getAlarm() });
@@ -261,6 +313,9 @@ import { capsFor, peerWindow, RELAY_CAPS, PEER_WINDOW } from "./relay-caps.ts";
 type DB = NonNullable<RemoteEnv["SHARE_DB"]>;
 let arrived: { n: number; release: (() => void)[] } = { n: 0, release: [] };
 let limiterCalls = 0;
+// (/__referrer?policy=P: every page's Referrer-Policy rewritten to P from then on, "" for the page's own: the browser
+// suite's control, the pages as they were (no-referrer), refused in a real browser)
+let pagePolicy = "";
 
 function wrapDb(db: DB, barrier: number, fail: string | null, atCount: (() => Promise<void>) | null): DB {
   const failing = { failing: true };
@@ -360,6 +415,8 @@ export default {
     if (req.headers.get("x-test-no-session") === "1") e = { ...e, SESSION_KEY: undefined };
     if (req.headers.has("x-test-session-key")) e = { ...e, SESSION_KEY: JSON.parse(req.headers.get("x-test-session-key")!) };
     if (req.headers.get("x-test-unbound") === "accounts") e = { ...e, REMOTE_ACCOUNTS: undefined };
+    if (req.headers.has("x-test-tiers")) e = { ...e, REMOTE_TIERS: JSON.parse(req.headers.get("x-test-tiers")!) };
+    if (req.headers.get("x-test-unbound") === "cocalc") e = { ...e, COCALC_ORIGIN: undefined, COCALC_CLIENT_SECRET: undefined } as RemoteEnv;
     if (req.headers.get("x-test-unbound") === "preauth") e = { ...e, REMOTE_PREAUTH: undefined };
     if (req.headers.get("x-test-unbound") === "relay") e = { ...e, REMOTE_RELAY: undefined };
     if (req.headers.get("x-test-hold-admission") && env.REMOTE_RELAY) {
@@ -375,7 +432,39 @@ export default {
         return real.get(id).fetch(u as string, init);
       } }) } as unknown as DurableObjectNamespace };
     }
+    const atAdmit = req.headers.get("x-test-at-admit");
+    if (atAdmit && env.REMOTE_RELAY) {
+      // (as the relay's admission returns its 101, before the Worker goes on: "revoke <rid>" (the remote's row revoked),
+      // "deleting <account>" (the account marked deleting) or "tombstone <hash>" (that account hash tombstoned): a
+      // revoke, a deletion or a purge landing while the relay admitted the leg)
+      const [what, arg] = atAdmit.split(" ");
+      const db = env.SHARE_DB!;
+      const write = what === "revoke" ? db.prepare("UPDATE remotes SET revoked = 1 WHERE remote_id = ?1").bind(arg)
+        : what === "deleting" ? db.prepare("UPDATE accounts SET deleting = 1 WHERE account_id = ?1").bind(arg)
+        : db.prepare("INSERT INTO tombstones (account_hash, created) VALUES (?1, 1)").bind(arg);
+      const real = e.REMOTE_RELAY!;
+      e = { ...e, REMOTE_RELAY: { idFromName: (n: string) => real.idFromName(n), get: (id: DurableObjectId) => ({ fetch: async (u: string | Request, init?: RequestInit) => {
+        const res = await real.get(id).fetch(u as string, init);
+        if (res.status === 101) await write.run();
+        return res;
+      } }) } as unknown as DurableObjectNamespace };
+    }
     if (url.pathname === "/__held") return Response.json({ holding });
+    if (url.pathname === "/__sync") {
+      const q = url.searchParams;
+      syncAnswer = q.get("throw") === "1" ? "throw"
+        : q.has("reason") ? { available: false, reason: q.get("reason")!, state: "off" }
+        : { available: true, state: q.get("state") ?? "active", generation: Number(q.get("gen") ?? "1") };
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/__engine") return Response.json({ syncEvery: RELAY_SYNC.everyMs, budget: ENGINE_BUDGET_DEFAULTS, range: ENGINE_BUDGET_RANGE, envelope: ENGINE_ENVELOPE, defaultsNeed: envelopeOf(ENGINE_BUDGET_DEFAULTS), entries: ENGINE_ENTRIES });
+    if (url.pathname === "/__synccalls") return Response.json({ calls: syncCalls.splice(0) });
+    if (url.pathname === "/__syncname" && (env as { SYNC_ACCOUNT?: DurableObjectNamespace }).SYNC_ACCOUNT) {
+      // (names an account object, so /__synccalls shows which one the relay asked)
+      const ns = (env as { SYNC_ACCOUNT?: DurableObjectNamespace }).SYNC_ACCOUNT!;
+      const name = url.searchParams.get("name")!;
+      return ns.get(ns.idFromName(name)).fetch(`https://sync/?name=${encodeURIComponent(name)}`);
+    }
     if (url.pathname === "/__relaycalls") {
       const n = relayCalls;
       relayCalls = 0;
@@ -426,6 +515,11 @@ export default {
       e = { ...e, REMOTE_RELAY: { idFromName: (n: string) => real.idFromName(n), get: (id: DurableObjectId) => ({ fetch: async (u: string | Request, init?: RequestInit) =>
         String(typeof u === "string" ? u : u.url).endsWith("/revoke") ? new Response("down", { status: 503 }) : real.get(id).fetch(u as string, init) }) } as unknown as DurableObjectNamespace };
     }
+    if (url.pathname === "/__authtier" && req.method === "POST") {
+      // (authTier() judged at a time of the test's choosing: LIMITS_TTL's edge, without waiting for it)
+      const b = (await req.json()) as { id: string; at: number };
+      return Response.json({ tier: await authTier(e as ShareEnv, { id: b.id, session: "" }, b.at) });
+    }
     if (url.pathname === "/__verify" && req.method === "POST") {
       const b = (await req.json()) as { c: unknown; sig: unknown };
       return Response.json(await verifyChallenge(e, b.c, b.sig));
@@ -455,7 +549,8 @@ export default {
     }
     if (url.pathname === "/__limits") {
       // (the tables the relay reads, as it reads them: the op tables, its limits, every receiver's window (grader's H16))
-      return Response.json({ ops: { peer: PEER_OPS, page: PAGE_OPS }, limits: RELAY_LIMITS, caps: RELAY_CAPS, peerWindow: PEER_WINDOW });
+      return Response.json({ ops: { peer: PEER_OPS, page: PAGE_OPS }, limits: RELAY_LIMITS, caps: RELAY_CAPS, peerWindow: PEER_WINDOW,
+        leases: { runner: leaseBytes("runner"), agent: leaseBytes("agent") } });
     }
     if (url.pathname === "/__limiter") return Response.json({ calls: limiterCalls });
     if (url.pathname === "/__bindpurge" && req.method === "POST") {
@@ -479,6 +574,16 @@ export default {
       else status = (await handleRemote(inner, e, ctx))!.status;
       return Response.json({ status, ...seen });
     }
-    return (await handleRemote(req, e, ctx)) ?? (await handleShare(req, e, ctx)) ?? new Response("not the API", { status: 404 });
+    if (url.pathname === "/__referrer") {
+      pagePolicy = url.searchParams.get("policy") ?? "";
+      return Response.json({ policy: pagePolicy });
+    }
+    const remote = await handleRemote(req, e, ctx);
+    if (remote && pagePolicy && remote.headers.has("referrer-policy")) {
+      const h = new Headers(remote.headers);
+      h.set("referrer-policy", pagePolicy);
+      return new Response(remote.body, { status: remote.status, headers: h });
+    }
+    return remote ?? (await handleShare(req, e, ctx)) ?? new Response("not the API", { status: 404 });
   },
 };

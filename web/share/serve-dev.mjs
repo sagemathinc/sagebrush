@@ -136,18 +136,26 @@ async function startWorker({ variant, site, files, limits, siteServer, filesServ
   const rules = headerRules();
   const log = { files: [], site: [] }; // (each request to the files domain, and to the site: G-10's share cases)
 
+  // (a request the Worker can't answer, as one still in flight when close() disposes it: 502, never an unhandled
+  // rejection, which ended a test that had passed every check (the page's last requests at its teardown))
   async function viaWorker(req, res, url) {
-    const chunks = [];
-    for await (const c of req) chunks.push(c);
-    const headers = {};
-    for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers[k] = v;
-    const r = await dispatch(mf, url, { method: req.method, headers, body: chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined, redirect: "manual" });
-    const h = {};
-    r.headers.forEach((v, k) => { if (k !== "set-cookie") h[k] = v; });
-    const cookies = r.headers.getSetCookie();
-    if (cookies.length) h["set-cookie"] = cookies;
-    res.writeHead(r.status, h);
-    res.end(Buffer.from(await r.arrayBuffer()));
+    try {
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      const headers = {};
+      for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers[k] = v;
+      const r = await dispatch(mf, url, { method: req.method, headers, body: chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined, redirect: "manual" });
+      const h = {};
+      r.headers.forEach((v, k) => { if (k !== "set-cookie") h[k] = v; });
+      const cookies = r.headers.getSetCookie();
+      if (cookies.length) h["set-cookie"] = cookies;
+      res.writeHead(r.status, h);
+      res.end(Buffer.from(await r.arrayBuffer()));
+    } catch (e) {
+      if (res.writableEnded || res.destroyed) return;
+      if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" });
+      res.end("the share Worker didn't answer: " + String(e?.cause?.message ?? e?.message ?? e).slice(0, 200));
+    }
   }
 
   handlers.site = async (req, res) => {
@@ -156,6 +164,8 @@ async function startWorker({ variant, site, files, limits, siteServer, filesServ
     if (/^\/(api|auth)\//.test(url.pathname)) return viaWorker(req, res, url.href);
     let path = url.pathname;
     if (/^\/s\/[a-z2-7]{12}(@[0-9a-f]{8,64})?\/?$/.test(path)) path = "/s/";
+    // (a public GitHub repository's notebook or folder: the same page, as the site's Worker serves it)
+    if (path.startsWith("/gh/")) path = "/s/";
     let file = normalize(join(DIST, decodeURIComponent(path)));
     if (!file.startsWith(DIST)) return res.writeHead(403).end();
     if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");

@@ -76,7 +76,10 @@ const STYLE = `
 .sbfprev .ph .m { color: #5d645f; font-size: 12px; flex: 1; white-space: nowrap; }
 .sbfprev .ph button, .sbfprev .pa button, .sbfprev .pv button { border: 1px solid #d4d4cb; background: #fff; border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; color: inherit; }
 .sbfprev .ph .x { border: 0; background: none; font-size: 16px; padding: 2px 6px; }
+.sbfprev a.btn { display: inline-block; border: 1px solid #d4d4cb; background: #fff; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: inherit; text-decoration: none; }
 .sbfprev .pb { overflow: auto; padding: 10px 14px; flex: 1; min-height: 80px; }
+.sbfprev .where { padding: 8px 14px 0; font-size: 13px; overflow-wrap: anywhere; }
+.sbfprev .where code { font-size: 12px; }
 .sbfprev .pb pre { margin: 0; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
 .sbfprev .pb table { border-collapse: collapse; font-size: 12.5px; }
 .sbfprev .pb th, .sbfprev .pb td { border: 1px solid #e2e1d9; padding: 3px 7px; text-align: left; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
@@ -106,6 +109,7 @@ const STYLE = `
 @media (prefers-color-scheme: dark) {
   .sbfprev .pp { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
   .sbfprev .ph button, .sbfprev .pa button, .sbfprev .pv button { background: #262b27; border-color: #39403a; }
+  .sbfprev a.btn { background: #262b27; border-color: #39403a; }
   .sbfprev .pb th { background: #262b27; } .sbfprev .pb th, .sbfprev .pb td { border-color: #39403a; }
 }
 `;
@@ -373,6 +377,11 @@ export type StorageHost = PreviewHost & {
   /** opened to export: the export starts at once, as its button would (File ▸ Download ▸ Everything, the file
    * browser's ⋯ and a selection's Download: sim run 11, X05's agent never found the button here) */
   startExport?: boolean;
+  /** where the files are on the computer (the desktop app's workspace folder): said, the panel then about this
+   * computer, not this browser; absent, not said */
+  where?: string;
+  /** Show in folder, beside where: the system's file manager at the workspace's folder */
+  reveal?: () => void;
 };
 
 /** How long ago `at` was, in words: "just now", "5 min ago", "3 h ago", "yesterday", "9 days ago". */
@@ -431,7 +440,13 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
   const { box, close, onClose } = panel("Storage");
   const x = button("✕", close, "x");
   x.setAttribute("aria-label", "Close");
-  box.append(h("div", { className: "ph" }, h("b", { textContent: "Storage in this browser" }), h("span", { className: "m" }), x));
+  box.append(h("div", { className: "ph" }, h("b", { textContent: host.where ? "Storage on this computer" : "Storage in this browser" }), h("span", { className: "m" }), x));
+  // (the desktop app: where the files are, the folder named in full, and Show in folder beside it (#1539))
+  if (host.where) {
+    const at = h("div", { className: "where" }, "Your files are in ", h("code", { textContent: host.where }));
+    if (host.reveal) at.append(" ", button("Show in folder", host.reveal));
+    box.append(at);
+  }
   const body = h("div", { className: "pb" });
   box.append(body);
   x.focus();

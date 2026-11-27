@@ -1,0 +1,333 @@
+// ci: web-runner order=167 runner=bun chrome
+// "Chat here" on the Agents page, end to end in headless Chromium: the built page (dist/agents,
+// SAGEBRUSH_AGENTS=1), served with the site's own headers (web/dist/_headers: its CSP's connect-src 'self' is what lets
+// the page reach the relay's agent leg on its own origin) by a server that also plays the relay and a runner on one
+// of your computers: GET /api/remote/v1/peers, and the agent page leg, a WebSocket that answers the hello, says
+// agent.ready, takes the grant, answers a chat message with a turn, and answers {"unpair":true} as the runner does
+// (agent.ended "The agent stopped…", then the close). Board's words are checked word for word:
+//   - the Connect dialog's computers: the heading, a row with Chat here; none set up; the listing failed;
+//   - the header while it connects and once allowed; Remember hidden; the Disconnect button's title;
+//   - Disconnect: grant.changed {} then {"unpair":true}, and only the page's own line after it;
+//   - a leg lost, and a refused hello in the runner's words;
+//   - after Disconnect and a reload, nothing of the runner's pairing in localStorage, sessionStorage or IndexedDB.
+//   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/agents/test-agents-chat-here.mjs
+import { spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, existsSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, normalize } from "node:path";
+import { devtoolsPort } from "../test-port.mjs";
+import { BAR_CLEAR } from "../workspace/agent-bar-check.mjs";
+
+const here = new URL(".", import.meta.url).pathname;
+const dist = join(here, "..", "dist");
+let failures = 0;
+const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+if (!existsSync(join(dist, "agents", "agents.js"))) { console.error("no web/dist/agents: SAGEBRUSH_AGENTS=1 bun web/build.ts first"); process.exit(1); }
+
+// ---- the site's headers, as web/serve.py applies them
+const rules = [];
+{
+  let cur = null;
+  for (const line of readFileSync(join(dist, "_headers"), "utf8").split("\n")) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    if (!/^\s/.test(line)) { cur = { pattern: line.trim(), headers: [] }; rules.push(cur); continue; }
+    const i = line.indexOf(":");
+    cur?.headers.push([line.slice(0, i).trim(), line.slice(i + 1).trim()]);
+  }
+}
+const headersFor = (path) => {
+  const h = new Headers();
+  for (const r of rules) {
+    const m = r.pattern.endsWith("*") ? path.startsWith(r.pattern.slice(0, -1)) : path === r.pattern;
+    if (m) for (const [k, v] of r.headers) h.set(k, v);
+  }
+  return h;
+};
+const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png" };
+
+// ---- the relay and the runner
+const R = { mode: "ok", peers: [{ kind: "runner", remote_id: "rid-laptop-01", name: "laptop" }], available: true, peersStatus: 200, legs: [], got: [] };
+const TOKEN = "TOKEN_" + "t".repeat(40), NONCE = "NONCE_n0nce";
+const rpc = (ws, method, params) => ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+const server = Bun.serve({
+  port: 0, hostname: "127.0.0.1",
+  fetch(req, srv) {
+    const url = new URL(req.url);
+    if (url.pathname === "/api/remote/v1/peers") {
+      if (R.peersStatus !== 200) return new Response("no", { status: R.peersStatus });
+      return Response.json({ peers: R.peers, available: R.available });
+    }
+    if (url.pathname === "/api/remote/v1/page") {
+      if (url.searchParams.get("chan") !== "agent" || url.searchParams.get("remote") !== "rid-laptop-01") return new Response("no", { status: 400 });
+      R.upgrades = (R.upgrades ?? 0) + 1;
+      // (the relay's answer while the computer's runner isn't connected: relay.ts's 503, before any WebSocket)
+      if (R.offline > 0) { R.offline--; return new Response("the remote isn't connected", { status: 503 }); }
+      return srv.upgrade(req, { data: { helloed: false, msgs: [] } }) ? undefined : new Response("no", { status: 400 });
+    }
+    let p = normalize(decodeURIComponent(url.pathname));
+    if (p.endsWith("/")) p += "index.html";
+    const f = join(dist, p);
+    if (!f.startsWith(dist) || !existsSync(f) || statSync(f).isDirectory()) return new Response("not found", { status: 404 });
+    const h = headersFor(url.pathname);
+    h.set("content-type", types[p.slice(p.lastIndexOf("."))] ?? "application/octet-stream");
+    return new Response(Bun.file(f), { headers: h });
+  },
+  websocket: {
+    open(ws) { R.legs.push(ws); },
+    message(ws, text) {
+      if (text === '{"relay":"ping"}') return ws.send('{"relay":"pong"}');
+      const env = JSON.parse(text);
+      const m = JSON.parse(env.m);
+      if (!ws.data.helloed) {
+        ws.data.helloed = true;
+        ws.data.hello = m.params;
+        if (R.mode === "refuse") { ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: R.refusal, data: { code: "refused", message: R.refusal } } })); return ws.close(1000); }
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, purpose: "agent", via: "relay", token: TOKEN, nonce: NONCE, maxFrameBytes: 4 * 1024 * 1024 - 4096, limits: { frame: 4 * 1024 * 1024 - 2048 }, gen: 3, incarnation: "0123456789abcdef", remote_id: "rid-laptop-01", channels: ["agent"], resumed: false } }));
+        rpc(ws, "agent.ready", { agent: { name: "Claude", client: "claude-agent-sdk", version: "0.4.0" }, features: ["notebook.edit", "permission.digest"], child: "child-laptop-1" });
+        return;
+      }
+      ws.data.msgs.push(m);
+      R.got.push(m);
+      if (m.method === "chat.message") {
+        const { conversation, id } = m.params, turn_id = "turn-" + id;
+        const ev = (event) => rpc(ws, "turn.event", { conversation, turn_id, in_reply_to: id, event });
+        ev({ type: "turn_started" });
+        ev({ type: "message_revised", message: turn_id + ":1", revision: 1 });
+        ev({ type: "text_delta", message: turn_id + ":1", revision: 1, text: "hello from laptop" });
+        ev({ type: "turn_finished", outcome: "completed" });
+      }
+      if (m.method === "grant.changed" && m.params?.folders && R.mode === "drop") setTimeout(() => ws.close(1001), 300);
+      if (m.unpair === true) {
+        // (as the runner answers an unpair: its agent.ended, then the page's close)
+        rpc(ws, "agent.ended", { text: "The agent stopped. Connect again to restart it." });
+        setTimeout(() => ws.close(1000), 50);
+      }
+    },
+  },
+});
+const site = `http://127.0.0.1:${server.port}`;
+
+// ---- Chromium
+const profile = mkdtempSync(join(tmpdir(), "sb-chat-here-"));
+let cdp = Number(process.env.CDP_PORT || 0);
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${cdp}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+try {
+  if (!cdp) cdp = await devtoolsPort(profile);
+  let targets;
+  for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdp}/json`)).json(); break; } catch { await sleep(100); } }
+  const sock = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+  await new Promise((r) => (sock.onopen = r));
+  let n = 0;
+  const waiting = new Map();
+  const violations = [];
+  sock.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
+    if (m.method === "Runtime.consoleAPICalled" || m.method === "Log.entryAdded") { const t = JSON.stringify(m.params); if (/Content Security Policy|Refused to connect/.test(t)) violations.push(t.slice(0, 300)); }
+  };
+  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
+  const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 400)); return r.result?.result?.value; };
+  const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+  await send("Runtime.enable");
+  await send("Log.enable");
+  await send("Page.enable");
+  const open = async () => { await send("Page.navigate", { url: site + "/agents/" }); await sleep(300); return until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && !document.querySelector('#connect').hidden`, 30000); };
+  const text = (sel) => ev(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? null`);
+  const dialogText = () => ev(`[...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? ''`);
+  const bar = () => ev(`({ alert: document.querySelector('#conn-alert').textContent, status: document.querySelector('#conn-status').textContent })`);
+  const chatHere = async () => {
+    await ev(`document.querySelector('#connect').click()`);
+    if (!(await until(`[...document.querySelectorAll('.sbag-dlg .runner button')].some((b) => b.textContent === 'Chat here')`))) return false;
+    await ev(`[...document.querySelectorAll('.sbag-dlg .runner button')].find((b) => b.textContent === 'Chat here').click()`);
+    return true;
+  };
+
+  ok(await open(), "the Agents page opens");
+  // (the Connect dialog: your computers, in their reviewed words)
+  await ev(`document.querySelector('#connect').click()`);
+  ok(await until(`[...document.querySelectorAll('.sbag-dlg .runner')].length === 1`), "the Connect dialog lists your computers");
+  const d = await dialogText();
+  ok(d.includes("Or chat with an agent on one of your computers:") && d.includes("laptop") && d.includes("Chat here"), "…under \"Or chat with an agent on one of your computers:\", a row: laptop, Chat here", d);
+  ok(d.includes("Link") && !d.includes("Port"), "…with the link field still there, for the agent on this computer (its one field: the link it gives)", d);
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+
+  // Chat here: connecting, then the grant dialog (no Remember), then the agent on laptop
+  await ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
+  ok(await chatHere(), "Chat here");
+  ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`), "…then the grant dialog");
+  // (while it waits for Allow: the header and the banner say the same, waiting for the dialog, never "isn't connected")
+  const askAllow = { who: await text("#who"), banner: await text("#banner") };
+  ok(/waiting: allow it in the dialog/.test(askAllow.who) && /is waiting for you to allow it in the dialog/.test(askAllow.banner) && !/isn't connected/.test(askAllow.banner), "…while it's open, the header and the banner both say it waits for Allow in the dialog", askAllow);
+  ok(await ev(`window.__whoSeen.some((t) => t.includes('Connecting to laptop…'))`), "the header said \"Connecting to laptop…\" meanwhile", await ev(`window.__whoSeen`));
+  const leg = R.legs.at(-1);
+  ok(leg.data.hello?.fresh === true && leg.data.hello?.purpose === "agent" && !("remember" in leg.data.hello) && !("resume" in leg.data.hello), "the hello asks a fresh agent and remembers nothing", leg.data.hello);
+  ok(!(await ev(`[...document.querySelectorAll('.sbag-dlg label')].some((l) => l.textContent.startsWith('Remember'))`)), "Remember this agent isn't offered for a computer's agent");
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').click()`);
+  ok(await until(`document.querySelector('#who').textContent.includes('Claude') && document.querySelector('#who').textContent.includes('on laptop')`), "allowed: \"Claude on laptop\"", await text("#who"));
+  ok((await text("#connect")) === "Connected", "the button stays Connected");
+  ok(leg.data.msgs.some((m) => m.method === "grant.changed" && m.params?.folders) && leg.data.msgs.some((m) => m.method === "page.features" && m.params.features.includes("permission.digest")), "the grant is told to the agent, and permission.digest among the page's features");
+  ok(violations.length === 0, "no Content Security Policy refusal: connect-src 'self' covers the page's own wss origin", violations);
+  ok(await until(`${BAR_CLEAR} === true`, 5000), "the Agents page: the agent's bar is in its own row, over nothing the person types in or reads", await ev(BAR_CLEAR).catch((e) => String(e)));
+  // (A1, #1546: the agent's access is an icon at the start of the composer's footer row, not a box above it; its words
+  //  are its title and stay for a screen reader; a click opens the same menu, above it, inside the window)
+  const foot = await ev(`(() => {
+    const b = document.querySelector('.sbag-bar'), chip = b?.querySelector('button.chip'), r = chip?.getBoundingClientRect();
+    const words = chip?.querySelector('.words'), ico = chip?.querySelector('.ico');
+    return { inRow: !!b?.parentElement?.matches('.composer .row > [data-sbag-footer]'), first: b?.parentElement === document.querySelector('.composer .row').firstElementChild,
+      w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), ico: !!ico && ico.getBoundingClientRect().width === 16 && getComputedStyle(ico).maskImage.startsWith('url('),
+      wordsW: Math.round(words?.getBoundingClientRect().width ?? -1), words: words?.textContent ?? '', title: chip?.title ?? '',
+      above: (() => { const f = document.querySelector('.composer-wrap > [data-sbag-slot]'); return !!f && f.childElementCount === 0 && f.getBoundingClientRect().height === 0; })() };
+  })()`);
+  ok(foot.inRow && foot.first && foot.above && foot.ico && foot.w <= 32 && foot.h <= 28 && foot.wordsW <= 1 && /^Claude · /.test(foot.words) && /^Claude on laptop: /.test(foot.title), "A1: the agent's access is a small icon at the start of the composer's footer row (the row above the composer empty, of no height); its words kept for a screen reader and as its title", foot);
+  await ev(`document.querySelector('.sbag-bar button.chip').click()`);
+  await until(`document.querySelector('.sbag-bar').classList.contains('open')`, 3000);
+  const menu = await ev(`(() => { const m = document.querySelector('.sbag-bar .menu').getBoundingClientRect(), c = document.querySelector('.sbag-bar button.chip').getBoundingClientRect();
+    return { items: [...document.querySelectorAll('.sbag-bar .menu [role=menuitem]')].map((b) => b.textContent), full: document.querySelector('.sbag-bar .menu .full').textContent,
+      above: m.bottom <= c.top, inside: m.left >= 0 && m.right <= innerWidth && m.top >= 0 && m.bottom <= innerHeight, focus: document.activeElement?.textContent }; })()`);
+  ok(menu.items.includes("Disconnect") && /^Claude on laptop: /.test(menu.full) && menu.above && menu.inside && menu.focus === menu.items[0], "A1: a click on the icon opens its menu above it, inside the window: the whole access sentence and its controls, the first focused", menu);
+  if (process.env.SHOTS) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOTS + "/a1-menu.png", Buffer.from(r.result.data, "base64")); }
+  await ev(`document.querySelector('.sbag-bar .menu [role=menuitem]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  ok(await until(`!document.querySelector('.sbag-bar').classList.contains('open') && document.activeElement === document.querySelector('.sbag-bar button.chip')`, 3000), "A1: Escape closes it, back on the icon");
+  if (process.env.SHOTS) { const r = await send("Page.captureScreenshot", { format: "png" }); (await import("node:fs")).writeFileSync(process.env.SHOTS + "/a1-footer.png", Buffer.from(r.result.data, "base64")); }
+  // (by keyboard: ArrowDown on the icon opens the menu on its first control; Escape closes it back on the icon)
+  await ev(`(() => { const c = document.querySelector('.sbag-bar button.chip'); c.focus(); c.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); return true; })()`);
+  const kb = await until(`document.querySelector('.sbag-bar').classList.contains('open') && document.activeElement?.getAttribute('role') === 'menuitem'`, 3000);
+  await ev(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  ok(kb && await until(`!document.querySelector('.sbag-bar').classList.contains('open')`, 3000), "A1: by keyboard too: ArrowDown on the icon opens its menu on the first control, Escape closes it");
+  // (a phone's width: the icon stays in the row, inside the composer, and Send stays in view)
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 800, deviceScaleFactor: 1, mobile: true });
+  await sleep(300);
+  const phone = await ev(`(() => { const c = document.querySelector('.composer').getBoundingClientRect(), i = document.querySelector('.sbag-bar button.chip').getBoundingClientRect(), s = document.querySelector('#send').getBoundingClientRect();
+    return { icon: i.width > 0 && i.left >= c.left && i.right <= c.right, send: s.width > 0 && s.right <= innerWidth && s.left >= 0 }; })()`);
+  const clear = await ev(BAR_CLEAR);
+  ok(phone.icon && phone.send && clear === true, "A1: at a phone's width the icon stays inside the composer's row, over nothing the person types in, and Send stays in view", { phone, clear });
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(300);
+  const title = await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.title ?? null`);
+  ok(title === "Disconnect and stop the agent on laptop", "the bar's Disconnect: \"Disconnect and stop the agent on laptop\"", title);
+
+  // a chat turn through the leg
+  await ev(`document.querySelector('#new').click()`);
+  await until(`!!document.querySelector('[data-try]')?.offsetParent`);
+  await ev(`document.querySelector('[data-try]').click()`);
+  ok(await until(`document.body.innerText.includes('hello from laptop')`), "a message goes to the agent on laptop, and its turn comes back");
+
+  // Disconnect: the drain's order, then only the page's own line (never the runner's "The agent stopped")
+  const before = leg.data.msgs.length;
+  await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect').click()`);
+  ok(await until(`document.querySelector('#conn-status').textContent.length > 0`), "Disconnect: the bar says so");
+  const after = leg.data.msgs.slice(before);
+  ok(JSON.stringify(after) === JSON.stringify([{ jsonrpc: "2.0", method: "grant.changed", params: {} }, { unpair: true }]), "…grant.changed {}, then {\"unpair\":true}", after);
+  await sleep(300);
+  const b1 = await bar();
+  ok(b1.status === "Disconnected. The agent on laptop may keep running for up to 5 minutes." && !b1.alert && !(await ev(`document.body.innerText.includes('The agent stopped')`)), "…only \"Disconnected. The agent on laptop may keep running for up to 5 minutes.\" (the runner's agent.ended isn't shown)", b1);
+
+  // after Disconnect and a reload: nothing of the runner's pairing kept in any store
+  await send("Page.reload", {});
+  await sleep(300);
+  // (Connect shown: the workspace open and the pairing's Connect wired, as open() waits for; the composer alone comes
+  //  first, and under load a Chat here's click on Connect before that did nothing)
+  await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && !document.querySelector('#connect').hidden`, 30000);
+  const stores = await ev(`(async () => {
+    const out = { local: JSON.stringify({ ...localStorage }), session: JSON.stringify({ ...sessionStorage }), idb: "" };
+    for (const { name } of await indexedDB.databases()) {
+      const db = await new Promise((ok, no) => { const r = indexedDB.open(name); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+      for (const s of db.objectStoreNames) {
+        const all = await new Promise((ok) => { const r = db.transaction(s).objectStore(s).getAll(); r.onsuccess = () => ok(r.result); r.onerror = () => ok([]); });
+        out.idb += JSON.stringify(all, (k, v) => (v instanceof Blob || ArrayBuffer.isView(v) ? "(bytes)" : v));
+      }
+      db.close();
+    }
+    return out;
+  })()`);
+  const all = stores.local + stores.session + stores.idb;
+  ok(!all.includes(TOKEN) && !all.includes(NONCE) && !all.includes("child-laptop-1") && !all.includes("rid-laptop-01") && !stores.session.includes("sb-agent-reload"), "after Disconnect and a reload: no token, nonce, agent child, computer or reload record in localStorage, sessionStorage or IndexedDB", { local: stores.local.length, session: stores.session.slice(0, 200), idb: stores.idb.length });
+  ok(!/"grant":\{[^}]*"folders"/.test(stores.idb.replace(/\s/g, "")) || !stores.idb.includes("laptop"), "…and no grant kept for it");
+
+  // a leg lost: the lost line, with how to connect again
+  R.mode = "drop";
+  ok(await chatHere(), "Chat here again");
+  ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`), "…its grant dialog");
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').click()`);
+  ok(await until(`document.querySelector('#conn-alert').textContent.startsWith('Not connected to laptop')`), "the leg lost: the bar's alert", await bar());
+  const b2 = await bar();
+  ok(/^Not connected to laptop(: .+)?\. Choose Chat here to connect again\.$/.test(b2.alert), "…\"Not connected to laptop[: why]. Choose Chat here to connect again.\"", b2);
+
+  // a refused hello: the runner's words, as they are
+  R.mode = "refuse";
+  R.refusal = "The agent is already open in another page or tab. Close it there, then connect again here.";
+  ok(await chatHere(), "Chat here, while another tab holds the agent");
+  ok(await until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(R.refusal)}`), "the runner's refusal, in its own words", await bar());
+
+  // the computer's runner not connected yet (the relay refuses the leg's upgrade, 503, as it does until the runner's
+  // own leg is up; the browser sees only a close): Chat here waits for it, tries again, and connects once it's up
+  R.mode = "ok";
+  R.offline = 2;
+  R.upgrades = 0;
+  await ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
+  ok(await chatHere(), "Chat here while the computer's runner isn't connected yet");
+  ok(await until(`window.__whoSeen.some((t) => t.includes('Waiting for laptop to connect…'))`, 15000), "…the header says \"Waiting for laptop to connect…\"", await ev(`window.__whoSeen`));
+  ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`, 20000), "…and once its runner is up, the grant dialog");
+  ok(R.offline === 0 && R.upgrades === 3, `…after two refused upgrades and a third taken (${R.upgrades})`);
+  ok(!(await ev(`document.querySelector('#conn-alert').textContent`)), "…with no alert while it waited");
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').click()`);
+  ok(await until(`document.querySelector('#who').textContent.includes('on laptop')`), "allowed: the agent on laptop");
+  await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect').click()`);
+  await until(`document.querySelector('#conn-status').textContent.length > 0`);
+
+  // none set up; the listing failed
+  R.mode = "ok";
+  R.peers = [];
+  await ev(`document.querySelector('#connect').click()`);
+  ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes('None of your computers is set up for this. On one, run: sagebrush remote login')`), "none set up: \"None of your computers is set up for this. On one, run: sagebrush remote login\"");
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  // an account the site doesn't let connect a computer: the sentence alone, no command, even with computers listed
+  R.peers = [{ kind: "runner", remote_id: "rid-laptop-01", name: "laptop" }];
+  R.available = false;
+  await ev(`document.querySelector('#connect').click()`);
+  ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Connecting a computer isn't enabled for your account yet.")`), "not enabled: \"Connecting a computer isn't enabled for your account yet.\"");
+  ok(await ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1); return !d.textContent.includes('sagebrush remote login') && ![...d.querySelectorAll('button')].some((b) => b.textContent === 'Chat here'); })()`), "…no command, and no Chat here");
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  // (not enabled and no computers, a new account's usual case; and an answer without `available`: both the sentence,
+  // never the hint's command)
+  for (const [what, available] of [["not enabled, no computers", false], ["no `available` in the answer", undefined]]) {
+    R.peers = [];
+    R.available = available;
+    await ev(`document.querySelector('#connect').click()`);
+    ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Connecting a computer isn't enabled for your account yet.")`), `${what}: the not-enabled sentence`);
+    ok(await ev(`!([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes('sagebrush remote login')`), `${what}: no command`);
+    await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  }
+  R.available = true;
+  R.peers = [];
+  // signed out (401 or 403): the reason, and the site's sign-in, back to this page (its query too)
+  await ev(`history.replaceState(null, "", location.pathname + "?from=a b&x=1")`);
+  for (const status of [401, 403]) {
+    R.peersStatus = status;
+    await ev(`document.querySelector('#connect').click()`);
+    ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes('Your computers: sign in to see them')`), `${status}: "Your computers: sign in to see them"`);
+    const signIn = await ev(`(() => { const a = [...document.querySelectorAll('.sbag-dlg')].at(-1)?.querySelector('a.sign-in'); return a ? { text: a.textContent, href: a.getAttribute('href') } : null; })()`);
+    const back = await ev(`location.pathname + location.search`);
+    ok(back.includes("?from=") && signIn?.text === "Sign in" && signIn?.href === "/auth/login?return=" + encodeURIComponent(back), `${status}: a "Sign in" link to the site's sign-in, back to this page and its query`, { signIn, back });
+    await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  }
+  // (a site without computers at all, a local one (404): no section, nothing about computers; the link field still there)
+  R.peersStatus = 404;
+  await ev(`document.querySelector('#connect').click()`);
+  await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`);
+  await sleep(500);
+  const d404 = await ev(`[...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? ''`);
+  ok(!/computers/i.test(d404) && /Link/.test(d404), "404 (a site without computers): no \"Your computers\" section at all, the link field still there", d404);
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  R.peersStatus = 500;
+  await ev(`document.querySelector('#connect').click()`);
+  ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Your computers: this site can't list your computers (HTTP 500)")`), "another failure: its reason");
+  ok(await ev(`!([...document.querySelectorAll('.sbag-dlg')].at(-1)?.querySelector('a.sign-in'))`), "…and no sign-in link");
+} finally {
+  chrome.kill();
+  server.stop(true);
+  try { rmSync(profile, { recursive: true, force: true }); } catch {}
+}
+console.log(failures ? `test-agents-chat-here: ${failures} failed` : "test-agents-chat-here: all passed");
+process.exit(failures ? 1 : 0);

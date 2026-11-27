@@ -1,5 +1,5 @@
 {
-  "_": "The benchmark's documents. Each is fetched from commit-pinned URLs and checked against its sha256, or generated (gen), or one of web/latex/examples.ts (example): run.mjs's source() says the forms. engine: the latexmk rule of the oracle. edit: the one-character edit timed after the first build, an x inserted right after the first occurrence of `after`. LICENSES.md has each document's license.",
+  "_": "The benchmark's documents. Each is fetched from commit-pinned URLs and checked against its sha256, or generated (gen), or one of scripts/latex-examples.mjs (example): run.mjs's source() says the forms. engine: the latexmk rule of the oracle. edit: the one-character edit timed after the first build, an x inserted right after the first occurrence of `after`. LICENSES.md has each document's license.",
   "docs": [
     {
       "id": "C0",
@@ -307,7 +307,7 @@
       "edit": {
         "after": "Which integers"
       },
-      "note": "web/latex/examples.ts's article example (MIT)"
+      "note": "scripts/latex-examples.mjs's article example (MIT)"
     },
     {
       "id": "C7b",
@@ -317,7 +317,7 @@
       "edit": {
         "after": "Left: words"
       },
-      "note": "web/latex/examples.ts's beamer example (MIT)"
+      "note": "scripts/latex-examples.mjs's beamer example (MIT)"
     },
     {
       "id": "C7c",
@@ -327,7 +327,7 @@
       "edit": {
         "after": "The 10th prime"
       },
-      "note": "web/latex/examples.ts's sagetex example (MIT). sagetex.sty and sagetex.py are made from sagetex's own .ins and .dtx at that commit, as Sage's install makes them (untimed)",
+      "note": "scripts/latex-examples.mjs's sagetex example (MIT). sagetex.sty and sagetex.py are made from sagetex's own .ins and .dtx at that commit, as Sage's install makes them (untimed)",
       "oracle": {
         "cycle": "sagetex"
       },
@@ -375,7 +375,7 @@
       "edit": {
         "after": "Ten factorial"
       },
-      "note": "web/latex/examples.ts's pythontex example (MIT)",
+      "note": "scripts/latex-examples.mjs's pythontex example (MIT)",
       "oracle": {
         "cycle": "pythontex"
       }
@@ -388,7 +388,7 @@
       "edit": {
         "after": "For this"
       },
-      "note": "web/latex/examples.ts's matlab example (MIT)"
+      "note": "scripts/latex-examples.mjs's matlab example (MIT)"
     },
     {
       "id": "C7f",
@@ -398,7 +398,7 @@
       "edit": {
         "after": "As Figure"
       },
-      "note": "web/latex/examples.ts's figure example (MIT)"
+      "note": "scripts/latex-examples.mjs's figure example (MIT)"
     },
     {
       "id": "C7g",
@@ -408,7 +408,7 @@
       "edit": {
         "after": "Mathematician"
       },
-      "note": "web/latex/examples.ts's cv example (MIT)"
+      "note": "scripts/latex-examples.mjs's cv example (MIT)"
     },
     {
       "id": "C7h",
@@ -418,7 +418,7 @@
       "edit": {
         "after": "A full LaTeX run"
       },
-      "note": "web/latex/examples.ts's tikz example (MIT)"
+      "note": "scripts/latex-examples.mjs's tikz example (MIT)"
     },
     {
       "id": "C7i",
@@ -428,7 +428,7 @@
       "edit": {
         "after": "Modular forms are"
       },
-      "note": "web/latex/examples.ts's bibliography example (MIT)"
+      "note": "scripts/latex-examples.mjs's bibliography example (MIT)"
     },
     {
       "id": "C7j",
@@ -438,7 +438,7 @@
       "edit": {
         "after": "Name:"
       },
-      "note": "web/latex/examples.ts's homework example (MIT)"
+      "note": "scripts/latex-examples.mjs's homework example (MIT)"
     }
   ]
 }

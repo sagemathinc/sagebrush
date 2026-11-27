@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "The Agents page on the site (#869): web/build.ts now builds web/agents in every build, so web/dist/_headers gains the /agents/* Content-Security-Policy rule (web/csp.ts, about 469 B). The CLI embeds web/dist/_headers as base64 (scripts/build-cli.mjs), so cli/pyjs.cjs grows; the page itself (dist/agents) isn't in the CLI. Measured by daybreak2 with bun 1.4.4 / Node 24.21.0 on master 733522e0 vs the landing tree: cli/pyjs.cjs +628; no other row moves. Marker: +628 with the usual 64 B slack.",
- "bytes": {
-  "cli/pyjs.cjs": 692
- }
-}

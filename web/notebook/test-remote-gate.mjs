@@ -886,10 +886,16 @@ export async function runGateTests(check) {
     const p = await page(ids.map((id, i) => [id, `v${i} = ${i}`]), { keepBodies: false });
     p.fake.kernel = async () => ({ events: [], outcome: { status: "ok", ms: 1 } });
     let most = 0;
+    const b0 = p.r().graph.builds;
     for (let i = 0; i < ids.length; i += 1000) {
       await p.gesture(ids.slice(i, i + 1000));
       most = Math.max(most, p.r().outputsSize(), p.gate.specs.size, p.gate.parentsMemo.size);
     }
+    // (showing values without output-name readers no longer rebuilds the graph per cell: once, each cell showing a
+    // value rebuilt it, and this control took 77 s of the file's 120. Counted, not timed: a time bound would flake on a
+    // loaded runner, and the file's own 120 s bound is the backstop)
+    const builds = p.r().graph.builds - b0;
+    check(builds <= 6, `no cell reads _, __ or ___: the graph is built at most once per gesture (its cells registered), never per cell (${builds} builds for the six gestures, the capped 200 included)`);
     const lastChunk = ids.slice(5000);
     check(most <= 5000 && p.r().outputsSize() <= 5000, `the run outputs (and the adapter's specs and parents) never exceed 5,000 (${most})`);
     check(p.runPosts().length === 5000 && lastChunk.every((id) => p.results.get(id)?.notRun === "skip"), `the chunk past 5,000 live attempts: no POST, not run (${p.runPosts().length})`);

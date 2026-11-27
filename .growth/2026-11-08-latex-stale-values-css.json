@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "LaTeX editor, values kept while their code has changed (#874, @sagebrush's Q3 ruling of Nov 8: the last values, marked stale, never '...'): the editor's page CSS gains one rule, .tex-page .sagestale { opacity: .5; }. Every LaTeX example's committed preview.html embeds the page CSS, so the 11 LaTeX previews in examples/ and the fixture corpus's article grow by that one line each; site/examples copies the previews. No other bundle grows (every core and runtime bundle byte-identical, daybreak2's binding run 42526271104). Measured +418 B on each row against master ec834a02; marked +64 B over it.",
- "bytes": {
-  "examples/corpus": 482,
-  "site/examples": 482
- }
-}

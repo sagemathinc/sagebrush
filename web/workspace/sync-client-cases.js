@@ -1016,6 +1016,39 @@ async function restoredPause() {
   await stop(c2);
 }
 
+async function blobConflicts() {
+  // (e2e PR 3a: the server holds other bytes under an address one of this device's records names, told by blobs/check
+  // or by the PUT: the connection halts, with its reason; no upload goes, and no op naming that file is sent)
+  const sentFor = async (path) => (await ctl("log")).sent.filter((m) => m.t === "ops" && (m.ops ?? []).some((o) => o.path === path)).length;
+  const puts = async () => (await ctl("log")).http.filter((h) => h.method === "PUT").length;
+  for (const via of ["check", "put"]) {
+    await account();
+    const w = await fresh();
+    const c = client(w);
+    check(await until(() => settled(w, c)), `blob conflict (${via}): synced`);
+    const held = { address: "e".repeat(64), ct_sha256: "e".repeat(64), size: 1 };
+    const putsBefore = await puts();
+    await ctl("set", { set: { fakeHttp: via === "check"
+      ? [{ method: "POST", path: "/blobs/check", status: 200, body: { missing: [], conflicts: [held] }, times: 2 }]
+      : [{ method: "PUT", status: 409, body: { error: "conflict", message: "the server holds other bytes under this address", held }, times: 2 }] } });
+    const path = `/conflict-${via}.bin`;
+    await w.create(path, { content: bytes(300, via === "check" ? 71 : 72) });
+    check(await until(() => /other bytes/.test(c.status.reason ?? "")), `blob conflict (${via}): halted, saying why: ` + J(c.status));
+    await sleep(400);
+    check(c.debug().halted === "blob-conflict" && c.stats.blobConflicts >= 1, `blob conflict (${via}): the connection is halted, and counted`);
+    check((await sentFor(path)) === 0 && (await outbox(w)) >= 1, `blob conflict (${via}): no op naming the file was sent; its record is kept`);
+    if (via === "check") check((await puts()) === putsBefore, "blob conflict (check): nothing was uploaded either");
+    await stop(c);
+    // (a reload: the new connection asks again, is told the same, and halts again; still nothing naming the file goes)
+    const c2 = client(w);
+    check(await until(() => c2.debug().halted === "blob-conflict" && /other bytes/.test(c2.status.reason ?? "")), `blob conflict (${via}): after a reload, halted again: ` + J(c2.status));
+    await sleep(400);
+    check((await sentFor(path)) === 0 && (await outbox(w)) >= 1, `blob conflict (${via}): after a reload, still no op naming the file`);
+    if (via === "check") check((await puts()) === putsBefore, "blob conflict (check): after a reload, still nothing uploaded");
+    await stop(c2);
+  }
+}
+
 async function indexThrottled() {
   // (CORR-PR58-3: a pull refused with retry_after; ops accepted meanwhile pull nothing before it ends; a prolonged
   // timer waits on; then pages in order, every record confirmed)
@@ -1227,6 +1260,78 @@ async function refusalAtomic() {
 // ---- step 4: the confirmed index and its view, live notices (D8), idle discovery (D8b)
 
 /** A client with the confirmed index (step 4's onIndex). */
+async function liveCheck() {
+  // (the liveness check: A's socket goes dead without a close (the front's `dead`: nothing passes either way), B changes
+  // something; A catches up once the page is shown again, or by the periodic check while visible, and never while
+  // hidden; a live socket is never replaced; one check at a time)
+  const keep = { ...W.CLIENT };
+  const fid = () => "/c-" + Math.random().toString(36).slice(2, 8) + ".txt";
+  // (A connected and settled, its socket then dead; B, connected after, makes `p`; how long until A has it)
+  const round = async (a, ca, b, p) => {
+    check(await until(() => settled(a, ca), 20_000), "live: A settled");
+    await ctl("dead");
+    const cb = viewClient(b);
+    try {
+      check(await until(() => settled(b, cb), 20_000), "live: B settled");
+      await b.create(p, { content: "x" });
+      check(await until(() => settled(b, cb), 20_000), "live: B's change up");
+    } finally {
+      await stop(cb);
+    }
+  };
+  const has = (w, p, ms) => until(async () => !!(await w.stat(p)), ms);
+  // (a front without the `dead` control (one made before it): said, not failed)
+  const probe = await ctl("dead").catch(() => null);
+  if (typeof probe?.dead !== "number") return void check(true, "skipped: liveCheck, this front has no `dead` control");
+  try {
+    // (1) shown again: caught up within 5 s; one check failed, one reconnect
+    await account();
+    let a = await fresh(), b = await fresh();
+    let ca = viewClient(a);
+    let p = fid();
+    await round(a, ca, b, p);
+    const c0 = ca.stats.connects, f0 = ca.stats.liveFails;
+    check(!(await has(a, p, 1500)), "live: a dead socket: A doesn't have it by itself");
+    const t0 = Date.now();
+    document.dispatchEvent(new Event("visibilitychange"));
+    const ok1 = await has(a, p, 5000);
+    check(ok1 && ca.stats.liveFails === f0 + 1 && ca.stats.connects === c0 + 1, `live: shown again: A has it after ${Date.now() - t0} ms, one check failed, one reconnect: ` + J({ fails: ca.stats.liveFails - f0, connects: ca.stats.connects - c0 }));
+    // (a live socket: checks pass, nothing replaced, however often asked; one check at a time)
+    const n0 = ca.stats.liveChecks, c1 = ca.stats.connects;
+    for (let i = 0; i < 5; i++) { document.dispatchEvent(new Event("visibilitychange")); dispatchEvent(new Event("focus")); }
+    await sleep(W.CLIENT.liveMs + 1500);
+    check(ca.stats.liveChecks - n0 >= 1 && ca.stats.liveChecks - n0 <= 2 && ca.stats.liveFails === f0 + 1 && ca.stats.connects === c1, "live: a live socket checked (once per check at most), never replaced: " + J({ checks: ca.stats.liveChecks - n0, fails: ca.stats.liveFails - f0, connects: ca.stats.connects - c1, state: ca.status.state, reason: ca.status.reason, ends: ca.stats.ends }));
+    await stop(ca);
+    // (2) the periodic check while visible: caught up with nothing shown or focused
+    W.CLIENT.liveEveryMs = 2000;
+    a = await fresh();
+    ca = viewClient(a);
+    p = fid();
+    await round(a, ca, b, p);
+    const t1 = Date.now();
+    const ok2 = await has(a, p, 2000 + W.CLIENT.liveMs + 5000);
+    check(ok2, `live: visible, nothing done: the periodic check catches up after ${Date.now() - t1} ms`);
+    await stop(ca);
+    // (3) hidden: no periodic check; shown: caught up
+    let back = null;
+    const net = { online: () => true, onBack: (f) => { back = f; return () => { back = null; }; }, visible: () => false };
+    a = await fresh();
+    ca = viewClient(a, { net });
+    p = fid();
+    await round(a, ca, b, p);
+    const h0 = ca.stats.liveChecks;
+    check(!(await has(a, p, 2000 + W.CLIENT.liveMs + 1500)) && ca.stats.liveChecks === h0, "live: hidden: no periodic check, not caught up: " + J({ checks: ca.stats.liveChecks - h0 }));
+    net.visible = () => true;
+    back?.();
+    check(await has(a, p, 5000), "live: …then shown: caught up");
+    await stop(ca);
+  } finally {
+    Object.assign(W.CLIENT, keep);
+  }
+}
+
+/** A page that is hidden, online, and never shown again: no liveness checks of its own. */
+const HIDDEN = { online: () => true, onBack: () => () => {}, visible: () => false };
 const viewClient = (w, opts = {}) => client(w, { onIndex: W.confirmedIndex(w), ...opts });
 
 async function echoNoCopy() {
@@ -1298,13 +1403,115 @@ async function noticeFlood() {
   }
 }
 
+async function idleMidPage() {
+  // (a timer's pull while a page is being applied: the page clears `pulling` before it moves the cursor, so a pull asked
+  // then, from the old cursor, would be answered with ops the cursor has passed and end the connection.  The timers'
+  // pulls run on the message chain, after the page: the idle pull's wake fired mid-page leaves one connection)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { clock, net: HIDDEN, onIndex });
+  try {
+    check(await until(() => settled(w, c)), "idle mid-page: synced");
+    await otherOps(10, 0, "m");
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("notice", { head: (await serverOps(w)).all.at(-1).seq });
+    check(await until(() => entered, 10_000), "idle mid-page: a page is being applied (held)");
+    const pulls = c.stats.pulls;
+    await clock.advance(W.CLIENT.idlePullMs + 1000);
+    await sleep(300);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/m9")), 10_000), "idle mid-page: the page applied");
+    await sleep(500);
+    check(!c.stats.ends.closed && c.stats.connects === 1 && c.status.state === "synced", "idle mid-page: the idle pull waited for the page; the same connection: " + J({ ends: c.stats.ends, connects: c.stats.connects, pulls: c.stats.pulls - pulls, state: c.status.state }));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function indexRetryMidPage() {
+  // (the index timer's retry, set by the server's refusal of a pull, fired while a page the server sent is being
+  // applied: the pull waits for the page (on the message chain); the same connection, no close)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { clock, net: HIDDEN, onIndex });
+  try {
+    check(await until(() => settled(w, c)), "index retry mid-page: synced");
+    await otherOps(5, 0, "q");
+    const { all } = await serverOps(w);
+    const head = all.at(-1).seq;
+    // (the next pull refused for a while: the index timer set, its retry a wake-up)
+    await ctl("set", { set: { fakePull: [{ code: "rate", detail: { message: "faked", retry_after: 4000 } }] } });
+    await ctl("notice", { head });
+    await sleep(300);
+    check(await until(() => c.debug().inflight === 0 && c.debug().wakes > 0, 5000), "index retry mid-page: the pull refused, its retry set: " + J(c.debug()));
+    // (a page of those ops, pushed by the server, held while it is applied; the retry's time comes meanwhile)
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("frame", { frame: { t: "index", ops: all.filter((o) => o.seq > 0 && /^\/q\d$/.test(o.path)), more: false } });
+    check(await until(() => entered, 10_000), "index retry mid-page: a page is being applied (held)");
+    await clock.advance(5000);
+    await sleep(300);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/q4")), 10_000), "index retry mid-page: the page applied");
+    await sleep(500);
+    check(!c.stats.ends.closed && c.stats.connects === 1 && c.status.state === "synced", "index retry mid-page: the retry's pull waited for the page; the same connection: " + J({ ends: c.stats.ends, connects: c.stats.connects, state: c.status.state }));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function liveSlowPage() {
+  // (a liveness check asked while a page is being applied for longer than the check's deadline: the check begins when
+  // the page is done, its deadline from then; the live connection is kept)
+  const keep = { ...W.CLIENT };
+  await account();
+  const w = await fresh();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { onIndex });
+  try {
+    W.CLIENT.liveMs = 500;
+    check(await until(() => settled(w, c)), "slow page: synced");
+    await otherOps(5, 0, "s");
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("notice", { head: (await serverOps(w)).all.at(-1).seq });
+    check(await until(() => entered, 10_000), "slow page: a page is being applied (held)");
+    const f0 = c.stats.liveFails, k0 = c.stats.liveChecks;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await sleep(3 * W.CLIENT.liveMs);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/s4")), 10_000), "slow page: the page applied");
+    await sleep(2 * W.CLIENT.liveMs + 500);
+    check(c.stats.liveChecks - k0 === 1 && c.stats.liveFails === f0 && !c.stats.ends.stale && c.stats.connects === 1, "slow page: the check asked mid-page ran after it, with its own deadline; the live connection kept: " + J({ checks: c.stats.liveChecks - k0, fails: c.stats.liveFails - f0, ends: c.stats.ends, connects: c.stats.connects }));
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(c);
+  }
+}
+
 async function idleDiscovery() {
   // (D8b r2: the only notice dropped; the ops arrive at the 5-minute idle pull, every page of a log longer than one
   // page, with no edit and no reconnect, and no pull before it)
   await account();
   const w = await fresh();
   const clock = fakeClock();
-  const c = viewClient(w, { clock });
+  // (a hidden page: no periodic liveness check (a visible one pulls every CLIENT.liveEveryMs of silence, liveCheck),
+  // so the idle pull is the only one)
+  const c = viewClient(w, { clock, net: HIDDEN });
   try {
     check(await until(() => settled(w, c)), "idle discovery: synced");
     await otherOps(1500, 0, "i");
@@ -1509,6 +1716,47 @@ async function downloadStale2() {
     check((await b.stat(pTrash.path))?.fid === pOld.fid && sameBytes(await b.contents(await b.stat(pTrash.path)), bytes(1500, 3)), "download stale 2: the removed one's bytes installed in Trash, by its identity");
   } finally {
     await ctl("set", { set: { holdGet: false } });
+    await ctl("release");
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
+async function conflictFresh() {
+  // (a write that loses to another device's: the server keeps both, the other's under the name and this one's as
+  // `name (conflict, …)`; this device then shows the same, not its own bytes under the name.  The other's write
+  // comes down first, while this one's record is still undecided (its upload held), so the page that decides it
+  // changes only the copy)
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    const base = bytes(3000, 1), mineA = bytes(3000, 2), mineB = bytes(3000, 3);
+    await a.create("/w.bin", { content: base });
+    check(await until(() => settled(a, ca)), "conflict, fresh: A's file up");
+    await seen(b, cb, "/w.bin");
+    check(await until(async () => { const x = await b.stat("/w.bin"); return x && !x.remote; }), "conflict, fresh: B has its bytes");
+    const fid = (await b.stat("/w.bin")).fid;
+    await ctl("set", { set: { holdPut: true } });
+    await b.write("/w.bin", mineB);
+    check(await until(async () => (await ctl("log")).putsNow === 1), "conflict, fresh: B's upload held (its record undecided)");
+    await ctl("set", { set: { holdPut: false } });
+    await a.write("/w.bin", mineA);
+    check(await until(() => settled(a, ca)), "conflict, fresh: A's write up first");
+    for (let i = 0; i < 30 && (await W.confirmedEntry(b, nsOf(cb), fid))?.sha256 !== (await a.stat("/w.bin")).sha256; i++) { await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq }); await sleep(100); }
+    check((await W.confirmedEntry(b, nsOf(cb), fid))?.sha256 === (await a.stat("/w.bin")).sha256 && sameBytes(await b.contents(await b.stat("/w.bin")), mineB), "conflict, fresh: A's write in B's confirmed index while B's own is undecided: B still shows its own");
+    await ctl("release");
+    check(await until(() => settled(b, cb)), "conflict, fresh: B's write decided");
+    // (the copy comes down as the server's own op, after B's write is decided: waited for, as the rows below wait for
+    // theirs; read once at once, it was missing in about one CI run in many)
+    let copy;
+    await until(async () => !!(copy = (await b.list("/")).find((e) => e.path.startsWith("/w (conflict, "))));
+    check(!!copy, "conflict, fresh: B has the conflict copy: " + J((await b.list("/")).map((e) => e.path)));
+    check(await until(async () => { const x = await b.stat("/w.bin"); return x && !x.remote && x.sha256 === (await a.stat("/w.bin")).sha256; }), "conflict, fresh: B shows the server's version under the name: " + J(await b.stat("/w.bin")));
+    check(sameBytes(await b.contents(await b.stat("/w.bin")), mineA), "conflict, fresh: …A's bytes");
+    check(await until(async () => { const x = copy && (await b.stat(copy.path)); return x && !x.remote; }) && sameBytes(await b.contents(await b.stat(copy.path)), mineB), "conflict, fresh: …and its own beside it, in the copy");
+    // (and A, which never lost: the same two)
+    check(await until(async () => !!(await seen(a, ca, copy.path)) && !(await a.stat(copy.path)).remote) && sameBytes(await a.contents(await a.stat(copy.path)), mineB) && sameBytes(await a.contents(await a.stat("/w.bin")), mineA), "conflict, fresh: A has the same two");
+  } finally {
+    await ctl("set", { set: { holdPut: false } });
     await ctl("release");
     await stop(ca);
     await stop(cb);
@@ -1936,6 +2184,101 @@ async function firstSyncCollision() {
   }
 }
 
+async function resetRejoin() {
+  // (sync reset (sync-reset.ts): a browser holding an older build's sync state can't sync; reset, it joins as a new
+  // device, and nothing is overwritten or lost on either side: the cloud's /x.txt stays /x.txt with its bytes, this
+  // browser's own /x.txt is kept as /x (2).txt with its bytes, listed as renamed, and its other files go up as they are)
+  await account();
+  const a = await fresh(), ca = viewClient(a);
+  const cloud = bytes(3_000, 1), local = bytes(2_000, 2), only = bytes(1_000, 3);
+  try {
+    await a.create("/x.txt", { content: cloud });
+    check(await until(() => settled(a, ca)), "reset, rejoin: the cloud has /x.txt");
+  } finally {
+    await stop(ca);
+  }
+  const b = await fresh();
+  const mine = await b.create("/x.txt", { content: local });
+  await b.create("/only.txt", { content: only });
+  // (an older build's state: its lease, a cursor and an outbox record, without this build's marker)
+  await new Promise((ok, no) => {
+    const tx = b.ws.transaction(["meta", "outbox"], "readwrite"), meta = tx.objectStore("meta");
+    const old = `${"e".repeat(64)}:7:${b.device}`;
+    meta.put({ ns: old, gen: 3 }, "sync:current");
+    meta.put(5, `sync:${old}:cursor`);
+    tx.objectStore("outbox").put({ ns: old, dseq: 1 });
+    tx.oncomplete = ok;
+    tx.onerror = tx.onabort = () => no(tx.error);
+  });
+  const d0 = await W.detectOldSync(b);
+  let refused = null;
+  try { await W.switchToIf(b, `${"f".repeat(64)}:1:${b.device}`); } catch (e) { refused = e; }
+  check(d0.old && refused instanceof W.OldSyncError, "reset, rejoin: old here, a lease refused: " + J({ d0, refused: refused?.name }));
+  await W.resetSyncHere(b);
+  const d1 = await W.detectOldSync(b);
+  check(!d1.old && (await metaGet(b.ws, W.PROTO_KEY)) === W.PROTO && (await outbox(b)) === 0 && (await metaGet(b.ws, "sync:current"))?.off === true, "reset, rejoin: clean after the reset, the link forgotten (the lease kept turned off, which fences): " + J(d1));
+  check(sameBytes(await b.contents(await b.stat("/x.txt")), local) && sameBytes(await b.contents(await b.stat("/only.txt")), only), "reset, rejoin: this browser's files untouched by the reset");
+  const cb = viewClient(b);
+  try {
+    check(await until(() => settled(b, cb), 20_000), "reset, rejoin: synced as a new device");
+    const x = await seen(b, cb, "/x.txt");
+    const ours = (await b.list("/")).find((e) => e.fid === mine.fid);
+    check(x?.fid !== mine.fid && ours?.path === "/x (2).txt", "reset, rejoin: the cloud's /x.txt here, this browser's at /x (2).txt: " + J({ x: x?.fid, ours: ours?.path }));
+    check(await until(async () => { const e = await b.stat("/x.txt"); return e && !e.remote; }), "reset, rejoin: the cloud's /x.txt fetched");
+    check(sameBytes(await b.contents(await b.stat("/x.txt")), cloud) && sameBytes(await b.contents(await b.stat("/x (2).txt")), local) && sameBytes(await b.contents(await b.stat("/only.txt")), only), "reset, rejoin: every file's bytes here are its own: the cloud's, this browser's renamed, the other");
+    const listed = await metaGet(b.ws, `sync:${nsOf(cb)}:listed`);
+    check(listed?.renamed >= 1 && W.listedSummary(listed).includes("renamed (another device has one with the name)"), "reset, rejoin: said on the page (the Sync panel's list): " + J(listed && W.listedSummary(listed)));
+    // (the log keeps each op as sent: this browser's /x.txt went up under its own identity, beside the cloud's; its
+    // name `x (2).txt` is the reducer's, seen by the other device below)
+    const { all: server, mine: up } = await serverOps(b);
+    const xs = server.filter((o) => o.path === "/x.txt").map((o) => o.fid);
+    check(up.some((o) => o.fid === mine.fid) && new Set(xs).size === 2 && up.some((o) => o.path === "/only.txt"), "reset, rejoin: the server has both /x.txt files, each its own, and /only.txt: " + J(server.map((o) => [o.op, o.path, o.fid?.slice(0, 6)])));
+  } finally {
+    await stop(cb);
+  }
+  // (A, the other device, sees both, the cloud's bytes unchanged)
+  const ca2 = viewClient(a);
+  try {
+    check(await until(() => settled(a, ca2)), "reset, rejoin: A synced again");
+    const r = await seen(a, ca2, "/x (2).txt");
+    check(r && sameBytes(await a.contents(await a.stat("/x.txt")), cloud), "reset, rejoin: A has its /x.txt unchanged and lists this browser's /x (2).txt");
+  } finally {
+    await stop(ca2);
+  }
+}
+
+async function sameNameRenamed() {
+  // (two devices, each with its own /spiral.ipynb made before sync, both turned on: two documents, nothing lost; the
+  // second's own put at /spiral (2).ipynb by the reducer is retitled "spiral (2)" (its title is its file's name again,
+  // as after a rename made here), and the change that moved it says so (Change.renamed), for a page that has it open)
+  await account();
+  const a = await fresh(), b = await fresh();
+  const na = await a.create("/spiral.ipynb"), nb = await b.create("/spiral.ipynb");
+  const title = async (w, e) => (await w.contents(e))?.name;
+  const t0 = [await title(a, na), await title(b, nb)];
+  const told = [];
+  const off = b.watch((c) => { if (c.renamed) told.push(...c.renamed); });
+  const ca = viewClient(a);
+  try {
+    check(await until(() => settled(a, ca), 20_000), "same name: A synced");
+    const cb = viewClient(b);
+    try {
+      check(await until(() => settled(b, cb), 20_000), "same name: B synced");
+      const mineB = (await b.list("/")).find((e) => e.ref === nb.ref), theirsB = await b.stat("/spiral.ipynb");
+      check(mineB?.path === "/spiral (2).ipynb" && mineB.renamed?.to === "/spiral (2).ipynb" && theirsB?.ref === na.ref && theirsB.remote, "same name: two documents; B's own at /spiral (2).ipynb, A's at /spiral.ipynb: " + J({ mine: mineB?.path, theirs: theirsB?.ref === na.ref }));
+      check(await until(async () => (await title(b, mineB)) === "spiral (2)", 5000), `same name: B's own retitled with its file: ${J(t0)} -> ${J(await title(b, mineB))}`);
+      check(told.length === 1 && J(told[0]) === J({ kind: "notebook", ref: nb.ref, from: "/spiral.ipynb", to: "/spiral (2).ipynb" }), "same name: the change says it was renamed: " + J(told));
+      const theirsA = await seen(a, ca, "/spiral (2).ipynb");
+      check(theirsA?.ref === nb.ref && (await title(a, na)) === "spiral" && (await a.stat("/spiral.ipynb"))?.ref === na.ref, "same name: A keeps its own /spiral.ipynb titled spiral, and lists B's as /spiral (2).ipynb");
+    } finally {
+      await stop(cb);
+    }
+  } finally {
+    off();
+    await stop(ca);
+  }
+}
+
 async function rebuildKickAfterHalt() {
   // (web-sync's "cap, no reset" flake: the server's invalid "rebuild" refusal answered after the sender went idle, so
   // nothing but that answer can start the rebuild: it must start by itself, at once, not wait for a reconnect)
@@ -2163,7 +2506,7 @@ async function s5Section() {
   const w = await fresh();
   const shapes = [
     [{ available: false, reason: "not_allowlisted", state: "off" }, (el) => el.textContent === "", "not_allowlisted: hidden"],
-    [{ available: false, reason: "plan_has_no_sync", state: "off" }, (el) => /\[x\] Turn on sync/.test(buttons(el).join()) && /isn't available/.test(text(el)), "plan_has_no_sync: disabled, the fallback words"],
+    [{ available: false, reason: "plan_has_no_sync", state: "off" }, (el) => /\[x\] Turn on sync/.test(buttons(el).join()) && /Your plan doesn't include sync/.test(text(el)) && !/plan_has_no_sync/.test(text(el)), "plan_has_no_sync: disabled, in plain words (never the code)"],
     [{ available: false, reason: "cocalc_unreachable", state: "off", message: "CoCalc says no" }, (el) => /CoCalc says no/.test(text(el)), "cocalc_unreachable: the server's own words"],
     [{ available: true, state: "deleting", generation: 2 }, (el) => /\[x\] Deleting your synced data/.test(buttons(el).join()), "deleting: said, disabled"],
     [{ available: true, state: "active", generation: 2 }, (el) => !/Delete my synced data/.test(buttons(el).join()), "active, no limit_bytes (no server precondition): no delete"],
@@ -2184,6 +2527,41 @@ async function s5Section() {
   check(/Can't check sync right now/.test(el.textContent) && down.poll.armed, "section: status unreadable: unknown (neither off nor on), asked again later");
   down.dispose();
   check(!down.poll.armed && !down.poll.busy, "section: dispose (the panel closed) leaves no timer, no request");
+}
+
+async function s5Reasons() {
+  // (the server's reason codes in plain words, one table for the foot and the panel; the code only in the foot's tooltip;
+  // the server's own sentence first; a browser that synced before told why sync stopped, and as whom)
+  const codes = ["not_allowlisted", "plan_has_no_sync", "cocalc_unreachable", "deleted", "unavailable"];
+  const lines = codes.map((c) => W.sidebarLine({ state: "off", reason: c }));
+  check(codes.every((c) => W.REASON_WORDS[c] && W.reasonWords(c).code === c) && lines.every((l, i) => l === "Sync off: " + W.REASON_WORDS[codes[i]] && !l.includes("_")), "reasons: every server code has words, and the foot never shows a code: " + J(lines));
+  const unknown = W.reasonWords("email_not_listed"), phrase = W.reasonWords("sign in first");
+  check(unknown.text === W.REASON_WORDS.unavailable && unknown.code === "email_not_listed" && phrase.text === "sign in first" && phrase.code === undefined, "reasons: an unknown code gets generic words (the code kept for the tooltip); a reason already in words is said as it is: " + J({ unknown, phrase }));
+  check(W.sidebarLine({ state: "off", reason: "not_allowlisted", message: "Sync isn't available yet" }) === "Sync isn't available yet" && W.sidebarTitle({ state: "off", reason: "not_allowlisted" }) === "Sync off (not_allowlisted): opens the Storage panel" && W.sidebarTitle({ state: "off", reason: "sign in first" }) === undefined && W.sidebarTitle({ state: "synced" }) === undefined, "reasons: the server's own sentence first; the code in the tooltip only");
+  // (the panel: not_allowlisted hidden for a browser that never synced, said with the account's email for one that did)
+  const fetchAs = (status) => async (url) => {
+    const path = String(url).replace(/^https?:\/\/[^/]+/, "");
+    if (path === "/api/share/me") return Response.json({ account_id: "acct-reasons", email: "someone@example.com" });
+    if (path === "/api/sync/v1/status") return Response.json(status);
+    return new Response("{}", { status: 404 });
+  };
+  const panel = async (w, status) => {
+    const el = document.createElement("div"), s = W.syncSection(w, el, hostOf(w), { fetch: fetchAs(status) });
+    await until(() => el.textContent !== "", 2000);
+    await sleep(100);
+    const t = text(el);
+    s.dispose();
+    return t;
+  };
+  const never = await fresh();
+  check((await panel(never, { available: false, reason: "not_allowlisted", state: "off" })) === "", "reasons: not_allowlisted, this browser never synced: hidden");
+  const used = await fresh();
+  await W.switchToIf(used, `${"a".repeat(64)}:1:${used.device}`);
+  await W.syncOffIf(used);
+  const t1 = await panel(used, { available: false, reason: "not_allowlisted", state: "off" });
+  check(/Sync is off here: not available for this account/.test(t1) && /signed in as someone@example\.com/.test(t1) && !/not_allowlisted/.test(t1), "reasons: not_allowlisted, this browser synced before: said, as whom, never the code: " + J(t1));
+  const t2 = await panel(used, { available: false, reason: "not_allowlisted", state: "off", message: "Sync isn't available yet" });
+  check(/Sync isn't available yet \(signed in as someone@example\.com\)/.test(t2), "reasons: …with the server's own sentence when it gives one: " + J(t2));
 }
 
 async function s5Delete() {
@@ -2296,6 +2674,261 @@ async function s5Docs() {
   owner.destroy();
 }
 
+async function s5Retry() {
+  // (a session that couldn't be asked: /api/share/me unreachable (offline, a 5xx, a 429) is neither yes nor no; with no
+  // client running the owner tries again, the wait doubling to its bound, and at once when the browser is back online;
+  // a client starting resets the wait.  401, 403 and another account are a final no: no try again.  pagehide clears
+  // the waiting try; nothing waits while sync is off here)
+  await account();
+  const w = await fresh();
+  // (sync turned on here first, through the panel, with the real session: the durable lease is on)
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "retry: sync on, a client synced");
+  s.dispose();
+  o0.destroy();
+  // (a page loaded afresh, its /api/share/me answered as `me` says; every other request real)
+  const real = window.fetch.bind(window);
+  let me = "throw", asked = 0;
+  const fetchMe = async (url, init) => {
+    if (!String(url).endsWith("/api/share/me")) return real(url, init);
+    asked++;
+    if (me === "throw") throw new TypeError("Failed to fetch");
+    // (a request that hangs: it answers only by being aborted)
+    if (me === "hang") return new Promise((_, no) => init?.signal?.addEventListener("abort", () => no(new DOMException("aborted", "AbortError"))));
+    if (me === "real") return real(url, init);
+    if (me === "other") return new Response(JSON.stringify({ account_id: "00000000-0000-4000-8000-0000000000ff" }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response("{}", { status: me, headers: { "content-type": "application/json" } });
+  };
+  const saved = { ...W.OWNER };
+  Object.assign(W.OWNER, { retryMs: 100, retryMaxMs: 400 });
+  try {
+    for (const transient of ["throw", 503, 429]) {
+      me = transient;
+      asked = 0;
+      const o = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+      o.start();
+      // (each try asks once: 1 at load, then after 100, 200, 400, 400 ms…)
+      const t0 = Date.now();
+      check(await until(() => asked >= 4, 5000), `retry (${transient}): asked again on its own: ${asked}`);
+      const took = Date.now() - t0;
+      check(o.client === null && took >= 650, `retry (${transient}): no client while it can't ask, the waits doubling (4 asks after ${took} ms)`);
+      const n = asked;
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked - n >= 1 && asked - n <= 3, `retry (${transient}): the wait bounded at its maximum: ${asked - n} asks in 900 ms`);
+      // (the session answers again: a client starts, and nothing waits any more)
+      me = "real";
+      check(await until(() => o.view().s.state === "synced", 15_000), `retry (${transient}): the session answers: a client starts and syncs`);
+      const settled = asked;
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked === settled && o.stats.retries >= 3, `retry (${transient}): once running, no more tries: ${asked - settled}`);
+      o.destroy();
+    }
+    // (a request that hangs is given up after its bound, and tried again: the owner never waits on it for good)
+    Object.assign(W.OWNER, { askMs: 200 });
+    me = "hang";
+    asked = 0;
+    const oh = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    oh.start();
+    check(await until(() => asked >= 3 && oh.stats.retries >= 2, 5000), "retry: a hung /api/share/me is given up after its bound and tried again: " + J({ asked, retries: oh.stats.retries }));
+    me = "real";
+    check(await until(() => oh.view().s.state === "synced", 15_000), "retry: …and once it answers, a client starts");
+    oh.destroy();
+    Object.assign(W.OWNER, { askMs: saved.askMs });
+    // (final answers: no try again)
+    for (const final of [401, 403, "other"]) {
+      me = final;
+      asked = 0;
+      const o = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+      o.start();
+      await until(() => asked >= 1, 5000);
+      await new Promise((r) => setTimeout(r, 900));
+      check(asked === 1 && o.client === null && o.stats.retries === 0, `retry: ${final} is a final no: asked once, no client, no try again (${asked})`);
+      o.destroy();
+    }
+    // (back online: a waiting try goes at once, the wait being long)
+    Object.assign(W.OWNER, { retryMs: 60_000, retryMaxMs: 60_000 });
+    me = "throw";
+    asked = 0;
+    const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o1.start();
+    await until(() => asked >= 1, 5000);
+    me = "real";
+    const tOn = Date.now();
+    window.dispatchEvent(new Event("online"));
+    // (synced long before the 60 s wait, its timer never having fired; the client itself asks /api/share/me too)
+    check(await until(() => o1.view().s.state === "synced", 15_000) && Date.now() - tOn < 15_000 && o1.stats.retries === 0, "retry: an online event sends the waiting try at once (not its timer): " + J({ ms: Date.now() - tOn, retries: o1.stats.retries }));
+    // (a client starting reset the wait: unreachable again after it stops, the first wait is the shortest again)
+    o1.destroy();
+    Object.assign(W.OWNER, { retryMs: 100, retryMaxMs: 400 });
+    // (pagehide: the waiting try cleared, nothing more asked)
+    me = "throw";
+    asked = 0;
+    const o2 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o2.start();
+    await until(() => asked >= 1, 5000);
+    o2.suspend();
+    await new Promise((r) => setTimeout(r, 700));
+    check(asked === 1 && o2.stats.retries === 0, "retry: pagehide clears the waiting try: " + asked);
+    o2.destroy();
+    // (sync off here: the session isn't asked, and nothing waits)
+    await new Promise((ok, no) => { const tx = w.ws.transaction("meta", "readwrite"); const m = tx.objectStore("meta"); const r = m.get("sync:current"); r.onsuccess = () => m.put({ ...r.result, off: true }, "sync:current"); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+    asked = 0;
+    const o3 = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    o3.start();
+    await new Promise((r) => setTimeout(r, 700));
+    check(asked === 0 && o3.stats.retries === 0 && o3.client === null, "retry: sync off here: nothing asked, nothing waits: " + asked);
+    o3.destroy();
+  } finally {
+    Object.assign(W.OWNER, saved);
+  }
+}
+
+async function s5Unsent() {
+  // (changes not sent: while sync is on here, the line says how many of this browser's changes haven't gone up, the
+  // outbox's records and the ops past the scan watermark, whatever the client's state; never "Synced", nor nothing)
+  const f = (s) => W.foot(s, 0), line = (s) => W.sidebarLine(s, 0);
+  check(f({ state: "synced" }) === "Synced" && f({ state: "synced", unsent: 3 }) === "3 changes not sent", "unsent: synced with changes not sent says them, never Synced: " + J(f({ state: "synced", unsent: 3 })));
+  check(f({ state: "connecting", unsent: 1 }) === "Connecting… · 1 change not sent" && f({ state: "paused", reason: "x", unsent: 2 }) === "Paused: x · 2 changes not sent", "unsent: connecting and paused add them");
+  check(f({ state: "syncing", waiting: 1, unsent: 4 }) === "Syncing 4 changes…" && f({ state: "offline", waiting: 5, unsent: 2 }) === "Offline: 5 changes wait", "unsent: syncing and offline count the larger of the two");
+  check(line({ state: "off", unsent: 2 }) === "2 changes not sent" && line({ state: "off" }) === "" && line({ state: "off", unsent: 1000, unsentMore: true }) === "1,000 or more changes not sent", "unsent: sync on here but not running: said, not an empty line");
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "unsent: sync on, a client synced");
+  check(await until(() => line(o0.view().s) === "Synced · just now", 5000), "unsent: nothing waiting: Synced: " + line(o0.view().s));
+  s.dispose();
+  o0.destroy();
+  // (a page loaded later whose session can't be asked: sync on here, no client running)
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1, 5000);
+  check(o1.client === null && line(o1.view().s) === "", "unsent: no client, nothing changed yet: nothing to say: " + J(o1.view().s));
+  await w.create("/u1.txt", { content: "one" });
+  await w.write("/u1.txt", "one two");
+  check(await until(() => o1.view().s.unsent === 2, 5000), "unsent: two changes made here while no client runs: counted, past the scan watermark: " + J(o1.view().s));
+  check(line(o1.view().s) === "2 changes not sent", "unsent: …and said on the line, not an empty one: " + J(line(o1.view().s)));
+  o1.destroy();
+  // (a page that can ask: the client sends them, and the line is Synced again)
+  const o2 = W.SyncOwner.of(w, { origin: location.origin });
+  o2.start();
+  check(await until(() => o2.view().s.state === "synced" && !o2.view().s.unsent, 15_000), "unsent: once sent, none left: " + J(o2.view().s));
+  check(line(o2.view().s) === "Synced · just now", "unsent: …and Synced again: " + line(o2.view().s));
+  o2.destroy();
+}
+
+async function s5UnsentTail() {
+  // (the count's cost: a long tail of the server's own ops past the watermark (a client stopped mid-download) is read
+  // UNSENT.visit records a time, each read going on from the last, so a burst of nudges doesn't read it again; until its
+  // end the line says "some changes not sent", never "Synced" nor nothing; then one late change of this browser's is
+  // counted exactly)
+  const line = (s) => W.sidebarLine(s, 0);
+  check(line({ state: "off", unsentMore: true }) === "some changes not sent" && W.foot({ state: "synced", unsentMore: true }, 0) === "some changes not sent" && line({ state: "off", unsent: 3, unsentMore: true }) === "3 or more changes not sent", "tail: not all read yet: said, never Synced");
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const sec = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "tail: sync on, a client synced");
+  sec.dispose();
+  o0.destroy();
+  // (the watermark, once the stopped client has left it still: what the tail is counted from)
+  const scannedMark = () => new Promise((ok, no) => {
+    const st = w.ws.transaction("meta").objectStore("meta"), k = st.getAllKeys();
+    k.onsuccess = () => { const key = k.result.find((x) => /^sync:.*:scanned$/.test(String(x))); if (key === undefined) return ok(null); const g = st.get(key); g.onsuccess = () => ok(g.result ?? null); g.onerror = () => no(g.error); };
+    k.onerror = () => no(k.error);
+  });
+  let mark = await scannedMark();
+  for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 250)); const m = await scannedMark(); if (m === mark && i >= 3) break; mark = m; }
+  // (the tail: TAIL ops applied from the server, logged past the watermark, as a stopped client leaves them)
+  const TAIL = 5000;
+  await new Promise((ok, no) => { const tx = w.ws.transaction("ops", "readwrite"); const ops = tx.objectStore("ops"); for (let i = 0; i < TAIL; i++) ops.add({ op: "noop", origin: "server", t: 0 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  // (no nudge from here: the reads go on by themselves to the end, each line it says recorded)
+  const seen = [];
+  o1.onChange(() => { const l = line(o1.view().s); if (seen.at(-1) !== l) seen.push(l); });
+  o1.start();
+  const ended = await until(() => o1.stats.unsentMostRead > 0 && !o1.view().s.unsentMore && !o1.countingNow(), 10_000);
+  const most = o1.stats.unsentMostRead;
+  check(most <= 2000 && seen.includes("some changes not sent") && seen.every((l) => l === "some changes not sent" || l === ""), "tail: each read visits UNSENT.visit records at most; until the end, \"some changes not sent\": " + J({ most, seen }));
+  check(ended && line(o1.view().s) === "", "tail: with no nudge, read on to its end by itself, the server's own ops: nothing not sent: " + J({ s: o1.view().s, reads: o1.stats.unsentReads }));
+  const visited = o1.stats.unsentVisited;
+  const past = await new Promise((ok, no) => { const c = w.ws.transaction("ops").objectStore("ops").count(IDBKeyRange.lowerBound(mark, true)); c.onsuccess = () => ok(c.result); c.onerror = () => no(c.error); });
+  check(typeof mark === "number" && (await scannedMark()) === mark && past >= TAIL && visited <= past, "tail: the whole tail read once, not once a read: " + J({ visited, past, reads: o1.stats.unsentReads, TAIL }));
+  // (one late change of this browser's: counted exactly, and a burst of nudges reads only what's new)
+  await w.create("/late.txt", { content: "late" });
+  check(await until(() => o1.view().s.unsent === 1 && !o1.view().s.unsentMore, 5000), "tail: one late change: 1 not sent: " + J(o1.view().s));
+  check(line(o1.view().s) === "1 change not sent", "tail: …said: " + J(line(o1.view().s)));
+  const v1 = o1.stats.unsentVisited, r1 = o1.stats.unsentReads, t1 = performance.now();
+  await Promise.all(Array.from({ length: 50 }, () => o1.recount()));
+  const burst = { visited: o1.stats.unsentVisited - v1, reads: o1.stats.unsentReads - r1, ms: Math.round(performance.now() - t1) };
+  check(burst.reads <= 2 && burst.visited <= 2 && o1.view().s.unsent === 1, "tail: 50 nudges at once: at most two reads, nothing read again: " + J(burst));
+  console.log("  tail: " + J({ TAIL, past, visitedTail: visited, reads: o1.stats.unsentReads, mostRead: o1.stats.unsentMostRead, burst }));
+  o1.destroy();
+}
+
+async function s5UnsentCap() {
+  // (the count's cap: past UNSENT.max (1,000), from the outbox or from the ops, it is "1,000 or more", even when the read
+  // ends there; exactly 1,000 is 1,000)
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const sec = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "cap: sync on, a client synced");
+  sec.dispose();
+  o0.destroy();
+  await sleep(1000);
+  // (the namespace's watermark moved to the last op: nothing past it; then the outbox and the ops set as each control asks)
+  const tx = (mode, f) => new Promise((ok, no) => { const t = w.ws.transaction(["meta", "ops"], mode); let out; Promise.resolve(f(t)).then((x) => (out = x)); t.oncomplete = () => ok(out); t.onerror = () => no(t.error); });
+  const ns = await tx("readonly", (t) => new Promise((ok) => { const k = t.objectStore("meta").getAllKeys(); k.onsuccess = () => ok(String(k.result.find((x) => /^sync:.*:scanned$/.test(String(x)))).slice(5, -8)); }));
+  const last = await tx("readonly", (t) => new Promise((ok) => { const c = t.objectStore("ops").openKeyCursor(null, "prev"); c.onsuccess = () => ok(c.result?.key ?? 0); }));
+  const outboxOf = await tx("readonly", (t) => new Promise((ok) => { const g = t.objectStore("meta").get(`sync:${ns}:outbox`); g.onsuccess = () => ok(g.result ?? {}); }));
+  const setOutbox = (count) => tx("readwrite", (t) => { t.objectStore("meta").put({ ...outboxOf, count }, `sync:${ns}:outbox`); });
+  await tx("readwrite", (t) => { t.objectStore("meta").put(last, `sync:${ns}:scanned`); });
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1, 5000);
+  const now = async () => { await o1.recount(); const s = o1.view().s; return { unsent: s.unsent, more: !!s.unsentMore, line: W.sidebarLine(s, 0) }; };
+  await setOutbox(1001);
+  let v = await now();
+  check(v.unsent === 1000 && v.more && v.line === "1,000 or more changes not sent", "cap: an outbox of 1,001, nothing past the watermark: \"1,000 or more\": " + J(v));
+  await setOutbox(1000);
+  v = await now();
+  check(v.unsent === 1000 && !v.more && v.line === "1,000 changes not sent", "cap: an outbox of exactly 1,000: 1,000, not \"or more\": " + J(v));
+  // (this browser's own ops past the watermark, the read ending where the cap is passed: 1,000, then 1,001)
+  await setOutbox(0);
+  await tx("readwrite", (t) => { const ops = t.objectStore("ops"); for (let i = 0; i < 1000; i++) ops.add({ op: "noop", t: 0 }); });
+  v = await now();
+  check(v.unsent === 1000 && !v.more && v.line === "1,000 changes not sent", "cap: exactly 1,000 ops of this browser's past the watermark: 1,000: " + J(v));
+  await tx("readwrite", (t) => { t.objectStore("ops").add({ op: "noop", t: 0 }); });
+  v = await now();
+  check(v.unsent === 1000 && v.more && v.line === "1,000 or more changes not sent", "cap: 1,001, the read ending at the cap: \"1,000 or more\": " + J(v));
+  o1.destroy();
+  await setOutbox(outboxOf.count ?? 0);
+}
+
 async function s5Tabs() {
   // (status across tabs: only the holder publishes; a follower opened later gets it at once; a flood of status? costs
   // one bit and at most one message a slot; an old holder's messages dropped; nothing echoed)
@@ -2330,6 +2963,258 @@ async function s5Tabs() {
   s.dispose();
   o2.destroy();
   o1.destroy();
+}
+
+// ---- syncReady: a barrier per call (refresh tokens), never a time
+/** A WebSocket whose incoming index pages are held while `held.on`, then let through in order. */
+function holdingIndexWS(held) {
+  return class extends WebSocket {
+    constructor(...a) {
+      super(...a);
+      const deliver = (ev) => { for (const f of this.__on) f.call(this, ev); };
+      this.__on = [];
+      super.addEventListener("message", (ev) => {
+        let t = null;
+        try { t = JSON.parse(ev.data)?.t; } catch {}
+        if (t === "index" && held.on) held.queue.push(() => deliver(ev));
+        else deliver(ev);
+      });
+    }
+    addEventListener(type, f, o) { if (type === "message") this.__on.push(f); else super.addEventListener(type, f, o); }
+    set onmessage(f) { this.__on.push(f); }
+  };
+}
+async function readyClient() {
+  // (the client's barrier: a token is answered only by a pull asked after it was given that reads the log to its end;
+  // an answer already in the status (made in the same millisecond or not), and a pull asked before the token, don't)
+  await account();
+  const w = await fresh();
+  const held = { on: false, queue: [] };
+  const c = viewClient(w, { WebSocket: holdingIndexWS(held) });
+  try {
+    check(await until(() => settled(w, c)), "ready: synced");
+    const t1 = "aaaaaaaaaaa1", t2 = "aaaaaaaaaaa2", t3 = "aaaaaaaaaaa3";
+    c.refresh(t1);
+    check(await until(() => c.status.ready?.includes(t1), 10_000), "ready: a token answered on an empty log: " + J(c.status));
+    // (a pull asked before the token: held, the other device's ops written after it was answered by the server)
+    held.on = true;
+    c.refresh(t2);
+    check(await until(() => held.queue.length > 0, 10_000), "ready: the token's pull asked, its page held");
+    await otherOps(3, 0, "pre");
+    c.refresh(t3);
+    const stale = c.status.ready ?? [];
+    check(stale.includes(t1) && !stale.includes(t3), "ready: right after the call, the status's answers (an earlier token's) don't answer it: " + J(stale));
+    held.on = false;
+    for (const f of held.queue.splice(0)) f();
+    check(await until(() => c.status.ready?.includes(t2), 10_000), "ready: the held page answers the token given before it was asked");
+    const t3First = c.status.ready.includes(t3);
+    check(!t3First || !!(await w.stat("/pre2")), "ready: the held page, asked before the later token, doesn't answer it alone");
+    check(await until(() => c.status.ready?.includes(t3), 10_000), "ready: a pull asked after the later token answers it");
+    check(!!(await w.stat("/pre0")) && !!(await w.stat("/pre2")), "ready: …once the ops written before that token are in this device's index");
+    // (a token answered, given again: a new barrier, not answered by its old answer)
+    held.on = true;
+    c.refresh(t1);
+    check(!c.status.ready.includes(t1), "ready: an answered token given again is taken back, not answered at once");
+    held.on = false;
+    for (const f of held.queue.splice(0)) f();
+    check(await until(() => c.status.ready?.includes(t1), 10_000), "ready: …and answered by a pull asked after it");
+    // (a token not of its form is ignored: given alone, then a pull that reads the log to its end (another token's), it
+    // is never answered)
+    held.on = false;
+    c.refresh("not a token");
+    c.refresh("ccccccccccc1");
+    check(await until(() => c.status.ready?.includes("ccccccccccc1"), 10_000) && !c.status.ready.includes("not a token"), "ready: a malformed token, given alone, then a pull to the log's end: never taken: " + J(c.status.ready));
+    // (at most READY.tokens kept)
+    c.refresh("not a token");
+    for (let i = 0; i < 12; i++) c.refresh("bbbbbbbbbb" + String(i).padStart(2, "0"));
+    check(await until(() => c.status.ready?.includes("bbbbbbbbbb11"), 10_000), "ready: many tokens, the newest answered");
+    check(c.status.ready.length <= W.READY.tokens && !c.status.ready.includes("not a token"), "ready: the answers kept are bounded, and a malformed token was never taken: " + J(c.status.ready));
+  } finally {
+    await stop(c);
+  }
+}
+async function readyWrapper() {
+  // (syncReady's own rules, with owners made here: one deadline and the caller's abort over the whole call, its first
+  // reads included, and nothing done after it ends; another lifecycle: off; a log that can't be read: refused)
+  const life = { ns: "n:1", epoch: 0 };
+  const fake = (o = {}) => {
+    const f = { refreshed: [], subs: new Set(), snap: { state: "synced" }, life: { ...life }, gen: 1,
+      reconcile: () => Promise.resolve(), durable: () => Promise.resolve({ ...life }),
+      lifecycle() { return this.life ? { ...this.life } : null; }, holderGen() { return this.gen; },
+      refresh(t) { this.refreshed.push(t); }, view() { return { from: "own", s: this.snap }; },
+      onChange(cb) { this.subs.add(cb); return () => this.subs.delete(cb); }, tell() { for (const cb of [...this.subs]) cb(); }, ...o };
+    return f;
+  };
+  const never = () => new Promise(() => {});
+  const timed = async (p) => { const t = performance.now(); const r = await p; return { r, ms: performance.now() - t }; };
+  // (a reconcile that never ends: the deadline still ends the call, and nothing is asked or listened to after)
+  {
+    const f = fake({ reconcile: never });
+    const { r, ms } = await timed(W.syncReady(f, { timeoutMs: 150 }));
+    check(r === "timeout" && ms < 1000 && f.refreshed.length === 0 && f.subs.size === 0, "ready wrapper: a stalled reconcile: timeout at the deadline, nothing refreshed or listened to: " + J({ r, ms: Math.round(ms), refreshed: f.refreshed.length }));
+  }
+  // (a timeout asked past the cap: the deadline used is the cap's, SYNC_READY.maxMs (the timer's delay, read where it is
+  // set: the timer itself run at once))
+  {
+    const f = fake({ reconcile: never });
+    const real = globalThis.setTimeout, delays = [];
+    globalThis.setTimeout = (cb, d, ...a) => { delays.push(d); return real(cb, 0, ...a); };
+    // (the timer is set as the call is made, synchronously: the stub only for that)
+    let p;
+    try {
+      p = W.syncReady(f, { timeoutMs: 10 * W.SYNC_READY.maxMs });
+    } finally {
+      globalThis.setTimeout = real;
+    }
+    const r = await p;
+    check(r === "timeout" && delays[0] === W.SYNC_READY.maxMs, "ready wrapper: a timeout past the cap waits the cap, never longer: " + J({ r, delays }));
+  }
+  // (the time the first reads take counts against the deadline)
+  {
+    const f = fake({ reconcile: () => sleep(200) });
+    const { r, ms } = await timed(W.syncReady(f, { timeoutMs: 300 }));
+    check(r === "timeout" && ms < 600, "ready wrapper: 200 ms of reconcile counts: timeout at about 300 ms, not 500: " + J({ r, ms: Math.round(ms) }));
+  }
+  // (aborted during reconcile, and during durable: ended at once, no refresh or listener after, even when they end later)
+  for (const at of ["reconcile", "durable"]) {
+    let go;
+    const gate = new Promise((ok) => (go = ok));
+    const f = fake(at === "reconcile" ? { reconcile: () => gate } : { durable: () => gate.then(() => ({ ...life })) });
+    const ac = new AbortController();
+    const p = W.syncReady(f, { signal: ac.signal, timeoutMs: 10_000 });
+    await sleep(50);
+    ac.abort();
+    const { r, ms } = await timed(p);
+    go();
+    await sleep(50);
+    check(r === "timeout" && ms < 200 && f.refreshed.length === 0 && f.subs.size === 0, `ready wrapper: aborted during ${at}: ended at once, nothing asked after it ends: ` + J({ r, ms: Math.round(ms), refreshed: f.refreshed.length, subs: f.subs.size }));
+  }
+  // (an error reading the owner's state, in reconcile or in durable: timeout, never off)
+  for (const at of ["reconcile", "durable"]) {
+    const f = fake(at === "reconcile" ? { reconcile: () => Promise.reject(new Error("storage")) } : { durable: () => Promise.reject(new Error("storage")) });
+    const r = await W.syncReady(f, { timeoutMs: 5000 });
+    check(r === "timeout" && f.refreshed.length === 0, `ready wrapper: ${at} failing: timeout, not off: ` + r);
+  }
+  // (the lifecycle known at the call changed while reconcile was held: off, no token given; none known at the call:
+  // the one the first reconcile finds)
+  {
+    let go;
+    const f = fake({ reconcile: () => new Promise((ok) => (go = ok)) });
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(20);
+    f.life = { ns: "other:1", epoch: 0 };
+    go();
+    check((await p) === "off" && f.refreshed.length === 0, "ready wrapper: another account while reconcile was held: off, no token given");
+    const e = fake();
+    let go2;
+    e.reconcile = () => new Promise((ok) => (go2 = ok));
+    e.life = { ns: "n:1", epoch: 0 };
+    const p2 = W.syncReady(e, { timeoutMs: 5000 });
+    await sleep(20);
+    e.life = { ns: "n:1", epoch: 1 };
+    go2();
+    check((await p2) === "off", "ready wrapper: another epoch while reconcile was held: off");
+    const g = fake({ life: null });
+    g.reconcile = () => { g.life = { ...life }; return Promise.resolve(); };
+    const p3 = W.syncReady(g, { timeoutMs: 5000 });
+    await sleep(30);
+    check(g.refreshed.length === 1, "ready wrapper: no lifecycle known at the call: the first reconcile's taken, the token given");
+    g.snap = { state: "synced", ready: [g.refreshed[0]] };
+    g.tell();
+    check((await p3) === "current", "ready wrapper: …and answered");
+  }
+  // (already aborted: timeout, nothing read)
+  {
+    let read = 0;
+    const f = fake({ reconcile: () => { read++; return Promise.resolve(); } });
+    const ac = new AbortController();
+    ac.abort();
+    check((await W.syncReady(f, { signal: ac.signal })) === "timeout" && read === 0, "ready wrapper: called aborted: timeout, nothing read");
+  }
+  // (another account's lifecycle meanwhile, before and after the token is given: off)
+  {
+    const f = fake();
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(30);
+    check(f.refreshed.length === 1, "ready wrapper: the token given once");
+    f.life = { ns: "other:1", epoch: 0 };
+    f.tell();
+    check((await p) === "off", "ready wrapper: another account meanwhile: off");
+    const g = fake({ durable: () => Promise.resolve({ ns: "other:1", epoch: 0 }) });
+    check((await W.syncReady(g, { timeoutMs: 5000 })) === "off" && g.refreshed.length === 0, "ready wrapper: the durable lifecycle not the owner's: off, no token given");
+    const h = fake({ life: null });
+    check((await W.syncReady(h, { timeoutMs: 5000 })) === "off", "ready wrapper: sync off: off");
+  }
+  // (a log that can't be read: refused; the token's answer: current, its own only; another holder: given again)
+  {
+    const f = fake();
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(30);
+    f.snap = { state: "paused", stuck: true };
+    f.tell();
+    check((await p) === "refused", "ready wrapper: the holder's log stuck: refused");
+    const g = fake();
+    const q = W.syncReady(g, { timeoutMs: 5000 });
+    await sleep(30);
+    g.snap = { state: "synced", ready: ["zzzzzzzzzzzz"] };
+    g.tell();
+    await sleep(30);
+    g.gen = 2;
+    g.tell();
+    check(g.refreshed.length === 2 && g.refreshed[0] === g.refreshed[1], "ready wrapper: another holder: the same token given to it");
+    g.snap = { state: "synced", ready: [g.refreshed[0]] };
+    g.tell();
+    check((await q) === "current", "ready wrapper: only its own token answers it");
+    // (each call its own token: a caller's is never taken)
+    const k = fake();
+    const a = W.syncReady(k, { timeoutMs: 200 }), b = W.syncReady(k, { timeoutMs: 200, token: "zzzzzzzzzzzz" });
+    await Promise.all([a, b]);
+    check(k.refreshed.length === 2 && k.refreshed[0] !== k.refreshed[1] && !k.refreshed.includes("zzzzzzzzzzzz") && k.refreshed.every((t) => /^[0-9a-z]{12}$/.test(t)), "ready wrapper: each call makes its own token, never the caller's: " + J(k.refreshed));
+  }
+}
+async function readyOwner() {
+  // (syncReady through the owner: the holding tab answers; a follower's call answered by the holder; the holder going
+  // away meanwhile (another tab takes over): answered by the new one; sync turned off meanwhile: "off"; never "current"
+  // before the ops written before the call are in this browser's index)
+  await account();
+  const nm = names();
+  const w1 = await fresh(nm), w2 = await fresh(nm);
+  const o1 = W.SyncOwner.of(w1, { origin: location.origin });
+  o1.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w1, el, hostOf(w1));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o1.view().s.state === "synced" && o1.isHolder(), 15_000), "ready owner: the first tab holds and syncs");
+  const r0 = await W.syncReady(o1, { timeoutMs: 15_000 });
+  check(r0 === "current", "ready owner: the holder's own call: current: " + J({ r0, view: o1.view(), status: o1.client?.status, debug: o1.client?.debug(), holder: o1.isHolder(), life: o1.lifecycle() }));
+  await otherOps(2, 0, "own");
+  const r1 = await W.syncReady(o1, { timeoutMs: 15_000 });
+  check(r1 === "current" && !!(await w1.stat("/own1")), "ready owner: ops written before the call: current only with them in the index");
+  const o2 = W.SyncOwner.of(w2, { origin: location.origin });
+  o2.start();
+  await until(() => o2.view().from === "holder", 10_000);
+  await otherOps(2, 2, "fol");
+  const r2 = await W.syncReady(o2, { timeoutMs: 15_000 });
+  check(r2 === "current" && !!(await w2.stat("/fol3")), "ready owner: a follower's call, answered by the holder's pull: " + r2);
+  // (the holder goes away while a follower waits: the token given to the next holder)
+  await otherOps(1, 4, "xfer");
+  const p = W.syncReady(o2, { timeoutMs: 30_000 });
+  o1.destroy();
+  const r3 = await p;
+  check(r3 === "current" && o2.isHolder() && !!(await w2.stat("/xfer4")), "ready owner: the holder gone meanwhile: the new holder answers: " + J({ r3, holder: o2.isHolder() }));
+  // (sync turned off while a call waits: "off")
+  const el2 = document.createElement("div");
+  const s2 = W.syncSection(w2, el2, hostOf(w2));
+  await until(() => /Turn off sync here/.test(buttons(el2).join()), 5000);
+  const p2 = W.syncReady(o2, { timeoutMs: 30_000 });
+  [...el2.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+  const r4 = await p2;
+  check(r4 === "off" || r4 === "current", "ready owner: turned off meanwhile: off (or answered just before): " + r4);
+  check((await W.syncReady(o2, { timeoutMs: 2000 })) === "off", "ready owner: sync off here: off at once");
+  s.dispose();
+  s2.dispose();
+  o2.destroy();
 }
 
 /** The front has dropped an ack since its log was last reset: the op was sent and its answer withheld. */
@@ -2396,7 +3281,7 @@ async function s5Rows() {
   const why = cleared ? "" : await rowsWhy(w, owner, [d.ident]);
   check(cleared, "rows: …cleared at its own ack " + why);
   const many = Array.from({ length: 1100 }, (_, i) => "0123456789abcd" + String(i).padStart(4, "0"));
-  check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1005, "rows: 1,100 identities asked: read at most 1,005, one transaction");
+  check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1050, "rows: 1,100 identities asked: read at most 1,050 (the tree's 1,000 and Recent's most, 50), one transaction");
   s.dispose();
   owner.destroy();
 }
@@ -2780,6 +3665,14 @@ async function s5Wire() {
     check(n <= W.STATUS_PUB.maxBytes && n > W.STATUS_PUB.maxBytes - 16 && m.t === "status" && m.ns === ns && m.rev === MAX && reason.startsWith(r) && r.length > 0 && !/[\ud800-\udbff]$/.test(r), `wire: ${k} reason: the whole message ${n} UTF-8 bytes (at most ${W.STATUS_PUB.maxBytes}), its reason cut to ${Array.from(r).length} code points, whole ones`);
   }
   // (a short one untouched)
+  // (syncReady's answers too, at their most (READY.tokens), with `stuck` and `used`: within the bound, the reason first
+  // to go, then the oldest answers; the newest answer kept)
+  {
+    const ready = Array.from({ length: W.READY.tokens }, (_, i) => "t".repeat(10) + String(i).padStart(2, "0"));
+    const big = W.statusMessage(ns, MAX, MAX, MAX, { state: "paused", waiting: MAX, reason: "x".repeat(600), used: true, lastSynced: MAX, resumesAt: MAX, full: true, limit: { limit_bytes: MAX, used_bytes: MAX }, ready, stuck: true });
+    const nb = bytes(big);
+    check(nb <= W.STATUS_PUB.maxBytes && big.snapshot.stuck === true && big.snapshot.ready?.at(-1) === ready.at(-1) && big.snapshot.reason === undefined, "wire: the worst case with syncReady's answers, stuck and used: within the bound, the newest answer kept: " + J({ bytes: nb, kept: big.snapshot.ready?.length }));
+  }
   const m = W.statusMessage(ns, 1, 2, 3, { state: "synced", reason: "ok" });
   check(m.snapshot.reason === "ok" && bytes(m) <= W.STATUS_PUB.maxBytes, "wire: a message that fits is sent as it is: " + J(out));
 }
@@ -3971,7 +4864,1080 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+// ---- e2e PR 5c, its send half: sealed sends.  A fixture key provider (an epoch's keys, a device's Ed25519 key, a view
+// of the key chain) stands where the page's key store will; the reference server holds the same chain (/__ctl e2eChain)
+const b64u = (b) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const rand32 = () => crypto.getRandomValues(new Uint8Array(32));
+const e2eId = () => {
+  const A = "abcdefghijklmnopqrstuvwxyz234567", r = crypto.getRandomValues(new Uint8Array(26));
+  return Array.from(r.subarray(0, 25), (x) => A[x & 31]).join("") + "aeimquy4"[r[25] & 7];
+};
+async function sealedFixture(accountId) {
+  // (the kit: the sealing module, loaded only here; the workspace's bundle doesn't carry it)
+  const kit = await import("./sealkit.js");
+  const account = "e2e-" + e2eId();
+  const keys = await kit.deriveEpochKeys(rand32(), account, 1);
+  // (the epochs: epoch 1 from the chain's base; `epoch()` begins the next at a new head (as a device removal does), its
+  // keys held by every device of the fixture)
+  const keyset = { 1: keys }, epochs = [{ n: 1, at: 5 }];
+  // (the key chain, as auth's verified state gives it: heads at absolute positions from `base`, devices with the
+  // positions they were added and removed at; every device of the fixture reads the same chain)
+  const base = 5;
+  const heads = [b64u(rand32())], generation = b64u(rand32());
+  const devices = new Map(); // id -> { raw, added, removed, privateKey }
+  const server = { get head() { return heads[heads.length - 1]; }, generation };
+  const put = () => ctl("e2eChain", { account: accountId, chain: { account, head: server.head, generation, signers: [...devices].filter(([, d]) => d.removed === null).map(([i, d]) => [i, b64u(d.raw)]) } });
+  const refreshes = { n: 0 };
+  const viewOf = (known) => {
+    const position = (h) => { const i = heads.slice(0, known).indexOf(h); return i < 0 ? null : base + i; };
+    return {
+      head: heads[known - 1], generation, currentEpoch: epochs.filter((e) => e.at <= base + known - 1).at(-1).n, position,
+      signerAt: (h, id) => { const p = position(h), d = devices.get(id); return p !== null && d && d.added <= p && (d.removed === null || d.removed > p) ? d.raw : null; },
+      epochAt: (h) => { const p = position(h); return p === null ? null : epochs.filter((e) => e.at <= p).at(-1).n; },
+      device: (id) => { const d = devices.get(id); return d ? { added: d.added, removed: d.removed } : null; },
+    };
+  };
+  const device = async () => {
+    const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    const id = e2eId();
+    // (a device added moves the head: added at that new head's position)
+    if (devices.size) heads.push(b64u(rand32()));
+    devices.set(id, { raw, added: base + heads.length - 1, removed: null });
+    await put();
+    let known = heads.length;
+    return {
+      account,
+      device: { id, sign: async (b) => new Uint8Array(await crypto.subtle.sign("Ed25519", pair.privateKey, b)) },
+      chain: async (refresh) => { if (refresh) { refreshes.n++; known = heads.length; } return viewOf(known); },
+      epochKeys: async (n) => keyset[n] ?? null,
+    };
+  };
+  const provider = await device();
+  return {
+    provider, kit, refreshes, server, device,
+    move: async () => { heads.push(b64u(rand32())); await put(); },
+    epoch: async () => {
+      heads.push(b64u(rand32()));
+      const n = epochs.at(-1).n + 1;
+      keyset[n] = await kit.deriveEpochKeys(rand32(), account, n);
+      epochs.push({ n, at: base + heads.length - 1 });
+      await put();
+      return n;
+    },
+    remove: async (p) => { heads.push(b64u(rand32())); devices.get(p.device.id).removed = base + heads.length - 1; await put(); },
+  };
+}
+const sealedSends = (log) => log.sent.filter((m) => m.t === "sops");
+const itemsOf = (sends) => sends.flatMap((m) => m.json.map((j) => JSON.parse(j)));
+
+async function sealedSend() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c0 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c0)), "sealed send: synced");
+  await stop(c0);
+  // (made while not connected, so they go up together: one message chains its ops, each after the one before it)
+  await w.mkdir("/s");
+  await w.create("/s/a.txt", { content: "sealed a" });
+  await w.mkdir("/s/b");
+  await ctl("log", { reset: true });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c), 15_000), "sealed send: the changes settled: " + J(c.status));
+  const log = await ctl("log");
+  const sends = sealedSends(log), items = itemsOf(sends);
+  check(sends.length >= 1 && log.sent.every((m) => m.t !== "ops") && sends.some((m) => m.dseqs.length >= 3), "sealed send: every op went as sops, none as plaintext, the three in one message: " + J(sends.map((m) => m.dseqs)));
+  check(items.length >= 2 && items.every((o) => o.env && o.sig && o.signer === f.provider.device.id && o.head === f.server.head && o.chain_gen === f.server.generation && o.path === undefined && o.op === undefined),
+    "sealed send: each op sealed and signed under the chain's head and generation, nothing readable beside it");
+  const file = items.find((o) => o.adds?.length === 1);
+  check(file && (await ctl("sealedRefs", { account: id, address: file.adds[0] })).refs === 1, "sealed send: the file's blob counted once, by its visible add");
+  check((await outbox(w)) === 0 && c.debug().halted === undefined, "sealed send: every record confirmed by its echo (matched by the envelope's hash)");
+  // (the per-device envelope chain: each envelope, opened, names the previous one's hash, the first none; the outbox's
+  // last link is the newest accepted envelope)
+  const hashOf = async (env) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(atob(env), (ch) => ch.charCodeAt(0)))));
+  const keys = await f.provider.epochKeys(1);
+  const fromB64u = (x) => Uint8Array.from(atob(x.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0));
+  let prev = null, chained = true;
+  for (const o of items.sort((x, y) => x.dseq - y.dseq)) {
+    try {
+      await f.kit.openIndexOp(keys, { device: w.device, dseq: o.dseq }, Uint8Array.from(atob(o.env), (ch) => ch.charCodeAt(0)), { prev: prev === null ? null : fromB64u(prev), adds: o.adds, releases: o.releases });
+    } catch (e) {
+      chained = false;
+    }
+    prev = await hashOf(o.env);
+  }
+  check(chained, "sealed send: each envelope opens naming the previous envelope's hash (the first, none), and its visible references");
+  const last = await metaGet(w.ws, `sync:${nsOf(c)}:sealedPrev`);
+  check(last?.hash === prev && last.dseq === items[items.length - 1].dseq, "sealed send: the outbox's last link is the newest accepted envelope: " + J(last));
+  await stop(c);
+}
+
+async function sealedEchoFirst() {
+  // (the ack lost, then the echo comes first: it confirms the record and makes its envelope the chain's last link, so the
+  // next envelope is sealed after it, on the same connection or after a reload)
+  for (const reload of [false, true]) {
+    const tag = reload ? "after a reload" : "same client";
+    const id = await account();
+    const f = await sealedFixture(id);
+    const w = await fresh();
+    const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(w, c)), `sealed echo first (${tag}): synced`);
+    await ctl("log", { reset: true });
+    await ctl("set", { set: { dropAcks: 1, closeAfterDrop: true } });
+    await w.create("/echo-a.txt", { content: "A, its ack lost" });
+    check(await until(() => settled(w, c), 15_000), `sealed echo first (${tag}): A settled: ` + J(c.status));
+    const aItems = itemsOf(sealedSends(await ctl("log")));
+    const a = aItems[0];
+    check(a && aItems.filter((o) => o.dseq === a.dseq).length === 1, `sealed echo first (${tag}): A was sent once: its echo, not a resend, decided it: ` + J(aItems.map((o) => o.dseq)));
+    const hashOf = async (env) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(atob(env), (ch) => ch.charCodeAt(0)))));
+    const last = await metaGet(w.ws, `sync:${nsOf(c)}:sealedPrev`);
+    check(a && last?.hash === (await hashOf(a.env)) && last.dseq === a.dseq, `sealed echo first (${tag}): A's envelope is the chain's last link: ` + J(last));
+    let c2 = c;
+    if (reload) {
+      await stop(c);
+      c2 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+    }
+    await ctl("log", { reset: true });
+    await w.create("/echo-b.txt", { content: "B, after A" });
+    check(await until(() => settled(w, c2), 15_000), `sealed echo first (${tag}): B settled: ` + J({ status: c2.status, rebuild: await metaGet(w.ws, `sync:${nsOf(c2)}:rebuild`), halted: c2.debug().halted }));
+    const b = itemsOf(sealedSends(await ctl("log"))).find((o) => o.adds?.length === 1);
+    const keys = await f.provider.epochKeys(1);
+    const fromB64u = (x) => Uint8Array.from(atob(x.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0));
+    let opened = false;
+    try {
+      await f.kit.openIndexOp(keys, { device: w.device, dseq: b.dseq }, Uint8Array.from(atob(b.env), (ch) => ch.charCodeAt(0)), { prev: fromB64u(await hashOf(a.env)), adds: b.adds, releases: b.releases });
+      opened = true;
+    } catch {}
+    check(b && opened, `sealed echo first (${tag}): B opens naming A's hash as the envelope before it`);
+    await stop(c2);
+  }
+}
+
+async function sealedEchoNoKit() {
+  // (this device's own sealed op, read back by a client given no sealing module: not read, halted, said)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c)), "sealed echo, no kit: synced");
+  await w.mkdir("/nokit");
+  check(await until(() => settled(w, c), 15_000), "sealed echo, no kit: sent sealed and settled");
+  await stop(c);
+  const c2 = client(w);
+  check(await until(() => c2.debug().halted === "sealed-unverified", 15_000), "sealed echo, no kit: a client without the module halts at its own sealed op: " + J(c2.status));
+  await stop(c2);
+}
+
+async function sealedEchoMalformed() {
+  // (this device's own sealed op served back as an envelope that isn't base64: halted, diverged; the record kept and the
+  // cursor where it was)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c)), "sealed echo, malformed: synced");
+  const cursor0 = c.debug().cursor;
+  await ctl("set", { set: { tamperIndexEnvBad: 1 } });
+  await w.mkdir("/malformed");
+  check(await until(() => c.debug().halted === "sealed-halt", 15_000), "sealed echo, malformed: halted (it doesn't verify): " + J(c.status));
+  check((await outbox(w)) >= 1 && c.debug().cursor === cursor0, "sealed echo, malformed: the record kept, the cursor where it was: " + J({ cursor0, cursor: c.debug().cursor }));
+  await stop(c);
+}
+
+async function sealedTamper() {
+  // (the server names other bytes than this device sealed: in an ack, or in the echo it serves: halted, diverged)
+  for (const via of ["ack", "echo"]) {
+    const id = await account();
+    const f = await sealedFixture(id);
+    const w = await fresh();
+    const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(w, c)), `sealed tamper (${via}): synced`);
+    await ctl("set", { set: via === "ack" ? { tamperAckHash: 1 } : { tamperIndexEnv: 1 } });
+    await w.mkdir(`/t-${via}`);
+    // (an ack naming another hash: diverged; an echo serving another envelope: it doesn't verify (pull checks every sealed
+    // op, this device's own too, before matching it): halted at it)
+    const want = via === "ack" ? "diverged" : "sealed-halt";
+    check(await until(() => c.debug().halted === want, 15_000), `sealed tamper (${via}): another envelope's hash named: halted, ${want}: ` + J(c.status));
+    await stop(c);
+  }
+}
+
+async function sealedLostAck() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c)), "sealed lost ack: synced");
+  await ctl("log", { reset: true });
+  // (the ack lost, and the next connection's first index too, so the record is resent rather than confirmed by its echo)
+  await ctl("set", { set: { dropAcks: 1, dropIndex: 1 } });
+  await w.create("/lost.txt", { content: "sealed, its answer lost" });
+  check(await until(async () => (await ctl("log")).got.some((g) => g.dropped && g.t === "ack")), "sealed lost ack: the answer was dropped");
+  await stop(c);
+  // (a reload: the outbox holds the record and its sealed form; the new client sends those exact bytes again)
+  const c2 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c2), 15_000), "sealed lost ack: after a reload, settled: " + J(c2.status));
+  const sends = sealedSends(await ctl("log"));
+  const first = sends[0]?.json?.[0], again = sends.slice(1).flatMap((m) => m.json).filter((j) => JSON.parse(j).dseq === JSON.parse(first ?? "{}").dseq);
+  check(first && again.length >= 1 && again.every((j) => j === first), "sealed lost ack: the resend after the reload carried the very same sealed bytes: " + J(sends.map((m) => m.dseqs)));
+  check((await outbox(w)) === 0 && c2.debug().halted === undefined, "sealed lost ack: decided once, confirmed, no divergence");
+  await stop(c2);
+}
+
+async function sealedRefusal() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c0 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c0)), "sealed refusal: synced");
+  await stop(c0);
+  // (three changes made offline go in one message: the server refuses the second; the third is undecided)
+  for (const p of ["/r1", "/r2", "/r3"]) await w.mkdir(p);
+  await ctl("log", { reset: true });
+  await ctl("refuseSealed", { dseq: 2, code: "missing" });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  // (settled: scanned past the three, every record decided, nothing in flight)
+  check(await until(() => settled(w, c), 15_000), "sealed refusal: every record decided: " + J(c.status));
+  const sends = sealedSends(await ctl("log"));
+  const firstMsg = sends.find((m) => m.dseqs.length === 3);
+  const third0 = firstMsg && JSON.parse(firstMsg.json[2]);
+  const third1 = sends.filter((m) => m !== firstMsg).flatMap((m) => m.json.map((j) => JSON.parse(j))).find((o) => o.dseq === 3);
+  check(firstMsg && third1 && third1.env !== third0.env, "sealed refusal: the undecided third was sealed again (other bytes) and sent again: " + J(sends.map((m) => m.dseqs)));
+  const refusals = await metaGet(w.ws, `sync:${nsOf(c)}:refused`);
+  check(Array.isArray(refusals) && refusals.some((r) => r.dseq === 2 && r.code === "missing"), "sealed refusal: the second's refusal kept: " + J(refusals));
+  await stop(c);
+}
+
+async function sealedStale() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c0 = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c0)), "sealed stale: synced");
+  await stop(c0);
+  await w.mkdir("/st");
+  const oldHead = f.server.head;
+  await f.move();
+  await ctl("log", { reset: true });
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c), 15_000), "sealed stale: settled after the chain moved: " + J(c.status));
+  const sends = sealedSends(await ctl("log")), heads = itemsOf(sends).map((o) => o.head);
+  check(heads[0] === oldHead && heads[heads.length - 1] === f.server.head && f.refreshes.n >= 1,
+    "sealed stale: sealed under the old head, refused stale_head, the chain read again, sealed again under the new head and accepted, the same dseq: " + J({ n: heads.length, refreshes: f.refreshes.n }));
+  await stop(c);
+}
+
+async function sealedBusy() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c)), "sealed busy: synced");
+  await ctl("log", { reset: true });
+  await ctl("set", { set: { fakeOps: [{ code: "busy", detail: { retry_after: 200 } }] } });
+  await w.mkdir("/busy");
+  check(await until(() => settled(w, c), 15_000), "sealed busy: settled: " + J(c.status));
+  const sends = sealedSends(await ctl("log"));
+  check(sends.length >= 2 && sends[1].json[0] === sends[0].json[0], "sealed busy: sent again with the identical bytes (nothing was decided, the head didn't move)");
+  await stop(c);
+}
+
+async function sealedLogFull() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const w = await fresh();
+  const c = client(w, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(w, c)), "sealed log full: synced");
+  await ctl("sealedCap", { n: 0 });
+  await ctl("log", { reset: true });
+  await w.mkdir("/full");
+  check(await until(() => c.debug().halted === "sealed-log-full" && /log is full/.test(c.status.reason ?? ""), 15_000), "sealed log full: halted, saying why: " + J(c.status));
+  await sleep(500);
+  check(sealedSends(await ctl("log")).length === 1 && (await outbox(w)) >= 1, "sealed log full: tried once, no retry loop; the record kept");
+  await ctl("sealedCap", { n: 1_000_000 });
+  await stop(c);
+}
+
+async function sealedForeign() {
+  // (another device's sealed ops, read by a device with no sealing module: not read, the pull stops there, said)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh(), wb = await fresh();
+  const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "sealed foreign: A synced");
+  await wa.mkdir("/from-a");
+  check(await until(() => settled(wa, a), 15_000), "sealed foreign: A's op in the log");
+  const b = client(wb);
+  check(await until(() => b.debug().halted === "sealed-unverified" && /can't verify/.test(b.status.reason ?? ""), 15_000), "sealed foreign: B, without the module, halts at A's sealed op, saying why: " + J(b.status));
+  check(!(await wb.stat("/from-a")), "sealed foreign: nothing of it applied on B");
+  await stop(a);
+  await stop(b);
+}
+
+async function sealedPull() {
+  // (e2e PR 5c, its pull half: B verifies and opens A's sealed ops, in the log's order, and applies them; its pull's
+  // state is kept with its cursor, so after a reload A's next op still verifies, chained after the last B verified)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const h0 = f.server.head;
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "sealed pull: A synced");
+  await wa.mkdir("/pa");
+  await wa.create("/pa/one.txt", { content: "one" });
+  check(await until(() => settled(wa, a), 15_000), "sealed pull: A's ops in the log: " + J(a.status));
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => !!(await wb.stat("/pa/one.txt")) && settled(wb, b), 15_000), "sealed pull: B verified, opened and applied A's sealed ops: " + J({ status: b.status, halted: b.debug().halted, why: b.stats.sealedHalt }));
+  const ns = nsOf(b);
+  const kept = await metaGet(wb.ws, `sync:${ns}:sealedPull`);
+  const cursor = await metaGet(wb.ws, `sync:${ns}:cursor`);
+  check(kept && kept.seq === cursor && Object.keys(kept.devices).length >= 1, "sealed pull: what B verified is kept with its cursor (the same seq): " + J({ kept: kept && { seq: kept.seq, floor: kept.floor }, cursor }));
+  await stop(b);
+  await wa.create("/pa/two.txt", { content: "two" });
+  check(await until(() => settled(wa, a), 15_000), "sealed pull: A's next op in the log");
+  const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => !!(await wb.stat("/pa/two.txt")), 15_000) && b2.debug().halted === undefined, "sealed pull: after a reload, A's next op verifies (chained after the last B kept) and applies: " + J({ halted: b2.debug().halted, why: b2.stats.sealedHalt }));
+  // (the floor, kept too: A's next op served at a head from before the ones B has verified halts by the floor, before
+  // any other check, so a reload can't lower it)
+  await ctl("set", { set: { tamperIndexHead: h0, tamperFor: wb.device, serverNotices: true } });
+  await wa.create("/pa/three.txt", { content: "three" });
+  check(await until(() => b2.debug().halted === "sealed-halt", 15_000) && /already passed/.test(b2.stats.sealedHalt), "sealed pull: after the reload, an op served at an earlier head halts by the floor B kept: " + J({ why: b2.stats.sealedHalt }));
+  await stop(a);
+  await stop(b2);
+}
+
+async function sealedPullHalt() {
+  // (a sealed op served altered: B halts at it, deterministically, nothing of it applied, the cursor where it was; for
+  // every kind of change, the reference lists' form included (never another error, which would end the connection and
+  // read the op again, untouched))
+  const many = Array.from({ length: 65 }, (_, i) => i.toString(16).padStart(64, "0"));
+  const kinds = [
+    ["envelope", { tamperIndexEnv: 1 }],
+    ["an add twice", { tamperIndexField: { field: "adds", value: ["3".repeat(64), "3".repeat(64)], sticky: true } }],
+    ["65 adds", { tamperIndexField: { field: "adds", value: many, sticky: true } }],
+    ["a release twice", { tamperIndexField: { field: "releases", value: [{ address: "4".repeat(64), add: 1 }, { address: "4".repeat(64), add: 1 }], sticky: true } }],
+    ["65 releases", { tamperIndexField: { field: "releases", value: many.map((address) => ({ address, add: 1 })), sticky: true } }],
+    ["a release in the old form", { tamperIndexField: { field: "releases", value: ["4".repeat(64)], sticky: true } }],
+  ];
+  for (const [kind, set] of kinds) {
+    const id = await account();
+    const f = await sealedFixture(id);
+    const pb = await f.device();
+    const wa = await fresh(), wb = await fresh();
+    const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(wa, a)), `sealed pull halt (${kind}): A synced`);
+    const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+    check(await until(() => settled(wb, b)), `sealed pull halt (${kind}): B synced`);
+    const cursor0 = await metaGet(wb.ws, `sync:${nsOf(b)}:cursor`);
+    await ctl("set", { set: { ...set, tamperFor: wb.device, serverNotices: true } });
+    await wa.mkdir("/tampered");
+    check(await until(() => b.debug().halted === "sealed-halt" && /doesn't verify/.test(b.status.reason ?? ""), 15_000), `sealed pull halt (${kind}): B halted, saying the log doesn't verify: ` + J({ status: b.status, why: b.stats.sealedHalt }));
+    await sleep(300);
+    const ns = nsOf(b);
+    const pull0 = J(await metaGet(wb.ws, `sync:${ns}:sealedPull`) ?? null);
+    check(b.debug().halted === "sealed-halt" && !(await wb.stat("/tampered")) && (await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0, `sealed pull halt (${kind}): still halted, nothing of it applied, B's cursor where it was`);
+    await stop(b);
+    if (set.tamperIndexField?.sticky) {
+      // (a server that keeps serving it: after a reload B halts again at the same op, nothing applied, its cursor and
+      // what it had verified unchanged)
+      const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+      check(await until(() => b2.debug().halted === "sealed-halt", 15_000), `sealed pull halt (${kind}): after a reload, halted again at it: ` + J({ why: b2.stats.sealedHalt }));
+      await sleep(300);
+      check(!(await wb.stat("/tampered")) && (await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0 && J(await metaGet(wb.ws, `sync:${ns}:sealedPull`) ?? null) === pull0,
+        `sealed pull halt (${kind}): after the reload, nothing applied, the cursor and what B verified unchanged`);
+      await stop(b2);
+      await ctl("set", { set: { tamperIndexField: null } });
+    }
+    await stop(a);
+  }
+}
+
+// ---- e2e PR 5d: the index's references released, and every device's check of a release
+
+/** The reference server's index references for an account: [address, add seq, the seq that released it or null]. */
+const refRows = async (id) => (await ctl("indexRefs", { account: id })).rows.map(([k, rel]) => [k.slice(0, k.lastIndexOf(":")), Number(k.slice(k.lastIndexOf(":") + 1)), rel]);
+/** A data file's content as text, or null if it isn't there. */
+const contentOf = async (w, p) => {
+  const c = (await w.read(p).catch(() => null))?.content;
+  return c instanceof Uint8Array ? new TextDecoder().decode(c) : c ?? null;
+};
+/** A device's ledger (its meta's index references, without the sweep's own stamps and place). */
+const ledgerOf = (ws) => new Promise((ok, no) => {
+  const tx = ws.transaction("meta", "readonly"), st = tx.objectStore("meta"), range = IDBKeyRange.bound("sync:", "sync;");
+  const ks = st.getAllKeys(range), vs = st.getAll(range);
+  tx.oncomplete = () => ok(J(ks.result.map((k, i) => [k, vs.result[i]]).filter(([k]) => k.includes(":refs:") && !k.includes(":refs:d:") && !k.endsWith(":refs:scan"))));
+  tx.onerror = () => no(tx.error);
+});
+/** Sweeps every time the log is read to its end, an add due at once after its first sight (on), or as shipped (off). */
+const sweepNow = (on) => {
+  Object.assign(W.REFS, { dueMs: on ? 0 : 24 * 3600_000 });
+  Object.assign(W.SWEEP, on ? { everyMs: 0, jitterMs: 0 } : { everyMs: 10 * 60_000, jitterMs: 60_000 });
+};
+/** A file made and written twice by `w`: its three index adds on the server, oldest first. */
+async function threeAdds(id, w, c, path) {
+  await w.create(path, { content: "one" });
+  await w.write(path, "two");
+  await w.write(path, "three");
+  check(await until(() => settled(w, c), 15_000), `(${path}: three writes in the log)`);
+  return (await refRows(id)).filter(([, , rel]) => rel === null).sort((x, y) => x[1] - y[1]).slice(-3).map(([address, add]) => ({ address, add }));
+}
+
+async function releaseSweep() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  sweepNow(true);
+  try {
+    const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(() => settled(wa, a)), "release sweep: A synced");
+    const adds = await threeAdds(id, wa, a, "/r.txt");
+    check(adds.length === 3, "release sweep: three live index adds on the server: " + J(adds));
+    await wa.remove("/r.txt");
+    await wa.emptyTrash();
+    check(await until(() => settled(wa, a), 15_000), "release sweep: the file forgotten");
+    // (the first sweep after it only stamps what it sees due; a later read of the log to its end releases)
+    for (let i = 0; i < 3 && !(await refRows(id)).every(([, , rel]) => rel !== null); i++) {
+      await wa.mkdir("/tick" + i);
+      await until(() => settled(wa, a), 15_000);
+    }
+    const rows = await refRows(id);
+    // (its three writes' adds, and the remove's: every op on a data file names its bytes, so adds one; that one held by no
+    // file, an orphan)
+    check(rows.length === 4 && rows.every(([, , rel]) => rel !== null) && a.debug().halted === undefined, "release sweep: every add the forgotten file held released, and the remove's orphan, by A's sweeps: " + J(rows));
+    // (B told of each new op, so it reads the log to its end)
+    await ctl("set", { set: { serverNotices: true } });
+    const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+    // (each device's keys are under its own namespace's index generation: compared without it)
+    const bare = async (w) => (await ledgerOf(w.ws)).replace(/sync:[^"]*?#\d+:refs:/g, "refs:");
+    const same = async () => (await bare(wa)) === (await bare(wb));
+    check(await until(async () => settled(wb, b) && b.debug().cursor === a.debug().cursor && (await same()), 15_000) && b.debug().halted === undefined, "release sweep: B reads the release ops, checks each against what it verified before it, and goes on: " + J({ b: b.debug(), a: a.debug().cursor, why: b.stats.sealedHalt }));
+    check((await ledgerOf(wa.ws)).length > 2 && (await same()), "release sweep: A's ledger and B's are the same");
+    await ctl("set", { set: { serverNotices: false } });
+    await stop(a);
+    await stop(b);
+  } finally {
+    sweepNow(false);
+  }
+}
+
+async function releaseHistory() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release history: A synced");
+  const adds = await threeAdds(id, wa, a, "/h.txt");
+  await wa.dropVersions("/h.txt");
+  const done = await until(async () => (await refRows(id)).filter(([, , rel]) => rel !== null).length === 2, 15_000);
+  const rows = await refRows(id), live = rows.filter(([, , rel]) => rel === null);
+  check(done && live.length === 1 && live[0][1] === adds[2].add, "release history: delete old versions released the file's two older adds at once, its current bytes' add live: " + J(rows));
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => settled(wb, b) && (await contentOf(wb, "/h.txt")) === "three", 15_000) && b.debug().halted === undefined, "release history: B accepts the release (history of a live file) and has the file as it is: " + J({ halted: b.debug().halted, why: b.stats.sealedHalt }));
+  await stop(a);
+  await stop(b);
+}
+
+async function releaseHistoryEarly() {
+  // (delete old versions asked at once after the writes, before the verified index has them: the request waits in the
+  // scan until it has, so the history released is the history the person saw, never an older ledger's (nothing lost))
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release history early: A synced");
+  await wa.create("/e.txt", { content: "one" });
+  await wa.write("/e.txt", "two");
+  await wa.write("/e.txt", "three");
+  await wa.dropVersions("/e.txt");
+  const done = await until(async () => (await refRows(id)).filter(([, , rel]) => rel !== null).length === 2 && settled(wa, a), 20_000);
+  const rows = (await refRows(id)).sort((x, y) => x[1] - y[1]);
+  check(done && rows.length === 3 && rows[0][2] !== null && rows[1][2] !== null && rows[2][2] === null,
+    "release history early: asked before its writes were confirmed, it still released the two older adds once the index had them, the current one live: " + J(rows));
+  await stop(a);
+}
+
+async function releaseHistoryView() {
+  // (delete old versions releases what the person saw, never more: A asks when its third version is current; before A's
+  // request is made into releases (held behind A's own outstanding op), B writes a fourth and A verifies it. Only the
+  // first two go: the third, current in A's view, stays held, as history now)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  let holdSops = false;
+  const held = [];
+  class Holding extends WebSocket {
+    send(data) {
+      if (holdSops && typeof data === "string" && data.includes('"t":"sops"')) { held.push(() => super.send(data)); return; }
+      super.send(data);
+    }
+  }
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit }, WebSocket: Holding });
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "release history view: A and B synced");
+  await ctl("set", { set: { serverNotices: true } });
+  const adds = await threeAdds(id, wa, a, "/v.txt");
+  check(await until(async () => settled(wb, b) && (await contentOf(wb, "/v.txt")) === "three", 15_000), "release history view: B has the third version");
+  holdSops = true;
+  await wa.mkdir("/v-held");
+  await wa.dropVersions("/v.txt");
+  await wb.write("/v.txt", "four");
+  check(await until(async () => settled(wb, b) && (await contentOf(wa, "/v.txt")) === "four", 15_000), "release history view: B's fourth version written, and verified by A, while A's request waits");
+  holdSops = false;
+  for (const go of held.splice(0)) go();
+  check(await until(async () => (await refRows(id)).filter(([x, sq, rel]) => adds.some((p) => p.address === x && p.add === sq) && rel !== null).length >= 2 && settled(wa, a), 20_000), "release history view: A's request made into releases");
+  await sleep(500);
+  const mine = (await refRows(id)).filter(([x, sq]) => adds.some((p) => p.address === x && p.add === sq)).sort((x, y) => x[1] - y[1]);
+  check(mine.length === 3 && mine[0][2] !== null && mine[1][2] !== null && mine[2][2] === null && a.debug().halted === undefined && b.debug().halted === undefined,
+    "release history view: only the two versions A saw as old went; the third (current when A asked) stays held: " + J(mine));
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(a);
+  await stop(b);
+}
+
+async function releaseBacklog() {
+  // (a backlog queued while A was stopped, read a page of two ops at a time: a create, two writes, "delete old versions",
+  // then a mkdir. The scan waits at the request until A's own writes are in the index, and yields meanwhile, so they are
+  // sent; the request then goes, in order, and the mkdir after it; across a reload in the middle too)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh();
+  const a0 = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a0)), "release backlog: A synced");
+  await stop(a0);
+  const page = W.OUTBOX.page;
+  W.OUTBOX.page = 2;
+  try {
+    await wa.create("/k.txt", { content: "one" });
+    await wa.write("/k.txt", "two");
+    await wa.write("/k.txt", "three");
+    await wa.dropVersions("/k.txt");
+    await wa.mkdir("/k-after");
+    const a1 = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+    await sleep(300);
+    await stop(a1);
+    const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+    const done = await until(async () => settled(wa, a) && (await refRows(id)).filter(([, , rel]) => rel !== null).length === 2, 20_000);
+    const rows = (await refRows(id)).sort((x, y) => x[1] - y[1]);
+    check(done && rows.length === 3 && rows[0][2] !== null && rows[1][2] !== null && rows[2][2] === null && a.debug().halted === undefined,
+      "release backlog: two ops a page, a reload in the middle: the writes sent, then the request's two older adds released, the current one live: " + J(rows));
+    // (the mkdir after the request went too, after it)
+    const log = (await ctl("indexRefs", { account: id })).rows.length;
+    check(log === 3 && !!(await wa.stat("/k-after")) && (await outbox(wa)) === 0, "release backlog: the op after the request sent too; nothing left");
+    await stop(a);
+  } finally {
+    W.OUTBOX.page = page;
+  }
+}
+
+async function releaseGeneration() {
+  // (a request's view is its namespace's: after "Delete my synced data" and sync on again (a new server generation, seqs
+  // from 1 again), a request asked in the old one releases nothing in the new one, though the new one's adds have seqs
+  // within its old view; a request asked in the new one releases its own history as usual)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release generation: A synced");
+  await threeAdds(id, wa, a, "/g.txt");
+  const ns1 = nsOf(a), view1 = await metaGet(wa.ws, `sync:${ns1}:cursor`), gen1 = Number(ns1.split(":")[1]);
+  await stop(a);
+  const del = await post("/api/sync/v1/delete", { confirm: "delete", generation: gen1 });
+  check(del.status === 202, "(release generation: the synced data deleted)");
+  check((await post("/api/sync/v1/enable", {})).ok, "(release generation: sync on again)");
+  const a2 = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a2) && nsOf(a2) !== ns1, 20_000), "release generation: A synced in the new generation: " + J({ ns: nsOf(a2), status: a2.status }));
+  // (the file adopted into the new generation first, then two writes, each settled)
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 1, 15_000), "(release generation: the file adopted into the new generation)");
+  await wa.write("/g.txt", "four");
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 2, 15_000), "(release generation: a write in the new generation)");
+  await wa.write("/g.txt", "five");
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 3, 15_000), "(release generation: another)");
+  const rows0 = await refRows(id);
+  check(rows0.length >= 2 && rows0.some(([, sq]) => sq <= view1), "(release generation: the new generation's adds have seqs within the old view): " + J({ rows0, view1, refused: await metaGet(wa.ws, `sync:${nsOf(a2)}:refused`), debug: a2.debug(), stats: { opsSent: a2.stats.opsSent, puts: a2.stats.puts }, entry: await wa.stat("/g.txt") }));
+  // (the old generation's request, as it would be if asked before the switch and scanned after it)
+  await new Promise((ok, no) => {
+    const tx = wa.ws.transaction("ops", "readwrite");
+    tx.objectStore("ops").add({ t: Date.now(), device: wa.device, by: "person", op: "dropVersions", path: "/g.txt", kind: "file", view: view1, viewNs: ns1 });
+    tx.oncomplete = ok;
+    tx.onerror = () => no(tx.error);
+  });
+  await wa.mkdir("/g-after");
+  check(await until(async () => settled(wa, a2) && !!(await wa.stat("/g-after")), 15_000), "(release generation: the op after it sent)");
+  await sleep(500);
+  check((await refRows(id)).every(([, , rel]) => rel === null), "release generation: the old generation's request released nothing in the new one: " + J(await refRows(id)));
+  // (and one asked now releases this generation's history)
+  await wa.dropVersions("/g.txt");
+  check(await until(async () => (await refRows(id)).some(([, , rel]) => rel !== null), 15_000) && a2.debug().halted === undefined, "release generation: a request asked in the new generation releases its history: " + J(await refRows(id)));
+  await stop(a2);
+}
+
+async function releaseGenerationMid() {
+  // (the public request, switched under while it runs: "delete old versions" asked while A's namespace is current, held
+  // after its deletion and before its log; meanwhile sync's data is deleted and sync turned on again, a new namespace B.
+  // The request is logged naming A and A's view, as asked, never B: it releases nothing in B, whose adds have seqs
+  // within A's view)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release generation mid: A synced");
+  await threeAdds(id, wa, a, "/m.txt");
+  const ns1 = nsOf(a), view1 = await metaGet(wa.ws, `sync:${ns1}:cursor`), gen1 = Number(ns1.split(":")[1]);
+  let reached, go, a2 = null;
+  const atLog = new Promise((r) => { reached = r; }), gate = new Promise((r) => { go = r; });
+  W.DROP_HOOK.beforeLog = async () => { reached(); await gate; };
+  try {
+    const drop = wa.dropVersions("/m.txt");
+    check(await Promise.race([atLog.then(() => true), sleep(15_000).then(() => false)]), "(release generation mid: the request held before its log, its deletion done)");
+    await stop(a);
+    const del = await post("/api/sync/v1/delete", { confirm: "delete", generation: gen1 });
+    check(del.status === 202, "(release generation mid: the synced data deleted)");
+    check((await post("/api/sync/v1/enable", {})).ok, "(release generation mid: sync on again)");
+    a2 = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+    check(await until(async () => nsOf(a2) !== undefined && nsOf(a2) !== ns1 && (await metaGet(wa.ws, "sync:current"))?.ns === nsOf(a2), 20_000),
+      "release generation mid: sync:current switched to the new namespace while the request was held: " + J({ ns: nsOf(a2), current: await metaGet(wa.ws, "sync:current") }));
+    go();
+    await drop;
+  } finally {
+    W.DROP_HOOK.beforeLog = undefined;
+    go();
+  }
+  const ops = await new Promise((ok, no) => { const r = wa.ws.transaction("ops").objectStore("ops").getAll(); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+  const logged = ops.filter((o) => o.op === "dropVersions").at(-1);
+  check(logged?.viewNs === ns1 && logged?.view === view1, "release generation mid: the request names the namespace and view it was asked in (A's), not the one current when it was logged: " + J({ logged, ns1, view1, ns2: nsOf(a2) }));
+  // (B's history made after: adopted, then two writes, each settled; then an op after the request, and nothing released)
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 1, 15_000), "(release generation mid: the file adopted into the new generation)");
+  await wa.write("/m.txt", "four");
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 2, 15_000), "(release generation mid: a write in the new generation)");
+  await wa.write("/m.txt", "five");
+  check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 3, 15_000), "(release generation mid: another)");
+  await wa.mkdir("/m-after");
+  check(await until(async () => settled(wa, a2) && !!(await wa.stat("/m-after")), 15_000), "(release generation mid: the op after it sent)");
+  await sleep(500);
+  check((await refRows(id)).every(([, , rel]) => rel === null), "release generation mid: the request asked in A released nothing in B: " + J(await refRows(id)));
+  await stop(a2);
+}
+
+async function releaseCurrent() {
+  // (a current device signs a release of a live file's current bytes: the server takes it (it can't see which bytes
+  // are current); every device's check of that release stops there, nothing of it kept, after a reload too)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release current: A synced");
+  const adds = await threeAdds(id, wa, a, "/c.txt");
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => settled(wb, b) && (await contentOf(wb, "/c.txt")) === "three", 15_000), "release current: B has the file");
+  const ns = nsOf(b), cursor0 = await metaGet(wb.ws, `sync:${ns}:cursor`), ledger0 = await ledgerOf(wb.ws);
+  await ctl("set", { set: { serverNotices: true } });
+  await a.testRelease([adds[0], adds[2]]);
+  check(await until(async () => (await refRows(id)).filter(([, , rel]) => rel !== null).length === 2, 15_000), "release current: the server accepted the release (history and the current bytes' add)");
+  await wa.mkdir("/after");
+  check(await until(() => b.debug().halted === "sealed-halt", 15_000) && /current bytes/.test(b.stats.sealedHalt ?? ""), "release current: B stops at it, saying it would end a live file's current bytes: " + J({ halted: b.debug().halted, why: b.stats.sealedHalt }));
+  await sleep(300);
+  check((await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0 && (await ledgerOf(wb.ws)) === ledger0 && !(await wb.stat("/after")) && (await contentOf(wb, "/c.txt")) === "three",
+    "release current: nothing of it kept on B (its cursor and ledger as they were; nothing after it applied; the file as it was)");
+  check(await until(() => a.debug().halted === "sealed-halt", 15_000), "release current: A, reading its own release back, stops there too");
+  await stop(b);
+  const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => b2.debug().halted === "sealed-halt", 15_000) && (await metaGet(wb.ws, `sync:${ns}:cursor`)) === cursor0 && (await ledgerOf(wb.ws)) === ledger0, "release current: after a reload, B stops at it again, nothing kept");
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(b2);
+  await stop(a);
+}
+
+async function releaseRace() {
+  // (B releases one add of a forgotten file; A, before it has read that, releases three including it: refused. A's
+  // next read of the log to its end finds that one ended by B: a race. The other two, still live and eligible, go again
+  // once, and are accepted)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release race: A synced");
+  const adds = await threeAdds(id, wa, a, "/x.txt");
+  await wa.remove("/x.txt");
+  await wa.emptyTrash();
+  check(await until(() => settled(wa, a), 15_000), "release race: the file forgotten");
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => settled(wb, b) && !(await wb.stat("/x.txt")), 15_000), "release race: B has read it all");
+  const dB = await b.testRelease([adds[1]]);
+  check(await until(async () => (await refRows(id)).some(([address, add, rel]) => address === adds[1].address && add === adds[1].add && rel !== null), 15_000), "release race: B's release of the middle add accepted: " + J({ dB, adds, rows: await refRows(id) }));
+  await ctl("log", { reset: true });
+  await a.testRelease(adds);
+  const mine = (rows) => rows.filter(([address, add]) => adds.some((p) => p.address === address && p.add === add));
+  const ended = await until(async () => mine(await refRows(id)).every(([, , rel]) => rel !== null), 15_000);
+  const sends = itemsOf(sealedSends(await ctl("log"))).length;
+  check(ended && a.debug().halted === undefined, "release race: A's three refused, then the two still live sent again and accepted; A goes on: " + J({ rows: await refRows(id), debug: a.debug(), why: a.stats.sealedHalt, sent: itemsOf(sealedSends(await ctl("log"))).map((o) => ({ dseq: o.dseq, releases: o.releases })), acks: (await ctl("log")).got?.slice?.(-5) }));
+  await sleep(500);
+  check(itemsOf(sealedSends(await ctl("log"))).length === sends && sends === 2, "release race: exactly the refused release and its one resend: " + J({ sends }));
+  await stop(a);
+  await stop(b);
+}
+
+async function releaseUnexplained() {
+  // (a release refused when not one pair it named was ended meanwhile: the log isn't what this device verified; it stops)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const wa = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "release unexplained: A synced");
+  const adds = await threeAdds(id, wa, a, "/u.txt");
+  await a.testRelease([{ address: adds[0].address, add: adds[2].add + 1000 }]);
+  check(await until(() => a.debug().halted === "sealed-halt", 15_000) && /doesn't say why/.test(a.stats.sealedHalt ?? "") && (await refRows(id)).every(([, , rel]) => rel === null),
+    "release unexplained: refused, and no pair it named ended since: A stops, saying so; nothing released: " + J({ debug: a.debug(), why: a.stats.sealedHalt, rows: await refRows(id) }));
+  await stop(a);
+}
+
+async function releasePlaintext() {
+  // (a plaintext write after sealed ones, alone in the page a device reads it in: the file's current bytes are now
+  // ones no index add holds, so its sealed adds are all history, on every device, however the log was paged. A sends
+  // one write up as a plaintext op, as an older client of the account might)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  let plain = false;
+  const recordOf = (w, ns, dseq) => new Promise((ok, no) => {
+    const tx = w.ws.transaction("outbox", "readonly"), r = tx.objectStore("outbox").get([ns, dseq]);
+    tx.oncomplete = () => ok(r.result);
+    tx.onerror = () => no(tx.error);
+  });
+  class PlainOnce extends WebSocket {
+    send(data) {
+      if (plain && typeof data === "string" && data.includes('"t":"sops"')) {
+        plain = false;
+        const m = JSON.parse(data), dseq = JSON.parse(m.json?.[0] ?? "null")?.dseq ?? m.ops?.[0]?.dseq;
+        recordOf(wa, nsOf(a), dseq).then((r) => super.send(JSON.stringify({ t: "ops", req: m.req, ops: [r.op] })));
+        return;
+      }
+      super.send(data);
+    }
+  }
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit }, WebSocket: PlainOnce });
+  check(await until(() => settled(wa, a)), "release plaintext: A synced");
+  await threeAdds(id, wa, a, "/p.txt");
+  await ctl("set", { set: { serverNotices: true } });
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(async () => settled(wb, b) && (await contentOf(wb, "/p.txt")) === "three", 15_000), "release plaintext: B has the file");
+  const nsB = nsOf(b), fid = (await wb.stat("/p.txt")).fid, gen = `${nsB}#${(await metaGet(wb.ws, `sync:${nsB}:indexGen`)) ?? 0}`;
+  check(typeof (await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) === "number" && (await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) > 0, "release plaintext: B's ledger: the file's current bytes held by its last sealed add");
+  plain = true;
+  await wa.write("/p.txt", "four");
+  check(await until(async () => (await contentOf(wb, "/p.txt")) === "four", 15_000), "release plaintext: B has the plaintext write");
+  check((await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) === 0, "release plaintext: B's ledger: the file's current bytes now no index add's (0), its sealed adds history: " + J(await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)));
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(a);
+  await stop(b);
+}
+
+/** A forgotten file of `w`'s with three adds, read by both devices: its three adds (the remove's orphan aside). */
+async function forgottenThree(id, wa, a, wb, b, path) {
+  const adds = await threeAdds(id, wa, a, path);
+  await wa.remove(path);
+  await wa.emptyTrash();
+  check(await until(() => settled(wa, a), 15_000), `(${path} forgotten)`);
+  check(await until(async () => settled(wb, b) && !(await wb.stat(path)), 15_000), `(${path}: B has read it all)`);
+  return adds;
+}
+const refusedOf = (w, c) => metaGet(w.ws, `sync:${nsOf(c)}:releaseRefused`);
+
+async function releaseRetry() {
+  // (two successive partial races, across a reload: A's release of three adds is refused (B ended one first); A is
+  // reloaded before its check; then its one resend is refused too (B ended another meanwhile). That resend is never sent
+  // a third time: its pair still live is dropped, for a later sweep; nothing stops)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  let holdSops = false;
+  const held = [];
+  class Holding extends WebSocket {
+    send(data) {
+      if (holdSops && typeof data === "string" && data.includes('"t":"sops"')) { held.push(() => super.send(data)); return; }
+      super.send(data);
+    }
+  }
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "release retry: A and B synced");
+  const adds = await forgottenThree(id, wa, a, wb, b, "/y.txt");
+  await b.testRelease([adds[1]]);
+  check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[1].address && s === adds[1].add && rel !== null), 15_000), "release retry: B ended the middle add");
+  W.SWEEP.hold = true;
+  try {
+    const d0 = await a.testRelease(adds);
+    check(await until(async () => (await refusedOf(wa, a))?.length === 1, 15_000), "release retry: A's release of all three refused, its refusal kept for its check: " + J(await refusedOf(wa, a)));
+    await stop(a);
+    // (reloaded: the check runs at its first read of the log to its end; its resend held at the socket while B ends another)
+    W.SWEEP.hold = false;
+    holdSops = true;
+    const a2 = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit }, WebSocket: Holding });
+    check(await until(async () => held.length >= 1 && !(await refusedOf(wa, a2))?.length, 15_000), "release retry: after the reload, the check made one resend (the two pairs B hadn't ended): " + J({ held: held.length, refused: await refusedOf(wa, a2) }));
+    await b.testRelease([adds[2]]);
+    check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[2].address && s === adds[2].add && rel !== null), 15_000), "release retry: B ended the last add meanwhile");
+    holdSops = false;
+    for (const go of held.splice(0)) go();
+    await ctl("set", { set: { serverNotices: true } });
+    await wb.mkdir("/nudge");
+    check(await until(async () => settled(wa, a2) && (await refusedOf(wa, a2)) === undefined && a2.stats.releasesDropped === 1, 15_000),
+      "release retry: the resend refused (a second race): never sent a third time, its pair still live dropped, nothing stopped: " + J({ debug: a2.debug(), dropped: a2.stats.releasesDropped, why: a2.stats.sealedHalt, refused: await refusedOf(wa, a2) }));
+    await sleep(500);
+    const rows = await refRows(id), first = rows.find(([x, s]) => x === adds[0].address && s === adds[0].add);
+    check(a2.debug().next === d0 + 2 && a2.debug().halted === undefined && first && first[2] === null,
+      "release retry: exactly the release and its one resend (no third dseq); the first add still live, for a later sweep: " + J({ next: a2.debug().next, d0, first }));
+    await ctl("set", { set: { serverNotices: false } });
+    await stop(a2);
+  } finally {
+    W.SWEEP.hold = false;
+  }
+  await stop(b);
+}
+
+async function releaseRoom() {
+  // (a refusal's resends admitted only as the outbox's bounds allow, the rest kept, checked, in their place: a crash in
+  // the middle keeps everything as it was; no room (records, or bytes) keeps all of it; room for one record makes one,
+  // the rest kept; and as room comes back it all goes. Each check is run by a read of the log to its end, which B's ops
+  // cause (A's own would use the room under test))
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  let holdSops = false;
+  const held = [];
+  class Holding extends WebSocket {
+    send(data) {
+      if (holdSops && typeof data === "string" && data.includes('"t":"sops"')) { held.push(() => super.send(data)); return; }
+      super.send(data);
+    }
+  }
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit }, WebSocket: Holding });
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "release room: A and B synced");
+  const adds = await forgottenThree(id, wa, a, wb, b, "/z.txt");
+  await b.testRelease([adds[0]]);
+  check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[0].address && s === adds[0].add && rel !== null), 15_000), "release room: B ended the first add");
+  const bounds = { ...W.OUTBOX };
+  let n = 0;
+  // (A told the log moved on: it reads to the log's end, and its check of its refusal runs once more (stats.releaseChecks),
+  // whatever it decides; a notice, not an op, so the room under test is nobody's to use: the bounds are the page's, both
+  // clients')
+  const nudge = async () => {
+    const k = a.stats.releaseChecks;
+    n++;
+    await ctl("notice", { head: (a.debug().cursor ?? 0) + 1 });
+    check(await until(() => a.stats.releaseChecks > k, 20_000), `(release room: A's check ran again, nudge ${n})`);
+  };
+  const totals = async () => (await metaGet(wa.ws, `sync:${nsOf(a)}:outbox`)) ?? { count: 0, charged: 0 };
+  const releaseRecords = async () => (await outbox(wa));
+  W.SWEEP.hold = true;
+  try {
+    await a.testRelease(adds);
+    check(await until(async () => (await refusedOf(wa, a))?.length === 1 && (await refusedOf(wa, a))[0].pairs.length === 3, 15_000), "release room: A's release of three refused, kept for its check");
+    await ctl("set", { set: { serverNotices: true } });
+    // (one add a release record from here: its two pairs to send again need two)
+    Object.assign(W.REFS, { page: 1 });
+    const before = J(await refusedOf(wa, a));
+    // (a crash in the middle of the check's transaction: nothing of it kept)
+    W.OUTBOX.cut = (k) => { if (k === 300) throw new Error("cut (test)"); };
+    W.SWEEP.hold = false;
+    await nudge();
+    check(J(await refusedOf(wa, a)) === before && (await releaseRecords()) === 0 && a.stats.releaseCheckFailures >= 1 && a.debug().halted === undefined, "release room: a crash in the middle: the refusal as it was, no record made, nothing stopped: " + J({ refused: await refusedOf(wa, a), before, rows: await refRows(id), adds, dropped: a.stats.releasesDropped, why: a.stats.sealedHalt, records: await releaseRecords() }));
+    W.OUTBOX.cut = null;
+    // (no room by bytes)
+    W.OUTBOX.maxBytes = 0;
+    await nudge();
+    const kept = await refusedOf(wa, a);
+    check(kept?.length === 1 && kept[0].checked === true && kept[0].pairs.length === 2 && (await releaseRecords()) === 0 && (await totals()).charged <= W.OUTBOX.maxBytes,
+      "release room: no room by bytes: no record, the two pairs to send again kept, checked: " + J(kept));
+    W.OUTBOX.maxBytes = bounds.maxBytes;
+    // (no room by records)
+    W.OUTBOX.maxRecords = 0;
+    await nudge();
+    check(J(await refusedOf(wa, a)) === J(kept) && (await releaseRecords()) === 0 && (await totals()).count <= W.OUTBOX.maxRecords, "release room: no room by records: as it was");
+    // (room for one record: one pair sent again (held at the socket, so its record stays), the other kept; another check
+    // makes nothing more; then, as room comes back, the rest)
+    W.OUTBOX.maxRecords = 1;
+    holdSops = true;
+    await nudge();
+    await nudge();
+    const part = await refusedOf(wa, a);
+    check(part?.length === 1 && part[0].checked === true && part[0].pairs.length === 1 && part[0].pairs[0].add === adds[2].add && (await releaseRecords()) === 1 && (await totals()).count <= 1,
+      "release room: room for one: the second add's record made, the third kept, checked; a second check makes nothing more: " + J({ part, records: await releaseRecords(), totals: await totals() }));
+    holdSops = false;
+    for (const go of held.splice(0)) go();
+    check(await until(async () => (await refRows(id)).some(([x, s, rel]) => x === adds[1].address && s === adds[1].add && rel !== null), 15_000), "release room: …and accepted");
+    await nudge();
+    check(await until(async () => (await refRows(id)).filter(([x, s]) => adds.some((p) => p.address === x && p.add === s)).every(([, , rel]) => rel !== null) && (await refusedOf(wa, a)) === undefined, 15_000) && a.debug().halted === undefined,
+      "release room: room again: the rest sent and accepted, nothing kept, nothing stopped: " + J({ rows: await refRows(id), refused: await refusedOf(wa, a) }));
+  } finally {
+    Object.assign(W.OUTBOX, bounds, { cut: null });
+    Object.assign(W.REFS, { page: 64 });
+    W.SWEEP.hold = false;
+    await ctl("set", { set: { serverNotices: false } });
+  }
+  await stop(a);
+  await stop(b);
+}
+
+// ---- document key declarations (sync-dockeys.ts; design notes e2e-doc-key-declarations r2)
+
+const hex32 = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+/** A declaration as a device's document keys make one: a fresh CEK for `doc` in `epoch`, wrapped under that epoch's keys. */
+async function declFor(f, P, doc, epoch, head) {
+  const cekId = hex32();
+  const { wrapped } = await f.kit.mintDocCek(await P.epochKeys(epoch), { account: P.account, document: doc, cekId, keyEpoch: epoch });
+  return { document: doc, cekId, keyEpoch: epoch, wrappedCek: wrapped, head: head ?? (await P.chain(true)).head };
+}
+/** How a promise has ended within `ms`: its value, its code, or still pending. */
+const outcome = (p, ms) => Promise.race([p.then((v) => ({ ok: v }), (e) => ({ code: e?.code ?? String(e) })), sleep(ms).then(() => ({ pending: true }))]);
+
+async function docKeyDeclare() {
+  // (A declares a document's key: confirmed, it answers its own; current and exact read it on A; B, started only now,
+  // reads it from the log it verifies then (its verdict computed on that pull, never stored); two declares of one
+  // (document, epoch) while the first is pending join it: one record)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "doc key declare: A synced");
+  const doc = crypto.randomUUID(), D = await declFor(f, f.provider, doc, 1);
+  const da = a.docDeclarations();
+  const r = await outcome(da.declare(D), 15_000);
+  check(r.ok?.cekId === D.cekId && r.ok.keyEpoch === 1 && sameBytes(r.ok.wrappedCek, D.wrappedCek) && r.ok.head === f.server.head, "doc key declare: confirmed, it answers its own declaration, with its envelope's head: " + J({ r: r.ok ? { ...r.ok, wrappedCek: r.ok.wrappedCek.length } : r }));
+  const cur = await da.current(doc, f.server.head);
+  check(cur?.cekId === D.cekId && sameBytes(cur.wrappedCek, D.wrappedCek), "doc key declare: current on A is it");
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wb, b), 15_000), "doc key declare: B synced, after");
+  const db = b.docDeclarations();
+  const curB = await db.current(doc, f.server.head), exB = await db.exact(doc, D.cekId, 1);
+  check(curB?.cekId === D.cekId && sameBytes(exB?.wrappedCek, D.wrappedCek), "doc key declare: B, reading the log afresh, has it current and exactly");
+  // (join: a second declare for the same (document, epoch) while the first waits is the same promise; one record)
+  const doc2 = crypto.randomUUID(), X = await declFor(f, f.provider, doc2, 1), Y = await declFor(f, f.provider, doc2, 1);
+  await ctl("log", { reset: true });
+  const p1 = da.declare(X), p2 = da.declare(Y);
+  const r2 = await outcome(p2, 15_000);
+  const items = itemsOf(sealedSends(await ctl("log")));
+  check(p1 === p2 && r2.ok?.cekId === X.cekId && items.length === 1, "doc key declare: a second declare of a (document, epoch) already waiting joins it: one record, the first's answer: " + J({ same: p1 === p2, cek: r2.ok?.cekId === X.cekId, items: items.length }));
+  // (a declaration the server refuses: its declare rejects "refused", nothing to rebuild, sync goes on)
+  const next = await metaGet(wa.ws, `sync:${nsOf(a)}:dseq`);
+  await ctl("refuseSealed", { dseq: next, code: "invalid" });
+  const doc3 = crypto.randomUUID(), Z = await declFor(f, f.provider, doc3, 1);
+  const rz = await outcome(da.declare(Z), 15_000);
+  await wa.mkdir("/dk-after-refusal");
+  check(rz.code === "refused" && (await da.current(doc3, f.server.head)) === null && await until(() => settled(wa, a), 15_000) && a.debug().halted === undefined,
+    "doc key declare: a declaration the server refuses: its declare rejects \"refused\", it declares nothing, and sync goes on: " + J({ rz, halted: a.debug().halted }));
+  // (the op's own head: a declare answers for the head and epoch its op was sealed under; once the chain begins
+  // another epoch, current at the new head is none, until one is declared there)
+  const headBefore = f.server.head;
+  await f.epoch();
+  const after = (await f.provider.chain(true)).head;
+  check(r.ok?.head === headBefore && (await da.current(doc, after)) === null && (await da.current(doc, headBefore))?.cekId === D.cekId,
+    "doc key declare: the declare answered for its op's own head and epoch; at a head of the next epoch, none is current (its provider declares anew)");
+  check(a.debug().halted === undefined && b.debug().halted === undefined, "doc key declare: neither device halted");
+  await stop(a);
+  await stop(b);
+}
+
+async function docKeyRace() {
+  // (A and B declare one document in one epoch at once: both answer the same generation, the log's first; each device
+  // finds both exactly)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } }), b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "doc key race: A and B synced");
+  await ctl("set", { set: { serverNotices: true } });
+  const doc = crypto.randomUUID(), DA = await declFor(f, f.provider, doc, 1), DB = await declFor(f, pb, doc, 1);
+  const [ra, rb] = await Promise.all([outcome(a.docDeclarations().declare(DA), 20_000), outcome(b.docDeclarations().declare(DB), 20_000)]);
+  check(ra.ok && rb.ok && ra.ok.cekId === rb.ok.cekId && [DA.cekId, DB.cekId].includes(ra.ok.cekId), "doc key race: both declares answer the same generation (one of the two): " + J({ a: ra.ok?.cekId ?? ra, b: rb.ok?.cekId ?? rb, DA: DA.cekId, DB: DB.cekId }));
+  check(await until(async () => !!(await a.docDeclarations().exact(doc, DA.cekId, 1)) && !!(await a.docDeclarations().exact(doc, DB.cekId, 1)) && !!(await b.docDeclarations().exact(doc, DA.cekId, 1)), 15_000), "doc key race: both declarations found exactly on each device");
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(a);
+  await stop(b);
+}
+
+async function docKeyEpoch() {
+  // (offline: an epoch-1 declare waits, never rejected; the chain begins epoch 2; an epoch-2 declare of the same
+  // document isn't joined to it. Back online: the epoch-1 one goes up sealed under an epoch-2 head, is void everywhere,
+  // and its declare rejects "stale"; the epoch-2 one answers itself; no device halts)
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "doc key epoch: A synced");
+  const da = a.docDeclarations(), doc = crypto.randomUUID();
+  await ctl("set", { set: { closeOnOpen: 1000 } });
+  await ctl("closeAll");
+  check(await until(() => a.status.state !== "synced", 10_000), "(doc key epoch: A offline)");
+  const D1 = await declFor(f, f.provider, doc, 1);
+  const p1 = da.declare(D1);
+  check((await outcome(p1, 1500)).pending === true, "doc key epoch: offline, a declare waits (neither answered nor rejected)");
+  await f.epoch();
+  const D2 = await declFor(f, f.provider, doc, 2);
+  const p2 = da.declare(D2);
+  check(p2 !== p1, "doc key epoch: a declare of the same document under another epoch isn't joined to the waiting one");
+  await ctl("set", { set: { closeOnOpen: 0 } });
+  const [r1, r2] = await Promise.all([outcome(p1, 20_000), outcome(p2, 20_000)]);
+  check(r1.code === "stale" && r2.ok?.cekId === D2.cekId && r2.ok.keyEpoch === 2, "doc key epoch: back online, the epoch-1 declare rejects \"stale\" and the epoch-2 one answers itself: " + J({ r1, r2: r2.ok?.cekId ?? r2 }));
+  const now = (await f.provider.chain(true)).head;
+  check((await da.current(doc, now))?.cekId === D2.cekId && (await da.exact(doc, D1.cekId, 1)) === null, "doc key epoch: current at the new head is the epoch-2 one; the stale declaration declared nothing");
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wb, b), 15_000) && (await b.docDeclarations().current(doc, now))?.cekId === D2.cekId && (await b.docDeclarations().exact(doc, D1.cekId, 1)) === null, "doc key epoch: B reads the same: the void declaration nothing, the epoch-2 one current");
+  check(a.debug().halted === undefined && b.debug().halted === undefined, "doc key epoch: no device halted on the void declaration");
+  await stop(a);
+  await stop(b);
+}
+
+async function docKeyExact() {
+  // (B hasn't read A's declaration yet: exact catches up once and finds it; two misses at once share one catch-up; a
+  // true miss is null after one catch-up. Offline, a miss waits; sync stopped, it rejects "ended". At a halt, "halted")
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } }), b = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wa, a) && settled(wb, b)), "doc key exact: A and B synced");
+  const doc = crypto.randomUUID(), D = await declFor(f, f.provider, doc, 1);
+  check((await outcome(a.docDeclarations().declare(D), 15_000)).ok?.cekId === D.cekId, "(doc key exact: A declared)");
+  const db = b.docDeclarations(), n0 = b.stats.dkCatchUps;
+  const [hit, miss] = await Promise.all([db.exact(doc, D.cekId, 1), db.exact(doc, hex32(), 1)]);
+  check(sameBytes(hit?.wrappedCek, D.wrappedCek) && miss === null && b.stats.dkCatchUps === n0 + 1, "doc key exact: a miss catches up once and finds it; a true miss at the same time shares that catch-up and is null after it: " + J({ hit: !!hit, miss, catchUps: b.stats.dkCatchUps - n0 }));
+  // (offline: waits, never null)
+  await ctl("set", { set: { closeOnOpen: 1000 } });
+  await ctl("closeAll");
+  check(await until(() => b.status.state !== "synced", 10_000), "(doc key exact: B offline)");
+  const pending = db.exact(doc, hex32(), 1);
+  check((await outcome(pending, 1500)).pending === true, "doc key exact: offline, a miss waits (no null on a transport failure)");
+  await stop(b);
+  check((await outcome(pending, 3000)).code === "ended", "doc key exact: sync stopped while it waits: rejected \"ended\"");
+  await ctl("set", { set: { closeOnOpen: 0 } });
+  // (a halt: B stops at a tampered op, and a waiting miss rejects "halted")
+  const b2 = viewClient(wb, { e2e: { keys: pb, kit: f.kit } });
+  check(await until(() => settled(wb, b2), 15_000), "(doc key exact: B again)");
+  // (A's op up first, with no notice to B: B's catch-up is what reads it, and halts at it while the miss waits)
+  await ctl("set", { set: { tamperIndexEnv: 1, tamperFor: wb.device, serverNotices: false } });
+  await wa.mkdir("/dk-tampered");
+  check(await until(() => settled(wa, a), 15_000) && b2.debug().halted === undefined, "(doc key exact: A's op up; B not halted yet)");
+  const halted = b2.docDeclarations().exact(doc, hex32(), 1);
+  const ho = await outcome(halted, 15_000);
+  check(ho.code === "halted" && b2.debug().halted === "sealed-halt", "doc key exact: a miss waiting when the client halts rejects \"halted\": " + J({ ho, halted: b2.debug().halted, why: b2.stats.sealedHalt }));
+  await stop(a);
+  await stop(b2);
+}
+
+const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

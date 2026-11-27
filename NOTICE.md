@@ -16,7 +16,9 @@ Most of Sagebrush is MIT OR Apache-2.0. `web/cloud/` is under the Microsoft Refe
 
 Some parts are derived from other permissively licensed projects. Their
 notices follow and must be kept with the parts named. Nothing in Sagebrush
-is derived from GPL software: PARI, Sage, Magma and FLINT are used only from
+is derived from GPL software, except code whose copyright holder gave
+permission for it to be ported to Sagebrush and licensed under MIT OR
+Apache-2.0 (PSAGE, below): PARI, Sage, Magma and FLINT are used only from
 the outside, as oracles in tests and as benchmarks.
 
 ## Code derived from other projects
@@ -182,7 +184,12 @@ routes, `fastScalarPower`, from `fast_scalar_power` in
 `numpy/_core/src/multiarray/number.c`; `arange`'s length and values, from
 `_calc_length` and `PyArray_ArangeObj` in `numpy/_core/src/multiarray/ctors.c`
 and the `@NAME@_fill` loops of `numpy/_core/src/multiarray/arraytypes.c.src`;
-`linspace`'s arithmetic, from `numpy/_core/function_base.py`; and the
+`linspace`'s arithmetic, from `numpy/_core/function_base.py`; the default
+sort and argsort of object arrays, `objQuick` and `objHeap`, from `npy_quicksort`,
+`npy_aquicksort`, `npy_heapsort` and `npy_aheapsort` in
+`numpy/_core/src/npysort/quicksort_generic.cpp` and `heapsort.cpp`, with the
+comparison of `OBJECT_compare` in `numpy/_core/src/multiarray/arraytypes.c.src`;
+and the
 size in an array's MemoryError, from `_ArrayMemoryError._size_to_string` in
 `numpy/_core/_exceptions.py`), `src/runtime/numpy_random.ts`,
 `src/runtime/ziggurat_data.ts` and `kernels/src/random.rs` (MT19937 with
@@ -727,7 +734,8 @@ gives permission. Nothing else in PSAGE is covered.
 
 ### mpmath 1.3.0 (BSD-3-Clause), from PyPI
 
-`packages/pypi-mpmath/py/` is the Python source of mpmath 1.3.0's wheel, unchanged:
+`packages/pypi-mpmath/py/` is the Python source of mpmath 1.3.0's wheel, unchanged but for
+Sagebrush's overlay (packages/pypi-mpmath/overlay.patch, 6 files):
 https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl
 (SHA-256 a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c). Its license:
 

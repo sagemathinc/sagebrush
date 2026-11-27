@@ -10,11 +10,12 @@ Opening another document loads a new page (`location.assign`), so memory can't c
 
 - **Per browser, never synced, never sent anywhere.** A scroll position depends on the window, so another device's would be wrong. Nothing goes in the workspace: no IndexedDB, Web Lock or sync row.
 - **Ids and numbers only, never content, checked on every write and every read.** The key is `<kind>:<id>`; a rename keeps the id (a notebook's or board's ref, a tex file's fid).
-  - The kind is notebook, board or tex.
+  - The kind is notebook, board, tex or code (r3: the code page, astra's SEC design review).
   - An id matches `[\w.:-]{1,64}`.
   - A view is an object of at most 16 fields, named `[A-Za-z][A-Za-z0-9_]{0,31}`. Each field is a finite number, an id, or such an object again, at most 3 deep.
 - **Bounded.**
   - At most 200 documents; the least recently kept is dropped first.
+  - No time limit, and nothing is cleared with its document: one moved to Trash, or Trash emptied, keeps its entry until it is the least recently kept past 200. This holds for every kind.
   - Each view's JSON is at most 512 characters.
   - A view or key outside these limits isn't kept. An entry already there that breaks them (malformed, oversize, misnamed: another version's, or written by hand) is dropped on read. It is never returned, and a save doesn't keep it.
 - **Many tabs: best effort.** Each save reads what's there, changes one document's view and writes it back, so a view another tab wrote earlier is kept. localStorage has no transactions, though: two tabs saving at the same moment aren't coordinated, and one tab's change can be lost. The result is a view not kept, never a wrong one. That is acceptable for a scroll position, so there's no Web Lock and no sync.
@@ -31,8 +32,9 @@ viewToRestore(key, el, skip) -> () => View | null
 | Editor | Fields |
 |---|---|
 | notebook | `cell` (the top cell's id) + `dy` (the offset in it), so reflowing output can't drift it; `frac` as a fallback |
-| tex | `src` {line, sel}, `preview` {anchor, frac}, `pdf` {page, zoom} |
+| tex | `src` {line, sel}, `preview` {anchor (the source line its top group begins on), dy, frac}; `pdf` {page, zoom} once the editor has a PDF view |
 | board | `x`, `y`, `zoom`, `page` |
+| code | `line` (the first line in view), `sel` (the cursor's offset, put back only when the page opens in Edit; it opens in View unless the person last left it in Edit) |
 
 ## The restore rules, the same for every editor
 

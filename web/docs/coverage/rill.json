@@ -1,0 +1,61 @@
+{
+  "mode": "rill",
+  "areas": [
+    {
+      "id": "language",
+      "title": "The R language: syntax, evaluation and printing",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["rill-tests/parse", "rill-tests/core", "rill-tests/print", "rill-tests/errfmt", "rill-tests/mem", "rill-tests/misc"],
+      "search": "print"
+    },
+    {
+      "id": "vectors",
+      "title": "Vectors, indexing and missing values",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["rill-tests/vec", "rill-tests/access", "rill-tests/na", "rill-tests/logic"],
+      "search": "c seq"
+    },
+    {
+      "id": "arithmetic",
+      "title": "Arithmetic and math functions",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["rill-tests/arith"],
+      "search": "sqrt round"
+    },
+    {
+      "id": "functions",
+      "title": "Functions, arguments and control flow",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["rill-tests/fun", "rill-tests/args", "rill-tests/ctrl", "rill-tests/apply"],
+      "search": "function sapply"
+    },
+    {
+      "id": "data-structures",
+      "title": "Lists, matrices, factors, strings and data frames",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["rill-tests/list", "rill-tests/mat", "rill-tests/fac", "rill-tests/str", "rill-tests/df"],
+      "search": "data.frame matrix"
+    },
+    {
+      "id": "statistics",
+      "title": "Statistics, distributions and random numbers",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["rill-tests/stats", "rill-tests/distributions", "rill-tests/rng", "rill-tests/test"],
+      "search": "mean rnorm t.test"
+    },
+    {
+      "id": "models",
+      "title": "Linear and generalized linear models",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["rill-tests/lm", "rill-tests/glm"],
+      "search": "lm glm"
+    },
+    {
+      "id": "homework",
+      "title": "Typical course exercises",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["rill-tests/homework"],
+      "search": "summary"
+    }
+  ]
+}

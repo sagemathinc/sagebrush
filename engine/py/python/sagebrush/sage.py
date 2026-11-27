@@ -39,7 +39,10 @@ class _Finder(_abc.MetaPathFinder):
 if not any(isinstance(f, _Finder) for f in _sys.meta_path):
     _sys.meta_path.insert(0, _Finder())
 
+import _sage_names  # noqa: E402
 import sage_all as _sage_all  # noqa: E402
 
-__all__ = list(_sage_all.__all__)
+# the full list of the session's names, from the name index (not from what
+# sage_all has imported so far)
+__all__ = list(_sage_names.ALL)
 globals().update({k: getattr(_sage_all, k) for k in __all__})

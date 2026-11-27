@@ -1,6 +1,8 @@
 // A terminal on one of your computers (terminal addendum T1.4, build step T-3): its own chunk,
 // sagebrush-remote-terminal.js (web/build.ts), loaded by the notebook page only when ⋯ ▸ Terminal on your computer…
-// is chosen (offered with ?remote=1).  The site and the app serve it; the CLI's page doesn't (it can't reach a relay).  It lists your enrolled computers (GET /api/remote/v1/peers, kind "runner"),
+// is chosen (offered on the site when the account can use it).  The site and the app serve it, though only the site
+// offers it; the CLI's page doesn't (it can't reach a relay).  It lists your enrolled computers (GET
+// /api/remote/v1/peers, kind "runner"),
 // and draws one's shell in xterm (the @xterm/xterm 6.0 the console already ships, with @xterm/addon-fit), over the
 // relay's terminal page leg (remote-terminal.js: the protocol, the page's DPoP key and proofs, credit and acks).
 //
@@ -9,6 +11,7 @@
 // terminals (no image addons; OSC 52 swallowed; the title as text in the panel's header; links http(s) only, on a click).
 import { Terminal, FitAddon, TOOLBAR_CSS, BUTTON_CSS, ensureXtermCss, extraKeysRow, safeTerminal, themeFromCss } from "../term/xterm-view.ts";
 import { RemoteTerminal, terminalKey } from "./remote-terminal.js";
+import { listRunners, pageLegUrl as sharedLegUrl, type Runner } from "../workspace/remote-runners";
 
 // (the module's own check of a link, under xterm's OSC 8 filter: the page test imports it from this chunk)
 export { webHref, webLinksIn } from "../term/xterm-view.ts";
@@ -35,26 +38,12 @@ html.phone #rterm { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0
 #rterm .rbody { flex: 1; min-height: 0; padding: 0 0 0 8px; }
 `;
 
-export interface Runner {
-  remote_id: string;
-  name: string;
-}
-
-/** Your enrolled computers: GET /api/remote/v1/peers (this site, its session cookie), kind "runner" only. */
-export async function listRunners(f: typeof fetch = fetch): Promise<Runner[]> {
-  const r = await f("/api/remote/v1/peers", { credentials: "same-origin", headers: { accept: "application/json" } });
-  if (r.status === 401 || r.status === 403) throw new Error("sign in to use your computers");
-  if (!r.ok) throw new Error(`this site can't list your computers (HTTP ${r.status})`);
-  const j = await r.json().catch(() => null);
-  const peers = Array.isArray(j?.peers) ? j.peers : [];
-  return peers
-    .filter((p: any) => p && p.kind === "runner" && typeof p.remote_id === "string" && p.remote_id.length > 0 && p.remote_id.length <= 200)
-    .map((p: any) => ({ remote_id: p.remote_id, name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 80) : p.remote_id.slice(0, 12) }));
-}
+// (your computers: the shared listing, web/workspace/remote-runners.ts, as the Agents page's Chat here uses it)
+export { listRunners, type Runner } from "../workspace/remote-runners";
 
 /** The relay's terminal page leg for a remote, on this site. */
 export function pageLegUrl(remoteId: string, loc: { protocol: string; host: string } = location): string {
-  return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/remote/v1/page?${new URLSearchParams({ remote: remoteId, chan: "terminal" })}`;
+  return sharedLegUrl(remoteId, "terminal", loc);
 }
 
 
@@ -67,8 +56,17 @@ const ERRORS: Record<string, string> = {
   not_open: "has no terminal open on this connection. Reconnect.",
   expired: "ended this session.",
   // (remote-terminal.js: 2 pings to the relay unanswered)
-  relay: "isn't answering: the connection went quiet. Reconnect.",
+  relay: "isn't answering: the connection went quiet.",
 };
+// (the errors after which the page tries again by itself: the leg went quiet, or the runner lost the attachment.  The
+// others are the computer's answer (a refusal, its session limit, an old Sagebrush), and trying again would get it again)
+const RETRY_ERRORS = new Set(["relay", "not_open", "protocol"]);
+
+// Reconnecting by itself (the tab in the background: the browser slows its timers, the relay counts the leg dead after
+// 40 s without a ping and closes it): after a leg is lost, again after these waits, the same session reattached; at most
+// this many tries in a row without an open, then only the Reconnect button.  While the tab is hidden nothing is tried;
+// when it's shown again, a probe checks a leg that looks open, and a lost one is reattached at once.
+export const RECONNECT = { waitsMs: [1000, 2000, 4000, 8000, 15000], probeMs: 5000 };
 
 const SESSION_KEY = (remoteId: string) => "sagebrush-rterm:" + remoteId;
 
@@ -111,10 +109,18 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
   // (while the runner replays a session's past output, what xterm answers to that output's queries (a cursor position,
   // its attributes) is not sent: those were asked long ago.  Keys typed meanwhile still are, through onKey.)
   let replaying = false;
+  // (reconnecting by itself: wanted after a start until a stop the person or the computer chose; tries counts the
+  // attempts since the last open; a lost leg in a hidden tab waits for the tab to be shown)
+  let auto = false, tries = 0, retryTimer: ReturnType<typeof setTimeout> | null = null, lostWhileHidden = false;
+  const clearRetry = () => { if (retryTimer !== null) clearTimeout(retryTimer); retryTimer = null; };
 
   const close = () => {
     if (ended) return;
     ended = true;
+    clearRetry();
+    document.removeEventListener("visibilitychange", onShown);
+    window.removeEventListener("online", onShown);
+    window.removeEventListener("pageshow", onShown);
     client?.close();
     observer?.disconnect();
     term?.dispose();
@@ -126,6 +132,9 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
   function connect(): void {
     if (!runner || !term || ended) return;
     const r = runner;
+    clearRetry();
+    lostWhileHidden = false;
+    tries++;
     reconnectB.hidden = true;
     say(`Connecting to ${r.name}…`);
     const session = sessionStorage.getItem(SESSION_KEY(r.remote_id)) ?? undefined;
@@ -151,16 +160,19 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
         on: (e: any) => {
           if (client !== t || ended) return;
           if (e.t === "opened") {
+            tries = 1;
             sessionStorage.setItem(SESSION_KEY(r.remote_id), e.session);
             endB.hidden = false;
             say("");
           } else if (e.t === "exit") {
+            auto = false;
             sessionStorage.removeItem(SESSION_KEY(r.remote_id));
             endB.hidden = true;
             reconnectB.textContent = "New session";
             reconnectB.hidden = false;
             say(`The shell ended${e.code != null ? ` (exit code ${e.code})` : e.signal ? ` (${e.signal})` : ""}.`);
           } else if (e.t === "elsewhere") {
+            auto = false;
             reconnectB.textContent = "Take it back";
             reconnectB.hidden = false;
             endB.hidden = true;
@@ -171,6 +183,7 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
             connect();
           } else if (e.t === "error") {
             errored = true;
+            if (!RETRY_ERRORS.has(e.error)) auto = false;
             // (no reason after the relay's sentence: "no pong" is the event's and the close's, not a person's (board, #853))
             const why = e.reason && e.error !== "relay" ? ` (${String(e.reason).slice(0, 200)})` : "";
             // (the session limit is the runner's own number, terminal.py TERMINAL_LIMITS)
@@ -182,6 +195,7 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
             reconnectB.hidden = false;
             // (an error already said why)
             if (!errored) say(`Not connected to ${r.name}${e.why ? `: ${String(e.why).slice(0, 200)}` : ""}.`);
+            retryLater(r);
           }
         },
       });
@@ -190,7 +204,48 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
       t.start();
     }, (err) => say(`The terminal couldn't start in this browser: ${err?.message ?? err}`));
   }
-  reconnectB.addEventListener("click", () => connect());
+  // (the leg lost: try again after the next wait, or once the tab is shown; after the last wait, only the button)
+  function retryLater(r: Runner): void {
+    if (!auto || ended || runner !== r) return;
+    if (document.hidden) { lostWhileHidden = true; return; }
+    // (tries: the opens attempted since the last one that worked, that one counted as 1: the waits run 1, 2, 4, 8, 15 s,
+    // whether a working leg was lost or the first open failed)
+    const n = Math.max(0, tries - 1);
+    if (n >= RECONNECT.waitsMs.length) return say(`${status.textContent} Press Reconnect to try again.`.trim());
+    const ms = RECONNECT.waitsMs[n];
+    say(`${status.textContent} Reconnecting in ${Math.round(ms / 1000)} s…`.trim());
+    clearRetry();
+    // (a tab hidden while it waits: no open now; the tab shown again reattaches, onShown)
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (document.hidden) { lostWhileHidden = true; return; }
+      connect();
+    }, ms);
+  }
+  // (the tab shown again, back online, or restored from the back-forward cache: a lost leg is reattached now; one that
+  // looks open is probed, and one that doesn't answer is closed, which reattaches it)
+  function onShown(): void {
+    if (ended || !auto || !runner) return;
+    // (hidden: a retry waiting is put off until the tab is shown again)
+    if (document.hidden) {
+      if (retryTimer !== null) { clearRetry(); lostWhileHidden = true; }
+      return;
+    }
+    const t = client;
+    if (lostWhileHidden || retryTimer !== null || !t || t.state === "ended") {
+      if (lostWhileHidden || retryTimer !== null) { tries = 0; connect(); }
+      return;
+    }
+    if (t.state !== "attached") return;
+    t.probe(RECONNECT.probeMs).then((alive: boolean) => {
+      if (alive || client !== t || ended) return;
+      t.close(4003, "no answer after the tab was shown");
+    });
+  }
+  document.addEventListener("visibilitychange", onShown);
+  window.addEventListener("online", onShown);
+  window.addEventListener("pageshow", onShown);
+  reconnectB.addEventListener("click", () => { auto = true; tries = 0; connect(); });
   endB.addEventListener("click", () => client?.kill());
 
   function start(r: Runner): void {
@@ -200,6 +255,21 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
     const row = extraKeysRow("rkeys", (data) => client?.input(data), () => term?.focus());
     if (row) panel.insertBefore(row, body);
     term = safeTerminal({ scrollback: SCROLLBACK, onTitle: (t) => { title.textContent = t; } });
+    // (a paste is sent as its text, never between bracketed-paste markers: a program that turned the mode on and was
+    // killed before turning it off leaves it on, and a shell without bracketed paste (bash before 5.1, or one configured
+    // off) then shows the markers as ^[[200~ … ~.  The page can't tell a stale mode from a live one)
+    term.options.ignoreBracketedPasteMode = true;
+    // Ported from CoCalc packages/frontend/frame-editors/terminal-editor/connected-terminal.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
+    // (initKeyHandler, lines 1975-1989 @a06a9ef1: Ctrl+C (Cmd+C) with text selected copies it, the
+    // browser's copy, instead of an interrupt; without a selection it is ^C as always; Ctrl+V (Cmd+V) is always the
+    // browser's paste, which xterm takes from the paste event.  Returning false: xterm does nothing with the key, and the
+    // browser does what it does with it)
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      if (event.type !== "keydown") return true;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && term?.hasSelection()) return false;
+      if ((event.ctrlKey || event.metaKey) && event.key === "v") return false;
+      return true;
+    });
     // Ported from CoCalc packages/frontend/frame-editors/terminal-editor/connected-terminal.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
     // (onKey / onData, lines 527-548 @2265acac: while output is being drawn, keys still go through onKey, or typing
     // "123456789" across the number row drops a "4".  There, it is while any output renders, because CoCalc's
@@ -224,6 +294,8 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
     observer = new ResizeObserver(() => { try { fit?.fit(); } catch {} });
     observer.observe(body);
     term.focus();
+    auto = true;
+    tries = 0;
     connect();
   }
 

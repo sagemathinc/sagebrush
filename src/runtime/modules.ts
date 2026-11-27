@@ -12,7 +12,7 @@ import * as FD from "./fdlibm";
 import * as CR from "./crmath";
 import * as PG from "./pygamma";
 import { floatRepr, intDigits } from "./format";
-import { heapLimit } from "./heap";
+import { admitHeap, heapLimit } from "./heap";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -211,6 +211,10 @@ const hasAttr = (o: any, name: string): boolean => {
     throw e;
   }
 };
+// The name a module's submodules are imported under, where it isn't its __name__: the library's own sagebrush package,
+// named "sagebrush" but imported by the library as _sagebrush_lib (src/compile.ts libraryPackage)
+export const IMPORT_NAME = Symbol("the name a module's submodules are imported under");
+const childBase = (m: any): string => (typeof m?.[IMPORT_NAME] === "string" ? m[IMPORT_NAME] : unbox(getattr(m, "__name__")));
 // (a package's fromlist, as CPython's _handle_fromlist: each name it lacks
 // imported as its child; a child that does not exist is passed over, for
 // the from-import to report, unless it is None in sys.modules; '*' is its
@@ -229,7 +233,7 @@ function handleFromlist(m: any, fromlist: any, recursive: boolean): void {
     if (name === "*") {
       if (!recursive && hasAttr(m, "__all__")) handleFromlist(m, getattr(m, "__all__"), true);
     } else if (!hasAttr(m, name)) {
-      const from = `${unbox(getattr(m, "__name__"))}.${name}`;
+      const from = `${childBase(m)}.${name}`;
       try {
         importModule(from);
       } catch (e: any) {
@@ -370,12 +374,21 @@ export function importFrom(m: any, name: string): any {
       if (!(e?.$cls !== undefined && isinstance(e, T.AttributeError))) throw e;
     }
   }
+  // only the submodule itself being missing becomes "cannot import name"; a
+  // module the submodule imports being missing, or a None in sys.modules,
+  // propagates, as CPython's _handle_fromlist does for a package (and
+  // handleFromlist above)
+  const sub = `${childBase(m)}.${name}`;
   try {
-    return importModule(`${m.__name__}.${name}`);
+    return importModule(sub);
   } catch (e: any) {
-    if (!(e?.$cls !== undefined && isinstance(e, T.ModuleNotFoundError))) throw e;
+    if (!(e?.$cls !== undefined && isinstance(e, T.ModuleNotFoundError) && e.name === sub && dictGet(sysModules, sub) !== null)) throw e;
   }
   const err = T.ImportError(`cannot import name '${name}' from '${m.__name__}'`);
+  // (as CPython's import_from: name the module's, path its file, name_from the name asked for; None where not a str)
+  err.name = typeof m.__name__ === "string" ? m.__name__ : null;
+  err.path = typeof m.__file__ === "string" ? m.__file__ : null;
+  err.name_from = name;
   throw err;
 }
 function hasattr(o: any, name: string): boolean {
@@ -739,7 +752,9 @@ newBuiltinModule("_time", (m) => {
   // SAGEBRUSH_TIME_PINNED_DIR in the tests of that way under Node)
   fn(m, "_pinned_zones", () => {
     const hook = (globalThis as any).__SAGEBRUSH_TZDATA_ZONES__;
-    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    // (a host test hook, read with raw fs: never while confined, `notebook run --confine`, whose program may use no
+    //  folder but its own)
+    const dir = typeof process !== "undefined" && !isConfined() ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
     try {
       if (typeof hook === "function") return tuple((hook() as string[]).map((z) => z));
       if (typeof dir === "string") {
@@ -770,7 +785,9 @@ newBuiltinModule("_time", (m) => {
   fn(m, "_pinned", (zone: any) => {
     const name = String(zone);
     const hook = (globalThis as any).__SAGEBRUSH_TZDATA__;
-    const dir = typeof process !== "undefined" ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
+    // (a host test hook, read with raw fs: never while confined, `notebook run --confine`, whose program may use no
+    //  folder but its own)
+    const dir = typeof process !== "undefined" && !isConfined() ? process.env?.SAGEBRUSH_TIME_PINNED_DIR : undefined;
     try {
       if (typeof hook === "function") {
         const b = hook(name);
@@ -1702,7 +1719,11 @@ newBuiltinModule("types", (m) => {
   // (CPython's own Python class, from lib/_pytypes.py; enum.py imports it)
   m.DynamicClassAttribute = importModule("_pytypes").DynamicClassAttribute;
   setattr(m.DynamicClassAttribute, "__module__", "types");
-  for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "CapsuleType"]) {
+  // (the runtime's own descriptor types, so that isinstance with these is true of them, as inspect needs)
+  m.WrapperDescriptorType = (T as any).wrapper_descriptor;
+  m.MethodDescriptorType = (T as any).method_descriptor;
+  m.MemberDescriptorType = (T as any).member_descriptor;
+  for (const n of ["MethodWrapperType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "CapsuleType"]) {
     m[n] = Ty.builtinTypeFor(n, class {}, "types", () => raise(T.TypeError, `cannot create '${n}' instances`));
   }
   // A generator function whose generators may be awaited.
@@ -1722,6 +1743,8 @@ newBuiltinModule("types", (m) => {
 
 // ------------------------------------------------------------------ _random: MT19937 exactly as CPython
 
+// (the ASCII codes of the 16 hex digits, for getrandbits's buffer)
+const HEX_DIGITS = Uint8Array.from([48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]);
 export class MT {
   mt = new Uint32Array(624);
   mti = 625;
@@ -1795,8 +1818,9 @@ export class MT {
     // seed(None): 256 bits of os.urandom, as CPython (it was the clock)
     if (x === null || x === undefined) v = [...(require("crypto").randomBytes(32) as Uint8Array)].reduce((a, b) => (a << 8n) | BigInt(b), 0n);
     else if (O.isPyInt(x)) v = BigInt(typeof x === "boolean" ? +x : x);
-    else if (typeof x === "string") v = BigInt.asUintN(64, BigInt(O.hashAny(x)));
-    else v = BigInt.asUintN(64, BigInt(O.hashAny(x)));
+    // (anything else, a float say: its hash cast to unsigned, as CPython's random_seed; the exact hash, never a
+    // double's rounding of it: hash(1.5) is 2^60 + 1)
+    else v = BigInt.asUintN(64, BigInt(O.hashExact(x)));
     if (v < 0n) v = -v;
     const key: number[] = [];
     do {
@@ -1805,18 +1829,26 @@ export class MT {
     } while (v > 0n);
     this.initByArray(key);
   }
-  getrandbits(k: number): number | bigint {
+  getrandbits(k: number, shown: string = String(k)): number | bigint {
     if (k < 0) raise(T.ValueError, "number of bits must be non-negative");
     if (k === 0) return 0;
     if (k <= 32) return this.genrand() >>> (32 - k);
-    let r = 0n, shift = 0n;
-    for (let left = k; left > 0; left -= 32) {
+    // (CPython's words, least significant first, the last one's top bits; made one int at once from their hex, not
+    // OR-ed in one at a time, which copied the growing int at each word: k = 2^20 took 0.4 s. The hex digits go into
+    // one byte buffer, decoded once: no string per word)
+    const n = Math.ceil(k / 32);
+    // (the buffer, k/4 bytes; its one-byte string, k/4; the int, k/8: 5/8 of a byte per bit at the peak, measured at
+    // 0.9 with the buffer counted twice by node's accounting, so 1 byte per bit, admitted before any word is drawn)
+    admitHeap(k, `getrandbits(${shown})`);
+    const buf = new Uint8Array(2 + 8 * n);
+    buf[0] = 48;
+    buf[1] = 120;
+    for (let i = 0, left = k; i < n; i++, left -= 32) {
       let w = this.genrand();
       if (left < 32) w >>>= 32 - left;
-      r |= BigInt(w) << shift;
-      shift += 32n;
+      for (let j = 2 + 8 * (n - 1 - i) + 7, e = j - 8; j > e; j--, w >>>= 4) buf[j] = HEX_DIGITS[w & 15];
     }
-    return O.normBig(r);
+    return O.normBig(BigInt(new TextDecoder("latin1").decode(buf)));
   }
 }
 
@@ -1828,7 +1860,14 @@ newBuiltinModule("_random", (m) => {
   });
   Ty.method(RandomType, "seed", (r: MT, x: any = null) => (r.seed(x), null));
   Ty.method(RandomType, "random", (r: MT) => O.mkfloat(r.random()));
-  Ty.method(RandomType, "getrandbits", (r: MT, k: any) => r.getrandbits(Number(k)));
+  // (k an index, as CPython's uint64_t argument: a float or a str a TypeError, a negative one or one past 64 bits a
+  // ValueError or OverflowError in its words; a large one a MemoryError, getrandbits's admission)
+  Ty.method(RandomType, "getrandbits", (r: MT, k: any) => {
+    const i = O.index(k);
+    if (i < 0) raise(T.ValueError, "Cannot convert negative int");
+    if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, "Python int too large for C uint64_t");
+    return r.getrandbits(Number(i), String(i));
+  });
   Ty.method(RandomType, "getstate", (r: MT) => tuple([3, tuple([...r.mt, r.mti]), null]));
   Ty.method(RandomType, "setstate", (r: MT, st: any) => {
     const inner = O.toArray(st[1]);
@@ -1927,7 +1966,95 @@ newBuiltinModule("gc", (m) => {
 // resolve against.
 let virtualCwd: string | null = null;
 const cwd = (): string => virtualCwd ?? process.cwd();
-const at = (p: any): any => (virtualCwd !== null && typeof p === "string" && !p.startsWith("/") ? (p === "." || p === "" ? virtualCwd : virtualCwd.replace(/\/$/, "") + "/" + p) : p);
+const atCwd = (p: any): any => (virtualCwd !== null && typeof p === "string" && !p.startsWith("/") ? (p === "." || p === "" ? virtualCwd : virtualCwd.replace(/\/$/, "") + "/" + p) : p);
+const at = (p: any): any => (confineRoots === null ? atCwd(p) : confined(atCwd(p)));
+
+// ------------------------------------------------------------------ confinement (`notebook run --confine`)
+// A run confined to its roots (an agent's Delegate task: its work folder and its run's temporary folder).  Every path
+// the program names (open(), os, the importer, file-once writes, zoneinfo's reads: all of them come through at()) is
+// walked one component at a time from "/", by lstat, before anything is opened, created or removed:
+//   - inside a root, a symbolic link anywhere in the path is refused (the program can't make one, so one there was
+//     planted), and so is a last component that is neither a directory nor a regular file (a FIFO, a device), or a
+//     regular file with more than one link (a hard link may be the same file as one outside);
+//   - outside the roots (the folders above them, as /var is a link on macOS) a link is followed, by realpath;
+//   - the path's end, existing or not, must lie within a root, compared by whole components (a root /a/work holds
+//     /a/work/x, never /a/work2).
+// A path that doesn't exist yet is checked against its deepest existing ancestor.  Refused: a PermissionError.  The
+// roots are set once, by the host, before any Python runs (setConfine: the first setting wins, and none can be
+// removed); with none set nothing here runs, as everywhere else.  While confined, the per-user compile cache is off
+// (src/compile.ts isConfined): it would be a module cache the program can write.
+let confineRoots: string[] | null = null;
+export function setConfine(roots: string[]): void {
+  if (confineRoots !== null) return; // (the first host setting wins)
+  const fs = require("fs");
+  // (a root that can't be resolved, or "/", confines to nothing: every path refused)
+  confineRoots = roots.flatMap((r) => { try { const q = fs.realpathSync(r); return q === "/" ? [] : [q.replace(/\/+$/, "")]; } catch { return []; } });
+}
+export const isConfined = (): boolean => confineRoots !== null;
+const refuse = (p: string): never => { throw Object.assign(new Error(`Requires access to "${p}", outside the folders this run may use`), { code: "ERR_ACCESS_DENIED" }); };
+// (the descriptors a confined program may use: the standard three, and those os.open opened here through a checked
+// path; one admission for every entry point that takes a descriptor (_fs, open(), os.read and the rest): any other
+// number the process holds, inherited or the runtime's own, is refused, and so is anything else that isn't a path)
+const checkedFds = new Set<number>();
+// (os.open's flags are Linux's numbers, as this os module names them (O_CREAT is 64), CPython's on Linux; a host
+// whose own numbers differ (on macOS O_CREAT is 0x200, and 64 is O_ASYNC there) gets its own number for each bit, and a
+// bit this module doesn't name is EINVAL, never passed on.  O_CLOEXEC has no number in node's table: node's descriptors
+// are close-on-exec already)
+const LINUX_OPEN_FLAGS: [number, string][] = [[1, "O_WRONLY"], [2, "O_RDWR"], [64, "O_CREAT"], [128, "O_EXCL"], [512, "O_TRUNC"], [1024, "O_APPEND"], [2048, "O_NONBLOCK"], [65536, "O_DIRECTORY"], [131072, "O_NOFOLLOW"], [524288, "O_CLOEXEC"]];
+export function hostOpenFlags(fl: number, c: Record<string, number | undefined>): number {
+  let out = 0, rest = fl;
+  for (const [bit, name] of LINUX_OPEN_FLAGS) {
+    if (!(fl & bit)) continue;
+    rest &= ~bit;
+    if (name === "O_CLOEXEC") continue;
+    const v = c[name];
+    if (typeof v !== "number") throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
+    out |= v;
+  }
+  if (rest) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
+  return out;
+}
+export const fdAdmitted = (fd: number): boolean => Number.isInteger(fd) && fd >= 0 && (fd <= 2 || checkedFds.has(fd));
+function confined(p: any): any {
+  if (typeof p === "number") return fdAdmitted(p) ? p : refuse(`descriptor ${p}`);
+  if (typeof p !== "string") return refuse(String(p).slice(0, 80));
+  return confinedPath(confineRoots!, cwd(), p);
+}
+/** `p` (relative to `base`) as the path to use, or a refusal (an Error with code ERR_ACCESS_DENIED), under `roots`
+ * (real paths): the check above, also the host's own for the notebook file `notebook run --confine` reads and writes. */
+export function confinedPath(roots: string[], base: string, p: string): string {
+  const fs = require("fs"), path = require("path");
+  const inRoot = (x: string) => roots.some((r) => x === r || x.startsWith(r + "/"));
+  const comps = path.resolve(base, p).split("/").filter(Boolean);
+  let cur = "", follows = 0;
+  for (let i = 0; i < comps.length; i++) {
+    const next = cur + "/" + comps[i];
+    // (a folder above a root, on the root's own path: real by construction, a root being a realpath; not looked at,
+    // since a sandbox around this process may not let it be: Deno allows only the roots themselves)
+    if (roots.some((r) => r.startsWith(next + "/"))) { cur = next; continue; }
+    let st: any;
+    try { st = fs.lstatSync(next); } catch (e: any) {
+      if (e?.code !== "ENOENT") return refuse(p);
+      // (the rest doesn't exist: no link can be in it; its deepest existing ancestor, cur, was checked)
+      const end = [next, ...comps.slice(i + 1)].join("/");
+      return inRoot(end) ? end : refuse(p);
+    }
+    if (st.isSymbolicLink()) {
+      if (inRoot(next) || ++follows > 40) return refuse(p);
+      let real: string;
+      try { real = fs.realpathSync(next); } catch { return refuse(p); }
+      cur = real === "/" ? "" : real;
+      continue;
+    }
+    if (inRoot(next) && !st.isDirectory()) {
+      if (!st.isFile() || st.nlink > 1) return refuse(p);
+      if (i < comps.length - 1) return refuse(p); // (a file in the middle of a path)
+    }
+    cur = next;
+  }
+  const end = cur || "/";
+  return inRoot(end) ? end : refuse(p);
+}
 // (open(F, M).write(S)'s native step, file-once.ts, opens the path _fs would)
 export const hostPath = (p: string): string => at(p);
 // (a path as this working directory resolves it: the importer's too,
@@ -1970,16 +2097,19 @@ export function setDataRoot(dir: string): void {
 
 // ------------------------------------------------------------------ _fs (backs open() in lib/_pyjs_open.py)
 
+// The Python exception for a failed read or write of a file (_fs's, open()'s), and for the import system's read of a
+// module's source (src/compile.ts, as fsOSError): a file it finds but can't read raises what open() raises on it
+export const oserr = (e: any, path: string): never => {
+  // (an exception the file system raised as Python's own, a Stop's KeyboardInterrupt in a Terminal command: as it is)
+  if (e?.$cls !== undefined) throw e;
+  if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
+  const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
+  // (CPython's strerror, as os's own errors give it: "Is a directory", not node's message)
+  throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : STRERROR[e.code] ?? String(e.message), path]));
+};
+
 newBuiltinModule("_fs", (m) => {
   const fs = require("fs");
-  const oserr = (e: any, path: string): never => {
-    // (an exception the file system raised as Python's own, a Stop's KeyboardInterrupt in a Terminal command: as it is)
-    if (e?.$cls !== undefined) throw e;
-    if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
-    const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
-    // (CPython's strerror, as os's own errors give it: "Is a directory", not node's message)
-    throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : STRERROR[e.code] ?? String(e.message), path]));
-  };
   fn(m, "read", (path: string) => {
     try {
       return new PyBytes(new Uint8Array(fs.readFileSync(at(path))));
@@ -2296,8 +2426,10 @@ newBuiltinModule("os", (m) => {
   };
   // (a descriptor converted as a C int with the other arguments, in signature order, then their checks; a negative
   // one is EBADF only then, just before the host call, where the kernel's would be: CPython's order of errors)
+  // (confined, `notebook run --confine`: only the standard three and the descriptors os.open opened here, through a
+  // checked path; any other number the process has, inherited or the runtime's own, is EBADF, never reached)
   const fdOpen = (fd: number): number => {
-    if (fd < 0) throw Object.assign(new Error("EBADF"), { code: "EBADF", errno: -9 });
+    if (fd < 0 || (isConfined() && !fdAdmitted(fd))) throw Object.assign(new Error("EBADF"), { code: "EBADF", errno: -9 });
     return fd;
   };
   const cWide = (x: any, c: string): bigint => {
@@ -2319,8 +2451,9 @@ newBuiltinModule("os", (m) => {
         throw e;
       }
     }
-    const fd = fs.openSync(at(q), fl, md);
+    const fd = fs.openSync(at(q), hostOpenFlags(fl, fs.constants), md);
     cliPos.set(fd, { pos: 0, append: (fl & 1024) !== 0 });
+    checkedFds.add(fd);
     return fd;
   });
   m.open.$sig = { args: ["path", "flags", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [0o777], kwdefaults: { dir_fd: null } };
@@ -2328,6 +2461,7 @@ newBuiltinModule("os", (m) => {
     const n = cInt(fd);
     fs.closeSync(fdOpen(n));
     cliPos.delete(n);
+    checkedFds.delete(n);
     return null;
   }));
   fn(m, "read", (fd: any, n: any) => fdCall(() => {

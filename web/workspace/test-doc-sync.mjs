@@ -1,4 +1,4 @@
-// ci: web-runner-sync order=10 runner=bun chrome
+// ci: web-runner-sync.1 order=10 runner=bun chrome
 // Sync 2c-3 (notebooks' contents on the wire) in headless Chromium: two devices of one account, each its own browser
 // context (its own IndexedDB and Web Locks), against core's reference server (web/sync-protocol/reference-server.ts)
 // behind a small front here.  The front serves the page, carries each device's account socket to the server with
@@ -17,6 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReferenceServer, SESSION_COOKIE } from "../sync-protocol/reference-server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
+import { batchHash, chainNext, chainSeed, hex as hexOf } from "../sync-protocol/doc-protocol.ts";
 import { devtoolsPort } from "../test-port.mjs";
 import { emit, guardConsole, pairCheck } from "./doc-sync-diag.mjs";
 // (before anything that can print: every in-process console call from here on is scrubbed (doc-sync-diag.mjs
@@ -40,6 +41,7 @@ writeFileSync(join(src, "entry.js"), [
   `export * as P from ${J(join(here, "../sync-protocol/protocol.ts"))};`,
   `export * as NB from ${J(join(here, "../notebook/notebook.js"))};`,
   `export * as ST from ${J(join(here, "../notebook/stores.js"))};`,
+  `export * as E from ${J(join(here, "e2e/index.ts"))};`,
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
@@ -78,7 +80,7 @@ if (CLOUD) {
 } else ref = new ReferenceServer();
 // (each device's session, as its Cookie header's name=value)
 const signIn = async () => (CLOUD ? await cloud.signIn(ACCOUNT) : `${SESSION_COOKIE}=${ref.signIn(ACCOUNT)}`);
-const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn() };
+const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn(), E: await signIn(), F: await signIn(), G: await signIn() };
 // (sync on for the account, as its first device's enable does: off, the server refuses every hello `readonly`)
 const enabled = await (CLOUD ? cloud.enable(sessions.A) : ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions.A } }))).then((r) => r.json());
 if (enabled.state !== "active") { emit.enableFail(enabled); process.exit(1); }
@@ -154,7 +156,7 @@ const front = Bun.serve({
       emit.syncStart(k, req.method, path);
       try {
         const h = new Headers({ cookie: sessions.D, ...(CLOUD ? { origin: cloud.url } : {}) });
-        for (const k of ["content-type", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
+        for (const k of ["content-type", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v) h.set(k, v); }
         const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
         const r = await (CLOUD ? fetch(cloud.url + path + u.search, { method: req.method, headers: h, body }) : ref.fetch(new Request("http://ref" + path + u.search, { method: req.method, headers: h, body })));
         emit.syncEnd(k, req.method, path, r.status, Date.now() - t);
@@ -199,6 +201,22 @@ const front = Bun.serve({
             if (t === "chain") m.items[0].chain = "0".repeat(64);
             if (t === "owner") m.owner = "f".repeat(64);
             if (t === "snapshot") m.snapshot = { at_seq: 1, sha256: "0".repeat(64) };
+            // (case E: a sealed page edited: a byte of the LAST batch's body flipped (in its tag), or the FIRST slice's key
+            // generation id changed from k-1 to k-2 (its third byte), another generation the device lists)
+            if (t === "slice-last" || t === "prefix-gen") {
+              const it = t === "slice-last" ? m.items[m.items.length - 1] : m.items[0];
+              const body = Buffer.from(it.body, "base64");
+              if (t === "slice-last") body[body.length - 3] ^= 1; else body[1 + 4 + 2] = 0x32;
+              it.body = body.toString("base64");
+              // (and the page's chain made again from the edited batch on, as a server that edits what it sends would:
+              // so the edit is caught by the slice not opening, not by the chain; the reference server's stored chain
+              // gives the link before the page)
+              for (let i = m.items.indexOf(it); i < m.items.length; i++) {
+                const b = m.items[i], before = i > 0 ? null : ref.controls.doc(ACCOUNT, m.doc)?.batches.find((x) => x.seq === b.seq - 1);
+                const prev = i > 0 ? Buffer.from(m.items[i - 1].chain, "hex") : before ? Buffer.from(before.chain, "hex") : chainSeed(m.owner, m.doc, 1);
+                b.chain = hexOf(chainNext(prev, { seq: b.seq, recv: b.recv, epoch: 1, author: String(b.author), writer: String(b.writer), hb: batchHash(J(b.patches), Buffer.from(b.body, "base64")) }));
+              }
+            }
             text = J(m);
           }
         }
@@ -228,7 +246,7 @@ async function cloudHead(id) {
     const w = new WebSocket(cloud.url.replace(/^http/, "ws") + "/api/sync/v1/account", { headers: { cookie: sessions.A, origin: cloud.url } });
     const done = (v) => { clearTimeout(t); try { w.close(); } catch {} ok(v); };
     const t = setTimeout(() => done(null), 10_000);
-    w.onopen = () => w.send(J({ t: "hello", v: 2, device: "probe-node-0000", name: "probe", index_after: 0 }));
+    w.onopen = () => w.send(J({ t: "hello", v: 3, device: "probe-node-0000", name: "probe", index_after: 0 }));
     w.onmessage = (e) => {
       const m = JSON.parse(String(e.data));
       if (m.t === "welcome") w.send(J({ t: "pull", req: 1, owner, doc: id, epoch: 1, after: 0, limit: 1 }));
@@ -249,7 +267,12 @@ const labels = new Map(), pageConsole = [];
 // (the traced requests in flight, by "<sessionId>:<requestId>": their page, call and route)
 const netReq = new Map();
 const noteConsole = (s) => { pageConsole.push(String(s).slice(0, 2000)); if (pageConsole.length > 200) pageConsole.shift(); };
-// (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
+// (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was.  Sized from CI's
+// timings: the cases before 14 take about 395 s and case 14 about 38 s; so the cases before it with a quarter more,
+// case 14's own budget and the margin, rounded up)
+const DEADLINE_MS = Number(process.env.DEADLINE_MS) || 660_000;
+/** Case 14's own budget: a fixed one (about three times what it takes), not what the cases before it left over. */
+const CASE14_MS = 120_000;
 let step = "start";
 const t0 = Date.now();
 const progress = (what) => { step = what; emit.step((Date.now() - t0) / 1000, what); if (/^case \d+$/.test(what)) censusAt(what.replace(" ", "-")); };
@@ -258,7 +281,7 @@ const deadline = setTimeout(() => {
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   try { rmSync(profile, { recursive: true, force: true }); rmSync(site, { recursive: true, force: true }); } catch {}
   process.exit(2);
-}, Number(process.env.DEADLINE_MS) || 480_000);
+}, DEADLINE_MS);
 try {
   if (!port) port = await devtoolsPort(profile);
   let version;
@@ -312,7 +335,8 @@ try {
     };
     for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
     await ev(`T.init(${J(dev)})`);
-    return { dev, ev, call: (f, ...args) => { progress(`${dev}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
+    // (`input`: text typed as a person types it, into the focused element: real input, CDP Input.insertText)
+    return { dev, ev, input: (text) => send("Input.insertText", { text }, sessionId), call: (f, ...args) => { progress(`${dev}.${f}`); return ev(`T.${f}(${args.map((a) => J(a)).join(", ")})`); } };
   }
   progress("devices");
   const A = await device("A"), B = await device("B");
@@ -390,8 +414,15 @@ try {
 
   progress("case 2");
   // 2. B edits; A (its notebook open, the writer) merges it into its record
+  const a2listed = await A.call("list", N1), a2pages = (await A.call("pagesOf", N1)).length;
+  await sleep(20);
   check(await B.call("edit", N1, [["a", "A1"], ["b", "B2"]]) === true, "2: B's edit saved");
   await settle();
+  // (A's Files entry: its last-modified time moved up to the pulled batch's time (DocSync's onPage, Workspace.touch),
+  // never back)
+  const a2p = (await A.call("pagesOf", N1)).slice(a2pages), a2up = await A.call("updatedOf", N1);
+  check(a2p.length >= 1 && a2p.every((p) => p.applied > 0) && a2up === Math.max(a2listed, ...a2p.map((p) => p.at)) && a2up > a2listed, "2: …A's Files entry for it: last modified moved up to the pulled batch's time: " + J({ listed: a2listed, pages: a2p, updated: a2up }));
+  check((await A.call("touch", N1, 1)) === a2up, "2: …and an older time never moves it back");
   const ar2 = await A.call("record", N1);
   check(ar2.codes === J([["a", "A1"], ["b", "B2"]]) && ar2.mark === null, "2: …it reaches A, whose record becomes the merge, unmarked: " + ar2.codes);
 
@@ -406,6 +437,36 @@ try {
   await settle();
   const [ar3, br3] = [await A.call("record", N1), await B.call("record", N1)];
   check(ar3.codes === J([["a", "A3"], ["b", "B3"]]) && br3.codes === ar3.codes, "3: edits of separate cells made apart: both kept, the two devices the same: " + J({ A: ar3.codes, B: br3.codes }));
+
+  progress("case P");
+  // P. A notebook made and saved on A before sync was on (journaled, never synced), then sync on (the page loaded
+  // again): its content reaches B, a later edit on A reaches B, and B's edit reaches A.  (A pre-existing notebook
+  // with the same name on two devices is two documents, sync-client-cases' sameNameRenamed; this is the other device
+  // opening A's.)  Each step waits for what it checks, polled, not for the whole run to settle: the run's deadline
+  // is shared with the cases after it.
+  const NP = "77777777-2222-4333-8444-555555555555";
+  const waitFor = async (f, ms = 15_000) => { const t = Date.now(); for (;;) { if (await f()) return true; if (Date.now() - t > ms) return false; await sleep(100); } };
+  await A.call("docSync", false);
+  await A.call("open", NP, [["s", "S1"]]);
+  const pe = [await A.call("edit", NP, [["s", "S2"], ["t", "T1"]]), await A.call("edit", NP, [["s", "S3"], ["t", "T1"]])];
+  const pj0 = await A.call("journal", NP);
+  await A.call("close", NP);
+  await A.call("docSync", true);
+  const pa = await A.call("open", NP);
+  await A.call("kick", NP, true);
+  // (B, told `changed`, has pulled it: its synced history started, its cursor past the root)
+  const pulled = await waitFor(async () => { const j = await B.call("journal", NP); return !!j.start && (j.cursor?.after ?? 0) >= 1; });
+  const pjA = await A.call("journal", NP);
+  const pb = await B.call("open", NP);
+  check(pulled && J(pe) === J([true, true]) && pa.codes === J([["s", "S3"], ["t", "T1"]]) && !pj0.start && pjA.start && pb.codes === J([["s", "S3"], ["t", "T1"]]), "P: a notebook saved before sync was on: its synced history started once on, and B gets its content: " + J({ saved: pe, A: pa.codes, before: pj0.start, after: !!pjA.start, B: pb.codes, row: pb.row, pulled }));
+  check(await A.call("edit", NP, [["s", "S4"], ["t", "T1"]]) === true, "P: A's edit after sync on saved");
+  const toB = await waitFor(async () => (await B.call("record", NP))?.codes === J([["s", "S4"], ["t", "T1"]]));
+  check(toB, "P: …A's next edit reaches B: " + (await B.call("record", NP))?.codes);
+  check(await B.call("edit", NP, [["s", "S4"], ["t", "T2"]]) === true, "P: B's edit saved");
+  const toA = await waitFor(async () => (await A.call("record", NP))?.codes === J([["s", "S4"], ["t", "T2"]]));
+  check(toA, "P: …and B's reaches A: " + (await A.call("record", NP))?.codes);
+  // (both devices idle again before the next case, as a settle leaves them)
+  await both("idle");
 
   progress("case 4");
   // 4. The same cell changed apart: both edits kept, merged as CoCalc's Jupyter merges them (plan-exact-only r1), the
@@ -645,9 +706,14 @@ try {
   await B.call("close", N10);
   await B.call("open", N10);
   const b10r = await B.call("record", N10);
+  // (and a second reload, still with no room: the value and its base's proof as the first reload wrote them, never
+  // set aside as legacy (recovery's T2 keeps the proof))
+  await B.call("close", N10);
+  await B.call("open", N10);
+  const b10r2 = await B.call("record", N10);
   await B.call("resetDebt");
   const a10 = JSON.parse(b10.codes).find(([id]) => id === "a")?.[1] ?? "", u10 = JSON.parse(b10.codes).find(([id]) => id === "u")?.[1];
-  check(bm10.mark === true && a10.includes("B") && a10.includes("C") && u10 === "Bu" && b10.mark === true && b10r.codes === b10.codes, "10: a marked value meets a later remote change of the same cell: both edits kept, its other cell its own, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
+  check(bm10.mark === true && a10.includes("B") && a10.includes("C") && u10 === "Bu" && b10.mark === true && b10r.codes === b10.codes && b10r2.codes === b10.codes && b10r2.mark === true && b10r.from > 0 && b10r2.from > 0 && b10r2.proof === "exact-1" && !b10r.legacy && !b10r2.legacy, "10: a marked value meets a later remote change of the same cell: both edits kept, its other cell its own, still marked, and after a reload and a second one, its base's proof kept, never set aside: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes, reloaded2: b10r2.codes, mark2: b10r2.mark, proof: [b10r.from, b10r2.from, b10r2.proof], legacy: [b10r.legacy, b10r2.legacy] }));
 
   progress("case 11");
   // 11. An ack over the wire resumes a writer's history paused for want of room: the next save is a
@@ -697,6 +763,192 @@ try {
   await settle();
   const [bs12b, br12b] = [await B.call("shown"), await B.call("record", N12)];
   check(bs12b === J([["a", "p2"], ["b", "q-typed"]]) && br12b.codes === bs12b && br12b.hashOk, "12: a remote change while this page types another cell: both kept, saved: " + J({ shown: bs12b, record: br12b.codes, hashOk: br12b.hashOk }));
+
+  progress("case 12b");
+  // 12b. A lagging page never records what it didn't type (William's reverted edit, Nov 13): A's change is in B's
+  // history while B's page doesn't show it yet (the store's merge after its arrival held open: the held state checked,
+  // the head A's, the page not), and B saves with nothing typed: a cell's output changed (as a run's), cleared, or the
+  // notebook's own fields.  Then the merge runs.  Every device and both records end with A's text, and B made no
+  // version at all.  Until the base, each of these saves recorded B's page over the head: A's edit undone
+  for (const how of ["output", "clear", "meta"]) {
+    const want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    const N = `cccccccc-2222-4222-8333-${{ output: "000000000001", clear: "000000000002", meta: "000000000003" }[how]}`;
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    // (an output to clear: the cell's, given before the lag, and saved)
+    if (how === "clear") { await B.call("untypedSaved", "output", "a"); await settle(); }
+    const before = await B.call("byClient", N);
+    await B.call("holdRemote", N);
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    const held = { head: await B.call("head", N), shown: await B.call("shown") };
+    const isHeld = held.head === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]) && held.shown === J([["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    check(isHeld, `12b (${how}): held: A's change in B's history, not yet on B's page: ` + J(held));
+    // (the save waited for, not a fixed sleep: it resolves with what it kept, A's text merged in, and the page shows
+    // that at once, before the held merge runs; the page is then read until it does, within 5 s)
+    await B.call("untypedSaved", how, "a");
+    let midShown = await B.call("shown");
+    for (const t = Date.now(); midShown !== want && Date.now() - t < 5000; midShown = await B.call("shown")) await sleep(50);
+    const mid = await B.call("byClient", N);
+    await B.call("releaseRemote");
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("byClient", N);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    const mine = (x) => (x.mine ? x.out[x.mine] ?? 0 : 0);
+    check(isHeld && bs === want && br.codes === want && ar.codes === want && bh === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]) && ah === bh && mine(mid) === mine(before) && mine(after) === mine(before) && midShown === want, `12b (${how}): a save with nothing typed, made while B lagged, records nothing, and B shows what it kept at once; A's text everywhere: ` + J({ midShown, shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah, bPatches: [mine(before), mine(mid), mine(after)] }));
+  }
+
+  progress("case 12c");
+  // 12c. An orphan version already sent (a stale save: its T1 kept and sent, its T2 refused: never the document), in a
+  // history only B has written: B's reload stamps its record over it (the record is the document), and sends that; A,
+  // which received the orphan, ends with it gone, no union and nothing brought back.  B never shows it
+  {
+    const N = "cccccccc-3333-4222-8333-000000000001";
+    await B.call("open", N, [["a", "A0"], ["b", "b0"]]);
+    await B.call("kick", N);
+    await settle();
+    await A.call("kick", N, true);
+    await settle();
+    await A.call("open", N);
+    const busy = await B.call("editStale", N, [["a", "C orphan"], ["b", "b0"]]);
+    await settle();
+    await sleep(900);
+    await settle();
+    const aSaw = await A.call("head", N);
+    await B.call("close", N);
+    const reopened = await B.call("open", N);
+    await B.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const [ar, br, ah, bh] = [await A.call("record", N), await B.call("record", N), await A.call("head", N), await B.call("head", N)];
+    const want = J([["a", "A0"], ["b", "b0"]]);
+    check(busy === "conflict" && aSaw === J([["a", "C orphan"], ["b", "b0"]]) && reopened.codes === want && br.codes === want && ar.codes === want && ah === bh && bh === want, "12c: an orphan version already sent, in a history only one device wrote: that device's reload stamps its record over it; the other, which had received it, ends without it, no union: " + J({ busy, aSaw, reopened: reopened.codes, recordB: br.codes, recordA: ar.codes, headA: ah, headB: bh }));
+  }
+
+  progress("case 12d");
+  // 12d. Concurrent changes of a field that isn't text (the notebook's mode), on both devices: every device names the
+  // same side the later (store.js mergeRemote, by the two sides' last versions), so both records end the same as both
+  // heads.  Named by theirs against the merge's base, each device took the other's as the later: the records differed
+  {
+    const N = "cccccccc-4444-4222-8333-000000000001";
+    await A.call("open", N, [["a", "x = 1"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("open", N);
+    await B.call("disconnect");
+    await A.call("editMode", N, "sage");
+    await B.call("editMode", N, "magma");
+    await settle();
+    await B.call("connect", "B", ACCOUNT);
+    await B.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    await A.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const [am, bm] = [await A.call("modes", N), await B.call("modes", N)];
+    check(am.record === bm.record && am.head === bm.head && am.record && (am.record === "sage" || am.record === "magma") && ({ sage: "sagemath", magma: "magma" })[am.record] === am.head, "12d: concurrent changes of the mode on two devices: both records the same, and the heads': " + J({ A: am, B: bm }));
+  }
+
+  progress("case 12e");
+  // 12e. The base held exact across the page's own timing: (save) a save with nothing typed whose document and base
+  // were taken, held, while A's change arrives and is shown, then let go; (gap) the page's merge held after the
+  // store's merge and before it is shown, and a save with nothing typed made in that gap.  Either way A's text
+  // everywhere and B makes no version
+  for (const what of ["save", "gap"]) {
+    const N = `cccccccc-5555-4222-8333-${what === "save" ? "000000000001" : "000000000002"}`, want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    const before = await B.call("byClient", N);
+    await B.call("hold", N, what);
+    if (what === "save") { await B.call("untyped", "output", "a"); await sleep(200); }
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    await sleep(600);
+    if (what === "gap") { await B.call("untyped", "output", "a"); await sleep(400); }
+    await B.call("release");
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("byClient", N), mine = (x) => (x.mine ? x.out[x.mine] ?? 0 : 0);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    check(bs === want && br.codes === want && ar.codes === want && ah === bh && bh === want && mine(after) === mine(before), `12e (${what}): a save with nothing typed, held across A's change (${what === "save" ? "its base taken before" : "in the page's merge's gap"}), records nothing; A's text everywhere: ` + J({ shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah, bPatches: [mine(before), mine(after)] }));
+  }
+
+  progress("case 12f");
+  // 12f. A change from elsewhere landing between a save's T1 and its T2 (an unmarked record's j covering a change it
+  // never showed, the case mergeRemote's j-based base would meet): the record is written marked (its value isn't the
+  // head), never unmarked without that change; then A's text and B's typing both kept, everywhere
+  {
+    const N = "cccccccc-6666-4222-8333-000000000001";
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    await B.call("hold", N, "t2");
+    await B.call("type", "b", "eig(A)'");
+    await sleep(900);
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    await sleep(400);
+    await B.call("release");
+    await sleep(300);
+    const mid = await B.call("record", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)'"]]);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    const midOk = mid.mark === true || JSON.parse(mid.codes).find(([c]) => c === "a")?.[1] === "A = [9 2; 3 4]";
+    check(midOk && bs === want && br.codes === want && ar.codes === want && bh === ah && bh === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)'"]]), "12f: a change landing between a save's T1 and its T2: the record never unmarked without it; A's text and B's typing everywhere: " + J({ mid, shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah }));
+  }
+
+  progress("case 12g");
+  // 12g. A page's saves run one after another (notebook.js saveChain): a second save asked for while the first is held
+  // isn't started until the first is done, so no two saves of one page ever take their bases at once; then both kept
+  {
+    const N = "cccccccc-7777-4222-8333-000000000001";
+    await A.call("open", N, [["a", "a0"], ["b", "b0"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    await B.call("countSaves", N);
+    await B.call("hold", N, "save");
+    await B.call("type", "a", "a1");
+    await sleep(900);
+    const first = await B.call("savesStarted");
+    await B.call("type", "b", "b1");
+    await sleep(900);
+    const whileHeld = await B.call("savesStarted");
+    await B.call("release");
+    await sleep(600);
+    await B.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("savesStarted"), [br, ar] = [await B.call("record", N), await A.call("record", N)];
+    const want = J([["a", "a1"], ["b", "b1"]]);
+    check(first === 1 && whileHeld === 1 && after >= 2 && br.codes === want && ar.codes === want, "12g: a page's second save waits for its first (held): one save started while held, then both kept everywhere: " + J({ first, whileHeld, after, recordB: br.codes, recordA: ar.codes }));
+  }
 
   progress("case 13");
   // 13. One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
@@ -1012,10 +1264,39 @@ try {
     }
   }
 
+  // X13. Typed on A and A's page asked to go away at once (a simulated beforeunload, as a reload within the save's half
+  // second sends it): the page asks to confirm leaving; declined, it stays, and the edit is saved on A and reaches B
+  {
+    const NK = "33333333-2222-4333-8444-5555555555e9";
+    try {
+      await A.call("open", NK, [["ka", "k0"], ["kb", "kb0"]]);
+      await A.call("kick", NK);
+      await settle();
+      await A.call("close", NK);
+      await A.call("mount", NK);
+      await B.call("kick", NK, true);
+      await settle();
+      await B.call("mount", NK);
+      // (typed as a person types: the notebook asks only after the person's own input)
+      if (!(await A.call("focus", "ka"))) throw new Error("no cell ka on A to type in");
+      await A.input("k1 typed, then a reload asked");
+      const asked = await A.call("leaveAsked");
+      await sleep(900);
+      await A.call("kick", NK);
+      for (let i = 0; i < 3; i++) await settle();
+      const [ra, eb, ha, hb, again] = [await A.call("record", NK), await B.call("editor"), await A.call("head", NK), await B.call("head", NK), await A.call("leaveAsked")];
+      const want = [["ka", "k1 typed, then a reload asked"], ["kb", "kb0"]];
+      check(asked === true && again === false && ra.codes === J(want) && J(eb.texts) === J(want) && ha !== null && ha === hb,
+        "X13: typed and a reload asked at once (simulated): the page asks to stay; declined, the edit saved on A and on B, and then nothing to ask: " + J({ asked, again, A: ra.codes, B: eb.texts, heads: [ha, hb] }));
+    } catch (e) {
+      check(false, "X13: the case stopped: " + String(e?.message ?? e).slice(0, 300));
+    }
+  }
+
   progress("case 14");
   // (the whole case within a budget that ends before the run's deadline: past it, or on a throw, this case records
   // a failed check and the run goes on to print every verdict)
-  const budget14 = Math.min(240_000, (Number(process.env.DEADLINE_MS) || 480_000) - (Date.now() - t0) - 30_000);
+  const budget14 = Math.min(CASE14_MS, DEADLINE_MS - (Date.now() - t0) - 30_000);
   const LATECASE = Symbol("late");
   // (a failed check ends the case there (recorded first): the rest depends on it, and a mutant's run stays short)
   const STOP14 = Symbol("stop");
@@ -1145,6 +1426,85 @@ try {
     const tr = await Promise.race([P.ev("T.traceDump ? T.traceDump() : []").catch(() => []), sleep(10_000).then(() => [])]);
     for (const x of tr ?? []) if (x.kind) emit.stage(x.call, x.kind, x.detail); else emit.pageBytes(x.call, x.bytes, x.sha);
   }
+  progress("case E");
+  // E. End-to-end encryption on the wire (doc-seal.ts; opt-in, with a fixture key provider, as no page has one yet):
+  // devices E and F of the account, each given the document key generations k-1 and k-2 (k-1 seals), and G given
+  // only k-2; A and B away.  Each check below that refuses a page says the whole page was left unapplied.
+  await A.call("disconnect");
+  await B.call("disconnect");
+  const E2E_ACCT = "e2e-acct-1", GENS = [{ cekId: "k-1", keyEpoch: 5, fill: 0x11 }, { cekId: "k-2", keyEpoch: 5, fill: 0x22 }];
+  const Ed = await device("E"), Fd = await device("F"), Gd = await device("G");
+  await Ed.call("useKeys", E2E_ACCT, GENS, 0);
+  await Fd.call("useKeys", E2E_ACCT, GENS, 0);
+  await Gd.call("useKeys", E2E_ACCT, GENS.slice(1), 0);
+  await Ed.call("connect", "E", ACCOUNT);
+  await Fd.call("connect", "F", ACCOUNT);
+  const efIdle = async () => { for (let i = 0; i < 3; i++) await Promise.all([Ed.call("idle"), Fd.call("idle")]); };
+  // E-1: E's new notebook reaches F, and F's edit reaches E; what the server stores is ciphertext
+  const NE = "e2e00000-0000-4000-8000-000000000001";
+  await Ed.call("open", NE, [["a", "SECRET-E1"]]);
+  await Ed.call("kick", NE);
+  await efIdle();
+  if (!CLOUD) {
+    const bodies = (ref.controls.doc(ACCOUNT, NE)?.batches ?? []).map((b) => Buffer.from(b.body));
+    check(bodies.length >= 1 && bodies.every((b) => b[0] === 1 && !b.includes("SECRET")), "E-1: what the server stores of a sealed notebook is its slices (format 0x01), with none of its text: " + J({ batches: bodies.length, first: bodies.map((b) => b[0]) }));
+  }
+  const fo = await Fd.call("open", NE);
+  check(fo.codes === J([["a", "SECRET-E1"]]), "E-1: …F, given its key generation, pulls and opens it: " + fo.codes);
+  check(await Fd.call("edit", NE, [["a", "SECRET-E1"], ["b", "SECRET-F1"]]) === true, "E-1: F's edit saved");
+  await efIdle();
+  const er = await Ed.call("record", NE);
+  check(er.codes === J([["a", "SECRET-E1"], ["b", "SECRET-F1"]]), "E-1: …and F's sealed edit reaches E: " + er.codes);
+  // E-2: a page of two sealed batches whose LAST slice is damaged (its chain made again, as a server that edits its
+  // pages would; on the reference server, whose stored chain the front reads): F stops "e2e" and applies neither
+  if (!CLOUD) {
+  await Fd.call("disconnect");
+  for (const code of ["SECRET-E2", "SECRET-E3"]) { await Ed.call("edit", NE, [["a", code], ["b", "SECRET-F1"]]); await Ed.call("idle"); }
+  const fj2 = await Fd.call("journal", NE), fr2 = await Fd.call("record", NE);
+  tamper.F = "slice-last";
+  await Fd.call("connect", "F", ACCOUNT);
+  await Fd.call("kick", NE);
+  await Fd.call("idle");
+  tamper.F = null;
+  const [fs2, fj2b, fr2b] = [await Fd.call("stopped"), await Fd.call("journal", NE), await Fd.call("record", NE)];
+  check(fs2[NE]?.code === "e2e" && J(fj2b.cursor) === J(fj2.cursor) && fr2b.codes === fr2.codes, "E-2: a pulled page whose last sealed slice fails to open stops the notebook (e2e) before any of the page is applied: its cursor and record unchanged: " + J({ stop: fs2[NE], before: fj2.cursor?.after, after: fj2b.cursor?.after }));
+  // E-3: a slice whose prefix names another generation F lists (k-2 for k-1): refused, nothing applied
+  const NE3 = "e2e00000-0000-4000-8000-000000000003";
+  await Fd.call("disconnect");
+  await Ed.call("open", NE3, [["a", "SECRET-E3"]]);
+  await Ed.call("kick", NE3);
+  await Ed.call("idle");
+  tamper.F = "prefix-gen";
+  await Fd.call("connect", "F", ACCOUNT);
+  await Fd.call("kick", NE3, true);
+  await Fd.call("idle");
+  tamper.F = null;
+  const [fs3, fj3] = [await Fd.call("stopped"), await Fd.call("journal", NE3)];
+  check(fs3[NE3]?.code === "e2e" && !fj3.cursor, "E-3: a slice whose prefix is edited to another generation the device lists is refused (e2e): never applied, no cursor: " + J({ stop: fs3[NE3], cursor: fj3.cursor }));
+  }
+  // E-4: G lists only k-2, and the notebook is sealed under k-1: refused, never another generation tried
+  const NE4 = "e2e00000-0000-4000-8000-000000000004";
+  await Ed.call("open", NE4, [["a", "SECRET-E4"]]);
+  await Ed.call("kick", NE4);
+  await Ed.call("idle");
+  await Gd.call("connect", "G", ACCOUNT);
+  await Gd.call("kick", NE4, true);
+  await Gd.call("idle");
+  const [gs4, gj4] = [await Gd.call("stopped"), await Gd.call("journal", NE4)];
+  check(gs4[NE4]?.code === "e2e" && /declare/.test(gs4[NE4]?.detail ?? "") && !gj4.cursor, "E-4: a device that doesn't list the generation a slice names refuses it (e2e: a generation the document doesn't declare), nothing applied: " + J(gs4[NE4]));
+  // E-5: a patch sent unsealed (A, which has no keys) reaches F, which has: refused, nothing applied
+  const NE5 = "e2e00000-0000-4000-8000-000000000005";
+  await A.call("connect", "A", ACCOUNT);
+  await A.call("open", NE5, [["a", "plain"]]);
+  await A.call("kick", NE5);
+  await A.call("idle");
+  await A.call("disconnect");
+  await Fd.call("kick", NE5, true);
+  await Fd.call("idle");
+  const [fs5, fj5] = [await Fd.call("stopped"), await Fd.call("journal", NE5)];
+  check(fs5[NE5]?.code === "e2e" && !fj5.cursor, "E-5: an unsealed patch reaching a device with keys is refused (e2e), never applied: " + J(fs5[NE5]));
+  for (const d of [Ed, Fd, Gd]) await d.call("disconnect");
+
   censusAt("cases-done");
   if (!emit.failures(results, errors)) {
     emit.ok(results.length);

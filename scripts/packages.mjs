@@ -22,14 +22,14 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 const MODES = new Set(["python", "sage", "matlab", "magma"]);
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // (beside the code, not pinned: the manifest, a README, licenses and notices)
-const DOCS = /^(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|known\.json)$/;
+const DOCS = /^(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|known\.json|overlay\.patch)$/;
 // (a relative path inside the package: no "..", no absolute or odd names)
 const safePath = (p) => typeof p === "string" && p !== "" && !p.startsWith("/") && p.split("/").every((s) => s !== "" && s !== "." && s !== ".." && /^[A-Za-z0-9_.-]+$/.test(s));
 
@@ -42,7 +42,7 @@ function walk(dir, bad, base = dir, out = []) {
     if (st.isSymbolicLink()) bad(`${relative(base, p)} is a symbolic link (a package's files are its own)`);
     if (st.isDirectory()) {
       if (f !== "__pycache__") walk(p, bad, base, out);
-    } else if (st.isFile()) out.push(relative(base, p));
+    } else if (st.isFile()) out.push(relative(base, p).split(sep).join("/")); // ("/" on every system, as the registry has them)
     else bad(`${relative(base, p)} is not a file or a directory`);
   }
   return out;

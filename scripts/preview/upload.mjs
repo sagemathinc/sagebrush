@@ -22,10 +22,10 @@ export async function upload(client, name, output, signal) {
     const key = `${name}/${path}`;
     // Compare the CURRENT object's metadata, not a last-success manifest: an
     // interrupted publish may have replaced this key since that manifest.
-    const same = previous.has(key) && await client.matches(key, file);
+    const same = previous.has(key) && await client.matches(key, file, check);
     check(); // A peer can fail during HEAD: never start a successor PUT then.
     if (same) { skipped++; return; }
-    await client.put(key, file.bytes, file.type);
+    await client.put(key, file.bytes, file.type, file.cacheControl, check);
     uploaded++;
   };
   // A full barrier keeps policies/assets ahead of all entry pages.

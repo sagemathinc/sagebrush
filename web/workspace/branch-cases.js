@@ -71,7 +71,7 @@ const CASES = {
     const f0 = await w.stat("/A/x.txt"), f1 = await w.stat("/Branches/fix-plots/A/x.txt");
     check(f1.fid !== f0.fid, "a data file's copy: a fid of its own");
     const rec = await recOf(w, "fix-plots");
-    check(rec && rec.status === "ready" && rec.owner === "g1" && rec.entries === 9 && !("base" in rec) && !("manifest" in rec), `the record: ready, the owner, 9 entries, no manifest in it (${JSON.stringify(rec)})`);
+    check(rec && rec.status === "ready" && rec.owner === "g1" && rec.entries === 9 && rec.canon === 2 && !("base" in rec) && !("manifest" in rec), `the record: ready, the owner, 9 entries, canon 2, no manifest in it (${JSON.stringify(rec)})`);
     // (exact logical bytes: a data file's size; a document's JSON as copied, outputs included)
     const nbDoc = (() => { const { id, rev, updated, ...d } = nb0.content; return d; })();
     const want = 5 + 4 + 3 + jsonBytes(nbDoc) + jsonBytes(b0.content);
@@ -79,9 +79,11 @@ const CASES = {
     const pages = await pagesOf(w, rec.fid);
     const hashes = pages.flatMap(([, p]) => p);
     const sha = async (b) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
-    const nbCanon = enc(JSON.stringify({ cells: nb0.content.cells.map((c) => ({ type: c.type ?? "code", code: c.code })) }));
-    const want2 = { "A/x.txt": await sha(enc("hello")), "A/deep/y.txt": await sha(enc("deep")), "B/z.txt": await sha(enc("bee")), "A/nb.ipynb": await sha(nbCanon), "A/b.board.json": await sha(enc(JSON.stringify(b0.content))) };
-    check(pages.length === 1 && hashes.length === 5 && hashes.every(([p, h]) => want2[p] === h), `each base hash is its canonical form's sha256 (a notebook's cells' kinds and sources, no outputs): ${JSON.stringify(hashes)}`);
+    // (canon 2, branch-canon.ts: a notebook's mode and each cell's type and code, as sorted-key JSON, written out
+    //  literally here; a board's file text, the board's own canonical())
+    const nbCanon = enc(JSON.stringify({ cells: nb0.content.cells.map((c) => ({ code: c.code, type: c.type ?? "code" })), mode: nb0.content.mode ?? null }));
+    const want2 = { "A/x.txt": await sha(enc("hello")), "A/deep/y.txt": await sha(enc("deep")), "B/z.txt": await sha(enc("bee")), "A/nb.ipynb": await sha(nbCanon), "A/b.board.json": await sha(enc(W.boardCanonical(b0.content))) };
+    check(pages.length === 1 && hashes.length === 5 && hashes.every(([p, h]) => want2[p] === h), `each base hash is its canon 2 form's sha256 (a notebook's mode and cells' kinds and sources, no outputs; a board's file text): ${JSON.stringify(hashes)}`);
     // (direct mode: a write to main under the grant, with a branch open)
     const a = agent(w, "g1");
     await a.write("/A/x.txt", enc("main"), { base: (await w.read("/A/x.txt")).rev });
@@ -92,6 +94,16 @@ const CASES = {
     await w.mkdir("/Branches/mine");
     check((await caught(make(w, "mine")))?.message === T.taken("mine"), "a name with a folder of the person's there: taken");
     check((await w.list("/", { recursive: true })).length === before + 1 && (await w.branchRecords()).size === 1, "nothing made for either");
+  },
+
+  // (a notebook switched to another language after it was made: its copy in the branch is in the language it is in now)
+  async mode(check) {
+    const w = await fresh("mode");
+    await w.createByPerson("/A/s.ipynb", { mode: "sage", content: { cells: [{ code: "1" }] } });
+    await w.write("/A/s.ipynb", { cells: [{ code: "1" }], mode: "magma" });
+    await make(w, "lang");
+    const c = await w.read("/Branches/lang/A/s.ipynb");
+    check(c.content.mode === "magma" && c.entry.mode === "magma", `a notebook switched from Sage to Magma is copied as Magma (${c.content.mode}, ${c.entry.mode})`);
   },
 
   async narrowed(check) {
@@ -135,7 +147,7 @@ const CASES = {
     const back = await mine.restore(gone.path, gone);
     check(back.path === "/Branches/fix/A/x.txt", "its maker restores into it");
     // (the branch's folder, and /Branches)
-    await refused("its maker removing its folder", mine.remove("/Branches/fix"), T.persons);
+    await refused("another grant removing its folder", other.remove("/Branches/fix"), T.otherConnection);
     await refused("its maker moving its folder", mine.rename("/Branches/fix", "/Branches/fix2"), T.persons);
     await refused("its maker moving its folder out", mine.rename("/Branches/fix", "/A/fix"), T.persons);
     await refused("mkdir /Branches/x", mine.mkdir("/Branches/x"), T.onlyGitBranch);
@@ -157,6 +169,62 @@ const CASES = {
     check(!!(await w.stat("/Branches/fix/A/p.txt")), "the person changes a branch as any folder");
   },
 
+  async removeOwn(check) {
+    // (#1803: an agent removes a branch it made, its folder to Trash; its records released by the reconcile, its name
+    //  and slot free again; everything else at the root stays the person's)
+    const w = await fresh("rmown");
+    await w.putFile("/A/x.txt", enc("a"));
+    await make(w, "own", "g1");
+    await make(w, "theirs", "g2");
+    const mine = agent(w, "g1");
+    const refusedRm = async (what, p, text) => { const e = await caught(p); check(e?.message === text, `${what}: ${e?.message}`); };
+    const before = await recOf(w, "own");
+    await refusedRm("another connection's branch", mine.remove("/Branches/theirs"), T.otherConnection);
+    check(!!(await w.stat("/Branches/theirs")), "and it stays where it is");
+    const gone = await mine.remove("/Branches/own");
+    check(gone.path.startsWith("/Trash/") && !(await w.stat("/Branches/own")) && !!(await w.stat(gone.path)), `its own ready branch: removed, to Trash (${gone.path})`);
+    check((await recOf(w, "own")) === null && !(await metaRows(w)).some(([k]) => k.includes(before.fid)), "its record, review, runs and hash pages go with the removal itself, in its transaction");
+    // (before the reconcile: the record's root missing, every change there refused as no branch; git_branch reconciles
+    //  first, so the name is free for it)
+    await refusedRm("a write at the removed branch's path before the reconcile", mine.create("/Branches/own/n.txt"), T.onlyGitBranch);
+    const again = await make(w, "own", "g1");
+    const fresh2 = await recOf(w, "own");
+    check(again.branch === "agent/own" && fresh2.fid !== before.fid && fresh2.status === "ready", `git_branch reconciles before reuse: the same name, a fresh fid (${before.fid} -> ${fresh2.fid})`);
+    const keys = (await metaRows(w)).map(([k]) => k);
+    check(!keys.some((k) => k.includes(before.fid)), "the old record, review state, runs and hash pages are gone");
+    // (a restored folder stays plain: removed, reconciled, then the person restores it: no record, so no branch)
+    await make(w, "rs", "g1");
+    const rsGone = await mine.remove("/Branches/rs");
+    await reconcile(w);
+    await refusedRm("its maker restoring a removed branch's folder", mine.restore(rsGone.path, rsGone), T.onlyGitBranch);
+    const back = await w.restore(rsGone.path, rsGone);
+    check(back.path === "/Branches/rs" && (await recOf(w, "rs")) === null, `the person restores it: a folder with no record (${back.path})`);
+    await refusedRm("a restored folder is plain", mine.create("/Branches/rs/n.txt"), T.notYours);
+    await refusedRm("and its maker can't remove it as a branch", mine.remove("/Branches/rs"), T.notYours);
+    // (the root's other operations: still the person's)
+    await refusedRm("its maker renaming its folder", mine.rename("/Branches/own", "/Branches/own2"), T.persons);
+    await refusedRm("its maker moving its folder out", mine.rename("/Branches/own", "/A/own"), T.persons);
+    await refusedRm("removing /Branches", mine.remove("/Branches"), T.persons);
+    // (a folder the person made in /Branches: no branch, not removable by an agent)
+    await w.putFile("/Branches/hand/x.txt", enc("h"));
+    await refusedRm("a plain folder in /Branches", mine.remove("/Branches/hand"), T.notYours);
+    // (a failed branch: its folder removable by its maker, its contents not)
+    let on = true;
+    W.GIT_BRANCH_HOOK.step = (st, i) => { if (st === "copied" && i === 0) on = false; };
+    await caught(make(w, "bad", "g1", { live: () => on }));
+    W.GIT_BRANCH_HOOK.step = undefined;
+    check((await recOf(w, "bad"))?.status === "failed", "(a failed branch)");
+    await refusedRm("inside a failed branch", mine.remove("/Branches/bad/A"), T.unfinished);
+    await refusedRm("another connection's failed branch", agent(w, "g2").remove("/Branches/bad"), T.otherConnection);
+    check((await mine.remove("/Branches/bad")).path.startsWith("/Trash/"), "its maker removes a failed branch's folder");
+    // (a branch still being made: its folder can't be removed; an interruption inside publish leaves it making)
+    W.BRANCH_HOOK.inPublish = () => { throw new Error("interrupted"); };
+    await caught(make(w, "mk", "g1"));
+    W.BRANCH_HOOK.inPublish = undefined;
+    check((await recOf(w, "mk"))?.status === "making", "(a branch being made)");
+    await refusedRm("a branch still being made", mine.remove("/Branches/mk"), T.unfinished);
+  },
+
   async revoked(check) {
     // (row 3: the grant revoked after k of n: no further entry written, failed, charged, never ready)
     const w = await fresh("revoke");
@@ -172,8 +240,12 @@ const CASES = {
     check((await pagesOf(w, rec.fid)).length === 0, "no hash pages");
     const a = agent(w, "g1");
     check((await caught(a.create("/Branches/rv/n.txt")))?.message === T.unfinished, "its maker can't write in it");
-    check((await caught(a.remove("/Branches/rv")))?.message === T.unfinished, "nor remove it");
+    check((await caught(a.remove("/Branches/rv/A")))?.message === T.unfinished, "nor remove anything in it");
     check((await caught(make(w, "rv")))?.message === T.taken("rv"), "its name stays taken");
+    // (#1803: its maker may remove the failed branch's folder; reconciled, the name is free again)
+    check((await a.remove("/Branches/rv")).path.startsWith("/Trash/"), "its maker removes the failed branch's folder");
+    await reconcile(w);
+    check((await recOf(w, "rv")) === null, "and the reconcile releases it");
     // (revoked between capture and the root: refused, nothing made, nothing charged)
     let on2 = true;
     W.GIT_BRANCH_HOOK.step = (s) => { if (s === "captured") on2 = false; };

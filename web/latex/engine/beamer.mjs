@@ -9,7 +9,10 @@ const ASPECTS = { "1610": [160, 100], "169": [160, 90], "149": [140, 90], "141":
 function slideStyle(opt) {
   const m = /aspectratio\s*=\s*(\d+)/.exec(opt || ""), [w, h] = ASPECTS[m && Object.hasOwn(ASPECTS, m[1]) ? m[1] : "43"];
   const pt = /(^|,)\s*(8|9|10|11|12|14|17|20)pt\s*(,|$)/.exec(opt || ""), size = pt ? +pt[2] : 11;
-  return "aspect-ratio:" + w + "/" + h + ";--sfs:" + (size * 0.3528 / w * 100).toFixed(3);
+  // (--spx: one pixel of a plot as a share of the slide's width, in cqw (a plot's SVG is 100 px to the inch, figsize's
+  //  unit): a plot in a slide is as wide, relative to the slide, as in the PDF, in the preview and in Present alike
+  //  (William's L1, Nov 10; style.ts, page.ts))
+  return "aspect-ratio:" + w + "/" + h + ";--sfs:" + (size * 0.3528 / w * 100).toFixed(3) + ";--spx:" + (25.4 / 100 / w * 100).toFixed(4);
 }
 let esc, OV_STEPS_MAX;
 export function install(proto, CMDS, deps) {

@@ -8,7 +8,8 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, BLOCKED } from "./engine/sagetex.mjs";
+import { namesIn } from "./names.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, isNonSage, BLOCKED } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -151,6 +152,7 @@ def _sx_disp(v):
 _sx_bi.__pyjs_host__ = _sx_host
 _sx_bi.__pyjs_display__ = _sx_disp
 _sx_pg = {}
+_sx_mg = {}
 _sx_x = 0
 try:
   for _sx_it in _sx_json.loads(_sx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
@@ -160,10 +162,11 @@ try:
     _sx_sys.stdout = _sx_buf
     try:
       _sx_m = _sx_it["mode"]
+      _sx_mm = _sx_m[:5] == "magma"
       _sx_py = _sx_m[:2] == "py"
       _sx_ev = "eval" if _sx_m in ("sage", "plot", "py") else "cell" if _sx_m == "block" and _sx_cs else "exec"
       _sx_s = _sx_it["code"].strip() if _sx_ev == "eval" else _sx_it["code"]
-      _sx_code = compile(_sx_s, "<pythontex>", _sx_ev) if _sx_py else _sx_cs(_sx_s, "<sagetex>", _sx_ev) if _sx_cs else _sx_pp(_sx_it["code"])
+      _sx_code = __pyjs_compile_magma__("print " + _sx_s.strip() + ";" if _sx_m == "magma" else _sx_s, "<magma>", "exec") if _sx_mm else compile(_sx_s, "<pythontex>", _sx_ev) if _sx_py else _sx_cs(_sx_s, "<sagetex>", _sx_ev) if _sx_cs else _sx_pp(_sx_it["code"])
       if _sx_m == "sage":
         _sx_r = {"s": "ok", "latex": str(latex(eval(_sx_code, _sx_g)))}
       elif _sx_m == "py":
@@ -173,6 +176,9 @@ try:
         if not hasattr(_sx_v, "_repr_svg_"):
           raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sx_v).__name__)
         _sx_r = {"s": "ok", "svg": _sx_v._repr_svg_()}
+      elif _sx_mm:
+        exec(_sx_code, _sx_mg)
+        _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()}
       else:
         _sx_lv = []
         if _sx_ev == "cell":
@@ -186,6 +192,10 @@ try:
         _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()} if _sx_py else {"s": "ok"}
         if _sx_lv and hasattr(_sx_lv[-1], "_repr_svg_"):
           _sx_r["svg"] = _sx_lv[-1]._repr_svg_()
+    except SystemExit as _sx_e:
+      _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()} if _sx_mm and _sx_e.code in (0, None) else {"s": "error", "msg": _sx_buf.getvalue() if _sx_mm else _sx_tb.format_exc()}
+      if _sx_r["s"] == "error":
+        _sx_x = 1
     except Exception:
       _sx_r = {"s": "error", "msg": _sx_tb.format_exc()}
       _sx_x = 1
@@ -247,7 +257,7 @@ export function statesOf(items, got, stopped, interactsOf = null) {
     const g = got[j++];
     if (!g) { states.push({ key, s: "error", msg: "not run: " + (stopped || "the session ended before this item"), ran: false }); continue; }
     if (g.s !== "ok") { states.push({ key, s: "error", msg: msgOf(g.msg) || "error" }); failed = true; continue; }
-    if (it.mode === "sage" || isPy(it)) {
+    if (it.mode === "sage" || isNonSage(it)) {
       const l = String(g.latex ?? "");
       if (utf8len(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; }
       else states.push({ key, s: "ok", latex: l });
@@ -271,6 +281,35 @@ export { wsReader, seenOf, checkedResults } from "./results-check.mjs";
 /** A Run's count for its status line: the items that ran (ok, raised or over a cap), and of those, how many failed;
  * a refused item, one after the session ended and one after a failure (blocked) never ran (board, #985). */
 export const tally = (states) => { const r = states.filter((x) => x.s !== "blocked" && x.ran !== false); return { ran: r.length, failed: r.filter((x) => x.s === "error").length }; };
+/** A Run's states, each item it didn't reach keeping its value from an earlier run (@sagebrush's ruling, Nov 12): one
+ *  after a failed item (blocked), or one the Run never got to (stopped, or the session ended), takes the earlier value
+ *  of the same occurrence of its code (its key: the n-th item with a key takes the n-th earlier result with it), if
+ *  that one was ok or kept already: stale, with why ("failed", "stopped" or "ended": the
+ *  renderer's sagetex.mjs KEPT words it). One with no such value keeps its state. `prev`: the results the page had
+ *  before this Run. A Run that reached every item gets `states` back as is, `prev` not read. */
+export function keepLast(states, items, prev, stopped) {
+  let old = null, seen = null, out = states;
+  const bump = (k) => { const n = seen.get(k) ?? 0; seen.set(k, n + 1); return n; };
+  for (let i = 0; i < states.length; i++) {
+    const st = states[i];
+    const why = st.s === "blocked" ? "failed" : st.ran === false && !items[i]?.err && /^not run: /.test(st.msg) ? (stopped === "the run was stopped" ? "stopped" : "ended") : null;
+    if (!why) { if (seen) bump(st.key); continue; }
+    // (the first item not reached: the earlier results by key, in order, and the occurrences before this one counted)
+    if (!old) {
+      old = new Map(); seen = new Map();
+      for (const x of prev ?? []) if (x && typeof x.key === "string") { if (!old.has(x.key)) old.set(x.key, []); old.get(x.key).push(x); }
+      for (let j = 0; j < i; j++) bump(states[j].key);
+    }
+    const x = old.get(st.key)?.[bump(st.key)];
+    if (!x || (x.s !== "ok" && x.s !== "stale")) continue;
+    // (ran: false: tally doesn't count it as run; the results file keeps the value, stale, with why, but not this mark)
+    const k = { key: st.key, s: "stale", why, ran: false };
+    for (const f of ["latex", "src", "interacts"]) if (x[f] !== undefined) k[f] = x[f];
+    if (out === states) out = states.slice();
+    out[i] = k;
+  }
+  return out;
+}
 /** The results file's text. */
 export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states.map(({ ran, ...x }) => x), ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n";
 /** The modules the session's Run imported from the .tex's folder (its last line's), paths relative to the folder:
@@ -315,33 +354,52 @@ export function sandboxEngine(classes, base) {
 /** Why Run can't run here: a page without the runner (the desktop app; a browser the site doesn't run the runner in). */
 export const NO_SANDBOX = "Run needs the sandbox Sagebrush runs code in, which this browser doesn't have here: open the file in Chrome or Edge on sagebrush.space";
 /** A Sage session, started once on the first call and kept; a start that fails is forgotten (the next call starts
- * again). `eng`: sandboxEngine(classes, base). Resolves to the kernel, ready; rejects with SANDBOX_FAILED. */
-export function sessionOf(eng, startMs = SANDBOX_START_MS) {
-  let start = null;
-  const get = () => (start ??= (async () => {
+ * again). `eng`: sandboxEngine(classes, base). Resolves to the kernel, ready; rejects with SANDBOX_FAILED.
+ * `mount` (a share page's: [path, {url, sha256, size}][], the shared files its code may read): given to each worker
+ * this session starts, after it is told it may change no file. get.dispose() ends the session for good (astra, daybreak3:
+ * dispose wins over a start at every step): a kernel started is stopped, one starting is stopped at once and never
+ * returned, an engine still loading makes none, and every call after it rejects, never returning a kernel. */
+export function sessionOf(eng, startMs = SANDBOX_START_MS, mount = null) {
+  let start = null, starting = null, stopWait = null;
+  const get = () => (get.disposed ? Promise.reject(new Error(SANDBOX_FAILED)) : (start ??= (async () => {
     const mod = await eng.module();
+    // (ended while the engine loaded: nothing made)
+    if (get.disposed) throw new Error(SANDBOX_FAILED);
     // (first, before anything runs: the document's code changes no file (astra's LATEX-RUN-2), the page writing the
     //  results file itself; and a new worker has none of the folder's files yet)
     // (a worker started again (after a stop, say): given the last admitted folder again, so a Run admitted against it
     //  never runs on an empty one)
     const onStart = (w) => {
       w.postMessage({ fsWritable: false });
+      if (mount) w.postMessage({ mount });
       get.sent.clear();
       for (const [p, data] of get.snapshot) { w.postMessage({ fsPut: p, data }); get.sent.add(p); }
     };
     const k = new mod.WorkerKernel({ createWorker: () => eng.worker(mod), onStart });
+    starting = k;
     k.start();
     const ok = await new Promise((res) => {
       if (k.ready) return res(true);
       const offs = [];
-      const done = (v) => { clearTimeout(t); for (const f of offs) f(); res(v); };
+      const done = (v) => { clearTimeout(t); for (const f of offs) f(); stopWait = null; res(v); };
       const t = setTimeout(() => done(false), startMs);
+      // (dispose() settles the wait at once: the kernel ended then, not at the deadline)
+      stopWait = () => done(false);
       offs.push(k.on("ready", () => done(true)), k.on("status", (s) => { if (/^error/.test(String(s))) done(false); }));
     });
-    if (!ok) { try { k.worker?.terminate?.(); } catch {} k.worker = null; throw new Error(SANDBOX_FAILED); }
+    starting = null;
+    if (!ok || get.disposed) { end(k); throw new Error(SANDBOX_FAILED); }
     get.kernel = k;
     return k;
-  })().catch((e) => { start = null; throw e; }));
+  })().catch((e) => { start = null; throw e; })));
+  const end = (k) => { try { k.worker?.terminate?.(); } catch {} k.worker = null; };
+  get.disposed = false;
+  get.dispose = () => {
+    get.disposed = true;
+    for (const k of [get.kernel, starting]) if (k) end(k);
+    get.kernel = null; starting = null;
+    stopWait?.();
+  };
   get.kernel = null;
   // (the folder's paths this session's worker was given, and the last folder admitted: putFolder)
   get.sent = new Set();
@@ -353,10 +411,6 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
   return get;
 }
 
-// (what code names: the modules it imports, by their first name, at a statement's start (a line's, or after ";" or a
-//  one-line suite's ":", daybreak3's #975 ENGINE; a match that isn't one only gives a named file there), and its quoted
-//  strings, each maybe a path)
-const namesIn = (code) => [...code.matchAll(/(?:^|[;:])[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
 /** The files of the .tex's folder (`texPath`'s, recursively) that the document's `codes` name, and those its named .py
  * and .sage files name in turn (William's H2: a folder of many files, the code using none of them, runs): each module
  * imported (m.py, or a package m/ and its .py files) and each quoted string that is the path of a file there; with
@@ -440,45 +494,21 @@ export async function runAndSave(o) {
   if (f?.msg) return { msg: f.msg };
   const k = await o.session();
   if (stale()) return { stale: true };
-  const stopAsked = () => !!o.stop?.aborted;
-  const go = async () => {
-    // (the test build only: the page test can hold a Run here, its turn in the session taken, to queue another behind
-    //  it; elsewhere this folds away)
-    if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await globalThis.__sbTexRunHold?.();
+  // (the .tex still in the folder that was read: moved meanwhile, nothing runs)
+  const ran = await scriptRun(o, k, f ? f.dir : null, f && (async () => {
+    const at = await o.ws.pathOfFile(o.fid);
     if (stale()) return null;
-    // (this Run stopped (its own Stop) while it waited: nothing runs (astra's LATEX-QUEUE-STOP-1))
-    if (stopAsked()) return { stoppedBefore: true };
-    // (the .tex still in the folder that was read: moved meanwhile, nothing runs)
-    if (f) {
-      const at = await o.ws.pathOfFile(o.fid);
-      if (stale()) return null;
-      if (stopAsked()) return { stoppedBefore: true };
-      if (!at.ok || (at.path.slice(0, at.path.lastIndexOf("/")) || "/") !== f.dir) return { moved: true };
-      putFolder(k, f.files, o.store);
-    }
-    // (this Run cancelled (its page gone) or stopped (its Stop) while its script runs: that script interrupted, only
-    //  it: the next Run's hasn't started. Stopped, what ran is still written, as before)
-    const cancel = () => k.interrupt?.();
-    o.signal?.addEventListener("abort", cancel);
-    o.stop?.addEventListener("abort", cancel);
-    // (the interpreter the script ran in: its generation then, or -1 if it was started again while the script ran, its
-    //  interacts gone; a Run's live interacts are that generation's (interact.ts))
-    try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; }
-    finally { o.signal?.removeEventListener("abort", cancel); o.stop?.removeEventListener("abort", cancel); }
-  };
-  const ran = await (o.serial ? o.serial(go) : go());
+    if (o.stop?.aborted) return { stoppedBefore: true };
+    if (!at.ok || (at.path.slice(0, at.path.lastIndexOf("/")) || "/") !== f.dir) return { moved: true };
+    putFolder(k, f.files, o.store);
+  }));
   if (!ran || stale()) return { stale: true };
   if (ran.moved) return { msg: "Not run: the .tex was moved meanwhile; press Run again" };
   // (a distinct mark: runIn's own `stopped` is why a Run that ran ended early, its results still written (astra))
   if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
-  const { out, stopped } = ran;
-  // (an item's @interacts, checked by the interact chunk's interactsOf: fetched only when the session returned one, so a
-  //  document without any never fetches it (daybreak2's SIZE design for the Beamer plan's PR 3); not there, none kept)
-  const got = parseOutput(out);
-  let ia = null;
-  if (o.interacts && got.some((g) => Array.isArray(g.interacts) && g.interacts.length)) { try { ia = (await o.interacts()).interactsOf; } catch {} }
-  if (stale()) return { stale: true };
-  const states = statesOf(o.items, got, stopped, ia);
+  const states = await statesAfter(o, ran);
+  if (!states) return { stale: true };
+  const { out } = ran;
   // (no results printed at all: nothing ran, nothing to record)
   const deps = !f ? [] : parseOutput(out).length ? await depsWith(parseDeps(out), f.files, f.dir) : [];
   if (stale()) return { stale: true };
@@ -503,6 +533,65 @@ export async function runAndSave(o) {
     if (err?.code === "conflict" || err?.code === "exists") return changed;
     throw err;
   }
-  // (the interacts this Run made, by id: live in the page while its session lasts (interact.ts live))
-  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0, interactIds: Object.assign(new Set(states.flatMap((x) => (x.interacts ?? []).map((i) => i.id))), { gen: ran.gen }) };
+  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0, interactIds: idsOf(states, ran) };
+}
+// (the interacts a Run made, by id: live in the page while its session lasts (interact.ts live))
+const idsOf = (states, ran) => Object.assign(new Set(states.flatMap((x) => (x.interacts ?? []).map((i) => i.id))), { gen: ran.gen });
+/** A Run whose results stay in the page (a shared talk's, on the share page): runAndSave's run, with no folder read,
+ * no workspace and nothing written. -> { ok: true, states, ms, interactIds } | { stale: true } | { msg }. `o`: items,
+ * session, exec, current, signal, stop?, serial?, max, now, prev? (the results shown before it), dir? (the code's
+ * working folder: the .tex's, where the session mounted the shared files), interacts? */
+export async function runInMemory(o) {
+  const stale = () => !o.current() || !!o.signal?.aborted;
+  const t0 = o.now();
+  const k = await o.session();
+  if (stale()) return { stale: true };
+  const ran = await scriptRun(o, k, o.dir ?? null, null);
+  if (!ran || stale()) return { stale: true };
+  if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
+  const states = await statesAfter(o, ran);
+  if (!states) return { stale: true };
+  return { ok: true, states, ms: o.now() - t0, interactIds: idsOf(states, ran) };
+}
+/** A Run's script, in its turn in the session: nothing if the Run went stale or was stopped while it waited; `before`
+ * (runAndSave's: the .tex still where its folder was read, the folder put in) may end it first. -> the script's
+ * {out, stopped, gen} | {stoppedBefore} | {moved} | null (stale). */
+function scriptRun(o, k, dir, before) {
+  const stale = () => !o.current() || !!o.signal?.aborted;
+  const go = async () => {
+    // (the test build only: the page test can hold a Run here, its turn in the session taken, to queue another behind
+    //  it; elsewhere this folds away)
+    if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await globalThis.__sbTexRunHold?.();
+    if (stale()) return null;
+    // (this Run stopped (its own Stop) while it waited: nothing runs (astra's LATEX-QUEUE-STOP-1))
+    if (o.stop?.aborted) return { stoppedBefore: true };
+    if (before) {
+      const b = await before();
+      if (b !== undefined) return b;
+      // (admitted again after that wait, just before the script runs: a Run replaced or stopped meanwhile runs nothing (astra))
+      if (stale()) return null;
+      if (o.stop?.aborted) return { stoppedBefore: true };
+    }
+    // (this Run cancelled (its page gone) or stopped (its Stop) while its script runs: that script interrupted, only
+    //  it: the next Run's hasn't started. Stopped, what ran is still written, as before)
+    const cancel = () => k.interrupt?.();
+    o.signal?.addEventListener("abort", cancel);
+    o.stop?.addEventListener("abort", cancel);
+    // (the interpreter the script ran in: its generation then, or -1 if it was started again while the script ran, its
+    //  interacts gone; a Run's live interacts are that generation's (interact.ts))
+    try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), dir), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; }
+    finally { o.signal?.removeEventListener("abort", cancel); o.stop?.removeEventListener("abort", cancel); }
+  };
+  return o.serial ? o.serial(go) : go();
+}
+/** A Run's states from what its script printed, an item it didn't reach keeping its value (keepLast); null if the Run
+ * went stale meanwhile. An item's @interacts are checked by the interact chunk's interactsOf: fetched only when the
+ * session returned one, so a document without any never fetches it (daybreak2's SIZE design for the Beamer plan's
+ * PR 3); not there, none kept. */
+async function statesAfter(o, ran) {
+  const got = parseOutput(ran.out);
+  let ia = null;
+  if (o.interacts && got.some((g) => Array.isArray(g.interacts) && g.interacts.length)) { try { ia = (await o.interacts()).interactsOf; } catch {} }
+  if (!o.current() || o.signal?.aborted) return null;
+  return keepLast(statesOf(o.items, got, ran.stopped, ia), o.items, o.prev, ran.stopped);
 }

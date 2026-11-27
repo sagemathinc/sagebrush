@@ -1,7 +1,9 @@
 // ci: web-runner order=505 chrome
 // The code page (1a, web/code/page.ts): a .py, .sage, .m, .mag, .js, .json or .txt file at /?code=<fid>, in headless
 // Chromium against the built site:
-//  - Files opens a code file there (the notebook page and the board page), not in the data-file preview;
+//  - Files opens a code file there (the notebook page and the board page), not in the data-file preview; from there, a
+//    notebook clicked in Files opens its own page, and the page's ✕ goes back to the notebook page (asking first when an
+//    edit couldn't be saved);
 //  - View: highlighted (the notebook's colors), line numbers, read-only; a file's text is only ever text (no element,
 //    no script, from what it holds);
 //  - ✎ Edit: saved as you type, over the revision read (the bytes, and a version of the old ones), Edit remembered;
@@ -26,13 +28,22 @@ let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = []; const dialogs = [];
+let n = 0; const waiting = new Map(); const errors = []; const dialogs = []; const wsWarnings = [];
+// (the top frame's navigations, by URL: a page that rewrites its own address once loaded is checked on the way in)
+const navs = [];
 let promptText = "";
+// (whether the page's confirm()/prompt() is accepted: the Close-with-unsaved-edits case says no)
+let dialogAccept = true;
+// (answers for the next dialogs, in order, before dialogAccept: a Trash question then a leave question)
+const dialogAnswers = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  // (the page's own warnings about its workspace, shown when a page didn't open: why the workspace couldn't be opened)
+  if (m.method === "Runtime.consoleAPICalled" && m.params.type === "warning" && /^workspace/.test(m.params.args?.[0]?.value ?? "")) wsWarnings.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 600));
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params); send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText } : {}) }); }
+  if (m.method === "Page.frameNavigated" && !m.params.frame.parentId) navs.push(m.params.frame.url);
+  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params); send("Page.handleJavaScriptDialog", { accept: dialogAnswers.length ? dialogAnswers.shift() : dialogAccept, ...(m.params.type === "prompt" ? { promptText } : {}) }); }
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
@@ -48,12 +59,23 @@ const text = (p) => `${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder
 const PY = `def square(x):\n    return x ** 2  # a comment\n\ns = "</script><img src=x onerror=\\"window.__pwned=1\\">"\nprint(square(3), s)\n`;
 const EVIL = `<img src=x onerror="window.__pwned=2"><b>bold</b>\n`;
 const page = (p) => `${W}.stat(${JSON.stringify(p)}).then((e) => e.fid)`;
-const openCode = async (p) => { const fid = await ev(page(p)); await go(base + "?code=" + fid); return until(`!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000); };
+// (not opened: what the page showed instead, in the run's log, so a red here says where it stopped)
+// (`tooLarge`: a file over the page's limit, which opens as its note, saying so, and sets no path: opened when the note
+// shows, never waited for to the end)
+const TOO_LARGE = `/too large to open here/.test(document.querySelector(".code-page .code-note")?.textContent ?? "")`;
+const openCode = async (p, { tooLarge = false } = {}) => {
+  await until(`!!${W}`, 30000);
+  const fid = await ev(page(p)); await go(base + "?code=" + fid);
+  const opened = await until(tooLarge ? TOO_LARGE : `!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000);
+  if (!opened) console.log(`(${p} didn't open; the workspace's warnings: ${JSON.stringify(wsWarnings.slice(-3))}: ` + JSON.stringify(await ev(`({ at: location.search, code: !!${C}, path: ${C}?.path ?? null, ready: document.readyState, old: !!window.__old, body: document.body?.innerText.slice(0, 200) ?? null })`).catch((e) => String(e).slice(0, 200))) + ")");
+  return opened;
+};
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await go(base);
-  await until(`!!${W} && !!window.sagebrush?.notebook`, 60000);
+  // (the workspace not there: what the page showed instead, in the run's log, and stop here, not at its first use)
+  if (!(await until(`!!${W} && !!window.sagebrush?.notebook`, 60000))) throw new Error("the notebook page's workspace never came; its warnings: " + JSON.stringify(wsWarnings.slice(-3)) + ": " + JSON.stringify(await ev(`({ at: location.href, ready: document.readyState, sb: Object.keys(window.sagebrush ?? {}), body: document.body?.innerText.slice(0, 300) ?? null })`).catch((e) => String(e).slice(0, 300))));
   await ev(`(async () => {
     const w = ${W};
     await w.create("/demo.py", { content: ${JSON.stringify(PY)} });
@@ -85,6 +107,220 @@ try {
   await ev(`(() => { document.querySelector('#wssidebar .frow[data-path="/demo.py"]').click(); return 1; })()`);
   check(await until(`/[?&]code=[\\w-]+/.test(location.search) && !!${C} && ${C}.path === "/demo.py"`, 30000), "Files: a .py file opens its own page (/?code=<fid>), not the preview");
   check(!(await ev(`!!document.querySelector(".sbfprev")`)), "…no data-file preview over it");
+  // (its bar, for a save it couldn't make, hidden until then: no empty strip of it under the toolbar)
+  const barShown = await ev(`(() => { const b = document.querySelector(".code-page .code-bar"); return b ? { hidden: b.hidden, height: b.offsetHeight } : null; })()`);
+  check(barShown && barShown.hidden && barShown.height === 0, "…its bar for an unsaved edit not shown while there is none (no empty yellow strip under the toolbar): " + JSON.stringify(barShown));
+
+  // leaving the code page: a notebook clicked in Files opens on its own page, never loaded hidden under the code
+  // page; and its ✕ goes back to the notebook page
+  await ev(`(() => { if (document.querySelector("#wssidebar")?.hidden !== false) document.querySelector("#wsfilesbtn").click(); return 1; })()`);
+  await until(`[...document.querySelectorAll("#wssidebar .frow")].some((r) => /\\.ipynb$/.test(r.dataset.path ?? ""))`, 20000);
+  await ev("(window.__old = 1, 1)");
+  const nbPath = await ev(`(() => { const r = [...document.querySelectorAll("#wssidebar .frow")].find((x) => /\\.ipynb$/.test(x.dataset.path ?? "")); r.click(); return r.dataset.path; })()`);
+  // (the notebook page, loaded anew (a navigation, not the notebook loaded hidden underneath), showing that notebook;
+  // it tidies its own address after loading)
+  const nbName = nbPath.replace(/^.*\//, "").replace(/\.ipynb$/, "");
+  check(await until(`!window.__old && !/[?&]code=/.test(location.search) && !document.querySelector(".code-page") && document.querySelector("#nbname")?.value === ${JSON.stringify(nbName)}`, 30000), `Files from the code page: a notebook (${nbPath}) opens on its own page, not hidden under the code page`);
+  check(await openCode("/notes.txt"), "(a .txt file's page again)");
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  check(await until(`!window.__old && !/[?&]code=/.test(location.search) && !document.querySelector(".code-page") && !!window.sagebrush?.notebook && document.querySelectorAll("#cells .cell").length > 0`, 30000), "the code page's ✕: back to the notebook page");
+  // a save that fails (a write error, not a conflict: saving isn't stopped): the ✕ asks first, and stays when told no,
+  // the edit still on the page
+  check(await openCode("/notes.txt"), "(a .txt file's page, for a save that fails)");
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "unsaved " });
+  dialogAccept = false;
+  const asked0 = dialogs.length;
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  await sleep(2000);
+  const stayed = await ev(`({ here: !!window.__old && /[?&]code=/.test(location.search) && !!document.querySelector(".code-page"), text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
+  check(dialogs.length === asked0 + 1 && dialogs.at(-1).type === "confirm" && stayed.here && stayed.text.startsWith("unsaved "), "a save that fails: the ✕ asks before dropping the edit, and stays when told no, the edit still here: " + JSON.stringify({ asked: dialogs.length - asked0, stayed }));
+  dialogAccept = true;
+  // (the write works again: the ✕ saves, then leaves, the edit in the file)
+  await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`);
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  check(await until(`!window.__old && !/[?&]code=/.test(location.search) && !!window.sagebrush?.notebook`, 30000) && (await until(`!!${W}`, 20000), await ev(text("/notes.txt"))).startsWith("unsaved "), "…then, the write working again: the ✕ saves the edit and leaves");
+
+  // a notebook opened from Files while a save is still being written: the page waits for it, then goes; the edit kept
+  const filesOpen = `(() => { if (document.querySelector("#wssidebar")?.hidden !== false) document.querySelector("#wsfilesbtn").click(); return 1; })()`;
+  const clickNb = `(() => { const r = [...document.querySelectorAll("#wssidebar .frow")].find((x) => /\\.ipynb$/.test(x.dataset.path ?? "")); r.click(); return r.dataset.path; })()`;
+  check(await openCode("/notes.txt"), "(a .txt file's page, for a save held while a notebook is opened)");
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => new Promise((r) => { window.__releaseWrite = r; }), 1)`);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "held " });
+  await ev(filesOpen);
+  await until(`[...document.querySelectorAll("#wssidebar .frow")].some((r) => /\\.ipynb$/.test(r.dataset.path ?? ""))`, 20000);
+  await ev("(window.__old = 1, 1)");
+  await ev(clickNb);
+  await sleep(1000);
+  const waited = await ev(`!!window.__old && /[?&]code=/.test(location.search)`).catch(() => false);
+  await ev(`(window.__releaseWrite?.(), delete globalThis.__sbCodeBeforeWrite, 1)`).catch(() => {});
+  const went = await until(`!window.__old && !/[?&]code=/.test(location.search) && !!window.sagebrush?.notebook`, 30000);
+  check(waited && went && (await until(`!!${W}`, 20000), await ev(text("/notes.txt"))).startsWith("held "), "a notebook from Files while a save is being written: the page waits for the save, then goes, the edit in the file: " + JSON.stringify({ waited, went }));
+
+  // a notebook opened from Files when the edit can't be saved: asked first; told no, the page stays with the edit
+  check(await openCode("/notes.txt"), "(a .txt file's page, for a save that fails before a notebook is opened)");
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "kept " });
+  await ev(filesOpen);
+  await until(`[...document.querySelectorAll("#wssidebar .frow")].some((r) => /\\.ipynb$/.test(r.dataset.path ?? ""))`, 20000);
+  dialogAccept = false;
+  const asked1 = dialogs.length;
+  await ev("(window.__old = 1, 1)");
+  await ev(clickNb);
+  await sleep(2000);
+  const stayed2 = await ev(`({ here: !!window.__old && /[?&]code=/.test(location.search), text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
+  check(dialogs.length === asked1 + 1 && dialogs.at(-1).type === "confirm" && stayed2.here && stayed2.text.startsWith("kept "), "a notebook from Files when the edit can't be saved: asked first, and told no, the page stays with the edit: " + JSON.stringify({ asked: dialogs.length - asked1, stayed2 }));
+  // (the same for the Sagebrush link and the File menu's New board: asked first, and told no, the page stays)
+  for (const [what, go] of [["the Sagebrush link", `document.querySelector(".code-page .code-home").click()`], ["File > New board", `document.querySelector('.code-page [data-f="c-newboard"]').click()`]]) {
+    const asked2 = dialogs.length;
+    await ev(`(${go}, 1)`);
+    await sleep(2000);
+    const stayed3 = await ev(`({ here: !!window.__old && /[?&]code=/.test(location.search), text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
+    check(dialogs.length === asked2 + 1 && dialogs.at(-1).type === "confirm" && stayed3.here && stayed3.text.startsWith("kept "), `${what} when the edit can't be saved: asked first, and told no, the page stays with the edit: ` + JSON.stringify({ asked: dialogs.length - asked2, stayed3 }));
+  }
+  dialogAccept = true;
+  await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`);
+  // a reload at once after typing, inside the save delay
+  check(await openCode("/notes.txt"), "(a .txt file's page, for a reload at once after typing)");
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "reload " });
+  const asked3 = dialogs.length;
+  dialogAccept = false;
+  await ev("(window.__old = 1, 1)");
+  await send("Page.reload", {});
+  await sleep(1500);
+  const stayed4 = await ev(`!!window.__old && /[?&]code=/.test(location.search)`).catch(() => false);
+  const landed = await until(`${W}.read("/notes.txt").then((r) => new TextDecoder().decode(r.content).startsWith("reload "))`, 15000);
+  const asked4 = dialogs.slice(asked3).map((d) => d.type);
+  dialogAccept = true;
+  const reopened = await openCode("/notes.txt");
+  const afterReload = await ev(`document.querySelector(".code-page")?.innerText ?? ""`).catch(() => "");
+  check(asked4.length === 1 && asked4[0] === "beforeunload" && stayed4 && landed && reopened && afterReload.includes("reload "), "a reload at once after typing: the browser asks; staying, the edit is saved, and the page opened again shows it: " + JSON.stringify({ asked4, stayed4, landed, reopened, afterReload: afterReload.slice(0, 80) }));
+  // (the page's own way out, having asked already, isn't asked again by the browser)
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "dropped " });
+  const asked5 = dialogs.length;
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  const went5 = await until(`!window.__old && !/[?&]code=/.test(location.search) && !!window.sagebrush?.notebook`, 30000);
+  const asked5t = dialogs.slice(asked5).map((d) => d.type);
+  check(went5 && asked5t.length === 1 && asked5t[0] === "confirm", "the ✕ with an edit that can't be saved, told yes: asked once, by the page, not again by the browser: " + JSON.stringify({ went5, asked5t }));
+
+  // another code file from Files, while a save is being written: the page waits for the save, then opens it, the edit kept
+  await until(`!!${W}`, 30000);
+  await ev(`(async () => { for (const p of ["/leave2.txt", "/leave3.txt"]) await ${W}.create(p, { content: "base\\n" }); return 1; })()`);
+  const editAt = async (p, t) => {
+    check(await openCode(p), `(${p}'s page)`);
+    await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+    await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+    await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+    await send("Input.insertText", { text: t });
+  };
+  const openFilesRow = async (p) => {
+    await ev(filesOpen);
+    await until(`[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${JSON.stringify(p)})`, 20000);
+    await ev(`([...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${JSON.stringify(p)}).click(), 1)`);
+  };
+  await editAt("/leave2.txt", "");
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => new Promise((r) => { window.__releaseWrite = r; }), 1)`);
+  await send("Input.insertText", { text: "held2 " });
+  await ev("(window.__old = 1, 1)");
+  await openFilesRow("/demo.py");
+  await sleep(1000);
+  const waited6 = await ev(`!!window.__old && ${C}?.path === "/leave2.txt"`).catch(() => false);
+  await ev(`(window.__releaseWrite?.(), delete globalThis.__sbCodeBeforeWrite, 1)`).catch(() => {});
+  const went6 = await until(`!window.__old && ${C}?.path === "/demo.py"`, 30000);
+  check(waited6 && went6 && (await until(`!!${W}`, 20000), await ev(text("/leave2.txt"))).startsWith("held2 "), "another code file from Files while a save is being written: the page waits for the save, then opens it, the edit in the file: " + JSON.stringify({ waited6, went6 }));
+
+  // Move to Trash with an edit that can't be saved: Trash, yes; drop the edit, no: the file and the page as they were
+  await editAt("/leave2.txt", "");
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await send("Input.insertText", { text: "trash " });
+  const asked7 = dialogs.length;
+  dialogAnswers.push(true, false);
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector('.code-page [data-f="c-delete"]').click(), 1)`);
+  await sleep(2000);
+  dialogAnswers.length = 0;
+  const here7 = await ev(`({ here: !!window.__old && ${C}?.path === "/leave2.txt", text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
+  const still7 = await ev(`${W}.stat("/leave2.txt").then((e) => !!e?.fid, () => false)`).catch(() => false);
+  check(dialogs.length === asked7 + 2 && here7.here && here7.text.startsWith("trash ") && still7, "Move to Trash with an edit that can't be saved, told no to dropping it: the file not moved, the page and the edit still here: " + JSON.stringify({ asked: dialogs.length - asked7, here7, still7 }));
+  await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`);
+
+  // told yes, but the way out then fails (the file already gone, so Trash can't take it): a reload still asks
+  await editAt("/leave3.txt", "");
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await send("Input.insertText", { text: "late " });
+  await ev(`${W}.remove("/leave3.txt").then(() => 1)`);
+  await until(`${C}.stopped()`, 10000);
+  dialogAccept = true;
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector('.code-page [data-f="c-delete"]').click(), 1)`);
+  const failed8 = await until(`/Not moved to Trash/.test(document.querySelector(".code-page")?.textContent ?? "")`, 10000);
+  const asked8 = dialogs.length;
+  dialogAccept = false;
+  await send("Page.reload", {});
+  await sleep(1500);
+  const asked8t = dialogs.slice(asked8).map((d) => d.type);
+  const here8 = await ev(`!!window.__old && ${C}?.path === "/leave3.txt"`).catch(() => false);
+  dialogAccept = true;
+  await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`).catch(() => {});
+  check(failed8 && here8 && asked8t.length === 1 && asked8t[0] === "beforeunload", "told yes, but the way out failed (Trash couldn't take the file): a reload still asks: " + JSON.stringify({ failed8, here8, asked8t }));
+
+  // decided to leave, with a step still to take (a notebook made, the file moved to Trash): typing is refused until
+  // the navigation, so nothing typed is dropped; when the step fails, typing works again
+  const ro = `document.querySelector(".code-page .code-edit textarea")?.readOnly`;
+  await editAt("/leave2.txt", "ok ");
+  await ev(`${C}.flush().then(() => 1)`);
+  await ev(`(globalThis.__sbCodeBeforeLeaveStep = () => new Promise((r) => { window.__releaseStep = r; }), 1)`);
+  const v9 = await ev(`document.querySelector(".code-page .code-edit textarea").value`);
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector('.code-page [data-f="c-new"]').click(), 1)`);
+  const held9 = await until(`${ro} === true && !!window.__releaseStep`, 10000);
+  await ev(`document.querySelector(".code-page .code-edit textarea").focus()`);
+  await send("Input.insertText", { text: "lost " });
+  await sleep(300);
+  const kept9 = await ev(`document.querySelector(".code-page .code-edit textarea").value`) === v9;
+  await ev(`(window.__releaseStep(), delete window.__releaseStep, delete globalThis.__sbCodeBeforeLeaveStep, 1)`);
+  const went9 = await until(`!window.__old && /[?&]nb=|^$/.test(location.search) && !!window.sagebrush?.notebook`, 30000);
+  const file9 = (await until(`!!${W}`, 20000), await ev(text("/leave2.txt")));
+  check(held9 && kept9 && went9 && file9.startsWith("ok ") && !file9.includes("lost "), "File > New notebook, the notebook still being made: typing is refused, and the page then goes, the file as it was saved: " + JSON.stringify({ held9, kept9, went9, file9: file9.slice(0, 30) }));
+
+  await editAt("/leave2.txt", "");
+  await ev(`(globalThis.__sbCodeBeforeLeaveStep = () => new Promise((r, j) => { window.__failStep = j; }), 1)`);
+  const v10 = await ev(`document.querySelector(".code-page .code-edit textarea").value`);
+  dialogAccept = true;
+  await ev(`(document.querySelector('.code-page [data-f="c-delete"]').click(), 1)`);
+  const held10 = await until(`${ro} === true && !!window.__failStep`, 10000);
+  await ev(`document.querySelector(".code-page .code-edit textarea").focus()`);
+  await send("Input.insertText", { text: "lost " });
+  await sleep(300);
+  const kept10 = await ev(`document.querySelector(".code-page .code-edit textarea").value`) === v10;
+  await ev(`(window.__failStep(new Error("injected Trash failure")), delete window.__failStep, delete globalThis.__sbCodeBeforeLeaveStep, 1)`);
+  const back10 = await until(`${ro} === false && /Not moved to Trash/.test(document.querySelector(".code-page")?.textContent ?? "")`, 10000);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "after " });
+  await ev(`${C}.flush().then(() => 1)`);
+  const file10 = await ev(text("/leave2.txt"));
+  check(held10 && kept10 && back10 && file10.startsWith("after ") && !file10.includes("lost "), "Move to Trash, the file still being moved: typing is refused; the move failing, typing works again and is saved: " + JSON.stringify({ held10, kept10, back10, file10: file10.slice(0, 30) }));
+  check(await openCode("/demo.py"), "(the .py file's page again, for what follows)");
 
   // View: highlighted, line numbers, read-only, the text only ever text
   check(await until(`${C}.mode() === "view" && !!document.querySelector(".code-page .code-src")`), "View: the file opens in View (William's Nov 4 rule)");
@@ -96,7 +332,7 @@ try {
   check(await ev(`document.querySelector(".code-page .code-lang").textContent === "Python" && document.title.startsWith("demo.py")`), "…its language and name shown");
 
   // the File menu: the one menu, Share… disabled saying why, Download ▸ the file
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); return 1; })()`);
   check(await ev(`(() => { const m = document.querySelector(".code-page .code-filemenu"); const s = m.querySelector("[data-item=share]"); return !m.hidden && !!m.querySelector("[data-item=examples]") && !!m.querySelector("[data-item=open]") && s.disabled && /shared with its notebook or folder/.test(s.title); })()`), "File ▾: the one File menu (Examples…, Open…); Share… disabled, saying why");
   check(await ev(`[...document.querySelectorAll(".code-page .code-filemenu [data-group=download] + .fmgroup button")].map((b) => b.textContent).join() === "demo.py"`), "…Download ▸ the file itself");
   await ev(`(() => { document.body.click(); return 1; })()`);
@@ -150,8 +386,133 @@ try {
   await sleep(1500);
   check(await ev(`${text("/demo.py")}`) === "theirs\n", "…their change is never written over");
   check(await ev(`[...document.querySelectorAll(".code-page .code-bar button")].map((b) => b.textContent).join("|") === "Reload (theirs)|Save mine as a copy"`), "…offering Reload (theirs) or Save mine as a copy");
+  // (no question on the way: the copy holds the edits; a "no" to one would strand the person on the stopped original)
+  dialogAccept = false;
+  const askedCopy = dialogs.length;
   await ev(`(() => { [...document.querySelectorAll(".code-page .code-bar button")].find((b) => b.textContent === "Save mine as a copy").click(); return 1; })()`);
   check(await until(`${text("/demo (copy).py")}.then((s) => s === "mine\\n").catch(() => false)`, 10000), "…Save mine as a copy: a new file beside it, with the text from here");
+  // (and it opens the copy here: waited for, so the page's own navigation is over before the test navigates again)
+  check(await until(`${C}?.path === "/demo (copy).py"`, 15000) && dialogs.length === askedCopy, "…and opens the copy here, asking nothing: " + JSON.stringify(dialogs.slice(askedCopy).map((d) => d.message)));
+  dialogAccept = true;
+
+  // (the desktop app's disk not yet written: a stand-in for its mirror, whose drain doesn't finish (it gives up after
+  //  300 ms, so the second click comes while the first waits; its drains counted). ✕, clicked twice, is one way out,
+  //  one drain, and leaves nothing: the page stays, says so, and typing comes back; once written, ✕ leaves. And the notebook
+  //  page opening a code file stays too: every way to the code page and out of it through index.html's leaveTo)
+  const STAND_IN = `({ pending: 1, failing: null, drain: () => (window.__drains = (window.__drains ?? 0) + 1, new Promise((r) => setTimeout(() => r(false), 300))), persist: async () => {} })`;
+  const DISK_SAID = `/Not saved yet/.test(document.getElementById("sb-disk-banner")?.textContent ?? "")`;
+  check(await openCode("/demo.py"), "(the page again, its disk not yet written)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`);
+  await ev(`(window.__leaves = [], window.__sbTestDiskMirror(${STAND_IN}, (x) => window.__leaves.push(x)), 1)`);
+  const stayAt = await ev("location.search");
+  await ev(`(() => { window.__drains = 0; const x = document.querySelector(".code-page .code-close"); x.click(); x.click(); return 1; })()`);
+  const diskSaid = await until(DISK_SAID, 15000);
+  await sleep(500);
+  const diskStayed = await ev(`({ drains: window.__drains, notebook: window.__leaves.map((x) => x.notebook), at: location.search, code: !!${C}, readOnly: document.querySelector(".code-page .code-edit textarea")?.readOnly ?? null })`);
+  check(diskSaid && diskStayed.drains === 1 && JSON.stringify(diskStayed.notebook) === "[false]" && diskStayed.at === stayAt && diskStayed.code && diskStayed.readOnly === false, "✕ twice, the desktop app's disk not yet written: one drain (no notebook to save), the page stays, says so, and typing comes back: " + JSON.stringify(diskStayed));
+  // (a .tex opened from Files on this page (the LaTeX boot's __sbTex, which leaves through __sbLeaveTo): through the code
+  //  page's own way out too (no notebook to save), never index.html's leaveTo directly, #1798)
+  await ev("(window.__leaves = [], window.__drains = 0, 1)");
+  await ev(`(window.__sbLeaveTo(location.origin + "/?tex=probe"), 1)`);
+  // (its one drain and its one leave seen, then a moment for a second, which mustn't come)
+  await until("window.__drains >= 1 && window.__leaves.length >= 1", 15000);
+  await sleep(300);
+  const texLeave = await ev(`({ drains: window.__drains, notebook: window.__leaves.map((x) => x.notebook), at: location.search, code: !!${C} })`);
+  check(texLeave.drains === 1 && JSON.stringify(texLeave.notebook) === "[false]" && texLeave.at === stayAt && texLeave.code, "a .tex opened from Files (__sbLeaveTo) leaves through the code page's own way out: one drain, no notebook to save, and the page stays: " + JSON.stringify(texLeave));
+  await ev(`(window.__sbTestDiskMirror(null), 1)`);
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  check(await until(`location.search !== ${JSON.stringify(stayAt)} && !${C}`, 15000), "…written: ✕ leaves");
+  await until(`!!${W}`, 30000);
+  const demoFid = await ev(page("/demo.py"));
+  await ev(`(window.__leaves = [], window.__sbTestDiskMirror(${STAND_IN}, (x) => window.__leaves.push(x)), 1)`);
+  const nbAt = await ev("location.search");
+  await ev(`(window.__sbCode({ kind: "file", path: "/demo.py", fid: ${JSON.stringify(demoFid)} }), 1)`);
+  const nbSaid = await until(DISK_SAID, 15000);
+  await sleep(500);
+  const nbLeaves = await ev("window.__leaves.map((x) => x.notebook)");
+  check(nbSaid && JSON.stringify(nbLeaves) === "[true]" && (await ev("location.search")) === nbAt && !(await ev(`!!${C}`)), "the notebook page opening a code file (its notebook saved first), the disk not yet written: it stays, and says so: " + JSON.stringify(nbLeaves));
+
+  // (File > Save a copy while the copy is being made (its create held): the text can't be typed into, as what's typed
+  //  then would be in neither file; and a copy that fails gives the text back to typing, on the same page)
+  check(await openCode("/demo.py"), "(the page again, for a held copy)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "to copy\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  await ev(`(() => { const held = new Promise((r) => (window.__releaseCopy = r)); window.__sbCodeBeforeCopyCreate = async () => { window.__copyStarted = true; await held; delete window.__sbCodeBeforeCopyCreate; }; return 1; })()`);
+  await ev(`(document.querySelector('.code-page [data-f="c-copy"]').click(), 1)`);
+  check(await until(`window.__copyStarted === true`, 10000), "(the copy's create, held)");
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`);
+  await send("Input.insertText", { text: "late edit" });
+  check(await ev(`document.querySelector(".code-page .code-edit textarea").value === "to copy\\n"`), "File > Save a copy: while the copy is made, typing doesn't go in (it would be in neither file)");
+  await ev(`(window.__releaseCopy(), 1)`);
+  check(await until(`/^\\/demo \\(copy\\)( \\(\\d+\\))?\\.py$/.test(${C}?.path ?? "")`, 15000), "…then the copy opens: " + (await ev(`${C}?.path`)));
+  check(await openCode("/demo.py"), "(the page again, for a copy that fails)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`(() => { window.__sbCodeBeforeCopyCreate = async () => { delete window.__sbCodeBeforeCopyCreate; throw new Error("disk full"); }; return 1; })()`);
+  await ev(`(document.querySelector('.code-page [data-f="c-copy"]').click(), 1)`);
+  check(await until(`/Not copied/.test(document.querySelector(".code-page").textContent) && !document.querySelector(".code-page .code-edit textarea").readOnly`, 10000) && (await ev(`${C}?.path`)) === "/demo.py", "…a copy that fails: said, the text can be typed into again, the page stays");
+
+  // (the bar's Save mine as a copy, saving stopped by a change made elsewhere: a copy that fails gives the text back to
+  //  typing, on the same page; one held while it's made takes no typing, then opens with the text as it was taken)
+  await ev(`${W}.create("/race.py", { content: new TextEncoder().encode("base\\n") }).then(() => 1)`);
+  check(await openCode("/race.py"), "(a file to stop saving on)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "mine\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  await ev(`${W}.write("/race.py", "theirs\\n").then(() => ${C}.flush()).then(() => 1)`);
+  check(await until(`${C}.stopped()`, 10000), "(saving stopped)");
+  const barCopy = `(() => { [...document.querySelectorAll(".code-page .code-bar button")].find((b) => b.textContent === "Save mine as a copy").click(); return 1; })()`;
+  await ev(`(() => { window.__sbCodeBeforeCopyCreate = async () => { delete window.__sbCodeBeforeCopyCreate; throw new Error("disk full"); }; return 1; })()`);
+  await ev(barCopy);
+  check(await until(`/Not copied/.test(document.querySelector(".code-page").textContent) && !document.querySelector(".code-page .code-edit textarea").readOnly`, 10000) && (await ev(`${C}?.path`)) === "/race.py" && (await ev(`document.querySelector(".code-page .code-edit textarea").value`)) === "mine\n", "the bar's Save mine as a copy that fails: said, the text kept and typeable, the page stays");
+  dialogAccept = false;
+  const askedBar = dialogs.length;
+  await ev(`(() => { const held = new Promise((r) => (window.__releaseCopy = r)); window.__copyStarted = false; window.__sbCodeBeforeCopyCreate = async () => { window.__copyStarted = true; await held; delete window.__sbCodeBeforeCopyCreate; }; return 1; })()`);
+  await ev(barCopy);
+  check(await until(`window.__copyStarted === true`, 10000), "(the bar's copy, held)");
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.focus(); t.setSelectionRange(0, 0); return 1; })()`);
+  await send("Input.insertText", { text: "later " });
+  check(await ev(`document.querySelector(".code-page .code-edit textarea").value === "mine\\n"`), "the bar's Save mine as a copy, while the copy is made: typing doesn't go in");
+  await ev(`(window.__releaseCopy(), 1)`);
+  check(await until(`/^\\/race \\(copy\\)( \\(\\d+\\))?\\.py$/.test(${C}?.path ?? "")`, 15000) && dialogs.length === askedBar, "…then the copy opens, asking nothing");
+  check(await ev(`${text("/race (copy).py")}`) === "mine\n" && (await ev(`${text("/race.py")}`)) === "theirs\n", "…with the text as it was taken; theirs never written over");
+  dialogAccept = true;
+
+  // (Ctrl+Alt+N on the code page: its own New notebook, by its way out (the edit saved first), never the hidden
+  //  notebook page's underneath)
+  check(await openCode("/demo.py"), "(the page again, for Ctrl+Alt+N)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "before new\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  const navsBefore = navs.length;
+  await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", ctrlKey: true, altKey: true, bubbles: true })), 1)`);
+  // (the notebook page takes ?nb= out of its address once it has opened that notebook, so the address is read on the
+  //  navigation itself, never polled for (a poll that came after the page loaded missed it: the merge queue's red);
+  //  then what stays: the notebook page up, the code page gone, given a page load's time)
+  const newNb = await until(`!document.querySelector(".code-page") && !!window.sagebrush?.notebook`, 30000) && navs.slice(navsBefore).some((u) => /[?&]nb=/.test(new URL(u).search));
+  // (a CI flake, 3 times in a day, not seen here: where the page stood, so the next one says which step didn't happen)
+  if (!newNb) console.log("(Ctrl+Alt+N didn't leave: " + JSON.stringify(await ev(`({ at: location.search, codePage: !!document.querySelector(".code-page"), status: document.querySelector(".code-page .code-status")?.textContent ?? null, readOnly: document.querySelector(".code-page .code-edit textarea")?.readOnly ?? null, path: ${C}?.path ?? null, ready: document.readyState })`).catch((e) => String(e))) + `, dialogs ${dialogs.length}, page errors ${JSON.stringify(errors.slice(-3))})`);
+  check(newNb, "Ctrl+Alt+N on the code page: a new notebook, on its own page");
+  check(await until(`${text("/demo.py")}.then((s) => s === "before new\\n").catch(() => false)`, 10000), "…the edit saved first");
+
+  // a workspace slow to open (the page's lock requests held back until 10 s after it loads, past the few seconds the
+  // notebook page gives it): the file's page waits for it and opens, never "can't be opened"
+  const slowId = (await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { try { if (!localStorage.getItem("sb-test-slow-locks")) return; } catch { return; } const l = navigator.locks, real = l.request.bind(l), t0 = Date.now(); l.request = (...a) => new Promise((r) => setTimeout(r, Math.max(0, 10000 - (Date.now() - t0)))).then(() => real(...a)); })()` })).identifier;
+  await ev(`(localStorage.setItem("sb-test-slow-locks", "1"), 1)`);
+  const slowT0 = Date.now();
+  const slowOpening = openCode("/demo.py");
+  // (and says so while it waits)
+  const slowSawOpening = await until(`document.querySelector(".sb-opening")?.textContent === "Opening your files…"`, 12000);
+  const slowOpened = await slowOpening;
+  const slowMs = Date.now() - slowT0;
+  const slowNoteGone = await ev(`!document.querySelector(".sb-opening")`).catch(() => false);
+  const slowSaid = await ev(`document.body.innerText.includes("can't be opened")`).catch(() => true);
+  await ev(`(localStorage.removeItem("sb-test-slow-locks"), 1)`).catch(() => {});
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: slowId });
+  check(slowOpened && !slowSaid && slowMs >= 6000, "a workspace slow to open (over 5 s): the file's page waits and opens it: " + JSON.stringify({ slowOpened, slowSaid, slowMs }));
+  check(slowSawOpening && slowNoteGone, "…saying \"Opening your files…\" while it waits, gone once it's open: " + JSON.stringify({ slowSawOpening, slowNoteGone }));
 
   // following a change made elsewhere, in Edit with nothing unsaved: followed (the control), and an edit typed while
   // that change is read keeps the draft and stops following (astra on #773: the read's bytes were installed over it)
@@ -234,7 +595,7 @@ try {
   // (Rename… with unsaved text: saved first, so the file renamed has it)
   await ev(`(() => { ${TA}.value += "z = 3;\\n"; return 1; })()`);
   promptText = "fn2";
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
   check(await until(`${C}.path === "/fn2.m"`, 10000) && (await until(`${text("/fn2.m")}.then((s) => s.endsWith("z = 3;\\n"))`, 5000)), "Rename… with unsaved text: saved, then renamed: " + JSON.stringify((await ev(text("/fn2.m")).catch(() => "")).slice(-12)));
   // (an edit over the 1 MB limit: not saved, said; "Saved" never said for it)
   await ev(`(() => { const t = ${TA}; t.value = "%" + "x".repeat(1100000) + "\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
@@ -247,11 +608,11 @@ try {
   // Rename… from the File menu
   promptText = "notes2";
   check(await openCode("/notes.txt"), "a .txt file opens");
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
   check(await until(`${C}.path === "/notes2.txt" && document.querySelector(".code-page .code-name").textContent === "notes2.txt"`, 10000), "File ▸ Rename…: the file renamed, its new name shown");
 
   // too large; a missing id
-  check(await openCode("/big.json").then(() => until(`/too large to open here/.test(document.querySelector(".code-page .code-note")?.textContent ?? "")`, 10000)), "a file over 4 MB: said, with Download from Files");
+  check(await openCode("/big.json", { tooLarge: true }), "a file over 4 MB: said, with Download from Files");
   await go(base + "?code=nosuchfid000");
   check(await until(`/isn't here any more/.test(document.querySelector(".code-page .code-note")?.textContent ?? "")`, 30000), "an id no file has: said");
 
@@ -283,7 +644,7 @@ try {
       watch: (cb) => { subs.add(cb); return () => subs.delete(cb); },
       list: async () => [],
     };
-    const host = (fid) => ({ ws, fid, open() {}, openFiles() {}, examples: async () => false, renderFileMenu() {} });
+    const host = (fid) => ({ ws, fid, open() {}, openFiles() {}, examples: async () => false, renderFileMenu() {}, navigate: async () => false });
     const root = document.createElement("div"); document.body.append(root);
     await m.mount(root, host("a"));
     await m.mount(root, host("b"));

@@ -1,0 +1,16 @@
+{
+ "title": "Text, cells, structs and functions (MATLAB)",
+ "summary": "Character vectors and strings, regular expressions, cell arrays and structs, function handles and closures.",
+ "tags": [
+  "programming",
+  "data"
+ ],
+ "level": "intro",
+ "main": "main.ipynb",
+ "files": [
+  "main.ipynb"
+ ],
+ "mode": "matlab",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

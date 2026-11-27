@@ -15,6 +15,7 @@ plain text, deterministic, and self-describing:
 """
 
 import math
+import sys
 
 # ------------------------------------------------------------------ colors
 
@@ -25,6 +26,45 @@ _BASE = {"b": "#0000ff", "g": "#008000", "r": "#ff0000", "c": "#00bfbf",
 _TAB = {"tab:" + n: c for n, c in zip(
     ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray", "olive", "cyan"], TAB10)}
 
+
+# The CSS named colors (CSS Color Module Level 4), which are matplotlib's names, and Sage's
+# (sage.plot.colors: the same names and values, without rebeccapurple, with "automatic")
+CSS_COLORS = {
+    "aliceblue": "#f0f8ff", "antiquewhite": "#faebd7", "aqua": "#00ffff", "aquamarine": "#7fffd4",
+    "azure": "#f0ffff", "beige": "#f5f5dc", "bisque": "#ffe4c4", "black": "#000000", "blanchedalmond": "#ffebcd",
+    "blue": "#0000ff", "blueviolet": "#8a2be2", "brown": "#a52a2a", "burlywood": "#deb887", "cadetblue": "#5f9ea0",
+    "chartreuse": "#7fff00", "chocolate": "#d2691e", "coral": "#ff7f50", "cornflowerblue": "#6495ed",
+    "cornsilk": "#fff8dc", "crimson": "#dc143c", "cyan": "#00ffff", "darkblue": "#00008b", "darkcyan": "#008b8b",
+    "darkgoldenrod": "#b8860b", "darkgray": "#a9a9a9", "darkgreen": "#006400", "darkgrey": "#a9a9a9",
+    "darkkhaki": "#bdb76b", "darkmagenta": "#8b008b", "darkolivegreen": "#556b2f", "darkorange": "#ff8c00",
+    "darkorchid": "#9932cc", "darkred": "#8b0000", "darksalmon": "#e9967a", "darkseagreen": "#8fbc8f",
+    "darkslateblue": "#483d8b", "darkslategray": "#2f4f4f", "darkslategrey": "#2f4f4f", "darkturquoise": "#00ced1",
+    "darkviolet": "#9400d3", "deeppink": "#ff1493", "deepskyblue": "#00bfff", "dimgray": "#696969",
+    "dimgrey": "#696969", "dodgerblue": "#1e90ff", "firebrick": "#b22222", "floralwhite": "#fffaf0",
+    "forestgreen": "#228b22", "fuchsia": "#ff00ff", "gainsboro": "#dcdcdc", "ghostwhite": "#f8f8ff",
+    "gold": "#ffd700", "goldenrod": "#daa520", "gray": "#808080", "green": "#008000", "greenyellow": "#adff2f",
+    "grey": "#808080", "honeydew": "#f0fff0", "hotpink": "#ff69b4", "indianred": "#cd5c5c", "indigo": "#4b0082",
+    "ivory": "#fffff0", "khaki": "#f0e68c", "lavender": "#e6e6fa", "lavenderblush": "#fff0f5",
+    "lawngreen": "#7cfc00", "lemonchiffon": "#fffacd", "lightblue": "#add8e6", "lightcoral": "#f08080",
+    "lightcyan": "#e0ffff", "lightgoldenrodyellow": "#fafad2", "lightgray": "#d3d3d3", "lightgreen": "#90ee90",
+    "lightgrey": "#d3d3d3", "lightpink": "#ffb6c1", "lightsalmon": "#ffa07a", "lightseagreen": "#20b2aa",
+    "lightskyblue": "#87cefa", "lightslategray": "#778899", "lightslategrey": "#778899", "lightsteelblue": "#b0c4de",
+    "lightyellow": "#ffffe0", "lime": "#00ff00", "limegreen": "#32cd32", "linen": "#faf0e6", "magenta": "#ff00ff",
+    "maroon": "#800000", "mediumaquamarine": "#66cdaa", "mediumblue": "#0000cd", "mediumorchid": "#ba55d3",
+    "mediumpurple": "#9370db", "mediumseagreen": "#3cb371", "mediumslateblue": "#7b68ee",
+    "mediumspringgreen": "#00fa9a", "mediumturquoise": "#48d1cc", "mediumvioletred": "#c71585",
+    "midnightblue": "#191970", "mintcream": "#f5fffa", "mistyrose": "#ffe4e1", "moccasin": "#ffe4b5",
+    "navajowhite": "#ffdead", "navy": "#000080", "oldlace": "#fdf5e6", "olive": "#808000", "olivedrab": "#6b8e23",
+    "orange": "#ffa500", "orangered": "#ff4500", "orchid": "#da70d6", "palegoldenrod": "#eee8aa",
+    "palegreen": "#98fb98", "paleturquoise": "#afeeee", "palevioletred": "#db7093", "papayawhip": "#ffefd5",
+    "peachpuff": "#ffdab9", "peru": "#cd853f", "pink": "#ffc0cb", "plum": "#dda0dd", "powderblue": "#b0e0e6",
+    "purple": "#800080", "rebeccapurple": "#663399", "red": "#ff0000", "rosybrown": "#bc8f8f",
+    "royalblue": "#4169e1", "saddlebrown": "#8b4513", "salmon": "#fa8072", "sandybrown": "#f4a460",
+    "seagreen": "#2e8b57", "seashell": "#fff5ee", "sienna": "#a0522d", "silver": "#c0c0c0", "skyblue": "#87ceeb",
+    "slateblue": "#6a5acd", "slategray": "#708090", "slategrey": "#708090", "snow": "#fffafa",
+    "springgreen": "#00ff7f", "steelblue": "#4682b4", "tan": "#d2b48c", "teal": "#008080", "thistle": "#d8bfd8",
+    "tomato": "#ff6347", "turquoise": "#40e0d0", "violet": "#ee82ee", "wheat": "#f5deb3", "white": "#ffffff",
+    "whitesmoke": "#f5f5f5", "yellow": "#ffff00", "yellowgreen": "#9acd32"}
 
 def to_color(c, default=None):
     """A CSS color from a name, hex string, matplotlib code or RGB(A) tuple."""
@@ -100,12 +140,42 @@ def _finite(v):
     return v
 
 
-def _fmt(v):
+def _fmt_printf(v):
     """Coordinates in the SVG: two decimals, no trailing zeros."""
     s = "%.2f" % v
     if "." in s:
         s = s.rstrip("0").rstrip(".")
     return "0" if s == "-0" else s
+
+
+def _fmt_int(v):
+    """_fmt_printf's text, from the number of hundredths as an integer: in
+    Sagebrush's Python an integer's digits cost a fraction of a float's.
+    Within a hair of half a hundredth (where the rounding of v * 100 could
+    decide), and for the huge, it is _fmt_printf's own."""
+    n = v * 100.0
+    if not -1e15 < n < 1e15:
+        return _fmt_printf(v)
+    f = math.floor(n)
+    d = n - f
+    if -1e-6 < d - 0.5 < 1e-6:
+        return _fmt_printf(v)
+    r = f + 1 if d > 0.5 else f
+    if r == 0:
+        return "0"
+    a = -r if r < 0 else r
+    q, m = a // 100, a % 100
+    if m == 0:
+        s = str(q)
+    elif m < 10:
+        s = str(q) + ".0" + str(m)
+    else:
+        s = str(q) + "." + (str(m // 10) if m % 10 == 0 else str(m))
+    return "-" + s if r < 0 else s
+
+
+# (CPython's printf is the faster there)
+_fmt = _fmt_printf if sys.implementation.name == "cpython" else _fmt_int
 
 
 def _esc(s):
@@ -572,13 +642,12 @@ class Line(Primitive):
 
     def svg(self, P):
         o = self.options
-        parts, pen = [], False
-        for x, y in zip(self.xs, self.ys):
-            p = P.map(x, y)
+        parts, pen, f = [], False, _fmt
+        for p in P.map_all(self.xs, self.ys) if hasattr(P, "map_all") else [P.map(x, y) for x, y in zip(self.xs, self.ys)]:
             if p is None:
                 pen = False
                 continue
-            parts.append(("L" if pen else "M") + _fmt(p[0]) + " " + _fmt(p[1]))
+            parts.append(("L" if pen else "M") + f(p[0]) + " " + f(p[1]))
             pen = True
         color = to_color(o.get("color"), "#1f77b4")
         out = ""
@@ -622,22 +691,68 @@ class Points(Primitive):
 def _markers(P, xs, ys, marker, r, color, alpha, sizes=None, edge=None):
     out = []
     many = isinstance(color, list)
-    for i, (x, y) in enumerate(zip(xs, ys)):
-        p = P.map(x, y)
-        if p is None:
-            continue
-        px, py = p
-        rr = sizes[i] if sizes is not None else r
-        c = color[i % len(color)] if many else color
-        out.append(_marker(marker, px, py, rr, c, edge))
+    pts = P.map_all(xs, ys) if hasattr(P, "map_all") else [P.map(x, y) for x, y in zip(xs, ys)]
+    if not many and sizes is None and marker in (",", "o", ".", None, True, "circle", "s", "square"):
+        # (the markers a plot of many points uses, each the same text as
+        # _marker's, built from the parts all the points share)
+        f, c = _fmt, _esc(color)
+        st = ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""
+        if marker == ",":
+            # (one path of whole pixels, numbered: the pixel a point is in, as _marker's)
+            u, d = _PIXEL, []
+            for p in pts:
+                if p is not None:
+                    d.append("M" + str(math.floor(p[0] / u + 1e-6)) + " " + str(math.floor(p[1] / u + 1e-6)) + "h1v1h-1z")
+            if d:
+                out.append('<path transform="scale(%.9g)" fill="%s" d="%s"/>' % (u, c, "".join(d)))
+        elif marker in ("s", "square"):
+            tail = '" width="%s" height="%s" fill="%s"%s/>' % (f(2 * r), f(2 * r), c, st)
+            for p in pts:
+                if p is not None:
+                    out.append('<rect x="' + f(p[0] - r) + '" y="' + f(p[1] - r) + tail)
+        else:
+            tail = '" r="%s" fill="%s"%s/>' % (f(max(1.0, r * 0.45)) if marker == "." else f(r), c, st)
+            for p in pts:
+                if p is not None:
+                    out.append('<circle cx="' + f(p[0]) + '" cy="' + f(p[1]) + tail)
+    else:
+        for i, p in enumerate(pts):
+            if p is None:
+                continue
+            rr = sizes[i] if sizes is not None else r
+            c = color[i % len(color)] if many else color
+            out.append(_marker(marker, p[0], p[1], rr, c, edge))
     if not out:
         return ""
     a = ' opacity="%s"' % _fmt(alpha) if alpha is not None else ""
     return "<g%s>%s</g>" % (a, "".join(out))
 
 
+# The size of one pixel of the picture being drawn, in SVG units (100 to the
+# inch): 1 for an SVG, 100 / dpi while savefig draws a PNG (pixel_size).
+_PIXEL = 1.0
+
+
+def pixel_size(u):
+    """Sets the size of a pixel of the picture being drawn, in SVG units, for
+    matplotlib's pixel marker ','; returns the size it had."""
+    global _PIXEL
+    old, _PIXEL = _PIXEL, float(u)
+    return old
+
+
 def _marker(m, x, y, r, color, edge=None):
     c = _esc(color)
+    if m == ",":
+        # matplotlib's pixel marker: the one pixel of the picture that the point
+        # is in, whatever the marker's size, and filled whole: its edges are on
+        # the pixel's edges, written in full (at 300 dpi a pixel is 1/3 unit).
+        # A point on a pixels' edge (the centre of a pixel at 100 dpi, drawn at
+        # 200) takes the pixel after it, the same for each such point, also when
+        # rounding put it a hair before the edge.
+        u = _PIXEL
+        return '<rect x="%.9g" y="%.9g" width="%.9g" height="%.9g" fill="%s"/>' % (
+            math.floor(x / u + 1e-6) * u, math.floor(y / u + 1e-6) * u, u, u, c)
     st = ' stroke="%s" stroke-width="0.8"' % _esc(edge) if edge else ""
     X, Y, R = _fmt(x), _fmt(y), _fmt(r)
     if m in ("o", ".", None, True, "circle"):
@@ -1134,6 +1249,23 @@ class _Placed:
             py = max(-1e5, min(1e5, py))
         return px, py
 
+    def map_all(self, xs, ys):
+        """map(x, y) of each point, clamped, in one loop (the same numbers:
+        a plot of many points spends its time here)."""
+        if self.xlog or self.ylog:
+            return [self.map(x, y) for x, y in zip(xs, ys)]
+        left, w, x0, dx = self.left, self.w, self._x0, self._x1 - self._x0
+        bottom, h, y0, dy = self.top + self.h, self.h, self._y0, self._y1 - self._y0
+        out = []
+        for x, y in zip(xs, ys):
+            if x is None or y is None:
+                out.append(None)
+                continue
+            px = left + (x - x0) / dx * w
+            py = bottom - (y - y0) / dy * h
+            out.append((-1e5 if px < -1e5 else 1e5 if px > 1e5 else px, -1e5 if py < -1e5 else 1e5 if py > 1e5 else py))
+        return out
+
 
 def _range(lo, hi, log):
     """the axis's range: a degenerate one widened (hi < lo stays: an inverted axis, as matplotlib's)"""
@@ -1569,6 +1701,8 @@ class Panel:
             tick.append("M%s %sv%s" % (_fmt(p[0]), _fmt(ax_y), "4" if frame else "3"))
             if skip_x is not None and abs(v - skip_x) < 1e-12:
                 continue
+            if o.get("xtick_labels") is False:  # (matplotlib's labelbottom=False: the tick, no label)
+                continue
             ly = (P.top + P.h if frame else min(max(ax_y, P.top), P.top + P.h)) + ts * 1.43
             if xrot:
                 # (turned as matplotlib's default rotation_mode places it:
@@ -1592,6 +1726,8 @@ class Panel:
                 continue
             ytick.append("M%s %sh%s" % (_fmt(ax_x), _fmt(p[1]), "-4" if frame else "-3"))
             if skip_y is not None and abs(v - skip_y) < 1e-12:
+                continue
+            if o.get("ytick_labels") is False:  # (labelleft=False)
                 continue
             lx = (P.left if frame else min(max(ax_x, P.left), P.left + P.w)) - 6
             ylabels.append('<text x="%s" y="%s" text-anchor="end" dominant-baseline="middle">%s</text>' % (_fmt(lx), _fmt(p[1]), s))
@@ -1620,23 +1756,40 @@ class Panel:
         if not items:
             return ""
         mk = o.get("markup")
-        w = max(len(mk.plain(s) if mk else str(s)) for _, s in items) * 6.6 + 40
-        h = len(items) * 18 + 8
+        title = o.get("legend_title")
+        th = 18 if title else 0  # (a title's line above the entries)
+        w = max([len(mk.plain(s) if mk else str(s)) * 6.6 + 40 for _, s in items] + ([len(str(title)) * 6.6 + 16] if title else []))
+        h = len(items) * 18 + 8 + th
         loc = o.get("legend_loc") or "upper right"
         if isinstance(loc, int):
             loc = LEGEND_LOCS[loc] if 1 <= loc < len(LEGEND_LOCS) else "upper right"
-        if isinstance(loc, tuple):  # (its lower left corner at axes fractions)
+        anchor = o.get("legend_anchor")
+        if anchor is not None and not isinstance(loc, tuple):
+            # (bbox_to_anchor: the legend's loc corner or side at that point, or within that box (x, y, width,
+            # height), in axes fractions, borderaxespad inside it, as matplotlib's; outside the axes as well)
+            bx, bw = P.left + anchor[0] * P.w, (anchor[2] * P.w if len(anchor) == 4 else 0.0)
+            bh = anchor[3] * P.h if len(anchor) == 4 else 0.0
+            by = P.top + (1 - anchor[1]) * P.h - bh
+            pad = o.get("legend_pad", 0.5 * 10 * 100 / 72)
+            lx = bx + pad if "left" in loc else bx + bw - w - pad if "right" in loc else bx + (bw - w) / 2
+            ly = by + pad if "upper" in loc else by + bh - h - pad if "lower" in loc else by + (bh - h) / 2
+        elif isinstance(loc, tuple):  # (its lower left corner at axes fractions)
             lx, ly = P.left + loc[0] * P.w, P.top + (1 - loc[1]) * P.h - h
         else:
             # (the legend centred on the axes in the directions its loc
             # doesn't name: "center right" is halfway up, "upper center"
             # halfway across)
-            lx = P.left + 8 if "left" in loc else P.left + P.w - w - 8 if "right" in loc else P.left + (P.w - w) / 2
-            ly = P.top + P.h - h - 8 if "lower" in loc else P.top + 8 if "upper" in loc else P.top + (P.h - h) / 2
+            pad = o.get("legend_pad", 8)
+            lx = P.left + pad if "left" in loc else P.left + P.w - w - pad if "right" in loc else P.left + (P.w - w) / 2
+            ly = P.top + P.h - h - pad if "lower" in loc else P.top + pad if "upper" in loc else P.top + (P.h - h) / 2
+        self._legend_box = (lx, ly, w, h)  # (render_svg widens the figure to a legend outside it)
         out = ['<g class="sb-legend"><rect x="%s" y="%s" width="%s" height="%s" rx="3" style="fill: var(--sb-legend-bg, #fff)" fill-opacity="0.85" stroke="currentColor" stroke-opacity="0.25"/>' % (
             _fmt(lx), _fmt(ly), _fmt(w), _fmt(h))]
+        if title:
+            out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="11">%s</text>' % (
+                _fmt(lx + w / 2), _fmt(ly + 13), mk.svg(str(title), 11) if mk else _rich(str(title))))
         for i, (p, s) in enumerate(items):
-            cy = ly + 13 + i * 18
+            cy = ly + 13 + th + i * 18
             c = _esc(to_color(p.options.get("color"), "#1f77b4"))
             if p.options.get("hidden"):
                 pass  # (an artist not drawn: its text, no swatch)
@@ -1716,6 +1869,7 @@ def render_frame(panels, width=640, height=480, title=None, markup=None):
     body, descs = [], []
     for panel, (fx, fy, fw, fh) in panels:
         panel._fig = (width, height)
+        panel._legend_box = None
         if panel.options.get("exact"):
             s, d = panel.svg(fx * width, top + fy * (height - top), fw * width, fh * (height - top))
         else:
@@ -1730,16 +1884,24 @@ def render_frame(panels, width=640, height=480, title=None, markup=None):
     return "".join(body), desc
 
 
-def _svg_open(width, height, desc, cls="sb-plot", extra=""):
-    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s %s" width="%s" height="%s" role="img" aria-label="%s" '
+def _svg_open(width, height, desc, cls="sb-plot", extra="", x0=0.0, y0=0.0):
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%s %s %s %s" width="%s" height="%s" role="img" aria-label="%s" '
             'font-family="system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="currentColor" class="%s"%s>'
-            '<title>%s</title>') % (_fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), cls, extra, _esc(desc))
+            '<title>%s</title>') % (_fmt(x0), _fmt(y0), _fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), cls, extra, _esc(desc))
 
 
-def render_svg(panels, width=640, height=480, title=None, markup=None):
-    """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure."""
+def render_svg(panels, width=640, height=480, title=None, markup=None, grow=False):
+    """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure. With grow, a
+    legend placed outside the figure (bbox_to_anchor) widens it to show the legend, as a notebook's inline
+    figure (bbox_inches="tight") does; without, it is cut off at the figure's edge, as savefig's."""
     body, desc = render_frame(panels, width, height, title, markup)
-    return _svg_open(float(width), float(height), desc) + body + "</svg>"
+    x0, y0, x1, y1 = 0.0, 0.0, float(width), float(height)
+    for panel, _ in panels:
+        b = getattr(panel, "_legend_box", None) if grow else None
+        if b is not None:
+            x0, y0 = min(x0, b[0] - 4), min(y0, b[1] - 4)
+            x1, y1 = max(x1, b[0] + b[2] + 4), max(y1, b[1] + b[3] + 4)
+    return _svg_open(x1 - x0, y1 - y0, desc, x0=x0, y0=y0) + body + "</svg>"
 
 
 def render_animation(frames, width=640, height=480, delay=200, iterations=0):
@@ -1775,6 +1937,149 @@ def describe_svg(svg):
 
 # ------------------------------------------------------------------ output
 
+# ------------------------------------------------------------------ inline figures
+# How a figure is shown, in every language: "auto" (the default: its SVG, unless that would be over AUTO_SVG_MAX bytes,
+# then a PNG, said in a line under it), "svg", "png" or "both".  A PNG is always drawn at twice the figure's dpi, with
+# its size at once in the display's metadata (IPython's "retina"), so it is sharp on a high-density screen.  Set by
+# figures() (sagebrush.figures in Python and Sage, sagebrush_figures in MATLAB and Magma) or %config
+# InlineBackend.figure_format(s) (lib/_pyjs_magic.py); else the host's (the Jupyter kernel's --figures or
+# SAGEBRUSH_FIGURES, src/kernel.ts); else "auto".  A figure's _repr_svg_ and _repr_png_ follow it; its SVG for any
+# other use is _sagebrush_svg_ (svg_of).
+FIGURE_MODES = ("auto", "svg", "png", "both")
+# (1 MiB of SVG text: about CoCalc's limit on a cell's output; a figure with a few curves or a few thousand points is
+# far below it)
+AUTO_SVG_MAX = 1 << 20
+
+
+def figure_mode():
+    """How figures are shown now: "auto", "svg", "png" or "both"."""
+    import builtins
+    m = getattr(builtins, "__sagebrush_figures__", None)
+    if m is None:
+        host = getattr(builtins, "__pyjs_host__", None)
+        # (no Sagebrush runtime, CPython with the Python package's copy of this file: its SVG, as before)
+        if host is None:
+            return "svg"
+        m = host("figures")
+    return m if m in FIGURE_MODES else "auto"
+
+
+def figures(mode=None):
+    """How figures are shown: "auto" (an SVG, unless it would be over 1 MiB: then a sharp PNG, said under it), "svg",
+    "png" (drawn at twice the size, sharp on a high-density screen) or "both"; "reset": the default again.  Without
+    an argument, the current one."""
+    import builtins
+    if mode is None:
+        return figure_mode()
+    m = str(mode).lower()
+    if m == "reset":
+        if hasattr(builtins, "__sagebrush_figures__"):
+            delattr(builtins, "__sagebrush_figures__")
+        return figure_mode()
+    if m not in FIGURE_MODES:
+        raise ValueError("figures: %r is not a way to show figures: give 'auto', 'svg', 'png' or 'both'" % (mode,))
+    builtins.__sagebrush_figures__ = m
+    return m
+
+
+def svg_of(obj):
+    """obj's SVG, however figures are shown."""
+    f = getattr(obj, "_sagebrush_svg_", None)
+    return f() if f is not None else obj._repr_svg_()
+
+
+def svg_size(svg):
+    """An SVG's width and height as written on it (SVG units: pixels at 100 dpi)."""
+    import re
+    m = re.match(r'<svg [^>]*?width="([^"]*)" height="([^"]*)"', svg)
+    if m is None:
+        raise ValueError("save: the picture has no size to draw it at")
+    return m.group(1), m.group(2)
+
+
+def svg_png(svg, dpi=None, transparent=False):
+    """An SVG drawn as PNG bytes by Sagebrush's PNG module (lib/_png.py): dpi pixels per inch, 100 SVG units to the
+    inch, default 100, on white unless transparent."""
+    import _png
+    sw, sh = svg_size(svg)
+    try:
+        w, h = float(sw) / 100, float(sh) / 100
+    except ValueError:
+        w = h = float("nan")
+    # (a background rectangle sized in percent, a MATLAB figure's: given the picture's own size, which the PNG
+    # module's drawing needs)
+    svg = svg.replace('<rect width="100%" height="100%"', '<rect width="%s" height="%s"' % (sw, sh), 1)
+    # (_png checks the size and dpi, finite and within its limits, first)
+    return _png.figure_png(svg, w, h, 100 if dpi is None else dpi, None if transparent else "white", [])
+
+
+def _mb(n):
+    return "%.1f MB" % (n / 1e6) if n >= 1e5 else "%d kB" % round(n / 1e3)
+
+
+def _svg_bytes(svg):
+    """An SVG's size as the display carries it: its UTF-8 bytes."""
+    return len(svg.encode("utf-8"))
+
+
+# (the way a figure is shown, decided once per display by _repr_svg_, which the display asks first, and taken by its
+# _repr_png_, which it asks next: (figure, svg or None, (png, metadata) or None, the line to say under it or None))
+_plan = [None, None, None, None]
+
+
+class InlineFigure:
+    """A figure shown as figure_mode() says: a subclass gives _sagebrush_svg_ (its SVG), and may give
+    _sagebrush_png_(scale) -> (PNG bytes, (width, height) to show it at) (else its SVG drawn).
+
+    A PNG is drawn before it is chosen: a figure whose PNG can't be drawn (a glyph the rasterizer lacks, say) is
+    shown as its SVG instead, in "png" mode too, so a figure is always shown; and the line under a PNG is said only
+    once that PNG is drawn."""
+
+    def _repr_svg_(self):
+        svg, png, note = _plan_of(self)
+        _plan[0], _plan[1], _plan[2], _plan[3] = self, svg, png, note
+        return svg
+
+    def _repr_png_(self):
+        if _plan[0] is self:
+            png, note = _plan[2], _plan[3]
+        else:
+            _, png, note = _plan_of(self)
+        _plan[0] = _plan[1] = _plan[2] = _plan[3] = None
+        if png is None:
+            return None
+        if note is not None:
+            import builtins
+            # (said under the figure, now that its PNG is drawn: the host writes this line after it,
+            # src/runtime/index.ts sayNote)
+            builtins.__sagebrush_note__ = note
+        return png
+
+    def _sagebrush_png_(self, scale):
+        svg = self._sagebrush_svg_()
+        w, h = svg_size(svg)
+        return svg_png(svg, 100 * scale), (float(w), float(h))
+
+
+def _plan_of(self):
+    """How the figure `self` (one with _sagebrush_svg_ and _sagebrush_png_) is shown now: (svg or None,
+    (png, metadata) or None, the line to say under it or None)."""
+    m = figure_mode()
+    svg = self._sagebrush_svg_()
+    if m == "svg" or (m == "auto" and _svg_bytes(svg) <= AUTO_SVG_MAX):
+        return svg, None, None
+    try:
+        png, (w, h) = self._sagebrush_png_(2)
+    except Exception:
+        # (its PNG couldn't be drawn: its SVG, whatever the mode, and nothing said)
+        return svg, None, None
+    note = None
+    if m == "auto":
+        note = ("Shown as a PNG: its SVG would be %s. For an SVG anyway: sagebrush.figures(\"svg\") "
+                "(in MATLAB or Magma: sagebrush_figures(\"svg\"))." % _mb(_svg_bytes(svg)))
+    return (svg if m == "both" else None), (png, {"width": int(round(w)), "height": int(round(h))}), note
+
+
 def host_display(obj):
     """Display obj richly if the host can: the browser (pyjs), or under
     CPython a Jupyter kernel (obj has _repr_svg_).  True if displayed."""
@@ -1802,14 +2107,14 @@ def show(obj, save_name="plot"):
     count = getattr(builtins, "__sagebrush_catalog__", None)
     if isinstance(count, list):
         count[0] += 1
-        print("[figure %d: %s]" % (count[0], describe_svg(obj._repr_svg_())))
+        print("[figure %d: %s]" % (count[0], describe_svg(svg_of(obj))))
         return None
     if getattr(builtins, "__sagebrush_doctest__", False):
         return None  # doctests show the repr only, as Sage's do
     shown = host_display(obj)
     if shown:
         return None
-    svg = obj._repr_svg_()
+    svg = svg_of(obj)
     try:
         import tempfile, os
         fd, path = tempfile.mkstemp(prefix="sagebrush-" + save_name + "-", suffix=".svg")
@@ -1846,17 +2151,7 @@ def save_figure(svg, filename, dpi=None, transparent=False):
     if ext == "svg":
         return save_svg(svg, filename)
     if ext == "png":
-        import re
-        import _png
-        m = re.match(r'<svg [^>]*?width="([^"]*)" height="([^"]*)"', svg)
-        if m is None:
-            raise ValueError("save: the picture has no size to draw it at")
-        try:
-            w, h = float(m.group(1)) / 100, float(m.group(2)) / 100
-        except ValueError:
-            w = h = float("nan")
-        # (_png checks the size and dpi, finite and within its limits, first)
-        png = _png.figure_png(svg, w, h, 100 if dpi is None else dpi, None if transparent else "white", [])
+        png = svg_png(svg, dpi, transparent)
         with open(name, "wb") as f:
             f.write(png)
         return

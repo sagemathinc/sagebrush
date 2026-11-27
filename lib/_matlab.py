@@ -106,10 +106,29 @@ def _absent_alternative(name):
     return _ABSENT[0].get(name)
 
 
+def _written(text):
+    """text with a reactive notebook's page-order names as written: xʹ2 (U+02B9 and digits, a later definition of x,
+    src/rename-matlab.ts) is x"""
+    if "\u02b9" not in text:
+        return text
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\u02b9" and i + 1 < n and text[i + 1].isdigit() and i > 0 and (text[i - 1].isalnum() or text[i - 1] == "_"):
+            i += 1
+            while i < n and text[i].isdigit():
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _undefined_message(name):
     """MATLAB's message for a name that is no variable or function, with the catalog's
     alternative when the name is a MATLAB function Sagebrush lacks: an agent reads the
     error, so the error says what to use"""
+    name = _written(name)
     msg = "Unrecognized function or variable '%s'." % name
     alt = _absent_alternative(name)
     if alt is not None:
@@ -157,6 +176,9 @@ def _identifier(e):
 
 
 _src = ["<matlab>", []]
+# the lines of the files found on the search path, by the name of each function or script in them, which an
+# error's report quotes for their frames (lib/_matlab_files.py)
+_file_lines = {}
 
 
 def begin(name, text):
@@ -207,11 +229,13 @@ def report(e, line):
         out = ["Error using %s" % st[0][0], _message(e)]
     lines = _src[1]
     # (no frame for line 0: the call that runs a function file, src/matlab.ts, is no line of the file)
-    for fname, ln in list(getattr(e, "_mstack", None) or []) + ([(_scriptname(), line)] if line else []):
+    frames = list(getattr(e, "_mstack", None) or [])
+    for k, (fname, ln) in enumerate(frames + ([(_scriptname(), line)] if line else [])):
         out.append("")
         out.append("Error in %s (line %d)" % (fname, ln))
-        if 0 < ln <= len(lines):
-            out.append(lines[ln - 1].strip())
+        fl = _file_lines.get(fname, lines) if k < len(frames) else lines
+        if 0 < ln <= len(fl):
+            out.append(fl[ln - 1].strip())
     _sys.stderr.write("\n".join(out) + "\n")
     raise SystemExit(1)
 
@@ -244,7 +268,15 @@ def report_cell(e, line):
     for fname, ln in st:
         out.append("")
         out.append("Error in %s (line %d)" % (fname, ln))
-    text = "\n".join(out) + "\n"
+    if _latex[0] and line:
+        # (in a LaTeX run, the item's own frame too, as report() gives a program's: its name, as given (no path: "\\matlab
+        # 5" keeps its backslash), its line, and the line)
+        lines = _src[1]
+        out.append("")
+        out.append("Error in %s (line %d)" % (_src[0], line))
+        if 0 < line <= len(lines):
+            out.append(lines[line - 1].strip())
+    text = _written("\n".join(out) + "\n")
     if _cell_error[1]:
         _cell_error[0] = text
     else:
@@ -1362,7 +1394,7 @@ def _isinstance_num(p):
 def _need_float(x, name):
     """refuse an input whose page lists only single and double"""
     if class_(x) not in ("double", "single"):
-        raise _err("%s: the input must be of class double or single, not %s." % (name, class_(x)))
+        raise _err("%s: the input must be of class double or single, not %s." % (name, class_(x)), "MATLAB:norm:inputType" if name == "norm" else "")
 
 
 def cond(v):
@@ -1892,6 +1924,16 @@ def _iscallable(v):
     return t is Builtin or t is Function or t is Anon or t is Handle
 
 
+def foreign(v):
+    """a value of another language in the shared workspace, not a MATLAB variable: one engine session
+    runs Sage, Python and MATLAB in one namespace, so a Python or Sage function, class or module there
+    (Sage's norm) leaves the MATLAB function of its name in view (src/matlab.ts inWorkspace)"""
+    t = type(v)
+    if t is type(_math):
+        return True
+    return callable(v) and t not in _CALLABLE and not isinstance(v, (Cell, Struct, Char, Str, StrArr))
+
+
 def _call(f, args, nargout=1):
     """call a function value with Python arguments, for one result"""
     r = f.call(nargout, args)
@@ -1934,38 +1976,93 @@ def _workspace():
     return m.__dict__ if m is not None else {}
 
 
-def fn(name):
-    """the function a name refers to, when the code runs"""
+def fn(name, top=False, imports=None):
+    """the function a name refers to, when the code runs.  top: named at the top level, where a
+    script can run (it sees the workspace); imports: the import list of the code naming it (a
+    function's or a script's, src/matlab.ts), else at the top level the workspace's"""
     ws = _workspace()
     v = ws.get(name)
     if type(v) is Function:
         return v
+    if imports is None and top and _base_imports:
+        imports = _base_imports
+    if imports:
+        host = _path_files()
+        f = host.imported(name, imports) if host is not None else None
+        if f is not None:
+            return f
     b = _B.get(name)
     if b is not None:
         return b
     f = _from_path(name)
     if f is not None:
+        if not top:
+            host = _sys.modules.get("_matlab_files")
+            if host is not None and f in host.scripts:
+                return host.script_in_function(name)
         return f
+    if _namespace(name):
+        return Namespace(name)
     raise _undefined(name)
 
 
+# the folders addpath put on the search path, in order (absolute: lib/_matlab_files.py)
+_search_path = []
+# the workspace's import list (import at the top level): "ns.name" and "ns.*" entries
+_base_imports = []
 _path_cache = {}
 
 
 def _from_path(name):
-    """a function in name.m in the program's folder (or on sys.path)"""
+    """the function (or script) in name.m on the search path, +ns/name.m for ns.name
+    (lib/_matlab_files.py)"""
     if name in _path_cache:
         return _path_cache[name]
     _path_cache[name] = None
+    host = _path_files()
+    if host is None:
+        return None
+    f = host.load(name)
+    _path_cache[name] = f
+    return f
+
+
+def _path_files():
+    """lib/_matlab_files.py (in a lazily loaded chunk), or None where it isn't"""
     host = _sys.modules.get("_matlab_files")
     if host is None:
         try:
             import _matlab_files as host
         except ImportError:
             return None
-    f = host.load(name)
-    _path_cache[name] = f
-    return f
+    return host
+
+
+def _namespace(name):
+    """whether name is a namespace: a +name folder (+a/+b for a.b) on the search path"""
+    key = ("+", name)
+    r = _path_cache.get(key)
+    if r is None:
+        host = _path_files()
+        r = _path_cache[key] = host is not None and host.is_namespace(name)
+    return r
+
+
+class Namespace:
+    """a namespace named in code (geom in geom.area(1)): its members are found when dot-indexed"""
+    __slots__ = ("name",)
+
+    def __init__(self, name):
+        self.name = name
+
+    def member(self, name):
+        full = self.name + "." + name
+        f = _from_path(full)
+        if f is not None:
+            return f
+        if _namespace(full):
+            return Namespace(full)
+        raise _undefined(full)
 
 
 def val(v):
@@ -1973,7 +2070,7 @@ def val(v):
     t = type(v)
     if t is Builtin or t is Function:
         return _call(v, [], 1)
-    if isinstance(v, Undef):
+    if isinstance(v, Undef) or t is Namespace:
         raise _undefined(v.name)
     return v
 
@@ -1990,6 +2087,8 @@ def bare(v, name, show):
     t = type(v)
     if t is Builtin or t is Function:
         return v.call(0, [])
+    if t is Namespace:
+        raise _undefined(name)
     if show:
         display(name, v)
     return NOVAL
@@ -2177,7 +2276,7 @@ def _ivec(arg, n, pos, grow):
 
 def _oob(pos, n):
     if pos < 0:
-        return _err("Index exceeds the number of array elements. Index must not exceed %d." % n, "MATLAB:index:exceedsdims")
+        return _err("Index exceeds the number of array elements. Index must not exceed %d." % n, "MATLAB:badsubscript")
     return _err("Index in position %d exceeds array bounds. Index must not exceed %d." % (pos + 1, n), "MATLAB:index:exceedsdims")
 
 
@@ -2344,7 +2443,7 @@ def brace(obj, args):
             return obj.a[k - 1]
     vals = brace_cs(obj, args)
     if not vals:
-        raise _err("Index exceeds the number of array elements. Index must not exceed %d." % _numel(obj), "MATLAB:index:exceedsdims")
+        raise _err("Index exceeds the number of array elements. Index must not exceed %d." % _numel(obj), "MATLAB:badsubscript")
     return vals[0]
 
 
@@ -2355,6 +2454,12 @@ def fieldname(v):
 def field_cs(obj, name):
     if type(obj) is Builtin or type(obj) is Function:
         return [field(obj, name)]
+    if type(obj) is Namespace:
+        # (a namespace's function named without arguments is called: geom.unit as an argument)
+        m = obj.member(name)
+        if type(m) is Builtin or type(m) is Function:
+            return [m.call(1, [])]
+        raise _undefined(m.name)
     if isinstance(obj, HandleObj):
         return [obj.mget(name)]
     if type(obj) is HandleArr:
@@ -2383,6 +2488,8 @@ def field(obj, name):
         d = obj.a[0]
         if name in d:
             return d[name]
+    if type(obj) is Namespace:
+        return obj.member(name)
     vals = field_cs(obj, name)
     if not vals:
         raise _err("Expected one output from a curly brace or dot indexing expression, but there were 0 results.")
@@ -3845,6 +3952,7 @@ def _is_nd(v):
 
 
 def display(name, v):
+    name = _written(name)
     if _is_nd(v):
         # A(:,:,1) = ... page by page (logical and integer arrays: their class first)
         cls = class_(v)
@@ -4433,6 +4541,18 @@ def randperm_(n, k=None):
     if k is not None:
         p = p[:_int_arg(k)]
     return np.asarray(p, dtype=np.float64).reshape((p.size, 1))
+
+
+@_bs("sagebrush_figures")
+def sagebrush_figures_(mode=None):
+    """sagebrush_figures(mode): how figures are shown, in every language (Python's sagebrush.figures): 'auto' (the
+    default: an SVG, unless it would be over 1 MiB, then a PNG drawn at twice the size, said under it), 'svg', 'png'
+    (drawn at twice the size, sharp on a high-density screen) or 'both'; 'reset', the default again.  Without an
+    argument, the current one."""
+    import _graphics
+    # (a char vector 'png' or a string "png")
+    m = _graphics.figures(None if mode is None else mode.text() if isinstance(mode, Char) else mode.s if isinstance(mode, Str) else str(mode))
+    return Char(m)
 
 
 @_bs("linspace")
@@ -6643,7 +6763,8 @@ def reshape_(x, *args):
         if free >= 0:
             rest = _prod(d)
             if rest == 0 or n % rest:
-                raise _err("Product of known dimensions, %d, not divisible into total number of elements, %d." % (rest, n))
+                raise _err("Product of known dimensions, %d, not divisible into total number of elements, %d." % (rest, n),
+                           "MATLAB:getReshapeDims:notDivisible")
             d[free] = n // rest
     if _prod(d) != n:
         raise _err("Number of elements must not change. Use [] as one of the size inputs to automatically calculate the appropriate size for that dimension.", "MATLAB:getReshapeDims:notSameNumel")
@@ -8302,7 +8423,7 @@ def sprintf_(fmt, *args):
     if type(fmt) is Str:
         return Str(_sprintf(fmt.s, args))
     if not _istext(fmt):
-        raise _err("sprintf: the format must be text.")
+        raise _err("sprintf: the format must be text.", "MATLAB:badformat_mx")
     r = _sprintf(_text(fmt), args)
     # (nothing written: a 1-by-0 character vector, as sprintf gives)
     return Char(r) if r else Char(np.zeros((0, 1)))
@@ -8550,7 +8671,10 @@ def _str2num_eval(text, nargout):
     host = getattr(builtins, "__pyjs_host__", None)
     if host is None:
         raise _err("str2num of '%s' is not supported in Sagebrush here: its text needs the MATLAB translator." % text[:40])
-    py = host("matlab_function_file", "function sbq__ = sbq__str2num()\nsbq__ = [" + text + "];\nend\n", "<str2num>")
+    py = host("matlab_path_file", "function sbq__ = sbq__str2num()\nsbq__ = [" + text + "];\nend\n", "<str2num>")
+    if py is not None:
+        # (after its first line, "#function": the file's Python, lib/_matlab_files.py)
+        py = py.partition("\n")[2]
     fail = np.zeros((0, 0))
     fail = fail if nargout <= 1 else [fail, False]
     if py is None:
@@ -9373,7 +9497,7 @@ def struct_(*args):
         vals.append(v)
         if type(v) is Cell and len(v.a) != 1:
             if n != 1 and len(v.a) != n:
-                raise _err("Array dimensions of input cell arrays must match.")
+                raise _err("Array dimensions of input cell arrays must match.", "MATLAB:StructConversion:DimensionMismatch")
             n = len(v.a)
             shape = v.shape
     items = []
@@ -9397,7 +9521,8 @@ def fieldnames_(s):
     elif type(s) is Struct:
         f = s.fields
     else:
-        raise _err("Invalid input argument of type '%s'. Input must be a structure or a Java or COM object." % class_(s))
+        raise _err("Invalid input argument of type '%s'. Input must be a structure or a Java or COM object." % class_(s),
+                   "MATLAB:fieldnames:InvalidInput")
     return Cell([Char(n) for n in f], (len(f), 1))
 
 
@@ -9548,7 +9673,7 @@ def _uniform_opts(args):
     return arrays, uniform, handler
 
 
-def _apply_each(nargout, f, arrays, uniform, handler, elems, shape):
+def _apply_each(nargout, f, arrays, uniform, handler, elems, shape, nonscalar=""):
     """f on each element (elems(k) -> the arguments), collected"""
     n = _prod(shape)
     nout = max(1, nargout)
@@ -9572,7 +9697,7 @@ def _apply_each(nargout, f, arrays, uniform, handler, elems, shape):
         if uniform:
             for v in vals:
                 if not _isnumlike(v) or _numel(v) != 1:
-                    raise _err("Non-scalar in Uniform output. Set 'UniformOutput' to false.")
+                    raise _err("Non-scalar in Uniform output. Set 'UniformOutput' to false.", nonscalar)
             if not vals:
                 outs.append(np.zeros(_stored(shape)))
                 continue
@@ -9623,7 +9748,8 @@ def cellfun_(nargout, f, *args):
     for a in arrays[1:]:
         if _size_key(a.shape) != _size_key(shape):
             raise _err("All of the input arguments must be of the same size and shape.")
-    return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [a.a[k] for a in arrays], shape)
+    return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [a.a[k] for a in arrays], shape,
+                       "MATLAB:cellfun:NotAScalarOutput")
 
 
 def _size_key(d):
@@ -9659,7 +9785,8 @@ def arrayfun_(nargout, f, *args):
     for a in arrays[1:]:
         if _size_key(_dims(a)) != _size_key(shape):
             raise _err("All of the input arguments must be of the same size and shape.")
-    return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [_element(a, k) for a in arrays], shape)
+    return _apply_each(nargout, fh, arrays, uniform, handler, lambda k: [_element(a, k) for a in arrays], shape,
+                       "MATLAB:arrayfun:NotAScalarOutput")
 
 
 @_bi("structfun")
@@ -9687,6 +9814,8 @@ def func2str_(f):
 
 @_bs("str2func")
 def str2func_(s):
+    if type(s) not in (Char, Str, StrArr):
+        raise _err("Expected a character vector or string argument, not %s." % class_(s), "MATLAB:string:MustBeStringScalarOrCharacterVector")
     t = _text(s).strip()
     if t.startswith("@"):
         host = _sys.modules.get("_matlab_files")
@@ -9923,6 +10052,14 @@ def rethrow_(nargout, err):
 
 @_bi("assert")
 def assert_(nargout, c, *args):
+    # (a second argument that is not text, or a first that is text, a cell or a struct: Octave's
+    # assert(observed, expected[, tol]), lib/_matlab_assert.py; MATLAB has no such form)
+    if args and (not _istext(args[0]) or _istext(c) or type(c) is Cell or type(c) is Struct):
+        if len(args) > 2:
+            raise _err("assert(observed, expected, tol) takes at most three inputs.")
+        import _matlab_assert
+        _matlab_assert.check(c, *args)
+        return NOVAL
     if not cond(c):
         if args:
             ident, msg = _error_args(args)
@@ -9978,8 +10115,15 @@ def _noop(nargout, *args):
     return NOVAL
 
 
-for _n in ("clc", "drawnow", "pause", "beep", "more", "commandwindow", "dbstop", "profile", "diary", "pkg", "graphics_toolkit"):
+for _n in ("clc", "drawnow", "pause", "beep", "more", "commandwindow", "dbstop", "profile", "graphics_toolkit"):
     _B[_n] = Builtin(_noop, _n)
+
+
+@_bi("diary")
+def diary_(nargout, *args):
+    # (no log is kept, in any run; in a LaTeX run, refused as a writer)
+    _latex_refuse("diary")
+    return NOVAL
 
 
 @_bi("format")
@@ -10101,9 +10245,7 @@ def _ws_vars(ns):
     for k, v in ns.items():
         if k.startswith("_") and not k.startswith("_k_"):
             continue
-        if isinstance(v, Undef) or type(v) is Function or type(v) is type(_math):
-            continue
-        if callable(v) and type(v) not in _CALLABLE and not isinstance(v, (Cell, Struct, Char, Str, StrArr)):
+        if isinstance(v, Undef) or type(v) is Function or foreign(v):
             continue
         out.append(k[3:] if k.startswith("_k_") else k)
     return out
@@ -10134,6 +10276,12 @@ def _ws_call(name, ns, args, nargout):
         if name == "clear" and tokens == ["global"] and "global" not in _ws_vars(ns):
             _globals.clear()
             return NOVAL
+        if name == "clear" and tokens == ["import"] and "import" not in _ws_vars(ns):
+            _base_imports.clear()
+            return NOVAL
+        if name == "clear" and tokens in (["all"], ["-all"], ["functions"], ["-functions"]):
+            # (function files and scripts are read again when next called, as after MATLAB's clear functions)
+            _path_cache.clear()
         for v in clear_select(name, tokens, _ws_vars(ns)):
             key = "_k_" + v if v in _PYKW else v
             if key in ns:
@@ -10142,6 +10290,8 @@ def _ws_call(name, ns, args, nargout):
                 except Exception:
                     ns[key] = Undef(v)
         return NOVAL
+    if name in ("which", "run"):
+        return _path_files().ws_call(name, ns, args, nargout)
     if name == "exist":
         if not args:
             raise _err("Not enough input arguments.", "MATLAB:minrhs")
@@ -11834,7 +11984,7 @@ def interp1_n(*args):
             elif t in ("linear", "nearest", "next", "previous", "pchip", "cubic", "spline", "*linear", "*cubic"):
                 methods.append({"*linear": "linear", "cubic": "pchip", "*cubic": "pchip"}.get(t, t))
             else:
-                raise _err("interp1: invalid interpolation method '%s'." % _text(a))
+                raise _err("interp1: invalid interpolation method '%s'." % _text(a), "MATLAB:interp1:InvalidMethod")
         else:
             if _numel(a) != 1 or class_(a) not in ("double", "single") or _arr(a).dtype.kind == "c":
                 # (the page's extrapolation value is a real scalar)
@@ -11868,7 +12018,7 @@ def interp1_n(*args):
         V = V.reshape((-1, 1))
     # (the sample points: one per value, at least two, distinct and not NaN, as the page requires)
     if len(X) != V.shape[0]:
-        raise _err("interp1: the sample points and the values must have the same length.")
+        raise _err("interp1: the sample points and the values must have the same length.", "MATLAB:interp1:YVectorInvalidNumRows")
     if len(X) < 2:
         raise _err("interp1: at least two sample points are required.")
     if any(t != t for t in X):
@@ -11877,7 +12027,7 @@ def interp1_n(*args):
     X = [X[k] for k in order]
     V = V[order]
     if any(X[k] == X[k + 1] for k in range(len(X) - 1)):
-        raise _err("interp1: the grid vectors must contain unique points.")
+        raise _err("interp1: the grid vectors must contain unique points.", "MATLAB:griddedInterpolant:NonUniqueCompVecsPtsErrId")
     Q = _farr(xq)
     if Q.dtype.kind == "c":
         raise _err("interp1 at complex query points is not supported in Sagebrush.")
@@ -12191,6 +12341,7 @@ def _workspace_globals_check(ns):
 
 
 def _save(mat, ns, rest, flags, args):
+    _latex_refuse("save")
     import os
     fname = rest[0] if rest else "matlab.mat"
     names = rest[1:]
@@ -12322,11 +12473,14 @@ def pwd_():
 def cd_(nargout, d=None):
     old = _os.getcwd()
     if d is not None:
+        _latex_refuse("cd")
         t = _text(d)
         try:
             _os.chdir(_os.path.expanduser(t))
         except OSError:
             raise _err("Cannot CD to %s (Name is nonexistent or not a directory)." % t, "MATLAB:cd:NonExistentFolder")
+        # (the current folder is searched first: names are looked up again)
+        _path_cache.clear()
     return Char(old) if nargout >= 1 or d is None else NOVAL
 
 
@@ -12349,6 +12503,7 @@ def isfolder_(f):
 
 @_bi("mkdir")
 def mkdir_(nargout, *args):
+    _latex_refuse("mkdir")
     path = "/".join(_text(a) for a in args)
     existed = _os.path.isdir(path)
     try:
@@ -12363,6 +12518,7 @@ def mkdir_(nargout, *args):
 
 @_bi("rmdir")
 def rmdir_(nargout, d, *opts):
+    _latex_refuse("rmdir")
     import shutil
     t = _text(d)
     try:
@@ -12385,6 +12541,7 @@ def delete_(nargout, *files):
             for o in _handles(f):
                 o.delete()
             continue
+        _latex_refuse("delete")
         t = _text(f)
         if "*" in t or "?" in t:
             d, pat = (t.rsplit("/", 1) if "/" in t else (".", t))
@@ -12447,6 +12604,9 @@ def fopen_(nargout, f, mode=None, *rest):
         return Char(h.name) if h else Char("")
     t = _text(f)
     m = _text(mode) if mode is not None else "r"
+    if _latex[0] and (set(m.lower()) - set("rtb") or "r" not in m.lower()):
+        # (in a LaTeX run only reading opens a file: 'r', with or without 't' or 'b'; any other mode is refused)
+        raise _err(_LATEX_FOPEN % m)
     # (text mode: fprintf and fgetl work on text)
     pm = m.replace("t", "").replace("b", "") or "r"
     try:
@@ -12604,9 +12764,18 @@ def _lazy_builtin(module, name):
     return Builtin(g, name)
 
 
+# (lib/_matlab_files.py, the search path's built-ins: in the lazy matlab-more chunk too)
+for _n in ("addpath", "rmpath", "genpath", "path", "pkg", "import"):
+    _B[_n] = _lazy_builtin("_matlab_files", _n)
+
+
 # (lib/_matlab_numeric_more.py: not imported by MATLAB mode's start, so in the lazy matlab-more chunk)
 for _n in ("rref", "nextpow2", "cumtrapz", "unwrap", "deg2rad", "rad2deg", "cart2pol", "pol2cart"):
     _B[_n] = _lazy_builtin("_matlab_numeric_more", _n)
+
+# (lib/_matlab_json.py: jsonencode and jsondecode, lazy too)
+for _n in ("jsonencode", "jsondecode"):
+    _B[_n] = _lazy_builtin("_matlab_json", _n)
 
 
 def _keep_single(name, data=(0,), keep=()):
@@ -12672,6 +12841,116 @@ def fresh_session():
     _warn_once.clear()
     _cell_failed[0] = False
     _cell_error[0] = None
+    _search_path.clear()
+    _base_imports.clear()
+    _path_cache.clear()
+
+
+# ---- MATLAB in a LaTeX document (the LaTeX build's runs: web/latex)
+
+# (on in a LaTeX build's run, latex_run(): the files' writers refused, an error framed with its item, figures one line)
+_latex = [False]
+# the writers' lines in a LaTeX run (the agreed texts; each writer pinned working in a .m program and in a notebook
+# cell, test/matlab-latex.test.ts)
+_LATEX_WRITERS = {
+    "save": "save writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "mkdir": "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    "rmdir": "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    "delete": "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    # (diary keeps no log in Sagebrush, in any run: its line says what it does in MATLAB, and promises nothing more)
+    "diary": "diary keeps a log file in MATLAB, and code in a LaTeX document can't write files.",
+    # (print, saveas and exportgraphics write a figure to a file: the line names the one called)
+    "print": "print writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "saveas": "saveas writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "exportgraphics": "exportgraphics writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "cd": "cd changes the current folder, and code in a LaTeX document always runs in the document's folder: use paths "
+          "relative to it.",
+}
+_LATEX_FOPEN = ("fopen with '%s' opens a file for writing, and code in a LaTeX document can't write files. fopen with "
+                "'r' still reads.")
+LATEX_FIGURE = "Figures aren't shown in LaTeX yet: this plot isn't drawn."
+# the variable an inline \matlab{expr} is evaluated into (a valid MATLAB name: it starts with a letter)
+LATEX_INLINE_VAR = "sbtx_inline__"
+_LATEX_INLINE = {
+    "cell": "\\matlab{…} can't show a cell array: it shows a number, a logical value or text.",
+    "struct": "\\matlab{…} can't show a struct: it shows a number, a logical value or text.",
+    "object": "\\matlab{…} can't show an object: it shows a number, a logical value or text.",
+    "char": "\\matlab{…} can't show a char matrix with more than one row: it shows one line of text.",
+    "empty": "\\matlab{…} can't show an empty value: it shows a number, a logical value or text.",
+    "array": "\\matlab{…} can't show an array of more than one element: it shows a number, a logical value or text.",
+}
+
+
+def _latex_refuse(name):
+    """In a LaTeX run, the writer `name` is refused with its line."""
+    if _latex[0]:
+        raise _err(_LATEX_WRITERS[name])
+
+
+def latex_run():
+    """A LaTeX build's MATLAB run begins: a new session's state (as fresh_session(), and no open files, timers,
+    figures or cached paths), the session's errors kept for cell_error() (host_shows_errors()), and the LaTeX switch
+    on: the writers (save, fopen in any mode but reading, mkdir, rmdir, delete, diary, cd, and print, saveas and
+    exportgraphics) refused with their lines, an item's
+    error framed with its name and line (report_cell), and each figure an item would show replaced by
+    LATEX_FIGURE."""
+    fresh_session()
+    _rng_states.clear()
+    _rng_seed[0] = 0.0
+    _warn_modes.update({"backtrace": "on", "verbose": "off"})
+    for f in list(_files.values()):
+        try:
+            f.fh.close()
+        except Exception:
+            pass
+    _files.clear()
+    _next_fid[0] = 3
+    _tic[0] = None
+    _path_cache.clear()
+    mod = _sys.modules.get("_matlab_plot")
+    if mod is not None:
+        mod._state["figs"] = []
+        mod._state["fig"] = None
+    _latex[0] = True
+    host_shows_errors()
+
+
+def latex_inline(ns):
+    """The text of an inline \\matlab{expr}, evaluated into LATEX_INLINE_VAR in the item's namespace ns: the variable
+    is removed (later items and `who` never see it), and its value given as disp shows it, without disp's padding: a
+    number, a logical value or text (\'\' is empty text).  Anything else raises ValueError with its line."""
+    if LATEX_INLINE_VAR not in ns:
+        raise ValueError("no inline value")
+    v = ns.pop(LATEX_INLINE_VAR)
+    c = class_(v)
+    if c in ("cell", "struct"):
+        raise ValueError(_LATEX_INLINE[c])
+    if c not in ("double", "single", "logical", "char", "string") and not c.startswith(("int", "uint")):
+        raise ValueError(_LATEX_INLINE["object"])
+    if c == "char":
+        if v.a.size == 0:
+            return ""
+        rows = v.rows()
+        if len(rows) > 1:
+            raise ValueError(_LATEX_INLINE["char"])
+        return rows[0]
+    if _numel(v) == 0:
+        raise ValueError(_LATEX_INLINE["empty"])
+    if _numel(v) > 1:
+        raise ValueError(_LATEX_INLINE["array"])
+    return _strip_links(_disp_text(v)).strip()
+
+
+def latex_statement_message(src):
+    """The line for a statement given inline (\\matlab{x = 3}), which fails to translate as an expression: naming
+    the statement and its variable when it assigns one variable."""
+    import re
+    m = re.match(r"^\s*([A-Za-z]\w*)\s*=(?!=)\s*(.+?)\s*;?\s*$", src)
+    if m:
+        stmt = "%s = %s" % (m.group(1), m.group(2))
+        return ("\\matlab{…} shows the value of an expression, not a statement: put %s in a block before it, and "
+                "write \\matlab{%s}." % (stmt, m.group(1)))
+    return "\\matlab{…} shows the value of an expression, not a statement: put the statement in a block before it."
 
 
 # ---- handle values in the rest of the runtime

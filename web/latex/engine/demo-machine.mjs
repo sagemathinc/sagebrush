@@ -4,7 +4,7 @@
 // class). Markers are plain objects; tokens are the core's integers. Each unit carries its events (unit.ev), so the D4
 // incremental layer reuses a converged suffix's events together with its units.
 // incremental-demo.mjs is core/incremental.mjs with only its two import lines changed (to this module).
-import { isCodeEnv } from "./sagetex.mjs";
+import { isCodeEnv, utf8len } from "./sagetex.mjs";
 import { Machine as CoreMachine, Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK, meaning } from "../core/machine.mjs";
 
 export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK };
@@ -13,7 +13,10 @@ export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, m
 // instead of being dropped with E-UNDEF-CS
 const ALL_KNOWN = { has: () => true };
 const VERBATIM = new Set(["verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment", "filecontents", "filecontents*",
-  "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode"]);
+  "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode",
+  "magmablock", "magmasilent"]);
+// (Magma's names, a Sagebrush extension: a document that defines one itself uses its own, and ours is off for it)
+const MAGMA_ENVS = new Set(["magmablock", "magmasilent"]);
 const MAX_VERB = 1 << 20;   // characters kept from one verbatim block
 // s03 (William's report: a self-recursive \newcommand hung the page): every machine also stops at a WALL-CLOCK bound
 // (checked at the core's own poll points, every pollEvery work units) and at an output-event bound; both stop the
@@ -62,8 +65,9 @@ export function setPyResults(p) { PY = p; }
 // snapshot, or why there is none; read from the snapshot, never fetched here. Each \input marks {k:"inref", name} (the
 // host gathers the files to read from them) and, when nothing is read, a visible note {k:"err", code:"input"}: a
 // file not found or refused, or nested deeper than INPUT_NEST (a cycle)
-let INPUT_RESOLVE = null;
-export function setInputResolver(f) { INPUT_RESOLVE = f; }
+// (and \bibliography: the host's \jobname, whose .bbl, made by BibTeX beside the .tex, is read as \input reads)
+let INPUT_RESOLVE = null, INPUT_JOB = null;
+export function setInputResolver(f, jobname = null) { INPUT_RESOLVE = f; INPUT_JOB = typeof jobname === "string" && jobname ? jobname : null; }
 const INPUT_NEST = 16;
 
 export class Machine extends CoreMachine {
@@ -107,7 +111,7 @@ export class Machine extends CoreMachine {
   //  unless a line at or after it is marked, so the highest line marked is that of the highest offset counted. Not the
   //  outer reader's place: after the main file read itself, that is behind lines already marked (astra4 POS-A4-1))
   restore(ck, files, delta = 0) {
-    super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS;
+    super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS; this.fposF = null;
     this.akH = this.srcSeen.get(this.mainPath); this.rt = 0; this.dd = 0;
     const seen = this.srcSeen.get(this.mainPath), text = files.get(this.mainPath);
     this.posFrontier = seen === undefined || typeof text !== "string" ? -1 : seen <= 0 ? 0 : text.lastIndexOf("\n", seen - 1) + 1;
@@ -117,9 +121,28 @@ export class Machine extends CoreMachine {
   //  of a half-read line) is never marked twice)
   countSrc(f, i) {
     super.countSrc(f, i);
-    if (f.path !== this.mainPath) return;
+    if (f.path !== this.mainPath) { this.fileLine(f); return; }
+    // (back in the main file after an \input: what follows is the main file's again)
+    if (this.fposF) { this.fposF = null; this.mark({ k: "fpos", file: null }); }
     const ls = f.lineStart ?? 0;
     if (ls > this.posFrontier) { this.posFrontier = ls; this.mark({ k: "pos", at: ls, ep: POS_EPOCH }); }
+  }
+  // (a line of an \input or \include file, first read: {k:"fpos", file, line} marks it, so latex check names the file and
+  //  its line for a problem found there, not the main file's \input line; once per line, the line found by its offset in
+  //  the file's own line index, made once per file)
+  fileLine(f) {
+    if (f.kind !== "file" || typeof f.text !== "string" || !this.files.has(f.path)) return;
+    const ls = f.lineStart ?? 0;
+    if (f === this.fposF && ls === this.fposLs) return;
+    this.fposF = f; this.fposLs = ls;
+    let idx = (this.nlIdx ??= new Map()).get(f.path);
+    if (!idx || idx.text !== f.text) {
+      const at = []; for (let k = f.text.indexOf("\n"); k !== -1; k = f.text.indexOf("\n", k + 1)) at.push(k);
+      idx = { text: f.text, at }; this.nlIdx.set(f.path, idx);
+    }
+    let lo = 0, hi = idx.at.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (idx.at[mid] < ls) lo = mid + 1; else hi = mid; }
+    this.mark({ k: "fpos", file: f.path, line: lo + 1 });
   }
   doInput(name) {
     name = String(name).trim();
@@ -240,13 +263,27 @@ export class Machine extends CoreMachine {
   // sequence or an active character, a blank line (a \par token: the argument ran on, as "a % b}" does), the end of
   // the input, an empty argument, or more than SAGE_MAX_CODE characters is rejected. The whole argument is consumed
   // either way, so the rest of the document reads as TeX would read it.
+  // Read straight from a file (the usual case), the code is the argument's own source text, exactly as written between
+  // its braces, its line ends joined as TeX joins them (one space): so a backslash, a ~ or a run of spaces inside it
+  // (a Python string's '$\sin(x^2)$', '\n') is Sage's to read, never TeX's. The tokens above still decide where the
+  // argument ends, as TeX reads it; where the text and the tokens could differ (a % comment, ^^ notation, an argument
+  // that came from a macro), the subset's rules above apply instead.
   readSageArg() {
     const t0 = this.skipSpacesRaw();
     if (t0 === null) return { err: "unbalanced" };
     if (isCs(t0) || catOf(t0) !== CAT.BGROUP) { this.back(t0); return { err: "nobrace" }; }
+    // (the file the brace came from: under it, a list already read to its end, as \sageplot's look past its options
+    //  leaves one, holds nothing more)
+    let k = this.stack.length - 1;
+    while (k >= 0 && this.stack[k].kind !== "file" && this.stack[k].i >= this.stack[k].toks.length) k--;
+    const f = this.stack[k];
+    const fromFile = !!f && f.kind === "file" && f.line !== null;
+    const start = fromFile ? f.lineStart + f.li : -1;
+    let same = fromFile && f.text[start - 1] === "{";
     let depth = 1, s = "", bytes = 0, err = null, name = null, n = 0;
     for (;;) {
       const t = this.nextRaw();
+      if (same && this.stack[this.stack.length - 1] !== f) same = false;
       if (t === null) return { err: "unbalanced" };
       this.charge(1);
       if (++n > this.limits.tokenList) throw new BoundError("E-BOUND-TOKENS");
@@ -265,6 +302,19 @@ export class Machine extends CoreMachine {
       bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
       if (bytes <= SAGE_MAX_CODE) s += String.fromCodePoint(cp);
     }
+    // (the closing brace read from the same file, right before where its reader now is: the text between the braces)
+    const end = same && this.stack[this.stack.length - 1] === f && f.line !== null ? f.lineStart + f.li - 1 : -1;
+    if (end >= 0 && end >= start && f.text[end] === "}") {
+      const raw = f.text.slice(start, end);
+      let plain = !raw.includes("^^");
+      for (let i = 0; plain && i < raw.length; i++) if (this.cat(raw.codePointAt(i)) === CAT.COMMENT) plain = false;
+      if (plain) {
+        const code = raw.replace(/[ \t]*\r?\n[ \t]*/g, " ");
+        if (utf8len(code) > SAGE_MAX_CODE) return { err: "toolong" };
+        if (code.trim() === "") return { err: "empty" };
+        return { code };
+      }
+    }
     if (err !== null) return { err, name };
     if (bytes > SAGE_MAX_CODE) return { err: "toolong" };
     if (s.trim() === "") return { err: "empty" };
@@ -274,14 +324,19 @@ export class Machine extends CoreMachine {
   installDemoPrimitives() {
     const P = this;
     const core = (nm) => this.A.get("m:" + nm).fn;
-    const coreBegin = core("begin"), coreEnd = core("end"), coreClass = core("documentclass"), coreLabel = core("label");
+    const coreBegin = core("begin"), coreEnd = core("end"), coreClass = core("documentclass"), coreLabel = core("label"), coreUse = core("usepackage");
     const isVerb = (env) => VERBATIM.has(env);
     // \begin / \end: the core's behaviour, plus markers (the name is read here, then pushed back for the core)
     P.prim("begin", function (t) {
       const ap = this.placeOf(), env = this.readArgString();
       // verbatim: exactly the core's branch (its reader must be the file on top of the stack, not a pushed list)
-      if (isVerb(env)) { this.charge(env.length); this.skipVerbatim(env, ap); return; }
-      if (env === "document") { this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls")); }
+      if (isVerb(env) && !(MAGMA_ENVS.has(env) && this.getS("m:" + env) !== undefined)) { this.charge(env.length); this.skipVerbatim(env, ap); return; }
+      if (env === "document") {
+        this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls"));
+        // (Magma's names the document took over: said once each, by check and the editor)
+        if (this.getS("m:magma") !== ourMagma) this.mark({ k: "own", name: "magma" });
+        for (const e of MAGMA_ENVS) if (this.getS("m:" + e) !== undefined) this.mark({ k: "own", name: e });
+      }
       else this.mark({ k: "be", env, user: this.getS("m:" + env) !== undefined });
       this.pushArg(env);
       coreBegin.call(this, t);
@@ -319,6 +374,16 @@ export class Machine extends CoreMachine {
       this.pushArg(cls);
       coreClass.call(this, t);
     });
+    // \penalty<number>: a line-breaking hint, nothing to see in the preview (BibTeX's plainnat writes "156:\penalty0 2399");
+    // the number read as TeX reads it, and dropped
+    P.prim("penalty", function () { this.scanInt(); });
+    // \usepackage: natbib's options marked (how its citations look: numbers, sort, compress), then the core's
+    P.prim("usepackage", function (t) {
+      const opt = this.readOptRaw(); const names = this.readArgString();
+      if (names.split(",").some((x) => x.trim() === "natbib")) this.mark({ k: "natbib", opt: opt ? this.toks2str(opt) : "" });
+      this.pushArg(names);
+      coreUse.call(this, t);
+    });
     // labels and references: the key is kept as a marker
     P.prim("label", function (t) {
       const key = this.readArgString();
@@ -326,9 +391,16 @@ export class Machine extends CoreMachine {
       this.pushArg(key);
       coreLabel.call(this, t);
     });
+    // (and the starred forms the packages define, their "*" read here, never taken for the key: hyperref's \ref*, \pageref*,
+    //  \autoref*, \nameref* and cleveref's \cref*, \Cref*, a reference without a link (marked star); natbib's \cite*,
+    //  \citet*, \citep*, with every author and still linked (not marked). \eqref has none, as in LaTeX)
+    const STARRED = new Set(["ref", "pageref", "autoref", "nameref", "cref", "Cref", "cite", "citep", "citet"]);
+    const CITES = new Set(["cite", "citep", "citet"]);
     for (const nm of ["ref", "eqref", "pageref", "cite", "cref", "Cref", "autoref", "citep", "citet", "nameref"]) P.prim(nm, function () {
+      const s = STARRED.has(nm) ? this.nextRaw() : null, star = s !== null && !isCs(s) && codeOf(s) === 42;
+      if (s !== null && !star) this.back(s);
       const opt = this.readOptRaw(); const key = this.readArgString();
-      this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null });
+      this.mark({ k: "ref", cmd: nm, key, opt: opt ? this.toks2str(opt) : null, ...(star && !CITES.has(nm) ? { star: true } : {}) });
     });
     // \newcommand (and \newcommand*) on a name that already has a meaning: LaTeX's "already defined" error, and the old
     // meaning stays (the core's own prim reported E-ALREADY-DEFINED but redefined anyway); the arguments are consumed
@@ -336,7 +408,8 @@ export class Machine extends CoreMachine {
     P.prim("newcommand", function (t) {
       const s0 = this.skipSpacesRaw(); const star = s0 === mkChar(CAT.OTHER, 42); if (!star && s0 !== null) this.back(s0);
       const cs = this.csArg(); if (cs === null) return;
-      if (this.getS("m:" + this.intern.name(cs)) !== undefined) {
+      // (\magma, ours, gives way to the document's: Magma is a Sagebrush extension, not a package's command)
+      if (this.getS("m:" + this.intern.name(cs)) !== undefined && !(this.intern.name(cs) === "magma" && this.getS("m:magma") === ourMagma)) {
         this.d("E-ALREADY-DEFINED"); this.readOptRaw(); this.readOptRaw(); this.readArgRaw(); this.finishAssignment();
         this.mark({ k: "err", code: "already-defined", name: this.intern.name(cs) });
         return;
@@ -354,6 +427,10 @@ export class Machine extends CoreMachine {
     // \printpythontex, what the last pyblock passed printed, by the results pass (plan r3.1)
     P.prim("py", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "py" }, this.readSageArg()), ap); });
     P.prim("printpythontex", function () { PY?.call(this); });
+    // Magma (a Sagebrush extension, William Nov 10): \magma{expr}, an item (Magma prints it); magmablock and magmasilent
+    // are code environments (VERBATIM)
+    P.prim("magma", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "magma" }, this.readSageArg()), ap); });
+    const ourMagma = this.getS("m:magma");
     P.prim("sageplot", function () {
       const ap = this.placeOf(), o1 = this.readOptRaw(); const o2 = o1 === null ? null : this.readOptRaw();
       const opts = [o1, o2].filter((o) => o !== null).map((o) => this.toks2str(o).trim());
@@ -461,6 +538,19 @@ export class Machine extends CoreMachine {
       const cps = [...(this.getS("svchars") ?? "")].map((c) => c.codePointAt(0));
       const saved = cps.map((cp) => this.cat(cp)); for (const cp of cps) this.setS("cat:" + cp, CAT.OTHER, true);
       let arg; try { arg = this.readArgRaw(); } finally { cps.forEach((cp, k) => this.setS("cat:" + cp, saved[k], true)); }
+      this.emit(t); this.pushList([mkChar(CAT.BGROUP, 123), ...arg, mkChar(CAT.EGROUP, 125)]);
+    });
+    // \bibliography{refs} reads \jobname.bbl, as LaTeX's does: the thebibliography BibTeX wrote beside the .tex, read
+    // as \input reads it (asked of the host by name, never fetched here). Without one, or before the host has read it,
+    // the command and its argument go on as before (render.mjs: the placeholder saying BibTeX is not run)
+    P.prim("bibliography", function (t) {
+      const arg = this.readArgRaw();
+      if (INPUT_JOB && INPUT_RESOLVE) {
+        const name = INPUT_JOB + ".bbl";
+        this.mark({ k: "inref", name });
+        const r = INPUT_RESOLVE(name);
+        if (r && r.key && this.files.has(r.key) && this.stack.filter((f) => f.kind === "file").length <= INPUT_NEST) { this.openFile(r.key); return; }
+      }
       this.emit(t); this.pushList([mkChar(CAT.BGROUP, 123), ...arg, mkChar(CAT.EGROUP, 125)]);
     });
     // (the classes that make "|" (and l3doc also '"') short verbatim at \begin{document})

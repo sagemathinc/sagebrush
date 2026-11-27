@@ -52,7 +52,7 @@ scripts; nothing is installed into your system Python.
 ```sh
 scripts/build-all.sh             # about 6.5 min here (pnpm's store and cargo's registry already downloaded)
 scripts/build-all.sh --no-app    # without the desktop app (no Tauri CLI or WebKitGTK needed)
-scripts/build-all.sh --no-engine # keep the committed wasm/sagebrush-engine.wasm
+scripts/build-all.sh --no-engine # fetch the five WebAssembly modules by their pins (no Rust needed)
 ```
 
 It runs these steps, in this order, and prints each one's time:
@@ -75,12 +75,18 @@ It runs these steps, in this order, and prints each one's time:
 
 Notes:
 
-- **The engine and the committed `wasm/sagebrush-engine.wasm`.** Building the engine writes over the committed
-  module, and with the pinned toolchain it's byte-identical to it. The module embeds its crates' source paths
-  (`$CARGO_HOME/registry/...`), so `build-all.sh` maps yours to CI's (`--remap-path-prefix=...=/home/runner/.cargo`,
-  as the README shows). Without that, a plain `node scripts/build-engine.mjs` differs by a few bytes: the same
-  engine, but `git diff` shows it. `git checkout -- wasm/` puts the committed one back. CI's `engine-wasm` job
-  checks that a fresh build equals the committed module (an error on master, a warning on a pull request).
+- **The WebAssembly modules and `wasm/pins.json`.** The five modules in `wasm/` aren't in git: `wasm/pins.json`
+  names each one's sha256 and length, and `node scripts/wasm-fetch.mjs` (or `pnpm wasm`) puts them there from
+  `https://get.sagebrush.space/wasm/sha256/`, through a cache in `~/.cache/sagebrush/wasm`, checking every byte
+  (design/wasm-artifacts.md). Run it after a clone, and after switching to a branch with other pins.
+  Building the engine writes over them, and with the pinned toolchain the build matches its pins. The modules
+  embed their crates' source paths (`$CARGO_HOME/registry/...`), so `build-all.sh` maps yours to CI's
+  (`--remap-path-prefix=...=/home/runner/.cargo`, as the README shows). Without that, a plain
+  `node scripts/build-engine.mjs` differs by a few bytes: the same engine, but not its pin.
+  `node scripts/wasm-fetch.mjs --force` puts the pinned ones back, and `node scripts/wasm-pins.mjs --check` says
+  which you have. A change to the engine commits its new pins (`node scripts/wasm-pins.mjs --from-local` after the
+  mapped build, or the lines its pull request's CI prints). CI's `engine-wasm` job checks that a fresh build matches
+  the pins (an error on master, a warning on a pull request).
   `test-all.sh` runs that job as CI does, without the mapping, so locally it only warns.
 - **The atlas data** (`web/dist/atlas/data`, about 50 MB of JSON) isn't built by default: `bun web/build.ts` says
   it's missing. It's rebuilt from the engine as [web/atlas/README.md](web/atlas/README.md) describes, and needs the
@@ -106,37 +112,40 @@ would then wait for an engine that was never deployed. Each job keeps CI's time 
 is one budget for all its steps, even past a step marked continue-on-error. What a step leaves running carries on
 into the job's later steps, as on CI, and is ended (found by ancestry) before the next job. If something won't end,
 the whole run stops there, even with `--keep-going`, and leaves everything as it is for inspection. At the end, the
-committed engine is put back only over this run's own engine-wasm build; any other change to it is left and reported.
+pinned engine is put back (`wasm-fetch.mjs --force`) only over this run's own engine-wasm build; any other change to it
+is left and reported.
 One known difference from CI: when a step runs past its own `timeout-minutes`, everything still running under the
 run is ended, including what earlier steps of the same job left in the background; on CI only that step's
 processes go. A later `continue-on-error` step that relied on such a background process won't have it here.
 
 `build-all.sh` first isn't needed: each job builds what it needs, as in CI. The jobs, in the order they run, with
-their times here:
+their times here, measured before CI's jobs were regrouped on Nov 22 2026 (`ci.yml` now also has the Linux jobs
+`sprig`, `web-export`, `web-lookalike`, `web-sync-ops`, `web-runner-sync`, `web-artifacts`, `mpmath-suite`,
+`engine-clippy`, `examples` and `examples-census`, which this table doesn't list yet):
 
 | job | what it runs | time |
 |---|---|---|
 | `changes` | the tier a change needs; core imports no server code | 0.0 min |
 | `census` | the limits census and the limits sweep's manifest | 0.3 min |
-| `node-tests` (8 shards) | the Node tests (`dist/test`, `target`) | 24.0 min |
-| `language-node` (6 shards) | the Magma and MATLAB case tests under Node | 23.2 min |
+| `node-tests` (2 shards) | the Node tests (`dist/test`, `target`) | 24.0 min |
+| `language-node` (2 shards) | the Magma and MATLAB case tests under Node | 23.2 min |
 | `checks` | security, bundles, generated files and web assets; the size record; the npm package metrics; Mermaid | 3.9 min |
 | `web-sync` | sharing, sync, the engines and the PWA, in Chrome | 22.2 min |
 | `web-runner` | the runner, the workspace and the board frame, in Chrome | 11.8 min (8 cores; below) |
 | `interrupt-matrix` | Stop and Ctrl-C across hosts and modes (CI's set) | 6.5 min |
-| `web-browser` (5 groups) | the notebook's and the boards' browser suites | 40.6 min |
+| `web-browser` (board, notebook, latex) | the notebook's and the boards' browser suites | 40.6 min |
 | `conformance` (Node, Deno, Bun) | the catalog's examples and coverage | 1.5 min |
 | `modes` (4 groups) | the Sage, Magma and MATLAB, numeric and other modes | 7.3 min |
 | `engine-rust` | `cargo test` over the engine's workspace | 5.6 min |
 | `engine-unsafe-sweep` | the unsafe boundary's compiler sweep | 0.4 min |
 | `engine-wasm` | a fresh WebAssembly engine, built and smoke-tested | 1.3 min |
-| `engine-node` (8 shards) | the Node tests on that fresh engine | 24.8 min |
-| `engine-language` (6 shards) | the Magma and MATLAB tests on it | 24.2 min |
+| `engine-node` (2 shards) | the Node tests on that fresh engine | 24.8 min |
+| `engine-language` (2 shards) | the Magma and MATLAB tests on it | 24.2 min |
 | `engine-modes` | Sage, calculus, Magma and MATLAB on it | 4.2 min |
 | `engine-cpython` | the CPython extension, audit regressions, MCP and Sage | 4.3 min (warm; below) |
 
 The engine jobs run last: `engine-wasm` builds a fresh engine, and the `engine-*` jobs after it test that engine,
-as in CI. The committed engine is restored at the end.
+as in CI. The pinned engine is restored at the end.
 
 The times were measured on the 16-core VM, except `web-runner`'s, which was measured alone on an 8-core VM. In the
 full run its step stopped at a failure (since fixed: the first paragraph of this section), so the time there
@@ -153,7 +162,12 @@ in `wasm/`, not a fresh one.
 
 - `size-base` and `size-gate`: the growth gate, which needs the base's size record from GitHub;
 - `ci`: the aggregate of the others;
+- `wasm-modules` and `wasm-publish`: the modules handed to the other jobs as the run's artifact, and publishing them to
+  the release bucket (here every job reads `wasm/` as it is);
+- `export-controls` and `lookalike-controls`, the long tier's jobs: run them with `scripts/test-all.sh --long`;
 - `webkit`: it installs Playwright's WebKit with `sudo apt`. Run it with `scripts/test-all.sh --webkit` where that's fine;
+- `engine-nd-neon` (macOS on Apple silicon: the NEON kernel of `engine/nd`) and `windows-smoke` (Windows): they
+  need those machines;
 - the other workflows:
   - `app.yml`: the desktop app on macOS, Windows and Linux, with its self-test;
   - `pypi.yml`: the wheels on five platforms, and Python 3.10 and 3.11;
@@ -172,3 +186,30 @@ python3 web/serve.py 8765                          # serve web/dist on http://12
 (cd engine && cargo test -p sagebrush-<crate>)     # one engine crate
 scripts/test-all.sh --only checks                  # the bundle, size and generated-file checks
 ```
+
+## Before sending a head: the precheck
+
+```sh
+node scripts/precheck.mjs            # CI's quick gates and the tests the branch touches: a few minutes
+node scripts/precheck.mjs --quick    # only the gates that need no build: about a minute
+node scripts/precheck.mjs --full     # also the long census suites (limits, catalog)
+```
+
+It runs, with ci.yml's own commands, the checks a change most often fails on CI: the limits census, the unsafe
+inventory, test discovery, the generated files and docs index (`sync-python-package.sh --check`), the Core API
+surface, the interrupt census and the rest of the `checks` job's quick gates, and every test file the branch
+touches. It runs them all and reports every failure at once. An author runs it before sending a head, and a
+reviewer runs it first. A track gets it with its pull of master, which brings the workflow lines it checks
+against; before that, a copy of `scripts/precheck.mjs` and `scripts/engine-cache.mjs` runs there and skips the gates
+the track's own CI doesn't have yet. When CI fails on a gate this could have run, add the gate to `STEPS` in
+`scripts/precheck.mjs` with ci.yml's command: `scripts/test-precheck.mjs` holds each such step to a line of a
+workflow.
+
+Its engine is the tree's own: `node scripts/engine-cache.mjs` fetches the pinned modules when the engine's source
+is master's, and otherwise copies the build of that exact source (engine/ and its build scripts, committed or
+not) from a cache shared by every checkout on the machine, building it only the first time.
+`node scripts/engine-cache.mjs --check` fails when `wasm/` is not this tree's engine, so a test never runs a stale
+or borrowed module.
+
+A meter review breaks every charge site in turn, with `scripts/meter-mutants.py`: the standard mutants (charge
+before the work, a dropped count, a dropped poll, a dropped preflight) are in its header.

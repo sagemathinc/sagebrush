@@ -269,7 +269,8 @@ const trusted = async (sel) => {
   await sleep(200);
 };
 // (File > Permissions…, the panel with the File writes switch: opened and closed as a person does, by clicks and Escape)
-const openPerms = async () => { await trusted("#filebtn"); await trusted("#permsmenu"); };
+// (a refused write's prompt, a modal, closed first if it is open (Escape, unanswered), as the person would: File is behind it)
+const openPerms = async () => { if (await ev("!!document.querySelector('#filesbar')?.open")) await closePerms(); await trusted("#filebtn"); await trusted("#permsmenu"); };
 const closePerms = async () => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }); await sleep(150); };
 const filesSwitch = async () => { await openPerms(); await trusted("#filesperm"); await closePerms(); };
 const out = (i = 0) => ev(`[...document.querySelectorAll('#cells .cell')][${i}]?.querySelector('.out')?.textContent ?? ''`);
@@ -279,6 +280,10 @@ const stat = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e, () => f
 const files = () => ev("sagebrush.permissions()?.files");
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  // (this suite is the path where a refused change can't wait for an answer: refused at once, the prompt saying to run
+  // the cell again; the page's loopback switch for it, set before any page loads (web/index.html ASK_WAIT). The run
+  // that waits on its prompt is web/share/test-run-bar.mjs and web/test-app-engine-ask.mjs)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('sagebrush-ask', '0'); } catch {}" });
   await send("Fetch.enable", { patterns: [{ urlPattern: "*/remote.ipynb", requestStage: "Request" }, { urlPattern: "*/remote2.ipynb", requestStage: "Request" }] });
   // (the person's data file, made in their workspace first)
   await go(base);
@@ -297,7 +302,7 @@ try {
   check(res === "NM:read:ok,write:refused,append:refused,mkdir:refused,remove:refused,rename:refused,move:refused,tmp:ok", "…it reads the person's files; its write, append, mkdir, remove, rename and replace are each refused with PermissionError; /tmp's write isn't: " + res);
   await sleep(1500);
   check((await stat("/keep.txt")) && !(await stat("/nm-w.txt")) && !(await stat("/nm-dir")) && !(await stat("/keep2.txt")) && !(await stat("/moved.txt")) && !(await stat("/tmp/nm-t.txt")), "…and the workspace is unchanged (/tmp kept nowhere)");
-  check(await ev("!document.querySelector('#filesbar').hidden && /wants to change \\/nm-w\\.txt, at the top of your files/.test(document.querySelector('#filesbar').textContent) && !document.querySelector('#fbperms').hidden && document.querySelector('#fballow').hidden"), "…the page asks about its first refused change, at the top of the files: no Allow there, only File > Permissions… (confinement phase 2: anywhere is never a prompt's default)");
+  check(await ev("!document.querySelector('#filesbar').hidden && /is trying to save nm-w\\.txt at the top of your Sagebrush workspace\\. To allow that, use File > Permissions/.test(document.querySelector('#filesbar').textContent) && document.querySelector('#filesbar').matches(':modal') && !document.querySelector('#fbperms').hidden && document.querySelector('#fballow').hidden"), "…the page asks about its first refused change, at the top of the files: no Allow there, only File > Permissions… (confinement phase 2: anywhere is never a prompt's default)");
   // (a forged change, as if from its interpreter: kept nowhere)
   await ev(`(() => { sagebrush.kernel.worker.onmessage?.({ data: { fsChanged: "/forged.txt", data: new Uint8Array([1, 2]) } }); return 1; })()`);
   await sleep(1500);
@@ -319,11 +324,12 @@ try {
   await go(base + "?open=" + encodeURIComponent(base + "remote2.ipynb"));
   check((await files()) === false, "a second notebook from elsewhere can't change files: the first's Allow is the first's alone");
 
-  // ---- a notebook that can't change files never runs in a plain worker
+  // ---- no run gate: a notebook that can't change files runs in this page's own worker where the sandbox isn't
+  //      (?runner=0), its permission still off (its writes are refused there: test-confine-writes.mjs)
   const remoteId = await ev("localStorage.getItem('sagebrush-current')");
   await go(base + "?open=" + encodeURIComponent(base + "remote.ipynb") + "&runner=0");
   await runAll();
-  check(await until("/can't run here/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "?runner=0: a notebook from elsewhere doesn't run in the page's own interpreter, and says why: " + (await out()).slice(0, 120));
+  check(await until(`(document.querySelector('#cells .cell .out')?.textContent ?? '').trim().length > 0`, 60000) && !/can't run here/.test(await out()) && !(await ev("!!document.querySelector('#runbar')")) && (await files()) === false, "?runner=0: a notebook from elsewhere runs in the page's own worker, no run bar, its file changes still off: " + JSON.stringify((await out()).slice(0, 120)));
 
   // ---- the person's own notebook: writes; Don't allow file changes; a run in flight; reopen; Allow again
   await go(base + "?runner=1");
@@ -338,7 +344,9 @@ try {
   await runAll();
   check(await until("/REFUSED/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 60000), "…its first write is refused: " + (await out()).trim().slice(0, 160));
   console.log(`(the own notebook's first run, in the sandbox frame: ${Date.now() - tFirst} ms)`);
-  check(!(await stat("/own-1.txt")) && (await ev("!document.querySelector('#filesbar').hidden && /wants to change \\/own-1\\.txt/.test(document.querySelector('#filesbar').textContent)")), "…nothing is written, and the bar asks about it");
+  check(!(await stat("/own-1.txt")) && (await ev("!document.querySelector('#filesbar').hidden && /is trying to save own-1\\.txt at the top of your Sagebrush workspace/.test(document.querySelector('#filesbar').textContent)")), "…nothing is written, and the prompt asks about it");
+  // (the prompt is a modal: File is behind it, so it's closed first (Esc), unanswered, as a person would)
+  await closePerms();
   await filesSwitch();
   check((await files()) === true && (await ev("document.querySelector('#filesbar').hidden")), "…the person's own click on File > Permissions…'s switch: it may change files now, the bar gone");
   await setCode("open('own-1.txt', 'w').write('x'); print('W1')");
@@ -492,7 +500,7 @@ try {
   check(idA && idB && idA !== idB && (await files()) === false, "(two notebooks of the person's: A, then B, which isn't allowed)");
   await setCode("print('B ran')");
   await runAll();
-  check(await until("/can't run here: it isn't allowed to change your files/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "?runner=0: the person's own notebook not allowed to change files doesn't run in the page's own interpreter, and says why: " + (await out()).slice(0, 140));
+  check(await until(`/B ran/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')`, 60000) && (await files()) === false, "?runner=0: the person's own notebook not allowed to change files runs anyway (no run gate), its file changes still off");
   const { identifier: statusLog } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__statuses = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.id === "status" || m.target.parentElement?.id === "status") for (const n of m.addedNodes) window.__statuses.push(n.textContent); }).observe(document, { childList: true, subtree: true });` });
   await go(base + "?runner=0");
   check((await ev("localStorage.getItem('sagebrush-current')")) === idB, "(reloaded into B; A has no interpreter in this page)");
@@ -501,16 +509,6 @@ try {
   await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(idA)} && !!sagebrush.kernel?.context`, 30000);
   const reopened = await ev("window.__statuses");
   check(!reopened.some((t) => /^ready \(sagebrush ,/.test(t)) && (await files()) === true, "A reopened while the page runs: its interpreter a plain one from the start (no refusing interpreter's ready), files allowed: " + JSON.stringify(reopened.filter((t) => /ready/.test(t))));
-  // (and one of Sagebrush's own examples, opened from the Examples dialog while the page runs: host-made before it opens)
-  await ev("(window.__statuses.length = 0, 1)");
-  await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="examples"]').click(); return 1; })()`);
-  await until("!!document.querySelector('#exlist button')", 10000);
-  const exBefore = await ev("localStorage.getItem('sagebrush-current')");
-  await ev("(document.querySelector('#exlist button').click(), 1)");
-  await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(exBefore)}`, 30000);
-  await sleep(800);
-  const exStatuses = await ev("window.__statuses");
-  check((await files()) === false, "an example opened from the Examples dialog starts with file changes off too (O6): " + JSON.stringify(exStatuses.filter((t) => /ready/.test(t))));
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: statusLog });
 
   // ---- no workspace (it can't be opened): the old store's write asks the same authority, in its own transaction

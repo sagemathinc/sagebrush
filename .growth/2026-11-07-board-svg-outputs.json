@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "board render draws code's stored outputs and in-file pictures in the SVG (Codex friction recheck P9a, part 1): web/board/svg.ts draws a code item's stored preview (text as code lines, stderr in the error color, its one raster picture as an <image>, when it was computed) and a picture whose source is a raster data: URL as an <image> within the board's pixel budget (an https: one stays a box); src/board-cli.ts says how to store previews, naming the files (previewsPath, shared with board run). Growth is svg.ts in the CLI and in the examples gallery's bundle. Figures: CI-order size records (bun 1.4.4) of the probe merge onto master 7ceef17f: pyjs +3457, site/examples +504 (after the COPY revision); markers with small margins.",
- "bytes": {
-  "cli/pyjs.cjs": 3500,
-  "site/examples": 540
- }
-}

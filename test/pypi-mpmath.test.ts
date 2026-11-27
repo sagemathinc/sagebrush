@@ -24,7 +24,8 @@ test("mpmath_zeta_cases.out is what CPython 3.14.10 prints", (t) => {
   if (v !== "3.14.10") return t.skip(`python3 is ${v}, not the recording's 3.14.10`);
   const live = execFileSync("python3", [CASES], {
     encoding: "utf8",
-    env: { ...process.env, PYTHONPATH: join(ROOT, "packages/pypi-mpmath/py") },
+    // (CPython runs the overlaid package on its python backend: the default, the core, is only Sagebrush's)
+    env: { ...process.env, PYTHONPATH: join(ROOT, "packages/pypi-mpmath/py"), SAGEBRUSH_MPMATH_BACKEND: "python" },
   });
   assert.equal(live, readFileSync(OUT, "utf8"));
 });
@@ -46,7 +47,8 @@ test("bench/mpmath runs the very suite pypi-tests/mpmath pins, over the shipped 
   assert.ok(new RegExp(`pip install [^\\n]*\\bmpmath==${src.version.replace(/\./g, "\\.")}\\b`).test(ci), `CI installs mpmath==${src.version}`);
   const numeric = /numeric\)\n([\s\S]*?);;/.exec(ci);
   assert.ok(numeric, "CI has the numeric mode group");
-  assert.match(numeric![1], /^\s*python3 bench\/mpmath\/compare\.py -j "\$SAGEBRUSH_CPUS"\s*$/m, "the numeric group runs compare.py, every module");
+  // (in the modes job's one step, each command through its group helper: the CI capacity ruling, Nov 22 2026)
+  assert.match(numeric![1], /^\s*group mpmath-compare python3 bench\/mpmath\/compare\.py -j "\$SAGEBRUSH_CPUS" \|\| rc=\$\?\s*$/m, "the numeric group runs compare.py, every module");
   // (compare.py: the installed mpmath's tests, every test_*.py, discovered, not listed)
   const cmp = readFileSync(join(ROOT, "bench/mpmath/compare.py"), "utf8");
   assert.ok(cmp.includes('shutil.copytree(os.path.dirname(mpmath.__file__), os.path.join(work, "mpmath")'), "compare.py runs the installed mpmath");

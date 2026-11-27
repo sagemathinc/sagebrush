@@ -1,15 +1,95 @@
 {
  "format": 1,
  "cases": {
+  "rill-tests/access/test_1.R#as-complex-chr-form-refused": {
+   "class": "not-implemented",
+   "reason": "complex syntax in a string (as.complex(\"1+2i\")), deferred by A1.2's scope (A1.6)",
+   "sha256": "8ef052b2eab4a333cd9c3df6165052164bc2fc52f38724440cb4bdfc8541f984"
+  },
+  "rill-tests/access/test_1.R#as-integer-cplx-refused": {
+   "class": "not-implemented",
+   "reason": "complex to integer, double or logical and its warning, deferred by A1.2's scope (A1.6)",
+   "sha256": "bea53114dfa283e7a94da5837b147b72ce9dd4f35c039d938f5ecfb7ca330e7f"
+  },
+  "rill-tests/access/test_1.R#as-raw-refused": {
+   "class": "not-implemented",
+   "reason": "raw vectors, deferred by A1.2's scope (A1.6)",
+   "sha256": "f074f134713781323612b037e5f78b77ddf932bcb106c1ac4c91f572632dbaad"
+  },
+  "rill-tests/access/test_1.R#as-raw-refused-first": {
+   "class": "not-implemented",
+   "reason": "raw vectors, refused before any argument runs; deferred by A1.2's scope (A1.6)",
+   "sha256": "f074f134713781323612b037e5f78b77ddf932bcb106c1ac4c91f572632dbaad"
+  },
+  "rill-tests/access/test_1.R#cat-fill-refused": {
+   "class": "not-implemented",
+   "reason": "cat()'s fill, labels and append, deferred by A1.2's scope (A1.6)",
+   "sha256": "0b2eb88e502b9ae31c69bfe17ccc009ed0f491ded86ad781aa1a03e2509704a0"
+  },
+  "rill-tests/access/test_1.R#complex-chr-part-refused": {
+   "class": "not-implemented",
+   "reason": "complex() of character or complex parts, deferred by A1.2's scope (A1.6)",
+   "sha256": "018f9f2215190ab10341e86db0bd46e6f3fcdcb91ac656ee39a5834d750617e1"
+  },
+  "rill-tests/access/test_1.R#complex-negative-zero-deparse": {
+   "class": "not-implemented",
+   "reason": "deparse() as an R function, a later builtin (A1.6); Rill's internal deparse already gives 1+0i",
+   "sha256": "7afb77ac18ef76789ac9ca7156de24293469b9499af150134d70f997ca6bc955"
+  },
+  "rill-tests/access/test_1.R#complex-negative-zero-dput": {
+   "class": "not-implemented",
+   "reason": "dput() as an R function, a later builtin (A1.6); Rill's internal deparse gives the same text (pinned in test/rill.test.ts)",
+   "sha256": "14da7fd28315c7387d66dc6b6843859b96473f8702596ad53aa6db3f9d8071ce"
+  },
+  "rill-tests/access/test_1.R#complex-negative-zero-dput-one": {
+   "class": "not-implemented",
+   "reason": "dput() as an R function, a later builtin (A1.6); Rill's internal deparse gives the same text (pinned in test/rill.test.ts)",
+   "sha256": "f739167060cb9d137a8525d14651eb17536e9b5ac4db296be2ab9cd368ed176e"
+  },
+  "rill-tests/access/test_1.R#index-cplx-refused": {
+   "class": "not-implemented",
+   "reason": "a complex index and its error, deferred by A1.2's scope (A1.6)",
+   "sha256": "a411a304c5fcef7474ab5324af0d796fb3b4de4e9ed3952afdd12f158a02c29c"
+  },
+  "rill-tests/access/test_1.R#options-unnamed-refused-first": {
+   "class": "not-implemented",
+   "reason": "options() with an unnamed argument, refused before any argument runs (A1.6)",
+   "sha256": "a43577c55c892d0e7464a78ff9e9d1e7d8558cdcf057153f058568c3070d20f7"
+  },
+  "rill-tests/access/test_1.R#options-width-refused": {
+   "class": "not-implemented",
+   "reason": "options other than digits and scipen, deferred by A1.2's scope (A1.6)",
+   "sha256": "13ee84633e8746d0eba3ce186d95c3962f011ec4d4e1249fdedea98b921b0fa6"
+  },
+  "rill-tests/access/test_1.R#options-width-refused-first": {
+   "class": "not-implemented",
+   "reason": "options other than digits and scipen, refused before any argument runs (A1.6)",
+   "sha256": "13ee84633e8746d0eba3ce186d95c3962f011ec4d4e1249fdedea98b921b0fa6"
+  },
+  "rill-tests/access/test_1.R#print-missing-x-first": {
+   "class": "not-implemented",
+   "reason": "print() without x needs print's S3 dispatch (print.default evaluates digits = first), refused before any argument runs (A1.3)",
+   "sha256": "d969b592d340914b8b70908009cb6dc4005390307afe107b8af4958d70702864"
+  },
+  "rill-tests/access/test_1.R#raw-refused": {
+   "class": "not-implemented",
+   "reason": "raw vectors, deferred by A1.2's scope (A1.6)",
+   "sha256": "f074f134713781323612b037e5f78b77ddf932bcb106c1ac4c91f572632dbaad"
+  },
+  "rill-tests/access/test_1.R#raw-refused-first": {
+   "class": "not-implemented",
+   "reason": "raw vectors, refused before any argument runs; deferred by A1.2's scope (A1.6)",
+   "sha256": "f074f134713781323612b037e5f78b77ddf932bcb106c1ac4c91f572632dbaad"
+  },
+  "rill-tests/args/test_1.R#options-old-visible": {
+   "class": "not-implemented",
+   "reason": "lists: options()'s value printed (A1.6)",
+   "sha256": "e823d2a0fb9447f7f0a0f25a57ba8284a20ce6cb553f52051adfa705e96208d6"
+  },
   "rill-tests/core/test_1.R#colon-chr-bad": {
    "class": "not-implemented",
    "reason": "warnings reported after an error, 'In addition:' (A1.4)",
    "sha256": "0e1ace60880761d57c6bdaa37f08c8f4675223cf4f19bfc22b399ca7a04c0cc7"
-  },
-  "rill-tests/core/test_1.R#recycle-zero": {
-   "class": "not-implemented",
-   "reason": "the builtin integer (A1.2)",
-   "sha256": "cb3ea07f092f7e19afcb88239f6589a47b5d5d8175749572b508d4b4e32dec37"
   },
   "rill-tests/core/test_2.R#cat-file-effect": {
    "class": "not-implemented",
@@ -76,11 +156,6 @@
    "reason": "closures and control flow (A1.3)",
    "sha256": "632f469c0c1a07f1b4d2d66188963ed0ce484684d0e06b43cceff74c5f85ee0b"
   },
-  "rill-tests/parse/test_1.R#newline-in-bracket": {
-   "class": "not-implemented",
-   "reason": "the builtin [ (A1.2)",
-   "sha256": "fbe73106d34abacf0c38f89e6671d3d90841b8a544d0ec071ffb071c803c848f"
-  },
   "rill-tests/parse/test_1.R#ns-double-colon": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",
@@ -91,35 +166,25 @@
    "reason": "closures and control flow (A1.3)",
    "sha256": "632f469c0c1a07f1b4d2d66188963ed0ce484684d0e06b43cceff74c5f85ee0b"
   },
-  "rill-tests/parse/test_1.R#num-imaginary": {
-   "class": "not-implemented",
-   "reason": "complex numbers (A1.2)",
-   "sha256": "e823d2a0fb9447f7f0a0f25a57ba8284a20ce6cb553f52051adfa705e96208d6"
-  },
   "rill-tests/parse/test_1.R#pipe": {
    "class": "not-implemented",
-   "reason": "the builtin sum (A1.2)",
+   "reason": "the builtins sum and sqrt (A1.2b)",
    "sha256": "0dc3a6e900c55a349fb849ee62f1bd143202c28746033ace6ee7f35c01800045"
   },
   "rill-tests/parse/test_1.R#pipe-placeholder": {
    "class": "not-implemented",
-   "reason": "the builtin rep (A1.2)",
+   "reason": "the builtin rep (A1.2b)",
    "sha256": "947c6963a4811915e950d8e0947ccc04157574ba0922a73f4790caa82924a096"
   },
   "rill-tests/parse/test_1.R#prec-in": {
    "class": "not-implemented",
-   "reason": "the builtin %in% (A1.2)",
+   "reason": "the builtin %in% (A1.2b)",
    "sha256": "fbebb689e42813ab26855f666a06f94dd95f05fdf36005b70cefc2ba9c152376"
   },
   "rill-tests/parse/test_2.R#tok-arg-name-backtick": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",
    "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
-  },
-  "rill-tests/parse/test_2.R#tok-arg-name-null": {
-   "class": "not-implemented",
-   "reason": "names (A1.2)",
-   "sha256": "fa42452c370d6a276d98bd1a02e18cc43e195f0d5218bd09bb59ef17bed2a995"
   },
   "rill-tests/parse/test_2.R#tok-arg-name-string": {
    "class": "not-implemented",
@@ -218,12 +283,12 @@
   },
   "rill-tests/parse/test_3.R#tok-placeholder-pipe-extract": {
    "class": "not-implemented",
-   "reason": "the builtin $ (A1.2)",
-   "sha256": "f21fb219bfc415e19de6ba19593cf92500a4129c1a6f37a6cb8a7d58dd5cf58a"
+   "reason": "lists: list() and $ on a list (A1.6)",
+   "sha256": "abd75ca23f48987bae7fe988510f28b5f850412aa2a6df2fac7f5506c30fa484"
   },
   "rill-tests/parse/test_3.R#tok-string-bell-etc": {
    "class": "not-implemented",
-   "reason": "the builtin nchar (A1.2)",
+   "reason": "the builtin nchar (A1.2b)",
    "sha256": "c7927cd0e24502a886b7dbad93e4716a60e76962825712483d39e5e5503f56e1"
   },
   "rill-tests/parse/test_3.R#tok-unmatched-close-bb": {

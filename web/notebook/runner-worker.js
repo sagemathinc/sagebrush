@@ -107,13 +107,14 @@ export function parsePkgsetIndex(bytes) {
 export class RunnerWorker {
   /**
    * @param {string} src the runner page's URL
-   * @param {{name?: string, fallback?: () => any, files?: Record<string, ArrayBuffer>}} [o]
+   * @param {{name?: string, fallback?: () => any, files?: Record<string, ArrayBuffer>, notRun?: string}} [o]
    *   the worker's name (TimeTravel replay's parameters); a plain worker to use
    *   if the frame doesn't answer; or, with src null, the engine's files
    *   themselves (sagebrush-worker.js, sagebrush-engine.wasm and the
-   *   library's chunks, lib/...), for files mode
+   *   library's chunks, lib/...), for files mode; and what a run held when
+   *   the fallback is given says it wasn't run (NOT_RUN unless given)
    */
-  constructor(src, { name = "", fallback, files } = {}) {
+  constructor(src, { name = "", fallback, files, notRun = NOT_RUN } = {}) {
     this.onmessage = null;
     this.onerror = null;
     this.queue = [];
@@ -148,7 +149,7 @@ export class RunnerWorker {
       for (const m of held) {
         const say = (d) => this.onmessage?.({ data: d });
         if (m.code !== undefined || m.interact !== undefined) {
-          say({ id: m.id, stream: "stderr", text: NOT_RUN });
+          say({ id: m.id, stream: "stderr", text: notRun });
           say({ id: m.id, done: true, error: true, ms: 0 });
         } else say({ id: m.id, skipped: true });
       }
@@ -181,7 +182,7 @@ export class RunnerWorker {
         if (this.inner) return;
         clearTimeout(this.timer);
         this.port = ch.port1;
-        for (const m of this.queue) this.port.postMessage(m);
+        for (const m of this.queue) this.port.postMessage(m, this.transfers?.get(m) ?? []);
         if (!fallback) this.queue = [];
         else if (this.queue.length) this.watch();
         return;
@@ -261,14 +262,17 @@ export class RunnerWorker {
     if (this.closed) return;
     this.port?.postMessage({ runnerFetched: id, url, bytes }, bytes ? [bytes] : []);
   }
-  postMessage(m) {
+  // (`transfer`: buffers moved with the message, kept with it while it waits for the frame; never with a fallback, which
+  // may need the message again)
+  postMessage(m, transfer = []) {
     if (this.inner) return this.inner.postMessage(m);
+    if (this.keep) transfer = [];
     // (a shared collection's files: the interpreter may ask for these)
     if (m && Array.isArray(m.mount)) for (const [, r] of m.mount) if (r && typeof r.url === "string") this.mounted.add(new URL(r.url).href);
     // (the package set this interpreter uses, one for its life as in the worker: its index the page may fetch)
     if (m && /^[0-9a-f]{64}$/.test(m.pkgset) && this.base && !this.pkgset) this.indexes.set(new URL(`pkgset/${(this.pkgset = m.pkgset)}.json`, this.base).href, [m.pkgset, parsePkgsetIndex]);
-    if (!this.port) return void this.queue.push(m);
-    this.port.postMessage(m);
+    if (!this.port) { if (transfer.length) (this.transfers ??= new Map()).set(m, transfer); return void this.queue.push(m); }
+    this.port.postMessage(m, transfer);
     if (!this.alive && this.keep) {
       // (kept for a fallback, until the interpreter answers)
       this.queue.push(m);
@@ -279,6 +283,11 @@ export class RunnerWorker {
   get interrupt() {
     if (this.inner) return this.inner.interrupt;
     return this.interruptible ? (id) => this.postMessage({ runnerInterrupt: id }) : undefined;
+  }
+  /** Ask the run in flight for the output it has written (the flush request), if the frame has the flag. */
+  get flush() {
+    if (this.inner) return this.inner.flush;
+    return this.interruptible ? () => this.postMessage({ runnerFlush: 1 }) : undefined;
   }
   terminate() {
     this.closed = true;

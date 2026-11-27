@@ -1,0 +1,2 @@
+# A curated package's overlay (scripts/pypi-import.mjs) is a unified diff: its blank context lines are a single space
+packages/pypi-*/overlay.patch -whitespace

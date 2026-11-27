@@ -14,8 +14,8 @@ worker (`web/shell/worker-boot.js`), which can't reach the network or eval.
 - shell: `echo printf pwd basename dirname env true false seq`
 
 Every other command answers 127, "command not found". That includes network
-commands (`curl`, `wget`), runtimes (`python3`, `node`, `js-exec`,
-`sqlite3`), and whatever §8 defers (`tee`, `xargs`, `tar`, `gzip`, `ln`,
+commands (`curl`, `wget`), runtimes (`node`, `js-exec`, `sqlite3`, and `python3`
+unless the page registers the Terminal commands below), and whatever §8 defers (`tee`, `xargs`, `tar`, `gzip`, `ln`,
 `split`, `rg`, `yq`, ...).
 
 **The interpreter's builtins.** These are part of the shell itself, so they
@@ -75,13 +75,14 @@ What differs from bash, besides just-bash's own differences (D1–D8,
   finished `bash -c` keeps nothing open.
 - **`mv` and `cp` onto an existing file are refused** ("File exists"):
   `mv -f` and copying over a file are deferred.
-- **`cp -r` of a folder that holds a notebook or board copies nothing.**
-  The shell changes data files and folders only; a document is copied in
-  the file browser.
+- **`cp` copies a notebook or board as the file browser's Duplicate does**,
+  never as bytes; its copy must keep its kind (`.ipynb`, `.board.json`). The
+  shell never writes into one.
 - **A path outside the grant looks missing.** Every command but `rm` says
   "No such file or directory" for it, since asking whether it exists tells
   nothing. `rm` says the host's refusal.
 - **`rm` is silent**, as GNU rm is, though what it removes goes to Trash.
+- **`more` and `less` are the Terminal's, not the shell's.** `more` and `less` page output in two forms only: `CMD | more` (or `| less`) at the end of a line, and `more FILE` (or `less FILE`) typed on its own. Any other use, such as with options, inside `( )`, in a script or after `xargs`, isn't supported yet and says "command not found".
 
 ## Terminal commands (0.4.0, host level 4)
 

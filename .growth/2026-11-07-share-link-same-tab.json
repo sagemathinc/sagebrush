@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Run 13's APP-share-link-same-tab (agent-usage sim; PR OK'd by @sagebrush Nov 7): a share link opened in a tab already showing a notebook (pasted into the address bar: only the fragment changes, nothing reloads) is opened as at load. web/index.html gains a hashchange handler through the same open path as File > Open, the link's language helper shared with the load path, and a status line for a damaged link; the notebook page is carried by `sagebrush notebook`, so cli/pyjs.cjs carries it. Measured +436 B on cli/pyjs.cjs vs master 60435643; r2 (astra's SHARE-HASH-STALE-1: only the latest fragment counts) +568 B vs master ae28018c, r3 (its second window) +624 B, marked 650.",
- "bytes": {
-  "cli/pyjs.cjs": 650
- }
-}

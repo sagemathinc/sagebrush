@@ -5,22 +5,40 @@
 <style data-sagebrush-shared="katex" data-sha256="c6457047d81b045d962c90ec3a2a690a46789d820b0a6d85ecabe5369621771a"></style>
 <style>
 .tex-page { position: fixed; inset: 0; display: flex; flex-direction: column; background: #eef0f2; color: #222; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; z-index: 10; }
-.tex-page .tex-banner { background: #fff4d6; border-bottom: 1px solid #e3c96b; padding: 2px 12px; font-size: 12px; }
-.tex-page .tex-banner-x { float: right; border: 0; background: none; cursor: pointer; min-width: 24px; min-height: 24px; font-size: 16px; line-height: 1; }
-.tex-page .tex-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; min-height: 40px; box-sizing: border-box; background: #2f3b2f; color: #eef; }
-.tex-page .tex-head button[aria-pressed="true"] { background: #dfe8d8; }
+.tex-page .sb-caret { display: inline-block; width: .38em; height: .38em; margin: 0 .15em 0 .55em; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateY(-.22em) rotate(45deg); vertical-align: middle; }
+.tex-page .tex-banner { display: flex; align-items: center; gap: .35em; background: #fff4d6; color: #222; border-bottom: 1px solid #e3c96b; padding: 2px 6px 2px 12px; font-size: 12px; line-height: 1.4; }
+.tex-page .tex-banner[hidden] { display: none; }
+.tex-page .tex-banner a { color: #1a55a8; }
+.tex-page .tex-banner-x { margin-left: auto; flex: none; border: 0; border-radius: 4px; background: none; color: #5a4a12; cursor: pointer; min-width: 24px; min-height: 24px; font-size: 16px; line-height: 1; }
+.tex-page .tex-banner-x:hover { background: rgba(0, 0, 0, .08); color: #222; }
+.tex-page .tex-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; min-height: 40px; box-sizing: border-box; background: var(--bg, #f7f6f1); color: var(--fg, #1f2421); border-bottom: 1px solid var(--line, #d4d4cb); }
+.tex-page .tex-head button[aria-pressed="true"] { border-color: var(--accent, #4a6b49); color: var(--accent, #4a6b49); }
 .tex-page .tex-tools { display: flex; align-items: center; gap: 4px; font-size: 12px; }
-.tex-page .tex-tl { opacity: .8; margin: 0 2px 0 8px; }
+.tex-page .tex-tl { color: var(--muted, #5d645f); margin: 0 2px 0 8px; }
 .tex-page .tex-zoomv { min-width: 3.2em; text-align: center; }
-.tex-page .tex-head button { font: inherit; font-size: 13px; padding: 2px 8px; }
-.tex-page .tex-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tex-page .tex-head button { font: inherit; font-size: 13px; padding: 3px 10px; border: 1px solid var(--line, #d4d4cb); background: var(--cell, #fff); color: var(--fg, #1f2421); border-radius: 6px; cursor: pointer; }
+.tex-page .tex-head button:hover { border-color: var(--accent2, #8aa889); }
+.tex-page .tex-head button:disabled { opacity: .5; cursor: default; }
+.tex-page .tex-home { display: none; color: var(--accent, #4a6b49); font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; margin-right: 4px; }
+body.sbft .tex-page:not(.tex-embed) .tex-home { display: inline; }
+.tex-page .tex-title { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tex-page .tex-title.renamable { cursor: text; border-radius: 3px; padding: 0 3px; }
-.tex-page .tex-title.renamable:hover, .tex-page .tex-title.renamable:focus-visible { background: rgba(255,255,255,.14); }
+.tex-page .tex-title.renamable:hover, .tex-page .tex-title.renamable:focus-visible { background: var(--code, rgba(0,0,0,.06)); }
 .tex-page .tex-titlein { font: inherit; font-weight: 600; min-width: 12em; padding: 0 3px; }
-.tex-page .tex-savestate { font-size: 12px; opacity: .85; white-space: nowrap; }
+.tex-page .tex-savestate { font-size: 12px; color: var(--muted, #5d645f); white-space: nowrap; }
 .tex-page .tex-savestate.failed { opacity: 1; color: #fff; background: #b3261e; padding: 2px 8px; border-radius: 4px; white-space: normal; }
-.tex-page .tex-status { margin-left: auto; font-size: 12px; opacity: .9; }
-.tex-page .tex-toggle { display: none; }
+.tex-page .tex-status { margin-left: auto; font-size: 12px; color: var(--muted, #5d645f); }
+.tex-page .tex-head .tex-sharebtn { display: inline-flex; align-items: center; gap: 6px; background: var(--code, #f0efe8); }
+.tex-page .tex-head .tex-sharebtn[hidden] { display: none; }
+.tex-page .tex-head .tex-sharebtn svg { width: 14px; height: 14px; }
+.tex-page button.tex-toggle { display: none; }
+.tex-page .tex-view { display: inline-flex; }
+.tex-page .tex-view[hidden] { display: none; }
+.tex-page .tex-head .tex-view button { border-radius: 0; margin-left: -1px; }
+.tex-page .tex-head .tex-view button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.tex-page .tex-head .tex-view button:last-child { border-radius: 0 6px 6px 0; }
+.tex-page[data-view="source"] .tex-right, .tex-page[data-view="pdf"] .tex-left, .tex-page[data-view="source"] .tex-main > .sb-edge, .tex-page[data-view="pdf"] .tex-main > .sb-edge { display: none !important; }
+.tex-page[data-view="source"] .tex-left, .tex-page[data-view="pdf"] .tex-right { flex: 1 1 100% !important; border-right: 0; }
 .tex-page .tex-main { flex: 1; display: flex; min-height: 0; }
 .tex-page .tex-left { flex: 1 1 50%; min-width: 0; position: relative; border-right: 1px solid #ccc; background: #fbfbf8; }
 .tex-page .tex-right { flex: 1 1 50%; min-width: 0; overflow: auto; background: #e3e5e8; }
@@ -29,7 +47,6 @@
 .tex-page .tex-ed.nowrap .tex-src, .tex-page .tex-ed.nowrap .tex-hl { white-space: pre; overflow-wrap: normal; }
 .tex-page .tex-src { border: 0; outline: 0; resize: none; background: transparent; color: transparent; caret-color: #1d2330; z-index: 1; }
 .tex-page .tex-hl { color: #1d2330; pointer-events: none; overflow: hidden; }
-.tex-page .hl-line { min-height: 1.45em; }
 .tex-page .c-cmd { color: #2a4d9b; } .tex-page .c-cmt { color: #7a7a72; font-style: italic; } .tex-page .c-math { color: #8a3b12; } .tex-page .c-brace { color: #6b6b6b; } .tex-page .c-verb { color: #2b6b38; }
 .tex-page .tex-gone { margin: 40px auto; max-width: 40em; font-size: 15px; }
 .tex-page .tex-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; background: #fde7e3; border-bottom: 1px solid #e0a89c; font-size: 13px; }
@@ -45,10 +62,13 @@
 body.wsfiles .tex-page { left: 272px; }
 @media (max-width: 640px) { body.wsfiles .tex-page { left: 0; } }
 @media (max-width: 700px) {
-  .tex-page .tex-toggle { display: inline-block; }
+  .tex-page button.tex-toggle { display: inline-block; }
   .tex-page .tex-left, .tex-page .tex-right { flex-basis: 100%; }
-  .tex-page:not(.show-preview) .tex-right { display: none; }
-  .tex-page.show-preview .tex-left { display: none; }
+  .tex-page:where(:not([data-view])):not(.show-preview) .tex-right { display: none; }
+  .tex-page:where(:not([data-view])).show-preview .tex-left { display: none; }
+  .tex-page .tex-view [data-view="both"] { display: none; }
+  .tex-page[data-view="both"] .tex-left, .tex-page[data-view="both"] .tex-main > .sb-edge { display: none !important; }
+  .tex-page[data-view="both"] .tex-right { flex: 1 1 100% !important; }
 }
 .tex-page .page { max-width: 46em; margin: 18px auto; padding: 48px 64px 72px 64px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.18);
   font-family: "Latin Modern Roman", "Computer Modern Serif", "CMU Serif", Georgia, "Times New Roman", serif; font-size: 16.5px; line-height: 1.38; color: #111; position: relative; }
@@ -205,6 +225,7 @@ body.wsfiles .tex-page { left: 272px; }
 .tex-page ol.bib li { position: relative; margin: .3em 0; }
 .tex-page ol.bib .biblab { position: absolute; right: 100%; margin-right: .5em; }
 
+.slide img[style*="--w"]{width:calc(var(--w)*var(--spx)*1cqw);max-width:100%}
 .tex-page .slide { display: flex; flex-direction: column; container-type: inline-size; position: relative; box-sizing: border-box; width: 100%; margin: 0 0 1.2em; overflow: hidden; background: #fff; border: 1px solid #c8c8d0; box-shadow: 0 1px 3px rgba(0,0,0,.15); text-indent: 0; text-align: left; font-family: "Latin Modern Sans", "CMU Sans Serif", "Helvetica Neue", Arial, sans-serif; line-height: 1.25; }
 .tex-page .slide > * { font-size: calc(var(--sfs) * 1cqw); }
 .tex-page .slide > .slide-title { font-size: calc(var(--sfs) * 1.44cqw); color: #2d2da0; padding: .5em .75em .2em; line-height: 1.2; }
@@ -243,6 +264,7 @@ body { margin: 0; background: #eef0f2; }
 .sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
 @media print {
   body { background: #fff; }
+  .sb-standalone .dmath { overflow: visible; }
   .sb-standalone .page.beamer { padding: 0; }
   .sb-standalone .page.beamer > .slide { margin: 0; border: none; box-shadow: none; break-after: page; break-inside: avoid; }
   .sb-standalone .page:not(.beamer) { box-shadow: none; margin: 0 auto; }
@@ -251,7 +273,8 @@ body { margin: 0; background: #eef0f2; }
 </head>
 <body><div class="tex-page sb-standalone"><div class="page tex-preview">
 <h2 id="sec-1">TikZ and pgfplots</h2>
-<div class="p ni"><span class="it">In this preview:</span> TikZ and pgfplots pictures are not drawn yet; each shows as a placeholder with its source. A full LaTeX run draws them.</div>
-<div class="center"><div class="placeholder">[tikzpicture: not rendered in this prototype]</div></div>
-<div class="center"><div class="placeholder">[tikzpicture: not rendered in this prototype]</div></div>
+<div class="p ni"><span class="it">In this preview:</span> TikZ pictures are drawn: their paths (lines, curves, circles and arcs, grids, arrows), styles, transforms, <span class="tt">\foreach</span>, and their nodes, the text in a picture, typeset like the preview’s mathematics. pgfplots isn’t drawn yet: its picture shows as a placeholder naming what it needs. A full LaTeX run draws it.</div>
+<div class="center"><div class="p al-c"><span class="tikz" data-box="-45.72 -45.72 45.72 45.72" style="display:inline-block;position:relative;vertical-align:baseline;width:91.45pt;height:91.45pt"><svg width="91.45pt" height="91.45pt" viewBox="0 0 91.45 91.45" style="display:block;overflow:visible"><defs><marker id="tk2" markerUnits="userSpaceOnUse" refX="0" refY="0" orient="auto-start-reverse" overflow="visible"><path d="M-2.08 -2.4C-1.52 -0.94 -0.62 -0.26 0 0C-0.62 0.26 -1.52 0.94 -2.08 2.4" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" stroke-linecap="round" stroke-linejoin="round"/></marker></defs><path d="M3.04,88.4M3.04,88.4M88.4,3.04M17.27,88.4L17.27,3.04M45.72,88.4L45.72,3.04M74.17,88.4L74.17,3.04M3.04,74.17L88.4,74.17M3.04,45.72L88.4,45.72M3.04,17.27L88.4,17.27" fill="none" stroke="rgb(191,191,191)" stroke-width="0.2"/><path d="M0.2,45.72L91.24,45.72" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" marker-end="url(#tk2)"/><path d="M45.72,91.24L45.72,0.2" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" marker-end="url(#tk2)"/><path d="M45.72,45.72M74.17,45.72C74.17,30.01 61.43,17.27 45.72,17.27C30.01,17.27 17.27,30.01 17.27,45.72C17.27,61.43 30.01,74.17 45.72,74.17C61.43,74.17 74.17,61.43 74.17,45.72Z" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4"/><path d="M45.72,45.72L67.52,27.43" fill="none" stroke="rgb(255,0,0)" stroke-width="0.8"/><path d="M54.26,45.72C54.26,43.71 53.55,41.77 52.26,40.23" fill="none" stroke="rgb(255,0,0)" stroke-width="0.4"/><path d="M67.52,27.43L67.52,45.72" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" stroke-dasharray="3 3"/></svg></span></div></div>
+<div class="center"><div class="placeholder">[tikzpicture: the axis environment inside a picture isn&#39;t drawn by the preview yet]</div></div>
+<div class="center"><div class="p al-c"><span class="tikz" data-box="-28.85 -28.85 97.94 70.02" style="display:inline-block;position:relative;vertical-align:baseline;width:126.79pt;height:98.87pt"><svg width="126.79pt" height="98.87pt" viewBox="0 0 126.79 98.87" style="display:block;overflow:visible"><defs><marker id="tk3" markerUnits="userSpaceOnUse" refX="0" refY="0" orient="auto-start-reverse" overflow="visible"><path d="M-2.08 -2.4C-1.52 -0.94 -0.62 -0.26 0 0C-0.62 0.26 -1.52 0.94 -2.08 2.4" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" stroke-linecap="round" stroke-linejoin="round"/></marker></defs><path d="M23.16,70.02L114.21,70.02" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" marker-end="url(#tk3)"/><path d="M28.85,75.71L28.85,13.11" fill="none" stroke="rgb(0,0,0)" stroke-width="0.4" marker-end="url(#tk3)"/><path d="M28.85,70.02M57.3,70.02C57.3,54.31 44.56,41.57 28.85,41.57C13.14,41.57 0.4,54.31 0.4,70.02C0.4,85.73 13.14,98.47 28.85,98.47C44.56,98.47 57.3,85.73 57.3,70.02Z" fill="none" stroke="rgb(0,0,255)" stroke-width="0.8"/><path d="M57.3,41.57M59.3,41.57C59.3,40.46 58.41,39.57 57.3,39.57C56.2,39.57 55.3,40.46 55.3,41.57C55.3,42.67 56.2,43.57 57.3,43.57C58.41,43.57 59.3,42.67 59.3,41.57Z" fill="rgb(255,0,0)" stroke="none"/></svg><span class="tikz-n" data-name="" data-c="91.75 0" data-box="85.56 -5.49 97.94 5.49" data-edges="" style="position:absolute;left:0;top:0;color:rgb(0,0,0)"><span style="position:absolute;left:117.74pt;top:67.87pt;width:5.72pt;display:flex;justify-content:center;line-height:0;white-space:nowrap"><span class="katex" style="line-height:0;font-size:10pt"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">{x}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="katex-base"><span class="katex-strut" style="height:0.4306em;"></span><span class="mord"><span class="mord mathnormal">x</span></span></span></span></span></span></span><span class="tikz-n" data-name="" data-c="0 63.56" data-box="-5.96 57.11 5.96 70.02" data-edges="" style="position:absolute;left:0;top:0;color:rgb(0,0,0)"><span style="position:absolute;left:26.22pt;top:3.33pt;width:5.26pt;display:flex;justify-content:center;line-height:0;white-space:nowrap"><span class="katex" style="line-height:0;font-size:10pt"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">{y}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="katex-base"><span class="katex-strut" style="height:0.625em;vertical-align:-0.1944em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em;">y</span></span></span></span></span></span></span><span class="tikz-n" data-name="" data-c="43.1 36.99" data-box="28.65 28.65 57.54 45.32" data-edges="" style="position:absolute;left:0;top:0;color:rgb(255,0,0)"><span style="position:absolute;left:60.84pt;top:28.04pt;width:22.22pt;display:flex;justify-content:center;line-height:0;white-space:nowrap"><span class="katex" style="line-height:0;font-size:10pt"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mn>1</mn><mo separator="true">,</mo><mn>1</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">{(1,1)}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="katex-base"><span class="katex-strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord"><span class="mopen">(</span><span class="mord">1</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span></span></span></span></span></div></div>
 </div></div></body></html>

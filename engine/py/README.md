@@ -89,6 +89,40 @@ files and permissions, until you press Ctrl-C there, which ends the page's
 access. It needs [uv](https://docs.astral.sh/uv/). Safari can't connect to
 your computer: use Chrome, Edge or Firefox. On Windows, run it in WSL.
 
+### Keep it running (Linux, systemd)
+
+`sagebrush remote` without `--loopback` connects this computer to your account
+through sagebrush.space, once you have approved it (`sagebrush remote login`
+shows a code to approve, signed in). Not every account can use it yet:
+[Connect a computer](https://sagebrush.space/remote/connect) says whether
+yours can. To keep it running across restarts,
+install sagebrush in the Python environment your notebooks should use (with
+your GPU packages, for example), approve the computer once, then add a unit
+such as `/etc/systemd/system/sagebrush-remote.service`:
+
+```
+[Unit]
+Description=sagebrush remote
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=you
+WorkingDirectory=/home/you/work
+ExecStart=/home/you/venv/bin/sagebrush remote
+Restart=on-failure
+RestartSec=5
+# 3: the computer's enrollment was revoked (or isn't known there); 4: another
+# `sagebrush remote` with the same key took over.  Restarting can't help either.
+RestartPreventExitStatus=3 4
+
+[Install]
+WantedBy=multi-user.target
+```
+
+and run `systemctl enable --now sagebrush-remote`. Notebooks then run in the
+`WorkingDirectory`, as `User`, in that environment's Python.
+
 ## For AI agents: `sagebrush-mcp`
 
 This package installs `sagebrush-mcp`, a
@@ -103,7 +137,13 @@ Its tools:
   last value and SVG plots.
 - `python`: the same session, as plain Python.
 - `factor`, `number_field`, `newforms`: shortcuts.
-- `guide`: what is implemented. `reset`: clear the session.
+- `guide`: what is implemented. `search_docs`: search the Sage library's
+  documentation. `reset`: clear the session.
+- `workspace_connect`, then the `workspace_*` tools (`workspace_list`,
+  `_read`, `_write`, `_create`, `_rename`, `_run_notebook`, ...): files in the
+  person's Sagebrush workspace, through the page they pair.
+- `chat_next`, `chat_reply`: the person's Sagebrush chat panel, beside a
+  notebook or board.
 - `run_status`, `run_result`, `run_cancel`, `run_list`, `run_keep`: runs.
 - `latex_comments_list`, `_show`, `_add`, `_reply`, `_resolve`, `_reattach`:
   comments on a `.tex` in the person's Sagebrush workspace, through the page
