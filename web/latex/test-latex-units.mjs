@@ -1430,6 +1430,22 @@ check("selftest-latex-names-are-the-judge's", judgeNames.length === 4 && JSON.st
   check("qedhere-each-proof-its-own", tags(two.h) === 1 && qeds(two.h) === 1, { tags: tags(two.h), qeds: qeds(two.h) });
 }
 
+// ---- length registers met in the text (the census: \textwidth, \linewidth, \columnwidth and \baselineskip were grey
+//      chips and problems in 36% of papers, each the argument of a command the preview didn't read): nothing shown and
+//      nothing said for the length; the command that wasn't read is still said
+{
+  setKatex((src) => src);
+  const run = (body) => new Engine().update("\\documentclass{article}\n\\begin{document}\n" + body + "\n\\end{document}\n");
+  const names = (r) => r.problems.map((p) => p.kind + ":" + p.name);
+  const a = run("A \\textwidth B \\linewidth C \\columnwidth D \\baselineskip E \\tabcolsep F.");
+  check("length-registers-silent", a.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() === "A B C D E F." && !a.problems.length && !/class="unk"/.test(a.chunks.join("")), [a.chunks.join("").slice(0, 300), names(a)]);
+  const b = run("\\resizebox{\\textwidth}{!}{X}");
+  check("length-registers-the-command-still-said", names(b).includes("command:resizebox") && !names(b).some((n) => /textwidth/.test(n)), names(b));
+  // (an unknown command of a length's look is still said: only LaTeX's own registers are silent)
+  const c = run("\\textwidthx y");
+  check("length-registers-only-latexs", names(c).includes("command:textwidthx"), names(c));
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's units, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);
