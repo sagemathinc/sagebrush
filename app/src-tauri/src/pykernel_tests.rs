@@ -85,6 +85,7 @@ for line in sys.stdin:
         say({"echo": c["v"]})
     elif k == "sleep":
         try:
+            say({"armed": True})
             time.sleep(30)
         except KeyboardInterrupt:
             say({"interrupted": True})
@@ -323,8 +324,9 @@ fn lines_go_both_ways_and_an_interrupt_reaches_the_running_code() {
     k.send(r#"{"cmd":"echo","v":"héllo"}"#).unwrap();
     assert_eq!(line(&k)["echo"], "héllo");
     assert_eq!(k.send("a\nb"), Err(KernelError::InputRefused));
+    // (interrupted once the stub says it is inside the code that catches it)
     k.send(r#"{"cmd":"sleep"}"#).unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(line(&k)["armed"], true);
     k.interrupt();
     assert_eq!(line(&k)["interrupted"], true);
     k.send(r#"{"cmd":"exit","code":3}"#).unwrap();
