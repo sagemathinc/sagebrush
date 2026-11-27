@@ -85,6 +85,16 @@ if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(j
   const used = /interpreter: the engine subprocess's/.test(res.err);
   if (!used) console.log("FAIL the app's log doesn't say the engine's interpreter ran the notebook");
   passed &&= used;
+  // (the engine's backend: native when the engine the app ships runs and it ships a native engine
+  // (app/engine/bundle.mjs --native-addon: in the .app's Resources; for an AppImage, built from this checkout's
+  // bundle), else wasm: an engine named by SAGEBRUSH_APP_ENGINE is never given one (engine.rs))
+  const shipsNative = env[0] === "the engine the app ships" && (/\.app\/Contents\/MacOS\/[^/]+$/.test(exe)
+    ? existsSync(join(exe, "..", "..", "Resources", "engine", "sagebrush-engine.node"))
+    : existsSync(join(bundled, "sagebrush-engine.node")));
+  const backend = /^.*engine backend: (.*)$/m.exec(res.err)?.[1].trim() ?? "(not said)";
+  const want = shipsNative ? "native" : "wasm";
+  console.log(`${backend === want ? "ok" : "FAIL"} the engine's backend: ${backend} (the app ${shipsNative ? "ships" : "doesn't ship"} a native engine)`);
+  passed &&= backend === want;
   console.log(passed ? "self-test with the engine passed" : `self-test with the engine failed (exit code ${res.code})`);
   if (passed && process.platform === "linux") {
     console.log("\nthe self-test again, with a Node that can't start (an older C library than it needs)");

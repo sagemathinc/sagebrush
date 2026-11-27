@@ -5116,6 +5116,9 @@ async function selftest(path) {
     await until(() => kernel.ready, 60000);
     // (which interpreter ran it, in the app's log, not the report: the engine subprocess's, or this page's own worker)
     console.log("interpreter: " + (kernel.worker instanceof NativeWorker && kernel.worker.native ? "the engine subprocess's" : "the page's own worker"));
+    // (and the engine it loaded, in the app's log: native when the app ships a native engine, else wasm; run.mjs judges it)
+    if (kernel.worker instanceof NativeWorker && kernel.worker.native)
+      console.log("engine backend: " + (await new Promise((resolve) => { let t = ""; kernel.execute("import sagebrush\nprint(sagebrush.engine_info()['backend'])", { mode: nb.mode }, { start() {}, out(x) { t += x; }, display() {}, interact() {}, clear() {}, done() { resolve(t.trim()); }, stopped(m) { resolve("(stopped) " + (t + (m || "")).trim()); }, skipped() { resolve("(not run)"); } }); })));
     await nb.runAll();
     await until(() => !cells().some((c) => /\*/.test(c.n.textContent)), 120000);
     const out = cells().map((c) => c.out.textContent).join("\n");
