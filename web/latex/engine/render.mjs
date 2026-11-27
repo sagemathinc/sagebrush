@@ -375,6 +375,16 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
   "flushbottom", "raggedbottom", "strut", "unskip", "hss", "hfilneg", "break", "filbreak", "goodbreak", "noindent@", "centerline@", "displaystyle", "textstyle", "boldmath", "unboldmath",
   "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
   ]);
+// LaTeX's length registers: in a valid document one is only ever an argument (a width, a skip) or after \setlength and
+// the like, never typeset (TeX stops with "You can't use \dimen in horizontal mode"). One met in the text is a command's
+// argument the preview didn't read (\resizebox{\textwidth}{!}, subfigure's width): that command is said; the length
+// itself shows nothing and says nothing (in an arXiv sample, it was a second problem for the same cause in 36% of papers)
+const LENGTHS = new Set(["textwidth", "linewidth", "columnwidth", "textheight", "hsize", "vsize", "baselineskip", "parindent", "parskip",
+  "tabcolsep", "arraycolsep", "arrayrulewidth", "doublerulesep", "fboxsep", "fboxrule", "columnsep", "columnseprule", "marginparwidth", "marginparsep",
+  "paperwidth", "paperheight", "oddsidemargin", "evensidemargin", "topmargin", "headheight", "headsep", "footskip", "topskip", "lineskip",
+  "itemsep", "parsep", "topsep", "partopsep", "labelwidth", "labelsep", "leftmargin", "rightmargin", "itemindent", "listparindent",
+  "abovedisplayskip", "belowdisplayskip", "abovedisplayshortskip", "belowdisplayshortskip", "abovecaptionskip", "belowcaptionskip",
+  "floatsep", "textfloatsep", "intextsep", "dbltextfloatsep", "footnotesep", "emergencystretch", "unitlength"]);
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
 // (saved boxes: their copies, all \usebox's together, at most BOX_MAX: each copy's HTML characters, and BOX_KEY for each
 //  of its SageTeX items, which a box with no HTML still copies (astra, BOX653-EXPAND-1's residual))
@@ -651,7 +661,7 @@ class Renderer {
       if (!base) { flow.text(Object.hasOwn(SPACING_ACCENTS, name) ? SPACING_ACCENTS[name] : "", st); return j; }
       flow.text((base + ACCENTS[name]).normalize("NFC"), st); return j;
     }
-    if (NOOP.has(name)) return i;
+    if (NOOP.has(name) || LENGTHS.has(name)) return i;
     if (Object.hasOwn(GOBBLE, name)) { let j = i; const [no, nm] = GOBBLE[name]; [, j] = this.star(nodes, j); for (let k = 0; k < no; k++) [, j] = this.opt(nodes, j); for (let k = 0; k < nm; k++) [, j] = this.arg(nodes, j); return j; }
     if (Object.hasOwn(this.macros, "\\" + name)) { flow.html(this.math(this.mathStr([n]), false), st); return i; }
     this.unk(name, flow, st);
