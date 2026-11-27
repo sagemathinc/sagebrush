@@ -11,14 +11,14 @@ Each builtin is called as f(session, call, args) with args a list of
 
 import math
 
-from . import fmt, mem
+from . import fmt, lists, mem
 from .access import (as_character, as_complex, as_double, as_integer, as_logical, character_, complex_, dollar,
                      double_, index, integer_, is_character, is_complex, is_double, is_finite, is_infinite,
                      is_integer, is_logical, is_na, is_nan, is_null, is_numeric, is_vector, length_, logical_,
                      names_, options, refuse_raw)
 from .args import DOTS, Closure, Primitive
 from .eval import NotSupported, RError
-from .values import NULL, RVector
+from .values import NULL, RList, RVector
 
 INT_MAX = 2147483647
 COLON_FUZZ = 2.0 ** -23  # `:`'s length allowance, single precision's epsilon (R 4.5.3, rill-tests/core/test_3.R)
@@ -524,9 +524,60 @@ def print_value(sess, v, digits=None):
         sess.write_out(fmt.deparse(v) + "\n")
         return
     opts = fmt.Options(sess.options["digits"] if digits is None else digits, sess.options["scipen"], sess.options["width"])
+    if isinstance(v, RList):
+        _print_list(sess, v, opts)
+        return
     with _print_reservation(v):
         if fmt.print_value(v, sess.write_out, opts) is None:
             raise NotSupported("printing this value")
+
+
+def _print_list(sess, v, opts):
+    """print() of a list, as R 4.5.3 prints one (rill-tests/list/): each element under its tag ($name, $`name`,
+    $<NA>, or [[k]] where it has none), the tags of nested lists prefixed by their parents', each element followed
+    by a blank line; an empty list is list() (named list() with names).  Every element is checked before anything
+    is written, and the walk keeps its own stack (nesting is as deep as the evaluator allows)."""
+    write = sess.write_out
+    leaves = []
+    stack = [v]
+    while stack:
+        x = stack.pop()
+        lists._only_names(x, "printing")
+        for e in x.data:
+            if isinstance(e, RList):
+                stack.append(e)
+            elif e is not NULL and not (isinstance(e, RVector) and (not e.attrs or set(e.attrs) == {"names"})):
+                raise NotSupported("printing a list holding this value")
+    if not v.data:
+        write("named list()\n" if v.attrs else "list()\n")
+        return
+    frames = [(v, "", 0)]
+    while frames:
+        x, prefix, i = frames.pop()
+        if i >= len(x.data):
+            if frames:
+                write("\n")
+            continue
+        frames.append((x, prefix, i + 1))
+        names = lists.names_of(x)
+        nm = names.data[i] if names is not None else ""
+        if nm is None:
+            tag = prefix + "$<NA>"
+        elif nm == "":
+            tag = prefix + "[[%d]]" % (i + 1)
+        else:
+            tag = prefix + "$" + fmt.deparse_symbol(nm)
+        write(tag + "\n")
+        e = x.data[i]
+        if isinstance(e, RList) and e.data:
+            frames.append((e, tag, 0))
+            continue
+        if isinstance(e, RList):
+            write("named list()\n" if e.attrs else "list()\n")
+        else:
+            with _print_reservation(e):
+                fmt.print_value(e, write, opts)
+        write("\n")
 
 
 def _print_reservation(v):
@@ -676,6 +727,9 @@ FORMALS = {
     "complex": Closure("length.out", "real", "imaginary", "modulus", "argument"),
     "is.vector": Closure("x", "mode", required=("x",)),
     "options": Closure(DOTS),
+    "list": Closure(DOTS),
+    "is.list": Primitive("x"),
+    "unlist": Closure("x", "recursive", "use.names", required=("x",)),
 }
 for _f in ("as.logical", "as.integer", "as.numeric", "as.double", "as.character", "as.complex"):
     FORMALS[_f] = Primitive("x", dots=True, least=0)
@@ -725,7 +779,14 @@ BUILTINS["is.finite"] = is_finite
 BUILTINS["is.infinite"] = is_infinite
 BUILTINS["is.vector"] = is_vector
 BUILTINS["options"] = options
+# A3: lists (lists.py)
+BUILTINS["list"] = lists.list_
+BUILTINS["is.list"] = lists.is_list
+BUILTINS["[["] = lists.double_bracket
+BUILTINS["unlist"] = lists.unlist_
 BUILTINS["raw"] = refuse_raw
 BUILTINS["as.raw"] = refuse_raw
 # base's constants (values, not functions)
-VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False])}
+VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False]),
+          "letters": RVector("character", [chr(c) for c in range(ord("a"), ord("z") + 1)]),
+          "LETTERS": RVector("character", [chr(c) for c in range(ord("A"), ord("Z") + 1)])}
