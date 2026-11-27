@@ -401,8 +401,9 @@ function binomN(b: bigint): BinomN {
   if (Number.isSafeInteger(d)) return { d, b, off: (c) => d + c, gt: (y) => y > d };
   return { d, b, off: (c) => Number(b + BigInt(c)), gt: (y) => BigInt(y) > b };
 }
-function binomialInversion(g: Gen, N: BinomN, p: number): number {
-  const n = N.d, q = 1.0 - p, qn = glibcExp(n * crlog(q)), np = n * p;
+// (qn: the Generator's exp(n log1p(-p)), the legacy RandomState's exp(n log(q)))
+function binomialInversion(g: Gen, N: BinomN, p: number, legacy: boolean): number {
+  const n = N.d, q = 1.0 - p, qn = glibcExp(n * (legacy ? crlog(q) : glibcLog1p(-p))), np = n * p;
   const bound = Math.trunc(Math.min(n, np + 10.0 * Math.sqrt(np * q + 1)));
   let X = 0, px = qn, U = g.nextDouble();
   while (U > px) {
@@ -464,7 +465,8 @@ function binomialBtpe(g: Gen, N: BinomN, p: number): number {
     const A = crlog(v);
     if (A < t - rho) return y;
     if (A > t + rho) continue;
-    const x1 = y + 1, f1 = m + 1, z = N.off(1 - m), w = N.off(1 - y);
+    // (z and w from n's double, as the C code; n - m + 0.5 from the exact n - m)
+    const x1 = y + 1, f1 = m + 1, z = n + 1 - m, w = n - y + 1;
     if (A > xm * crlog(f1 / x1) + (N.off(-m) + 0.5) * crlog(z / w) + (y - m) * crlog((w * r) / (x1 * q)) +
         tail(f1, f1 * f1) + tail(z, z * z) + tail(x1, x1 * x1) + tail(w, w * w)) continue;
     return y;
@@ -474,9 +476,9 @@ function binomialBtpe(g: Gen, N: BinomN, p: number): number {
 // the result exactly, a bigint where n - y is past 2^53)
 function binomial(g: Gen, N: BinomN, p: number, legacy: boolean): number | bigint {
   if (!legacy && (N.b === 0n || p === 0.0)) return 0;
-  if (p <= 0.5) return p * N.d <= 30.0 ? binomialInversion(g, N, p) : binomialBtpe(g, N, p);
+  if (p <= 0.5) return p * N.d <= 30.0 ? binomialInversion(g, N, p, legacy) : binomialBtpe(g, N, p);
   const q = 1.0 - p;
-  const y = q * N.d <= 30.0 ? binomialInversion(g, N, q) : binomialBtpe(g, N, q);
+  const y = q * N.d <= 30.0 ? binomialInversion(g, N, q, legacy) : binomialBtpe(g, N, q);
   const r = N.b - BigInt(y), d = Number(r);
   return Number.isSafeInteger(d) ? d : r;
 }
