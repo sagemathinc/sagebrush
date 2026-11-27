@@ -52,7 +52,7 @@ export function openConsole(el: HTMLElement, host: Host) {
   term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
     if (event.type !== "keydown") return true;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && term.hasSelection()) return false;
-    if ((event.ctrlKey || event.metaKey) && event.key === "v") return false;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") return false;
     return true;
   });
   const fit = new FitAddon();

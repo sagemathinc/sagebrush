@@ -3,7 +3,7 @@
 // (connected-terminal.ts initKeyHandler, and the remote terminal: test-remote-terminal-page.mjs 7c): Ctrl+C with
 // nothing selected is a KeyboardInterrupt; with text selected it is the browser's copy (xterm leaves the key alone),
 // and the line being typed is untouched; Ctrl+V is the browser's paste, never a ^V: the word just copied lands on the
-// line, as does a paste event's text.  Serve web/dist first:
+// line, as does a paste event's text; and with Caps Lock on ("V"), the same.  Serve web/dist first:
 //   bun web/build.ts && bash web/run-tests.sh console-keys
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -106,6 +106,11 @@ try {
   ok(await until(`${LAST} === ">>> xyzSELECTME"`, 10000), `...the word Ctrl+C copied is pasted on the line, and no ^V (${JSON.stringify(await ev(LAST))})`);
   await ev(`(() => { const dt = new DataTransfer(); dt.setData('text/plain', ' + 1'); ${TEXTAREA}.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return 1; })()`);
   ok(await until(`${LAST} === ">>> xyzSELECTME + 1"`, 10000), `the paste's text is on the line (${JSON.stringify(await ev(LAST))})`);
+
+  // Ctrl+V with Caps Lock on (the key reported as "V"): still the browser's paste, never xterm's
+  k = await ctrl("V", "KeyV", 86);
+  ok(k?.key === "V" && k.ctrl && k.prevented === false, `Ctrl+V with Caps Lock ("V"): left to the browser, its paste (${JSON.stringify(k)})`);
+  ok(await until(`${LAST} === ">>> xyzSELECTME + 1SELECTME"`, 10000), `...the copied word pasted again (${JSON.stringify(await ev(LAST))})`);
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
