@@ -11,7 +11,7 @@ stabilizer chains are completed by the deterministic Schreier-Sims test.
 
 import operator
 
-from sagebrush._engine import call as _call
+from _sagebrush_lib._engine import call as _call
 
 __all__ = ["PermutationGroup", "PermutationGroupElement", "SymmetricGroup", "AlternatingGroup",
            "CyclicPermutationGroup", "DihedralGroup", "MathieuGroup", "PSL", "PGL", "AGL1",

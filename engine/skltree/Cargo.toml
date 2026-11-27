@@ -1,0 +1,25 @@
+[package]
+name = "sagebrush-skltree"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Sagebrush's decision-tree kernel for its scikit-learn subset: datasets handed over once, then trees, forests and bagging ported line by line from scikit-learn 1.9.1 (BSD-3); a wasm32 module of its own (wasm/sagebrush-skltree.wasm), loaded at the first dataset"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Stop (Ctrl-C): the long loops poll it through work::tick (in WebAssembly through the
+# import `sagebrush.interrupted`; an interrupt traps and the host retires the instance)
+sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
+
+# The WebAssembly heap and its page bound: engine/wasmheap's, as the PNG module's and the
+# multiprecision core's (exported by src/wasm.rs)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sagebrush-wasmheap = { path = "../wasmheap" }
+
+[dev-dependencies]
+sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host", "test-hooks"] }
+
+[lints]
+workspace = true

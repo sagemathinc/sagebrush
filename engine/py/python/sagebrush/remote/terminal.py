@@ -77,8 +77,11 @@ TERMINAL_LIMITS = {
 OPEN_PATH = "/terminal/open"
 _SID_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
 # (the PTY's slave becomes the shell's controlling terminal: start_new_session gives the child its own session,
-# then this sets the terminal and execs the shell, so no preexec_fn runs in a threaded runner)
-_CTTY = "import fcntl,os,sys,termios;fcntl.ioctl(0,termios.TIOCSCTTY,0);os.execvp(sys.argv[1],sys.argv[1:])"
+# then this sets the terminal and execs the shell, so no preexec_fn runs in a threaded runner.  Python ignores SIGPIPE
+# and SIGXFSZ at its start, and an ignored signal stays ignored across exec, so this sets both back to their default
+# first: otherwise the shell and everything it runs would inherit them ignored (`yes | head` printing "Broken pipe"))
+_CTTY = ("import fcntl,os,signal,sys,termios;signal.signal(signal.SIGPIPE,signal.SIG_DFL);"
+         "signal.signal(signal.SIGXFSZ,signal.SIG_DFL);fcntl.ioctl(0,termios.TIOCSCTTY,0);os.execvp(sys.argv[1],sys.argv[1:])")
 
 
 def new_session_id():

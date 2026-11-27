@@ -96,6 +96,9 @@ export function safeTerminal(o: { scrollback: number; onTitle: (title: string) =
     cursorBlink: true,
     scrollback: o.scrollback,
     theme: themeFromCss(),
+    // (any colour a program draws is shown at least at this contrast with its background, WCAG AA's 4.5:1, as xterm
+    // computes it: a prompt in bold white on the light theme was invisible, white on white)
+    minimumContrastRatio: 4.5,
     // (OSC 8: http(s) only (allowNonHttpProtocols is false), opened on a click)
     linkHandler: { activate: (_e: MouseEvent, text: string) => openWeb(text), allowNonHttpProtocols: false },
   });
@@ -127,6 +130,7 @@ export function themeFromCss() {
     selectionBackground: dark ? "#3d4a3f" : "#cfe0c8",
     red: v("--err"),
     green: v("--accent"),
-    ...(dark ? {} : { brightBlack: "#5d645f", white: "#5d645f" }),
+    // (light: the two whites as greys that read on it; bold white is drawn as bright white, as most prompts use it)
+    ...(dark ? {} : { brightBlack: "#5d645f", white: "#5d645f", brightWhite: "#3b413d" }),
   };
 }

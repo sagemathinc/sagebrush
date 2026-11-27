@@ -245,3 +245,29 @@ for m in ("o", ".", "s"):
   // (one path, a pixel for each of the 2000 points, and no rect of a pixel)
   assert.deepEqual(out.trim().split("\n"), ["1 2000 0", "o True", ". True", "s True"]);
 });
+
+test("many points: the fast path maps as map() does on log axes and clamps points far outside the limits", () => {
+  const out = cli("-c", `
+import math, random, _graphics as g
+random.seed(3)
+lin = [random.uniform(-1e7, 1e7) for _ in range(200)] + [1e7, -1e7, 0.5, 1e12, -1e12]
+pos = [10 ** random.uniform(-3, 6) for _ in range(200)] + [1e-9, 1e9, 2.5, 1e300, 0.0, -1.0]
+cases = [((0.0, 1.0, 0.0, 1.0, False, False), lin, lin[::-1]),
+         ((1.0, 100.0, 0.0, 1.0, True, False), pos, lin[:len(pos)]),
+         ((0.0, 1.0, 1e-2, 1e4, False, True), lin[:len(pos)], pos),
+         ((1.0, 10.0, 1.0, 10.0, True, True), pos, pos[::-1])]
+u = g.pixel_size(1.0)
+for lims, xs, ys in cases:
+    P = g._Placed(10, 20, 600, 400, *lims)
+    each = [P.map(x, y) for x, y in zip(xs, ys)]
+    fast = g._markers(P, xs, ys, "o", 3.5, "#1f77b4", None)
+    circles = "".join(g._marker("o", p[0], p[1], 3.5, "#1f77b4") for p in each if p is not None)
+    pixels = "".join("M%d %dh1v1h-1z" % (math.floor(p[0] + 1e-6), math.floor(p[1] + 1e-6)) for p in each if p is not None)
+    print(P.map_all(xs, ys) == each, fast == "<g>" + circles + "</g>",
+          ('d="%s"' % pixels) in g._markers(P, xs, ys, ",", 1.0, "#000000", None),
+          max(abs(c) for p in each if p is not None for c in p) == 1e5)
+g.pixel_size(u)
+`);
+  // (each: the fast mapping is map()'s, the circles and the pixels are the per-point ones, and some point clamped)
+  assert.deepEqual(out.trim().split("\n"), Array(4).fill("True True True True"));
+});
