@@ -367,8 +367,13 @@ def verify(root, plat, pins=None):
 def _private(path):
     os.makedirs(path, mode=0o700, exist_ok=True)
     st = os.lstat(path)
-    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) & 0o077:
-        _refuse("the folder %s isn't private to you (owner and mode 0700 needed): chmod 700 %s" % (path, path), "private")
+    if not stat.S_ISDIR(st.st_mode):
+        _refuse("%s isn't a folder: move it aside, and the runner makes the folder again" % path, "private")
+    if st.st_uid != os.getuid():
+        _refuse("the folder %s is owned by another user: remove it (or set XDG_STATE_HOME to a folder of yours), and "
+                "the runner makes it again" % path, "private")
+    if stat.S_IMODE(st.st_mode) & 0o077:
+        _refuse("the folder %s isn't private to you (mode 0700 needed): chmod 700 %s" % (path, path), "private")
     return path
 
 

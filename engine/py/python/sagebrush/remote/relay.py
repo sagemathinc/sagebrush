@@ -1593,6 +1593,23 @@ def main(argv):
     except ValueError as e:
         sys.stderr.write("sagebrush remote: %s\n%s" % (e, USAGE))
         return 2
+    # (first, before an enrollment that may wait for an approval: what the agent will need here, and the built-in
+    # agent itself, so a person sees a missing Claude Code before they go and approve this computer)
+    builtin = agents and not agent_cmds
+    if agents:
+        # (before anything connects: what the agent will need on this computer and isn't here, each with its fix)
+        for problem, fix in agent_runtime.preflight(None if builtin else agent_cmds[0][1]):
+            sys.stderr.write("For the agent: %s\n  To fix it: %s\n" % (problem, fix))
+    if builtin:
+        try:
+            inst = agent_runtime.ensure(say=lambda t: sys.stderr.write(t + "\n"))
+            cmd = inst.argv()
+        except agent_runtime.AgentRuntimeError as e:
+            # (notebooks and terminals still work; an agent page is told this, and the next start tries again)
+            sys.stderr.write("The built-in agent couldn't be set up: %s\nNotebooks and terminals still work; the "
+                             "agent is tried again when a page starts a chat.\n" % e)
+            cmd = ["<the built-in agent>"]
+        agent_cmds = agent_kinds([("default", cmd)])
     try:
         key = _keys.load()
     except _keys.OldKeyFile:
@@ -1611,19 +1628,4 @@ def main(argv):
     except EnrollError as e:
         sys.stderr.write("sagebrush remote: the key file's origin: %s\n" % e)
         return 1
-    builtin = agents and not agent_cmds
-    if agents:
-        # (before anything connects: what the agent will need on this computer and isn't here, each with its fix)
-        for problem, fix in agent_runtime.preflight(None if builtin else agent_cmds[0][1]):
-            sys.stderr.write("For the agent: %s\n  To fix it: %s\n" % (problem, fix))
-    if builtin:
-        try:
-            inst = agent_runtime.ensure(say=lambda t: sys.stderr.write(t + "\n"))
-            cmd = inst.argv()
-        except agent_runtime.AgentRuntimeError as e:
-            # (notebooks and terminals still work; an agent page is told this, and the next start tries again)
-            sys.stderr.write("The built-in agent couldn't be set up: %s\nNotebooks and terminals still work; the "
-                             "agent is tried again when a page starts a chat.\n" % e)
-            cmd = ["<the built-in agent>"]
-        agent_cmds = agent_kinds([("default", cmd)])
     return asyncio.run(run_relay(key, agents=agents, agent_cmds=agent_cmds, builtin_agent=builtin))
