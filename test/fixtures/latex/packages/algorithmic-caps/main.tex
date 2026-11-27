@@ -1,0 +1,22 @@
+\documentclass{article}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\begin{document}
+\begin{algorithm}
+\caption{Widget count}
+\begin{algorithmic}[1]
+\REQUIRE $n \geq 0$
+\ENSURE $y = n$
+\STATE $y \leftarrow 0$
+\FOR{$i = 1$ to $n$}
+  \IF{$i$ is odd}
+    \STATE $y \leftarrow y + 1$
+  \ELSE
+    \STATE $y \leftarrow y + 1$ \COMMENT{even}
+  \ENDIF
+\ENDFOR
+\WHILE{$y < 0$} \STATE $y \leftarrow 0$ \ENDWHILE
+\RETURN $y$
+\end{algorithmic}
+\end{algorithm}
+\end{document}

@@ -1,0 +1,25 @@
+Algorithm 1 Widget count
+Require: n ≥ 0
+Ensure: y = n
+1: y ← 0
+2: for i = 1 to n do
+3:
+if i is odd then
+4:
+y ←y+1
+5:
+else
+6:
+y ← y + 1 {even}
+7:
+end if
+8: end for
+9: while y < 0 do
+10:
+y←0
+11: end while
+12: return y
+
+1
+
+

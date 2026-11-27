@@ -1,0 +1,6 @@
+{
+ "recall": 0.793,
+ "stray": 14,
+ "problems": 10,
+ "note": "the baseline on master (Nov 27 2026); a change that shows more raises it; tex.txt: pdftotext joined the footnote marks to their words ('First1'); spaced by hand"
+}

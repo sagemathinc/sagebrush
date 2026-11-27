@@ -1,0 +1,21 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\begin{document}
+\begin{figure}
+\centering
+\begin{subfigure}[b]{0.45\textwidth}
+  \centering
+  \rule{2cm}{1cm}
+  \caption{Left panel}\label{fig:a}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.45\textwidth}
+  \centering
+  \rule{2cm}{1cm}
+  \caption{Right panel}\label{fig:b}
+\end{subfigure}
+\caption{Two panels}\label{fig:both}
+\end{figure}
+See Figure~\ref{fig:both}, panels~\ref{fig:a} and~\subref{fig:b}.
+\end{document}

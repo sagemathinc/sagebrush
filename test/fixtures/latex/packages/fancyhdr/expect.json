@@ -1,0 +1,6 @@
+{
+ "recall": 0.428,
+ "stray": 1,
+ "problems": 1,
+ "note": "the baseline on master (Nov 27 2026); a change that shows more raises it; the preview is one long page: running headers and footers aren't shown, so recall stays below 1; no problems, and no header text in the body"
+}

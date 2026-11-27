@@ -1,0 +1,37 @@
+Algorithm 1 Widget search
+Require: a list L and a key k
+Ensure: the index of k
+1: i ← 0
+2: for each x in L do
+3:
+if x = k then
+4:
+return i
+5:
+else if x > k then
+6:
+break
+7:
+else
+8:
+i←i+1
+9:
+end if
+10: end for
+11: while i > 0 do
+12:
+i←i−1
+13: end while
+14: function Find(L, k)
+15:
+Search(L)
+16: end function
+▷ done
+
+17:
+
+Algorithm 1 searches.
+
+1
+
+

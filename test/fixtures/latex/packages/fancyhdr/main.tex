@@ -1,0 +1,20 @@
+\documentclass{article}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Widget Notes}
+\chead{Draft}
+\rhead{\thepage}
+\lfoot{Left foot}
+\cfoot{Page \thepage\ of \pageref{LastPage}}
+\rfoot{Right foot}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\rfoot{\thepage}}
+\begin{document}
+\thispagestyle{fancy}
+\lhead{Notes, from the body}
+\fancyfoot[C]{Body foot}
+Body text.
+\end{document}

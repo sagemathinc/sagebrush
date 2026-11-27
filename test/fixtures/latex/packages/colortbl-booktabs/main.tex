@@ -1,0 +1,18 @@
+\documentclass{article}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\begin{document}
+\begin{tabular}{lcc}
+\toprule
+\rowcolor{gray!20} Model & Params & Acc \\
+\midrule
+Alpha & 10M & \cellcolor{green!25}81.5 \\
+\addlinespace
+Beta & 20M & 83.0 \\
+\addlinespace[2pt]
+\shortstack{Gamma\\large} & 40M & \textbf{85.1} \\
+\cmidrule(lr){2-3}
+\rowcolors{2}{white}{gray!10}Delta & 80M & 86.0 \\
+\bottomrule
+\end{tabular}
+\end{document}
