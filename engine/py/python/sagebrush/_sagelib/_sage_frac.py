@@ -150,9 +150,13 @@ def _plain_repr(p):
     takes a global's name (Magma: ($.1 + 1)/($.1 - 1), even after
     F := Parent(f)).  In Sage mode the two names are always the same."""
     r = getattr(p, "_ring", None)
-    if r is not None and hasattr(p, "_c") and hasattr(r, "_repr_name") and r._repr_name() != r._name:
-        from _sage_poly import _poly_repr
-        return _poly_repr(p._c, r._name) if p._c else "0"
+    if r is not None and hasattr(p, "_c") and hasattr(r, "_repr_name"):
+        # (the name given to the variable, R<x> := ..., else $.1: Magma mode's
+        # shared rings keep a given name apart from _name, variable_name())
+        name = r.variable_name() if hasattr(r, "variable_name") else r._name
+        if r._repr_name() != name:
+            from _sage_poly import _poly_repr
+            return _poly_repr(p._c, name) if p._c else "0"
     return repr(p)
 
 

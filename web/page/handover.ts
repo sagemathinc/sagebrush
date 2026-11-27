@@ -43,7 +43,8 @@ export type HandoverPage = {
   notApplied?(n: number): void;
   /** The document shown, and the document `doc` shown in its place as a change made here (saved, recorded): what a
    * whole write asked of this tab while it writes the document is made with (Workspace.write under sync's journal).
-   * Without them, this tab answers no such write. */
+   * Without them, this tab answers no such write; a shown document of null (the page can't save it now) answers it
+   * "lost", nothing changed. */
   shownDoc?(): any;
   replaceDoc?(doc: any): void;
 };
@@ -414,6 +415,7 @@ export function writerHandover(page: HandoverPage) {
     if (!rec) return end(req, w, { t: "failed", req, why: "its record couldn't be read" });
     // (typed here since that save, or a base that isn't the record's revision: a conflict, with what is there now)
     const shown = page.shownDoc!();
+    if (shown == null) return end(req, w, { t: "lost", req });
     if (!sameDoc(shown, rec) || (w.base !== null && rec.rev !== w.base)) return end(req, w, { t: "conflict", req, current: plainDoc(rec) });
     w.rec = rec; w.state = "ready"; w.readyAt = Date.now();
     post({ t: "ready", req });
@@ -426,6 +428,7 @@ export function writerHandover(page: HandoverPage) {
     if (!holds(st)) return end(req, w, { t: "lost", req });
     // (the whole document shown still the record it got ready on: an output, a count, metadata changed since is a change)
     const shown = page.shownDoc!();
+    if (shown == null) return end(req, w, { t: "lost", req });
     if (!sameDoc(shown, w.rec)) return end(req, w, { t: "conflict", req, current: plainDoc(w.rec) });
     // (a whole write: the notebook-level fields it doesn't name go, as a write with no holder leaves the record)
     const gone = Object.fromEntries(Object.keys(shown).filter((k) => k !== "cells" && k !== "mode" && !ENVELOPE.includes(k) && !(k in w.doc)).map((k) => [k, undefined]));

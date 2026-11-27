@@ -213,7 +213,7 @@ RFC 9180's base mode doesn't authenticate the sender and doesn't prevent replay.
 | Quota | holding and document sizes | ciphertext bytes, as now (quota already uses sizes only) |
 | Agent scope, `list`/`stat` | the server's derived index | a device acting for the agent (§6) |
 | Grants and the access log | each grant's scope paths, and every agent call's paths, in plaintext (account.ts `grants.scopes`, `access_log.paths`) | scopes sealed to the devices, which enforce them; the server keeps only the grant id, token hash, tag, rates and expiry. The access log is written by the answering device, encrypted (or with paths HMACed under `K_index[e]`) |
-| Version retention, Trash | every file blob an op names is held until the account is purged; version retention is client-side (IndexedDB), and the server enforces no version cap | explicit client ops; the server counts the refs each envelope adds and releases. Physical GC stays deferred (§3.3), as it effectively is today |
+| Version retention, Trash | every file blob an op names is held until the account is purged; version retention is client-side (IndexedDB), and the server enforces no version cap | explicit client ops; the server counts the refs each envelope adds and releases. Each release names the add it ends, `{address, add: seq}`, and the server keeps the index's live adds apart from the blob's shared count (document pins and chunk manifests count there too), so a release must end a live index add, once. Physical GC stays deferred (§3.3), as it effectively is today |
 
 **What changes in the server:**
 - `checkOp` becomes form-only. The server still checks the signature, `dseq` order, envelope size, and that every added ref is a held blob.

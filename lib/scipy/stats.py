@@ -22,7 +22,7 @@ import scipy.special as _sc
 __all__ = ["norm", "t", "f", "chi2", "cauchy", "levy", "binom",
            "rv_continuous", "rv_discrete", "rv_frozen", "levy_stable", "genextreme", "genpareto",
            "skew", "kurtosis", "pearsonr", "spearmanr", "rankdata", "ttest_ind", "levene", "jarque_bera",
-           "describe", "zscore"]
+           "describe", "zscore", "bootstrap", "BootstrapResult", "DegenerateDataWarning"]
 
 _NAN = float("nan")
 _INF = float("inf")
@@ -896,7 +896,9 @@ class binom_gen(rv_discrete):
             g2 = 1.0 / var - 6.0 / n
         return mu, var, g1, g2
 
-    _rvs = _no_sampler("binom", "binomial")
+    def _rvs(self, rs, shape, n, p):
+        # (SciPy's: the random state's binomial, NumPy's draws)
+        return rs.binomial(n, p, shape)
 
     def _support_raw(self, n, p):
         return np.zeros_like(n), n
@@ -947,4 +949,13 @@ levene = _py("levene")
 jarque_bera = _py("jarque_bera")
 describe = _py("describe")
 zscore = _py("zscore")
+bootstrap = _py("bootstrap")
+
+
+def __getattr__(name):
+    # (the bootstrap's result and warning classes, from the statistics chunk when first asked for)
+    if name in ("BootstrapResult", "DegenerateDataWarning"):
+        import _scipy_stats_py
+        return getattr(_scipy_stats_py, name)
+    raise AttributeError("module 'scipy.stats' has no attribute %r" % (name,))
 
