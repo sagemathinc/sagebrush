@@ -20,9 +20,10 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/space/`;
 globalThis.location = new URL(base);
-const { LIMITS, checkSpace, jsonSize, readText, sameSite, utf8Bytes } = await import("./src/read.ts");
+const { LIMITS, checkSpace, jsonSize, jsonSizeWithin, readText, sameSite, utf8Bytes } = await import("./src/read.ts");
 const { treeRoom } = await import("./src/treeroom.ts");
 const { KEPT, EDIT, keepEdit } = await import("./src/keep.ts");
+const { layered } = await import("./src/roomlayout.ts");
 
 try {
   // ---- where from
@@ -63,6 +64,21 @@ try {
   //      structural byte, measured as JSON.stringify writes it
   const sample = { s: 'q"b\\s\n\t\u0001 € 😀 \ud800', n: [0, -0, 0.1, -12.5e-7, 1e300, Number.MAX_VALUE, -Number.MAX_VALUE, 2 ** 53], b: [true, false, null], o: { "k\"ey": { deep: [[], {}, [1, [2, { x: "y" }]]] } }, e: "" };
   ok(jsonSize(sample) === utf8Bytes(JSON.stringify(sample)), "its size is exactly compact JSON's, in UTF-8 (escapes, control characters, €, a character beyond the BMP, a lone surrogate, numbers, true/false/null, nesting)", [jsonSize(sample), utf8Bytes(JSON.stringify(sample))]);
+  // (the walk is lazy: refused at the first limit passed, it hasn't read what comes after; a getter late in a value says so)
+  {
+    const sentinel = () => { const t = { touched: false }; return t; };
+    const arr = (t) => { const a = new Array(5000).fill(null); Object.defineProperty(a, 4999, { get() { t.touched = true; return null; }, enumerable: true }); return a; };
+    const obj = (t) => { const o = {}; for (let k = 0; k < 4999; k++) o["k" + k] = null; Object.defineProperty(o, "k4999", { get() { t.touched = true; return null; }, enumerable: true }); return o; };
+    const refusesWithin = (v, lim) => { try { jsonSizeWithin(v, { values: Infinity, depth: Infinity, string: Infinity, bytes: Infinity, ...lim }); return false; } catch { return true; } };
+    let t = sentinel();
+    ok(refusesWithin(arr(t), { values: 10 }) && !t.touched, "an array of 5,000 values, 10 allowed: refused before its 5,000th is read");
+    t = sentinel();
+    ok(refusesWithin(arr(t), { bytes: 100 }) && !t.touched, "and 100 bytes allowed: refused from its length, before any element is read");
+    t = sentinel();
+    ok(refusesWithin(obj(t), { values: 10 }) && !t.touched, "an object of 5,000 keys, 10 values allowed: refused before its last key's value is read");
+    t = sentinel();
+    ok(jsonSize(arr(t)) === utf8Bytes(JSON.stringify(new Array(5000).fill(null))) && t.touched, "within limits, every value is read and the size is compact JSON's");
+  }
   const surface = (n, pad) => sp({ nodes: [{ id: "p", kind: "plot3d", surface: { z: new Array(n).fill(Number.MAX_VALUE) } }], pad: "x".repeat(pad) });
   const n = 340000, bare = utf8Bytes(JSON.stringify(surface(n, 0)));
   const atLimit = surface(n, LIMITS.bytes - bare);
@@ -79,6 +95,17 @@ try {
   ok(treeRoom(flat(LIMITS.nodes + 1, "sub/"), "").nodes.length === 1, "while the folder above it, one entry, is made");
   const linked = flat(150); linked.imports = []; for (let i = 0; i < 150; i++) for (let j = 0; j < 150; j++) if (i !== j) linked.imports.push([i, j]);
   ok(await refuses(() => treeRoom(linked, ""), /more than 20000 links/), "a room whose links (from its tree's imports) are over the limit is refused");
+
+  // ---- every room is checked whole before it is laid out (roomlayout.js layered): a refused one is never laid out
+  const parts = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: "n" + i, kind: "fn", title: "f" + i, ...extra }));
+  { const nodes = parts(LIMITS.nodes); layered(nodes, []);
+    ok(nodes.every((n) => Array.isArray(n.position)), `a room of ${LIMITS.nodes} parts is laid out (each given a position)`); }
+  { const nodes = parts(LIMITS.nodes + 1);
+    ok(await refuses(() => layered(nodes, []), /more than 4000 objects/) && nodes.every((n) => n.position === undefined), "one part more: refused before any is laid out (none has a position)"); }
+  { const nodes = parts(10, { text: "t".repeat(1 << 20) });
+    ok(await refuses(() => layered(nodes, []), /too large/) && nodes.every((n) => n.position === undefined), "a room whose parts are 10 MiB in all: refused before layout too"); }
+  { const nodes = parts(200), edges = []; for (let i = 0; i < 200; i++) for (let j = 0; j < 200; j++) if (i !== j && edges.length <= LIMITS.edges) edges.push({ from: "n" + i, to: "n" + j });
+    ok(await refuses(() => layered(nodes, edges), /links/) && nodes.every((n) => n.position === undefined), "and one with more links than a space may have"); }
 
   // ---- what is kept in this browser: bytes in UTF-8, the oldest dropped before a write, never over the limits
   const store = () => { const m = new Map(); return { m, get length() { return m.size; }, key: (k) => [...m.keys()][k] ?? null, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };

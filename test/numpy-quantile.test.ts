@@ -13,3 +13,8 @@ test("numpy quantile, percentile and median: NumPy 2.5.5's values and dtypes", (
   const got = execFileSync(process.execPath, [CLI, TEST + "numpy_quantile_cases.py"], { encoding: "utf8" });
   assert.equal(got, readFileSync(TEST + "numpy_quantile_cases.out", "utf8"));
 });
+// every method= NumPy has (#1910) and NaN propagation (#1909): test/numpy_quantile_methods_cases.py, its .out NumPy 2.5.5's
+test("numpy quantile: every method NumPy 2.5.5 has, and a slice with a NaN gives NaN", () => {
+  const got = execFileSync(process.execPath, [CLI, TEST + "numpy_quantile_methods_cases.py"], { encoding: "utf8" });
+  assert.equal(got, readFileSync(TEST + "numpy_quantile_methods_cases.out", "utf8"));
+});

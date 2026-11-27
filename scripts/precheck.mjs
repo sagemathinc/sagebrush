@@ -28,6 +28,7 @@ export const STEPS = [
   { tier: "quick", ci: true, name: "whitespace (working tree)", run: "git diff --check" },
   { tier: "quick", name: "whitespace (the branch)", run: 'git diff --check "$PRECHECK_BASE" --' },
   { tier: "quick", ci: true, name: "test discovery", run: "node scripts/web-tests.mjs check" },
+  { tier: "quick", ci: true, name: "public text", run: "node scripts/test-public-text.mjs && node scripts/public-text.mjs" },
   { tier: "quick", ci: true, name: "core imports no server code", run: "bun scripts/test-check-no-server-imports.mjs && bun scripts/check-no-server-imports.mjs", needs: "bun" },
   { tier: "quick", ci: true, name: "actions pinned", run: "bun scripts/test-check-action-pins.mjs && bun scripts/check-action-pins.mjs", needs: "bun" },
   { tier: "quick", ci: true, name: "limits census", run: "python3 test/limit_sites.py --check > census.json || { cat census.json; exit 1; }", leaves: "census.json" },
