@@ -43,7 +43,7 @@ export const NODE = {
 export const PATCHELF = { version: "0.19.1", file: "patchelf-0.19.1-x86_64.tar.gz", sha256: "a6818fef80128fb354423234ecacdcca3e993913d774e5d8346bc63f70fed4cf" };
 // the interpreter's files, from app/dist
 const ROOT_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-skltree.wasm", "lib", "pkg", "pkgset", "pkgmeta"];
-const ENGINE_FILES = ["frames.mjs", "files.mjs", "serve.mjs", "thread.mjs", "main.mjs"];
+const ENGINE_FILES = ["frames.mjs", "files.mjs", "serve.mjs", "thread.mjs", "native-load.mjs", "main.mjs"];
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const app = join(here, "..");
