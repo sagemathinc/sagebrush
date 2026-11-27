@@ -168,7 +168,9 @@ export interface ServiceKey { id: string; raw: Uint8Array; sign(bytes: Uint8Arra
 export interface Pair { transfer: string; receipt: string }
 export type GrantResult = { ok: true; gen: number; reapply: boolean; replayed: boolean; pairs: Pair[] } | { refused: string };
 
-const TEN_MIN = 600_000, WINDOW_MS = 300_000, AUTH_MS = 300_000;
+const TEN_MIN = 600_000, WINDOW_MS = 300_000;
+/** A signed write's sign-in is fresh this long (ms): the core's AUTH_MS (its freshAuth), which it doesn't export. */
+export const AUTH_MS = 300_000;
 /** §1.8: agents in one grant, so transfers in one request. */
 export const TRANSFERS_MAX = 64;
 /** The stored result's bytes (the JSON of its receipt pairs): the migration's CHECK is the same bound. */
