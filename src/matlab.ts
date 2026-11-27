@@ -2175,7 +2175,7 @@ class Emitter {
     freeNames(e.body, free);
     for (const n of free) {
       if (inner.vars.has(n)) continue;
-      if (this.isVar(n, scope)) {
+      if (this.isVar(n, scope) && !this.clearable(n, scope)) {
         // (a global's value now, from the registry: the anonymous function
         // keeps a snapshot, its own scope having no globals)
         captured.push(`${pyName(n)}=_m.cp(${this.varRead(n, scope)})`);
@@ -2183,7 +2183,7 @@ class Emitter {
         // (an enclosing anonymous function's capture that may be a function (NOVAR): still one here)
         if (scope.caps?.has(n)) inner.caps!.add(n);
       } else if (!scope.fn && !this.isFn(n, scope)) {
-        // (at the top level: a workspace variable now, else a function)
+        // (at the top level: a workspace variable now, else a function; also for a variable clear may have removed)
         captured.push(`${pyName(n)}=(_m.cp(${pyName(n)}) if ${inWorkspace(pyName(n))} else _m.NOVAR)`);
         inner.vars.add(n);
         inner.caps!.add(n);
