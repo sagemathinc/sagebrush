@@ -542,6 +542,7 @@ namespaces/nested_packages.m
 namespaces/package_function_handle.m
 namespaces/package_with_class.m
 namespaces/test_loop_namespace_call.m
+namespaces/test_namespace_shadowing.m
 plotting/colorbar_locations.m
 plotting/contour_output.m
 plotting/imagesc_axis_limits.m

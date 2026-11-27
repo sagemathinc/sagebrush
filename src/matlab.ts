@@ -1316,6 +1316,8 @@ class Emitter {
   mfile = "_m._program_file()";
   // (the class whose methods are being emitted: their property reads and assignments pass its access checks)
   classCtx: string | null = null;
+  // (while a chain on a top-level variable clear may have removed is emitted twice: as the variable's, or the name's)
+  clearRoot: "var" | "fn" | null = null;
 
   constructor(private funcs: FuncDef[], private filename: string, private cell = false) {
     for (const f of funcs) this.fnNames.add(f.name);
@@ -1969,12 +1971,23 @@ class Emitter {
         }
         return this.indexExpr(e, scope, "1");
       case "field": {
+        // (a chain on a top-level variable clear may have removed: the variable's chain while it exists, read as any
+        // variable's; else the name's, whose member is called when named alone; one of the two runs)
+        let root: Expr = e.e;
+        while (root.k === "field") root = root.e;
+        if (root.k === "id" && this.clearRoot === null && this.clearable(root.name, scope)) {
+          const py = pyName(root.name);
+          this.clearRoot = "var";
+          const asVar = this.expr(e, scope);
+          this.clearRoot = "fn";
+          const asName = this.expr(e, scope);
+          this.clearRoot = null;
+          return `(${asVar} if ${inWorkspace(py)} else ${asName})`;
+        }
         const f = this.classCtx ? `_m.cfield(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)}, ${JSON.stringify(this.classCtx)})` : `_m.field(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)})`;
         // (a class's static method named alone is called: uint8.empty; and a namespace's function or class, at any depth:
         // aa.bb.Name constructs, as aa.bb.Name() does)
-        let root: Expr = e.e;
-        while (root.k === "field") root = root.e;
-        return root.k === "id" && !this.isVar(root.name, scope) ? `_m.val(${f})` : f;
+        return this.clearRoot !== "var" && this.chainOnName(e, scope) ? `_m.val(${f})` : f;
       }
       case "dynfield": return `_m.field(${this.fieldBase(e.e, scope)}, _m.fieldname(${this.expr(e.name, scope)}))`;
       case "matrix": {
@@ -2002,16 +2015,30 @@ class Emitter {
     // (a name an anonymous function captured, before a dot: its value, or the function it names, uncalled, which
     // field() calls unless it is a class, Name.x a static member, never an object made)
     if (e.k === "id" && scope.caps?.has(e.name)) return `_m.capf(${pyName(e.name)}, ${JSON.stringify(e.name)})`;
+    // (at the top level, a variable that clear may have removed: the function or namespace of that name again)
+    if (e.k === "id" && this.clearable(e.name, scope)) {
+      const py = pyName(e.name);
+      if (this.clearRoot === "var") return py;
+      if (this.clearRoot === "fn") return `_m.fn(${JSON.stringify(e.name)}, True)`;
+      return `(${py} if ${inWorkspace(py)} else _m.fn(${JSON.stringify(e.name)}, True))`;
+    }
     // (a chain on a name that is not a variable, a.b.c: each step dot-indexes the one before, so a namespace's
     // namespace, a.b, is indexed, not called)
     if (e.k === "field" && this.chainOnName(e, scope)) return `_m.field(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)})`;
     return this.expr(e, scope);
   }
 
-  /** whether a field chain (a.b.c) starts at a name that is not a variable */
+  /** whether a field chain (a.b.c) starts at a name that may not be a variable when it runs: not a variable here, one an
+   * anonymous function captured (a value, or a function), or a top-level variable clear may have removed; then the
+   * chain may name a namespace's function or class, which is called when named alone */
   chainOnName(e: Expr, scope: Scope): boolean {
     while (e.k === "field") e = e.e;
-    return e.k === "id" && !this.isVar(e.name, scope) && !(scope.caps?.has(e.name));
+    return e.k === "id" && (!this.isVar(e.name, scope) || !!scope.caps?.has(e.name) || this.clearable(e.name, scope));
+  }
+
+  /** a top-level variable that clear may have removed (mayClear), whose name is then the function's again */
+  clearable(name: string, scope: Scope): boolean {
+    return this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(name) && !this.isFn(name, scope) && this.isVar(name, scope);
   }
 
   /** x(args): indexing a variable, or calling a function, with nargout */
