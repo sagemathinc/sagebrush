@@ -2421,12 +2421,16 @@ def _reshape(a, shape, order="C", copy=None):
     o = _reshape_order(order)
     if o == "A":
         o = "F" if a.flags.f_contiguous and not a.flags.c_contiguous else "C"
-    # (copy: None a copy only where the strides need one, True always, False never)
-    return _np.reshape(a, _shape(shape), o, 0 if copy is None else 1 if copy else 2)
+    # (copy: None a copy only where the strides need one, True always, False never; a string refused, as NumPy's
+    # PyArray_CopyConverter does, never taken by its truth)
+    if isinstance(copy, str):
+        raise ValueError("strings are not allowed for 'copy' keyword. Use True/False/None instead.")
+    # (an array as the shape is a sequence of sizes, as a list is)
+    return _np.reshape(a, shape if isinstance(shape, ndarray) else _shape(shape), o, 0 if copy is None else 1 if copy else 2)
 
 
 def reshape(a, shape=None, order="C", *, newshape=None, copy=None):
-    return _reshape(asarray(a), _shape(shape if shape is not None else newshape), order, copy)
+    return _reshape(asarray(a), shape if shape is not None else newshape, order, copy)
 
 
 def _m_reshape(self, *shape, order="C", copy=None):

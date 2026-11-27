@@ -1555,7 +1555,15 @@ function reshapeNp(a: NDArray, shape: number[], order: string, copyMode: number,
     if (strides === null) src = copyIn();
   }
   if (strides === null) {
-    strides = f ? cStrides(dims.slice().reverse()).reverse() : cStrides(dims);
+    // (NumPy's _array_fill_strides: a dimension of size 0 isn't multiplied in, so np.empty(0).reshape((0, 2), order="F")
+    // has strides (8, 8), not (8, 0))
+    strides = new Array(dims.length);
+    let s = 1;
+    for (let i = 0; i < dims.length; i++) {
+      const d = f ? i : dims.length - 1 - i;
+      strides[d] = s;
+      if (dims[d] !== 0) s *= dims[d];
+    }
   }
   return viewOf(new NDArray(src.dt, src.data, dims, strides, src.offset, src === a ? (a.base ?? a) : (src.base ?? null)), src);
 }
