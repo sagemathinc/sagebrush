@@ -29,6 +29,13 @@ for d in ("int8", "int16", "int32", "uint8", "uint16", "bool"):
     show(f"mean {d}", lambda: np.mean(np.array([1.75, 300.7]), dtype=d))
     show(f"prod {d}", lambda: np.prod(np.array([1.5, 300.7, 2.0]), dtype=d))
 show("nansum int8", lambda: np.nansum(x, dtype="int8"))
+# (prod with where=: each kept element cast before multiplying; and prod's own "reduce" warning)
+w = [[True, True], [False, True]]
+for d in ("int8", "int16", "uint8", "bool"):
+    show(f"prod where {d}", lambda: np.prod(np.array([[1.5, 300.7], [2.9, -7.5]]), axis=0, dtype=d, where=w))
+    show(f"prod where nan {d}", lambda: np.prod(np.array([[1.5, np.nan], [2.9, -7.5]]), axis=0, dtype=d, where=w))
+    for v in (np.nan, np.inf, 3e9):
+        show(f"prod {v} {d}", lambda: np.prod(np.array([1.5, v, 2.0]), dtype=d))
 # (int64: finite values only; NaN, inf and values past 2**53 are refused there, NUMPY.md)
 show("sum finite int64", lambda: np.sum(np.array([1.75, 1.75, -2.5, 3e9]), dtype="int64"))
 show("prod int64", lambda: np.prod(np.array([1.5, 300.7, 2.0]), dtype="int64"))
