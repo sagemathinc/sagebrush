@@ -1,7 +1,7 @@
 """Rill's corpus of recorded R outputs (design/rill.md §7).
 
     python3 rill-tests/run.py --verify              # provenance complete, every output's hash recorded
-    python3 rill-tests/run.py --regen [FILE ...]    # re-record from the oracle (VM4), files given or all
+    python3 rill-tests/run.py --regen [FILE ...]    # re-record from the oracle, files given or all
     python3 rill-tests/run.py --regen --all         # an oracle bump: re-record everything
 
 A case file is rill-tests/<area>/test_<n>.R: cases separated by lines "#-- <id>"
@@ -14,6 +14,11 @@ recorded from inside the runs, and the sha256 of every case file and output.
 Held-out files (rill-tests/heldout/<phase>/) are frozen by their SHA256SUMS
 once committed: --regen refuses to touch a frozen held-out file (a needed fix
 becomes a new visible case, design/rill.md §7.4).
+
+The oracle is R 4.5.3 over ssh on RILL_ORACLE_HOST, or, with
+RILL_ORACLE_RSCRIPT set to an Rscript on this machine, that R run locally
+(the same oracle.py and pinned environment; its environment record must
+match PROVENANCE.json's as a remote one's must).
 
 An oracle bump (a new R or package version) re-records everything with
 --all, in one PR that shows the diff and updates KNOWN.json; --regen of some
@@ -31,7 +36,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PROV = os.path.join(HERE, "PROVENANCE.json")
 HOST = os.environ.get("RILL_ORACLE_HOST", "sagebrush-4")
-RSCRIPT = "~/sbm-r/env/bin/Rscript"
+# (a local oracle: an Rscript on this machine, run without ssh)
+LOCAL = os.environ.get("RILL_ORACLE_RSCRIPT")
+RSCRIPT = LOCAL or "~/sbm-r/env/bin/Rscript"
 REMOTE = "~/sbm-r/rill-oracle"
 RECORD_KEYS = ["R.version.string", "platform", "locale", "timezone", "options", "namespaces"]
 
@@ -126,13 +133,30 @@ def regen(paths, everything):
     with tempfile.TemporaryDirectory() as d:
         cj = os.path.join(d, "cases.json")
         write_json(cj, cases)
-        ssh("mkdir -p %s && rm -f %s/cases.json %s/results.json" % (REMOTE, REMOTE, REMOTE))
-        for f in (os.path.join(HERE, "oracle.py"), cj):
-            subprocess.run(["scp", "-q", f, "%s:%s/" % (HOST, REMOTE.replace("~/", ""))], check=True)
-        ssh("cd %s && TMPDIR=$HOME/sbm-r/tmp python3 oracle.py %s cases.json > results.json" % (REMOTE, RSCRIPT))
         rj = os.path.join(d, "results.json")
-        subprocess.run(["scp", "-q", "%s:%s/results.json" % (HOST, REMOTE.replace("~/", "")), rj], check=True)
-        results = json.load(open(rj, encoding="utf-8"))
+        if LOCAL:
+            tmp = os.path.join(d, "tmp")
+            os.mkdir(tmp)
+            with open(rj, "w", encoding="utf-8") as out:
+                subprocess.run([sys.executable, os.path.join(HERE, "oracle.py"), LOCAL, cj], stdout=out, check=True,
+                               env=dict(os.environ, TMPDIR=tmp))
+            results = json.load(open(rj, encoding="utf-8"))
+        else:
+            results = remote(cj, rj)
+    return record_results(prov, paths, cases, results, everything)
+
+
+def remote(cj, rj):
+    """The cases in cj run on the oracle host over ssh; the results read back from rj."""
+    ssh("mkdir -p %s && rm -f %s/cases.json %s/results.json" % (REMOTE, REMOTE, REMOTE))
+    for f in (os.path.join(HERE, "oracle.py"), cj):
+        subprocess.run(["scp", "-q", f, "%s:%s/" % (HOST, REMOTE.replace("~/", ""))], check=True)
+    ssh("cd %s && TMPDIR=$HOME/sbm-r/tmp python3 oracle.py %s cases.json > results.json" % (REMOTE, RSCRIPT))
+    subprocess.run(["scp", "-q", "%s:%s/results.json" % (HOST, REMOTE.replace("~/", "")), rj], check=True)
+    return json.load(open(rj, encoding="utf-8"))
+
+
+def record_results(prov, paths, cases, results, everything):
     if len(results) != len(cases):
         raise SystemExit("oracle returned %d results for %d cases" % (len(results), len(cases)))
     records = set(r["provenance"] for r in results)
@@ -155,7 +179,7 @@ def regen(paths, everything):
         f = rel(p)
         write_json(out_path(p), {"format": "rill-out", "v": 1, "file": f, "cases": by_file[f]})
         prov["files"][f] = {"r_sha256": sha256(p), "out_sha256": sha256(out_path(p)), "cases": len(by_file[f])}
-    prov["oracle"] = {"host": "VM4 (%s)" % HOST, "rscript": RSCRIPT, "env": {"LC_ALL": "C.UTF-8", "TZ": "UTC"},
+    prov["oracle"] = {"host": "local" if LOCAL else "VM4 (%s)" % HOST, "rscript": "Rscript (local)" if LOCAL else RSCRIPT, "env": {"LC_ALL": "C.UTF-8", "TZ": "UTC"},
                       "record": record, "oracle_py_sha256": sha256(os.path.join(HERE, "oracle.py")),
                       "run_py_sha256": sha256(os.path.abspath(__file__))}
     write_json(PROV, prov)
