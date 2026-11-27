@@ -30,6 +30,10 @@ i64 = np.arange(3)
 i8 = np.arange(3, dtype=np.int8)
 c = np.array([1 + 2j, 3.0])
 
+print("== the check comes before the loop: a refused out wins over the loop's own error (negative integer powers)")
+o = zeros(2, np.uint8); show("power by -1 into uint8", lambda: np.power(np.array([2, 3]), -1, out=o), o)
+o = zeros(2, np.uint8); show("power by a -1 array into uint8", lambda: np.power(np.array([2, 3]), np.array([-1, -2]), out=o), o)
+
 print("== same_kind, the default: a float result into an int out is refused, out untouched, no warning")
 o = zeros(2, np.int8); show("add nan", lambda: np.add(a, 0, out=o), o)
 o = zeros(3, np.int8); show("add", lambda: np.add(f, 1, out=o), o)
