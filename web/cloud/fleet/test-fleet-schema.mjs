@@ -21,7 +21,7 @@ const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
 
 let failures = 0, count = 0;
 const ok = (c, what, detail) => { count++; if (!c) { failures++; console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 300)); } };
-const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql"];
+const MIGRATIONS = ["0001_fleet_leases.sql", "0002_fleet_writers_chain_hosts.sql", "0003_fleet_writers_grants_transfers.sql", "0004_fleet_request_nonces.sql", "0005_fleet_accounts_and_bytes.sql", "0006_fleet_pairings.sql"];
 const statements = MIGRATIONS.flatMap((m) => readFileSync(join(here, "migrations", m), "utf8").replace(/--[^\n]*/g, "").split(";").map((s) => s.trim()).filter(Boolean));
 
 const ID = "abcdefghijklmnopqrstuvwxy2", B43 = "A".repeat(42) + "w", B22 = "A".repeat(21) + "w";
@@ -49,12 +49,29 @@ const TABLES = {
   fleet_host_queue: { row: { fleet: ID, host: ID, kind: "transfer", ref: B43, at_ms: 0 }, text: { fleet: "id", host: "id", kind: "enum", ref: "b43" } },
   fleet_grant_decisions: { row: { request: ID, decided: "ok" }, text: { request: "id", decided: "enum" } },
   fleet_request_nonces: { row: { fleet: ID, host: ID, nonce: B22, created_ms: 0 }, text: { fleet: "id", host: "id", nonce: "b22" } },
+  fleet_pairings: { row: { pairing: ID, code_hash: B43, host: ID, sign_key: B43, enc_key: B43, fingerprint: B43, name: "lab-box", source: "198.51.100.7", created_ms: 0, expires_ms: 600000,
+    claim: ID, claim_account: "acct_1-x", claim_until_ms: 60000, fleet: ID },
+    text: { pairing: "id", code_hash: "b43", host: "id", sign_key: "b43", enc_key: "b43", fingerprint: "b43", name: "name", source: { min: 1, max: 64 }, claim: "id",
+      claim_account: { min: 1, max: 64, ascii: true }, fleet: "id" } },
+  fleet_pairing_approvals: { row: { approval: ID, pairing: ID, account: "acct_1-x", at_ms: 0 }, text: { approval: "id", pairing: "id", account: { min: 1, max: 64, ascii: true } } },
+  fleet_pairing_nonces: { row: { host: ID, nonce: B22, created_ms: 0 }, text: { host: "id", nonce: "b22" } },
 };
 const VALID = { id: ID, b43: B43, b22: B22 };
 
 /** The cases for one column: [what, value, accepted?]. */
 function cases(col, fam, valid) {
   if (fam === "enum") return [["the value + NUL", valid + "\0", false], ["NUL + the value", "\0" + valid, false]];
+  // (a display name, the schema's $defs.name: 1 to 32 bytes of a-z, 0-9 and "-")
+  if (fam === "name") return [
+    ["a NUL inside", "lab\0box", false],
+    ["the valid value + NUL", valid + "\0", false],
+    ["exactly 32 bytes", "a".repeat(32), true],
+    ["33 bytes", "a".repeat(33), false],
+    ["empty", "", false],
+    ["an upper-case letter", "Lab-box", false],
+    ["a space", "lab box", false],
+    ["2-byte text", "é", false],
+  ];
   if (typeof fam === "string") {
     const v = VALID[fam];
     return [
