@@ -519,6 +519,10 @@ def preflight(cmd=None, env=None, which=None, signed_in=_CHECK):
     if env.get("ANTHROPIC_BASE_URL"):
         out.append(("ANTHROPIC_BASE_URL is set in this terminal, and the agent won't run Claude against another endpoint.",
                     "unset ANTHROPIC_BASE_URL   (then start the runner again)"))
+    if env.get("ANTHROPIC_API_KEY"):
+        # (an API key: the agent reaches Claude with it through its own pinned Claude Code, so no `claude` on PATH and
+        # no sign-in are needed; a person's subscription sign-in stays the usual way)
+        return out
     if which("claude") is None:
         out.append(("Claude Code isn't installed on this computer (no `claude` on PATH).",
                     "%s   (then run `claude` once and sign in)" % INSTALL_CLAUDE))

@@ -436,6 +436,11 @@ def test_preflight_words():
     assert T.preflight(None, env={"PATH": "/x"}, which=claude, signed_in=True) == []
     assert T.preflight(None, env={"PATH": "/x"}, which=claude, signed_in=None) == []  # (macOS: can't tell, says nothing)
     assert any("claude auth login" in f for _, f in T.preflight(None, env={"PATH": "/x"}, which=claude, signed_in=False))
+    # (an Anthropic API key: the agent's own Claude Code uses it, so neither `claude` on PATH nor a sign-in is asked
+    # for; ANTHROPIC_BASE_URL is still said)
+    assert T.preflight(None, env={"PATH": "/x", "ANTHROPIC_API_KEY": "k"}, which=none, signed_in=False) == []
+    assert [p for p, _ in T.preflight(None, env={"PATH": "/x", "ANTHROPIC_API_KEY": "k", "ANTHROPIC_BASE_URL": "http://p"}, which=none)] == [
+        "ANTHROPIC_BASE_URL is set in this terminal, and the agent won't run Claude against another endpoint."]
     # (Claude Code's own answer, `claude auth status --json`; None when it gives none)
     class P:
         def __init__(self, out):
