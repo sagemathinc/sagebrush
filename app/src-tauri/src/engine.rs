@@ -216,15 +216,20 @@ fn shipped(app: &tauri::AppHandle) -> Option<Command> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-/// The native engine's two variables for the shipped engine (the loader's contract: an absolute path, and the
-/// lowercase hex SHA-256 its bytes must have), when the app was built with one bundled: the path into the app's own
-/// resources and the hash build.rs compiled in. The path is given even if the file has gone, so the engine says it is
-/// refused rather than quietly running WebAssembly. Built without one: none, and the engine runs WebAssembly.
+/// The native engine's variables for the shipped engine (the loader's contract: an absolute path, and the lowercase
+/// hex SHA-256 its bytes must have), when the app was built with one bundled: the path into the app's own resources,
+/// the hash build.rs compiled in, and SAGEBRUSH_ENGINE=native, so that a native engine that fails any check (the
+/// file gone or changed) makes every engine call an error that says why, never a quiet run of WebAssembly. Built
+/// without one: none, and the engine runs WebAssembly.
 fn native_env(engine: &std::path::Path, sha: &str) -> Vec<(&'static str, std::ffi::OsString)> {
     if sha.is_empty() {
         return Vec::new();
     }
-    vec![("SAGEBRUSH_ADDON", engine.join("sagebrush-engine.node").into_os_string()), ("SAGEBRUSH_ADDON_SHA256", sha.into())]
+    vec![
+        ("SAGEBRUSH_ADDON", engine.join("sagebrush-engine.node").into_os_string()),
+        ("SAGEBRUSH_ADDON_SHA256", sha.into()),
+        ("SAGEBRUSH_ENGINE", "native".into()),
+    ]
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -372,11 +377,12 @@ mod tests {
         assert!(super::native_env(dir, "").is_empty(), "built without one: WebAssembly");
         let sha = "ab".repeat(32);
         let env = super::native_env(dir, &sha);
-        assert_eq!(env.len(), 2);
+        assert_eq!(env.len(), 3);
         assert_eq!(env[0].0, "SAGEBRUSH_ADDON");
         assert_eq!(std::path::Path::new(&env[0].1), dir.join("sagebrush-engine.node"));
         assert!(std::path::Path::new(&env[0].1).is_absolute(), "the loader needs an absolute path");
         assert_eq!(env[1], ("SAGEBRUSH_ADDON_SHA256", sha.clone().into()));
+        assert_eq!(env[2], ("SAGEBRUSH_ENGINE", "native".into()), "a native engine that fails a check is an error, not WebAssembly");
     }
 
     use super::*;
