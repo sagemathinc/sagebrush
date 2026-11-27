@@ -14,17 +14,21 @@ const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 let port = Number(process.env.CDP_PORT) || 0;
 const profile = mkdtempSync(join(tmpdir(), "sb-console-keys-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
-if (!port) port = await devtoolsPort(profile);
-let targets;
-for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 let checks = 0;
 const ok = (c, msg) => { checks++; console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
-const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
-await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map();
-ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+// (every step bounded: Chrome's start, its targets, the connection and each request, which a closed or failed socket
+//  also ends, so a reply that never comes fails the suite instead of leaving it pending past its cleanup)
+const REQUEST_MS = 90000;
+const within = (p, ms, what) => { let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${what}: no answer in ${ms} ms`)), ms); })]).finally(() => clearTimeout(t)); };
+let chrome = null, ws = null, n = 0;
+const waiting = new Map();
+const fail = (e) => { for (const [, w] of waiting) w.reject(e); waiting.clear(); };
+const send = (method, params = {}) => {
+  if (!ws || ws.readyState !== 1) return Promise.reject(new Error(`${method}: the DevTools connection is closed`));
+  const id = ++n;
+  const p = new Promise((resolve, reject) => { waiting.set(id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params })); });
+  return within(p, REQUEST_MS, method).finally(() => waiting.delete(id));
+};
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(100); } return false; };
 const ready = "window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && sagebrush.kernel?.ready";
@@ -53,6 +57,18 @@ const ctrl = async (k, code, vk) => {
 };
 
 try {
+  chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--remote-debugging-port=${port}`, "--window-size=1000,700", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  if (!port) port = await within(devtoolsPort(profile), 30000, "Chrome's DevTools port");
+  let targets;
+  for (let i = 0; i < 300 && !targets; i++) { try { targets = await within(fetch(`http://127.0.0.1:${port}/json`).then((r) => r.json()), 5000, "the targets"); } catch { await sleep(100); } }
+  const page = targets?.find((t) => t.type === "page");
+  if (!page) throw new Error("no page target from Chrome");
+  ws = new WebSocket(page.webSocketDebuggerUrl);
+  ws.onmessage = (e) => { const m = JSON.parse(e.data); const w = m.id && waiting.get(m.id); if (w) { waiting.delete(m.id); w.resolve(m.result ?? m.error); } };
+  await within(new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = () => reject(new Error("the DevTools connection failed")); }), 30000, "the DevTools connection");
+  ws.onerror = () => fail(new Error("the DevTools connection failed"));
+  ws.onclose = () => fail(new Error("the DevTools connection closed"));
+
   await send("Page.navigate", { url: base });
   ok(await until(ready, 60000), "the page is up");
   await ev("document.querySelector('#consolebtn').click(); true");
@@ -115,6 +131,13 @@ try {
   ok(false, String(e?.stack ?? e));
 } finally {
   console.log(process.exitCode ? `FAIL: the Console's copy and paste keys` : `ok: the Console's copy and paste keys, ${checks} checks`);
-  chrome.kill();
+  fail(new Error("the suite ended"));
+  try { ws?.close(); } catch {}
+  // (its profile removed once Chrome has exited: a profile removed while Chrome still writes is left behind)
+  if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
+    const gone = new Promise((r) => chrome.once("exit", r));
+    chrome.kill();
+    await within(gone, 10000, "Chrome's exit").catch(() => chrome.kill("SIGKILL"));
+  }
   try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 }
