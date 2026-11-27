@@ -79,7 +79,8 @@ def _measure(line, size, dpi):
     enough, measured as its letters without the markup."""
     n = line.count("$") - line.count("\\$")
     if not (n > 0 and n % 2 == 0):
-        return text_metrics(line, size, dpi)
+        # (not mathtext: its escaped dollars measured as dollars, as matplotlib's _preprocess_math gives them)
+        return text_metrics(line.replace("\\$", "$"), size, dpi)
     import re
     m = re.match(r"^\$\\mathdefault\{10\^\{([-\u2212]?\d+)\}\}\$$", line)
     key = round(size * dpi / M.DPI, 6)
@@ -95,9 +96,10 @@ def text_box(s, size, dpi, x, y, ha, va, rotation=0.0, mode="default"):
     if not s:
         return None
     width, a, below, d = _line_extents(s, size, dpi)
-    # the unrotated box: x from 0 to width, y from -(a + below) to 0, the first baseline at -a
-    baseline = a
+    # the unrotated box: x from 0 to width, y from -(a + below) to 0; matplotlib's baseline is the last line's,
+    # its distance from the top (the whole height less the last line's descent)
     h = a + below
+    baseline = h - d
     corners = [(0.0, -h), (0.0, 0.0), (width, 0.0), (width, -h)]
     th = math.radians(rotation)
     c, sn = math.cos(th), math.sin(th)

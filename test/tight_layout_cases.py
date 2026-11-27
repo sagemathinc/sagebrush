@@ -161,4 +161,21 @@ axs[1].set_yscale("log")
 fig.tight_layout()
 out = layout(fig)
 """),
+    ("multiline_ticklabels", """
+fig, axs = plt.subplots(1, 2)
+for ax, rot in zip(axs, (0, 30)):
+    ax.set_yticks([0, 1], labels=["a\\nb", "c\\nd"], rotation=rot)
+    ax.set_xticks([0, 1], labels=["e\\nf\\ng", "h"], rotation=rot)
+    ax.set_ylim(0, 1)
+    ax.set_xlim(0, 1)
+fig.tight_layout()
+out = layout(fig)
+"""),
+    ("escaped_dollar_ticklabels", """
+fig, axs = plt.subplots(1, 2)
+axs[0].set_yticks([0, 1], labels=[r"\\$100", r"\\$\\$\\$5"])
+axs[1].set_yticks([0, 1], labels=[r"\\$1 and \\$2", "plain"])
+fig.tight_layout()
+out = layout(fig)
+"""),
 ]
