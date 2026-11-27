@@ -1,0 +1,16 @@
+2
+2
+2
+
+>> #H; v;
+       ^
+User error: Identifier 'v' has not been declared or assigned
+2
+3
+
+>> (1,2);
+   ^
+Runtime error in elt< ... >: No permutation group context in which to create 
+cycle
+
+end
