@@ -22,7 +22,8 @@ test("each removed numpy name warns once per call with a DeprecationWarning nami
     "for m in w: print(m.category.__name__, m.message)",
     "print(np.trapz.__name__, np.round is np.around)",
     "try:\n    np.round(np.array([1.25]), 1, out=np.zeros(1, complex))\nexcept NotImplementedError as e:\n    print(type(e).__name__)",
-    "try:\n    np.round(np.array([0.25000001]), 1, out=np.zeros(1, np.float32))\nexcept NotImplementedError as e:\n    print(type(e).__name__)",
+    // (into a narrower out NumPy rounds by out's precision between its stages: 0.2, not float64's 0.3)
+    "print(repr(np.round(np.array([0.25000001]), 1, out=np.zeros(1, np.float32))))",
   ].join("\n");
   const got = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" });
   assert.equal(
@@ -36,7 +37,7 @@ test("each removed numpy name warns once per call with a DeprecationWarning nami
       "DeprecationWarning `np.trapz` is deprecated (current NumPy no longer has it); use `np.trapezoid` instead",
       "trapz True",
       "NotImplementedError",
-      "NotImplementedError",
+      "array([0.2], dtype=float32)",
       "",
     ].join("\n"),
   );
