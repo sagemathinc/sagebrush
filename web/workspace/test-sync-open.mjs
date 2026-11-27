@@ -415,6 +415,21 @@ const ROUNDS = Number(process.env.FUZZ_ROUNDS ?? 40);
     older = { verdict: "halt", why: e.why };
   }
   ok(older.verdict === "ok" && older.docKey?.eligible === false && !asked.includes(1), "V9: a declaration of an older epoch than its head's: not a halt, never eligible, its epoch's keys never asked for (unwrapped only under the head's epoch)", { older, asked });
+  // (an older declaration crafted to open under the head's own key: keyEpoch 1, wrapped under epoch 2's K_wrap with an AAD
+  // naming epoch 1. Still never unwrapped, never eligible: only a declaration of its head's epoch is)
+  const crafted = async () => {
+    const aad = BY.concat(BY.utf8(LABELS.docCekWrap), BY.name(C2.account, "a"), BY.name(DOC, "d"), BY.name(CEK, "c"), BY.u64(1));
+    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    return b64u(BY.concat(nonce, new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: aad }, C2.keys[2].wrap, rand32()))));
+  };
+  const rows3 = await logOf(C2, { a: a2 }, [{ dev: "a", op: { ...old, wrappedCek: await crafted() } }]);
+  const v3 = await K.verifyRow(C2.provider(a2), SYNC_GEN, wire(rows3[0]), K.PULL_START).catch((e) => ({ halt: e.why }));
+  ok(v3.docKey?.eligible === false, "V9: an older declaration crafted to open under the head's own epoch key (its AAD naming its own older epoch): not eligible, void", v3.docKey ?? v3);
+  // (and doc-cek's own guard, the second line: that crafted wrap, offered to unwrapDocCek with the head epoch's keys for
+  // its older epoch's place, is refused before any decryption: keys open only their own epoch's places)
+  const { unwrapDocCek } = await import(join(here, "e2e", "doc-cek.ts"));
+  const guard = await unwrapDocCek(C2.keys[2], { ...home, account: C2.account, keyEpoch: 1 }, Buffer.from(await crafted(), "base64url")).then(() => "opened", (e) => e?.code ?? String(e));
+  ok(guard === "bad_form", "V9: unwrapDocCek refuses an epoch's keys for another epoch's place, even for a wrap made to open there", guard);
   // (C2 and the form: an `eligible` the op claims, an inner head, a field missing, a cekId or document that isn't one, a
   // wrap of the wrong length: each halts)
   const forms = {
