@@ -36,7 +36,7 @@ const html = `<!doctype html><script type="module">import * as m from "/s.js"; O
 window.code = async (f) => { try { await f(); return "ok"; } catch (e) { return e?.code ?? String(e?.message ?? e); } };
 window.ACCT = "e2e-acct-1";
 window.store = () => {
-  const decls = [], calls = { current: 0, exact: 0, declare: 0 }, s = { decls, calls, retired: new Set(), race: null, failOnce: false, stale: 0, onStale: null };
+  const decls = [], calls = { current: 0, exact: 0, declare: 0 }, s = { decls, calls, retired: new Set(), race: null, failOnce: false, stale: 0, onStale: null, onDeclare: null };
   const key = (d) => d.document + "/" + d.cekId + "/" + d.keyEpoch;
   s.api = {
     current: async (doc, head) => { calls.current++; for (let i = decls.length - 1; i >= 0; i--) if (decls[i].document === doc && !s.retired.has(key(decls[i]))) return decls[i]; return null; },
@@ -46,6 +46,7 @@ window.store = () => {
       await new Promise((r) => setTimeout(r, 5));
       if (s.failOnce) { s.failOnce = false; throw new Error("offline"); }
       if (s.stale > 0) { s.stale--; s.onStale?.(); throw Object.assign(new Error("stale head"), { code: "stale" }); }
+      if (s.onDeclare) { const f = s.onDeclare; s.onDeclare = null; f(); }
       if (s.race) { decls.push(s.race); s.race = null; return decls[decls.length - 1]; }
       decls.push(d); return d;
     },
@@ -225,6 +226,17 @@ try {
     })()`);
     ok(r.once.epoch === 2 && r.once.declares === 2 && J(r.once.decls) === J([[2, "h-removal"]]), "K-10: a declaration refused stale is minted again under the chain read afresh (the new epoch, declared at the new head)", r);
     ok(r.twice === "stale" && r.declares2 === 2, "K-10: only once: a second stale refusal fails the sealing", r);
+  }
+
+  // ---- K-11: a declaration confirmed after the chain began a new epoch: nothing sealed under it, the new epoch's used
+  {
+    const r = await P.ev(`(async () => {
+      const st = store(), a = account(${J(FILLS)}), p = K.docKeys({ epochs: a.api, declarations: st.api });
+      st.onDeclare = () => { a.head = "h-removal"; a.currentEpoch = 2; };
+      const s = await S.sealSlice(p, W(${J(DOC)}, 1), new Uint8Array([9]));
+      return { sealed: S.readPrefix(s).keyEpoch, decls: st.decls.map((d) => [d.keyEpoch, d.head]) };
+    })()`);
+    ok(r.sealed === 2 && J(r.decls) === J([[1, "h1"], [2, "h-removal"]]), "K-11: a declaration that answers for its own epoch after the chain moved on isn't sealed under: the new epoch's generation is declared and used", r);
   }
 
   // ---- K-9: no page has keys yet

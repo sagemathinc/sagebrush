@@ -79,10 +79,15 @@ export function docKeys(src: { epochs: AccountEpochs; declarations: DocDeclarati
       const had = current.get(doc);
       if (had && had.head === head) return had.gen;
       // (a declaration re-sealed under a newer head than it names is refused "stale": the chain read again, once)
+      // (and a declaration confirmed after the chain began a new epoch answers for its own: that generation is retired
+      //  at the new head, so nothing is sealed under it; the new epoch's is resolved instead, once)
       const gen = resolve(doc, head, currentEpoch).catch(async (e) => {
         if ((e as { code?: string })?.code !== "stale") throw e;
         const now = await epochs.chain(true);
         return resolve(doc, now.head, now.currentEpoch);
+      }).then(async (g) => {
+        const now = await epochs.chain();
+        return now.currentEpoch === g.keyEpoch ? g : resolve(doc, now.head, now.currentEpoch);
       });
       const entry = { head, gen };
       current.set(doc, entry);
