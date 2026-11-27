@@ -265,6 +265,38 @@ class Space:
         The new subspace
         sage: sys._sagebrush_heap_limit = old; M.new_submodule().dimension()  # sagebrush only
         3
+
+    The ledger's edges: growth past a reservation is admitted (refused past
+    the allowance); live inputs count; the allowance is inclusive; pinned
+    matrices survive the trimming, which keeps the cache within half the
+    allowance::
+
+        sage: ch = ms._Charge("A row"); ch.limit = ch.used + 10  # sagebrush only
+        sage: try:  # sagebrush only
+        ....:     ms._settle(ch, 0, [Fraction(1, 3)] * 4)
+        ....: except MemoryError:
+        ....:     print("refused")
+        refused
+        sage: try:  # sagebrush only
+        ....:     _ = ms.Space(11, 2, 0).work("A computation", live=[10**12])
+        ....: except MemoryError:
+        ....:     print("refused")
+        refused
+        sage: ch = ms._Charge("A computation"); ch.take(ch.limit - ch.used); ch.used == ch.limit  # sagebrush only
+        True
+        sage: try:  # sagebrush only
+        ....:     ch.take(1)
+        ....: except MemoryError:
+        ....:     print("refused")
+        refused
+        sage: L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 3200000; _ = L.hecke_matrix(2)  # sagebrush only
+        sage: with L.work("A computation", pin=(2,)):  # sagebrush only
+        ....:     print(2 in L._hecke)
+        True
+        sage: sys._sagebrush_heap_limit = old; L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 6000000  # sagebrush only
+        sage: _ = L.hecke_matrix(2); _ = L.hecke_matrix(3); sorted(L._hecke), L.held() <= 6000000 // 4 // 2  # sagebrush only
+        ([3], True)
+        sage: sys._sagebrush_heap_limit = old  # sagebrush only
     """
 
     def __init__(self, N, k, sign):

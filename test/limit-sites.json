@@ -13115,6 +13115,11 @@
   "owner": "finite fields + configuration",
   "row": "inv-1"
  },
+ "lib/_sage_ff.py :: IntegerModRing_._units_field :: raise NotImplementedError(\"%s of %r (not a field) is not supported yet\" % (what, self)) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: the unit-group and roots-of-unity methods of Z/n with n composite (Sage's values there are not modelled), and lift_centered of a vector over a non-prime field; not a size or work limit"
+ },
  "lib/_sage_ff.py :: PolynomialRing_ff_.irreducible_element :: raise NotImplementedError(\"irreducible_element with algorithm=%r is not supported yet (only 'first_lexicographic')\" % algorithm) #0": {
   "class": "none",
   "owner": "finite fields + configuration",
@@ -13164,11 +13169,6 @@
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "domain refusal: irreducible_element algorithms other than first_lexicographic/the default, and polynomial nth_root where several roots exist (Sage's choice not modelled); not a size or work limit"
- },
- "lib/_sage_ff.py :: IntegerModRing_._units_field :: raise NotImplementedError(\"%s of %r (not a field) is not supported yet\" % (what, self)) #0": {
-  "class": "none",
-  "owner": "finite fields + configuration",
-  "reason": "domain refusals: the unit-group and roots-of-unity methods of Z/n with n composite (Sage's values there are not modelled), and lift_centered of a vector over a non-prime field; not a size or work limit"
  },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
@@ -14452,15 +14452,30 @@
   "owner": "modular symbols/runtime memory",
   "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
  },
+ "lib/_sage_modsym.py :: Space :: sage: L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 3200000; _ = L.hecke_matrix(2) # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
+ },
  "lib/_sage_modsym.py :: Space :: sage: L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 4 * 800000 # sagebrush only #0": {
   "class": "none",
   "owner": "modular symbols/runtime memory",
   "reason": "doctests that lower the heap figure to show the admission's refusal, reuse and cache eviction"
  },
+ "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A computation\"); ch.take(ch.limit - ch.used); ch.used == ch.limit # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
+ },
  "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A product\"); ch.limit = ch.used + 10 # sagebrush only #0": {
   "class": "none",
   "owner": "modular symbols/runtime memory",
   "reason": "doctests that lower the heap figure or the allowance to show the admission's refusal, reuse, eviction and reservation before arithmetic"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A row\"); ch.limit = ch.used + 10 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
  },
  "lib/_sage_modsym.py :: Space :: sage: ch = ms._Charge(\"A sum\"); ch.used, ch.limit = 0, 240 # sagebrush only #0": {
   "class": "none",
@@ -14476,6 +14491,16 @@
   "class": "none",
   "owner": "modular symbols/runtime memory",
   "reason": "doctests that lower the heap figure or the allowance to show the admission's refusal, reuse, eviction, reservation before arithmetic, sound sum bounds and the one ledger"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = old # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
+ },
+ "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = old; L = ms.Space(389, 2, 1); sys._sagebrush_heap_limit = 6000000 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular symbols/runtime memory",
+  "reason": "doctests that lower the heap figure or the allowance to show the admission's edges: growth admitted at settle, live inputs, the inclusive allowance, pins and the half-allowance cache"
  },
  "lib/_sage_modsym.py :: Space :: sage: sys._sagebrush_heap_limit = old; M.new_submodule().dimension() # sagebrush only #0": {
   "class": "none",
