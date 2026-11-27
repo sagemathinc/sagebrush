@@ -65,3 +65,24 @@ show('CuspForms(DirichletGroup(7).0^3, 3).newforms("a")[0].character()', lambda:
 show('CuspForms(DirichletGroup(7).0^3, 3).newforms("a")[0].atkin_lehner_eigenvalue(7)', lambda: CuspForms(DirichletGroup(7).0^3, 3).newforms("a")[0].atkin_lehner_eigenvalue(7))
 show('CuspForms(DirichletGroup(12).1, 3).newforms("a")[0].character()', lambda: CuspForms(DirichletGroup(12).1, 3).newforms("a")[0].character())
 show('CuspForms(DirichletGroup(12).1, 3).newforms("a")[0].atkin_lehner_eigenvalue(3)', lambda: CuspForms(DirichletGroup(12).1, 3).newforms("a")[0].atkin_lehner_eigenvalue(3))
+# q_integral_basis below the Sturm bound: the integral vectors of the
+# truncated span, a stored basis truncated while that keeps its rank;
+# series over ZZ; prec normalized as Sage does
+M = ModularForms(35, 2)
+for p in [0, 1, 5, 6, 7, 9, 6, 5, 7]:
+    print(p, [f.padded_list(p) for f in M.q_integral_basis(p)])
+S = CuspForms(61, 2)
+for p in [6, 20, 6, 4]:
+    print(p, [f.padded_list(min(p, 8)) for f in S.q_integral_basis(p)])
+b = CuspForms(11, 2).q_integral_basis(5)
+print(b[0].parent(), b[0][1].parent(), CuspForms(11, 2).q_integral_basis(0)[0].parent())
+for f in ['q_integral_basis', 'q_echelon_basis']:
+    for p in [2.5, -1, 5/2, '3', QQ(4)]:
+        try:
+            print(f, repr(p), list(getattr(CuspForms(11, 2), f)(p)))
+        except Exception as e:
+            print(f, repr(p), type(e).__name__, e)
+T = CuspForms(73, 2)
+for p in [30, 4, 3]:
+    print(p, [f.padded_list(min(p, 6)) for f in T.q_integral_basis(p)])
+print([f.padded_list(4) for f in CuspForms(55, 2).q_integral_basis(4)])

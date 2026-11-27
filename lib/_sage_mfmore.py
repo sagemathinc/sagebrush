@@ -61,6 +61,30 @@ def _basis_bits(k, prec):
     return (k + 1) * max(prec, 2).bit_length() + 256
 
 
+def _prec(prec):
+    """prec as Sage normalizes it: 6 by default, an integer (Sage's
+    TypeError for 2.5 or 5/2), at least 0."""
+    if prec is None:
+        return 6
+    from sage_all import ZZ
+    prec = int(ZZ(prec))
+    if prec < 0:
+        raise ValueError("prec (=%d) must be at least 0" % prec)
+    return prec
+
+
+def _zz_series(coeffs, prec):
+    from sage_all import ZZ
+    from _sage_series import PowerSeriesRing, Series
+    v = next((i for i, x in enumerate(coeffs[:prec]) if x), prec)
+    return Series(PowerSeriesRing(ZZ, "q"), v, [ZZ(x) for x in coeffs[v:prec]], prec)
+
+
+# the integral bases computed, by space: (prec, rows); as in Sage, a request
+# at a lower precision truncates the stored basis (even where that loses rank)
+_QINT = {}
+
+
 def _sigma(n, k):
     return sum(d ** k for d in _divisors(n))
 
@@ -343,7 +367,7 @@ class QSpaceMethods:
             sage: list(ModularForms(11, 2).q_echelon_basis(6))
             [1 + 12*q^2 + 12*q^3 + 12*q^4 + 12*q^5 + O(q^6), q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)]
         """
-        prec = 6 if prec is None else int(prec)
+        prec = _prec(prec)
         with _work("The echelon q-expansion basis of %r to precision %d" % (self, prec)) as ch:
             rows, _ = self._echelon_rows(prec)
             # (the series: prec coefficients of each row, reserved first)
@@ -368,30 +392,74 @@ class QSpaceMethods:
         return _Basis(out)
 
     def q_integral_basis(self, prec=None):
-        """The q-expansions of the basis, in Hermite normal form, of the forms
-        in the space with integral coefficients (to the Sturm bound, which
-        integrality there implies for all), to precision prec (6 by default).
+        """The q-expansions to precision prec (6 by default), over ZZ, of the
+        basis in Hermite normal form of the integral vectors in the span of
+        the space's q-expansions truncated at prec, padded with zeros to the
+        dimension. From the Sturm bound on these are the forms with integral
+        coefficients. As in Sage, a basis computed at a higher precision is
+        truncated instead, even where that loses rank.
 
         EXAMPLES::
 
             sage: list(CuspForms(37, 2).q_integral_basis(6))
             [q + q^3 - 2*q^4 + O(q^6), q^2 + 2*q^3 - 2*q^4 + q^5 + O(q^6)]
+            sage: S = CuspForms(61, 2); list(S.q_integral_basis(6))
+            [q - q^5 + O(q^6), q^2 - 2*q^5 + O(q^6), q^3 + q^5 + O(q^6), q^4 + 2*q^5 + O(q^6)]
+            sage: _ = S.q_integral_basis(20); list(S.q_integral_basis(6))
+            [q + q^4 + q^5 + O(q^6), q^2 - 2*q^5 + O(q^6), q^3 + q^4 + 3*q^5 + O(q^6), 2*q^4 + 4*q^5 + O(q^6)]
+            sage: T = CuspForms(73, 2); _ = T.q_integral_basis(30); list(T.q_integral_basis(4))
+            [q + q^3 + O(q^4), q^2 + q^3 + O(q^4), 2*q^3 + O(q^4), O(q^4), O(q^4)]
+            sage: list(CuspForms(73, 2).q_integral_basis(4))  # the same space, so the same stored basis
+            [q + q^3 + O(q^4), q^2 + q^3 + O(q^4), 2*q^3 + O(q^4), O(q^4), O(q^4)]
+            sage: b = CuspForms(11, 2).q_integral_basis(5); b[0].parent(), b[0][1].parent()
+            (Power Series Ring in q over Integer Ring, Integer Ring)
+            sage: CuspForms(11, 2).q_integral_basis(0)[0].parent()
+            Power Series Ring in q over Integer Ring
+            sage: CuspForms(11, 2).q_integral_basis(-1)
+            Traceback (most recent call last):
+            ...
+            ValueError: prec (=-1) must be at least 0
+            sage: CuspForms(11, 2).q_integral_basis(5/2)
+            Traceback (most recent call last):
+            ...
+            TypeError: no conversion of this rational to integer
         """
-        from sage_all import matrix, ZZ
-        from math import lcm
-        prec = 6 if prec is None else int(prec)
+        prec = _prec(prec)
         with _work("The integral q-expansion basis of %r to precision %d" % (self, prec)) as ch:
             return self._q_integral(prec, ch)
 
     def _q_integral(self, prec, ch):
+        import _sage_modsym as ms
+        A = self._amb()
+        key = (A._N, A._k, repr(A._chi), tuple(self._parts()), self.dimension())
+        have = _QINT.get(key)
+        if have is not None and have[0] >= prec:
+            # (the copies handed out are this computation's)
+            ch.take(len(have[1]) * prec * ms._SLOT)
+            out = [r[:prec] for r in have[1]]
+        else:
+            out = self._q_integral_rows(prec, ch)
+            # (kept: admitted before it is published)
+            ch.take(sum(ms._row_bytes(r) for r in out))
+            _QINT[key] = (prec, out)
+        res = _rows_reserve(ch, len(out), prec, max((_bits_of(r) for r in out), default=0))
+        series = _Basis(_zz_series(r, prec) for r in out)
+        _rows_settle(ch, res, out)
+        return series
+
+    def _q_integral_rows(self, prec, ch):
         from sage_all import matrix, ZZ
         from math import lcm
         import _sage_modsym as ms
-        R, work = self._echelon_rows(prec)
+        E, work = self._echelon_rows(prec)
+        # (the echelon rows truncated at prec: still reduced, the nonzero
+        # ones a basis of the truncated span)
+        R = [r[:prec] for r in E if any(r[:prec])]
         d = len(R)
+        pad = [[0] * prec for _ in range(len(E) - d)]
         if not d:
-            return _Basis([])
-        n = len(R[0])
+            return pad
+        n = prec
         piv = [next(j for j, x in enumerate(r) if x) for r in R]
         others = [j for j in range(n) if j not in set(piv)]
         den = 1
@@ -432,11 +500,10 @@ class QSpaceMethods:
         _note(ch, "hermite bound", (E, H))
         _take_step(ch, "hermite", 3 * ms._reserve(ch, E, H, frac=False) // 2)
         H = matrix(ZZ, vecs).echelon_form()
-        res = ms._reserve(ch, H.nrows() * prec, max((abs(int(x)).bit_length() for x in H.list()), default=0))
-        out = [[_Fr(int(x)) for x in H.row(i)] for i in range(H.nrows()) if any(H.row(i))]
-        series = _Basis(_series(r[:prec], prec) for r in out)
-        _rows_settle(ch, res, [r[:prec] for r in out])
-        return series
+        res = ms._reserve(ch, H.nrows() * prec, max((abs(int(x)).bit_length() for x in H.list()), default=0), frac=False)
+        out = [[int(x) for x in H.row(i)] for i in range(H.nrows()) if any(H.row(i))]
+        ms._settle(ch, res, [x for r in out for x in r])
+        return out + pad
 
     def eisenstein_series(self):
         """Sage's Eisenstein series of the space: for the nontrivial (real)
