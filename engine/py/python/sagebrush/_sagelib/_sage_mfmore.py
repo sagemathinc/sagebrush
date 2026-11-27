@@ -32,8 +32,10 @@ def _note(ch, step, nbytes):
 
 
 def _take_step(ch, step, nbytes):
+    # (what the charge took, not what was asked: its growth across the take)
+    before = ch.used
     ch.take(nbytes)
-    return _note(ch, step, nbytes)
+    return _note(ch, step, ch.used - before)
 
 
 def _rows_reserve(ch, rows, cols, bits):
@@ -216,7 +218,7 @@ class QSpaceMethods:
         sage: s = steps(lambda: Newforms(11, names='a')[0].qexp(1000))  # sagebrush only
         sage: s["coefficients"] >= 1000 * (unit + (3 * 10 // 2 + 2) // 8)  # sagebrush only
         True
-        sage: s = steps(lambda: ModularForms(35, 2).q_integral_basis(8)); "kernel" in s, "hermite" in s  # sagebrush only
+        sage: s = steps(lambda: ModularForms(35, 2).q_integral_basis(8)); s["kernel"] > 0, s["hermite"] > 0  # sagebrush only
         (True, True)
         sage: mm._hadamard_bits([[3, 4]]), mm._hadamard_bits([[3, 4], [0, 8]])  # sagebrush only
         (4, 8)
