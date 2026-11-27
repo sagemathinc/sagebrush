@@ -90,6 +90,86 @@ test("the contract lint flags reflection, private access and monkeypatching, and
   assert.ok(lintPackage(pkg({ "py/fixture.py": "" }, { private_prefix: used }), api).findings.some((f: any) => f.construct === "private_prefix"));
 });
 
+test("a package uses the packages it requires, at their exact ids, never their private names; a reference finding waives only by its declared line", async () => {
+  const { lintPackage, loadApi } = await esm("scripts/optional-packages.mjs");
+  const api = loadApi(repo);
+  const dep = { dir: "dep", id: "@sagebrush/dep@0.1.0", kind: "python", manifest: { python: { root: "py", modules: ["dep", "dep._dp_impl", "dep.sub"] }, private_prefix: "_dp_", requires: [] }, files: {}, declarations: [] };
+  const pkg = (src: string, requires: string[] = ["@sagebrush/dep@0.1.0"], declarations: any[] = []) => ({ dir: "fixture", id: "@sagebrush/fixture@0.1.0", manifest: { python: { root: "py", modules: ["fixture"] }, private_prefix: "_fx_", requires }, files: { "py/fixture.py": src }, declarations });
+  const lint = (src: string, requires?: string[], declarations?: any[]) => lintPackage(pkg(src, requires, declarations), api, [dep]).findings;
+  // (its public modules and names: allowed, and not checked against the Core API)
+  assert.deepEqual(lint("import dep\nimport dep.sub as s\nfrom dep.sub import f\nx = dep.Thing(1).method(s.g, f)\n"), []);
+  // (not required, or required at another version: not allowed)
+  assert.ok(lint("import dep\n", []).some((f: any) => f.construct === "import" && f.target === "dep"));
+  assert.ok(lint("import dep\n", ["@sagebrush/dep@0.2.0"]).some((f: any) => f.construct === "import"));
+  // (and a declaration never makes another package's module its own to import, public or private)
+  for (const [src, target] of [["import dep\n", "dep"], ["import dep._dp_impl\n", "dep._dp_impl"], ["from dep._dp_impl import x\n", "dep._dp_impl"], ["from dep.sub import f\n", "dep.sub"]]) {
+    const found = lint(src, [], [{ file: "py/fixture.py", line: 1, construct: "import", target, reason: "probe" }]);
+    assert.ok(found.some((f: any) => f.construct === "import" && f.hard === true), `${JSON.stringify(src)}: a hard import finding when dep isn't required, declared or not`);
+  }
+  // (its private names, a change to it: findings no declaration waives)
+  const declareAll = (line: number, construct: string, target: string) => [{ file: "py/fixture.py", line, construct, target, reason: "probe" }];
+  for (const [src, construct, target] of [
+    ["import dep._dp_impl\n", "import", "dep._dp_impl"],
+    ["from dep._dp_impl import x\n", "import", "dep._dp_impl"],
+    ["from dep import _hidden\n", "import", "dep._hidden"],
+    ["import dep\ny = dep._hidden\n", "attribute", "_hidden"],
+    ["from dep import sub\ny = sub._dp_state\n", "attribute", "_dp_state"],
+    ["import dep\ndep.Thing = None\n", "monkeypatch", "Thing"],
+    ["from dep import *\n", "import", "dep.*"],
+    // (through a name bound from the package: SEC's H1, then each way of binding one)
+    ["import dep\nx = dep\ny = x._secret\n", "attribute", "_secret"],
+    ["import dep\nx = dep\nx.Thing = None\n", "monkeypatch", "Thing"],
+    ["import dep\nT = dep.Thing\nT.attr = None\n", "monkeypatch", "attr"],
+    ["import dep\na, b = dep.Thing, 1\na.attr = None\n", "monkeypatch", "attr"],
+    ["import dep\nfor c in [dep.Thing]:\n    c.attr = None\n", "monkeypatch", "attr"],
+    ["import dep\nif (c := dep.Thing):\n    c.attr = None\n", "monkeypatch", "attr"],
+    ["from dep import Thing\nT = Thing if True else None\nT.attr = None\n", "monkeypatch", "attr"],
+    // (a comprehension's elements, and an item of what it builds)
+    ["import dep\nxs = [dep.Thing for _ in [0]]\nxs[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nys = {k: dep.Thing for k in [0]}\nys[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nfor t in (dep.Thing for _ in [0]):\n    t.attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nfor t in {dep.Thing for _ in [0]}:\n    t.attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nzs = [c for c in [dep.Thing]]\nzs[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nxs = [dep.Thing for _ in [0]]\ny = xs[0]._secret\n", "attribute", "_secret"],
+    ["import dep\nxs = {dep.Thing: 0}\nfor x in xs:\n    x.attr = 1\n", "monkeypatch", "attr"],
+    // (each literal container: set, tuple, list, starred elements, ** unpacking, a starred target)
+    ["import dep\nxs = {dep.Thing}\nfor x in xs:\n    x.attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nxs = (dep.Thing, 1)\nxs[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nxs = [dep.Thing]\nxs[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nys = [*[dep.Thing]]\nys[0].attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\nzs = {**{dep.Thing: 0}}\nfor z in zs:\n    z.attr = 1\n", "monkeypatch", "attr"],
+    ["import dep\na, *rest = 1, dep.Thing\nrest[0].attr = 1\n", "monkeypatch", "attr"],
+    // (a module object other than as an attribute's base, and any private name not self's in a requiring package)
+    ["import dep\nf(dep)\n", "escape", "dep"],
+    ["from dep import sub\nreturn_it = [sub]\n", "escape", "dep.sub"],
+    // (a submodule reached through its package: passed, stored, bound, returned)
+    ["import dep\nf(dep.sub)\n", "escape", "dep.sub"],
+    ["import dep\nx = [dep.sub]\n", "escape", "dep.sub"],
+    ["import dep\nx = dep.sub\n", "escape", "dep.sub"],
+    ["import dep\ndef g():\n    return dep.sub\n", "escape", "dep.sub"],
+    ["import dep.sub as s\nh = {1: s}\n", "escape", "dep.sub"],
+    ["import dep\nclass K: pass\ny = K()._other\n", "attribute", "_other"],
+  ] as [string, string, string][]) {
+    const line = src.split("\n").length - 1;
+    const found = lint(src, undefined, declareAll(line, construct, target));
+    assert.ok(found.some((f: any) => f.construct === construct && f.hard === true), `${JSON.stringify(src)}: a hard ${construct} finding, declared or not`);
+  }
+  // (a call's result is a new value, not the package's: using it is no finding)
+  assert.deepEqual(lint("import dep\nx = dep.Thing(1)\nx.attr = 2\ny = dep.sub.f().g\nz = dep.sub.Thing\n"), []);
+  // (instances built in a comprehension are new values too)
+  assert.deepEqual(lint("import dep\nxs = [dep.Thing() for _ in [0]]\nxs[0].attr = 1\nys = {k: dep.Thing(k) for k in [0]}\nys[0].attr = 2\nzs = {dep.Thing(): 0}\nfor z in zs:\n    z.attr = 3\nws = [dep.Thing(), (dep.Thing(),), {dep.Thing()}]\nws[0].attr = 4\n"), []);
+  // (a reference outside the Core API: a finding; a reviewed declaration of that line and target waives it, no other)
+  const ref = "import numpy as np\nr = np.random.rand.__self__\n";
+  assert.ok(lint(ref, []).some((f: any) => f.construct === "reference" && f.target === "numpy.random.rand.__self__"));
+  assert.deepEqual(lint(ref, [], declareAll(2, "reference", "numpy.random.rand.__self__")), []);
+  assert.ok(lint(ref, [], declareAll(1, "reference", "numpy.random.rand.__self__")).some((f: any) => f.construct === "reference"));
+  assert.ok(lint(ref, [], declareAll(2, "reference", "numpy.random.randint")).some((f: any) => f.construct === "reference"));
+  // (a reference waiver without a target, or with another construct, waives nothing)
+  assert.ok(lint(ref, [], [{ file: "py/fixture.py", line: 2, construct: "reference", reason: "probe" }]).some((f: any) => f.construct === "reference"));
+  assert.ok(lint(ref, [], declareAll(2, "name", "numpy.random.rand.__self__")).some((f: any) => f.construct === "reference"));
+  assert.ok(lint(ref, [], [{ file: "py/other.py", line: 2, construct: "reference", target: "numpy.random.rand.__self__", reason: "probe" }]).some((f: any) => f.construct === "reference"));
+});
+
 test("requirements come from the call forms used (§6.2–6.3): a new keyword raises the level, the old call doesn't", async () => {
   const { useLevel } = await esm("scripts/optional-packages.mjs");
   // level 1 had f(x); level 2 added extra=False (keyword-only) and a positional y=0

@@ -29,6 +29,8 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = []; const dialogs = []; const wsWarnings = [];
+// (the top frame's navigations, by URL: a page that rewrites its own address once loaded is checked on the way in)
+const navs = [];
 let promptText = "";
 // (whether the page's confirm()/prompt() is accepted: the Close-with-unsaved-edits case says no)
 let dialogAccept = true;
@@ -40,6 +42,7 @@ ws.onmessage = (ev) => {
   // (the page's own warnings about its workspace, shown when a page didn't open: why the workspace couldn't be opened)
   if (m.method === "Runtime.consoleAPICalled" && m.params.type === "warning" && /^workspace/.test(m.params.args?.[0]?.value ?? "")) wsWarnings.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 600));
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
+  if (m.method === "Page.frameNavigated" && !m.params.frame.parentId) navs.push(m.params.frame.url);
   if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params); send("Page.handleJavaScriptDialog", { accept: dialogAnswers.length ? dialogAnswers.shift() : dialogAccept, ...(m.params.type === "prompt" ? { promptText } : {}) }); }
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -408,6 +411,15 @@ try {
   await sleep(500);
   const diskStayed = await ev(`({ drains: window.__drains, notebook: window.__leaves.map((x) => x.notebook), at: location.search, code: !!${C}, readOnly: document.querySelector(".code-page .code-edit textarea")?.readOnly ?? null })`);
   check(diskSaid && diskStayed.drains === 1 && JSON.stringify(diskStayed.notebook) === "[false]" && diskStayed.at === stayAt && diskStayed.code && diskStayed.readOnly === false, "✕ twice, the desktop app's disk not yet written: one drain (no notebook to save), the page stays, says so, and typing comes back: " + JSON.stringify(diskStayed));
+  // (a .tex opened from Files on this page (the LaTeX boot's __sbTex, which leaves through __sbLeaveTo): through the code
+  //  page's own way out too (no notebook to save), never index.html's leaveTo directly, #1798)
+  await ev("(window.__leaves = [], window.__drains = 0, 1)");
+  await ev(`(window.__sbLeaveTo(location.origin + "/?tex=probe"), 1)`);
+  // (its one drain and its one leave seen, then a moment for a second, which mustn't come)
+  await until("window.__drains >= 1 && window.__leaves.length >= 1", 15000);
+  await sleep(300);
+  const texLeave = await ev(`({ drains: window.__drains, notebook: window.__leaves.map((x) => x.notebook), at: location.search, code: !!${C} })`);
+  check(texLeave.drains === 1 && JSON.stringify(texLeave.notebook) === "[false]" && texLeave.at === stayAt && texLeave.code, "a .tex opened from Files (__sbLeaveTo) leaves through the code page's own way out: one drain, no notebook to save, and the page stays: " + JSON.stringify(texLeave));
   await ev(`(window.__sbTestDiskMirror(null), 1)`);
   await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
   check(await until(`location.search !== ${JSON.stringify(stayAt)} && !${C}`, 15000), "…written: ✕ leaves");
@@ -474,8 +486,15 @@ try {
   await ev(`${C}.setMode("edit").then(() => 1)`);
   await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
   await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "before new\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  const navsBefore = navs.length;
   await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", ctrlKey: true, altKey: true, bubbles: true })), 1)`);
-  check(await until(`/[?&]nb=/.test(location.search) && !document.querySelector(".code-page")`, 15000), "Ctrl+Alt+N on the code page: a new notebook, on its own page");
+  // (the notebook page takes ?nb= out of its address once it has opened that notebook, so the address is read on the
+  //  navigation itself, never polled for (a poll that came after the page loaded missed it: the merge queue's red);
+  //  then what stays: the notebook page up, the code page gone, given a page load's time)
+  const newNb = await until(`!document.querySelector(".code-page") && !!window.sagebrush?.notebook`, 30000) && navs.slice(navsBefore).some((u) => /[?&]nb=/.test(new URL(u).search));
+  // (a CI flake, 3 times in a day, not seen here: where the page stood, so the next one says which step didn't happen)
+  if (!newNb) console.log("(Ctrl+Alt+N didn't leave: " + JSON.stringify(await ev(`({ at: location.search, codePage: !!document.querySelector(".code-page"), status: document.querySelector(".code-page .code-status")?.textContent ?? null, readOnly: document.querySelector(".code-page .code-edit textarea")?.readOnly ?? null, path: ${C}?.path ?? null, ready: document.readyState })`).catch((e) => String(e))) + `, dialogs ${dialogs.length}, page errors ${JSON.stringify(errors.slice(-3))})`);
+  check(newNb, "Ctrl+Alt+N on the code page: a new notebook, on its own page");
   check(await until(`${text("/demo.py")}.then((s) => s === "before new\\n").catch(() => false)`, 10000), "…the edit saved first");
 
   // a workspace slow to open (the page's lock requests held back until 10 s after it loads, past the few seconds the

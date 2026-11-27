@@ -9,22 +9,48 @@ distributed but not NumPy's stream (NumPy uses ziggurat tables for them).
 """
 
 import math as _math
+import operator as _operator
 import numpy as _np
 import _nprandom as _r
 
 __all__ = ["seed", "rand", "randn", "random", "random_sample", "ranf", "sample", "randint", "random_integers",
-           "uniform", "normal", "standard_normal", "exponential", "standard_exponential", "poisson",
+           "uniform", "normal", "standard_normal", "exponential", "standard_exponential", "poisson", "binomial",
+           "gamma", "standard_gamma",
            "choice", "shuffle", "permutation", "RandomState", "Generator", "default_rng", "get_state", "set_state"]
+
+
+def _dim(d):
+    # (one dimension of a shape, as NumPy reads it: through __index__, so a NumPy integer is an int; a bool or a
+    # float is refused)
+    if isinstance(d, (bool, _np.bool_)):
+        raise TypeError("an integer is required")
+    return _nonneg_dim(_operator.index(d))
+
+
+def _nonneg_dim(n):
+    if n < 0:
+        raise ValueError("negative dimensions are not allowed")
+    return n
 
 
 def _size(size):
     if size is None:
         return None
-    return list(size) if isinstance(size, (tuple, list)) else [size]
+    if isinstance(size, (tuple, list)):
+        return [_dim(d) for d in size]
+    # (__index__ read once, as NumPy reads it)
+    if not isinstance(size, (bool, _np.bool_)):
+        try:
+            n = _operator.index(size)
+        except TypeError:
+            n = None
+        if n is not None:
+            return [_nonneg_dim(n)]
+    raise TypeError(f"expected a sequence of integers or a single integer, got '{size}'")
 
 
 def _sz(*args):
-    return list(args) if args else None
+    return [_dim(d) for d in args] if args else None
 
 
 def _scalar_or(x):
@@ -50,6 +76,52 @@ def _poisson(g, lam, size):
         return _r.poisson(g, lam, _size(size))
     lam = _np.broadcast_to(_np.asarray(lam, float), tuple(_size(size)))
     return _np.array([_r.poisson(g, float(v), None) for v in lam.ravel().tolist()], dtype=_np.int64).reshape(lam.shape)
+
+
+def _binomial(g, n, p, size, legacy):
+    """NumPy's binomial draws (random_binomial: inversion, or BTPE when n min(p, 1 - p) > 30), n checked first"""
+    # (a scalar n kept as its Python int: exact past 2**53, as NumPy's int64 n, the draws too)
+    scalar = isinstance(n, int) or not _np.shape(n)
+    if scalar:
+        n = int(n)
+        if n > 2**63 - 1 or n < -2**63:
+            raise OverflowError("Python int too large to convert to C long")
+        if n < 0:
+            raise ValueError("n < 0")
+    elif _np.any(_np.asarray(n) < 0):
+        raise ValueError("n < 0")
+    pa = _np.asarray(p, float)
+    if _np.any(pa < 0) or _np.any(pa > 1) or _np.any(_np.isnan(pa)):
+        raise ValueError("p < 0, p > 1 or p is NaN")
+    size = _bsize(size, p, 0 if scalar else n)  # (NumPy's order: p, then n)
+    if scalar and not _np.shape(p):
+        if size is None or n < 2**53:
+            return _r.binomial(g, n, float(p), _size(size), legacy)
+        # (n past 2**53 with a size: drawn one by one, each exactly, kept only where an int64 array holds it
+        # (they are doubles), else refused, never rounded)
+        shape = tuple(_size(size))
+        return _np.array([_r.binomial(g, n, float(p), None, legacy) for _ in range(_math.prod(shape))],
+                         dtype=_np.int64).reshape(shape)
+    shape = tuple(_size(size))
+    nb = _np.broadcast_to(_np.asarray(n).astype(_np.int64), shape).ravel().tolist()
+    pb = _np.broadcast_to(pa, shape).ravel().tolist()
+    return _np.array([_r.binomial(g, int(a), float(b), None, legacy) for a, b in zip(nb, pb)],
+                     dtype=_np.int64).reshape(shape)
+
+
+def _gamma(g, shape, scale, size):
+    # (NumPy's legacy gamma: shape, then scale, checked; array parameters drawn element by element in C order of
+    # their broadcast shape, each scale * standard_gamma(shape))
+    _nonneg(shape, "shape")
+    _nonneg(scale, "scale")
+    size = _bsize(size, shape, scale)
+    if not _np.shape(shape) and not _np.shape(scale):
+        z = _r.legacy_gamma(g, float(shape), _size(size))
+        return float(scale) * z
+    sh = tuple(_size(size))
+    sv = _np.broadcast_to(_np.asarray(shape, float), sh).ravel().tolist()
+    cv = _np.broadcast_to(_np.asarray(scale, float), sh).ravel().tolist()
+    return _np.array([c * _r.legacy_gamma(g, v, None) for v, c in zip(sv, cv)], dtype=float).reshape(sh)
 
 
 class RandomState:
@@ -119,6 +191,17 @@ class RandomState:
     def poisson(self, lam=1.0, size=None):
         return _poisson(self._g, lam, size)
 
+    def binomial(self, n, p, size=None):
+        """Draws from the binomial distribution of n trials of probability p, as NumPy's (the same numbers for a
+        seed)."""
+        return _binomial(self._g, n, p, size, True)
+
+    def standard_gamma(self, shape, size=None):
+        return _gamma(self._g, shape, 1.0, size)
+
+    def gamma(self, shape, scale=1.0, size=None):
+        return _gamma(self._g, shape, scale, size)
+
     def randint(self, low, high=None, size=None, dtype=int):
         if high is None:
             low, high = 0, low
@@ -171,8 +254,29 @@ class RandomState:
             if k > n:
                 raise ValueError("Cannot take a larger sample than population when 'replace=False'")
             if p is not None:
-                raise NotImplementedError("choice(replace=False, p=...)")
-            idx = self.permutation(n)[:k]
+                # (NumPy's legacy draw: rand() for the indices still missing, through the cdf of p with those
+                # already found zeroed, keeping each new index's first occurrence, until there are k)
+                p = _check_p(p, n)
+                if _np.count_nonzero(p > 0) < k:
+                    raise ValueError("Fewer non-zero entries in p than size")
+                n_uniq = 0
+                p = p.copy()
+                found = _np.zeros(k, dtype=_np.int64)
+                while n_uniq < k:
+                    x = self.rand(k - n_uniq)
+                    if n_uniq > 0:
+                        p[found[0:n_uniq]] = 0
+                    cdf = _np.cumsum(p)
+                    cdf /= cdf[-1]
+                    new = _np.searchsorted(cdf, x, side="right")
+                    _, unique_indices = _np.unique(new, return_index=True)
+                    unique_indices.sort()
+                    new = new.take(unique_indices)
+                    found[n_uniq:n_uniq + new.size] = new
+                    n_uniq += new.size
+                idx = found
+            else:
+                idx = self.permutation(n)[:k]
             if shape is not None:
                 idx = idx.reshape(shape)
             else:
@@ -204,6 +308,9 @@ uniform = _global.uniform
 exponential = _global.exponential
 standard_exponential = _global.standard_exponential
 poisson = _global.poisson
+binomial = _global.binomial
+gamma = _global.gamma
+standard_gamma = _global.standard_gamma
 randint = _global.randint
 random_integers = _global.random_integers
 shuffle = _global.shuffle
@@ -308,6 +415,11 @@ class Generator:
 
     def poisson(self, lam=1.0, size=None):
         return _poisson(self._g, lam, size)
+
+    def binomial(self, n, p, size=None):
+        """Draws from the binomial distribution of n trials of probability p, as NumPy's (the same numbers for a
+        seed: NumPy's algorithm over this generator's stream)."""
+        return _binomial(self._g, n, p, size, False)
 
     def shuffle(self, x, axis=0):
         n = len(x)

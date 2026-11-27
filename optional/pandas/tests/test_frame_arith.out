@@ -1,0 +1,927 @@
+== scalar-add
+
+   a    b
+0  5  3.5
+1 -1  2.0
+2  2  0.0
+== scalar-add.dtypes
+['int64', 'float64']
+== scalar-add-float
+
+     a    b
+0  5.5  4.0
+1 -0.5  2.5
+2  2.5  0.5
+== scalar-add-float.dtypes
+['float64', 'float64']
+== reflected-add
+
+   a    b
+0  5  3.5
+1 -1  2.0
+2  2  0.0
+== reflected-add.dtypes
+['int64', 'float64']
+== frame-add
+
+   a    b
+0  7  4.0
+1 -5  1.0
+2  1 -3.0
+== frame-add.dtypes
+['int64', 'float64']
+== zero-add
+
+   a    b
+0  3  1.5
+1 -3  0.0
+2  0 -2.0
+== zero-add.dtypes
+['int64', 'float64']
+== frame-zero-add
+
+   a    b
+0  3  1.5
+1 -3  0.0
+2  0 -2.0
+== frame-zero-add.dtypes
+['int64', 'float64']
+== method-zero-add
+
+   a    b
+0  3  1.5
+1 -3  0.0
+2  0 -2.0
+== method-zero-add.dtypes
+['int64', 'float64']
+== scalar-sub
+
+   a    b
+0  1 -0.5
+1 -5 -2.0
+2 -2 -4.0
+== scalar-sub.dtypes
+['int64', 'float64']
+== scalar-sub-float
+
+     a    b
+0  0.5 -1.0
+1 -5.5 -2.5
+2 -2.5 -4.5
+== scalar-sub-float.dtypes
+['float64', 'float64']
+== reflected-sub
+
+   a    b
+0 -1  0.5
+1  5  2.0
+2  2  4.0
+== reflected-sub.dtypes
+['int64', 'float64']
+== frame-sub
+
+   a    b
+0 -1 -1.0
+1 -1 -1.0
+2 -1 -1.0
+== frame-sub.dtypes
+['int64', 'float64']
+== zero-sub
+
+   a    b
+0  3  1.5
+1 -3  0.0
+2  0 -2.0
+== zero-sub.dtypes
+['int64', 'float64']
+== frame-zero-sub
+
+   a    b
+0  3  1.5
+1 -3  0.0
+2  0 -2.0
+== frame-zero-sub.dtypes
+['int64', 'float64']
+== method-zero-sub
+
+   a    b
+0  3  1.5
+1 -3  0.0
+2  0 -2.0
+== method-zero-sub.dtypes
+['int64', 'float64']
+== scalar-mul
+
+   a    b
+0  6  3.0
+1 -6  0.0
+2  0 -4.0
+== scalar-mul.dtypes
+['int64', 'float64']
+== scalar-mul-float
+
+     a     b
+0  7.5  3.75
+1 -7.5  0.00
+2  0.0 -5.00
+== scalar-mul-float.dtypes
+['float64', 'float64']
+== reflected-mul
+
+   a    b
+0  6  3.0
+1 -6  0.0
+2  0 -4.0
+== reflected-mul.dtypes
+['int64', 'float64']
+== frame-mul
+
+    a     b
+0  12  3.75
+1   6  0.00
+2   0  2.00
+== frame-mul.dtypes
+['int64', 'float64']
+== zero-mul
+
+   a    b
+0  0  0.0
+1  0  0.0
+2  0 -0.0
+== zero-mul.dtypes
+['int64', 'float64']
+== frame-zero-mul
+
+   a    b
+0  0  0.0
+1  0 -0.0
+2  0 -0.0
+== frame-zero-mul.dtypes
+['int64', 'float64']
+== method-zero-mul
+
+   a    b
+0  0  0.0
+1  0 -0.0
+2  0 -0.0
+== method-zero-mul.dtypes
+['int64', 'float64']
+== scalar-truediv
+
+     a     b
+0  1.5  0.75
+1 -1.5  0.00
+2  0.0 -1.00
+== scalar-truediv.dtypes
+['float64', 'float64']
+== scalar-truediv-float
+
+     a    b
+0  1.2  0.6
+1 -1.2  0.0
+2  0.0 -0.8
+== scalar-truediv-float.dtypes
+['float64', 'float64']
+== reflected-truediv
+
+          a         b
+0  0.666667  1.333333
+1 -0.666667       inf
+2       inf -1.000000
+== reflected-truediv.dtypes
+['float64', 'float64']
+== frame-truediv
+
+      a    b
+0  0.75  0.6
+1  1.50  0.0
+2  0.00  2.0
+== frame-truediv.dtypes
+['float64', 'float64']
+== zero-truediv
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== zero-truediv.dtypes
+['float64', 'float64']
+== frame-zero-truediv
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== frame-zero-truediv.dtypes
+['float64', 'float64']
+== method-zero-truediv
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== method-zero-truediv.dtypes
+['float64', 'float64']
+== scalar-floordiv
+
+   a    b
+0  1  0.0
+1 -2  0.0
+2  0 -1.0
+== scalar-floordiv.dtypes
+['int64', 'float64']
+== scalar-floordiv-float
+
+     a    b
+0  1.0  0.0
+1 -2.0  0.0
+2  0.0 -1.0
+== scalar-floordiv-float.dtypes
+['float64', 'float64']
+== reflected-floordiv
+
+     a    b
+0  0.0  1.0
+1 -1.0  inf
+2  inf -1.0
+== reflected-floordiv.dtypes
+['float64', 'float64']
+== frame-floordiv
+
+   a    b
+0  0  0.0
+1  1  0.0
+2  0  2.0
+== frame-floordiv.dtypes
+['int64', 'float64']
+== zero-floordiv
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== zero-floordiv.dtypes
+['float64', 'float64']
+== frame-zero-floordiv
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== frame-zero-floordiv.dtypes
+['float64', 'float64']
+== method-zero-floordiv
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== method-zero-floordiv.dtypes
+['float64', 'float64']
+== scalar-mod
+
+   a    b
+0  1  1.5
+1  1  0.0
+2  0  0.0
+== scalar-mod.dtypes
+['int64', 'float64']
+== scalar-mod-float
+
+     a    b
+0  0.5  1.5
+1  2.0  0.0
+2  0.0  0.5
+== scalar-mod-float.dtypes
+['float64', 'float64']
+== reflected-mod
+
+     a    b
+0  2.0  0.5
+1 -1.0  NaN
+2  NaN -0.0
+== reflected-mod.dtypes
+['float64', 'float64']
+== frame-mod
+
+   a    b
+0  3  1.5
+1 -1  0.0
+2  0 -0.0
+== frame-mod.dtypes
+['int64', 'float64']
+== zero-mod
+
+    a   b
+0 NaN NaN
+1 NaN NaN
+2 NaN NaN
+== zero-mod.dtypes
+['float64', 'float64']
+== frame-zero-mod
+
+    a   b
+0 NaN NaN
+1 NaN NaN
+2 NaN NaN
+== frame-zero-mod.dtypes
+['float64', 'float64']
+== method-zero-mod
+
+    a   b
+0 NaN NaN
+1 NaN NaN
+2 NaN NaN
+== method-zero-mod.dtypes
+['float64', 'float64']
+== scalar-pow
+
+   a     b
+0  9  2.25
+1  9  0.00
+2  0  4.00
+== scalar-pow.dtypes
+['int64', 'float64']
+== scalar-pow-float
+
+           a         b
+0  15.588457  2.755676
+1        NaN  0.000000
+2   0.000000       NaN
+== scalar-pow-float.dtypes
+['float64', 'float64']
+== reflected-pow
+!! ValueError: Integers to negative integer powers are not allowed.
+== reflected-pow.dtypes
+!! ValueError: Integers to negative integer powers are not allowed.
+== frame-pow
+!! ValueError: Integers to negative integer powers are not allowed.
+== frame-pow.dtypes
+!! ValueError: Integers to negative integer powers are not allowed.
+== zero-pow
+
+   a    b
+0  1  1.0
+1  1  1.0
+2  1  1.0
+== zero-pow.dtypes
+['int64', 'float64']
+== frame-zero-pow
+
+   a    b
+0  1  1.0
+1  1  1.0
+2  1  1.0
+== frame-zero-pow.dtypes
+['int64', 'float64']
+== method-zero-pow
+
+   a    b
+0  1  1.0
+1  1  1.0
+2  1  1.0
+== method-zero-pow.dtypes
+['int64', 'float64']
+== neg
+
+   a    b
+0 -3 -1.5
+1  3 -0.0
+2  0  2.0
+== neg.dtypes
+['int64', 'float64']
+== pos
+
+   a    b
+0  3  1.5
+1 -3  0.0
+2  0 -2.0
+== pos.dtypes
+['int64', 'float64']
+== abs
+
+   a    b
+0  3  1.5
+1  3  0.0
+2  0  2.0
+== abs.dtypes
+['int64', 'float64']
+== abs-method
+
+   a    b
+0  3  1.5
+1  3  0.0
+2  0  2.0
+== abs-method.dtypes
+['int64', 'float64']
+== divmod
+(   a    b
+0  1  0.0
+1 -2  0.0
+2  0 -1.0,    a    b
+0  1  1.5
+1  1  0.0
+2  0  0.0)
+== rdivmod
+(     a    b
+0  2.0  4.0
+1 -3.0  inf
+2  inf -4.0,      a    b
+0  1.0  1.0
+1 -2.0  NaN
+2  NaN -1.0)
+== divmod-zero
+(     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf,     a   b
+0 NaN NaN
+1 NaN NaN
+2 NaN NaN)
+== pow-neg
+!! ValueError: Integers to negative integer powers are not allowed.
+== rpow-neg
+!! ValueError: Integers to negative integer powers are not allowed.
+== truediv.exact
+[[1.0, 0.5], [-1.0, 0.0], [0.0, -0.6666666666666666]]
+== row-list
+
+   a    b
+0  4  3.5
+1 -2  2.0
+2  1  0.0
+== row-list.dtypes
+['int64', 'float64']
+== row-list-mixed
+
+     a    b
+0  4.0  4.0
+1 -2.0  2.5
+2  1.0  0.5
+== row-list-mixed.dtypes
+['float64', 'float64']
+== row-ndarray
+
+   a    b
+0  6  4.5
+1 -6  0.0
+2  0 -6.0
+== row-ndarray.dtypes
+['int64', 'float64']
+== row-int8-strong
+
+   a
+0  4
+1  5
+== row-int8-strong.dtypes
+['int64']
+== row-int8-ndarray
+
+   a
+0  4
+1  5
+== row-int8-ndarray.dtypes
+['int64']
+== row-float32-strong
+
+     f    g
+0  3.5  4.0
+1  4.5  5.0
+== row-float32-strong.dtypes
+['float64', 'float64']
+== row-index
+
+   a    b
+0  4  3.5
+1 -2  2.0
+2  1  0.0
+== row-index.dtypes
+['int64', 'float64']
+== row-tuple
+(   a    b
+0  4  3.5
+1 -2  2.0
+2  1  0.0, [('Pandas4Warning', 'Operation with tuple is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== row-range
+(   a    b
+0  3  2.5
+1 -3  1.0
+2  0 -1.0, [('Pandas4Warning', 'Operation with range is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== row-tuple-method
+(   a    b
+0  2 -0.5
+1 -4 -2.0
+2 -1 -4.0, [('Pandas4Warning', 'Operation with tuple is deprecated. In a future version these will be treated as scalar-like. To retain the old behavior, explicitly wrap in a Series instead.')])
+== row-floordiv-zero
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== row-floordiv-zero.dtypes
+['float64', 'float64']
+== rsub-list
+
+   a    b
+0 -2  0.5
+1  4  2.0
+2  1  4.0
+== rsub-list.dtypes
+['int64', 'float64']
+== row-length
+!! ValueError: Unable to coerce to Series, length must be 2: given 3
+== row-length-ndarray
+!! ValueError: Unable to coerce to Series, length must be 2: given 3
+== column-list
+
+   a    b
+0  4  2.5
+1 -1  2.0
+2  3  1.0
+== column-list.dtypes
+['int64', 'float64']
+== column-list-index-axis
+
+   a    b
+0  4  2.5
+1 -1  2.0
+2  3  1.0
+== column-list-index-axis.dtypes
+['int64', 'float64']
+== column-list-rows-axis
+
+   a    b
+0  4  2.5
+1 -1  2.0
+2  3  1.0
+== column-list-rows-axis.dtypes
+['int64', 'float64']
+== column-floordiv-zero
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== column-floordiv-zero.dtypes
+['float64', 'float64']
+== column-length
+!! ValueError: Unable to coerce to Series, length must be 3: given 2
+== axis-2
+!! ValueError: No axis named 2 for object type DataFrame
+== block
+
+     a    b
+0  4.0  2.5
+1 -2.0  1.0
+2  1.0 -1.0
+== block.dtypes
+['float64', 'float64']
+== block-column
+
+   a    b
+0  3  1.5
+1 -2  1.0
+2  2  0.0
+== block-column.dtypes
+['int64', 'float64']
+== block-row
+
+   a    b
+0  6  4.5
+1 -6  0.0
+2  0 -6.0
+== block-row.dtypes
+['int64', 'float64']
+== block-shape
+!! ValueError: Unable to coerce to DataFrame, shape must be (3, 2): given (2, 2)
+== zerodim
+
+   a    b
+0  5  3.5
+1 -1  2.0
+2  2  0.0
+== zerodim.dtypes
+['int64', 'float64']
+== zerodim-floordiv-zero
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== zerodim-floordiv-zero.dtypes
+['float64', 'float64']
+== zerodim-int8-overflow
+!! OverflowError: Python integer 300 out of bounds for int8
+== numpy-scalar-int8-overflow
+!! OverflowError: Python integer 300 out of bounds for int8
+== float32-weak
+
+     f     g
+0  2.5   7.5
+1  5.0  10.0
+== float32-weak.dtypes
+['float32', 'float32']
+== series-columns
+
+   a    b
+0  4  3.5
+1 -2  2.0
+2  1  0.0
+== series-columns.dtypes
+['int64', 'float64']
+== series-columns-permuted
+
+   a    b
+0  5  2.5
+1 -1  1.0
+2  2 -1.0
+== series-columns-permuted.dtypes
+['int64', 'float64']
+== series-int8-strong
+
+     a
+0  301
+1  302
+== series-int8-strong.dtypes
+['int64']
+== series-float32-strong
+
+     f    g
+0  3.5  4.0
+1  4.5  5.0
+== series-float32-strong.dtypes
+['float64', 'float64']
+== series-floordiv-zero
+
+     a    b
+0  inf  inf
+1 -inf  NaN
+2  NaN -inf
+== series-floordiv-zero.dtypes
+['float64', 'float64']
+== series-div-axis1
+
+     a      b
+0  1.5  0.375
+1 -1.5  0.000
+2  0.0 -0.500
+== series-div-axis1.dtypes
+['float64', 'float64']
+== series-reflected
+
+   a    b
+0 -1  1.5
+1  5  3.0
+2  2  5.0
+== series-reflected.dtypes
+['int64', 'float64']
+== series-rpow
+
+    a     b
+0  32  2187
+== series-rpow.dtypes
+['int64', 'int64']
+== series-rsub-method
+
+   a  b
+0 -3 -4
+== series-rsub-method.dtypes
+['int64', 'int64']
+== series-divmod
+(   a  b
+0  3  2,    a  b
+0  1  1)
+== series-rows
+
+   a    b
+0  4  2.5
+1 -1  2.0
+2  3  1.0
+== series-rows.dtypes
+['int64', 'float64']
+== series-rows-aligned
+
+     a    b
+0  2.0  0.5
+1  NaN  NaN
+2  NaN  NaN
+5  NaN  NaN
+== series-rows-aligned.dtypes
+['float64', 'float64']
+== series-rows-floordiv-zero
+
+     a
+0  inf
+1 -inf
+2  NaN
+== series-rows-floordiv-zero.dtypes
+['float64']
+== frame-rows-differ
+
+      a
+1  12.0
+5   NaN
+7   NaN
+== frame-rows-differ.dtypes
+['float64']
+== frame-float32-rows-differ
+
+     f    g
+0  NaN  NaN
+1  3.0  5.0
+2  NaN  NaN
+== frame-float32-rows-differ.dtypes
+['float32', 'float32']
+== frame-columns-permuted
+
+   a    b
+0  6  3.0
+1 -6  0.0
+2  0 -4.0
+== frame-columns-permuted.dtypes
+['int64', 'float64']
+== frame-float32-float64
+
+     f    g
+0  2.0  3.5
+1  4.0  4.5
+== frame-float32-float64.dtypes
+['float64', 'float64']
+== frame-str
+
+     s
+0   xy
+1  NaN
+== frame-str.dtypes
+['str']
+== frame-bool
+
+      t
+0  True
+1  True
+== frame-bool.dtypes
+['bool']
+== frame-repeated-index-same
+
+   a
+0  2
+0  4
+== frame-repeated-index-same.dtypes
+['int64']
+== frame-index-names
+('i', 'i')
+== fill-scalar
+
+     a    b
+0  2.0  1.0
+1  1.0  3.0
+== fill-scalar.dtypes
+['float64', 'float64']
+== fill-scalar-nan
+
+    a   b
+0 NaN NaN
+1 NaN NaN
+== fill-scalar-nan.dtypes
+['float64', 'float64']
+== fill-frame
+
+     a    b
+0  1.0  NaN
+1  5.0  2.0
+== fill-frame.dtypes
+['float64', 'float64']
+== fill-frame-rows
+
+      a    b
+0  11.0  NaN
+1  11.0  3.0
+== fill-frame-rows.dtypes
+['float64', 'float64']
+== fill-series
+
+     a    b
+0  2.0  NaN
+1  1.0  2.0
+== fill-series.dtypes
+['float64', 'float64']
+== fill-series-rows
+
+     a    b
+0  1.0  NaN
+1  1.0  3.0
+2  3.0  3.0
+== fill-series-rows.dtypes
+['float64', 'float64']
+== fill-list
+
+     a    b
+0  2.0  NaN
+1  1.0  2.0
+== fill-list.dtypes
+['float64', 'float64']
+== fill-block
+
+     a    b
+0  1.0  1.0
+1  1.0  3.0
+== fill-block.dtypes
+['float64', 'float64']
+== str-concat
+
+     s
+0   xz
+1   yz
+2  NaN
+== str-concat.dtypes
+['str']
+== str-repeat-mixed
+
+   a   s
+0  2  xx
+== str-repeat-mixed.dtypes
+['int64', 'str']
+== str-plus-int
+!! TypeError: can only concatenate str (not "int") to str
+== plus-none
+!! TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'
+== bool-plus-int
+
+   t
+0  2
+1  1
+== bool-plus-int.dtypes
+['int64']
+== bool-series
+
+      t
+0  True
+1  True
+== bool-series.dtypes
+['bool']
+== empty-columns
+
+Empty DataFrame
+Columns: []
+Index: [0, 1]
+== empty-columns.dtypes
+[]
+== names-kept
+('c', 'c', 'c')
+== fill-scalar-reflected
+
+     a    b
+0  9.0  9.0
+1  9.0  8.0
+== fill-scalar-reflected.dtypes
+['float64', 'float64']
+== fill-int-frame
+
+     a
+0  6.0
+1  3.0
+== fill-int-frame.dtypes
+['float64']
+== fill-frame-pow-both-missing
+
+     a    b
+0  1.0  NaN
+1  0.0  1.0
+== fill-frame-pow-both-missing.dtypes
+['float64', 'float64']
+== fill-row-rpow-both-missing
+
+     a    b
+0  0.0  1.0
+1  NaN  4.0
+== fill-row-rpow-both-missing.dtypes
+['float64', 'float64']
+== no-columns-series-rows
+
+Empty DataFrame
+Columns: []
+Index: [0, 2, 3]
+== no-columns-series-rows.dtypes
+[]
+== no-columns-series-rows.index
+[0, 2, 3]
+== no-columns-series-rows-permuted.index
+[0, 2]
+== no-columns-series-rows-same.index
+[2, 0]
+== no-columns-frame.index
+[0, 2, 5]
+== axis-none-scalar
+
+   a
+0  2
+1  3
+== axis-none-scalar.dtypes
+['int64']
+== axis-none-series
+
+    a   b
+0  11  23
+1  12  24
+== axis-none-series.dtypes
+['int64', 'int64']

@@ -38,11 +38,11 @@
 // (§8.2), its changes credited to agent:page.
 import { synthetic } from "./board";
 import { termKeep } from "../shell/term-keep.ts";
-import { anyCode, isBoard, type BoardDoc } from "./doc";
+import { anyCode, isBoard, type BoardDoc, type BoardMode } from "./doc";
 import { BoardCode, siteEngine } from "./code";
 import { createRunnerPill } from "../notebook/runner-pill.js";
 import { RUNNER_BROWSER } from "../notebook/runner-browser.js";
-import { OWN_ENGINE, chooseEngine, fileEngine } from "./engine";
+import { OWN_ENGINE, chooseEngine, fileEngine, publicLatestEngine, EngineRecovery } from "./engine";
 import { IdbOutputCache, MemoryOutputCache, carriedOutputs } from "./outcache";
 import { boardFromText, fromMermaid } from "./mermaid";
 import { localFollow } from "./local-follow";
@@ -245,6 +245,9 @@ if (desktopApp) {
   }
   void desktopModule().then((d) => d.drainOnQuit({ mirror: () => diskMirror, invoke, listen: (ev: string, f: () => void) => (window as any).__TAURI__.event.listen(ev, f), freeze: () => document.body.setAttribute("inert", ""), flushEditor: () => wsFlush() })).catch((e) => console.warn("quit:", e));
 }
+// (the desktop app: the folder its workspace is kept in, for the Storage panel to say (#1539))
+let boardWsFolder: string | undefined;
+if (desktopApp) (window as any).__TAURI__.core.invoke("disk_where").then((p: unknown) => { if (typeof p === "string") boardWsFolder = p; }, () => {});
 /** To `url`, once this page's changes are on disk (the desktop app; elsewhere at once). */
 async function leaveTo(url: string) {
   if (diskMirror && !(await (await desktopModule()).beforeLeave(diskMirror, () => wsFlush()))) return;
@@ -1074,6 +1077,10 @@ async function journalLoad(id: string, path: string, pend: ReturnType<typeof rea
 const docIndexes: Record<string, Promise<DocEntry[] | null>> = {};
 // (the engine an exported file's code last ran with, as chooseEngine chose it)
 let chosen: string | null = null;
+// Only a reader's click may leave an exported file's pinned site. A posted
+// frame cannot request this, and a hash mismatch never offers it.
+const engineRecovery = new EngineRecovery();
+let publicEngine = false;
 // (a document opened from the file browser or the File menu: a board here, a notebook on its page; this board's saves made first)
 // (U1, William Nov 2: a .tex file clicked in the board's file panel did nothing. It opens in the LaTeX editor, on the
 // notebook page's /?tex=<fid>, where the editor is on (the hosts the build lists: latexOn); this board left the way every
@@ -1106,6 +1113,12 @@ function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "board" && e.ref === source.slice(6)) return;
+  // (in the app, a notebook or board another window shows: that window to the front instead, app/src-tauri/src/windows.rs
+  // window_claim, #1541)
+  if (desktopApp && (e.kind === "notebook" || e.kind === "board")) {
+    void (window as any).__TAURI__.core.invoke("window_claim", { doc: e.path }).then((at: string | null) => { if (at == null) void leaveFor(url, nameOf(e.path)); }, () => void leaveFor(url, nameOf(e.path)));
+    return;
+  }
   void leaveFor(url, nameOf(e.path));
 }
 // Leaving this board for another page, whichever way (an open, an upload, the file browser): what
@@ -1476,7 +1489,8 @@ const host: BoardHost = {
   code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && RUNNER_BROWSER && !(window as any).__TAURI__), { observeRunner: (kernel, mod) => runnerPill.watch(kernel, (w: any) => w instanceof mod.RunnerWorker && !w.inner) })
     // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
     // (one for each language the board's items are in: Sage's with its library, item 16)
-    : ref ? (d, mode) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine).then((e) => ((chosen = e.id), e)), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
+    : ref ? (d, mode) => new BoardCode(engineRecovery.track(mode, (unavailable) => fileEngine(() => (publicEngine ? publicLatestEngine() : chooseEngine(ref, fromParent ? "pinned" : d.engine)).then((e) => ((chosen = e.id), e)), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent, unavailable }))) : undefined,
+  engineRecovery: file && ref && !fromParent ? () => !publicEngine ? engineRecovery.action(() => { publicEngine = true; }) : null : undefined,
   // KaTeX, the notebook's (its stylesheet and fonts beside it); an exported
   // file carries the module as text: imported from a Blob
   math: () => {
@@ -1770,8 +1784,11 @@ if (ws) {
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
-      // (Agents…: the agents page, left as for any other page, this board's saves made first)
-      agents: () => void leaveFor("/agents/", "Agents"),
+      // (Agents…: the agents page, left as for any other page, this board's saves made first; not in the desktop app,
+      // which has no agents page yet (#1542))
+      ...(desktopApp ? {} : { agents: () => void leaveFor("/agents/", "Agents") }),
+      // (Show in folder, and where the files are: the desktop app's workspace is real files on the computer (#1539))
+      ...(desktopApp ? { reveal: (p: string) => (window as any).__TAURI__.core.invoke("disk_reveal", { path: p }), where: () => boardWsFolder } : {}),
       // (the Storage panel's export: its lazy chunk at the site's root, beside the notebook page)
       exportUrl: (f) => new URL("/" + f, location.href).href,
       // (and this board's own saves settled first, as settled() waits for them before the page goes elsewhere:

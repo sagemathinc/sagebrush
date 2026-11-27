@@ -10,8 +10,8 @@
 //    the same commit runs too (bar wasm-publish, a push's own), with every output at least as wide, so the skipped
 //    push repeats nothing the queue didn't already run.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -168,6 +168,84 @@ for (const files of [["src/compile.ts"], ["web/notebook/x.ts"], ["engine/poly/sr
   }
   n += 6;
 }
+// ---- PR CI light (CI_PR_LIGHT, the checked-in switch .github/pr-ci-light): a pull request runs only checks, the size gate
+// with its size-base, and the modules' build when it needs one; queue groups, pushes and a full-ci label are untouched
+{
+  const pr = (files, env = {}) => paths("pull_request", files, { GITHUB_REF: "refs/pull/1/merge", ...env });
+  const PR = { event_name: "pull_request", ref: "refs/pull/1/merge", repository: REPO };
+  const LIGHT = ["changes", "checks", "ci", "size-base", "size-gate"];
+  for (const files of [["src/compile.ts"], ["web/notebook/x.ts"], ["src/a.ts", "web/board/b.ts", "magma-tests/x.m"], ["engine/poly/src/lib.rs"], ["engine/mp/src/c.rs", "src/x.ts"]]) {
+    const off = pr(files), on = pr(files, { CI_PR_LIGHT: "true" });
+    assert.equal(on.pr_light, "true", files.join());
+    // (checks and size-base where checks would have run anyway; a Rust-only change never ran them and still doesn't: its
+    // engine suites are left to the merge_group run, like every other suite)
+    const checks = [off.node, off.web, off.size_inputs].includes("true");
+    const want = [...(checks ? LIGHT : ["changes", "ci", "size-gate"]), ...(off.wasm_build === "true" ? ["wasm-modules"] : [])].sort();
+    assert.deepEqual([...runSet(on, PR)].sort(), want, `${files.join()}: light runs only checks, the size gate and the modules' build`);
+    assert.ok(runSet(off, PR).size > want.length, `${files.join()}: off, the full PR set`);
+    // (the switch off, unset or anything but "true": exactly the outputs of no switch)
+    for (const v of ["false", "1", "TRUE", ""]) assert.deepEqual(pr(files, { CI_PR_LIGHT: v }), { ...off }, `${files.join()}: CI_PR_LIGHT=${JSON.stringify(v)}`);
+    // (full-ci asks for everything: light doesn't apply)
+    const label = pr(files, { CI_PR_LIGHT: "true", CI_PR_LABELS: "full-ci" });
+    assert.equal(label.pr_light, "false");
+    assert.deepEqual(label, pr(files, { CI_PR_LABELS: "full-ci" }));
+    n += 5;
+  }
+  // (a change to the LaTeX group's inputs keeps web-artifacts, whose suite checks the group's caps, even when light:
+  // #1702, Nov 24 2026; and only that job beyond the light set)
+  for (const files of [["web/latex/split.ts"], ["scripts/latex-group.mjs"], ["web/latex/core/x.ts", "src/compile.ts"], ["pnpm-lock.yaml"]]) {
+    const on = pr(files, { CI_PR_LIGHT: "true" }), off = pr(files);
+    assert.equal(on.latex_budget, "true", files.join());
+    assert.ok(runSet(on, PR).has("web-artifacts"), `${files.join()}: light keeps web-artifacts`);
+    assert.ok(runSet(off, PR).has("web-artifacts"), `${files.join()}: not light, the full tier runs it as before`);
+    const base = pr(files.filter((f) => f === "src/compile.ts").length ? ["src/compile.ts"] : ["design/x.md"], { CI_PR_LIGHT: "true" });
+    assert.deepEqual([...runSet(on, PR)].filter((j) => !runSet(base, PR).has(j) && j !== "web-artifacts" && j !== "wasm-modules" && !["checks", "size-base", "size-gate"].includes(j)), [], `${files.join()}: nothing else beyond the light set`);
+    n += 4;
+  }
+  // (and a change outside them doesn't: the light set as before)
+  for (const files of [["web/board/x.ts"], ["web/latex/test-latex-units.mjs"], ["src/compile.ts"]]) {
+    const on = pr(files, { CI_PR_LIGHT: "true" });
+    assert.equal(on.latex_budget, "false", files.join());
+    assert.ok(!runSet(on, PR).has("web-artifacts"), `${files.join()}: light, no web-artifacts`);
+    n += 2;
+  }
+  // (latex_budget is a pull request's only: a queue group and a push follow the full tier, as before)
+  for (const event of ["merge_group", "push"]) assert.equal(paths(event, ["web/latex/split.ts"]).latex_budget, "false", event);
+  n += 2;
+  // (a docs-only pull request: light changes nothing it runs)
+  assert.deepEqual([...runSet(pr(["design/x.md"], { CI_PR_LIGHT: "true" }), PR)].sort(), [...runSet(pr(["design/x.md"]), PR)].sort());
+  // (never a queue group, a push or a track push: the full set, whatever the switch says)
+  for (const [event, gh] of [["merge_group", github("merge_group")], ["push", github("push")]]) {
+    const o = paths(event, ["src/compile.ts"], { CI_PR_LIGHT: "true" });
+    assert.equal(o.pr_light, "false", event);
+    assert.deepEqual([...runSet(o, gh)].sort(), [...runSet(paths(event, ["src/compile.ts"]), gh)].sort(), event);
+  }
+  assert.equal(paths("push", ["src/x.ts"], { CI_PR_LIGHT: "true", GITHUB_REF: "refs/heads/track/math" }).full, "true");
+  // (ci.yml passes the checked-in switch's first line to ci-paths, and no repository variable: a fork's pull request
+  // gets no `vars`, so the switch must be a file in its checkout)
+  assert.equal((yml.match(/PR_CI_LIGHT/g) ?? []).length, 0, "no repository variable");
+  assert.equal((yml.match(/pr-ci-light/g) ?? []).length, 2, "the comment and the paths step's run line");
+  n += 6;
+  // (the paths step's own run line, in bash with ci-paths stubbed: what CI_PR_LIGHT it hands over for each file)
+  const line = /\n        run: (CI_PR_LIGHT=.*node scripts\/ci-paths\.mjs >> "\$GITHUB_OUTPUT")\n/.exec(yml)?.[1];
+  assert.ok(line, "the paths step's run line");
+  for (const [content, want] of [["true\n", "true"], ["true", "true"], [" true \r\n", "true"], ["true\nfalse\n", "true"],
+    ["false\n", "false"], ["TRUE\n", "TRUE"], ["", ""], [null, ""], ["# true\n", "#true"]]) {
+    const d = mkdtempSync(join(tmpdir(), "pr-ci-light-"));
+    spawnSync("mkdir", ["-p", join(d, ".github"), join(d, "bin")]);
+    if (content !== null) writeFileSync(join(d, ".github", "pr-ci-light"), content);
+    writeFileSync(join(d, "bin", "node"), '#!/bin/sh\nprintf "%s" "$CI_PR_LIGHT" > "$OUT_SEEN"\n', { mode: 0o755 });
+    const r = spawnSync("bash", ["-e", "-c", line], { cwd: d, encoding: "utf8",
+      env: { PATH: `${join(d, "bin")}:/usr/bin:/bin`, GITHUB_OUTPUT: join(d, "out"), OUT_SEEN: join(d, "seen") } });
+    assert.equal(r.status, 0, `${JSON.stringify(content)}: ${r.stderr}`);
+    assert.equal(readFileSync(join(d, "seen"), "utf8"), want, `switch file ${JSON.stringify(content)}`);
+    rmSync(d, { recursive: true, force: true });
+    n += 2;
+  }
+  // (the repository's switch, as committed, says true or false: a typo would read as off without a word)
+  assert.match(readFileSync(join(root, ".github", "pr-ci-light"), "utf8").split("\n")[0].replace(/[ \t\r]/g, ""), /^(?:true|false)$/);
+  n += 1;
+}
 // (a track push, or a dispatch on master, ignores CI_QUEUE_TESTED: the full set)
 const track = paths("push", ["src/x.ts"], { CI_QUEUE_TESTED: "true", GITHUB_REF: "refs/heads/track/math" });
 assert.equal(track.queue_tested, "false");
@@ -182,5 +260,35 @@ assert.match(changes, /\n    permissions:\n      contents: read\n      actions: 
 assert.match(changes, /- id: queue\n[\s\S]*?run: node scripts\/ci-queue-tested\.mjs >> "\$GITHUB_OUTPUT"/);
 assert.match(changes, /CI_QUEUE_TESTED: \$\{\{ steps\.queue\.outputs\.queue_tested \}\}/);
 n += 3;
+// (size-gate's gate step, run as written with node stubbed: a queue-tested push passes without measuring, as its
+// merge_group run measured and passed this commit; 74aee607's push failed closed in the docs-only branch before this)
+{
+  const ci = JSON.parse(execFileSync("bun", ["-e", "console.log(JSON.stringify(Bun.YAML.parse(await Bun.file(process.argv[1]).text())))", join(root, ".github", "workflows", "ci.yml")], { encoding: "utf8" }));
+  const step = ci.jobs["size-gate"].steps.find((x) => x.name === "the gate");
+  assert.ok(step && step.env.QUEUE_TESTED === "${{ needs.changes.outputs.queue_tested }}", "the gate reads changes' queue_tested");
+  const stub = join(dir, "stub");
+  mkdirSync(stub, { recursive: true });
+  writeFileSync(join(stub, "node"), '#!/bin/sh\necho "$*" >> "$NODE_CALLS"\nexit "${NODE_EXIT:-0}"\n', { mode: 0o755 });
+  const gate = (env) => {
+    const calls = join(dir, "calls"), summary = join(dir, "summary");
+    writeFileSync(calls, ""); writeFileSync(summary, "");
+    const r = spawnSync("bash", ["-e", "-c", step.run], { encoding: "utf8", env: { PATH: `${stub}:${process.env.PATH}`, RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary, NODE_CALLS: calls,
+      CHANGES: "success", CHECKS: "skipped", BASE: "skipped", SIZE_GATE_NODE: "false", SIZE_GATE_WEB: "false", SIZE_INPUTS: "false", TRACK_PULL: "false", ...env } });
+    return { status: r.status, calls: readFileSync(calls, "utf8"), summary: readFileSync(summary, "utf8") };
+  };
+  const tested = gate({ QUEUE_TESTED: "true", NODE_EXIT: "1" });
+  assert.equal(tested.status, 0, "a queue-tested push passes the gate");
+  assert.equal(tested.calls, "", "and measures nothing");
+  assert.match(tested.summary, /passed it in its merge_group run/);
+  for (const q of ["false", "", "TRUE"]) {
+    const docs = gate({ QUEUE_TESTED: q });
+    assert.match(docs.calls, /size-measure\.mjs --gate --docs-only/, `QUEUE_TESTED=${JSON.stringify(q)}: the docs-only gate still runs`);
+    assert.equal(gate({ QUEUE_TESTED: q, NODE_EXIT: "1" }).status, 1, `QUEUE_TESTED=${JSON.stringify(q)}: and its failure still fails`);
+  }
+  // (changes didn't succeed: never excused, whatever queue_tested says)
+  assert.equal(gate({ QUEUE_TESTED: "true", CHANGES: "failure" }).status, 1);
+  assert.equal(gate({ QUEUE_TESTED: "true", CHANGES: "skipped", CHECKS: "success", BASE: "failure" }).status, 1);
+  n += 9;
+}
 rmSync(dir, { recursive: true, force: true });
 console.log(`ci queue-tested: ${n} checks pass`);
