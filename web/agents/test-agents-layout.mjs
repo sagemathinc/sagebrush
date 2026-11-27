@@ -125,6 +125,12 @@ try {
       return { chat: r('main').width, whoTop: who.top, howTop: how.top, conTop: con.top, whoRight: who.right, howLeft: how.left, conRight: con.right, topRight: top.right, topH: top.height, conH: con.height }; })()`);
     const al = await ev(`(() => { const t = document.querySelector('.top'), cs = getComputedStyle(t), g = document.querySelector('.top .top-actions').getBoundingClientRect(), r = t.getBoundingClientRect(); return { gap: (r.right - parseFloat(cs.paddingRight)) - g.right }; })()`);
     ok("L2-header-actions-right", Math.abs(al.gap) < 1.5, "with the chat at 420 px the header's actions keep to its right edge (#1793)", al);
+    // (and room to spare on that line: another browser's or system's font (CI's google-chrome) draws the same words a
+    //  few px wider, and the merge queue once saw the line wrap there by ~7 px)
+    const sp = await ev(`(() => { const t = document.querySelector('.top'), who = document.querySelector('#who').getBoundingClientRect(), g = document.querySelector('.top .top-actions'), kids = [...g.children].filter((b) => !b.hidden).map((b) => b.getBoundingClientRect());
+      const need = kids.reduce((s, k) => s + k.width, 0) + parseFloat(getComputedStyle(g).columnGap) * (kids.length - 1);
+      return { spare: (t.getBoundingClientRect().right - parseFloat(getComputedStyle(t).paddingRight)) - need - parseFloat(getComputedStyle(t).columnGap) - who.right, need, kids: kids.length }; })()`);
+    ok("L2-header-spare", sp.kids === 2 && sp.spare >= 24, "with the chat at 420 px and both actions shown, the header's line has at least 24 px to spare (for wider fonts)", sp);
     ok("L2-header-one-line", near(h.chat, 420) && Math.abs(h.conTop - h.howTop) < 2 && Math.abs(h.conTop - h.whoTop) < 6 && h.topH < 2 * h.conH && h.whoRight <= h.howLeft + 1 && h.conRight <= h.topRight + 1, "with the chat at 420 px the header is one line: the name gives way, the buttons stay in the header", h);
     // (board's B-O2-1: "on your computer" either whole or visually hidden, never cut to a letter; the name itself whole,
     //  its own characters measured, not the space after it)

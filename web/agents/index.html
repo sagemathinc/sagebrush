@@ -134,7 +134,13 @@
       /* (and the name whole: the empty spacer and its gap go, the link keeps the right side, the dot 2 px closer) */
       .top .spacer { display: none; }
       .top .top-actions { margin-left: auto; }
-      .top #who .conn { margin-right: 6px; }
+      .top #who .conn { margin-right: 4px; }
+      /* (room for wider fonts on that one line, ~25 px: the link's empty side padding (it draws no box), a closer
+         chevron still inside the status's own padding, and a smaller gap between the actions) */
+      .top button.link { padding-left: 0; padding-right: 0; }
+      .top button#who { padding-right: 15px; }
+      .top button#who::after { right: 5px; }
+      .top .top-actions { column-gap: 6px; }
     }
     /* (the Sagebrush wordmark gives way first: the chat list's header still says where you are) */
     @container sb-top (max-width: 600px) { .top .wordmark { display: none; } }
