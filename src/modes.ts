@@ -9,7 +9,7 @@
 // is_incomplete) stay with each host, which imports them itself.
 
 /** Every mode. */
-export const MODE_NAMES = ["python", "sage", "magma", "matlab"] as const;
+export const MODE_NAMES = ["python", "sage", "magma", "matlab", "r"] as const;
 export type ModeName = (typeof MODE_NAMES)[number];
 
 /** Whether s names a mode. */
@@ -55,8 +55,9 @@ export function isTranslated(mode: string | null | undefined): mode is Translate
   return mode === "magma" || mode === "matlab";
 }
 
-/** The CLI's interactive prompt modes (src/cli.ts): Sage mode's prompt is Python's with Sage's preparser. */
-export const REPL_MODES = ["python", "magma", "matlab"] as const;
+/** The CLI's interactive prompt modes (src/cli.ts): Sage mode's prompt is Python's with Sage's preparser. R runs on
+ * lib/_rill (design/rill.md), not translated to Python. */
+export const REPL_MODES = ["python", "magma", "matlab", "r"] as const;
 export type ReplMode = (typeof REPL_MODES)[number];
 
 /** The Jupyter kernels (src/kernel.ts), in the order `--mode all` installs them. */

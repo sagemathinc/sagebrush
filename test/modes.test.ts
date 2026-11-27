@@ -19,14 +19,16 @@ const repo = join(__dirname, "..", "..");
 const text = (p: string) => readFileSync(join(repo, p), "utf8");
 
 test("the registry's subsets, in their consumers' orders", () => {
-  assert.deepEqual(MODE_NAMES, ["python", "sage", "magma", "matlab"]);
+  // (R, lib/_rill: the CLI's prompt so far; notebooks, boards, workers and kernels take it in their own PR)
+  assert.deepEqual(MODE_NAMES, ["python", "sage", "magma", "matlab", "r"]);
   assert.deepEqual(DOCUMENT_MODES, ["python", "sage", "magma", "matlab"]);
   assert.deepEqual(FLAG_MODES, ["sage", "magma", "matlab"]);
   assert.deepEqual(TRANSLATED_MODES, ["magma", "matlab"]);
-  assert.deepEqual(REPL_MODES, ["python", "magma", "matlab"]);
+  assert.deepEqual(REPL_MODES, ["python", "magma", "matlab", "r"]);
   assert.deepEqual(KERNEL_MODES, ["sage", "python", "magma", "matlab"]);
   for (const s of [...MODE_NAMES]) assert.ok(isModeName(s));
-  for (const s of ["", "Python", "r", "all", null, undefined, 1, {}]) assert.ok(!isModeName(s) && !isFlagMode(s) && !isTranslated(s as any), String(s));
+  for (const s of ["", "Python", "R", "all", null, undefined, 1, {}]) assert.ok(!isModeName(s) && !isFlagMode(s) && !isTranslated(s as any), String(s));
+  assert.ok(isModeName("r") && !isFlagMode("r") && !isTranslated("r"));
   assert.deepEqual(MODE_NAMES.filter(isFlagMode), FLAG_MODES);
   assert.deepEqual(MODE_NAMES.filter(isTranslated), TRANSLATED_MODES);
 });
@@ -61,7 +63,7 @@ test("web/notebook/worker-kernel.js (loaded from its text, so it imports nothing
   assert.equal(sent.length, 3);
   // (and the notebook's setMode, whose text test/remote-approval-census.test.ts plants a fault in)
   assert.match(text("web/notebook/notebook.js"), /^    mode = \["python", "sage", "magma", "matlab"\]\.includes\(m\) \? m : "python";$/m);
-  assert.deepEqual(MODE_NAMES, ["python", "sage", "magma", "matlab"]);
+  assert.deepEqual(MODE_NAMES, ["python", "sage", "magma", "matlab", "r"]);
   assert.deepEqual(FLAG_MODES, ["sage", "magma", "matlab"]);
 });
 

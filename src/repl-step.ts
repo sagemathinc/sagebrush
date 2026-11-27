@@ -9,6 +9,7 @@ import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, QUITTERS, matlabQui
 import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabIsIncomplete } from "./matlab";
 import { getattr } from "./runtime/object";
+import { rillCellSource, rillIsIncomplete, rillQuit } from "./rill";
 import type { ReplMode } from "./modes";
 
 export interface PromptIO {
@@ -37,7 +38,7 @@ export class PromptSession {
 
   /** Before the first prompt: the language's library, and get_ipython() as in a notebook. */
   start(): void {
-    if (this.mode !== "python") this.io.guarded(() => R.importModule(this.mode === "magma" ? "_magma" : "_matlab"));
+    if (this.mode !== "python") this.io.guarded(() => R.importModule(this.mode === "magma" ? "_magma" : this.mode === "r" ? "_rill" : "_matlab"));
     // (the session's own Python around each input: %autoreload's hooks)
     this.host = R.newModule("__sagebrush_host__");
     this.host.__builtins__ = R.builtins;
@@ -49,14 +50,15 @@ export class PromptSession {
     return { sage: this.sage };
   }
 
-  // (Magma's prompt and MATLAB's; neither shows one for a continued input)
+  // (Magma's prompt and MATLAB's; neither shows one for a continued input; R's are "> " and "+ ")
   ps1(): string {
-    if (this.mode === "magma") return "> ";
+    if (this.mode === "magma" || this.mode === "r") return "> ";
     if (this.mode === "matlab") return ">> ";
     const sys = R.importModule("sys");
     return typeof sys.ps1 === "string" ? sys.ps1 : this.sage ? "sage: " : ">>> ";
   }
   ps2(): string {
+    if (this.mode === "r") return "+ ";
     if (this.mode !== "python") return "";
     const sys = R.importModule("sys");
     return typeof sys.ps2 === "string" ? sys.ps2 : this.sage ? "....: " : "... ";
@@ -65,13 +67,14 @@ export class PromptSession {
   /** Is `src` (the lines so far) an input that goes on? */
   incomplete(src: string): boolean {
     if (src.trim() === "") return false;
+    if (this.mode === "r") return rillIsIncomplete(src);
     return this.mode === "magma" ? magmaIsIncomplete(src) : this.mode === "matlab" ? matlabIsIncomplete(src) : needsMore(src, this.opts());
   }
 
   /** One complete, non-blank input. */
   run(src: string): StepResult {
     // (MATLAB's exit and quit, at the prompt: the session ends, with the status given; a comment may follow)
-    const q = this.mode === "matlab" ? matlabQuit(src) : null;
+    const q = this.mode === "matlab" ? matlabQuit(src) : this.mode === "r" ? rillQuit(src) : null;
     if (q !== null) return { end: q };
     // (a function definition at the prompt: refused with MATLAB's command-window error, not run line by line)
     if (this.mode === "matlab" && /^\s*function\b/.test(src)) {
@@ -82,7 +85,8 @@ export class PromptSession {
     // (a SystemExit at a Python or Sage prompt leaves it, whatever its status, as CPython's: exit(1), sys.exit("bye")
     // (its text written by guarded, status 1), not only a status other than an error's)
     let left = false;
-    if (this.mode !== "python") code = this.runTranslated(src);
+    if (this.mode === "r") code = this.io.guarded(() => R.loader.exec(rillCellSource(src), this.main, "exec", "<stdin>", this.opts()));
+    else if (this.mode !== "python") code = this.runTranslated(src);
     else {
       this.io.guarded(() => R.loader.exec(MAGIC_PRE, this.host, "exec", "<autoreload>"));
       code = this.io.guarded(() => {
