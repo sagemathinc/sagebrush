@@ -143,3 +143,18 @@ test("compiling a wide function with a nested function takes time linear in its 
   }
   assert.fail(last + ", 3 times");
 });
+
+test("an anonymous function made in an anonymous function resolves functions and constants by name", () => {
+  // (at the top level, a captured name that may be a function stays one in the anonymous functions made inside)
+  const r = run({ "main.m": lines(
+    "f = @() feval(@() pi); fprintf('pi|%.4f\\n', f());",
+    "f = @() feval(@() numel([1 2 3])); fprintf('numel|%g\\n', f());",
+    "f = @() feval(@() max(3, 4)); fprintf('max|%g\\n', f());",
+    "f = @() (@() pi); g = f(); fprintf('returned|%.4f\\n', g());",
+    "s.K = 4; f = @() feval(@() s.K); fprintf('struct|%g\\n', f());",
+    "k = 5; f = @() feval(@() k + 1); fprintf('var|%g\\n', f());",
+    "f = @(x) feval(@(y) x + y + pi, 1); fprintf('param|%.4f\\n', f(2));",
+    "f = @() @() @() max(7, 2); g = f(); h = g(); fprintf('deep|%g\\n', h());") });
+  assert.equal(r.err, "");
+  assert.equal(r.out, "pi|3.1416\nnumel|3\nmax|4\nreturned|3.1416\nstruct|4\nvar|6\nparam|6.1416\ndeep|7\n");
+});

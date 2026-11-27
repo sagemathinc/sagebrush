@@ -2180,6 +2180,8 @@ class Emitter {
         // keeps a snapshot, its own scope having no globals)
         captured.push(`${pyName(n)}=_m.cp(${this.varRead(n, scope)})`);
         inner.vars.add(n);
+        // (an enclosing anonymous function's capture that may be a function (NOVAR): still one here)
+        if (scope.caps?.has(n)) inner.caps!.add(n);
       } else if (!scope.fn && !this.isFn(n, scope)) {
         // (at the top level: a workspace variable now, else a function)
         captured.push(`${pyName(n)}=(_m.cp(${pyName(n)}) if ${inWorkspace(pyName(n))} else _m.NOVAR)`);
