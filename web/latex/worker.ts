@@ -23,6 +23,9 @@ const ready = import(/* @vite-ignore */ new URL("sagebrush-math.js", self.locati
 const loadBeamer = once(() => import(/* @vite-ignore */ new URL("sagebrush-latex-beamer.js", self.location.href).href).then(installBeamer));
 // (PythonTeX's results pass, engine/pythontex.mjs: a chunk of its own too, fetched only when a document has a PythonTeX
 //  result to read back (the update's needPy); then the same text rendered again, not expanded again)
+// (a .bib's reading, bib.ts: a chunk of its own too, fetched when a document has a .bib read (and no .bbl): inputs.ts
+//  makes the .bbl from it; a failed fetch leaves the placeholder, as with no .bib)
+const loadBib = once(() => import(/* @vite-ignore */ new URL("sagebrush-latex-bib.js", self.location.href).href).then((m: any) => m.bblFor));
 const loadPythontex = once(() => import(/* @vite-ignore */ new URL("sagebrush-latex-pythontex.js", self.location.href).href).then(installPythontex));
 
 self.onmessage = async (e: MessageEvent) => {
@@ -38,7 +41,9 @@ self.onmessage = async (e: MessageEvent) => {
     if (!eng || m.reset) eng = new Engine({ images: m.images || {}, sage, run: !!m.run });
     else eng.opts = Object.assign({}, eng.opts, { images: m.images || {}, sage, run: !!m.run });
     if (m.inputs && typeof m.inputs.docPath === "string" && Array.isArray(m.inputs.known)) inputs = { docPath: m.inputs.docPath, known: new Map(m.inputs.known.slice(0, 1024)), version: Number(m.inputs.version) || 0 };
-    const ei = inputs ? engineInputs(inputs.docPath, inputs.known) : null;
+    const hasBib = !!inputs && [...inputs.known].some(([p, k]) => /\.bib$/i.test(p) && "text" in k);
+    const makeBbl = hasBib ? await loadBib().catch(() => undefined) : undefined;
+    const ei = inputs ? engineInputs(inputs.docPath, inputs.known, false, String(m.text ?? ""), makeBbl) : null;
     const text = String(m.text ?? ""), opts = ei ? { inputs: { files: ei.files, resolve: ei.resolve, jobname: ei.jobname, version: inputs!.version } } : {};
     // (rendered again with beamer's code: the same text, so not expanded again)
     let r = await withBeamer(eng.update(text, { cold: !!m.cold, ...opts }), loadBeamer, () => eng.update(text, opts));

@@ -98,12 +98,17 @@ for (const [name, snip] of Object.entries(U)) {
   // (a picture's problem names what it needs: "tikzpicture (\\clip isn't drawn by the preview yet)")
   ok(r.json?.problems?.some((p) => (p.name === nm || p.name.startsWith(nm + " (")) && ["command", "environment", "not-rendered"].includes(p.kind)), "Not supported: " + name + " reported by check", r.json?.problems);
 }
-writeFileSync(join(dir, "refs.bib"), "@article{knuth84, author = {D. Knuth}, title = {Literate Programming}, year = {1984}}\n");
 writeFileSync(join(dir, "bib.tex"), "\\documentclass{article}\n\\begin{document}\n\\cite{knuth84}\n\\bibliography{refs}\n\\end{document}\n");
 latex("render", "bib.tex", "-o", "bib.html");
 const html = existsSync(join(dir, "bib.html")) ? readFileSync(join(dir, "bib.html"), "utf8") : "";
 ok(html.includes("[bibliography from refs.bib: BibTeX is not run]") && /\[\s*knuth84\s*\]/.test(html.replace(/<[^>]+>/g, "")), "Not supported: BibTeX's line shown, and \\cite as the key in brackets, as the page says", html.length);
 ok(PAGE.includes('"[bibliography from refs.bib: BibTeX is not run]"'), "the page quotes the BibTeX line as the preview shows it");
+// (the .bib beside it, and no .bbl: its entries in plain's style, each \cite numbered, as the page says)
+writeFileSync(join(dir, "refs.bib"), "@article{knuth84, author = {D. Knuth}, title = {Literate Programming}, year = {1984}}\n");
+latex("render", "bib.tex", "-o", "bib1.html");
+const html1 = existsSync(join(dir, "bib1.html")) ? readFileSync(join(dir, "bib1.html"), "utf8") : "";
+ok(!html1.includes("BibTeX is not run") && /\[\s*1\s*\]/.test(html1.replace(/<[^>]+>/g, "")) && /D\. Knuth\.\s*Literate programming\./.test(html1.replace(/<[^>]+>/g, "")), "a .bib and no .bbl: its entries in plain's style, \\cite numbered, as the page says", html1.length);
+ok(/the \.bib files it names, in BibTeX's plain style/.test(PAGE) && /plain style \(sorted by author, numbered\)/.test(PAGE), "the page says the .bib is read, in plain's style");
 // (and the .bbl BibTeX made beside the .tex: read by \bibliography, as the page says)
 writeFileSync(join(dir, "bib.bbl"), "\\begin{thebibliography}{1}\n\\bibitem{knuth84}\nD.~Knuth.\n\\newblock Literate programming, 1984.\n\\end{thebibliography}\n");
 latex("render", "bib.tex", "-o", "bib2.html");

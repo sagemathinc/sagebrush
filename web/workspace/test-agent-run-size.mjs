@@ -99,7 +99,11 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (161,926 / 58,770: Nov 21 2026, every way out of the LaTeX page by the hosting page's leaveTo (the page module's
 //  leaveThen and home link), on its merge with master 97da53af: 161,862 / 58,706 measured on the shipped build (bun
 //  1.4.4, node 24.21.0), + 64)
-const AGG_RAW = 161926, AGG_GZIP = 58770;
+// (161,667 / 58,992: Nov 27 2026, a .bib read when there is no .bbl: the expander's request for each \bibliography
+//  name's .bib, the inputs' .bib lookup and the "?" mark, in the page module and the worker (the .bib's own reading is its
+//  lazy chunk, outside this aggregate): 161,603 / 58,928 measured by CI on the shipped build of its merge with master
+//  bd4a014f (+366 / +159 over master's 161,237 / 58,769), + 64)
+const AGG_RAW = 161667, AGG_GZIP = 58992;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)

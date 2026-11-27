@@ -275,6 +275,19 @@ ${"many words ".repeat(14000)}
   const lc = JSON.parse((await call("latex_check"))[0].text), tl = lc.problems.filter((x) => x.kind === "toolong");
   check(noteLine > 4 && tl.length === 1 && tl[0].severity === "warning" && tl[0].line === noteLine && /16 MiB/.test(tl[0].message),
     "latex_check: a document past 16 MiB, one warning where the preview stops, at the note's line", { noteLine, toolong: tl, n: lc.problems.length });
+
+  // ---- a paper with a .bib and no .bbl, in the page: the host reads refs.bib (the expander asked for it), the worker
+  //  fetches the .bib chunk and the preview has the references as plain's style writes them, each \cite its number,
+  //  a key with no entry "?"
+  const BIB = "@article{knuth84, author = {Donald E. Knuth}, title = {Literate Programming}, journal = {The Computer Journal}, volume = 27, number = 2, pages = {97-111}, year = 1984}\n@book{lamport94, author = {Leslie Lamport}, title = {A Document Preparation System}, publisher = {Addison-Wesley}, year = 1994}\n";
+  await mk("/refs.bib", BIB);
+  const bfid2 = await mk("/bibpaper.tex", "\\documentclass{article}\n\\begin{document}\nA \\cite{lamport94,knuth84}. B \\cite{nosuch}.\n\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n");
+  await send("Page.navigate", { url: base + "?tex=" + bfid2 + "&latex=1" });
+  const PV = `(document.querySelector(".tex-preview")?.textContent ?? "").replace(/\\s+/g, " ")`;
+  const bibOk = await until(`/Literate programming/.test(${PV})`, 60000);
+  const pv = await ev(PV);
+  check(bibOk && /A \[2, 1\]\. B \[\?\]\./.test(pv) && /Donald E\. Knuth\. Literate programming\. The Computer Journal, 27\(2\):97–111, 1984\./.test(pv) && !/BibTeX is not run/.test(pv),
+    "a .bib and no .bbl, in the page: the references in plain's style, each \\cite its numbers in the order given (as LaTeX's \\cite), a missing key \"?\"", pv.slice(0, 400));
   await until(`!${P}`, 5000);
 
   // ---- an article: pages

@@ -23,6 +23,7 @@ import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_B
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
 import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
+import { bblFor } from "../web/latex/bib";
 import { checkResult, checkText, lineOf, type CheckResult, type ImageReport } from "../web/latex/check";
 import { applyStep } from "../web/latex/overlay";
 import { splitChunk, tooLargeProblem } from "../web/latex/split";
@@ -180,7 +181,7 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   //  it by their real paths), until it asks for no new one; a .tex outside the folder reads none)
   const known = new Map<string, Known>();
   let inputBytes = 0;
-  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), jobname: ei.jobname, version: known.size } }; };
+  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true, text, bblFor); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), jobname: ei.jobname, version: known.size } }; };
   let first: any;
   for (let round = 0; ; round++) {
     const { ei, opt } = inputsNow();

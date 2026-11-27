@@ -543,11 +543,13 @@ export class Machine extends CoreMachine {
     // \bibliography{refs} reads \jobname.bbl, as LaTeX's does: the thebibliography BibTeX wrote beside the .tex, read
     // as \input reads it (asked of the host by name, never fetched here). Without one, or before the host has read it,
     // the command and its argument go on as before (render.mjs: the placeholder saying BibTeX is not run)
+    // (and each .bib it names, asked of the host too: with no .bbl, inputs.ts makes the .bbl from them, plain's style)
     P.prim("bibliography", function (t) {
       const arg = this.readArgRaw();
       if (INPUT_JOB && INPUT_RESOLVE) {
         const name = INPUT_JOB + ".bbl";
         this.mark({ k: "inref", name });
+        for (const b of this.toks2str(arg).split(",").map((x) => x.trim()).filter(Boolean).slice(0, 16)) this.mark({ k: "inref", name: /\.bib$/i.test(b) ? b : b + ".bib" });
         const r = INPUT_RESOLVE(name);
         if (r && r.key && this.files.has(r.key) && this.stack.filter((f) => f.kind === "file").length <= INPUT_NEST) { this.openFile(r.key); return; }
       }

@@ -46,7 +46,7 @@ the PDF (see [Differences from pdflatex's output](#differences-from-pdflatexs-ou
 | Tables | `tabular`, `tabularx`, `longtable`, `array`, `\multicolumn`, `\hline`, `\cline`, `\toprule`, `\midrule`, `\bottomrule`, `\cmidrule` | |
 | Links and color | `\url`, `\href`, `\hyperref`, `\textcolor`, `\color`, `\colorbox`, `\definecolor` | |
 | Code | `lstlisting`, `minted`, `Verbatim`, `\lstinline` | shown as written, not highlighted |
-| Citations | `\cite`, `\citet`, `\citep`, `thebibliography` with `\bibitem`, natbib's numbers and sort&compress options | \bibliography reads the .bbl BibTeX made beside the .tex; see BibTeX below |
+| Citations | `\cite`, `\citet`, `\citep`, `thebibliography` with `\bibitem`, natbib's numbers and sort&compress options | \bibliography reads the .bbl BibTeX made beside the .tex, or with none, the .bib files it names, in BibTeX's plain style; see BibTeX below |
 | Beamer | frames, `block`, `columns`, overlays (`\pause`, `<2->`, `\only`, `\uncover`, `\alt`), each theme's headers and footers | the preview shows every overlay step at once; Present steps through them |
 | SageTeX | `\sage`, `\sageplot`, `sageblock`, `sagesilent`, and `@interact` widgets | see [SageTeX](#sagetex-and-interact) |
 | PythonTeX | `\py`, `pycode`, `pyblock`, `\printpythontex` | see [PythonTeX](#pythontex) |
@@ -67,7 +67,7 @@ each one with its line.
 | babel and csquotes: `\selectlanguage`, `\foreignlanguage`, `otherlanguage`, `\enquote` | a grey chip or a plain box; the text itself is shown |
 | `subfigure`, `subequations`, `algorithm`, `algorithmic`, `tcolorbox`, `mdframed`, `framed`, `landscape` | a plain box with the content |
 | TikZ pictures that clip, or use matrices, pics, edges, plots, decorations or a pgfplots axis: `tikzpicture` | a placeholder naming what isn't drawn yet. TikZ's paths (lines, curves, circles and arcs, grids, arrows), styles, transforms, `\foreach` and nodes (the text in a picture, its anchors and placement) are drawn |
-| BibTeX and biber: `\bibliography` with a `.bib` file and no .bbl beside the .tex | the line "[bibliography from refs.bib: BibTeX is not run]", and `\cite` shows the key in brackets, [knuth84]. Run BibTeX once and keep its .bbl beside the .tex: the preview reads it |
+| BibTeX and biber: `\bibliography` with a `.bib` file and no .bbl beside the .tex | the .bib is read and its cited entries listed in BibTeX's plain style (sorted by author, numbered), whatever `\bibliographystyle` says; a `\cite` of a key the .bib doesn't have shows [?]. If the .bib isn't found either: the line "[bibliography from refs.bib: BibTeX is not run]", and `\cite` shows the key in brackets, [knuth84]. For your own style, run BibTeX once and keep its .bbl beside the .tex: the preview reads it |
 | PythonTeX's other commands and environments (pyc, pys, pyb, pyconsole, pysub, pyverbatim, and the families other than py) | the code as written, or a "not run" mark where its results would go |
 
 A package named in `\usepackage` isn't loaded: its commands work only if
@@ -86,7 +86,7 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
 | Line breaks and spacing | TeX's paragraph breaking | the browser's |
 | Floats | placed by TeX (`[t]`, `[h]`, ...) | where they are written |
 | References | after a second run | at once |
-| Bibliography | from BibTeX or biber | `thebibliography` written in the document, or the .bbl BibTeX made beside the .tex |
+| Bibliography | from BibTeX or biber | `thebibliography` written in the document, the .bbl BibTeX made beside the .tex, or the .bib in plain's style |
 | Pictures | TikZ and pgfplots drawn | TikZ's paths and nodes drawn, a node's text in KaTeX's Computer Modern-based fonts, sized from KaTeX's layout metrics; pgfplots as a placeholder |
 | Speed | about 0.5 to 20 s to remake the PDF after an edit | about 25 to 260 ms from a keystroke to the preview ([benchmark](01-how-it-works.md)) |
 

@@ -51,6 +51,12 @@ export function texCandidates(arg: string, docPath: string, root = "/"): { ok: t
   return candidates(arg, docPath, [], root, (base) => (base.toLowerCase().endsWith(".tex") ? [base] : [base + ".tex", base]));
 }
 
+/** The workspace paths a \bibliography name may be, as BibTeX looks for it: with ".bib" added unless written, found
+ * as an \input is (the file's folder, ../, a leading "/"). */
+export function bibCandidates(arg: string, docPath: string, root = "/"): { ok: true; paths: string[]; searched: string[] } | { ok: false; why: string } {
+  return candidates(arg, docPath, [], root, (base) => [/\.bib$/i.test(base) ? base : base + ".bib"]);
+}
+
 function candidates(arg: string, docPath: string, dirs: string[], root: string, names: (base: string) => string[]): { ok: true; paths: string[]; searched: string[] } | { ok: false; why: string } {
   const s = String(arg).trim();
   if (s === "" || s.length > 512) return { ok: false, why: "not a file name" };

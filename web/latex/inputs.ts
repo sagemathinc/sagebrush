@@ -3,7 +3,7 @@
 // the workspace's top; .tex added first), read by the host (the page from the workspace, the CLI from the folder it
 // runs in, each with its own read rules), bounded here, and given to the engine as a snapshot: the engine never reads
 // a file itself (engine/pipeline.mjs inputs, engine/demo-machine.mjs doInput). Pure: test-latex-units.mjs checks it.
-import { texCandidates, notFoundWhy } from "./images";
+import { texCandidates, bibCandidates, notFoundWhy } from "./images";
 import { openBytes, EDIT_MAX } from "./save";
 
 /** At most this many included files, of at most EDIT_MAX bytes each and INPUT_BOUNDS.total in all. */
@@ -17,7 +17,7 @@ export type Known = { text: string } | { why: string } | { absent: true };
  * candidate paths the host should look at next: unknown ones for each name, in order, up to the first that might
  * be it). The .tex itself is the engine's main.tex; `jobname` is its name, as TeX's \jobname, and `jobname`.bbl is looked
  * for by that exact name. `relativeToFile`: the folders named from the file's (the CLI). */
-export function engineInputs(docPath: string, known: Map<string, Known>, relativeToFile = false) {
+export function engineInputs(docPath: string, known: Map<string, Known>, relativeToFile = false, main?: string, makeBbl?: (texts: string[], read: (name: string) => string | undefined) => string | null) {
   const files = new Map<string, string>();
   for (const [p, k] of known) if ("text" in k && p !== docPath) files.set(p, k.text);
   // (TeX's \jobname: the .tex's name without its folder and ".tex"; \bibliography reads \jobname.bbl by that exact name,
@@ -25,8 +25,12 @@ export function engineInputs(docPath: string, known: Map<string, Known>, relativ
   const slash = docPath.lastIndexOf("/"), base = docPath.slice(slash + 1);
   const jobname = /\.tex$/i.test(base) ? base.slice(0, -4) : base;
   const bbl = jobname + ".bbl";
-  const candidates = (name: string) => name === bbl ? { ok: true as const, paths: [docPath.slice(0, slash + 1) + bbl], searched: [docPath.slice(0, Math.max(slash, 1))] } : texCandidates(name, docPath);
+  const bblPath = docPath.slice(0, slash + 1) + bbl;
+  // (a \bibliography's .bib, by its name as BibTeX finds it: ".bib" added unless written, never a .tex)
+  const candidates = (name: string) => name === bbl ? { ok: true as const, paths: [bblPath], searched: [docPath.slice(0, Math.max(slash, 1))] } : /\.bib$/i.test(name) ? bibCandidates(name, docPath) : texCandidates(name, docPath);
+  let made = false;
   const resolve = (name: string): { key?: string; why?: string } => {
+    if (name === bbl && made) return { key: bblPath };
     const c = candidates(name);
     if (!c.ok) return { why: c.why };
     for (const p of c.paths) {
@@ -52,6 +56,16 @@ export function engineInputs(docPath: string, known: Map<string, Known>, relativ
     }
     return out;
   };
+  // (no .bbl beside the .tex, and the .bib files its \bibliography names read: the .bbl BibTeX would make, in plain's
+  //  style (`makeBbl`: bib.ts's bblFor, a chunk the worker fetches), given to the engine as that .bbl. `main`: the .tex's
+  //  text, for its \bibliography and its \cite's (with the included files'); without it or `makeBbl`, or with a .bbl
+  //  there or not yet known, nothing is made)
+  const k0 = known.get(bblPath);
+  if (main !== undefined && makeBbl && k0 !== undefined && "absent" in k0) {
+    const texts = [main, ...[...files].filter(([p]) => !/\.bib$/i.test(p)).map(([, t]) => t)];
+    const bbl0 = makeBbl(texts, (nm) => { const r = resolve(nm); return r.key ? files.get(r.key) : undefined; });
+    if (bbl0 !== null) { files.set(bblPath, bbl0); made = true; }
+  }
   return { files, resolve, wanted, jobname };
 }
 

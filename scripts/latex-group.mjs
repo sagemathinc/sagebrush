@@ -16,6 +16,7 @@ export const LATEX_LAZY = {
   DOC: "dist/sagebrush-latex-doc.js",
   BEAMER: "dist/sagebrush-latex-beamer.js",
   PYTHONTEX: "dist/sagebrush-latex-pythontex.js",
+  BIB: "dist/sagebrush-latex-bib.js",
   RUN: "dist/sagebrush-latex-run.js",
   INTERACT: "dist/sagebrush-latex-interact.js",
   VIEW: "dist/sagebrush-latex-view.js",
@@ -149,7 +150,11 @@ export const LATEX_LAZY = {
 // (311,297 raw / 105,855 gzip: Nov 26 2026, \input and \include in a shared or GitHub view (mountEditor's inputs,
 //  web/latex/component.ts): 311,233 / 105,791 measured on the shipped build of its merge with master 9063c669, with bun
 //  1.4.4 and node 24.21.0 (+644 / +241 over master's 310,589 / 105,550), + 64)
-export const LATEX_CAPS = { raw: 311297, gzip: 105855 };
+// (312,484 raw / 106,308 gzip: Nov 26 2026, a .bib read when there is no .bbl (the expander asks for each \bibliography
+//  name's .bib, inputs.ts gives the engine the .bbl the .bib chunk makes, the worker fetches that chunk; a \cite of a key
+//  with no entry "?"): 312,420 / 106,244 measured on the shipped build of its merge with master bd4a014f, with bun 1.4.4 and
+//  node 24.21.0 (+1,187 / +453 over master's 311,233 / 105,791), + 64)
+export const LATEX_CAPS = { raw: 312484, gzip: 106308 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -278,6 +283,11 @@ export const LATEX_LAZY_CAPS = {
   //  read back (a valid or stale one), never for one that only has PythonTeX items (Nov 10:
   //  its own row, not in an existing chunk; 5 KiB / 2.25 KiB, the smallest rounded cap above its first build's 4,540 / 2,008; 4,799 / 2,153 with the stale fade's code; 4,892 / 2,191 with display states made afresh on a cache hit)
   PYTHONTEX: { label: "the LaTeX PythonTeX results chunk", raw: 5 * 1024, gzip: 2.25 * 1024 },
+  // (a .bib's reading, web/latex/bib.ts: the worker's, fetched when a document has a .bib read and no .bbl; inputs.ts
+  //  makes the .bbl from it. 8,147 / 3,368: Nov 26 2026, 8,083 / 3,304 measured on master 9063c669 with it (the same on its merge with master bd4a014f), + 64;
+  //  10,130 / 3,781: Nov 27 2026, 10,066 / 3,717 measured with plain.bst's output machine (sentences and blocks, every type's order, the sort
+  //  key by type: a BibTeX differential's 35 entries), + 64)
+  BIB: { label: "the LaTeX .bib chunk", raw: 10130, gzip: 3781 },
   // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
   //  the group so save-as-you-type (eager by nature) fits under the group's cap without a raise (Nov 7:
   //  a lazy split, not a raise). 12 KiB / 5.25 KiB: Nov 7, on 11,330 / 4,804 measured at master
