@@ -52,6 +52,10 @@
     { "id": "N09", "name": "number-line", "src": "\\draw[->] (-0.5,0) -- (4.5,0); \\foreach \\x in {0,...,4} { \\draw (\\x,0.1) -- (\\x,-0.1); \\node[below] at (\\x,-0.1) {$\\x$}; } \\fill[red] (1.5,0) circle (2pt) node[above] {$\\frac{3}{2}$};" },
     { "id": "N10", "name": "venn", "src": "\\draw (0,0) circle (1); \\draw (1.2,0) circle (1); \\node at (-0.4,0) {$A$}; \\node at (1.6,0) {$B$}; \\node at (0.6,0) {$A\\cap B$}; \\node[font=\\small] at (0.6,-1.4) {two sets};" },
     { "id": "N11", "name": "labels-and-pins", "src": "\\node[draw, circle, label=above:$v_1$] (a) at (0,0) {}; \\node[draw, circle, label=below:$v_2$] (b) at (2,0) {}; \\node[draw, circle, label=right:$v_3$] (c) at (1,1.5) {}; \\draw (a) -- (b) -- (c) -- (a);" },
-    { "id": "N12", "name": "multiline", "src": "\\node[draw, align=center] at (0,0) {first line\\\\second}; \\node[draw, align=left] at (3,0) {left\\\\aligned text};" }
+    { "id": "N12", "name": "multiline", "src": "\\node[draw, align=center] at (0,0) {first line\\\\second}; \\node[draw, align=left] at (3,0) {left\\\\aligned text};" },
+    { "id": "P01", "name": "plot-variable-smooth-sharp", "src": "\\draw[->] (-2,0) -- (2,0);\n\\draw[->] (0,-0.5) -- (0,3);\n\\draw[blue, smooth, samples=40, domain=-1.5:1.5] plot (\\x, {(\\x)^2 + 0.5)});\n\\draw[orange, samples=6, domain=-1.5:1.5] plot (\\x, {0.8*(\\x)^2});" },
+    { "id": "P02", "name": "plot-x-squared-line-to-variable", "src": "\\draw[gray] (-1.2,0) -- (1.2,0);\n\\draw[thick, domain=-1:1, samples=21] plot (\\x, \\x^2);\n\\draw[red, variable=\\t, domain=0:1, samples=11] (0,-1) -- plot (\\t, {1-(\\t)^2});" },
+    { "id": "P03", "name": "plot-coordinates-smooth-tension", "src": "\\draw plot coordinates {(0,0) (1,1) (2,0.5) (3,1.5)};\n\\draw[smooth, green!60!black] plot coordinates {(0,-1) (1,0) (2,-0.5) (3,0.5)};\n\\draw[smooth, tension=1, blue] plot coordinates {(0,-2) (1,-1) (2,-1.5) (3,-0.5)};" },
+    { "id": "P04", "name": "plot-samples-at-and-options", "src": "\\draw[smooth, samples at={0,0.25,...,3}] plot (\\x, {sin(\\x*60)});\n\\draw[dashed] plot[domain=0:3, samples=4] (\\x, {0.5*\\x - 1});" }
   ]
 }

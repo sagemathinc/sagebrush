@@ -149,7 +149,11 @@ export const LATEX_LAZY = {
 // (311,297 raw / 105,855 gzip: Nov 26 2026, \input and \include in a shared or GitHub view (mountEditor's inputs,
 //  web/latex/component.ts): 311,233 / 105,791 measured on the shipped build of its merge with master 9063c669, with bun
 //  1.4.4 and node 24.21.0 (+644 / +241 over master's 310,589 / 105,550), + 64)
-export const LATEX_CAPS = { raw: 311297, gzip: 105855 };
+// (313,386 raw / 106,615 gzip: Nov 27 2026, TikZ's plot (domain, samples, samples at, variable, smooth as pgf's curveto
+//  handler, plot coordinates) and pgfmath's stray ), in the worker's bundle with the paths: 313,322 / 106,551 measured on
+//  the shipped build of it on master 5963e768, with bun 1.4.4 and node 24.21.0 (+2,089 / +760 over master's 311,233 /
+//  105,791), + 64)
+export const LATEX_CAPS = { raw: 313386, gzip: 106615 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
