@@ -1306,6 +1306,111 @@ try {
     ok(late.closedAt === 0 && late.roots === 0 && late.nbs === 0 && !late.open, "a notebook closed while it opened leaves nothing behind (its late load and attach let go)", late);
   }
 
+  // ======================================================================== #1792: closing one notebook's tab (its ×)
+  // (the tab's own close: the same consent, saving and keeping as the pane's; a run started after the person's Stop
+  //  keeps the tab; a second click while it asks or saves changes nothing)
+  if (want("tabclose")) {
+    const shownId = () => ev(`document.querySelector('#artifacts .tab.on')?.dataset.tab ?? null`);
+    // (a tab shown: the pane open with it; a closed pane keeps its last head, hidden)
+    const hasTab = (id) => ev(`document.body.classList.contains('has-artifact') && !!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(id)}]')`);
+    const closedNow = () => ev(`(() => { const s = JSON.parse(localStorage.getItem('sagebrush-agents-preview-v1') ?? 'null'); return s ? s.threads.find((t) => t.id === s.current)?.closed ?? [] : []; })()`);
+    const x = (id) => ev(`(document.querySelector('#artifacts [data-close=${JSON.stringify(id)}]').click(), true)`);
+    const running = () => ev(`/running|queued/.test(${cellJs(0)}?.className ?? '')`);
+
+    // TC1: a running cell: the × asks; a second click while it asks changes nothing; Cancel keeps the run and the tab
+    const S = "/notes/tab-slow.ipynb";
+    // (each run prints a token of its own first: a new run is told from the one before by it)
+    await call("workspace.create", { path: S, content: docFor(S, [{ code: "import time, random\nprint('run', random.random())\nfor i in range(600):\n    time.sleep(0.05)" }]), mode: "python" });
+    await openNotebook(S);
+    const sid = await shownId();
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`/· running/.test(document.querySelector('#artifacts .tab.on')?.textContent ?? '')`, 120000);
+    const exc = () => logs.filter((l) => l.startsWith("exception:")).length;
+    const errs1 = exc();
+    await x(sid);
+    await until(`document.querySelector('#close-running').open`, 5000);
+    await x(sid); // (a second click while it asks)
+    await sleep(200);
+    const twice = { open: await ev(`document.querySelector('#close-running').open`), errors: exc() - errs1 };
+    await ev(`document.querySelector('#close-running').close('')`);
+    await sleep(300);
+    ok(twice.open && twice.errors === 0 && (await hasTab(sid)) && (await running()) && !(await closedNow()).includes(sid), "TC1: a running notebook's × asks first; a second click while it asks changes nothing; Cancel keeps the tab and the run", twice);
+
+    // TC2: Stop and close: the run stops, the tab closes, kept closed with the chat
+    await x(sid);
+    await until(`document.querySelector('#close-running').open`, 5000);
+    await ev(`document.querySelector('#close-running').close('stop')`);
+    await until(`!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(sid)}]') || !document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    await sleep(500);
+    ok(!(await ev(`document.body.classList.contains('has-artifact') && !!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(sid)}]')`)) && (await closedNow()).includes(sid), "TC2: Stop and close stops the run and closes the tab, kept closed with the chat", await closedNow());
+
+    // TC3: a run started right after the person's Stop keeps the tab open, said so; nothing of it is cancelled silently
+    await openNotebook(S);
+    await ev(`${cellJs(0)}.querySelector('.runb').click()`);
+    await until(`/· running/.test(document.querySelector('#artifacts .tab.on')?.textContent ?? '')`, 120000);
+    // (the run's number: a run admitted after the Stop is a new one, with the next number)
+    const runNo = () => ev(`(${cellJs(0)}?.querySelector('.out')?.textContent ?? '').match(/run [0-9.]+/)?.[0] ?? ''`);
+    await until(`/run [0-9.]+/.test(${cellJs(0)}?.querySelector('.out')?.textContent ?? '')`, 30000).catch(() => {});
+    const n0 = await runNo();
+    await x(sid);
+    await until(`document.querySelector('#close-running').open`, 5000);
+    // (Stop, then at once the cell run again: as an agent's run admitted after the answer)
+    // (Run pressed again every 20 ms until a new run's token shows: the first press that lands once the stop has gone
+    //  through starts it, within the page's settle; presses while it still stops do nothing)
+    await ev(`(() => { document.querySelector('#close-running').close('stop'); const t0 = Date.now(); const id = setInterval(() => { const c = ${cellJs(0)}; const tok = (c?.querySelector('.out')?.textContent ?? '').match(/run [0-9.]+/)?.[0] ?? ''; if (!c || (tok && tok !== ${JSON.stringify(n0)}) || Date.now() - t0 > 8000) return clearInterval(id); if (!/running|queued/.test(c.className)) c.querySelector('.runb')?.click(); }, 20); return true; })()`);
+    await until(`/is still running/.test(document.querySelector('#toast')?.textContent ?? '')`, 15000).catch(() => {});
+    await until(`((${cellJs(0)}?.querySelector('.out')?.textContent ?? '').match(/run [0-9.]+/)?.[0] ?? '') !== ${JSON.stringify(n0)} && /run [0-9.]+/.test(${cellJs(0)}?.querySelector('.out')?.textContent ?? '')`, 15000).catch(() => {});
+    const t3 = { toast: await ev(`document.querySelector('#toast')?.textContent ?? ''`), tab: await hasTab(sid), running: await running(), n0, n1: await runNo() };
+    ok(/is still running/.test(t3.toast) && t3.tab && t3.running && !!t3.n0 && !!t3.n1 && t3.n1 !== t3.n0 && !(await closedNow()).includes(sid), "TC3: a run started after the person's Stop keeps the tab open, running, and says so", t3);
+    // (then closed for good: Stop and close again, nothing restarting it)
+    await x(sid);
+    await until(`document.querySelector('#close-running').open`, 5000);
+    await ev(`document.querySelector('#close-running').close('stop')`);
+    await until(`!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(sid)}]') || !document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+
+    // TC4: an edit whose save waits (the workspace held by another tab, released in time): nothing is taken away before
+    // the save is made; a second click shares the one close; then the tab closes, its edit saved
+    const D = "/notes/tab-held.ipynb";
+    await call("workspace.create", { path: D, content: docFor(D, [{ code: "d = 0" }]), mode: "python" });
+    const dref = await refOf(D);
+    await openNotebook(D);
+    const did = await shownId();
+    await lockWorkspace();
+    await typeInto(0, "  # tab");
+    await sleep(500);
+    await x(did);
+    await sleep(400);
+    const mid = { tab: await hasTab(did), closed: (await closedNow()).includes(did), roots: await ev(`document.querySelectorAll('#artifacts .nb-root').length`) };
+    await x(did); // (a second click while it saves)
+    await sleep(200);
+    await ev(`window.__release()`);
+    await until(`!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(did)}]') || !document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+    await sleep(800);
+    const rec4 = (await record(dref))?.cells?.[0]?.code ?? null;
+    ok(mid.tab && !mid.closed && mid.roots > 0 && rec4 === "d = 0  # tab" && (await closedNow()).includes(did) && !(await hasTab(did)), "TC4: while the edit's save waits, nothing is taken away (tab, notebook, closed state); a second click shares the close; then the tab closes with its edit saved", { mid, rec4 });
+
+    // TC5: a save and a copy both refused (the workspace held throughout): the tab stays, shown, with its rescue actions;
+    // Try again, once the workspace is free, keeps the edit as a copy and closes
+    const R = "/notes/tab-refused.ipynb";
+    await call("workspace.create", { path: R, content: docFor(R, [{ code: "r = 0" }]), mode: "python" });
+    await openNotebook(R);
+    const rid = await shownId();
+    await lockWorkspace();
+    await typeInto(0, "  # kept");
+    await sleep(800);
+    await x(rid);
+    await until(`/couldn't be saved or kept/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 15000).catch(() => {});
+    const r5 = { shown: await shownId(), bar: await ev(`document.querySelector('#artifacts .pane-bar')?.textContent ?? ''`), acts: await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].map((b) => b.textContent)`), closed: (await closedNow()).includes(rid) };
+    ok(r5.shown === rid && /couldn't be saved or kept/.test(r5.bar) && r5.acts.includes("Try again") && r5.acts.includes("Close without keeping") && !r5.closed, "TC5: a tab whose edit can be neither saved nor kept stays, shown, with Try again and Close without keeping", r5);
+    await ev(`window.__release()`);
+    await sleep(1500);
+    await ev(`[...document.querySelectorAll('#artifacts .pane-bar button')].find((b) => b.textContent === 'Try again')?.click()`);
+    await until(`!document.querySelector('#artifacts .tab[data-tab=${JSON.stringify(rid)}]') || !document.body.classList.contains('has-artifact')`, 10000).catch(() => {});
+    await sleep(600); // (the chat is kept 300 ms after a change)
+    const copy5 = await readCells("/notes/tab-refused (copy).ipynb").then((c) => c[0].code, (e) => "no copy: " + e.message);
+    ok(copy5 === "r = 0  # kept" && (await closedNow()).includes(rid), "TC5: Try again, the workspace free, keeps the edit as a copy and closes the tab", copy5);
+  }
+
   // ======================================================================== chat.resume: a reload mid-turn
   // (an agent that keeps each conversation's log: after a reload the running turn is away, not interrupted; the real
   //  composer queues a message typed then (its button says Queue; no Stop, no Send now); the replay finishes the turn
@@ -2702,11 +2807,14 @@ try {
   // editor through the journal's store, as the notebook page's is: editable and runnable; an agent's edit is applied,
   // lands in the journal, and a notebook tab of this browser shows it, the person's typing there kept)
   if (want("journal-live")) {
+    // (paired as the edit cases pair, May run code off, when run on its own: with it on, a notebook the agent makes
+    // runs by itself in the pane at once, which then writes it, and J1-J5's notebooks would start in a pane already;
+    // J10 and J11 pair again with it on)
     if (!FEATURES) {
       FEATURES = true;
       await ev(`document.querySelector('#new')?.click()`);
       await sleep(700);
-      await pair();
+      await pair({ run: false });
     }
     await converse();
     const turn = `t${++turnN}`;
@@ -2969,6 +3077,100 @@ try {
         await sleep(2500);
         const names = await call("workspace.list", { folder: "/notes" }).then((x) => (x.entries ?? x).map((e) => e.path), (e) => ["list: " + e.message]);
         ok(ran && added === true && run2 === "done" && versions && names.includes(path) && !names.some((p) => p.startsWith("/notes/live-plots (copy")), "J12: under sync's journal, a notebook the agent made and ran (a plot, then a next turn's cell and run), its chat left: no copy kept beside it", { ran, added, run2, versions, cells: rec?.cells?.length, names: names.filter((p) => p.includes("live-plots")) });
+      }
+      // J13, J14: a whole write of the notebook the pane writes (Workspace.write: an agent's workspace_write through
+      // another page of this browser, here the notebook page's workspace in a tab open on no notebook): the pane is the
+      // writer the write asks. J13: saved, the pane shows it and the journal has it. J14: the person typed in the pane
+      // after the agent read it: a conflict, the person's text kept in the pane and the journal
+      {
+        const path = "/notes/whole.ipynb";
+        await call("workspace.create", { path, content: docFor(path, [{ code: "w = 1" }, { code: "v = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const writes = await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`, 10000).catch(() => false);
+        const rev0 = (await record(ref))?.rev;
+        const A = await tab(`${site}/`);
+        const aReady = await A.until(`!!window.__sbTestWs`, 30000);
+        await send("Page.bringToFront");
+        const nbCells = (cells) => cells.map((c) => ({ cell_type: "code", source: c.code, metadata: {}, outputs: [] }));
+        const whole = (cells, base) => Promise.race([
+          A.ev(`window.__sbTestWs.write(${JSON.stringify(path)}, { cells: ${JSON.stringify(nbCells(cells))} }, { base: ${base} }).then(() => ({ ok: true }), (e) => ({ ok: false, code: e?.code ?? null, msg: String(e?.message ?? e) }))`),
+          sleep(30000).then(() => ({ ok: false, code: "timeout", msg: "no answer in 30 s" })),
+        ]);
+        const r1 = await call("workspace.read", { path });
+        const res = await whole([{ code: "w = 2  # whole" }, { code: "v = 1" }], r1.rev);
+        const shown = await until(`(document.querySelector('${PANE} .nb-root .cell textarea')?.value ?? "") === "w = 2  # whole"`, 10000).catch(() => false);
+        const rec1 = await record(ref);
+        const stillWrites = await ev(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`);
+        ok(aReady && writes && res.ok && shown && rec1?.cells?.[0]?.code === "w = 2  # whole" && rec1.rev > rev0 && stillWrites,
+          "J13: an agent's whole write of the notebook the pane writes: saved, the pane shows it (still the writer) and the journal has it",
+          { aReady, writes, res, shown, rev0, rec1: rec1 && { rev: rec1.rev, cells: rec1.cells?.map((c) => c.code) }, stillWrites });
+        // J14: read, then the person types in the pane's second cell, then the agent writes from what it read
+        const r2 = await call("workspace.read", { path });
+        await ev(`(() => { const t = ${cellJs(1)}.querySelector("textarea"); t.focus(); t.value = "v = 1  # person"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+        const res2 = await whole([{ code: "w = 3  # whole" }, { code: "v = 1" }], r2.rev);
+        const pane2 = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell textarea')].map((t) => t.value)`);
+        let rec2 = null;
+        for (let i = 0; i < 50 && rec2?.cells?.[1]?.code !== "v = 1  # person"; i++) { rec2 = await record(ref); if (rec2?.cells?.[1]?.code !== "v = 1  # person") await sleep(200); }
+        ok(!res2.ok && res2.code === "conflict" && pane2?.[0] === "w = 2  # whole" && pane2?.[1] === "v = 1  # person" && rec2?.cells?.[0]?.code === "w = 2  # whole" && rec2?.cells?.[1]?.code === "v = 1  # person",
+          "J14: the person typed in the pane after the agent read the notebook: the agent's whole write is a conflict, the person's text kept in the pane and the journal",
+          { res2, pane2, rec2: rec2 && { rev: rec2.rev, cells: rec2.cells?.map((c) => c.code) } });
+        await A.close();
+        await send("Page.bringToFront");
+      }
+      // J15, J16: the pane still holds the notebook's writer lock but can't save it (a close's first step, freeze, alone:
+      // __sbTestPaneFreeze), frozen while a whole write is held at the pane's prepare (J15) or after its ready, at the
+      // commit (J16). The pane answers "lost" each time: nothing replaced, shown or saved by it, and the write ends not
+      // confirmed (no ok). Once the pane is closed and its lock let go, the same write is saved directly.
+      for (const [name, stage] of [["J15", "prepare"], ["J16", "commit"]]) {
+        const path = `/notes/whole-frozen-${stage}.ipynb`;
+        await call("workspace.create", { path, content: docFor(path, [{ code: "f = 1" }]), mode: "python" });
+        const ref = await refOf(path);
+        await send("Page.bringToFront");
+        await openNotebook(path, { finish: false, turn });
+        const writes = await until(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === false`, 10000).catch(() => false);
+        const A = await tab(`${site}/`);
+        const aReady = await A.until(`!!window.__sbTestWs`, 30000);
+        await send("Page.bringToFront");
+        // (the revision the write is made from, read as the agent reads it, once the pane's own first save under the
+        // journal is made: the record unchanged for 2 s)
+        let last = -1, since = Date.now();
+        for (const t0 = Date.now(); Date.now() - t0 < 15000 && Date.now() - since < 2000; await sleep(200)) {
+          const r = (await record(ref))?.rev ?? -1;
+          if (r !== last) { last = r; since = Date.now(); }
+        }
+        const rec0 = await record(ref), base = (await call("workspace.read", { path })).rev;
+        const doc = JSON.stringify({ cells: [{ cell_type: "code", source: "f = 2  # whole", metadata: {}, outputs: [] }] });
+        const start = (base) => A.ev(`(window.__wres = null, window.__sbTestWs.write(${JSON.stringify(path)}, ${doc}, { base: ${base} }).then(() => ({ ok: true }), (e) => ({ ok: false, code: e?.code ?? null, msg: String(e?.message ?? e) })).then((r) => (window.__wres = r)), 1)`);
+        const result = async () => (await A.until(`window.__wres !== null`, 60000)) ? await A.ev(`window.__wres`) : { ok: false, code: "timeout" };
+        // (the pane's side held once, at `stage`; every stage it reaches recorded)
+        await ev(`(() => { window.__wstages = []; window.__wheld = null; window.__sbTestWritePause = (s) => { window.__wstages.push(s); if (s === ${JSON.stringify(stage)} && !window.__wheld) return new Promise((r) => { window.__wheld = s; window.__wresume = r; }); return null; }; return 1; })()`);
+        await start(base);
+        const held = await until(`window.__wheld === ${JSON.stringify(stage)}`, 15000).catch(() => false);
+        await ev(`(window.__sbTestPaneFreeze(), 1)`);
+        const frozen = await ev(`document.querySelector('${PANE} .nb-root .cell textarea')?.readOnly === true`);
+        await ev(`(window.__wresume?.(), 1)`);
+        const res = await result();
+        const stages = await ev(`window.__wstages`);
+        const pane = await ev(`[...document.querySelectorAll('${PANE} .nb-root .cell textarea')].map((t) => t.value)`);
+        const rec1 = await record(ref);
+        await ev(`(window.__sbTestWritePause = null, window.__wresume = null, 1)`);
+        ok(writes && aReady && held && frozen && !res.ok && res.code === "busy" && /couldn't confirm/.test(res.msg ?? "") && !stages.includes("wrote") && JSON.stringify(pane) === JSON.stringify(["f = 1"]) && rec1?.rev === base && rec1?.cells?.[0]?.code === "f = 1",
+          `${name}: the pane frozen (still holding the writer lock) while a whole write was held at its ${stage}: answered lost, nothing replaced, shown or saved by the pane, and the write not confirmed`,
+          { writes, aReady, held, frozen, res, stages, pane, base, rec0rev: rec0?.rev, rec: rec1 && { rev: rec1.rev, cells: rec1.cells?.map((c) => c.code) } });
+        // (the pane closed: its writer lock let go, so the write goes straight to the record)
+        await ev(`document.querySelector('#close')?.click()`);
+        const closed = await until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => false);
+        const free = await until(`navigator.locks.query().then((q) => !q.held.some((l) => l.name.endsWith(${JSON.stringify(ref)})))`, 15000).catch(() => false);
+        await start(base);
+        const res2 = await result();
+        const rec2 = await record(ref);
+        ok(closed && free && res2.ok && rec2?.cells?.[0]?.code === "f = 2  # whole" && rec2.rev > base,
+          `${name}: …once the pane is closed and its lock let go, the same write is saved`,
+          { closed, free, res2, rec: rec2 && { rev: rec2.rev, cells: rec2.cells?.map((c) => c.code) } });
+        await A.close();
+        await send("Page.bringToFront");
       }
     } finally {
       for (const x of tabs) await x.close().catch(() => {});

@@ -44,8 +44,8 @@ for (const name of ["numpy_prod_order_cases.py", "numpy_prod3d64_cases.py", "num
 test("an int64 or uint64 value Sagebrush cannot hold exactly is refused, never rounded", () => {
   const cases = [
     "np.array([2**53 + 1])", "np.array([3]) ** 50", "np.array([3]) ** 40", "np.array([1]) + 2**60", "np.array([1]) + (2**60 + 1)",
-    "np.prod(np.array([3**20, 3**20, 3]))", "np.cumprod(np.array([3**20, 3**20, 3]))", "np.array([1e20]).astype(np.int64)",
-    "np.array([float('nan')]).astype(np.int64)", "np.array([-1]).astype(np.uint64)", "np.array([3], np.uint64) - np.array([5], np.uint64)",
+    "np.prod(np.array([3**20, 3**20, 3]))", "np.cumprod(np.array([3**20, 3**20, 3]))",
+    "np.array([-1]).astype(np.uint64)", "np.array([3], np.uint64) - np.array([5], np.uint64)",
     "np.square(np.array([2**31 + 1]))", "np.array([1]) & (2**60 + 1)", "np.array([2**62 + 1])",
     "np.sum(np.array([2**62, 2**62, 1]))", "~np.array([2**62])", "np.array([2**62]) // np.array([3])",
     // (astra's review of 6ae79e89)
@@ -60,6 +60,22 @@ test("an int64 or uint64 value Sagebrush cannot hold exactly is refused, never r
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8" }).trimEnd().split("\n");
   assert.equal(out.length, cases.length);
   out.forEach((l, i) => assert.match(l, /^NotImplementedError u?int64 values beyond 2\*\*53 are not supported yet$/, cases[i]));
+});
+
+// (#2283: a float out of int64's or uint64's range, NaN or infinite converts as NumPy's x86-64 cast does, to values
+// Sagebrush's 64-bit stores hold exactly: INT64_MIN for int64; 2**63, or 0 at 2**64 and past, for uint64; with the
+// cast's warning; compared with the runner's NumPy, which must be an x86-64 build: other machines' casts differ)
+test("a float out of int64's or uint64's range converts to NumPy's value, which these stores hold exactly", () => {
+  const src = `import numpy as np, warnings
+for v in (1e20, -1e20, float("nan"), float("inf"), -float("inf"), 2.0**63, 2.0**64, -2.0**63, -3e18, 1.8e19):
+    for d in (np.int64, np.uint64):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            r = np.array([v]).astype(d)
+        print(v, d.__name__, r.tolist(), [str(m.message) for m in w])`;
+  const want = execFileSync("python3", ["-c", src], { encoding: "utf8" });
+  const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", src], { encoding: "utf8" });
+  assert.equal(got, want);
 });
 
 // (astra CORR-1B4-2: a float32 product over several axes of a view whose

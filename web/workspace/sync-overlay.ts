@@ -557,6 +557,10 @@ export async function runOp(base: PartialIndex, store: Store, op: SyncOp, opts: 
 export type LargeOpts = { chunk: number; ready?: { seq: number; hidden: Hidden[]; check: (ov: Overlay, outcome: Outcome) => string | undefined } };
 export type PageResult = { base: PartialIndex; taken: number; changed: Set<string>; units: number; carry: number; outcomes: Outcome[]; large?: { cands: { id: string; path: string; count: number }[]; ran?: boolean } };
 
+/** The op that releases index references (sync-refs.ts RELEASE_OP), which a page runs alone. */
+const RELEASE_OP = "release";
+const kept = (o: Outcome): Outcome => ({ changed: [], ...(o.skipped !== undefined ? { skipped: o.skipped } : {}), ...(o.holder !== undefined ? { holder: o.holder } : {}) });
+
 export async function runPage(store: Store, ops: SyncOp[], carried = 0, large?: LargeOpts): Promise<PageResult> {
   const base = new PartialIndex(), changed = new Set<string>(), outcomes: Outcome[] = [];
   let units = 0, carry = carried;
@@ -573,17 +577,21 @@ export async function runPage(store: Store, ops: SyncOp[], carried = 0, large?: 
         const r = await runOp(base, store, ops[i], { carried: carry, alone: true, check: large.ready.check });
         if ("trial" in r) throw new Halt(`sync: a large op (seq ${ops[i].seq}) as a trial`);
         for (const id of r.outcome.changed) changed.add(id);
-        outcomes.push({ changed: [], ...(r.outcome.skipped !== undefined ? { skipped: r.outcome.skipped } : {}) });
+        outcomes.push(kept(r.outcome));
         return { base, taken: 1, changed, units: r.units, carry: 0, outcomes, large: { cands, ran: true } };
       }
     }
+    // (a release op (e2e PR 5d) runs alone in its page: its check (sync-refs.ts) reads the state the page before it
+    // committed, which is exactly the state before it)
+    if (ops[i].op === RELEASE_OP && i > 0) return { base, taken: i, changed, units, carry: 0, outcomes };
     const r = await runOp(base, store, ops[i], { carried: carry, budget: OVERLAY.pageUnits - units, alone, dirty: changed.size });
     carry = 0;
     if ("trial" in r) return { base, taken: i, changed, units, carry: r.trial, outcomes };
     units += r.units;
     for (const id of r.outcome.changed) changed.add(id);
-    // (its changed array let go at once: only whether it was skipped is kept)
-    outcomes.push({ changed: [], ...(r.outcome.skipped !== undefined ? { skipped: r.outcome.skipped } : {}) });
+    // (its changed array let go at once: only whether it was skipped, and the holder of its bytes, are kept)
+    outcomes.push(kept(r.outcome));
+    if (ops[i].op === RELEASE_OP) return { base, taken: i + 1, changed, units, carry: 0, outcomes };
   }
   return { base, taken: ops.length, changed, units, carry: 0, outcomes };
 }

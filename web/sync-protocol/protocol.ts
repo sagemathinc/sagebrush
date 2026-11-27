@@ -10,7 +10,9 @@ import { normPath, PathError, type Kind } from "../workspace/paths.ts";
 
 // (2: every notebook merges exactly, CoCalc's way (plan-exact-only r1, Oct 30): a version 1 client merged concurrent
 // edits by the older rule, so it is refused at hello (`invalid`) and never syncs with a version 2 one)
-export const VERSION = 2;
+// (3: a blob is named by its `address` in blobs/check, the PUT's answer and a conflict's `held` (e2e PR 3a), where
+// version 2 said `sha256`: a version 2 page is refused at hello and reloads, never sending a check this server refuses)
+export const VERSION = 3;
 
 /** §8: the server's limits.  Each has a test in web/sync/test-sync.mjs. */
 export const LIMITS = {
@@ -27,6 +29,12 @@ export const LIMITS = {
   /** a patch inline in a batch; larger ones go as a blob (Env.blobs) */
   patchBytes: 256 << 10,
   opsPerMessage: 500,
+  /** a sealed op's envelope, in bytes (design/e2e-encryption.md §4; e2e PR 5b) */
+  sealedOpBytes: 64 << 10,
+  /** the blob references one sealed op may add, and release, each */
+  sealedOpRefs: 64,
+  /** sealed ops an account's log keeps, until a signed checkpoint lets older ones go (§4.1; e2e PR 5e) */
+  sealedLog: 1_000_000,
   entries: 100_000,
   folderEntries: 10_000,
   docsPerAccount: 100_000,
@@ -274,6 +282,72 @@ export function checkOp(v: unknown): Op {
   if (makes && op.kind === "file" && (!isFid(op.fid) || !isSha(op.sha256) || op.size === undefined)) throw invalid("op: a data file needs fid, sha256 and size");
   if (op.base !== undefined && !(op.op === "write" && op.kind === "file")) throw invalid("op: base is for a data file's write");
   return op;
+}
+
+// ---- sealed ops (design/e2e-encryption.md §4, §4.1; e2e PR 5b): an index op as the server sees it under end-to-end
+// encryption.  The op is ciphertext the server never opens: it checks the envelope's form and size, the device's order,
+// the key chain's head the op was sealed under (the current one), the signature of a device current in that chain over
+// the op's place, envelope and references (so a device removed from the chain, or a session that isn't an E2E device,
+// can't append or move a reference), and the references the op adds and releases, which are all it counts.
+
+/** The key chain's head: the SHA-256 of its last entry, as unpadded base64url (43 characters). */
+const CHAIN_HEAD = /^[A-Za-z0-9_-]{43}$/;
+export const isChainHead = (s: unknown): s is string => typeof s === "string" && CHAIN_HEAD.test(s);
+
+/** An E2E device's id in the key chain (26 base32 characters, as the fleet core's isId checks). */
+const E2E_ID = /^[a-z2-7]{25}[aeimquy4]$/;
+/** An Ed25519 signature: 64 bytes as unpadded base64url (86 characters). */
+const SIG = /^[A-Za-z0-9_-]{86}$/;
+
+/** A key chain's generation: its genesis entry's hash (a head's form) or, after a reset, the id it names (an E2E id). */
+export const isChainGeneration = (s: unknown): s is string => isChainHead(s) || (typeof s === "string" && E2E_ID.test(s));
+
+/** A release of one index reference: the address, and the seq of the accepted sealed op whose adds named it (e2e PR
+ * 5d): it ends exactly that add, never a reference of another kind (a document's pin, a chunked file's manifest). */
+export interface SealedRelease { address: string; add: number }
+
+/** A sealed op: its device order, the chain head (and that chain's generation) it was sealed under, its envelope, its
+ * visible blob references, and the E2E device that signed it (web/workspace/e2e/sealed-op.mjs says what is signed). */
+export interface SealedOp { dseq: number; head: string; chainGen: string; env: Uint8Array; adds: string[]; releases: SealedRelease[]; signer: string; sig: string }
+
+/** An envelope's SHA-256 as an ack names it: unpadded base64url, 43 characters (e2e/index-op.ts opHash, encoded). */
+export const isEnvHash = (s: unknown): s is string => isChainHead(s);
+
+/** One sealed op, checked: its form only (the server can't read it). */
+export function checkSealedOp(v: unknown): SealedOp {
+  const o = fields(v, ["dseq", "head", "chain_gen", "env", "adds", "releases", "signer", "sig"], "sealed op");
+  if (!isNat(o.dseq) || o.dseq < 1) throw invalid("sealed op: dseq is a positive integer");
+  if (!isChainHead(o.head)) throw invalid("sealed op: head is the key chain's head, 43 base64url characters");
+  if (!isChainGeneration(o.chain_gen)) throw invalid("sealed op: chain_gen is the key chain's generation");
+  const env = fromB64(o.env, LIMITS.sealedOpBytes, "sealed_op_bytes");
+  if (env.length === 0) throw invalid("sealed op: env is empty");
+  const refs = (x: unknown, what: string): string[] => {
+    if (x === undefined) return [];
+    if (!Array.isArray(x) || !x.every(isSha)) throw invalid(`sealed op: ${what} is a list of blob addresses`);
+    if (x.length > LIMITS.sealedOpRefs) throw tooBig("sealed_op_refs", LIMITS.sealedOpRefs, `sealed op: at most ${LIMITS.sealedOpRefs} ${what}`);
+    if (new Set(x).size !== x.length) throw invalid(`sealed op: ${what} names an address twice`);
+    return x as string[];
+  };
+  // (each release names the add it ends; one address may be released more than once, an add at a time)
+  const releases = (x: unknown): SealedRelease[] => {
+    if (x === undefined) return [];
+    if (!Array.isArray(x)) throw invalid("sealed op: releases is a list of {address, add}");
+    if (x.length > LIMITS.sealedOpRefs) throw tooBig("sealed_op_refs", LIMITS.sealedOpRefs, `sealed op: at most ${LIMITS.sealedOpRefs} releases`);
+    const out: SealedRelease[] = [];
+    const seen = new Set<string>();
+    for (const r of x) {
+      const f = fields(r, ["address", "add"], "release");
+      if (!isSha(f.address) || !isNat(f.add) || f.add < 1) throw invalid("sealed op: a release is {address, add}: a blob address and the seq of the op that added it");
+      const k = f.address + ":" + f.add;
+      if (seen.has(k)) throw invalid("sealed op: releases names one add twice");
+      seen.add(k);
+      out.push({ address: f.address, add: f.add });
+    }
+    return out;
+  };
+  if (typeof o.signer !== "string" || !E2E_ID.test(o.signer)) throw invalid("sealed op: signer is an E2E device's id");
+  if (typeof o.sig !== "string" || !SIG.test(o.sig)) throw invalid("sealed op: sig is an Ed25519 signature, 86 base64url characters");
+  return { dseq: o.dseq, head: o.head, chainGen: o.chain_gen, env, adds: refs(o.adds, "adds"), releases: releases(o.releases), signer: o.signer, sig: o.sig };
 }
 
 // ---- batches (§4.1, §5.3)

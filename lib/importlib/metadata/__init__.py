@@ -1,12 +1,15 @@
 """importlib.metadata, for the distributions this runtime has: the curated
-PyPI packages (packages/pypi-<name>/, pinned in its package registry).
+PyPI packages (packages/pypi-<name>/, pinned in its package registry) and
+the optional packages of the session's package set that stand for one
+(optional/<name>/sagebrush.json's "distribution": scikit-learn, pandas).
 
 CPython 3.14's Lib/importlib/metadata reads installed distributions'
 *.dist-info directories; Sagebrush installs none, so this module is not a
 copy (PSF License; see cdn/LICENSE-CPython.txt). Its parts:
 
-- version(name): a curated package's pinned version, looked up by the
-  project's normalized name, as CPython's Prepared.normalize does it;
+- version(name): a curated package's pinned version, or an optional
+  package's own version, looked up by the project's normalized name, as
+  CPython's Prepared.normalize does it;
 - PackageNotFoundError, as CPython's (a ModuleNotFoundError), for any other
   name: Sagebrush's own modules (numpy, say) are not distributions here;
 - the rest of CPython's API (distribution, metadata, entry_points, files,
@@ -59,6 +62,11 @@ def _curated():
         info = pkg.get("pypi")
         if info:
             out[_normalize(info["project"])] = info["version"]
+    # (the optional set's, after: a curated package keeps its name)
+    optional = getattr(builtins, "__pyjs_optional_distributions__", None)
+    raw = optional() if optional is not None else None
+    for name, ver in (json.loads(raw) if raw is not None else {}).items():
+        out.setdefault(_normalize(name), ver)
     return out
 
 

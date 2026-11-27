@@ -28,10 +28,19 @@ mod engine;
 #[cfg(desktop)]
 mod windows;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
-//  comes next; until then nothing calls it but its tests)
+//  comes next; until then only its tests and the self-test's bundle report call it)
 #[cfg(desktop)]
 #[allow(dead_code)]
 mod agent_host;
+// (the tools the app connects, chosen by the person: the checks, before the agents page offers them)
+#[cfg(desktop)]
+#[allow(dead_code)]
+mod tools;
+// (Native (Python), the machine's own CPython as a kernel: choosing the interpreter and running the kernel, before the
+//  kernel menu offers it)
+#[cfg(all(desktop, unix))]
+#[allow(dead_code)]
+mod pykernel;
 mod nav;
 mod version;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -355,11 +364,32 @@ fn page_window<'a, M: Manager<tauri::Wry>>(app: &'a M, label: &str, url: tauri::
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_reveal, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log]
+}
+
+/// The agent bundle's check, on this app's own resources, Node and compiled-in values, as one log line for the
+/// self-test's judge: "[agent] bundle: ok ...", "[agent] bundle: not_bundled", or "[agent] bundle: refused <why>".
+#[cfg(desktop)]
+fn selftest_agent_bundle(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let check = agent_host::node_check();
+    let how = match check {
+        agent_host::NodeCheck::Bytes => "bytes",
+        agent_host::NodeCheck::TeamSignature(_) => "signature",
+    };
+    let r = match (app.path().resource_dir().ok(), agent_host::shipped_node()) {
+        (Some(res), Some(node)) => agent_host::verify_bundle(&res, &node, env!("SAGEBRUSH_AGENT_MANIFEST_SHA256"), check),
+        _ => Err(agent_host::BundleError::Missing),
+    };
+    match r {
+        Ok(v) => eprintln!("[agent] bundle: ok agent={} node={} claude_code={} node_check={how}", v.agent, v.node, v.claude_code.as_deref().unwrap_or("not_bundled")),
+        Err(agent_host::BundleError::NotBundled) => eprintln!("[agent] bundle: not_bundled"),
+        Err(e) => eprintln!("[agent] bundle: refused {e:?} node_check={how}"),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -400,6 +430,11 @@ pub fn run() {
     let builder = builder.menu(version::menu);
     builder
         .setup(move |app| {
+            // (a self-test reports the agent bundle's check, as the launcher will run it: app/selftest/run-judge.mjs)
+            #[cfg(desktop)]
+            if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+                selftest_agent_bundle(app.handle());
+            }
             // (the page's server, listening before the window exists: the window never loads a page from a port
             // this app doesn't hold)
             // (a free port; in a self-test, SAGEBRUSH_APP_PORT, so two launches can be made to differ: the workspace
@@ -484,4 +519,18 @@ pub fn run() {
                 let _ = _app.emit("open-files", sent);
             }
         });
+}
+
+#[cfg(test)]
+mod entry_point_tests {
+    // (the mobile build's entry point is the attribute on run(): an item inserted between them would take it, and
+    // the phone apps would have no entry point while the desktop build stays green)
+    #[test]
+    fn the_mobile_entry_point_attribute_is_on_run() {
+        let src = include_str!("lib.rs");
+        let attr = concat!("#[cfg_attr(mobile, tauri::", "mobile_entry_point)]");
+        let at: Vec<usize> = src.lines().enumerate().filter(|(_, l)| l.trim() == attr).map(|(i, _)| i).collect();
+        assert_eq!(at.len(), 1, "the attribute appears once");
+        assert_eq!(src.lines().nth(at[0] + 1).map(str::trim), Some("pub fn run() {"), "the line after it is run()'s");
+    }
 }

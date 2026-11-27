@@ -55,13 +55,31 @@ export const KEYWORDS = new Set(
     "intrinsic time eval declare clear").split(" "),
 );
 
+// print x : Level, the levels Magma 2.18-5 knows (another name is its "Bad print level")
+const PRINT_LEVELS = new Set(["Default", "Minimal", "Maximal", "Magma", "Hex", "Latex", "Debug"]);
+// Magma 2.18-5's reserved words that this lexer reads as names (each checked: print 1 : default; is bad syntax there,
+// not a bad print level)
+const RESERVED_NAMES = new Set(("adj assert2 assert3 catch default exists forall fprintf freeze iload import load notadj " +
+  "random read readi requirege requirerange restore save try vprintf vtime").split(" "));
+
 // longest first
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
 
+// A real literal's text as Python reads it: 1. as 1.0, 1.e5 as 1.0e5
+function realText(t: string, real: boolean): string {
+  return real ? t.replace(/\.(?=[eE]|$)/, ".0") : t;
+}
+
 // The keywords whose assignment form Magma has, x div:= 2 (Magma 2.18-5; not eq:=, cmpeq:= or subset:=)
 const OPA_KW = new Set(["cat", "div", "mod", "join", "meet", "diff", "sdiff", "and", "or", "xor"]);
 const OPAS = ["+:=", "-:=", "*:=", "/:=", "^:=", ...[...OPA_KW].map((k) => k + ":=")];
+
+// After a literal zero denominator (Parser.zeroDenominator): the operators that start or bind an operand of their
+// own, which Magma doesn't take as continuing the expression, and the keywords it does (Magma 2.18-5, each checked)
+const ZERO_NOT_AFTER = new Set(["(", "[", "{", "{@", "{*", ".", "$", "$$", "#", "!", "@", "@@", "~", "&", "`", "\\"]);
+const ZERO_KW_AFTER = new Set(("eq ne lt le gt ge in notin subset notsubset cmpeq cmpne div mod and or xor join meet diff sdiff " +
+  "then do to by select else where").split(" "));
 
 export function lex(src: string): Tok[] {
   const out: Tok[] = [];
@@ -104,19 +122,30 @@ export function lex(src: string): Tok[] {
         continue;
       }
       let real = false;
-      // 1.5 (but not 1..5) and 1e10
-      if (src[j] === "." && /[0-9]/.test(src[j + 1] ?? "")) {
+      // a real, as Magma 2.18-5 reads it: 1.5, and 1. with no digits after the point (12., 1.e5), but not 1..5 (a
+      // range); then an exponent, e or E, which must have digits after its sign (1e5, 1.5E-2): else Magma's "Real
+      // literal has no digits after exponent indicator", just after the e (1e;, 1.ex)
+      if (src[j] === "." && src[j + 1] !== ".") {
         real = true;
         j++;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
-      if ((src[j] === "e" || src[j] === "E") && /[0-9+-]/.test(src[j + 1] ?? "") && (real || /[0-9]/.test(src[j + 1]) || /[0-9]/.test(src[j + 2] ?? ""))) {
+      if (src[j] === "e" || src[j] === "E") {
+        let k = j + 1;
+        if (src[k] === "+" || src[k] === "-") k++;
+        if (!/[0-9]/.test(src[k] ?? "")) {
+          out.push({ t: real ? "real" : "num", v: realText(src.slice(i, j), real), line: L, col: C });
+          adv(j + 1 - i);
+          out.push({ t: "bad", v: src.slice(j + 1, k) || "e", line, col, msg: "Real literal has no digits after exponent indicator" });
+          adv(k - j - 1);
+          continue;
+        }
         real = true;
-        j += 2;
+        j = k;
         while (j < n && /[0-9]/.test(src[j])) j++;
       }
       // (an integer without its leading zeros: 007 is 7 in Magma, and not a Python literal)
-      out.push({ t: real ? "real" : "num", v: real ? src.slice(i, j) : src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
+      out.push({ t: real ? "real" : "num", v: real ? realText(src.slice(i, j), true) : src.slice(i, j).replace(/^0+(?=\d)/, ""), line: L, col: C });
       adv(j - i);
       continue;
     }
@@ -212,8 +241,10 @@ export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.sta
  * (lib/_magma.py's _CALL_POS_NAMES, which a test keeps equal): their calls
  * are emitted as _m._call((line, col), f, args), so that a repeated or
  * nested call is told apart. */
-export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity IsSubfield " +
-  "MinimalPolynomial Norm PrimeField Root RootsInSplittingField Solution Submatrix Subsets Sym Trace Vector").split(" "));
+export const CALL_POS = new Set(("Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed " +
+  "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm " +
+  "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization " +
+  "Stabilizer Submatrix Subsets Sym Trace Vector").split(" "));
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
@@ -383,10 +414,16 @@ class Parser {
       if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
       if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
       if (a.v === "^" && b.v === "^" && next(a, b)) return found("a^^n (a multiplicity in a multiset)");
-      if (a.v === ":" && b.t === "id" && ["Hex", "Magma", "Maximal", "Minimal", "Default"].includes(b.v)) return found(`x: ${b.v} (a printing level)`);
+      // (x: Magma as a statement of its own, which Magma prints; anywhere else, x := 1 : Magma, : : Magma, it's bad syntax;
+      // a name that isn't a level there is Magma's "Bad print level" at it, a reserved word its bad syntax)
+      if (a.v === ":" && b.t === "id" && c.v === ";" && this.levelStatement(from, k)) {
+        if (PRINT_LEVELS.has(b.v)) return found(`x: ${b.v} (a printing level)`);
+        const said = { name: "", tok: b, verbatim: RESERVED_NAMES.has(b.v) ? "bad syntax" : `Bad print level "${b.v}"` };
+        return said;
+      }
       if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");
       if (a.v === "eval" && a.t === "kw") return found("eval");
-      if (a.t === "id" && (a.v === "try" || a.v === "catch")) return found("try ... catch");
+      if (a.t === "id" && (a.v === "try" || a.v === "catch") && k === from) return found("try ... catch");
       if (a.v === ".." && b.v === "." && next(a, b)) return found("... (a function with a variable number of arguments)");
       if (a.v === "case" && b.v === "<") return found("case< ... >");
       if (a.v === "." && b.t === "id" && k > from && (T[k - 1].t === "id" || T[k - 1].v === ")" || T[k - 1].v === "]")) return found(`${T[k - 1].v}.${b.v} (a generator by a variable's index)`);
@@ -394,6 +431,21 @@ class Parser {
       if (a.v === "\\") return found("\\ (a line continued)");
     }
     return null;
+  }
+
+  /** Whether the tokens [from, k) are an expression statement's value, as in Magma's x : Magma; (not a print, an
+   * assignment or anything inside brackets). */
+  levelStatement(from: number, k: number): boolean {
+    const T = this.toks;
+    // (a statement that a keyword begins takes no level: return 1 : Magma; is bad syntax, as in Magma)
+    if (T[from].t === "kw" && ["print", "printf", "vprint", "return", "assert", "error", "delete", "require"].includes(T[from].v)) return false;
+    let depth = 0;
+    for (let q = from; q < k; q++) {
+      if ("([{<".includes(T[q].v) || T[q].v === "{@" || T[q].v === "{*") depth++;
+      else if (")]}>".includes(T[q].v) || T[q].v === "@}" || T[q].v === "*}") depth--;
+      else if (depth === 0 && (T[q].v === ":=" || T[q].v === ":")) return false;
+    }
+    return depth === 0;
   }
 
   // The loops being parsed, innermost last (a function's body starts its
@@ -519,7 +571,10 @@ class Parser {
         // (the line the statement is dropped through, in a session: the error's)
         const errLine = e instanceof MagmaSyntaxError ? e.line : 0;
         if (u && e instanceof MagmaSyntaxError) {
-          e.message = `${u.name} is not supported yet`;
+          // (Magma's own words where it has them: x : Bogus; is its "Bad print level")
+          const said = (u as { verbatim?: string }).verbatim;
+          e.message = said ?? `${u.name} is not supported yet`;
+          if (said) e.verbatim = true;
           e.line = u.tok.line;
           e.col = u.tok.col;
         }
@@ -1156,8 +1211,13 @@ class Parser {
   printList(kind: "print" | "vprint") {
     const vals = [this.expr()];
     while (this.eat(",")) vals.push(this.expr());
-    // print x: Magma level; print x: Maximal etc. are ignored
-    if (this.eat(":")) this.ident();
+    // print x: Magma level; print x: Maximal etc. are ignored; a name that isn't a level is Magma's error at it
+    if (this.eat(":")) {
+      const t = this.peek();
+      if (t.t === "id" && RESERVED_NAMES.has(t.v)) this.fail(`'${t.v}' is reserved, not a print level`, t);
+      const level = this.ident();
+      if (!PRINT_LEVELS.has(level)) throw new MagmaSyntaxError(`Bad print level "${level}"`, t.line, t.col, true);
+    }
     this.expect(";");
     // (each value's all, as for a, b; at a statement)
     this.emit(`_m._print_line(_m._flat([${vals.map((v) => this.all(v)).join(", ")}]))`);
@@ -1472,10 +1532,15 @@ class Parser {
       while (op(T[at], "(")) at++;
       return { zero: /^0+$/.test(n.v), at: T[at] };
     };
-    // (Magma reads one token past the zero first: one that can't follow it, an identifier, a number, a string, . or
-    // $, is its bad syntax there instead, as in 1/0 x and 1/0X5, which is 0 and X5)
-    const ahead = this.toks[b1];
-    if (["id", "num", "real", "str", "bad"].includes(ahead.t) || (ahead.t === "op" && [".", "$", "$$"].includes(ahead.v))) return;
+    // (Magma reads one token past the zero first, and refuses only if that token can continue the expression: an
+    // operator, a closer or separator, or one of the keywords below (Magma 2.18-5, each checked); anything else,
+    // as in 1/0 x, 1/0 true, 1/0 is 1 and 1/0X5 (which is 0 and X5), is its bad syntax there instead.  The
+    // operators that start or bind an operand of their own, ( [ { . $ # ! @ ~ ::, aren't followers here)
+    // (= is a follower, as Magma reads 1/0 = 1; :: is two :s here)
+    const ahead = this.toks[b1], after = this.toks[b1 + 1];
+    const follows = ahead.t === "op" ? !ZERO_NOT_AFTER.has(ahead.v) : ahead.t === "kw" && ZERO_KW_AFTER.has(ahead.v);
+    const colons = ahead.v === ":" && after?.v === ":" && after.line === ahead.line && after.col === ahead.col + 1;
+    if (!follows || colons) return;
     const a = literal(a0, a1), b = literal(b0, b1);
     if (a && b?.zero) throw new MagmaSyntaxError("Illegal zero denominator", b.at.line, b.at.col, true);
   }
@@ -1769,6 +1834,28 @@ class Parser {
         } while (this.eat(","));
         this.expect(">");
         return `_m._ext(${base}, [${args.join(", ")}], (${lt.line}, ${lt.col}))`;
+      }
+      this.i = start;
+    }
+    if (t.v === "PermutationGroup" || t.v === "sub") {
+      // PermutationGroup< n | g, ... > and sub< G | g, ... > (lib/_magma.py
+      // _group_ctor; other forms of them are not implemented yet)
+      const start = this.i;
+      const first = this.expr();
+      if (this.eat("|")) {
+        const gens: string[] = [];
+        if (!this.at(">")) {
+          do {
+            gens.push(this.expr());
+          } while (this.eat(","));
+        }
+        this.expect(">");
+        // (it returns the group and a map: in an expression, the group, as a
+        // call's first value)
+        const call = `_m._group_ctor(${JSON.stringify(t.v)}, ${first}, [${gens.join(", ")}], (${lt.line}, ${lt.col}))`;
+        const e = `_m._first(${call})`;
+        this.calls.set(e, call);
+        return e;
       }
       this.i = start;
     }

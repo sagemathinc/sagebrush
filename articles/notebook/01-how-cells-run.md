@@ -43,11 +43,14 @@ not see the class's own names: `x` there is the notebook's.
 
 **Names starting with one underscore are private to their cell.** `_t`,
 `_i` or `_tmp` in two cells are two different variables, and no other cell
-sees them. (`__x` and `__` are not private.)
+sees them. (`__x` is not private.) `_`, `__` and `___` are the values shown
+by the nearest, second and third cells above that showed one, in page order:
+a cell that reads one depends on those cells, and reruns when they change.
 
 Sage cells are read after Sage's preparser (so `R.<x> = QQ[]` defines `R`
-and `x`), and a top-level `var('x y')` defines `x` and `y`. Magma cells are
-read after their translation to Python. A line `obj?` (help) reads `obj`.
+and `x`), and a top-level `var('x y')` defines `x` and `y`. Magma and
+MATLAB cells are read after their translation to Python. A line `obj?`
+(help) reads `obj`.
 `from m import *` is an error: what it defines cannot be known.
 
 ## 2. The dependency graph
@@ -163,7 +166,7 @@ When you run cells, the notebook runs, in dependency order:
    and updaters of an object whose updater changed or was deleted
    (section 5).
 
-**The time budget** limits the automatic runs (the "Auto-run" control at
+**The time budget** limits the automatic runs (the "Auto" control at
 the top: 2 seconds by default, 10 seconds, always, or never; kept in the
 notebook). In dependency order, each automatic cell runs if the time it
 took last time still fits in what is left of the budget (a cell never run
@@ -234,9 +237,9 @@ There is one interpreter per notebook (the console has its own).
 
 Outputs that this interpreter did not compute are shown dimmed and marked
 stale: after Restart, after reloading the page or opening a saved notebook,
-and after changing the notebook's language (Python, Sage, Magma), which
-also reads every cell again in the new language. Running a cell first runs
-the stale cells it depends on.
+and after changing the notebook's language (Python, Sage, Magma,
+MATLAB), which also reads every cell again in the new language. Running a
+cell first runs the stale cells it depends on.
 
 **TimeTravel's "Revert to this version"** makes an old version the
 notebook (as a new version: nothing is lost) and computes it from scratch:

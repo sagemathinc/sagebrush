@@ -1,0 +1,19 @@
+x^2 - 1
+Univariate Polynomial Ring in x over Rational Field
+[
+    <x + 2, 1>,
+    <x - 1, 2>
+]
+x + 1
+x^2 + 3
+Univariate Polynomial Ring in x over Rational Field
+2*y + 2
+[
+    <2, 1>,
+    <3, 1>,
+    <y^2 - 3, 1>,
+    <y + 1, 2>
+]
+Univariate Polynomial Ring in x over Rational Field
+x^3
+end
