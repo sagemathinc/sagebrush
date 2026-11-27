@@ -383,8 +383,14 @@ then enumerations, events and dynamic properties).
   (handle classes and inheritance), events, enumerations, property
   validation, `Dependent` and `Abstract` members, property get and set
   methods, and the class attributes `InferiorClasses` and
-  `AllowedSubclasses`. Arrays of objects are refused where they would be
-  made.
+  `AllowedSubclasses`.
+- **Arrays of objects** (`_m.ObjArr`, of one class; 1-by-1 is the object
+  itself): made by concatenation, `repmat`, `repelem`, `reshape` and
+  `Name.empty`, indexed, assigned and deleted as struct arrays are, and
+  grown as MATLAB grows them, the gap filled with copies of one object the
+  constructor makes with no arguments. `arr.p` is a comma-separated list,
+  and a method called with an array gets the array. Concatenating objects
+  of different classes is refused.
 
 ## Display
 
