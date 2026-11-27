@@ -615,7 +615,7 @@ _CYCLE_CTX = [0]
 def _coerce_ctx(R, x, pos=None):
     """R!x, x (a function of no arguments) evaluated in R's context when R
     is a permutation group."""
-    if isinstance(R, (_MSymGroup, _MDihedralGroup)):
+    if _is_perm_group(R):
         _CYCLE_CTX[0] += 1
         try:
             x = x()
@@ -638,14 +638,14 @@ def _ctx_enter(R):
     refuses try/catch), so every error ends its statement.  Code that
     catches one and continues mid-statement must restore _CYCLE_CTX
     itself."""
-    if isinstance(R, (_MSymGroup, _MDihedralGroup)):
+    if _is_perm_group(R):
         _CYCLE_CTX[0] += 1
     return R
 
 
 def _coerce_after(R, x, pos=None):
     """R!x, x evaluated in R's context (_ctx_enter), which is left now."""
-    if isinstance(R, (_MSymGroup, _MDihedralGroup)):
+    if _is_perm_group(R):
         _CYCLE_CTX[0] -= 1
     return _coerce(R, x, pos)
 
@@ -12092,7 +12092,14 @@ def _groups():
 
 
 def _group_ctor(kind, first, gens, pos):
-    """PermutationGroup< n | gens > and sub< G | gens > (lib/_magma_groups.py)."""
+    """PermutationGroup< n | gens > and sub< G | gens > (lib/_magma_groups.py):
+    gens (a function of no arguments) evaluated in a permutation group's
+    context, so that a cycle written there is made (_cycle), as Magma's."""
+    _CYCLE_CTX[0] += 1
+    try:
+        gens = gens()
+    finally:
+        _CYCLE_CTX[0] -= 1
     if kind == "PermutationGroup":
         return _groups().construct(first, gens, pos)
     return _groups().sub(first, gens, pos)

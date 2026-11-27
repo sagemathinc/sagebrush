@@ -1864,7 +1864,8 @@ class Parser {
         this.expect(">");
         // (it returns the group and a map: in an expression, the group, as a
         // call's first value)
-        const call = `_m._group_ctor(${JSON.stringify(t.v)}, ${first}, [${gens.join(", ")}], (${lt.line}, ${lt.col}))`;
+        // (the generators evaluated in the group's context, a lambda: a cycle written there is made, _cycle)
+        const call = `_m._group_ctor(${JSON.stringify(t.v)}, ${first}, lambda: [${gens.join(", ")}], (${lt.line}, ${lt.col}))`;
         const e = `_m._first(${call})`;
         this.calls.set(e, call);
         return e;
