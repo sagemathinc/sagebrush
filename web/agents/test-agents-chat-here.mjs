@@ -169,9 +169,9 @@ try {
   await ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
   ok(await chatHere(), "Chat here");
   ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`), "…then the grant dialog");
-  // (while it waits for Allow: the header and the banner say the same, waiting for the dialog, never "isn't connected")
-  const askAllow = { who: await text("#who"), banner: await text("#banner") };
-  ok(/waiting: allow it in the dialog/.test(askAllow.who) && /is waiting for you to allow it in the dialog/.test(askAllow.banner) && !/isn't connected/.test(askAllow.banner), "…while it's open, the header and the banner both say it waits for Allow in the dialog", askAllow);
+  // (while it waits for Allow: the header and its popover say the same, waiting for the dialog, never "isn't connected")
+  const askAllow = { who: await text("#who"), info: await text("#who-info") };
+  ok(/waiting: allow it in the dialog/.test(askAllow.who) && /is waiting for you to allow it in the dialog/.test(askAllow.info) && !/isn't connected/.test(askAllow.info), "…while it's open, the header and its popover both say it waits for Allow in the dialog", askAllow);
   ok(await ev(`window.__whoSeen.some((t) => t.includes('Connecting to laptop…'))`), "the header said \"Connecting to laptop…\" meanwhile", await ev(`window.__whoSeen`));
   const leg = R.legs.at(-1);
   ok(leg.data.hello?.fresh === true && leg.data.hello?.purpose === "agent" && !("remember" in leg.data.hello) && !("resume" in leg.data.hello), "the hello asks a fresh agent and remembers nothing", leg.data.hello);
