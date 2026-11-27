@@ -200,7 +200,8 @@ class QSpaceMethods:
     before the engine is asked for them, and caches nothing; the same call
     works with the allowance restored; a cached basis charges the copies it
     hands out; and a basis is published only once its storage is admitted
-    (here the allowance is spent just after its echelon form)::
+    (here the allowance is spent as its echelon form starts, so the
+    elimination's first reservation is refused, and then just after it)::
 
         sage: import _sage_modular as sm, _sage_modsym as ms  # sagebrush only
         sage: S = CuspForms(11, 2); P = 3000; S.dimension()  # sagebrush only
@@ -238,15 +239,19 @@ class QSpaceMethods:
         SagebrushMemoryError
         sage: sys._sagebrush_heap_limit = old  # sagebrush only
         sage: del sm._QBASIS[(11, 2, 'cusp')]; real = ms._echelon  # sagebrush only
-        sage: def spent(rows, n):  # sagebrush only
+        sage: def spent(rows, n, before):  # sagebrush only
+        ....:     if before:
+        ....:         ms._CUR[0].limit = ms._CUR[0].used
         ....:     out = real(rows, n)
         ....:     ms._CUR[0].limit = ms._CUR[0].used
         ....:     return out
-        sage: ms._echelon = spent  # sagebrush only
-        sage: try:  # sagebrush only
-        ....:     sm._qbasis(11, 2, "cusp", P)
-        ....: except MemoryError as e:
-        ....:     print(type(e).__name__, (11, 2, 'cusp') in sm._QBASIS)
+        sage: for before in (True, False):  # sagebrush only
+        ....:     ms._echelon = lambda rows, n: spent(rows, n, before)
+        ....:     try:
+        ....:         sm._qbasis(11, 2, "cusp", P)
+        ....:     except MemoryError as e:
+        ....:         print(type(e).__name__, (11, 2, 'cusp') in sm._QBASIS)
+        SagebrushMemoryError False
         SagebrushMemoryError False
         sage: ms._echelon = real  # sagebrush only
 
