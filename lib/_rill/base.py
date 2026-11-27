@@ -578,13 +578,15 @@ def _cat_reservation(args, sep):
     """cat's peak: an element string per element (numbers at most 24 characters, strings their own length) and
     the output they are joined into, with its final newline when sep has one, reserved before either is built
     (§8.5)."""
-    count, chars = 0, 0
+    count, chars, seps = 0, 0, 0
     for name, v in args:
         # (every argument but sep is printed: a named one went to `...`, e.g. cat(1, se = "-"))
         if name != "sep" and isinstance(v, RVector):
             count += len(v.data)
+            # (a separator per element, and one more for a zero-length argument, which writes only its separator)
+            seps += len(v.data) or 1
             chars += sum(len(e) for e in v.data if e is not None) if v.type == "character" else 24 * len(v.data)
-    return mem.reserve(0, "character", (count, "character"), extra_bytes=chars + count * len(sep) + ("\n" in sep))
+    return mem.reserve(0, "character", (count, "character"), extra_bytes=chars + seps * len(sep) + ("\n" in sep))
 
 
 def cat(sess, call, args):
@@ -600,18 +602,19 @@ def cat(sess, call, args):
 
 def _cat(sess, args):
     sep = " "
-    items = []
+    # (each argument's elements joined by sep, in order; NULL stays as its position, its text None)
+    parts = []
     for name, v in args:
         if name == "sep":
             if not (isinstance(v, RVector) and v.type == "character" and len(v.data) == 1):
                 raise NotSupported("cat(sep =) other than one string")
             sep = v.data[0]
-        elif v is not NULL:
+        elif v is NULL:
+            parts.append(None)
+        else:
             if not isinstance(v, RVector) or v.type == "complex":
                 raise NotSupported("cat() of this type")
-            # (a zero-length vector, unlike NULL, is an empty item between its separators: cat("a", character(0), "b") is "a  b")
-            if not v.data:
-                items.append("")
+            items = []
             for e in v.data:
                 if e is None:
                     items.append("NA")
@@ -621,8 +624,16 @@ def _cat(sess, args):
                     items.append("TRUE" if e else "FALSE")
                 else:
                     items.append(str(e))
-    # (a sep with a newline in it ends the output with one, as R's cat documents: cat("a", "b", sep = "\n") is "a\nb\n")
-    sess.write_out(sep.join(items) + ("\n" if "\n" in sep else ""))
+            parts.append(items)
+    # (a separator goes before every argument but NULL and the first, which is first even when it is NULL:
+    # cat(NULL, "b") is " b", and a zero-length vector is its separator alone, cat("a", character(0), "b") "a  b")
+    out = []
+    for k, items in enumerate(parts):
+        if items is not None:
+            if k:
+                out.append(sep)
+            out.append(sep.join(items))
+    sess.write_out("".join(out) + ("\n" if "\n" in sep else ""))
 
 
 # the shapes of calls Rill refuses, checked after R's matching (args.match: `plan`, the formal each actual

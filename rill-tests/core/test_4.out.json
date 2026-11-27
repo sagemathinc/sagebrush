@@ -65,6 +65,30 @@
    "status": 0,
    "stderr": "",
    "stdout": "ab|\na b|\n"
+  },
+  {
+   "id": "cat-null-first",
+   "status": 0,
+   "stderr": "",
+   "stdout": " b|\n-b|\n-b|\n"
+  },
+  {
+   "id": "cat-null-first-zero-length",
+   "status": 0,
+   "stderr": "",
+   "stdout": "-|\n--b|\n-b|\n"
+  },
+  {
+   "id": "cat-null-first-newline",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nb\n\n\n\nend\n"
+  },
+  {
+   "id": "cat-null-last",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a|\na-b|\n|\n-x-y|\na\nend\n"
   }
  ],
  "file": "rill-tests/core/test_4.R",
