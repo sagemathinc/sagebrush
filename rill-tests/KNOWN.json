@@ -126,6 +126,11 @@
    "reason": "tapply() (A3: merge and aggregate)",
    "sha256": "e2ed06d09245e771f1999f1cb1fb2cfabdb8bff090e1ab11be32a3dbf11cfca0"
   },
+  "rill-tests/fac/test_3.R#cut-duplicate-breaks": {
+   "class": "not-implemented",
+   "reason": "the S3 method's call in R's message, Error in cut.default(...) and its Calls: line (A1.3: S3 dispatch)",
+   "sha256": "0b7db99c6cbb1391c6decde6c4cac50623b2edb89e94246ab76cb2d926a8565c"
+  },
   "rill-tests/parse/test_1.R#arg-empty-name": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",

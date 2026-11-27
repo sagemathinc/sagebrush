@@ -73,8 +73,15 @@ def _sorted_unique(x):
     from .base import coerce_elt
     seen = set()
     vals = []
+    nan = False
     for e in x.data:
-        if e is None or (x.type == "double" and e != e) or e in seen:
+        if e is None:
+            continue
+        if x.type == "double" and e != e:
+            # (NaN isn't NA: it is a level of its own, after every number, R 4.5.3)
+            nan = True
+            continue
+        if e in seen:
             continue
         seen.add(e)
         vals.append(e)
@@ -82,7 +89,7 @@ def _sorted_unique(x):
         vals.sort(key=collate.key)
     else:
         vals.sort()
-    return [coerce_elt(e, x.type, "character") for e in vals]
+    return [coerce_elt(e, x.type, "character") for e in vals] + (["NaN"] if nan else [])
 
 
 # ---------------------------------------------------------------- factor and ordered
@@ -302,7 +309,7 @@ def _interval_labels(breaks, dig, right, lowest):
 
 def _g(x, d):
     """x written with d significant digits, as C's %g does (formatC's default)."""
-    s = "%.*g" % (d, x)
+    s = "%.*g" % (d, x + 0.0)  # (0 + breaks, as R writes them: a negative zero is "0")
     if "e" in s:
         mant, ex = s.split("e")
         s = "%se%s%02d" % (mant, ex[0], abs(int(ex)))
