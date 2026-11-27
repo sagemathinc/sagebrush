@@ -15,7 +15,8 @@ pub mod fail;
 pub mod consts;
 pub mod gamma;
 pub mod elefun;
-pub mod glibm;
+// (glibc's log and pow: engine/glibm, re-exported under the name the core has always used)
+pub use sagebrush_glibm as glibm;
 pub mod int;
 pub mod intmath;
 pub mod kernel;
