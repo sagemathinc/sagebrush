@@ -19,7 +19,7 @@ let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
 // ---- the mirror: the upstream commit and each file's sha256 there (a new upstream version means new pins, reviewed)
-const UPSTREAM = "c24d74038257cb560b7cbb54a87c7469b31b506e";
+const UPSTREAM = "549da540bc174dbe7a24b7de120111a42f6b0d40";
 const PINS = {
   "core/bytes.mjs": ["lib/fleet/core/bytes.mjs", "be5c199fcadf375336c49dae692fce6af96644af6f98b11161a4fb0d65eaaf6b"],
   "core/canon.mjs": ["lib/fleet/core/canon.mjs", "d9b7831f6772f6010689ecb74a8727280470e8e1437a2166fc0fd6b1728f08e8"],
@@ -30,9 +30,9 @@ const PINS = {
   "core/control.mjs": ["lib/fleet/core/control.mjs", "32ff93c76b65e19b3a5e6189fd118ae7860ecfbae70c22a1c0469e246379165b"],
   "core/crypto.mjs": ["lib/fleet/core/crypto.mjs", "34d85de82f75c4bbae276d7fb24fddce0b8fd576825298fbe452535db12557b4"],
   "core/ed25519.mjs": ["lib/fleet/core/ed25519.mjs", "63420ae7dd5f17d159e56bc3a0ad91a3e96269a7eedf56196da2599a3a05c4ad"],
-  "core/envelope.mjs": ["lib/fleet/core/envelope.mjs", "a75fdd24675a12377dfba1a2e1f2c38c846e61f1b80e0914afa988bc7501d2e5"],
+  "core/envelope.mjs": ["lib/fleet/core/envelope.mjs", "26c79fb8b50d47933035e4c97c4a21de4e4cb8899fcc528ae7f6be44c818ae90"],
   "core/hpke.mjs": ["lib/fleet/core/hpke.mjs", "38d2ac452098e275b423a8530fb62c2cc113c6f4493cbefa397aa92dd40bf6d1"],
-  "core/index.mjs": ["lib/fleet/core/index.mjs", "b4c13f9a14e6eb0ff08f0c0a14109e48c11840f81065fcd08854de702c9e6f8e"],
+  "core/index.mjs": ["lib/fleet/core/index.mjs", "6bc04a48559f72cdb8688340befddc1d125c826a67a48a8926deb3acc53dd6db"],
   "core/lease-service.mjs": ["lib/fleet/core/lease-service.mjs", "b92c721e5718c2e27a983ef8612b4a1a8741443ab4797a1503f9682881fa244b"],
   "core/recovery.mjs": ["lib/fleet/core/recovery.mjs", "a636cdaab732d71eeb24c241cd6f0c61b5d1634bafd5992675976083e36a90ff"],
   "core/relay.mjs": ["lib/fleet/core/relay.mjs", "c30eab74b5305ae0e0194e76555ed11bee3a2768c12ba95c599145fd74138c2a"],
@@ -40,15 +40,15 @@ const PINS = {
   "core/schema.mjs": ["lib/fleet/core/schema.mjs", "f7e0c255623d3bfad7212c147dbe2ee6bc3a36b6c06c8879f000c1efdb52e495"],
   "core/schemas.mjs": ["lib/fleet/core/schemas.mjs", "871a9e3278d9312d82eb4871fc267e204bb5df7af587a3d1f1005571724135d1"],
   "core/sealed.mjs": ["lib/fleet/core/sealed.mjs", "bd9d9843486dd5a70061bc30c4db2defaa1afbada4fdaa52401361d53ba52fb5"],
-  "core/verify.mjs": ["lib/fleet/core/verify.mjs", "bc45d490a510a5c8fa2f9c145083b3747157cd2e4d3859ad69ecee30e42ed17b"],
-  "core/webcrypto.mjs": ["lib/fleet/core/webcrypto.mjs", "82f5b25fcd77710fa75f18c65df00dbea5be223315ff4f32308f3164acb0e61b"],
+  "core/verify.mjs": ["lib/fleet/core/verify.mjs", "4d2b91fdc17d3543688d485da8f5d5b2bc51f56fff9d3697ff6649097d9d33fc"],
+  "core/webcrypto.mjs": ["lib/fleet/core/webcrypto.mjs", "4d5cad6661951bd2800bea78892a1df6acc48ec493104de1607db174ef114799"],
   "core/worker.mjs": ["lib/fleet/core/worker.mjs", "9471ad45d78b0a423ac64a07d1ee02c73b5e6241d11f11f40e6daf070801633f"],
-  "fleet.schema.json": ["schema/fleet/fleet.schema.json", "e74f056439d6d360c525529e90bd945e9dd9e2edb9e299d384a5f9fce8ff887e"],
+  "fleet.schema.json": ["schema/fleet/fleet.schema.json", "391e4a190f0b638ce93dfbde9a120364649c76a2fadc3c05e69778857f8d8a92"],
   "reasons.json": ["schema/fleet/reasons.json", "6131d4c662bd7247aa2cfb041bc5eb6449c9fcc734259f991c2d46854b88d83e"],
-  "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "5c5ecf60b381360f0d05fe2eab3ad02a544e2c68d58cba795c749cbdbaf64129"],
+  "fleet-fixtures.json": ["test/fixtures/fleet-fixtures.json", "633ae280ed7995d96eccd1e7255d7a236cba7a97fa78b901cac7ffa90c543217"],
   "fleet-hpke-fixtures.json": ["test/fixtures/fleet-hpke-fixtures.json", "2c4d640af72ee2514c33930763dd17521b73ca50e231fdc0cb8d54915e16736c"],
   "hpke-x25519-sha256-aes256gcm.json": ["test/fixtures/hpke-x25519-sha256-aes256gcm.json", "054c8e53704afdc91aae501f96ee964828c78fd4581e5894d21593b93a066d8e"],
-  "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "02e79a5991335ed6f798e67cb334353bf6f7139c8e23bfad15555e01bb9c4661"],
+  "fleet-fixture-cases.mjs": ["test/fleet-fixture-cases.mjs", "fcfba0d36c88f25df18e7a4f829449dc64fd0011ace6d6875749a638d9817e60"],
 };
 const OWN = ["install.ts"]; // (the page's own file in fleet/; everything else there is upstream's)
 const sha = (b) => createHash("sha256").update(b).digest("hex");
@@ -71,8 +71,9 @@ const impure = Object.keys(PINS).filter((f) => f.startsWith("core/")).flatMap((f
 });
 ok(impure.length === 0, "M-4: the mirrored core is pure (only ./*.mjs imports; no node:, Buffer, process, import.meta, require)", impure);
 
-// ---- the core's page users: the end-to-end crypto (e2e/), and the fleet verifier (fleet-verify.ts, which signs nothing,
-// and which nothing reaches yet: N-2). A page module (e2e/*.ts, fleet-verify.ts) reaches it only through
+// ---- the core's page users: the end-to-end crypto (e2e/), the fleet verifier (fleet-verify.ts, which signs nothing:
+// N-2), and the page's one signer (fleet-sign.ts, behind fleet-device.ts's minted grant) with its routes
+// (agents/fleet/client-write.ts). A page module (e2e/*.ts, those three) reaches it only through
 // fleet/install.ts, the one installer. e2e/core/'s pure modules
 // (.mjs, like the core itself) may import the core's pure functions directly, but never an installer: not
 // core/index.mjs, not webcrypto.mjs, and no useCrypto or useSchemas, so nothing there can install or swap a backend.
@@ -92,6 +93,8 @@ const coreImportOk = (t) => {
   return named.length === refs && named.every((m) => /^\.\.\/\.\.\/fleet\/core\/[a-z0-9-]+\.mjs$/.test(m[2])
     && !/\/(?:index|webcrypto)\.mjs$/.test(m[2]) && !INSTALLERS.test(m[1]));
 };
+// (the page modules outside e2e/ that may reach the core, each through fleet/install.ts)
+const CORE_PAGE_USERS = [join("workspace", "fleet-verify.ts"), join("workspace", "fleet-sign.ts"), join("agents", "fleet", "client-write.ts")];
 /** The page modules under `webDir` (a web/ tree) that reach the fleet core other than N-1 allows. */
 const coreUsers = (webDir) => {
   const fleetDir = join(webDir, "workspace", "fleet"), e2eDir = join(webDir, "workspace", "e2e"), coreDir = join(e2eDir, "core");
@@ -102,15 +105,16 @@ const coreUsers = (webDir) => {
     if (!/\.(?:ts|mts|js|mjs)$/.test(e.name) || /^test-/.test(e.name)) continue;
     const t = readFileSync(p, "utf8");
     const inCore = p.startsWith(coreDir + "/") && p.endsWith(".mjs");
-    const verifier = relative(webDir, p) === join("workspace", "fleet-verify.ts");
+    const verifier = CORE_PAGE_USERS.includes(relative(webDir, p));
     if ((/fleet\/core/.test(t) && !(inCore && coreImportOk(t))) || (/fleet\/install/.test(t) && !p.startsWith(e2eDir + "/") && !verifier)) out.push(relative(webDir, p));
   } };
   scan(webDir);
   return out;
 };
 const users = coreUsers(web);
-ok(users.length === 0, "N-1: only e2e/ and the verifier (fleet-verify.ts) use the fleet core (trees under their own licence aside): page modules through fleet/install.ts, e2e/core/'s pure modules by named imports of the core's pure functions, never an installer", users);
-// (and only the fleet pages reach the verifier: /agents/fleet/'s page.ts, read only, reviewed with it. Any other page
+ok(users.length === 0, "N-1: only e2e/, the verifier (fleet-verify.ts) and the signer (fleet-sign.ts, client-write.ts) use the fleet core (trees under their own licence aside): page modules through fleet/install.ts, e2e/core/'s pure modules by named imports of the core's pure functions, never an installer", users);
+// (and only the fleet pages reach the verifier: /agents/fleet/'s page.ts, read only, reviewed with it, and the signer,
+//  which syncs the chain before it signs and reads its receipts: fleet-sign.ts and client-write.ts. Any other page
 //  module naming it is reported. The scan covers fleet/ too, its own installer included: only the byte-pinned mirror
 //  files, PINS, are left out)
 /** The modules under `webDir` (a web/ tree) that name the verifier, other than the verifier itself. */
@@ -128,7 +132,8 @@ const verifierUsersIn = (webDir) => {
   return out;
 };
 const verifierUsers = verifierUsersIn(web);
-ok(JSON.stringify(verifierUsers) === JSON.stringify([join("agents", "fleet", "page.ts")]), "N-2: only the fleet pages (agents/fleet/page.ts) name the verifier; no other page module does", verifierUsers);
+const VERIFIER_USERS = [join("agents", "fleet", "client-write.ts"), join("agents", "fleet", "page.ts"), join("workspace", "fleet-sign.ts")];
+ok(JSON.stringify([...verifierUsers].sort()) === JSON.stringify(VERIFIER_USERS), "N-2: only the fleet pages (agents/fleet/page.ts) and the signer (fleet-sign.ts, client-write.ts) name the verifier; no other page module does", verifierUsers);
 {
   // (its control, on real files: the page's own installer importing the verifier is reported, while a pinned mirror
   //  file is left out of the scan)
@@ -204,12 +209,12 @@ const settle = async (P, before) => { for (const t = Date.now(); P.loads === bef
 const page = async () => { const P = await B.tab(); const n = P.loads; await P.send("Page.navigate", { url: site + "/" }); await settle(P, n); return P; };
 const err = (P, expr) => P.ev(`(async () => { try { await (${expr}); return null; } catch (e) { return String(e?.message ?? e); } })()`);
 // (the count is pinned so a group of cases that stopped running shows up, not only a case that fails)
-const CASES = 204, HPKE_VECTOR = 260, HPKE_CASES = 34;
+const CASES = 251, HPKE_VECTOR = 260, HPKE_CASES = 34;
 try {
   {
     const P = await page();
     const r = await P.ev(`fc.checkFixtures(fc.fleetCore(), F).then((r) => ({ n: r.n, bad: r.bad }))`);
-    ok(r.n === CASES && r.bad.length === 0, `C-1: all ${CASES} of the agent's fixture cases agree in Chromium (canonical, base64url, ids, ed25519, chain, service keys, lease keys, envelopes, grants, grant acks, host ops, approvals, transfers, leases, fence acks, fleet fingerprints)`, r);
+    ok(r.n === CASES && r.bad.length === 0, `C-1: all ${CASES} of the agent's fixture cases agree in Chromium (canonical, base64url, ids, ed25519, chain, service keys, lease keys, envelopes, grants, grant acks, host ops, approvals, transfers, leases, fence acks, fleet fingerprints, agent messages, agent replies)`, r);
     // (the small-order forgery: R = identity and S = 0 under a small-order key. Chromium's own verify may accept it;
     //  the core refuses it before WebCrypto is asked. The platform's answer is printed, not asserted: it may change)
     const so = await P.ev(`(async () => { const c = F.ed25519.find((c) => /small-order/.test(c.name)); const core = fc.fleetCore(); const k = core.unb64(c.public, 32), m = core.unb64(c.msg_b64), s = core.unb64(c.sig, 64);

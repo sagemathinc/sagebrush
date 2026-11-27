@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sagebrush.org/schema/fleet/1",
   "title": "Sagebrush fleet protocol v1 (O6/O7 r2.3)",
-  "$comment": "Frozen design: agent-autonomous-schemas.md r2.5, sha256 589730708dbc76d742f67831e2772e8f4a85fac51650640eb76fb0747c1a1bd3. Bodies by type name in $defs (sb.<name>.v1). The browser-session body is O11's, imported from O11 draft 5.1 (sha256 66755f3a1a97d060…); the four audit bodies are the audit design's, absent here until imported by exact revision. Validate with lib/fleet/schema.mjs (closed subset). Amended Nov 23 2026 by the owner's ruling (a Claude login is never held, sealed or relayed by the service; Claude subscriptions are host-local, signed in through Claude Code's own flow): no subscription, sealed package or package plaintext names provider claude, and there is no claude-setup-token purpose. Nor does an agent's broker list a claude-subscription right: the host-local pool is the only authority on Claude subscriptions, and the service never learns of one. An agent's client may still be claude.",
+  "$comment": "Frozen design: agent-autonomous-schemas.md r2.5, sha256 589730708dbc76d742f67831e2772e8f4a85fac51650640eb76fb0747c1a1bd3. Bodies by type name in $defs (sb.<name>.v1). The browser-session body is O11's, imported from O11 draft 5.1 (sha256 66755f3a1a97d060…); the three host audit bodies (audit-event, audit-checkpoint, audit-continuity) are imported from the host audit stream design d1 to d1r5; the service's audit-ack body is still absent until imported by exact revision. Validate with lib/fleet/schema.mjs (closed subset). Amended Nov 23 2026 by the owner's ruling (a Claude login is never held, sealed or relayed by the service; Claude subscriptions are host-local, signed in through Claude Code's own flow): no subscription, sealed package or package plaintext names provider claude, and there is no claude-setup-token purpose. Nor does an agent's broker list a claude-subscription right: the host-local pool is the only authority on Claude subscriptions, and the service never learns of one. An agent's client may still be claude. The agent-message and agent-reply bodies are agent-messages r6's (sha256 a372fb354232bd17fff97a7a65aac423969b87a56846c537b0676f85ba68ca90) with its deltas r7 (e118a55b), r8 (9732a889), r9 (3be5c3cc), r10 (bc918563) and r11 (sha256 c24c03c33519217dd8054294e631d926dde1c1bfe26abe756ddd99f56695b397: the closed reasons answer_lost and not_granted, and aud), imported by exact revision.",
   "$defs": {
     "agent-fence-ack": {
       "type": "object",
@@ -49,6 +49,204 @@
           "$ref": "#/$defs/ms"
         }
       }
+    },
+    "agent-message": {
+      "$comment": "agent-messages r6 (sha256 a372fb354232bd17fff97a7a65aac423969b87a56846c537b0676f85ba68ca90) §2: a person->agent message, signed by an enrolled, non-removed device of the fleet (no tier). body_sha256 is the SHA-256 of the HPKE ct (§6). The host verifies it against its pinned chain before a turn (§7).",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "body_sha256": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "in_reply_to": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thread": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "agent",
+        "at_ms",
+        "aud",
+        "body_sha256",
+        "chain_seq",
+        "fleet",
+        "host",
+        "id",
+        "in_reply_to",
+        "thread"
+      ],
+      "type": "object"
+    },
+    "agent-reply": {
+      "$comment": "agent-messages r6 §2: an agent->person record, signed by the host's cert key. kind reply carries a body (AES-256-GCM under the answered send's reply key; body_sha256 over the ct) and reason null; turn_failed and refused carry no body (body_sha256 null) and a closed reason. in_reply_to is the last verified send the turn covered (R2), or, for refused, the refused message.",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "answer": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/id"
+                },
+                "thread": {
+                  "$ref": "#/$defs/id"
+                }
+              },
+              "required": [
+                "id",
+                "thread"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "body_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/b64_32"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "covers": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/id"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          ]
+        },
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "in_reply_to": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "reply",
+            "turn_failed",
+            "refused",
+            "covered"
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "crashed",
+                "start_refused",
+                "budget",
+                "stopped",
+                "bad_signature",
+                "device_unknown",
+                "replayed",
+                "too_old",
+                "too_new",
+                "bad_body",
+                "stalled",
+                "not_granted",
+                "answer_lost"
+              ]
+            }
+          ]
+        },
+        "thread": {
+          "$ref": "#/$defs/id"
+        },
+        "turn": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "answer",
+        "at_ms",
+        "aud",
+        "body_sha256",
+        "chain_seq",
+        "covers",
+        "fleet",
+        "host",
+        "id",
+        "in_reply_to",
+        "kind",
+        "reason",
+        "thread",
+        "turn"
+      ],
+      "type": "object"
     },
     "agent-transfer": {
       "type": "object",
@@ -2101,6 +2299,437 @@
         "native",
         "browser"
       ]
+    },
+    "audit-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_ms",
+        "aud",
+        "cert",
+        "chain_seq",
+        "epoch",
+        "fleet",
+        "host",
+        "op",
+        "op_id",
+        "phase",
+        "prev",
+        "seq",
+        "stream",
+        "v"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "cert": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "stream": {
+          "$ref": "#/$defs/id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/count"
+        },
+        "seq": {
+          "$ref": "#/$defs/count"
+        },
+        "prev": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "op": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,47}$"
+        },
+        "op_id": {
+          "$ref": "#/$defs/b64_16"
+        },
+        "phase": {
+          "enum": [
+            "requested",
+            "refused",
+            "authorized",
+            "started",
+            "succeeded",
+            "failed_no_effect",
+            "unknown_effect",
+            "reconciled_succeeded",
+            "reconciled_no_effect",
+            "revoked",
+            "expired"
+          ]
+        },
+        "gen": {
+          "$ref": "#/$defs/gen"
+        },
+        "agent": {
+          "$ref": "#/$defs/id"
+        },
+        "life": {
+          "$ref": "#/$defs/count"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,39}$"
+        },
+        "intent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "epoch",
+            "seq"
+          ],
+          "properties": {
+            "epoch": {
+              "$ref": "#/$defs/count"
+            },
+            "seq": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "detail": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "digest": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "plan_digest": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "grant_hash": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "pairs_digest": {
+              "$ref": "#/$defs/b64_32"
+            },
+            "killed": {
+              "type": "boolean"
+            },
+            "late": {
+              "type": "boolean"
+            },
+            "truncated": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,39}$"
+              },
+              "maxItems": 8,
+              "uniqueItems": true
+            },
+            "omitted": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,39}$"
+              },
+              "maxItems": 8,
+              "uniqueItems": true
+            },
+            "step": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9:-]{0,63}$"
+            },
+            "set": {
+              "type": "string",
+              "pattern": "^(hoststore|(agent|archive|tag):[a-z2-7]{25}[aeimquy4])$"
+            },
+            "pair": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "receipt_digest",
+                "transfer_digest",
+                "replaces"
+              ],
+              "properties": {
+                "action": {
+                  "enum": [
+                    "written",
+                    "kept"
+                  ]
+                },
+                "receipt_digest": {
+                  "$ref": "#/$defs/b64_32"
+                },
+                "transfer_digest": {
+                  "$ref": "#/$defs/b64_32"
+                },
+                "replaces": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "gen",
+                        "transfer_digest"
+                      ],
+                      "properties": {
+                        "gen": {
+                          "$ref": "#/$defs/gen"
+                        },
+                        "transfer_digest": {
+                          "$ref": "#/$defs/b64_32"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "reconciles": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "epoch",
+                "seq"
+              ],
+              "properties": {
+                "epoch": {
+                  "$ref": "#/$defs/count"
+                },
+                "seq": {
+                  "$ref": "#/$defs/count"
+                }
+              }
+            },
+            "refusal": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "count",
+                "first_at_ms",
+                "last_at_ms"
+              ],
+              "properties": {
+                "count": {
+                  "$ref": "#/$defs/gen"
+                },
+                "first_at_ms": {
+                  "$ref": "#/$defs/ms"
+                },
+                "last_at_ms": {
+                  "$ref": "#/$defs/ms"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "audit-checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_ms",
+        "aud",
+        "cert",
+        "chain_seq",
+        "covers",
+        "epoch",
+        "fleet",
+        "host",
+        "prev",
+        "seq",
+        "stream",
+        "v"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "cert": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "stream": {
+          "$ref": "#/$defs/id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/count"
+        },
+        "seq": {
+          "$ref": "#/$defs/count"
+        },
+        "prev": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "covers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "seq",
+            "digest"
+          ],
+          "properties": {
+            "seq": {
+              "$ref": "#/$defs/count"
+            },
+            "digest": {
+              "$ref": "#/$defs/b64_32"
+            }
+          }
+        }
+      }
+    },
+    "audit-continuity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_ms",
+        "aud",
+        "cert",
+        "chain_seq",
+        "epoch",
+        "fleet",
+        "host",
+        "prev",
+        "prior_checkpoint",
+        "prior_last",
+        "reason",
+        "seq",
+        "stream",
+        "v"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "fleet": {
+          "$ref": "#/$defs/id"
+        },
+        "aud": {
+          "$ref": "#/$defs/aud"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "cert": {
+          "$ref": "#/$defs/b64_32"
+        },
+        "chain_seq": {
+          "$ref": "#/$defs/count"
+        },
+        "stream": {
+          "$ref": "#/$defs/id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/count"
+        },
+        "seq": {
+          "$ref": "#/$defs/count"
+        },
+        "prev": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/b64_32"
+            }
+          ]
+        },
+        "at_ms": {
+          "$ref": "#/$defs/ms"
+        },
+        "reason": {
+          "enum": [
+            "genesis",
+            "restart_unanchored",
+            "restart"
+          ]
+        },
+        "prior_checkpoint": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "epoch",
+                "seq",
+                "digest"
+              ],
+              "properties": {
+                "epoch": {
+                  "$ref": "#/$defs/count"
+                },
+                "seq": {
+                  "$ref": "#/$defs/count"
+                },
+                "digest": {
+                  "$ref": "#/$defs/b64_32"
+                }
+              }
+            }
+          ]
+        },
+        "prior_last": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "epoch",
+                "seq",
+                "digest"
+              ],
+              "properties": {
+                "epoch": {
+                  "$ref": "#/$defs/count"
+                },
+                "seq": {
+                  "$ref": "#/$defs/count"
+                },
+                "digest": {
+                  "$ref": "#/$defs/b64_32"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   }
 }

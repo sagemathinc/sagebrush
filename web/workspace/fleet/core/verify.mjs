@@ -190,6 +190,53 @@ export async function verifyGrantAck(bytes, ctx) {
   return env.body;
 }
 
+// ---- agent messages (agent-messages r6 §2, with r7 to r10): a person's message to an agent, signed by an enrolled,
+// non-removed device of the fleet (no tier: a message can't widen anything), and the host's signed records answering it
+
+/** ctx: { aud, fleet, chain, host?, agent? }. Returns { body, device }. With host or agent, a message for another is
+ * refused not_granted. */
+export async function verifyAgentMessage(bytes, ctx) {
+  const env = await openByDevice(bytes, ctx, "sb.agent-message.v1", "agent-message");
+  const m = env.body;
+  if ((ctx.host !== undefined && m.host !== ctx.host) || (ctx.agent !== undefined && m.agent !== ctx.agent)) refuse("not_granted", "a message for another host or agent");
+  if (m.in_reply_to === m.id) refuse("bad_form", "a message answering itself");
+  return { body: m, device: env.device };
+}
+
+// (each kind's closed reasons; a kind not named here has none)
+const REPLY_REASONS = {
+  turn_failed: new Set(["crashed", "start_refused", "budget", "stalled", "stopped", "answer_lost"]),
+  refused: new Set(["bad_signature", "device_unknown", "replayed", "too_old", "too_new", "bad_body", "not_granted"]),
+};
+
+/** ctx: { aud, fleet, cert } (the signing host's verified certificate). Returns the body. The rules the schema can't
+ * say: each kind's reasons; a body only on reply; covers on reply, turn_failed and covered, its last element the
+ * in_reply_to; a turn on all but refused; answer only on covered. */
+export async function verifyAgentReply(bytes, ctx) {
+  const env = await open(bytes, {
+    aud: ctx.aud, fleet: ctx.fleet,
+    resolveKey: async (signer, t, body) => {
+      if (t !== "sb.agent-reply.v1") refuse("bad_form", "another type");
+      bodyValidator("agent-reply")(body);
+      if (signer.kind !== "host" || signer.id !== ctx.cert.body.host || body.host !== signer.id) refuse("bad_signature");
+      if (signer.key !== (await keyId("ed25519", ctx.cert.signRaw))) refuse("bad_signature", "not the certified host key");
+      return ctx.cert.signRaw;
+    },
+  });
+  const r = env.body, bad = (why) => refuse("bad_form", why);
+  const reasons = REPLY_REASONS[r.kind];
+  if (reasons ? !(typeof r.reason === "string" && reasons.has(r.reason)) : r.reason !== null) bad(`a ${r.kind} record's reason`);
+  if ((r.kind === "reply") !== (r.body_sha256 !== null)) bad("a body only on a reply");
+  if (r.kind === "refused") {
+    if (r.covers !== null || r.turn !== null) bad("a refused record has no covers and no turn");
+  } else {
+    if (r.covers === null || r.turn === null) bad(`a ${r.kind} record has covers and a turn`);
+    if (r.covers[r.covers.length - 1] !== r.in_reply_to) bad("in_reply_to is the last of covers");
+  }
+  if (r.answer !== null && r.kind !== "covered") bad("an answer only on a covered record");
+  return r;
+}
+
 // ---- person-signed host operations (§3.4)
 
 const WIDENING_OPS = new Set(["resume", "delete"]);

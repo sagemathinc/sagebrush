@@ -37,6 +37,8 @@ export const TYPES = Object.freeze({
   "sb.agent-fence-ack.v1": ["host"],
   "sb.lease-request.v1": ["host"],
   "sb.execution-lease.v1": ["lease"],
+  "sb.agent-message.v1": ["device"],
+  "sb.agent-reply.v1": ["host"],
 });
 
 const KINDS = new Set(["device", "host", "recovery", "service", "lease"]);
