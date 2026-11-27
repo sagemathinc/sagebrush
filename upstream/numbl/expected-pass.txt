@@ -374,12 +374,19 @@ functions/closure_capture.m
 functions/closure_from_function.m
 functions/fewer_outputs.m
 functions/function_handles.m
+functions/local_from_nested_funcfile/local_from_nested_funcfile.m
 functions/local_func_unknown_args/local_func_unknown_args.m
 functions/local_function_handle/local_function_handle.m
 functions/local_function_shadowing/local_function_shadowing.m
 functions/multiple_returns.m
+functions/nested_and_lambdas.m
+functions/nested_deep_sharing.m
+functions/nested_func_arg_shadowing.m
+functions/nested_functions.m
+functions/nested_within_nested.m
 functions/prototype_name_functions.m
 functions/recursion.m
+functions/recursive_nested_handles.m
 functions/script_shares_caller_workspace.m
 functions/script_with_local_functions.m
 functions/space_separated_multi_assign.m
@@ -388,8 +395,11 @@ functions/test_anon_func_too_many_outputs.m
 functions/test_arrayfun_cellfun_multi_output.m
 functions/test_empty_output_and_anon_tilde.m
 functions/test_handle_true_false.m
+functions/test_local_from_nested.m
 functions/test_local_shadows_builtin.m
 functions/test_nargout_override_leak.m
+functions/test_nested_call_parity.m
+functions/test_nested_func_hoisting.m
 functions/test_starfish_jit.m
 functions/test_user_call_tensor_hot_loop.m
 functions/test_varargin_jit.m
@@ -505,6 +515,7 @@ memory/test_cell_struct_with_tensors.m
 memory/test_chained_lvalue_cow.m
 memory/test_clear_and_delete.m
 memory/test_cow_adversarial.m
+memory/test_cow_adversarial2.m
 memory/test_cow_adversarial3.m
 memory/test_cow_loop_cell_struct.m
 memory/test_error_paths.m
@@ -513,6 +524,7 @@ memory/test_lambda_captures_tensor.m
 memory/test_overwrites_loop.m
 memory/test_persistent_lifecycle.m
 memory/test_pool_aliasing_correctness.m
+memory/test_pool_churn_correctness.m
 memory/test_recursion.m
 memory/test_self_referencing_assign.m
 namespaces/basic_class.m
