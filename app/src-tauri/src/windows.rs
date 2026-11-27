@@ -74,6 +74,10 @@ impl Docs {
         m.insert(doc.to_string(), label.to_string());
         Claim::Mine
     }
+    /// The window that holds document `doc`, if it still exists (`alive`).
+    pub fn holder_alive(&self, doc: &str, alive: impl Fn(&str) -> bool) -> Option<String> {
+        self.0.lock().unwrap().get(doc).filter(|l| alive(l)).cloned()
+    }
     /// Every claim of window `label` ends (it closed).
     pub fn release_window(&self, label: &str) {
         self.0.lock().unwrap().retain(|_, l| l != label);
@@ -99,18 +103,43 @@ pub fn clear_webview_dirs(data: &Path) {
 
 // ---- the page's commands (capabilities/default.json: "main" and "doc-*")
 
-/// A new window at this app's page `at` (lib.rs page_window, its own data folder); its label.  Async: a window made
-/// in a synchronous command deadlocks on Windows (WebView2 waits on the thread the command holds; Tauri's own warning),
-/// which the self-test's two-window probe hit there.
+/// A new window at this app's page `at` (lib.rs page_window, its own data folder): File ▸ New window, or a workspace
+/// document `doc` opened in a window of its own (at "/?wsopen=<doc>", or the board's page).  A document another window
+/// shows brings that window to the front instead, and no window opens; else the new window holds it from the start
+/// (its page's own claim then finds it its own).  {label, opened}.  Async: a window made in a synchronous command
+/// deadlocks on Windows (WebView2 waits on the thread the command holds; Tauri's own warning), which the self-test's
+/// two-window probe hit there.
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn window_open(app: tauri::AppHandle, port: tauri::State<'_, PagePort>, next: tauri::State<'_, NextWindow>, at: String) -> Result<String, String> {
+pub async fn window_open(app: tauri::AppHandle, port: tauri::State<'_, PagePort>, next: tauri::State<'_, NextWindow>, docs: tauri::State<'_, Docs>, at: String, doc: Option<String>) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
     let url = page_target(port.0, &at)?;
+    if let Some(d) = &doc {
+        crate::disk::workspace_path(d)?;
+        if let Some(holder) = docs.holder_alive(d, |l| app.get_webview_window(l).is_some()) {
+            focus(&app, &holder);
+            return Ok(serde_json::json!({ "label": holder, "opened": false }));
+        }
+    }
     let label = format!("doc-{}", next.0.fetch_add(1, Ordering::SeqCst));
     let data = crate::disk::data_dir(&app)?;
     let dir = webview_dir(&data, &label).ok_or("no window label")?;
     crate::page_window(&app, &label, url, port.0, false).data_directory(dir).build().map_err(|e| format!("the window didn't open: {e}"))?;
-    Ok(label)
+    if let Some(d) = &doc {
+        docs.claim(d, &label, |l| app.get_webview_window(l).is_some());
+    }
+    Ok(serde_json::json!({ "label": label, "opened": true }))
+}
+
+/// Window `label` to the front.
+#[cfg(desktop)]
+fn focus(app: &tauri::AppHandle, label: &str) {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window(label) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
 }
 
 /// The asking window opens workspace document `doc`: null if it's this window's now, else the label of the window
@@ -123,11 +152,7 @@ pub fn window_claim(app: tauri::AppHandle, webview: tauri::Webview, docs: tauri:
     match docs.claim(&doc, webview.label(), |l| app.get_webview_window(l).is_some()) {
         Claim::Mine => Ok(None),
         Claim::Elsewhere(holder) => {
-            if let Some(w) = app.get_webview_window(&holder) {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            focus(&app, &holder);
             Ok(Some(holder))
         }
     }
@@ -190,6 +215,10 @@ mod tests {
         assert_eq!(docs.claim("/c.ipynb", "doc-2", all), Claim::Mine);
         assert_eq!(docs.claim("/c.ipynb", "doc-3", |l| l != "doc-2"), Claim::Mine);
         assert_eq!(docs.holder("/c.ipynb").as_deref(), Some("doc-3"));
+        // (who holds it, if it still exists: what opening it in a new window asks first)
+        assert_eq!(docs.holder_alive("/c.ipynb", |_| true).as_deref(), Some("doc-3"));
+        assert_eq!(docs.holder_alive("/c.ipynb", |l| l != "doc-3"), None);
+        assert_eq!(docs.holder_alive("/none.ipynb", |_| true), None);
         // (a closed window's claims all end)
         docs.release_window("doc-3");
         assert_eq!(docs.holder("/c.ipynb"), None);
