@@ -3039,6 +3039,10 @@ def _div1(a, b, pos, op):
     if isinstance(a, _sp.Polynomial) and _num(b) and (b == 0 or b not in (1, -1) and a.parent().base_ring() == _sp.ZZ):
         # over the integers a number divides only if it is a unit, and over a field only if it isn't 0
         raise MagmaError("Argument 2 is not a unit", "'%s'" % op, True, pos)
+    if isinstance(a, _sp.Polynomial) and _num(b) and a.parent().base_ring() == _sp.ZZ:
+        # (by a unit, 1 or -1, an integer or a rational (1/1, 3/3): the polynomial in its own ring over the
+        # integers, as Magma; Sage's x/1 is over QQ)
+        return a if b == 1 else -a
     if isinstance(a, MReal) or isinstance(b, MReal):
         a, b = _real_pair(a, b)
         return a / b
