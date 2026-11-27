@@ -1635,6 +1635,14 @@ function asType32(x: NDArray): NDArray {
   r.data[0] = Math.fround(Number(x.data[x.offset]));
   return r;
 }
+// A 0-d operand as complex64 (each part rounded to the float32 nearest, as complex64's Float32Array stores
+// it; a real one's imaginary part 0)
+function asTypeC64(x: NDArray): NDArray {
+  const r = empty([], D.complex64);
+  r.data[0] = Number(x.data[x.dt.cplx ? 2 * x.offset : x.offset]);
+  r.data[1] = x.dt.cplx ? x.data[2 * x.offset + 1] : 0;
+  return r;
+}
 
 function operand(x: any): { arr: NDArray; weak: Weak | null } {
   if (x instanceof NDArray) return { arr: x, weak: null };
@@ -1785,7 +1793,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
       return bigMinMax(op, ct, o.arr, w.big);
     }
   }
-  for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && w.big !== undefined && !Number.isFinite(w.v) && ct.kind === "f") raise(T.OverflowError, "int too large to convert to float");
+  for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && w.big !== undefined && !Number.isFinite(w.v) && (ct.kind === "f" || ct.cplx)) raise(T.OverflowError, "int too large to convert to float");
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkWeak(ct, w);
   if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatLoop(op, A, B, ct);
   if (op === "power" && ct.kind === "b") ct = D.int8;
@@ -1794,6 +1802,9 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   // nearest 0.1, so a float32 array times 0.1 rounds each product of two float32 values, and a comparison
   // with 0.1 compares float32 values)
   if (ct === D.float32) for (const W of [A, B]) if (W.weak && W.arr.dt !== D.float32) W.arr = asType32(W.arr);
+  // (and a complex64 loop's: a Python float, int or complex is the complex64 nearest, each part rounded, so
+  // complex64 == 0.1 compares complex64 values, and a float32 array times a Python complex runs on rounded parts)
+  if (ct === D.complex64) for (const W of [A, B]) if (W.weak && W.arr.dt !== D.complex64) W.arr = asTypeC64(W.arr);
   const a = A.arr, b = B.arr;
   const kop = op === "power" ? powerExponent(ct, b) : op; // the kernel
   const shape = broadcastShapes(a.shape, b.shape);
@@ -5375,6 +5386,8 @@ newBuiltinModule("_numpy", (m) => {
         let ct = resultType(A, B);
         // (floats only: integers take binary()'s checked kernel)
         if (ct.kind === "f") {
+          // (a Python int past a double's range: NumPy's OverflowError, in comparisons too, as binary() raises it)
+          for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && w.big !== undefined && !Number.isFinite(w.v)) raise(T.OverflowError, "int too large to convert to float");
           const rt = spec.out === "bool" ? D.bool : ct;
           const f = spec.f;
           // (each operand in the loop's type first: a Python float with a float32 scalar is the float32 nearest)

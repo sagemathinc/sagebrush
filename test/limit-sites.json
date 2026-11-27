@@ -13834,6 +13834,11 @@
   "owner": "python (@sagebrush-python)",
   "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
  },
+ "src/runtime/numpy.ts :: binary :: for (const w of [A.weak, B.weak]) if (w && w.kind === \"i\" && w.big !== undefined && !Number.isFinite(w.v) && (ct.kind === \"f\" || ct.cplx)) raise(T.OverflowError, \"int too large to convert to float\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "NumPy's own error for a Python int past a double's range (OverflowError: int too large to convert to float), in float, complex and comparison loops: matched text that caps nothing"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13923,6 +13928,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: for (const w of [A.weak, B.weak]) if (w && w.kind === \"i\" && w.big !== undefined && !Number.isFinite(w.v)) raise(T.OverflowError, \"int too large to convert to float\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "NumPy's own error for a Python int past a double's range (OverflowError: int too large to convert to float), in float, complex and comparison loops: matched text that caps nothing"
  },
  "src/runtime/numpy.ts :: notIndex :: if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, false, O.truth(stable)) : objSort(a, normAxis(intNum(axis), a.ndim), false, O.truth(stable)); #0": {
   "class": "none",
