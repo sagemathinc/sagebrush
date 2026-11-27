@@ -1,0 +1,82 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== series.float32
+('float32', [1.5, 2.0], (2,), True)
+== series.np-float32
+('float32', [1.5, 2.0], (2,), True)
+== series.same-dtype
+('float64', [1.5, 2.0], (2,), False)
+== series.int-float
+('float64', [1.0, 2.0, 3.0], (3,), True)
+== series.int-int32
+('int32', [1, 2, 3], (3,), True)
+== series.int-uint8
+('uint8', [255, 0, 255], (3,), True)
+== series.float-int
+('int64', [1, -2], (2,), True)
+== series.bool-int
+('int64', [1, 0], (2,), True)
+== series.int-bool
+('bool', [False, True], (2,), True)
+== series.na-value
+('float64', [1.5, -7.0, -2.25], (3,), False)
+== series.na-value-int
+('float64', [1.5, 0.0, -2.25], (3,), False)
+== series.na-value-none-missing
+('int64', [1, 2, 3], (3,), False)
+== series.na-value-all-missing
+('float64', [0.0, 0.0], (2,), False)
+== series.na-value-dtype
+('int64', [1, 0, -2], (3,), True)
+== series.na-value-float32
+('float32', [1.5, 0.0, -2.25], (3,), True)
+== series.str-na-value
+(['a', ''], (2,))
+== series.str-dtype-str
+(['a', 'bc'], (2,))
+== series.int-str
+(['1', '2', '3'], (3,))
+== series.float-str
+(['0.1', '2.0'], (2,))
+== series.copy-and-dtype
+('float64', [1.0, 2.0, 3.0], (3,), True)
+== frame.float32
+('float32', [[1.0, 0.5], [2.0, 1.5]], (2, 2), True)
+== frame.na-value
+('float64', [[1.0, 0.5], [2.0, 0.0]], (2, 2), True)
+== frame.na-value-dtype
+('float32', [[1.0, 0.5], [2.0, -1.0]], (2, 2), True)
+== frame.na-value-one-dtype
+('float64', [[0.5], [0.0]], (2, 1), True)
+== frame.na-value-nan
+('float64', [[1.0, 0.5], [2.0, nan]], (2, 2), True)
+== frame.bool-int
+('int64', [[1, 1]], (1, 2), True)
+== frame.int-float
+('float64', [[1.0, 3.0], [2.0, 4.0]], (2, 2), False)
+== frame.str-dtype-str
+([['x', 'yz']], (1, 2))
+== frame.empty
+('float32', [], (0, 1), False)
+== original-kept
+
+0    1.50
+1     NaN
+2   -2.25
+dtype: float64

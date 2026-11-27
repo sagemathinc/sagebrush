@@ -40,7 +40,7 @@ let n = 0; const waiting = new Map(); const errors = [];
 // `hold`: the sync status asked for is left unanswered until released)
 let mode = "none", hold = false, holdMe = false;
 const held = [], heldMe = [], logouts = [];
-const ME = { account_id: "5e5e5e5e-00d5-4e5e-8e5e-5e5e5e5e5ed5", name: "Ada Lovelace", email: "ada@example.org" };
+const ME = { account_id: "ada0ada0-ada0-4ada-8ada-ada0ada0ada0", name: "Ada Lovelace", email: "ada@example.org" };
 const answer = (id, code, body) => send("Fetch.fulfillRequest", { requestId: id, responseCode: code, responseHeaders: [{ name: "content-type", value: "application/json" }], body: Buffer.from(J(body)).toString("base64") });
 ws.onmessage = (e) => {
   const m = JSON.parse(e.data);

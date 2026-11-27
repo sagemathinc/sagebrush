@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your fleet · Sagebrush</title>
+<style>
+  :root { --ink: #24231f; --muted: #6b6a63; --line: #e3e0d6; --bg: #faf9f5; --card: #fff; --accent: #c2410c; --warn: #9a3412; --code: #f4f2ec; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  main { max-width: 820px; margin: 0 auto; padding: 24px 18px 56px; }
+  .top { font-size: 14px; margin-bottom: 18px; }
+  a { color: var(--accent); }
+  h1 { font-size: 26px; margin: 0 0 14px; }
+  h2 { font-size: 20px; margin: 0 0 6px; }
+  h3 { font-size: 17px; margin: 0 0 4px; }
+  .tabs { margin: 0 0 16px; }
+  .tabs a { margin-right: 14px; text-decoration: none; padding-bottom: 2px; }
+  .tabs a.on { color: var(--ink); border-bottom: 2px solid var(--accent); }
+  .card, li.host, li.agent { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 0 0 12px; list-style: none; }
+  ul.hosts, ul.agents, ul.ops { padding: 0; margin: 0; }
+  ul.ops li { list-style: none; }
+  .note { margin: 4px 0; }
+  .warn { color: var(--warn); margin: 6px 0; }
+  .grant { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+  .revoked { color: var(--warn); font-weight: 600; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; background: var(--code); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  .kv { display: flex; gap: 10px; font-size: 15px; }
+  .kv .k { color: var(--muted); min-width: 92px; }
+  .kv .v { overflow-wrap: anywhere; }
+  .report { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 10px; color: var(--muted); background: #fcfbf8; }
+  .report-label { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .report-src { margin: 0 0 4px; font-size: 13px; }
+  button { font: inherit; font-size: 15px; border: 1px solid var(--warn); background: #fff; color: var(--warn); border-radius: 8px; padding: 6px 14px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .msg { min-height: 1.5em; }
+</style>
+</head>
+<body>
+<main>
+  <p class="top"><a href="/agents/">← Agents</a></p>
+  <h1>Your fleet</h1>
+  <div id="fleet" aria-live="polite"></div>
+</main>
+<script type="module" src="/agents/fleet/fleet.js"></script>
+</body>
+</html>

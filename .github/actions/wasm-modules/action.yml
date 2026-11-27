@@ -1,6 +1,6 @@
 name: wasm modules
 description: >-
-  Puts the four WebAssembly modules in wasm/ before anything reads them (design/wasm-artifacts.md sections 4 and 6).
+  Puts the five WebAssembly modules in wasm/ before anything reads them (design/wasm-artifacts.md sections 4 and 6).
   When this run built them (its wasm-modules job), installs that artifact after checking it and the pin policy;
   otherwise fetches the published modules that wasm/pins.json names (a no-op while they are committed and match).
 inputs:
