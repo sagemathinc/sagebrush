@@ -18,6 +18,8 @@ import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fileRowTitle, fmtSize, isElsewhere } from "./row-meta";
 import { fileLabel, NEW_ITEMS } from "./filemenu";
 import { agentsIcon, modeSwitch } from "./mode-switch";
+// (a board copy's pictures not copied as files: kept in this browser, which the copy shows them from)
+import { keepHere } from "../board/images";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -732,7 +734,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
     if (e.kind === "folder") items.push(["New notebook", () => make(e.path, "notebook")], ["New board", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)], ["Move to…", () => void moveTo(at, e)]);
-    if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}` + (x.picturesLeft ? `, without ${x.picturesLeft === 1 ? "one of its pictures" : `${x.picturesLeft} of its pictures`}: they couldn't be copied, so the copy shows them as missing` : ""))).catch(fail).then(refresh)]);
+    if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path, undefined, { pictures: { keep: keepHere } }).then((x) => say(`Copied as ${nameOf(x.path)}` + (x.picturesLeft ? `, without ${x.picturesLeft === 1 ? "one of its pictures" : `${x.picturesLeft} of its pictures`}: they couldn't be copied, so the copy shows them as missing` : ""))).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
     if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
     items.push(["Copy path name", () => navigator.clipboard?.writeText(e.path).then(() => say(`Copied path '${e.path}'`), () => say(e.path))]);

@@ -47,9 +47,8 @@ import { IdbOutputCache, MemoryOutputCache, carriedOutputs } from "./outcache";
 import { boardFromText, fromMermaid } from "./mermaid";
 import { localFollow } from "./local-follow";
 import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
-import { Images, keepInBrowser } from "./images";
+import { Images, keepHere } from "./images";
 import { boardPictureFiles, copyBoardPictures } from "../workspace/board-pictures";
-import { imageType } from "../workspace/image-store";
 import { BoardHistory, type HistoryModule } from "./history";
 import { BoardRecordStore, boardKind, journalId } from "./journal";
 import { canon, boardMerge3 } from "./merge";
@@ -309,8 +308,7 @@ async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?
   // (one that can't be copied as a file is kept in this browser, which the copy shows it from; one neither copied nor
   // kept, the person is told about before the copy opens: `said`, what the copy is called to them)
   if (as.copyOf && e.ref && d.images) {
-    const lost = await copyBoardPictures(w, as.copyOf, e.ref, Object.keys(d.images), (q, content) => (src ? w.createCopyOf(src, q, { content }) : w.create(q, { content })),
-      (name, bytes) => keepInBrowser(new Blob([bytes], { type: imageType(bytes)?.mime ?? "" }), name));
+    const lost = await copyBoardPictures(w, as.copyOf, e.ref, Object.keys(d.images), (q, content) => (src ? w.createCopyOf(src, q, { content }) : w.create(q, { content })), keepHere);
     if (lost.length) {
       const n = lost.length === 1 ? "one of its pictures" : `${lost.length} of its pictures`;
       if (as.said) alert(`${as.said} is made, but without ${n}: they couldn't be copied into its folder or kept in this browser, so it shows them as missing.`);

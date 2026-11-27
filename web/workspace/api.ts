@@ -34,7 +34,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { dropRows } from "../notebook/journal-rows.js";
 import { SYNC_NB } from "../notebook/sync-rows.js";
 import { isBoard } from "../board/doc";
-import { copyBoardPictures } from "./board-pictures";
+import { copyBoardPictures, type PictureKeep } from "./board-pictures";
 import { fromNbformat, cellId, kernelMode } from "../notebook/nbformat.js";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
@@ -2001,8 +2001,10 @@ export class Workspace {
    * holding the lock, on the very record being copied, before the destination is admitted or anything is made; another
    * entry there, or another revision of it, a WorkspaceError("conflict") and nothing copied. */
   /** A board's copy also gets copies of its picture files, in its own folder (board-pictures.ts), made as the copy
-   * was and admitted as it was: `picturesLeft`, how many of them couldn't be (the copy shows those as missing). */
-  async duplicate(p: string, to?: string, opts: Collect & Admitted & { expect?: RenameExpect } = {}): Promise<Entry & { picturesLeft?: number }> {
+   * was, each admitted on its own: by `pictures.admit(bytes)` (a fresh check for that picture and its size: the
+   * shell's charge), else by `admit` (a check that keeps no state). A picture not copied is offered to
+   * `pictures.keep`; `picturesLeft`, how many were neither copied nor kept (the copy shows those as missing). */
+  async duplicate(p: string, to?: string, opts: Collect & Admitted & { expect?: RenameExpect; pictures?: { admit?: (bytes: number) => (c: AdmitCheck) => void; keep?: PictureKeep } } = {}): Promise<Entry & { picturesLeft?: number }> {
     const collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     let pictures: { from: Entry; names: string[] } | undefined;
     const made = await this.locked(async () => {
@@ -2043,7 +2045,9 @@ export class Workspace {
     }, undefined, { collect });
     if (!pictures || !pictures.names.length || !pictures.from.ref || !made.ref) return made;
     const src = pictures.from;
-    const left = await copyBoardPictures(this, src.ref!, made.ref, pictures.names, (q, content) => this.createAs(q, { content, collect: opts.collect, admit: opts.admit }, src.made));
+    const pa = opts.pictures?.admit;
+    const left = await copyBoardPictures(this, src.ref!, made.ref, pictures.names,
+      (q, content) => this.createAs(q, { content, collect: opts.collect, admit: pa ? pa(content.length) : opts.admit }, src.made), opts.pictures?.keep);
     return left.length ? { ...made, picturesLeft: left.length } : made;
   }
 

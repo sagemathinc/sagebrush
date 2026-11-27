@@ -6,7 +6,7 @@ import { IMAGE_BYTES_MAX, imageFolder, saveImage } from "./image-store";
 
 /** What of the workspace a board's pictures need (Workspace has them). */
 export interface PictureWorkspace {
-  list(folder: string): Promise<{ path: string; kind?: string }[]>;
+  list(folder: string): Promise<{ path: string; kind?: string; size?: number }[]>;
   readUpTo(p: string, max: number): Promise<{ content: Uint8Array }>;
   createByPerson(p: string, opts: { content: Uint8Array }): Promise<unknown>;
 }
@@ -24,24 +24,45 @@ export function boardPictureFiles(w: PictureWorkspace, id: string | null | undef
   };
 }
 
-/** Copy the pictures `names` of board `from` to board `to`'s folder (a board's copy: Duplicate, a conflict's), by
- * `create` (the copy's own provenance, never more than the board's). What can't be copied as a file (not readable,
- * refused, a save that threw) is offered to `keep` (with its bytes, if they were read: a page keeps them in this
- * browser, where the copy shows them); returns the names of the pictures neither copied nor kept, so the caller
- * tells the person the copy is incomplete. A picture that was never a file (kept in this browser alone) isn't one. */
-export async function copyBoardPictures(w: PictureWorkspace, from: string, to: string, names: Iterable<string>, create: (path: string, bytes: Uint8Array) => Promise<unknown>, keep?: (name: string, bytes: Uint8Array) => Promise<boolean>): Promise<string[]> {
-  const a = boardPictureFiles(w, from), b = boardPictureFiles(w, to);
-  const want = new Set(names);
-  if (!a || !b || !want.size) return [];
-  const lost: string[] = [];
+/** What a board's copy does with a picture it couldn't copy as a file (its bytes, if they were read; null if it has
+ * none to copy: never a file, gone, unreadable): true if the caller keeps it where the copy shows it (a page: this
+ * browser's store, its write committed), else it is reported. */
+export type PictureKeep = (name: string, bytes: Uint8Array | null) => Promise<boolean>;
+
+/** The picture files of board `from` named in `names` (its folder's `<name>.<raster ext>`), with their sizes: what a
+ * copy of the board copies, for a caller to admit and charge before anything is copied. */
+export async function pictureFilesOf(w: PictureWorkspace, from: string, names: Iterable<string>): Promise<{ path: string; name: string; size: number }[]> {
+  const a = boardPictureFiles(w, from);
+  const want = new Set(names), out: { path: string; name: string; size: number }[] = [];
+  if (!a || !want.size) return out;
+  const seen = new Set<string>();
   // (no folder: no picture of the board is a file)
-  for (const p of await a.list().catch(() => [] as string[])) {
-    const base = p.slice(p.lastIndexOf("/") + 1), name = base.slice(0, base.lastIndexOf("."));
-    if (!want.has(name) || p !== `${a.folder}/${base}`) continue;
-    const u = await a.read(p).catch(() => null);
-    const r = u ? await saveImage(create, b.folder, u, { name, read: b.read }).catch(() => null) : null;
+  for (const e of await w.list(a.folder).catch(() => [] as { path: string; kind?: string; size?: number }[])) {
+    if (e.kind !== undefined && e.kind !== "file") continue;
+    const base = e.path.slice(e.path.lastIndexOf("/") + 1), name = base.slice(0, base.lastIndexOf("."));
+    if (!want.has(name) || seen.has(name) || e.path !== `${a.folder}/${base}`) continue;
+    seen.add(name);
+    out.push({ path: e.path, name, size: e.size ?? 0 });
+  }
+  return out;
+}
+
+/** Copy the pictures `names` of board `from` to board `to`'s folder (a board's copy: Duplicate, a conflict's, an
+ * agent's or the shell's), by `create` (the copy's own provenance, never more than the board's, admitted per picture
+ * with its bytes). Every name asked for is copied, kept by the caller (`keep`), or returned: the names neither copied
+ * nor kept, so the caller says the copy is incomplete. */
+export async function copyBoardPictures(w: PictureWorkspace, from: string, to: string, names: Iterable<string>, create: (path: string, bytes: Uint8Array) => Promise<unknown>, keep?: PictureKeep): Promise<string[]> {
+  const want = [...new Set(names)];
+  if (!want.length) return [];
+  const a = boardPictureFiles(w, from), b = boardPictureFiles(w, to);
+  const files = a && b ? new Map((await pictureFilesOf(w, from, want)).map((f) => [f.name, f.path])) : new Map<string, string>();
+  const lost: string[] = [];
+  for (const name of want) {
+    const p = files.get(name);
+    const u = p && a ? await a.read(p).catch(() => null) : null;
+    const r = u && b ? await saveImage(create, b.folder, u, { name, read: b.read }).catch(() => null) : null;
     if (r && "path" in r) continue;
-    if (!(u && keep && (await keep(name, u).catch(() => false)))) lost.push(name);
+    if (!(keep && (await keep(name, u).catch(() => false)))) lost.push(name);
   }
   return lost;
 }

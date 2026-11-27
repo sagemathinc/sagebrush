@@ -42,6 +42,7 @@
 //   else at the grace, the start abandoned and its worker ended when it comes.
 import { Workspace, WorkspaceError, OutOfScope, identOf, type AdmitCheck, type Entry, type RenameExpect } from "../workspace/api";
 import { normPath, parentOf, nameOf, within, kindOf, TRASH, PathError } from "../workspace/paths";
+import { pictureFilesOf } from "../workspace/board-pictures";
 import { ShellUnavailableError, TERMINAL_COMMANDS, type Shell, type ShellOutcome, type FsRequest, type FsAnswer, type CmdRequest, type CmdAnswer } from "./loader";
 export { BashConfigError, BASH_RANGES, OUTPUT_BACKSTOP } from "./limits";
 import { boundedJson, boundedJsonSize, TooLarge } from "./bounded-json";
@@ -131,7 +132,8 @@ function refusalOf(err: unknown, p: string): Refusal | null {
 const refuse = (code: string, p: string, why = REASON[code]) => new Refusal(code, `${p}: ${why}`);
 const CHANGED = "changed during the copy (it is no longer what was measured)";
 // (what cp keeps of a document it measured: the identity and record revision its duplicate must still find, and its size)
-type Snapshot = RenameExpect & { rev: number; size: number };
+// (a measured document; a board's, with its picture files a copy copies, each with its size)
+type Snapshot = RenameExpect & { rev: number; size: number; pictures?: { path: string; name: string; size: number }[] };
 // (the verbs that change something, and so need write: a duplicate's destination, not its source)
 const MUTATES = (c: AdmitCheck) => c.op === "create" || c.op === "write" || c.op === "mkdir" || c.op === "rename" || c.op === "remove" || (c.op === "duplicate" && c.role === "destination");
 
@@ -891,7 +893,14 @@ export class ShellRun {
       }
       const L = this.limits;
       const s = await this.measure(e, [["read_bytes", this.host.readBytes], ["written_bytes", L.written_bytes! - this.used.written_bytes]]);
+      // (a board's pictures, before anything is copied: one op and their bytes each, and the workspace's room for them
+      // and their folder)
+      const P = s.pictures?.length ?? 0, PB = pictureBytes(s);
+      if (this.used.ops + 1 + P > L.ops!) throw new LimitHit("ops");
+      if (this.used.written_bytes + s.size + PB > L.written_bytes!) throw new LimitHit("written_bytes");
+      if (P) await this.room(b, 1 + P + 2);
       await this.copyDoc(a, b, s);
+      this.saidLeft(b);
       return;
     }
     if (!recursive) throw refuse("EISDIR", a);
@@ -916,6 +925,8 @@ export class ShellRun {
     // refuses the copy with no later read.  cp_entries and cp_bytes are then reserved, never given back; each mkdir and
     // duplicate also charges ops and written_bytes at its admit)
     const F = all.filter((x) => x.kind !== "folder").length, D = all.length - F + 1;
+    // (each board's pictures, counted as each board is measured below: P entries, their bytes in `bytes`)
+    let P = 0;
     let bytes = all.reduce((t, x) => t + (x.kind === "file" ? (x.size ?? 0) : 0), 0);
     const L = this.limits;
     if (this.used.cp_entries + F + D > L.cp_entries!) throw new LimitHit("cp_entries");
@@ -932,9 +943,18 @@ export class ShellRun {
         ["written_bytes", L.written_bytes! - this.used.written_bytes - bytes],
       ]);
       docs.set(x.path, s);
-      bytes += s.size;
+      bytes += s.size + pictureBytes(s);
+      // (a board's picture files and their folder: entries and ops the copy makes too)
+      if (s.pictures?.length) P += s.pictures.length + 1;
+      if (this.used.cp_bytes + bytes > L.cp_bytes!) throw new LimitHit("cp_bytes");
+      if (this.used.written_bytes + bytes > L.written_bytes!) throw new LimitHit("written_bytes");
     }
-    this.used.cp_entries += F + D;
+    if (P) {
+      if (this.used.cp_entries + F + D + P > L.cp_entries!) throw new LimitHit("cp_entries");
+      if (this.used.ops + F + D + P > L.ops!) throw new LimitHit("ops");
+      await this.room(b, F + D + P + 1);
+    }
+    this.used.cp_entries += F + D + P;
     this.used.cp_bytes += bytes;
     const to = (q: string) => b + q.slice(a.length);
     await this.ws.mkdir(b, { admit: this.charging(0) });
@@ -951,6 +971,7 @@ export class ShellRun {
         this.record({ verb: "duplicate", path: x.path, to: to(x.path), committed: "local" });
       }
     }
+    this.saidLeft(b);
   }
   // (a document measured for a copy: one locked read, bound to the entry walked (kind, ref, created), its JSON's bytes
   // counted up to the smallest room in `caps` and refused with that room's key past it; only a compact snapshot is
@@ -958,10 +979,14 @@ export class ShellRun {
   private async measure(x: Entry, caps: [LimitKey, number][]): Promise<Snapshot> {
     const r = await this.ws.read(x.path, { admit: this.check });
     if (r.entry.kind !== x.kind || r.entry.ref !== x.ref || r.entry.created !== x.created) throw refuse("ECONFLICT", x.path, CHANGED);
+    // (a board's picture files, by the names its document gives them: what its copy copies)
+    const imgs = r.entry.kind === "board" ? (r.content as { images?: unknown } | null)?.images : undefined;
+    const pictures = imgs && typeof imgs === "object" && r.entry.ref && Object.keys(imgs as object).length
+      ? await pictureFilesOf(this.ws, r.entry.ref, Object.keys(imgs as object)) : undefined;
     let [key, cap] = caps[0];
     for (const [k, n] of caps) if (n < cap) [key, cap] = [k, n];
     try {
-      return { kind: r.entry.kind, ref: r.entry.ref, fid: r.entry.fid, created: r.entry.created, rev: r.rev, size: boundedJsonSize(r.content, Math.max(0, cap)) };
+      return { kind: r.entry.kind, ref: r.entry.ref, fid: r.entry.fid, created: r.entry.created, rev: r.rev, size: boundedJsonSize(r.content, Math.max(0, cap)), ...(pictures?.length ? { pictures } : {}) };
     } catch (err) {
       if (err instanceof TooLarge) throw new LimitHit(key);
       throw err;
@@ -969,10 +994,22 @@ export class ShellRun {
   }
   // (a measured document's copy: written_bytes charged with its measured size at the destination's admit, once; the
   // record cloned must be the one measured)
+  // (a board's pictures: each its own charge, one op and its bytes, at its own admit; one not copied, counted in
+  // `left`, which cp says once it has copied everything else)
   private async copyDoc(p: string, to: string, s: Snapshot) {
-    const { size, ...expect } = s;
-    await this.measured(p, () => this.ws.duplicate(p, to, { admit: this.charging(size), expect }));
+    const { size, pictures: _p, ...expect } = s;
+    const e = await this.measured(p, () => this.ws.duplicate(p, to, { admit: this.charging(size), expect, pictures: { admit: (n) => this.charging(n) } }));
     this.record({ verb: "duplicate", path: p, to, committed: "local" });
+    if (e.picturesLeft) this.left.push([to, e.picturesLeft]);
+  }
+  private left: [string, number][] = [];
+  // (the copies cp made without some of their pictures, said as an error after the copy, which is kept)
+  private saidLeft(b: string) {
+    const left = this.left;
+    this.left = [];
+    if (!left.length) return;
+    const n = left.reduce((t, [, k]) => t + k, 0);
+    throw new Refusal("EIO", `${b}: copied, but without ${n} of its pictures (${left.map(([q, k]) => `${q}: ${k}`).join(", ")}): they couldn't be copied, so the copy shows them as missing`);
   }
   private async measured<T>(p: string, fn: () => Promise<T>): Promise<T> {
     try {
@@ -983,6 +1020,8 @@ export class ShellRun {
     }
   }
 }
+
+const pictureBytes = (s: Snapshot) => (s.pictures ?? []).reduce((t, f) => t + f.size, 0);
 
 function bytes(x: unknown): Uint8Array {
   if (x instanceof Uint8Array) return x;

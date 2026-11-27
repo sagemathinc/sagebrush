@@ -1,10 +1,10 @@
 // ci: web-runner order=200 runner=bun
 // A board's copy and its pictures (board-pictures.ts copyBoardPictures): each picture file copied to the copy's
 // folder; one that can't be (its read fails, the copy's create is refused or throws) offered to `keep` with its bytes
-// when they were read, and reported when neither copied nor kept, so the caller can tell the person; a picture that
-// was never a file isn't one.
+// when they were read (null when there are none: never a file, unreadable), and reported when neither copied nor kept,
+// so the caller can tell the person: every name asked for is one of the three.
 //   bun web/workspace/test-board-pictures-copy.mjs
-import { copyBoardPictures } from "./board-pictures.ts";
+import { copyBoardPictures, pictureFilesOf } from "./board-pictures.ts";
 
 let failures = 0;
 const J = JSON.stringify;
@@ -17,7 +17,7 @@ function ws(failRead = new Set()) {
   const files = new Map([[`${A}/ione.png`, png(1)], [`${A}/itwo.png`, png(2)]]);
   return {
     files,
-    list: async (folder) => [...files.keys()].filter((p) => p.startsWith(folder + "/")).map((path) => ({ path, kind: "file" })),
+    list: async (folder) => [...files.keys()].filter((p) => p.startsWith(folder + "/")).map((path) => ({ path, kind: "file", size: files.get(path).length })),
     readUpTo: async (p) => { if (failRead.has(p) || !files.has(p)) throw new Error("not readable"); return { content: files.get(p) }; },
     createByPerson: async () => { throw new Error("not used"); },
   };
@@ -32,32 +32,44 @@ const names = ["ione", "itwo", "ibrowser"];
 {
   const w = ws();
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w));
-  ok(J(lost) === "[]" && w.files.has(`${B}/ione.png`) && w.files.has(`${B}/itwo.png`), "every picture file copied to the copy's folder; one never a file (kept in a browser) isn't reported", lost);
+  ok(J(lost) === J(["ibrowser"]) && w.files.has(`${B}/ione.png`) && w.files.has(`${B}/itwo.png`), "every picture file copied to the copy's folder; a name with no file and nothing to keep it: reported", lost);
+  const w2 = ws(), asked = [];
+  const lost2 = await copyBoardPictures(w2, "a", "b", names, creator(w2), async (n, u) => (asked.push([n, u]), u === null));
+  ok(J(lost2) === "[]" && asked.length === 1 && asked[0][0] === "ibrowser" && asked[0][1] === null, "a name with no file is offered to keep with no bytes; kept (a browser that has it), not reported", asked);
+  ok(J((await pictureFilesOf(ws(), "a", names)).map((f) => [f.name, f.size])) === J([["ione", 64], ["itwo", 64]]), "the picture files a copy copies, with their sizes, for the caller to charge first");
 }
 {
   const w = ws();
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w, (p) => p.startsWith(B)));
-  ok(J(lost.sort()) === J(["ione", "itwo"]) && ![...w.files.keys()].some((p) => p.startsWith(B)), "the copy's creates refused, nothing to keep them: both reported", lost);
+  ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]) && ![...w.files.keys()].some((p) => p.startsWith(B)), "the copy's creates refused, nothing to keep them: all reported", lost);
 }
 {
   const w = ws(), kept = new Map();
-  const lost = await copyBoardPictures(w, "a", "b", names, creator(w, (p) => p.startsWith(B)), async (n, u) => (kept.set(n, u), true));
-  ok(J(lost) === "[]" && kept.size === 2 && kept.get("ione")?.[8] === 1 && kept.get("itwo")?.[8] === 2, "refused, then kept (this browser): none reported, each kept with its own bytes", [...kept.keys()]);
+  const lost = await copyBoardPictures(w, "a", "b", names, creator(w, (p) => p.startsWith(B)), async (n, u) => (kept.set(n, u), u !== null));
+  ok(J(lost) === J(["ibrowser"]) && kept.get("ione")?.[8] === 1 && kept.get("itwo")?.[8] === 2, "refused, then kept (this browser): those not reported, each kept with its own bytes", [...kept.keys()]);
 }
 {
   const w = ws();
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w, (p) => p.startsWith(B)), async () => false);
-  ok(J(lost.sort()) === J(["ione", "itwo"]), "refused and not kept: reported", lost);
+  ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]), "refused and not kept: reported", lost);
 }
 {
   const w = ws(new Set([`${A}/itwo.png`])), kept = [];
-  const lost = await copyBoardPictures(w, "a", "b", names, creator(w), async (n) => (kept.push(n), true));
-  ok(J(lost) === J(["itwo"]) && J(kept) === "[]" && w.files.has(`${B}/ione.png`), "a source that can't be read: reported (no bytes to keep), the others copied", { lost, kept });
+  const lost = await copyBoardPictures(w, "a", "b", names, creator(w), async (n, u) => (kept.push(n), u !== null));
+  ok(J(lost.sort()) === J(["ibrowser", "itwo"]) && J(kept.sort()) === J(["ibrowser", "itwo"]) && w.files.has(`${B}/ione.png`), "a source that can't be read: offered with no bytes, not kept, reported; the others copied", { lost, kept });
 }
 {
   const w = ws();
   const lost = await copyBoardPictures(w, "a", "b", names, async () => { throw new TypeError("a save that threw"); });
-  ok(J(lost.sort()) === J(["ione", "itwo"]), "a create that throws anything: reported, never taken as copied", lost);
+  ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]), "a create that throws anything: reported, never taken as copied", lost);
+}
+
+{
+  // the source folder can't be listed: no picture is known to be a file, so every name asked for is reported
+  const w = ws();
+  w.list = async () => { throw new Error("listing failed"); };
+  const lost = await copyBoardPictures(w, "a", "b", names, creator(w));
+  ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]) && ![...w.files.keys()].some((p) => p.startsWith(B)), "a source folder that can't be listed: every name reported, nothing copied", lost);
 }
 
 console.log(failures ? `${failures} FAILED` : "test-board-pictures-copy: all passed");

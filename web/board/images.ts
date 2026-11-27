@@ -85,6 +85,16 @@ export async function keepInBrowser(blob: Blob, name: string): Promise<boolean> 
   });
 }
 
+/** Whether this browser's picture store holds `name` (a picture that was never a board's file: an SVG, or one kept
+ * here alone), so a copy that shows pictures from it shows this one. */
+export async function hasInBrowser(name: string): Promise<boolean> {
+  return (await idb("readonly", (s) => s.get(name))) instanceof Blob;
+}
+/** A board copy's keep (board-pictures.ts PictureKeep): a picture read but not copied, kept here, its write
+ * committed; one with no bytes to copy, kept if this browser's store has it already. */
+export const keepHere = (name: string, bytes: Uint8Array | null): Promise<boolean> =>
+  bytes ? keepInBrowser(new Blob([bytes as BlobPart], { type: imageType(bytes)?.mime ?? "" }), name) : hasInBrowser(name);
+
 // A name from the bytes' SHA-256 (the first 128 bits): the same picture is
 // kept once, and a document cannot name its picture after another one.
 async function nameOf(blob: Blob): Promise<string> {

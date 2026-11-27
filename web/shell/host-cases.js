@@ -731,6 +731,55 @@ async function cpDocuments(check) {
       }
     }
   }
+  // a board's pictures (#1872): its copy gets its picture files, each charged on its own (one op and its bytes);
+  // counted before anything is copied, so a limit they'd pass refuses the copy with nothing made; one the copy
+  // can't get (no file for a name the document gives) is said, as cp's error, once the rest is copied
+  {
+    const png = (fill, n) => { const u = new Uint8Array(n).fill(fill); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); return u; };
+    const N1 = "i" + "a1".repeat(16), N2 = "i" + "b2".repeat(16), N3 = "i" + "c3".repeat(16);
+    const board = async (ws, p, names) => {
+      const e = await ws.create(p, { content: { title: "pics", nodes: [], images: Object.fromEntries(names.map((n) => [n, { w: 1, h: 1 }])) } });
+      return e.ref;
+    };
+    const { ws, host } = await fresh("cpdocs-pics");
+    const ref = await board(ws, "/p.board.json", [N1, N2]);
+    await ws.create(`/Attachments/board-${ref}/${N1}.png`, { content: png(1, 100) });
+    await ws.create(`/Attachments/board-${ref}/${N2}.png`, { content: png(2, 250) });
+    const size = await sizeOf(ws, "/p.board.json");
+    let run = host.run(PERSON);
+    let r = await run.invoke("cp p.board.json q.board.json");
+    let led = run.ledger();
+    const q = await ws.stat("/q.board.json");
+    const got = q ? (await ws.list(`/Attachments/board-${q.ref}`).catch(() => [])).map((e) => e.path).sort() : [];
+    check(r.kind === "exit" && r.code === 0 && same(got, [`/Attachments/board-${q?.ref}/${N1}.png`, `/Attachments/board-${q?.ref}/${N2}.png`]) && led.ops === 3 && led.written_bytes === size + 350,
+      `cp of a board with two pictures: both copied to its copy's folder, each charged: ops 3, written_bytes ${led.written_bytes} = ${size} + 100 + 250 (${show(r)}; ${JSON.stringify(led)}; ${JSON.stringify(got)})`);
+    for (const [key, bash] of [["ops", { ops: 2 }], ["written_bytes", { written_bytes: size + 349 }]]) {
+      const h = new ShellHost(ws, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), { bash });
+      const run2 = h.run(PERSON);
+      const r2 = await run2.invoke("cp p.board.json r.board.json");
+      check(typed(r2, key) && !(await ws.stat("/r.board.json")) && run2.ledger().ops === 0 && run2.ledger().written_bytes === 0,
+        `cp of that board with room for the board but not its pictures (${key}): refused before anything is copied (${show(r2)})`);
+      h.endShell("case done");
+    }
+    // cp -r: the pictures in cp_entries, cp_bytes, ops and written_bytes too (each board's picture folder an entry)
+    await ws.mkdir("/t2");
+    const ref2 = await board(ws, "/t2/b.board.json", [N1]);
+    await ws.create(`/Attachments/board-${ref2}/${N1}.png`, { content: png(3, 120) });
+    const s2 = await sizeOf(ws, "/t2/b.board.json");
+    run = host.run(PERSON);
+    r = await run.invoke("cp -r t2 t3");
+    led = run.ledger();
+    const c2 = await ws.stat("/t3/b.board.json");
+    check(r.kind === "exit" && r.code === 0 && !!c2 && !!(await ws.stat(`/Attachments/board-${c2.ref}/${N1}.png`)) && led.cp_entries === 2 + 2 && led.cp_bytes === s2 + 120 && led.written_bytes === s2 + 120 && led.ops === 3,
+      `cp -r of a folder with a board and its picture: copied; cp_entries ${led.cp_entries}, cp_bytes = written_bytes = ${s2} + 120, ops ${led.ops} (${show(r)}; ${JSON.stringify(led)})`);
+    // a name with no file: the copy is made, and cp says what it lacks
+    const ref3 = await board(ws, "/m.board.json", [N1, N3]);
+    await ws.create(`/Attachments/board-${ref3}/${N1}.png`, { content: png(4, 90) });
+    r = await host.exec(PERSON, "cp m.board.json n.board.json; echo rc=$?");
+    const n = await ws.stat("/n.board.json");
+    check(!!n && !!(await ws.stat(`/Attachments/board-${n.ref}/${N1}.png`)) && /rc=1/.test(r.stdout) && /without 1 of its pictures/.test(r.stderr),
+      `cp of a board one of whose pictures has no file: copied with the other, and cp says one is missing, status 1 (${show(r)})`);
+  }
   // cp -r: a tree of files, folders, a notebook and a board, every entry copied; the ledger charged with the documents'
   // sizes, checked against boundedJson's own
   {

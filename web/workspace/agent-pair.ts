@@ -153,6 +153,8 @@ function entryOut(e: any, origin?: string) {
   if (!e) return null;
   const out: Record<string, unknown> = { path: e.path, kind: e.kind, created: e.created, updated: e.updated };
   for (const k of ["mode", "size", "rev"]) if (e[k] !== undefined) out[k] = e[k];
+  // (a board's copy made without some of its pictures: how many, so the agent knows the copy is incomplete)
+  if (typeof e.picturesLeft === "number" && e.picturesLeft > 0) out.picturesLeft = e.picturesLeft;
   if (e.trashed) out.trashed = { from: e.trashed.from, at: e.trashed.at };
   const u = origin && !e.trashed ? entryUrl(e) : null;
   if (u) out.url = origin + u;

@@ -30,7 +30,10 @@ ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
+  // (an alert the page shows: kept, and dismissed, so the page goes on)
+  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params.message); send("Page.handleJavaScriptDialog", { accept: true }).catch(() => {}); }
 };
+const dialogs = [];
 // (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
 const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
@@ -106,6 +109,28 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/board/?doc=local:${dup.ref}` });
   check(await ready(), "the workspace's copy opens");
   check(await shows(30) && (await shows(40)), "and shows both pictures, from its own files");
+
+  // a copy that can't get a picture (its file too big to read, as no picture file can be) and can't keep it either
+  // (not in this browser's store): the person is told before the copy opens; kept (in the store), not told
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/board/?new=python` });
+  check(await ready(), "another new board opens");
+  const id3 = await idOf(), NB = "i" + "d4".repeat(16);
+  await ev(`window.sagebrush.board.editing(true), 1`);
+  check(await ev(`(async () => { const u = new Uint8Array(4_000_000).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); await window.sagebrush.workspace.create(${JSON.stringify(`${folder(id3)}/${NB}.png`)}, { content: u }); return true; })()`), "a picture file too big to read, in its folder");
+  await ev(`Promise.resolve(window.sagebrush.board.edit((d) => { d.images = { ${JSON.stringify(NB)}: { w: 4, h: 4 } }; d.nodes.push({ id: "big", image: ${JSON.stringify(NB)}, x: 0, y: 0, w: 4 }); })).then(() => 1)`);
+  check(await until(`window.sagebrush.workspace.list("/").then((l) => l.find((e) => e.kind === "board" && e.ref === ${JSON.stringify(id3)})).then((e) => window.sagebrush.workspace.read(e.path)).then((r) => r.content.nodes.some((x) => x.id === "big"))`), "its board names it, saved");
+  const before = dialogs.length;
+  await ev("document.querySelector('[data-sbb=duplicate]').click(), 1");
+  check(await until(`new URLSearchParams(location.search).get("doc") !== ${JSON.stringify("local:" + id3)} && /doc=local:/.test(location.search)`, 30000) && (await ready()), "Duplicate opens the copy");
+  check(dialogs.length === before + 1 && /without one of its pictures/.test(dialogs[before] ?? ""), "the person was told the copy lacks one picture, before it opened: " + JSON.stringify(dialogs.slice(before)));
+  // the control: this browser's store has it, so the copy shows it from there; no word
+  await ev(`(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open("sagebrush-board-images", 1); r.onupgradeneeded = () => r.result.createObjectStore("blobs"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); await new Promise((res, rej) => { const t = db.transaction("blobs", "readwrite"); t.objectStore("blobs").put(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }), ${JSON.stringify(NB)}); t.oncomplete = res; t.onerror = () => rej(t.error); }); db.close(); return 1; })()`);
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/board/?doc=local:${id3}` });
+  check(await ready(), "the board opens again");
+  const mid = dialogs.length;
+  await ev("document.querySelector('[data-sbb=duplicate]').click(), 1");
+  check(await until(`new URLSearchParams(location.search).get("doc") !== ${JSON.stringify("local:" + id3)} && /doc=local:/.test(location.search)`, 30000) && (await ready()), "Duplicate opens another copy");
+  check(dialogs.length === mid, "kept in this browser's store: no word " + JSON.stringify(dialogs.slice(mid)));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));
