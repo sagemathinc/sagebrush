@@ -340,7 +340,10 @@ class complex64(complex, complexfloating):
     # shortest digits, as NumPy prints one)
     def __new__(cls, *args):
         if len(args) == 1 and isinstance(args[0], (list, tuple, ndarray)):
-            return asarray(args[0], complex64)
+            # (a 0-d array gives the scalar, as NumPy's constructor extracts it; any other the array, itself when
+            # it's already complex64's)
+            r = asarray(args[0], complex64)
+            return r if r.ndim else r[()]
         c = complex(*args)
         return complex.__new__(cls, _f32(c.real), _f32(c.imag))
 
