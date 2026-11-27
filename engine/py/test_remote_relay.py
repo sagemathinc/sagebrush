@@ -166,6 +166,10 @@ class RelaySide:
                             await self.inbox.put(("window", self.sent_to_page))
                             continue
                         await self.inbox.put(("text", t))
+                    elif op == 0x2:
+                        # (an engine page's binary message: its prefix, then the kernel's bytes (r3 P2a))
+                        i = payload.index(b"\n")
+                        await self.inbox.put(("binary", (int(payload[:i]), payload[i + 1:])))
                     elif op == 0x8:
                         self.closed_code = int.from_bytes(payload[:2], "big") if len(payload) >= 2 else 1005
                         await self.inbox.put(("close", self.closed_code))
@@ -219,7 +223,8 @@ class RelaySide:
     def control(self, **kw):
         op = kw.pop("relay")
         if op == "page-open":
-            kw = {"conn": kw["conn"], "kind": kw["kind"], "chan": kw.get("chan", "kernel"), "gen": kw["gen"]}
+            extra = {k: kw[k] for k in ("nb", "entry", "sgen", "cgen") if k in kw}
+            kw = {"conn": kw["conn"], "kind": kw["kind"], "chan": kw.get("chan", "kernel"), "gen": kw["gen"], **extra}
             self.gen = kw["gen"]
         self.send_text(json.dumps({"relay": op, **kw}, separators=(",", ":")))
 
@@ -314,7 +319,8 @@ class FakeRelay:
             raw = base64.urlsafe_b64decode(sig + "=" * (-len(sig) % 4))
             ok = _native.es256_verify(self.key.x, self.key.y, ("sb-remote-chal/1\n" + c).encode(), raw)
             self.challenges[c] = True  # (single use)
-        self.upgrades.append({"ok": ok, "challenge": c, "agent": h.get("user-agent"), "agents": h.get("x-sb-remote-agents")})
+        self.upgrades.append({"ok": ok, "challenge": c, "agent": h.get("user-agent"), "agents": h.get("x-sb-remote-agents"),
+                              "caps": h.get("x-sb-remote-caps")})
         if not ok or self.upgrade_status != 101:
             writer.write(b"HTTP/1.1 %d No\r\ncontent-length: 0\r\n\r\n" % (403 if not ok else self.upgrade_status))
             await writer.drain()

@@ -27,7 +27,7 @@ import { checkResult, checkText, lineOf, type CheckResult, type ImageReport } fr
 import { applyStep } from "../web/latex/overlay";
 import { splitChunk, tooLargeProblem } from "../web/latex/split";
 
-setKatex(katex.renderToString);
+setKatex(katex.renderToString, (katex as any).__renderToHTMLTree);
 // (beamer's code: in the browser a chunk the worker fetches when a document needs it; here, always)
 installBeamer(beamerCode);
 installPythontex(pythontexCode);
@@ -62,13 +62,15 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       environments, math KaTeX can't typeset, missing images, code not run, expansion stopped. Exits 1 if
       there is an error (a warning alone exits 0).
 
-  sagebrush latex render FILE.tex [-o OUT.html] [--png DIR [--steps]] [--pdf OUT.pdf] [--json]
+  sagebrush latex render FILE.tex [-o OUT.html] [--png DIR [--steps]] [--pdf OUT.pdf] [--timeout SECONDS] [--json]
       The preview as one self-contained HTML file (default: FILE.html beside FILE.tex). With --png DIR, one
       PNG per beamer frame (frame-01.png, ...) or per page of another document, and a report of each frame
       whose content overflows its slide. PNGs need Chrome, Chromium, Edge or Brave on this computer (or
       CHROME=/path/to/browser); nothing is installed. --steps: each frame at each of its overlay steps
       (\\pause, <2->, \\only, \\uncover), frame-02-1.png, frame-02-2.png, ..., as the editor's Present shows them.
       --pdf: the preview printed to a PDF by the same browser (a beamer document one page per frame).
+      --timeout: how long --png or --pdf waits for the browser to load the HTML (default 30 s, and 10 s more for
+      each MiB of it, at most 600 s).
       In a document that isn't beamer's, --png or --pdf reports each display more than 1px wider than the
       text (up to 50) as a warning (TeX's Overfull \\hbox), its line found from the start of its TeX where it
       can be; printed, such a display runs on into the margin. (A beamer frame's overflow is its PNG's report.)
@@ -82,12 +84,13 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   if (cmd === undefined || cmd === "-h" || cmd === "--help" || cmd === "help") { process.stdout.write(HELP); return cmd === undefined ? 2 : 0; }
   if (cmd !== "check" && cmd !== "render" && cmd !== "run") { process.stderr.write(`sagebrush latex: no command ${JSON.stringify(cmd)} (check, run or render)\n\n${HELP}`); return 2; }
   const args = argv.slice(1);
-  let file: string | null = null, out: string | null = null, png: string | null = null, pdf: string | null = null, json = false, timeout = 120, steps = false;
+  let file: string | null = null, out: string | null = null, png: string | null = null, pdf: string | null = null, json = false, timeout = 120, steps = false, loadTimeout: number | null = null;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--json") json = true;
     else if ((a === "-o" || a === "--out") && cmd === "render") { out = args[++i] ?? null; if (out === null) return usage(`${a} needs a file name`); }
     else if (a === "--timeout" && cmd === "run") { timeout = Number(args[++i]); if (!(timeout > 0 && timeout <= 3600)) return usage("--timeout needs a number of seconds, at most 3600"); }
+    else if (a === "--timeout" && cmd === "render") { loadTimeout = Number(args[++i]); if (!(loadTimeout > 0 && loadTimeout <= 3600)) return usage("--timeout needs a number of seconds, at most 3600"); }
     else if (a === "--steps" && cmd === "render") steps = true;
     else if (a === "--pdf" && cmd === "render") { pdf = args[++i] ?? null; if (pdf === null) return usage("--pdf needs a file name"); }
     else if (a === "--png" && cmd === "render") { png = args[++i] ?? null; if (png === null) return usage("--png needs a folder"); }
@@ -116,7 +119,7 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   let code = 0;
   if (png !== null || pdf !== null) {
     try {
-      const { overfull, ...b } = await screenshots(htmlPath, png, result, steps, pdf);
+      const { overfull, ...b } = await screenshots(htmlPath, png, result, steps, pdf, loadTimeout ?? loadWait(Buffer.byteLength(html)));
       if (png !== null) report.png = b;
       if (pdf !== null) report.pdf = b.pdf;
       // (a display wider than the text, as TeX's "Overfull \hbox" warns of it: a warning in the check's problems, its
@@ -247,7 +250,7 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
   // (results not used, a helper they imported having changed since: said, the items shown as not run)
   const stale = saved.stale === null ? [] : [{ kind: "stale", name: saved.stale, at: -1 }];
   const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems.concat(tooLarge, stale), frames: r.frames,
-    sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);
+    sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport, doc ?? undefined);
   return { result, html: pageHtml(basename(file), pieces.join("\n"), !!r.beamer) };
 }
 
@@ -603,10 +606,10 @@ class Cdp {
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
-  once(method: string, ms: number): Promise<void> {
-    return new Promise((ok, no) => {
-      const t = setTimeout(() => no(new Error(`the browser sent no ${method} in ${ms / 1000} s`)), ms);
-      const f = (m: any) => { if (m.method === method) { clearTimeout(t); this.events = this.events.filter((g) => g !== f); ok(); } };
+  /** The next `method` event (its deadline the caller's). */
+  once(method: string): Promise<void> {
+    return new Promise((ok) => {
+      const f = (m: any) => { if (m.method === method) { this.events = this.events.filter((g) => g !== f); ok(); } };
       this.events.push(f);
     });
   }
@@ -619,7 +622,13 @@ class Cdp {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function screenshots(htmlPath: string, dir: string | null, check: CheckResult, steps = false, pdf: string | null = null) {
+/** How long --png or --pdf waits for the browser to load the HTML, in seconds: LOAD_WAIT_MIN, and LOAD_WAIT_PER_MIB more
+ * for each MiB of it (a long article's 40 MB, each formula as KaTeX's HTML and MathML, took 195 s to load on a
+ * computer busy far past its cores), at most LOAD_WAIT_MAX; render's --timeout sets it instead. */
+export const LOAD_WAIT_MIN = 30, LOAD_WAIT_PER_MIB = 10, LOAD_WAIT_MAX = 600;
+export const loadWait = (bytes: number): number => Math.min(LOAD_WAIT_MAX, LOAD_WAIT_MIN + Math.ceil(bytes / 2 ** 20) * LOAD_WAIT_PER_MIB);
+
+async function screenshots(htmlPath: string, dir: string | null, check: CheckResult, steps = false, pdf: string | null = null, wait = LOAD_WAIT_MIN) {
   const browser = findBrowser();
   if (!browser) throw new Error("no Chrome, Chromium, Edge or Brave found (set CHROME=/path/to/it); the HTML is written: open it in a browser");
   if (typeof (globalThis as any).WebSocket !== "function") throw new Error(`this JavaScript runtime has no WebSocket (Node 22 or newer has it)`);
@@ -646,9 +655,18 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
     const beamer = check.class === "beamer";
     const width = beamer ? SLIDE_W + 32 : 900;
     await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
-    const loaded = cdp.once("Page.loadEventFired", 30000);
-    await cdp.send("Page.navigate", { url: pathToFileURL(resolve(htmlPath)).href });
-    await loaded;
+    // (the navigation and its load awaited together under the one deadline, from the start: a navigate the browser
+    //  answers late or never ends there too, and the finally below closes the browser. A load that doesn't end in time
+    //  is said with the HTML's size and what to do, the HTML itself kept)
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((ok) => { timer = setTimeout(() => ok("late"), wait * 1000); });
+    const loading = Promise.all([cdp.once("Page.loadEventFired"), cdp.send("Page.navigate", { url: pathToFileURL(resolve(htmlPath)).href })]).then(() => "loaded" as const);
+    let how: "loaded" | "late";
+    try { how = await Promise.race([loading, late]); } finally { clearTimeout(timer); }
+    if (how === "late") {
+      const mb = (statSync(htmlPath).size / 2 ** 20).toFixed(1);
+      throw new Error(`the browser didn't finish loading the HTML (${mb} MiB) in ${wait} s; a long document loads slowly on a busy computer: try again with a longer --timeout (at most 3600 s), or open ${htmlPath} in a browser`);
+    }
     await cdp.eval("document.fonts.ready.then(() => Promise.all([...document.images].map((i) => i.decode().catch(() => null)))).then(() => 1)");
     // (a display wider than the text: on paper it runs on into the margin (STANDALONE_CSS's print rules), as TeX's
     //  overfull box does, rather than being cut off at its box's edge, and it is reported, with its TeX; measured as
