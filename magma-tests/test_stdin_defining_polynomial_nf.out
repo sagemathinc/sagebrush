@@ -1,0 +1,13 @@
+$.1^2 - 5
+Univariate Polynomial Ring over Integer Ring
+true
+t^2 - 5
+t^2 - 3
+t^2 + 1
+x^3 - 2
+true
+Univariate Polynomial Ring in x over Rational Field
+t^2 - 2
+Univariate Polynomial Ring in t over Integer Ring
+$.1^2 + 2*$.1 + 2
+end
