@@ -194,12 +194,14 @@ export function setTypeAttr(cls: PyType, name: string, value: any) {
   // __qualname__, or a metaclass's property), as CPython's type.__setattr__
   const d = lookupType(typeOf(cls), name);
   if (d !== undefined && d !== null && typeof d === "object") {
-    const set = dunderOf(lookupType(typeOf(d), "__set__"));
+    const set = lookupType(typeOf(d), "__set__");
     if (set !== undefined) {
-      set(d, cls, value);
+      callDescrHook(set, d, [cls, value]);
       bumpVersion(cls);
       return;
     }
+    // (a data descriptor with no __set__, a delete-only one: CPython's AttributeError, never the class's dict)
+    if (lookupType(typeOf(d), "__delete__") !== undefined) raise(T.AttributeError, "__set__");
   }
   cls.$dict.set(name, value);
   bumpVersion(cls);
@@ -215,12 +217,13 @@ export function delTypeAttr(cls: PyType, name: string) {
     // (type's own writable ones without a deleter, __name__ or __doc__:
     // CPython's check_set_special_type_attr)
     if (typeOf(d) === T.getset_descriptor && d.owner === T.type && d.set !== null && d.del === null) raise(T.TypeError, `cannot delete '${name}' attribute of immutable type '${cls.$name}'`);
-    const del = dunderOf(lookupType(typeOf(d), "__delete__"));
+    const del = lookupType(typeOf(d), "__delete__");
     if (del !== undefined) {
-      del(d, cls);
+      callDescrHook(del, d, [cls]);
       bumpVersion(cls);
       return;
     }
+    if (lookupType(typeOf(d), "__set__") !== undefined) raise(T.AttributeError, "__delete__");
   }
   if (!cls.$dict.delete(name)) raise(T.AttributeError, `type object '${cls.$name}' has no attribute '${name}'`);
   bumpVersion(cls);
@@ -683,6 +686,19 @@ export function hasInstanceDict(o: any): boolean {
 // as on its type NoneType, a method is bound and a get/set descriptor gives
 // its value, as CPython's lookup does; None.__class__ was the descriptor
 // itself, and so isinstance(None, an ABC) a TypeError)
+// A descriptor's __get__ as CPython's slot_tp_descr_get calls it: the raw class attribute called with the
+// descriptor, the instance (None for a class) and the owner (a staticmethod's function, a callable object's
+// __call__; a classmethod or other non-callable CPython's TypeError)
+function callDescrGet(g: any, d: any, o: any, t: any): any {
+  return typeof g === "function" ? g(d, o, t) : callObj(g, [d, o, t]);
+}
+// A descriptor's __set__, __delete__ or __set_name__ as CPython's vectorcall_method calls it: the class attribute
+// bound to the descriptor as any method is (a function as a method, a staticmethod's function as it is, a
+// classmethod bound to its class, a callable object as it is, another descriptor through its own __get__)
+function callDescrHook(raw: any, d: any, args: any[]): any {
+  if (typeof raw === "function") return callObj(dunderFn(raw), [d, ...args]);
+  return callObj(descrGet(raw, d, typeOf(d)), args);
+}
 function descrGet(d: any, o: any, t: PyType): any {
   const none = o === null && t === T.NoneType;
   if (typeof d === "function") return d.$pyfn === true && (o !== null || none) && d.$static !== true ? bindMethod(d, o) : d;
@@ -692,7 +708,7 @@ function descrGet(d: any, o: any, t: PyType): any {
       return d.get(o);
     }
     const g = lookupType(typeOf(d), "__get__");
-    if (g !== undefined) return g(d, o, t);
+    if (g !== undefined) return callDescrGet(g, d, o, t);
   }
   return d;
 }
@@ -833,18 +849,20 @@ function descrGetOrGetattr(d: any, o: any, t: PyType, name: string): any {
 function metaHookCall(f: any, cls: any, meta: any, name: string): any {
   if (typeof f === "function" && bindsAsDunder(f)) return f(cls, name);
   const get = lookupType(typeOf(f), "__get__");
-  return get !== undefined ? callObj(get(f, cls, meta), [name]) : callObj(f, [name]);
+  return get !== undefined ? callObj(callDescrGet(get, f, cls, meta), [name]) : callObj(f, [name]);
 }
 export function typeGetattr(cls: PyType, name: string, dflt?: any): any {
   const meta = (cls as any).$meta ?? T.type;
   const md = lookupType(meta, name);
-  if (md !== undefined && isDataDescriptor(md)) return descrGet(md, cls, meta);
+  // (a metaclass data descriptor wins only with a getter, as CPython's type_getattro: a set-only one leaves the
+  // class's own value)
+  if (md !== undefined && isDataDescriptor(md) && (typeof md !== "object" || md === null || lookupType(typeOf(md), "__get__") !== undefined)) return descrGet(md, cls, meta);
   const d = lookupType(cls, name);
   if (d !== undefined) {
     if (typeof d === "function") return unboundFunction(d); // functions on a class are plain functions (builtin ones check their receiver)
     if (d !== null && typeof d === "object") {
       const g = lookupType(typeOf(d), "__get__");
-      if (g !== undefined) return g(d, null, cls);
+      if (g !== undefined) return callDescrGet(g, d, null, cls);
     }
     return d;
   }
@@ -977,16 +995,19 @@ export function setattr(o: any, name: string, v: any): void {
   genericSetattr(o, name, v, t);
 }
 
+export { callDescrHook, callDescrGet };
 export function genericSetattr(o: any, name: string, v: any, t: PyType) {
   if (reservedName(name)) reservedAttr(o, name);
   if (o !== null && implField(o, name)) reservedAttr(o, name);
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
-    const s = dunderOf(lookupType(typeOf(d), "__set__"));
+    const s = lookupType(typeOf(d), "__set__");
     if (s !== undefined) {
-      s(d, o, v);
+      callDescrHook(s, d, [o, v]);
       return;
     }
+    // (a delete-only data descriptor: CPython's AttributeError, never the instance's dict)
+    if (lookupType(typeOf(d), "__delete__") !== undefined) raise(T.AttributeError, "__set__");
   }
   // (None has no __dict__: CPython's AttributeError, after a data
   // descriptor's own answer, such as __class__'s TypeError)
@@ -1078,11 +1099,12 @@ export function genericDelattr(o: any, name: string, t: PyType): void {
   }
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
-    const del = dunderOf(lookupType(typeOf(d), "__delete__"));
+    const del = lookupType(typeOf(d), "__delete__");
     if (del !== undefined) {
-      del(d, o);
+      callDescrHook(del, d, [o]);
       return;
     }
+    if (lookupType(typeOf(d), "__set__") !== undefined) raise(T.AttributeError, "__delete__");
   }
   // (a session's module, Sage mode's __main__: `del __main__.X` deletes X for good, as `del X` does, index.ts delName;
   // a Sage name not loaded yet deletes as a bound one does)

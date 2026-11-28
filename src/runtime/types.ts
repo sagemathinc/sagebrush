@@ -9,6 +9,7 @@ import {
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, toPyExc, instanceDict, detachInstanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr, typeSetattr, typeDelattr, notForType, slotArgs, noKeywords,
   dunderFn, dunderOf, setSlotMemberProto,
+  callDescrHook, callDescrGet,
 } from "./object";
 import * as O from "./ops";
 import * as UC from "./unicodecs";
@@ -987,7 +988,7 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   if (ns.has("__slots__")) {
     const sv = ns.get("__slots__");
     const items = typeof unbox(sv) === "string" ? [sv] : O.toArray(sv);
-    const baseDict = bases.some((b: any) => b.$heap === true && b.$noDict !== true);
+    const baseDict = bases.some(givesDict);
     slotNames = [];
     for (const it of items) {
       const n = unbox(it);
@@ -1004,12 +1005,33 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
       slotNames.push(n.startsWith("__") && !n.endsWith("__") && owner !== "" ? `_${owner}${n}` : n);
     }
     for (const n of slotNames) if (ns.has(n)) raise(T.ValueError, `'${n}' in __slots__ conflicts with class variable`);
+    // (nonempty __slots__ on a variable-size builtin base, as CPython's type_new: its TypeError; a library class that
+    // emulates a C type's extra fields, time.struct_time's, says so with __sagebrush_native_slots__, taken out of the
+    // namespace here)
+    const nativeSlots = ns.has("__sagebrush_native_slots__");
+    ns.delete("__sagebrush_native_slots__");
+    const solid0 = solidBase(bases.length ? bases[0] : object);
+    if (slotNames.length && !nativeSlots && (solid0 === T.int || solid0 === T.tuple || solid0 === T.bytes)) raise(T.TypeError, `nonempty __slots__ not supported for subtype of '${bases[0].$name}'`);
+  }
+  // (several bases whose instance layouts can't be one, as CPython's best_base: a class with slots of its own beside a
+  // base with another layout; only where a slotted class is involved, the builtin bases' own checks being elsewhere)
+  if (bases.length > 1) {
+    const solids = bases.map(solidBase);
+    if (solids.some((c: any) => c.$slotLayout === true)) {
+      let winner = solids[0];
+      for (const c of solids.slice(1)) {
+        if (winner.$mro.includes(c)) continue;
+        if (c.$mro.includes(winner)) winner = c;
+        else raise(T.TypeError, "multiple bases have instance lay-out conflict");
+      }
+    }
   }
   const cls = objectType(name, bases.length ? bases : [object], ns, module);
   (cls as any).$heap = true;
   if (slotNames !== null) {
     for (const n of slotNames) ns.set(n, new PyMember(cls, n));
-    if (!slotDict && bases.every((b: any) => b.$heap !== true || b.$noDict === true)) (cls as any).$noDict = true;
+    if (!slotDict && !bases.some(givesDict)) (cls as any).$noDict = true;
+    if (slotNames.length) (cls as any).$slotLayout = true;
   }
   if (cell !== undefined) cell.v = cls;
   if (dcell !== undefined) classDictHooks.bind!(dcell, cls);
@@ -1019,15 +1041,46 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   // __set_name__ hooks see the original namespace even if one changes it.
   for (const [k, v] of [...ns]) {
     if (v !== null && typeof v === "object") {
-      const sn = dunderOf(lookupType(typeOf(v), "__set_name__"));
-      if (sn !== undefined) sn(v, cls, k);
+      const sn = lookupType(typeOf(v), "__set_name__");
+      if (sn !== undefined) callDescrHook(sn, v, [cls, k]);
     }
   }
-  const parent = cls.$mro[1];
-  const isub = parent !== undefined ? lookupType(parent, "__init_subclass__") : undefined;
-  if (isub instanceof PyClassMethod) callKw(isub.f, [cls], [...kw.keys()], [...kw.values()]);
-  else if (kw.size) raise(T.TypeError, `${name}.__init_subclass__() takes no keyword arguments`);
+  // (super(cls, cls).__init_subclass__(**kw), as CPython's init_subclass: the first class after cls in its MRO that
+  // defines it, bound as super binds it (a classmethod to cls, a staticmethod's function, a descriptor's __get__
+  // with no instance, a callable object as it is); object's own takes no keywords)
+  let isub: any = undefined, isubOwner: any = undefined;
+  for (const c of cls.$mro.slice(1)) {
+    if (c.$dict.has("__init_subclass__")) {
+      isub = c.$dict.get("__init_subclass__");
+      isubOwner = c;
+      break;
+    }
+  }
+  const kwNames = [...kw.keys()], kwValues = [...kw.values()];
+  if (isub === undefined || isubOwner === object) {
+    if (kw.size) raise(T.TypeError, `${name}.__init_subclass__() takes no keyword arguments`);
+  } else if (isub instanceof PyClassMethod) callKw(isub.f, [cls], kwNames, kwValues);
+  else if (typeof isub === "function") callKw(isub, [cls], kwNames, kwValues);
+  else {
+    const g = isub !== null && typeof isub === "object" ? lookupType(typeOf(isub), "__get__") : undefined;
+    callKw(g !== undefined ? callDescrGet(g, isub, null, cls) : isub, [], kwNames, kwValues);
+  }
   return cls;
+}
+
+// (a base whose instances carry a dict: a class without __slots__ of its own (or with __dict__ in them), or a builtin
+// exception type, whose instances keep their attributes)
+function givesDict(b: any): boolean {
+  return b.$heap === true ? b.$noDict !== true : b.$mro.includes(T.BaseException);
+}
+// (CPython's solid_base: the nearest class along the first bases that adds an instance layout, a class with slots of
+// its own, else the builtin base; the builtin exceptions share BaseException's)
+function solidBase(c: any): any {
+  while (c.$heap === true) {
+    if (c.$slotLayout === true) return c;
+    c = c.$bases[0] ?? object;
+  }
+  return c.$mro.includes(T.BaseException) ? T.BaseException : c;
 }
 
 // ------------------------------------------------------------------ exceptions
@@ -3474,12 +3527,18 @@ method(T.reversed, "__length_hint__", (it: ReversedIter) => {
 });
 
 // `gen.throw(E)`, `gen.throw(E, v)`, `gen.throw(e)`.
+// generator.throw(typ, val) as CPython's _gen_throw normalizes it: a class with no value (or None) instantiated
+// bare, with a tuple called with its items, with an instance of it that instance, else called with the value; an
+// instance with no separate value (or None) as it is, with one CPython's TypeError
 export function throwable(e: any, v: any): any {
   if (isType(e)) {
     if (!e.$mro.includes(T.BaseException)) raise(T.TypeError, "exceptions must be classes or instances deriving from BaseException, not type");
-    return v === undefined || v === null ? e() : isinstance(v, e) ? v : e(v);
+    if (v === undefined || v === null) return e();
+    if (isinstance(v, e)) return v;
+    return isinstance(v, T.tuple) ? callObj(e, [...v]) : e(v);
   }
   if (e === null || typeof e !== "object" || !isinstance(e, T.BaseException)) raise(T.TypeError, `exceptions must be classes or instances deriving from BaseException, not ${typeName(e)}`);
+  if (v !== undefined && v !== null) raise(T.TypeError, "instance exception may not have a separate value");
   return e;
 }
 
@@ -3492,7 +3551,7 @@ const genResult = (r: IteratorResult<any>) => {
 method(generator, "__iter__", (g: Generator) => g);
 method(generator, "__next__", (g: Generator) => genResult(O.genStep(g, false, undefined)));
 method(generator, "send", (g: Generator, v: any) => genResult(O.genStep(g, false, v)));
-method(generator, "throw", (g: any, e: any, v: any = undefined) => {
+method(generator, "throw", (g: any, e: any, v: any = undefined, _tb: any = undefined) => {
   let x: any;
   const args = v === undefined ? [e] : [e, v];
   try {
@@ -3518,6 +3577,7 @@ method(generator, "throw", (g: any, e: any, v: any = undefined) => {
 method(generator, "close", (g: any) => {
   if (!g.$started) {
     g.$started = true;
+    g.$finished = true;
     g.return(undefined);
     return null;
   }
@@ -3535,7 +3595,7 @@ method(generator, "close", (g: any) => {
   if (!r.done) raise(T.RuntimeError, "generator ignored GeneratorExit");
   return r.value ?? null;
 });
-getset(generator, "gi_running", () => false);
+getset(generator, "gi_running", (g: any) => g.$running === true);
 getset(generator, "__name__", (g: any) => g.$fn?.__name__ ?? "<genexpr>");
 getset(generator, "__qualname__", (g: any) => g.$fn?.__qualname__ ?? "<genexpr>");
 method(generator, "__repr__", (g: any) => `<generator object ${g.$fn?.__qualname__ ?? "<genexpr>"} at 0x${O.id(g).toString(16)}>`);
