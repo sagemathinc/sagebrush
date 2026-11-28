@@ -7810,13 +7810,13 @@ def _no_root():
 
 def _nf_is_square(y):
     """IsSquare of a number field element: true and a root r (r^2 = y), a
-    root of x^2 - y over its field, else false.  Which of r and -r is
-    Sagebrush's: the one whose last nonzero coordinate past the constant
-    one is negative (-a for a^2, -a - 1 for (a + 1)^2 in Q(sqrt 2), as
-    Magma's), a rational root positive if an integer, else negative (2 for
-    4, -3/2 for 9/4, as Magma's).  Magma's own choice depends on the field
-    and the element (2 w + 2 or -2 w - 2 for (2 + 2 w)^2, 2/3 or -2/3 for
-    4/9), a rule not documented."""
+    root of x^2 - y over its field, else false.  Which of r and -r is a
+    documented choice: the one whose last nonzero coordinate past the
+    constant one is negative (-a for a^2, -a - 1 for (a + 1)^2 in
+    Q(sqrt 2)), a rational root positive if an integer, else negative (2
+    for 4, -3/2 for 9/4).  Magma's sign agrees about half the time
+    (measured on 7560 rows, Nov 28); its own rule depends on the field and
+    the element (2 w + 2 or -2 w - 2 for (2 + 2 w)^2, 2/3 or -2/3 for 4/9)."""
     K = y.parent()
     if y == 0:
         return _multi([True, K(0)])
@@ -8540,6 +8540,8 @@ def IsUnit(x):
         return bool(x)  # (every nonzero element of a field)
     if isinstance(x, _Fraction):
         return x != 0  # (a rational field element, Q!2 too: its field's rule)
+    if isinstance(x, _snf.NumberFieldElement):
+        return x != 0  # (in a number field every nonzero element is a unit)
     return x in (1, -1)
 
 

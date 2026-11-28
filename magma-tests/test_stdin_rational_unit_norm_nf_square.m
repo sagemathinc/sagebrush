@@ -30,3 +30,17 @@ for y in [(b-1)^2, L!(-7), L!(9/4), (2*b+3)^2] do
 end for;
 M<c> := QuadraticField(5);
 s, r := IsSquare(((1+c)/2)^2); print s, r;
+// IsUnit in number fields: every nonzero element is a unit (degrees 2, 3, 5)
+K<a> := QuadraticField(3);
+print [IsUnit(x) : x in [K!2, a, 2+a, K!0, K!1, K!(-1), K!(1/2)]];
+P<x> := PolynomialRing(Rationals());
+L<b> := NumberField(x^3 - 2);
+print [IsUnit(y) : y in [L!0, L!3, b, b^2 - 1, 1/b]];
+M<c> := NumberField(x^5 - x - 1);
+print [IsUnit(z) : z in [M!0, M!7, c, c^4 + 3]];
+// IsSquare in a cubic field
+L<b> := NumberField(x^3 - 2);
+for y in [b^2, (b+1)^2, L!4, (1-b)^2, L!9] do
+  s, r := IsSquare(y); print s, r, r^2 eq y;
+end for;
+print IsSquare(b), IsSquare(L!2), IsSquare(1 + b);

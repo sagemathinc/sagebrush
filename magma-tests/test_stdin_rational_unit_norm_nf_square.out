@@ -33,3 +33,17 @@ true -b
 true -3/2
 true -2*b - 3
 true 1/2*(-c - 1)
+[ true, true, true, false, true, true, true ]
+[ false, true, true, true, true ]
+[ false, true, true, true ]
+true -b
+true
+true -b - 1
+true
+true 2
+true
+true -b + 1
+true
+true 3
+true
+false false false
