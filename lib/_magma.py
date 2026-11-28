@@ -9549,6 +9549,11 @@ def Eltseq(x):
             raise MagmaError("Bad argument types\nArgument types given: %s[%s]" % (_type(x), et), "'Eltseq'", True)
     if isinstance(x, _MVectorSpace):
         raise _bad_types("Eltseq", (x,))
+    if isinstance(x, _MFFMat):
+        # (over a finite field: its entries row by row, in the field)
+        return MSeq([c for row in x.M._rows for c in row])
+    if isinstance(x, _MFFVec):
+        return MSeq(list(x.v))
     if isinstance(x, _smat.Matrix):
         # (its entries, row by row, in its ring, as Magma's; not its rows)
         return MSeq([c for row in x.rows() for c in row], BaseRing(x))
@@ -11722,6 +11727,9 @@ _FF_SIGS = {
     "Characteristic": lambda a: (len(a) == 1 and isinstance(a[0], _MFFPolyRing)) or None,
     "FieldOfFractions": lambda a: len(a) == 1 and isinstance(a[0], _MFFPolyRing),
     "AssignNames": lambda a: len(a) == 2 and isinstance(a[0], _MFFPolyRing),
+    # (of a matrix or vector its entries; of a polynomial over a finite field
+    # Magma has one Sagebrush doesn't: refused in words)
+    "Eltseq": lambda a: (len(a) == 1 and isinstance(a[0], (_MFFMat, _MFFVec))) or None,
     "Determinant": _M1, "Rank": _M1, "Transpose": _M1, "NumberOfRows": _M1, "NumberOfColumns": _M1,
     "Nrows": _M1, "Ncols": _M1, "CharacteristicPolynomial": _M1, "Trace": lambda a: _M1(a) or None,
     # (of a polynomial or its ring: its signatures check the rest; of a
