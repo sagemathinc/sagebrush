@@ -8,15 +8,21 @@ holds here:
     `working-directory`, and $GITHUB_ENV / $GITHUB_OUTPUT emulated
     (scripts/ci-cpus.sh sets SAGEBRUSH_CPUS through the first);
   - with `${{ matrix.* }}`, `${{ runner.temp }}` and `${{ github.sha }}`
-    substituted; in an env value, GitHub-only contexts (vars.*, github.event.*,
-    github.token, needs.*) are empty, as on a run with no such event; in a
-    script any of them is an error, so a step that needs CI is never run wrongly;
-  - under CI's time limits: the job's `timeout-minutes` (default 360) is one
-    budget for all its steps, and a step's own `timeout-minutes` caps it within
-    what's left.
+    substituted, and CI's choice idiom `${{ X == 'v' && A || B }}` (or !=), with
+    X a matrix value or the changes job's output (the full tier's, below) and
+    A, B literals; otherwise, in an env value, GitHub-only contexts (vars.*,
+    github.event.*, github.token, needs.*) are empty, as on a run with no such
+    event; in a script any of them is an error, so a step that needs CI is
+    never run wrongly;
+  - under CI's time limits: the job's `timeout-minutes` (default 360; a number
+    or the choice idiom) is one budget for all its steps, and a step's own
+    `timeout-minutes` caps it within what's left.
 Each job starts from a fresh checkout's generated state, as on CI: build/cli,
 web/dist and engine/py/dist are removed before it, and it runs its own build
-lines. A matrix is expanded, and its combinations run one after another. A
+lines. A matrix is expanded, and its combinations run one after another: its
+keys' lists, or an `include:` that is the whole matrix and is the changes job's
+list of objects, one combination each. The changes job's outputs are the full
+tier's here (scripts/ci-paths.mjs as a dispatch; the long tier's with --long). A
 `uses:` step (checkout, setup-node, caches, artifacts) is skipped: the toolchains
 it would install are DEVELOPMENT.md's prerequisites.
 
@@ -27,11 +33,12 @@ run is interrupted, it is ended at once. Ending: found by ancestry (never by
 name), sent TERM, then KILL, and checked gone before the next job or the engine
 restore.
 
-What it doesn't do, and refuses rather than guesses at: a matrix's
-include/exclude, and an `if:` beyond always(), matrix.X ==/!= 'v', `&&`, and the
-conditions on CI's own context (github.*, vars.*, steps.*, needs.*,
-cancelled()), whose steps are skipped and named in the report. A job's own
-`if:` (path selection) is ignored: every job runs.
+What it doesn't do, and refuses before running anything rather than guesses
+at: a matrix's exclude or any other include, an expression in a job's timeout
+or an env value beyond those above, and an `if:` beyond always(), matrix.X
+==/!= 'v', `&&`, and the conditions on CI's own context (github.*, vars.*,
+steps.*, needs.*, cancelled()), whose steps are skipped and named in the
+report. A job's own `if:` (path selection) is ignored: every job runs.
 
 Jobs only CI can run are skipped, and named in the report:
   - size-base, size-gate and ci: they need GitHub's API, its artifacts or
@@ -52,7 +59,9 @@ pinned engine is restored at the end (node scripts/wasm-fetch.mjs --force), if
 it was the pinned one at the start; a run that would rebuild over an engine that
 isn't its pin (a local build) refuses to start.
 
-    python3 scripts/ci-local.py                 # every job CI runs on a full (master) run
+    python3 scripts/ci-local.py                 # every job CI runs on a full (master) run; refused for now,
+                                                # as the changes job has env values on steps.*, inputs.* and a
+                                                # join() over github.event (use --only)
     python3 scripts/ci-local.py --list          # the jobs, their matrices and what's skipped
     python3 scripts/ci-local.py --only checks,engine-rust
     python3 scripts/ci-local.py --dry-run       # print the commands, run nothing
@@ -115,12 +124,33 @@ class Unsupported(Exception):
 
 def matrix_of(job):
     m = (job.get("strategy") or {}).get("matrix") or {}
-    if "include" in m or "exclude" in m:
-        raise Unsupported("a matrix include/exclude")
+    if "exclude" in m:
+        raise Unsupported("a matrix exclude")
+    if "include" in m:
+        # (an include that is the whole matrix and the changes job's list: each object is one combination, as on CI;
+        # any other include, beside keys it would extend or as a literal list, isn't modelled)
+        if len(m) > 1 or isinstance(m["include"], list):
+            raise Unsupported("a matrix include other than the changes job's whole list")
+        combos = values_of(m["include"])
+        if not combos or not all(isinstance(c, dict) and c and all(isinstance(x, (str, int, float, bool)) for x in c.values()) for c in combos):
+            raise Unsupported(f"a matrix include whose list isn't one or more objects of plain values: {combos}")
+        return combos
     keys = list(m)
     if not keys:
         return [{}]
     return [dict(zip(keys, combo)) for combo in itertools.product(*(values_of(m[k]) for k in keys))]
+
+
+def changes_output(name):
+    """The changes job's output NAME as CI's full tier gives it (scripts/ci-paths.mjs as a dispatch, the long tier's
+    with --long): its text, as `needs.changes.outputs.NAME` is on CI."""
+    env = {**os.environ, "GITHUB_EVENT_NAME": "workflow_dispatch", "CI_LONG": "true" if LONG else ""}
+    out = subprocess.run(["node", os.path.join(ROOT, "scripts", "ci-paths.mjs")], env=env, cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout
+    for line in out.splitlines():
+        if line.startswith(name + "="):
+            return line.split("=", 1)[1]
+    raise Unsupported(f"scripts/ci-paths.mjs has no output {name}")
 
 
 def values_of(v):
@@ -131,21 +161,55 @@ def values_of(v):
     t = re.fullmatch(r"\$\{\{\s*fromJSON\(needs\.changes\.outputs\.([A-Za-z0-9_]+)\)\s*\}\}", str(v).strip())
     if not t:
         raise Unsupported(f"a matrix value that isn't a list or the changes job's output: {v}")
-    env = {**os.environ, "GITHUB_EVENT_NAME": "workflow_dispatch", "CI_LONG": "true" if LONG else ""}
-    out = subprocess.run(["node", os.path.join(ROOT, "scripts", "ci-paths.mjs")], env=env, cwd=ROOT,
-                         capture_output=True, text=True, check=True).stdout
-    for line in out.splitlines():
-        if line.startswith(t.group(1) + "="):
-            return json.loads(line.split("=", 1)[1])
-    raise Unsupported(f"scripts/ci-paths.mjs has no output {t.group(1)}")
+    return json.loads(changes_output(t.group(1)))
+
+
+# (CI's choice idiom, `X == 'v' && A || B` (or !=), with X a matrix value or a changes job's output and A, B literals)
+CHOICE = re.compile(r"(matrix\.[A-Za-z0-9_-]+|needs\.changes\.outputs\.[A-Za-z0-9_]+)\s*(==|!=)\s*'([^']*)'\s*&&\s*"
+                    r"('[^']*'|-?[0-9]+(?:\.[0-9]+)?)\s*\|\|\s*('[^']*'|-?[0-9]+(?:\.[0-9]+)?)")
+
+
+def choice(expr, combo):
+    """The value of a CHOICE expression, by GitHub's && and || (each gives an operand, not a boolean): the condition's
+    A when it holds and A is truthy, else B. None: expr isn't one."""
+    t = CHOICE.fullmatch(expr)
+    if not t:
+        return None
+    x, op, v, a, b = t.groups()
+    if x.startswith("matrix."):
+        if x[len("matrix."):] not in combo:
+            raise Unsupported(f"an expression on {x}, which this job's matrix doesn't have: {expr}")
+        val = str(combo[x[len("matrix."):]])
+    else:
+        val = changes_output(x[len("needs.changes.outputs."):])
+    # (falsy: the empty string and the number 0)
+    truthy = a != "''" if a.startswith("'") else float(a) != 0
+    lit = lambda s: s[1:-1] if s.startswith("'") else s
+    return lit(a) if (val == v) == (op == "==") and truthy else lit(b)
+
+
+def job_minutes(job, combo):
+    """The job's timeout-minutes (GitHub's default 360): a number, or a CHOICE expression; anything else is refused."""
+    v = job.get("timeout-minutes", 360)
+    if isinstance(v, (int, float)):
+        return float(v)
+    t = re.fullmatch(r"\$\{\{\s*(.*?)\s*\}\}", str(v).strip())
+    r = choice(t.group(1), combo) if t else None
+    try:
+        return float(r if r is not None else v)
+    except ValueError:
+        raise Unsupported(f"a timeout-minutes this can't evaluate: {v}") from None
 
 
 def substitute(text, ctx, lenient=False):
-    """${{ ... }}: matrix.*, runner.temp and github.sha. Anything else is GitHub's own context: in an env value
-    (lenient) it's empty, as on a run with no such event; in a script it's an error, so a step that needs CI's
+    """${{ ... }}: matrix.*, a CHOICE, runner.temp and github.sha. Anything else is GitHub's own context: in an env
+    value (lenient) it's empty, as on a run with no such event; in a script it's an error, so a step that needs CI's
     context is never run wrongly."""
     def one(m):
         expr = m.group(1).strip()
+        c = choice(expr, ctx["matrix"])
+        if c is not None:
+            return c
         if expr.startswith("matrix."):
             return str(ctx["matrix"][expr[len("matrix."):]])
         if expr == "runner.temp":
@@ -424,14 +488,14 @@ def run_job(name, job, combo, args, state):
             env[k] = substitute(str(v), ctx, lenient=True)
     t0 = time.time()
     # (the job's timeout-minutes is one budget for all its steps, as on CI; GitHub's default is 360)
-    deadline = time.monotonic() + 60 * float(job.get("timeout-minutes", 360))
+    deadline = time.monotonic() + 60 * job_minutes(job, combo)
     notes, failed = [], None
     for step in job.get("steps", []):
         ok, why = step_runnable(step, combo)
         label = step.get("name") or (step.get("run", "").strip().splitlines() or [""])[0][:70]
         try:
             label = substitute(str(label), ctx, lenient=True)
-        except KeyError:
+        except (KeyError, Unsupported):
             pass
         if not ok:
             if why != "uses":
@@ -444,6 +508,9 @@ def run_job(name, job, combo, args, state):
             script = substitute(step["run"], ctx)
         except KeyError as e:
             failed = failed or f"FAILED (needs CI's context: {e.args[0]}): {label}"
+            continue
+        except (Unsupported, subprocess.CalledProcessError) as e:
+            failed = failed or f"FAILED ({e}): {label}"
             continue
         senv = dict(env)
         # (what earlier steps put in $GITHUB_ENV, then the step's own env over it)
@@ -594,11 +661,21 @@ def main():
             print(f"(skipped) {n}: {why}")
         return
     # (refused before anything runs: a construct this doesn't model, in any planned job)
+    # (and the job's timeout and its env values, which would otherwise stop the run partway)
     try:
         for n in plan:
             for combo in matrix_of(jobs[n]):
+                job_minutes(jobs[n], combo)
+                ctx = {"matrix": combo, "temp": "", "sha": ""}
+                envs = [wf.get("env") or {}, jobs[n].get("env") or {}]
                 for s in jobs[n].get("steps", []):
-                    step_runnable(s, combo)
+                    if step_runnable(s, combo)[0]:
+                        envs.append(s.get("env") or {})
+                for k, v in ((k, v) for e in envs for k, v in e.items()):
+                    try:
+                        substitute(str(v), ctx, lenient=True)
+                    except KeyError as x:
+                        raise Unsupported(f"an env value this can't evaluate ({k}: {x.args[0]})") from None
     except Unsupported as e:
         sys.exit(f"ci-local: {n} has {e}; it isn't modelled here, so it isn't run (DEVELOPMENT.md)")
     sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip() or "0" * 40
