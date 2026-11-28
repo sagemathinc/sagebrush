@@ -24,6 +24,7 @@ pub fn factor(mut n: u64) -> Vec<(u64, u32)> {
     let mut out = vec![];
     let mut p = 2;
     while p * p <= n {
+        sagebrush_interrupt::check();
         let mut e = 0;
         while n % p == 0 {
             n /= p;
@@ -66,6 +67,7 @@ pub fn level_data(n: u64) -> (u64, u64, u64, u64, u64) {
     // gcd(d, N/d) > 2.
     let (mut cusps, mut orbits) = (0u64, 0u64);
     for d in 1..=n {
+        sagebrush_interrupt::check();
         if n % d == 0 {
             let g = crate::p1::gcd(d, n / d);
             let phi = factor(g).iter().fold(g, |acc, &(p, _)| acc / p * (p - 1));

@@ -42,7 +42,10 @@ pub struct Character {
 
 impl Character {
     pub fn trivial(n: u64) -> Self {
-        let exps = (0..n).map(|m| if gcd(m, n) == 1 || n == 1 { 0 } else { u32::MAX }).collect();
+        let exps = (0..n).map(|m| {
+            sagebrush_interrupt::check();
+            if gcd(m, n) == 1 || n == 1 { 0 } else { u32::MAX }
+        }).collect();
         Character { n, order: 1, exps }
     }
 
@@ -53,6 +56,7 @@ impl Character {
             return Err("need one exponent per residue mod N".into());
         }
         for a in 0..n {
+            sagebrush_interrupt::check();
             let unit = gcd(a, n) == 1 || n == 1;
             if unit != (exps[a as usize] != u32::MAX) {
                 return Err(format!("eps({}) must be defined exactly on units", a));
@@ -60,6 +64,7 @@ impl Character {
         }
         for a in 0..n {
             for b in 0..n {
+                sagebrush_interrupt::check();
                 let (ea, eb) = (exps[a as usize], exps[b as usize]);
                 if ea != u32::MAX && eb != u32::MAX {
                     let ab = exps[((a * b) % n) as usize] as u64;
@@ -99,8 +104,12 @@ impl Character {
     /// x = 1 mod M.
     pub fn conductor(&self) -> u64 {
         let n = self.n;
-        (1..=n).filter(|m| n % m == 0).find(|&m| {
+        (1..=n).filter(|m| {
+            sagebrush_interrupt::check();
+            n % m == 0
+        }).find(|&m| {
             (0..n / m).all(|t| {
+                sagebrush_interrupt::check();
                 let x = (1 + t * m) % n;
                 self.exponent(x as i64).map_or(true, |e| e as u64 % self.order == 0)
             })

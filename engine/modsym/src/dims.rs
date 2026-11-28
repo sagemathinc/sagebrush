@@ -28,19 +28,50 @@ fn lambda(r: u32, s: u32, p: u64) -> u64 {
     }
 }
 
-/// sum of eps(x) over x mod N with f(x) = 0 mod N, as a complex number.
-fn character_sum(eps: &Character, f: impl Fn(u64) -> u64) -> (f64, f64) {
+/// The values eps(x) = zeta^e (zeta = exp(2 pi i / order)) over the x mod N
+/// with f(x) = 0 mod N, as counts by exponent e: the sum exactly.  The scan
+/// over the level polls Stop.
+fn character_values(eps: &Character, f: impl Fn(u64) -> u64) -> Vec<(u64, i128)> {
     let n = eps.n;
-    let mut s = (0.0, 0.0);
+    let mut counts: std::collections::BTreeMap<u64, i128> = std::collections::BTreeMap::new();
     for x in 0..n {
+        sagebrush_interrupt::check();
         if f(x) % n == 0 {
             let e = eps.exponent(x as i64).expect("a root of x^2+1 or x^2+x+1 is a unit");
-            let t = 2.0 * std::f64::consts::PI * e as f64 / eps.order as f64;
-            s.0 += t.cos();
-            s.1 += t.sin();
+            *counts.entry(e as u64).or_insert(0) += 1;
         }
     }
-    s
+    counts.into_iter().collect()
+}
+
+/// sum of eps(x) over the roots x of x^2 + 1 mod N, for eps even: each
+/// eps(x)^2 = eps(-1) = 1, so the sum is an integer (ones and minus ones).
+fn sum_i(eps: &Character, vals: &[(u64, i128)]) -> i128 {
+    let o = eps.order;
+    vals.iter().map(|&(e, c)| {
+        assert!(2 * e % o == 0, "eps(x)^2 = eps(-1) = 1 at a root of x^2 + 1");
+        if e == 0 { c } else { -c }
+    }).sum()
+}
+
+/// Twice the sum of eps(x) over the roots x of x^2 + x + 1 mod N: each
+/// eps(x) is a cube root of unity (x^3 = 1), and the roots come in pairs x,
+/// x^2 = -1 - x with conjugate values, so the sum is real: 1 for each value
+/// 1, -1/2 for each other.
+fn twice_sum_omega(eps: &Character, vals: &[(u64, i128)]) -> i128 {
+    let o = eps.order;
+    let (mut re2, mut im) = (0i128, 0i128);
+    for &(e, c) in vals {
+        assert!(3 * e % o == 0, "eps(x)^3 = 1 at a root of x^2 + x + 1");
+        if e == 0 {
+            re2 += 2 * c;
+        } else {
+            re2 -= c;
+            im += if 3 * e == o { c } else { -c };
+        }
+    }
+    assert_eq!(im, 0, "the values at the roots of x^2 + x + 1 pair off into conjugates");
+    re2
 }
 
 /// dim S_k(Gamma0(N), eps) for k >= 2 (Cohen-Oesterle).
@@ -51,23 +82,26 @@ pub fn dim_cusp_forms(eps: &Character, k: usize) -> u64 {
     }
     let n = eps.n;
     let f = eps.conductor();
-    let psi = level_data(n).0 as f64;
-    let lam: u64 = factor(n).iter().map(|&(p, r)| {
+    let psi = level_data(n).0 as i128;
+    let lam: i128 = factor(n).iter().map(|&(p, r)| {
         let s = factor(f).iter().find(|&&(q, _)| q == p).map_or(0, |&(_, s)| s);
-        lambda(r, s, p)
+        lambda(r, s, p) as i128
     }).product();
-    let g4 = match k % 4 { 2 => -0.25, 0 => 0.25, _ => 0.0 };
-    let g3 = match k % 3 { 2 => -1.0 / 3.0, 0 => 1.0 / 3.0, _ => 0.0 };
+    // 12 dim = (k - 1) psi - 6 lambda + 12 g4 S4 + 12 g3 S3 + 12 [dim M_{2-k}],
+    // in exact integers: 12 g4 = -3, 3 or 0 (k = 2, 0 mod 4 or odd) and
+    // 12 g3 S3 = (-2, 2 or 0 by k mod 3) times 2 S3
     let nn = n as u128;
-    let s4 = if g4 != 0.0 { character_sum(eps, |x| ((x as u128 * x as u128 + 1) % nn) as u64) } else { (0.0, 0.0) };
-    let s3 = if g3 != 0.0 { character_sum(eps, |x| ((x as u128 * x as u128 + x as u128 + 1) % nn) as u64) } else { (0.0, 0.0) };
+    let t4: i128 = match k % 4 { 2 => -3, 0 => 3, _ => 0 };
+    let t3: i128 = match k % 3 { 2 => -2, 0 => 2, _ => 0 };
+    let s4 = if t4 != 0 { sum_i(eps, &character_values(eps, |x| ((x as u128 * x as u128 + 1) % nn) as u64)) } else { 0 };
+    let s3 = if t3 != 0 { twice_sum_omega(eps, &character_values(eps, |x| ((x as u128 * x as u128 + x as u128 + 1) % nn) as u64)) } else { 0 };
     // dim S_k - dim M_{2-k}; M_0 is the constants when eps = 1.
-    let m2k = if k == 2 && eps.is_trivial() { 1.0 } else { 0.0 };
-    let re = (k - 1) as f64 / 12.0 * psi - 0.5 * lam as f64 + g4 * s4.0 + g3 * s3.0 + m2k;
-    let im = g4 * s4.1 + g3 * s3.1;
-    let d = re.round();
-    assert!((re - d).abs() < 1e-6 && im.abs() < 1e-6 && d >= 0.0, "Cohen-Oesterle gave {} + {} i", re, im);
-    d as u64
+    let m2k: i128 = if k == 2 && eps.is_trivial() { 1 } else { 0 };
+    let twelve = (k as i128 - 1) * psi - 6 * lam + t4 * s4 + t3 * s3 + 12 * m2k;
+    assert!(twelve >= 0 && twelve % 12 == 0, "Cohen-Oesterle gave {}/12", twelve);
+    // (it fits: N's character table has N entries, so psi < 2^36 at most
+    // where it can be built, and (k - 1) psi / 12 < 2^31 2^36)
+    u64::try_from(twelve / 12).expect("a dimension below 2^64")
 }
 
 /// dim E_k(Gamma0(N), eps) for k >= 2: the number of eps-regular cusps,
@@ -109,6 +143,67 @@ mod tests {
         for n in 1..300 {
             assert_eq!(dim_cusp_forms(&Character::trivial(n), 2), level_data(n).1, "N = {}", n);
         }
+    }
+
+    /// Exact integers at weights near 2^31, where f64 roundoff gave wrong
+    /// dimensions or a failed residual check (Gamma0(39) at 2^31 - 2 panicked
+    /// on 10021590341.999998): against Sage 10.10's dimension_cusp_forms, for
+    /// trivial characters and for characters of order 2 and 3 (eps(g^j) =
+    /// zeta_order^j for the generator g of (Z/p)^*, as Sage's G.0 powers).
+    #[test]
+    fn exact_at_large_weights() {
+        let ks = [2147483646usize, 2147483645, 2147483644, 2147483643, 2147483642, 2147483641, 2, 3, 4, 12, 13];
+        let triv: [(u64, [u64; 11]); 14] = [
+            (1, [178956970, 0, 178956970, 0, 178956969, 0, 0, 0, 0, 1, 0]),
+            (2, [536870910, 0, 536870910, 0, 536870909, 0, 0, 0, 0, 2, 0]),
+            (3, [715827881, 0, 715827880, 0, 715827879, 0, 0, 0, 0, 3, 0]),
+            (4, [1073741821, 0, 1073741820, 0, 1073741819, 0, 0, 0, 0, 4, 0]),
+            (7, [1431655763, 0, 1431655761, 0, 1431655759, 0, 0, 0, 1, 7, 0]),
+            (9, [2147483643, 0, 2147483641, 0, 2147483639, 0, 0, 0, 1, 9, 0]),
+            (13, [2505397585, 0, 2505397583, 0, 2505397579, 0, 0, 0, 3, 13, 0]),
+            (36, [12884901864, 0, 12884901852, 0, 12884901840, 0, 1, 0, 12, 60, 0]),
+            (39, [10021590342, 0, 10021590332, 0, 10021590322, 0, 3, 0, 12, 50, 0]),
+            (49, [10021590340, 0, 10021590330, 0, 10021590320, 0, 1, 0, 10, 48, 0]),
+            (63, [17179869156, 0, 17179869140, 0, 17179869124, 0, 5, 0, 20, 84, 0]),
+            (91, [20043180686, 0, 20043180666, 0, 20043180646, 0, 7, 0, 26, 102, 0]),
+            (117, [30064771026, 0, 30064770998, 0, 30064770970, 0, 11, 0, 38, 150, 0]),
+            (147, [40086361366, 0, 40086361328, 0, 40086361290, 0, 11, 0, 48, 198, 0]),
+        ];
+        for (n, want) in triv {
+            let got: Vec<u64> = ks.iter().map(|&k| dim_cusp_forms(&Character::trivial(n), k)).collect();
+            assert_eq!(got, want.to_vec(), "N = {}", n);
+        }
+        // eps(g^j) = zeta_order^(j mod order), g generating (Z/n)^*
+        let power_char = |n: u64, g: u64, order: u64| {
+            let mut exps = vec![u32::MAX; n as usize];
+            let mut x = 1u64;
+            for j in 0..n {
+                exps[x as usize] = (j % order) as u32;
+                x = x * g % n;
+                if x == 1 {
+                    break;
+                }
+            }
+            Character::from_exponents(n, order, exps).unwrap()
+        };
+        let chars: [(&str, Character, [u64; 11]); 4] = [
+            ("cubic mod 7", power_char(7, 3, 3), [1431655762, 0, 1431655761, 0, 1431655760, 0, 0, 0, 1, 6, 0]),
+            ("cubic mod 9", power_char(9, 2, 3), [2147483644, 0, 2147483642, 0, 2147483640, 0, 0, 0, 2, 10, 0]),
+            ("quadratic mod 13", power_char(13, 2, 2), [2505397586, 0, 2505397582, 0, 2505397580, 0, 0, 0, 2, 12, 0]),
+            ("quadratic mod 7", power_char(7, 3, 2), [0, 1431655761, 0, 1431655761, 0, 1431655759, 0, 1, 0, 0, 7]),
+        ];
+        for (name, eps, want) in chars {
+            let got: Vec<u64> = ks.iter().map(|&k| dim_cusp_forms(&eps, k)).collect();
+            assert_eq!(got, want.to_vec(), "{}", name);
+        }
+    }
+
+    /// Past 2^53 (Sage 10.10: 9007200315899901; f64 gave ...900). Its
+    /// character table takes about 200 MB: run with --ignored.
+    #[test]
+    #[ignore]
+    fn exact_past_2_53() {
+        assert_eq!(dim_cusp_forms(&Character::trivial(50331653), 2147483646), 9007200315899901);
     }
 
     #[test]

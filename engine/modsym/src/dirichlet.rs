@@ -226,6 +226,7 @@ impl Character {
     pub fn restrict(&self, m: u64) -> Character {
         assert!(self.n % m == 0 && m % self.conductor() == 0);
         let exps = (0..m).map(|x| {
+            sagebrush_interrupt::check();
             if m > 1 && gcd(x, m) != 1 {
                 return u32::MAX;
             }
