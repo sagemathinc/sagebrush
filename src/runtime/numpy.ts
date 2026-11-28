@@ -2515,6 +2515,12 @@ function sum(a: NDArray, axis: any, keepdims: boolean, dtype: any = null, first 
       a = realPart(a);
     }
   }
+  if (!a.dt.cplx && rt.cplx) {
+    // (a real operand summed in a complex dtype: each element cast to it, so its real parts summed in the part's
+    // precision, as NumPy sums the complex array (its pairwise order), and every imaginary part zero)
+    const r = sum(a, axis, keepdims, rt === D.complex64 ? D.float32 : D.float64, first, mask, true);
+    return combineComplex(r, r instanceof NDArray ? imagPart(r) : 0, rt);
+  }
   if (a.dt.cplx) {
     // (the whole complex sum admitted first: the real and imaginary sums,
     // each with its accumulator, and the combined result; daybreak2's
@@ -2674,6 +2680,7 @@ function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initia
   const axes = axesArg(axis, a.ndim);
   if (initial === null && (axes === null ? a.size : prod([...new Set(axes)].map((i) => a.shape[i]))) === 0)
     raise(T.ValueError, `zero-size array to reduction operation ${isMax ? "maximum" : "minimum"} which has no identity`);
+  if (a.dt.cplx) return finish(cplxMinmax(a, axes, keepdims, isMax, initial, firstWins), axis, keepdims);
   // (firstWins: fmax/fmin, nanmax/nanmin's reduction: a NaN on either side is skipped, so a slice of NaNs alone
   // gives NaN and so does a NaN initial with no other values; without initial the fold starts from the first
   // element, as NumPy's reduce. A tie, as of +0 and -0: maximum/minimum keep the later operand, fmax/fmin the
@@ -2683,6 +2690,63 @@ function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initia
     ? isMax ? (x: number, y: number) => (x !== x ? y : y !== y ? x : y > x ? y : x) : (x: number, y: number) => (x !== x ? y : y !== y ? x : y < x ? y : x)
     : isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y);
   return finish(reduceAxes(a, axes, keepdims, a.dt, init, fold), axis, keepdims);
+}
+
+// A complex array's extremum, as NumPy orders complex numbers: by the real part, then the imaginary part; a NaN in
+// either part propagates (maximum/minimum, the first NaN met) or is passed over (fmax/fmin, firstWins), and a tie
+// keeps the later operand (maximum/minimum) or the accumulator (fmax/fmin), as the real fold does. Each element is
+// its two slots, never one.
+const cnan = (r: number, i: number) => r !== r || i !== i;
+const cgt = (ar: number, ai: number, br: number, bi: number) => ar > br || (ar === br && ai > bi);
+function cplxMinmax(a: NDArray, axes: number[] | null, keepdims: boolean, isMax: boolean, initial: any, firstWins: boolean): NDArray {
+  const nd = a.ndim;
+  const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))];
+  const keep = a.shape.map((_, i) => i).filter((i) => !ax.includes(i));
+  const outShape = keep.map((i) => a.shape[i]);
+  const red = ax.slice().sort((x, y) => x - y);
+  const rshape = red.map((i) => a.shape[i]), rstr = red.map((i) => a.strides[i]);
+  admitWork(prod(outShape) * a.dt.itemsize, "the reduction");
+  const out = empty(outShape, a.dt);
+  const d = a.data, od = out.data;
+  let i0r = NaN, i0i = NaN;
+  if (initial !== null) {
+    const w = pyScalar(initial);
+    if (w === null) raise(T.TypeError, `the initial value of a complex ${isMax ? "maximum" : "minimum"} must be a number`);
+    i0r = castNum(a.dt === D.complex64 ? D.float32 : D.float64, w!.v);
+    i0i = castNum(a.dt === D.complex64 ? D.float32 : D.float64, w!.im ?? 0);
+  }
+  const better = (xr: number, xi: number, yr: number, yi: number) => (isMax ? cgt(yr, yi, xr, xi) : cgt(xr, xi, yr, yi));
+  loop1(outShape, keep.map((i) => a.strides[i]), a.offset, (base, k) => {
+    let has = initial !== null, ar = i0r, ai = i0i;
+    loop1(rshape, rstr, base, (p) => {
+      const vr = d[2 * p], vi = d[2 * p + 1];
+      if (!has) {
+        ar = vr;
+        ai = vi;
+        has = true;
+        return;
+      }
+      if (firstWins) {
+        // (fmax/fmin: a NaN on either side passed over; a tie keeps the accumulator)
+        if (cnan(vr, vi)) return;
+        if (cnan(ar, ai) || better(ar, ai, vr, vi)) {
+          ar = vr;
+          ai = vi;
+        }
+        return;
+      }
+      // (maximum/minimum: a NaN propagates, the first one met; otherwise the later operand unless the accumulator
+      // is strictly better)
+      if (cnan(ar, ai)) return;
+      if (cnan(vr, vi) || !(isMax ? cgt(ar, ai, vr, vi) : cgt(vr, vi, ar, ai))) {
+        ar = vr;
+        ai = vi;
+      }
+    });
+    od[2 * k] = ar;
+    od[2 * k + 1] = ai;
+  });
+  return keepdims ? reshape(out, a.shape.map((n, i) => (ax.includes(i) ? 1 : n))) : out;
 }
 
 function argminmax(a: NDArray, axis: any, isMax: boolean): any {
@@ -2696,6 +2760,28 @@ function argminmax(a: NDArray, axis: any, isMax: boolean): any {
   const outShape = t.shape.slice(0, -1);
   const out = empty(outShape, D.int64);
   const n = t.shape[t.ndim - 1], st = t.strides[t.ndim - 1];
+  if (t.dt.cplx) {
+    // (complex: by the real part, then the imaginary part, each element its two slots; the first NaN's index)
+    loop1(outShape, t.strides.slice(0, -1), t.offset, (base, k) => {
+      let br = t.data[2 * base], bim = t.data[2 * base + 1], bi = 0;
+      if (!cnan(br, bim)) {
+        for (let i = 1, p = base + st; i < n; i++, p += st) {
+          const vr = t.data[2 * p], vi = t.data[2 * p + 1];
+          if (cnan(vr, vi)) {
+            bi = i;
+            break;
+          }
+          if (isMax ? cgt(vr, vi, br, bim) : cgt(br, bim, vr, vi)) {
+            br = vr;
+            bim = vi;
+            bi = i;
+          }
+        }
+      }
+      out.data[k] = bi;
+    });
+    return out.ndim === 0 ? pyScalarOf(D.int64, out.data, 0) : out;
+  }
   loop1(outShape, t.strides.slice(0, -1), t.offset, (base, k) => {
     let best = t.data[base], bi = 0;
     if (best === best) {

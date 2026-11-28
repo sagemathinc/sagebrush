@@ -13929,6 +13929,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: argminmax :: if (isMax ? cgt(vr, vi, br, bim) : cgt(br, bim, vr, vi)) { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
  "src/runtime/numpy.ts :: axesArg :: const axes = axis.map((x) => normAxis(axisInt(x), nd)); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13938,6 +13943,16 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
+ },
+ "src/runtime/numpy.ts :: better :: const better = (xr: number, xi: number, yr: number, yi: number) => (isMax ? cgt(yr, yi, xr, xi) : cgt(xr, xi, yr, yi)); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: better :: if (cnan(vr, vi) || !(isMax ? cgt(ar, ai, vr, vi) : cgt(vr, vi, ar, ai))) { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
   "class": "none",
@@ -13973,6 +13988,21 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))]; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: function cplxMinmax(a: NDArray, axes: number[] | null, keepdims: boolean, isMax: boolean, initial: any, firstWins: boolean): NDArray { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: if (w === null) raise(T.TypeError, `the initial value of a complex ${isMax ? \"maximum\" : \"minimum\"} must be a number`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: cumulative :: if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim); #0": {
   "class": "none",
@@ -14028,6 +14058,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: isMax picks the max/min fold (firstWins: fmax/fmin's tie rule for nanmax/nanmin)"
+ },
+ "src/runtime/numpy.ts :: minmax :: if (a.dt.cplx) return finish(cplxMinmax(a, axes, keepdims, isMax, initial, firstWins), axis, keepdims); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: minmax :: raise(T.ValueError, `zero-size array to reduction operation ${isMax ? \"maximum\" : \"minimum\"} which has no identity`); #0": {
   "class": "none",
