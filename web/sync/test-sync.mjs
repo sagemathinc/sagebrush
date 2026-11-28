@@ -2697,6 +2697,27 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
     w2.ws.close();
   }
 
+  // (the session's end, to the millisecond, with the document's session clock fixed (its test seam): a write at exactly
+  // its session's end is refused, one a millisecond before it is committed. Every other clock of the write is the real
+  // one, so the forward itself is live and only the session check decides)
+  {
+    const doc = "fe5c0000000b";
+    const { s, until } = await shortSession(120);
+    const w = await socket(s);
+    await hello(w, "fence-edge-0001");
+    await w.ask(batch(doc, 1, [[1, pid(1, "clientFN0b"), [], "seed"]], { kind: "board" }));
+    const end = until * 1000;
+    await docOf(doc).testSessionAt({ at: end });
+    const atEnd = await w.ask(batch(doc, 1, [[2, pid(2, "clientFN0b"), [pid(1, "clientFN0b")], "at the end"]]));
+    await docOf(doc).testSessionAt({ at: end - 1 });
+    const before = await w.ask(batch(doc, 1, [[2, pid(3, "clientFN0b"), [pid(1, "clientFN0b")], "just before"]]));
+    await docOf(doc).testSessionAt({ at: null });
+    const got = await ids(doc);
+    ok(atEnd?.t === "error" && atEnd.code === "forbidden" && !got?.includes(pid(2, "clientFN0b")), "a write at exactly its session's end is refused (forbidden), not committed: " + JSON.stringify(atEnd));
+    ok(before?.batch?.new === 1 && got?.includes(pid(3, "clientFN0b")), "…and one a millisecond before its end is committed: " + JSON.stringify(before));
+    w.ws.close();
+  }
+
   // (control: the same hold with no sign-out commits, so the rows above are the sign-out's doing)
   {
     const doc = "fe5c00000004";

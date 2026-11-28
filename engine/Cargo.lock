@@ -783,6 +783,7 @@ dependencies = [
  "sagebrush-ball",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-ledger",
  "sagebrush-poly",
 ]
 
