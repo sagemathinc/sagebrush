@@ -391,11 +391,14 @@ def _complex_parts(cls, re, im):
     if isinstance(im, complex64):
         i = float(im.real)
     elif isinstance(im, ndarray):
-        i = float(im.item())
+        # (its item: a NumPy complex scalar's real part (an object array may hold one), else its float())
+        x = im.item()
+        i = float(x.real) if isinstance(x, complexfloating) else float(x)
     else:
         i = float(im)
     if isinstance(re, ndarray):
-        if re.dtype.kind in "USO":
+        # (a str array refused; an object array's item converted as complex() converts it, '1+2j' too)
+        if re.dtype.kind in "US":
             raise TypeError("Unable to convert dtype('%s') to complex" % re.dtype.str)
         z = complex(re.item())
         r, i = z.real, z.imag + i

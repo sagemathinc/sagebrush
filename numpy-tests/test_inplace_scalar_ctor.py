@@ -153,3 +153,16 @@ for nm, f in (("C64(1/3, 1/7)", lambda: C64(1 / 3, 1 / 7)), ("C64(1/3+1j/7)", la
     z = f()
     print(f"subclass {nm} |", type(z).__name__, float(z.real).hex(), float(z.imag).hex())
 print("float32 rounding |", float(np.complex64(0.1, 0.2).real), float(np.complex64(0.1, 0.2).imag))
+# an object 0-d array as either part: its item as the real part through complex() (both its parts), as the imaginary
+# part a NumPy complex scalar's real part, else its float(); subclasses too
+class C64Child(C64): pass
+for T in (np.complex64, np.complex128, C64, C64Child, C128):
+    for it in (1.5, 2, True, 1 + 1j, np.float32(2.5), np.int8(3), np.complex64(1 + 1j), np.complex128(1 + 2j), "2", "1+2j", None, -0.0, [1.0]):
+        o = np.empty((), dtype=object)
+        o[()] = it
+        for args in ((o, 2), (2, o)):
+            try:
+                z = T(*args)
+                print(f"object part {T.__name__}{('obj ' + repr(it), args[1]) if args[0] is o else (args[0], 'obj ' + repr(it))} |", type(z).__name__, float(z.real).hex(), float(z.imag).hex())
+            except Exception as e:
+                print(f"object part {T.__name__}{('obj ' + repr(it), args[1]) if args[0] is o else (args[0], 'obj ' + repr(it))} |", type(e).__name__, e)
