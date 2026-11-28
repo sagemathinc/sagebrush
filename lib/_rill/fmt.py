@@ -229,9 +229,10 @@ def _print_named(strs, names, write, opts):
 
 # ---------------------------------------------------------------- deparse
 
-BINARY_SPACED = {"+", "-", "*", "/", "<-", "<<-", "=", "==", "!=", "<", ">", "<=", ">=", "&", "&&",
+# (R writes /, %% and %/% tight, like ^ and :, and every other %op% spaced: 1/3, 1%%3, a %in% b)
+BINARY_SPACED = {"+", "-", "*", "<-", "<<-", "=", "==", "!=", "<", ">", "<=", ">=", "&", "&&",
                  "|", "||", "~"}
-BINARY_TIGHT = {"^", ":", "$", "@", "::", ":::"}
+BINARY_TIGHT = {"^", ":", "$", "@", "::", ":::", "/", "%%", "%/%"}
 UNARY = {"-", "+", "!", "~"}
 RESERVED = {"if", "else", "repeat", "while", "function", "for", "next", "break", "TRUE", "FALSE",
             "NULL", "Inf", "NaN", "NA", "NA_integer_", "NA_real_", "NA_character_", "in"}
@@ -338,7 +339,7 @@ def _expand(e):
         n = len(args)
         if n == 2 and all(a[0] is None for a in args):
             a, b = args[0][1], args[1][1]
-            if f in BINARY_SPACED or (f.startswith("%") and f.endswith("%") and len(f) > 1):
+            if f in BINARY_SPACED or (f.startswith("%") and f.endswith("%") and len(f) > 1 and f not in BINARY_TIGHT):
                 return [_operand(a), " %s " % f, BREAK, _operand(b)]
             if f in BINARY_TIGHT:
                 return [_operand(a), f, _operand(b)]
