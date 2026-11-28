@@ -35,10 +35,13 @@ These hold in addition to the text below, and each comes with its row in the PR 
   - **What it bounds:** only unanswered (held) credit, within the budget that remains after durable history (answered records, kept until their threads are deleted) and leased slack. It promises no fleet storage headroom; that is the storage budget's job (r12.1 C3, r12.2 L1, r12.4 E1).
   - **S** is every host owning any stale credit (held past `stale_after_ms`), whether or not it answers its other agents, and k = |S|. S's held bytes are at most k x `host_held_bytes_max`, with no exception (r12.10: a re-grant moves credit only when it fits).
   - **The bound:** the hosts outside S can hold new unanswered messages up to (the budget remaining after durable history and slack) - max(`stale_pool_bytes`, S's held bytes), floored at 0. At the defaults, with nothing else stored, that is at least 75% for k <= 2, 50% for k = 5, and 0 from k = 10.
-  - **It is collective (TESTS):** it bounds the hosts outside S together, never a single host. A single healthy host is promised nothing beyond the budget's free bytes.
+  - **It is collective (TESTS):** it bounds the hosts outside S together, never one host among several. A slow host whose backlog has aged is in S.
+  - **k counts owners (SEC):** S is the hosts that OWN stale credit, so one misbehaving host can account for several of the k while re-granted credit waits to move (r12.10: a host stopping with re-granted agents whose credit is still owned by three other hosts makes k = 4). "k = 1 leaves 75%" therefore isn't "one bad host leaves 75%" while credit is moving. The Agents page shows the computed k, and the owners it counts, beside the "moving" agents.
   - **Rows:**
     - answered history, then stale: budget 100, S holding 90 of answered records plus 1 held byte that goes stale. The others are bounded by the 9 free, and G1 claims nothing beyond the remaining budget;
-    - one healthy host beside 3 slow-but-answering hosts whose backlogs age past the pool: the bound holds for the four together;
+    - one healthy host beside 3 slow-but-answering hosts whose backlogs age past the pool: the 3 are in S (k = 3), and the healthy host, alone outside S, can hold up to (the remaining budget) - max(`stale_pool_bytes`, the 3's held bytes): at least 70% at the defaults with nothing else stored;
+    - two healthy hosts outside S: the bound is for the two together, and neither alone is promised a share;
+    - a host stopping while holding re-granted agents whose credit three other hosts still own: k = 4, and the Agents page shows k and its owners;
     - k = 1, 2 and 5 at the defaults; r12.10's re-grant rows.
 - **Carried to the PR that builds the service (from SEC and Codex on r12.x):**
   - N2 to N5 (r12.1: the channel's identity from its attachment, client frames bounded, one socket per host, grant changes closing the channel) and N8 (the host's page checks, with r12.3 F1's after <= through <= head);
