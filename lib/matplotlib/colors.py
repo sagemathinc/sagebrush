@@ -101,15 +101,78 @@ class LinearSegmentedColormap(Colormap):
         return "#%02x%02x%02x" % tuple(mix)
 
 
+def _sanitize_extrema(ex):
+    # (a bound as matplotlib keeps it: a NumPy scalar's .item(), anything else a float; Normalize(0, 10).vmin is 0.0)
+    if ex is None:
+        return ex
+    try:
+        return ex.item()
+    except AttributeError:
+        return float(ex)
+
+
+def _iterable(v):
+    # (np.iterable's test)
+    try:
+        iter(v)
+    except TypeError:
+        return False
+    return True
+
+
 class Normalize:
+    """matplotlib's linear map of [vmin, vmax] onto [0, 1]: bounds autoscaled from the first data they are missing
+    for, equal bounds mapping everything to 0, clip (the instance's or the call's) clipping to [vmin, vmax] first.
+    The result is a plain array (matplotlib's is a masked array of the same values and dtype)."""
+
     def __init__(self, vmin=None, vmax=None, clip=False):
-        # (floats, as matplotlib's: Normalize(0, 10).vmin is 0.0)
-        self.vmin = None if vmin is None else float(vmin)
-        self.vmax = None if vmax is None else float(vmax)
+        self.vmin = vmin
+        self.vmax = vmax
         self.clip = clip
 
-    def __call__(self, v):
-        return (v - self.vmin) / (self.vmax - self.vmin)
+    def __setattr__(self, name, value):
+        # (a bound kept as matplotlib's setters keep it)
+        object.__setattr__(self, name, _sanitize_extrema(value) if name in ("vmin", "vmax") else value)
+
+    @staticmethod
+    def _process_value(value):
+        # ((value as a float array of its own, is_scalar): float dtypes kept, integers and booleans promoted to at
+        # least float32, as matplotlib's process_value)
+        import numpy as np
+        is_scalar = not _iterable(value)
+        if is_scalar:
+            value = [value]
+        data = np.asarray(value)
+        dtype = data.dtype
+        if np.issubdtype(dtype, np.integer) or dtype == np.bool_:
+            dtype = np.promote_types(dtype, np.float32)
+        return np.array(data, dtype=dtype), is_scalar
+
+    def __call__(self, value, clip=None):
+        import numpy as np
+        if clip is None:
+            clip = self.clip
+        result, is_scalar = self._process_value(value)
+        # (missing bounds: the data's minimum and maximum, kept for later calls, as matplotlib's autoscale_None)
+        if result.size and self.vmin is None:
+            self.vmin = result.min()
+        if result.size and self.vmax is None:
+            self.vmax = result.max()
+        (vmin,), _ = self._process_value(self.vmin)
+        (vmax,), _ = self._process_value(self.vmax)
+        if vmin == vmax:
+            result.fill(0)
+        elif vmin > vmax:
+            raise ValueError("minvalue must be less than or equal to maxvalue")
+        else:
+            if clip:
+                result = np.clip(result, vmin, vmax)
+            # (in place, as matplotlib's: the result keeps the value's dtype)
+            np.subtract(result, vmin, out=result)
+            np.true_divide(result, vmax - vmin, out=result)
+        if is_scalar:
+            result = result[0]
+        return result
 
 
 # the CSS named colors, which matplotlib's names are (CSS Color Module Level 4: _graphics.CSS_COLORS)

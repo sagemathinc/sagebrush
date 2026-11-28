@@ -1027,8 +1027,9 @@ class ModularSymbols:
             sage: ModularSymbols(23, sign=1).hecke_polynomial(2)
             x^3 - 2*x^2 - 4*x + 3
         """
+        n = self.hecke_operator(n)._n  # (Sage's: through T_n, so an index that isn't an integer is refused)
         from sage_all import is_prime
-        if not is_prime(int(n)):
+        if not is_prime(n):
             raise NotImplementedError("hecke_polynomial is available for primes n")
         m = self._m()
         c = self._hecke(n)
@@ -1046,8 +1047,44 @@ class ModularSymbols:
             Hecke operator T_2 on Modular Symbols space of dimension 3 for Gamma_0(11) of weight 2 with sign 0 over Rational Field
             sage: T.charpoly()
             x^3 + x^2 - 8*x - 12
+
+        The index must be an int or an Integer, as Sage's HeckeOperator
+        requires: a fractional (or any other non-integer) index is refused,
+        not truncated to another operator.  (Sage keeps T_n by int(n) and
+        checks only when it makes one, so there 3.0 gives T_3 once T_3
+        exists; Sagebrush refuses it every time.)::
+
+            sage: M = ModularSymbols(11, 2, sign=1)
+            sage: M.hecke_operator(QQ(5)/2)
+            Traceback (most recent call last):
+            ...
+            TypeError: n must be an int
+            sage: M.hecke_polynomial(QQ(7)/3)
+            Traceback (most recent call last):
+            ...
+            TypeError: n must be an int
+            sage: M.T(2.0)
+            Traceback (most recent call last):
+            ...
+            TypeError: n must be an int
+            sage: M.T(3) is M.hecke_operator(int(3)), M.T(3).charpoly()
+            (True, x^2 - 3*x - 4)
+
+        Even with T_3 made, a non-integer index is refused (Sage returns
+        its cached T_3 here)::
+
+            sage: M.T(3.0)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            TypeError: n must be an int
         """
-        return HeckeOperator(self, int(n))
+        if not isinstance(n, int):  # (Sage's HeckeOperator: an int or an Integer)
+            raise TypeError("n must be an int")
+        ops = self.__dict__.setdefault("_hecke_ops", {})
+        k = int(n)
+        if k not in ops:
+            ops[k] = HeckeOperator(self, k)
+        return ops[k]
 
     T = hecke_operator
 

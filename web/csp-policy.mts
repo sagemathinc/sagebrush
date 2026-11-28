@@ -34,13 +34,16 @@ export function pagePolicy(scriptHashes: string[] = [], frameAncestors: "'self'"
   ].join("; ");
 }
 
-// A space in 3D (/space/, web/space): the page's policy, narrowed. It reads and shows only this site's files (the
-// viewer, its chunks, the engine's worker and modules, a space and a file's text), so nothing of another origin is
-// fetched or shown: no https: in connect-src or img-src, and no loopback socket (no agent pairing on this page).
+// A space in 3D (/space/, web/space): the page's policy, narrowed. It reads and shows this site's files (the viewer,
+// its chunks, the engine's worker and modules, a space and a file's text), and one other place: a file's text of
+// Sagebrush's own repository, under https://raw.githubusercontent.com/sagemathinc/sagebrush/ (a path, which holds
+// because no redirect is followed; web/space/src/read.ts pinnedRaw narrows it further, to the build's own commit).
+// No https: in connect-src or img-src beyond that path, and
+// no loopback socket (no agent pairing on this page).
 export function spacePolicy(scriptHashes: string[] = []): string {
   return pagePolicy(scriptHashes)
     .replace("img-src 'self' data: blob: https: http:", "img-src 'self' data: blob:")
-    .replace("connect-src 'self' data: blob: https: http: ws://127.0.0.1:* ws://localhost:*", "connect-src 'self' data: blob:");
+    .replace("connect-src 'self' data: blob: https: http: ws://127.0.0.1:* ws://localhost:*", "connect-src 'self' data: blob: https://raw.githubusercontent.com/sagemathinc/sagebrush/");
 }
 
 // A public GitHub repository's notebook or folder page (/gh/..., web/gh): the

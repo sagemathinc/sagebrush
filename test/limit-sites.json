@@ -1365,6 +1365,31 @@
   "owner": "multivariate engine",
   "row": "inv-36"
  },
+ "engine/mpoly/src/lib.rs :: frames_declaring_more_than_they_hold_are_refused_before_allocating :: f[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/src/lib.rs :: frames_declaring_more_than_they_hold_are_refused_before_allocating :: for (flags, len) in [(0u8, u64::MAX), (1, u64::MAX), (0, 1 << 40), (1, (1 << 61) + 1)] { #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/src/lib.rs :: frames_declaring_more_than_they_hold_are_refused_before_allocating :: huge_args[k - 4..].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/src/lib.rs :: frames_declaring_more_than_they_hold_are_refused_before_allocating :: let r = record(0, 1, 8, 0, &u32::MAX.to_le_bytes(), &[]); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/src/lib.rs :: malformed_frames_never_panic :: let v = [0u32, 1, 2, 0x7fff_ffff, u32::MAX][next(5)].to_le_bytes(); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
  "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let gap = hooks::max_gap_ns(); #0": {
   "class": "none",
   "owner": "sage"
@@ -1372,6 +1397,21 @@
  "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let poll = hooks::max_poll_gap_ns(); #0": {
   "class": "none",
   "owner": "sage"
+ },
+ "engine/mpoly/tests/frames_alloc.rs :: malformed_counts_allocate_within_their_bytes :: (\"2^64 - 1 word terms\", frame(\"len\", &[&record(0, u64::MAX, &one, &[0; 32])])), #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/tests/frames_alloc.rs :: malformed_counts_allocate_within_their_bytes :: (\"a denominator of 2^31 - 1 words\", frame(\"len\", &[&record(0, 0, &u32::MAX.to_le_bytes(), &[])])), #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/tests/frames_alloc.rs :: malformed_counts_allocate_within_their_bytes :: table[k - 4..].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
  },
  "engine/nd/examples/solve_bench.rs :: main :: let an = (0..n).map(|i| (0..n).map(|j| a0[i + j * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
   "class": "none",
@@ -5522,6 +5562,21 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: Insert :: if len(s) + pad + 1 > _COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma.py :: Insert :: raise MagmaError(\"Argument 2 (%d) is too large\" % i, \"'Insert'\", True, _located(\"Insert\")) #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "Magma's own answer reproduced (Magma 2.18-5 refuses Insert at a position of 2^30 or more in these words): Magma semantics, not a Sagebrush cap"
+ },
  "lib/_magma.py :: MRec._str :: A maximal order in it prints on one line (_IN_REC), as a tuple's does: #0": {
   "class": "none",
   "owner": "Magma compatibility",
@@ -7109,6 +7164,11 @@
   "class": "3",
   "owner": "finite fields + configuration",
   "row": "inv-1"
+ },
+ "lib/_sage_ff.py :: IntegerMod.nth_root :: raise NotImplementedError(\"nth_root for large moduli\") #1": {
+  "class": "coverage",
+  "owner": "Sage finite rings",
+  "reason": "all k-th roots for k = 0 list every nonzero residue: for a modulus of 10^6 or more that list is refused (unsupported), as the k > 0 search's; a single root needs no list"
  },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
@@ -8880,6 +8940,16 @@
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
+ "lib/_scipy_stats_py.py :: pearsonr :: if xmax == 0 or ymax == 0 or bool(np.all(x == x[0])) or bool(np.all(y == y[0])): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: nx, ny = xmax * float(np.sqrt(np.dot(ux, ux))), ymax * float(np.sqrt(np.dot(uy, uy))) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
  "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
@@ -8889,6 +8959,16 @@
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: ux, uy = xm / xmax, ym / ymax #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: xmax, ymax = float(np.max(np.abs(xm))), float(np.max(np.abs(ym))) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
  },
  "lib/_scipy_stats_py.py :: rankdata :: \"\"\"the ranks of a (from 1), ties by method ('average', 'min', 'max', 'dense' or 'ordinal'), as float64 as #0": {
   "class": "none",
@@ -8906,11 +8986,6 @@
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
  "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)\") #0": {
-  "class": "coverage",
-  "owner": "python (@sagebrush-python)",
-  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
- },
- "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
@@ -13954,6 +14029,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: argminmax :: if (isMax ? cgt(vr, vi, br, bim) : cgt(br, bim, vr, vi)) { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
  "src/runtime/numpy.ts :: axesArg :: const axes = axis.map((x) => normAxis(axisInt(x), nd)); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13963,6 +14043,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
+ },
+ "src/runtime/numpy.ts :: better :: const better = (xr: number, xi: number, yr: number, yi: number) => (isMax ? cgt(yr, yi, xr, xi) : cgt(xr, xi, yr, yi)); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
   "class": "none",
@@ -13989,6 +14074,36 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: I64MAX and U64MAX, the int64 and uint64 ranges, by which NumPy discovers a Python int's dtype and past which its C conversion raises OverflowError; NumPy's semantics, not a Sagebrush limit"
  },
+ "src/runtime/numpy.ts :: cmaxmin :: const bBetter = isMax ? br > ar || (br === ar && bi > ai) : br < ar || (br === ar && bi < ai); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: fmax: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.max(x, y)), c: cmaxmin(true, true) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: fmin: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.min(x, y)), c: cmaxmin(false, true) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: function cmaxmin(isMax: boolean, skip: boolean): CBin { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: maximum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.max(x, y)), c: cmaxmin(true, false) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: minimum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.min(x, y)), c: cmaxmin(false, false) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13998,6 +14113,21 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))]; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: function cplxMinmax(a: NDArray, axes: number[] | null, keepdims: boolean, isMax: boolean, initial: any, firstWins: boolean): NDArray { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: if (w === null) raise(T.TypeError, `the initial value of a complex ${isMax ? \"maximum\" : \"minimum\"} must be a number`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: cumulative :: if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim); #0": {
   "class": "none",
@@ -14053,6 +14183,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: isMax picks the max/min fold (firstWins: fmax/fmin's tie rule for nanmax/nanmin)"
+ },
+ "src/runtime/numpy.ts :: minmax :: if (a.dt.cplx) return finish(cplxMinmax(a, axes, keepdims, isMax, initial, firstWins), axis, keepdims); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: minmax :: raise(T.ValueError, `zero-size array to reduction operation ${isMax ? \"maximum\" : \"minimum\"} which has no identity`); #0": {
   "class": "none",

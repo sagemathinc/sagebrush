@@ -389,6 +389,27 @@ try {
     const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
     ok(kept.length === 1 && kept[0] === kept0[0], `reload ${n}: the kept session is still the one in force (${kept[0] === undefined ? "lost" : kept[0] === kept0[0] ? "same" : "changed"})`);
   }
+  // (the remembered grant bound to its agent (Codex audit S05b): the same kept session, its grant now another agent's
+  //  (name and client); the server answering it is this one, "Test agent". The reconnect must close at the hello: no
+  //  grant reaches the server, no bar, and the kept grant is left as it was, its identity not rewritten. Then the record
+  //  put back, and reconnected, for the rows after)
+  {
+    const saved = await ev(`T.ws.agentGrants().then((g) => JSON.stringify(g))`);
+    await ev(`(async () => { for (const [id, k] of Object.entries(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, { ...k, grant: { ...k.grant, agent: "Second agent", client: "test2" } }); return true; })()`);
+    const relabelled = await ev(`T.ws.agentGrants().then((g) => JSON.stringify(g))`);
+    await drive({ op: "grants" });
+    await drive({ op: "hellos" });
+    ok(await open(""), "another agent's grant: a reload");
+    await sleep(2500);
+    const hs = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === PORT);
+    const gs = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === PORT);
+    const bar = await ev(`!!document.querySelector(".sbag-bar")`);
+    const after = await ev(`T.ws.agentGrants().then((g) => JSON.stringify(g))`);
+    ok(hs.length >= 1 && gs.length === 0 && !bar && after === relabelled && (await ev(`T.ui.pairing?.state ?? "none"`)) !== "granted", `another agent's grant: the session answered by "Test agent" is closed at its hello, nothing granted, no bar, the kept grant unchanged (${hs.length} hellos, ${gs.length} grants, bar ${bar}, kept ${after === relabelled ? "unchanged" : "changed"})`);
+    await ev(`(async () => { for (const [id, k] of Object.entries(${saved})) await T.ws.putAgentGrant(id, k); return true; })()`);
+    ok(await open(""), "another agent's grant: the record put back, a reload");
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 15000) && (await grantedAtServer()), "another agent's grant: …its own agent reconnects as before");
+  }
   // (W4, the chip: a newer pairing started while one is shown (the remembered grant's reconnect, asked again while the
   //  agent is still connected; its hello answered 1 s late, so the newer pairing says nothing meanwhile): the old chip
   //  goes at once, and its Revoke and Turn off running code, pressed after, act on nothing, neither pairing)
@@ -534,16 +555,35 @@ try {
 
   // ---- a refusal other than the agent's "another page is paired with this agent" is final: one hello, no retry (A11,
   // the remote computer's words; A12, any other)
-  for (const [n, text] of [["10", "another page is paired with this computer"], ["11", "wrong session"]]) {
+  const keptN = () => ev(`T.ws.agentGrants().then((a) => Object.keys(a).length)`);
+  for (const [n, text] of [["10", "another page is paired with this computer"], ["11", "not now"]]) {
     await drive({ op: "slow", s: 0 });
     await sleep(700);
+    const before = await keptN();
     await drive({ op: "refuse", text });
     await drive({ op: "hellos" });
     ok(await open(""), `reload ${n}`);
     await sleep(2500);
     const hs = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === PORT);
     await drive({ op: "refuse", text: null });
-    ok(hs.length === 1 && !(await ev(`!!document.querySelector(".sbag-bar")`)), `reload ${n}: refused "${text}", the reconnect asks once and stops (${hs.length} hellos)`);
+    const after = await keptN();
+    ok(hs.length === 1 && !(await ev(`!!document.querySelector(".sbag-bar")`)) && before > 0 && after === before, `reload ${n}: refused "${text}", the reconnect asks once and stops, the remembered grant kept (${hs.length} hellos, ${before} -> ${after} kept)`);
+  }
+  // ---- the agent's own unusable-session refusal (pairing.py's "wrong session"): asked once, and the remembered grant
+  // forgotten, not kept for the next load (#1751); then put back as it was, for reload 12
+  {
+    await drive({ op: "slow", s: 0 });
+    await sleep(700);
+    const saved = await ev(`T.ws.agentGrants().then((a) => JSON.stringify(a))`);
+    await drive({ op: "refuse", text: "wrong session" });
+    await drive({ op: "hellos" });
+    ok(await open(""), "reload 11b");
+    await sleep(2500);
+    const hs = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === PORT);
+    await drive({ op: "refuse", text: null });
+    const after = await keptN();
+    ok(hs.length === 1 && !(await ev(`!!document.querySelector(".sbag-bar")`)) && after === 0, `reload 11b: refused "wrong session", asked once, the remembered grant forgotten (${hs.length} hellos, ${after} kept)`);
+    await ev(`(async () => { for (const [id, k] of Object.entries(${saved})) await T.ws.putAgentGrant(id, k); return true; })()`);
   }
 
   // ---- an expiry inside the retry window ends it (A9, reconnect()'s remembered grant), on a fake clock
@@ -649,6 +689,101 @@ try {
   const g13 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === sixth.port);
   ok(h13.length >= 1 && h13.length <= 2 && g13.length === 0, `reload 13: the reload record's grant expired during the window: no further attempt, and it isn't given again (${h13.length} hellos, ${g13.length} grants)`);
   await drive({ op: "slow", s: 0 });
+
+  // ---- one "disconnected" dialog per pairing (#1751, Codex review): a timed grant's expiry ends the pairing once; its
+  // local cleanup then notifies again (started, done, a failure and each retry), and those update the bar, never a new
+  // dialog
+  const lossDialogs = `[...document.querySelectorAll(".sbag-box h2")].filter((h) => h.textContent === "The agent is disconnected").length`;
+  for (const mode of ["cleanup succeeds", "cleanup fails, then retries"]) {
+    ok(await open(""), `expiry (${mode}): a fresh page`);
+    await sleep(300);
+    const c = await drive({ op: "code" });
+    if (mode !== "cleanup succeeds") await ev(`(() => { const put = T.ws.putAgentGrant.bind(T.ws); window.__failDeletes = 0; window.__allowDelete = false; T.ws.putAgentGrant = async (id, g) => { if (g === null && !window.__allowDelete) { window.__failDeletes++; throw new Error("controlled local cleanup failure"); } return put(id, g); }; return true; })()`);
+    ok(await openConnect(c.code, c.port), `expiry (${mode}): the Connect dialog`);
+    const allowShown = nextDialog("Allow this agent?");
+    await click(".sbag-box button.primary");
+    ok((await allowShown).ok, `expiry (${mode}): the grant dialog`);
+    // (a grant of 1.5 s, given through the dialog's own Allow: one more duration offered by its select)
+    await ev(`(() => { const b = [...document.querySelectorAll(".sbag-box")].pop(); const s = b.querySelector("select"); s.append(Object.assign(document.createElement("option"), { value: "1500", textContent: "for 1.5 s" })); s.value = "1500"; s.dispatchEvent(new Event("change")); [...b.querySelectorAll("button")].find((x) => x.textContent === "Allow").click(); return true; })()`);
+    ok(await until(`T.ui.pairing?.state === "granted"`, 10000), `expiry (${mode}): granted`);
+    ok(await until(`T.ui.pairing?.state === "closed" && T.ui.pairing.closeReason === "the grant expired"`, 10000), `expiry (${mode}): the grant expires`);
+    if (mode === "cleanup succeeds") {
+      ok(await until(`!T.ui.pairing.cleanup`, 10000), "expiry (cleanup succeeds): the local cleanup commits");
+      await sleep(1500);
+    } else {
+      ok(await until(`window.__failDeletes >= 3`, 20000), `expiry (cleanup fails): the local cleanup failed and was retried (${await ev("window.__failDeletes")} attempts)`);
+      await ev("(window.__allowDelete = true, 1)");
+      ok(await until(`!T.ui.pairing.cleanup`, 20000), "expiry (cleanup fails): a later retry commits it");
+      await sleep(500);
+    }
+    const n = await ev(lossDialogs);
+    ok(n === 1, `expiry (${mode}): exactly one "The agent is disconnected" dialog, across the cleanup's notifications (${n})`);
+    await ev(`([...document.querySelectorAll(".sbag-box")].forEach((b) => [...b.querySelectorAll("button")].find((x) => x.textContent === "OK")?.click()), true)`);
+  }
+
+  // ---- an unusable remembered session, forgotten only by the attempt that still owns the page (#1751, Codex review):
+  // two remembered agents, the first's session one its server doesn't know ("wrong session"), the second's on the
+  // second server. Control: the first is forgotten and the reconnect goes on to the second. Then the first's hello held
+  // at the server while the person connects the second agent; its late refusal must neither forget nor go on: the
+  // person's connection stays the page's, and the second remembered agent is never asked
+  {
+    const port2 = (await drive({ op: "code2" })).port;
+    const plant = () => ev(`(async () => {
+      sessionStorage.removeItem("sb-agent-reload-v1");
+      for (const id of Object.keys(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, null);
+      const g = { folders: ["/"], write: false, expires: Date.now() + 600000 };
+      await T.ws.putAgentGrant("000000000000", { grant: g, session: "s".repeat(43), port: ${PORT} });
+      await T.ws.putAgentGrant("zzzzzzzzzzzz", { grant: g, session: "t".repeat(43), port: ${port2} });
+      return Object.keys(await T.ws.agentGrants()).join(",");
+    })()`);
+    const at = (hs, port) => (hs.ok ?? []).filter(([p]) => p === port).length;
+
+    await drive({ op: "slow", s: 0 });
+    ok(await plant() === "000000000000,zzzzzzzzzzzz", "unusable session (control): two remembered agents, the stale one first");
+    await drive({ op: "hellos" });
+    ok(await open(""), "unusable session (control): a reload");
+    ok(await until(`T.ws.agentGrants().then((a) => !("000000000000" in a))`, 10000), "unusable session (control): the stale session is forgotten");
+    await sleep(1500);
+    const hc = await drive({ op: "hellos" });
+    ok(at(hc, PORT) === 1 && at(hc, port2) >= 1, `unusable session (control): the reconnect goes on to the second remembered agent (${at(hc, PORT)} and ${at(hc, port2)} hellos)`);
+
+    ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "status2" })).ok?.paired === false) return true; await sleep(50); } return false; })(), "unusable session (superseded): the second server free");
+    ok(await plant() === "000000000000,zzzzzzzzzzzz", "unusable session (superseded): the two remembered agents again");
+    await drive({ op: "hellos" });
+    await drive({ op: "hellogate", n: (await drive({ op: "hellon" })).ok + 1 });
+    ok(await open(""), "unusable session (superseded): a reload");
+    ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "hellowaiting" })).ok) return true; await sleep(25); } return false; })(), "unusable session (superseded): the stale session's hello waits at the server");
+    // (the page's own other way to connect, adopted meanwhile (the Agents page's Chat here): a link whose agent hasn't
+    //  answered yet; Connect itself waits while a reconnect is under way)
+    ok(await ev(`(() => { const link = { socket: () => ({ readyState: 0, send() {}, close() {} }), ready: () => undefined, send: () => "ok", owe: () => true, answer() {}, disconnect: async () => {} }; window.__mine = T.ui.adopt(link, "this browser"); return T.ui.pairing === window.__mine; })()`), "unusable session (superseded): a newer connection adopted meanwhile");
+    await drive({ op: "hellos" });
+    await drive({ op: "hellogo" });
+    await sleep(2500);
+    const hs = await drive({ op: "hellos" });
+    const mine = await ev(`T.ui.pairing === window.__mine && T.ui.pairing.state !== "closed"`);
+    const keptS = await ev(`T.ws.agentGrants().then((a) => Object.keys(a).join(","))`);
+    ok(mine && at(hs, port2) === 0 && keptS === "000000000000,zzzzzzzzzzzz", `unusable session (superseded): the late refusal leaves the person's connection the page's, the second remembered agent never asked, nothing forgotten (mine ${mine}, ${at(hs, port2)} hellos to the second, kept ${keptS})`);
+    await ev(`(async () => { for (const id of Object.keys(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, null); [...document.querySelectorAll(".sbag-box")].forEach((b) => b.remove()); return true; })()`);
+
+    // (superseded during the cleanup itself: the stale record's delete held, a connection adopted on the cleanup's own
+    //  completion notice (before that, adopting is refused: cleanup pending), then the delete let go. The reconnect,
+    //  resuming after its awaited cleanup, must see it no longer owns the page: the stale record forgotten, the second
+    //  remembered agent never asked)
+    ok(await open(""), "unusable session (superseded at its cleanup): a fresh page, nothing remembered");
+    await drive({ op: "slow", s: 0 });
+    ok(await plant() === "000000000000,zzzzzzzzzzzz", "unusable session (superseded at its cleanup): the two remembered agents again");
+    await ev(`(() => { const put = T.ws.putAgentGrant.bind(T.ws); window.__letGo = null; const held = new Promise((r) => (window.__letGo = r)); T.ws.putAgentGrant = async (id, g) => { if (id === "000000000000" && g === null) await held; return put(id, g); }; return true; })()`);
+    await drive({ op: "hellos" });
+    await ev("(T.ui.useRemembered(), 1)");
+    ok(await until(`T.ui.pairing?.cleanup === "revoking"`, 10000), "unusable session (superseded at its cleanup): refused, its cleanup's delete held");
+    ok(await ev(`(() => { const p = T.ui.pairing; const link = { socket: () => ({ readyState: 0, send() {}, close() {} }), ready: () => undefined, send: () => "ok", owe: () => true, answer() {}, disconnect: async () => {} }; window.__mine = null; const off = p.onChange(() => { if (!p.cleanup && !window.__mine) { off(); window.__mine = T.ui.adopt(link, "this browser"); } }); window.__letGo(); return true; })()`), "unusable session (superseded at its cleanup): a connection adopted at the cleanup's completion");
+    await sleep(2500);
+    const hz = await drive({ op: "hellos" });
+    const mineZ = await ev(`!!window.__mine && T.ui.pairing === window.__mine`);
+    const keptZ = await ev(`T.ws.agentGrants().then((a) => Object.keys(a).join(","))`);
+    ok(mineZ && at(hz, PORT) === 1 && at(hz, port2) === 0 && keptZ === "zzzzzzzzzzzz", `unusable session (superseded at its cleanup): the adopted connection stays the page's, the stale record forgotten, the second remembered agent never asked (mine ${mineZ}, ${at(hz, PORT)} and ${at(hz, port2)} hellos, kept ${keptZ})`);
+    await ev(`(async () => { for (const id of Object.keys(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, null); return true; })()`);
+  }
 
   // ---- a spent code (A5): the agent refuses it, and the dialog says so, with no local-network advice; Connect shows
   // that it is trying

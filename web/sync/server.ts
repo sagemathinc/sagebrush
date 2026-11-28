@@ -9,8 +9,9 @@
 //   PUT  /api/sync/v1/blob/<address>     the bytes, with x-sb-ct-sha256: their SHA-256, which R2 checks
 //   GET  /api/sync/v1/blob/<address>     303 to a signed URL on the user-content domain
 //
-// (a blob's `address` is 64 hex: today the bytes' own hash, under end-to-end encryption a keyed address
-// (design/e2e-encryption.md §3.3).  So the server never assumes it is the bytes' hash: it checks the declared
+// (a blob's `address` is 64 hex, a plaintext account's (the bytes' own hash), or under end-to-end encryption a keyed
+// address carrying its scheme's version, "a1:" and 64 hex (design/e2e-encryption.md §3.3; protocol.ts isAddress).
+// So the server never assumes it is the bytes' hash: it checks the declared
 // ct_sha256, and holds one (ct_sha256, size) per address, the first; another at that address is a 409 conflict
 // naming what is held.  The account object's tables still call the address column sha256)
 //
@@ -42,7 +43,7 @@
 
 import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
-import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
+import { accountHash, fields, hmacHex, isAddress, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
 import { e2eOn, agentOn, allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { AGENT, tokenOf } from "./agent-token.ts";
 import { TIERED } from "./manifest.ts";
@@ -293,7 +294,7 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
       if (!Array.isArray(b.blobs) || b.blobs.length > LIMITS.checkItems) throw new SyncError("limit", "at most " + LIMITS.checkItems);
       blobs = b.blobs.map((x) => {
         const o = fields(x, ["address", "ct_sha256", "size"], "blob");
-        if (!isSha(o.address) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
+        if (!isAddress(o.address) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
         return { address: o.address, ct_sha256: o.ct_sha256, size: o.size };
       });
     } catch (e) {
@@ -395,7 +396,7 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     if (mv && mv[2] && m === "POST") return verifyStep(env, stub, who.id, mv[1], bind);
     return err(404, "not found");
   }
-  const g = p.match(/^\/api\/sync\/v1\/blob\/([0-9a-f]{64})$/);
+  const g = p.match(/^\/api\/sync\/v1\/blob\/((?:a1:)?[0-9a-f]{64})$/);
   if (g && m === "PUT") return putBlob(req, env, stub, who.id, g[1], bind);
   if (g && m === "GET") {
     if (!env.SYNC_URL_KEY || !env.FILES_ORIGIN) return err(404, "reading blobs is not enabled here");

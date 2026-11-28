@@ -96,8 +96,10 @@ class _Groups(object):
         self.keys = [keys[k] for k in order]
         self.positions = [positions[k] for k in order]
         if na_rows and not dropna:
-            self.keys.append(na_rows[0])
-            self.positions.append(na_rows)
+            # (the missing keys' group: last when sorted, else in its first row's place, as pandas')
+            at = len(self.keys) if sort else sum(1 for k in self.keys if k < na_rows[0])
+            self.keys.insert(at, na_rows[0])
+            self.positions.insert(at, na_rows)
         self.key_col = key_col
         self.name = name
         # (pandas' is_monotonic: the rows' group numbers, -1 for a dropped key, never decreasing)
