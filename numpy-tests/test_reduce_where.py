@@ -1,0 +1,58 @@
+# Reductions with where=, as NumPy's: ufunc.reduce takes in only the elements the mask keeps (each result from initial, or
+# the ufunc's identity, none and no initial NumPy's ValueError), every axis and keepdims; prod, nansum and nanprod pass
+# where= and initial= through; an integer mask array is refused (a safe cast to bool only). And where=None writes
+# nothing, a complex mask is refused, divmod and power refuse dtype=bool in their own names.
+import numpy as np
+def show(tag, f):
+    try:
+        r = f()
+        print(tag, "|", r.tolist() if isinstance(r, np.ndarray) else repr(r), getattr(r, "dtype", ""))
+    except Exception as e:
+        print(tag, "| !!", type(e).__name__, e)
+a = np.array([7, 8, 9]); m = [True, False, True]
+M = np.array([[1., 2.], [3., 4.]]); mm = np.array([[True, False], [False, True]])
+show("add.reduce", lambda: np.add.reduce(a, where=m, initial=0))
+show("add.reduce noinit", lambda: np.add.reduce(a, where=m))
+show("add.reduce initial 10", lambda: np.add.reduce(a, where=m, initial=10))
+show("mul.reduce", lambda: np.multiply.reduce(a, where=m, initial=1))
+show("mul.reduce noinit", lambda: np.multiply.reduce(a, where=m))
+show("max.reduce", lambda: np.maximum.reduce(a, where=[True, True, False], initial=0))
+show("max.reduce noinit", lambda: np.maximum.reduce(a, where=[True, True, False]))
+show("min.reduce", lambda: np.minimum.reduce(a, where=[False, True, True], initial=100))
+show("sub.reduce", lambda: np.subtract.reduce(a, where=m, initial=0))
+show("sub.reduce noinit", lambda: np.subtract.reduce(a, where=m))
+show("add.reduce 2d ax0", lambda: np.add.reduce(M, axis=0, where=mm, initial=0))
+show("add.reduce 2d ax1 keep", lambda: np.add.reduce(M, axis=1, where=mm, keepdims=True))
+show("add.reduce 2d None", lambda: np.add.reduce(M, axis=None, where=mm, initial=0))
+show("add.reduce 2d (0,1)", lambda: np.add.reduce(M, axis=(0, 1), where=mm))
+show("add.reduce broadcast mask", lambda: np.add.reduce(M, axis=0, where=[True, False]))
+show("add.reduce False", lambda: np.add.reduce(a, where=False, initial=0))
+show("add.reduce False noinit", lambda: np.add.reduce(a, where=False))
+show("add.reduce out", lambda: (lambda o: (np.add.reduce(a, where=m, initial=0, out=o), o.tolist())[1])(np.zeros((), int)))
+show("lor.reduce", lambda: np.logical_or.reduce(np.array([False, True]), where=[True, False], initial=False))
+show("land.reduce", lambda: np.logical_and.reduce(np.array([True, False]), where=[True, False]))
+show("add.reduce bool", lambda: np.add.reduce(np.array([True, True, False]), where=[True, True, False]))
+show("add.reduce int8", lambda: np.add.reduce(np.array([100, 100, 1], np.int8), where=[True, True, False]))
+show("add.reduce dtype", lambda: np.add.reduce(a, where=m, dtype=np.float32))
+show("add.reduce int mask", lambda: np.add.reduce(a, where=np.array([1, 0, 1]), initial=0))
+show("prod", lambda: np.prod(a, where=m))
+show("prod axis", lambda: np.prod(M, axis=1, where=mm))
+show("prod initial", lambda: np.prod(a, where=m, initial=2))
+show("prod int mask", lambda: np.prod(a, where=np.array([1, 0, 1])))
+show("sum", lambda: np.sum(a, where=m))
+show("max", lambda: np.max(a, where=[True, True, False], initial=0))
+show("mean", lambda: np.mean(a, where=m))
+show("arr.sum", lambda: a.sum(where=m))
+show("sum 2d", lambda: np.sum(M, axis=1, where=mm))
+for w in (None,):
+    show("add where=None out", lambda: (lambda o: (np.add([1, 2], 1, out=o, where=w), o.tolist())[1])(np.zeros(2, int)))
+show("add complex mask", lambda: np.add([1, 2], 1, out=np.zeros(2, int), where=np.array([1 + 0j, 0j])))
+show("divmod bool", lambda: np.divmod(np.array([True]), np.array([True]), dtype=bool))
+show("power bool", lambda: np.power(np.array([True]), np.array([True]), dtype=bool))
+show("power bool empty", lambda: np.power(np.array([], bool), np.array([], bool), dtype=bool))
+show("power bool default", lambda: np.power(np.array([True]), np.array([True])))
+show("nansum", lambda: np.nansum(np.array([1., np.nan, 3.]), where=[True, True, False]))
+show("nansum axis", lambda: np.nansum(np.array([[1., np.nan], [3., 4.]]), axis=0, where=[[True, False], [True, True]]))
+show("nansum initial", lambda: np.nansum(np.array([1., np.nan]), initial=5))
+show("nanprod", lambda: np.nanprod(np.array([2., np.nan, 3.]), where=[True, True, False]))
+show("nanprod int mask", lambda: np.nanprod(np.array([2., 3.]), where=np.array([1, 0])))

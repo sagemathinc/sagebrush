@@ -789,6 +789,9 @@ def _where_mask(where):
     Python or NumPy scalar) converted as np.array(where, dtype=bool) converts it"""
     if where is True:
         return True
+    if where is None:
+        # (np.array(None, dtype=bool): False, so nothing is written)
+        return array(False)
     if isinstance(where, ndarray) and where.dtype.kind != "b":
         what = "scalar" if where.ndim == 0 else "array data"
         raise TypeError(f"Cannot cast {what} from {where.dtype!r} to dtype('bool') according to the rule 'safe'")
@@ -807,7 +810,7 @@ class ufunc:
         return "<ufunc '%s'>" % self.__name__
 
     def __call__(self, *args, out=None, dtype=None, where=True, casting="same_kind", **kw):
-        _where_mask(where)
+        where = _where_mask(where)
         if len(args) != self.nin:
             if len(args) == self.nin + 1 and out is None:
                 out = args[-1]
@@ -854,7 +857,7 @@ class ufunc:
         op = self._op
         if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
                 else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
-                else dt.kind in "bc" and op in ("floor_divide", "remainder", "fmod")):
+                else (dt.kind in "bc" and op in ("floor_divide", "remainder", "fmod")) or (dt.kind == "b" and op == "power")):
             raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
         return dt
 
@@ -937,6 +940,8 @@ class ufunc:
             dt = self._loop(dtype)
             if a.dtype != dt:
                 a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
+        if where is not True:
+            return self._masked_reduce(a, axis, dtype, keepdims, initial, _where_mask(where))
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
         if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
@@ -970,6 +975,35 @@ class ufunc:
         if keepdims:
             acc = asarray(acc).reshape((1,) * nd) if a.ndim == 1 else expand_dims(acc, axis)
         return acc
+
+    # (the ufuncs whose reduction has an identity, the start of a masked reduction without initial)
+    _IDENTITY = {"add": 0, "multiply": 1, "logical_or": False, "logical_and": True, "logical_xor": False,
+                 "bitwise_or": 0, "bitwise_xor": 0, "bitwise_and": -1}
+
+    def _masked_reduce(self, a, axis, dtype, keepdims, initial, mask):
+        """reduce with where=: each result starts from initial (or the ufunc's identity, as NumPy's; none and no
+        initial is NumPy's ValueError) and takes in only the elements the mask (broadcast to a) keeps, in order"""
+        if initial is None:
+            initial = self._IDENTITY.get(self._op)
+            if initial is None:
+                raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to specify 'initial'" % self.__name__)
+        nd = a.ndim
+        m = broadcast_to(mask, a.shape)
+        axes = _axes(a, axis)
+        rest = [i for i in range(nd) if i not in axes]
+        order = list(axes) + rest
+        rshape = tuple(a.shape[i] for i in rest)
+        t = a.transpose(order).reshape((-1,) + rshape)
+        mt = m.transpose(order).reshape((-1,) + rshape)
+        # (the result's dtype: the unmasked reduction's of one element, so a bool or small int sum promotes as it does)
+        probe = self.reduce(t[:1] if t.shape[0] else zeros((1,) + rshape, a.dtype), axis=0, dtype=dtype)
+        acc = full(rshape, initial, dtype=asarray(probe).dtype)
+        for i in range(t.shape[0]):
+            acc = where(mt[i], self(acc, t[i]), acc)
+        acc = asarray(acc)
+        if keepdims:
+            acc = acc.reshape(tuple(1 if i in axes else a.shape[i] for i in range(nd)))
+        return acc[()] if acc.ndim == 0 else acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
         if asarray(a).ndim == 0:
@@ -1073,6 +1107,9 @@ class _ufunc2(ufunc):
         self._parts = (first, second)
 
     def __call__(self, *args, out=None, **kw):
+        # (no bool loop: refused in divmod's own name, before its parts are asked)
+        if kw.get("dtype") is not None and _dtype_of(kw["dtype"]).kind == "b":
+            raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
         if len(args) in (3, 4) and out is not None:
             raise TypeError("cannot specify 'out' as both a positional and keyword argument")
         if len(args) < 2 or len(args) > 4:
@@ -1355,7 +1392,9 @@ def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=
 
 
 def prod(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
-    # (initial starts the product, as NumPy's reduction: not a last factor)
+    # (initial starts the product, as NumPy's reduction: not a last factor; where= as multiply.reduce takes it)
+    if where is not True:
+        return _out(multiply.reduce(a, axis=axis, dtype=dtype, keepdims=keepdims, initial=initial, where=where), out)
     r = _np.prod(asarray(a), axis, keepdims, dtype, initial)
     return _out(r, out)
 
@@ -1492,12 +1531,12 @@ def _nanfill(a, value):
     return where(isnan(a), value, a)
 
 
-def nansum(a, axis=None, dtype=None, out=None, keepdims=False):
-    return sum(_nanfill(a, 0), axis, dtype, out, keepdims)
+def nansum(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
+    return sum(_nanfill(a, 0), axis, dtype, out, keepdims, initial, where)
 
 
-def nanprod(a, axis=None, dtype=None, out=None, keepdims=False):
-    return prod(_nanfill(a, 1), axis, dtype, out, keepdims)
+def nanprod(a, axis=None, dtype=None, out=None, keepdims=False, initial=None, where=True):
+    return prod(_nanfill(a, 1), axis, dtype, out, keepdims, initial, where)
 
 
 def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
