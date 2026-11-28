@@ -47,6 +47,7 @@ export async function kemFromSeed(seed) {
 
 const le = (b) => { let n = 0n; for (let i = b.length - 1; i >= 0; i--) n = (n << 8n) | BigInt(b[i]); return n; };
 const bytesLe = (n) => { const b = new Uint8Array(32); for (let i = 0; i < 32; i++) { b[i] = Number(n & 255n); n >>= 8n; } return b; };
+/** @param {bigint} b @param {bigint} e */
 function pow(b, e) { let r = 1n; b %= P; while (e > 0n) { if (e & 1n) r = (r * b) % P; b = (b * b) % P; e >>= 1n; } return r; }
 
 /** An Ed25519 signing key from a 32-byte seed, in the fleet core's key shape ({ raw, key, sign }); non-extractable. */
