@@ -34,6 +34,13 @@ for label, colors in [("named", ["red", "blue", "green"]), ("hex", ["#ff0000", "
     show("listed %s nan alpha" % label, lambda: c(float("nan"), alpha=0.5))
     show("listed %s shape" % label, lambda: c([[0.0, 1.0], [0.4, 0.6]]))
     show("listed %s ints" % label, lambda: c(np.array([0, 1, 2])))
+# (alpha clipped to [0, 1]; a bool an index, True the second entry, not the last as 1.0 would be)
+three = ListedColormap(["red", "#00ff00", "blue"])
+show("alpha 2", lambda: three(0.5, alpha=2))
+show("alpha -1", lambda: three(0.5, alpha=-1))
+show("True", lambda: three(True))
+show("False", lambda: three(False))
+show("bools", lambda: three(np.array([True, False])))
 show("listed N=5", lambda: ListedColormap(["red", "blue"], N=5)(np.array([0, 1, 2, 3, 4])))
 show("listed N=2", lambda: ListedColormap(["red", "blue", "green"], N=2)(np.linspace(0, 1, 4)))
 
