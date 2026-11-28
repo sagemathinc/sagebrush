@@ -1135,6 +1135,20 @@ pub fn try_is_irreducible(f: &[BigInt]) -> Result<bool, FactorLimit> {
     Ok(fs.len() == 1 && fs[0].1 == 1)
 }
 
+/// Whether f (integer coefficients) is square-free over Q: certified modulo
+/// a prime where it keeps its degree, else decided by the exact gcd(f, f')
+/// (Yun's first step), so never "unknown".  Within the default limits.
+pub fn try_is_squarefree(f: &[BigInt]) -> Result<bool, FactorLimit> {
+    let f = trimmed(f);
+    if f.len() < 3 {
+        return Ok(true);
+    }
+    let b = Budget::default();
+    let p = prim(&b, f)?;
+    let parts = squarefree_with(&b, &p)?;
+    Ok(parts.len() == 1 && parts[0].1 == 1)
+}
+
 /// [`try_is_irreducible`], panicking on a refusal (for tests).
 pub fn is_irreducible(f: &[BigInt]) -> bool {
     try_is_irreducible(f).unwrap_or_else(|e| panic!("{e}"))
