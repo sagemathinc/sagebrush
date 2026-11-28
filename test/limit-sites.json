@@ -4113,6 +4113,11 @@
   "owner": "HMF engine",
   "row": "inv-38"
  },
+ "engine/hmf/src/field.rs :: from_gens :: let g = shortest(u, v).ok_or(\"ideal too large\")?; #0": {
+  "class": "coverage",
+  "owner": "Hilbert modular forms (engine)",
+  "reason": "the generator search's checked i128 arithmetic actually overflowing: ideals past the types supported, not a size or work cap"
+ },
  "engine/hmf/src/field.rs :: primes_above_norms_past_u64 :: for p in [(1u64 << 63) - 25, u64::MAX - 58] { #0": {
   "class": "none",
   "owner": "Hilbert modular forms (engine)",

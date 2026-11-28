@@ -507,20 +507,32 @@ impl Ord for Prime {
 /// A shortest nonzero vector of the 2-dimensional lattice with basis u, v
 /// (vectors x + y w as (x, y)) for the positive definite form
 /// Q(x + y w) = 2x^2 + 2xy + 3y^2, the sum of the squares of the two real
-/// embeddings, by Lagrange-Gauss reduction.
-fn shortest(mut u: (i128, i128), mut v: (i128, i128)) -> (i128, i128) {
-    let q = |x: (i128, i128)| 2 * x.0 * x.0 + 2 * x.0 * x.1 + 3 * x.1 * x.1;
-    let bil = |x: (i128, i128), y: (i128, i128)| 2 * x.0 * y.0 + x.0 * y.1 + x.1 * y.0 + 3 * x.1 * y.1;
-    if q(u) > q(v) {
+/// embeddings, by Lagrange-Gauss reduction; None when a value it forms
+/// passes i128 (checked: no fixed bound on the input).
+fn shortest(mut u: (i128, i128), mut v: (i128, i128)) -> Option<(i128, i128)> {
+    fn mul(a: i128, b: i128) -> Option<i128> {
+        a.checked_mul(b)
+    }
+    fn add(terms: &[Option<i128>]) -> Option<i128> {
+        terms.iter().try_fold(0i128, |acc, t| acc.checked_add((*t)?))
+    }
+    let q = |x: (i128, i128)| add(&[mul(2, x.0).and_then(|t| mul(t, x.0)), mul(2, x.0).and_then(|t| mul(t, x.1)), mul(3, x.1).and_then(|t| mul(t, x.1))]);
+    let bil = |x: (i128, i128), y: (i128, i128)| {
+        add(&[mul(2, x.0).and_then(|t| mul(t, y.0)), mul(x.0, y.1), mul(x.1, y.0), mul(3, x.1).and_then(|t| mul(t, y.1))])
+    };
+    if q(u)? > q(v)? {
         std::mem::swap(&mut u, &mut v);
     }
     loop {
-        // v -= round(B(u, v) / Q(u)) u
-        let (n, d) = (bil(u, v), q(u));
-        let m = (2 * n + d).div_euclid(2 * d);
-        v = (v.0 - m * u.0, v.1 - m * u.1);
-        if q(v) >= q(u) {
-            return u;
+        // v -= round(B(u, v) / Q(u)) u, the rounding as n div d plus one when
+        // the remainder is at least half of d (2 r < 2 d never overflows
+        // where d does not)
+        let (n, d) = (bil(u, v)?, q(u)?);
+        let (fl, r) = (n.div_euclid(d), n.rem_euclid(d));
+        let m = if r >= d - r { fl.checked_add(1)? } else { fl };
+        v = (v.0.checked_sub(mul(m, u.0)?)?, v.1.checked_sub(mul(m, u.1)?)?);
+        if q(v)? >= q(u)? {
+            return Some(u);
         }
         std::mem::swap(&mut u, &mut v);
     }
@@ -528,8 +540,8 @@ fn shortest(mut u: (i128, i128), mut v: (i128, i128)) -> (i128, i128) {
 
 /// The primes of O_F above the rational prime p, sorted; an error if p is
 /// not prime, is inert of norm p^2 >= 2^64 (p >= 2^32), past the u64 norms
-/// of [`Prime`] and [`Hnf`], or is split and at least 2^62, past the i128
-/// arithmetic of the generator's search (its Gram values reach 6 p^2).
+/// of [`Prime`] and [`Hnf`], or is split and the generator's search
+/// (checked i128 arithmetic) or its coefficients actually overflow.
 pub fn primes_above(p: u64) -> Result<Vec<Prime>, String> {
     if !is_prime(p) {
         return Err(format!("{} is not prime", p));
@@ -546,11 +558,6 @@ pub fn primes_above(p: u64) -> Result<Vec<Prime>, String> {
         }
         return Ok(vec![Prime::from_gen(p, Kind::Inert, Elt::int(p as i64))]);
     }
-    if p >= 1 << 62 {
-        // (shortest's reduction forms 2 B(u, v) + Q(u) <= 6 p^2 + 6 p + 3 in
-        // i128 from the basis (p, 0), (-r, 1): below 2^127 for p < 2^62)
-        return Err(format!("the primes above {} are split of norm {}, at least 2^62: past the norms supported", p, p));
-    }
     // p = +-1 mod 5 splits: x^2 - x - 1 has the roots r = (1 +- sqrt 5)/2
     // mod p, and (p) = (p, w - r)(p, w - r'). The lattice (p, w - r) has
     // covolume p sqrt 5 in the Minkowski embedding, so a shortest vector g has
@@ -560,8 +567,9 @@ pub fn primes_above(p: u64) -> Result<Vec<Prime>, String> {
     let mut v = vec![];
     for t in [s, p - s] {
         let r = ((1 + t) as u128 * half as u128 % p as u128) as u64;
-        let g = shortest((p as i128, 0), (-(r as i128), 1));
-        let g = Elt::new(narrow(g.0), narrow(g.1));
+        let big = || format!("the primes above {} are split of norm {}, past the i128 arithmetic of their generators' search", p, p);
+        let g = shortest((p as i128, 0), (-(r as i128), 1)).ok_or_else(big)?;
+        let g = Elt::new(i64::try_from(g.0).map_err(|_| big())?, i64::try_from(g.1).map_err(|_| big())?);
         assert_eq!(g.norm().unsigned_abs(), p as u128, "no generator of norm p found");
         v.push(Prime::from_gen(p, Kind::Split, g));
     }
@@ -652,7 +660,7 @@ impl Ideal {
         }
         // u = (A, 0) and v = (B, C) with C | A: reduce B modulo A
         let v = (v.0.rem_euclid(u.0.abs()), v.1);
-        let g = shortest(u, v);
+        let g = shortest(u, v).ok_or("ideal too large")?;
         let g = Elt::new(i64::try_from(g.0).map_err(|_| "ideal too large")?, i64::try_from(g.1).map_err(|_| "ideal too large")?);
         let n = (u.0 * v.1 - u.1 * v.0).unsigned_abs();
         if g.norm().unsigned_abs() != n {
@@ -737,10 +745,11 @@ mod tests {
     /// 10.10 gives 2^63 - 25 and 2^64 - 59 one inert prime each, of norm p^2
     /// (85070591730234615404675050015203263089 and
     /// 340282366920938461286658806734041124249), where this gave norms 625 and
-    /// 3481. Split primes from 2^62 on are refused too (the generator's
-    /// search passes i128 there; in a debug build 2^63 - 259 overflowed).
-    /// The largest inert prime below 2^32 and the largest split prime below
-    /// 2^62 are still answered, with Sage's norms.
+    /// 3481. The generator's search for a split prime is checked, so it
+    /// refuses only on an actual i128 overflow: 2^62 + 135 and 2^63 - 259
+    /// (which overflowed in a debug build before) are answered with Sage's
+    /// norms, 2^64 - 95 is refused. The largest inert prime below 2^32 is
+    /// answered too.
     #[test]
     fn primes_above_norms_past_u64() {
         for p in [(1u64 << 63) - 25, u64::MAX - 58] {
@@ -754,9 +763,18 @@ mod tests {
         for q in &v {
             assert_eq!((q.norm, q.kind), (4611686018427387761, Kind::Split));
         }
-        for p in [9223372036854775549, 18446744073709551521] {
-            assert!(primes_above(p).unwrap_err().contains("2^62"));
+        // (past 2^62 the search's worst case passes i128, but not its actual
+        // values: answered, with Sage's norms)
+        for p in [4611686018427388039u64, 9223372036854775549] {
+            let v = primes_above(p).unwrap();
+            assert_eq!(v.len(), 2);
+            for q in &v {
+                assert_eq!((q.norm, q.kind), (p, Kind::Split));
+            }
         }
+        // (near 2^64 the search's first Gram value, 2 p^2, does pass i128:
+        // refused on that actual overflow)
+        assert!(primes_above(18446744073709551521).unwrap_err().contains("i128"));
         assert!(primes_above(91).unwrap_err().contains("not prime"));
     }
 
