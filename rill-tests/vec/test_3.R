@@ -73,3 +73,38 @@ x <- sum(c(2147483647L, 1L), NA); typeof(x); x; typeof(sum(2147483647L, NA, 1L))
 1/prod(c(-1, 0)); 1/prod(c(-1, -1, 0)); 1/prod(c(0, -2), 3); 1/prod(c(-0, 2)); 1/prod(c(-0, -0))
 #-- mean-trim-rounding
 mean(c(1, 2, 3, 4, 10, 20, 30, 40, 50, 1000), trim = 0.15); mean(1:7, trim = 0.2)
+#-- prod-extended-range
+prod(c(rep(1e300, 20), rep(1e-300, 20))); prod(c(rep(1e-300, 20), rep(1e300, 20))); print(prod(c(rep(1e300, 16), rep(1e-300, 16))), digits = 17); prod(c(rep(1e300, 17), rep(1e-300, 17)))
+print(prod(c(rep(1e300, 16), 1.18e132, rep(1e-300, 16))), digits = 17); prod(c(rep(1e300, 16), 1.19e132, rep(1e-300, 16))); prod(c(rep(1e-300, 17), rep(1e300, 17)))
+#-- prod-subnormal
+print(prod(c(rep(1e-300, 16), 1e-150, rep(1e300, 16))), digits = 17); print(prod(c(rep(1e-300, 16), 1e-145, rep(1e300, 16))), digits = 17); prod(c(rep(1e-300, 16), 1.8e-151, rep(1e300, 16)))
+print(prod(c(rep(1e-300, 16), 1.9e-151, rep(1e300, 16))), digits = 17); 1/prod(c(rep(-1e-300, 17), rep(1e300, 17))); prod(c(rep(-1e300, 17), rep(1e-300, 17)))
+#-- prod-overflow-nan
+prod(c(rep(1e300, 17), 0)); prod(c(rep(1e-300, 17), Inf)); prod(c(1e300, 1e300), 0); prod(rep(1e300, 17), c(0, NA))
+#-- sum-prod-na-order
+sum(NaN, NA); sum(NA, NaN); sum(c(NaN, 1), c(2, NA)); sum(c(NA, 1), NaN); sum(NaN, NA_integer_); sum(c(Inf, -Inf), NA); sum(c(Inf, -Inf, NA)); sum(c(Inf, -Inf), c(NA, 1)); sum(NaN, c(NA, 1L))
+prod(NaN, NA); prod(NA, NaN); prod(c(NaN, NA)); prod(c(NA, NaN)); prod(NaN, NA_integer_); prod(NA_integer_, NaN); prod(c(Inf, 0), NA); prod(NA, c(Inf, 0)); prod(c(Inf, 0, NA))
+#-- sum-overflow
+sum(c(1e308, 1e308)); sum(1e308, 1e308); sum(c(1e308, 1e308), -Inf); sum(c(rep(1e308, 10), -rep(1e308, 10)))
+#-- sum-complex-na-rm
+z <- complex(real = c(NaN, 1), imaginary = c(2, 3)); w <- complex(real = c(1, NA), imaginary = c(NaN, 1))
+sum(z); sum(z, na.rm = TRUE); sum(w); sum(w, na.rm = TRUE); sum(c(1+2i, NA), na.rm = TRUE); sum(1i, NaN, na.rm = TRUE)
+#-- mean-complex-na
+z <- complex(real = c(NaN, 1), imaginary = c(2, 3)); w <- complex(real = c(1, NA), imaginary = c(NaN, 1))
+mean(z); mean(z, na.rm = TRUE); mean(w); mean(w, na.rm = TRUE); mean(complex(0)); mean(c(1+2i, NA), na.rm = TRUE); mean(complex(0), trim = 0.1)
+v <- c(3, 0.3, 1e16, 1e16, 1e16, 0.7, 0.2, 3, 0.2, 0.1); print(mean(complex(real = v, imaginary = v)), digits = 17)
+#-- mean-complex-trim-error
+mean(c(1+1i, 2+0i), trim = 0.1)
+#-- mean-trim-na
+mean(c(NaN, 1, 2), trim = 0.1); mean(c(1, 2, NaN), trim = 0.5); mean(c(1, NA), trim = 0.1); mean(c(1, NA, 3), trim = 0.2, na.rm = TRUE); mean(numeric(0), trim = 0.1)
+mean(c(5, 1, Inf), trim = 0.4); mean(c(5, 1, -Inf, Inf), trim = 0.1); mean(c(3, 1, 2, 10), trim = 0.6)
+#-- mean-special
+mean(c(1, Inf)); mean(c(-Inf, 1, 2)); mean(c(Inf, -Inf)); mean(c(Inf, -Inf, NA)); mean(rep(1e308, 4))
+#-- min-max-mixed-character
+max(9, 10, "5"); max("5", 9, 10); max(c(9, 10), "5"); max("5", c(9, 10)); min(c(1e-20, 1), "5"); min(c(1.5, 2.25), "2"); max(pi, ""); max(1e5, ""); max(1234567.1, ""); max(TRUE, "")
+max(-0, ""); max(Inf, ""); max(NaN, "a"); min(NaN, "a"); max("a", c(NaN, 1)); max(NA, "a"); max("a", c(NA, 1)); max(1, NA, "a", na.rm = TRUE); max(c("b", "B", "a")); min(c("b", "B", "a"))
+#-- min-max-character-empty
+max(character(0))
+min(NA_character_, na.rm = TRUE)
+#-- min-max-signed-zero
+1/max(-0, 0); 1/max(0, -0); 1/min(0, -0); 1/min(-0, 0); 1/max(c(-0, 0)); max(NaN, 1L, NA); typeof(min(NA_integer_, NaN))

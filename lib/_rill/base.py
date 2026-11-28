@@ -24,6 +24,7 @@ from .values import NULL, RVector
 
 INT_MAX = 2147483647
 COLON_FUZZ = 2.0 ** -23  # `:`'s length allowance, single precision's epsilon (R 4.5.3, rill-tests/core/test_3.R)
+COLON_LONG = 2 ** 52
 RANK = {"logical": 0, "integer": 1, "double": 2, "complex": 3, "character": 4}
 
 
@@ -406,7 +407,11 @@ def colon(sess, call, args):
         raise RError("NA/NaN argument", call)
     if math.isinf(a) or math.isinf(b):
         raise RError("result would be too long a vector", call)
-    n = int(math.floor(abs(b - a) + COLON_FUZZ)) + 1
+    span = abs(b - a)
+    # (R 4.5.3: -1e308:1e308 and 0:(2^52 - 1) are "result would be too long a vector")
+    if math.isinf(span) or span + COLON_FUZZ >= COLON_LONG - 1:
+        raise RError("result would be too long a vector", call)
+    n = int(math.floor(span + COLON_FUZZ)) + 1
     step = 1 if b >= a else -1
     last = a + step * (n - 1)
     as_int = a == int(a) and -INT_MAX <= a <= INT_MAX and -INT_MAX <= last <= INT_MAX

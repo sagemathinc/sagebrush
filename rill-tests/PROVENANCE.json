@@ -186,14 +186,14 @@
    "r_sha256": "602642aa56993754d3de7eb2a484407ee5ea2f81eef1e3133634064cdeeb57c1"
   },
   "rill-tests/vec/test_2.R": {
-   "cases": 39,
-   "out_sha256": "0f3a4736e32112da6fdd760655aa80d7c5715419b6fcc5513d8774d3f5ce6594",
-   "r_sha256": "feb9a16b0346f941c6d7fe4136f5939722f7f71657a0e22cc62958f1182b8e4d"
+   "cases": 65,
+   "out_sha256": "a35aabcf73b2bfa282a53896f7dcd3891fb3edc77905c0fd2da5af7bd6eb1f00",
+   "r_sha256": "9813cd6ec582fa45ad5a258e47735778b2e5421ee9d105bc8581ca480668f343"
   },
   "rill-tests/vec/test_3.R": {
-   "cases": 35,
-   "out_sha256": "d94acf2044ee1fbfc6fef43f6c60566cf6e9c235f116d60fbe7a26caecca620c",
-   "r_sha256": "2a56c8ce7127945277afb05b0c2aec4b6ae94def2ae3654dfedf2b21eee328d2"
+   "cases": 48,
+   "out_sha256": "e88f0361a8d9defd7f789782108576e2da123fadccaed7ce376c82c73a2ff1ce",
+   "r_sha256": "bd623095ce236285da9c0c744c5459f2b5e40ad592813c3771dfba9a8e1e13e4"
   }
  },
  "format": "rill-provenance",

@@ -123,10 +123,14 @@ test("§8.5: a vector past the allowance is refused with R's message and Sagebru
     assert.equal(big.status, 1);
     assert.match(big.stderr, /^Error: cannot allocate vector of size 74\.5 Gb\n(Not enough memory for this computation\.|This computation is larger than Sagebrush allows\.)\nA vector of 10000000000 numbers needs about /);
     // (a size past any host's limits is computed in Python integers, never an overflow or a host error)
-    const huge = rill("1:1e300", dir);
+    const huge = rill("1:4e15", dir);
     assert.equal(huge.status, 1);
     assert.match(huge.stderr, /^Error: cannot allocate vector of size \d+\.\d Gb\n/);
     assert.doesNotMatch(huge.stderr, /Traceback|OverflowError/);
+    // (2^52 elements or more is R's own error, R 4.5.3)
+    const long = rill("1:1e300", dir);
+    assert.equal(long.status, 1);
+    assert.equal(long.stderr, "Error in 1:1e+300 : result would be too long a vector\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -184,6 +188,9 @@ s.evaluate(parse("w <- c(a = z)")[0])
 s.evaluate(parse("j <- 50:1")[0])
 s.evaluate(parse("t10 <- 1:10")[0])
 s.evaluate(parse("t100 <- 1:100")[0])
+s.evaluate(parse('ch <- c("b", "a")')[0])
+s.evaluate(parse("cz <- complex(real = z, imaginary = 1)")[0])
+s.evaluate(parse("e0 <- integer(0)")[0])
 mem.SMALL_BYTES = 0
 cases = {
   "1:100": 100 * 32,
@@ -213,6 +220,40 @@ cases = {
   "complex(50)": 50 * 128 + 50 * 64 * 2,
   "is.na(z)": 50 * 8,
   "w[x]": 50 * 64 + 50 * 32 + 50 * 136,
+  # (#2321's review, item 8) seq, rep and the summaries, one case for each branch: the result (and its
+  # names) is the whole peak, reserved before anything is built; the summaries stream their arguments, and a
+  # trimmed mean adds its sorted copy
+  "seq(1, 50, by = 1)": 50 * 64,
+  "seq(1L, 50L, by = 1L)": 50 * 32,
+  "seq(-1e308, 1e308, by = 1e307)": 21 * 64,
+  "seq(1, 2, length.out = 50)": 50 * 64,
+  "seq(1L, 50L, length.out = 50L)": 50 * 32,
+  "seq(-1e308, 1e308, length.out = 50)": 50 * 64,
+  "seq(TRUE, TRUE, length.out = 50)": 50 * 8,
+  "seq(1L, by = 2L, length.out = 50L)": 50 * 32,
+  "seq(to = 50, length.out = 50)": 50 * 64,
+  "seq(by = 2, length.out = 50)": 50 * 64,
+  "seq_len(50)": 50 * 32,
+  "seq(x)": 50 * 32,
+  "rep(x, 2)": 100 * 32,
+  "rep(x, times = x)": 1275 * 32,
+  "rep(x, each = 2, length.out = 75)": 75 * 32,
+  "rep(w, 2)": 100 * 64 + 100 * 136,
+  "rep(e0, length.out = 50)": 50 * 32,
+  "rep_len(x, 75)": 75 * 32,
+  "rev(w)": 50 * 64 + 50 * 136,
+  "sum(x)": 64,
+  "sum(z)": 64,
+  "sum(cz)": 128,
+  "prod(z)": 64,
+  "max(x)": 32,
+  "min(z)": 64,
+  "max(ch)": 136,
+  "max(x, ch)": 136,
+  "mean(z)": 64,
+  "mean(cz)": 128,
+  "mean(z, trim = 0.1)": 50 * 64 + 64,
+  "mean(z, trim = 0.5)": 50 * 64 + 64,
 }
 TAG = "t" * 1001
 cases["c(%s = x)" % TAG] = 50 * 32 * 2 + 50 * 136 * 2 + 4 * (50 * 1001 + 91)

@@ -233,6 +233,162 @@
    "status": 0,
    "stderr": "",
    "stdout": "[1]  3 NA  1\n[1]   NA TRUE\n"
+  },
+  {
+   "id": "rep-named-arguments",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3 1 2 3\n[1] 1 2 3 1 2 3\n[1] 1 2 1\n[1] 1 1 2 2\n[1] 1 1 2 2 1 1 2 2\n[1] 1 2 1\n[1] 1 1 2\n[1] 1 2 1 2\n[1] 1 2 1 2\n[1] 1 2 1\n"
+  },
+  {
+   "id": "rep-zero-length",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA NA NA\n[1] NA NA\n      \nNA NA \ninteger(0)\n[1] NA NA NA\n[1] NA NA NA\nNULL\ncharacter(0)\n[1] 1 2 1\n"
+  },
+  {
+   "id": "rep-null",
+   "status": 0,
+   "stderr": "Warning message:\nIn rep(NULL, length.out = 3) : 'x' is NULL so the result will be NULL\n",
+   "stdout": "NULL\nNULL\nNULL\nNULL\n"
+  },
+  {
+   "id": "rep-len-null-error",
+   "status": 1,
+   "stderr": "Error in rep_len(NULL, 1) : cannot replicate NULL to a non-zero length\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-counts-lenient",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n[1] 1 2\n[1] 1 2\n[1] 1 1 2 2\ninteger(0)\n[1] 1 2 1\n[1] 1\n[1] 1 2\n[1] 1 1 1\na a b \n1 1 2 \n [1] 1 1 1 2 2 2 2 2 2 2\n"
+  },
+  {
+   "id": "rep-counts-first-element",
+   "status": 0,
+   "stderr": "Warning message:\nIn rep(1:3, length.out = c(4, 5)) :\n  first element used of 'length.out' argument\nWarning message:\nIn rep(1:2, each = c(2, 3)) : first element used of 'each' argument\nWarning message:\nIn rep(1:2, each = integer(0)) : first element used of 'each' argument\n",
+   "stdout": "[1] 1 2 3 1\n[1] 1 1 2 2\n[1] 1 2\n"
+  },
+  {
+   "id": "rep-error-length-out",
+   "status": 1,
+   "stderr": "Error in rep(1:3, length.out = -1) : invalid 'length.out' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-error-each-negative",
+   "status": 1,
+   "stderr": "Error in rep(1:2, each = -1) : invalid 'each' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-error-times-na",
+   "status": 1,
+   "stderr": "Error in rep(1:2, times = c(1, NA)) : invalid 'times' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-error-times-after-each",
+   "status": 1,
+   "stderr": "Error in rep(1:2, each = 2, times = c(1, 2)) : invalid 'times' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-len-error-na",
+   "status": 1,
+   "stderr": "Error in rep_len(1:3, NA) : invalid 'length.out' value\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-len-error-length",
+   "status": 1,
+   "stderr": "Error in rep_len(1:3, c(2, 3)) : invalid 'length.out' value\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "rep-len-lenient",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2\n[1] 1\n"
+  },
+  {
+   "id": "seq-one-argument",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 1\n[1] 1 2\n[1] 1\n[1] 1 2\n[1]  1  0 -1 -2\n"
+  },
+  {
+   "id": "seq-one-argument-error",
+   "status": 1,
+   "stderr": "Error in seq.default(NA_real_) : 'from' must be a finite number\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-huge-ends",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -1e+308   0e+00  1e+308\n[1] -1.0000000000000000e+308 -7.0000000000000003e+307 -4.0000000000000004e+307\n[4] -1.0000000000000016e+307  1.9999999999999992e+307  5.0000000000000001e+307\n[7]  7.9999999999999969e+307\n[1] -1.6999999999999999e+308 -6.9999999999999993e+307  3.0000000000000008e+307\n[4]  1.3000000000000001e+308\n[1]  1e+308   0e+00 -1e+308\n[1] -1e+308   0e+00  1e+308\n[1] -1.0000000000000000e+308 -5.0000000000000001e+307   0.0000000000000000e+00\n[4]  5.0000000000000001e+307  1.0000000000000000e+308\n[1]  1e+308   0e+00 -1e+308\n[1] -1.7e+308  1.7e+308\n"
+  },
+  {
+   "id": "seq-too-long",
+   "status": 1,
+   "stderr": "Error in from:to : result would be too long a vector\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "colon-too-long",
+   "status": 1,
+   "stderr": "Error in -1e+308:1e+308 : result would be too long a vector\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-by-much-too-small",
+   "status": 1,
+   "stderr": "Error in seq.default(0, 1, by = 1e-10) : 'by' argument is much too small\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-by-ratio-infinite",
+   "status": 1,
+   "stderr": "Error in seq.default(0, 1e+308, by = 1e-308) : invalid '(to - from)/by'\nCalls: seq -> seq.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "seq-tiny-span",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 23\n[1] 4\n[1] 9\n[1] 1e+10\n[1] -1\n"
+  },
+  {
+   "id": "seq-length-out-type-rule",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"integer\"\n[1] \"integer\"\n[1] \"double\"\n[1] \"double\"\n[1] \"integer\"\n[1] \"double\"\n[1] \"integer\"\n[1] \"integer\"\n[1] \"double\"\n[1] \"integer\"\n[1] \"double\"\n[1] \"double\"\n[1] \"integer\"\n[1]  1  4  7 10\n[1] 5 3 1\n[1] 1.0 2.5 4.0\n"
+  },
+  {
+   "id": "seq-length-out-int-range",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]          1 2147483648\n[1] \"double\"\n[1]          0 2147483647\n[1] \"double\"\n[1] -2147483647           0  2147483647\n"
+  },
+  {
+   "id": "seq-equal-ends",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE TRUE TRUE\n[1] 1 1 1\n[1] 1 1\n[1] \"double\"\n[1] 1e+308 1e+308\n"
+  },
+  {
+   "id": "seq-by-integer-like",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"integer\"\n[1] \"double\"\n[1] 0 1 2\n[1] \"double\"\n[1] \"double\"\n[1] 5 3 1\n"
+  },
+  {
+   "id": "seq-length-out-first",
+   "status": 0,
+   "stderr": "Warning message:\nIn seq.default(1, 10, length.out = c(2, 3)) :\n  first element used of 'length.out' argument\n",
+   "stdout": "[1]  1 10\n"
   }
  ],
  "file": "rill-tests/vec/test_2.R",
