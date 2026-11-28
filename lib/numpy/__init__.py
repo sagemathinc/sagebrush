@@ -191,14 +191,45 @@ def _arith(cls):
     return cls
 
 
+def _as_array_arg(v, complex_=False):
+    """A scalar type's array-like argument as asarray takes it: a plain sequence object (__len__ and __getitem__, not
+    a list or tuple) read item by item, as NumPy's sequence protocol reads it; one whose __len__ is negative is no
+    sequence, NumPy's error for a scalar it can't convert (a float type's ValueError, a complex type's TypeError)"""
+    if isinstance(v, (list, tuple, ndarray, range)) or hasattr(v, "__array__"):
+        return v
+    try:
+        len(v)
+    except ValueError:
+        if complex_:
+            raise TypeError("must be real number, not %s" % type(v).__name__) from None
+        raise ValueError("setting an array element with a sequence.") from None
+    # (items read until IndexError, as NumPy's: __len__ neither truncates nor extends them)
+    out = []
+    while True:
+        try:
+            out.append(v[len(out)])
+        except IndexError:
+            return out
+
+
+def _array_like(v):
+    """A scalar type's argument NumPy converts as an array: a sequence (a range, a list, ... not a str, bytes or a
+    mapping), an ndarray or an object with __array__"""
+    if isinstance(v, (list, tuple, ndarray, range)) or hasattr(v, "__array__"):
+        return True
+    return (hasattr(v, "__len__") and hasattr(v, "__getitem__") and not isinstance(v, (str, bytes, bytearray, dict))
+            and not hasattr(v, "keys"))
+
+
 @_arith
 class float64(float, floating):
     __slots__ = ()
     __hash__ = float.__hash__
 
     def __new__(cls, v=0.0):
-        if isinstance(v, (list, tuple, ndarray)):
-            return asarray(v, float64)  # as NumPy: a sequence gives an array
+        if _array_like(v):
+            a = asarray(_as_array_arg(v), float64)  # as NumPy: a sequence gives an array, a 0-d array its scalar
+            return a[()] if a.ndim == 0 else a
         return float.__new__(cls, v)
 
     def __repr__(self):
@@ -221,8 +252,9 @@ class float32(float, floating):
     __hash__ = float.__hash__
 
     def __new__(cls, v=0.0):
-        if isinstance(v, (list, tuple, ndarray)):
-            return asarray(v, float32)
+        if _array_like(v):
+            a = asarray(_as_array_arg(v), float32)
+            return a[()] if a.ndim == 0 else a
         return float.__new__(cls, _f32(v))
 
     def __repr__(self):
@@ -323,6 +355,16 @@ class complex128(complex, complexfloating):
     __slots__ = ()
     __hash__ = complex.__hash__
 
+    def __new__(cls, *args):
+        if len(args) == 1 and _array_like(args[0]):
+            a = asarray(_as_array_arg(args[0], True), complex128)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
+            return a[()] if a.ndim == 0 else a
+        if len(args) == 2:
+            return _complex_parts(cls, *args)
+        # (a new value from its two float parts: complex.__new__(cls, z) of a Python complex z would retype z itself)
+        z = complex(*args)
+        return complex.__new__(cls, z.real, z.imag)
+
     def __repr__(self):
         r = complex.__repr__(self)
         return "np.complex128(%s)" % (r[1:-1] if r.startswith("(") else r)
@@ -331,17 +373,79 @@ class complex128(complex, complexfloating):
         return complex.__repr__(self)
 
 
+def _complex_parts(cls, re, im):
+    """np.complex64(re, im) and np.complex128(re, im), as NumPy's: each part a real number (a Python int, float or
+    bool, a NumPy integer, floating or bool scalar), an np.complex64 or a 0-d array (a larger one NumPy's TypeError);
+    the real part, if an np.complex64 or a 0-d array, brings both its parts, its imaginary part added to the given
+    one (no +0.0 seed otherwise, so np.complex64(0, -0.0) keeps its -0.0); the imaginary part only its float(), or an
+    np.complex64's real part; anything else (a Python complex, np.complex128, a str, None) NumPy's TypeError; a
+    complex64 (or a subclass of it) rounds both parts to float32"""
+    def ok(x):
+        return ((isinstance(x, (_builtins.int, _builtins.float, integer, floating)) and not isinstance(x, _builtins.complex))
+                or isinstance(x, (complex64, ndarray)))
+    if not (ok(re) and ok(im)):
+        raise TypeError("Could not convert arguments into a complex scalar. '%r' given." % ((re, im),))
+    for x in (re, im):
+        if isinstance(x, ndarray) and x.ndim != 0:
+            raise TypeError("only 0-dimensional arrays can be converted to Python scalars")
+    if isinstance(im, complex64):
+        i = float(im.real)
+    elif isinstance(im, ndarray):
+        # (its item: a NumPy complex scalar's real part (an object array may hold one), else its float())
+        x = im.item()
+        i = float(x.real) if isinstance(x, complexfloating) else float(x)
+    else:
+        i = float(im)
+    if isinstance(re, ndarray):
+        # (a str array refused; an object array's item converted as complex() converts it, '1+2j' too)
+        if re.dtype.kind in "US":
+            raise TypeError("Unable to convert dtype('%s') to complex" % re.dtype.str)
+        z = complex(re.item())
+        r, i = z.real, z.imag + i
+    elif isinstance(re, complex64):
+        r, i = float(re.real), float(re.imag) + i
+    else:
+        r = float(re)
+    if issubclass(cls, complex64):
+        r, i = _f32(r), _f32(i)
+    return complex.__new__(cls, r, i)
+
+
+def _c64_str(z):
+    """A complex64's str, as NumPy's: Python's complex layout ("1j", "(-0-0j)", "(1+2j)"), each part in float32's
+    shortest digits (0.33333334, 1.2345679e+08)"""
+    import math
+    def part(x):
+        t = _np.format_f32(float(x))
+        return t[:-2] if t.endswith(".0") else t
+    re, im = float(z.real), float(z.imag)
+    i = part(im)
+    if re == 0 and math.copysign(1.0, re) > 0:
+        return i + "j"
+    return "(%s%s%sj)" % (part(re), "" if i.startswith("-") else "+", i)
+
+
 @_arith
 class complex64(complex, complexfloating):
     __slots__ = ()
     __hash__ = complex.__hash__
 
+    def __new__(cls, *args):
+        if len(args) == 1 and _array_like(args[0]):
+            a = asarray(_as_array_arg(args[0], True), complex64)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
+            return a[()] if a.ndim == 0 else a
+        if len(args) == 2:
+            return _complex_parts(cls, *args)
+        # (a new value from its two float parts: complex.__new__(cls, z) of a Python complex z would retype z itself)
+        z = complex(*args)
+        return complex.__new__(cls, _f32(z.real), _f32(z.imag))
+
     def __repr__(self):
-        r = complex.__repr__(self)
+        r = _c64_str(self)
         return "np.complex64(%s)" % (r[1:-1] if r.startswith("(") else r)
 
     def __str__(self):
-        return complex.__repr__(self)
+        return _c64_str(self)
 
 
 True_ = bool_(True)
@@ -785,6 +889,7 @@ class _UFuncTypeError(TypeError):
 
 
 _UFuncTypeError.__name__ = _UFuncTypeError.__qualname__ = "UFuncTypeError"
+_np.set_ufunc_type_error(_UFuncTypeError)
 
 
 def _out_cast(name, dt, out, casting):
