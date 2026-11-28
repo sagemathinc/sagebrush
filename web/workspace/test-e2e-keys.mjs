@@ -607,6 +607,15 @@ let state, A, B, C, seed, rec, e0, e1;
     ["with a missing label", { provisioned: (({ approved, ...r }) => r)(atStart) }],
   ]) await refuses("bad_form", async () => apply(before, await addEntry(before, P, G, extra)), `tier: a provisioned add ${what}`);
   await refuses("bad_form", async () => apply(before, await addEntry(before, P, Q, { provisioned: atStart })), "tier: another kind's add carries no provisioned labels");
+  // (the labels' bounds, exactly: 128 characters accepted, 129 refused, for the reservation and the instance)
+  {
+    const at128 = await apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, reservation: "r".repeat(128), instance: "i".repeat(128) } }));
+    ok(E.currentDevice(at128, G.id)?.provisioned?.reservation.length === 128 && E.currentDevice(at128, G.id).provisioned.instance.length === 128, "tier: a reservation and an instance of exactly 128 characters are accepted");
+    await refuses("bad_form", async () => apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, reservation: "r".repeat(129) } })), "tier: a reservation of 129 characters is refused");
+    await refuses("bad_form", async () => apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, instance: "i".repeat(129) } })), "tier: an instance of 129 characters is refused");
+  }
+  // (another policy on a card approval, where the Start rule doesn't apply: refused by the policy check itself)
+  await refuses("bad_form", async () => apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, approved: "card", retire_on: "never" } })), "tier: a card-approved add with another retirement policy is refused");
   {
     // (the labels are signed: changed after signing, the signature fails)
     const t = parseCanonical(addG); t.body.provisioned.approved = "card";
