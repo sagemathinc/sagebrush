@@ -139,7 +139,7 @@ export class DeviceKeys implements OpKeys {
   #current: { n: number; S: Uint8Array } | null = null;
   #derived = new Map<number, EpochKeys>();
   #seen = new Set<string>();
-  #forked = false;
+  #ended: "forked" | "no_device" | null = null;
 
   private constructor(
     readonly account: string,
@@ -153,15 +153,21 @@ export class DeviceKeys implements OpKeys {
     this.recoveryUnconfirmed = rec.recoveryShown === false;
   }
 
-  /** Refuses once the account is marked forked here, by this object or another (another tab's load or refresh): every
-   * sign, chain view and epoch key goes through it, and the cached epoch secrets are dropped on the first refusal. */
+  /** Refuses once the account is marked forked here, or this device is no longer this browser's for the account (Reset
+   * this device, in this tab or another), by this object or another: every sign, chain view and epoch key goes through
+   * it, and the cached epoch secrets are dropped on the first refusal. */
   private async live(): Promise<void> {
-    if (!this.#forked && (await get<PinRecord>("pins", this.account))?.forked) this.#forked = true;
-    if (!this.#forked) return;
+    if (!this.#ended) {
+      const tx = (await open()).transaction(["pins", "devices"], "readonly");
+      const [pin, rec] = await Promise.all([req(tx.objectStore("pins").get(this.account)), req(tx.objectStore("devices").get(this.account))]) as [PinRecord | undefined, DeviceRecord | undefined];
+      if (pin?.forked) this.#ended = "forked";
+      else if (rec?.id !== this.rec.id) this.#ended = "no_device";
+    }
+    if (!this.#ended) return;
     this.#current?.S.fill(0);
     this.#current = null;
     this.#derived.clear();
-    throw new DeviceKeysError("forked", "this device saw a forked key chain");
+    throw this.#ended === "forked" ? new DeviceKeysError("forked", "this device saw a forked key chain") : new DeviceKeysError("no_device", "this device was reset in this browser");
   }
 
   /** The device for the signed-in account, or null if this browser has none. Refuses a forked account, or a chain

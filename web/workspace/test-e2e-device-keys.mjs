@@ -198,6 +198,23 @@ try {
       "an object in use when another marks the account forked: its sign, chain view and epoch keys (cached or not) are refused (forked)", r);
   }
 
+  // ---- and for Reset this device (in another tab): an object in use stops too, until the page loads a device again
+  {
+    await reset(); await putBack();
+    const r = await P.ev(`(async () => {
+      const k1 = await K.DeviceKeys.load();
+      const warm = { e0: !!(await k1.epochKeys(0)), sig: (await k1.device.sign(new Uint8Array([1]))).length };
+      await K.resetDevice(${acct});
+      const out = { warm, sign: await code(async () => k1.device.sign(new Uint8Array([1]))), view: await code(async () => k1.chain()), refresh: await code(async () => k1.chain(true)), e0: await code(async () => k1.epochKeys(0)) };
+      await idb((d) => { d.put(window.kept, ${acct}); });
+      out.after = await code(async () => k1.device.sign(new Uint8Array([1])));
+      return out;
+    })()`);
+    ok(r.warm.e0 && r.warm.sig === 64 && [r.sign, r.view, r.refresh, r.e0].every((x) => x.code === "no_device") && r.after.code === "no_device",
+      "an object in use when Reset this device runs (another tab): its sign, chain view, refresh and epoch keys are refused (no_device), and stay so for that object", r);
+    await reset(); await putBack();
+  }
+
   // ---- C1: a fork mark another tab writes while this object's refresh is between its pin read and its advance survives:
   // the refresh is refused (forked) and the mark is still there
   {
