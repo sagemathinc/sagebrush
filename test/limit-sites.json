@@ -189,6 +189,11 @@
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
   "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
  },
+ "engine/classgroup/src/api.rs :: bnf_certify :: pub fn bnf_certify(f: &[BigInt], norm_max: Option<u64>, index_max: Option<u64>) -> Result<BnfProofData, crate::nf::factor::FactorError> { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
  "engine/classgroup/src/api.rs :: lll :: let b = sagebrush_poly::Budget::default(); #0": {
   "class": "none",
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
@@ -245,9 +250,10 @@
   "class": "none",
   "owner": "class group/number fields"
  },
- "engine/classgroup/src/limits.rs :: searches_honour_an_explicit_limit_and_converge_without_one :: let e = with_round_limit(0, || crate::api::bnf(&poly(&[-5, 0, 0, 1])).map(|_| ())).unwrap_err(); #0": {
+ "engine/classgroup/src/limits.rs :: searches_honour_an_explicit_limit_and_converge_without_one :: let e = with_round_limit(0, || crate::api::bnf(&poly(&[-5, 0, 0, 1])).map(|_| ())).unwrap_err().to_string(); #0": {
   "class": "none",
-  "owner": "class group/number fields"
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
  },
  "engine/classgroup/src/limits.rs :: searches_honour_an_explicit_limit_and_converge_without_one :: let e = with_round_limit(0, || crate::api::quadratic(&BigInt::from(-1000003)).map(|_| ())).unwrap_err(); #0": {
   "class": "none",
@@ -334,10 +340,10 @@
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
  },
- "engine/classgroup/src/nf/cost.rs ::  :: use super::factor::{RHO_ITERS, SPLIT_BITS_MAX, TRIAL_BOUND}; #0": {
+ "engine/classgroup/src/nf/cost.rs ::  :: use super::factor::{ecm_levels_before_siqs, RHO_ITERS, SPLIT_BITS_MAX, TRIAL_BOUND}; #0": {
   "class": "none",
   "owner": "estimates",
-  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
  },
  "engine/classgroup/src/nf/cost.rs :: counts_are_exact_or_unknown :: assert!(prp_cost(8_989_696).unwrap() <= u64::MAX as u128); #0": {
   "class": "none",
@@ -364,10 +370,10 @@
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
  },
- "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX #2": {
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: SPLIT_BITS_MAX, #0": {
   "class": "none",
   "owner": "estimates",
-  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
  },
  "engine/classgroup/src/nf/cost.rs :: factor_estimate :: if bits > SPLIT_BITS_MAX { #0": {
   "class": "none",
@@ -379,10 +385,25 @@
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
  },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: if let (Some(costs), Some(units_total), false) = (costs, units_total, sieved && bits <= siqs::MAX_BITS) { #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: let before = ecm_levels_before_siqs(bits.min(siqs::MAX_BITS)); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
  "engine/classgroup/src/nf/cost.rs :: factor_estimate :: let max_digits = ((bits as f64 / 2.0) * 2f64.log10()).ceil() as u32; #0": {
   "class": "none",
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: let memory = lv.iter().map(|l| table_peak(l.table) + buffers).max().unwrap_or(0).max(RHO_MEMORY).max(siqs::memory_bound(siqs::MAX_BITS)); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
  },
  "engine/classgroup/src/nf/cost.rs :: factor_estimate :: let sqrt_bound = if bits / 2 + 1 >= 64 { u64::MAX } else { 1u64 << (bits / 2 + 1) }; #0": {
   "class": "none",
@@ -394,10 +415,35 @@
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
  },
- "engine/classgroup/src/nf/cost.rs :: factor_estimate :: name: format!(\"Pollard-Brent rho and ECM on a cofactor of at most {} bits\", SPLIT_BITS_MAX), #0": {
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: memory: Some(siqs::memory_bound(bits.min(siqs::MAX_BITS))), #0": {
   "class": "none",
   "owner": "estimates",
-  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: name: format!(\"Pollard-Brent rho, ECM and the quadratic sieve on a cofactor of at most {} bits\", SPLIT_BITS_MAX), #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: name: format!(\"quadratic sieve (SIQS) on a cofactor of {} to {} bits\", siqs::MIN_BITS, siqs::MAX_BITS), #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: siqs::MAX_BITS #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: siqs::MAX_BITS #1": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
+ "engine/classgroup/src/nf/cost.rs :: factor_estimate :: siqs::MAX_BITS, #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
  },
  "engine/classgroup/src/nf/cost.rs :: gcd_u64 :: const RHO_UMAX: usize = 64; #0": {
   "class": "none",
@@ -438,6 +484,21 @@
   "class": "none",
   "owner": "estimates",
   "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing (estimates plan r3 PR 2a)"
+ },
+ "engine/classgroup/src/nf/cost.rs :: the_sieve_is_a_stage_of_unknown_work :: assert_eq!(e.ecm.is_empty(), bits <= siqs::MAX_BITS, \"{}\", bits); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
+ "engine/classgroup/src/nf/cost.rs :: the_sieve_is_a_stage_of_unknown_work :: assert_eq!(s.memory, Some(siqs::memory_bound(bits.min(siqs::MAX_BITS)))); #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
+ },
+ "engine/classgroup/src/nf/cost.rs :: the_sieve_is_a_stage_of_unknown_work :: for bits in [siqs::MIN_BITS, 160, siqs::MAX_BITS, 300, 1024] { #0": {
+  "class": "none",
+  "owner": "estimates",
+  "reason": "the estimator's cost model (nf/cost.rs): information only, it runs, limits and refuses nothing; the quadratic sieve's stage and its range"
  },
  "engine/classgroup/src/nf/ecm.rs ::  :: pub const MAXL: usize = 16; #0": {
   "class": "coverage",
@@ -480,10 +541,30 @@
   "owner": "class group/number fields",
   "reason": "ECM's bound schedule (B2 = 50 B1 up to these bounds; the prime table's bound): algorithm parameters, named for the estimator (nf/cost.rs) with unchanged values; nothing is refused"
  },
+ "engine/classgroup/src/nf/factor.rs :: factors_in_the_sieve_range :: assert!((super::super::siqs::MIN_BITS..=super::super::siqs::MAX_BITS).contains(&(n.bits() as u64))); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's range (siqs::MIN_BITS to MAX_BITS): routing only; a composite outside it goes to ECM, and nothing is refused"
+ },
+ "engine/classgroup/src/nf/factor.rs :: split :: if (super::siqs::MIN_BITS..=super::siqs::MAX_BITS).contains(&bits) { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's range (siqs::MIN_BITS to MAX_BITS): routing only; a composite outside it goes to ECM, and nothing is refused"
+ },
  "engine/classgroup/src/nf/factor.rs :: strong_lucas_prp :: pub const SPLIT_BITS_MAX: u64 = 1024; #0": {
   "class": "coverage",
   "owner": "class group/number fields",
   "reason": "the Montgomery arithmetic's range (16 limbs, 1024 bits): beyond it rho and ECM don't apply (TooLarge); made pub for the estimator (nf/cost.rs), unchanged"
+ },
+ "engine/classgroup/src/nf/order.rs :: maximal_order :: pub fn maximal_order(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>), FactorError> { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/order.rs :: maximal_order_assuming :: pub fn maximal_order_assuming(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>, Vec<BigInt>), FactorError> { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
  },
  "engine/classgroup/src/nf/proof.rs ::  :: impl Limits { #0": {
   "class": "3",
@@ -492,6 +573,46 @@
  "engine/classgroup/src/nf/proof.rs ::  :: pub const CALIBRATED: Limits = Limits { norm_max: 1_000_000, index_max: 1_000_000 }; #0": {
   "class": "3",
   "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/proof.rs :: certify :: _ => return Err(refuse(\"a prime factor of h* (each is checked modulo itself)\", &l, PRIME_MAX - 1).into()), #0": {
+  "class": "coverage",
+  "owner": "class group/number fields",
+  "reason": "the class group proof does not cover primes past PRIME_MAX or a maximal order resting on probable primes: unsupported, not a cap; the error is now the typed one, the same text"
+ },
+ "engine/classgroup/src/nf/proof.rs :: certify :: pub fn certify(f: &[BigInt], limits: &Limits) -> Result<Proof, crate::nf::factor::FactorError> { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/proof.rs :: certify :: return Err(format!(\"the maximal order assumes {} prime (probable primes, not proven)\", ps.join(\", \")).into()); #0": {
+  "class": "coverage",
+  "owner": "class group/number fields",
+  "reason": "the class group proof does not cover primes past PRIME_MAX or a maximal order resting on probable primes: unsupported, not a cap; the error is now the typed one, the same text"
+ },
+ "engine/classgroup/src/nf/proof.rs :: certify :: return Err(refuse(\"the bound on the index of the units found in the unit group (regulator found / Zimmert's lower bound)\", &bnd, PRIME_MAX - 1).into()); #0": {
+  "class": "coverage",
+  "owner": "class group/number fields",
+  "reason": "the class group proof does not cover primes past PRIME_MAX or a maximal order resting on probable primes: unsupported, not a cap; the error is now the typed one, the same text"
+ },
+ "engine/classgroup/src/nf/proof.rs :: certify :: return Err(refuse(\"the bound on the index of the units found in the unit group (regulator found / Zimmert's lower bound)\", &bnd, limits.index_max).into()); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "limits": "nf.certify_index_max"
+   }
+  },
+  "owner": "class group/number fields",
+  "reason": "the class group proof refuses an index bound past the session limit nf.certify_index_max (unlimited by default); the error is now the typed one, the same text"
+ },
+ "engine/classgroup/src/nf/proof.rs :: certify :: return Err(refuse(&format!(\"the {} bound for the norms of ideal class representatives\", kind.name()), &mbound, limits.norm_max).into()); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "limits": "nf.certify_norm_max"
+   }
+  },
+  "owner": "class group/number fields",
+  "reason": "the class group proof refuses a norm bound past the session limit nf.certify_norm_max (unlimited by default); the error is now the typed one, the same text"
  },
  "engine/classgroup/src/nf/proof.rs :: default :: Limits { norm_max: u64::MAX, index_max: u64::MAX } #0": {
   "class": "3",
@@ -519,13 +640,159 @@
   "class": "none",
   "owner": "class group/number fields"
  },
- "engine/classgroup/src/nf/proof.rs :: limits_are_opt_in :: let e = certify(&poly(&[3_000_000_000_001, 0, 1]), &Limits::CALIBRATED).unwrap_err(); #0": {
+ "engine/classgroup/src/nf/proof.rs :: limits_are_opt_in :: let e = certify(&poly(&[3_000_000_000_001, 0, 1]), &Limits::CALIBRATED).unwrap_err().to_string(); #0": {
   "class": "none",
-  "owner": "class group/number fields"
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/proof.rs :: small_factors :: fn small_factors(m: &BigInt, max: u64, primes: &[u64]) -> Result<Vec<(u64, u32)>, crate::nf::factor::FactorError> { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs ::  :: const A_MAX: usize = 1 << 14; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's cap on the values of a per run (a 250-bit n needs about 800), so that the set of those used is in memory_bound: past it the sieve gives up and ECM goes on; nothing is refused"
+ },
+ "engine/classgroup/src/nf/siqs.rs ::  :: const A_PRIME_MAX: f64 = 4000.0; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs ::  :: const PARTIALS_MAX: usize = 8; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve keeps at most this many partial relations per relation wanted, so that its memory has a bound (siqs::memory_bound); further ones are dropped, which can only slow the sieve: nothing is refused"
+ },
+ "engine/classgroup/src/nf/siqs.rs ::  :: pub const MAX_BITS: u64 = 250; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's range (siqs::MIN_BITS to MAX_BITS): routing only; a composite outside it goes to ECM, and nothing is refused"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: dependencies :: let mut col_of = vec![usize::MAX; ncols]; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: fixed_bytes :: let per_candidate = 6 * big_bytes(limbs) as usize + 4 * 6 * max_cols(bits, s, m); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: fixed_bytes :: let slots = want * std::mem::size_of::<Rel>() + table_bytes(PARTIALS_MAX * want, std::mem::size_of::<(u64, (BigInt, Vec<u32>))>()) as usize; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: max_cols :: fn max_cols(bits: u64, s: usize, m: usize) -> usize { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: memory_bound_with :: let qcap = (2.0 * size as f64).min(A_PRIME_MAX); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: new :: fb.plim.push(u64::MAX / p); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: new :: let cap = size.max(1); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: new :: let mut fb = Fb { p: Vec::with_capacity(cap), t: Vec::with_capacity(cap), logp: Vec::with_capacity(cap), pinv: Vec::with_capacity(cap), plim: Vec::with_capacity(cap) }; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: if !chosen || used.len() > A_MAX { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's cap on the values of a per run (a 250-bit n needs about 800), so that the set of those used is in memory_bound: past it the sieve gives up and ECM goes on; nothing is refused"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: if partials.len() < PARTIALS_MAX * want { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve keeps at most this many partial relations per relation wanted, so that its memory has a bound (siqs::memory_bound); further ones are dropped, which can only slow the sieve: nothing is refused"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let log_gmax = (m as f64).log2() + 0.5 * log_kn - 0.5; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let lp_max = pmax * par.lp_mult.clamp(1, pmax); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let mut partials: HashMap<u64, (BigInt, Vec<u32>)> = HashMap::with_capacity(PARTIALS_MAX * want); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let pmax = *fb.p.last().unwrap() as u64; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let qcap = (pmax as f64 / 2.0).min(A_PRIME_MAX); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let thresh = (log_gmax - (lp_max as f64).log2() - par.slack as f64).clamp(10.0, 127.0) as u8; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: } else if let Some(l) = v.to_u64().filter(|&l| l <= lp_max) { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: table_bytes :: fn table_bytes(cap: usize, item: usize) -> u64 { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: table_bytes :: let buckets = if cap < 4 { 4 } else if cap < 8 { 8 } else { (cap * 8 / 7).next_power_of_two() }; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
  },
  "engine/classgroup/src/realq.rs :: class_group_real_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
   "owner": "class group/number fields"
+ },
+ "engine/classgroup/tests/siqs_memory.rs ::  :: use sagebrush_classgroup::nf::order::maximal_order; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/siqs_memory.rs ::  :: use sagebrush_classgroup::nf::proof::{certify, Limits}; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/siqs_memory.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: match certify(&f, &Limits::default()) { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/siqs_memory.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: match maximal_order(&f) { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/siqs_memory.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: other => panic!(\"maximal_order: {:?}\", other.map(|_| ())), #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
  },
  "engine/galois/src/tables.rs ::  :: pub const MAX_DEGREE: usize = 23; #0": {
   "class": "3",
@@ -4163,6 +4430,11 @@
   "class": "3",
   "owner": "polynomial factorization"
  },
+ "engine/web/src/lib.rs :: dispatch :: let b = typed(sagebrush_classgroup::api::bnf_certify(&bigs(v.get(\"f\"))?, opt(\"norm_max\")?, opt(\"index_max\")?))?; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
  "engine/web/src/lib.rs :: host_map_room :: h.reserve_exact((new - cap) as usize); #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
@@ -6593,6 +6865,11 @@
  "lib/_memguard.py :: SagebrushMemoryError.__init__ :: self.limit_bytes = limit_bytes #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: engine_refusal :: sage: type(e).__name__, e.what, e.need_bytes, e.limit_bytes, e.record[\"row\"] #0": {
+  "class": "none",
+  "owner": "memory guards (lib/_memguard.py)",
+  "reason": "a doctest printing the memory guard error's figures (limit_bytes, the room it reports): refuses nothing"
  },
  "lib/_memguard.py :: memory_guard :: def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None, fixed=False, #0": {
   "class": "none",
