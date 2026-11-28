@@ -1971,6 +1971,28 @@ async function sessionFor(sub, context) {
   const prow = await db.prepare("SELECT ags_scope, lineitems, lineitem, resource_link FROM placements WHERE placement = ?").bind(plA).first();
   ok(prow && JSON.parse(prow.ags_scope).sort().join() === "lineitem,result.readonly,score", `the placement records the launch's grant (${prow && prow.ags_scope})`);
   ok(prow && prow.lineitems === lineitems && prow.lineitem === null && prow.resource_link === "rl-ags", "...with its line items URL and resource link");
+  // the placements quota counts rows, not launches: refreshes of one placement charge it once; at the cap an existing
+  // placement still launches and a new one is refused with nothing stored
+  {
+    const pq = () => db.prepare("SELECT q.count AS count, q.bytes AS bytes, (SELECT count(*) FROM placements WHERE rid = ?1) AS rows, (SELECT coalesce(sum(size), 0) FROM placements WHERE rid = ?1) AS sum FROM quota q WHERE q.scope = ?1 AND q.kind = 'placements'").bind(R1.rid).first();
+    const relaunch = () => agsLaunch("student-a", "rl-ags", { scope: [S + "lineitem", S + "score", S + "result.readonly"], lineitems });
+    const st = [await relaunch(), await relaunch(), await relaunch()];
+    const after3 = await pq();
+    ok(st.every((x) => x === 200) && after3.count === after3.rows && after3.bytes === after3.sum, `three more launches of one placement: the quota still counts its rows and bytes exactly (${JSON.stringify(after3)})`);
+    // (a refresh that changes the row's size moves the bytes by the difference only)
+    ok((await agsLaunch("student-a", "rl-ags", { scope: [S + "score"], lineitems })) === 200, "(a launch with a smaller grant)");
+    const smaller = await pq();
+    ok(smaller.count === smaller.rows && smaller.bytes === smaller.sum && smaller.bytes < after3.bytes, `a refresh with a smaller grant moves the bytes by the difference (${JSON.stringify(smaller)})`);
+    ok((await relaunch()) === 200, "(and back)");
+    await db.prepare("UPDATE quota SET cap_count = count WHERE scope = ? AND kind = 'placements'").bind(R1.rid).run();
+    const atCap = await relaunch();
+    const fresh = dkey("placement", R1.rid, dep, ctxA, "rl-quota-new");
+    const refused = await agsLaunch("student-a", "rl-quota-new", { scope: [S + "score"], lineitems });
+    const stored = await db.prepare("SELECT 1 AS x FROM placements WHERE placement = ?").bind(fresh).first();
+    const capq = await pq();
+    ok(atCap === 200 && refused !== 200 && !stored && capq.count === capq.rows, `at the placements cap an existing placement still launches, and a new one is refused with nothing stored (${atCap}, ${refused}, ${JSON.stringify(capq)})`);
+    await db.prepare("UPDATE quota SET cap_count = 10000 WHERE scope = ? AND kind = 'placements'").bind(R1.rid).run();
+  }
   // a score, the line item made by query-then-POST, and the score posted
   const q1 = await queue({});
   ok(q1.ok && q1.value.seq === 1, `a score is queued at seq 1 (${JSON.stringify(q1)})`);
@@ -2207,6 +2229,26 @@ async function sessionFor(sub, context) {
 
 // the flag: without the per-IP limit bound, the tool is off
 ok((await at("https://off.vmtest", "/lti/jwks")).status === 404, "without LTI_PREAUTH every route is a 404");
+
+// ---- 0006 repairs a placements counter that 0004's trigger overcharged: on a database migrated to 0005, three
+// refreshes of one placement leave the counter at 3; 0006 sets it back to the one row
+{
+  const d = await mf.getD1Database("LTI_DB_DEV", "lti-dev");
+  const dir = join(here, "migrations");
+  for (const f of readdirSync(dir).filter((f) => f.endsWith(".sql") && f < "0006").sort())
+    for (const s of splitSql(readFileSync(join(dir, f), "utf8"))) await d.prepare(s).run();
+  const rid = "a".repeat(32), plc = "b".repeat(32), course = "c".repeat(32);
+  await d.prepare("INSERT INTO quota (scope, kind, cap_count, cap_bytes) VALUES (?, 'placements', 10000, 10240000)").bind(rid).run();
+  const size = 32 + 32 + 3 + 32 + 4 + 32 + 0 + 0 + 0 + 8 + 8;
+  const up = () => d.prepare("INSERT INTO placements (placement, rid, deployment, course, resource_link, updated, size) VALUES (?, ?, 'dep', ?, 'rl-1', 0, ?) ON CONFLICT (placement) DO UPDATE SET updated = excluded.updated, size = excluded.size").bind(plc, rid, course, size).run();
+  await up(); await up(); await up();
+  const before = await d.prepare("SELECT count, bytes FROM quota WHERE scope = ? AND kind = 'placements'").bind(rid).first();
+  for (const s of splitSql(readFileSync(join(dir, "0006_placements_quota.sql"), "utf8"))) await d.prepare(s).run();
+  const after = await d.prepare("SELECT count, bytes FROM quota WHERE scope = ? AND kind = 'placements'").bind(rid).first();
+  await up();
+  const again = await d.prepare("SELECT count, bytes FROM quota WHERE scope = ? AND kind = 'placements'").bind(rid).first();
+  ok(before.count === 3 && before.bytes === 3 * size && after.count === 1 && after.bytes === size && again.count === 1 && again.bytes === size, `0006 repairs the overcharged counter to its rows, and a refresh after it charges nothing (${JSON.stringify([before, after, again])})`);
+}
 
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);

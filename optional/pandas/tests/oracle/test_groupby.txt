@@ -116,6 +116,156 @@ b    4
 a    7
 c    6
 Name: n, dtype: int64
+== dropna-false-na-first-sort-False
+
+g
+NaN     3
+a      10
+b      20
+Name: v, dtype: int64
+== dropna-false-na-first-sort-False.first
+np.int64(3)
+== dropna-false-na-first-sort-False.size
+
+g
+NaN    2
+a      1
+b      1
+dtype: int64
+== dropna-false-na-first-sort-False.mean
+
+        v     x
+g              
+NaN   1.5  1.25
+a    10.0   NaN
+b    20.0  4.00
+== dropna-false-na-first-sort-False.groups
+['nan', 'a', 'b']
+== dropna-false-na-first-sort-True
+
+g
+a      10
+b      20
+NaN     3
+Name: v, dtype: int64
+== dropna-false-na-first-sort-True.first
+np.int64(10)
+== dropna-false-na-first-sort-True.size
+
+g
+a      1
+b      1
+NaN    2
+dtype: int64
+== dropna-false-na-first-sort-True.mean
+
+        v     x
+g              
+a    10.0   NaN
+b    20.0  4.00
+NaN   1.5  1.25
+== dropna-false-na-first-sort-True.groups
+['a', 'b', 'nan']
+== dropna-false-na-middle-sort-False
+
+g
+b      6
+NaN    6
+a      3
+Name: v, dtype: int64
+== dropna-false-na-middle-sort-False.first
+np.int64(6)
+== dropna-false-na-middle-sort-False.size
+
+g
+b      2
+NaN    2
+a      1
+dtype: int64
+== dropna-false-na-middle-sort-False.mean
+
+       v
+g       
+b    3.0
+NaN  3.0
+a    3.0
+== dropna-false-na-middle-sort-False.groups
+['b', 'nan', 'a']
+== dropna-false-na-middle-sort-True
+
+g
+a      3
+b      6
+NaN    6
+Name: v, dtype: int64
+== dropna-false-na-middle-sort-True.first
+np.int64(3)
+== dropna-false-na-middle-sort-True.size
+
+g
+a      1
+b      2
+NaN    2
+dtype: int64
+== dropna-false-na-middle-sort-True.mean
+
+       v
+g       
+a    3.0
+b    3.0
+NaN  3.0
+== dropna-false-na-middle-sort-True.groups
+['a', 'b', 'nan']
+== dropna-false-na-none-sort-False
+
+k
+b    4
+a    7
+c    6
+Name: n, dtype: int64
+== dropna-false-na-none-sort-False.first
+np.int64(4)
+== dropna-false-na-none-sort-False.size
+
+k
+b    2
+a    2
+c    1
+dtype: int64
+== dropna-false-na-none-sort-False.mean
+
+     j    x    n   ok
+k                    
+b  1.5  1.5  2.0  1.0
+a  1.0  3.5  3.5  0.0
+c  1.0  6.0  6.0  1.0
+== dropna-false-na-none-sort-False.groups
+['b', 'a', 'c']
+== dropna-false-na-none-sort-True
+
+k
+a    7
+b    4
+c    6
+Name: n, dtype: int64
+== dropna-false-na-none-sort-True.first
+np.int64(7)
+== dropna-false-na-none-sort-True.size
+
+k
+a    2
+b    2
+c    1
+dtype: int64
+== dropna-false-na-none-sort-True.mean
+
+     j    x    n   ok
+k                    
+a  1.0  3.5  3.5  0.0
+b  1.5  1.5  2.0  1.0
+c  1.0  6.0  6.0  1.0
+== dropna-false-na-none-sort-True.groups
+['a', 'b', 'c']
 == as-index-false
 
    k  n

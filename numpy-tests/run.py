@@ -2,16 +2,24 @@
 
     python3 numpy-tests/run.py            # every numpy-tests/test_*.py
     python3 numpy-tests/run.py linalg -v  # those whose name contains "linalg", with diffs
+    python3 numpy-tests/run.py --dir D    # the test_*.py programs of directory D instead
 
-Each program runs under CPython with the real NumPy and under sagebrush; their
-stdout (and exit status) must be identical.  Programs print results rather
+Each program runs under CPython with the real NumPy and under sagebrush; both
+must exit with status 0, and their stdout must be identical.  Programs print results rather
 than assert, so a difference shows exactly what differs.
 """
 import difflib, os, subprocess, sys, concurrent.futures as cf
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLI = os.path.join(os.path.dirname(HERE), "dist", "src", "cli.js")
-args = [a for a in sys.argv[1:] if not a.startswith("-")]
+argv = sys.argv[1:]
+if "--dir" in argv:
+    i = argv.index("--dir")
+    if i + 1 == len(argv):
+        sys.exit("usage: run.py [--dir D] [-v] [NAME ...]: --dir needs a directory")
+    HERE = os.path.abspath(argv[i + 1])
+    del argv[i:i + 2]
+args = [a for a in argv if not a.startswith("-")]
 verbose = "-v" in sys.argv
 files = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".py") and (not args or any(a in f for a in args)))
 workers = min(8, max(1, int(os.environ.get("SAGEBRUSH_CPUS", "8"))))
@@ -29,14 +37,15 @@ def one(f):
 bad = 0
 with cf.ThreadPoolExecutor(workers) as ex:
     for f, ref, got in ex.map(one, files):
-        ok = ref[0] == got[0] and ref[1] == got[1]
+        # (a program that fails on both sides, a missing fixture say, is a failure, not an agreement: both must exit 0)
+        ok = ref[0] == 0 and got[0] == 0 and ref[1] == got[1]
         print("%-28s %s  (%d lines)" % (f, "ok" if ok else "DIFF", ref[1].count("\n")))
         if not ok:
             bad += 1
             if verbose or len(files) == 1:
-                if ref[0] != got[0]:
-                    print("  exit status: numpy %s, sagebrush %s" % (ref[0], got[0]))
-                    print("  " + (got[2] or ref[2]).strip().replace("\n", "\n  ")[-1500:])
+                if ref[0] != 0 or got[0] != 0:
+                    print("  exit status: numpy %s, sagebrush %s (both must be 0)" % (ref[0], got[0]))
+                    print("  " + (got[2] if got[0] != 0 else ref[2]).strip().replace("\n", "\n  ")[-1500:])
                 for line in list(difflib.unified_diff(ref[1].splitlines(), got[1].splitlines(), "numpy", "sagebrush", lineterm="", n=0))[:80]:
                     print("  " + line[:300])
 print("%d/%d identical" % (len(files) - bad, len(files)))
