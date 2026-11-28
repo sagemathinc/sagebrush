@@ -18,7 +18,7 @@ fn main() {
         );
         for g in groups {
             for mi in 0..g.maximal.len() {
-                out += &format!("{}:{} ; {}\n", g.k, mi, sagebrush_galois::find_invariant_seed(n, g.k, mi));
+                out += &format!("{}:{} ; {}\n", g.k, mi, sagebrush_galois::find_invariant_seed(n, g.k, mi).unwrap());
             }
         }
         std::fs::write(format!("tables/invariants-{}.txt", n), out).unwrap();

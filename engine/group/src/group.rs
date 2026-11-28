@@ -6,6 +6,51 @@ use crate::perm::{Perm, Rng};
 use sagebrush_bigint::BigInt;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The chain's levels known before any orbit is walked, in bytes: one for
+/// each point of the prefix (else one for a nontrivial group), each n
+/// transversal slots and its base point's element and inverse (two
+/// permutations of n points, 4n bytes each).  0 for the trivial group with
+/// no prefix.
+pub fn chain_levels_bytes(n: usize, gens: &[Perm], prefix: &[u32]) -> u64 {
+    let slot = std::mem::size_of::<Option<(Perm, Perm)>>() as u64;
+    let levels = if !prefix.is_empty() { prefix.len() as u64 } else { gens.iter().any(|g| !g.is_identity()) as u64 };
+    levels * (slot + 8) * n as u64
+}
+
+/// The base point the chain's first level has: the prefix's first point,
+/// else the first point the first nontrivial generator moves (as
+/// Chain::new chooses it; an identity generator before it is passed over).
+fn first_base(gens: &[Perm], prefix: &[u32]) -> Option<u32> {
+    prefix.first().copied().or_else(|| gens.iter().find(|g| !g.is_identity()).and_then(|g| g.first_moved()))
+}
+
+/// The bytes certain of the stabilizer chain: its levels known before any
+/// orbit is walked ([`chain_levels_bytes`]) and, at the first level, an
+/// element and its inverse for each other point of the base point's orbit
+/// (8 n^2 bytes in all for a transitive group).  Stop is checked once per
+/// point of the orbit.
+pub fn chain_certain_bytes(n: usize, gens: &[Perm], prefix: &[u32]) -> u64 {
+    chain_levels_bytes(n, gens, prefix) + first_base(gens, prefix).map_or(0, |b| (orbit_len(n, gens, b) - 1) * 8 * n as u64)
+}
+
+fn orbit_len(n: usize, gens: &[Perm], base: u32) -> u64 {
+    let mut seen = vec![false; n];
+    seen[base as usize] = true;
+    let (mut orbit, mut todo) = (1u64, vec![base]);
+    while let Some(p) = todo.pop() {
+        sagebrush_interrupt::check();
+        for g in gens {
+            let q = g.image(p);
+            if !seen[q as usize] {
+                seen[q as usize] = true;
+                orbit += 1;
+                todo.push(q);
+            }
+        }
+    }
+    orbit
+}
+
 #[derive(Clone, Debug)]
 pub struct Group {
     pub n: usize,
@@ -27,6 +72,19 @@ impl Group {
         if let Some(&b) = prefix.iter().find(|&&b| b as usize >= n) {
             return Err(format!("point {} is outside 0..{}", b, n));
         }
+        // the chain's certain part (chain_certain_bytes: its known levels'
+        // slots, and at the first level an element and its inverse for each
+        // point of the base point's orbit, 8 n^2 bytes for a transitive
+        // group) is reserved with the engine's memory ledger before it is
+        // built: refused where it can't fit, not left to the allocator (a
+        // 200000-cycle's would be 320 GB).  What is known without walking
+        // (and the walk's n-byte mark array) first, then the orbit's rest;
+        // the other levels' growth is the computation's own
+        const WHAT: &str = "a permutation group's stabilizer chain";
+        let levels = chain_levels_bytes(n, &gens, prefix);
+        let _known = sagebrush_ledger::reserve(WHAT, levels + n as u64).map_err(|e| e.to_string())?;
+        let rest = first_base(&gens, prefix).map_or(0, |b| (orbit_len(n, &gens, b) - 1) * 8 * n as u64);
+        let _orbit = sagebrush_ledger::reserve(WHAT, rest).map_err(|e| e.to_string())?;
         let chain = Chain::new(n, &gens, prefix);
         Ok(Group { n, gens, chain })
     }
@@ -91,26 +149,28 @@ impl Group {
         self.n <= 1 || self.orbit(0).len() == self.n
     }
 
-    /// The stabilizer of x.
-    pub fn stabilizer(&self, x: u32) -> Group {
+    /// The stabilizer of x (a chain with base x is built: admitted, so an
+    /// Err where its certain part can't fit, as Group::with_base).
+    pub fn stabilizer(&self, x: u32) -> Result<Group, String> {
         let full = if self.chain.levels.first().map(|l| l.base) == Some(x) {
             self.clone()
         } else {
-            Group::with_base(self.n, self.gens.clone(), &[x]).unwrap()
+            Group::with_base(self.n, self.gens.clone(), &[x])?
         };
         let tail = full.chain.tail();
         let gens = tail.strong_gens();
-        Group { n: self.n, gens, chain: tail }
+        Ok(Group { n: self.n, gens, chain: tail })
     }
 
-    /// The pointwise stabilizer of a sequence of points.
-    pub fn pointwise_stabilizer(&self, pts: &[u32]) -> Group {
-        let mut full = Group::with_base(self.n, self.gens.clone(), pts).unwrap();
+    /// The pointwise stabilizer of a sequence of points (admitted as
+    /// [`Group::stabilizer`]).
+    pub fn pointwise_stabilizer(&self, pts: &[u32]) -> Result<Group, String> {
+        let mut full = Group::with_base(self.n, self.gens.clone(), pts)?;
         for _ in 0..pts.len() {
             full.chain = full.chain.tail();
         }
         full.gens = full.chain.strong_gens();
-        full
+        Ok(full)
     }
 
     pub fn random(&self, rng: &mut Rng) -> Perm {
@@ -167,11 +227,11 @@ impl Group {
 
     /// For a transitive group: every nontrivial block containing x (one for
     /// each nontrivial block system), smallest first.
-    pub fn blocks_containing(&self, x: u32) -> Vec<Vec<u32>> {
+    pub fn blocks_containing(&self, x: u32) -> Result<Vec<Vec<u32>>, String> {
         let n = self.n;
         // the blocks generated by x and one more point; y and y^h (h fixing x)
         // give the same block, so one y from each orbit of the stabilizer
-        let stab = self.stabilizer(x);
+        let stab = self.stabilizer(x)?;
         let mut atoms: BTreeSet<Vec<u32>> = BTreeSet::new();
         for o in stab.orbits() {
             if o[0] == x {
@@ -201,7 +261,7 @@ impl Group {
         }
         let mut out: Vec<Vec<u32>> = found.into_iter().collect();
         out.sort_by(|a, b| a.len().cmp(&b.len()).then(a.cmp(b)));
-        out
+        Ok(out)
     }
 
     /// The block system containing the block b: the images of b.
@@ -225,19 +285,19 @@ impl Group {
         sys.into_iter().collect()
     }
 
-    pub fn is_primitive(&self) -> bool {
+    pub fn is_primitive(&self) -> Result<bool, String> {
         if !self.is_transitive() {
-            return false;
+            return Ok(false);
         }
         if self.n <= 2 {
-            return true;
+            return Ok(true);
         }
-        let stab = self.stabilizer(0);
-        stab.orbits().iter().filter(|o| o[0] != 0).all(|o| self.min_block(&[0, o[0]]).len() == self.n)
+        let stab = self.stabilizer(0)?;
+        Ok(stab.orbits().iter().filter(|o| o[0] != 0).all(|o| self.min_block(&[0, o[0]]).len() == self.n))
     }
 
     /// The largest k such that the group is k-transitive on {0..n-1}.
-    pub fn transitivity(&self) -> usize {
+    pub fn transitivity(&self) -> Result<usize, String> {
         let mut k = 0;
         let mut g = self.clone();
         let mut fixed: Vec<u32> = vec![];
@@ -245,28 +305,28 @@ impl Group {
             // is g transitive on the points not yet fixed?
             let rest: Vec<u32> = (0..self.n as u32).filter(|p| !fixed.contains(p)).collect();
             if rest.is_empty() {
-                return k;
+                return Ok(k);
             }
             if g.orbit(rest[0]).len() != rest.len() {
-                return k;
+                return Ok(k);
             }
             k += 1;
             fixed.push(rest[0]);
-            g = g.stabilizer(rest[0]);
+            g = g.stabilizer(rest[0])?;
         }
     }
 
     // ---------------------------------------------------------------- subgroups
 
     /// The subgroup generated by `gens` (inside the same symmetric group).
-    pub fn subgroup(&self, gens: Vec<Perm>) -> Group {
-        Group::new(self.n, gens).unwrap()
+    pub fn subgroup(&self, gens: Vec<Perm>) -> Result<Group, String> {
+        Group::new(self.n, gens)
     }
 
     /// The normal closure in self of the subgroup generated by `gens`.
-    pub fn normal_closure(&self, gens: &[Perm]) -> Group {
+    pub fn normal_closure(&self, gens: &[Perm]) -> Result<Group, String> {
         let mut ngens: Vec<Perm> = gens.iter().filter(|g| !g.is_identity()).cloned().collect();
-        let mut nn = Group::new(self.n, ngens.clone()).unwrap();
+        let mut nn = Group::new(self.n, ngens.clone())?;
         let mut i = 0;
         while i < ngens.len() {
             for g in &self.gens {
@@ -275,23 +335,24 @@ impl Group {
                 if !nn.contains(&c) {
                     ngens.push(c);
                     // rebuild from the strong generators found so far
+                    // (admitted, as every chain built)
                     let mut sg = nn.chain.strong_gens();
                     sg.push(ngens.last().unwrap().clone());
-                    nn = Group { n: self.n, gens: vec![], chain: Chain::new(self.n, &sg, &[]) };
+                    nn = Group { n: self.n, gens: vec![], chain: Group::new(self.n, sg)?.chain };
                 }
             }
             i += 1;
         }
         nn.gens = ngens;
-        nn.reduce_gens();
-        nn
+        nn.reduce_gens()?;
+        Ok(nn)
     }
 
     /// Replace a long generating list by a few random elements generating the
     /// same group (checked against the order, so the result is exact).
-    pub fn reduce_gens(&mut self) {
+    pub fn reduce_gens(&mut self) -> Result<(), String> {
         if self.gens.len() <= 4 {
-            return;
+            return Ok(());
         }
         let target = self.order();
         let mut rng = Rng::new(0x9e37 ^ self.gens.len() as u64);
@@ -304,17 +365,18 @@ impl Group {
                 continue;
             }
             gs.push(r);
-            sub = Group::new(self.n, gs.clone()).unwrap();
+            sub = Group::new(self.n, gs.clone())?;
             if sub.order() == target {
                 self.gens = gs;
-                return;
+                return Ok(());
             }
         }
         // (not reached in practice: keep the long list)
+        Ok(())
     }
 
     /// [G, G]
-    pub fn derived_subgroup(&self) -> Group {
+    pub fn derived_subgroup(&self) -> Result<Group, String> {
         let mut cs = vec![];
         for (i, a) in self.gens.iter().enumerate() {
             for b in &self.gens[i + 1..] {
@@ -328,17 +390,17 @@ impl Group {
     }
 
     /// G = G_0 > G_1 = [G, G] > ... until it stops shrinking.
-    pub fn derived_series(&self) -> Vec<Group> {
+    pub fn derived_series(&self) -> Result<Vec<Group>, String> {
         let mut out = vec![self.clone()];
         loop {
-            let d = out.last().unwrap().derived_subgroup();
+            let d = out.last().unwrap().derived_subgroup()?;
             if d.order() == out.last().unwrap().order() {
-                return out;
+                return Ok(out);
             }
             let trivial = d.is_trivial();
             out.push(d);
             if trivial {
-                return out;
+                return Ok(out);
             }
         }
     }
@@ -347,8 +409,8 @@ impl Group {
         self.gens.iter().enumerate().all(|(i, a)| self.gens[i + 1..].iter().all(|b| a.mul(b) == b.mul(a)))
     }
 
-    pub fn is_solvable(&self) -> bool {
-        self.derived_series().last().unwrap().is_trivial()
+    pub fn is_solvable(&self) -> Result<bool, String> {
+        Ok(self.derived_series()?.last().unwrap().is_trivial())
     }
 
     /// Is h (a subgroup of self) normal in self?

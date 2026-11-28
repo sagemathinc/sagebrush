@@ -9,45 +9,45 @@ fn cyc(n: usize, c: &[u32]) -> Perm {
 }
 
 /// Sym(n)
-pub fn symmetric(n: usize) -> Group {
+pub fn symmetric(n: usize) -> Result<Group, String> {
     if n < 2 {
-        return Group::trivial(n);
+        return Ok(Group::trivial(n));
     }
     let all: Vec<u32> = (0..n as u32).collect();
-    Group::new(n, vec![cyc(n, &[0, 1]), cyc(n, &all)]).unwrap()
+    Group::new(n, vec![cyc(n, &[0, 1]), cyc(n, &all)])
 }
 
 /// Alt(n)
-pub fn alternating(n: usize) -> Group {
+pub fn alternating(n: usize) -> Result<Group, String> {
     if n < 3 {
-        return Group::trivial(n);
+        return Ok(Group::trivial(n));
     }
     // a 3-cycle and an n-cycle (n odd) or (n-1)-cycle (n even)
     let long: Vec<u32> = if n % 2 == 1 { (0..n as u32).collect() } else { (1..n as u32).collect() };
-    Group::new(n, vec![cyc(n, &[0, 1, 2]), cyc(n, &long)]).unwrap()
+    Group::new(n, vec![cyc(n, &[0, 1, 2]), cyc(n, &long)])
 }
 
 /// C_n, regular
-pub fn cyclic(n: usize) -> Group {
+pub fn cyclic(n: usize) -> Result<Group, String> {
     let all: Vec<u32> = (0..n as u32).collect();
     if n < 2 {
-        return Group::trivial(n);
+        return Ok(Group::trivial(n));
     }
-    Group::new(n, vec![cyc(n, &all)]).unwrap()
+    Group::new(n, vec![cyc(n, &all)])
 }
 
 /// The dihedral group of order 2n, on the vertices of an n-gon.
-pub fn dihedral(n: usize) -> Group {
+pub fn dihedral(n: usize) -> Result<Group, String> {
     if n < 3 {
         // as Sage: order 2n on max(n, 2) points... keep it simple
         return match n {
-            2 => Group::new(4, vec![cyc(4, &[0, 1]), cyc(4, &[2, 3])]).unwrap(),
-            _ => Group::new(2, vec![cyc(2, &[0, 1])]).unwrap(),
+            2 => Group::new(4, vec![cyc(4, &[0, 1]), cyc(4, &[2, 3])]),
+            _ => Group::new(2, vec![cyc(2, &[0, 1])]),
         };
     }
     let all: Vec<u32> = (0..n as u32).collect();
     let refl = Perm((0..n as u32).map(|x| (n as u32 - x) % n as u32).collect());
-    Group::new(n, vec![cyc(n, &all), refl]).unwrap()
+    Group::new(n, vec![cyc(n, &all), refl])
 }
 
 pub fn is_prime(p: u64) -> bool {
@@ -178,7 +178,7 @@ pub fn mathieu(n: usize) -> Result<Group, String> {
             }
             // M23 fixes infinity (23); M22 also fixes 22: restrict the generators
             let fixed: Vec<u32> = if n == 23 { vec![23] } else { vec![23, 22] };
-            let st = m24.pointwise_stabilizer(&fixed);
+            let st = m24.pointwise_stabilizer(&fixed)?;
             let gens: Vec<Perm> = st.gens.iter().map(|g| Perm(g.0[..n].to_vec())).collect();
             Group::new(n, gens)
         }

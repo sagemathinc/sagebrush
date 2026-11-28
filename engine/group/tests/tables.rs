@@ -6,8 +6,8 @@
 use sagebrush_group::{Group, Perm};
 
 fn inv(g: &Group) -> String {
-    format!("{} {} {} {} {} {} {} {}", g.order(), g.is_primitive() as u8, g.is_solvable() as u8, g.is_abelian() as u8,
-        g.transitivity(), g.blocks_containing(0).len(), g.derived_subgroup().order(), g.stabilizer(0).order())
+    format!("{} {} {} {} {} {} {} {}", g.order(), g.is_primitive().unwrap() as u8, g.is_solvable().unwrap() as u8, g.is_abelian() as u8,
+        g.transitivity().unwrap(), g.blocks_containing(0).unwrap().len(), g.derived_subgroup().unwrap().order(), g.stabilizer(0).unwrap().order())
 }
 
 #[test]

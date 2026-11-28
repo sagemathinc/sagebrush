@@ -33,13 +33,13 @@ fn check(data: &str, count: usize) {
         let want = |i: usize| f[i].to_string();
         let got = [
             g.order().to_string(),
-            (g.is_primitive() as u8).to_string(),
-            (g.is_solvable() as u8).to_string(),
+            (g.is_primitive().unwrap() as u8).to_string(),
+            (g.is_solvable().unwrap() as u8).to_string(),
             (g.is_abelian() as u8).to_string(),
-            g.transitivity().to_string(),
-            g.blocks_containing(0).len().to_string(),
-            g.derived_subgroup().order().to_string(),
-            g.stabilizer(0).order().to_string(),
+            g.transitivity().unwrap().to_string(),
+            g.blocks_containing(0).unwrap().len().to_string(),
+            g.derived_subgroup().unwrap().order().to_string(),
+            g.stabilizer(0).unwrap().order().to_string(),
         ];
         let names = ["order", "primitive", "solvable", "abelian", "transitivity", "block systems", "|G'|", "|G_1|"];
         for (i, name) in names.iter().enumerate() {

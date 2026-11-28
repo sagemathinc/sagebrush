@@ -444,10 +444,10 @@ fn act_atoms(ps: &[Atom], g: &Perm) -> (Vec<Atom>, bool) {
 /// catches index-2 subgroups cut out by sign characters (the sign on the
 /// points, on the blocks, or within the blocks), whose monomial invariants
 /// are huge.
-fn find_product_invariant(n: usize, g: &Group, k: &Group) -> Option<(Vec<Atom>, Vec<Atom>)> {
+fn find_product_invariant(n: usize, g: &Group, k: &Group) -> Result<Option<(Vec<Atom>, Vec<Atom>)>, String> {
     // the atoms: pairs of points, pairs of blocks
     let mut systems: Vec<Vec<Vec<u8>>> = vec![(0..n as u8).map(|i| vec![i]).collect()];
-    for b in k.blocks_containing(0) {
+    for b in k.blocks_containing(0)? {
         let sys: Vec<Vec<u8>> = k.block_system(&b).into_iter().map(|blk| blk.into_iter().map(|x| x as u8).collect()).collect();
         systems.push(sys);
     }
@@ -531,13 +531,13 @@ fn find_product_invariant(n: usize, g: &Group, k: &Group) -> Option<(Vec<Atom>, 
             }
         }
     }
-    best.map(|idx| (idx.iter().flat_map(|&i| families[i].iter().cloned()).collect(), idx.iter().map(|&i| families[i][0].clone()).collect()))
+    Ok(best.map(|idx| (idx.iter().flat_map(|&i| families[i].iter().cloned()).collect(), idx.iter().map(|&i| families[i][0].clone()).collect())))
 }
 
 /// An invariant F with Stab_G(F) = K, for K maximal in G: an orbit sum
 /// of monomials or a product of differences that G does not preserve, the
 /// cheapest we find.
-fn find_invariant(n: usize, g: &Group, k: &Group, log2_root: f64) -> Invariant {
+fn find_invariant(n: usize, g: &Group, k: &Group, log2_root: f64) -> Result<Invariant, String> {
     let mut patterns: Vec<Vec<u8>> = vec![];
     for s in 2..n {
         patterns.push(vec![1; s]);
@@ -549,7 +549,7 @@ fn find_invariant(n: usize, g: &Group, k: &Group, log2_root: f64) -> Invariant {
         patterns.push((1..=s as u8).rev().collect());
     }
     patterns.sort_by_key(|p| (p.iter().map(|&e| e as u32).sum::<u32>(), p.len()));
-    let mut best: Option<Invariant> = find_product_invariant(n, g, k).map(|(d, seeds)| Invariant { terms: vec![], degree: d.len() as u32, max_exp: 1, diffs: d, seeds });
+    let mut best: Option<Invariant> = find_product_invariant(n, g, k)?.map(|(d, seeds)| Invariant { terms: vec![], degree: d.len() as u32, max_exp: 1, diffs: d, seeds });
     let cap = 20_000;
     // monomials: up to two degrees past the first that works (and degree 6
     // if a product of differences works already)
@@ -585,41 +585,44 @@ fn find_invariant(n: usize, g: &Group, k: &Group, log2_root: f64) -> Invariant {
         }
     }
     if let Some(b) = best {
-        return b;
+        return Ok(b);
     }
     // the generic one: x_1^(n-1) x_2^(n-2) ... has trivial stabilizer
     let m: Vec<(u8, u8)> = (0..n - 1).map(|i| (i as u8, (n - 1 - i) as u8)).collect();
     let terms = orbit(m, &k.gens, usize::MAX).unwrap_or_else(|e| e);
-    Invariant { terms, degree: (n * (n - 1) / 2) as u32, max_exp: (n - 1) as u8, diffs: vec![], seeds: vec![] }
+    Ok(Invariant { terms, degree: (n * (n - 1) / 2) as u32, max_exp: (n - 1) as u8, diffs: vec![], seeds: vec![] })
 }
 
 /// The invariant for the maximal subgroup number `mi` of nT(cur+1), for
 /// the groups as tabulated (seeds in engine/galois/tables, else found now
 /// and kept for the session).
-fn table_invariant(n: usize, cur: usize, mi: usize) -> Invariant {
+fn table_invariant(n: usize, cur: usize, mi: usize) -> Result<Invariant, String> {
     use std::sync::{Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<HashMap<(usize, usize, usize), Invariant>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(inv) = cache.lock().unwrap().get(&(n, cur, mi)) {
-        return inv.clone();
+        return Ok(inv.clone());
     }
     let groups = transitive_groups(n);
     let (j, y) = &groups[cur].maximal[mi];
-    let g = Group::new(n, groups[cur].gens.clone()).unwrap();
-    let k = Group::new(n, groups[j - 1].gens.iter().map(|x| conjf(x, &y.inv())).collect()).unwrap();
-    let inv = tables::invariant_seed(n, cur + 1, mi).and_then(|s| Invariant::rebuild(s, &k)).unwrap_or_else(|| find_invariant(n, &g, &k, 8.0));
+    let g = Group::new(n, groups[cur].gens.clone())?;
+    let k = Group::new(n, groups[j - 1].gens.iter().map(|x| conjf(x, &y.inv())).collect())?;
+    let inv = match tables::invariant_seed(n, cur + 1, mi).and_then(|s| Invariant::rebuild(s, &k)) {
+        Some(inv) => inv,
+        None => find_invariant(n, &g, &k, 8.0)?,
+    };
     cache.lock().unwrap().insert((n, cur, mi), inv.clone());
-    inv
+    Ok(inv)
 }
 
 /// The seed of the invariant for the maximal subgroup number `mi` (from 0)
 /// of nTk, found from scratch (for writing the seed tables).
-pub fn find_invariant_seed(n: usize, k: usize, mi: usize) -> String {
+pub fn find_invariant_seed(n: usize, k: usize, mi: usize) -> Result<String, String> {
     let groups = transitive_groups(n);
     let (j, y) = &groups[k - 1].maximal[mi];
-    let g = Group::new(n, groups[k - 1].gens.clone()).unwrap();
-    let kk = Group::new(n, groups[j - 1].gens.iter().map(|x| conjf(x, &y.inv())).collect()).unwrap();
-    find_invariant(n, &g, &kk, 8.0).seed()
+    let g = Group::new(n, groups[k - 1].gens.clone())?;
+    let kk = Group::new(n, groups[j - 1].gens.iter().map(|x| conjf(x, &y.inv())).collect())?;
+    Ok(find_invariant(n, &g, &kk, 8.0)?.seed())
 }
 
 // ------------------------------------------------------------ cosets
@@ -1209,7 +1212,7 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
     'descent: loop {
         let h = &groups[cur];
         trace(|| format!("at {} ({:.3}s)", h.label(), clock()));
-        let gg = Group::new(n, h.gens.iter().map(|x| conjf(x, &c)).collect()).unwrap();
+        let gg = Group::new(n, h.gens.iter().map(|x| conjf(x, &c)).collect())?;
         debug_assert!(gg.contains(&roots.pi));
         let is_symalt = cur >= groups.len() - 2;
         let maxes: Vec<(usize, &(usize, Perm))> = h.maximal.iter().enumerate().filter(|(_, (j, _))| cand.contains(&(j - 1))).collect();
@@ -1223,12 +1226,12 @@ pub fn galois_group_with(f: &[BigInt], proof: Proof) -> Result<GaloisGroup, Stri
             let kt = &groups[j - 1];
             // K = conjf(H_j, y^-1 o c)
             let kc = comp(&y.inv(), &c);
-            let kk = Group::new(n, kt.gens.iter().map(|x| conjf(x, &kc)).collect()).unwrap();
+            let kk = Group::new(n, kt.gens.iter().map(|x| conjf(x, &kc)).collect())?;
             let index_big: u128 = h.order / kt.order;
             let index = index_big.min(usize::MAX as u128) as usize;
             assert!(kk.gens.iter().all(|x| gg.contains(x)), "{} is not in {}", kt.label(), h.label());
             let t_inv = clock();
-            let inv = table_invariant(n, cur, mi).relabel(&c);
+            let inv = table_invariant(n, cur, mi)?.relabel(&c);
             trace(|| format!("{} in {}: invariant of degree {} with {} terms{} in {:.2}s", kt.label(), h.label(), inv.degree, inv.terms.len(), if inv.diffs.is_empty() { "".to_string() } else { format!(" (product of {} linear forms)", inv.diffs.len()) }, clock() - t_inv));
             // cosets fixed by the Frobenius
             let t_cos = clock();

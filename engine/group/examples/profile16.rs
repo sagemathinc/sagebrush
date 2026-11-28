@@ -12,11 +12,11 @@ fn main() {
     for (n, line) in data.lines().enumerate().take(0) { let _ = (n, line); }
     let gs: Vec<_> = groups.iter().map(|g| g.gens.clone()).collect();
     let t0 = Instant::now(); for g in &gs { let _ = Group::new(16, g.clone()).unwrap(); } println!("chain {:?}", t0.elapsed());
-    let t0 = Instant::now(); for g in &groups { let _ = g.is_primitive(); } println!("primitive {:?}", t0.elapsed());
-    let t0 = Instant::now(); for g in &groups { let _ = g.is_solvable(); } println!("solvable {:?}", t0.elapsed());
-    let t0 = Instant::now(); for g in &groups { let _ = g.transitivity(); } println!("transitivity {:?}", t0.elapsed());
-    let t0 = Instant::now(); let mut mx = 0; for g in &groups { mx = mx.max(g.blocks_containing(0).len()); } println!("blocks {:?} (max {})", t0.elapsed(), mx);
-    let t0 = Instant::now(); for g in &groups { let _ = g.derived_subgroup(); } println!("derived {:?}", t0.elapsed());
-    let t0 = Instant::now(); for g in &groups { let _ = g.stabilizer(0); } println!("stabilizer {:?}", t0.elapsed());
+    let t0 = Instant::now(); for g in &groups { let _ = g.is_primitive().unwrap(); } println!("primitive {:?}", t0.elapsed());
+    let t0 = Instant::now(); for g in &groups { let _ = g.is_solvable().unwrap(); } println!("solvable {:?}", t0.elapsed());
+    let t0 = Instant::now(); for g in &groups { let _ = g.transitivity().unwrap(); } println!("transitivity {:?}", t0.elapsed());
+    let t0 = Instant::now(); let mut mx = 0; for g in &groups { mx = mx.max(g.blocks_containing(0).unwrap().len()); } println!("blocks {:?} (max {})", t0.elapsed(), mx);
+    let t0 = Instant::now(); for g in &groups { let _ = g.derived_subgroup().unwrap(); } println!("derived {:?}", t0.elapsed());
+    let t0 = Instant::now(); for g in &groups { let _ = g.stabilizer(0).unwrap(); } println!("stabilizer {:?}", t0.elapsed());
     println!("total {:?}", t.elapsed());
 }

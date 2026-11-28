@@ -53,7 +53,7 @@ fn main() {
         let key = |g: &Group| -> String {
             let mut rng = sagebrush_group::Rng::new(1);
             let (c, _) = g.cycle_type_counts(3_000_000, 0, &mut rng);
-            format!("{} {:?} {} {} {}", g.order(), c, g.blocks_containing(0).len(), g.derived_subgroup().order(), g.stabilizer(0).orbits().len())
+            format!("{} {:?} {} {} {}", g.order(), c, g.blocks_containing(0).unwrap().len(), g.derived_subgroup().unwrap().order(), g.stabilizer(0).unwrap().orbits().len())
         };
         let our_keys: Vec<String> = ours.iter().map(|(_, g)| key(g)).collect();
         for (k, h, name) in &theirs {
