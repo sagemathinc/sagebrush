@@ -191,7 +191,8 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
       const other = token, me = (window as any).__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
       const tryIt = (cmd: string) => host.invoke(cmd, { msg: "page " + me }).then((v: any) => `REACHED ${String(v).slice(0, 40)}`, (e: any) => `refused: ${String(e?.message ?? e).slice(0, 80)}`);
       const sign = await tryIt("signer_probe_sign");
-      if (me !== "main") { peer = true; return; }
+      // (the second window's own answer, in the app's log for run.mjs's judge: its call must be seen to have run)
+      if (me !== "main") { await host.invoke("app_log", { message: `signer second window: ${sign}` }).catch(() => {}); peer = true; return; }
       const open = await tryIt("signer_open");
       const frameOut: any = await new Promise((res) => {
         const f = document.createElement("iframe");
@@ -208,11 +209,12 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
       ff.style.display = "none";
       ff.src = other + "/frame";
       document.body.append(ff);
-      await host.invoke("window_open", { at: "/" }).catch(() => {});
+      // (a second window that didn't open is said, and fails the probe: its call is one of the callers it claims)
+      const second = await host.invoke("window_open", { at: "/" }).then(() => "opened", (e: any) => `open failed: ${String(e?.message ?? e).slice(0, 80)}`);
       // (the approvals window's page, its controls, the second window: time to act)
       await new Promise((r) => setTimeout(r, 8000));
-      ok = true;
-      line = `signer at ${location.origin}: this page's signing call ${sign}; a page's signer_open ${open}; an output frame's ${frameOut ?? "(no answer)"}`;
+      ok = second === "opened";
+      line = `signer at ${location.origin}: this page's signing call ${sign}; a page's signer_open ${open}; an output frame's ${frameOut ?? "(no answer)"}; second window ${second}`;
     } else line = `no such mode ${JSON.stringify(mode)}`;
   } catch (e: any) { line = `${mode} at ${location.origin}: ${e?.message ?? e}`; }
   // (the second window of "windows" reports through the first)

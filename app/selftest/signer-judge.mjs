@@ -12,6 +12,9 @@
 //     and still nothing of it reached the command: dispatches 1, signatures 1, the signer window's own;
 //   - "guard-off" (the signer window's navigation guard left out, the window sent to the other server): that page
 //     loaded in the signer window, and nothing of it reached the command: dispatches 1, signatures 1.
+// In every run each caller the probe claims must have run and reported: the second window opened and its call
+// answered (in the app's log, "[page] signer second window: …"), and the other server's frame loaded and said what
+// its call got; a result that is missing, or comes after the run, fails by name.
 // In every run the other server's pages must have reached nothing ("REACHED" in what they said), and in every run but
 // "cap+check" the main page's own call, a page's signer_open and an output frame's call must have been refused.  And in
 // every run the app must have ended cleanly: exit 0, no signal, its output captured to the end (no timeout), so a run
@@ -70,6 +73,13 @@ export function signerVerdict({ err, out, seen, control, code, signal, problems,
   if (reached.length) why.push(`the other server's pages reached a command: ${reached.join("; ")}`);
   const line = /^(ok|FAIL) persist: signer at .*$/m.exec(out)?.[0] ?? "";
   if (!line.startsWith("ok")) why.push(`the main page's probe didn't report (${line || "no line"})`);
+  // (every caller the probe claims must have run and said so: a result missing, or late past the run, fails by name)
+  if (!/; second window opened$/.test(line)) why.push(`the second window didn't open (${/; second window ([^;]*)$/.exec(line)?.[1] ?? "not said"})`);
+  const second = /^\[page\] signer second window: (REACHED|refused)\b.*$/m.exec(err);
+  if (!second) why.push("the second window's call didn't report");
+  else if (control !== "cap+check" && second[1] !== "refused") why.push(`the second window's call: ${second[1]}, not refused`);
+  if (!seen.includes("frame: loaded")) why.push("the other server's frame didn't load");
+  if (!seen.some((x) => /^frame: signer (refused|REACHED)/.test(x))) why.push("the other server's frame didn't report its call");
   if (control !== "cap+check") {
     for (const what of ["this page's signing call", "a page's signer_open", "an output frame's"]) {
       const m = new RegExp(`${what.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} (REACHED|refused|\\(no answer\\))`).exec(line);
