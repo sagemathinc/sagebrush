@@ -562,3 +562,43 @@ export function glibcPowf(x: number, y: number): number {
   }
   return powfExp2(ylogx, signBias);
 }
+
+// glibc's hypot (sysdeps/ieee754/dbl-64/e_hypot.c, the 2021 rewrite, as glibc 2.43 builds it for x86-64: no
+// multiarch variant, so the kernel without FMA), which NumPy's np.hypot and the absolute value of a complex
+// array call: a correction of sqrt(ax^2 + ay^2) by its residual, after scaling a huge or tiny pair by 2^-600 or
+// 2^600. Not correctly rounded (hypot(3.1622776601683795, 2) is 0x1.deeea11683f4ap+1, one ulp above), and kept
+// so for NumPy's bits; the correctly rounded CR.hypot stays where another mode wants it.
+function hypotKernel(ax: number, ay: number): number {
+  let h = Math.sqrt(ax * ax + ay * ay), t1: number, t2: number;
+  if (h <= 2.0 * ay) {
+    const delta = h - ay;
+    t1 = ax * (2.0 * delta - ax);
+    t2 = (delta - 2.0 * (ax - ay)) * delta;
+  } else {
+    const delta = h - ax;
+    t1 = 2.0 * delta * (ax - 2.0 * ay);
+    t2 = (4.0 * delta - ay) * ay + delta * delta;
+  }
+  h -= (t1 + t2) / (2.0 * h);
+  return h;
+}
+export function glibcHypot(x: number, y: number): number {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    if (x === Infinity || x === -Infinity || y === Infinity || y === -Infinity) return Infinity;
+    return x + y;
+  }
+  x = Math.abs(x);
+  y = Math.abs(y);
+  const ax = x < y ? y : x, ay = x < y ? x : y;
+  const SCALE = 2 ** -600, EPS = 2 ** -54;
+  if (ax > 2 ** 511) {
+    if (ay <= ax * EPS) return ax + ay;
+    return hypotKernel(ax * SCALE, ay * SCALE) / SCALE;
+  }
+  if (ay < 2 ** -459) {
+    if (ax >= ay / EPS) return ax + ay;
+    return hypotKernel(ax / SCALE, ay / SCALE) * SCALE;
+  }
+  if (ay <= ax * EPS) return ax + ay;
+  return hypotKernel(ax, ay);
+}
