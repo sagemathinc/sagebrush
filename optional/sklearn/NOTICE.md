@@ -12,9 +12,11 @@ Parts of this package are ported from scikit-learn 1.9.1 (https://github.com/sci
 - **`py/sklearn/utils/__init__.py`:** Bunch, from `sklearn/utils/_bunch.py`; gen_batches and gen_even_slices, from `sklearn/utils/_chunking.py`.
 - **`py/sklearn/utils/_sk_param.py`:** the constraints and messages of `sklearn/utils/_param_validation.py`.
 - **`py/sklearn/utils/validation.py`:** from `sklearn/utils/validation.py`.
-- **`py/sklearn/utils/_sk_indexing.py`:** from `sklearn/utils/_indexing.py`, and resample and shuffle.
+- **`py/sklearn/utils/_sk_indexing.py`:** from `sklearn/utils/_indexing.py`: `_safe_indexing`, `resample` (stratified too) and `shuffle`.
 - **`py/sklearn/metrics/_sk_regression.py`:** from `sklearn/metrics/_regression.py`: the four regression metrics and `_check_reg_targets`.
 - **`py/sklearn/metrics/_sk_classification.py`:** from `sklearn/metrics/_classification.py`: `_check_targets`, the classification metrics and `classification_report`; `_nanaverage` from `sklearn/utils/extmath.py`.
+- **`py/sklearn/model_selection/_sk_split.py`:** from `sklearn/model_selection/_split.py`: the splitters, `_validate_shuffle_split`, `check_cv`, `train_test_split` and the splitters' repr (`_pprint`, `_build_repr`).
+- **`py/sklearn/utils/_sk_extmath.py`:** `_approximate_mode`, from `sklearn/utils/extmath.py`.
 - **`py/sklearn/utils/multiclass.py`:** from `sklearn/utils/multiclass.py`.
 - **`py/sklearn/datasets/__init__.py`:** the loaders, from `sklearn/datasets/_base.py`.
 - **`py/sklearn/datasets/_sk_data_*.py`:** scikit-learn's bundled data files and their descriptions (`sklearn/datasets/data/`, `sklearn/datasets/descr/`), embedded by `tests/gen-data.py`. Each file's docstring gives the sha256 of the data file it embeds.

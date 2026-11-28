@@ -1,0 +1,222 @@
+python 3.14.4 x86_64 glibc
+package numpy 2.5.5
+package pandas 3.1.1
+package scikit-learn 1.9.1
+package scipy 1.18.1
+package joblib 1.6.0
+package threadpoolctl 3.8.0
+--
+== kfold
+[([4, 5, 6, 7, 8, 9], [0, 1, 2, 3]), ([0, 1, 2, 3, 7, 8, 9], [4, 5, 6]), ([0, 1, 2, 3, 4, 5, 6], [7, 8, 9])]
+== kfold.uneven
+[([3, 4, 5, 6, 7, 8, 9, 10], [0, 1, 2]), ([0, 1, 2, 6, 7, 8, 9, 10], [3, 4, 5]), ([0, 1, 2, 3, 4, 5, 9, 10], [6, 7, 8]), ([0, 1, 2, 3, 4, 5, 6, 7, 8], [9, 10])]
+== kfold.shuffle-0
+[([0, 1, 3, 5, 6, 7], [2, 4, 8, 9]), ([0, 2, 3, 4, 5, 8, 9], [1, 6, 7]), ([1, 2, 4, 6, 7, 8, 9], [0, 3, 5])]
+== kfold.wine-0
+[(('int64', (142,), 'd913cdeed8faf472'), ('int64', (36,), '00d2def99a593780')), (('int64', (142,), 'd2cad9742c65a482'), ('int64', (36,), '4087b1bb42e95b9a')), (('int64', (142,), 'c939b53d1b9f7dca'), ('int64', (36,), 'f15c791f2c54264d')), (('int64', (143,), 'f85e890679ad27ed'), ('int64', (35,), '1533bf1cf7b22695')), (('int64', (143,), 'f529764d1749b610'), ('int64', (35,), 'b7aef6b20a331293'))]
+== kfold.shuffle-1
+[([0, 1, 3, 5, 7, 8], [2, 4, 6, 9]), ([2, 4, 5, 6, 7, 8, 9], [0, 1, 3]), ([0, 1, 2, 3, 4, 6, 9], [5, 7, 8])]
+== kfold.wine-1
+[(('int64', (142,), '6c0780f0a47a2e3b'), ('int64', (36,), '49b8833a5f801b8d')), (('int64', (142,), 'dfc72b9f0a60047f'), ('int64', (36,), 'a124ddab86df58d8')), (('int64', (142,), 'aa0e0cd222664e5a'), ('int64', (36,), '70a05ecb6978f95f')), (('int64', (143,), '66ad262032dc8faa'), ('int64', (35,), 'e176815458ceec0a')), (('int64', (143,), '692b59c09096afa0'), ('int64', (35,), '8afa33fd418bfbeb'))]
+== kfold.shuffle-42
+[([2, 3, 4, 6, 7, 9], [0, 1, 5, 8]), ([0, 1, 3, 4, 5, 6, 8], [2, 7, 9]), ([0, 1, 2, 5, 7, 8, 9], [3, 4, 6])]
+== kfold.wine-42
+[(('int64', (142,), '4515a6eb31e5a6eb'), ('int64', (36,), 'a8e25afcd870b931')), (('int64', (142,), 'f0701d88600c1dbf'), ('int64', (36,), '2af5bd17a3bd4229')), (('int64', (142,), 'a912c58b9b65cbae'), ('int64', (36,), '6c2292ddbba863d7')), (('int64', (143,), 'c50930050ffae38f'), ('int64', (35,), '5799b339203e2c4b')), (('int64', (143,), 'f112d84135ab9100'), ('int64', (35,), '34c180e43839bff4'))]
+== kfold.rng-object
+[([0, 3, 6, 7, 8], [1, 2, 4, 5, 9]), ([1, 2, 4, 5, 9], [0, 3, 6, 7, 8])]
+== kfold.get_n_splits
+7
+== kfold.too-many
+!! ValueError: Cannot have number of splits n_splits=11 greater than the number of samples: n_samples=10.
+== kfold.one
+!! ValueError: k-fold cross-validation requires at least one train/test split by setting n_splits=2 or more, got n_splits=1.
+== kfold.float
+!! ValueError: The number of folds must be of Integral type. 2.5 of type <class 'float'> was passed.
+== kfold.shuffle-not-bool
+!! TypeError: shuffle must be True or False; got 1
+== kfold.seed-without-shuffle
+!! ValueError: Setting a random_state has no effect since shuffle is False. You should leave random_state to its default (None), or set shuffle=True.
+== kfold.groups
+([([5, 6, 7, 8, 9], [0, 1, 2, 3, 4]), ([0, 1, 2, 3, 4], [5, 6, 7, 8, 9])], [('UserWarning', 'The groups parameter is ignored by KFold')])
+== kfold.list
+[([2, 3], [0, 1]), ([0, 1], [2, 3])]
+== kfold.frame
+[([2], [0, 1]), ([0, 1], [2])]
+== skfold
+[([1, 2, 5, 6, 8, 9], [0, 3, 4, 7]), ([0, 2, 3, 4, 6, 7, 9], [1, 5, 8]), ([0, 1, 3, 4, 5, 7, 8], [2, 6, 9])]
+== skfold.shuffle-0
+[([0, 1, 3, 4, 8, 9], [2, 5, 6, 7]), ([0, 2, 4, 5, 6, 7, 8], [1, 3, 9]), ([1, 2, 3, 5, 6, 7, 9], [0, 4, 8])]
+== skfold.wine-0
+[(('int64', (142,), '588e85ea8720ed4f'), ('int64', (36,), '4870c674fa8a96b5')), (('int64', (142,), '954c829487593570'), ('int64', (36,), 'af682a89e5972660')), (('int64', (142,), 'fc1b324c11a3cedb'), ('int64', (36,), '6a2fc123f9be1afb')), (('int64', (143,), 'e3196c40f95a16ea'), ('int64', (35,), 'a19868af388fb593')), (('int64', (143,), 'dc439e609d454426'), ('int64', (35,), 'df8566e79611046c'))]
+== skfold.shuffle-1
+[([1, 2, 3, 5, 8, 9], [0, 4, 6, 7]), ([0, 1, 4, 5, 6, 7, 8], [2, 3, 9]), ([0, 2, 3, 4, 6, 7, 9], [1, 5, 8])]
+== skfold.wine-1
+[(('int64', (142,), '63e8a01db362b053'), ('int64', (36,), '43e4c771604cc879')), (('int64', (142,), 'fe8c4d89974cc68f'), ('int64', (36,), 'f799c67aa5317272')), (('int64', (142,), '4fd62fa9fb80d232'), ('int64', (36,), '4a7afb67336412e6')), (('int64', (143,), '703b40f97773c83f'), ('int64', (35,), '362aaf4275074846')), (('int64', (143,), 'b1c56d49a4f2d4a5'), ('int64', (35,), '161c078f6f726db9'))]
+== skfold.shuffle-42
+[([1, 2, 4, 5, 7, 8], [0, 3, 6, 9]), ([0, 2, 3, 4, 6, 8, 9], [1, 5, 7]), ([0, 1, 3, 5, 6, 7, 9], [2, 4, 8])]
+== skfold.wine-42
+[(('int64', (142,), '996138cabc1c86e6'), ('int64', (36,), '3132753d3c900df6')), (('int64', (142,), '8d167ba94ea0c5f7'), ('int64', (36,), 'cf42ef107289e502')), (('int64', (142,), '7f6aa94f6c3f9c1a'), ('int64', (36,), '3c0d886774adea17')), (('int64', (143,), 'd358f420c2c6c247'), ('int64', (35,), '95c791604268de54')), (('int64', (143,), '3dfc5cd7cbf242a8'), ('int64', (35,), '0cc1fd1532b562f0'))]
+== skfold.wine
+[(('int64', (142,), 'e7477b6442d064a6'), ('int64', (36,), '2613a0723f4feed1')), (('int64', (142,), 'b6957707276afeab'), ('int64', (36,), '919b223c7007d34a')), (('int64', (142,), '3d6d1339cec47383'), ('int64', (36,), '7187adec1089075d')), (('int64', (143,), '8587df87a46dd4fb'), ('int64', (35,), '2e9edfa3f6094126')), (('int64', (143,), 'ed1bbe484f85672a'), ('int64', (35,), '69dd5b9452ce59bb'))]
+== skfold.iris-tied
+[(('int64', (112,), '3c1ed6bc22d843f2'), ('int64', (38,), '637bbba2ea6fe34f')), (('int64', (112,), '6801327045a7044e'), ('int64', (38,), '58b3d59bb7b3c62a')), (('int64', (113,), 'e5c01f652f53adff'), ('int64', (37,), 'd658fbf2dcd6827a')), (('int64', (113,), '6449173d805e3fe6'), ('int64', (37,), '3b87ac34b0c62479'))]
+== skfold.strings
+[([2, 3, 5], [0, 1, 4]), ([0, 1, 4], [2, 3, 5])]
+== skfold.str-series
+[([2, 3, 5], [0, 1, 4]), ([0, 1, 4], [2, 3, 5])]
+== skfold.appearance-order
+[([1, 3, 5], [0, 2, 4]), ([0, 2, 4], [1, 3, 5])]
+== skfold.appearance-unbalanced
+[([2, 3, 5, 6, 7, 8, 11, 12, 13, 14], [0, 1, 4, 9, 10]), ([0, 1, 3, 4, 7, 8, 9, 10, 13, 14], [2, 5, 6, 11, 12]), ([0, 1, 2, 4, 5, 6, 9, 10, 11, 12], [3, 7, 8, 13, 14])]
+== skfold.appearance-unbalanced-shuffle
+[([0, 1, 5, 6, 7, 8, 10, 11, 13, 14], [2, 3, 4, 9, 12]), ([1, 2, 3, 4, 7, 8, 9, 11, 12, 14], [0, 5, 6, 10, 13]), ([0, 2, 3, 4, 5, 6, 9, 10, 12, 13], [1, 7, 8, 11, 14])]
+== skfold.few-members
+([([1, 2, 4, 5], [0, 3, 6]), ([0, 2, 3, 5, 6], [1, 4]), ([0, 1, 3, 4, 6], [2, 5])], [('UserWarning', 'The least populated class in y has only 1 members, which is less than n_splits=3.')])
+== skfold.too-few
+!! ValueError: n_splits=3 cannot be greater than the number of members in each class.
+== skfold.continuous
+!! ValueError: Supported target types are: ('binary', 'multiclass'). Got 'continuous' instead.
+== skfold.groups
+([([2, 5, 6, 8, 9], [0, 1, 3, 4, 7]), ([0, 1, 3, 4, 7], [2, 5, 6, 8, 9])], [('UserWarning', 'The groups parameter is ignored by StratifiedKFold')])
+== loo
+[([1, 2, 3], [0]), ([0, 2, 3], [1]), ([0, 1, 3], [2]), ([0, 1, 2], [3])]
+== loo.n
+4
+== loo.one
+!! ValueError: Cannot perform LeaveOneOut with n_samples=1.
+== loo.none
+!! ValueError: The 'X' parameter should not be None.
+== ss-0
+[([9, 1, 6, 7, 3, 0, 5], [2, 8, 4]), ([2, 9, 8, 0, 6, 7, 4], [3, 5, 1]), ([4, 5, 1, 0, 6, 9, 7], [2, 3, 8])]
+== sss-0
+[([0, 3, 5, 7, 2, 9], [1, 8, 6, 4]), ([3, 7, 1, 5, 9, 0], [2, 8, 4, 6]), ([7, 5, 9, 2, 1, 4], [6, 3, 0, 8])]
+== ss-1
+[([4, 0, 3, 1, 7, 8, 5], [2, 9, 6]), ([0, 8, 4, 2, 1, 6, 7], [9, 5, 3]), ([9, 0, 6, 1, 7, 4, 2], [8, 3, 5])]
+== sss-1
+[([3, 5, 7, 2, 9, 1], [8, 6, 0, 4]), ([8, 3, 0, 1, 6, 9], [7, 4, 2, 5]), ([4, 0, 7, 3, 8, 2], [6, 1, 9, 5])]
+== ss-42
+[([0, 7, 2, 9, 4, 3, 6], [8, 1, 5]), ([5, 3, 4, 7, 9, 6, 2], [0, 1, 8]), ([6, 8, 5, 3, 7, 1, 4], [9, 2, 0])]
+== sss-42
+[([6, 2, 1, 7, 8, 4], [0, 3, 5, 9]), ([9, 3, 2, 0, 7, 5], [4, 6, 8, 1]), ([1, 0, 9, 6, 3, 7], [5, 4, 2, 8])]
+== ss.default
+[18, 18, 18, 18, 18, 18, 18, 18, 18, 18]
+== ss.train-size
+[([4, 9, 1], [2, 8]), ([1, 2, 9], [3, 5])]
+== ss.wine
+[(('int64', (133,), '967df77de0ae6d5e'), ('int64', (45,), '1eab3a33b93eedc9')), (('int64', (133,), '52cadb02cadb55e3'), ('int64', (45,), '624b0e24d81035d4')), (('int64', (133,), '71cd323b1b20b4a6'), ('int64', (45,), '64dafff576287f76')), (('int64', (133,), '1027cd1662381ed7'), ('int64', (45,), '7ad46f6cb09b713c'))]
+== sss.wine
+[(('int64', (133,), '71e3a2b84f4f281a'), ('int64', (45,), 'ac3112a8b18f3405')), (('int64', (133,), 'c001bc21ba8b33ef'), ('int64', (45,), '1a2b0f36905d1057')), (('int64', (133,), '3f67af9c7609cee3'), ('int64', (45,), '2ff40f8be7b0ed73')), (('int64', (133,), 'a140656c4d7d1b99'), ('int64', (45,), '689749e897d62c68'))]
+== sss.iris-tied
+[(('int64', (135,), '37fc7c6faff15280'), ('int64', (15,), '32975f9d92176a0e')), (('int64', (135,), 'aec942f397e185d2'), ('int64', (15,), 'c1cd6e03f1549b8f')), (('int64', (135,), '54d86bde2eab3454'), ('int64', (15,), 'bb2c52b1407310e4')), (('int64', (135,), '25902030c3894ae2'), ('int64', (15,), '556439b8cc332e75')), (('int64', (135,), '23d0efeaa5b5b35d'), ('int64', (15,), 'e2074fa53bf7834f'))]
+== sss.tied-odd
+[([6, 3, 5, 8, 7, 9, 2], [10, 4, 1, 0, 11]), ([7, 9, 0, 10, 3, 5, 4], [8, 2, 11, 1, 6]), ([5, 10, 7, 3, 8, 2, 11], [4, 6, 1, 9, 0]), ([2, 3, 9, 7, 10, 0, 4], [8, 6, 1, 11, 5])]
+== sss.single-member
+!! ValueError: The least populated classes in y have only 1 member, which is too few. The minimum number of groups for any class cannot be less than 2. Classes with too few members are: [2]
+== sss.test-too-small
+!! ValueError: The test_size = 2 should be greater or equal to the number of classes = 3
+== sss.train-too-small
+!! ValueError: The train_size = 2 should be greater or equal to the number of classes = 3
+== sss.multilabel
+[([5, 4, 1, 6], [0, 2, 3, 7]), ([4, 2, 1, 7], [6, 5, 3, 0])]
+== sss.strings
+[([5, 4, 1], [3, 2, 0]), ([5, 2, 3], [0, 4, 1])]
+== tts.wine-42
+[('float64', (133, 13), 'b705a9bb61831047'), ('float64', (45, 13), 'b165f59b058c42b4'), ('int64', (133,), '1db8fe4bece24474'), ('int64', (45,), 'e65d7b0dbac879b0')]
+== tts.wine-0
+[('float64', (133, 13), 'b367d97d49f34039'), ('float64', (45, 13), '911f560933b7046b'), ('int64', (133,), '3fbcb20f373c2726'), ('int64', (45,), 'd1e53bf335a354fb')]
+== tts.stratified-0
+[('float64', (124, 13), '44e00e89e46e0cd5'), ('float64', (54, 13), 'ea6fdbf3a5faad02'), ('int64', (124,), '58f81ba2ccd48ce6'), ('int64', (54,), '7c84d4d787b112cc')]
+== tts.wine-1
+[('float64', (133, 13), 'c53f5169001849c0'), ('float64', (45, 13), 'a2c1297c2239d857'), ('int64', (133,), '7ea220d87255b260'), ('int64', (45,), 'c8a57f982602d2c3')]
+== tts.stratified-1
+[('float64', (124, 13), 'ad64faea15faf8df'), ('float64', (54, 13), '1824768c52804809'), ('int64', (124,), 'b528ca0ea06ec203'), ('int64', (54,), 'a858982db19cd493')]
+== tts.small
+[array([[18, 19],
+       [ 2,  3],
+       [12, 13],
+       [14, 15],
+       [ 6,  7],
+       [ 0,  1],
+       [10, 11]]), array([[ 4,  5],
+       [16, 17],
+       [ 8,  9]]), array([2, 0, 1, 2, 1, 0, 1]), array([0, 2, 1])]
+== tts.lists
+[['d', 'h', 'f', 'a'], ['e', 'b', 'g', 'c'], [3, 7, 5, 0], [4, 1, 6, 2]]
+== tts.no-shuffle
+[array([0, 1, 2, 3, 4, 5, 6]), array([7, 8, 9])]
+== tts.no-shuffle-stratify
+!! ValueError: Stratified train/test split is not implemented for shuffle=False
+== tts.frame
+[   a    b
+4  4  2.0
+0  0  0.0
+3  3  1.5
+5  5  2.5,    a    b
+2  2  1.0
+1  1  0.5]
+== tts.series-target
+[[7, 1, 2, 0], [3, 6, 5, 4], ['q', 'q', 'p', 'p'], ['q', 'p', 'q', 'p']]
+== tts.none
+!! ValueError: At least one array required as input
+== tts.inconsistent
+!! ValueError: Found input variables with inconsistent numbers of samples: [2, 3]
+== tts.sum
+!! ValueError: The sum of test_size and train_size = 1.2, should be in the (0, 1) range. Reduce test_size and/or train_size.
+== tts.too-many
+!! ValueError: The sum of train_size and test_size = 12, should be smaller than the number of samples 10. Reduce test_size and/or train_size.
+== tts.test-size-big
+!! ValueError: test_size=10 should be either positive and smaller than the number of samples 10 or a float in the (0, 1) range
+== tts.empty-train
+!! ValueError: With n_samples=3, test_size=0.9 and train_size=None, the resulting train set will be empty. Adjust any of the aforementioned parameters.
+== tts.bool-size
+!! ValueError: Invalid value for test_size: True
+== tts.param.test_size
+!! InvalidParameterError: The 'test_size' parameter of train_test_split must be a float in the range (0.0, 1.0), an int in the range [1, inf) or None. Got 1.5 instead.
+== tts.param.test_size-zero
+!! InvalidParameterError: The 'test_size' parameter of train_test_split must be a float in the range (0.0, 1.0), an int in the range [1, inf) or None. Got 0 instead.
+== tts.param.train_size-one
+!! InvalidParameterError: The 'train_size' parameter of train_test_split must be a float in the range (0.0, 1.0), an int in the range [1, inf) or None. Got 1.0 instead.
+== tts.param.random_state
+!! InvalidParameterError: The 'random_state' parameter of train_test_split must be an int in the range [0, 4294967295], an instance of 'numpy.random.mtrand.RandomState' or None. Got 'x' instead.
+== tts.param.random_state-negative
+!! InvalidParameterError: The 'random_state' parameter of train_test_split must be an int in the range [0, 4294967295], an instance of 'numpy.random.mtrand.RandomState' or None. Got -1 instead.
+== tts.param.shuffle
+!! InvalidParameterError: The 'shuffle' parameter of train_test_split must be an instance of 'bool' or an instance of 'numpy.bool'. Got 1 instead.
+== tts.param.stratify
+!! InvalidParameterError: The 'stratify' parameter of train_test_split must be an array-like or None. Got 3 instead.
+== repr.kfold
+'KFold(n_splits=5, random_state=None, shuffle=False)'
+== repr.kfold-shuffle
+'KFold(n_splits=3, random_state=0, shuffle=True)'
+== repr.skfold
+'StratifiedKFold(n_splits=10, random_state=12345, shuffle=True)'
+== repr.sss
+'StratifiedShuffleSplit(n_splits=10, random_state=None, test_size=0.123456789,\n            train_size=None)'
+== repr.ss
+'ShuffleSplit(n_splits=10, random_state=None, test_size=3, train_size=0.5)'
+== repr.loo
+'LeaveOneOut()'
+== check_cv.int
+'KFold(n_splits=3, random_state=None, shuffle=False)'
+== check_cv.none
+'KFold(n_splits=5, random_state=None, shuffle=False)'
+== check_cv.classifier
+'StratifiedKFold(n_splits=4, random_state=None, shuffle=False)'
+== check_cv.classifier-continuous
+'KFold(n_splits=4, random_state=None, shuffle=False)'
+== check_cv.object
+True
+== check_cv.iterable
+!! AttributeError: 'list' object has no attribute 'tolist'
+== check_cv.str
+!! ValueError: Expected `cv` as an integer, a cross-validation object (from sklearn.model_selection), or an iterable yielding (train, test) splits as arrays of indices. Got five.
+== check_cv.bad
+!! ValueError: Expected `cv` as an integer, a cross-validation object (from sklearn.model_selection), or an iterable yielding (train, test) splits as arrays of indices. Got 2.5.
+== resample.stratify
+array([0, 1, 8, 6, 8, 6])
+== resample.stratify-noreplace
+array([3, 5, 2, 7, 1])
+== resample.stratify-strings
+array([3, 2, 5, 0, 1, 0])
+== resample.stratify-wine
+('float64', (50, 13), '761958bb00520637')

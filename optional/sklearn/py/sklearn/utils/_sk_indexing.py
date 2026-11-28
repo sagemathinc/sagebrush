@@ -5,8 +5,10 @@ from itertools import compress
 
 import numpy as np
 
-from .validation import check_random_state, check_consistent_length, _check_sample_weight
+from ._sk_extmath import _approximate_mode
 from ._sk_param import check_int_at_least
+from .multiclass import _sk_label_values
+from .validation import _check_sample_weight, check_array, check_consistent_length, check_random_state
 
 
 def _sk_has(obj, read):
@@ -145,19 +147,40 @@ def resample(*arrays, replace=True, n_samples=None, random_state=None, stratify=
         raise NotImplementedError("Resampling with sample_weight is only implemented for replace=True.")
     if sample_weight is not None and stratify is not None:
         raise NotImplementedError("Resampling with sample_weight is only implemented for stratify=None.")
-    if stratify is not None:
-        raise NotImplementedError("sklearn.utils.resample with stratify is not in Sagebrush's sklearn 0.x subset")
-    if replace:
-        if sample_weight is not None:
-            sample_weight = _check_sample_weight(sample_weight, first, dtype=np.float64)
-            p = sample_weight / sample_weight.sum()
+    if stratify is None:
+        if replace:
+            if sample_weight is not None:
+                sample_weight = _check_sample_weight(sample_weight, first, dtype=np.float64)
+                p = sample_weight / sample_weight.sum()
+            else:
+                p = None
+            indices = random_state.choice(n_samples, size=max_n_samples, p=p, replace=True)
         else:
-            p = None
-        indices = random_state.choice(n_samples, size=max_n_samples, p=p, replace=True)
+            indices = np.arange(n_samples)
+            random_state.shuffle(indices)
+            indices = indices[:max_n_samples]
     else:
-        indices = np.arange(n_samples)
-        random_state.shuffle(indices)
-        indices = indices[:max_n_samples]
+        # (as StratifiedShuffleSplit draws)
+        y = check_array(_sk_label_values(stratify), ensure_2d=False, dtype=None)
+        if y.ndim == 2:
+            y = np.array([" ".join(row.astype("str").tolist()) for row in y])
+
+        classes, y_indices = np.unique(y, return_inverse=True)
+        n_classes = classes.shape[0]
+
+        class_counts = np.bincount(y_indices)
+
+        class_indices = np.split(np.argsort(y_indices, kind="mergesort"), np.cumsum(class_counts)[:-1])
+
+        n_i = _approximate_mode(class_counts, max_n_samples, random_state)
+
+        indices = []
+
+        for i in range(n_classes):
+            indices_i = random_state.choice(class_indices[i], int(n_i[i]), replace=replace)
+            indices.extend(indices_i.tolist())
+
+        indices = random_state.permutation(np.asarray(indices, dtype=np.int64))
     resampled_arrays = [_safe_indexing(a, indices) for a in arrays]
     if len(resampled_arrays) == 1:
         return resampled_arrays[0]

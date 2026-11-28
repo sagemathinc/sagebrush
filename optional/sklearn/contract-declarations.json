@@ -54,5 +54,19 @@
     "construct": "reference",
     "target": "numpy.random.rand.__self__",
     "reason": "check_random_state(None) returns NumPy's global RandomState itself, the one np.random.seed seeds (scikit-learn's np.random.mtrand._rand, a private name); the module functions' bound instance is that object"
+  },
+  {
+    "file": "py/sklearn/model_selection/_sk_split.py",
+    "line": 8,
+    "construct": "import",
+    "target": "inspect",
+    "reason": "a splitter's repr lists its __init__'s parameters (inspect.signature), as scikit-learn's _build_repr does"
+  },
+  {
+    "file": "py/sklearn/model_selection/_sk_split.py",
+    "line": 541,
+    "construct": "name",
+    "target": "getattr",
+    "reason": "_build_repr reads each __init__ parameter, named by the signature, from the splitter itself (getattr(self, key, None)); it reads, never calls or sets"
   }
 ]
