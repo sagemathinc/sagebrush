@@ -561,7 +561,9 @@ class GenericGraph:
         return _sa().matrix(rows)
 
     def laplacian_matrix(self, weighted=None, vertices=None, **kwds):
-        """D - A, with the (out-)degrees on the diagonal.
+        """D - A, the degrees on the diagonal: weighted by the edge labels for a
+        weighted graph (weighted=None: the graph's own), and for a digraph the
+        in-degrees (indegree=False: the out-degrees), as Sage's.
 
         EXAMPLES::
 
@@ -570,13 +572,52 @@ class GenericGraph:
             [-1  2 -1  0]
             [ 0 -1  2 -1]
             [-1  0 -1  2]
+            sage: Graph([(0, 1, 3)], weighted=True).laplacian_matrix()
+            [ 3 -3]
+            [-3  3]
+            sage: D = DiGraph([(0, 1, 3)], weighted=True)
+            sage: D.laplacian_matrix(), D.laplacian_matrix(indegree=False)
+            (
+            [ 0 -3]  [ 3 -3]
+            [ 0  3], [ 0  0]
+            )
         """
+        # (indegree as a keyword, Sage's, so the signature is unchanged)
+        indegree = kwds.pop("indegree", True)
+        if weighted is None:
+            weighted = bool(self._weighted)
         A = self.weighted_adjacency_matrix(vertices=vertices) if weighted else self.adjacency_matrix(vertices=vertices)
         n = A.nrows()
-        rows = [[(sum(A[i, k] for k in range(n)) if i == j else 0) - A[i, j] for j in range(n)] for i in range(n)]
-        return _sa().matrix(_sa().ZZ, rows)
+        if self.is_directed() and indegree:
+            deg = [sum(A[k, i] for k in range(n)) for i in range(n)]
+        else:
+            deg = [sum(A[i, k] for k in range(n)) for i in range(n)]
+        rows = [[(deg[i] if i == j else 0) - A[i, j] for j in range(n)] for i in range(n)]
+        # (over the weights' ring: a weight 1/2 makes it QQ's)
+        return _sa().matrix(rows)
 
     kirchhoff_matrix = laplacian_matrix
+
+    def spanning_trees_count(self):
+        """The number of spanning trees (Kirchhoff's theorem): of a weighted
+        graph, weighted by its edges' labels, and of a digraph the spanning
+        trees into its first vertex (the in-degree Laplacian), as Sage's (a
+        digraph had none: it was Graph's only).
+
+        EXAMPLES::
+
+            sage: graphs.CompleteGraph(5).spanning_trees_count()
+            125
+            sage: Graph([(0, 1, 3), (1, 2, 2), (0, 2, 5)], weighted=True).spanning_trees_count()
+            31
+            sage: DiGraph([(0, 1, 3), (1, 2, 2), (2, 0, 5), (0, 2, 1)], weighted=True).spanning_trees_count()
+            9
+        """
+        L = self.laplacian_matrix()
+        n = L.nrows()
+        if n <= 1:
+            return _sa().Integer(1)
+        return _sa().matrix([[L[i, j] for j in range(1, n)] for i in range(1, n)]).det()
 
     def to_dictionary(self, edge_labels=False, multiple_edges=False):
         """{vertex: neighbours} (or {vertex: {neighbour: label}}).
@@ -1344,20 +1385,6 @@ class Graph(GenericGraph):
             (True, False)
         """
         return self.is_connected() and self.size() == self.order() - 1
-
-    def spanning_trees_count(self):
-        """The number of spanning trees (Kirchhoff's theorem).
-
-        EXAMPLES::
-
-            sage: graphs.CompleteGraph(5).spanning_trees_count()
-            125
-        """
-        L = self.laplacian_matrix()
-        n = L.nrows()
-        if n <= 1:
-            return _sa().Integer(1)
-        return _sa().Integer(_sa().matrix(_sa().ZZ, [[L[i, j] for j in range(1, n)] for i in range(1, n)]).det())
 
     def tutte_polynomial(self):
         """The Tutte polynomial (deletion-contraction).

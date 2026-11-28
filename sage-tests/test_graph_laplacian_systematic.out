@@ -1,0 +1,53 @@
+G weighted lap() | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted lap(weighted=True) | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted lap(weighted=False) | ([(1, -1), (-1, 1)], Integer Ring)
+G weighted lap(indegree=True) | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted lap(indegree=False) | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted kirchhoff | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted stc | 3
+H unweighted lap() | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted lap(weighted=True) | ([(3, -3), (-3, 3)], Integer Ring)
+H unweighted lap(weighted=False) | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted lap(indegree=True) | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted lap(indegree=False) | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted kirchhoff | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted stc | 1
+D weighted lap() | ([(0, -3), (0, 3)], Integer Ring)
+D weighted lap(weighted=True) | ([(0, -3), (0, 3)], Integer Ring)
+D weighted lap(weighted=False) | ([(0, -1), (0, 1)], Integer Ring)
+D weighted lap(indegree=True) | ([(0, -3), (0, 3)], Integer Ring)
+D weighted lap(indegree=False) | ([(3, -3), (0, 0)], Integer Ring)
+D weighted kirchhoff | ([(0, -3), (0, 3)], Integer Ring)
+D weighted stc | 3
+E unweighted lap() | ([(0, -1), (0, 1)], Integer Ring)
+E unweighted lap(weighted=True) | ([(0, -3), (0, 3)], Integer Ring)
+E unweighted lap(weighted=False) | ([(0, -1), (0, 1)], Integer Ring)
+E unweighted lap(indegree=True) | ([(0, -1), (0, 1)], Integer Ring)
+E unweighted lap(indegree=False) | ([(1, -1), (0, 0)], Integer Ring)
+E unweighted kirchhoff | ([(0, -1), (0, 1)], Integer Ring)
+E unweighted stc | 1
+W lap | ([(8, -3, -5), (-3, 5, -2), (-5, -2, 7)], Integer Ring)
+W stc | 31
+Q lap | ([(1/2, -1/2, 0), (-1/2, 5/2, -2), (0, -2, 2)], Rational Field)
+Q stc | 1
+DD lap {} | ([(5, -3, -1), (0, 3, -2), (-5, 0, 3)], Integer Ring)
+DD lap {'indegree': True} | ([(5, -3, -1), (0, 3, -2), (-5, 0, 3)], Integer Ring)
+DD lap {'indegree': False} | ([(4, -3, -1), (0, 2, -2), (-5, 0, 5)], Integer Ring)
+DD lap {'weighted': False} | ([(1, -1, -1), (0, 1, -1), (-1, 0, 2)], Integer Ring)
+DD stc | 9
+Finite Field of size 2 default | ([(1, 0, 1, 0, 0, 1, 1), (0, 1, 1, 0, 1, 0, 1), (0, 0, 0, 1, 1, 1, 1)], Finite Field of size 2)
+Finite Field of size 2 pos=(1, 2, 3) | ([(1, 1, 0, 0, 1, 1, 0), (1, 0, 1, 0, 0, 1, 1), (0, 0, 0, 1, 1, 1, 1)], Finite Field of size 2)
+Finite Field of size 2 pos=(4, 5, 6) | ([(1, 0, 1, 1, 1, 0, 0), (0, 1, 1, 1, 0, 1, 0), (1, 1, 0, 1, 0, 0, 1)], Finite Field of size 2)
+Finite Field of size 2 pos=(0, 2, 3) | ([(1, 1, 0, 0, 1, 1, 0), (0, 1, 1, 0, 1, 0, 1), (0, 0, 0, 1, 1, 1, 1)], Finite Field of size 2)
+Finite Field of size 2 pos=(3, 2, 1) | ([(0, 0, 0, 1, 1, 1, 1), (1, 0, 1, 0, 0, 1, 1), (1, 1, 0, 0, 1, 1, 0)], Finite Field of size 2)
+Finite Field of size 3 default | ([(1, 0, 0, 0, 0, 0, 1), (0, 1, 0, 0, 2, 1, 0), (0, 0, 1, 2, 2, 2, 2)], Finite Field of size 3)
+Finite Field of size 3 pos=(1, 2, 3) | ValueError systematic_positions are not an information set
+Finite Field of size 3 pos=(4, 5, 6) | ([(1, 1, 1, 2, 1, 0, 0), (1, 2, 1, 2, 0, 1, 0), (1, 0, 0, 0, 0, 0, 1)], Finite Field of size 3)
+Finite Field of size 3 pos=(0, 2, 3) | ValueError systematic_positions are not an information set
+Finite Field of size 3 pos=(3, 2, 1) | ValueError systematic_positions are not an information set
+Finite Field of size 5 default | ([(1, 0, 1, 0, 4), (0, 1, 1, 2, 3)], Finite Field of size 5)
+Finite Field of size 5 pos=(1, 2) | ([(4, 1, 0, 2, 4), (1, 0, 1, 0, 4)], Finite Field of size 5)
+Finite Field of size 5 pos=(3, 4) | ([(4, 3, 2, 1, 0), (4, 0, 4, 0, 1)], Finite Field of size 5)
+Finite Field of size 5 pos=(0, 2) | ([(1, 4, 0, 3, 1), (0, 1, 1, 2, 3)], Finite Field of size 5)
+Finite Field of size 5 pos=(2, 1) | ([(1, 0, 1, 0, 4), (4, 1, 0, 2, 4)], Finite Field of size 5)
+GF(2) non-information set (0,1) | ValueError systematic_positions are not an information set

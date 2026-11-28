@@ -694,8 +694,27 @@ class AbstractLinearCode(AbstractCode):
             [1 0 0 0 0 0 1]
             [0 1 0 0 2 1 0]
             [0 0 1 2 2 2 2]
+
+        Systematic in given positions: the identity in those columns, in
+        their order, as Sage's (they were ignored)::
+
+            sage: LinearCode(G).systematic_generator_matrix(systematic_positions=(4, 5, 6))
+            [1 1 1 2 1 0 0]
+            [1 2 1 2 0 1 0]
+            [1 0 0 0 0 0 1]
+            sage: LinearCode(G).systematic_generator_matrix(systematic_positions=(1, 2, 3))
+            Traceback (most recent call last):
+            ...
+            ValueError: systematic_positions are not an information set
         """
-        return self.generator_matrix().echelon_form()
+        G = self.generator_matrix()
+        if systematic_positions is None:
+            return G.echelon_form()
+        pos = [int(i) for i in systematic_positions]
+        S = _sa().matrix(G.base_ring(), [[G[i, j] for j in pos] for i in range(G.nrows())])
+        if S.nrows() != S.ncols() or S.rank() < S.nrows():
+            raise ValueError("systematic_positions are not an information set")
+        return S.inverse() * G
 
     def information_set(self):
         """An information set (the pivots of the echelon form).
