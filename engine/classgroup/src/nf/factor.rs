@@ -1,5 +1,6 @@
 //! Factoring integers: trial division, Miller-Rabin, perfect powers,
-//! Pollard-Brent rho and the elliptic curve method (ecm.rs).
+//! Pollard-Brent rho, the elliptic curve method (ecm.rs) and the quadratic
+//! sieve (siqs.rs).
 
 use sagebrush_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive, Zero};
@@ -133,14 +134,28 @@ fn strong_lucas_prp(n: &BigInt) -> bool {
 pub const TRIAL_BOUND: u64 = 1 << 16;
 /// One Pollard-Brent rho attempt's iterations.
 pub const RHO_ITERS: u64 = 1 << 20;
+const ECM_SEED: u64 = 0x2545_F491_4F6C_DD1D;
 /// Rho and ECM work modulo at most this many bits.
 pub const SPLIT_BITS_MAX: u64 = 1024;
 
+/// The levels of ECM's schedule run before the quadratic sieve on a
+/// composite of `bits` bits: they find a small factor for a fraction of the
+/// sieve's cost, which depends on n's size alone.
+pub fn ecm_levels_before_siqs(bits: u64) -> usize {
+    match bits {
+        0..=179 => 0,
+        180..=229 => 1,
+        _ => 2,
+    }
+}
+
 /// A nontrivial factor of a composite n (no factors below 2^16): a perfect
 /// power's root, then Pollard-Brent rho (in Montgomery arithmetic; factors
-/// up to ~10^12), then the elliptic curve method with bounds that keep
-/// growing until it succeeds (Stop interrupts).  None only when no method
-/// applies: rho and ECM work on at most 1024 bits.
+/// up to ~10^12).  Then, for n of siqs::MIN_BITS to siqs::MAX_BITS bits, a
+/// few levels of ECM and the quadratic sieve; otherwise, or if the sieve
+/// finds nothing, the elliptic curve method with bounds that keep growing
+/// until it succeeds (Stop interrupts).  None only when no method applies:
+/// rho and ECM work on at most 1024 bits.
 fn split(n: &BigInt) -> Option<BigInt> {
     for k in (2..=n.bits() as u32 / 16).rev() {
         let r = num_integer::Roots::nth_root(n, k);
@@ -152,7 +167,14 @@ fn split(n: &BigInt) -> Option<BigInt> {
     if let Some(d) = super::ecm::rho(&nu, RHO_ITERS, 0x9E37_79B9) {
         return Some(BigInt::from(d));
     }
-    super::ecm::ecm_until_found(&nu, 0x2545_F491_4F6C_DD1D).map(BigInt::from)
+    let bits = n.bits() as u64;
+    if (super::siqs::MIN_BITS..=super::siqs::MAX_BITS).contains(&bits) {
+        let d = super::ecm::ecm_levels(&nu, ECM_SEED, ecm_levels_before_siqs(bits)).or_else(|| super::siqs::siqs(&nu, 1));
+        if let Some(d) = d {
+            return Some(BigInt::from(d));
+        }
+    }
+    super::ecm::ecm_until_found(&nu, ECM_SEED).map(BigInt::from)
 }
 
 /// The factorization of |n| > 0 as sorted (prime, exponent) pairs; the
@@ -234,6 +256,25 @@ mod tests {
         assert!(!is_probable_prime(&n));
         let e = factor(&n).unwrap_err();
         assert!(e.contains("1128 bits"), "{}", e);
+    }
+
+    // Composites in the quadratic sieve's range, balanced and not, through
+    // the whole pipeline.
+    #[test]
+    fn factors_in_the_sieve_range() {
+        // 2^80 - 65 and 2^80 - 143; 2^61 - 1 and 2^89 - 1 and 2^31 - 1;
+        // 1000003^2 times 2^89 - 1
+        let cases: [&[(&str, u32)]; 3] = [
+            &[("1208925819614629174706033", 1), ("1208925819614629174706111", 1)],
+            &[("2147483647", 1), ("2305843009213693951", 1), ("618970019642690137449562111", 1)],
+            &[("1000003", 2), ("618970019642690137449562111", 1)],
+        ];
+        for want in cases {
+            let want: Vec<(BigInt, u32)> = want.iter().map(|&(p, e)| (p.parse().unwrap(), e)).collect();
+            let n: BigInt = want.iter().map(|(p, e)| p.pow(*e)).product();
+            assert!((super::super::siqs::MIN_BITS..=super::super::siqs::MAX_BITS).contains(&(n.bits() as u64)));
+            assert_eq!(factor(&n).unwrap(), want);
+        }
     }
 
     // Every factor reported is a probable prime and the product is n.
