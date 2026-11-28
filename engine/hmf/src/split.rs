@@ -204,7 +204,7 @@ mod tests {
     fn splittings_are_isomorphisms() {
         let sc = structure_constants();
         for p in rational_primes(60) {
-            for pr in primes_above(p) {
+            for pr in primes_above(p).unwrap() {
                 for e in 1..=3u32 {
                     if (pr.norm as u128).pow(e) > 1 << 20 {
                         continue;

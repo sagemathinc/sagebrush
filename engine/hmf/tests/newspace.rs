@@ -62,14 +62,14 @@ fn degeneracy_lower_spaces() {
 fn psage_aplists() {
     // level F.primes_above(31)[0]: ap at a prime above 11 is 4, at (sqrt 5)
     // -2, at 7 2 (which prime above 11 depends on Sage's order: one of them)
-    for p31 in primes_above(31) {
+    for p31 in primes_above(31).unwrap() {
         let ns = Newspaces::new(Ideal::principal(p31.gen).unwrap()).unwrap();
         let f = ns.rational_newforms().unwrap();
         assert_eq!(f.len(), 1);
         let ap = |p| f[0].ap(ns.top(), &p).unwrap();
-        assert_eq!(ap(primes_above(5)[0]), -2);
-        assert_eq!(ap(primes_above(7)[0]), 2);
-        let a11: Vec<i64> = primes_above(11).into_iter().map(ap).collect();
+        assert_eq!(ap(primes_above(5).unwrap()[0]), -2);
+        assert_eq!(ap(primes_above(7).unwrap()[0]), 2);
+        let a11: Vec<i64> = primes_above(11).unwrap().into_iter().map(ap).collect();
         assert!(a11.contains(&4));
     }
     // H = HilbertModularForms(F.primes_above(71)[1]).elliptic_curve_factors()[0];
@@ -79,7 +79,7 @@ fn psage_aplists() {
     // Galois conjugate, so both match).
     let psage = [-1i64, 0, -2, 0, 0, 2, -4, 6, -6, 8, 2, 6, 12, -4];
     let norms: Vec<u64> = primes_of_bounded_norm(50).iter().map(|p| p.norm).collect();
-    for p71 in primes_above(71) {
+    for p71 in primes_above(71).unwrap() {
         let ns = Newspaces::new(Ideal::principal(p71.gen).unwrap()).unwrap();
         let f = ns.rational_newforms().unwrap();
         assert_eq!(f.len(), 1);
@@ -104,9 +104,9 @@ fn psage_aplists() {
 #[test]
 fn huge_hecke_operator_coefficients_are_errors() {
     use sagebrush_hmf::newspace::{eigenvalue_bound, op_matrix, NewformOrbits, MAX_OP_BOUND};
-    let p2 = primes_above(2)[0];
-    let p3 = primes_above(3)[0];
-    let p5 = primes_above(5)[0];
+    let p2 = primes_above(2).unwrap()[0];
+    let p3 = primes_above(3).unwrap()[0];
+    let p5 = primes_above(5).unwrap()[0];
     let one = Newspaces::new(Ideal::principal(Elt::int(1)).unwrap()).unwrap();
     let n31 = Newspaces::new(Ideal::principal(Elt::new(-2, 5)).unwrap()).unwrap();
     // the reproducer, and extreme coefficients of both signs
