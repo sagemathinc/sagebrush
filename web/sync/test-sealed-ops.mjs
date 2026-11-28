@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { dispatch } from "../miniflare-dispatch.mjs";
 import { useCrypto, webCrypto } from "../workspace/fleet/core/index.mjs";
 import { keyFromSeed, verifyStrict } from "../workspace/fleet/core/ed25519.mjs";
@@ -58,6 +58,13 @@ const K = "5ea1ed00-0009-4e2e-8e2e-e2e2e2e2e209"; // releases keyed to the add t
 const L = "5ea1ed00-000a-4e2e-8e2e-e2e2e2e2e20a"; // an object made before the index's references
 const F = "5ea1ed00-000b-4e2e-8e2e-e2e2e2e2e20b"; // a sealed op in flight when its session signs out (S07)
 const G = "5ea1ed00-000c-4e2e-8e2e-e2e2e2e2e20c"; // a plaintext op raced against genesis
+const D = "5ea1ed00-000d-4e2e-8e2e-e2e2e2e2e20d"; // an end-to-end account's notebooks and blobs: sealed only
+const NB = "5ea1ed00-000e-4e2e-8e2e-e2e2e2e2e20e"; // a notebook in the clear, then genesis
+const BH = "5ea1ed00-000f-4e2e-8e2e-e2e2e2e2e20f"; // a blob held at a bare SHA-256, then genesis
+const BR = "5ea1ed00-0010-4e2e-8e2e-e2e2e2e2e210"; // an upload in progress at a bare SHA-256, then genesis
+const BM = "5ea1ed00-0011-4e2e-8e2e-e2e2e2e2e211"; // a chunked file's manifest, then genesis
+const RR = "5ea1ed00-0012-4e2e-8e2e-e2e2e2e2e212"; // a bare upload held past its first check while genesis lands
+const MR = "5ea1ed00-0013-4e2e-8e2e-e2e2e2e2e213"; // a manifest held past its first check while genesis lands
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -66,10 +73,10 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R, P, S, X, Y, Z, K, L, F, G].join(",");
+const listed = [A, N, R, P, S, X, Y, Z, K, L, F, G, D, NB, BH, BR, BM, RR, MR].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
-    { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
+    { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_TIERED: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
     { ...base, name: "off", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["off.test/*"], outboundService: cocalc, ratelimits: ratelimits("4102") },
   ],
 }));
@@ -242,7 +249,9 @@ async function hello(s, device) {
   return w;
 }
 const sha = (b) => createHash("sha256").update(b).digest("hex");
-const putBlob = (s, bytes, address = sha(bytes)) => at(SITE, `/api/sync/v1/blob/${address}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes) }, body: bytes });
+/** A blob's keyed address, as an end-to-end device names it (e2e PR 3b): every account this test seals is one. */
+const kaddr = (b) => "a1:" + sha(b);
+const putBlob = (s, bytes, address = kaddr(bytes)) => at(SITE, `/api/sync/v1/blob/${address}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes) }, body: bytes });
 /** A sealed op as a device makes it: an envelope (random bytes: the server never reads it), signed by E2E device `d`
  * of `W` under chain state `st` (and its generation, unless `extra.chainGen` says another), for sync device `sdev` at
  * `dseq`, in sync generation `extra.gen` (1 unless said). */
@@ -340,15 +349,15 @@ await section("sealed ops: signed by a current device, under the current head", 
   // (another current device may release a reference the first one added)
   const blob = Buffer.from("sealed ops' blob");
   ok((await putBlob(s, blob)).status === 201, "(a blob held)");
-  const refs = async () => (await acct.inspect({ sha256: sha(blob) }))?.refs;
-  const r1 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n, { adds: [sha(blob)] })] });
+  const refs = async () => (await acct.inspect({ sha256: kaddr(blob) }))?.refs;
+  const r1 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n, { adds: [kaddr(blob)] })] });
   ok(Number.isInteger(r1?.ops?.[0]?.seq) && (await refs()) === 1, "an op adding a held blob: accepted, one reference");
   const missing = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 1, { adds: ["e".repeat(64)] })] });
   ok(missing?.ops?.[0]?.code === "missing", "an op adding a blob not held: refused, missing");
   const phone = ad.nd;
-  const r2 = await ws.ask({ t: "sops", ops: [await signed(W, phone, st, dev, n + 2, { releases: [{ address: sha(blob), add: r1.ops[0].seq }] })] });
+  const r2 = await ws.ask({ t: "sops", ops: [await signed(W, phone, st, dev, n + 2, { releases: [{ address: kaddr(blob), add: r1.ops[0].seq }] })] });
   ok(Number.isInteger(r2?.ops?.[0]?.seq) && (await refs()) === 1, "another current device releases it: accepted, and the blob still held (held until the account is purged)");
-  const r3 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 3, { releases: [{ address: sha(blob), add: r1.ops[0].seq }] })] });
+  const r3 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 3, { releases: [{ address: kaddr(blob), add: r1.ops[0].seq }] })] });
   ok(r3?.ops?.[0]?.code === "invalid" && (await refs()) === 1, "releasing it again, its add already ended: refused, and nothing changes");
   n += 4;
 
@@ -499,9 +508,9 @@ await section("what a device that pulls needs: every signed value served, the en
   // (the first refusal ends the message: the ops after it decide nothing, and are new when they come again)
   const blob = Buffer.from("sealed ops' undecided blob");
   ok((await putBlob(s, blob)).status === 201, "(a blob held)");
-  const refs = async () => (await acct.inspect({ sha256: sha(blob) }))?.refs;
+  const refs = async () => (await acct.inspect({ sha256: kaddr(blob) }))?.refs;
   const first = await signed(W, d, st, dev, n), bad = await signed(W, d, st, dev, n + 1, { adds: ["e".repeat(64)] });
-  const later = await signed(W, d, st, dev, n + 2, { adds: [sha(blob)] }), last = await signed(W, d, st, dev, n + 3);
+  const later = await signed(W, d, st, dev, n + 2, { adds: [kaddr(blob)] }), last = await signed(W, d, st, dev, n + 3);
   const rows1 = (await logOf()).length;
   const mid = await ws.ask({ t: "sops", ops: [first, bad, later, last] });
   const shape = mid?.ops?.map((o) => (o.seq !== undefined ? "seq" : o.code ?? (o.undecided === true ? "undecided" : "?")));
@@ -533,7 +542,7 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   const acct = await objectOf(K);
   const b1 = Buffer.from("keyed releases: one"), b2 = Buffer.from("keyed releases: two"), b3 = Buffer.from("keyed releases: shared only");
   for (const b of [b1, b2, b3, otherAdd.blob]) ok((await putBlob(s, b)).status === 201, "(a blob held)");
-  const one = async (b) => (await acct.inspect({ sha256: sha(b) }))?.refs;
+  const one = async (b) => (await acct.inspect({ sha256: kaddr(b) }))?.refs;
   // (what a refusal must leave as it was: the log, every count, the index's references, this device's next dseq)
   const state = async () => J({
     log: ((await ws.ask({ t: "pull_index", after: 0 }))?.ops ?? []).map((o) => o.seq),
@@ -545,11 +554,11 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   ok(Number.isInteger(pl?.ops?.[0]?.seq) && (await one(b3)) === 0, "(a sealed op naming no blob: b3's shared count is 0, and no index add)");
   n += 1;
   const addOp = async (sock, by, sdev, dseq, adds) => (await sock.ask({ t: "sops", ops: [await signed(W, by, st, sdev, dseq, { adds })] }))?.ops?.[0]?.seq;
-  const s1 = await addOp(ws, d, dev, n, [sha(b1)]), s2 = await addOp(ws, d, dev, n + 1, [sha(b1)]), s3 = await addOp(ws, d, dev, n + 2, [sha(b2)]), s4 = await addOp(ws, d, dev, n + 3, [sha(b2)]);
+  const s1 = await addOp(ws, d, dev, n, [kaddr(b1)]), s2 = await addOp(ws, d, dev, n + 1, [kaddr(b1)]), s3 = await addOp(ws, d, dev, n + 2, [kaddr(b2)]), s4 = await addOp(ws, d, dev, n + 3, [kaddr(b2)]);
   n += 4;
   ok([s1, s2, s3, s4].every(Number.isInteger) && (await one(b1)) === 2 && (await one(b2)) === 2, "(b1 added twice, b2 added twice: two live index adds each)");
   const ix = (await acct.inspect({}))?.index_refs ?? [];
-  ok(J(ix) === J([[sha(b1), s1], [sha(b1), s2], [sha(b2), s3], [sha(b2), s4]].map(([address, add_seq]) => ({ address, add_seq, released_seq: null }))),
+  ok(J(ix) === J([[kaddr(b1), s1], [kaddr(b1), s2], [kaddr(b2), s3], [kaddr(b2), s4]].map(([address, add_seq]) => ({ address, add_seq, released_seq: null }))),
     "each accepted add is an index reference keyed by its op's seq: " + J(ix));
 
   // (every wrong release: refused invalid, the message ended there, and nothing it could touch changed; its dseq is spent as any refusal's)
@@ -561,43 +570,43 @@ await section("releases keyed to the add they end: exact, once, and only an inde
     n += 1;
     ok(r?.ops?.[0]?.code === code && (await state()) === before, `${what}: refused, ${code}, and the log, the counts and the index's references unchanged: ` + J(r?.ops ?? r));
   };
-  await refused([{ address: sha(b1), add: s3 }], "the address right, the add wrong (s3 added b2, not b1)");
-  await refused([{ address: sha(b2), add: s1 }], "the add right, the address wrong (s1 added b1, not b2)");
+  await refused([{ address: kaddr(b1), add: s3 }], "the address right, the add wrong (s3 added b2, not b1)");
+  await refused([{ address: kaddr(b2), add: s1 }], "the add right, the address wrong (s1 added b1, not b2)");
   ok(!(otherAdd.seq === s1 || otherAdd.seq === s2), "(S's add seq names no add of its blob here)");
-  await refused([{ address: sha(otherAdd.blob), add: otherAdd.seq }], "another account's add (its blob held here too, its seq S's)");
-  await refused([{ address: sha(b1), add: s4 + 1000 }], "a future add seq");
-  await refused([{ address: sha(b3), add: pl.ops[0].seq }], "a seq that is an op, but no index add of the blob (a sealed op naming none)");
-  await refused([{ address: sha(b1), add: s1 }, { address: sha(b2), add: s1 }], "one good release and one wrong one: the op whole");
+  await refused([{ address: kaddr(otherAdd.blob), add: otherAdd.seq }], "another account's add (its blob held here too, its seq S's)");
+  await refused([{ address: kaddr(b1), add: s4 + 1000 }], "a future add seq");
+  await refused([{ address: kaddr(b3), add: pl.ops[0].seq }], "a seq that is an op, but no index add of the blob (a sealed op naming none)");
+  await refused([{ address: kaddr(b1), add: s1 }, { address: kaddr(b2), add: s1 }], "one good release and one wrong one: the op whole");
   // (b3: held only by other kinds of reference, as a document's pin or a manifest holds one, never by an index add)
-  await seam(K, { shareRefs: { sha256: sha(b3), n: 2 } });
+  await seam(K, { shareRefs: { sha256: kaddr(b3), n: 2 } });
   ok((await one(b3)) === 2, "(b3's shared count raised as two pins or manifests would: 2, still no index add)");
-  await refused([{ address: sha(b3), add: s1 }], "a blob held only by a pin or a manifest: no index add of it to end");
+  await refused([{ address: kaddr(b3), add: s1 }], "a blob held only by a pin or a manifest: no index add of it to end");
   // (the same add twice in one op: a form error, so the op is refused before any check of the log)
-  await refused([{ address: sha(b1), add: s1 }, { address: sha(b1), add: s1 }], "the same (address, add) twice in one op");
+  await refused([{ address: kaddr(b1), add: s1 }, { address: kaddr(b1), add: s1 }], "the same (address, add) twice in one op");
   // (a malformed release: an old bare address, a missing or zero add, an extra field)
-  await refused([sha(b1)], "a bare address, the form before releases were keyed", true);
-  await refused([{ address: sha(b1) }], "a release with no add", true);
-  await refused([{ address: sha(b1), add: 0 }], "an add seq of 0", true);
-  await refused([{ address: sha(b1), add: s1, n: 1 }], "a release with a field it doesn't have", true);
+  await refused([kaddr(b1)], "a bare address, the form before releases were keyed", true);
+  await refused([{ address: kaddr(b1) }], "a release with no add", true);
+  await refused([{ address: kaddr(b1), add: 0 }], "an add seq of 0", true);
+  await refused([{ address: kaddr(b1), add: s1, n: 1 }], "a release with a field it doesn't have", true);
   // (at most 64 releases an op: 65 is refused by its form, and 64 distinct ones (none live) get as far as the log)
-  const many = (k) => Array.from({ length: k }, (_, i) => ({ address: sha(b1), add: s4 + 2000 + i }));
+  const many = (k) => Array.from({ length: k }, (_, i) => ({ address: kaddr(b1), add: s4 + 2000 + i }));
   await refused(many(65), "65 releases in one op", false, "limit");
   await refused(many(64), "64 releases in one op, none of them live: past the form, refused by the log", false, "invalid");
 
   // (two live adds of one address, released independently, each once)
   const rel = async (releases) => (await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n++, { releases })] }))?.ops?.[0];
-  const x1 = await rel([{ address: sha(b1), add: s2 }]);
+  const x1 = await rel([{ address: kaddr(b1), add: s2 }]);
   ok(Number.isInteger(x1?.seq) && (await one(b1)) === 2, "the second add of b1 released: accepted, b1's shared count kept at 2: " + J(x1));
-  await refused([{ address: sha(b1), add: s2 }], "the same add released again");
-  const x2 = await rel([{ address: sha(b1), add: s1 }]);
+  await refused([{ address: kaddr(b1), add: s2 }], "the same add released again");
+  const x2 = await rel([{ address: kaddr(b1), add: s1 }]);
   ok(Number.isInteger(x2?.seq) && (await one(b1)) === 2, "the first add of b1 released: accepted, b1's shared count still 2 (no release gives one back)");
   const ix2 = (await acct.inspect({}))?.index_refs ?? [];
-  ok(J(ix2.filter((r) => r.address === sha(b1))) === J([{ address: sha(b1), add_seq: s1, released_seq: x2.seq }, { address: sha(b1), add_seq: s2, released_seq: x1.seq }]),
+  ok(J(ix2.filter((r) => r.address === kaddr(b1))) === J([{ address: kaddr(b1), add_seq: s1, released_seq: x2.seq }, { address: kaddr(b1), add_seq: s2, released_seq: x1.seq }]),
     "each add records the op that released it: " + J(ix2));
 
   // (two devices racing to release one add: both pass their checks before either commits; one commits, the other is refused, one decrement)
   await seam(K, { sealedHold: 1500 });
-  const ra = signed(W, d, st, dev, n, { releases: [{ address: sha(b2), add: s3 }] }), rb = signed(W, phone, st, pdev, m, { releases: [{ address: sha(b2), add: s3 }] });
+  const ra = signed(W, d, st, dev, n, { releases: [{ address: kaddr(b2), add: s3 }] }), rb = signed(W, phone, st, pdev, m, { releases: [{ address: kaddr(b2), add: s3 }] });
   const [opA, opB] = [await ra, await rb];
   const t0 = Date.now();
   const [ansA, ansB] = await Promise.all([ws.ask({ t: "sops", ops: [opA] }), wp.ask({ t: "sops", ops: [opB] })]);
@@ -606,8 +615,8 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   ok(took >= 1500 && took < 2900, "(both were held at once, past their checks, before either committed: " + took + " ms, not two holds in turn)");
   n += 1, m += 1;
   const codes = [ansA?.ops?.[0], ansB?.ops?.[0]].map((o) => (Number.isInteger(o?.seq) ? "seq" : o?.code));
-  ok(J(codes.slice().sort()) === J(["invalid", "seq"]) && (await one(b2)) === 2 && ((await acct.inspect({}))?.index_refs ?? []).filter((r) => r.address === sha(b2) && r.add_seq === s3 && r.released_seq !== null).length === 1, "two devices release one add at once: one accepted, one refused invalid, the add ended once: " + J({ codes, refs: await one(b2) }));
-  const x3 = await (async () => (await wp.ask({ t: "sops", ops: [await signed(W, phone, st, pdev, m++, { releases: [{ address: sha(b2), add: s4 }] })] }))?.ops?.[0])();
+  ok(J(codes.slice().sort()) === J(["invalid", "seq"]) && (await one(b2)) === 2 && ((await acct.inspect({}))?.index_refs ?? []).filter((r) => r.address === kaddr(b2) && r.add_seq === s3 && r.released_seq !== null).length === 1, "two devices release one add at once: one accepted, one refused invalid, the add ended once: " + J({ codes, refs: await one(b2) }));
+  const x3 = await (async () => (await wp.ask({ t: "sops", ops: [await signed(W, phone, st, pdev, m++, { releases: [{ address: kaddr(b2), add: s4 }] })] }))?.ops?.[0])();
   ok(Number.isInteger(x3?.seq) && (await one(b2)) === 2, "the other device releases b2's other add, which this device added: accepted, its shared count kept");
   ok((await one(b3)) === 2, "b3's shared count is still the pins', untouched by every refusal");
   ws.ws.close();
@@ -631,8 +640,8 @@ await section("an object made before the index's references: its restart makes t
   let n = (await hello(ws, "sealed-dev-l001")).next_dseq;
   const blob = Buffer.from("an old object's blob");
   ok((await putBlob(s, blob)).status === 201, "(a blob held)");
-  const a1 = await ws.ask({ t: "sops", ops: [await signed(W, g.d, g.next, "sealed-dev-l001", n, { adds: [sha(blob)] })] });
-  const r1 = Number.isInteger(a1?.ops?.[0]?.seq) ? await ws.ask({ t: "sops", ops: [await signed(W, g.d, g.next, "sealed-dev-l001", n + 1, { releases: [{ address: sha(blob), add: a1.ops[0].seq }] })] }) : null;
+  const a1 = await ws.ask({ t: "sops", ops: [await signed(W, g.d, g.next, "sealed-dev-l001", n, { adds: [kaddr(blob)] })] });
+  const r1 = Number.isInteger(a1?.ops?.[0]?.seq) ? await ws.ask({ t: "sops", ops: [await signed(W, g.d, g.next, "sealed-dev-l001", n + 1, { releases: [{ address: kaddr(blob), add: a1.ops[0].seq }] })] }) : null;
   const ix = (await (await objectOf(L)).inspect({}))?.index_refs ?? [];
   ok(Number.isInteger(r1?.ops?.[0]?.seq) && ix.length === 1 && ix[0].released_seq === r1.ops[0].seq, "after the restart: an add and its release accepted, the add recorded and ended: " + J({ a1: a1?.ops ?? a1, r1: r1?.ops ?? r1, ix }));
   ws.ws.close();
@@ -720,6 +729,142 @@ await section("a plaintext op raced against genesis: exactly one of the two land
   ok(Number.isInteger(op?.ops?.[0]?.seq) && gr.status === 409 && grb.reason === "plaintext_log" && (await seam(G, {})).e2e_chain <= 0,
     "the plaintext op lands while genesis is held past its checks; genesis, decided in its own transaction, is then refused (plaintext_log), no chain stored: " + J({ op: op?.ops?.[0], genesis: gr.status, reason: grb.reason }));
   ws.ws.close();
+});
+
+await section("an end-to-end account's notebooks take sealed patches only, and its blobs keyed addresses only", async () => {
+  const pid = (t, c) => t.toString(36).padStart(11, "0") + "_" + c;
+  const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+  const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(n)); return b; };
+  /** A batch of patches [cseq, id, parents, payload bytes, blobs?]. */
+  const batchOf = (doc, patches, extra = {}) => ({ t: "batch", doc, epoch: 1, patches: patches.map((p) => ({ cseq: p[0], id: p[1], parents: p[2], size: p[3].length, ...(p[4] ? { blobs: p[4] } : {}) })), body: Buffer.concat(patches.map((p) => p[3])).toString("base64"), ...extra });
+  // (a sealed slice's form, as doc-seal.ts writes one: format 0x01, a cekId with its length, a key epoch, a seal id and a chunk)
+  const slice = (o = {}) => Buffer.concat([Buffer.from([o.format ?? 1]), u32(o.len ?? 32), o.id ?? Buffer.from("a".repeat(o.len ?? 32)), u64(o.epoch ?? 1), randomBytes(o.rest ?? 32 + 16 + 20)]);
+  const refusedSealed = (r) => r?.t === "error" && r.code === "conflict" && r.detail?.reason === "sealed_account";
+  const s = await enabled(D);
+  const W = account(D);
+  const g = await W.genesis();
+  ok((await post(s, D, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(D: a key chain, over an empty log)");
+  const ws = await socket(s);
+  await hello(ws, "sealed-dev-d001");
+  const doc = "d0c0d0c0d0c0", C = "clientD001";
+  const plain = await ws.ask(batchOf(doc, [[1, pid(1, C), [], Buffer.from('{"patch":"plain"}')]], { kind: "board" }));
+  ok(refusedSealed(plain), "a plain patch to an end-to-end account's notebook: refused whole (conflict, sealed_account): " + J(plain));
+  const first = await ws.ask(batchOf(doc, [[1, pid(1, C), [], slice()]], { kind: "board" }));
+  ok(first?.t === "ack" && Number.isInteger(first.batch?.seq), "a patch of a sealed slice's form: taken (the server can't open it, only check its form): " + J(first));
+  const near = {
+    "format 2": slice({ format: 2 }), "a cekId of 0 bytes": slice({ len: 0, id: Buffer.alloc(0) }), "a cekId of 257 bytes": slice({ len: 257 }),
+    "no room for a seal id and a tag": slice({ rest: 32 + 15 }), "a key epoch past 2^53 - 1": slice({ epoch: 2n ** 53n }),
+    "a cekId that isn't UTF-8": slice({ len: 2, id: Buffer.from([0xff, 0xfe]) }),
+  };
+  let cseq = 2;
+  for (const [what, b] of Object.entries(near)) {
+    const r = await ws.ask(batchOf(doc, [[cseq, pid(cseq, C), [pid(1, C)], b]]));
+    ok(refusedSealed(r), `a patch that isn't a sealed slice's form (${what}): refused`, r);
+  }
+  const withBlob = await ws.ask(batchOf(doc, [[cseq, pid(cseq, C), [pid(1, C)], slice(), ["c".repeat(64)]]]));
+  ok(refusedSealed(withBlob), "a sealed-form patch that names blobs (an end-to-end patch goes inline): refused", withBlob);
+  const mixed = await ws.ask(batchOf(doc, [[cseq, pid(cseq, C), [pid(1, C)], slice()], [cseq + 1, pid(cseq + 1, C), [pid(cseq, C)], Buffer.from('{"patch":"plain"}')]]));
+  ok(refusedSealed(mixed), "a batch of one sealed patch and one plain: refused whole", mixed);
+  const next = await ws.ask(batchOf(doc, [[cseq, pid(cseq, C), [pid(1, C)], slice()]]));
+  ok(next?.t === "ack" && next.batch?.seq > first.batch.seq, "…and after every refusal, the next sealed patch is taken", next);
+  ws.ws.close();
+  // (its blobs: a bare SHA-256 can't be referenced from a sealed index, so it is never taken)
+  const bytes = Buffer.from("an end-to-end account's blob");
+  const bare = await putBlob(s, bytes, sha(bytes));
+  const bb = await bare.json().catch(() => ({}));
+  ok(bare.status === 409 && bb.reason === "sealed_account", "a PUT at a bare SHA-256 for an end-to-end account: refused (409, sealed_account): " + J({ status: bare.status, body: bb }));
+  ok((await putBlob(s, bytes, "a1:" + sha(Buffer.from("D's keyed address")))).status === 201, "…at a keyed a1: address: held");
+  const chk = await post(s, D, "/api/sync/v1/blobs/check", { blobs: [{ address: sha(bytes), ct_sha256: sha(bytes), size: bytes.length }] });
+  ok(chk.status === 409, "a check naming a bare SHA-256: refused (409): " + chk.status);
+  const chk2 = await post(s, D, "/api/sync/v1/blobs/check", { blobs: [{ address: "a1:" + sha(Buffer.from("D's other")), ct_sha256: sha(bytes), size: bytes.length }] });
+  ok(chk2.status === 200, "a check of keyed addresses: answered (200)");
+  // (and no chunked file: a manifest lists its chunks' hashes in the clear; refused before it is read)
+  const mf = await post(s, D, "/api/sync/v1/manifest", { manifest: {} });
+  const mfb = await mf.json().catch(() => ({}));
+  ok(mf.status === 409 && mfb.reason === "sealed_account", "a chunked file's manifest for an end-to-end account: refused (409, sealed_account), before it is read: " + J({ status: mf.status, body: mfb }));
+  // (a plaintext account is as before: plain patches and bare blobs)
+  const sn = await enabled(N);
+  const wn = await socket(sn);
+  await hello(wn, "sealed-dev-n0d1");
+  const pn = await wn.ask(batchOf("d0c0d0c0d0c1", [[1, pid(1, "clientN0d1"), [], Buffer.from('{"patch":"plain"}')]], { kind: "board" }));
+  ok(pn?.t === "ack", "a plaintext account: a plain patch taken, as before", pn);
+  ok((await putBlob(sn, Buffer.from("N's blob"), sha(Buffer.from("N's blob")))).status === 201, "…and a blob at its bare SHA-256");
+  const nm = await post(sn, N, "/api/sync/v1/manifest", { manifest: {} });
+  const nmb = await nm.json().catch(() => ({}));
+  ok(nmb.reason !== "sealed_account" && nm.status !== 409, "…and its manifest is read as before (this empty one invalid, not refused as sealed): " + J({ status: nm.status, body: nmb }));
+  wn.ws.close();
+});
+
+await section("a notebook in the clear, with no index op: no key chain begins over it either", async () => {
+  const s = await enabled(NB);
+  const ws = await socket(s);
+  await hello(ws, "sealed-dev-e001");
+  const body = Buffer.from('{"patch":"plain"}');
+  const b = await ws.ask({ t: "batch", doc: "e0e0e0e0e0e0", epoch: 1, kind: "board", patches: [{ cseq: 1, id: (1).toString(36).padStart(11, "0") + "_clientE001", parents: [], size: body.length }], body: body.toString("base64") });
+  ok(b?.t === "ack", "(a board's first batch, in the clear: its document made by the batch alone, no index op)", b);
+  ok(J((await ws.ask({ t: "pull_index", after: 0 }))?.ops ?? []) === "[]", "(the index log is empty)");
+  const g = await account(NB).genesis();
+  const gr = await post(s, NB, "/api/sync/v1/e2e/chain", g.body);
+  const grb = await gr.json().catch(() => ({}));
+  ok(gr.status === 409 && grb.reason === "plaintext_log" && (await seam(NB, {})).e2e_chain <= 0, "genesis over an account whose only plaintext is a notebook's: refused (409, plaintext_log), no chain stored: " + J({ status: gr.status, body: grb }));
+  ws.ws.close();
+});
+
+await section("files in the clear: no key chain begins over them, and none lands once one has begun", async () => {
+  const gateOn = (name, on) => at(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
+  const refusedGenesis = async (id, s, what) => {
+    const gr = await post(s, id, "/api/sync/v1/e2e/chain", (await account(id).genesis()).body);
+    const grb = await gr.json().catch(() => ({}));
+    ok(gr.status === 409 && grb.reason === "plaintext_log" && (await seam(id, {})).e2e_chain <= 0, `genesis over ${what}: refused (409, plaintext_log), no chain stored: ` + J({ status: gr.status, body: grb }));
+  };
+  // (genesis over what is already there: a held blob, an upload in progress, a chunked file's manifest)
+  const sh = await enabled(BH);
+  const hb = Buffer.from("BH's blob in the clear");
+  ok((await putBlob(sh, hb, sha(hb))).status === 201, "(BH: a blob held at its bare SHA-256)");
+  await refusedGenesis(BH, sh, "a blob held at a bare SHA-256");
+  const sr = await enabled(BR);
+  ok((await seamAll(BR, { plant: "reservation" })).plain_reservations === 1, "(BR: an upload in progress at a bare SHA-256)");
+  await refusedGenesis(BR, sr, "an upload in progress at a bare SHA-256");
+  const sm = await enabled(BM);
+  ok((await seamAll(BM, { plant: "manifest" })).plain_files === 1, "(BM: a chunked file's manifest registered)");
+  await refusedGenesis(BM, sm, "a chunked file's manifest");
+  // (a bare upload past its first check, held before its allocation, while genesis lands: refused at the allocation,
+  // nothing reserved or held)
+  const srr = await enabled(RR);
+  const rb = Buffer.from("RR's blob, late");
+  await gateOn("reserve-allocate", true);
+  const late = putBlob(srr, rb, sha(rb));
+  await new Promise((r) => setTimeout(r, 300));
+  const g1 = await post(srr, RR, "/api/sync/v1/e2e/chain", (await account(RR).genesis()).body);
+  ok(g1.status === 201, "(RR: genesis lands while the upload is held)");
+  await gateOn("reserve-allocate", false);
+  const lr = await late;
+  const lrb = await lr.json().catch(() => ({}));
+  const after = await seamAll(RR, {});
+  ok(lr.status === 409 && lrb.reason === "sealed_account" && after.plain_reservations === 0 && after.plain_holdings === 0, "a bare upload held past its first check while genesis lands: refused at its allocation (409, sealed_account), nothing reserved or held: " + J({ status: lr.status, body: lrb, after }));
+  // (a manifest past its first check, held before its write, while genesis lands: refused at the write, no row. Its
+  // chunks, held in the clear, would refuse genesis themselves: dropped meanwhile (a seam), so the write's own check
+  // is what decides; without it, the write would fail on the missing chunks instead)
+  const keep = plan.max_file_bytes;
+  plan.max_file_bytes = 64 << 20;
+  try {
+    const smr = await enabled(MR);
+    const c1 = randomBytes(8 << 20), c2 = randomBytes(1 << 20), all = Buffer.concat([c1, c2]);
+    for (const c of [c1, c2]) ok((await putBlob(smr, c, sha(c))).status === 201, "(MR: a chunk held, " + c.length + " bytes)");
+    const m = { v: 1, cdc: "fastcdc-gear-v1/1M/4M/8M", sha256: sha(all), size: all.length, chunks: [[sha(c1), c1.length], [sha(c2), c2.length]] };
+    await gateOn("manifest-write", true);
+    const reg = post(smr, MR, "/api/sync/v1/manifest", { manifest: m });
+    await new Promise((r) => setTimeout(r, 300));
+    await seamAll(MR, { dropBare: true });
+    const g2 = await post(smr, MR, "/api/sync/v1/e2e/chain", (await account(MR).genesis()).body);
+    ok(g2.status === 201, "(MR: genesis lands while the manifest is held)");
+    await gateOn("manifest-write", false);
+    const mr = await reg;
+    const mrb = await mr.json().catch(() => ({}));
+    ok(mr.status === 409 && mrb.reason === "sealed_account" && (await seamAll(MR, {})).plain_files === 0, "a manifest held past its first check while genesis lands: refused at its write (409, sealed_account), no row: " + J({ status: mr.status, body: mrb }));
+  } finally {
+    plan.max_file_bytes = keep;
+  }
 });
 
 await section("the sync generation: an op in flight when the synced data is deleted, and a replay after", async () => {
