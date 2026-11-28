@@ -213,8 +213,10 @@ impl Hnf {
         let (c, s, t) = xgcd(y1, y2);
         // |det| / c = |N(g)| / c, exact in i128 as in Elt::norm
         let ax = (y2 / c).wrapping_mul(x1).wrapping_sub((y1 / c).wrapping_mul(x2)).abs();
-        let r = |u: i128| u.rem_euclid(ax);
-        let b = (r(s) * r(x1) % ax + r(t) * r(x2) % ax) % ax;
+        // (residues below ax < 2^64: their products formed in u128)
+        let r = |u: i128| u.rem_euclid(ax) as u128;
+        let m = ax as u128;
+        let b = ((r(s) * r(x1) % m + r(t) * r(x2) % m) % m) as i128;
         let h = Hnf { a: ax as u64, b: b as u64, c: c as u64 };
         debug_assert!(h.a % h.c == 0 && h.b % h.c == 0, "{:?} is not an ideal", h);
         h
@@ -538,6 +540,37 @@ fn shortest(mut u: (i128, i128), mut v: (i128, i128)) -> Option<(i128, i128)> {
     }
 }
 
+/// A basis of the lattice {x + y w : x + y r = 0 mod p} (r a root of
+/// x^2 - x - 1 mod p, 0 < r < p) whose Gram values fit i128 for every
+/// p < 2^64: (p, 0), (-r, 1) has Q((p, 0)) = 2 p^2, past i128 from 2^63.
+/// Euclid on (p, r), stopped at the first remainder r_i below sqrt p,
+/// gives the lattice vectors (r_i, -t_i) (r_i = s_i p + t_i r) with
+/// |t_i| <= p / r_(i-1) <= sqrt p; the one before, of coordinates below p
+/// and sqrt p, is size-reduced against it (B fits: below 2^64 2^33); the
+/// result has Q <= 5 p^2 / Q(u) + Q(u) / 4 <= 6 p, as Q(u) >= 2 |N(u)| >= 2 p.
+fn half_euclid(p: u64, r: u64) -> Option<((i128, i128), (i128, i128))> {
+    let p128 = p as i128;
+    let (mut r0, mut r1) = (p128, r as i128);
+    let (mut t0, mut t1) = (0i128, 1i128);
+    while r1 != 0 && r1.checked_mul(r1)? >= p128 {
+        let q = r0 / r1;
+        (r0, r1) = (r1, r0 - q * r1);
+        (t0, t1) = (t1, t0.checked_sub(q.checked_mul(t1)?)?);
+    }
+    let u = (r1, -t1);
+    let v = (r0, -t0);
+    let q = |x: (i128, i128)| -> Option<i128> {
+        (2 * x.0).checked_mul(x.0)?.checked_add((2 * x.0).checked_mul(x.1)?)?.checked_add((3 * x.1).checked_mul(x.1)?)
+    };
+    let bil = |x: (i128, i128), y: (i128, i128)| -> Option<i128> {
+        (2 * x.0).checked_mul(y.0)?.checked_add(x.0.checked_mul(y.1)?)?.checked_add(x.1.checked_mul(y.0)?)?.checked_add((3 * x.1).checked_mul(y.1)?)
+    };
+    let (n, d) = (bil(v, u)?, q(u)?);
+    let (fl, rem) = (n.div_euclid(d), n.rem_euclid(d));
+    let m = if rem >= d - rem { fl + 1 } else { fl };
+    Some((u, (v.0.checked_sub(m.checked_mul(u.0)?)?, v.1.checked_sub(m.checked_mul(u.1)?)?)))
+}
+
 /// The primes of O_F above the rational prime p, sorted; an error if p is
 /// not prime, is inert of norm p^2 >= 2^64 (p >= 2^32), past the u64 norms
 /// of [`Prime`] and [`Hnf`], or is split and the generator's search
@@ -568,7 +601,8 @@ pub fn primes_above(p: u64) -> Result<Vec<Prime>, String> {
     for t in [s, p - s] {
         let r = ((1 + t) as u128 * half as u128 % p as u128) as u64;
         let big = || format!("the primes above {} are split of norm {}, past the i128 arithmetic of their generators' search", p, p);
-        let g = shortest((p as i128, 0), (-(r as i128), 1)).ok_or_else(big)?;
+        let (u, w) = half_euclid(p, r).ok_or_else(big)?;
+        let g = shortest(u, w).ok_or_else(big)?;
         let g = Elt::new(i64::try_from(g.0).map_err(|_| big())?, i64::try_from(g.1).map_err(|_| big())?);
         assert_eq!(g.norm().unsigned_abs(), p as u128, "no generator of norm p found");
         v.push(Prime::from_gen(p, Kind::Split, g));
@@ -746,9 +780,10 @@ mod tests {
     /// (85070591730234615404675050015203263089 and
     /// 340282366920938461286658806734041124249), where this gave norms 625 and
     /// 3481. The generator's search for a split prime is checked, so it
-    /// refuses only on an actual i128 overflow: 2^62 + 135 and 2^63 - 259
-    /// (which overflowed in a debug build before) are answered with Sage's
-    /// norms, 2^64 - 95 is refused. The largest inert prime below 2^32 is
+    /// starts from a half-Euclid basis whose Gram values fit i128: 2^62 + 135,
+    /// 2^63 - 259 (which overflowed in a debug build before), and the first
+    /// and last split primes in [2^63, 2^64), 2^63 + 123 and 2^64 - 95, are
+    /// answered with Sage's norms. The largest inert prime below 2^32 is
     /// answered too.
     #[test]
     fn primes_above_norms_past_u64() {
@@ -772,10 +807,27 @@ mod tests {
                 assert_eq!((q.norm, q.kind), (p, Kind::Split));
             }
         }
-        // (near 2^64 the search's first Gram value, 2 p^2, does pass i128:
-        // refused on that actual overflow)
-        assert!(primes_above(18446744073709551521).unwrap_err().contains("i128"));
+        // (past 2^63, where the basis (p, 0), (-r, 1) has Gram values past
+        // i128, the half-Euclid basis is used: the first and last split
+        // primes in [2^63, 2^64), with Sage's norms)
+        for p in [9223372036854775931u64, 18446744073709551521] {
+            let v = primes_above(p).unwrap();
+            assert_eq!(v.len(), 2);
+            for q in &v {
+                assert_eq!((q.norm, q.kind), (p, Kind::Split));
+                assert!(q.contains(q.gen) && q.gen.norm().unsigned_abs() == p as u128);
+            }
+            assert_ne!(v[0], v[1]);
+        }
         assert!(primes_above(91).unwrap_err().contains("not prime"));
+        // (the principal HNF's residues multiplied in u128: Sage 10.10's
+        // (18446744069414584319, 4294967295, 1) for -(2^32 - 1) - w and its
+        // negative, the generator in it)
+        for g in [Elt::new(-4294967295, -1), Elt::new(4294967295, 1)] {
+            let h = Hnf::principal(g);
+            assert_eq!((h.a, h.b, h.c), (18446744069414584319, 4294967295, 1));
+            assert!(h.contains(g));
+        }
     }
 
     /// For tests/wasm-stop.mjs (the Stop button in wasm): seconds of
