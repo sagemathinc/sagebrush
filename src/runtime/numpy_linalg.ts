@@ -295,7 +295,11 @@ function invNormEst(n: number, B: (x: Float64Array, t: boolean) => void, anorm: 
     const t = 2 * (asum(x) / (3 * n)); // (divided before doubled, as dlacn2 and engine/nd: 2 * sum can overflow)
     if (t > est) est = t;
   }
-  return !isFinite(est) || est === 0 ? 0 : 1 / est / anorm;
+  if (!isFinite(est) || est === 0) return 0;
+  // (when 1 / est overflows, est a subnormal as for [realmax 0; 1 realmax], whose rcond is 1: (1 / anorm) / est,
+  // dtrcon's order and engine/nd's, the same value wherever the first form is finite)
+  const r = 1 / est / anorm;
+  return r === Infinity ? 1 / anorm / est : r;
 }
 
 // The dot product of x[xo..xo+n] and y[yo..yo+n] as engine/nd's (engine/nd/src/cond.rs dot): four partial sums
