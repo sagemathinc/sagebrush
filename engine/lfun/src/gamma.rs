@@ -243,9 +243,19 @@ fn near_pole(a: C64, m: usize, z: C64) -> Scaled {
     for j in 1..=m {
         p0 *= -(j as f64);
     }
-    let pe = (C64::ONE + eps * p) * p0; // P(eps)
     let lz = z.ln();
-    let bracket = (g - p) / pe - lz * expm1_over(eps * lz) * (1.0 / p0);
+    let bracket = if p0.is_finite() {
+        let pe = (C64::ONE + eps * p) * p0; // P(eps)
+        (g - p) / pe - lz * expm1_over(eps * lz) * (1.0 / p0)
+    } else {
+        // (m! past the doubles, m >= 171: 1/P(0) = (-1)^m / m! from ln m!,
+        // which underflows to at most a subnormal instead; m! overflowed to
+        // inf and 0 * inf made both parts NaN, Gamma(-171, 1) among them:
+        // Codex audit A05-F1)
+        let ln_fact: f64 = (2..=m).map(|j| (j as f64).ln()).sum();
+        let inv_p0 = if m % 2 == 0 { 1.0 } else { -1.0 } * (-ln_fact).exp();
+        (g - p) * (C64::ONE + eps * p).recip() * inv_p0 - lz * expm1_over(eps * lz) * inv_p0
+    };
     // z^a sum_(k != m) (-z)^k / (k! (a + k))
     let mut rest = C64::ZERO;
     let mut pk = C64::ONE; // (-z)^k / k!
