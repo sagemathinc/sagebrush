@@ -77,7 +77,10 @@ impl Character {
         // exponents reduced mod the order: [_, 2, 2, ...] with order 2 is the
         // trivial character, which minimal() and is_trivial() must see (the
         // second review's R2-MOD-F4: it got cusp dimension 0 at level 11)
-        let exps = exps.into_iter().map(|e| if e == u32::MAX { e } else { (e as u64 % order) as u32 }).collect();
+        let exps = exps.into_iter().map(|e| {
+            sagebrush_interrupt::check();
+            if e == u32::MAX { e } else { (e as u64 % order) as u32 }
+        }).collect();
         Ok(Character { n, order, exps })
     }
 

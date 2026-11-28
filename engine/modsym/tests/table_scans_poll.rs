@@ -23,6 +23,9 @@ fn table_scans_poll() {
     let exps: Vec<u32> = (0..n).map(|x| chi.exponent(x as i64).unwrap_or(u32::MAX)).collect();
     let check = count(&|| drop(Character::from_exponents(n, chi.order, exps.clone()).unwrap()));
     let minimal = count(&|| drop(chi.minimal()));
+    // from_exponents: its unit scan, its pairs' check and the exponents'
+    // normalization, a check each
+    assert!(check >= n * n + 2 * n, "from_exponents: {} checks", check);
     // the closure walk alone: a check per element and per generator
     assert!(all - check - minimal >= 2 * (n - 1), "walk: {} checks", all - check - minimal);
     // minimal's two scans, is_trivial's and the trivial table's
