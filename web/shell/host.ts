@@ -130,6 +130,7 @@ function refusalOf(err: unknown, p: string): Refusal | null {
 }
 const refuse = (code: string, p: string, why = REASON[code]) => new Refusal(code, `${p}: ${why}`);
 const CHANGED = "changed during the copy (it is no longer what was measured)";
+const DOC = "a notebook or board: edit it in its editor";
 // (what cp keeps of a document it measured: the identity and record revision its duplicate must still find, and its size)
 type Snapshot = RenameExpect & { rev: number; size: number };
 // (the verbs that change something, and so need write: a duplicate's destination, not its source)
@@ -495,7 +496,8 @@ export class ShellRun {
       if (!covered) throw new ScopeRefusal(`${c.path}: Permission denied (outside this shell's access)`);
       if (MUTATES(c) && !pr.write) throw refuse("EROFS", c.path, "Read-only file system (this shell may only read)");
     }
-    if (c.op === "write" && c.entry && c.entry.kind !== "file") throw refuse("EACCES", c.path, "a notebook or board: edit it in its editor");
+    // (bytes are a data file's only: never written into a notebook or board, nor creating one under its name)
+    if ((c.op === "write" && c.entry && c.entry.kind !== "file") || (c.op === "create" && kindOf(c.path) !== "file")) throw refuse("EACCES", c.path, DOC);
     if (c.op === "duplicate" && c.role === "source" && c.entry && c.entry.kind === "folder") throw refuse("EISDIR", c.path);
   };
   /**
@@ -649,7 +651,9 @@ export class ShellRun {
     if (p === "/") throw refuse("EISDIR", p);
     const e = await this.ws.stat(p, { admit: this.check });
     if (e && e.kind === "folder") throw refuse("EISDIR", p);
-    if (e && e.kind !== "file") throw refuse("EACCES", p, "a notebook or board: edit it in its editor");
+    // (an absent notebook's or board's name too: a byte write would make the document, not these bytes, so refused
+    // before anything is made, as an existing one is)
+    if (e ? e.kind !== "file" : kindOf(p) !== "file") throw refuse("EACCES", p, DOC);
     if (!e) {
       const up = parentOf(p), f = up === "/" ? null : await this.ws.stat(up, { admit: this.check });
       if (up !== "/" && !f) throw refuse("ENOENT", p);
@@ -753,7 +757,7 @@ export class ShellRun {
       readCapped: (p: string) => this.readCapped(p),
       commit: (p: string, b: Uint8Array, o: { fid: string; rev: number } | null) => this.commitAt(p, b, o),
       mkdir: (p: string, recursive: boolean) => this.mkdir(p, recursive),
-      rm: (p: string, recursive: boolean) => this.rm(p, recursive, false),
+      rm: (p: string, recursive: boolean, empty = false) => this.rm(p, recursive, false, empty),
       mv: (a: string, b: string) => this.mv(a, b),
       flush: (p: string) => this.flush(p),
       list: (p: string) => this.list(p),
@@ -841,7 +845,9 @@ export class ShellRun {
   private forget(p: string) {
     for (const q of [...this.obs.keys()]) if (within(q, p)) this.obs.delete(q);
   }
-  private async rm(p: string, recursive: boolean, force: boolean) {
+  // (`empty`, rmdir's: only an empty folder, checked holding the workspace's lock right before the move, so a child
+  // added after the caller looked refuses it, ENOTEMPTY, nothing moved)
+  private async rm(p: string, recursive: boolean, force: boolean, empty = false) {
     this.mutating(p);
     if (p === "/") throw refuse("EACCES", p, "the top folder can't be removed");
     await this.flush(p);
@@ -852,7 +858,12 @@ export class ShellRun {
     }
     if (e.kind === "folder" && !recursive) throw refuse("EISDIR", p);
     // (always to Trash, everything in it, as one op; a large folder's rewrite settled before the next request: §3.4)
-    await this.ws.remove(p, expectOf(e), undefined, { admit: this.charging(0) });
+    let full = false;
+    try {
+      await this.ws.remove(p, expectOf(e), undefined, { admit: this.charging(0), still: async () => !(full = empty && (await this.ws.list(p)).length > 0) });
+    } catch (err) {
+      throw full ? refuse("ENOTEMPTY", p, "Directory not empty") : err;
+    }
     await this.ws.rewriteSettled();
     this.forget(p);
     this.record({ verb: "remove", path: p, committed: "local" });

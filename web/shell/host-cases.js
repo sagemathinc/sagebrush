@@ -159,6 +159,18 @@ async function identity(check) {
   hooks.readUpTo = async (p) => { if (p === "/g") { delete hooks.readUpTo; await ws.write("/f", enc("old\nother tab\n")); } };
   r = await host.exec(PERSON, "for i in 1 2; do echo $i >> f; cat g > /dev/null; done");
   check(r.code === 1 && /changed elsewhere/.test(r.stderr) && (await read(ws, "/f")) === "old\nother tab\n", `a re-opened append isn't observed again: another tab's change between iterations is ECONFLICT (${JSON.stringify(r)})`);
+  // an absent notebook's or board's name as a redirection's target: refused before anything is made (bytes never
+  // make a document); a data file's name: created
+  {
+    const { ws: w2, host: h2 } = await fresh("absent-doc-target");
+    await w2.create("/src.ipynb", { content: { cells: [{ cell_type: "code", source: "1", outputs: [] }] } });
+    for (const [cmd, gone] of [["cat src.ipynb > copy.ipynb", "/copy.ipynb"], ["echo x > new.board.json", "/new.board.json"], ["echo x >> app.ipynb", "/app.ipynb"]]) {
+      const r = await h2.exec(PERSON, cmd);
+      check(r.code === 1 && /edit it in its editor/.test(r.stderr) && !(await w2.stat(gone)) && r.ops.length === 0, `${cmd} (absent): refused before anything is made, EACCES (${JSON.stringify(r).slice(0, 240)})`);
+    }
+    const r = await h2.exec(PERSON, "cat src.ipynb > copy.txt");
+    check(r.code === 0 && (await w2.stat("/copy.txt"))?.kind === "file", `the control, a data file's name: created (${JSON.stringify(r).slice(0, 200)})`);
+  }
   // a notebook or board is never written
   await ws.create("/nb.ipynb", { content: { cells: [{ cell_type: "code", source: "1" }] } });
   r = await host.exec(PERSON, "echo x > nb.ipynb; echo after");

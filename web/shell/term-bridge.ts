@@ -241,7 +241,8 @@ export function fileHandler(port: CommandPort) {
                 if (!a.folder && e.kind === "folder") throw port.refuse("EISDIR", q);
                 if (a.folder && (await port.list(q)).length) throw port.refuse("ENOTEMPTY", q, "Directory not empty");
               }
-              await port.rm(q, a.folder === null ? a.recursive : !!a.folder);
+              // (rmdir: empty checked again holding the workspace's lock, with the removal)
+              await port.rm(q, a.folder === null ? a.recursive : !!a.folder, a.folder === true);
               return true;
             }),
           );
