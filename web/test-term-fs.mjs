@@ -180,6 +180,21 @@ const raised = (f) => {
   shim.closeSync(ad);
 }
 
+// ---------------------------------------------------------------- a descriptor's metadata is its own file's
+// (fstat and lseek(SEEK_END) on a descriptor whose file was replaced at its path: refused (EBADF), as a read is; never
+// the replacement's size or inode)
+{
+  fileAt("/w/s.txt", enc.encode("abc"));
+  const fd = shim.openSync("/w/s.txt", 0);
+  const st = shim.fstatSync(fd);
+  ok(st.size === 3 && shim.seekFd(fd, 0, 2) === 3, "fstat and SEEK_END of an open file: its size");
+  fileAt("/w/s.txt", enc.encode("twelve bytes"));
+  const ef = raised(() => shim.fstatSync(fd)), es = raised(() => shim.seekFd(fd, 0, 2));
+  ok(ef?.code === "EBADF" && es?.code === "EBADF", `fstat and SEEK_END after the file was replaced at its path: EBADF, not the replacement's metadata (${ef?.code}, ${es?.code})`);
+  ok(shim.seekFd(fd, 1, 0) === 1, "a seek that needs no metadata still works");
+  shim.closeSync(fd);
+}
+
 // ---------------------------------------------------------------- renames, persistence, mounts, Stop
 {
   fileAt("/w/m.txt", enc.encode("m"));
