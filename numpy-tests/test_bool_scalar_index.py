@@ -64,3 +64,20 @@ for k in ([0.0, 1.0], [1j], [[0.5]], ([0.0],), (0, [0.0]), [0, 1.0], [True, 1], 
           (0, 1.5), ([[True, False], [True, False]],), (Ellipsis, [[True, False, True, False, True]]),
           ([[True, True]], 0)):
     print("list", repr(k), "|", show(lambda: np.arange(10).reshape(2, 5)[k]))
+
+# (a list no numeric array holds is NumPy's IndexError too; a ragged one its ValueError)
+for k in (["a"], [None], [[None]], [1, "a"], [object()], [{}], [[1], [2, 3]], ([None],), (0, ["x"])):
+    print("list", "[object]" if "object" in repr(k) else repr(k), "|", show(lambda: np.arange(6).reshape(2, 3)[k]))
+# (a value that does not broadcast to an advanced index's result: NumPy's shape-mismatch message)
+b3 = np.zeros((2, 3, 4))
+for k, v in (((Ellipsis, True), np.arange(4)), ((True,), np.arange(5)), (([0, 1],), np.ones((2, 3, 4))),
+             (([0, 1],), np.ones((1, 1, 3, 4))), (([0, 1],), np.ones((2, 2, 3, 4))), (([0, 1],), np.ones(5)),
+             ((0, [0, 2]), np.ones(3)), ((0, [0, 2]), [[7, 8, 9, 10]]), (([True, False],), np.ones((5,))),
+             ((slice(None), [1]), np.ones((2, 1, 4))), ((True,), np.ones((1, 2, 3, 4))), ((True,), np.ones((2, 1, 3, 4))),
+             (([0],), 5), ((True,), [1, 2]), ((False,), [1, 2]), ((np.True_, 0), [1, 2])):
+    c = b3.copy()
+
+    def put():
+        c[k] = v
+        return c.sum()
+    print("mismatch", repr(k), np.shape(v), "|", show(put))
