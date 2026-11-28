@@ -8,14 +8,21 @@
 let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 300) : "")); if (!c) failures++; };
 
-// (this tab's storage: working, or failing to write, or writing nothing, or failing to read)
-const store = new Map();
-let mode = "ok";
-globalThis.sessionStorage = {
-  getItem(k) { if (mode === "read-throws") throw new Error("storage unavailable"); return store.get(k) ?? null; },
-  setItem(k, v) { if (mode === "write-throws") throw new Error("quota"); if (mode !== "write-lost") store.set(k, v); },
-  removeItem(k) { store.delete(k); },
+// (this tab's storage and the site's: each working, or failing to write, or writing nothing, or failing to read)
+const stand = () => {
+  const store = new Map();
+  const s = { store, mode: "ok",
+    getItem(k) { if (s.mode === "read-throws") throw new Error("storage unavailable"); return store.get(k) ?? null; },
+    setItem(k, v) { if (s.mode === "write-throws") throw new Error("quota"); if (s.mode !== "write-lost") store.set(k, v); },
+    removeItem(k) { store.delete(k); } };
+  return s;
 };
+globalThis.sessionStorage = stand();
+globalThis.localStorage = stand();
+const store = { clear() { sessionStorage.store.clear(); localStorage.store.clear(); }, get size() { return sessionStorage.store.size + localStorage.store.size; } };
+// (`mode` sets both: a failure of both is what makes a board unmarkable)
+let mode = "ok";
+const setMode = (m, local = m) => { mode = m; sessionStorage.mode = m; localStorage.mode = local; };
 const { uploadFiles, convertCopy, isPaused, unpause, pauseBoard } = await import("./upload.ts");
 
 // (a workspace: documents and files by path, refs handed out as they are made)
@@ -44,7 +51,7 @@ const boards = (ws) => [...ws.entries.values()].filter((x) => x.entry.kind === "
 // ---- every board an upload makes waits, in a single-file upload and in a several-file one (the branch the pages
 //      never marked), and a notebook beside them doesn't
 {
-  mode = "ok"; store.clear();
+  setMode("ok"); store.clear();
   const ws = workspace();
   const one = await uploadFiles(ws, [file("solo.board.json", BOARD)], "/", O);
   ok(one.made.length === 1 && isPaused(one.made[0].ref), "a board uploaded alone waits for its code to be run", one.made);
@@ -56,7 +63,7 @@ const boards = (ws) => [...ws.entries.values()].filter((x) => x.entry.kind === "
 }
 // ---- Open as… (a converted copy made a board) waits, marked where it is made
 {
-  mode = "ok"; store.clear();
+  setMode("ok"); store.clear();
   const ws = workspace();
   await ws.putFile("/notes.txt", new TextEncoder().encode("hello"));
   const made = await convertCopy(ws, await ws.stat("/notes.txt"), "board", { maxBytes: 1 << 20, mode: "python", asBoard: () => JSON.parse(BOARD) });
@@ -64,7 +71,7 @@ const boards = (ws) => [...ws.entries.values()].filter((x) => x.entry.kind === "
 }
 // ---- fail-closed: a mark that can't be written (or isn't kept) means the board isn't made, and is said
 for (const m of ["write-throws", "write-lost"]) {
-  mode = m; store.clear();
+  setMode(m); store.clear();
   const ws = workspace();
   const r = await uploadFiles(ws, [file("x.board.json", BOARD), file("n.ipynb", NOTEBOOK)], "/", O);
   ok(boards(ws).length === 0 && !r.made.some((e) => e.kind === "board"), `${m}: the board isn't made (nothing left in the workspace)`, [...ws.entries.keys()]);
@@ -76,27 +83,45 @@ for (const m of ["write-throws", "write-lost"]) {
   try { await convertCopy(ws2, await ws2.stat("/notes.txt"), "board", { maxBytes: 1 << 20, mode: "python", asBoard: () => JSON.parse(BOARD) }); } catch (e) { threw = String(e.message); }
   ok(/couldn't be kept waiting/.test(threw) && boards(ws2).length === 0, `${m}: Open as… makes no board either, and says why`, threw);
 }
+// ---- this tab's storage can't be written, the site's can: the mark is kept there (every tab: stricter), the board
+//      is made and waits, also as a new page of this tab sees it; Run clears both
+for (const m of ["write-throws", "write-lost"]) {
+  setMode(m, "ok"); store.clear();
+  const ws = workspace();
+  const r = await uploadFiles(ws, [file("fallback.board.json", BOARD)], "/", O);
+  const e = r.made[0];
+  ok(e?.kind === "board" && localStorage.store.get("sagebrush-board-paused:" + e.ref) === "1" && sessionStorage.store.size === 0, `${m} in this tab's storage: the mark is kept in the site's storage instead`, [...localStorage.store.keys()]);
+  setMode("ok");
+  ok(isPaused(e.ref), `${m}: the board waits, as any page reading the storage sees it`);
+  unpause(e.ref);
+  ok(!isPaused(e.ref) && store.size === 0, `${m}: and Run (unpause) clears the mark from both`);
+}
+{
+  setMode("ok", "read-throws");
+  ok(isPaused("never-marked") === true, "the site's storage can't be read: waiting, though this tab's can");
+  setMode("ok");
+}
 // ---- and if the board made can't be taken away again either: it stays, but waits for this tab's life, and the
 //      person is told to delete it
 {
-  mode = "write-throws"; store.clear();
+  setMode("write-throws"); store.clear();
   const ws = workspace();
   ws.remove = async () => { throw new Error("remove failed"); };
   const r = await uploadFiles(ws, [file("stuck.board.json", BOARD)], "/", O);
   const left = boards(ws);
   ok(left.length === 1 && r.made.length === 0, "the mark and the removal both failing: the board is still there, not reported as made", left.map((e) => e.path));
   ok(r.refused.some((t) => /stuck\.board\.json/.test(t) && /couldn't be removed: delete it/.test(t) && t.includes(left[0].path)), "…the upload says it couldn't be removed, naming it, to delete", r.refused);
-  mode = "ok";
+  setMode("ok");
   ok(isPaused(left[0].ref) === true && store.size === 0, "…and it waits all the same, for this tab's life (no mark stored)");
 }
 // ---- fail-closed on reading: a mark that can't be read means waiting; with working storage, a board made here
 //      (never marked) runs, and one the person ran is no longer marked
 {
-  mode = "ok"; store.clear();
+  setMode("ok"); store.clear();
   ok(pauseBoard("here") === true && isPaused("here"), "a mark written is read back");
-  mode = "read-throws";
+  setMode("read-throws");
   ok(isPaused("here") === true && isPaused("never-marked") === true, "a mark that can't be read means waiting, for any board");
-  mode = "ok";
+  setMode("ok");
   ok(isPaused("made-here") === false, "with working storage, a board made here (never marked) doesn't wait");
   unpause("here");
   ok(isPaused("here") === false, "and one the person ran (unpause) no longer waits");

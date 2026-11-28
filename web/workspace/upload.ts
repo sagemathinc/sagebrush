@@ -80,15 +80,27 @@ const message = (e: unknown) => String((e as Error)?.message ?? e);
 /** A board opened from a file the person brought in (an upload, a drop, Open as…): its code waits for
  * them, "Run this board's code" (an interim, until design/capabilities.md's gate; @sagebrush, on astra's
  * CORR-4B3-1).  Kept for this tab, until they run it.  Marked here, where every such board is made
- * (uploadFiles, convertCopy), never by the pages that open one; fail-closed: a mark that can't be written
- * means the board isn't made, and a mark that can't be read means waiting. */
+ * (uploadFiles, convertCopy), never by the pages that open one; fail-closed: the mark is kept in this tab's
+ * sessionStorage, or, if that can't be written, in localStorage (every tab of this site: stricter, never
+ * looser); a mark that can be kept in neither means the board isn't made; and a mark that can't be read means
+ * waiting. */
 export const PAUSED = "sagebrush-board-paused:";
-/** Marks `ref` as waiting; whether the mark is there (written and read back). */
-export function pauseBoard(ref: string): boolean { try { sessionStorage.setItem(PAUSED + ref, "1"); return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return false; } }
+const marked = (s: Storage, ref: string) => { s.setItem(PAUSED + ref, "1"); return s.getItem(PAUSED + ref) === "1"; };
+/** Marks `ref` as waiting; whether the mark is there (written and read back), in this tab's storage or the site's. */
+export function pauseBoard(ref: string): boolean {
+  try { if (marked(sessionStorage, ref)) return true; } catch {}
+  try { return marked(localStorage, ref); } catch { return false; }
+}
 /** Boards made in this tab whose mark couldn't be kept and that couldn't be taken away again: waiting, for this tab's life. */
 const unmarked = new Set<string>();
-export function isPaused(ref: string) { if (unmarked.has(ref)) return true; try { return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return true; } }
-export function unpause(ref: string) { try { sessionStorage.removeItem(PAUSED + ref); } catch {} }
+export function isPaused(ref: string) {
+  if (unmarked.has(ref)) return true;
+  try { return sessionStorage.getItem(PAUSED + ref) === "1" || localStorage.getItem(PAUSED + ref) === "1"; } catch { return true; }
+}
+export function unpause(ref: string) {
+  try { sessionStorage.removeItem(PAUSED + ref); } catch {}
+  try { localStorage.removeItem(PAUSED + ref); } catch {}
+}
 /** A board just made from a file brought in: marked as waiting, or, if it can't be, taken away again and refused. */
 async function imported(ws: Workspace, e: Entry): Promise<Entry> {
   if (e.kind !== "board" || pauseBoard(e.ref!)) return e;
