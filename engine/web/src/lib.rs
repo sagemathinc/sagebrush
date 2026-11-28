@@ -506,22 +506,110 @@ fn progress_selftest(v: &Value) -> Result<Value, String> {
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 pub fn call(req: &str) -> String {
+    // (an internal error's provenance: cleared here, read by error_json)
+    let _ = sagebrush_poly::take_internal_raised();
     // the capped ops' request sizes are admitted before serde copies
     // anything (the last top-level fn name is read by one scan that owns no
-    // text: every other value skipped); unknown names go on as before
-    if let Some(op) = capped_op(req) {
+    // text: every other value skipped), their own byte limits first
+    let op = capped_op(req);
+    if let Some(op) = op {
         if req.len() > op.max_request {
             return json!({ "error": format!("{}: the request has {} bytes, more than {}", op.name, req.len(), op.max_request) }).to_string();
         }
-        if let Some(f) = op.run {
-            return nmod_ops::run(op, req, f);
-        }
     }
-    match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
+    // then every request's parsed form, before anything is parsed: its
+    // bound by a scan that allocates nothing (json_tree_bound), reserved
+    // with the memory ledger (whatever its structure: unknown names, extra
+    // or mistyped fields included); refused, the typed memory reply
+    let parse = match sagebrush_ledger::reserve("a JSON request's parsed form", json_tree_bound(req)) {
+        Ok(r) => r,
+        Err(sagebrush_ledger::EngineError::Memory(m)) => return json!({ "memory": memory_error_value(&m) }).to_string(),
+        Err(e) => return json!({ "error": e.to_string(), "internal": true }).to_string(),
+    };
+    if let Some(f) = op.and_then(|op| op.run.map(|f| (op, f))) {
+        // (the parse reserved while the op parses its request: its own
+        // peak formulas admit the rest)
+        let r = nmod_ops::run(f.0, req, f.1);
+        drop(parse);
+        return r;
+    }
+    let v = serde_json::from_str::<Value>(req).map_err(|e| e.to_string());
+    // (parsed: the tree is live, measured from here, no longer outstanding)
+    drop(parse);
+    match v.and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
-        Err(e) => error_json(e),
+        Err(e) => error_json(e, sagebrush_poly::take_internal_raised()),
     }
     .to_string()
+}
+
+/// The bytes serde_json's Value tree takes for each node of a request (a
+/// container, a string or a scalar; an object's key is one too), its
+/// strings' text apart, on a 64-bit host (a wasm32 one's Values are
+/// smaller): a 32-byte Value in its parent's vector, whose growth briefly
+/// holds the old and the doubled buffer, or a map entry's share of its
+/// node (tests/json_parse_alloc.rs measures the costliest shapes).
+pub const JSON_NODE_BYTES: u64 = 192;
+
+/// The bytes a parsed request takes for each byte of a string's text
+/// without escapes: serde borrows it from the request and copies it once
+/// into an exact-size String.
+pub const JSON_TEXT_BYTES: u64 = 1;
+
+/// The bytes a parsed request takes for each byte of a string's text with
+/// an escape: decoded through a growing scratch buffer (the old and the
+/// doubled buffer briefly both live), then copied, and the decoded text is
+/// never longer than the text as written.
+pub const JSON_ESCAPED_TEXT_BYTES: u64 = 3;
+
+/// A bound on the bytes the parsed form of the JSON text `req` takes, by
+/// one scan of its bytes that allocates nothing: JSON_NODE_BYTES for each
+/// node and, for each byte of a string's text as written,
+/// JSON_TEXT_BYTES (no escape in the string) or JSON_ESCAPED_TEXT_BYTES.
+/// Malformed text is counted the same way (serde stops at the first
+/// error, having built less).  Stop is checked every 64 KB.
+pub fn json_tree_bound(req: &str) -> u64 {
+    let b = req.as_bytes();
+    let (mut nodes, mut text, mut escaped, mut i) = (0u64, 0u64, 0u64, 0usize);
+    while i < b.len() {
+        if i & 0xffff == 0 {
+            sagebrush_interrupt::check();
+        }
+        match b[i] {
+            b'"' => {
+                nodes += 1;
+                i += 1;
+                let (mut len, mut esc) = (0u64, false);
+                while i < b.len() && b[i] != b'"' {
+                    let step = if b[i] == b'\\' { 2 } else { 1 };
+                    esc |= step == 2;
+                    len += step as u64;
+                    i += step;
+                }
+                if esc {
+                    escaped += len;
+                } else {
+                    text += len;
+                }
+                i += 1;
+            }
+            b'[' | b'{' => {
+                nodes += 1;
+                i += 1;
+            }
+            b'-' | b'0'..=b'9' | b't' | b'f' | b'n' => {
+                nodes += 1;
+                while i < b.len() && !matches!(b[i], b',' | b']' | b'}' | b':' | b' ' | b'\t' | b'\n' | b'\r' | b'"' | b'[' | b'{') {
+                    i += 1;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    nodes
+        .saturating_mul(JSON_NODE_BYTES)
+        .saturating_add(text.saturating_mul(JSON_TEXT_BYTES))
+        .saturating_add(escaped.saturating_mul(JSON_ESCAPED_TEXT_BYTES))
 }
 
 /// The polynomials' factorization as modsym's factor callback (`run` gets
@@ -555,12 +643,15 @@ fn keeping_internal<T>(
     }
 }
 
-/// A call's error reply: {"error": MESSAGE}, with "internal": true when the
-/// message carries a failed proved invariant of the factoring engine (also
-/// inside an op's own message), so the callers raise it as an internal
-/// error, never as a resource limit or a user error.
-fn error_json(e: String) -> Value {
-    if e.contains(sagebrush_poly::INTERNAL_PREFIX) || e.contains(sagebrush_poly::LLL_INTERNAL_PREFIX) {
+/// A call's error reply: {"error": MESSAGE}, with "internal": true when a
+/// failed proved invariant of the factoring engine was raised in this call
+/// (`raised`, the poly crate's provenance flag) and the message carries it
+/// (also inside an op's own message), so the callers raise it as an
+/// internal error, never as a resource limit or a user error.  A message
+/// alone isn't typed: a caller's text (an unknown name echoed) may contain
+/// the same words.
+fn error_json(e: String, raised: bool) -> Value {
+    if raised && (e.contains(sagebrush_poly::INTERNAL_PREFIX) || e.contains(sagebrush_poly::LLL_INTERNAL_PREFIX)) {
         json!({ "error": e, "internal": true })
     } else {
         json!({ "error": e })
@@ -1826,14 +1917,14 @@ mod tests {
         let e = super::keeping_internal(&internal, |fac| sagebrush_modsym::newspace::newspace_orbits(23, 2, &eps, fac)).map(|_| ()).unwrap_err();
         assert!(called.load(std::sync::atomic::Ordering::Relaxed) > 0, "the factor callback was never asked");
         assert!(e.starts_with(sagebrush_poly::INTERNAL_PREFIX) && e.contains("an injected invariant") && e.contains("please report it"), "{}", e);
-        assert_eq!(super::error_json(e)["internal"], true);
+        assert_eq!(super::error_json(e, sagebrush_poly::take_internal_raised())["internal"], true);
         // a resource refusal: no factors, checked_factor's own error, unflagged
         let refusing = |_: &[BigInt]| -> Result<super::Factored, sagebrush_poly::FactorLimit> {
             Err(sagebrush_poly::Budget::unlimited().refuse("work", 2, 1))
         };
         let e = super::keeping_internal(&refusing, |fac| sagebrush_modsym::newspace::newspace_orbits(23, 2, &eps, fac)).map(|_| ()).unwrap_err();
         assert!(!e.contains(sagebrush_poly::INTERNAL_PREFIX), "{}", e);
-        assert!(super::error_json(e).get("internal").is_none());
+        assert!(super::error_json(e, sagebrush_poly::take_internal_raised()).get("internal").is_none());
         // and the real factorization still answers
         let real = |f: &[BigInt]| sagebrush_poly::try_factor(f).map(|r| r.1);
         let r = super::keeping_internal(&real, |fac| sagebrush_modsym::newspace::newspace_orbits(23, 2, &eps, fac)).unwrap();
@@ -1841,15 +1932,25 @@ mod tests {
     }
 
     /// A failed proved invariant of the factoring engine is flagged
-    /// "internal" (also inside another op's message); a resource refusal
-    /// and other errors are not (rank-3 plan r3, section 3.5).
+    /// "internal" (also inside another op's message) when one was raised in
+    /// the call; a resource refusal, other errors, and a caller's text that
+    /// merely contains the same words are not (the type comes from the
+    /// raising, not the text).
     #[test]
     fn internal_factoring_errors_are_flagged() {
-        let m = format!("{} (x divides the residual after the pre-pass in small-subset pre-pass); please report it; not factored", sagebrush_poly::INTERNAL_PREFIX);
-        assert_eq!(super::error_json(m.clone()), serde_json::json!({ "error": m, "internal": true }));
+        let m = sagebrush_poly::Budget::unlimited().internal("x divides the residual after the pre-pass").to_string();
+        assert!(sagebrush_poly::take_internal_raised(), "making the message records its provenance");
+        assert_eq!(super::error_json(m.clone(), true), serde_json::json!({ "error": m, "internal": true }));
         let wrapped = format!("hmf newspace: {}", m);
-        assert_eq!(super::error_json(wrapped.clone())["internal"], true);
-        assert_eq!(super::error_json("factor of the zero polynomial".into()), serde_json::json!({ "error": "factor of the zero polynomial" }));
+        assert_eq!(super::error_json(wrapped.clone(), true)["internal"], true);
+        assert_eq!(super::error_json("factor of the zero polynomial".into(), true), serde_json::json!({ "error": "factor of the zero polynomial" }));
+        // the same words with no invariant raised: not internal
+        assert!(super::error_json(m.clone(), false).get("internal").is_none());
+        // a caller's function name echoed in the unknown-function error, the
+        // marker in it: an ordinary error through call()
+        let req = serde_json::json!({ "fn": format!("{} (made up); please report it", sagebrush_poly::INTERNAL_PREFIX) }).to_string();
+        let r: serde_json::Value = serde_json::from_str(&call(&req)).unwrap();
+        assert!(r["error"].as_str().unwrap().contains(sagebrush_poly::INTERNAL_PREFIX) && r.get("internal").is_none(), "{}", r);
         // a real resource refusal through call(): no flag
         let r: serde_json::Value = serde_json::from_str(&call(r#"{"fn":"factor","f":["1","1","0","0","1"],"work":1}"#)).unwrap();
         assert!(r["error"].as_str().unwrap().contains("resource limit exceeded") && r.get("internal").is_none(), "{}", r);

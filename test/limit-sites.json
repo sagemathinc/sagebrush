@@ -2037,11 +2037,6 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
- "engine/poly/src/budget.rs :: name :: impl FactorLimit { #0": {
-  "class": "none",
-  "owner": "polynomial factorization",
-  "reason": "the refusal's wording (impl lines): refuses nothing"
- },
  "engine/poly/src/budget.rs :: name :: pub memory_limit: u64, #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -2095,6 +2090,11 @@
  "engine/poly/src/budget.rs :: set_memory_limit :: pub fn set_memory_limit(&self, m: u64) { #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: take_internal_raised :: impl FactorLimit { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the refusal's wording (impl lines): refuses nothing"
  },
  "engine/poly/src/budget.rs :: unlimited :: pub fn unlimited() -> Budget { #0": {
   "class": "2+3",
@@ -2552,7 +2552,7 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "an entry's size or an all-ones limb (max_bits, u64::MAX, a maximum of |mu|); refuses nothing"
  },
- "engine/poly/src/lib.rs ::  :: pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX, LLL_INTERNAL_PREFIX}; #0": {
+ "engine/poly/src/lib.rs ::  :: pub use budget::{take_internal_raised, with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX, LLL_INTERNAL_PREFIX}; #0": {
   "class": "none",
   "owner": "polynomial factorization",
   "reason": "a re-export of the budget's names: refuses nothing"
@@ -4098,6 +4098,11 @@
  "engine/web/src/lib.rs :: internal_factoring_errors_are_flagged :: assert!(r[\"error\"].as_str().unwrap().contains(\"resource limit exceeded\") && r.get(\"internal\").is_none(), \"{}\", r); #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/web/src/lib.rs :: internal_factoring_errors_are_flagged :: let m = sagebrush_poly::Budget::unlimited().internal(\"x divides the residual after the pre-pass\").to_string(); #0": {
+  "class": "none",
+  "owner": "engine/web (calls)",
+  "reason": "a test's internal-error message, made to check its provenance flag: refuses nothing"
  },
  "engine/web/src/lib.rs :: keeping_internal :: factor: &(dyn Fn(&[BigInt]) -> Result<Factored, sagebrush_poly::FactorLimit> + Sync), #0": {
   "class": "none",
