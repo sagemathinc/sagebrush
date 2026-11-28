@@ -51,7 +51,7 @@ import { createServer } from "node:net";
 import { createServer as httpCreateServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { capture, judge, python } from "./run-judge.mjs";
 import { signerVerdict } from "./signer-judge.mjs";
 import { controlsMode, controlNamesIn, releaseSignerVerdict, expectation, CONTROL_NAMES } from "./release-judge.mjs";
@@ -194,19 +194,16 @@ function otherServer() {
   const page = (name) => `<!doctype html><script>
     const say = (v) => ${name === "sforge" ? `void (window.__sbImgs ||= []).push(Object.assign(new Image(), { src: "/report?p=${name}&v=" + encodeURIComponent(v) }))` : `fetch("/report?p=${name}&v=" + encodeURIComponent(v)).catch(() => {})`};
     say("loaded");
-    // (each call bounded: a call that never answers says "(no answer)", and the next is tried)
+    // (the three calls at once, each bounded: one that never answers says "(no answer)" within 5 s, and holds up none
+    // of the others, so each is said before the launch ends)
     const answer = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("(no answer)")), 5000))]);
-    (async () => {
-      try { const w = await answer(window.__TAURI__.core.invoke("disk_where")); say("REACHED disk_where " + String(w).length); }
-      catch (e) { say("refused: " + String(e && e.message || e).slice(0, 80)); }
-      try { const x = await answer(window.__TAURI__.fs.exists("/")); say("REACHED fs.exists " + x); }
-      catch (e) { say("fs refused: " + String(e && e.message || e).slice(0, 80)); }
-      // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded; /sforge's
-      // page may not fetch (its CSP), so Tauri's script sends on the postMessage path, where a header is the caller's
-      // to set: it claims the signer page's Origin)
-      try { const x = await answer(window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }${name === "sforge" ? `, { headers: { Origin: "tauri://localhost" } }` : ""})); say("REACHED signer " + String(x).slice(0, 40)); }
-      catch (e) { say("signer refused: " + String(e && e.message || e).slice(0, 80)); }
-    })();
+    const call = (f, ok, no) => answer(Promise.resolve().then(f)).then((x) => say(ok(x)), (e) => say(no + String(e && e.message || e).slice(0, 80)));
+    call(() => window.__TAURI__.core.invoke("disk_where"), (w) => "REACHED disk_where " + String(w).length, "refused: ");
+    call(() => window.__TAURI__.fs.exists("/"), (x) => "REACHED fs.exists " + x, "fs refused: ");
+    // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded; /sforge's
+    // page may not fetch (its CSP), so Tauri's script sends on the postMessage path, where a header is the caller's
+    // to set: it claims the signer page's Origin)
+    call(() => window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }${name === "sforge" ? `, { headers: { Origin: "tauri://localhost" } }` : ""}), (x) => "REACHED signer " + String(x).slice(0, 40), "signer refused: ");
   <\/script>`;
   const server = httpCreateServer((req, res) => {
     const u = new URL(req.url, "http://x");
@@ -331,7 +328,8 @@ function executable() {
   if (!/\.AppImage$/.test(exe)) return exe;
   const at = mkdtempSync(join(tmpdir(), "sagebrush-appimage-"));
   const { APPIMAGE_EXTRACT_AND_RUN: _, ...env } = process.env;
-  const x = spawnSync(exe, ["--appimage-extract"], { cwd: at, stdio: "ignore", env, timeout: 120000 });
+  // (the AppImage by its absolute path: the extraction runs in its own folder)
+  const x = spawnSync(resolve(exe), ["--appimage-extract"], { cwd: at, stdio: "ignore", env, timeout: 120000 });
   const bin = join(at, "squashfs-root", "usr", "bin");
   const names = existsSync(bin) ? readdirSync(bin) : [];
   console.log(`(the AppImage extracted: exit ${x.status}${x.error ? `, ${x.error.message}` : ""}; usr/bin: ${names.join(", ") || "none"})`);
