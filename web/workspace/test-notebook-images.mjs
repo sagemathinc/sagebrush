@@ -8,7 +8,8 @@
 //      no image;
 //  N5. an .ipynb uploaded with PNG, GIF and SVG attachments: the raster ones extracted to files (the cells refer to
 //      them), the SVG kept inline; exported again, the attachments and sources are the same (round trip);
-//  N6. an ill-formed reference ({"sagebrush/file": "/private/..."}) shows as missing and is never read.
+//  N6. an ill-formed reference ({"sagebrush/file": "/private/..."}) shows as missing and is never read;
+//  N13. Files > Duplicate of such a notebook: the copy has the images embedded (its own folder), shows and exports them.
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && CHROME=google-chrome bun web/workspace/test-notebook-images.mjs
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -228,6 +229,22 @@ try {
   const doc12 = r12[0] && (await P.ev(`(async () => (await ${W}.read(${J(r12[0].path)})).content)()`));
   const reads12b = await P.ev(`window.__reads.filter((p) => p.startsWith("/Attachments/"))`);
   ok(r12[0] && !JSON.stringify(doc12?.cells?.[0]?.attachments ?? null).includes("sagebrush/file") && reads12b.length === 0, "N12: an imported .ipynb's own sagebrush/file references are removed on import, and nothing under /Attachments is read", { att: doc12?.cells?.[0]?.attachments, reads12b });
+  // ---- N13: Files > Duplicate of a notebook with images in its own folder: the copy is another notebook with its own
+  //  folder, so its images go into it embedded (read from the source's folder), never as references it couldn't follow;
+  //  the copy shows them, and its export carries the same bytes
+  const dup = await P.ev(`(async () => { const e = await ${W}.duplicate(${J(made?.path ?? "/none")}); return { path: e.path, ref: e.ref }; })()`).catch((e) => ({ err: String(e) }));
+  const doc13 = dup?.path && (await P.ev(`(async () => (await ${W}.read(${J(dup.path)})).content)()`));
+  const att13 = doc13?.cells?.[0]?.attachments ?? {};
+  ok(dup?.ref && dup.ref !== made?.ref && J(att13["p.png"]) === J({ "image/png": b64(PNG) }) && J(att13["g.gif"]) === J({ "image/gif": gif.toString("base64") }) && J(att13["s.svg"]) === J(svg) && !J(att13).includes("sagebrush/file"), "N13: Files > Duplicate: the copy (its own ref) has the source's images embedded, the same bytes, and no reference into the source's folder", { dup, att13 });
+  const src13 = await P.ev(`(async () => (await ${W}.read(${J(made?.path ?? "/none")})).content.cells[0].attachments)()`);
+  ok(src13?.["p.png"]?.["sagebrush/file"] === pp, "N13: …the source is unchanged", src13);
+  await P.ev(`window.sagebrush.open(${J(dup?.ref)})`);
+  await P.until(`${T}.ref() === ${J(dup?.ref)}`, 15000).catch(() => {});
+  await P.ev(`(${NB}.cells().forEach((c) => c.md && ${NB}.run(c)), true)`).catch(() => {});
+  await P.until(`${NB}.cells()[0]?.md?.querySelectorAll("img").length >= 2`, 10000).catch(() => {});
+  const shown13 = await decoded(P, "#cells .cell img");
+  const ex13 = JSON.parse(await P.ev(`${T}.exportIpynb()`));
+  ok(shown13.filter((w) => w > 0).length >= 2 && J(ex13.cells[0].attachments) === J(src.cells[0].attachments), "N13: …opened, the copy shows them, and its export has the same attachments, byte for byte", { shown13, att: ex13.cells[0].attachments });
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the run threw: " + String(e?.stack ?? e).slice(0, 600));

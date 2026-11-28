@@ -25,6 +25,7 @@
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
 import { docValue } from "./notebook-form";
+import { embedAttachments, imageFolder } from "./image-store";
 import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, BRANCH_RUNS_KEY, mergeRun, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchRun, type BranchRuns, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
@@ -2051,8 +2052,15 @@ export class Workspace {
       await this.admitAt(admit, "duplicate", "destination", dest);
       if (e.kind === "notebook") {
         const { id: _i, rev: _r, updated: _u, ...doc } = c;
+        // (a copy is another notebook, with its own folder: its source's images go into it embedded, read from the
+        //  source's own folder only, never as references to that folder, which the copy doesn't follow; as Save a copy)
+        const { doc: copy } = await embedAttachments(doc, e.ref ? imageFolder("nb", e.ref) : null, async (q) => {
+          const f = await this.stat(q);
+          const b = f?.kind === "file" ? await this.contents(f) : undefined;
+          return b instanceof Uint8Array ? b : null;
+        });
         // (the notebook's own mode, as it is now; the entry's is the one it was made with)
-        return this.make(dest, "notebook", doc, (doc as { mode?: string }).mode ?? e.mode, undefined, e.made);
+        return this.make(dest, "notebook", copy, (copy as { mode?: string }).mode ?? e.mode, undefined, e.made);
       }
       // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
       if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);

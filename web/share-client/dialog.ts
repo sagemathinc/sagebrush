@@ -232,23 +232,26 @@ export function createShareDialog(h: ShareDialogHost) {
       out.textContent = "The notebook changed since Share was opened: open Share again.";
       return;
     }
-    // (its images read again first, then the notebook as it is now, bounded like any file, CORR-172-ASTRA-3)
+    // (its images read again first, then the notebook as it is now, bounded like any file, CORR-172-ASTRA-3; the publish
+    //  is reserved before that read, so a second click meanwhile does nothing, and every way out before it starts lets it go)
+    setBusy(true);
     await h.prepareNotebook?.();
-    if (!picker.mine()) {
-      out.textContent = "The notebook changed since Share was opened: open Share again.";
+    if (!d.open || !picker.mine()) {
+      if (d.open) out.textContent = "The notebook changed since Share was opened: open Share again.";
+      setBusy(false);
       return;
     }
     const nb = h.notebook();
     const max = h.bounds().maxFileBytes;
     if (max !== undefined && nb.data.length > max) {
       out.textContent = `This notebook (${h.fmtSize(nb.data.length)}) is larger than your plan's largest file.`;
+      setBusy(false);
       return;
     }
     const { snap, stillRunning } = picker.take();
     const title = ($(d, "#sharetitlein") as HTMLInputElement).value;
     const license = ($(d, "#sharelicense") as HTMLSelectElement).value;
     const author = authorIn.value;
-    setBusy(true);
     out.textContent = "";
     if (stillRunning) status.textContent = state.textContent = "Finding the files stopped: publishing what you checked.";
     try {

@@ -50,15 +50,18 @@ export function createDownloadDialog(h: DownloadDialogHost) {
       out.textContent = "The notebook changed since this was opened: open it again.";
       return;
     }
+    // (the download is reserved before the images are read, so a second click while they are read does nothing; every
+    //  way out before it starts lets it go, and closing meanwhile stops it)
+    const ac = new AbortController();
+    setBusy(ac);
     await h.prepareNotebook?.();
-    if (!picker.mine()) {
-      out.textContent = "The notebook changed since this was opened: open it again.";
+    if (ac.signal.aborted || !picker.mine()) {
+      if (!ac.signal.aborted) out.textContent = "The notebook changed since this was opened: open it again.";
+      setBusy(null);
       return;
     }
     const nb = h.notebook(), nbId = picker.notebook;
     const { snap } = picker.take();
-    const ac = new AbortController();
-    setBusy(ac);
     out.textContent = "";
     try {
       const where = await h.notebookPath();
