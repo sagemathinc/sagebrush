@@ -424,14 +424,23 @@ def ttest_ind(a, b, axis=0, equal_var=True, nan_policy="propagate", permutations
     if permutations is not None or trim or method is not None or keepdims:
         raise NotImplementedError("scipy.stats.ttest_ind: permutations, trim, method and keepdims are not supported in Sagebrush")
     _check_nan_policy(nan_policy)
+    # (the axis checked first, against the samples' larger dimension, a scalar's counted as 1, as SciPy's)
+    if axis is not None:
+        nd = max(np.ndim(a), np.ndim(b), 1)
+        if not -nd <= axis < nd:
+            raise AxisError("`axis` is out of bounds for array of dimension %d" % nd)
     if axis is None or (np.ndim(a) <= 1 and np.ndim(b) <= 1):
         return _ttest_ind_1d(np.asarray(a, dtype=float).reshape(-1), np.asarray(b, dtype=float).reshape(-1),
                              equal_var, nan_policy, alternative)
-    # (n-d samples: one test a slice along axis, as SciPy's; the other dimensions the same in both)
-    xa, shape = _array(a, axis)
+    # (n-d samples: one test a slice along axis, as SciPy's; the other dimensions broadcast against each other)
+    xa, shape_a = _array(a, axis)
     xb, shape_b = _array(b, axis)
-    if shape != shape_b:
-        raise NotImplementedError("scipy.stats.ttest_ind: samples whose other dimensions differ (broadcasting) are not supported in Sagebrush")
+    try:
+        shape = tuple(np.broadcast_shapes(shape_a, shape_b))
+    except ValueError:
+        raise ValueError("Array shapes are incompatible for broadcasting.") from None
+    xa = np.broadcast_to(xa, shape + (xa.shape[-1],))
+    xb = np.broadcast_to(xb, shape + (xb.shape[-1],))
     ra = xa.reshape(int(np.prod(shape)), xa.shape[-1])
     rb = xb.reshape(int(np.prod(shape)), xb.shape[-1])
     res = [_ttest_ind_1d(x, y, equal_var, nan_policy, alternative) for x, y in zip(ra, rb)]

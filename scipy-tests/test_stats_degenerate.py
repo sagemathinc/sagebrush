@@ -95,6 +95,14 @@ for a, b in [([np.nan, 1.0], [2.0, 3.0]), ([1.0, 1.0], [2.0, 2.0]), ([1.0, 1.0],
             for level in (0.95, 0.5):
                 out("ttest_ind ci %r %r %s %s %g" % (a, b, eq, alt, level),
                     lambda: tuple(st.ttest_ind(a, b, equal_var=eq, alternative=alt).confidence_interval(level)))
+# (the axis checked against the samples' larger dimension first, a scalar's counted as 1; the other dimensions
+# broadcast, or SciPy's ValueError)
+for label, a, b in [("1-d", [1.0, 2.0], [3.0, 4.0]), ("scalars", 1.0, 2.0), ("scalar and 1-d", 1.0, [2.0, 3.0]),
+                    ("2-d", [[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 9.0]]),
+                    ("empty rows", np.empty((0, 3)), np.ones((2, 3))), ("empty columns", np.empty((2, 0)), np.ones((2, 1))),
+                    ("broadcast", np.ones((2, 3)) * [1.0, 2.0, 3.0], np.ones((2, 1)) * [[4.0], [6.0]] + [[0.0], [1.0]])]:
+    for axis in (0, -1, 1, -2, 2, None):
+        out("ttest_ind %s axis %r" % (label, axis), lambda: tuple(st.ttest_ind(a, b, axis=axis)) + (st.ttest_ind(a, b, axis=axis).df,))
 out("ttest_ind ci level 1.5", lambda: tuple(st.ttest_ind([1.0, 2.0], [3.0, 5.0]).confidence_interval(1.5)))
 # (n-d samples: one test a slice along axis, not one test of the flattened samples)
 M = np.arange(12.0).reshape(4, 3) ** 1.5
