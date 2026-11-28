@@ -39,7 +39,7 @@ export function selfSpace(web: string) {
   const add = (id: string, title: string, body: string, group: string, lang: string) => {
     const summary = text.summaries[id];
     if (!summary) throw new Error(`web/space/examples/self.ts: no summary for ${id}`);
-    nodes.push({ id, kind: "code", title, summary, lang, group, lines: linesOf(body), text: preview(body) });
+    nodes.push({ id, kind: "file", title, summary, lang, group, lines: linesOf(body), text: preview(body) });
     has.add(id);
   };
   // (the long files' parts)

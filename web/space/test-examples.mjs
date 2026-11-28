@@ -76,6 +76,10 @@ if (me) {
   ok(me.tours.length === 5 && me.tours.every((t) => t.steps.length >= 4 && t.steps.every((st) => ids.has(st.node))), "five tours, each stop an object of the space");
   ok(me.edges.every((e) => ids.has(e.from) && ids.has(e.to)) && me.edges.length > 50, `its ${me.edges.length} links join its objects`);
   ok(me.nodes.every((n) => !("src" in n)) && me.nodes.every((n) => String(n.text ?? "").split("\n").length <= 60), "previews only: no src, at most 60 lines each");
+  // (as main.ts decides what may be run: a code or plot3d object that isn't a notebook's cell)
+  const runnable = (n) => (n.kind === "code" || n.kind === "plot3d") && !n.cell;
+  ok(readFileSync(join(here, "src", "main.ts"), "utf8").includes('const runnable = (nd) => (nd.kind === "code" || nd.kind === "plot3d") && !nd.cell;'), "main.ts decides what may be run as this check does");
+  ok(!me.nodes.some(runnable) && me.nodes.filter((n) => n.kind === "file").length === 40, "nothing in it can be run: its sources are files (40), the overview a note", me.nodes.filter(runnable).map((n) => n.id).slice(0, 5));
   ok(/not shown here/.test(me.nodes.find((n) => n.id === "space/src/tex.ts")?.text ?? ""), "a preview line the push text check would catch is left out, and says so");
   const web = join(here, ".."), sources = ["space/src/main.ts", "space/src/xr.ts", ...me.nodes.filter((n) => /\.(ts|js)$/.test(n.id)).map((n) => n.id)].map((f) => readFileSync(join(web, f), "utf8")).join("\n");
   const named = new Set([...JSON.stringify([me.nodes.map((n) => n.summary), me.tours]).matchAll(/\*\*([A-Za-z_$][\w$]*)\*\*/g)].map((m) => m[1]).filter((w) => /[a-z][A-Z]|^[a-z]+$/.test(w) && !/^(load|run|go|step|draw|open|press|hit|leave|enter|save|restore|search|look|editor|math|embed|start|layered|frame|engine|interrupt|layout|tick)$/.test(w) || /^[a-z]+[A-Z]/.test(w)));
