@@ -864,6 +864,7 @@ version = "0.1.0"
 dependencies = [
  "sagebrush-ap",
  "sagebrush-interrupt",
+ "serde_json",
 ]
 
 [[package]]

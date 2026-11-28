@@ -99,25 +99,31 @@ impl C64 {
         let eb = ilog2(mb);
         let (br, bi) = (scale2(o.re, -eb), scale2(o.im, -eb));
         let (a, c) = (self.re, self.im);
+        // (Smith's ratio r = p / q is never formed: a subnormal r, or one that
+        // underflows to 0, lost the term y r; y p / q is taken from the three
+        // mantissas instead, part(), with p and q the divisor's own parts: the
+        // scaled smaller part can underflow where the ratio's terms don't)
         if br.abs() >= bi.abs() {
-            let r = bi / br;
-            let den = br + bi * r;
-            C64::new(part(a, c, r, den, -eb), part(c, -a, r, den, -eb))
+            let den = br + bi * (bi / br);
+            C64::new(part(a, c, o.im, o.re, den, -eb), part(c, -a, o.im, o.re, den, -eb))
         } else {
-            let r = br / bi;
-            let den = br * r + bi;
-            C64::new(part(c, a, r, den, -eb), part(-a, c, r, den, -eb))
+            let den = br * (br / bi) + bi;
+            C64::new(part(c, a, o.re, o.im, den, -eb), part(-a, c, o.re, o.im, den, -eb))
         }
     }
 
 }
 
-/// (x + y r) / den 2^s, with x and y r first brought near 1 by one power of
-/// two, so that the sum and the quotient round once, at their own scale (r and
-/// den are moderate: |r| <= 1, den in [1, 4)).
-fn part(x: f64, y: f64, r: f64, den: f64, s: i32) -> f64 {
+/// (x + y p / q) / den 2^s, with the two terms first brought near 1 by one
+/// power of two, so that the sum and the quotient round once, at their own
+/// scale; y p / q from the three mantissas and its exponent applied once, so
+/// that no factor alone passes the doubles on the way (scaling y first
+/// overflowed at y = 1e308, p / q = 1e-308) and the ratio p / q is never
+/// rounded by itself (subnormal, or 0, it lost the term).  (p and q are of
+/// any finite size with |p| <= |q|; den is moderate, in [1, 4).)
+fn part(x: f64, y: f64, p: f64, q: f64, den: f64, s: i32) -> f64 {
     let ex = if x != 0.0 { Some(ilog2(x.abs())) } else { None };
-    let ey = if y != 0.0 && r != 0.0 { Some(ilog2(y.abs()) + ilog2(r.abs())) } else { None };
+    let ey = if y != 0.0 && p != 0.0 { Some(ilog2(y.abs()) + ilog2(p.abs()) - ilog2(q.abs())) } else { None };
     let k = match (ex, ey) {
         (Some(a), Some(b)) => -a.max(b),
         (Some(a), None) | (None, Some(a)) => -a,
@@ -125,21 +131,46 @@ fn part(x: f64, y: f64, r: f64, den: f64, s: i32) -> f64 {
     };
     // (a zero term is left out: a huge y scaled for a tiny x would be inf, and inf * 0 NaN)
     let tx = if ex.is_some() { scale2(x, k) } else { x };
-    let ty = if ey.is_some() { scale2(y, k) * r } else { 0.0 };
+    let ty = if ey.is_some() {
+        let ((my, e1), (mp, e2), (mq, e3)) = (mant(y), mant(p), mant(q));
+        // (the ratio first: p = q gives exactly y, and z / z exactly 1)
+        scale2(my * (mp / mq), e1 + e2 - e3 + k)
+    } else {
+        0.0
+    };
     let v = (tx + ty) / den;
     scale2(v, s - k)
 }
 
-/// Parts within 2^-500..2^500 (or 0): Smith's formulas neither overflow nor
-/// lose the quotient there, and keep their bits as before.
+/// Each part 0 or within 2^-500..2^500, and the two within 2^500 of each
+/// other: Smith's formulas neither overflow nor lose a term there (their ratio
+/// of the parts is a normal double), and keep their bits as before.  (A
+/// lopsided z, (7.9e6 + 8.8e-302 i) say, lost its small part's term through a
+/// subnormal ratio.)
 fn moderate(z: C64) -> bool {
-    let m = z.re.abs().max(z.im.abs());
-    m == 0.0 || (m > 2f64.powi(-500) && m < 2f64.powi(500))
+    let ok = |v: f64| v == 0.0 || (v.abs() > 2f64.powi(-500) && v.abs() < 2f64.powi(500));
+    let lopsided = z.re != 0.0 && z.im != 0.0 && (ilog2(z.re.abs()) - ilog2(z.im.abs())).abs() > 500;
+    ok(z.re) && ok(z.im) && !lopsided
 }
 
-/// floor(log2 m) for a finite m > 0 (subnormals included).
+/// floor(log2 m) for a finite m > 0, exactly, from its bits (subnormals
+/// included): f64::log2 is the host's and can round up just below a power of 2.
 fn ilog2(m: f64) -> i32 {
-    m.log2().floor() as i32
+    let bits = m.to_bits() & !(1u64 << 63);
+    let e = (bits >> 52) as i32;
+    if e == 0 {
+        // (subnormal: m = f 2^-1074 with f the 52-bit fraction)
+        let f = bits & ((1u64 << 52) - 1);
+        63 - f.leading_zeros() as i32 - 1074
+    } else {
+        e - 1023
+    }
+}
+
+/// m 2^-e with e = ilog2(m): v's mantissa, in [1, 2) up to sign (v finite, nonzero).
+fn mant(v: f64) -> (f64, i32) {
+    let e = ilog2(v.abs());
+    (scale2(v, -e), e)
 }
 
 /// x 2^n, exact unless the result leaves the doubles (in steps a double holds).
