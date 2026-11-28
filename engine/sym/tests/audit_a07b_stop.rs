@@ -1,9 +1,20 @@
 //! Codex audit A07b F2: expanding a sum to the minimum signed exponent,
 //! i64::MIN, takes its magnitude without signed negation; F3: the radical-
 //! index search with an lcm past i64.  Its own test binary: Stop's test
-//! hooks are process-wide.
+//! hooks are process-wide, so the two tests also take one lock in turn (the
+//! harness runs them on parallel threads, and one's hooks::reset would
+//! disarm the other's Stop, leaving the expansion of F2 to run unstopped).
+use std::sync::{Mutex, MutexGuard};
+
 use sagebrush_sym::err::{catch, install_quiet_hook};
 use sagebrush_sym::parse::parse;
+
+static HOOKS: Mutex<()> = Mutex::new(());
+
+/// The hooks to this test alone (a failed test's poisoned lock still serves).
+fn hooks() -> MutexGuard<'static, ()> {
+    HOOKS.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn line(s: &str) -> Result<String, String> {
     install_quiet_hook();
@@ -12,6 +23,7 @@ fn line(s: &str) -> Result<String, String> {
 
 #[test]
 fn f2_minimum_signed_exponent_of_a_sum() {
+    let _hooks = hooks();
     // (the magnitude without signed negation; the expansion itself is
     // stoppable, so Stop is armed some checks in, past the sign test, and
     // interrupts the expansion's own loop)
@@ -30,6 +42,7 @@ fn f2_minimum_signed_exponent_of_a_sum() {
 
 #[test]
 fn f3_radical_index_lcm_past_i64() {
+    let _hooks = hooks();
     // (Sage's exact lcm is 18446743979220271189: the candidate search must
     // not overflow forming it.  The integral's other methods run long on
     // these radicals, so Stop is armed well past the search; an interrupt
