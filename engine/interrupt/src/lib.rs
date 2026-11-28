@@ -206,6 +206,8 @@ pub mod hooks {
     static CURRENT: AtomicUsize = AtomicUsize::new(0);
     static COUNTS: [AtomicU64; MAX_PHASES] = [const { AtomicU64::new(0) }; MAX_PHASES];
     static TOTAL: AtomicU64 = AtomicU64::new(0);
+    // (the check_coarse calls among them: each asks a WebAssembly host)
+    static COARSE: AtomicU64 = AtomicU64::new(0);
     static ARMED: AtomicU64 = AtomicU64::new(0);
     static STOPPED: AtomicUsize = AtomicUsize::new(0);
     static TRACING: AtomicBool = AtomicBool::new(false);
@@ -227,6 +229,9 @@ pub mod hooks {
         let cur = CURRENT.load(Relaxed);
         COUNTS[cur].fetch_add(1, Relaxed);
         let t = TOTAL.fetch_add(1, Relaxed) + 1;
+        if coarse {
+            COARSE.fetch_add(1, Relaxed);
+        }
         if TRACING.load(Relaxed) {
             TRACE.lock().unwrap_or_else(|e| e.into_inner()).push(cur as u8);
             let n = now_ns();
@@ -311,6 +316,7 @@ pub mod hooks {
     pub fn reset() {
         CURRENT.store(0, Relaxed);
         TOTAL.store(0, Relaxed);
+        COARSE.store(0, Relaxed);
         ARMED.store(0, Relaxed);
         STOPPED.store(0, Relaxed);
         TRACING.store(false, Relaxed);
@@ -333,6 +339,12 @@ pub mod hooks {
     /// The checks counted since the last reset.
     pub fn total() -> u64 {
         TOTAL.load(Relaxed)
+    }
+
+    /// The check_coarse calls among them (each asks a WebAssembly host,
+    /// where a check asks it only every 1024th time).
+    pub fn coarse() -> u64 {
+        COARSE.load(Relaxed)
     }
 
     /// The current phase's name ("" before any).

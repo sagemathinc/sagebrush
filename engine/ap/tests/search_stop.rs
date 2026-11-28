@@ -27,14 +27,15 @@ fn search_stops_inside_the_scan_and_at_the_limit() {
     let total = hooks::total();
     let gap = hooks::max_gap_ns();
     let polls = hooks::traced("ap.search poll");
+    let coarse = hooks::coarse();
     hooks::reset();
     let blocks = (2 * rmax + 1).div_ceil(W);
     assert_eq!(total, 1 + blocks + 1);
     assert!((gap as f64) < 50e6, "longest gap between checks {} ms", gap as f64 / 1e6);
-    // every 64th block's check asks a WebAssembly host itself
-    // (check_coarse), not only every 1024th check: counted exactly, without
-    // timing, and a Stop there is seen
-    assert_eq!(polls.len() as u64, blocks / 64);
+    // every 64th block's check is a check_coarse, which asks a WebAssembly
+    // host itself (a check asks it only every 1024th time): counted exactly,
+    // without timing, and a Stop there is seen
+    assert_eq!((coarse, polls.len() as u64), (blocks / 64, blocks / 64));
     hooks::reset();
     hooks::arm_at(polls[polls.len() / 2]);
     let r = catch(|| search(rmax, 1, 1000));
