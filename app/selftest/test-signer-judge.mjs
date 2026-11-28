@@ -102,10 +102,9 @@ ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "main"), s(2, 2, "main")], { cont
   ok(!noSecond.ok && /the second window's call didn't report/.test(why(noSecond)), "a caller missing: no answer from the second window's call (never ran, or late past the run) fails, by name");
   const secondReached = signerVerdict({ err: [...good, ...LOADED.map((l) => (l === SECOND ? "[page] signer second window: REACHED probe-signature-2" : l))].join("\n"), out: refusedLine, seen: FRAME, code: 0, signal: null, problems: [] });
   ok(!secondReached.ok && /second window's call: REACHED/.test(why(secondReached)), "the second window's call answered (REACHED) fails, outside cap+check");
-  const noFrame = v(good, { seen: FRAME.filter((x) => x !== "frame: loaded") });
-  ok(!noFrame.ok && /frame didn't load/.test(why(noFrame)), "a caller missing: the other server's frame never loaded fails, by name");
-  const noFrameCall = v(good, { seen: FRAME.filter((x) => !x.startsWith("frame: signer")) });
-  ok(!noFrameCall.ok && /frame didn't report its call/.test(why(noFrameCall)), "a caller missing: the other server's frame loaded but its call never reported fails, by name");
+  // (no frame of the other server in the main window is claimed: the window's guard refuses it, so nothing from it is
+  // needed, and a run whose other server saw nothing at all passes)
+  ok(v(good, { seen: [] }).ok, "no control: the other server seeing nothing (its frame refused by the main window's guard) passes");
   ok(v(good).ok, "...and with every caller reported: passes");
 }
 

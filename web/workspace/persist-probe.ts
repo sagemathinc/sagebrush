@@ -185,10 +185,10 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
     } else if (mode === "signer") {
       // "signer:<origin>" (N1, app/src-tauri/src/signer.rs): who can reach the approvals window's signing command.  The
       // app opens that window itself (as its menu does), whose page signs once (the positive).  This page, a second
-      // window's, a notebook output's frame and another local server's frame each try the command, and this page tries a
+      // window's and a notebook output's frame each try the command, and this page tries a
       // command that would open the window from a page (there is none).  What reached the command, and what signed, is
       // judged by run.mjs from the app's own log (signer.rs's lines), not by this page.
-      const other = token, me = (window as any).__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
+      const me = (window as any).__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
       const tryIt = (cmd: string) => host.invoke(cmd, { msg: "page " + me }).then((v: any) => `REACHED ${String(v).slice(0, 40)}`, (e: any) => `refused: ${String(e?.message ?? e).slice(0, 80)}`);
       const sign = await tryIt("signer_probe_sign");
       // (the second window's own answer, in the app's log for run.mjs's judge: its call must be seen to have run)
@@ -205,10 +205,9 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
         f.srcdoc = `<script>(async () => { let r; try { r = "REACHED " + await window.__TAURI_INTERNALS__.invoke("signer_probe_sign", { msg: "frame" }); } catch (e) { r = "refused: " + String(e && e.message || e).slice(0, 80); } parent.postMessage({ sbSignerProbe: r }, "*"); })();<\/script>`;
         document.body.append(f);
       });
-      const ff = document.createElement("iframe");
-      ff.style.display = "none";
-      ff.src = other + "/frame";
-      document.body.append(ff);
+      // (no frame of the other server in this window: its navigation guard refuses one before it loads (nav.rs may_load,
+      // shown by the "nav" probe and its controls), so it could never report; the signer page's own frames are the
+      // csp-off control's)
       // (a second window that didn't open is said, and fails the probe: its call is one of the callers it claims)
       const second = await host.invoke("window_open", { at: "/" }).then(() => "opened", (e: any) => `open failed: ${String(e?.message ?? e).slice(0, 80)}`);
       // (the approvals window's page, its controls, the second window: time to act)

@@ -15,8 +15,10 @@
 //     loaded in the signer window and said what its signing call got (refused), and nothing of it reached the command:
 //     dispatches 1, signatures 1.
 // In every run each caller the probe claims must have run and reported: the second window opened and its call
-// answered (in the app's log, "[page] signer second window: …"), and the other server's frame loaded and said what
-// its call got; a result that is missing, or comes after the run, fails by name.
+// answered (in the app's log, "[page] signer second window: …"), and in the csp-off and guard-off controls the other
+// server's page loaded where the control puts it and said what its signing call got; a result that is missing, or comes
+// after the run, fails by name.  (A frame of the other server in the main window is never claimed: that window's
+// navigation guard refuses it before it loads, nav.rs may_load, which the "nav" probe and its controls show.)
 // In every run the other server's pages must have reached nothing ("REACHED" in what they said), and in every run but
 // "cap+check" the main page's own call, a page's signer_open and an output frame's call must have been refused.  And in
 // every run the app must have ended cleanly: exit 0, no signal, its output captured to the end (no timeout), so a run
@@ -80,8 +82,6 @@ export function signerVerdict({ err, out, seen, control, code, signal, problems,
   const second = /^\[page\] signer second window: (REACHED|refused)\b.*$/m.exec(err);
   if (!second) why.push("the second window's call didn't report");
   else if (control !== "cap+check" && second[1] !== "refused") why.push(`the second window's call: ${second[1]}, not refused`);
-  if (!seen.includes("frame: loaded")) why.push("the other server's frame didn't load");
-  if (!seen.some((x) => /^frame: signer (refused|REACHED)/.test(x))) why.push("the other server's frame didn't report its call");
   if (control !== "cap+check") {
     for (const what of ["this page's signing call", "a page's signer_open", "an output frame's"]) {
       const m = new RegExp(`${what.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} (REACHED|refused|\\(no answer\\))`).exec(line);
