@@ -509,32 +509,34 @@ impl Num {
     }
 
     /// Order of real numbers (for canonical sorting; complex numbers by
-    /// real then imaginary part).
+    /// real then imaginary part).  One key for every kind, so that the order
+    /// is total: the doubles (real part, then imaginary part), then the kind,
+    /// then within the kind the full value (an exact number's, an MP
+    /// number's, a real one as a complex one with imaginary part +0, then
+    /// the precision), the doubles' bits for floats.  Rounding to a double
+    /// is monotone, so reals keep their order by value; comparing the full
+    /// value first within a kind but the doubles across kinds was not
+    /// transitive (Mpc(1 + 2^-80, 5) > Mpc(1, 6), with CDF(1, 5.5) between
+    /// them by the doubles), and a sort of terms may panic on that.
     pub fn cmp(&self, o: &Num) -> Ordering {
-        match (self, o) {
+        let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
+        fcmp(a, c).then(fcmp(b, d)).then(self.kind_rank().cmp(&o.kind_rank())).then_with(|| match (self, o) {
             (Num::Exact(a, b), Num::Exact(c, d)) => a.cmp(c).then(b.cmp(d)),
-            // (the value, then a total order on equal ones: -0 and +0, the
-            // precisions)
-            // (NaN after every number, so that the order is total)
-            (Num::Mp(x), Num::Mp(y)) => (x.sp == Sp::NaN)
-                .cmp(&(y.sp == Sp::NaN))
-                .then_with(|| x.cmp_value(y))
-                .then_with(|| x.hash_key().cmp(&y.hash_key()))
-                .then(x.prec.cmp(&y.prec)),
-            (Num::Mpc(x), Num::Mpc(y)) => {
+            (Num::Float(a, b, _), Num::Float(c, d, _)) => (a.to_bits(), b.to_bits()).cmp(&(c.to_bits(), d.to_bits())),
+            (Num::Mp(_) | Num::Mpc(_), Num::Mp(_) | Num::Mpc(_)) => {
+                // (NaN after every number, -0 before +0, as the hash key orders them)
                 let nan = |m: &Mp| m.sp == Sp::NaN;
                 let part = |a: &Mp, b: &Mp| nan(a).cmp(&nan(b)).then_with(|| a.cmp_value(b)).then_with(|| a.hash_key().cmp(&b.hash_key()));
-                part(&x.re, &y.re).then_with(|| part(&x.im, &y.im)).then(x.prec().cmp(&y.prec()))
+                let parts = |n: &Num| match n {
+                    Num::Mp(x) => (Mpc::from_real(x), 0u8),
+                    Num::Mpc(z) => ((**z).clone(), 1u8),
+                    _ => unreachable!(),
+                };
+                let ((x, kx), (y, ky)) = (parts(self), parts(o));
+                part(&x.re, &y.re).then_with(|| part(&x.im, &y.im)).then(x.prec().cmp(&y.prec())).then(kx.cmp(&ky))
             }
-            _ => {
-                let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
-                // (then the doubles' bits: -0 and +0, NaNs, equal values of two kinds)
-                fcmp(a, c).then(fcmp(b, d)).then(self.kind_rank().cmp(&o.kind_rank())).then_with(|| match (self, o) {
-                    (Num::Float(a, b, _), Num::Float(c, d, _)) => (a.to_bits(), b.to_bits()).cmp(&(c.to_bits(), d.to_bits())),
-                    _ => Ordering::Equal,
-                })
-            }
-        }
+            _ => Ordering::Equal,
+        })
     }
 
     /// The order of equal values of different kinds: a float before an exact
@@ -1451,7 +1453,7 @@ pub fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
 
 #[cfg(test)]
 mod tests {
-    use crate::mpnum::{Mp, Sp};
+    use crate::mpnum::{Mp, Mpc, Sp};
 
     fn mpq(n: i64, d: i64, p: u32) -> Num {
         Num::mp(Mp::from_q(&BigInt::from(n), &BigInt::from(d), p))
@@ -1555,6 +1557,7 @@ mod tests {
             v.push(mpq(-2, 1, p));
             v.push(mpq(5, 1, p));
         }
+        v.extend(near_one());
         for a in &v {
             for b in &v {
                 assert_eq!(a.cmp(b), b.cmp(a).reverse(), "{:?} {:?}", a, b);
@@ -1564,6 +1567,91 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// Numbers of every kind near 1 and 1 + 5i: MP values that round to the
+    /// same double, reals against complex ones with imaginary part +-0,
+    /// mixed precisions, NaN parts, and floats and exact numbers between
+    /// them by the doubles.
+    fn near_one() -> Vec<Num> {
+        let one_plus = |p: u32| Mp::fin(&((BigInt::one() << 80usize) + 1), -80, p);
+        let c = |re: Mp, im: f64| {
+            let p = re.prec;
+            Num::mpc(Mpc::new(re, Mp::from_f64(im, p)))
+        };
+        let mut v = vec![];
+        for p in [60, 100, 200] {
+            v.push(Num::mp(one_plus(p)));
+            v.push(Num::mp(Mp::from_f64(1.0, p)));
+            v.push(c(Mp::from_f64(1.0, p), 0.0));
+            v.push(c(Mp::from_f64(1.0, p), -0.0));
+            v.push(c(one_plus(p), 0.0));
+            v.push(c(one_plus(p), 5.0));
+            v.push(c(Mp::from_f64(1.0, p), 6.0));
+            v.push(c(Mp::from_f64(1.0, p), f64::NAN));
+            v.push(c(Mp::special(p, Sp::NaN), 5.0));
+            v.push(Num::mpc(Mpc::new(Mp::zero(p, true), Mp::zero(p, false))));
+            v.push(Num::mpc(Mpc::new(Mp::zero(p, false), Mp::zero(p, true))));
+        }
+        for (a, b) in [(1.0, 0.0), (1.0, -0.0), (1.0, 5.5), (1.0, 5.0), (1.0, 6.0), (1.0, f64::NAN), (f64::NAN, 5.0)] {
+            v.push(Num::Float(a, b, Fk::CDF));
+        }
+        let tiny = Q::new(BigInt::one(), BigInt::from(10).pow(30u32));
+        v.push(Num::Exact(Q::one() + &tiny, qr(5, 1)));
+        v.push(Num::Exact(Q::one(), qr(6, 1)));
+        v.push(Num::Exact(Q::one() + &tiny, Q::zero()));
+        v.push(Num::Exact(Q::one(), Q::zero()));
+        v
+    }
+
+    /// A sum of f(n) for the numbers above, its terms sorted by the
+    /// canonical order: the same sum whatever order the terms come in (the
+    /// sort neither panics nor depends on it), each pair of neighbours in
+    /// order.
+    #[test]
+    fn canonical_order_sorts_function_arguments_alike() {
+        use crate::expr::{add, fun, num, Fun, Kind};
+        let f = |n: &Num| fun(Fun::User("f".into()), vec![num(n.clone())]);
+        // (one of each value: equal ones of two precisions would add up)
+        let mut v: Vec<Num> = vec![];
+        for n in near_one() {
+            if !v.contains(&n) {
+                v.push(n);
+            }
+        }
+        let arg = |t: &crate::expr::Expr| match &t.kind {
+            Kind::Fun(_, a) => match &a[0].kind {
+                Kind::Num(n) => n.clone(),
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+        let first = add(v.iter().map(f).collect());
+        let Kind::Add(terms) = &first.kind else { panic!("{:?}", first) };
+        for w in terms.windows(2) {
+            assert_ne!(arg(&w[0]).cmp(&arg(&w[1])), Ordering::Greater);
+        }
+        // (rotations and reversals of the input, with a stride mixing it)
+        let n = v.len();
+        for k in 0..n {
+            for stride in [1, 7, 13] {
+                if gcd_usize(stride, n) != 1 {
+                    continue;
+                }
+                let mut u: Vec<Num> = (0..n).map(|i| v[(k + i * stride) % n].clone()).collect();
+                assert_eq!(add(u.iter().map(f).collect()), first, "rotation {} stride {}", k, stride);
+                u.reverse();
+                assert_eq!(add(u.iter().map(f).collect()), first, "reversed rotation {} stride {}", k, stride);
+            }
+        }
+    }
+
+    fn gcd_usize(a: usize, b: usize) -> usize {
+        if b == 0 {
+            a
+        } else {
+            gcd_usize(b, a % b)
         }
     }
 
