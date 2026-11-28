@@ -75,14 +75,29 @@ impl Elt {
         assert!(n != 0, "division by zero in Z[w]");
         // self conj(o) = (x + y w)(c' - d w), c' = c + d
         let (x, y, c, d) = (self.a as i128, self.b as i128, o.a as i128 + o.b as i128, -(o.b as i128));
-        let m = |u: i128, v: i128| u.checked_mul(v).expect("Z[w] product overflows i128");
-        let s = |u: i128, v: i128| u.checked_add(v).expect("Z[w] product overflows i128");
-        let a = s(m(x, c), m(y, d));
-        let b = s(s(m(x, d), m(y, c)), m(y, d));
-        if a % n != 0 || b % n != 0 {
+        let checked = || -> Option<(i128, i128)> {
+            let a = x.checked_mul(c)?.checked_add(y.checked_mul(d)?)?;
+            let b = x.checked_mul(d)?.checked_add(y.checked_mul(c)?)?.checked_add(y.checked_mul(d)?)?;
+            Some((a, b))
+        };
+        if let Some((a, b)) = checked() {
+            if a % n != 0 || b % n != 0 {
+                return None;
+            }
+            return Some(Elt { a: i64::try_from(a / n).ok()?, b: i64::try_from(b / n).ok()? });
+        }
+        // (an intermediate past i128, |x c| up to 2^127: in big integers,
+        // where the quotient may still fit, as x / x = 1 at x = MIN + MIN w)
+        use num_traits::ToPrimitive;
+        use sagebrush_bigint::BigInt;
+        let (x, y, c, d, n) = (BigInt::from(x), BigInt::from(y), BigInt::from(c), BigInt::from(d), BigInt::from(n));
+        let a = &x * &c + &y * &d;
+        let b = &x * &d + &y * &c + &y * &d;
+        let zero = BigInt::from(0);
+        if &a % &n != zero || &b % &n != zero {
             return None;
         }
-        Some(Elt { a: i64::try_from(a / n).ok()?, b: i64::try_from(b / n).ok()? })
+        Some(Elt { a: (&a / &n).to_i64()?, b: (&b / &n).to_i64()? })
     }
     /// x / 2, if 2 divides x.
     pub fn half(self) -> Option<Elt> {
@@ -154,8 +169,17 @@ fn sign_u_v_sqrt5(u: i128, v: i128) -> Ordering {
     if su == Ordering::Equal {
         return sv;
     }
-    // opposite signs: compare u^2 with 5 v^2 (never equal, sqrt 5 is irrational)
-    if u * u > 5 * v * v {
+    // opposite signs: compare u^2 with 5 v^2 (never equal, sqrt 5 is
+    // irrational), in big integers when they pass i128 (u up to 3 2^63)
+    let bigger = match (u.checked_mul(u), v.checked_mul(v).and_then(|t| t.checked_mul(5))) {
+        (Some(uu), Some(vv)) => uu > vv,
+        _ => {
+            use sagebrush_bigint::BigInt;
+            let (u, v) = (BigInt::from(u), BigInt::from(v));
+            &u * &u > BigInt::from(5) * &v * &v
+        }
+    };
+    if bigger {
         su
     } else {
         sv
@@ -839,6 +863,25 @@ mod tests {
                 p += 2;
             }
         }
+    }
+
+    /// Embedding signs and exact division at the ends of i64, where the
+    /// intermediates pass i128 (A10b): M(1 + w) = M w^2 (M = 2^63 - 1) and
+    /// the unit w^92 are totally positive, as Sage 10.10 gives; x / x = 1 at
+    /// x = MIN + MIN w (norm 2^126).
+    #[test]
+    fn signs_and_division_at_the_ends() {
+        let m = Elt::new(i64::MAX, i64::MAX);
+        assert_eq!(m.signs(), (Ordering::Greater, Ordering::Greater));
+        let w92 = Elt::new(4660046610375530309, 7540113804746346429);
+        assert_eq!(w92.signs(), (Ordering::Greater, Ordering::Greater));
+        assert_eq!(Elt::new(-i64::MAX, -i64::MAX).signs(), (Ordering::Less, Ordering::Less));
+        // a + b w with a = MAX, b = MIN: 2a + b = 2^63 - 2 > 0, conjugate signs
+        // by u^2 against 5 b^2 (2^63 - 2)^2 < 5 2^126: (Less, Greater)
+        assert_eq!(Elt::new(i64::MAX, i64::MIN).signs(), (Ordering::Less, Ordering::Greater));
+        let x = Elt::new(i64::MIN, i64::MIN);
+        assert_eq!(x.div_exact(x), Some(Elt::int(1)));
+        assert_eq!(m.div_exact(Elt::new(i64::MAX, 0)), Some(Elt::new(1, 1)));
         // (the principal HNF's residues multiplied in u128: Sage 10.10's
         // (18446744069414584319, 4294967295, 1) for -(2^32 - 1) - w and its
         // negative, the generator in it)

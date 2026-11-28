@@ -49,10 +49,12 @@ impl LocalRing {
     /// The reduction of x + y w.
     #[inline]
     pub fn reduce(&self, x: i128, y: i128) -> Res {
-        let c = self.c as i128;
+        // (x and the quotient reduced first, by Euclidean division: no
+        // intermediate passes i128 at its ends; a, b, c < 2^31)
+        let (a, c) = (self.a as i128, self.c as i128);
         let yr = y.rem_euclid(c);
-        let k = (y - yr) / c;
-        let xr = (x - (k % self.a as i128) * self.b as i128).rem_euclid(self.a as i128);
+        let k = y.div_euclid(c);
+        let xr = (x.rem_euclid(a) - k.rem_euclid(a) * self.b as i128).rem_euclid(a);
         Res(xr as u64, yr as u64)
     }
     pub fn from_elt(&self, x: Elt) -> Res {
@@ -231,6 +233,19 @@ impl LocalRing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reduction at the ends of i128 (A10b): in O_F / P, P = (11, 3 + w),
+    /// w = -3, so x + y w reduces to x - 3 y mod 11 (MIN + w to 1, as Sage
+    /// 10.10 gives).
+    #[test]
+    fn reduce_at_the_ends() {
+        let p = crate::field::primes_above(11).unwrap().into_iter().find(|q| q.hnf.b == 3).unwrap();
+        let r = LocalRing::new(p, 1).unwrap();
+        let (lo, hi) = (i128::MIN, i128::MAX);
+        for (x, y, want) in [(lo, 1, 1), (hi, lo, 5), (lo, lo, 3), (hi, hi, 10)] {
+            assert_eq!(r.reduce(x, y), Res(want, 0), "{} + {} w", x, y);
+        }
+    }
     use crate::field::{primes_above, rational_primes};
 
     /// PSAGE tests.py residue_ring_arith: arithmetic agrees with O_F.
