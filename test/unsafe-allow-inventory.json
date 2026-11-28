@@ -83,6 +83,12 @@
  },
  "items": [
   {
+   "file": "engine/ap/tests/sieve_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (the sieve's peak against its reservation). Token-identical to engine/arith/tests/nmod_fast_alloc.rs's audited item (same hash)."
+  },
+  {
    "file": "engine/arith/src/crt.rs",
    "item": "mod tests > mod spy > impl GlobalAlloc for Spy",
    "hash": "4389ee1fd532f0cae6cf031dd79b92022576a0681d0e74701967d2344b23b06e",

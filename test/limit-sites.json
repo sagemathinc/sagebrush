@@ -1,4 +1,14 @@
 {
+ "engine/ap/src/ec.rs :: traces :: for k in -kmax..=kmax { #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "kmax is the giant steps' count from the Hasse bound, a loop range; it limits nothing"
+ },
+ "engine/ap/src/lib.rs :: prime_count_bound :: usize::try_from(b.min(n)).unwrap_or(usize::MAX).max(1) #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "an upper bound on pi(n) for the sieve's capacity and its reservation, saturated to usize; it refuses nothing"
+ },
  "engine/ap/tests/stop.rs :: traced :: let (gap, poll) = (hooks::max_gap_ns() as f64 / 1e6, hooks::max_poll_gap_ns() as f64 / 1e6); #0": {
   "class": "none",
   "owner": "remote-compute",
@@ -8738,6 +8748,24 @@
   "class": "3",
   "owner": "polynomial factorization"
  },
+ "engine/web/src/lib.rs :: dispatch :: let (count, m) = sagebrush_ap::moments(&e, n, kmax); #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "moments run with kmax already bounded and its result's bytes reserved; these lines refuse nothing themselves"
+ },
+ "engine/web/src/lib.rs :: dispatch :: let kmax = size(v, \"kmax\", Some(4), 64)?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "elliptic curves (engine)",
+  "reason": "moments' kmax <= 64, the dispatcher's bound on a JSON argument (the same on every target)"
+ },
+ "engine/web/src/lib.rs :: dispatch :: let n = ap_bound(v, \"moments\", 0, (kmax as u64).saturating_mul(2 * (8 + 32 + 32)).saturating_add(256))?; #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "moments run with kmax already bounded and its result's bytes reserved; these lines refuse nothing themselves"
+ },
  "engine/web/src/lib.rs :: dispatch :: let prec = size(v, \"prec\", None, sagebrush_modsym::linalg::MAX_HECKE_PRIME)?; #0": {
   "class": "3",
   "disposition": {
@@ -9288,6 +9316,11 @@
   },
   "owner": "series ops",
   "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
+ },
+ "engine/web/tests/ap_reply_admission.rs :: moments_result_and_the_reply_are_admitted :: let req = r#\"{\"fn\":\"moments\",\"a\":[0,0,0,-1,0],\"n\":0,\"kmax\":64}\"#; #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "a test's request with kmax = 64; it limits nothing"
  },
  "engine/web/tests/bin_alloc.rs ::  :: use sagebrush_web::nmod_ops::{DIV_MAX_LEN, GCD_MAX_LEN, MUL_MAX_LEN}; #0": {
   "class": "none",
@@ -20605,7 +20638,7 @@
  },
  "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
   "class": "none",
-  "owner": "python (@sagebrush-python)",
+  "owner": "python",
   "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {

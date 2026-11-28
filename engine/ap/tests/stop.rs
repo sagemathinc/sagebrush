@@ -85,7 +85,10 @@ fn ap_kernels_stop_everywhere_and_change_nothing_otherwise() {
     // and ceil(half / 2^16) for the collection.  A dropped or thinned check
     // changes it; a deliberate retune updates it.
     assert_eq!(counts[0], 957, "the sieve's checks for n = 2e7");
-    assert_eq!(counts[1], 1270607, "one check per prime");
+    // aplist: one per prime in its loop, and a_p's own (A09b: per base point
+    // of the BSGS search, every 1024 x when counting, every 256 baby or
+    // giant steps), exact and independent of the threads
+    assert_eq!(counts[1], 3813452, "one check per prime and a_p's own");
     // (wall time, generous for a loaded CI runner: without the checks the whole
     // call, about 0.2 s natively here, went unchecked)
     assert!(gap < 50.0 && poll < 100.0, "gap {gap:.2} ms, poll gap {poll:.2} ms");

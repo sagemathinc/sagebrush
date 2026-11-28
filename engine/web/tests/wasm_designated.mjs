@@ -55,11 +55,12 @@ for (const [file, want] of [["designated_errors.jsonl", '{"error"'], ["designate
   //     + one per SIEVE_BLOCK-stride block of each marking pass: 222 odd primes up to 1414, 1 block each,
   //       and 5 + 3 + 2 + 1 + 1 more for q = 3, 5, 7, 11, 13 = 234
   //     + one per SIEVE_BLOCK indices of the collection: ceil(999999 / 65536) = 16           = 252;
-  //   aplist's per-prime check polls on every 1024th call, the first included:
-  //     ceil(148933 primes / 1024)                                                           = 146;
-  //   398 in all.  A dropped or thinned check changes it.
-  const ok = full.reply?.startsWith('{"ok":[[2,') && total === 398;
-  if (!ok) { fail++; console.log(`FAIL aplist(2e6) without a Stop: ${total} host polls (398 expected), ${(full.reply ?? full.trap).slice(0, 80)}`); }
+  //   aplist's checks poll on every 1024th call, the first included: its per-prime check
+  //     (148933 primes) and a_p's own (since A09b: per base point of the BSGS search, every
+  //     1024 x when counting, every 256 baby or giant steps), 437 polls                    = 437;
+  //   689 in all.  A dropped or thinned check changes it.
+  const ok = full.reply?.startsWith('{"ok":[[2,') && total === 689;
+  if (!ok) { fail++; console.log(`FAIL aplist(2e6) without a Stop: ${total} host polls (689 expected), ${(full.reply ?? full.trap).slice(0, 80)}`); }
   for (const [label, at] of [["in the sieve", 1], ["in the a_p loop", total - 2]]) {
     polls = 0; stopAt = at;
     const r = run(inst());
