@@ -1038,30 +1038,44 @@ class IntegerMod:
             sage: sorted(Mod(1, 9).nth_root(3, all=True))
             [1, 4, 7]
         """
-        if getattr(self._parent, "_prime", False):
-            return _ff_nth_root(self, k, all)
+        # (an integer exponent, as Sage's ZZ(k): 1/2 is a TypeError; int()
+        # truncated it to 0)
+        k = int(_Integer(k))
         n = self._parent._n
-        k = int(k)
-        # (as Sage's: for k < 0 the units r with r^k = self, none if self isn't
-        # one (pow(0, k, n) raised before any unit was tried); for k = 0 every
-        # nonzero residue if self is 1, else none (0 was counted, and given))
-        if k > 0:
-            ok = lambda v: pow(v, k, n) == self._v
-        elif k < 0:
-            ok = lambda v: _m.gcd(v, n) == 1 and pow(v, k, n) == self._v
-        else:
-            ok = lambda v: v != 0 and self._v == 1 % n
-        rs = [_elt(self._parent, v) for v in range(n) if ok(v)] if n < 10 ** 6 else None
+        if k < 0:
+            # (Sage's rule: (x^-1).nth_root(-k), the same roots, a unit's;
+            # through the k > 0 search or the prime field's, whichever this
+            # ring uses: the primality cache once sent k <= 0 to the field's,
+            # which hasn't these)
+            if _m.gcd(self._v, n) != 1:
+                if all:
+                    return []
+                raise ValueError("")
+            return (~self).nth_root(-k, all=all)
+        if k == 0:
+            # (as Sage's: every nonzero residue if self is 1, else none; the
+            # trivial ring's one element for a single root, though all=True
+            # gives [])
+            if not all:
+                if n == 1:
+                    return _elt(self._parent, 0)
+                if self._v != 1:
+                    raise ValueError("")
+                return _elt(self._parent, 1)
+            if n >= 10 ** 6:
+                raise NotImplementedError("nth_root for large moduli")
+            return [_elt(self._parent, v) for v in range(1, n)] if self._v == 1 % n else []
+        # (GF(p)'s own route; a Zmod(p) ring searches whether or not
+        # is_field() has cached its primality, which sent it there)
+        if getattr(self._parent, "_is_gf", False):
+            return _ff_nth_root(self, k, all)
+        rs = [_elt(self._parent, v) for v in range(n) if pow(v, k, n) == self._v] if n < 10 ** 6 else None
         if rs is None:
             raise NotImplementedError("nth_root for large moduli")
         if all:
             return rs
-        if not rs and n == 1:
-            # (the trivial ring's one element, as Sage's, though all=True
-            # gives [] for k = 0)
-            return _elt(self._parent, 0)
         if not rs:
-            raise ValueError("no %d-th root" % k)
+            raise ValueError("no nth root")
         return rs[0]
 
     def log(self, b=None):

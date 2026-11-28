@@ -7100,6 +7100,11 @@
   "owner": "finite fields + configuration",
   "row": "inv-1"
  },
+ "lib/_sage_ff.py :: IntegerMod.nth_root :: raise NotImplementedError(\"nth_root for large moduli\") #1": {
+  "class": "coverage",
+  "owner": "Sage finite rings",
+  "reason": "all k-th roots for k = 0 list every nonzero residue: for a modulus of 10^6 or more that list is refused (unsupported), as the k > 0 search's; a single root needs no list"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
   "owner": "finite fields + configuration"

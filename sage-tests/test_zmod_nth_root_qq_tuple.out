@@ -1377,3 +1377,194 @@ QQ((1,0)) | ValueError
 QQ((1,2,3)) | TypeError
 QQ((1,)) | TypeError
 QQ(()) | TypeError
+is_field Zmod(5)(0).nth_root(-3, all=True) | []
+is_field Zmod(5)(0).nth_root(-2, all=True) | []
+is_field Zmod(5)(0).nth_root(-1, all=True) | []
+is_field Zmod(5)(0).nth_root(0, all=True) | []
+is_field Zmod(5)(1).nth_root(-3, all=True) | [1]
+is_field Zmod(5)(1).nth_root(-2, all=True) | [1, 4]
+is_field Zmod(5)(1).nth_root(-1, all=True) | [1]
+is_field Zmod(5)(1).nth_root(0, all=True) | [1, 2, 3, 4]
+is_field Zmod(5)(2).nth_root(-3, all=True) | [2]
+is_field Zmod(5)(2).nth_root(-2, all=True) | []
+is_field Zmod(5)(2).nth_root(-1, all=True) | [3]
+is_field Zmod(5)(2).nth_root(0, all=True) | []
+is_field Zmod(5)(3).nth_root(-3, all=True) | [3]
+is_field Zmod(5)(3).nth_root(-2, all=True) | []
+is_field Zmod(5)(3).nth_root(-1, all=True) | [2]
+is_field Zmod(5)(3).nth_root(0, all=True) | []
+is_field Zmod(5)(4).nth_root(-3, all=True) | [4]
+is_field Zmod(5)(4).nth_root(-2, all=True) | [2, 3]
+is_field Zmod(5)(4).nth_root(-1, all=True) | [4]
+is_field Zmod(5)(4).nth_root(0, all=True) | []
+is_field Zmod(7)(0).nth_root(-3, all=True) | []
+is_field Zmod(7)(0).nth_root(-2, all=True) | []
+is_field Zmod(7)(0).nth_root(-1, all=True) | []
+is_field Zmod(7)(0).nth_root(0, all=True) | []
+is_field Zmod(7)(1).nth_root(-3, all=True) | [1, 2, 4]
+is_field Zmod(7)(1).nth_root(-2, all=True) | [1, 6]
+is_field Zmod(7)(1).nth_root(-1, all=True) | [1]
+is_field Zmod(7)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6]
+is_field Zmod(7)(2).nth_root(-3, all=True) | []
+is_field Zmod(7)(2).nth_root(-2, all=True) | [2, 5]
+is_field Zmod(7)(2).nth_root(-1, all=True) | [4]
+is_field Zmod(7)(2).nth_root(0, all=True) | []
+is_field Zmod(7)(3).nth_root(-3, all=True) | []
+is_field Zmod(7)(3).nth_root(-2, all=True) | []
+is_field Zmod(7)(3).nth_root(-1, all=True) | [5]
+is_field Zmod(7)(3).nth_root(0, all=True) | []
+is_field Zmod(7)(4).nth_root(-3, all=True) | []
+is_field Zmod(7)(4).nth_root(-2, all=True) | [3, 4]
+is_field Zmod(7)(4).nth_root(-1, all=True) | [2]
+is_field Zmod(7)(4).nth_root(0, all=True) | []
+is_field Zmod(7)(5).nth_root(-3, all=True) | []
+is_field Zmod(7)(5).nth_root(-2, all=True) | []
+is_field Zmod(7)(5).nth_root(-1, all=True) | [3]
+is_field Zmod(7)(5).nth_root(0, all=True) | []
+is_field Zmod(7)(6).nth_root(-3, all=True) | [3, 5, 6]
+is_field Zmod(7)(6).nth_root(-2, all=True) | []
+is_field Zmod(7)(6).nth_root(-1, all=True) | [6]
+is_field Zmod(7)(6).nth_root(0, all=True) | []
+is_field Zmod(11)(0).nth_root(-3, all=True) | []
+is_field Zmod(11)(0).nth_root(-2, all=True) | []
+is_field Zmod(11)(0).nth_root(-1, all=True) | []
+is_field Zmod(11)(0).nth_root(0, all=True) | []
+is_field Zmod(11)(1).nth_root(-3, all=True) | [1]
+is_field Zmod(11)(1).nth_root(-2, all=True) | [1, 10]
+is_field Zmod(11)(1).nth_root(-1, all=True) | [1]
+is_field Zmod(11)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+is_field Zmod(11)(2).nth_root(-3, all=True) | [8]
+is_field Zmod(11)(2).nth_root(-2, all=True) | []
+is_field Zmod(11)(2).nth_root(-1, all=True) | [6]
+is_field Zmod(11)(2).nth_root(0, all=True) | []
+is_field Zmod(11)(3).nth_root(-3, all=True) | [5]
+is_field Zmod(11)(3).nth_root(-2, all=True) | [2, 9]
+is_field Zmod(11)(3).nth_root(-1, all=True) | [4]
+is_field Zmod(11)(3).nth_root(0, all=True) | []
+is_field Zmod(11)(4).nth_root(-3, all=True) | [9]
+is_field Zmod(11)(4).nth_root(-2, all=True) | [5, 6]
+is_field Zmod(11)(4).nth_root(-1, all=True) | [3]
+is_field Zmod(11)(4).nth_root(0, all=True) | []
+is_field Zmod(11)(5).nth_root(-3, all=True) | [4]
+is_field Zmod(11)(5).nth_root(-2, all=True) | [3, 8]
+is_field Zmod(11)(5).nth_root(-1, all=True) | [9]
+is_field Zmod(11)(5).nth_root(0, all=True) | []
+is_field Zmod(11)(6).nth_root(-3, all=True) | [7]
+is_field Zmod(11)(6).nth_root(-2, all=True) | []
+is_field Zmod(11)(6).nth_root(-1, all=True) | [2]
+is_field Zmod(11)(6).nth_root(0, all=True) | []
+is_field Zmod(11)(7).nth_root(-3, all=True) | [2]
+is_field Zmod(11)(7).nth_root(-2, all=True) | []
+is_field Zmod(11)(7).nth_root(-1, all=True) | [8]
+is_field Zmod(11)(7).nth_root(0, all=True) | []
+is_field Zmod(11)(8).nth_root(-3, all=True) | [6]
+is_field Zmod(11)(8).nth_root(-2, all=True) | []
+is_field Zmod(11)(8).nth_root(-1, all=True) | [7]
+is_field Zmod(11)(8).nth_root(0, all=True) | []
+is_field Zmod(11)(9).nth_root(-3, all=True) | [3]
+is_field Zmod(11)(9).nth_root(-2, all=True) | [4, 7]
+is_field Zmod(11)(9).nth_root(-1, all=True) | [5]
+is_field Zmod(11)(9).nth_root(0, all=True) | []
+is_field Zmod(11)(10).nth_root(-3, all=True) | [10]
+is_field Zmod(11)(10).nth_root(-2, all=True) | []
+is_field Zmod(11)(10).nth_root(-1, all=True) | [10]
+is_field Zmod(11)(10).nth_root(0, all=True) | []
+Zmod(5)(1).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(5)(1).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(5)(1).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(5)(2).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(5)(2).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(5)(2).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(5)(3).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(5)(3).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(5)(3).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(5)(4).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(5)(4).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(5)(4).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(8)(1).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(8)(1).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(8)(1).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(8)(3).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(8)(3).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(8)(3).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(8)(5).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(8)(5).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(8)(5).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(8)(7).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(8)(7).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(8)(7).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(9)(1).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(9)(1).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(9)(1).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(9)(2).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(9)(2).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(9)(2).nth_root(-3) == (x^-1).nth_root(3) | ValueError
+Zmod(9)(4).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(9)(4).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(9)(4).nth_root(-3) == (x^-1).nth_root(3) | ValueError
+Zmod(9)(5).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(9)(5).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(9)(5).nth_root(-3) == (x^-1).nth_root(3) | ValueError
+Zmod(9)(7).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(9)(7).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(9)(7).nth_root(-3) == (x^-1).nth_root(3) | ValueError
+Zmod(9)(8).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(9)(8).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(9)(8).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(15)(1).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(15)(1).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(15)(1).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(15)(2).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(15)(2).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(15)(2).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(15)(4).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(15)(4).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(15)(4).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(15)(7).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(15)(7).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(15)(7).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(15)(8).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(15)(8).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(15)(8).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(15)(11).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(15)(11).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(15)(11).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(15)(13).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(15)(13).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(15)(13).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(15)(14).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(15)(14).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(15)(14).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(16)(1).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(16)(1).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(16)(1).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(16)(3).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(16)(3).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(16)(3).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(16)(5).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(16)(5).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(16)(5).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(16)(7).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(16)(7).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(16)(7).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(16)(9).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(16)(9).nth_root(-2) == (x^-1).nth_root(2) | True
+Zmod(16)(9).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(16)(11).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(16)(11).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(16)(11).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(16)(13).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(16)(13).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(16)(13).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(16)(15).nth_root(-1) == (x^-1).nth_root(1) | True
+Zmod(16)(15).nth_root(-2) == (x^-1).nth_root(2) | ValueError
+Zmod(16)(15).nth_root(-3) == (x^-1).nth_root(3) | True
+Zmod(9)(1).nth_root(1/2) | TypeError
+Zmod(9)(1).nth_root(1/2, all=True) | TypeError
+GF(5)(1).nth_root(1/2) | TypeError
+GF(13)(4).nth_root(0) | ValueError ''
+GF(13)(0).nth_root(-2) | ValueError ''
+Zmod(4)(2).nth_root(-1) | ValueError ''
+Zmod(4)(3).nth_root(0) | ValueError ''
+Zmod(4)(3).nth_root(2) | ValueError 'no nth root'
+Zmod(8)(3).nth_root(2) | ValueError 'no nth root'

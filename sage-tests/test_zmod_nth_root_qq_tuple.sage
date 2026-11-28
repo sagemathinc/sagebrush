@@ -16,3 +16,30 @@ for e, f in [("QQ((1,2))", lambda: QQ((1,2))), ("QQ((6,-4))", lambda: QQ((6,-4))
              ("QQ((1,2), 3)", lambda: QQ((1,2), 3)), ("QQ([1,2])", lambda: QQ([1,2])), ("QQ((1,0))", lambda: QQ((1,0))),
              ("QQ((1,2,3))", lambda: QQ((1,2,3))), ("QQ((1,))", lambda: QQ((1,))), ("QQ(())", lambda: QQ(()))]:
     show(e, lambda: (lambda v: (v, v.parent()))(f()))
+# a prime modulus after is_field() (its field's root route): the same rules
+for p in [5, 7, 11]:
+    R = Zmod(p); R.is_field()
+    for a in range(p):
+        for k in [-3, -2, -1, 0]:
+            x = R(a)
+            show("is_field Zmod(%d)(%d).nth_root(%d, all=True)" % (p, a, k), lambda: sorted(int(t) for t in x.nth_root(k, all=True)))
+# a single root for k < 0 is (x^-1).nth_root(-k), Sage's rule (the sets above
+# are the claim; which single root k > 0 gives is issue #2414)
+for n in [5, 8, 9, 15, 16]:
+    for a in range(n):
+        if gcd(a, n) == 1:
+            for k in [-1, -2, -3]:
+                x = Zmod(n)(a)
+                show("Zmod(%d)(%d).nth_root(%d) == (x^-1).nth_root(%d)" % (n, a, k, -k), lambda: x.nth_root(k) == (x**-1).nth_root(-k))
+# a non-integer exponent: TypeError
+show("Zmod(9)(1).nth_root(1/2)", lambda: Zmod(9)(1).nth_root(1/2))
+show("Zmod(9)(1).nth_root(1/2, all=True)", lambda: Zmod(9)(1).nth_root(1/2, all=True))
+show("GF(5)(1).nth_root(1/2)", lambda: GF(5)(1).nth_root(1/2))
+# the error messages, as Sage's: empty for k <= 0, "no nth root" for k > 0
+for e, f in [("GF(13)(4).nth_root(0)", lambda: GF(13)(4).nth_root(0)), ("GF(13)(0).nth_root(-2)", lambda: GF(13)(0).nth_root(-2)),
+             ("Zmod(4)(2).nth_root(-1)", lambda: Zmod(4)(2).nth_root(-1)), ("Zmod(4)(3).nth_root(0)", lambda: Zmod(4)(3).nth_root(0)),
+             ("Zmod(4)(3).nth_root(2)", lambda: Zmod(4)(3).nth_root(2)), ("Zmod(8)(3).nth_root(2)", lambda: Zmod(8)(3).nth_root(2))]:
+    try:
+        print(e, "|", f())
+    except ValueError as err:
+        print(e, "| ValueError", repr(str(err)))
