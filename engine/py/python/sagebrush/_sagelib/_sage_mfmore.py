@@ -279,6 +279,22 @@ class QSpaceMethods:
         SagebrushMemoryError False
         sage: ms._echelon = real  # sagebrush only
 
+    The space's own paths into the rows (a Hecke matrix from q-expansions,
+    a form's coordinates) charge a ledger of their own when no computation
+    is running::
+
+        sage: M = ModularForms(11, 2); _ = M.q_echelon_basis(8)  # sagebrush only
+        sage: for heap, f in ((4 * 5000, lambda: M._hecke_matrix_qexp(97)), (4 * 300, lambda: M._coords_of(lambda p: [0] * p))):  # sagebrush only
+        ....:     sys._sagebrush_heap_limit = heap
+        ....:     try:
+        ....:         f()
+        ....:     except MemoryError as e:
+        ....:         print(type(e).__name__, e.what.split(" ")[1])
+        SagebrushMemoryError Hecke
+        SagebrushMemoryError coordinates
+        sage: sys._sagebrush_heap_limit = old; M._hecke_matrix_qexp(2).charpoly()  # sagebrush only
+        x^2 - x - 6
+
     Each reservation, by its step, at least the floor of its stated bound
     (entries times the slot, the Fraction and the bound's bytes): the basis
     rows at >= 256 bits, the Eisenstein rows likewise, a newform's
@@ -309,6 +325,19 @@ class QSpaceMethods:
         [True, True]
         sage: mm._hadamard_bits([[3, 4]]), mm._hadamard_bits([[3, 4], [0, 8]])  # sagebrush only
         (4, 8)
+
+    The basis rows' producer: the copy of an orbit's traces, the rank
+    test's scratch (v's integers and three rows of residues) and its rank
+    state (a row of residues per kept translate), at least their floors::
+
+        sage: import _sage_modular as sm  # sagebrush only
+        sage: for c in (sm._QBASIS, sm._NEWROWS):  # sagebrush only
+        ....:     for key in [key for key in c if key[:2] == (11, 2)]:
+        ....:         del c[key]
+        sage: s = steps(lambda: CuspForms(11, 2).q_echelon_basis(40)); w = sm._WORD_PRIME.bit_length()  # sagebrush only
+        sage: res = lambda n, bits: n * (ms._SLOT + ms._INT + (bits + 7) // 8 + 8)  # sagebrush only
+        sage: s["traces copy"] >= res(40, 0), s["rank scratch"] >= res(3 * 40, w), s["rank state"] >= res(40, w)  # sagebrush only
+        (True, True, True)
     """
 
     def _all_cusp(self):

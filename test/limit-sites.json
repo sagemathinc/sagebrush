@@ -14470,6 +14470,11 @@
   "owner": "modular forms/runtime memory",
   "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
  },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: ....: sys._sagebrush_heap_limit = heap #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
  "lib/_sage_mfmore.py :: QSpaceMethods :: sage: old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 200000 # sagebrush only #0": {
   "class": "none",
   "owner": "modular forms/runtime memory",
@@ -14496,6 +14501,11 @@
   "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
  },
  "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old # sagebrush only #2": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old; M._hecke_matrix_qexp(2).charpoly() # sagebrush only #0": {
   "class": "none",
   "owner": "modular forms/runtime memory",
   "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
@@ -14959,6 +14969,11 @@
   "class": "none",
   "owner": "modular forms (Sage mode)",
   "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"
+ },
+ "lib/_sage_modular.py :: _new_cusp_rows_charged :: sres = _step(ch, \"rank scratch\", _reserve_rows(ch, 1, prec, ms._maxbits(v), frac=False) + _reserve_rows(ch, 3, prec, pbits, frac=False)) #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "the rank test's scratch reserved at its bound (the translate's bits and three rows of residues); it refuses nothing itself"
  },
  "lib/_sage_mpoly.py ::  :: _MAX_CONVERT_ENTRIES = 1 << 20 #0": {
   "class": "2",

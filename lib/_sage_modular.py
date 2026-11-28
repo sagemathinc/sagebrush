@@ -1335,6 +1335,15 @@ def _reserve_rows(ch, rows, cols, bits, frac=True):
     return ms._reserve(ch, rows * cols, bits, frac=frac)
 
 
+def _step(ch, step, nbytes):
+    # (a reservation recorded under its step's name on a charge that keeps
+    # a list ch.steps: the doctests' checks)
+    steps = getattr(ch, "steps", None)
+    if steps is not None:
+        steps.append((step, nbytes))
+    return nbytes
+
+
 def _deligne_bits(k, J, r=1):
     """Bits bounding |a_j|, j <= J, of a trace form of an orbit of
     dimension r: r d(j) j^((k-1)/2) <= r j^((k+1)/2)."""
@@ -1362,9 +1371,8 @@ def _minor_bits(rows):
 def _subs_qd(v, d, prec):
     """f(q^d) to precision prec, from f's coefficients v."""
     import _sage_modsym as ms
-    ch = ms._CUR[0]
-    if ch is not None:
-        ch.take(prec * ms._SLOT)
+    ch = ms._charge()
+    ch.take(prec * ms._SLOT)
     out = [_Fr(0)] * prec
     for n in range(0, (prec - 1) // d + 1):
         out[n * d] = v[n]
@@ -1378,11 +1386,10 @@ def _hecke_qexp(v, n, N, k, prec):
     ds = [d for d in _divisors(n) if _gcd(d, N) == 1]
     pw = {d: d ** (k - 1) for d in ds}
     import _sage_modsym as ms
-    ch = ms._CUR[0]
-    if ch is not None:
-        # (|a_m(T_n f)| <= d(n) n^(k-1) max|a_j(f)|, j <= (prec - 1) n)
-        vb = ms._maxbits(v[:(prec - 1) * n + 1])
-        _reserve_rows(ch, 1, prec, n.bit_length() + (k - 1) * n.bit_length() + vb + 2)
+    ch = ms._charge()
+    # (|a_m(T_n f)| <= d(n) n^(k-1) max|a_j(f)|, j <= (prec - 1) n)
+    vb = ms._maxbits(v[:(prec - 1) * n + 1])
+    _reserve_rows(ch, 1, prec, n.bit_length() + (k - 1) * n.bit_length() + vb + 2)
     out = [_Fr(0)] * prec
     out[0] = sum(pw[d] for d in ds) * v[0]
     for m in range(1, prec):
@@ -1474,13 +1481,11 @@ def _solve_rows(B, V):
     from _sagebrush_lib import linalg
     s = len(B[0])
     import _sage_modsym as ms
-    ch = ms._CUR[0]
-    if ch is not None:
-        ch.take(s * (d + len(V)) * ms._SLOT)
+    ch = ms._charge()
+    ch.take(s * (d + len(V)) * ms._SLOT)
     aug = [[B[i][c] for i in range(d)] + [v[c] for v in V] for c in range(s)]
-    if ch is not None:
-        # (the engine's echelon form and the coordinates: ratios of minors)
-        _reserve_rows(ch, 2 * min(s, d + len(V)), d + len(V), 2 * _minor_bits(aug))
+    # (the engine's echelon form and the coordinates: ratios of minors)
+    _reserve_rows(ch, 2 * min(s, d + len(V)), d + len(V), 2 * _minor_bits(aug))
     R, piv = linalg.rref(aug)
     if list(piv) != list(range(d)):
         raise ValueError("not in the span")
@@ -1535,10 +1540,16 @@ def _new_cusp_rows_charged(M, k, prec, key, ch):
         held = res
         orbits = data["newforms"] if isinstance(data, dict) else data
         rows, short = [], False
+        pbits = _WORD_PRIME.bit_length()
         for o in orbits:
             r = int(o["dim"])
+            # (the orbit's traces, copied: at Deligne's bound; and below, its
+            # modular rank state, a row of prec residues per kept translate:
+            # both charged until the orbit is done)
+            tres = _step(ch, "traces copy", _reserve_rows(ch, 1, len(o["traces"]) + 1, _deligne_bits(k, bound, r), frac=False))
             t = [0] + [int(x) for x in o["traces"]]
             ech = _ModpEchelon()
+            state = 0
             m = got = 0
             while got < r:
                 m += 1
@@ -1550,19 +1561,29 @@ def _new_cusp_rows_charged(M, k, prec, key, ch):
                                        % (o.get("letter"), M, k, got, r))
                 before = ch.used
                 v = _hecke_qexp(t, m, M, k, prec)
-                if ech.add([int(x) for x in v]):
-                    # (kept: settled to its size; dropped: released)
+                vres = ch.used - before
+                # (the rank test's scratch: v's integers, then at most three
+                # rows of residues at once, its reduction and normalized row)
+                sres = _step(ch, "rank scratch", _reserve_rows(ch, 1, prec, ms._maxbits(v), frac=False) + _reserve_rows(ch, 3, prec, pbits, frac=False))
+                added = ech.add([int(x) for x in v])
+                ch.give(sres)
+                if added:
+                    # (kept: settled to its size, and its residues kept in the
+                    # rank state; dropped: released)
                     rows.append(v)
                     got += 1
                     b = ms._row_bytes(v)
                     held += b
-                    d = ch.used - before - b
+                    d = vres - b
                     if d >= 0:
                         ch.give(d)
                     else:
                         ch.take(-d)
+                    state += _reserve_rows(ch, 1, prec, pbits, frac=False)
                 else:
-                    ch.give(ch.used - before)
+                    ch.give(vres)
+            # (the orbit's traces and rank state are dropped)
+            ch.give(_step(ch, "rank state", state) + tres)
             if short:
                 break
         if not short:
@@ -1649,12 +1670,11 @@ def _eis_components(m, j, L, k, prec):
     phi_poly = _cyclotomic(m)
     deg = len(phi_poly) - 1
     import _sage_modsym as ms
-    ch = ms._CUR[0]
+    ch = ms._charge()
     # (x^e mod Phi_m: each reduction multiplies the coefficients by at most
     # 1 + max |Phi_m's coefficients|)
     gb = (1 + max(abs(c) for c in phi_poly)).bit_length()
-    if ch is not None:
-        _reserve_rows(ch, m, deg, m * gb + 1, frac=False)
+    _reserve_rows(ch, m, deg, m * gb + 1, frac=False)
     powers = []
     cur = [1] + [0] * (deg - 1)
     for e in range(m):
@@ -1664,9 +1684,8 @@ def _eis_components(m, j, L, k, prec):
         if top:
             nxt = [a - top * b for a, b in zip(nxt, phi_poly[:deg])]
         cur = nxt
-    if ch is not None:
-        # (|a_n| <= sigma_(k-1)(n) max |power coefficient| <= n^k 2^(m gb))
-        _reserve_rows(ch, deg, prec, k * prec.bit_length() + m * gb + 2)
+    # (|a_n| <= sigma_(k-1)(n) max |power coefficient| <= n^k 2^(m gb))
+    _reserve_rows(ch, deg, prec, k * prec.bit_length() + m * gb + 2)
     comps = [[_Fr(0)] * prec for _ in range(deg)]
     for n in range(1, prec):
         acc = [0] * deg
@@ -1689,13 +1708,12 @@ def _eis_rows(N, k, prec, new=False):
         return []
     rows = []
     import _sage_modsym as ms
-    ch = ms._CUR[0]
-    if ch is not None:
-        # (sigma_(k-1)(n) <= n^k, the constant term -B_k/2k or (t - 1)/24,
-        # E_2(q) - t E_2(q^t): one more bit and t's; each t a row)
-        bk = _bernoulli(k) if k >= 2 else _Fr(0)
-        _reserve_rows(ch, 2 * len(_divisors(N)) + 2, prec,
-                      k * prec.bit_length() + bk.numerator.bit_length() + bk.denominator.bit_length() + 2 * N.bit_length() + 8)
+    ch = ms._charge()
+    # (sigma_(k-1)(n) <= n^k, the constant term -B_k/2k or (t - 1)/24,
+    # E_2(q) - t E_2(q^t): one more bit and t's; each t a row)
+    bk = _bernoulli(k) if k >= 2 else _Fr(0)
+    _reserve_rows(ch, 2 * len(_divisors(N)) + 2, prec,
+                  k * prec.bit_length() + bk.numerator.bit_length() + bk.denominator.bit_length() + 2 * N.bit_length() + 8)
     # the trivial pair
     if k >= 4:
         base = [-_bernoulli(k) / (2 * k)] + [_Fr(sum(d ** (k - 1) for d in _divisors(n))) for n in range(1, prec)]
@@ -2034,7 +2052,8 @@ class _QSpace:
         coefficients coeffs(prec) gives (ValueError if it is not in the space)."""
         prec = self.sturm_bound() + 2
         try:
-            return _solve_rows(self._qrows(prec), [coeffs(prec)])[0]
+            with _ledger("The coordinates of a form in %r" % self):
+                return _solve_rows(self._qrows(prec), [coeffs(prec)])[0]
         except ValueError:
             raise ValueError("the form is not in %s" % self)
 
@@ -2177,9 +2196,10 @@ class _QSpace:
         from sage_all import QQ, matrix
         A = self._amb()
         s = self.sturm_bound() + 2
-        rows = self._qrows((s - 1) * n + 1)
         try:
-            out = _solve_rows([r[:s] for r in rows], [_hecke_qexp(r, n, A._N, A._k, s) for r in rows])
+            with _ledger("The Hecke operator T_%d on %r" % (n, self)):
+                rows = self._qrows((s - 1) * n + 1)
+                out = _solve_rows([r[:s] for r in rows], [_hecke_qexp(r, n, A._N, A._k, s) for r in rows])
         except ValueError:
             raise RuntimeError("internal error: T_%d left the space %s" % (n, self))
         d = len(rows)
