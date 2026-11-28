@@ -5284,7 +5284,9 @@ async function docsUnderSealedHalt() {
   check(!busy(beforeF) && !busy(underF) && bare(underF) === bare(beforeF), "docs under a full sealed log: a notebook's request still reaches the server, answered as before: " + J({ beforeF, underF }));
   await ctl("sealedCap", { n: 1_000_000 });
   await stop(cf);
-  // (the control: a rebuild's halt (invalid) stops notebooks as before)
+  // (the control: a rebuild's halt (invalid) stops notebooks as before; on an account of its own, never sealed, so
+  // the halt is the rebuild's and nothing else's)
+  await account();
   const wc = await fresh();
   const ds2 = new W.DocSync({});
   const was2 = ds2.connected.bind(ds2);
