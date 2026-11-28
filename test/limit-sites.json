@@ -4,10 +4,35 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
- "engine/arith/src/zmat.rs :: mul :: let w = 1 + (self.max_bits() / 64) as usize * (o.max_bits() / 64) as usize; #0": {
+ "engine/arith/src/zmat.rs :: a_multiply_adds_weight_saturates_at_the_targets_usize :: assert_eq!(mul_weight(1 << 22, 1 << 22, u64::MAX), (1 << 32) + 1); #0": {
   "class": "none",
   "owner": "arithmetic kernels (engine/arith)",
-  "reason": "the product's poll weight from its entries' sizes (max_bits): how often Stop is polled, not a limit"
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: a_multiply_adds_weight_saturates_at_the_targets_usize :: assert_eq!(mul_weight(u64::MAX, u64::MAX, u64::MAX), u64::MAX); #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: a_multiply_adds_weight_saturates_at_the_targets_usize :: let cap32 = u32::MAX as u64; #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: mul :: let w = mul_weight(self.max_bits(), o.max_bits(), usize::MAX as u64) as usize; #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight :: (a / 64).saturating_mul(b / 64).saturating_add(1).min(cap) #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight :: fn mul_weight(a: u64, b: u64, cap: u64) -> u64 { #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
  },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",

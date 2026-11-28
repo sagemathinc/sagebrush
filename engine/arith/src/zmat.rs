@@ -135,14 +135,21 @@ impl ZMat {
             }
         }
         // (a multiply-add of big integers costs about the product of their
-        // sizes in words: counted so, a product of few large entries polls)
-        let w = 1 + (self.max_bits() / 64) as usize * (o.max_bits() / 64) as usize;
+        // sizes in words: counted so, a product of few large entries polls;
+        // past 2^10 words a multiply-add, each is counted as it is done)
+        let w = mul_weight(self.max_bits(), o.max_bits(), usize::MAX as u64) as usize;
+        let each = w >= 1 << 10;
         let mut d = Vec::with_capacity(r * c);
         for i in 0..r {
             for j in 0..c {
-                poll.add(k.saturating_mul(w));
+                if !each {
+                    poll.add(k.saturating_mul(w));
+                }
                 let mut s = BigInt::zero();
                 for l in 0..k {
+                    if each {
+                        poll.add(w);
+                    }
                     if !self.d[i * k + l].is_zero() {
                         s += &self.d[i * k + l] * &o.d[l * c + j];
                     }
@@ -453,6 +460,14 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
             check = (2 * check).min(max_iters);
         }
     }
+}
+
+/// The work of one multiply-add of entries of `a` and `b` bits, in word
+/// products (1 + their sizes in words multiplied), at most `cap` (usize's
+/// largest: on a 32-bit target the product of two 2^22-bit entries' sizes
+/// is 2^32, which would wrap).
+fn mul_weight(a: u64, b: u64, cap: u64) -> u64 {
+    (a / 64).saturating_mul(b / 64).saturating_add(1).min(cap)
 }
 
 /// Fraction-free Gaussian elimination (Bareiss): exact determinant with
@@ -1221,6 +1236,19 @@ pub fn charpoly(a: &ZMat) -> Vec<BigInt> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_multiply_adds_weight_saturates_at_the_targets_usize() {
+        // (a 32-bit target: 2^22-bit entries are 2^16 words each, whose
+        // product 2^32 wraps to 0 in a u32; saturated, the weight is the cap)
+        let cap32 = u32::MAX as u64;
+        assert_eq!(mul_weight(1 << 22, 1 << 22, cap32), cap32);
+        assert_eq!(mul_weight(3 << 21, 3 << 21, cap32), cap32);
+        assert_eq!(mul_weight(1 << 22, 1 << 22, u64::MAX), (1 << 32) + 1);
+        assert_eq!(mul_weight(63, 1 << 20, cap32), 1);
+        assert_eq!(mul_weight(128, 640, cap32), 21);
+        assert_eq!(mul_weight(u64::MAX, u64::MAX, u64::MAX), u64::MAX);
+    }
 
     fn rng(seed: &mut u64) -> u64 {
         *seed ^= *seed << 13;
