@@ -365,6 +365,16 @@
    "class": "not-implemented",
    "reason": "a %s precision that cuts inside a multibyte character (R cuts its bytes) is refused for now (A3: strings)",
    "sha256": "d59bccdd54c521664f6d68598d0732e038dde7b7595406dfeb6e3623871c9c3b"
+  },
+  "rill-tests/str/test_5.R#format-nsmall-na-error": {
+   "class": "not-implemented",
+   "reason": "R names the call inside format.default (prettyNum(.Internal(format(...)))) and its Calls: line; Rill names the format() call (A3: strings)",
+   "sha256": "38298ac6885c87220f2545ab2839b619747c05c835eee193eb15e4b9724e261e"
+  },
+  "rill-tests/str/test_5.R#format-nsmall-too-large-error": {
+   "class": "not-implemented",
+   "reason": "R names the call inside format.default (prettyNum(.Internal(format(...)))) and its Calls: line; Rill names the format() call (A3: strings)",
+   "sha256": "169d5a04b3aacd0f9666ef1f8286e06c7747295a4748dd648835619929d5e645"
   }
  }
 }

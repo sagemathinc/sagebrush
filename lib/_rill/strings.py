@@ -374,8 +374,9 @@ class _Arg:
             if t != "integer" and not (t == "logical" and conv in "di"):
                 raise RError("invalid format '%s'; %s" % (spec.group(0), _USE[t]), call)
             if e is None or (self.v.type == "double" and e == -_INT_MAX - 1):
-                # (NA in the field's width, its sign and 0 flags dropped: R 4.5.3, sprintf("%05d", NA) is "   NA")
-                return _word("NA", flags, width)
+                # (NA as %s writes it, the sign and 0 flags dropped but the precision kept: R 4.5.3, sprintf("%05d",
+                # NA) is "   NA", "%5.1d" "    N", "%08.0d" eight spaces)
+                return _str_pieces("NA", flags, width, prec)
             return _int_pieces(int(e), flags, width, prec, conv)
         if conv in "feEgG":
             if t != "double":
@@ -437,7 +438,8 @@ def sprintf(sess, call, args):
     def pieces(i):
         ps = parsed[i % len(parsed)]
         if ps is None:
-            return None
+            # (an NA format gives the string "NA": R 4.5.3, sprintf(c(NA, "%d"), 1:2) is "NA" "2")
+            return ["NA"]
         k, out = 0, []
         for p in ps:
             if isinstance(p, str):
@@ -465,7 +467,18 @@ def format_(sess, call, args):
             raise NotSupported("format(%s =)" % name if name else "format() with more arguments")
     x = _arg(args, "x")
     nsmall = _arg(args, "nsmall")
-    nsmall = 0 if nsmall is MISSING else _int1(nsmall, "format(nsmall =)")
+    if nsmall is MISSING:
+        nsmall = 0
+    else:
+        # (R 4.5.3 takes 0 to 20 decimals, truncated toward zero: format(1, nsmall = 2.5) is "1.00", nsmall = -0.5
+        # "1", nsmall = 21 an error)
+        k = nsmall.data[0] if isinstance(nsmall, RVector) and nsmall.type in ("logical", "integer", "double") \
+            and len(nsmall.data) == 1 else MISSING
+        if k is MISSING:
+            raise NotSupported("format(nsmall =) other than one number")
+        if k is None or k != k or abs(k) == math.inf or not 0 <= int(k) <= 20:
+            raise RError("invalid 'nsmall' argument", call)
+        nsmall = int(k)
     width = _arg(args, "width")
     width = 0 if width is MISSING else _int1(width, "format(width =)")
     trim = _arg(args, "trim")
@@ -531,6 +544,10 @@ def formatC(sess, call, args):
     # formatC(1/3, format = "f") "0.3333", format = "e" "3.3333e-01")
     if x.type == "double" and digits is None:
         digits = 4
+    if digits is not None and digits < 0:
+        # (a negative digits is C's default precision, 6: R 4.5.3, formatC(1/3, digits = -1) is "0.333333", and
+        # the width digits + 1 below is 7, formatC(2, digits = -1) "      2")
+        digits = 6
     if digits is not None and form != "s":
         # (R 4.5.3 shows at most 324 decimals in format "f" and 50 digits in the others, with a warning:
         # formatC(1/3, format = "e", digits = 900) is formatC(1/3, format = "e", digits = 50))

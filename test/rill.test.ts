@@ -852,7 +852,7 @@ strings._piece = counted
 mem._allowance = lambda: (0 - mem.open_bytes(), None)
 out = {}
 for src in ('sprintf("%1048576s", "a")', 'sprintf("%.100000f", 1)', 'sprintf("%-1048576d", 1L)',
-            'format(y, width = 1048576)', 'formatC(y, width = 1048576)', 'substr(w, 2, 5)'):
+            'format(y, width = 1048576)', 'format(y, nsmall = 20, width = 1048576)', 'formatC(y, width = 1048576)', 'substr(w, 2, 5)'):
     built[0] = 0
     try:
         s.evaluate(parse(src)[0])
