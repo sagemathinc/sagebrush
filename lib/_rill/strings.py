@@ -523,7 +523,7 @@ def formatC(sess, call, args):
     if x.type not in ("integer", "double", "character"):
         raise RError("unsupported type ", call)
     width = _arg(args, "width")
-    width = 0 if width is MISSING else _int1(width, "formatC(width =)")
+    width = None if width is MISSING or width is NULL else _int1(width, "formatC(width =)")
     digits = _arg(args, "digits")
     digits = None if digits is MISSING or digits is NULL else _int1(digits, "formatC(digits =)")
     form = _arg(args, "format")
@@ -555,10 +555,20 @@ def formatC(sess, call, args):
         if digits > most:
             sess.warn("'digits' reduced to %d" % most, call)
             digits = most
-    if _arg(args, "width") is MISSING and digits is not None and _arg(args, "digits") is not MISSING:
-        # (with digits and no width, the width is digits + 1: R 4.5.3, formatC(c(2, 1/3), digits = 10) is
-        # "          2" "0.3333333333")
-        width = digits + 1
+    if form != "s":
+        # (a number's width comes from its digits (2 for an integer when not given) unless given: with digits and no
+        # width it is digits + 1, and a width of 0 is digits, which must not be 0 (R 4.5.3, formatC(c(2, 1/3),
+        # digits = 10) is "          2" "0.3333333333", formatC(2L, width = 0) " 2", formatC(2, digits = 0,
+        # width = 0) an error); a string's is only its own (formatC("x", digits = 3) is "x")
+        d = 2 if digits is None else digits
+        if width is None:
+            given = _arg(args, "digits")
+            width = d + 1 if given is not MISSING and given is not NULL else 0
+        elif width == 0:
+            if d == 0:
+                raise RError("width cannot be zero", call)
+            width = d
+    width = width or 0
     if width < 0:
         flag, width = flag + "-", -width
     # (format "d" doesn't take digits: R 4.5.3, formatC(22L, width = 3, digits = 3, format = "d") is " 22")
