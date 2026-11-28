@@ -59,16 +59,36 @@ impl fmt::Display for ParseBigIntError {
 }
 impl std::error::Error for ParseBigIntError {}
 
+// num-bigint's text: one '+' before the digits (not "++"), and for a BigInt
+// one '-' instead (not "-+"), then digits, never a leading '_'; dashu's parser
+// takes a sign itself, so "+-1" was -1 and "_1" was 1
+fn parse_ubig(s: &str, radix: u32) -> Option<UBig> {
+    let s = match s.strip_prefix('+') {
+        Some(t) if !t.starts_with('+') => t,
+        _ => s,
+    };
+    if s.starts_with(['_', '+', '-']) {
+        return None;
+    }
+    UBig::from_str_radix(s, radix).ok()
+}
+fn parse_ibig(s: &str, radix: u32) -> Option<IBig> {
+    match s.strip_prefix('-') {
+        Some(t) if !t.starts_with('+') => parse_ubig(t, radix).map(|m| -IBig::from(m)),
+        _ => parse_ubig(s, radix).map(IBig::from),
+    }
+}
+
 impl FromStr for BigInt {
     type Err = ParseBigIntError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        IBig::from_str_radix(s.strip_prefix('+').unwrap_or(s), 10).map(BigInt).map_err(|_| ParseBigIntError)
+        parse_ibig(s, 10).map(BigInt).ok_or(ParseBigIntError)
     }
 }
 impl FromStr for BigUint {
     type Err = ParseBigIntError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        UBig::from_str_radix(s.strip_prefix('+').unwrap_or(s), 10).map(BigUint).map_err(|_| ParseBigIntError)
+        parse_ubig(s, 10).map(BigUint).ok_or(ParseBigIntError)
     }
 }
 
@@ -371,48 +391,79 @@ impl Neg for &BigInt {
     }
 }
 
+// The shift amount as a usize, or None past it (on 32-bit wasm: 2^32 and up);
+// a negative amount panics, as num-bigint's.
+fn shift_amount(n: i128) -> Option<usize> {
+    assert!(n >= 0, "shift amount");
+    usize::try_from(n).ok()
+}
+// x >> n for n past usize: every bit is shifted out, leaving the sign (0 or
+// -1, the floor); x << n is 0 for x = 0 and past any allocation otherwise
+trait PastShift: Sized {
+    fn shr_past(&self) -> Self;
+    fn shl_past(&self) -> Self;
+}
+impl PastShift for IBig {
+    fn shr_past(&self) -> IBig {
+        if *self < IBig::ZERO { -IBig::ONE } else { IBig::ZERO }
+    }
+    fn shl_past(&self) -> IBig {
+        assert!(self.is_zero(), "shift amount");
+        IBig::ZERO
+    }
+}
+impl PastShift for UBig {
+    fn shr_past(&self) -> UBig {
+        UBig::ZERO
+    }
+    fn shl_past(&self) -> UBig {
+        assert!(self.is_zero(), "shift amount");
+        UBig::ZERO
+    }
+}
+
 macro_rules! shifts {
     ($t:ident, $($p:ty),*) => {$(
         impl Shl<$p> for $t {
             type Output = $t;
             #[inline]
             fn shl(self, n: $p) -> $t {
-                $t(self.0 << usize::try_from(n).expect("shift amount"))
+                $t(match shift_amount(n as i128) { Some(n) => self.0 << n, None => self.0.shl_past() })
             }
         }
         impl Shl<$p> for &$t {
             type Output = $t;
             #[inline]
             fn shl(self, n: $p) -> $t {
-                $t(&self.0 << usize::try_from(n).expect("shift amount"))
+                $t(match shift_amount(n as i128) { Some(n) => &self.0 << n, None => self.0.shl_past() })
             }
         }
         impl Shr<$p> for $t {
             type Output = $t;
             #[inline]
             fn shr(self, n: $p) -> $t {
-                $t(self.0 >> usize::try_from(n).expect("shift amount"))
+                $t(match shift_amount(n as i128) { Some(n) => self.0 >> n, None => self.0.shr_past() })
             }
         }
         impl Shr<$p> for &$t {
             type Output = $t;
             #[inline]
             fn shr(self, n: $p) -> $t {
-                $t(&self.0 >> usize::try_from(n).expect("shift amount"))
+                $t(match shift_amount(n as i128) { Some(n) => &self.0 >> n, None => self.0.shr_past() })
             }
         }
         impl ShlAssign<$p> for $t {
             #[inline]
             fn shl_assign(&mut self, n: $p) {
                 let a = std::mem::take(&mut self.0);
-                self.0 = a << usize::try_from(n).expect("shift amount");
+                self.0 = match shift_amount(n as i128) { Some(n) => a << n, None => a.shl_past() };
             }
         }
         impl ShrAssign<$p> for $t {
             #[inline]
             fn shr_assign(&mut self, n: $p) {
                 let a = std::mem::take(&mut self.0);
-                self.0 = a >> usize::try_from(n).expect("shift amount");
+                self.0 = match shift_amount(n as i128) { Some(n) => a >> n, None => a.shr_past() };
             }
         }
     )*};
@@ -585,13 +636,13 @@ impl num_traits::One for BigUint {
 impl num_traits::Num for BigInt {
     type FromStrRadixErr = ParseBigIntError;
     fn from_str_radix(s: &str, radix: u32) -> Result<Self, ParseBigIntError> {
-        IBig::from_str_radix(s.strip_prefix('+').unwrap_or(s), radix).map(BigInt).map_err(|_| ParseBigIntError)
+        parse_ibig(s, radix).map(BigInt).ok_or(ParseBigIntError)
     }
 }
 impl num_traits::Num for BigUint {
     type FromStrRadixErr = ParseBigIntError;
     fn from_str_radix(s: &str, radix: u32) -> Result<Self, ParseBigIntError> {
-        UBig::from_str_radix(s.strip_prefix('+').unwrap_or(s), radix).map(BigUint).map_err(|_| ParseBigIntError)
+        parse_ubig(s, radix).map(BigUint).ok_or(ParseBigIntError)
     }
 }
 impl num_traits::Signed for BigInt {
@@ -637,7 +688,9 @@ impl num_traits::ToPrimitive for BigInt {
         Some(self.0.to_f64().value())
     }
     fn to_f32(&self) -> Option<f32> {
-        Some(self.0.to_f64().value() as f32)
+        // (rounded once, from the integer: through f64 it rounded twice,
+        // 2^54 + 2^30 + 1 to 2^54)
+        Some(self.0.to_f32().value())
     }
 }
 impl num_traits::ToPrimitive for BigUint {
@@ -655,6 +708,10 @@ impl num_traits::ToPrimitive for BigUint {
     }
     fn to_f64(&self) -> Option<f64> {
         Some(self.0.to_f64().value())
+    }
+    fn to_f32(&self) -> Option<f32> {
+        // (rounded once: the trait's default goes through f64)
+        Some(self.0.to_f32().value())
     }
 }
 impl num_traits::FromPrimitive for BigInt {
@@ -942,11 +999,16 @@ impl BigInt {
     }
     /// Bit n of the two's complement representation (num-bigint's semantics).
     pub fn bit(&self, n: u64) -> bool {
+        // (a bit past usize, on 32-bit wasm, is past every value's bits: the
+        // sign's extension; n as usize truncated, so bit(2^32) was bit 0)
+        let Ok(n) = usize::try_from(n) else {
+            return self.0 < IBig::ZERO;
+        };
         if self.0 >= IBig::ZERO {
-            (&self.0).unsigned_abs().bit(n as usize)
+            (&self.0).unsigned_abs().bit(n)
         } else {
             // -x = ~(x - 1)
-            !((&self.0).unsigned_abs() - UBig::ONE).bit(n as usize)
+            !((&self.0).unsigned_abs() - UBig::ONE).bit(n)
         }
     }
     /// self^e mod m, in [0, m) for m > 0 and (m, 0] for m < 0 (num-bigint's
@@ -955,6 +1017,10 @@ impl BigInt {
         assert!(e.0 >= IBig::ZERO, "negative exponent");
         assert!(!m.0.is_zero(), "zero modulus");
         let mm = (&m.0).unsigned_abs();
+        // (mod +-1 everything is 0, as num-bigint's; ConstDivisor panics on 1)
+        if mm.is_one() {
+            return BigInt(IBig::ZERO);
+        }
         let ring = dashu_int::fast_div::ConstDivisor::new(mm.clone());
         let base = self.0.clone();
         let eb = (&e.0).unsigned_abs();
@@ -1014,7 +1080,7 @@ impl BigInt {
     }
     pub fn parse_bytes(buf: &[u8], radix: u32) -> Option<BigInt> {
         let s = std::str::from_utf8(buf).ok()?;
-        IBig::from_str_radix(s.strip_prefix('+').unwrap_or(s), radix).ok().map(BigInt)
+        parse_ibig(s, radix).map(BigInt)
     }
     pub fn from_bytes_le(sign: Sign, bytes: &[u8]) -> BigInt {
         BigInt::from_biguint(sign, BigUint(UBig::from_le_bytes(bytes)))
@@ -1051,10 +1117,13 @@ impl BigUint {
         self.0.trailing_zeros().map(|t| t as u64)
     }
     pub fn bit(&self, n: u64) -> bool {
-        self.0.bit(n as usize)
+        usize::try_from(n).is_ok_and(|n| self.0.bit(n))
     }
     pub fn modpow(&self, e: &BigUint, m: &BigUint) -> BigUint {
         assert!(!m.0.is_zero(), "zero modulus");
+        if m.0.is_one() {
+            return BigUint(UBig::ZERO);
+        }
         let ring = dashu_int::fast_div::ConstDivisor::new(m.0.clone());
         BigUint(ring.reduce(self.0.clone()).pow(&e.0).residue())
     }
@@ -1063,7 +1132,7 @@ impl BigUint {
     }
     pub fn parse_bytes(buf: &[u8], radix: u32) -> Option<BigUint> {
         let s = std::str::from_utf8(buf).ok()?;
-        UBig::from_str_radix(s.strip_prefix('+').unwrap_or(s), radix).ok().map(BigUint)
+        parse_ubig(s, radix).map(BigUint)
     }
     pub fn from_bytes_le(bytes: &[u8]) -> BigUint {
         BigUint(UBig::from_le_bytes(bytes))
