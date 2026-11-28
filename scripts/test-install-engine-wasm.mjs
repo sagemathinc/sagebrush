@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installWasm, namesLocalCargoHome, remappedRustflags, removeLockOf, targetLockPath, withTargetLock } from "./install-engine-wasm.mjs";
+import { installWasm, namesLocalCargoHome, pidAlive, remappedRustflags, removeLockOf, targetLockPath, withTargetLock } from "./install-engine-wasm.mjs";
 
 let failures = 0;
 const ok = (c, what) => (c ? console.log("ok  ", what) : (failures++, console.log("FAIL", what)));
@@ -124,6 +124,34 @@ try {
     ran = false;
     withTargetLock(target, () => (ran = true), { host: "h", wait: 1 });
     ok(ran, "a lock with no holder record, two minutes old: taken over");
+    // (a lock with no holder record, but recent: waited for, not taken over at once)
+    mkdirSync(lock);
+    writeFileSync(join(lock, "x"), "");
+    const recent = new Date(Date.now() - 10000);
+    fs.utimesSync(lock, recent, recent);
+    told = 0;
+    let stillThere = false;
+    withTargetLock(target, () => {}, { host: "h", wait: 1, log: () => ((stillThere = fs.existsSync(join(lock, "x"))), told++, rmSync(lock, { recursive: true, force: true })) });
+    ok(told === 1 && stillThere, "a lock with no holder record, ten seconds old: waited for");
+    // (a process here we may not signal is running; one that doesn't exist is not)
+    ok(pidAlive(process.pid) && (process.getuid?.() === 0 || pidAlive(1)), "pidAlive: this process, and pid 1 (EPERM for a non-root user) are running");
+    ok(!pidAlive(2 ** 30 + 12345), "pidAlive: a pid past any pid_max is not");
+    // (the interleaving: this build judged a dead holder stale, but by the time it moves the lock aside, a live build
+    // has replaced it; the live lock must survive, and this build wait for it)
+    held(4245, "h", "live");
+    let firstRead = true, survived = false;
+    const io = {
+      ...fs,
+      readFileSync: (p, o) => {
+        if (firstRead && String(p) === join(lock, "holder.json")) {
+          firstRead = false;
+          return JSON.stringify({ token: "dead", pid: 999999, host: "h" });
+        }
+        return fs.readFileSync(p, o);
+      },
+    };
+    withTargetLock(target, () => {}, { host: "h", wait: 1, io, alive: (pid) => pid !== 999999, log: () => ((survived = holderOf().token === "live"), rmSync(lock, { recursive: true, force: true })) });
+    ok(survived, "a takeover that finds a live holder in place of the dead one it judged leaves it, and waits for it");
     // (one target, two spellings: a symlink to it names the same lock)
     const alias = join(d, "alias");
     fs.symlinkSync(target, alias);

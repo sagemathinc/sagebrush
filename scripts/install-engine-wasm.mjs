@@ -64,7 +64,8 @@ export function namesLocalCargoHome(bytes, env = process.env) {
   return home !== CI_CARGO_HOME && Buffer.from(bytes).includes(Buffer.from(home + "/"));
 }
 
-const pidAlive = (pid) => {
+/** Whether a process is running here: one we may not signal (EPERM) is running too. */
+export const pidAlive = (pid) => {
   try {
     process.kill(pid, 0);
     return true;
