@@ -73,7 +73,7 @@ import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showS
 // that it stopped in this tab, at the journal's activation: at the top with Reload, kept until then, which no busy
 // notice (a deletion's progress, its end) replaces or hides: board's N2 on 7e4ddd5b)
 onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
-import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
+import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { langOf } from "../code/langs";
@@ -346,8 +346,7 @@ function convertedAsBoard(w: Workspace, e: Entry, mode: string): Promise<Entry> 
   let note = "";
   return convertCopy(w, e, "board", { maxBytes: LIMITS.maxBoardBytes, mode, asBoard: (name, text) => boardFromText(text, name, (md) => { note = md; }) }).then((made) => {
     if (note) try { sessionStorage.setItem(CONVERTED + made.ref, note); } catch {}
-    // (made from a file the person brought in: its code waits for them)
-    pauseBoard(made.ref!);
+    // (made from a file the person brought in: its code waits for them, marked where it was made, upload.ts)
     return made;
   });
 }
@@ -1238,7 +1237,6 @@ async function uploadToWorkspace(w: Workspace, files: File[], mode: string, fold
   const single = files.length === 1;
   if (single && r.made.length === 1 && !r.kept.length) {
     const e = r.made[0];
-    if (e.kind === "board") pauseBoard(e.ref!);
     carryNotice(refused ? said + refused : "");
     openEntry(e, "here");
   } else if (single && r.kept.length === 1 && !r.made.length) {

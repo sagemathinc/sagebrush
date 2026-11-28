@@ -2,7 +2,7 @@
 // A data file's preview, its versions, and the Storage panel
 // (web/workspace/preview.ts, design/workspace-files.md §4, §2.5, §6.3), in
 // headless Chromium against the built site: a table's first rows, a
-// picture, a text, a binary file not shown; a file's earlier versions,
+// picture (within its header's pixel limits; an SVG only downloaded), a text, a binary file not shown; a file's earlier versions,
 // restored (what was there kept as a version too) and deleted by the
 // person after confirming; "Delete older versions in this folder"; the
 // Storage panel's numbers, Free (old versions), Trash, asking
@@ -14,6 +14,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { deflateSync } from "node:zlib";
 import { devtoolsPort } from "../test-port.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
@@ -51,6 +52,14 @@ let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const W = "window.sagebrush?.workspace";
 const S = "document.querySelector('#wssidebar')";
+// (PNGs: a real 80 x 40 one, and one whose header says 10000 x 10000 though its file is tiny)
+const crc32 = (b) => { let c = ~0; for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return ~c >>> 0; };
+const chunk = (type, data) => { const t = Buffer.from(type), len = Buffer.alloc(4), crc = Buffer.alloc(4); len.writeUInt32BE(data.length); crc.writeUInt32BE(crc32(Buffer.concat([t, data]))); return Buffer.concat([len, t, data, crc]); };
+const png = (w, h, real = true) => {
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const rows = real ? deflateSync(Buffer.concat(Array.from({ length: h }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0x60)])))) : Buffer.alloc(64);
+  return [...Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", rows), chunk("IEND", Buffer.alloc(0))])];
+};
 const P = "document.querySelector('.sbfprev')";
 const rowSel = (p) => `#wssidebar .frow[data-path=${JSON.stringify(p)}]`;
 const click = (sel) => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) throw new Error("no " + ${JSON.stringify(sel)}); e.click(); return 1; })()`);
@@ -75,6 +84,8 @@ try {
     await w.write("/data/primes.csv", "n,p\\n1,2\\n2,3\\n3,5\\n4,7\\n");
     await w.create("/data/notes.txt", { content: "Primes below ten: 2, 3, 5, 7." });
     await w.create("/pic.svg", { content: ${JSON.stringify(SVG)} });
+    await w.create("/pic.png", { content: new Uint8Array(${JSON.stringify(png(80, 40))}) });
+    await w.create("/huge.png", { content: new Uint8Array(${JSON.stringify(png(10000, 10000, false))}) });
     await w.create("/blob.bin", { content: new Uint8Array([0, 1, 2, 0, 255]) });
     await w.create("/raw.txt", { content: new Uint8Array([104, 105, 0, 1, 2]) });
     await w.create("/Algebra.ipynb");
@@ -121,10 +132,23 @@ try {
   await openRow("/blob.bin");
   check(await until(`/No preview for this kind of file/.test(${P}?.textContent ?? "") && /Download/.test(${P}.textContent)`), "a kind of file with no preview says so, and offers Download");
   await closePanel();
-  await openRow("/pic.svg");
+  // (every Blob URL the page makes and lets go of, counted from here)
+  await ev(`(() => { const c = URL.createObjectURL.bind(URL), r = URL.revokeObjectURL.bind(URL); window.__urls = { made: 0, revoked: 0 }; URL.createObjectURL = (b) => (window.__urls.made++, c(b)); URL.revokeObjectURL = (u) => (window.__urls.revoked++, r(u)); return 1; })()`);
+  await openRow("/pic.png");
   check(await until(`${P}?.querySelector("img")?.complete && ${P}.querySelector("img").naturalWidth === 80`), "a picture's preview: the picture");
-  check(await ev(`window.__svgRan === undefined && ${P}.querySelector("img").src.startsWith("blob:")`), "…as an image, so an SVG's script doesn't run");
+  check(await ev(`${P}.querySelector("img").src.startsWith("blob:")`), "…as an image, from a Blob URL");
   await shot("preview-image");
+  await closePanel();
+  check(await ev(`window.__urls.made === 1 && window.__urls.revoked === 1`), "…let go of when the preview closes", await ev(`window.__urls`));
+  // a picture whose header says it is too many pixels: refused from its header, before any URL is made or decoded
+  await openRow("/huge.png");
+  check(await until(`/can't be previewed here \\(it is 10000 × 10000 pixels\\)/.test(${P}?.textContent ?? "") && !${P}.querySelector("img")`), "a picture of 10000 × 10000 pixels (a small file) isn't previewed: its size said, from its header", await ev(`${P}?.textContent`));
+  check(await ev(`window.__urls.made === 1`), "…and no URL is made for it", await ev(`window.__urls`));
+  await closePanel();
+  // an SVG isn't previewed (what drawing one costs has no bound here): download it; its script never runs
+  await openRow("/pic.svg");
+  check(await until(`/An SVG picture isn't previewed here/.test(${P}?.textContent ?? "") && !${P}.querySelector("img") && /Download/.test(${P}.textContent)`), "an SVG isn't previewed: Download is offered");
+  check(await ev(`window.__svgRan === undefined && window.__urls.made === 1`), "…nothing of it drawn or run, no URL made");
   await closePanel();
   // a folder's older versions, from its ⋯
   await ev(`(async () => { const w = ${W}; await w.write("/data/notes.txt", "v2"); await w.write("/data/notes.txt", "v3"); await w.write("/data/primes.csv", "n,p\\n"); return 1; })()`);
@@ -140,7 +164,7 @@ try {
   check(await until(`/Storage in this browser/.test(${P}?.textContent ?? "") && /used of/.test(${P}.textContent)`), "the meter opens the Storage panel, with the browser's estimate");
   const st = await ev(`Object.fromEntries([...${P}.querySelectorAll("dt")].map((d) => [d.textContent, d.nextElementSibling.textContent]))`);
   const docs = await ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => (e.kind === "notebook" || e.kind === "board") && !e.path.startsWith("/Trash")).length)`);
-  check(st["Notebooks and boards"] === String(docs) && docs >= 2 && /^4 · /.test(st["Data files"]) && /^2 · 4 B/.test(st["Old versions"]) && /^1 item · 5 B of files/.test(st["Trash"]), "…what this browser holds: " + JSON.stringify(st));
+  check(st["Notebooks and boards"] === String(docs) && docs >= 2 && /^6 · /.test(st["Data files"]) && /^2 · 4 B/.test(st["Old versions"]) && /^1 item · 5 B of files/.test(st["Trash"]), "…what this browser holds: " + JSON.stringify(st));
   check(await ev(`!!${P}.querySelector(".keep")`), "…and whether the browser keeps it");
   // (one short line each, the explanations in the docs: no list and no long note in the panel, and its link into /docs/storage)
   check(await ev(`!${P}.querySelector("ul") && [...${P}.querySelectorAll("p.note")].every((p) => p.textContent.length <= 90)`), "…no wall of text: every note one short line: " + JSON.stringify(await ev(`[...${P}.querySelectorAll("p.note")].map((p) => p.textContent)`)));
