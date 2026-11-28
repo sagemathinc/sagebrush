@@ -213,6 +213,7 @@ impl Hnf {
         let (c, s, t) = xgcd(y1, y2);
         // |det| / c = |N(g)| / c, exact in i128 as in Elt::norm
         let ax = (y2 / c).wrapping_mul(x1).wrapping_sub((y1 / c).wrapping_mul(x2)).abs();
+        debug_assert!(ax < 1 << 64, "a principal ideal's HNF past u64");
         // (residues below ax < 2^64: their products formed in u128)
         let r = |u: i128| u.rem_euclid(ax) as u128;
         let m = ax as u128;
@@ -552,7 +553,9 @@ fn half_euclid(p: u64, r: u64) -> Option<((i128, i128), (i128, i128))> {
     let p128 = p as i128;
     let (mut r0, mut r1) = (p128, r as i128);
     let (mut t0, mut t1) = (0i128, 1i128);
-    while r1 != 0 && r1.checked_mul(r1)? >= p128 {
+    // (r1 < p < 2^64: its square in u128, so a root past 2^63.5 is not lost
+    // to the stop test)
+    while r1 != 0 && (r1 as u128) * (r1 as u128) >= p as u128 {
         let q = r0 / r1;
         (r0, r1) = (r1, r0 - q * r1);
         (t0, t1) = (t1, t0.checked_sub(q.checked_mul(t1)?)?);
@@ -820,6 +823,22 @@ mod tests {
             assert_ne!(v[0], v[1]);
         }
         assert!(primes_above(91).unwrap_err().contains("not prime"));
+        // (a root r past 2^63.5, whose square passed i128 in the half-Euclid
+        // stop test: 2^64 - 199967; and windows of 200 split primes each
+        // from 2^63, 1.3 10^19, 1.35 10^19 and below 2^64, all answered)
+        let v = primes_above(18446744073709351649).unwrap();
+        assert!(v.len() == 2 && v.iter().all(|q| q.norm == 18446744073709351649 && q.contains(q.gen)));
+        for lo in [(1u64 << 63) + 1, 13_000_000_000_000_000_001, 13_500_000_000_000_000_001, u64::MAX - 2_000_000] {
+            let (mut p, mut n) = (lo | 1, 0);
+            while n < 200 {
+                if (p % 5 == 1 || p % 5 == 4) && is_prime(p) {
+                    let v = primes_above(p).unwrap();
+                    assert!(v.len() == 2 && v.iter().all(|q| q.norm == p && q.gen.norm().unsigned_abs() == p as u128), "{}", p);
+                    n += 1;
+                }
+                p += 2;
+            }
+        }
         // (the principal HNF's residues multiplied in u128: Sage 10.10's
         // (18446744069414584319, 4294967295, 1) for -(2^32 - 1) - w and its
         // negative, the generator in it)
