@@ -3,10 +3,12 @@
 // that shows what it must passes, and each way it can fail is caught.
 //   bun app/selftest/test-signer-judge.mjs
 import { signerVerdict, signerLog } from "./signer-judge.mjs";
+import { controlsMode, controlNamesIn, releaseSignerVerdict, expectation, CONTROL_NAMES } from "./release-judge.mjs";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
-const d = (n, label, origin = label === "signer" ? "tauri://localhost" : "http://127.0.0.1:5") => `[signer] dispatch ${n} from ${label} at ${origin}`;
+// (a dispatch, and its caller line: the calling document's origin, by default the window's own page's)
+const d = (n, label, origin = label === "signer" ? "tauri://localhost" : "http://127.0.0.1:5", caller = label === "signer" ? "local" : "remote", header = origin) => `[signer] dispatch ${n} from ${label} at ${origin}` + (caller === null ? "" : `\n[signer] caller ${n}: ${caller} (Origin header ${header})`);
 const s = (n, k, label) => `[signer] signed ${n} (signature ${k}) for ${label}`;
 const refusedLine = "ok persist: signer at http://127.0.0.1:5: this page's signing call refused: Command not allowed; a page's signer_open refused: Command not found; an output frame's refused: not allowed; second window opened";
 const reachedLine = "ok persist: signer at http://127.0.0.1:5: this page's signing call REACHED probe-signature-2; a page's signer_open refused: Command not found; an output frame's refused: not allowed; second window opened";
@@ -15,7 +17,7 @@ const GOOD_STATE = "[signer] state: ready=complete probe=yes tauri=yes ran=yes p
 const SECOND = "[page] signer second window: refused: Command not allowed";
 const LOADED = [SECOND, "[signer] startup data folder: removed", "[signer] page started null/signer/index.html", "[signer] page finished null/signer/index.html", "[signer] state check sent", GOOD_STATE];
 const FRAME = ["frame: requested", "frame: loaded", "frame: refused: not allowed", "frame: signer refused: not allowed"];
-const v = (err, { out = refusedLine, seen = FRAME, control, code = 0, signal = null, problems = [], left = null, bare = false } = {}) => signerVerdict({ err: (bare ? err : [...err, ...LOADED]).join("\n"), out, seen, control, code, signal, problems, left });
+const v = (err, { out = refusedLine, seen = FRAME, control, code = 0, signal = null, problems = [], left = null, bare = false, platform } = {}) => signerVerdict({ err: (bare ? err : [...err, ...LOADED]).join("\n"), out, seen, control, code, signal, problems, left, platform });
 
 ok(signerLog([d(1, "signer"), s(1, 1, "signer"), "[signer] refused 2: not the signer window's page", d(2, "main")].join("\n")).dispatches.length === 2, "the log's lines are read: dispatches and signatures");
 
@@ -43,6 +45,45 @@ ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer", "http://127.0.0.1:9")],
 ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off", seen: [...FRAME, "stop: loaded", "stop: refused: not allowed", "stop: signer refused: not allowed"] }).ok, "guard-off: the other server's page loaded in the signer window, and reached nothing: passes");
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off" }).ok, "guard-off: the page never loaded there fails");
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unknown control fails");
+
+// frame+cap and the caller (N1): the frames' calls reach the command in the signer window, on its page, Tauri resolves
+// them as remote, and the command refuses them, the forged Origin header's too
+{
+  const SF = [...FRAME, "sframe: loaded", "sframe: refused: not allowed", "sframe: signer refused: only the approvals window's page signs", "sforge: loaded", "sforge: signer refused: only the approvals window's page signs"];
+  const framed = (n, header = "http://127.0.0.1:9") => [d(n, "signer", "tauri://localhost", "remote", header), `[signer] refused ${n}: not the signer page's own document`];
+  const both = [...framed(2), ...framed(3, "tauri://localhost")];
+  ok(v([d(1, "signer"), s(1, 1, "signer"), ...both], { control: "frame+cap", seen: SF }).ok, "frame+cap: both frames' calls reach the command, remote, and are refused (the forged Origin's too), the signer page's one signature: passes");
+  ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: SF }).ok, "frame+cap: no call from a frame reaching the command (the widening didn't take) fails");
+  // (as CI saw it on Windows: /sframe's call reached the command, remote, refused; /sforge's forged call never arrived)
+  const SFW = [...SF.filter((x) => !x.startsWith("sforge: signer")), "sforge: refused: (no answer)", "sforge: signer refused: (no answer)"];
+  ok(v([d(1, "signer"), s(1, 1, "signer"), ...framed(2)], { control: "frame+cap", seen: SFW }).ok, "frame+cap, Windows: /sframe refused at the command, /sforge's forged call never answered: passes");
+  // (as on macOS and Linux: a frame of another origin has no IPC bridge, so nothing of either frame reaches the command)
+  const NOB = ["sframe: loaded", "sframe: signer refused: undefined is not an object (evaluating 'window.__TAURI__.core')", "sforge: loaded", "sforge: signer refused: undefined is not an object (evaluating 'window.__TAURI__.core')"];
+  ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB, platform: "darwin" }).ok && v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB, platform: "linux" }).ok, "frame+cap, macOS and Linux: both frames loaded, no bridge, nothing reached the command: passes");
+  ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB }).ok, "frame+cap, Windows: no frame's call reaching the command fails (there the frame has the bridge)");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer")], { control: "frame+cap", seen: NOB, platform: "darwin" }).ok, "frame+cap: a second dispatch the check took as local fails, on any platform");
+  // (T1: exactly one signature, the signer page's: none fails, on any platform)
+  ok(!v([d(1, "signer"), ...framed(2)], { control: "frame+cap", seen: SFW }).ok && !v([d(1, "signer")], { control: "frame+cap", seen: NOB, platform: "linux" }).ok, "frame+cap: no signature at all fails, on Windows and elsewhere");
+  // (T2: on Windows the frame's call must be refused by the check of the calling document, as the app logs it)
+  for (const why of ["not the signer window's page", "not a self-test"]) {
+    ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer", "tauri://localhost", "remote", "http://127.0.0.1:9"), `[signer] refused 2: ${why}`], { control: "frame+cap", seen: SFW }).ok, `frame+cap, Windows: the frame's call refused for another reason (${why}) fails`);
+  }
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer", "tauri://localhost", "remote", "http://127.0.0.1:9")], { control: "frame+cap", seen: SFW }).ok, "frame+cap, Windows: the frame's call at the command with no refusal logged fails");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2)], { control: "frame+cap", seen: SFW.map((x) => x.startsWith("sframe: signer") ? "sframe: signer refused: Command signer_probe_sign not allowed by ACL" : x) }).ok, "frame+cap, Windows: /sframe's page saying another refusal fails");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2), d(3, "signer", "tauri://localhost", "remote", "tauri://localhost"), s(3, 2, "signer")], { control: "frame+cap", seen: SF }).ok, "frame+cap: the forged frame's call signing fails");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2), d(3, "signer", "tauri://localhost", "local", "tauri://localhost"), s(3, 2, "signer")], { control: "frame+cap", seen: SF }).ok, "frame+cap: a frame's call resolved as local and signing (two signatures) fails");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), ...both], { control: "frame+cap" }).ok, "frame+cap: the frames never loaded fails");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), ...both], { control: "frame+cap", seen: SF.filter((x) => !x.startsWith("sforge: signer")) }).ok, "frame+cap: the forged frame's own report missing fails");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), ...both, d(4, "main"), "[signer] refused 4: not the signer window's page"], { control: "frame+cap", seen: SF }).ok, "frame+cap: another window's call reaching the command fails");
+  // (any run but cap+check: a signature whose caller Tauri didn't resolve as local, or isn't said, fails; the header
+  // doesn't count)
+  ok(!v([d(1, "signer", "tauri://localhost", "remote", "tauri://localhost"), s(1, 1, "signer")]).ok, "no control: a signature for a remote caller, whatever its Origin header, fails");
+  ok(!v([d(1, "signer", "tauri://localhost", null), s(1, 1, "signer")]).ok, "no control: a signature whose caller isn't logged fails");
+  ok(v([d(1, "signer", "http://tauri.localhost", "local", "none"), s(1, 1, "signer")]).ok, "no control: the signer page's signature, local, without an Origin header: passes (the header is information only)");
+  const r = signerLog(d(4, "signer", "tauri://localhost", "remote", "tauri://localhost")).dispatches[0];
+  ok(r.caller === "remote" && r.header === "tauri://localhost", "the caller line is read with its dispatch: Tauri's word and the header");
+  ok(signerLog(d(4, "signer").replace("(Origin header tauri://localhost)", "(Origin header )")).dispatches[0].caller === "unsaid", "a caller line out of shape isn't read");
+}
 
 // the state check runs on the signer's own loaded page only (never the guard-off destination, a frame or nothing)
 {
@@ -124,6 +165,28 @@ ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "main"), s(2, 2, "main")], { cont
   ok(!frameFromStop.ok && /signer page's frame didn't report its signing call/.test(why(frameFromStop)), "csp-off: only the guard-off window's result present, not the frame's own, fails by name");
   ok(v(good, { control: "csp-off", seen: [...FRAME, "sframe: loaded", "sframe: signer refused: not allowed"] }).ok && v(good, { control: "guard-off", seen: [...FRAME, "stop: loaded", "stop: signer refused: not allowed"] }).ok, "...and each control with its destination's call refused: passes");
 }
+
+// a release build (release-judge.mjs, C1): the build says which it is, holds none of the controls' names, and with
+// the signer's widest control set refuses every call
+ok(controlsMode("x\n[app] self-test controls: compiled out\ny") === "out" && controlsMode("[app] self-test controls: compiled in") === "in" && controlsMode("[app] the page is at http://127.0.0.1:5/") === null, "the build's word on its controls is read; none said is null");
+ok(controlNamesIn(Buffer.from("...a release binary...signer_probe_sign...probe-nocsp...[signer] refused: no stand-in in this build...http://127.0.0.1:")).length === 0, "a release executable's names: the command's name in the ACL, the bundled page's file name and the release stand-in's line aren't controls");
+ok(CONTROL_NAMES.every((n) => controlNamesIn(Buffer.from(`\0${n}\0`)).join() === n), "each control's name in an executable is found");
+{
+  const RL = "FAIL persist: signer at http://127.0.0.1:5: this page's signing call refused: Command not allowed; a page's signer_open refused: Command not found; an output frame's refused: not allowed; second window opened";
+  const rv = (err, o = {}) => releaseSignerVerdict({ err: err.join("\n"), out: RL, seen: [], code: 0, signal: null, problems: [], ...o });
+  ok(rv(["[app] self-test controls: compiled out", "[signer] startup data folder: none"]).ok, "release, cap+check set: nothing reached the command, the window wasn't opened, the main page refused: passes");
+  ok(!rv(["[signer] refused: no stand-in in this build (main)", "[signer] dispatch 1 from main at http://127.0.0.1:5"]).ok, "release: a call that reached the command fails");
+  ok(!rv(["[signer] signed 1 (signature 1) for main"]).ok, "release: a signature fails");
+  ok(!rv(["[signer] page started null/signer/index.html"]).ok, "release: the probe opening the approvals window fails");
+  ok(!rv([], { seen: ["frame: REACHED signer x"] }).ok, "release: the other server's page reaching a command fails");
+  ok(!rv([], { out: RL.replace("signing call refused", "signing call REACHED") }).ok && !rv([], { out: "" }).ok, "release: the main page's call answered, or no report, fails");
+  ok(!rv([], { code: 1 }).ok && !rv([], { signal: "SIGKILL" }).ok, "release: an unclean end fails");
+}
+
+// K3: a run told to expect the release build fails unless the app says its controls are compiled out
+ok(expectation("1", "out") === null, "expecting the release build, and it says compiled out: passes");
+ok(expectation("1", "in") !== null && expectation("1", null) !== null, "expecting the release build, and it says compiled in, or nothing: fails");
+ok(expectation(undefined, "in") === null && expectation("0", "in") === null && expectation("", "out") === null, "no expectation: either build passes this row");
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-signer-judge: all ${checks} passed`);
 process.exit(fails ? 1 : 0);

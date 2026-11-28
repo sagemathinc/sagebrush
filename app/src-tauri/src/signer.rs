@@ -11,24 +11,38 @@
 //   - Its commands are in a capability of their own (capabilities/signer.json: the signer window, local pages only);
 //     the page's capability never lists them.  And each command checks, itself, that its caller is the signer window
 //     on that page (signer_caller_ok), so a weakened capability alone still signs nothing.
+//   - And each checks that Tauri resolved the request as the app's own document, not a frame of another origin in it
+//     (acl_local, from the request's URL, never a header: N1).
 // The self-test (app/selftest/run.mjs, "signer") counts, from this module's log lines, the calls that reached the
-// command ("[signer] dispatch …") and the signatures made ("… signed").
-use std::sync::atomic::{AtomicU64, Ordering};
+// command ("[signer] dispatch …"), their callers ("[signer] caller …") and the signatures made ("… signed").  Its
+// controls and the stand-in command are compiled into the self-test's build only (C1, lib.rs SELFTEST_CONTROLS).
+#[cfg(any(test, feature = "selftest-controls"))]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use tauri::Url;
 
 pub const LABEL: &str = "signer";
 /// The signer's page, in the app's bundled files (app/signer/, copied by app/build-frontend.mjs).
 pub const PAGE: &str = "signer/index.html";
-/// The same page without its CSP: the self-test's control only (SAGEBRUSH_APP_SIGNER_CONTROL=csp-off).
+/// The same page without its CSP: the self-test's framing controls only (SAGEBRUSH_APP_SIGNER_CONTROL=csp-off, frame+cap).
 const PAGE_NO_CSP: &str = "signer/probe-nocsp.html";
 
-/// The self-test's controls, each leaving one guard out (never outside a self-test):
+/// The self-test's controls, each leaving one guard out (never outside a self-test, and only in a build with the
+/// self-test's controls compiled in, lib.rs SELFTEST_CONTROLS; a release build has none):
 /// "cap": the signing command in the page's capability too; "cap+check": that and no caller check; "csp-off": the
-/// signer's page without its CSP; "guard-off": the signer window's navigation guard left out.
+/// signer's page without its CSP, framing the other local server's page; "frame+cap": that, and the signing command in
+/// the signer window's capability for that server's origin too, so the frame's call reaches the command, whose check of
+/// the calling document's origin must refuse it (N1); "guard-off": the signer window's navigation guard left out.
+#[cfg(feature = "selftest-controls")]
 pub fn control() -> Option<String> {
     control_from(std::env::var("SAGEBRUSH_APP_SIGNER_CONTROL").ok(), std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
 }
+#[cfg(not(feature = "selftest-controls"))]
+pub fn control() -> Option<String> {
+    None
+}
 /// The control asked for (`asked`), honoured only in a self-test (`selftest`): never in a normal run.
+#[cfg(any(test, feature = "selftest-controls"))]
 fn control_from(asked: Option<String>, selftest: bool) -> Option<String> {
     asked.filter(|_| selftest)
 }
@@ -43,9 +57,13 @@ fn app_page(url: &Url, path: &str) -> bool {
     };
     host_ok && url.port().is_none() && url.username().is_empty() && url.password().is_none() && url.path() == path
 }
-/// The signer's pages the window may show: its page, and in the csp-off control only, that page without its CSP.
+/// Whether a control shows the signer's page without its CSP, framing the other local server's page.
+fn framing(control: Option<&str>) -> bool {
+    matches!(control, Some("csp-off" | "frame+cap"))
+}
+/// The signer's pages the window may show: its page, and in the framing controls only, that page without its CSP.
 fn signer_page(url: &Url, control: Option<&str>) -> bool {
-    app_page(url, &format!("/{PAGE}")) || (control == Some("csp-off") && app_page(url, &format!("/{PAGE_NO_CSP}")))
+    app_page(url, &format!("/{PAGE}")) || (framing(control) && app_page(url, &format!("/{PAGE_NO_CSP}")))
 }
 
 /// Whether the signer window may load `url` (its navigation guard): its own page only.
@@ -53,11 +71,11 @@ pub fn may_load(url: &Url, control: Option<&str>) -> bool {
     signer_page(url, control)
 }
 
-/// In the self-test's csp-off control only: whether `url` is the other local server the control frames, which the
+/// In the self-test's framing controls only: whether `url` is the other local server the control frames, which the
 /// guard then lets load.  On macOS the navigation guard also sees a frame's loads, so without this the frame never
 /// loads and the control can't show that the capability and the command's check refuse it without the CSP.
 pub fn control_frame_ok(url: &Url, control: Option<&str>, other: Option<&Url>) -> bool {
-    control == Some("csp-off") && other.is_some_and(|o| matches!(o.scheme(), "http") && o.host_str() == Some("127.0.0.1") && o.origin() == url.origin())
+    framing(control) && other.is_some_and(|o| matches!(o.scheme(), "http") && o.host_str() == Some("127.0.0.1") && o.origin() == url.origin())
 }
 
 /// The self-test's diagnostic codes for a signer page that didn't sign (a fixed set: nothing else is ever logged).
@@ -398,8 +416,52 @@ pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri:
 }
 
 /// Whether a call of a signing command comes from the signer window on its own page.
+// (in a release build, until part 3's signing commands call them, only their tests do)
+#[cfg_attr(not(feature = "selftest-controls"), allow(dead_code))]
 pub fn signer_caller_ok(label: &str, url: &Url, control: Option<&str>) -> bool {
     label == LABEL && signer_page(url, control)
+}
+
+/// Whether the document that sent a signing command's request is the app's own (N1): Tauri's word, from the request's
+/// URL as the web view gives it (the calling document's, which a frame doesn't share with its window), the same URL it
+/// resolves capabilities from, never a header, which on the postMessage path is the caller's to set.  The command's
+/// grants resolved for this request must include a local one (the app protocol's pages); a request matched only by a
+/// remote origin's grant (a frame of another server in the signer page, or another window's page) is refused.
+/// signer_caller_ok reads the window's top-level page, which a frame's call shares: every signing command checks both.
+pub fn acl_local(acl: Option<&[tauri::utils::acl::resolved::ResolvedCommand]>) -> bool {
+    acl.is_some_and(|a| a.iter().any(|c| matches!(c.context, tauri::utils::acl::ExecutionContext::Local)))
+}
+thread_local! {
+    /// The invoke handler's acl_local for the signing command it is about to run on this thread (lib.rs handlers): a
+    /// synchronous command runs on the thread its request was handled on, and takes it once; none (another thread, or
+    /// taken already) is not local.
+    static CALLER_LOCAL: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// The signing commands (each takes its caller's word, caller_local).
+pub const SIGNING_COMMANDS: &[&str] = &["signer_probe_sign"];
+/// Called by the invoke handler for every request, before the command runs: for a signing command, Tauri's word on its
+/// caller is kept for it; for any other, any word left is cleared.
+pub fn note_caller(command: &str, acl: Option<&[tauri::utils::acl::resolved::ResolvedCommand]>) {
+    let word = SIGNING_COMMANDS.contains(&command).then(|| acl_local(acl));
+    CALLER_LOCAL.with(|c| c.set(word));
+}
+/// The signing command's caller, as noted for it: local only if the handler said so for this very request.
+#[cfg_attr(not(feature = "selftest-controls"), allow(dead_code))]
+pub fn caller_local() -> bool {
+    CALLER_LOCAL.with(|c| c.take()).unwrap_or(false)
+}
+/// A request's Origin header as the self-test's log shows it (information only, never a check): an origin's own
+/// serialization, "null", or "none"/"other".
+#[cfg_attr(not(feature = "selftest-controls"), allow(dead_code))]
+pub fn origin_code(origin: Option<&str>) -> String {
+    match origin {
+        None => "none".into(),
+        Some(o @ ("null" | "tauri://localhost")) => o.into(),
+        Some(o) => match o.parse::<Url>() {
+            Ok(u) if u.origin().is_tuple() && u.origin().ascii_serialization() == o => o.into(),
+            _ => "other".into(),
+        },
+    }
 }
 
 /// The signer window, made (or, if it is there, brought to the front).  Native UI the app owns calls this; no page can.
@@ -420,13 +482,20 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
         }
         life.begin_open()
     };
+    // (the native gate, immediately before the window is made: part 3's native signing commands check it again, each
+    //  time, and refuse native signing if it fails or has changed)
+    match crate::device_key::native_tier() {
+        Ok(()) => eprintln!("[signer] native tier: yes"),
+        Err(why) => eprintln!("[signer] native tier: no ({why})"),
+    }
     let c = control();
-    let page = if c.as_deref() == Some("csp-off") { PAGE_NO_CSP } else { PAGE };
+    let page = if framing(c.as_deref()) { PAGE_NO_CSP } else { PAGE };
     let guard_off = c.as_deref() == Some("guard-off");
     let gc = c.clone();
     let lc = c.clone();
     // (the self-test's other local server, which the controls frame or visit)
-    let probe = std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
+    // (a build with the self-test's controls only: a release build has no probe of this window)
+    let probe = std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|_| crate::SELFTEST_CONTROLS && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
     let other: Option<Url> = probe.as_deref().and_then(|p| p.strip_prefix("signer:")).and_then(|o| o.parse().ok());
     let go = other.clone();
     let selftest = probe.is_some();
@@ -511,18 +580,24 @@ pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "selftest-controls")]
 static DISPATCHED: AtomicU64 = AtomicU64::new(0);
+#[cfg(feature = "selftest-controls")]
 static SIGNED: AtomicU64 = AtomicU64::new(0);
 
 /// The self-test's stand-in signing command (no key: it "signs" with a counter), so that who reaches a signing command
 /// is shown before any key exists.  Outside a self-test it signs nothing.  Each call is logged: dispatched (it reached
-/// the command), then signed or refused.
-#[cfg(desktop)]
+/// the command), then signed or refused.  Only in a build with the self-test's controls: in a release build the command
+/// refuses every call, below.
+#[cfg(all(desktop, feature = "selftest-controls"))]
 #[tauri::command]
-pub fn signer_probe_sign(webview: tauri::Webview, msg: String) -> Result<String, String> {
+pub fn signer_probe_sign(webview: tauri::Webview, request: tauri::ipc::Request<'_>, msg: String) -> Result<String, String> {
     let url = webview.url().map_err(|e| format!("no page: {e}"))?;
+    let local = caller_local();
+    let header = request.headers().get("origin").map(|v| v.to_str().unwrap_or("\u{fffd}").to_owned());
     let n = DISPATCHED.fetch_add(1, Ordering::SeqCst) + 1;
     eprintln!("[signer] dispatch {n} from {} at {}", webview.label(), url.origin().ascii_serialization());
+    eprintln!("[signer] caller {n}: {} (Origin header {})", if local { "local" } else { "remote" }, origin_code(header.as_deref()));
     if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_none() {
         eprintln!("[signer] refused {n}: not a self-test");
         return Err("not available".into());
@@ -532,9 +607,21 @@ pub fn signer_probe_sign(webview: tauri::Webview, msg: String) -> Result<String,
         eprintln!("[signer] refused {n}: not the signer window's page");
         return Err("only the approvals window signs".into());
     }
+    if c.as_deref() != Some("cap+check") && !local {
+        eprintln!("[signer] refused {n}: not the signer page's own document");
+        return Err("only the approvals window's page signs".into());
+    }
     let s = SIGNED.fetch_add(1, Ordering::SeqCst) + 1;
     eprintln!("[signer] signed {n} (signature {s}) for {}", webview.label());
     Ok(format!("probe-signature-{s}-{}", msg.len()))
+}
+/// The stand-in in a release build: no counter, no control, no signature; every call refused.
+#[cfg(all(desktop, not(feature = "selftest-controls")))]
+#[tauri::command]
+pub fn signer_probe_sign(webview: tauri::Webview, msg: String) -> Result<String, String> {
+    let _ = (msg, caller_local());
+    eprintln!("[signer] refused: no stand-in in this build ({})", webview.label());
+    Err("not available".into())
 }
 
 #[cfg(test)]
@@ -546,7 +633,7 @@ mod tests {
 
     #[test]
     fn a_control_is_honoured_only_in_a_self_test() {
-        for c in ["cap", "cap+check", "csp-off", "guard-off"] {
+        for c in ["cap", "cap+check", "csp-off", "frame+cap", "guard-off"] {
             assert_eq!(control_from(Some(c.to_string()), true), Some(c.to_string()), "{c} in a self-test");
             assert_eq!(control_from(Some(c.to_string()), false), None, "{c} outside a self-test: never");
         }
@@ -590,9 +677,45 @@ mod tests {
         ] {
             assert!(!signer_caller_ok("signer", &u(bad), None), "{bad}");
         }
-        // (the page without its CSP: in the self-test's csp-off control only)
+        // (the page without its CSP: in the self-test's framing controls only)
         assert!(signer_caller_ok("signer", &u("tauri://localhost/signer/probe-nocsp.html"), Some("csp-off")));
+        assert!(signer_caller_ok("signer", &u("tauri://localhost/signer/probe-nocsp.html"), Some("frame+cap")));
         assert!(!signer_caller_ok("signer", &u("tauri://localhost/signer/probe-nocsp.html"), Some("cap")));
+    }
+
+    #[test]
+    fn only_a_request_tauri_resolves_as_local_signs() {
+        use tauri::utils::acl::{resolved::ResolvedCommand, ExecutionContext};
+        let local = ResolvedCommand { context: ExecutionContext::Local, ..Default::default() };
+        let remote = ResolvedCommand { context: ExecutionContext::Remote { url: "http://127.0.0.1:49314/*".parse().unwrap() }, ..Default::default() };
+        // (N1: a local grant among those resolved for this request; only remote ones, none, or no access: no)
+        assert!(acl_local(Some(&[local.clone()])));
+        assert!(acl_local(Some(&[remote.clone(), local.clone()])));
+        assert!(!acl_local(Some(&[remote.clone()])));
+        assert!(!acl_local(Some(&[])));
+        assert!(!acl_local(None));
+        // (the word is kept for a signing command only, and taken once: a second take, or another command's request
+        // in between, is not local)
+        note_caller("signer_probe_sign", Some(&[local.clone()]));
+        assert!(caller_local());
+        assert!(!caller_local(), "taken once");
+        note_caller("signer_probe_sign", Some(&[local.clone()]));
+        note_caller("disk_where", Some(&[local.clone()]));
+        assert!(!caller_local(), "another command's request clears it");
+        note_caller("signer_probe_sign", Some(&[remote]));
+        assert!(!caller_local());
+        // (on another thread nothing was noted: not local)
+        note_caller("signer_probe_sign", Some(&[local]));
+        assert!(!std::thread::spawn(caller_local).join().unwrap());
+        assert!(caller_local());
+        // (the Origin header is only logged, and as an origin or a fixed word, never its text)
+        assert_eq!(origin_code(Some("http://127.0.0.1:49314")), "http://127.0.0.1:49314");
+        assert_eq!(origin_code(Some("tauri://localhost")), "tauri://localhost");
+        assert_eq!(origin_code(Some("null")), "null");
+        assert_eq!(origin_code(None), "none");
+        for odd in ["http://127.0.0.1:49314/x", "not a url", "http://a b", "\u{fffd}", "http://x\nREACHED"] {
+            assert_eq!(origin_code(Some(odd)), "other", "{odd}");
+        }
     }
 
     #[test]

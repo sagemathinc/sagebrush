@@ -11,6 +11,12 @@ edition = "2021"
 name = "sagebrush_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# (the self-test's controls, each leaving one guard out, and its stand-in signing command: compiled in only where this
+# feature is on, which only the self-test's build turns on (C1, the native signing design note), never by the
+# environment; a release build has none of them, whatever it is started with: lib.rs SELFTEST_CONTROLS)
+[features]
+selftest-controls = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 sha2 = "0.10"
@@ -23,13 +29,18 @@ sha2 = "0.10"
 serde_json = "1"
 # (the agent host, src/agent_host.rs: the pairing code from the OS's CSPRNG; on Unix, the child's process group)
 getrandom = "0.3"
+# (fleet signing, src/fleet_sig.rs and src/device_key.rs: pinned exactly; a new version is a reviewed change)
+ed25519-dalek = "=2.2.0"
+zeroize = "=1.9.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# (the agent host's bundle check on a signed Mac build: the shipped Node's code signature, through the safe API)
+# (the agent host's bundle check on a signed Mac build: the shipped Node's code signature, through the safe API; the
+# device key's store, the macOS Keychain only, and the runtime code-signature check of native_tier; pinned exactly)
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = { version = "3.7.0", default-features = false }
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+security-framework = { version = "=3.7.0", default-features = false }
 core-foundation = "0.10.1"
 
 # (the fs plugin: a phone's only, linked only there, since withGlobalTauri puts every linked plugin's

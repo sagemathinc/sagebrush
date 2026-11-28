@@ -45,15 +45,16 @@
 // bound.
 //
 //   node app/selftest/run.mjs <the app's executable>
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as httpCreateServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { capture, judge, python } from "./run-judge.mjs";
 import { signerVerdict } from "./signer-judge.mjs";
+import { controlsMode, controlNamesIn, releaseSignerVerdict, expectation, CONTROL_NAMES } from "./release-judge.mjs";
 
 const RUN_MS = 360000;
 
@@ -72,6 +73,18 @@ async function selftest(env = {}) {
 }
 let { passed, res } = await selftest({ SAGEBRUSH_APP_ENGINE: "off" });
 console.log(passed ? "self-test passed" : `self-test failed (exit code ${res.code})`);
+// (whether this build has the self-test's controls, in its own words: the self-test's build does; a release build
+// doesn't, and is checked for that instead, release-judge.mjs)
+const controls = controlsMode(res.err);
+console.log(`the self-test's controls: ${controls === "in" ? "compiled in (the self-test's build)" : controls === "out" ? "compiled out (a release build)" : "FAIL the app didn't say"}`);
+if (!controls) passed = false;
+// (K3: a run told it has the release build, the signed job's, SAGEBRUSH_EXPECT_RELEASE=1, fails unless the build says
+// it has no controls)
+const unexpected = expectation(process.env.SAGEBRUSH_EXPECT_RELEASE, controls);
+if (unexpected) {
+  console.log(`FAIL ${unexpected}`);
+  passed = false;
+}
 const engine = fileURLToPath(new URL("../engine/main.mjs", here)), root = fileURLToPath(new URL("../dist", here));
 if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(join(root, "sagebrush-worker.js"))) {
   console.log("\nthe self-test again, with the engine subprocess");
@@ -180,23 +193,26 @@ if (passed) {
 function otherServer() {
   const seen = [];
   const page = (name) => `<!doctype html><script>
-    const say = (v) => fetch("/report?p=${name}&v=" + encodeURIComponent(v)).catch(() => {});
+    const say = (v) => ${name === "sforge" ? `void (window.__sbImgs ||= []).push(Object.assign(new Image(), { src: "/report?p=${name}&v=" + encodeURIComponent(v) }))` : `fetch("/report?p=${name}&v=" + encodeURIComponent(v)).catch(() => {})`};
     say("loaded");
-    (async () => {
-      try { const w = await window.__TAURI__.core.invoke("disk_where"); say("REACHED disk_where " + String(w).length); }
-      catch (e) { say("refused: " + String(e && e.message || e).slice(0, 80)); }
-      try { const x = await window.__TAURI__.fs.exists("/"); say("REACHED fs.exists " + x); }
-      catch (e) { say("fs refused: " + String(e && e.message || e).slice(0, 80)); }
-      // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded)
-      try { const x = await window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }); say("REACHED signer " + String(x).slice(0, 40)); }
-      catch (e) { say("signer refused: " + String(e && e.message || e).slice(0, 80)); }
-    })();
+    // (the three calls at once, each bounded: one that never answers says "(no answer)", and holds up none of the
+    // others, so each is said before the launch ends; /sforge's within 1.5 s, since its frame loads last, a few seconds
+    // before the main page's probe ends the launch, and its calls go nowhere)
+    const answer = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("(no answer)")), ${name === "sforge" ? 1500 : 5000}))]);
+    const call = (f, ok, no) => answer(Promise.resolve().then(f)).then((x) => say(ok(x)), (e) => say(no + String(e && e.message || e).slice(0, 80)));
+    call(() => window.__TAURI__.core.invoke("disk_where"), (w) => "REACHED disk_where " + String(w).length, "refused: ");
+    call(() => window.__TAURI__.fs.exists("/"), (x) => "REACHED fs.exists " + x, "fs refused: ");
+    // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded; /sforge's
+    // page may not fetch (its CSP), so Tauri's script sends on the postMessage path, where a header is the caller's
+    // to set: it claims the signer page's Origin)
+    call(() => window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }${name === "sforge" ? `, { headers: { Origin: "tauri://localhost" } }` : ""}), (x) => "REACHED signer " + String(x).slice(0, 40), "signer refused: ");
   <\/script>`;
   const server = httpCreateServer((req, res) => {
     const u = new URL(req.url, "http://x");
     if (u.pathname === "/report") seen.push(`${u.searchParams.get("p")}: ${u.searchParams.get("v")}`);
     else seen.push(`${u.pathname.slice(1) || "/"}: requested`);
-    res.writeHead(200, { "Content-Type": "text/html", "Cross-Origin-Resource-Policy": "cross-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Access-Control-Allow-Origin": "*" });
+    // (/sforge: its reports go to this server by image, since its page may not fetch)
+    res.writeHead(200, { "Content-Type": "text/html", "Cross-Origin-Resource-Policy": "cross-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Access-Control-Allow-Origin": "*", ...(u.pathname === "/sforge" ? { "Content-Security-Policy": "connect-src 'none'" } : {}) });
     res.end(u.pathname === "/report" ? "" : page(u.pathname.slice(1)));
   });
   return new Promise((ok) => server.listen(0, "127.0.0.1", () => ok({ origin: `http://127.0.0.1:${server.address().port}`, seen, close: () => server.close() })));
@@ -227,8 +243,16 @@ if (passed) {
   const good = r.code === 0 && /^ok persist: nav at /m.test(r.line) && !r.reached.length && !r.topLoaded && frameGuarded;
   console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : !frameGuarded ? (process.platform === "win32" ? "another origin's frame didn't load and show both its calls refused (the capability's positive)" : "another origin's frame loaded in the window: its navigation guard didn't refuse it") : "the probe failed (above)"}`);
   passed = good;
+  // (a release build: started with the widest control's variable set, it still refuses the other origin, as above)
+  if (passed && controls === "out") {
+    console.log("\nwithout the controls (a release build): the same, SAGEBRUSH_APP_NAV_CONTROL=wide set");
+    const c = await navLaunch("wide");
+    const same = c.code === 0 && /^ok persist: nav at /m.test(c.line) && !c.reached.length && !c.topLoaded;
+    console.log(same ? "the variable changed nothing: only the app's own page reached its commands" : `FAIL a release build honoured the control: ${c.reached.length ? c.reached.join("; ") : c.topLoaded ? "the window loaded another origin's page" : c.line}`);
+    passed = same;
+  }
   // (the controls: each must show what its part keeps out)
-  for (const control of passed ? ["open", "wide"] : []) {
+  for (const control of passed && controls === "in" ? ["open", "wide"] : []) {
     console.log(`\nthe control: the same, ${control === "open" ? "the navigation guard left out (the page may leave; the commands must still refuse the other origin)" : "the guard left out and the commands for every port (the other origin's page must reach them)"}`);
     const c = await navLaunch(control);
     const topReached = c.reached.some((s) => s.startsWith("top: REACHED"));
@@ -280,9 +304,11 @@ if (passed) {
 // window from a page.  Then the controls, each leaving one guard out (SAGEBRUSH_APP_SIGNER_CONTROL): "cap" the command
 // in the page's capability too (other windows' calls reach it; its own check refuses them), "cap+check" that and no
 // check (another window's call signs: the probe sees the path it checks), "csp-off" the signer's page without its CSP,
-// framing the other server's page, and "guard-off" the signer window's navigation guard left out, the window sent to
-// that page (each loads there, and reaches nothing).  Calls that reached the command and signatures are counted from
-// the app's own log.
+// framing the other server's page, "frame+cap" that and the command in the signer window's capability for that
+// server's origin too (the frame's call reaches the command, whose check of the calling document's origin refuses it,
+// N1), and "guard-off" the signer window's navigation guard left out, the window sent to that page (each loads there,
+// and reaches nothing).  Calls that reached the command, their callers and signatures are counted from the app's own
+// log.  The controls are in the self-test's build only (C1): a release build runs release-judge.mjs's rows instead.
 // (what's in a folder, as relative paths, folders ending in "/"; null if it isn't there)
 function listTree(dir, rel = "") {
   if (!existsSync(dir)) return null;
@@ -306,13 +332,50 @@ async function signerLaunch(control) {
   // (the approvals window's web view data folder once the app has quit: signer.rs DATA_FOLDER)
   const left = listTree(join(data, "signer-webview"));
   console.log(`  the approvals window's data folder after the app quit: ${left === null ? "absent" : left.length ? `${left.length} entries: ${left.slice(0, 80).join(", ")}` : "empty"}`);
-  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control, code: res.code, signal: res.signal, problems: res.problems, left });
+  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control, code: res.code, signal: res.signal, problems: res.problems, left, platform: process.platform });
   console.log(`launch${control ? ` (control: ${control})` : ""}: ${persistLine(res)} (exit ${res.code}); reached the command ${v.counts.dispatches} (${v.counts.dispatchesOthers} not the approvals window's), signed ${v.counts.signed} (${v.counts.signedOthers} not the approvals window's)`);
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   return v;
 }
-if (passed) {
-  for (const control of [null, "cap", "cap+check", "csp-off", "guard-off"]) {
+// (the app's own executable: an AppImage's is inside its compressed image, extracted to read it: usr/bin/sagebrush-app)
+function executable() {
+  if (!/\.AppImage$/.test(exe)) return exe;
+  const at = mkdtempSync(join(tmpdir(), "sagebrush-appimage-"));
+  const { APPIMAGE_EXTRACT_AND_RUN: _, ...env } = process.env;
+  // (the AppImage by its absolute path: the extraction runs in its own folder)
+  const x = spawnSync(resolve(exe), ["--appimage-extract"], { cwd: at, stdio: "ignore", env, timeout: 120000 });
+  const bin = join(at, "squashfs-root", "usr", "bin");
+  const names = existsSync(bin) ? readdirSync(bin) : [];
+  console.log(`(the AppImage extracted: exit ${x.status}${x.error ? `, ${x.error.message}` : ""}; usr/bin: ${names.join(", ") || "none"})`);
+  // (the app's own executable by its exact name, never a guess: missing, the check fails and says what was there)
+  return join(bin, names.includes("sagebrush-app") ? "sagebrush-app" : "(no sagebrush-app)");
+}
+// (a release build: the executable holds none of the controls' names, and started with the signer's widest control
+// set, nothing reaches a signing command; release-judge.mjs)
+if (passed && controls === "out") {
+  console.log("\nwithout the controls (a release build): the executable, and a launch with SAGEBRUSH_APP_SIGNER_CONTROL=cap+check");
+  const bin = executable();
+  const found = existsSync(bin) ? controlNamesIn(readFileSync(bin)) : [`(no executable at ${bin})`];
+  console.log(found.length ? `FAIL the executable holds the controls' names: ${found.join(", ")}` : "the executable holds none of the controls' names");
+  const o = await otherServer();
+  const r = await launch({ SAGEBRUSH_APP_PERSIST: `signer:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: mkdtempSync(join(tmpdir(), "sagebrush-app-data-")), SAGEBRUSH_APP_SIGNER_CONTROL: "cap+check" }, 120000);
+  await new Promise((ok) => setTimeout(ok, 1000));
+  o.close();
+  const v = releaseSignerVerdict({ err: r.err, out: r.out, seen: o.seen, code: r.code, signal: r.signal, problems: r.problems });
+  console.log(`launch (SAGEBRUSH_APP_SIGNER_CONTROL=cap+check): ${persistLine(r)} (exit ${r.code})`);
+  console.log(v.ok ? "the variable changed nothing: no call reached a signing command" : `FAIL ${v.why.join("; ")}`);
+  passed = !found.length && v.ok;
+}
+if (passed && controls === "in") {
+  // (the search's positive: the self-test's build holds every name a release build must not)
+  const bin = executable();
+  const found = existsSync(bin) ? controlNamesIn(readFileSync(bin)) : [];
+  const all = found.length === CONTROL_NAMES.length;
+  console.log(all ? `\nthe executable holds the controls' names (${found.length}), as the self-test's build must` : `\nFAIL the self-test's build's executable doesn't hold all the controls' names: the search can't see them (found ${found.join(", ") || "none"}${existsSync(bin) ? "" : `; no executable at ${bin}`})`);
+  passed = all;
+}
+if (passed && controls === "in") {
+  for (const control of [null, "cap", "cap+check", "csp-off", "frame+cap", "guard-off"]) {
     console.log(`\nthe approvals window${control ? `, the control "${control}"` : ": only its own page signs"}`);
     const v = await signerLaunch(control);
     console.log(v.ok ? "as it must" : `FAIL ${v.why.join("; ")}`);
