@@ -1,5 +1,6 @@
 """matplotlib.colors: the colormap classes (enough to build one from colors),
 Normalize, and color conversions."""
+import itertools
 import re as _re
 from numbers import Real as _Real
 from _graphics import to_color, colormap as _colormap, TAB10 as _TAB10, CSS_COLORS as _CSS_COLORS
@@ -87,7 +88,7 @@ def _lookup(tab, x, alpha, bytes):
 class ListedColormap(Colormap):
     """A colormap of a list of colors, each a band of equal width."""
 
-    def __init__(self, colors, name="from_list", N=None):
+    def __init__(self, colors, name="unnamed", N=None):
         cs = colors.tolist() if hasattr(colors, "tolist") else list(colors)
         # (N, matplotlib's deprecated argument: the colors cycled, or cut, to N)
         if N is not None:
@@ -103,46 +104,86 @@ class ListedColormap(Colormap):
         return self._table_color(t)
 
 
-class LinearSegmentedColormap(Colormap):
-    """A colormap interpolating between colors (from_list)."""
+def _create_lookup_table(N, data, gamma=1.0):
+    """matplotlib's table of N values of one channel: from rows (x, y0, y1), x from 0 to 1 increasing, a value
+    between x[i-1] and x[i] interpolated linearly from y1[i-1] to y0[i], sampled at linspace(0, 1, N) ** gamma (N 1:
+    y0 at x 1); or a callable's values there; clipped to [0, 1]"""
+    import numpy as np
+    if callable(data):
+        xind = np.linspace(0, 1, N) ** gamma
+        return np.clip(np.array(data(xind), dtype=float), 0, 1)
+    try:
+        adata = np.array(data)
+    except Exception as err:
+        raise TypeError("data must be convertible to an array") from err
+    if adata.ndim != 2 or adata.shape[1] != 3:
+        raise ValueError("'data' must be 2D with shape (N, 3), but your input has shape %s" % (adata.shape,))
+    x, y0, y1 = adata[:, 0], adata[:, 1], adata[:, 2]
+    if x[0] != 0. or x[-1] != 1.0:
+        raise ValueError("data mapping points must start with x=0 and end with x=1")
+    if (np.diff(x) < 0).any():
+        raise ValueError("data mapping points must have x in increasing order")
+    if N == 1:
+        lut = np.array(y0[-1])
+    else:
+        x = x * (N - 1)
+        xind = (N - 1) * np.linspace(0, 1, N) ** gamma
+        ind = np.searchsorted(x, xind)[1:-1]
+        distance = (xind[1:-1] - x[ind - 1]) / (x[ind] - x[ind - 1])
+        lut = np.concatenate([[y1[0]], distance * (y0[ind] - y1[ind - 1]) + y1[ind - 1], [y0[-1]]])
+    return np.clip(lut, 0.0, 1.0)
 
-    def __init__(self, name, segmentdata=None, N=256, gamma=1.0):
+
+class LinearSegmentedColormap(Colormap):
+    """A colormap of linear segments: segmentdata's 'red', 'green', 'blue' and optional 'alpha', each rows
+    (x, y0, y1) or a callable, made into a table of N colors when first used (matplotlib's)."""
+
+    def __init__(self, name, segmentdata, N=256, gamma=1.0):
         super().__init__(name, N)
-        self._stops = None
+        self.monochrome = False
+        self._segmentdata = segmentdata
+        self._gamma = gamma
+        self._lut = None
 
     @staticmethod
     def from_list(name, colors, N=256, gamma=1.0):
-        m = LinearSegmentedColormap(name, None, N, gamma)
+        import numpy as np
+        if not _iterable(colors):
+            raise ValueError("colors must be iterable")
         cs = colors.tolist() if hasattr(colors, "tolist") else list(colors)
-        m._stops = [to_rgba(c if isinstance(c, str) else tuple(c)) for c in cs]
-        m._gamma = gamma
-        return m
+        try:
+            # (a list of colors, evenly spaced on [0, 1])
+            rgba = [to_rgba(c if isinstance(c, str) else tuple(c)) for c in cs]
+            vals = np.linspace(0, 1, len(cs))
+        except Exception as e:
+            # (else a list of (value, color) pairs)
+            try:
+                _vals, _colors = itertools.zip_longest(*cs)
+            except Exception as e2:
+                raise e2 from e
+            vals = np.asarray(_vals)
+            if np.min(vals) < 0 or np.max(vals) > 1 or np.any(np.diff(vals) < 0):
+                raise ValueError("the values passed in the (value, color) pairs must increase monotonically from 0 to 1.")
+            rgba = [to_rgba(c if isinstance(c, str) else tuple(c)) for c in _colors]
+        r, g, b, a = (np.array([c[j] for c in rgba], dtype=float) for j in range(4))
+        cdict = {"red": np.column_stack([vals, r, r]), "green": np.column_stack([vals, g, g]),
+                 "blue": np.column_stack([vals, b, b]), "alpha": np.column_stack([vals, a, a])}
+        return LinearSegmentedColormap(name, cdict, N, gamma)
 
     def _table(self):
-        # (matplotlib's table of N colors: each channel interpolated linearly between the colors, evenly spaced on
-        # [0, 1], at linspace(0, 1, N) ** gamma for red, green and blue, and at linspace(0, 1, N) for alpha, as its
-        # _init and _create_lookup_table)
-        if not self._stops:
-            return None
-        import numpy as np
-        x = np.linspace(0, 1, len(self._stops))
-        chans = np.array(self._stops, dtype=float)
-        cols = []
-        for j in range(4):
-            y = chans[:, j]
-            if self.N == 1:
-                lut = np.array([y[-1]])
-            else:
-                xind = np.linspace(0, 1, self.N) ** (self._gamma if j < 3 else 1.0)
-                ind = np.searchsorted(x, xind)[1:-1]
-                distance = (xind[1:-1] - x[ind - 1]) / (x[ind] - x[ind - 1])
-                lut = np.concatenate([[y[0]], distance * (y[ind] - y[ind - 1]) + y[ind - 1], [y[-1]]])
-            cols.append(np.clip(lut, 0.0, 1.0))
-        return np.stack(cols, axis=1).tolist()
+        # (matplotlib's _init: red, green and blue at gamma, alpha at gamma 1, or 1 without one)
+        if self._lut is None:
+            import numpy as np
+            lut = np.ones((self.N, 4))
+            lut[:, 0] = _create_lookup_table(self.N, self._segmentdata["red"], self._gamma)
+            lut[:, 1] = _create_lookup_table(self.N, self._segmentdata["green"], self._gamma)
+            lut[:, 2] = _create_lookup_table(self.N, self._segmentdata["blue"], self._gamma)
+            if "alpha" in self._segmentdata:
+                lut[:, 3] = _create_lookup_table(self.N, self._segmentdata["alpha"], 1)
+            self._lut = lut.tolist()
+        return self._lut
 
     def _color(self, t):
-        if not self._stops:
-            return _colormap(t, self.name)
         return self._table_color(t)
 
 

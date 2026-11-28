@@ -37,3 +37,16 @@ print(sorted(set(re.findall(r'fill="(rgba[^"]*)"', fig._svg()))))`]);
   // (a transparent red and a half-transparent blue, not opaque)
   assert.equal(out, "['rgba(0, 0, 255, 0.5)', 'rgba(255, 0, 0, 0)']\n");
 });
+
+test("points drawn with a colormap of segment data take its segments' colors, not viridis'", () => {
+  const out = run(["-c", `import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+import re
+cd = {'red': [(0, 0, 0), (0.5, 1, 1), (1, 1, 1)], 'green': [(0, 0, 0), (0.25, 0, 0), (0.75, 1, 1), (1, 1, 1)],
+      'blue': [(0, 0, 0), (0.5, 0, 1), (1, 0.5, 0.5)]}
+fig, ax = plt.subplots()
+ax.scatter([0, 1, 2], [0, 1, 2], c=[0.0, 0.5, 1.0], cmap=LinearSegmentedColormap('s', cd))
+print(sorted(set(c.lower() for c in re.findall(r'fill="(#[0-9a-fA-F]{6})"', fig._svg()))))`]);
+  // (matplotlib's to_hex of the map at 0, 0.5 and 1: blue's jump at 0.5 taken)
+  assert.equal(out, "['#000000', '#ff80fe', '#ffff80']\n");
+});
