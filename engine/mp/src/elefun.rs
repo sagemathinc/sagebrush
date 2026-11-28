@@ -5,18 +5,21 @@
 //! session's and each giving what the reference's gives for the same
 //! history), and mpf_exp, mpf_log, mpf_cos/mpf_sin, mpf_pow, exp_fixed,
 //! cos_sin_fixed, log_int_fixed.  Float parameter choices go through glibm
-//! (CPython's pow and log).
+//! (CPython's pow and log).  One reviewed exception to the reference's
+//! results: mpf_pow rounded up or down replaces a result that a certified
+//! bound shows to be on the wrong side of the true value (pow_directed_side).
 
 use crate::fail::{failed, raise, too_big};
 use crate::consts::{e_fixed, ln2_fixed, pi_fixed};
 use crate::exp::Exp;
+use core::cmp::Ordering;
 use crate::glibm::pow as fpow;
 use crate::int::Int;
 use crate::intmath::isqrt_fast_python;
 use crate::mpc::{mpc_abs, mpf_shift as mpf_shift_i64, Mpc};
 use crate::mpf::{
     finf, fnan, fninf, fone, from_int, from_int_man_exp, fzero, mpf_add, mpf_div, mpf_mul, mpf_neg, mpf_perturb,
-    mpf_pow_int, mpf_sqrt, normalize, to_fixed, Mpf, Rnd,
+    mpf_pos, mpf_pow_int, mpf_sqrt, normalize, to_fixed, Mpf, Rnd,
 };
 use crate::nat::Nat;
 use crate::Fail;
@@ -733,7 +736,141 @@ pub fn mpf_pow(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
         return fone();
     }
     let c = mpf_log(s, prec + 10, rnd);
-    mpf_exp(&mpf_mul(t, &c, 0, Rnd::Down), prec, rnd)
+    let r = mpf_exp(&mpf_mul(t, &c, 0, Rnd::Down), prec, rnd);
+    pow_directed_side(s, t, prec, rnd, r)
+}
+
+/// s^t bounded at wp bits (s > 0): below the true value (upper = false) or
+/// above it, log, the product and exp each rounded on the bound's side
+/// (exp is increasing, so the argument is rounded the same way), and each
+/// widened by one more unit of its last place, outward: mpf_log's and
+/// mpf_exp's directed results carry a limited number of guard bits.
+fn pow_bound(s: &Mpf, t: &Mpf, wp: u64, upper: bool) -> Mpf {
+    let lrnd = if (t.sign == 0) == upper { Rnd::Ceiling } else { Rnd::Floor };
+    let c = widen(&mpf_log(s, wp, lrnd), wp, lrnd == Rnd::Ceiling);
+    let a = mpf_mul(t, &c, 0, Rnd::Down);
+    widen(&mpf_exp(&a, wp, if upper { Rnd::Ceiling } else { Rnd::Floor }), wp, upper)
+}
+
+/// x moved by one unit in the wp-th bit of its top, up (or down), exactly.
+fn widen(x: &Mpf, wp: u64, up: bool) -> Mpf {
+    if x.man.is_zero() {
+        return x.clone();
+    }
+    let u = Mpf { sign: 0, man: Nat::from_u64(1), exp: x.exp.add_i64(x.bc - wp as i64), bc: 1 };
+    mpf_add(x, &u, 0, Rnd::Down, !up)
+}
+
+/// The reference's directed result r of s^t, kept when it is on its side of
+/// the true value and replaced when it isn't.  (Its log is rounded in the
+/// result's direction, which a negative t turns around: 17498112^(-31/4)
+/// rounded up was below the true value.)  A Ziv loop: certified bounds lo <=
+/// s^t <= hi at wp bits decide the side of r, or else wp doubles; a wrong r
+/// gives way to the correct rounding, once lo and hi round alike.  An exact
+/// true value never separates from its bounds, so the bounds of a wrong r
+/// straddling it never round alike: an exactness test decides that where it
+/// fits the session's limb limit (pow_is_exact), of each distinct candidate
+/// once, r while it may be right, else the bound rounded on r's side (lo
+/// rounded up, or hi rounded down; 2^-28 to the 201/4 rounded up at 128 bits
+/// doubled its precision to the limit before).  The loop ends
+/// before its precision would pass that limit, keeping r: there, and only
+/// there, the side is not certified.  Nearest is not checked.
+fn pow_directed_side(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, r: Mpf) -> Mpf {
+    // (s > 0, so the result is positive: up is ceiling, down is floor)
+    let up = match rnd {
+        Rnd::Ceiling | Rnd::Up => true,
+        Rnd::Floor | Rnd::Down => false,
+        Rnd::Nearest => return r,
+    };
+    if r.man.is_zero() {
+        return r;
+    }
+    // (x - y's sign)
+    let side = |x: &Mpf, y: &Mpf| {
+        let d = mpf_add(x, y, 0, Rnd::Down, true);
+        if d.man.is_zero() { Ordering::Equal } else if d.sign == 1 { Ordering::Less } else { Ordering::Greater }
+    };
+    // (the candidates whose exactness was tested, none of them exact)
+    let mut tested: Vec<Mpf> = Vec::new();
+    let mut wp = 2 * prec + 64;
+    loop {
+        let (lo, hi) = (pow_bound(s, t, wp, false), pow_bound(s, t, wp, true));
+        if failed() {
+            return r;
+        }
+        // (r on its side for certain, or wrong for certain)
+        let (ok, wrong) = if up {
+            (side(&r, &hi) != Ordering::Less, side(&r, &lo) == Ordering::Less)
+        } else {
+            (side(&r, &lo) != Ordering::Greater, side(&r, &hi) == Ordering::Greater)
+        };
+        if ok {
+            return r;
+        }
+        let (a, b) = (mpf_pos(&lo, prec, rnd), mpf_pos(&hi, prec, rnd));
+        if wrong && a == b {
+            return a;
+        }
+        let cand = if !wrong { &r } else if up { &a } else { &b };
+        if !tested.contains(cand) {
+            if pow_is_exact(cand, s, t) == Some(true) {
+                return cand.clone();
+            }
+            tested.push(cand.clone());
+        }
+        // (the next precision within the session's limb limit, else stop:
+        // a wrong r gives way to the bound on its side, an undecided one
+        // stays)
+        let next = 2 * wp;
+        if next / 64 + 8 > crate::nat::max_limbs() as u64 / 4 {
+            if wrong {
+                return if up { b } else { a };
+            }
+            return r;
+        }
+        wp = next;
+    }
+}
+
+/// Whether r = s^t exactly, for s > 0 and t = +-m 2^-k (k > 0), or None
+/// where the test doesn't fit the session's limb limit: mantissas are odd,
+/// so for t > 0, r^(2^k) = s^m is rm^(2^k) = sm^m with re 2^k = se m, and for
+/// t < 0, r^(2^k) s^m = 1 is rm = sm = 1 with re 2^k + se m = 0.
+fn pow_is_exact(r: &Mpf, s: &Mpf, t: &Mpf) -> Option<bool> {
+    let k = t.exp.as_i64()?.checked_neg()?;
+    if k <= 0 || k >= 62 {
+        return None;
+    }
+    let m = t.man.to_u64()?;
+    let lim = 64 * crate::nat::max_limbs() as u64 / 2;
+    if (r.man.bits() as u64).checked_mul(1 << k)? > lim || (s.man.bits() as u64).checked_mul(m)? > lim {
+        return None;
+    }
+    let (re, se) = (r.exp.mul_i64(1 << k), s.exp.mul_i64(m as i64));
+    if t.sign == 1 {
+        let one = Nat::from_u64(1);
+        return Some(r.man == one && s.man == one && re.add(&se).is_zero());
+    }
+    if re.cmp(&se) != Ordering::Equal {
+        return Some(false);
+    }
+    let mut a = r.man.clone();
+    for _ in 0..k {
+        a = a.mul(&a);
+    }
+    let mut b = Nat::from_u64(1);
+    let mut base = s.man.clone();
+    let mut e = m;
+    while e > 0 {
+        if e & 1 == 1 {
+            b = b.mul(&base);
+        }
+        e >>= 1;
+        if e > 0 {
+            base = base.mul(&base);
+        }
+    }
+    Some(a == b)
 }
 
 /// libmpc's mpc_exp(z, prec, rnd)
