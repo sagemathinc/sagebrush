@@ -5208,6 +5208,163 @@ async function sealedPull() {
   await stop(b2);
 }
 
+// (e2e PR 3b-2) Files between two devices of one end-to-end account: sealed at their keyed address, under the epoch of
+// the op that names them, and nothing of a file (its bytes, its SHA-256) in any request; downloaded, opened and checked
+// against the index; tampered or misaddressed downloads refused; one blob for one file in one epoch; an older epoch's
+// file still opened after the account moves on; the guard; a file that grows past the largest PUT never sent.
+async function sealedBlobs() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const binOf = async (w, p) => { const r = (await w.read(p).catch(() => null))?.content; return r instanceof Uint8Array ? r : typeof r === "string" ? new TextEncoder().encode(r) : null; };
+  const hexOf = async (b) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", b)), (x) => x.toString(16).padStart(2, "0")).join("");
+  const has = (hay, needle) => { outer: for (let i = 0; hay && i + needle.length <= hay.length; i++) { for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer; return true; } return false; };
+  // (each device's requests to the sync API, recorded: method, path, headers, body, status; `alter` may change an answer)
+  const recording = (rec, alter) => async (input, init = {}) => {
+    const url = String(input), body = init.body;
+    const e = { method: init.method ?? "GET", url, headers: { ...(init.headers ?? {}) }, body: body instanceof Uint8Array ? body.slice() : typeof body === "string" ? new TextEncoder().encode(body) : null };
+    rec.push(e);
+    const res = await fetch(input, init);
+    e.status = res.status;
+    return alter ? alter(url, res) : res;
+  };
+  const recA = [], recB = [];
+  let alterB = null;
+  const clock = fakeClock();
+  const keep = { ...W.CLIENT };
+  const wa = await fresh(), wb = await fresh();
+  // (the server tells each device when the log moves: B's clock is a fake one, so it never asks by itself)
+  await ctl("set", { set: { serverNotices: true } });
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit }, fetch: recording(recA) });
+  let b = null;
+  try {
+    check(await until(() => settled(wa, a)), "sealed blobs: A synced");
+    const files = { "/sb/empty.bin": new Uint8Array(0), "/sb/one.bin": bytes(1, 9), "/sb/pattern.bin": Uint8Array.from({ length: 5000 }, (_, i) => (i * 131 + 7) & 0xff), "/sb/big.bin": bytes((1 << 20) + 1, 3) };
+    await wa.mkdir("/sb");
+    for (const [p, c] of Object.entries(files)) await wa.create(p, { content: c });
+    check(await until(() => settled(wa, a), 20_000), "sealed blobs: A's files up");
+    const shas = await Promise.all(Object.values(files).map(hexOf));
+    // ---- the wire: nothing of a file in any request of A's
+    const blobPaths = recA.filter((e) => e.url.includes("/api/sync/v1/blob/"));
+    const puts = recA.filter((e) => e.method === "PUT");
+    const leaks = recA.filter((e) => shas.some((h) => e.url.includes(h) || JSON.stringify(e.headers).includes(h) || has(e.body, new TextEncoder().encode(h))) || has(e.body, files["/sb/pattern.bin"].subarray(0, 64)) || has(e.body, files["/sb/big.bin"].subarray(1000, 1064)));
+    check(puts.length === 4 && blobPaths.every((e) => /\/blob\/a1:[0-9a-f]{64}$/.test(e.url)) && puts.every((e) => e.body && new TextDecoder().decode(e.body.subarray(0, 4)) === "SBB1") && leaks.length === 0 && !recA.some((e) => e.url.includes("/blobs/check")),
+      "sealed blobs: A's four PUTs are sealed frames at a1: addresses; no request names a file's SHA-256 or holds its bytes, and nothing is checked by them: " + J({ puts: puts.length, leaks: leaks.map((e) => e.method + " " + e.url.slice(-70)) }));
+    // ---- B, another device of the account: every file downloaded, opened, checked and installed
+    W.CLIENT.downloadsAtOnce = 1;
+    b = viewClient(wb, { e2e: { keys: pb, kit: f.kit }, fetch: recording(recB, (url, res) => (alterB ? alterB(url, res) : res)), clock });
+    const same = async (p) => { const e = await wb.stat(p); if (!e || e.remote) return false; const got = await binOf(wb, p); const want = files[p]; return got instanceof Uint8Array ? got.length === want.length && got.every((x, i) => x === want[i]) : false; };
+    check(await until(async () => { for (const p of Object.keys(files)) if (!(await same(p))) return false; return true; }, 30_000), "sealed blobs: B has every file, byte for byte (empty, one byte, a pattern, one past a chunk): opened from its sealed frame");
+    check(recB.filter((e) => e.url.includes("/api/sync/v1/blob/")).every((e) => /\/blob\/a1:[0-9a-f]{64}$/.test(e.url)), "sealed blobs: B asked for each by its a1: address only");
+    // ---- dedup: the same file again, from B: one blob (the PUT answered have)
+    await wb.create("/sb/again.bin", { content: files["/sb/pattern.bin"] });
+    check(await until(() => settled(wb, b), 15_000), "sealed blobs: B's copy up");
+    const aPut = puts.find((e) => e.body.length === f.kit.sealedSize(5000)), bPut = recB.filter((e) => e.method === "PUT").at(-1);
+    check(aPut && bPut && aPut.url === bPut.url && bPut.status === 200, "sealed blobs: the same file in the same epoch from another device: the same address, and the server already holds it (have): " + J({ a: aPut?.url.slice(-20), b: bPut?.url.slice(-20), status: bPut?.status }));
+    // ---- tampering, served to B: a flipped byte, then another file's frame of the same length: refused, nothing kept;
+    // then, served as it is, the file opens and is installed
+    const nsB = nsOf(b);
+    const decoy = bytes(4000, 200);
+    const nPut = recA.filter((e) => e.method === "PUT").length;
+    await wa.create("/sb/decoy.bin", { content: decoy });
+    check(await until(() => recA.filter((e) => e.method === "PUT").length > nPut, 15_000), "sealed blobs: (a decoy of the same size up)");
+    const decoyFrame = recA.filter((e) => e.method === "PUT").at(-1).body;
+    check(await until(async () => (await binOf(wb, "/sb/decoy.bin"))?.length === 4000, 20_000), "sealed blobs: (B has the decoy)");
+    for (const [what, make] of [
+      ["a flipped byte", async (res) => { const u = new Uint8Array(await res.arrayBuffer()); u[u.length - 3] ^= 1; return u; }],
+      ["another file's frame", async (res) => { await res.arrayBuffer(); return decoyFrame.slice(); }],
+    ]) {
+      const p = `/sb/t-${what.length}.bin`, content = bytes(4000, what.length);
+      let served = 0;
+      alterB = async (url, res) => {
+        if (!url.includes("/blob/a1:") || served) return res;
+        served++;
+        const body = await make(res);
+        return new Response(body, { status: 200, headers: { "content-length": String(body.length) } });
+      };
+      const failed = b.stats.fetchFailed;
+      await wa.create(p, { content });
+      check(await until(() => b.stats.fetchFailed > failed, 20_000), `sealed blobs: ${what} served to B: refused`);
+      // (the note on its entry is written just after the failure is counted: waited for)
+      check(await until(async () => { const e = await wb.stat(p); return e?.remote === true && /didn't open/.test(e.fetchFailed?.why ?? ""); }), `sealed blobs: …nothing installed, and why said on its entry: ` + J((await wb.stat(p))?.fetchFailed));
+      alterB = null;
+      await clock.advance(3_600_000);
+      check(await until(async () => { const g = await binOf(wb, p); return g?.length === 4000 && g.every((x, i) => x === content[i]); }, 20_000), `sealed blobs: …and served as it is, on its next try, the file is opened and installed`);
+    }
+    // ---- an address altered where B keeps it: the download refused (it isn't the file's address under its epoch)
+    {
+      await ctl("set", { set: { fakeHttp: [{ method: "GET", path: "/api/sync/v1/blob/", status: 429, body: { error: "rate", retry_after: 600_000 }, times: 1 }] } });
+      const content = bytes(3000, 77), sha = await hexOf(content);
+      await wa.create("/sb/moved.bin", { content });
+      check(await until(async () => (await metaGet(wb.ws, `sync:${nsB}:fetchPause`))?.until > clock.now(), 20_000), "sealed blobs: (B's downloads paused)");
+      const at = await metaGet(wb.ws, `sync:${nsB}:addr:${sha}`);
+      const other = aPut.url.slice(aPut.url.lastIndexOf("/") + 1);
+      check(at && /^a1:/.test(at.address) && at.address !== other, "sealed blobs: B keeps the file's address and epoch, from its verified op: " + J(at));
+      await rawPut(wb.ws, "meta", { ...at, address: other }, `sync:${nsB}:addr:${sha}`);
+      const failed = b.stats.fetchFailed;
+      await clock.advance(600_001);
+      check(await until(() => b.stats.fetchFailed > failed, 20_000) && (await wb.stat("/sb/moved.bin"))?.remote === true, "sealed blobs: the address B keeps altered (another file's): the download refused, nothing installed");
+      await rawPut(wb.ws, "meta", at, `sync:${nsB}:addr:${sha}`);
+      await clock.advance(3_600_000);
+      check(await until(async () => (await binOf(wb, "/sb/moved.bin"))?.length === 3000, 20_000), "sealed blobs: …its own address back, the next try opens and installs it");
+    }
+    // ---- a file of an older epoch, after the account moves on: still opened under its own epoch's keys; a new one is
+    // sealed under the new epoch, at that epoch's address
+    {
+      const old = bytes(2000, 41), oldSha = await hexOf(old);
+      await wa.create("/sb/old.bin", { content: old });
+      check(await until(() => settled(wa, a), 15_000), "sealed blobs: a file up under the first epoch");
+      const n = await f.epoch();
+      const neu = bytes(2000, 42), neuSha = await hexOf(neu);
+      const before = recA.length;
+      await wa.create("/sb/new.bin", { content: neu });
+      check(await until(() => settled(wa, a), 15_000), "sealed blobs: a file up after the epoch moved");
+      const k1 = await f.provider.epochKeys(1), kn = await f.provider.epochKeys(n);
+      const hexB = (h) => Uint8Array.from({ length: 32 }, (_, i) => parseInt(h.slice(2 * i, 2 * i + 2), 16));
+      // (A may seal it first under the head it last knew, be told that head is stale, and seal it again under the new one:
+      // its blob then goes up again, at the new epoch's address; the op the log keeps names that one)
+      const put = recA.slice(before).filter((e) => e.method === "PUT").at(-1);
+      const want = (await f.kit.sealFile(kn, hexB(neuSha), neu)).address, notOld = (await f.kit.sealFile(k1, hexB(neuSha), neu)).address;
+      check(put && put.url.endsWith(want) && want !== notOld, "sealed blobs: a file made after the epoch moved is sealed at the new epoch's address: " + J({ puts: recA.slice(before).filter((e) => e.method === "PUT").map((e) => e.url.slice(-12)), want: want.slice(-12), old: notOld.slice(-12) }));
+      const wc = await fresh();
+      const c3 = viewClient(wc, { e2e: { keys: await f.device(), kit: f.kit } });
+      const got = async (p, b2) => { const g = await binOf(wc, p); return g instanceof Uint8Array && g.length === b2.length && g.every((x, i) => x === b2[i]); };
+      check(await until(async () => (await got("/sb/old.bin", old)) && (await got("/sb/new.bin", neu)), 30_000), "sealed blobs: a device added after: the older epoch's file opened under that epoch's keys, the newer under its own");
+      const at = await metaGet(wc.ws, `sync:${nsOf(c3)}:addr:${oldSha}`);
+      check(at?.epoch === 1, "sealed blobs: …the older file's address kept with its epoch (1): " + J(at));
+      await stop(c3);
+    }
+    // ---- the guard: with e2e, a request naming a file by its SHA-256, or a plain body, throws before it is made
+    {
+      const n0 = recA.length, sha = shas[2];
+      const tries = [
+        await a.http("PUT", `/api/sync/v1/blob/${sha}`, files["/sb/pattern.bin"], { "x-sb-ct-sha256": sha }).then(() => "sent", () => "thrown"),
+        await a.http("PUT", `/api/sync/v1/blob/a1:${sha}`, files["/sb/pattern.bin"], { "x-sb-ct-sha256": sha }).then(() => "sent", () => "thrown"),
+        await a.http("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: sha, ct_sha256: sha, size: 5000 }] }).then(() => "sent", () => "thrown"),
+        await a.http("GET", "/api/sync/v1/manifest/" + sha).then(() => "sent", () => "thrown"),
+      ];
+      check(J(tries) === J(["thrown", "thrown", "thrown", "thrown"]) && recA.length === n0, "sealed blobs: the guard: a blob named by its SHA-256, a plain body at an a1: address, a check by SHA-256, a manifest: each throws, and no request is made: " + J(tries));
+    }
+    // ---- a file that grows past the largest PUT: its new version never sent, nor any piece of it; B keeps the old
+    {
+      W.CLIENT.maxPut = 6000;
+      const small = bytes(3000, 5), grown = bytes(5990, 6);
+      await wa.create("/sb/grow.bin", { content: small });
+      check(await until(async () => { const g = await binOf(wb, "/sb/grow.bin"); return g instanceof Uint8Array && g.length === 3000; }, 20_000), "sealed blobs: a file under the largest PUT, synced");
+      const n0 = recA.filter((e) => e.method === "PUT" || e.url.includes("/manifest")).length;
+      await wa.write("/sb/grow.bin", grown);
+      await sleep(1500);
+      const after = recA.filter((e) => e.method === "PUT" || e.url.includes("/manifest")).length;
+      const g = await binOf(wb, "/sb/grow.bin");
+      check(after === n0 && g instanceof Uint8Array && g.length === 3000, "sealed blobs: grown past the largest PUT (its sealed frame larger still): no PUT, no manifest, nothing of it sent; B keeps the version it had: " + J({ puts: after - n0, b: g?.length }));
+    }
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await ctl("set", { set: { serverNotices: false } });
+    await stop(a);
+    if (b) await stop(b);
+  }
+}
 async function sealedPullHalt() {
   // (a sealed op served altered: B halts at it, deterministically, nothing of it applied, the cursor where it was; for
   // every kind of change, the reference lists' form included (never another error, which would end the connection and
@@ -5620,7 +5777,12 @@ async function releasePlaintext() {
       if (plain && typeof data === "string" && data.includes('"t":"sops"')) {
         plain = false;
         const m = JSON.parse(data), dseq = JSON.parse(m.json?.[0] ?? "null")?.dseq ?? m.ops?.[0]?.dseq;
-        recordOf(wa, nsOf(a), dseq).then((r) => super.send(JSON.stringify({ t: "ops", req: m.req, ops: [r.op] })));
+        // (and its bytes as such a client puts them, at their own SHA-256: an end-to-end client never does, e2e PR 3b-2)
+        recordOf(wa, nsOf(a), dseq).then(async (r) => {
+          const bytes = new TextEncoder().encode("four");
+          await fetch(`/api/sync/v1/blob/${r.op.sha256}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/octet-stream", "x-sb-ct-sha256": r.op.sha256 }, body: bytes });
+          super.send(JSON.stringify({ t: "ops", req: m.req, ops: [r.op] }));
+        });
         return;
       }
       super.send(data);
@@ -5636,7 +5798,11 @@ async function releasePlaintext() {
   check(typeof (await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) === "number" && (await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) > 0, "release plaintext: B's ledger: the file's current bytes held by its last sealed add");
   plain = true;
   await wa.write("/p.txt", "four");
-  check(await until(async () => (await contentOf(wb, "/p.txt")) === "four", 15_000), "release plaintext: B has the plaintext write");
+  // (B applies the plaintext write to its index, but, an end-to-end client, fetches no file by its plaintext SHA-256: with
+  // no encrypted copy known for it, the download is set apart and said, the file's bytes kept as they were (e2e PR 3b-2)
+  const fourSha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("four"))), (x) => x.toString(16).padStart(2, "0")).join("");
+  check(await until(async () => { const e = await wb.stat("/p.txt"); return e?.sha256 === fourSha && e.fetchFailed?.final === true; }, 15_000) && /no encrypted copy/.test((await wb.stat("/p.txt")).fetchFailed.why),
+    "release plaintext: B has the plaintext write in its index, and sets its download apart, said (no encrypted copy known; never fetched by its SHA-256): " + J(await wb.stat("/p.txt")));
   check((await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)) === 0, "release plaintext: B's ledger: the file's current bytes now no index add's (0), its sealed adds history: " + J(await metaGet(wb.ws, `sync:${gen}:refs:c:${fid}`)));
   await ctl("set", { set: { serverNotices: false } });
   await stop(a);
@@ -5941,7 +6107,7 @@ async function docKeyExact() {
   await stop(b2);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
+const CASES = { sealedBlobs, blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

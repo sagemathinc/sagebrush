@@ -39,9 +39,11 @@ export const RELEASE_MAX = 64;
  * and names the adds it ends; no other op carries a release, so a race between two devices releasing one add refuses a
  * release, never a person's edit.
  */
-export function refsOf(op: { op: string; kind: string; sha256?: string; releases?: readonly RefPair[] }): { adds: string[]; releases: RefPair[] } {
+export function refsOf(op: { op: string; kind: string; sha256?: string; address?: string; releases?: readonly RefPair[] }): { adds: string[]; releases: RefPair[] } {
   if (op.op === RELEASE_OP) return { adds: [], releases: (op.releases ?? []).map((r) => ({ address: r.address, add: r.add })) };
-  return { adds: op.kind === "file" && op.sha256 !== undefined ? [op.sha256] : [], releases: [] };
+  // (a sealed file op's add is its blob's keyed address, which verifyRow derived and set (sync-seal.ts ADDRESS_FIELD);
+  // a plaintext op's is its bytes' SHA-256, as the server holds it)
+  return { adds: op.kind === "file" && op.sha256 !== undefined ? [op.address ?? op.sha256] : [], releases: [] };
 }
 
 /** A release op this device can't accept: the pull stops at it, nothing of it or after it applied. */
