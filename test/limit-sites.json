@@ -9150,7 +9150,7 @@
  },
  "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: 2-d samples (a matrix of the variables' correlations) are not supported in Sagebrush (give two 1-d samples)\") #0": {
   "class": "coverage",
-  "owner": "python (@sagebrush-python)",
+  "owner": "python",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (spearmanr's matrix of the variables' correlations for 2-d samples): raised before any work, never a guessed result; not a cap"
  },
  "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)\") #0": {
