@@ -14499,6 +14499,116 @@
   "owner": "symbolic linear algebra (@sagebrush-matlab)",
   "reason": "the doctest's expected output for _eigen's unsupported case (the review's N10 pin), not a cap"
  },
+ "lib/_sage_mfmore.py :: NewformMethods.atkin_lehner_eigenvalue :: NotImplementedError: Atkin-Lehner eigenvalues at p with p^2 | N (here p = 3) are not supported yet #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: NewformMethods.atkin_lehner_eigenvalue :: raise NotImplementedError(\"Atkin-Lehner eigenvalues at p with p^2 | N (here p = %d) are not supported yet\" % p) #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: ....: ms._CUR[0].limit = ms._CUR[0].used #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: ....: ms._CUR[0].limit = ms._CUR[0].used #1": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: ....: print(type(e).__name__, e.need_bytes > e.limit_bytes) #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: ....: sys._sagebrush_heap_limit = heap #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: bits = 2 + 1 * 2 + ms._maxbits(t[:58]) + 2; ch.used == 20 * (unit + (bits + 7) // 8) # (T_3 to 20: d(n) n^(k-1) max|a_j|) # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "a doctest checking a reservation's exact size on the running charge; it refuses nothing"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 200000 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sm._mf = Spy(); sys._sagebrush_heap_limit = 4 * (est + P * ms._SLOT) # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = 4 * P * ms._SLOT // 2 # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old # sagebrush only #1": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old # sagebrush only #2": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: sys._sagebrush_heap_limit = old; M._hecke_matrix_qexp(2).charpoly() # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.cuspidal_submodule :: raise NotImplementedError(\"the cuspidal part of %s is not supported yet\" % self) #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.eisenstein_series :: NotImplementedError: Eisenstein series with coefficients in a cyclotomic field (characters of order > 2 mod 25) are not supported yet #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.eisenstein_submodule :: raise NotImplementedError(\"the Eisenstein part of %s is not supported yet\" % self) #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.hecke_bound :: NotImplementedError: hecke_bound of a space with a nontrivial character is not supported yet #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "domain refusal: hecke_bound of a space with a nontrivial character (Sage's rule there not yet pinned); not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: QSpaceMethods.hecke_bound :: raise NotImplementedError(\"hecke_bound of a space with a nontrivial character is not supported yet\") #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "domain refusal: hecke_bound of a space with a nontrivial character (Sage's rule there not yet pinned); not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: _bits_of :: return ms._maxbits(r) #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "bit-size bounds of the coefficients about to be built, reserved against the allowance before they are built (the admission's need), not a limit"
+ },
+ "lib/_sage_mfmore.py :: _real_characters :: DirichletGroup order; NotImplementedError if one is not real (its #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
+ "lib/_sage_mfmore.py :: _real_characters :: raise NotImplementedError(\"Eisenstein series with coefficients in a cyclotomic field (characters of order > 2 mod %d) are not supported yet\" % N) #0": {
+  "class": "none",
+  "owner": "modular forms",
+  "reason": "domain refusals: Eisenstein series with cyclotomic coefficients, Atkin-Lehner eigenvalues where p^2 | N, and the cuspidal or Eisenstein part of a mixed new subspace are not supported yet; not a size or work limit"
+ },
  "lib/_sage_modsym.py :: ModularSymbolsMethods._exact :: raise NotImplementedError(\"Hecke matrices and subspaces of modular symbols with a nontrivial character are not supported yet\") #0": {
   "class": "none",
   "owner": "modular symbols",
@@ -14904,15 +15014,25 @@
   "owner": "modular forms (Sage mode)",
   "reason": "spaces with a nontrivial character: their bases need the engine's forms over Q(chi), not available yet; refused, never a wrong basis"
  },
- "lib/_sage_modular.py :: _new_cusp_rows :: bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1 #0": {
+ "lib/_sage_modular.py :: _hecke_qexp :: vb = ms._maxbits(v[:(prec - 1) * n + 1]) #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "the bits of the coefficients a Hecke translate reads, for the bound its row is reserved at; it refuses nothing"
+ },
+ "lib/_sage_modular.py :: _new_cusp_rows_charged :: bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1 #0": {
   "class": "none",
   "owner": "modular forms (Sage mode)",
   "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"
  },
- "lib/_sage_modular.py :: _new_cusp_rows :: r_max = max(int(o[\"dim\"]) for o in orbits) #0": {
+ "lib/_sage_modular.py :: _new_cusp_rows_charged :: r_max, res = _orbit_dims(M, k, prec, nd, ch) #0": {
   "class": "none",
   "owner": "modular forms (Sage mode)",
   "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"
+ },
+ "lib/_sage_modular.py :: _translate :: sres = _step(ch, \"rank scratch\", _reserve_rows(ch, 1, prec, ms._maxbits(v), frac=False) + _reserve_rows(ch, 3, prec, pbits, frac=False)) #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "the rank test's scratch reserved at its bound (the translate's bits and three rows of residues); it refuses nothing itself"
  },
  "lib/_sage_mpoly.py ::  :: _MAX_CONVERT_ENTRIES = 1 << 20 #0": {
   "class": "2",
@@ -20420,11 +20540,6 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
- },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -20467,6 +20582,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",
