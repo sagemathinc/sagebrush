@@ -295,8 +295,14 @@
   {
    "file": "engine/ledger/src/audit.rs",
    "item": "impl < A : GlobalAlloc > GlobalAlloc for Audit < A >",
-   "hash": "e65b9feb984eb46cc55251cfc7225b20ae220d3951afcaf2bf4e8986a60bdb59",
+   "hash": "3623b74e6c7c74cefe0a01151be0388884e82a8315d204f9de39afeacd78911a",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. The audit allocator (feature ledger-audit, tests/CI only) forwards to the inner allocator; it reads the thread's CHAIN and COVER cells and the O/RES mirror atomics and writes only its own counters. It constructs, moves or mutates no ledger object; it is not generic over any ledger type."
+  },
+  {
+   "file": "engine/ledger/tests/alloc_moving.rs",
+   "item": "impl GlobalAlloc for Moving",
+   "hash": "a19703cfb1dcb31344e5388402365066fdab5d9b5ba8d7d3428929679170cfa2",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue under the audit allocator (feature ledger-audit): a System-backed allocator whose realloc always moves (allocate, copy the smaller size, free) or, once when asked, fails with null keeping the old block; it touches no ledger object."
   },
   {
    "file": "engine/modsym/src/linalg.rs",
@@ -633,6 +639,12 @@
    "item": "fn skt_last_refusal",
    "hash": "68e75c2b6f72c4cf7931f5847026ccb7c25b9a2db3c341011475372cf012a10d",
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-skltree (deps: interrupt and wasmheap, neither of which depends on the ledger; its own wasm module) does not depend on sagebrush-ledger, so it cannot name those types. This item is an export of the kernel's wasm ABI with no unsafe operation (the allow covers #[no_mangle] only); it reads and writes the kernel's own instance state (its dataset table, a buffer's address, a failure's detail, and the bounded heap's bound and refusal) through wasm::with or wasmheap. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
+  },
+  {
+   "file": "engine/sym/tests/trace_stop.rs",
+   "item": "impl GlobalAlloc for Count",
+   "hash": "adb893caebecae695aeb476fbac8212fcf270ff80c423bb0cde4e94462b4a27a",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (integration retains nothing after a stopped trace); it writes only its own LIVE counter."
   },
   {
    "file": "engine/wasmheap/src/lib.rs",
