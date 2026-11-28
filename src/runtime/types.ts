@@ -1064,7 +1064,9 @@ method(BaseException, "__repr__", (self: any) => {
 });
 method(BaseException, "with_traceback", (self: any, _tb: any) => self);
 // (as CPython's BaseException_add_note: a str (a subclass too), into __notes__, which must be a list if present)
-method(BaseException, "add_note", (self: any, note: any) => {
+method(BaseException, "add_note", (self: any, ...args: any[]) => {
+  if (args.length !== 1) raise(T.TypeError, `BaseException.add_note() takes exactly one argument (${args.length} given)`);
+  const note = args[0];
   if (!isinstance(note, T.str)) raise(T.TypeError, `add_note() argument must be str, not ${note === null ? "None" : typeName(note)}`);
   if (self.__notes__ === undefined) self.__notes__ = [];
   else if (!isinstance(self.__notes__, T.list)) raise(T.TypeError, "Cannot add note: __notes__ is not a list");
@@ -1088,7 +1090,7 @@ getset(BaseException, "__context__", (o) => o.__context__ ?? null, (o, v) => voi
 getset(BaseException, "__suppress_context__", (o) => o.__suppress_context__ ?? false, (o, v) => {
   if (typeof v !== "boolean") raise(T.TypeError, "attribute value type must be bool");
   o.__suppress_context__ = v;
-});
+}, () => raise(T.TypeError, "can't delete numeric/char attribute"));
 BaseException.$dict.set("__traceback__", null);
 
 function exc(name: string, base: PyType, extra?: (cls: PyType) => void): PyType {
@@ -1791,16 +1793,33 @@ bindClass(FloatBox, float);
 // float.from_number(x), as CPython 3.14's: a real number only (no str), as PyFloat_AsDouble takes it (a float
 // subclass's value, an int subclass's __float__, else __index__); an int past a double's range OverflowError; a
 // subclass called with the float
-float.$dict.set("from_number", new PyClassMethod(pyfn((cls: any, ...args: any[]) => {
-  if (args.length !== 1) raise(T.TypeError, `float.from_number() takes exactly one argument (${args.length} given)`);
-  const x = args[0];
+// (an int's conversion to a double past its range: an exact int, or an int subclass through int's own __float__, as
+// PyLong_AsDouble raises; a subclass's own __float__ returning infinity is its value)
+export function intDoubleOverflow(x: any, v: number): void {
+  if (Number.isFinite(v)) return;
+  const n = x;
+  if (isinstance(n, T.int) && !isinstance(n, float) && lookupType(typeOf(n), "__float__") === lookupType(T.int, "__float__"))
+    raise(T.OverflowError, "int too large to convert to float");
+}
+// (a from_number classmethod: one positional argument, as CPython's METH_O, in its words)
+export function fromNumberMethod(owner: string, f: (cls: any, x: any) => any): PyClassMethod {
+  const fn = pyfn((cls: any, ...args: any[]) => {
+    if (args.length !== 1) raise(T.TypeError, `${owner}.from_number() takes exactly one argument (${args.length} given)`);
+    return f(cls, args[0]);
+  }, "from_number");
+  (fn as any).$kw = (pos: any[], names: string[], _values: any[]) => {
+    if (names.length) raise(T.TypeError, `${owner}.from_number() takes no keyword arguments`);
+    return fn(...pos);
+  };
+  return new PyClassMethod(fn);
+}
+float.$dict.set("from_number", fromNumberMethod("float", (cls: any, x: any) => {
   const v = asDouble(x);
   if (v === undefined) raise(T.TypeError, `must be real number, not ${typeName(x)}`);
-  if (!Number.isFinite(v) && (typeof x === "bigint" || (isinstance(x, T.int) && !isinstance(x, float))))
-    raise(T.OverflowError, "int too large to convert to float");
+  intDoubleOverflow(x, v);
   const r = O.mkfloat(v);
   return cls === float ? r : callObj(cls, [r]);
-}, "from_number")));
+}));
 method(float, "is_integer", (x: any) => isInt(O.fv(x)!));
 method(float, "conjugate", (x: any) => x);
 method(float, "__float__", (x: any) => (typeof x === "number" || x instanceof FloatBox ? x : O.mkfloat(O.fv(x)!))); // (a subclass's value as a float)
@@ -3810,6 +3829,8 @@ getset(object, "__dict__", (o) => {
         i++;
         continue;
       }
+      // (a hex digit with nothing after it: CPython 3.14's own words for an odd count)
+      if (i + 1 === s.length && /[0-9a-fA-F]/.test(s[i])) raise(T.ValueError, "fromhex() arg must contain an even number of hexadecimal digits");
       if (!/^[0-9a-fA-F]{2}$/.test(s.slice(i, i + 2))) raise(T.ValueError, `non-hexadecimal number found in fromhex() arg at position ${/[0-9a-fA-F]/.test(s[i]) ? i + 1 : i}`);
       out.push(parseInt(s.slice(i, i + 2), 16));
       i += 2;

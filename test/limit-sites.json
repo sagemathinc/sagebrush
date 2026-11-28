@@ -13107,11 +13107,6 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
- "src/runtime/complex.ts :: mixed :: if (!Number.isFinite(v) && typeof x === \"bigint\") raise(T.OverflowError, \"int too large to convert to float\"); #0": {
-  "class": "none",
-  "owner": "python runtime",
-  "reason": "CPython's own semantics, not a Sagebrush cap: float.from_number and complex.from_number of an int past the largest double raise this same OverflowError as CPython 3.14's PyFloat_AsDouble path; no size, memory or work bound (the Codex audit P01)"
- },
  "src/runtime/engine.ts ::  :: import { newBuiltinModule, heapLimit } from \"./modules\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
@@ -14354,11 +14349,6 @@
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
   "reason": "the decision-tree kernel's footprint bound B = min(4 GiB, ARRAY_LIMITS.bytes, the engine's E), retired debt included (fails closed on an inexact sum): MemoryError through memoryGuard before anything is made (design note sklearn-trees r3 section 6)"
  },
- "src/runtime/types.ts :: floatCall :: raise(T.OverflowError, \"int too large to convert to float\"); #0": {
-  "class": "none",
-  "owner": "python runtime",
-  "reason": "CPython's own semantics, not a Sagebrush cap: float.from_number and complex.from_number of an int past the largest double raise this same OverflowError as CPython 3.14's PyFloat_AsDouble path; no size, memory or work bound (the Codex audit P01)"
- },
  "src/runtime/types.ts :: flush :: if (size > MAX_STR) raise(T.MemoryError); #0": {
   "class": "2",
   "owner": "pyjs containers/runtime memory",
@@ -14368,6 +14358,11 @@
   "class": "2",
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
+ },
+ "src/runtime/types.ts :: intDoubleOverflow :: raise(T.OverflowError, \"int too large to convert to float\"); #0": {
+  "class": "none",
+  "owner": "python runtime",
+  "reason": "CPython's own semantics, not a Sagebrush cap: from_number of an int past the largest double (int's own conversion) raises this same OverflowError as CPython 3.14's PyLong_AsDouble; no size, memory or work bound (Codex audit P01)"
  },
  "src/runtime/types.ts :: intOfScan :: const m = intDigits.max; #0": {
   "class": "2",

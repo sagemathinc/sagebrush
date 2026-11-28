@@ -106,3 +106,26 @@ show("__notes__ not a list", notes_not_list)
 def notes_tuple():
     e = ValueError(); e.__notes__ = ('a',); e.add_note('x'); return e.__notes__
 show("__notes__ tuple", notes_tuple)
+# an int subclass's own __float__ returning infinity is its value; int's own conversion past a double's range
+# OverflowError (an int subclass without __float__ too); the classmethods' and add_note's argument errors; deleting
+# __suppress_context__; fromhex's odd digit count
+class FI(int):
+    def __float__(self): return float("inf")
+class BI(int): pass
+show("float.from_number(FI(1))", lambda: float.from_number(FI(1)))
+show("FS.from_number(FI(1))", lambda: FS.from_number(FI(1)))
+show("complex.from_number(FI(1))", lambda: complex.from_number(FI(1)))
+show("float.from_number(BI(10**400))", lambda: float.from_number(BI(10 ** 400)))
+show("complex.from_number(BI(10**400))", lambda: complex.from_number(BI(10 ** 400)))
+show("float.from_number(x=1)", lambda: float.from_number(x=1))
+show("float.from_number(1, 2)", lambda: float.from_number(1, 2))
+show("complex.from_number(x=1)", lambda: complex.from_number(x=1))
+show("complex.from_number()", lambda: complex.from_number())
+show("add_note('a', 'b')", lambda: ValueError().add_note('a', 'b'))
+show("add_note()", lambda: ValueError().add_note())
+def del_suppress():
+    e = ValueError(); del e.__suppress_context__
+show("del __suppress_context__", del_suppress)
+for s in ("4", "4 1", "41 4", "", " ", "4x", "x4", "41 ", "4\t1"):
+    show(f"fromhex {s!r}", lambda: bytes.fromhex(s))
+    show(f"bytearray.fromhex {s!r}", lambda: bytearray.fromhex(s))
