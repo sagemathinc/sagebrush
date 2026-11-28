@@ -84,6 +84,18 @@ for a, b in [([1.0], [2.0, 3.0]), ([2.0, 3.0], [1.0]), ([1.0], [2.0]), ([1.0, np
             out("ttest_ind(%r, %r, equal_var=%s, %s)" % (a, b, eq, alt),
                 lambda: tuple(st.ttest_ind(a, b, equal_var=eq, alternative=alt)) + (st.ttest_ind(a, b, equal_var=eq, alternative=alt).df,))
 out("ttest_ind omit", lambda: tuple(st.ttest_ind([1.0, np.nan, 3.0], [2.0, 3.0, 5.0], nan_policy="omit")))
+# (the interval: t's quantiles, an infinite one for one-sided, times the standard error plus the estimate, so that
+# an undefined or zero standard error leaves an undefined end, not an infinite one)
+for a, b in [([np.nan, 1.0], [2.0, 3.0]), ([1.0, 1.0], [2.0, 2.0]), ([1.0, 1.0], [1.0, 1.0]), ([1.0], [2.0, 3.0]),
+             ([], [2.0, 3.0]), ([1.0, 2.0, 4.0], [2.0, 3.0, 9.0, 1.0])]:
+    for eq in (True, False):
+        for alt in ("two-sided", "less", "greater"):
+            # (not levels 0 and 1: SciPy's interval takes scipy.special.stdtrit, whose stdtrit(df, 0) is +inf where
+            # t.ppf(0, df) is -inf; Sagebrush's is the latter)
+            for level in (0.95, 0.5):
+                out("ttest_ind ci %r %r %s %s %g" % (a, b, eq, alt, level),
+                    lambda: tuple(st.ttest_ind(a, b, equal_var=eq, alternative=alt).confidence_interval(level)))
+out("ttest_ind ci level 1.5", lambda: tuple(st.ttest_ind([1.0, 2.0], [3.0, 5.0]).confidence_interval(1.5)))
 # (n-d samples: one test a slice along axis, not one test of the flattened samples)
 M = np.arange(12.0).reshape(4, 3) ** 1.5
 N3 = (np.arange(24.0).reshape(2, 4, 3) % 7) ** 1.3

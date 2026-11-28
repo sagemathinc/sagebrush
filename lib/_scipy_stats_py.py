@@ -101,20 +101,29 @@ class TtestResult(tuple):
         return "TtestResult(statistic=%r, pvalue=%r, df=%r)" % (self[0], self[1], self._df)
 
     def confidence_interval(self, confidence_level=0.95):
+        """as SciPy's _t_confidence_interval: t's quantiles (one-sided: an infinite one) scaled by the standard error
+        and shifted by the estimate, low = q_low * se + estimate, so that an undefined or zero se leaves an
+        undefined end, not an infinite one"""
         import scipy.stats as st
+        if confidence_level < 0 or confidence_level > 1:
+            raise ValueError("`confidence_level` must be a number between 0 and 1.")
         est, se, df = self._estimate, self._se, self._df
-        if self._alternative == "two-sided":
-            h = st.t.ppf(0.5 + confidence_level / 2, df)
-            lo, hi = est - h * se, est + h * se
-        elif self._alternative == "less":
-            lo, hi = np.float64(-_math.inf), est + st.t.ppf(confidence_level, df) * se
+        inf = np.float64(_math.inf)
+        if self._alternative == "less":
+            q_lo, q_hi = -inf, st.t.ppf(confidence_level, df)
+        elif self._alternative == "greater":
+            q_lo, q_hi = st.t.ppf(1 - confidence_level, df), inf
         else:
-            lo, hi = est - st.t.ppf(confidence_level, df) * se, np.float64(_math.inf)
+            tail = (1 - confidence_level) / 2
+            q_lo, q_hi = st.t.ppf(tail, df), st.t.ppf(1 - tail, df)
+        with np.errstate(invalid="ignore", over="ignore"):
+            lo = np.asarray(q_lo, dtype=float) * se + est
+            hi = np.asarray(q_hi, dtype=float) * se + est
         # (n-d tests: both bounds arrays of the tests' shape, a one-sided interval's infinite end too)
         if np.ndim(lo) or np.ndim(hi):
             shape = np.shape(lo) if np.ndim(lo) else np.shape(hi)
             return ConfidenceInterval(np.asarray(lo, dtype=float) + np.zeros(shape), np.asarray(hi, dtype=float) + np.zeros(shape))
-        return ConfidenceInterval(np.float64(lo), np.float64(hi))
+        return ConfidenceInterval(np.float64(float(lo)), np.float64(float(hi)))
 
 
 class LeveneResult(tuple):
