@@ -717,7 +717,7 @@ async function startIdentitySession(env: ShareEnv, account: string, ttl: number,
       // a sign-in that stands has always offered it, and one refused wrote nothing; a newer answer already written wins)
       ...(ident.kind === "workos" ? [db.prepare(`UPDATE identities SET email = ?2, email_at = ?3, email_obs = ?4 WHERE identity_id = ?1 AND ${emailNewer(4)}`).bind(ident.identity_id, ident.email, t, ident.ticket)] : []),
       // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking)
-      db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
+      db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT DISTINCT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
       db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${EVICTED}))`).bind(account, SESSIONS_MAX),
       db.prepare(`DELETE FROM sessions WHERE rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX),
     ]);
@@ -863,7 +863,7 @@ export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): P
   if (!c) return out;
   const db = env.SHARE_DB!;
   const start = Date.now();
-  const due = (await db.prepare("SELECT id, sid, attempts FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0 AND next_at <= ?1 AND (claim IS NULL OR claim_until < ?1) ORDER BY next_at LIMIT ?2").bind(now(), n).all<{ id: number; sid: string; attempts: number }>()).results;
+  const due = (await db.prepare("SELECT id, sid, account_id, attempts FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0 AND next_at <= ?1 AND (claim IS NULL OR claim_until < ?1) ORDER BY next_at LIMIT ?2").bind(now(), n).all<{ id: number; sid: string; account_id: string | null; attempts: number }>()).results;
   for (const r of due) {
     if (Date.now() - start > budgetMs) break;
     const claim = b64url(random(12));
@@ -882,7 +882,14 @@ export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): P
     }
     if (Number(got.meta?.changes ?? 0) !== 1) continue;
     if ((await revokeSession(c, r.sid)) === "revoked") {
-      await db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND claim = ?2").bind(r.id, claim).run();
+      // (and the same account's other rows for this sid, met by this one delivery: the ends that remove several rows at
+      // once queue each sid once (SELECT DISTINCT), but rows queued at different times can still name one sid, and a
+      // second delivery would be answered 404, retried until exhausted.  One claimed by another drain right now is left
+      // to that drain)
+      await db.batch([
+        db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND claim = ?2").bind(r.id, claim),
+        db.prepare("DELETE FROM revoke_outbox WHERE sid = ?1 AND account_id IS ?2 AND id != ?3 AND sid_unknown = 0 AND (claim IS NULL OR claim_until < ?4)").bind(r.sid, r.account_id, r.id, now()),
+      ]);
       out.delivered++;
     } else {
       const a = r.attempts + 1;
@@ -907,7 +914,7 @@ async function endAllSessions(db: D1, account: string, reason: "everywhere" | "d
   const t = now();
   await db.batch([
     db.prepare(`UPDATE accounts SET generation = generation + 1, signed_out_all_at = ${D1_NOW_MS}${disable ? ", disabled = ?2" : ""} WHERE account_id = ?1`).bind(account, ...(disable ? [t] : [])),
-    db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, ?2, ?3, ?3 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, reason, t),
+    db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT DISTINCT provider_sid, account_id, ?2, ?3, ?3 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, reason, t),
     db.prepare("DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE account_id = ?1)").bind(account),
     db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
   ]);
@@ -1623,7 +1630,7 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
   await db.batch([
     db.prepare("INSERT INTO accounts (account_id, created, deleting) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET deleting = ?2, email = NULL, name = NULL, last_active = NULL").bind(account, t),
     // (with WorkOS sign-in: the account's WorkOS sessions queued for revoking, in the batch that drops them)
-    ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'deleted', ?2, ?2 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, t)] : []),
+    ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT DISTINCT provider_sid, account_id, 'deleted', ?2, ?2 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, t)] : []),
     db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
     // (the sessions' admin grants with them: admin-visibility-plan r1h §1.8)
     db.prepare("DELETE FROM admin_grants WHERE account_id = ?1").bind(account),
@@ -1833,7 +1840,7 @@ export async function scheduled(env: ShareEnv): Promise<void> {
     const stale = "SELECT id FROM pending_exchanges WHERE expires < ?1 ORDER BY id LIMIT 500";
     for (let i = 0; i < 20; i++) {
       const rs = (await db.batch([
-        db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'expired', ?1, ?1 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${past})`).bind(t),
+        db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT DISTINCT provider_sid, account_id, 'expired', ?1, ?1 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${past})`).bind(t),
         db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${past}))`).bind(t),
         db.prepare(`DELETE FROM sessions WHERE rowid IN (${past})`).bind(t),
         db.prepare(`INSERT INTO revoke_outbox (sid, account_id, sid_unknown, reason, created, next_at, exchange_id) SELECT NULL, NULL, 1, 'exchange-stale', ?1, ?1, id FROM pending_exchanges WHERE id IN (${stale})`).bind(t),

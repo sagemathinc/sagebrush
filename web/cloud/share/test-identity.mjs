@@ -135,6 +135,11 @@ async function outbound(req) {
     }
     if (fake.revokeDown) return new Response("down", { status: 503 });
     if (fake.revoke404) return new Response("<html>Not Found</html>", { status: 404, headers: { "content-type": "text/html" } });
+    // (a session already ended at WorkOS: a second revoke of it is answered 404, as WorkOS does)
+    if (fake.revokeRepeat404) {
+      const id = (await req.clone().json()).session_id;
+      if (fake.revoked.includes(id)) return new Response("not found", { status: 404 });
+    }
     if (req.headers.get("authorization") !== `Bearer ${API_KEY}`) {
       fake.revokeAuthBad++;
       return new Response("no", { status: 401 });
@@ -1385,6 +1390,41 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   for (let i = 0; i < 21; i++) last = await signIn("user_01SHAREC", "session_01SHAREDC");
   const d2 = await drain();
   ok((await rowsFor("session_01SHAREDC")) === 20 && (await me(last.session)).status === 200 && !fake.revoked.includes("session_01SHAREDC") && (await queuedFor("session_01SHAREDC")) === 0, `V2 a cap eviction of one of 21 local sessions sharing a WorkOS session doesn't revoke it (${JSON.stringify(d2)}, ${fake.revoked})`);
+
+  // sign-out everywhere with two local sessions sharing one sid queues it twice; one delivery meets both, so nothing
+  // is left to be answered 404 and retried until exhausted
+  {
+    const e1 = await signIn("user_01SHAREE", "session_01SHAREDE");
+    await signIn("user_01SHAREE", "session_01SHAREDE");
+    fake.revoked = [];
+    fake.revokeRepeat404 = true;
+    const all = await post("/auth/logout-everywhere", e1.session);
+    await drain();
+    await drain();
+    fake.revokeRepeat404 = false;
+    const left = await db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(attempts), 0) AS attempts FROM revoke_outbox WHERE sid = 'session_01SHAREDE'").first();
+    ok(all.status === 200 && fake.revoked.filter((x) => x === "session_01SHAREDE").length === 1 && left.n === 0, `V4 sign-out everywhere of two local sessions sharing a sid revokes it once, and no duplicate is left queued or retried (${JSON.stringify(left)}, ${fake.revoked})`);
+  }
+
+  // a row queued earlier and still waiting to be retried (WorkOS was down), then the same sid queued again by a later
+  // end: the delivery of the later one retires the earlier, which would otherwise be answered 404 and retried to
+  // exhaustion
+  {
+    const f1 = await signIn("user_01SHAREF", "session_01SHAREDF");
+    fake.revokeDown = true;
+    await post("/auth/logout", f1.session);
+    await drain();
+    fake.revokeDown = false;
+    const waiting = await db.prepare("SELECT COUNT(*) AS n, MAX(attempts) AS a FROM revoke_outbox WHERE sid = 'session_01SHAREDF'").first();
+    const f2 = await signIn("user_01SHAREF", "session_01SHAREDF");
+    fake.revoked = [];
+    fake.revokeRepeat404 = true;
+    await post("/auth/logout-everywhere", f2.session);
+    await drain();
+    fake.revokeRepeat404 = false;
+    const left = (await db.prepare("SELECT COUNT(*) AS n FROM revoke_outbox WHERE sid = 'session_01SHAREDF'").first()).n;
+    ok(waiting.n === 1 && waiting.a >= 1 && fake.revoked.filter((x) => x === "session_01SHAREDF").length === 1 && left === 0, `V5 an earlier queued revoke of a sid, still waiting to be retried, is retired by the later delivery of the same sid (${JSON.stringify(waiting)}, ${left} left)`);
+  }
 
   // a sid no local session holds is still revoked as before
   const c = await signIn("user_01SHARED", "session_01SHAREDD");
