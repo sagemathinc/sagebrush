@@ -165,6 +165,26 @@ function precompiled(source: string, filename: string, name: string, sage: boole
   if (m === undefined || m === null || typeof m !== "object" || m.path !== rel || typeof m.code !== "string" || !Array.isArray(m.lineMap)) return null;
   return { code: m.code, lineMap: m.lineMap };
 }
+// (Rill's modules are recorded without their docstrings: nothing reads a Rill function's __doc__, and they were
+// about a twentieth of its precompiled chunk; their sources keep them, and a module compiled at run time has them)
+const NO_DOCSTRINGS = (rel: string) => rel.startsWith("_rill/");
+/** Removes each module, class and function body's docstring from CPython's tree (a body left empty gets a pass). */
+export function stripDocstrings(node: any): void {
+  if (node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const n of node) stripDocstrings(n);
+    return;
+  }
+  const t = node._type;
+  if ((t === "Module" || t === "FunctionDef" || t === "AsyncFunctionDef" || t === "ClassDef") && Array.isArray(node.body)) {
+    const first = node.body[0];
+    if (first?._type === "Expr" && first.value?._type === "Constant" && typeof first.value.value === "string") {
+      node.body.shift();
+      if (node.body.length === 0) node.body.push({ _type: "Pass", lineno: first.lineno, col_offset: first.col_offset, end_lineno: first.end_lineno, end_col_offset: first.end_col_offset });
+    }
+  }
+  for (const k of Object.keys(node)) if (k !== "_type") stripDocstrings(node[k]);
+}
 // (making them: every library module compiled in this process, written at exit)
 const recording: Record<string, Compiled & { path: string }> | null = process.versions?.node && process.env.SAGEBRUSH_PRECOMPILE_OUT ? {} : null;
 if (recording !== null) {
@@ -185,7 +205,7 @@ function compileCached(source: string, filename: string, name: string, sage: boo
   const pre = precompiled(source, filename, name, sage);
   if (pre !== null) return { compiled: pre, script: new Script(pre.code, { filename: jsName }) };
   if (recording !== null && precompiledPath(filename) !== null) {
-    const compiled = compile(source, filename, name, false, false, { sage });
+    const compiled = compile(source, filename, name, false, false, NO_DOCSTRINGS(precompiledPath(filename)!) ? { sage, transform: stripDocstrings } : { sage });
     recording[precompiledKey(name, sage)] = { ...compiled, path: precompiledPath(filename)! };
     return { compiled, script: new Script(compiled.code, { filename: jsName }) };
   }
