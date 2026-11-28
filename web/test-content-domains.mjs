@@ -1,6 +1,6 @@
 // ci: web-runner order=124 runner=bun
 import assert from "node:assert/strict";
-import { CONTENT_DOMAINS, LEGACY_CONTENT_ROOTS, checkContentDomains, filesOrigin, filesHost, filesHosts, forbiddenContentRoots } from "./content-domains.mts";
+import { CONTENT_DOMAINS, LEGACY_CONTENT_ROOTS, agentOrigin, checkContentDomains, filesOrigin, filesHost, filesHosts, forbiddenContentRoots } from "./content-domains.mts";
 import { SITES, checkSites } from "./output-shell/sites.mts";
 const it = (name, f) => { f(); console.log("ok   " + name); };
 const legacy = ["cocalcusercontent.com", "cocalcusercontent.dev"];
@@ -16,7 +16,7 @@ it("keeps deployed files routes and all hosted roles unchanged", () => {
     assert.equal(filesHost(env), `files.${root}`);
     assert.deepEqual(filesHosts(env), [`files.${root}`]);
   }
-  assert(Object.values(CONTENT_DOMAINS).every((c) => Object.values(c).every((v) => v === "")));
+  assert(Object.values(CONTENT_DOMAINS).every((c) => Object.values(c).every((v) => v === "" || v === false)), "every role unset and no PSL adoption recorded");
   assert(Object.values(SITES).every((s) => s.shell === ""));
   assert.deepEqual(checkSites(), []);
 });
@@ -67,4 +67,32 @@ it("legacy and pending content roots stay forbidden for hosted rendering", () =>
     const problems = checkSites({ ...SITES, dev: { ...SITES.dev, shell: `https://render.${root}/` } });
     assert.deepEqual(problems, [`dev: the shell may not share the app's or the user-content site (${root})`]);
   }
+});
+it("the agent guest: an exact agent origin under its root, none by default", () => {
+  assert.equal(agentOrigin("dev"), "");
+  assert.equal(agentOrigin("prod"), "");
+  const c = configured(); c.dev.agentOrigin = "https://agent.content-example.dev";
+  assert.deepEqual(checkContentDomains(c), []);
+  assert.equal(agentOrigin("dev", c), "https://agent.content-example.dev");
+  assert.deepEqual(forbiddenContentRoots(c), [...legacy, "content-example.dev", "content-example.com"]);
+  for (const bad of ["https://agent.other-example.dev", "http://agent.content-example.dev", "https://x.agent.content-example.dev", "https://agent.content-example.dev/"]) {
+    const d = configured(); d.dev.agentOrigin = bad;
+    assert.deepEqual(checkContentDomains(d), ["dev: agentOrigin must be the exact https agent origin under its content root"], bad);
+  }
+});
+it("SEC G-O1: no script-running host shares a root with the agent guest until the root's PSL listing is adopted", () => {
+  const shared = "dev: agentOrigin can't share its content root with runOrigin or renderOrigin until the root's Public Suffix List listing is adopted";
+  for (const role of ["run", "render"]) {
+    const c = configured(); c.dev.agentOrigin = "https://agent.content-example.dev"; c.dev[`${role}Origin`] = `https://${role}.content-example.dev`;
+    assert.deepEqual(checkContentDomains(c), [shared], role);
+    assert.throws(() => agentOrigin("dev", c), /Public Suffix List/);
+    c.dev.pslAdopted = true;
+    assert.deepEqual(checkContentDomains(c), [], `${role}, the listing adopted`);
+  }
+  // (run or render on a root without the guest: as before)
+  const r = configured(); r.prod.runOrigin = "https://run.content-example.com";
+  assert.deepEqual(checkContentDomains(r), []);
+  // (the guest on one environment's root, run on the other's: separate roots, allowed)
+  const x = configured(); x.dev.agentOrigin = "https://agent.content-example.dev"; x.prod.runOrigin = "https://run.content-example.com";
+  assert.deepEqual(checkContentDomains(x), []);
 });

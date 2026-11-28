@@ -249,8 +249,12 @@ def structured():
         call("number_field", {"polynomial": bad}, "invalid_arguments")
     for bad in ["23; __sagebrush_data__ = {}", "23.5", "1e3", None]:
         call("newforms", {"level": bad}, "invalid_arguments")
-    # (rational coefficients parse, and the engine refuses them: integral only)
-    assert "integer coefficients" in call("number_field", {"polynomial": "x^2/4 + 23/4"}, "unimplemented")["error"]["message"]
+    # (rational coefficients parse, and the field is the one of the polynomial made monic and integral: x^2/4 + 23/4
+    # keeps its polynomial and has x^2 + 23's invariants)
+    rq = call("number_field", {"polynomial": "x^2/4 + 23/4"})["result"]
+    rz = call("number_field", {"polynomial": "x^2 + 23"})["result"]
+    assert rq["polynomial"] == "1/4*x^2 + 23/4" and (rq["degree"], rq["signature"], rq["discriminant"]) == (2, [0, 1], {"value": "-23", "certified": True, "assumes": []}), rq
+    assert {k: v for k, v in rq.items() if k != "polynomial"} == {k: v for k, v in rz.items() if k != "polynomial"}, (rq, rz)
     # ... and user code cannot reach the shortcut tools' session: a patched
     # is_prime in the sage tool's session leaves factor's status honest
     call("sage", {"code": "import sagebrush.sage as S\nS.is_prime = lambda *a, **k: True\nS.is_prime(2^127 - 1, proof=True)"})

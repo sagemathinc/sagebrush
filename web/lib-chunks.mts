@@ -32,6 +32,7 @@
 // SHA-256, and the manifest the whole hash, which the worker checks before it
 // uses one (design/security.md, SEC-8D6-1: a cached copy is origin storage).
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 export type Recording = { build: string; modules: Record<string, { code: string; lineMap: unknown; path: string }> };
 export type ChunkRef = { file: string; sha256: string; size: number };
@@ -102,9 +103,10 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   if (top === "_sprig") return path === "_sprig/plot.py" ? "sprig-plot" : "sprig-more";
   if (PATHLIB_FAMILY.has(top)) return "mod-pathlib";
   if (XML_FAMILY.has(top)) return "mod-xml";
-  // (elliptic curves over GF(p), imported only by EllipticCurve() over a
-  // finite field: its own group, so sage-more's users don't fetch it)
-  if (top === "_sage_ec_ff") return "mod-sage-ec-ff";
+  // (a Sage-layer module no start uses, a domain's: a group of its own, mod-sage-<domain>, fetched the first time one
+  // of its names is used (Sage mode's session loads a domain then: lib/_sage_lazy.py, lib/_sage_names.py); a module
+  // another imports at module level (the index's DEPS) is in that one's group, so the two come in one fetch)
+  if (/^_?sage_[a-z0-9_]+$/.test(top)) return sageDomainGroup(top, sets);
   if (/^_?sage/.test(top)) return "sage-more";
   // (live data's small modules, imported together: fredapi and its bridge, and yfinance's refusal; one group,
   // design-data-access r3.1)
@@ -121,6 +123,36 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   const sub = /^scipy\/(special|stats|optimize)(?:\.py$|\/)/.exec(path);
   if (sub) return "mod-scipy-" + sub[1];
   return modGroup(top);
+}
+// Sage-layer modules whose group is their own though they import another at module level: Graph imports sage_plot,
+// and in its group plot()'s users, more than Graph's, would fetch Graph's 66 kB too (16 kB compressed), to save
+// Graph's users one fetch
+const SAGE_OWN_GROUP = new Set(["_sage_graph"]);
+// The group of Sage-layer module `top` no start uses: its DEPS parent's, while that isn't a start's, else its own
+function sageDomainGroup(top: string, sets: Record<string, Set<string>>): string {
+  return "mod-sage-" + sageDomainRoot(top, sets).replace(/^_?sage_/, "").replace(/_/g, "-");
+}
+// (the module whose group it is: following DEPS while there's exactly one parent no start uses, except from a
+// module in SAGE_OWN_GROUP)
+export function sageDomainRoot(top: string, sets: Record<string, Set<string>>, deps: Record<string, string[]> = sageDeps()): string {
+  for (let seen = new Set<string>(); !seen.has(top) && !SAGE_OWN_GROUP.has(top); ) {
+    seen.add(top);
+    const parents = (deps[top] ?? []).filter((p) => !Object.values(sets).some((s) => s?.has(p + ".py")));
+    if (parents.length !== 1) break;
+    top = parents[0];
+  }
+  return top;
+}
+let sageDepsCache: Record<string, string[]> | null = null;
+/** The name index's DEPS (lib/_sage_names.py): module -> the Sage-layer modules it imports at module level */
+export function sageDeps(): Record<string, string[]> {
+  if (sageDepsCache !== null) return sageDepsCache;
+  const text = readFileSync(new URL("../lib/_sage_names.py", import.meta.url), "utf8");
+  const block = /^DEPS = \{\n([\s\S]*?)^\}/m.exec(text);
+  if (!block) throw new Error("library chunks: lib/_sage_names.py has no DEPS block");
+  const deps: Record<string, string[]> = {};
+  for (const m of block[1].matchAll(/^\s*'([\w]+)': \(([^)]*)\),?$/gm)) deps[m[1]] = [...m[2].matchAll(/'([\w]+)'/g)].map((x) => x[1]);
+  return (sageDepsCache = deps);
 }
 // (lowercase letters, digits and "-": an engine file's name has nothing
 // else, web/engines.ts; mod-future for __future__, mod-ipython for IPython)
@@ -142,7 +174,9 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     // (two top-level names that would share a group's name: never silently
     // merged, but for a private module and its public twin, _string and
     // string, which are imported together)
-    const top = path.split("/")[0].replace(/\.py$/, "").replace(/^_(?!_)/, "");
+    // (a Sage domain's group holds the modules DEPS joins to it: their root module is the group's one name)
+    const raw = path.split("/")[0].replace(/\.py$/, "");
+    const top = g.startsWith("mod-sage-") && /^_?sage_[a-z0-9_]+$/.test(raw) ? sageDomainRoot(raw, sets) : raw.replace(/^_(?!_)/, "");
     if (g.startsWith("mod-") && !SHARED_MOD_GROUPS.has(g) && (tops.get(g) ?? top) !== top) throw new Error(`library chunks: ${tops.get(g)} and ${top} would both be ${g}`);
     tops.set(g, top);
     const bad = familyViolation(path, g);
