@@ -13304,6 +13304,16 @@
   "owner": "Sage-mode matrices (shape and exponent checks)",
   "reason": "doctest output: a Python complex keeps Python's refusal with a finite-field matrix; not a cap"
  },
+ "lib/_sage_ffmat.py :: FFMatrix :: sage: cls.__init__ = init; sys._sagebrush_heap_limit = old; A[[0] * 3, :].dimensions() # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show a selection refused before its submatrix is built, and working again"
+ },
+ "lib/_sage_ffmat.py :: FFMatrix :: sage: import sys; old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 10**6 # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show a selection refused before its submatrix is built, and working again"
+ },
  "lib/_sage_ffmat.py :: FFMatrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
@@ -20475,7 +20485,7 @@
  },
  "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
   "class": "none",
-  "owner": "python (@sagebrush-python)",
+  "owner": "python",
   "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {

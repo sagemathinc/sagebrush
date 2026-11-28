@@ -120,13 +120,10 @@ def _qfrac(t):
 
 
 def _weight_arg(k):
-    """A weight as Sage converts it: an integer, or a float, rational or
-    string with an integral value; Sage's TypeError for a non-integral one
-    (never truncated to a different weight)."""
-    if isinstance(k, float):
-        if not k.is_integer():
-            raise TypeError("cannot convert non-integral float to integer")
-        return int(k)
+    """A weight as Sage converts it, through ZZ: an integer, or a float, a
+    real, a rational or a string with an integral value; Sage's errors for
+    a non-integral one, NaN or an infinity (never truncated to a different
+    weight)."""
     from sage_all import ZZ
     return int(ZZ(k))
 

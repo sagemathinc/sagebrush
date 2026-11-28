@@ -1588,6 +1588,43 @@ class FFMatrix:
         Traceback (most recent call last):
         ...
         TypeError: unsupported operand type(s) for *: 'complex' and 'FFMatrix'
+
+    Submatrices from slices, ranges and lists of indices keep their shape::
+
+        sage: A = matrix(GF(5), [[1, 2, 3], [3, 2, 1]])
+        sage: A[:0, :].dimensions(), A[:0, :].right_kernel().dimension(), A[1:1, 0].dimensions()
+        ((0, 3), 3, (0, 1))
+        sage: A[[1, 0], :], A[[1, 1], [2, 0]], A[[], :].dimensions()
+        (
+        [3 2 1]  [1 3]
+        [1 2 3], [1 3], (0, 3)
+        )
+        sage: A[[1, 0]]
+        [3 2 1]
+        [1 2 3]
+        sage: A[[2], :]
+        Traceback (most recent call last):
+        ...
+        IndexError: matrix index out of range
+        sage: A['a', :]
+        Traceback (most recent call last):
+        ...
+        TypeError: index must be an integer
+
+    A selection is admitted before it is built::
+
+        sage: import sys; old = getattr(sys, "_sagebrush_heap_limit", None); sys._sagebrush_heap_limit = 4 * 10**6  # sagebrush only
+        sage: cls = type(A); init = cls.__init__; made = []  # sagebrush only
+        sage: cls.__init__ = lambda self, *a: (made.append(1), init(self, *a))[1]  # sagebrush only
+        sage: for f in (lambda: A[[0] * 10**5, :], lambda: A[[0] * 10**5]):  # sagebrush only
+        ....:     try:
+        ....:         f()
+        ....:     except MemoryError as e:
+        ....:         print(type(e).__name__, len(made))
+        SagebrushMemoryError 0
+        SagebrushMemoryError 0
+        sage: cls.__init__ = init; sys._sagebrush_heap_limit = old; A[[0] * 3, :].dimensions()  # sagebrush only
+        (3, 3)
     """
 
     __slots__ = ("_base", "_rows", "_ncols", "_subdiv")
@@ -1705,7 +1742,7 @@ class FFMatrix:
         IndexErrors), or None for a single index."""
         if isinstance(idx, slice):
             return list(range(n)[idx])
-        if isinstance(idx, (list, tuple)):
+        if isinstance(idx, (list, tuple, range)):
             import operator
             out = []
             for k in idx:
@@ -1717,30 +1754,17 @@ class FFMatrix:
                     raise IndexError("matrix index out of range")
                 out.append(k % n)
             return out
+        import operator
+        try:
+            operator.index(idx)
+        except TypeError:
+            raise TypeError("index must be an integer")
         return None
 
     def __getitem__(self, ij):
-        """An entry, a row, or the submatrix that slices or lists of indices
-        select (its shape kept when it selects no rows).
-
-        EXAMPLES::
-
-            sage: A = matrix(GF(5), [[1, 2, 3], [3, 2, 1]])
-            sage: A[:0, :].dimensions(), A[:0, :].right_kernel().dimension(), A[1:1, 0].dimensions()
-            ((0, 3), 3, (0, 1))
-            sage: A[[1, 0], :], A[[1, 1], [2, 0]], A[[], :].dimensions()
-            (
-            [3 2 1]  [1 3]
-            [1 2 3], [1 3], (0, 3)
-            )
-            sage: A[[1, 0]]
-            [3 2 1]
-            [1 2 3]
-            sage: A[[2], :]
-            Traceback (most recent call last):
-            ...
-            IndexError: matrix index out of range
-        """
+        """An entry, a row, or the submatrix that slices, ranges or lists
+        of indices select (its shape kept when it selects no rows); the
+        examples are on the class."""
         if isinstance(ij, tuple):
             i, j = ij
             ri = self._selector(i, len(self._rows), "row")
@@ -1755,10 +1779,11 @@ class FFMatrix:
             return FFMatrix(self._base, [[self._rows[r][c] for c in cj] for r in ri], len(cj))
         if isinstance(ij, slice):
             return FFMatrix(self._base, self._rows[ij], self._ncols)
-        if isinstance(ij, list):
+        if isinstance(ij, (list, range)):
             ri = self._selector(ij, len(self._rows), "row")
             _admit_size(self._base, len(ri), self._ncols)
             return FFMatrix(self._base, [list(self._rows[r]) for r in ri], self._ncols)
+        self._selector(ij, len(self._rows), "row")
         return FFVector(self._base, self._rows[ij])
 
     def __setitem__(self, ij, v):
