@@ -136,6 +136,7 @@ const NOT_IN_APP = new Map([
   ["gh", "a GitHub notebook's address: the site's"],
   ["nb", "the local server's notebook addresses (sagebrush notebook), not the app's"],
   ["tmp", "a path in the interpreter's own file system, not a page"],
+  ["space", "3D view examples (web/workspace/browser.ts): offered only on the site's listed hosts (web/build.ts SPACE_HOSTS), never in the app"],
 ]);
 const goesTo = new Set();
 for (const f of pageFiles) for (const m of readFileSync(join(out, f), "utf8").matchAll(/["'`]\/([a-z][a-z0-9-]*)\/(?:\?|["'`])/g)) goesTo.add(m[1]);
