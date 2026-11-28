@@ -350,3 +350,10 @@ I7.eigenspaces_right(algebraic_multiplicity=1) -> NotImplementedError: unable to
 I7.eigenspaces_left(algebraic_multiplicity=False) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
 I7.eigenspaces_right(algebraic_multiplicity="x") -> ValueError: algebraic_multiplicity keyword must be True or False
 type(B2.eigenspaces_right(algebraic_multiplicity=True)[0][2]) -> <class 'int'>
+B2.eigenvectors_right(None, other=B2) -> TypeError: eigenvectors_right() got multiple values for keyword argument 'other'
+B2.eigenvectors_left(None, other=B2) -> TypeError: eigenvectors_left() got multiple values for keyword argument 'other'
+B2.eigenvectors_right(None, other=None) -> TypeError: eigenvectors_right() got multiple values for keyword argument 'other'
+B2.eigenvectors_left(None, other=None) -> TypeError: eigenvectors_left() got multiple values for keyword argument 'other'
+B2.eigenvectors_left(None, extend=False) -> [(2, [
+(0, 1)
+], 2)]

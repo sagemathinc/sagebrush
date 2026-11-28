@@ -4106,6 +4106,22 @@ class PolynomialRing_ff_:
         raise NotImplementedError("iterated polynomial rings")
 
 
+def _admit_workspace(base, entries, what):
+    """Check that entries coefficients over base, a computation's workspace
+    live at once, fit this process's budget for one operation (that of one
+    matrix, 1/_HEAP_SHARE of the heap): the memory guard's
+    SagebrushMemoryError, before anything is built, if not.  The heap
+    decides alone; there is no cap on the degree or shape."""
+    from _sage_ffmat import _entry_cost, _heap_limit, _HEAP_SHARE
+    need = entries * _entry_cost(base)
+    limit = _heap_limit()
+    if need > limit // _HEAP_SHARE:
+        import _capacity, _memguard
+        e = _memguard.memory_guard(what, need, limit // _HEAP_SHARE, "one operation's workspace")
+        e.capacity = _capacity.capacity()
+        raise e
+
+
 def PolynomialRing_ff(base, name="x"):
     """The univariate polynomial ring over a finite field or Z/nZ (what
     PolynomialRing(GF(q), name) and GF(q)[name] return).
@@ -4990,17 +5006,37 @@ class Polynomial_ff:
             SagebrushMemoryError 0
             sage: (x^2).minpoly_mod(x^10 + 3*x + 1).degree()  # sagebrush only
             10
-            sage: sys._sagebrush_heap_limit = old; P.padded_list = padded  # sagebrush only
+
+        A high-degree input with a small modulus: its reduction is admitted
+        before it is made, and no degree or shape cap applies::
+
+            sage: g = x^100000 + 1; mods = []; built.clear(); mod = P.__mod__  # sagebrush only
+            sage: P.__mod__ = lambda self, other: (mods.append(1), mod(self, other))[1]  # sagebrush only
+            sage: try:  # sagebrush only
+            ....:     g.minpoly_mod(x^2 + 1)
+            ....: except MemoryError as e:
+            ....:     print(type(e).__name__, len(mods), len(built))
+            SagebrushMemoryError 0 0
+            sage: sys._sagebrush_heap_limit = old; g.minpoly_mod(x^2 + 1)  # sagebrush only
+            x + 99
+            sage: sys._sagebrush_heap_limit = 2^60  # sagebrush only
+            sage: (x^2).minpoly_mod(x^1448 + x + 1).degree()  # sagebrush only
+            1448
+            sage: sys._sagebrush_heap_limit = old; P.padded_list = padded; P.__mod__ = mod  # sagebrush only
         """
         self._need_field("minpoly_mod")
         m = self._coerce(other)
         n = m.degree()
         B = self._ring._base
-        from _sage_ffmat import _admit_size
-        # (live at once: at most n + 1 reduced rows of n coordinates and n + 1
-        # combination coefficients, with a working row and combination,
-        # admitted before any is built)
-        _admit_size(B, n + 1, 2 * n + 2, 2)
+        D = max(self.degree(), 0)
+        # (live at once, admitted against the heap before any is built, with
+        # no shape cap: self's reduction mod m (its copy, the quotient and
+        # the remainder: at most 2 D + 2 coefficients); at most n + 1 reduced
+        # rows of n coordinates and n + 1 combination coefficients, with a
+        # working row and combination; and a power times self's residue
+        # before its reduction, with that reduction's copies (6 n))
+        _admit_workspace(B, 2 * D + 2 + 2 * (n + 1) * (2 * n + 2) + 6 * n + 6,
+                         "The minimal polynomial of a degree %d polynomial modulo one of degree %d over %r" % (D, n, B))
         a = self % m
         # (reduced rows: each power's coordinates, eliminated against the
         # ones before, with the combination of powers that produced it)

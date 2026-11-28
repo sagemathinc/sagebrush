@@ -73,3 +73,6 @@ for nm in ['B2', 'B', 'D', 'X3', 'I7']:
               'eigenspaces_right(algebraic_multiplicity="x")']:
         show(nm + '.' + c, lambda: eval(nm + '.' + c))
 show('type(B2.eigenspaces_right(algebraic_multiplicity=True)[0][2])', lambda: type(B2.eigenspaces_right(algebraic_multiplicity=True)[0][2]))
+# a duplicate binding of other
+for c in ['B2.eigenvectors_right(None, other=B2)', 'B2.eigenvectors_left(None, other=B2)', 'B2.eigenvectors_right(None, other=None)', 'B2.eigenvectors_left(None, other=None)', 'B2.eigenvectors_left(None, extend=False)']:
+    show(c, lambda: eval(c))

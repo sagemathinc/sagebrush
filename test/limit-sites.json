@@ -13178,7 +13178,17 @@
   "owner": "finite fields + configuration",
   "reason": "domain refusal: resultant, discriminant and is_square over Z/n with n composite (not a field) are not implemented; not a size or work limit"
  },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: before it is made, and no degree or shape cap applies:: #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: import sys; old = getattr(sys, \"_sagebrush_heap_limit\", None) # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = 2^60 # sagebrush only #0": {
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
@@ -13188,7 +13198,12 @@
   "owner": "finite fields + configuration",
   "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
  },
- "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = old; P.padded_list = padded # sagebrush only #0": {
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = old; P.padded_list = padded; P.__mod__ = mod # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = old; g.minpoly_mod(x^2 + 1) # sagebrush only #0": {
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
@@ -13226,6 +13241,66 @@
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: decides alone; there is no cap on the degree or shape.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: e = _memguard.memory_guard(what, need, limit // _HEAP_SHARE, \"one operation's workspace\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: from _sage_ffmat import _entry_cost, _heap_limit, _HEAP_SHARE #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: if need > limit // _HEAP_SHARE: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: limit = _heap_limit() #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: live at once, fit this process's budget for one operation (that of one #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
  },
  "lib/_sage_ff.py :: _ff_bounded :: return lambda: NotImplementedError(\"%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most %s elements%s)\" % (what, A, B, _ffsub().embed_max_text(), _ffsub().work_clause())) #0": {
   "class": "3",

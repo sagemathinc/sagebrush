@@ -727,6 +727,8 @@ class FFMatrixMethods:
         for key in kwds:
             if key not in allowed:
                 raise TypeError("%s() got an unexpected keyword argument '%s'" % (name, key))
+        if args and "other" in kwds:
+            raise TypeError("%s() got multiple values for keyword argument 'other'" % name)
         other = args[0] if args else kwds.get("other")
         if other is not None:
             raise NotImplementedError("generalized eigenvector decomposition is implemented for RDF and CDF, but not for %r" % self._base)
