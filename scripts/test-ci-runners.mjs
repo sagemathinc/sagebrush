@@ -3,7 +3,7 @@
 // SB_CI_RUNNER their switch; @sagebrush's ruling on astra4's review of the runner plan).  Every workflow is read as
 // GitHub reads it, and every job's runs-on evaluated for every event:
 // - with SB_CI_RUNNER set, exactly the jobs scripts/ci-runner-jobs.json names take it, and only for a merge-queue group
-//   or a push to master or a track; every pull request (this repository's too, a fork's, a deleted fork's), the
+//   or a push to master (not a track: track branches have no ruleset, SEC Nov 28 2026); every pull request (this repository's too, a fork's, a deleted fork's), the
 //   schedule and a dispatch stay on GitHub's runners; wasm-modules stays there on master's push (wasm-publish
 //   publishes its modules);
 // - no named job holds a secret, an environment, an OIDC token or a write permission; the jobs not named (wasm-publish,
@@ -24,13 +24,13 @@ let n = 0;
 // ---- the list itself
 assert.equal(spec.repository, "sagemathinc/sagebrush");
 assert.equal(spec.workflow, ".github/workflows/ci.yml");
-assert.deepEqual(spec.events, ["merge_group", "push refs/heads/master", "push refs/heads/track/*"]);
+assert.deepEqual(spec.events, ["merge_group", "push refs/heads/master"]);
 assert.deepEqual(spec.not_for, { "wasm-modules": ["push refs/heads/master"] });
 assert.deepEqual(spec.jobs, [...new Set(spec.jobs)].sort(), "the jobs, sorted, once each");
 n += 5;
 
-const T = "vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/track/'))))";
-const TW = "vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/track/')))";
+const T = "vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))";
+const TW = "vars.SB_CI_RUNNER != '' && github.event_name == 'merge_group'";
 const RULE = { default: `\${{ ${T} && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}`, "wasm-modules": `\${{ ${TW} && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}` };
 
 // ---- an evaluator of exactly these expressions (GitHub's && and || yield an operand, as JavaScript's do)
@@ -49,7 +49,7 @@ function runner(expr, ctx) {
 const EVENTS = {
   "merge_group": [{ event_name: "merge_group", ref: "refs/heads/gh-readonly-queue/master/pr-1-abc" }, "trusted"],
   "push master": [{ event_name: "push", ref: "refs/heads/master" }, "master"],
-  "push track": [{ event_name: "push", ref: "refs/heads/track/math" }, "trusted"],
+  "push track": [{ event_name: "push", ref: "refs/heads/track/math" }, "hosted"],
   "push other branch": [{ event_name: "push", ref: "refs/heads/feature" }, "hosted"],
   "push tag": [{ event_name: "push", ref: "refs/tags/app-v0.9.0" }, "hosted"],
   "pull_request (this repository)": [{ event_name: "pull_request", ref: "refs/pull/1/merge" }, "hosted"],
