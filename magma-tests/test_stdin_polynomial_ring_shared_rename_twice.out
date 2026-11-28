@@ -1,0 +1,12 @@
+y^2 - 2
+Univariate Polynomial Ring in y over Rational Field
+z^2 - 2
+z
+z
+true
+[
+    z^2 - 2,
+    z + 1
+]
+Univariate Polynomial Ring in z over Rational Field
+end

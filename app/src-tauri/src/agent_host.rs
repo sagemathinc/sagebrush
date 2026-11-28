@@ -24,8 +24,12 @@
 //   after it, and with it the group id is given up (`group` 0: nothing left armed).
 //
 // C, verify_bundle(): before each start, the files the app will run (r5 §3): <resources>/agent/MANIFEST.json, whose
-// sha256 must be the one compiled into the app, then every file it lists (size, sha256, mode), the Node sidecar, and
-// nothing else in agent/: no extra file, no link, no special file. Any difference refuses the start; nothing is ever
+// sha256 must be the one compiled into the app, then every file it lists (size, sha256, mode), the Node sidecar (the
+// binary the start will exec, beside the app's executable: shipped_node()), and nothing else in agent/: no extra
+// file, no link, no special file. The Node is always a regular file, not a link, executable and not writable by
+// others; on Linux and in an unsigned build its exact size and sha256 are the manifest's, while a signed Mac build
+// (signing rewrites it, after the manifest is made) checks its code signature: valid, Developer ID, and the app's own
+// Team ID, compiled in (node_check()). Any difference refuses the start; nothing is ever
 // fetched instead.
 //
 // Windows: not yet (its owned child is a Job Object, with the Windows step of design/app-agent-host.md §4):
@@ -424,6 +428,7 @@ pub enum BundleError {
     BadPath,
     Missing,
     NotAFile,
+    NodeSignature,
     Link,
     Extra,
     Size,
@@ -441,7 +446,8 @@ impl BundleError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Versions {
     pub agent: String,
-    pub claude_code: String,
+    /// None: this build bundles no Claude Code (the agent can't chat until one is present; nothing falls back to PATH)
+    pub claude_code: Option<String>,
     pub codex: Option<String>,
     pub node: String,
 }
@@ -452,9 +458,34 @@ struct Entry {
     exec: bool,
 }
 
+/// The Node the app ships (tauri's externalBin, beside the app's executable): the one path both the bundle check and
+/// every start that runs it use.
+pub fn shipped_node() -> Option<PathBuf> {
+    Some(std::env::current_exe().ok()?.parent()?.join("sagebrush-node"))
+}
+
+/// How the shipped Node is checked beyond its shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeCheck<'a> {
+    /// its exact size and sha256, the manifest's (Linux, and an unsigned build)
+    Bytes,
+    /// its code signature: valid in every architecture, a Developer ID Application certificate, this Team ID
+    /// (a signed Mac build)
+    TeamSignature(&'a str),
+}
+
+/// This build's NodeCheck: a Mac build signed for release has SAGEBRUSH_MACOS_TEAM_ID compiled in (build.rs).
+pub fn node_check() -> NodeCheck<'static> {
+    match option_env!("SAGEBRUSH_MACOS_TEAM_ID") {
+        Some(t) if cfg!(target_os = "macos") && !t.is_empty() => NodeCheck::TeamSignature(t),
+        _ => NodeCheck::Bytes,
+    }
+}
+
 /// Check <resources>/agent/ against its manifest, whose sha256 must be `manifest_sha256` (the app's compiled-in
-/// SAGEBRUSH_AGENT_MANIFEST_SHA256, lowercase hex; empty: no agent in this build).
-pub fn verify_bundle(resources: &Path, manifest_sha256: &str) -> Result<Versions, BundleError> {
+/// SAGEBRUSH_AGENT_MANIFEST_SHA256, lowercase hex; empty: no agent in this build), and `node` (shipped_node(), the
+/// binary the start will exec): a regular file, not a link, executable, not writable by others, then `check`.
+pub fn verify_bundle(resources: &Path, node: &Path, manifest_sha256: &str, check: NodeCheck) -> Result<Versions, BundleError> {
     if manifest_sha256.is_empty() {
         return Err(BundleError::NotBundled);
     }
@@ -474,9 +505,15 @@ pub fn verify_bundle(resources: &Path, manifest_sha256: &str) -> Result<Versions
     if Sha256::digest(&bytes).as_slice() != want {
         return Err(BundleError::ManifestHash);
     }
-    let (versions, node, files) = parse_manifest(&bytes)?;
-    // (the Node sidecar, outside agent/: its path relative to resources, checked like a listed file)
-    check_file(resources, &node.0, &node.1)?;
+    let (versions, node_entry, files) = parse_manifest(&bytes)?;
+    // (the Node sidecar, outside resources: the very binary the start runs)
+    match check {
+        NodeCheck::Bytes => check_entry(node, &node_entry)?,
+        NodeCheck::TeamSignature(team) => {
+            check_shape(node, true)?;
+            signed_by_team(node, team)?;
+        }
+    }
     // (every file in agent/ is listed, and is what the list says; MANIFEST.json itself is checked above)
     let mut seen = 0usize;
     walk(&agent, &agent, &mut |rel, full| {
@@ -493,7 +530,7 @@ pub fn verify_bundle(resources: &Path, manifest_sha256: &str) -> Result<Versions
     Ok(versions)
 }
 
-fn parse_manifest(bytes: &[u8]) -> Result<(Versions, (String, Entry), BTreeMap<String, Entry>), BundleError> {
+fn parse_manifest(bytes: &[u8]) -> Result<(Versions, Entry, BTreeMap<String, Entry>), BundleError> {
     use BundleError::ManifestForm as F;
     let v: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| F)?;
     let o = v.as_object().ok_or(F)?;
@@ -502,17 +539,21 @@ fn parse_manifest(bytes: &[u8]) -> Result<(Versions, (String, Entry), BTreeMap<S
     }
     let s = |x: Option<&serde_json::Value>| x.and_then(|y| y.as_str()).map(|y| y.to_string()).filter(|y| !y.is_empty() && y.len() <= 64).ok_or(F);
     let agent = o.get("agent").and_then(|x| x.as_object()).ok_or(F)?;
-    let claude = o.get("claude_code").and_then(|x| x.as_object()).ok_or(F)?;
     let node = o.get("node").and_then(|x| x.as_object()).ok_or(F)?;
+    // (claude_code and codex: each absent, or an object with its version; present in any other form is refused)
+    let claude_code = match o.get("claude_code") {
+        None => None,
+        Some(c) => Some(s(c.as_object().ok_or(F)?.get("version"))?),
+    };
     let codex = match o.get("codex") {
         None => None,
         Some(c) => Some(s(c.as_object().ok_or(F)?.get("version"))?),
     };
     s(agent.get("release_sha256")).and_then(|h| hex32(&h).ok_or(F))?;
-    let versions = Versions { agent: s(agent.get("version"))?, claude_code: s(claude.get("version"))?, codex, node: s(node.get("version"))? };
-    let node_path = s(node.get("path"))?;
-    if !clean_rel(&node_path) {
-        return Err(BundleError::BadPath);
+    let versions = Versions { agent: s(agent.get("version"))?, claude_code, codex, node: s(node.get("version"))? };
+    // (node: exactly its version, sha256 and size; where it is, is the app's to say, never the manifest's)
+    if node.len() != 3 {
+        return Err(F);
     }
     let node_entry = Entry { sha256: hex32(&s(node.get("sha256"))?).ok_or(F)?, size: node.get("size").and_then(|x| x.as_u64()).ok_or(F)?, exec: true };
     let list = o.get("files").and_then(|x| x.as_array()).ok_or(F)?;
@@ -536,7 +577,7 @@ fn parse_manifest(bytes: &[u8]) -> Result<(Versions, (String, Entry), BTreeMap<S
             return Err(BundleError::BadPath); // (listed twice)
         }
     }
-    Ok((versions, (node_path, node_entry), files))
+    Ok((versions, node_entry, files))
 }
 
 /// A normalized relative '/'-separated path: no '..', no '.', no empty component, nothing absolute, no '\\' or NUL.
@@ -606,20 +647,8 @@ fn rel_of(root: &Path, full: &Path) -> Option<String> {
     clean_rel(&s).then_some(s)
 }
 
-fn check_file(base: &Path, rel: &str, e: &Entry) -> Result<(), BundleError> {
-    // (each folder on the way, and the file, must not be a link)
-    let mut p = PathBuf::from(base);
-    for c in rel.split('/') {
-        p.push(c);
-        let m = std::fs::symlink_metadata(&p).map_err(|_| BundleError::Missing)?;
-        if m.file_type().is_symlink() {
-            return Err(BundleError::Link);
-        }
-    }
-    check_entry(&p, e)
-}
-
-fn check_entry(full: &Path, e: &Entry) -> Result<(), BundleError> {
+/// A regular file, not a link, executable exactly when `exec`, not writable by group or others; its length.
+fn check_shape(full: &Path, exec: bool) -> Result<u64, BundleError> {
     let m = std::fs::symlink_metadata(full).map_err(|_| BundleError::Missing)?;
     if m.file_type().is_symlink() {
         return Err(BundleError::Link);
@@ -627,17 +656,48 @@ fn check_entry(full: &Path, e: &Entry) -> Result<(), BundleError> {
     if !m.file_type().is_file() {
         return Err(BundleError::NotAFile);
     }
-    if m.len() != e.size {
-        return Err(BundleError::Size);
-    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let exec = m.permissions().mode() & 0o111 != 0;
+        let is_exec = m.permissions().mode() & 0o111 != 0;
         let writable_by_others = m.permissions().mode() & 0o022 != 0;
-        if exec != e.exec || writable_by_others {
+        if is_exec != exec || writable_by_others {
             return Err(BundleError::Mode);
         }
+    }
+    Ok(m.len())
+}
+
+/// The code requirement for `team`: Apple's anchor, a Developer ID Application leaf, that team (a Team ID is ten
+/// uppercase letters and digits; anything else is refused before it reaches the requirement's text).
+pub fn team_requirement(team: &str) -> Option<String> {
+    if team.len() != 10 || !team.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!("anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"{team}\""))
+}
+
+/// `node`'s code signature is valid (strictly, in every architecture) and satisfies team_requirement(team).
+#[cfg(target_os = "macos")]
+pub fn signed_by_team(node: &Path, team: &str) -> Result<(), BundleError> {
+    use core_foundation::url::CFURL;
+    use security_framework::os::macos::code_signing::{Flags, SecRequirement, SecStaticCode};
+    let text = team_requirement(team).ok_or(BundleError::NodeSignature)?;
+    let req: SecRequirement = text.parse().map_err(|_| BundleError::NodeSignature)?;
+    let url = CFURL::from_path(node, false).ok_or(BundleError::NodeSignature)?;
+    let code = SecStaticCode::from_path(&url, Flags::NONE).map_err(|_| BundleError::NodeSignature)?;
+    code.check_validity(Flags::STRICT_VALIDATE | Flags::CHECK_ALL_ARCHITECTURES, &req).map_err(|_| BundleError::NodeSignature)
+}
+
+/// (no code signatures to check here: a signed-build check off macOS refuses)
+#[cfg(not(target_os = "macos"))]
+pub fn signed_by_team(_node: &Path, _team: &str) -> Result<(), BundleError> {
+    Err(BundleError::NodeSignature)
+}
+
+fn check_entry(full: &Path, e: &Entry) -> Result<(), BundleError> {
+    if check_shape(full, e.exec)? != e.size {
+        return Err(BundleError::Size);
     }
     let mut f = std::fs::File::open(full).map_err(|_| BundleError::Missing)?;
     let mut h = Sha256::new();

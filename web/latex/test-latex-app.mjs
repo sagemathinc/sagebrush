@@ -3,8 +3,9 @@
 // (app/serve-app.py), in headless Chromium with window.__TAURI__ before the page's scripts, as the app's web view has
 // it, and __SB_DESKTOP_APP__ as the desktop build sets it (app/src-tauri/src/lib.rs, cfg(desktop)). There File ▸ New ▸
 // LaTeX document makes a .tex and opens the editor; the preview draws its title and a formula; and what the app
-// doesn't offer is said, not done: Share disabled with its reason, no Agent, Run (its button and Shift+Enter) answered
-// with why, its Sage never started; the banner's article on sagebrush.space. Then as the phone apps have it (no
+// doesn't offer is said, not done: Share disabled with its reason, no Agent; Run (its button, then Shift+Enter) runs the
+// SageTeX item in the app's interpreter (#1540: its engine, here the page's own worker, as where the engine doesn't
+// start, this bridge having none), \sage{1+1} shown as 2; the banner's article on sagebrush.space. Then as the phone apps have it (no
 // __SB_DESKTOP_APP__): no LaTeX document under New, and the same .tex's ?tex= link says the editor isn't on here.
 //   bun web/build.ts && node app/build-frontend.mjs && bun web/latex/test-latex-app.mjs
 import { spawn } from "node:child_process";
@@ -23,7 +24,7 @@ const check = (ok, what) => {
   console.log(`${ok ? "ok" : "FAIL"} ${what}`);
 };
 const TEX = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\section{Hello from the app}\nTwo is $\\sage{1+1}$, and $x^2 + 1$.\n\\end{document}\n";
-const TAURI = `window.__TAURI__ = { core: { invoke: async (c) => (c === "startup_files" ? [] : null) }, event: { listen: async () => () => {} } };`;
+const TAURI = `window.__calls = []; window.__TAURI__ = { core: { invoke: async (c, a, o) => { window.__calls.push({ c, a: a instanceof Uint8Array ? null : a, h: o?.headers ?? null }); return c === "startup_files" ? [] : null; } }, event: { listen: async () => () => {} } };`;
 let chrome = null, server = null;
 const profile = mkdtempSync(join(tmpdir(), "sb-latex-app-"));
 try {
@@ -73,15 +74,27 @@ try {
   const link = await evaluate(`[...document.querySelectorAll(".tex-banner a")].map((a) => a.href)[0] ?? null`);
   check(link === "https://sagebrush.space/articles/latex/02-how-it-differs", `desktop: the banner's article is sagebrush.space's (${link})`);
   const runShown = await until(`(() => { const b = document.querySelector(".tex-run"); return !!b && !b.hidden; })()`, 30000);
-  check(!!runShown && /desktop app/.test(await evaluate(`document.querySelector(".tex-run").title`)), "desktop: Run is shown for the SageTeX item, its title saying the app doesn't run it");
-  const why = /Run isn't available in the desktop app/;
+  const runTitle = await evaluate(`document.querySelector(".tex-run").title`);
+  check(!!runShown && /on this computer/.test(runTitle) && !/isn't available/.test(runTitle), `desktop: Run is shown for the SageTeX item, its title about this computer (${JSON.stringify(runTitle)})`);
+  const preview = `document.querySelector(".tex-preview")?.textContent ?? ""`;
+  check(!/Two is\s*2\b/.test(await evaluate(preview)), "desktop: before Run, the item has no result");
   await evaluate(`document.querySelector(".tex-run").click()`);
-  const clicked = await until(`${why}.test(document.querySelector(".tex-status")?.textContent ?? "")`, 10000);
-  check(!!clicked && (await evaluate(`document.querySelector(".tex-run").textContent`)) === "Run", `desktop: Run's click says why, and nothing starts (${JSON.stringify(await evaluate(`document.querySelector(".tex-status")?.textContent`))})`);
-  await evaluate(`document.querySelector(".tex-status").textContent = ""`);
+  const ran = await until(`/Two is\\s*2\\b/.test(${preview}) && document.querySelector(".tex-run").textContent === "Run"`, 180000);
+  check(!!ran && !/isn't available/.test(await evaluate(`document.querySelector(".tex-status")?.textContent ?? ""`)), `desktop: Run runs it: \\sage{1+1} shown as 2 (${JSON.stringify((await evaluate(preview)).replace(/\s+/g, " ").slice(0, 80))}; status ${JSON.stringify(await evaluate(`document.querySelector(".tex-status")?.textContent`))})`);
+  // (Shift+Enter runs it again, an edited item: 2+3 shown as 5)
+  await evaluate(`(() => { const t = document.querySelector(".tex-src"); t.value = t.value.replace("1+1", "2+3"); t.dispatchEvent(new Event("input")); return true; })()`);
+  await until(`!/Two is\\s*2\\b/.test(${preview})`, 20000);
   await evaluate(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true })); return true; })()`);
-  const keyed = await until(`${why}.test(document.querySelector(".tex-status")?.textContent ?? "")`, 10000);
-  check(!!keyed && (await evaluate(`document.querySelector(".tex-run").textContent`)) === "Run", "desktop: Shift+Enter is answered the same way");
+  const keyed = await until(`/Two is\\s*5\\b/.test(${preview})`, 120000);
+  check(!!keyed, `desktop: Shift+Enter runs it too (${JSON.stringify((await evaluate(preview)).replace(/\s+/g, " ").slice(0, 80))})`);
+  // (Run's code may change no file in the app either (run-core.mjs tells its interpreter so first): a write is refused,
+  //  in the preview, and nothing reaches the app's disk (no disk_write asked of it))
+  await evaluate(`(() => { const t = document.querySelector(".tex-src"); t.value = t.value.replace("2+3", "open('/written-by-tex.txt', 'w').write('x')"); t.dispatchEvent(new Event("input")); return true; })()`);
+  await until(`!/Two is\\s*5\\b/.test(${preview})`, 20000);
+  await evaluate(`document.querySelector(".tex-run").click()`);
+  const refused = await until(`/PermissionError|Errno 13|isn't allowed/.test(${preview} + (document.querySelector(".tex-status")?.textContent ?? ""))`, 120000);
+  const wrote = await evaluate(`(window.__calls ?? []).some((c) => c.c === "disk_write" && /written-by-tex/.test(JSON.stringify(c.a ?? "")))`);
+  check(!!refused && wrote === false, `desktop: Run's code can't write a file: refused, nothing written (${JSON.stringify((await evaluate(preview)).replace(/\s+/g, " ").slice(0, 120))})`);
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: desk.result.identifier });
 
   // ---- a phone app: __TAURI__ without the desktop build's flag

@@ -178,3 +178,87 @@ True
 (True, False)
 == force-writeable-frame
 (True, [[1.0], [2.0]])
+== complex-dtype <class 'numpy.float64'>
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype <class 'numpy.float64'>
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype <class 'numpy.float32'>
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype <class 'numpy.float32'>
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype <class 'numpy.int64'>
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype <class 'numpy.int64'>
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype <class 'numpy.int32'>
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype <class 'numpy.int32'>
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype 'numeric'
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype 'numeric'
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype None
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype None
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype [<class 'numpy.float64'>, <class 'numpy.float32'>]
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype [<class 'numpy.float64'>, <class 'numpy.float32'>]
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== pandas-copy Series ['ensure_2d'] copy=True
+(True, [99.0, 2.0], [1.0, 2.0])
+== pandas-copy Series ['ensure_2d'] copy=False
+(False, [1.0, 2.0], [1.0, 2.0])
+== pandas-copy DataFrame [] copy=True
+(True, [[99.0, 99.0], [2.0, 4.0]], [[1.0, 3.0], [2.0, 4.0]])
+== pandas-copy DataFrame [] copy=False
+(False, [[1.0, 3.0], [2.0, 4.0]], [[1.0, 3.0], [2.0, 4.0]])
+== pandas-copy DataFrame [] copy=True
+(True, [[99], [2]], [[1], [2]])
+== pandas-copy DataFrame [] copy=False
+(False, [[1], [2]], [[1], [2]])
+== complex-into <class 'bool'>
+('b', [[True, False]])
+== complex-into <class 'numpy.bool'>
+('b', [[True, False]])
+== complex-into 'U40'
+('U', [['(1+2j)', '0j']])
+== complex-into <class 'str'>
+('U', [['(1+2j)', '0j']])
+== complex-into <class 'numpy.float32'>
+!! ValueError: Complex data not supported
+[[1.+2.j 0.+0.j]]
+
+== complex-into <class 'numpy.int8'>
+!! ValueError: Complex data not supported
+[[1.+2.j 0.+0.j]]
+

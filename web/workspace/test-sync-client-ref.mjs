@@ -30,13 +30,14 @@ if (process.env.SYNC_REQUIRE_CLAIM !== "1") {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const J = JSON.stringify;
-// (each case signs in its own account, so none sees another's log: 97 of them, then FULL and SMALL, which end the
-// cases' pool; an id's index stays under 100, its last group 12 hex digits)
+// (each case signs in its own account, so none sees another's log: 97 of them and 30 more, then FULL and SMALL, which
+// end the cases' pool; an id's index stays under 100 in its family, its last group 12 hex digits)
 const accountId = (i) => `c1c1c1c1-${String(i).padStart(4, "0")}-4c1c-8c1c-c1c1c1c1c1${String(i).padStart(2, "0")}`;
+const accountId2 = (i) => `c2c2c2c2-${String(i).padStart(4, "0")}-4c2c-8c2c-c2c2c2c2c2${String(i).padStart(2, "0")}`;
 // (the cloud's fake CoCalc gives FULL a small storage and SMALL small files; the reference server has no plan limits,
 // so the two cases that use them are skipped here, by name)
 const FULL = accountId(87), SMALL = accountId(88);
-const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), FULL, SMALL];
+const ACCOUNTS = [...Array.from({ length: 99 }, (_, i) => accountId(i)).filter((a) => a !== FULL && a !== SMALL), ...Array.from({ length: 40 }, (_, i) => accountId2(i)), FULL, SMALL];
 // (the control pages' accounts: their own, so no case of the main run sees a control's log)
 // (each control page takes its own 3 of them, by its place in CONTROL_PAGES)
 const CTL_ACCOUNTS = Array.from({ length: 30 }, (_, i) => `d0d0d0d0-${String(i).padStart(4, "0")}-4d0d-8d0d-d0d0d0d0d0${String(i).padStart(2, "0")}`);
@@ -158,6 +159,9 @@ const ctl = {
   rebuiltReal: false,
   /** the next n unasked-for index pages (a hello's) dropped */
   dropIndex: 0,
+  // (e2e PR 5c: the next ack naming an envelope hash, or the next index serving a sealed op, altered on its way to the
+  // page, as a server holding other bytes would answer)
+  tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null, tamperIndexHead: null, tamperIndexField: null,
   /** the next n pulled index pages (answers to pull_index) dropped */
   dropPulled: 0,
   /** the next n pulled index pages answered {ops: [], more: true} instead (a page that moves nothing) */
@@ -361,7 +365,7 @@ const probe = (body, own = {}) => frontOp("probe", async () => {
         await new Promise((ok) => { wake = ok; setTimeout(ok, 50); });
       }
     };
-    ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "probe", index_after: 0 }));
+    ws.send(JSON.stringify({ t: "hello", v: 3, device, name: "probe", index_after: 0 }));
     const welcome = await next((m) => m.t === "welcome");
     const index = [];
     let page = await next((m) => m.t === "index");
@@ -433,13 +437,26 @@ async function control(body) {
     case "dead": { let n = 0; for (const c of pageSockets) if (!c.data.dead) { c.data.dead = true; n++; } return { dead: n }; }
     case "release": { const n = held.length; for (const f of held.splice(0)) f(); return { released: n }; }
     case "probe": return probe(body);
+    // (e2e PR 5c: the reference server's key chain for an account (sealed ops are checked against it; null: none), its
+    // sealed log's cap, and a blob's sealed references)
+    case "e2eChain": {
+      const ch = body.chain;
+      const unb = (x) => Uint8Array.from(atob(x.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+      ref.controls.setChain(body.account, ch ? { account: ch.account, head: ch.head, generation: ch.generation, signers: new Map(ch.signers.map(([id, raw]) => [id, unb(raw)])) } : null);
+      return { ok: true };
+    }
+    case "sealedCap": ref.controls.setSealedCap(body.n); return { ok: true };
+    case "refuseSealed": ref.controls.refuseSealed(body.dseq, body.code); return { ok: true };
+    case "sealedRefs": return { refs: ref.controls.refs(body.account, body.address) };
+    // (e2e PR 5d: the index's references, each add `address:add_seq` with the seq that released it or null)
+    case "indexRefs": return { rows: ref.controls.indexRefs(body.account) };
     // (index_changed notices, as the account object sends them (plan-sync-index-changed r1), `times` of them to every
     // open socket: the client's side is tested by injecting them here; the server's own are dropped unless
     // ctl.serverNotices)
     // (a frame of the server's own, pushed to every page socket as the server would push it (no req): 2c-3's docWire)
     case "frame": { let sent = 0; for (const f of toPage) { f(JSON.stringify(body.frame)); sent++; } return { sent }; }
     case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
-    case "reset": Object.assign(ctl, { fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null, serverNotices: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null, tamperIndexHead: null, tamperIndexField: null, fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null, serverNotices: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     // (3b's control-only commands: a held wait released only by release/reset or the barrier (K-B, K-R1); a timer
     // (K-I, K-J); K-L2's armed late op; K-R2's reset of exactly its one untracked read)
     case "hang": await new Promise((ok) => held.push(ok)); return { ok: true };
@@ -599,7 +616,7 @@ async function serveOp(req, server, u, p) {
       floorsFront.served.push(createHash("sha256").update(bytes).digest("hex"));
       return new Response(bytes, { headers: { "content-type": "text/javascript" } });
     }
-    if (p === "/" || p === "/ws.js" || p === "/cases.js" || p === "/ctl.html" || (FLOORS && p === "/floors.html")) {
+    if (p === "/" || p === "/ws.js" || p === "/cases.js" || p === "/sealkit.js" || p === "/ctl.html" || (FLOORS && p === "/floors.html")) {
       return new Response(Bun.file(join(site, p === "/" ? "index.html" : p.slice(1))), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
     }
     if (p === "/__ctl") {
@@ -686,7 +703,7 @@ async function serveOp(req, server, u, p) {
       return sessionAccount ? Response.json({ account_id: sessionAccount }) : Response.json({ error: "sign in first" }, { status: 401 });
     }
     const headers = {};
-    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
+    for (const k of ["content-type", "content-length", "x-sync-account", "x-sync-generation", "x-sb-ct-sha256"]) { const v = req.headers.get(k); if (v !== null) headers[k] = v; }
     // (the reference server reads a PUT's length from its header: the page's, forwarded; else the body's own)
     if (isPut && headers["content-length"] === undefined) headers["content-length"] = String(body.length);
     let r;
@@ -787,6 +804,35 @@ const websocket = {
         if (ctl.closeAfterDrop) d.closeBoth(1000);
         return;
       }
+      if (m.t === "ack" && Array.isArray(m.ops) && ctl.tamperAckHash > 0 && m.ops.some((o) => typeof o.env_sha256 === "string")) {
+        ctl.tamperAckHash--;
+        const o = m.ops.find((x) => typeof x.env_sha256 === "string");
+        o.env_sha256 = (o.env_sha256[0] === "A" ? "B" : "A") + o.env_sha256.slice(1);
+        return d.send(JSON.stringify(m));
+      }
+      if (m.t === "index" && Array.isArray(m.ops) && ctl.tamperIndexEnvBad > 0 && m.ops.some((o) => typeof o.env === "string")) {
+        ctl.tamperIndexEnvBad--;
+        m.ops.find((x) => typeof x.env === "string").env = "!!not base64!!";
+        return d.send(JSON.stringify(m));
+      }
+      if (m.t === "index" && Array.isArray(m.ops) && ctl.tamperIndexField && (!ctl.tamperFor || d.helloDevice === ctl.tamperFor) && m.ops.some((o) => typeof o.env === "string")) {
+        const o = m.ops.find((x) => typeof x.env === "string");
+        o[ctl.tamperIndexField.field] = ctl.tamperIndexField.value;
+        // (sticky: every index this device is served is altered the same way, as a server that keeps serving it would)
+        if (!ctl.tamperIndexField.sticky) ctl.tamperIndexField = null;
+        return d.send(JSON.stringify(m));
+      }
+      if (m.t === "index" && Array.isArray(m.ops) && ctl.tamperIndexHead && (!ctl.tamperFor || d.helloDevice === ctl.tamperFor) && m.ops.some((o) => typeof o.env === "string")) {
+        m.ops.find((x) => typeof x.env === "string").head = ctl.tamperIndexHead;
+        ctl.tamperIndexHead = null;
+        return d.send(JSON.stringify(m));
+      }
+      if (m.t === "index" && Array.isArray(m.ops) && ctl.tamperIndexEnv > 0 && (!ctl.tamperFor || d.helloDevice === ctl.tamperFor) && m.ops.some((o) => typeof o.env === "string")) {
+        ctl.tamperIndexEnv--;
+        const o = m.ops.find((x) => typeof x.env === "string");
+        o.env = (o.env[0] === "A" ? "B" : "A") + o.env.slice(1);
+        return d.send(JSON.stringify(m));
+      }
       d.send(text);
     };
     up.onclose = (code) => { fl({ k: "close", code }); d.closeBoth(code); };
@@ -800,8 +846,11 @@ const websocket = {
     const text = typeof data === "string" ? data : Buffer.from(data).toString();
     let m;
     try { m = JSON.parse(text); } catch { m = {}; }
-    log.sent.push(m.t === "ops" ? { t: "ops", req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
+    // (sealed sends, e2e PR 5c: `sops`, logged as its own type with the same fields)
+    const opsLike = m.t === "ops" || m.t === "sops";
+    log.sent.push(opsLike ? { t: m.t, req: m.req, dseqs: m.ops.map((o) => o.dseq), json: m.ops.map((o) => JSON.stringify(o)), at: Date.now() } : { t: m.t, req: m.req, index_after: m.index_after, after: m.after, at: Date.now() });
     if (m.t === "hello") d.helloAccount = m.account ?? null;
+    if (m.t === "hello") d.helloDevice = m.device ?? null;
     if (d.dead) return;
     fl({ k: "sent", t: m.t, req: m.req, ...(m.t === "batch" ? { doc: m.doc } : {}) });
     // (every batch checked as the canonical reference server checks it (§5.8: one generation for each client in its
@@ -815,8 +864,8 @@ const websocket = {
         return;
       }
     }
-    if (m.t === "ops") log.bindings.push({ session: d.socketSession, hello: d.helloAccount, dseqs: m.ops.map((o) => o.dseq) });
-    if (m.t === "ops") log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
+    if (opsLike) log.bindings.push({ session: d.socketSession, hello: d.helloAccount, dseqs: m.ops.map((o) => o.dseq) });
+    if (opsLike) log.ops.push(...m.ops.map((o) => JSON.stringify(o)));
     if (m.t === "rebuilt" && ctl.rebuiltReal) log.rebuilt.push({ through: m.through, answer: "server", at: Date.now() });
     if (m.t === "rebuilt" && !ctl.rebuiltReal) {
       const f = ctl.rebuilt.shift() ?? { ack: { floor: m.through, count: 0 } };
@@ -831,7 +880,7 @@ const websocket = {
       d.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
       return;
     }
-    if (m.t === "ops" && ctl.fakeOps.length) {
+    if (opsLike && ctl.fakeOps.length) {
       const f = ctl.fakeOps.shift();
       // (hold: answered only when the test releases it, after it has seen the client's sender idle)
       const answer = () => d.send(JSON.stringify({ t: "error", req: m.req, code: f.code, detail: f.detail ?? { message: "faked" } }));
@@ -1179,7 +1228,7 @@ async function resourceControls() {
         for (const text of c.buf.splice(0)) ws.onmessage(text);
         const next = async (f, ms = 1000) => { const t = performance.now(); for (;;) { const m = got.find(f); if (m) return m; if (performance.now() - t > ms) return null; await sleep(10); } };
         const doc = crypto.randomUUID(), client = "ctlmsg1", id = "1".padStart(11, "0") + "_" + client;
-        ws.send(J({ t: "hello", v: 2, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
+        ws.send(J({ t: "hello", v: 3, device: "c0c0c0c0c0c0c0c0", name: "ctl", index_after: 0, generation: 1 }));
         const welcome = await next((m) => m.t === "welcome" || m.t === "error");
         steps.push(["welcome", welcome?.t === "welcome" && welcome.state === "active" && welcome.generation === 1]);
         ws.send(J({ t: "doc_claim", req: 1, epoch: 1, doc, client }));
@@ -1561,8 +1610,18 @@ try {
     writeFileSync(join(site, "floors.html"), `<!doctype html><meta charset="utf-8"><title>sync floors: the old front</title><script>window.ACCOUNTS = ${J(FLOOR_ACCOUNTS)}; window.OLD_SHA = ${J(OLD_SHA)};</script><script type="module">import { runFloors } from "./cases.js"; window.runFloors = runFloors; window.ready = true;</script>`);
   } else {
     waitingOn = "the page's bundle (Bun.build of index.ts)";
-    const b = await bounded(Bun.build({ entrypoints: [join(here, "index.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
+    // (index.ts, and the test hooks it doesn't export: dropVersions' DROP_HOOK sits between an irreversible deletion and
+    // its log, so only this test bundle carries it, never the product's public surface)
+    const wsEntry = join(site, "ws-entry.ts");
+    writeFileSync(wsEntry, `export * from ${J(join(here, "index.ts"))};\nexport { DROP_HOOK } from ${J(join(here, "api.ts"))};\n`);
+    const b = await bounded(Bun.build({ entrypoints: [wsEntry], outdir: site, naming: "ws.js", target: "browser", format: "esm" }), waitingOn, 120_000);
     if (!b.success) throw new Error("the page's bundle: " + b.logs.map(String).join("\n"));
+    // (e2e PR 5c: the sealing module and an epoch's keys, a bundle of their own that only the sealed cases load, so the
+    // workspace's bundle carries none of it, as a page without end-to-end encryption doesn't)
+    const kitEntry = join(site, "sealkit-entry.ts");
+    writeFileSync(kitEntry, `export * from ${J(join(here, "sync-seal.ts"))};\nexport { deriveEpochKeys } from ${J(join(here, "e2e", "keys.ts"))};\nexport { openIndexOp } from ${J(join(here, "e2e", "index-op.ts"))};\nexport { mintDocCek } from ${J(join(here, "e2e", "doc-cek.ts"))};\n`);
+    const kb = await bounded(Bun.build({ entrypoints: [kitEntry], outdir: site, naming: "sealkit.js", target: "browser", format: "esm" }), "the sealed cases' kit", 120_000);
+    if (!kb.success) throw new Error("the sealed cases' kit: " + kb.logs.map(String).join("\n"));
     copyFileSync(join(here, "sync-client-cases.js"), join(site, "cases.js"));
     writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>sync client test</title><script>window.ACCOUNTS = ${J(ACCOUNTS)}; window.FULL = ${J(FULL)}; window.SMALL = ${J(SMALL)}; window.REQUIRE_CLAIM = true; window.__budgets = ${J(MAIN_BUDGETS)};</script><script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
     // (the control pages: their own accounts, never the main run's, and their own budgets; P7 has none, so it's legacy)

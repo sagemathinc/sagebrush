@@ -44,6 +44,9 @@ export interface SyncEnv {
   /** design/agent-endpoint.md (fs-sync step 1a): "1" turns on agents' grants and /api/agent/v1/, and only where
    * SHARE_DEV is "1" (DEV) and GRANT_TAG_KEY is bound; unset, off */
   SYNC_AGENT?: string;
+  /** design/e2e-encryption.md PR 2c: "1" turns on the E2E key chain and the enrollment mailbox, and only where
+   * SHARE_DEV is "1" (DEV); unset, off */
+  SYNC_E2E?: string;
   /** the key of a grant token's tag (design/agent-endpoint.md §2): a secret, the owner's; without it agents are off */
   GRANT_TAG_KEY?: string;
   COCALC_ORIGIN?: string;
@@ -91,6 +94,12 @@ export function tieredOn(env: SyncEnv): boolean {
  * (SHARE_DEV "1"), with a tag key bound, so a stray binding in production turns nothing on. */
 export function agentOn(env: SyncEnv): boolean {
   return env.SYNC_AGENT === "1" && env.SHARE_DEV === "1" && !!env.GRANT_TAG_KEY;
+}
+
+/** Whether the E2E key chain and the enrollment mailbox are on (design/e2e-encryption.md, PR 2c): SYNC_E2E "1" on DEV
+ * only (SHARE_DEV "1"), so a stray binding in production turns nothing on. */
+export function e2eOn(env: SyncEnv): boolean {
+  return env.SYNC_E2E === "1" && env.SHARE_DEV === "1";
 }
 
 /** Whether `account` may sync here (§11): every signed-in account when SYNC_ADMIT is exactly "all" (its plan governs
