@@ -4128,6 +4128,26 @@
   "owner": "Hilbert modular forms (engine)",
   "reason": "a test's inputs: the two inert primes past the u64 norms that must be refused"
  },
+ "engine/hmf/src/field.rs :: signs_and_division_at_the_ends :: assert_eq!(Elt::new(-i64::MAX, -i64::MAX).signs(), (Ordering::Less, Ordering::Less)); #0": {
+  "class": "none",
+  "owner": "Hilbert modular forms (engine)",
+  "reason": "tests' inputs at the ends of the integer types; they limit nothing"
+ },
+ "engine/hmf/src/field.rs :: signs_and_division_at_the_ends :: assert_eq!(Elt::new(i64::MAX, i64::MIN).signs(), (Ordering::Less, Ordering::Greater)); #0": {
+  "class": "none",
+  "owner": "Hilbert modular forms (engine)",
+  "reason": "tests' inputs at the ends of the integer types; they limit nothing"
+ },
+ "engine/hmf/src/field.rs :: signs_and_division_at_the_ends :: assert_eq!(m.div_exact(Elt::new(i64::MAX, 0)), Some(Elt::new(1, 1))); #0": {
+  "class": "none",
+  "owner": "Hilbert modular forms (engine)",
+  "reason": "tests' inputs at the ends of the integer types; they limit nothing"
+ },
+ "engine/hmf/src/field.rs :: signs_and_division_at_the_ends :: let m = Elt::new(i64::MAX, i64::MAX); #0": {
+  "class": "none",
+  "owner": "Hilbert modular forms (engine)",
+  "reason": "tests' inputs at the ends of the integer types; they limit nothing"
+ },
  "engine/hmf/src/fpoly.rs :: reconstruct :: pub const MAX_BITS: u64 = 1 << 18; #0": {
   "class": "2+3",
   "owner": "HMF engine",
@@ -4152,6 +4172,11 @@
   "class": "2+3",
   "owner": "HMF engine",
   "row": "inv-39"
+ },
+ "engine/hmf/src/residue.rs :: reduce_at_the_ends :: let (lo, hi) = (i128::MIN, i128::MAX); #0": {
+  "class": "none",
+  "owner": "Hilbert modular forms (engine)",
+  "reason": "tests' inputs at the ends of the integer types; they limit nothing"
  },
  "engine/hmf/src/rqf.rs :: integral :: pub const MAX_NORM: i128 = 1 << 60; #0": {
   "class": "2+3",
