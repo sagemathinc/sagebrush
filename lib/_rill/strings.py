@@ -115,10 +115,36 @@ def _built(n, pieces):
     return held, build
 
 
-def _padded(ps, width, left, fill=" "):
-    """ps in a field width characters wide: padded on the right when left, else on the left."""
-    pad = max(0, width - _pieces_len(ps))
+def _padded(ps, width, left, fill=" ", used=None):
+    """ps in a field width characters wide (used columns, when not their length): padded on the right when left,
+    else on the left."""
+    pad = max(0, width - (_pieces_len(ps) if used is None else used))
     return ps + [(pad, fill)] if left else [(pad, fill)] + ps
+
+
+_ESCAPED = {"\\": 2, "\a": 2, "\b": 2, "\f": 2, "\v": 2, "\t": 2, "\n": 2, "\r": 2}
+
+
+def _columns(s):
+    """The columns format() and formatC() pad s by: a wide character takes 2, a combining one 0, and a character
+    R escapes takes its escape's (R 4.5.3, formatC(c("日本", "abc")) is "日本" " abc", format(c("a\tb", "abcde"))
+    "a\tb " "abcde")."""
+    if s.isascii() and s.isprintable() and "\\" not in s:
+        return len(s)
+    from . import fmt, uchar
+    w = 0
+    for c in s:
+        o = ord(c)
+        if c in _ESCAPED:
+            w += _ESCAPED[c]
+        elif o < 32 or o == 127:
+            w += 4
+        elif o < 127:
+            w += 1
+        else:
+            k = uchar.klass(o)
+            w += len(fmt._escape_cp(o)) if k == 3 else k
+    return w
 
 
 # ---------------------------------------------------------------- paste
@@ -504,9 +530,10 @@ def format_(sess, call, args):
         raise NotSupported("format() of %s" % x.type)
     n = len(x.data)
     # (the common width, measured one element at a time: every string is padded to it)
+    cols = _columns if x.type == "character" else len
     w = width
     for e in x.data:
-        w = max(w, len(raw(e)))
+        w = max(w, cols(raw(e)))
     left = x.type == "character"
     # (trim only stops numbers and logicals being padded to their common width: an explicit width still pads them,
     # and strings still pad to theirs; R 4.5.3, format(1, width = 3, trim = TRUE) is "  1", format(c("a", "bb"),
@@ -515,7 +542,8 @@ def format_(sess, call, args):
         w = width
 
     def pieces(i):
-        return _padded([raw(x.data[i])], w, left)
+        r = raw(x.data[i])
+        return _padded([r], w, left, used=cols(r))
     held, build = _built(n, pieces)
     with held:
         return _keep_names("character", build(), x)
@@ -601,13 +629,13 @@ def formatC(sess, call, args):
     for e in x.data:
         word = ("NA" if e is None else e) if form == "s" else nonfinite(e)
         if word is not None:
-            words = max(words, len(word))
+            words = max(words, _columns(word))
 
     def pieces(i):
         e = x.data[i]
         word = ("NA" if e is None else e) if form == "s" else nonfinite(e)
         if word is not None:
-            return _padded([word], max(width, words), words_left)
+            return _padded([word], max(width, words), words_left, used=_columns(word))
         if form == "d":
             return _int_pieces(int(e), flag, width, prec, "d")
         return _float_pieces(float(e), flag, width, prec, form)

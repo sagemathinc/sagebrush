@@ -26,3 +26,8 @@ formatC(c(1, NA), flag = "- 0", width = 5); formatC(c(1, NA), flag = "-+", width
 formatC(c(1, NA), flag = "-#", width = 5); formatC(c("ab", NA), flag = "-+", width = 5); formatC(c("ab", NA), flag = "--", width = 5)
 formatC(c(1L, NA), flag = "#-", width = 5); formatC(c("ab", NA), flag = "+", width = -5); formatC(c(1, NA), flag = "-", width = -5)
 sprintf("[%-05f|%0-6f|%-05d|%-05s]", Inf, NaN, NA_integer_, NA)
+#-- format-formatC-display-width
+formatC(c("日本", "abc")); formatC(c("日本", "a"), width = 5); formatC(c("日本", "a"), flag = "-"); format(c("日本", "abc"))
+format("日本", width = 5); format(c("日本", NA)); formatC(c("é", "ab")); format(c("é", "ab")); format(c("é", "ab"))
+formatC(c("a\\b", "abcd")); formatC(c("a\"b", "abcd")); format(c("a\\b", "abcd")); format(c("a\tb", "abcde")); formatC(c("a\001b", "abcdef"))
+formatC(c("a\tb", "abcde")); formatC(c("​", "ab")); formatC(c("\U0001F600", "abc"))
