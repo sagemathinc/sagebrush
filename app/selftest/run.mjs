@@ -326,7 +326,7 @@ async function signerLaunch(control) {
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   return v;
 }
-// (the app's own executable: an AppImage's is inside its compressed image, extracted to read it)
+// (the app's own executable: an AppImage's is inside its compressed image, extracted to read it: usr/bin/sagebrush-app)
 function executable() {
   if (!/\.AppImage$/.test(exe)) return exe;
   const at = mkdtempSync(join(tmpdir(), "sagebrush-appimage-"));
@@ -335,9 +335,8 @@ function executable() {
   const bin = join(at, "squashfs-root", "usr", "bin");
   const names = existsSync(bin) ? readdirSync(bin) : [];
   console.log(`(the AppImage extracted: exit ${x.status}${x.error ? `, ${x.error.message}` : ""}; usr/bin: ${names.join(", ") || "none"})`);
-  // (the app's own executable: the one there, or the one named for the app)
-  const name = names.length === 1 ? names[0] : names.find((n) => /^sagebrush/i.test(n));
-  return join(bin, name ?? "(none)");
+  // (the app's own executable by its exact name, never a guess: missing, the check fails and says what was there)
+  return join(bin, names.includes("sagebrush-app") ? "sagebrush-app" : "(no sagebrush-app)");
 }
 // (a release build: the executable holds none of the controls' names, and started with the signer's widest control
 // set, nothing reaches a signing command; release-judge.mjs)
