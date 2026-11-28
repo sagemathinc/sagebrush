@@ -20550,36 +20550,36 @@
  },
  "engine/poly/src/binomial.rs :: cyclotomics :: let o = spend(b, Family::AddSub, (a.len() as u64).checked_add(e).and_then(|l| l.checked_mul(limbs(maxbits(&a) + 1))))?; #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
  },
  "engine/poly/src/binomial.rs :: cyclotomics :: let o = spend(b, Family::AddSub, l.checked_mul(limbs(maxbits(&a) + clog2(l.div_ceil(e) + 1))))?; #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
  },
  "engine/poly/src/binomial.rs :: fold_passes :: let b = Budget::unlimited(); #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
  },
  "engine/poly/src/binomial.rs :: spend :: fn spend(b: &Budget, f: Family, units: Option<u64>) -> FResult<Owed> { #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the route's debit helper, not a limit: it charges the factoring budget (whose limits are registered at the budget) and counts the same units for the tally"
  },
  "engine/poly/src/binomial_tests.rs :: a_refused_certificate_step_counts_nothing :: let b = Budget::default(); #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)"
+  "owner": "polynomial factorization"
  },
  "engine/poly/src/binomial_tests.rs :: a_refused_certificate_step_counts_nothing :: let mut meter = sagebrush_arith::cost::Meter::accounting(u64::MAX); #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
  },
  "engine/poly/src/binomial_tests.rs :: units_reach_the_tally :: let mut meter = sagebrush_arith::cost::Meter::accounting(u64::MAX); #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word max or MAX (an operand's maxbits, or u64::MAX as a test meter's allowance), not a limit: the route's work is bounded by the factoring budget it debits"
  },
  "engine/poly/src/budget.rs :: merge :: return Err(self.b.internal(\"budget: a merged reservation overflowed\")); #0": {
@@ -21281,22 +21281,22 @@
  },
  "engine/poly/tests/binomial_units.rs ::  :: use sagebrush_poly::{binomial_testing, reset_binomial_units, try_factor_with, Budget}; #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
  },
  "engine/poly/tests/binomial_units.rs :: a_stop_charges_only_finished_steps_and_a_traps_counts_are_reset :: let mut meter = Meter::accounting(u64::MAX); #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
  },
  "engine/poly/tests/binomial_units.rs :: units :: let _ = metered(&mut meter, || sagebrush_interrupt::catch(|| try_factor_with(f, &Budget::default()).map(|x| x.1.len()))); #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
  },
  "engine/poly/tests/binomial_units.rs :: units :: let mut meter = Meter::accounting(u64::MAX); #0": {
   "class": "none",
-  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "owner": "polynomial factorization",
   "reason": "the word MAX or unlimited in a test or test hook (an accounting meter's u64::MAX allowance, an unlimited budget for the fold passes alone), not a limit: nothing is refused"
  },
  "engine/poly/tests/modp_stop.rs ::  :: use sagebrush_poly::{try_factor_mod_with, Budget}; #0": {
@@ -23014,7 +23014,7 @@
  },
  "lib/_graphics.py :: image_rgba :: raise ValueError(\"minvalue must be less than or equal to maxvalue\") #0": {
   "class": "none",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "matplotlib's Normalize refusal of vmin above vmax (the colormap's range), input validation, not a cap"
  },
  "lib/_magma.py ::  :: _OWN_CONTAINERS_MAX = 0 #0": {
@@ -23064,7 +23064,7 @@
  },
  "lib/_sage_expr.py ::  :: _MP_MAX_EXP = 4096 #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _cc_function :: element of CC, or NotImplementedError past the doubles, never a #0": {
@@ -23079,7 +23079,7 @@
  },
  "lib/_sage_expr.py :: _complete_mp :: raise NotImplementedError(\"the value of %s is not available in sagebrush yet\" % _call(\"str\", calls[0])[0]) #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _function.f :: except NotImplementedError: #0": {
@@ -23089,77 +23089,77 @@
  },
  "lib/_sage_expr.py :: _mp_call_value :: or NotImplementedError.\"\"\" #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a docstring naming the error a function raises; refuses nothing"
  },
  "lib/_sage_expr.py :: _mp_call_value :: raise NotImplementedError(\"%s of a real number of RealField(%d) with a complex, infinite, undefined \" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_call_value :: raise NotImplementedError(\"%s of a real number of RealField(%d) with an infinite or undefined complex value \" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "ComplexField(p) numbers in symbolic expressions: a case not represented yet (a function Sage computes with Arb or PARI, an infinite or undefined value, a part past 2^+-4096, an element of CC past the doubles), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_call_value :: raise NotImplementedError(\"%s of a real number of RealField(p) with a double or a complex number \" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_call_value :: unavailable = NotImplementedError(\"%s of a real number of RealField(%d) in a symbolic expression is not \" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_s :: \"symbolic expression is not available in sagebrush yet\" % (v, _MP_MAX_EXP, _MP_MAX_EXP + 1)) #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_s :: if abs(v._e + abs(v._m).bit_length()) > _MP_MAX_EXP: #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_s :: m (p != 53), as a double for 53 bits; NotImplementedError where the #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a docstring naming the error a function raises; refuses nothing"
  },
  "lib/_sage_expr.py :: _mp_s :: raise NotImplementedError(\"%s, an element of RR past the double range, has no symbolic form in sagebrush yet\" % (v,)) #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_s :: raise NotImplementedError(\"%s: a real number of absolute value at least 2^%d or less than 2^-%d in a \" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mp_s :: raise NotImplementedError(\"an element of %s in a symbolic expression is not available in sagebrush yet \" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "RealField(p) numbers in symbolic expressions: a case not represented yet (complex values, mixed doubles, values past 2^+-4096, other rounding modes), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mpc_call_value :: of RealField(p) with an exact complex one), or NotImplementedError. #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a docstring naming the error a function raises; refuses nothing"
  },
  "lib/_sage_expr.py :: _mpc_call_value :: raise NotImplementedError(\"%s of a complex number of ComplexField(%d) with an infinite or undefined value in a \" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "ComplexField(p) numbers in symbolic expressions: a case not represented yet (a function Sage computes with Arb or PARI, an infinite or undefined value, a part past 2^+-4096, an element of CC past the doubles), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mpc_call_value :: unavailable = NotImplementedError(\"%s of a complex number of ComplexField(%d) in a symbolic expression is not \" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "ComplexField(p) numbers in symbolic expressions: a case not represented yet (a function Sage computes with Arb or PARI, an infinite or undefined value, a part past 2^+-4096, an element of CC past the doubles), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_expr.py :: _mpc_s :: raise NotImplementedError(\"%s, an element of CC past the double range, has no symbolic form in sagebrush yet\" % (v,)) #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "ComplexField(p) numbers in symbolic expressions: a case not represented yet (a function Sage computes with Arb or PARI, an infinite or undefined value, a part past 2^+-4096, an element of CC past the doubles), refused as not available, never a wrong value; not a resource cap"
  },
  "lib/_sage_ff.py :: IntegerModRing_._units_field :: raise NotImplementedError(\"%s of %r (not a field) is not supported yet\" % (what, self)) #0": {
@@ -23224,12 +23224,12 @@
  },
  "lib/_sage_ffmat.py :: FFMatrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
  },
  "lib/_sage_ffmat.py :: FFMatrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #1": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
  },
  "lib/_sage_ffmat.py :: FFMatrix._from_qq :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (op, a.parent(), b.parent())) #0": {
@@ -23499,12 +23499,12 @@
  },
  "lib/_sage_matrix.py :: Matrix.__rpow__ :: raise NotImplementedError(\"non-integral exponents not supported\") #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a number to a matrix power: Sage's own NotImplementedError for a non-integral exponent; refuses nothing for size"
  },
  "lib/_sage_matrix.py :: Matrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(other), self.parent())) #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
  },
  "lib/_sage_matrix.py :: Matrix._finite :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (op, self.parent(), other.parent())) #0": {
@@ -23514,12 +23514,12 @@
  },
  "lib/_sage_matrix.py :: Vector.__rpow__ :: raise TypeError(\"unsupported operand parent(s) for ^: '%s' and '%s'\" % (_sa().parent(b), self.parent())) #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
  },
  "lib/_sage_matrix.py :: Vector.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(other), self.parent())) #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a TypeError for a number and a matrix or vector that do not meet (a non-square matrix, a vector), Sage's coercion message; refuses nothing for size"
  },
  "lib/_sage_matrix.py :: _cc_slow :: MP complex field: a ComplexNumber, or NotImplementedError past the #0": {
@@ -23819,7 +23819,7 @@
  },
  "lib/_sage_real.py :: _cc_complex :: raise NotImplementedError(\"a %s number beyond the double range with a 53-bit number is not available in sagebrush yet\" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "a RealField(p) or ComplexField(p) number meeting a 53-bit one in CC, with a part past the doubles' normal range: sagebrush's CC holds doubles where Sage's holds MPFR's exponents, so it is refused as not available, never an infinity or lost bits; not a resource cap"
  },
  "lib/_sage_real.py :: _cc_from_mp :: NotImplementedError (a part past the doubles, which Sage's CC holds and #0": {
@@ -23839,7 +23839,7 @@
  },
  "lib/_sage_real.py :: _log_abs_cr :: raise NotImplementedError(\"log|z| correctly rounded to %d bits is not decided in sagebrush yet\" % R._prec) #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "fail-closed Ziv check of log|z| for a complex z: a value whose correct rounding is not decided by 64 times the starting working precision is refused, never guessed; not a resource cap"
  },
  "lib/_sage_real.py :: _log_gamma_neg :: raise NotImplementedError(\"log_gamma(%s) correctly rounded to %d bits is not decided within %d bits in sagebrush yet\" % (x, p, W)) #0": {
@@ -23849,57 +23849,57 @@
  },
  "lib/_sage_real.py :: _ziv_checked.checked :: or not b._m or not _EMIN + 4 * W < b._e + abs(b._m).bit_length() < _EMAX - 64): #0": {
   "class": "none",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "the exponent-range test of the Ziv check: a value near the ends of the range goes to the method's own range logic, unchecked; it refuses nothing"
  },
  "lib/_sage_real.py :: _ziv_checked.checked :: raise NotImplementedError(\"%s(%s) correctly rounded to %d bits is not decided within %d bits in sagebrush yet\" #0": {
   "class": "coverage",
-  "owner": "sage kernel (@sagebrush-sage2)",
+  "owner": "sage kernel",
   "reason": "fail-closed Ziv check: a value whose correct rounding is not decided after _ZIV_CHECK_TRIES doublings of the working precision is refused, never guessed; not a resource cap"
  },
  "lib/sage_plot.py :: Graphics._panel :: lims = [float(o[k]) if o.get(k) is not None else float(v) for k, v in zip((\"xmin\", \"xmax\", \"ymin\", \"ymax\"), bb)] #0": {
   "class": "none",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "lib/sage_plot.py :: Graphics._svg :: xmin=0.0, xmax=1.0, ymin=lo, ymax=hi, margins=0, xticks=[], yaxis_side=\"right\", frame=True) #0": {
   "class": "none",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "lib/sage_plot_fields.py ::  :: \"vmax\": \"The maximum value\", #0": {
   "class": "none",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "lib/sage_plot_fields.py :: matrix_plot :: \"subdivisions\": False, \"vmax\": None, \"vmin\": None} #0": {
   "class": "none",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "lib/sage_plot_fields.py :: matrix_plot :: hi = float(opts[\"vmax\"]) if opts[\"vmax\"] is not None else (float(finite.max()) if finite.size else 1.0) #0": {
   "class": "none",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "lib/sage_plot_fields.py :: matrix_plot :: raise NotImplementedError(\"matrix_plot's cmap as a list of colors is not implemented in Sagebrush: use a colormap's name\") #0": {
   "class": "coverage",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "matrix_plot's cmap as a list of colors (a ListedColormap in Sage) is not implemented: an unsupported feature, not a cap"
  },
  "lib/sage_plot_fields.py :: matrix_plot :: raise NotImplementedError(\"matrix_plot's norm option is not implemented in Sagebrush: use vmin and vmax\") #0": {
   "class": "coverage",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "matrix_plot's norm option (a normalization function) is not implemented: an unsupported feature, not a cap"
  },
  "lib/sage_plot_fields.py :: matrix_plot :: sage: P.get_minmax_data() #0": {
   "class": "none",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "lib/sage_plot_fields.py :: matrix_plot :: {'xmax': 3.5, 'xmin': -0.5, 'ymax': 2.5, 'ymin': -0.5} #0": {
   "class": "none",
-  "owner": "Sage graphics (@sagebrush-sage2)",
+  "owner": "Sage graphics",
   "reason": "vmin/vmax are the colormap's range and xmin/xmax/ymin/ymax a figure's box (matrix_plot, its colorbar and integer ticks), not caps: nothing is refused"
  },
  "src/runtime/engine.ts :: admitPieces :: if (pieces.length > BIN_MAX_PIECES) throw new BinRequestRefused(`a request in more than ${BIN_MAX_PIECES} pieces`); #0": {
