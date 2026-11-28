@@ -164,9 +164,12 @@ try {
 
   // (a board of questions only, their checks its only code: held unconfined, Run offered; Check runs nothing until the
   // person runs it; then it does)
-  const revQ = await write({ title: "Asks", nodes: [{ id: "k", kind: "ask", input: "number", text: "Two?", answer: 2, check: "answer == 2" }], edges: [] });
+  const revQ = await write({ title: "Asks", layout: "grid", columns: 1, nodes: [{ id: "k", kind: "ask", input: "number", text: "Two?", answer: 2, check: "answer == 2" }], edges: [] });
   const askNode = `window.sagebrush.board.snapshot().doc.nodes.find((n) => n.id === "k")`;
-  check(typeof revQ === "number" && await A.until(`${askNode}?.check === "answer == 2" && !!document.querySelector('.board-ask[data-ask="k"] .board-ask-check')`, 15000) && await A.until(`!${runBtn}.hidden`, 10000), "a board of questions only, written elsewhere: held, Run offered");
+  check(typeof revQ === "number" && await A.until(`${askNode}?.check === "answer == 2"`, 15000), "a board of questions only, written elsewhere: shown");
+  // (its question in view, so its controls are drawn, as test-ask.mjs does)
+  await A.ev("window.board.setCamera({ x: -40, y: -100, z: 1 }), window.board.render(), 1");
+  check(await A.until(`!!document.querySelector('.board-ask[data-ask="k"] .board-ask-check')`, 15000) && await A.until(`!${runBtn}.hidden`, 10000), "…held: Run offered, its Check drawn");
   await A.ev(`(document.querySelector('.board-ask[data-ask="k"] .board-ask-check').click(), 1)`);
   await sleep(3000);
   check((await A.ev(`${askNode}.result ?? null`)) === null && !(await A.ev(`${runBtn}.hidden`)), "…Check runs nothing before the person's Run", await A.ev(`${askNode}.result ?? null`));

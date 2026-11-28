@@ -83,4 +83,3 @@ export function mergeApprovals(base: unknown, file: unknown, local: unknown): Re
   }
   return validApprovals(out);
 }
-
