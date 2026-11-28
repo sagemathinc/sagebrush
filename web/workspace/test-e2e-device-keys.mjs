@@ -34,6 +34,8 @@ const LOST = "de71ce00-0002-4e2e-8e2e-e2e2e2e2e202", REFUSED = "de71ce00-0003-4e
 const LATE = "de71ce00-0005-4e2e-8e2e-e2e2e2e2e205";
 // (one whose append fails while another device's genesis lands first)
 const OTHER = "de71ce00-0006-4e2e-8e2e-e2e2e2e2e206";
+// (genesis whose page goes before the person confirms they saved the code)
+const UNSAVED = "de71ce00-0007-4e2e-8e2e-e2e2e2e2e207", RESETFIRST = "de71ce00-0008-4e2e-8e2e-e2e2e2e2e208";
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const rl = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
@@ -42,7 +44,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"],
     name: "on", routes: ["sagebrush.test/*"], outboundService: async () => Response.json(plan), ratelimits: rl("4301"),
     durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
-    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: [A, LOST, REFUSED, DARK, LATE, OTHER].join(","), SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" },
+    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: [A, LOST, REFUSED, DARK, LATE, OTHER, UNSAVED, RESETFIRST].join(","), SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" },
   }],
 }));
 const db = await mf.getD1Database("SHARE_DB", "on");
@@ -54,7 +56,7 @@ const db = await mf.getD1Database("SHARE_DB", "on");
 const at = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init });
 const signIn = async (id) => (await at("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: J({ token: "dev-token", account_id: id }) })).headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
 const sessions = {};
-for (const [k, id] of Object.entries({ A, LOST, REFUSED, DARK, LATE, OTHER })) {
+for (const [k, id] of Object.entries({ A, LOST, REFUSED, DARK, LATE, OTHER, UNSAVED, RESETFIRST })) {
   sessions[k] = await signIn(id);
   ok((await at("/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions[k], origin: SITE, "content-type": "application/json" }, body: "{}" })).status === 200, `(sync on for ${k})`);
 }
@@ -99,7 +101,7 @@ window.transport = (as, f = {}) => async (method, path, body) => {
   return { status: r.status, json };
 };
 // (each test account's E2E id, as the page derives it from the account's hash: what load and create are given)
-window.idOf = async (as) => e2eAccountOf(await accountHash(${J({ A, LOST, REFUSED, DARK, LATE, OTHER })}[as]));
+window.idOf = async (as) => e2eAccountOf(await accountHash(${J({ A, LOST, REFUSED, DARK, LATE, OTHER, UNSAVED, RESETFIRST })}[as]));
 window.ready = true;</script>`;
 let requests = 0;
 const server = createServer(async (req, res) => {
@@ -133,10 +135,15 @@ try {
 
   // ---- genesis from the page
   const made = await P.ev(`(async () => {
-    const { keys, recoveryCode } = await K.DeviceKeys.create("laptop", await idOf("A"));
+    const { keys, recoveryCode, confirm } = await K.DeviceKeys.create("laptop", await idOf("A"));
     window.keys = keys;
+    // (unconfirmed until the person says they saved the code: here, and in the stored record)
+    const before = { live: keys.recoveryUnconfirmed, stored: (await deviceOf(keys.account))?.recoveryShown };
+    await confirm();
+    await confirm();
+    const after = { live: keys.recoveryUnconfirmed, stored: (await deviceOf(keys.account))?.recoveryShown };
     const view = await keys.chain();
-    return { id: keys.device.id, account: keys.account, code: recoveryCode, head: view.head, epoch: view.currentEpoch, pos: view.position(view.head), dev: view.device(keys.device.id),
+    return { before, after, id: keys.device.id, account: keys.account, code: recoveryCode, head: view.head, epoch: view.currentEpoch, pos: view.position(view.head), dev: view.device(keys.device.id),
       signer: Array.from(view.signerAt(view.head, keys.device.id) ?? []), e0: !!(await keys.epochKeys(0)), e1: await keys.epochKeys(1) };
   })()`);
   const c1 = await chainOf();
@@ -144,6 +151,8 @@ try {
   ok(typeof made.code === "string" && made.code.replace(/-/g, "").length === 52, `the recovery code is returned once to show: 52 characters in groups (${made.code?.length})`);
   ok(made.epoch === 0 && made.pos === 0 && made.dev?.added === 0 && made.dev?.removed === null && made.signer.length === 32, "the chain view: epoch 0, the head at position 0, the device added there and current, its signing key", made);
   ok(made.e0 === true && made.e1 === null, "the device holds epoch 0's keys and no other", { e0: made.e0, e1: made.e1 });
+  ok(made.before.live === true && made.before.stored === false && made.after.live === false && made.after.stored === true,
+    "genesis leaves the device unconfirmed (recoveryShown false, stored) until confirm, which marks it, and again changes nothing", { before: made.before, after: made.after });
   const again = await P.ev(`code(async () => K.DeviceKeys.create("laptop", await idOf("A")))`);
   ok(again.code === "exists", `turning it on again is refused (exists): ${J(again)}`);
 
@@ -343,11 +352,52 @@ try {
       "another object pins seq 1; this object's refresh, served the older chain, is refused (chain_fork) and the stored pin stays at 1", r);
   }
 
+  // ---- a refresh answered for another account: refused, and the pin neither moves nor is marked forked
+  {
+    await reset(); await putBack();
+    const r = await P.ev(`(async () => {
+      const f = { other: false };
+      const base = transport("A");
+      const t = async (method, path, body) => {
+        const res = await base(method, path, body);
+        return f.other && method === "GET" && path.includes("/e2e/chain") ? { ...res, json: { ...res.json, account: "abcdefghijklmnopqrstuvwxya" } } : res;
+      };
+      const k1 = await K.DeviceKeys.load(await idOf("A"), t);
+      const before = await pinOf(${acct});
+      f.other = true;
+      const refresh = await code(async () => k1.chain(true));
+      const after = await pinOf(${acct});
+      f.other = false;
+      const again = await code(async () => (await k1.chain(true)).head);
+      return { refresh, same: JSON.stringify(before) === JSON.stringify(after), forked: !!after?.forked, again };
+    })()`);
+    ok(r.refresh.code === "server" && r.same && !r.forked && typeof r.again.ok === "string",
+      "a refresh answered for another account is refused, the pin unmoved and not marked forked; answered for its own again, the refresh works", r);
+  }
+
+  // ---- a page that goes before the person confirms: after a reload the device loads unconfirmed
+  {
+    const acct1 = await P.ev(`(async () => (await K.DeviceKeys.create("kiosk", await idOf("UNSAVED"), transport("UNSAVED"))).keys.account)()`);
+    await load();
+    const r = await P.ev(`(async () => { const k = await K.DeviceKeys.load(await idOf("UNSAVED"), transport("UNSAVED")); return { unconfirmed: k.recoveryUnconfirmed, stored: (await deviceOf(k.account))?.recoveryShown }; })()`);
+    ok(typeof acct1 === "string" && r.unconfirmed === true && r.stored === false, "genesis whose page went before the person confirmed: after a reload the device loads unconfirmed (its code may never have been saved)", r);
+  }
+  // ---- a confirm for a device reset meanwhile writes nothing
+  {
+    const r = await P.ev(`(async () => {
+      const made = await K.DeviceKeys.create("kiosk", await idOf("RESETFIRST"), transport("RESETFIRST"));
+      await K.resetDevice(made.keys.account);
+      await made.confirm();
+      return { left: (await deviceOf(made.keys.account)) ?? null };
+    })()`);
+    ok(r.left === null, "a confirm for a device reset since it was made writes nothing (no record comes back)", r);
+  }
+
   // ---- H1: genesis whose append fails or whose answer is lost
   {
     // (its answer lost after it applied: the chain says so, and genesis finishes, its recovery code returned)
-    const lost = await P.ev(`code(async () => { const { keys, recoveryCode } = await K.DeviceKeys.create("tablet", await idOf("LOST"), transport("LOST", { lose: true })); return { code: recoveryCode.length, unconfirmed: keys.recoveryUnconfirmed, again: !!(await K.DeviceKeys.load(await idOf("LOST"), transport("LOST"))), e0: !!(await keys.epochKeys(0)) }; })`);
-    ok(lost.ok?.code === 64 && lost.ok.unconfirmed === false && lost.ok.again && lost.ok.e0, "genesis whose append's answer is lost after it applied finishes: the recovery code is returned, the device loads", lost);
+    const lost = await P.ev(`code(async () => { const { keys, recoveryCode, confirm } = await K.DeviceKeys.create("tablet", await idOf("LOST"), transport("LOST", { lose: true })); const u = keys.recoveryUnconfirmed; await confirm(); return { code: recoveryCode.length, unconfirmed: u, confirmed: !keys.recoveryUnconfirmed, again: !!(await K.DeviceKeys.load(await idOf("LOST"), transport("LOST"))), e0: !!(await keys.epochKeys(0)) }; })`);
+    ok(lost.ok?.code === 64 && lost.ok.unconfirmed === true && lost.ok.confirmed && lost.ok.again && lost.ok.e0, "genesis whose append's answer is lost after it applied finishes: the recovery code is returned, the device loads", lost);
     // (refused before it applied, definitely (a 4xx): no device is left behind, and trying again works)
     const refused = await P.ev(`(async () => {
       const first = await code(async () => K.DeviceKeys.create("phone", await idOf("REFUSED"), transport("REFUSED", { refuse: 409 })));

@@ -40,9 +40,10 @@ export class DeviceKeysError extends Error {
 type Signer = Awaited<ReturnType<typeof asKey>>;
 type Kem = { publicRaw: Uint8Array; privateKey: CryptoKey };
 type Pin = { seq: number; hash: string; generation: string };
-/** `recoveryShown`: false from before genesis's append until create returns the recovery code to its caller. A device
- * found with it false (the append's answer was lost and the call ended) has a recovery key nobody was shown: the
- * caller is told (recoveryUnconfirmed), and recovery's rotation (M1b) replaces the key. No secret in it. */
+/** `recoveryShown`: false from before genesis's append until the person confirms they saved the recovery code (create's
+ * `confirm`, called by the page once they say so). A device found with it false (the append's answer was lost, or the
+ * page closed before the person confirmed) has a recovery key nobody may have saved: the caller is told
+ * (recoveryUnconfirmed), and recovery's rotation (M1b) replaces the key. No secret in it. */
 type DeviceRecord = { id: string; sign: CryptoKeyPair; signRaw: Uint8Array; kem: CryptoKeyPair; kemRaw: Uint8Array; created: number; recoveryShown?: boolean };
 type PinRecord = Pin & { forked?: { at: number; code: string } };
 /** The verified chain state as chain.mjs makes it (the fields read here). */
@@ -134,8 +135,9 @@ async function fetchChain(t: Transport, expect: string | null): Promise<{ accoun
  */
 export class DeviceKeys implements OpKeys {
   readonly device: { readonly id: string; sign(bytes: Uint8Array): Promise<Uint8Array> };
-  /** whether this device's recovery code may never have been shown (see DeviceRecord.recoveryShown) */
-  readonly recoveryUnconfirmed: boolean;
+  /** whether this device's recovery code may never have been saved (see DeviceRecord.recoveryShown) */
+  get recoveryUnconfirmed(): boolean { return this.#unconfirmed; }
+  #unconfirmed: boolean;
   // (only the current epoch's raw secret is kept: an older one is used once, to derive its keys, which are cached)
   #current: { n: number; S: Uint8Array } | null = null;
   #derived = new Map<number, EpochKeys>();
@@ -151,7 +153,7 @@ export class DeviceKeys implements OpKeys {
     private readonly t: Transport,
   ) {
     this.device = { id: rec.id, sign: async (b) => { await this.live(); return signer.sign(b); } };
-    this.recoveryUnconfirmed = rec.recoveryShown === false;
+    this.#unconfirmed = rec.recoveryShown === false;
   }
 
   /** Refuses once the account is marked forked here, or this device is no longer this browser's for the account (Reset
@@ -215,11 +217,12 @@ export class DeviceKeys implements OpKeys {
 
   /**
    * Turn end-to-end encryption on for the signed-in account from this browser (genesis, §2): a new device, a new
-   * recovery key and epoch 0, appended with their wrappers. Returns the device and the recovery code, which is shown
-   * once and never stored (the caller shows it). Refused if the account already has a chain, or if the chain answer
-   * names another E2E account than `expect` (as load).
+   * recovery key and epoch 0, appended with their wrappers. Returns the device, the recovery code, which is shown once
+   * and never stored (the caller shows it), and `confirm`, which the caller calls once the person says they saved the
+   * code: until then the device stays unconfirmed (recoveryUnconfirmed), here and after a reload. Refused if the account
+   * already has a chain, or if the chain answer names another E2E account than `expect` (as load).
    */
-  static async create(name: string, expect: string, t: Transport = sameOrigin): Promise<{ keys: DeviceKeys; recoveryCode: string }> {
+  static async create(name: string, expect: string, t: Transport = sameOrigin): Promise<{ keys: DeviceKeys; recoveryCode: string; confirm: () => Promise<void> }> {
     const E = e2eCore();
     const c = await fetchChain(t, expect);
     if (c.entries.length > 0) throw new DeviceKeysError("exists", "this account's key chain already exists");
@@ -276,10 +279,13 @@ export class DeviceKeys implements OpKeys {
       if (applied === "unknown") throw new DeviceKeysError("server", "the key chain couldn't be started; reload the page");
     }
     await advance(c.account, E.pinOf(state), state.hashes, state.base);
-    await shown(c.account, rec.id);
-    const keys = new DeviceKeys(c.account, ctx, { ...rec, recoveryShown: true }, signer, state as State, t);
+    const keys = new DeviceKeys(c.account, ctx, { ...rec, recoveryShown: false }, signer, state as State, t);
     keys.#current = { n: 0, S };
-    return { keys, recoveryCode: E.showCode(E.codeOfSeed(seed)) };
+    const confirm = async () => {
+      await shown(c.account, rec.id);
+      keys.#unconfirmed = false;
+    };
+    return { keys, recoveryCode: E.showCode(E.codeOfSeed(seed)), confirm };
   }
 
   /** The verified chain as a ChainView; `refresh` reads the server's newer entries first, verified under this device's
