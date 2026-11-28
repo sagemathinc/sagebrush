@@ -767,6 +767,13 @@ await section("an end-to-end account's notebooks take sealed patches only, and i
   ok(refusedSealed(mixed), "a batch of one sealed patch and one plain: refused whole", mixed);
   const next = await ws.ask(batchOf(doc, [[cseq, pid(cseq, C), [pid(1, C)], slice()]]));
   ok(next?.t === "ack" && next.batch?.seq > first.batch.seq, "…and after every refusal, the next sealed patch is taken", next);
+  // (a clear's root is a notebook's patch too: in the clear it is refused before anything is held, and nothing changes;
+  // of a sealed slice's form it is taken, and the new epoch begins at it)
+  const clearOf = (body) => ({ t: "clear", doc, expect_head: { epoch: 1, seq: next.batch.seq }, root: { patches: [{ cseq: 1, id: pid(1000, "clientD0R1"), parents: [], size: body.length }], body: body.toString("base64") } });
+  const plainRoot = await ws.ask(clearOf(Buffer.from('{"root":"plain"}')));
+  ok(refusedSealed(plainRoot), "a clear whose root is in the clear, for an end-to-end account: refused (conflict, sealed_account)", plainRoot);
+  const sealedRoot = await ws.ask(clearOf(slice()));
+  ok(sealedRoot?.t === "ack" && sealedRoot.batch?.head?.epoch === 2, "…and the same clear with a sealed root: taken, the new epoch beginning at it (so the refusal above changed nothing)", sealedRoot);
   ws.ws.close();
   // (its blobs: a bare SHA-256 can't be referenced from a sealed index, so it is never taken)
   const bytes = Buffer.from("an end-to-end account's blob");
@@ -788,6 +795,8 @@ await section("an end-to-end account's notebooks take sealed patches only, and i
   await hello(wn, "sealed-dev-n0d1");
   const pn = await wn.ask(batchOf("d0c0d0c0d0c1", [[1, pid(1, "clientN0d1"), [], Buffer.from('{"patch":"plain"}')]], { kind: "board" }));
   ok(pn?.t === "ack", "a plaintext account: a plain patch taken, as before", pn);
+  const cn = await wn.ask({ t: "clear", doc: "d0c0d0c0d0c1", expect_head: { epoch: 1, seq: pn.batch.seq }, root: { patches: [{ cseq: 1, id: pid(1000, "clientN0R1"), parents: [], size: 4 }], body: Buffer.from("root").toString("base64") } });
+  ok(cn?.t === "ack" && cn.batch?.head?.epoch === 2, "…and a clear with a root in the clear, as before", cn);
   ok((await putBlob(sn, Buffer.from("N's blob"), sha(Buffer.from("N's blob")))).status === 201, "…and a blob at its bare SHA-256");
   const nm = await post(sn, N, "/api/sync/v1/manifest", { manifest: {} });
   const nmb = await nm.json().catch(() => ({}));
