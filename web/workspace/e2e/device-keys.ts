@@ -38,7 +38,10 @@ export class DeviceKeysError extends Error {
 type Signer = Awaited<ReturnType<typeof asKey>>;
 type Kem = { publicRaw: Uint8Array; privateKey: CryptoKey };
 type Pin = { seq: number; hash: string; generation: string };
-type DeviceRecord = { id: string; sign: CryptoKeyPair; signRaw: Uint8Array; kem: CryptoKeyPair; kemRaw: Uint8Array; created: number };
+/** `recoveryShown`: false from before genesis's append until create returns the recovery code to its caller. A device
+ * found with it false (the append's answer was lost and the call ended) has a recovery key nobody was shown: the
+ * caller is told (recoveryUnconfirmed), and recovery's rotation (M1b) replaces the key. No secret in it. */
+type DeviceRecord = { id: string; sign: CryptoKeyPair; signRaw: Uint8Array; kem: CryptoKeyPair; kemRaw: Uint8Array; created: number; recoveryShown?: boolean };
 type PinRecord = Pin & { forked?: { at: number; code: string } };
 /** The verified chain state as chain.mjs makes it (the fields read here). */
 type State = {
@@ -118,9 +121,12 @@ async function fetchChain(t: Transport): Promise<{ account: string; aud: string;
  */
 export class DeviceKeys implements OpKeys {
   readonly device: { readonly id: string; sign(bytes: Uint8Array): Promise<Uint8Array> };
-  private secrets = new Map<number, Uint8Array>();
-  private derived = new Map<number, EpochKeys>();
-  private seen = new Set<string>();
+  /** whether this device's recovery code may never have been shown (see DeviceRecord.recoveryShown) */
+  readonly recoveryUnconfirmed: boolean;
+  // (only the current epoch's raw secret is kept: an older one is used once, to derive its keys, which are cached)
+  #current: { n: number; S: Uint8Array } | null = null;
+  #derived = new Map<number, EpochKeys>();
+  #seen = new Set<string>();
 
   private constructor(
     readonly account: string,
@@ -131,6 +137,7 @@ export class DeviceKeys implements OpKeys {
     private readonly t: Transport,
   ) {
     this.device = { id: rec.id, sign: (b) => signer.sign(b) };
+    this.recoveryUnconfirmed = rec.recoveryShown === false;
   }
 
   /** The device for the signed-in account, or null if this browser has none. Refuses a forked account, or a chain
@@ -142,9 +149,17 @@ export class DeviceKeys implements OpKeys {
     if (!rec) return null;
     const pin = await get<PinRecord>("pins", c.account);
     if (pin?.forked) throw new DeviceKeysError("forked", "this device saw a forked key chain");
-    if (c.entries.length === 0) throw new DeviceKeysError("no_chain", "the account's key chain is gone");
+    // (with a pin, an empty chain is a rollback to nothing and a compacted one can't be checked against it: each marks the
+    // account forked here, as a rollback does; with no pin yet, each is only refused)
+    if (c.entries.length === 0) {
+      if (pin) await markForked(c.account, "chain_fork");
+      throw new DeviceKeysError("no_chain", "the account's key chain is gone");
+    }
     const ctx = { aud: c.aud, account: c.account };
-    if (c.entries.length > 0 && !e2eFirstIsGenesis(c.entries[0])) throw new DeviceKeysError("chain_unanchored", "a compacted key chain needs its anchor (recovery)");
+    if (!e2eFirstIsGenesis(c.entries[0])) {
+      if (pin) await markForked(c.account, "chain_unanchored");
+      throw new DeviceKeysError("chain_unanchored", "a compacted key chain needs its anchor (recovery)");
+    }
     const state = await DeviceKeys.verify(E, c.entries, ctx, pin ?? null, c.account);
     const signer = await asKey(rec.signRaw, async (m: Uint8Array) => new Uint8Array(await crypto.subtle.sign("Ed25519", rec.sign.privateKey, m as BufferSource)));
     const me = E.currentDevice(state, rec.id);
@@ -189,17 +204,36 @@ export class DeviceKeys implements OpKeys {
     const sender = { id: rec.id, sign: signer };
     const wrappers = [];
     for (const recipient of [{ kind: "device", id: rec.id }, { kind: "recovery", id: c.account }]) wrappers.push(new TextDecoder().decode(await E.wrapEpoch({ hpke, state, ctx, sender, recipient, n: 0, S })));
-    // (the device is stored before the append: if the append's answer is lost, a reload finds the device and the chain)
+    // (the device is stored before the append, marked as not having shown its recovery code: if the append's answer is
+    // lost and this call ends, a reload finds the device, the chain, and that its code may never have been shown)
     const tx = (await open()).transaction("devices", "readwrite");
     const s = tx.objectStore("devices");
     if ((await req(s.getKey(c.account))) !== undefined) { tx.abort(); throw new DeviceKeysError("exists", "this browser already has a device for the account"); }
-    s.add(rec, c.account);
+    s.add({ ...rec, recoveryShown: false } satisfies DeviceRecord, c.account);
     await done(tx);
-    const r = await t("POST", `${API}/chain`, { entry: new TextDecoder().decode(entry), keyring: null, wrappers });
-    if (r.status !== 201) throw new DeviceKeysError("server", `the key chain couldn't be started (${r.status})`);
+    const text = new TextDecoder().decode(entry);
+    let posted = false;
+    try {
+      posted = (await t("POST", `${API}/chain`, { entry: text, keyring: null, wrappers })).status === 201;
+    } catch { /* (an answer lost on the way: decided below, from the chain) */ }
+    if (!posted) {
+      // (a failed or lost append: the chain says which. This entry first: it was applied, and genesis finishes. Another
+      // entry or none: it wasn't, and this device goes, so the person can try again)
+      let applied: boolean | null = null;
+      try {
+        const now = await fetchChain(t);
+        applied = now.account === c.account && now.entries[0] === text;
+      } catch { /* (the chain couldn't be read either: this device stays, its code marked as not shown) */ }
+      if (applied === null) throw new DeviceKeysError("server", "the key chain couldn't be started; reload the page");
+      if (!applied) {
+        await forget(c.account, rec.id);
+        throw new DeviceKeysError("server", "the key chain couldn't be started; try again");
+      }
+    }
     await advance(c.account, E.pinOf(state), state.hashes, state.base);
-    const keys = new DeviceKeys(c.account, ctx, rec, signer, state as State, t);
-    keys.secrets.set(0, S);
+    await shown(c.account, rec.id);
+    const keys = new DeviceKeys(c.account, ctx, { ...rec, recoveryShown: true }, signer, state as State, t);
+    keys.#current = { n: 0, S };
     return { keys, recoveryCode: E.showCode(E.codeOfSeed(seed)) };
   }
 
@@ -223,12 +257,12 @@ export class DeviceKeys implements OpKeys {
    * can't reach them (it was added after that epoch's keyring chain began, or removed). */
   async epochKeys(n: number): Promise<EpochKeys | null> {
     if (!Number.isSafeInteger(n) || n < 0) return null;
-    const have = this.derived.get(n);
+    const have = this.#derived.get(n);
     if (have) return have;
     const S = await this.secret(n);
     if (!S) return null;
     const keys = await deriveEpochKeys(S, this.account, n);
-    this.derived.set(n, keys);
+    this.#derived.set(n, keys);
     return keys;
   }
 
@@ -236,23 +270,23 @@ export class DeviceKeys implements OpKeys {
     const E = e2eCore();
     const cur = this.state.epoch.n;
     if (n > cur) return null;
-    if (!this.secrets.has(cur)) {
+    if (this.#current?.n !== cur) {
       const r = await this.t("GET", `${API}/wrapper?kind=device&id=${encodeURIComponent(this.rec.id)}`);
       if (r.status !== 200 || typeof r.json.wrapper !== "string") return null;
       const me = { kind: "device", id: this.rec.id, recipient: { publicRaw: this.rec.kemRaw, privateKey: this.rec.kem.privateKey } as Kem };
-      const got = await E.openWrapper({ hpke, state: this.state, ctx: this.ctx, bytes: new TextEncoder().encode(r.json.wrapper), me, seen: (id: string) => this.seen.has(id) });
-      this.seen.add(got.id);
+      const got = await E.openWrapper({ hpke, state: this.state, ctx: this.ctx, bytes: new TextEncoder().encode(r.json.wrapper), me, seen: (id: string) => this.#seen.has(id) });
+      this.#seen.add(got.id);
       if (got.n !== cur) return null;
-      this.secrets.set(cur, got.S);
+      this.#current = { n: cur, S: got.S };
     }
-    if (n === cur) return this.secrets.get(cur)!;
+    if (n === cur) return this.#current!.S;
     // (an older epoch: back along the chained keyrings from the current one, each checked against the chain)
     const commits = new Map(this.state.epochs.map((e: { n: number; commit: string }) => [e.n, e.commit]));
     try {
       // (walkBack's JSDoc types its callbacks loosely)
       const walkBack = E.walkBack as unknown as (a: Record<string, unknown>) => Promise<Uint8Array>;
       const S = await walkBack({
-        S: this.secrets.get(cur)!, n: cur, expect: this.state.epoch.keyring?.hash, to: n, account: this.account,
+        S: this.#current!.S, n: cur, expect: this.state.epoch.keyring?.hash, to: n, account: this.account,
         row: async (k: number) => {
           const r = await this.t("GET", `${API}/keyring/${k}`);
           if (r.status !== 200) throw new DeviceKeysError("server", "a keyring couldn't be read");
@@ -260,7 +294,6 @@ export class DeviceKeys implements OpKeys {
         },
         commit: (k: number) => commits.get(k),
       });
-      this.secrets.set(n, S);
       return S;
     } catch {
       return null;
@@ -286,6 +319,25 @@ function viewOf(state: State): ChainView {
     epochAt: (h: string) => { const p = position(h); return p === null ? null : (E.epochAt(state, p)?.n ?? null); },
     device: (id: string) => { const d = state.devices.get(id); return d ? { added: d.added, removed: d.removed } : null; },
   });
+}
+
+/** Delete the account's device record, if it is still the one with `id` (one transaction: another tab's never goes). */
+async function forget(account: string, id: string): Promise<void> {
+  const tx = (await open()).transaction(["devices", "pins"], "readwrite");
+  const d = tx.objectStore("devices");
+  if (((await req(d.get(account))) as DeviceRecord | undefined)?.id === id) {
+    d.delete(account);
+    tx.objectStore("pins").delete(account);
+  }
+  await done(tx);
+}
+/** Mark the account's device `id` as having returned its recovery code to the caller. */
+async function shown(account: string, id: string): Promise<void> {
+  const tx = (await open()).transaction("devices", "readwrite");
+  const d = tx.objectStore("devices");
+  const cur = (await req(d.get(account))) as DeviceRecord | undefined;
+  if (cur?.id === id) d.put({ ...cur, recoveryShown: true } satisfies DeviceRecord, account);
+  await done(tx);
 }
 
 /** "Reset this device": its keys and pin for the account deleted, the fork mark with them (it then enrolls again). */

@@ -4,7 +4,9 @@
 // only). The page's requests go through a small proxy that adds the test's session, as same-origin requests do:
 // genesis from the page (a device, a recovery code shown once, epoch 0); its keys non-extractable; a reload finds the
 // device and its pin, and the epoch's keys again; the chain view the sync client reads; a pin the chain doesn't extend
-// marks the account forked for good; and "Reset this device" forgets it.
+// (a fork, a rollback, a reset since it, an emptied or compacted chain) marks the account forked for good, for every
+// object of the account in the page; the stored pin never moves back; "Reset this device" forgets the device, its pin
+// and the mark; and genesis whose append fails or whose answer is lost ends either finished or with nothing left.
 //   CHROME=google-chrome node web/workspace/test-e2e-device-keys.mjs
 import { readdirSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -26,6 +28,8 @@ const J = JSON.stringify;
 // ---- the server: the sync Worker with the E2E routes on
 const SITE = "https://sagebrush.test";
 const A = "de71ce00-0001-4e2e-8e2e-e2e2e2e2e201";
+// (genesis whose append's answer is lost after it applied; one refused before it applied; one whose chain then can't be read)
+const LOST = "de71ce00-0002-4e2e-8e2e-e2e2e2e2e202", REFUSED = "de71ce00-0003-4e2e-8e2e-e2e2e2e2e203", DARK = "de71ce00-0004-4e2e-8e2e-e2e2e2e2e204";
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const rl = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
@@ -34,7 +38,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"],
     name: "on", routes: ["sagebrush.test/*"], outboundService: async () => Response.json(plan), ratelimits: rl("4301"),
     durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
-    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: A, SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" },
+    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: [A, LOST, REFUSED, DARK].join(","), SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" },
   }],
 }));
 const db = await mf.getD1Database("SHARE_DB", "on");
@@ -45,18 +49,45 @@ const db = await mf.getD1Database("SHARE_DB", "on");
 }
 const at = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init });
 const signIn = async (id) => (await at("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: J({ token: "dev-token", account_id: id }) })).headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
-const session = await signIn(A);
-ok((await at("/api/sync/v1/enable", { method: "POST", headers: { cookie: session, origin: SITE, "content-type": "application/json" }, body: "{}" })).status === 200, "(sync on for the account)");
+const sessions = {};
+for (const [k, id] of Object.entries({ A, LOST, REFUSED, DARK })) {
+  sessions[k] = await signIn(id);
+  ok((await at("/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions[k], origin: SITE, "content-type": "application/json" }, body: "{}" })).status === 200, `(sync on for ${k})`);
+}
+const session = sessions.A;
 const chainOf = async () => (await (await at("/api/sync/v1/e2e/chain?from=0", { headers: { cookie: session, origin: SITE } })).json());
 
 // ---- the page: the module, and a proxy to the server with the session
 const dir = mkdtempSync(join(tmpdir(), "sb-device-keys-"));
 const entry = join(dir, "entry.ts");
-writeFileSync(entry, `export * as K from ${J(join(here, "e2e", "device-keys.ts"))};\n`);
+writeFileSync(entry, [
+  `export * as K from ${J(join(here, "e2e", "device-keys.ts"))};`,
+  // (the core and HPKE, for a row that makes a real next entry from the page with the recovery code)
+  `export { e2eCore } from ${J(join(here, "e2e", "core-ready.ts"))};`,
+  `export { hpke } from ${J(join(here, "e2e", "hpke.ts"))};`,
+  `export { asKey } from ${J(join(here, "fleet", "core", "ed25519.mjs"))};`,
+  `export { b64 } from ${J(join(here, "fleet", "core", "bytes.mjs"))};`,
+].join("\n"));
 const js = execFileSync("bun", ["build", entry, "--format", "esm", "--target", "browser"], { encoding: "utf8", maxBuffer: 64 << 20 });
 rmSync(dir, { recursive: true, force: true });
 const html = `<!doctype html><script type="module">import * as m from "/s.js"; Object.assign(window, m);
 window.code = async (f) => { try { return { ok: await f() }; } catch (e) { return { code: e?.code ?? String(e?.message ?? e) }; } };
+// (the store, read and written as another tab would)
+window.idb = (fn) => new Promise((res, rej) => { const r = indexedDB.open("sagebrush-e2e-v1"); r.onsuccess = () => { const tx = r.result.transaction(["devices", "pins"], "readwrite"); const out = fn(tx.objectStore("devices"), tx.objectStore("pins")); tx.oncomplete = () => res(out instanceof IDBRequest ? out.result : out); tx.onerror = () => rej(tx.error); }; });
+window.pinOf = (acct) => idb((d, p) => p.get(acct));
+window.deviceOf = (acct) => idb((d) => d.get(acct));
+// (a transport as the module's own, as another account (the proxy's x-test-as), and with faults: an append's answer
+// lost after it was forwarded, an append refused before it, the chain unreadable, or the chain served as given)
+window.transport = (as, f = {}) => async (method, path, body) => {
+  const isAppend = method === "POST" && path.endsWith("/e2e/chain"), isChain = method === "GET" && path.includes("/e2e/chain");
+  if (isAppend && f.refuse) return { status: 503, json: {} };
+  if (isChain && f.dark && f.dark()) return { status: 502, json: {} };
+  if (isChain && f.serve) { const r = await window.transport(as)(method, path, body); return { status: 200, json: { ...r.json, entries: f.serve(r.json.entries) } }; }
+  const r = await fetch(path, { method, headers: { "x-test-as": as, ...(body === undefined ? {} : { "content-type": "application/json" }) }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const json = await r.json().catch(() => ({}));
+  if (isAppend && f.lose) return { status: 502, json: {} };
+  return { status: r.status, json };
+};
 window.ready = true;</script>`;
 let requests = 0;
 const server = createServer(async (req, res) => {
@@ -66,7 +97,8 @@ const server = createServer(async (req, res) => {
   requests++;
   const chunks = [];
   for await (const c of req) chunks.push(c);
-  const r = await at(u.pathname + u.search, { method: req.method, headers: { cookie: session, origin: SITE, ...(req.headers["content-type"] ? { "content-type": req.headers["content-type"] } : {}) }, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}) });
+  const as = sessions[req.headers["x-test-as"]] ?? session;
+  const r = await at(u.pathname + u.search, { method: req.method, headers: { cookie: as, origin: SITE, ...(req.headers["content-type"] ? { "content-type": req.headers["content-type"] } : {}) }, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}) });
   res.writeHead(r.status, { "content-type": r.headers.get("content-type") ?? "application/json" }).end(Buffer.from(await r.arrayBuffer()));
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -111,18 +143,127 @@ try {
 
   // ---- a reload: the device and its pin from IndexedDB, the epoch's keys from its wrapper again
   await load();
-  const back = await P.ev(`(async () => { const k = await K.DeviceKeys.load(); window.keys = k; const v = await k.chain(true); return { id: k.device.id, head: v.head, e0: !!(await k.epochKeys(0)), sig: (await k.device.sign(new Uint8Array([1, 2, 3]))).length }; })()`);
+  const back = await P.ev(`(async () => { const k = await K.DeviceKeys.load(); window.keys = k; const v = await k.chain(true); return { id: k.device.id, head: v.head, e0: !!(await k.epochKeys(0)), sig: (await k.device.sign(new Uint8Array([1, 2, 3]))).length, unconfirmed: k.recoveryUnconfirmed }; })()`);
   ok(back.id === made.id && back.head === made.head && back.e0 === true && back.sig === 64, "after a reload the same device loads, verifies the chain under its pin, reopens epoch 0's wrapper and signs", back);
+  ok(back.unconfirmed === false, "and, its genesis having returned the recovery code, it loads saying so (the stored mark, read back)", back);
 
-  // ---- a pin the chain doesn't extend: forked, for good
-  await P.ev(`new Promise((res) => { const r = indexedDB.open("sagebrush-e2e-v1"); r.onsuccess = () => { const tx = r.result.transaction("pins", "readwrite"); const s = tx.objectStore("pins"); const g = s.getAll(); const k = s.getAllKeys(); tx.oncomplete = () => { const t2 = r.result.transaction("pins", "readwrite"); t2.objectStore("pins").put({ ...g.result[0], hash: "A".repeat(42) + "A" }, k.result[0]); t2.oncomplete = () => res(true); }; }; })`);
-  const forked = await P.ev(`code(async () => K.DeviceKeys.load())`);
-  const forked2 = await P.ev(`code(async () => K.DeviceKeys.load())`);
-  ok(forked.code === "chain_fork" && forked2.code === "forked", `a chain that doesn't extend this device's pin is refused (chain_fork), and the account is then forked here for good (${J([forked, forked2])})`);
+  const acct = J(made.account);
+  // (a device record kept aside, to put back as an enrollment would after a reset; and a reset)
+  const keepDevice = async () => P.ev(`(async () => { window.kept = await deviceOf(${acct}); return !!window.kept; })()`);
+  const putBack = async () => P.ev(`idb((d) => { d.put(window.kept, ${acct}); return true; })`);
+  const reset = async () => P.ev(`code(async () => K.resetDevice(${acct}))`);
+  await keepDevice();
 
-  // ---- "Reset this device"
-  const reset = await P.ev(`code(async () => { await K.resetDevice(${J(made.account)}); return (await K.DeviceKeys.load()) === null; })`);
-  ok(reset.ok === true, "after Reset this device, this browser has no device for the account (it enrolls again)", reset);
+  // ---- T3: two objects of one account; another load meets a fork and marks it: the first object's refresh is refused
+  // as forked, and its pin doesn't move
+  {
+    const r = await P.ev(`(async () => {
+      const k1 = await K.DeviceKeys.load();
+      const before = await pinOf(${acct});
+      await idb((d, p) => { p.put({ ...before, hash: "A".repeat(42) + "A" }, ${acct}); });
+      const second = await code(async () => K.DeviceKeys.load());
+      const third = await code(async () => K.DeviceKeys.load());
+      const refresh = await code(async () => k1.chain(true));
+      const after = await pinOf(${acct});
+      return { second, third, refresh, moved: after.hash !== "A".repeat(42) + "A", forked: !!after.forked };
+    })()`);
+    ok(r.second.code === "chain_fork" && r.third.code === "forked" && r.refresh.code === "forked" && !r.moved && r.forked,
+      "a fork another object met marks the account: a later load and an object already loaded are both refused (forked), the pin unmoved", r);
+  }
+
+  // ---- T1: Reset this device forgets the pin and the fork mark too: the device enrolled again loads, pinned afresh
+  {
+    await reset();
+    const gone = await P.ev(`(async () => ({ pin: (await pinOf(${acct})) ?? null, load: await code(async () => (await K.DeviceKeys.load()) === null) }))()`);
+    await putBack();
+    const again = await P.ev(`(async () => { const r = await code(async () => { const k = await K.DeviceKeys.load(); return (await k.chain()).head; }); return { r, pin: await pinOf(${acct}) }; })()`);
+    ok(gone.pin === null && gone.load.ok === true && again.r.ok === made.head && again.pin?.hash === made.head && !again.pin.forked,
+      "after Reset this device no pin or fork mark is left, and the device enrolled again loads with a fresh pin at the head", { gone, again });
+  }
+
+  // ---- T2: a chain reset since the pin (another generation) is refused and marks the account forked
+  {
+    await P.ev(`idb((d, p) => { const g = p.get(${acct}); g.onsuccess = () => p.put({ ...g.result, generation: "z".repeat(26) }, ${acct}); })`);
+    const r = await P.ev(`(async () => [await code(async () => K.DeviceKeys.load()), await code(async () => K.DeviceKeys.load())])()`);
+    ok(r[0].code === "chain_reset" && r[1].code === "forked", "a chain of another generation than the pin's (a reset since) is refused, and the account is then forked here", r);
+    await reset(); await putBack();
+  }
+
+  // ---- N1, N2: a pinned device meeting an emptied chain, or one that starts at a reset, marks it too
+  for (const [what, serve, code0] of [["an emptied chain", "() => []", "no_chain"], ["a chain that starts at a reset", "() => [JSON.stringify({ body: { op: 'reset' } })]", "chain_unanchored"]]) {
+    await P.ev(`code(async () => K.DeviceKeys.load())`);
+    const r = await P.ev(`(async () => [await code(async () => K.DeviceKeys.load(transport("A", { serve: ${serve} }))), await code(async () => K.DeviceKeys.load())])()`);
+    ok(r[0].code === code0 && r[1].code === "forked", `a pinned device meeting ${what} is refused (${code0}) and the account is then forked here`, r);
+    await reset(); await putBack();
+  }
+
+  // ---- T4: another object moves the stored pin forward; this object's refresh meets the older chain: refused, and the
+  // stored pin stays where it is (a refresh replays from the stored pin, never from its own memory)
+  {
+    const r = await P.ev(`(async () => {
+      const E = e2eCore();
+      const old = { serve: null };
+      const k1 = await K.DeviceKeys.load(transport("A", { serve: (entries) => (old.serve ? old.serve(entries) : entries) }));
+      // (a real next entry from the page: the recovery key replaced, signed by this device, the new key countersigning
+      // and proving its X25519 half; its package, the epoch's secret wrapped to the new key, read with the recovery code)
+      const chain = await (await fetch("/api/sync/v1/e2e/chain?from=0")).json();
+      const ctx = { aud: chain.aud, account: chain.account };
+      const state = await E.replayFrom(chain.entries.map((e) => new TextEncoder().encode(e)), ctx);
+      const rk = await E.recoveryKeys(E.seedOfCode(${J(made.code)}), ctx.account);
+      const rw = await (await fetch("/api/sync/v1/e2e/wrapper?kind=recovery")).json();
+      const { S } = await E.openWrapper({ hpke, state, ctx, bytes: new TextEncoder().encode(rw.wrapper), me: { kind: "recovery", id: ctx.account, recipient: rk.kem }, seen: () => false });
+      const rk2 = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+      const draft = E.nextBody(state, ctx, "replace-recovery", { recovery: { sign: b64(rk2.sign.raw), kem: b64(rk2.kem.publicRaw) }, pop: null });
+      const pre = await E.preEntryHash(draft);
+      const ch = await E.challenge(hpke, rk2.kem.publicRaw, pre);
+      const mac = await E.respond(hpke, rk2.kem, ch.enc, pre);
+      const view = await k1.chain();
+      const signer = await asKey(view.signerAt(view.head, k1.device.id), k1.device.sign);
+      const bytes = await E.sealEntry(E.deviceSigner(k1.device.id, signer), { ...draft, pop: { enc: b64(ch.enc), mac: b64(mac) } }, signer, { recovery: rk2.sign });
+      const next = (await E.applyChainEntry(state, bytes, ctx)).state;
+      const w = await E.wrapEpoch({ hpke, state: next, ctx, sender: { id: k1.device.id, sign: signer }, recipient: { kind: "recovery", id: ctx.account }, n: 0, S });
+      const posted = (await fetch("/api/sync/v1/e2e/chain", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ entry: new TextDecoder().decode(bytes), keyring: null, wrappers: [new TextDecoder().decode(w)] }) })).status;
+      // (another object loads the longer chain: the stored pin moves to seq 1)
+      const k2 = await K.DeviceKeys.load();
+      const moved = await pinOf(${acct});
+      // (k1, still at seq 0 in memory, is now served the chain as it was: just genesis)
+      old.serve = (entries) => entries.slice(0, 1);
+      const refresh = await code(async () => k1.chain(true));
+      const after = await pinOf(${acct});
+      return { posted, k2: (await k2.chain()).head === next.head, moved: moved.seq, refresh, after: after.seq };
+    })()`);
+    ok(r.posted === 201 && r.k2 && r.moved === 1 && r.refresh.code === "chain_fork" && r.after === 1,
+      "another object pins seq 1; this object's refresh, served the older chain, is refused (chain_fork) and the stored pin stays at 1", r);
+  }
+
+  // ---- H1: genesis whose append fails or whose answer is lost
+  {
+    // (its answer lost after it applied: the chain says so, and genesis finishes, its recovery code returned)
+    const lost = await P.ev(`code(async () => { const { keys, recoveryCode } = await K.DeviceKeys.create("tablet", transport("LOST", { lose: true })); return { code: recoveryCode.length, unconfirmed: keys.recoveryUnconfirmed, again: !!(await K.DeviceKeys.load(transport("LOST"))), e0: !!(await keys.epochKeys(0)) }; })`);
+    ok(lost.ok?.code === 64 && lost.ok.unconfirmed === false && lost.ok.again && lost.ok.e0, "genesis whose append's answer is lost after it applied finishes: the recovery code is returned, the device loads", lost);
+    // (refused before it applied: no device is left behind, and trying again works)
+    const refused = await P.ev(`(async () => {
+      const first = await code(async () => K.DeviceKeys.create("phone", transport("REFUSED", { refuse: true })));
+      const left = await K.DeviceKeys.load(transport("REFUSED"));
+      const retry = await code(async () => (await K.DeviceKeys.create("phone", transport("REFUSED"))).recoveryCode.length);
+      return { first, left: left === null, retry };
+    })()`);
+    ok(refused.first.code === "server" && refused.left && refused.retry.ok === 64, "genesis whose append is refused before it applies leaves no device behind, and trying again succeeds", refused);
+    // (its answer lost and the chain then unreadable: the device stays, marked as not having shown its recovery code)
+    const dark = await P.ev(`(async () => {
+      let posted = false;
+      const first = await code(async () => K.DeviceKeys.create("desk", transport("DARK", { lose: true, dark: () => { const was = posted; posted = true; return was; } })));
+      const k = await K.DeviceKeys.load(transport("DARK"));
+      return { first, unconfirmed: k?.recoveryUnconfirmed ?? null };
+    })()`);
+    ok(dark.first.code === "server" && dark.unconfirmed === true, "genesis whose answer is lost and whose chain can't then be read keeps the device, which loads saying its recovery code may never have been shown", dark);
+  }
+
+  // ---- N3: only the current epoch's raw secret is kept, in a private field
+  {
+    const r = await P.ev(`(async () => { const k = await K.DeviceKeys.load(transport("LOST")); await k.epochKeys(0); return Object.keys(k).sort(); })()`);
+    ok(!r.some((x) => /secret|current|derived|seen/i.test(x)), `no epoch secret or key cache is an ordinary property of the object (${J(r)})`);
+  }
   ok(requests > 0, `(the page's requests went to the server: ${requests})`);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
