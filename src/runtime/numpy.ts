@@ -1466,12 +1466,15 @@ function getitem(a: NDArray, key: any): any {
 // cast as the arrays are, wrapping. A list's values are checked one by one, a NumPy scalar among them as by basic
 // indexing (not in np.full).
 const isSmallInt = (dt: DType) => dt.isInt && !isWide(dt);
-function admitSmallInt(dt: DType, x: any, floats: boolean, npScalars: boolean, lists: boolean) {
+function admitSmallInt(dt: DType, x: any, floats: boolean, npScalars: boolean, lists: boolean, depth = 0) {
   if (lists && isSeq(x) && !(x instanceof NDArray)) {
     // (a list or tuple subclass with __array__ converts by its protocol, once, later, as NumPy's: its stored items are
     // never what is written, so never checked here)
     if (protocolSeq(x)) return;
-    for (const it of seqItems(x)) admitSmallInt(dt, it, floats, true, true);
+    // (nesting past MAX_DIMS, a container holding itself among them: left to discover, whose ValueError refuses it
+    // before anything is written; never a recursion without bound here)
+    if (depth >= MAX_DIMS) return;
+    for (const it of seqItems(x)) admitSmallInt(dt, it, floats, true, true, depth + 1);
     return;
   }
   const w = pyScalar(x);
@@ -5190,6 +5193,12 @@ newBuiltinModule("_numpy", (m) => {
     } else {
       writable(a);
       if (isSmallInt(a.dt) && !(v instanceof NDArray)) admitSmallInt(a.dt, v, true, true, false);
+      // (a float into int64/uint64 as NumPy packs it, by int(), as setitem does: NaN, infinity and values past the
+      // dtype refused; a NumPy float into uint64 is cast instead)
+      if (isWide(a.dt)) {
+        const npFloat = typeName(v) === "float64" || typeName(v) === "float32";
+        if (npFloat ? a.dt.kind !== "u" : (typeof v === "number" && !Number.isInteger(v)) || v instanceof Obj.FloatBox) v = toNum(v, a.dt);
+      }
       assign(a, operand(v).arr);
     }
     return null;

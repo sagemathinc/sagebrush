@@ -13799,6 +13799,11 @@
   "owner": "python (@sagebrush-python)",
   "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
  },
+ "src/runtime/numpy.ts :: admitSmallInt :: if (depth >= MAX_DIMS) return; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: MAX_DIMS, NumPy's NPY_MAXDIMS (64), where the admission prepass stops descending; nesting past it is left to discover, whose ValueError refuses it; NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
