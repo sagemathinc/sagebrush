@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-interrupt = { path = "../interrupt" }
+sagebrush-ledger = { path = "../ledger" }
 num-integer = "0.1"
 num-traits = "0.2"
 

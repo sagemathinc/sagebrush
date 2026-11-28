@@ -827,6 +827,7 @@ dependencies = [
  "num-traits",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-ledger",
 ]
 
 [[package]]
