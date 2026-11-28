@@ -2,7 +2,7 @@
 // The desktop app's file permissions across launches (web/workspace/grants-file.ts, #1565): the record kept in
 // grants.json by where each notebook is, and brought back at the next launch under the notebooks' new ids.
 //   bun web/workspace/test-grants-file.mjs
-import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
+import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -50,6 +50,13 @@ for (const [bad, why] of [["", "none kept"], ["not json", "not JSON"], [J({ v: 2
   const fb = files(); fb.set(bad);
   const sb = store();
   ok((await restoreGrants(w2, fb.invoke, sb)) === 0 && sb.getItem(GRANTS_KEY) === null, `nothing comes back from ${why}`);
+}
+
+// an entry of grants.json that isn't whole (Codex S14 F2: a string where a list goes, a scope not in its canonical
+// form) is left out, the entries beside it kept
+{
+  const p = parseGrants(J({ v: 1, seq: 3, docs: { "ws:/a.ipynb": { write: "/", t: 1 }, "ws:/b.ipynb": { write: ["/b/../.."], t: 1 }, "ws:/c.ipynb": { write: ["/c"], t: 2 } } }));
+  ok(J(p?.docs) === J({ "ws:/c.ipynb": { write: ["/c"], t: 2 } }), "grants.json: an entry that isn't whole is left out, the one beside it kept: " + J(p));
 }
 
 // kept at each change, one write at a time, the last one winning
@@ -292,6 +299,54 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     ok(r1.failed && perms.writeTrees("id1").length === 0, "storage failure: a merge that can't be stored sets the grants aside: " + J(r1));
     const r2 = await reconcileGrants(sync, perms);
     ok(!r2.failed && perms.suspended() === null && perms.writeTrees("id1").length === 0, "storage failure: the same grants.json tried again is merged again: the revocation holds, the old grant doesn't come back: " + J({ r2, trees: perms.writeTrees("id1") }));
+  }
+  delete globalThis.localStorage;
+}
+
+// at launch (startGrants, Codex S14 F3): every grant set aside first; the listener for another window's change
+// registered, and waited for, before grants.json is read; a listener that can't be registered leaves the grants set
+// aside, and is tried again.  The oracle: permissions.js's own writeTrees
+{
+  const launch = async ({ listenFails = 0 } = {}) => {
+    const mem = new Map();
+    globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+    const { createPermissions } = await import("../notebook/permissions.js");
+    const perms = createPermissions();
+    const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+    // (the last launch's grant, in this page's record and in grants.json)
+    perms.grant("id1", "write", "/allowed");
+    await grantsSync(w, f.invoke, localStorage).write();
+    // (another window takes it back while this launch's first read runs, and says so to whoever listens by then)
+    let heard = null, listens = 0, reads = 0, release;
+    const registered = new Promise((r) => (release = r));
+    const invoke = async (c, a) => {
+      if (c === "grants_read" && ++reads === 1) { const old = await f.invoke(c, a); f.set(J({ v: 1, seq: 30, docs: {} })); heard?.(); return old; }
+      return f.invoke(c, a);
+    };
+    const listen = async (fn) => { listens++; await registered; if (listens <= listenFails) throw new Error("event bus not ready"); heard = fn; };
+    const told = { n: 0 };
+    const s = startGrants(grantsSync(w, invoke, localStorage), perms, listen, { changed: () => told.n++ }, 20, 40);
+    return { perms, s, release, told, reads: () => reads, listens: () => listens };
+  };
+  {
+    const { perms, s, release, told, reads } = await launch();
+    ok(perms.suspended() !== null && perms.writeTrees("id1").length === 0 && told.n === 1, "launch: until the grants are read, every grant is set aside, and the page is told");
+    await sleep(10);
+    ok(reads() === 0, "launch: grants.json isn't read before the listener is registered");
+    release();
+    await s.ready;
+    await sleep(10);
+    ok(perms.suspended() === null && perms.writeTrees("id1").length === 0, "launch: a revocation another window wrote while the first read ran is heard and merged: the old grant doesn't come back: " + J(perms.writeTrees("id1")));
+    s.stop();
+  }
+  {
+    const { perms, s, release, listens } = await launch({ listenFails: 1 });
+    release();
+    await s.ready;
+    ok(/can't watch for changes to its file permissions/.test(perms.suspended() ?? "") && perms.writeTrees("id1").length === 0 && !perms.grant("id1", "write", "/more").ok, "launch: a listener that can't be registered leaves every grant set aside, no Allow made (and the launch isn't held up): " + J(perms.suspended()));
+    await s.done;
+    ok(listens() === 2 && perms.suspended() === null, "launch: ...it is tried again, and once registered the grants come back (as grants.json now says)");
+    s.stop();
   }
   delete globalThis.localStorage;
 }

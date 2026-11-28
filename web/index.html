@@ -5271,25 +5271,14 @@ const wsReady = (async () => {
       const d = await desktopModule(), invoke = (c, a) => TAURI.core.invoke(c, a);
       // (one queue for this page's reads and writes of grants.json, each merged with what it last saw: grants-file.ts)
       const grantsFile = d.grantsSync(w, invoke);
-      if (await grantsFile.restore()) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (current.id) filesShown(); }
-      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f), undefined, undefined, grantsFile);
-      // (another window of the app wrote grants.json, #1541: merged in, so what it took back is gone here too)
+      // (another window of the app wrote grants.json, #1541: merged in, so what it took back is gone here too. The
+      // listener first, waited for, then grants.json read and read again; until then, and while either fails, every
+      // grant here is set aside: grants-file.ts startGrants)
       const me = window.__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
-      // (one that can't be read: every grant here set aside until it can, tried again every 5 s: grants-file.ts
-      // reconcileGrants)
-      let again = null;
-      const reconcile = async () => {
-        clearTimeout(again);
-        again = null;
-        try {
-          const r = await d.reconcileGrants(grantsFile, perms);
-          if (r.changed) { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (fbReq?.doc !== undefined) filesBar(false); if (current.id) filesShown(); }
-          // (this page's own changes grants.json hasn't yet: written, over what was just merged)
-          if (r.ahead) grantsKept.changed();
-          if (r.failed) again = setTimeout(reconcile, 5000);
-        } catch (e) { console.warn("grants.json:", e); }
-      };
-      TAURI.event.listen("sb-grants-changed", (ev) => { if (me && ev?.payload?.from !== me) void reconcile(); }).catch((e) => console.warn("grants.json:", e));
+      const told = () => { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (fbReq?.doc !== undefined) filesBar(false); if (current.id) filesShown(); };
+      const started = d.startGrants(grantsFile, perms, (f) => TAURI.event.listen("sb-grants-changed", (ev) => { if (me && ev?.payload?.from !== me) f(); }), { changed: told, ahead: () => grantsKept?.changed() });
+      await started.ready;
+      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f), undefined, undefined, grantsFile);
       // (in the quit's and the leave's barrier, as the settings' flush is: disk-mirror.ts keepAll)
       window.__sbGrantsFlush = () => grantsKept.flush();
     } catch (e) { console.warn("grants.json:", e); }
