@@ -6,6 +6,7 @@ from itertools import compress
 import numpy as np
 
 from ._sk_extmath import _approximate_mode
+from ._sk_param import check_int_at_least
 from .multiclass import _sk_label_values
 from .validation import _check_sample_weight, check_array, check_consistent_length, check_random_state
 
@@ -123,6 +124,8 @@ def _safe_indexing(X, indices, *, axis=0):
 
 def resample(*arrays, replace=True, n_samples=None, random_state=None, stratify=None, sample_weight=None):
     """Resample arrays or sparse matrices in a consistent way."""
+    # (validate_params' Interval(Integral, 1, None) or None, before anything is drawn; shuffle's too, as it calls this)
+    check_int_at_least("resample", "n_samples", n_samples, 1, none_ok=True)
     max_n_samples = n_samples
     random_state = check_random_state(random_state)
     if len(arrays) == 0:

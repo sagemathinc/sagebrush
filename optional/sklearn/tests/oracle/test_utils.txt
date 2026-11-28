@@ -142,3 +142,45 @@ array([3, 5, 3, 3, 5, 5, 2, 3])
 !! NotImplementedError: Resampling with sample_weight is only implemented for replace=True.
 == resample-weighted-length
 !! ValueError: sample_weight.shape == (2,), expected (4,)!
+== resample-n-check replace=False n=-1
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got -1 instead.
+== resample-n-check replace=False n=0
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got 0 instead.
+== resample-n-check replace=False n=1
+[3]
+== resample-n-check replace=False n=1.5
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got 1.5 instead.
+== resample-n-check replace=False n=2.0
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got 2.0 instead.
+== resample-n-check replace=False n=None
+[3, 2, 1]
+== resample-n-check replace=False n=np.int64(2)
+[3, 2]
+== resample-n-check replace=False n='2'
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got '2' instead.
+== resample-n-check replace=True n=-1
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got -1 instead.
+== resample-n-check replace=True n=0
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got 0 instead.
+== resample-n-check replace=True n=1
+[1]
+== resample-n-check replace=True n=1.5
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got 1.5 instead.
+== resample-n-check replace=True n=2.0
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got 2.0 instead.
+== resample-n-check replace=True n=None
+[1, 2, 1]
+== resample-n-check replace=True n=np.int64(2)
+[1, 2]
+== resample-n-check replace=True n='2'
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got '2' instead.
+== resample-n-check bool
+[3]
+== shuffle-n-check n=-1
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got -1 instead.
+== shuffle-n-check n=0
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got 0 instead.
+== shuffle-n-check n=2
+[3, 2]
+== shuffle-n-check n=None
+[3, 2, 1]

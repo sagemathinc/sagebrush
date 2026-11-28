@@ -36,21 +36,21 @@
   },
   {
     "file": "py/sklearn/utils/validation.py",
-    "line": 433,
+    "line": 441,
     "construct": "name",
     "target": "hasattr",
     "reason": "check_is_fitted(estimator, attributes): whether the estimator has each fitted attribute the caller names, as scikit-learn's _is_fitted"
   },
   {
     "file": "py/sklearn/utils/validation.py",
-    "line": 436,
+    "line": 444,
     "construct": "name",
     "target": "vars",
     "reason": "check_is_fitted without attributes: an estimator is fitted when one of its own attributes ends in an underscore (vars(estimator)), as scikit-learn's _is_fitted"
   },
   {
     "file": "py/sklearn/utils/validation.py",
-    "line": 415,
+    "line": 423,
     "construct": "reference",
     "target": "numpy.random.rand.__self__",
     "reason": "check_random_state(None) returns NumPy's global RandomState itself, the one np.random.seed seeds (scikit-learn's np.random.mtrand._rand, a private name); the module functions' bound instance is that object"

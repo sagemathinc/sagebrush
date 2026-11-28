@@ -75,6 +75,9 @@ def real_interval(low, high, closed):
     def test(v):
         if not isinstance(v, numbers.Real):
             return False
+        # (NaN is in no interval, as Interval.__contains__ checks it first)
+        if not isinstance(v, numbers.Integral) and v != v:
+            return False
         if low is not None and (v < low if closed in ("left", "both") else v <= low):
             return False
         if high is not None and (v > high if closed in ("right", "both") else v >= high):

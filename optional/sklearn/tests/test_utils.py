@@ -70,3 +70,11 @@ case("resample-weighted", lambda: resample(np.arange(6), sample_weight=[0.1, 0.0
 case("resample-weighted-two-arrays", lambda: resample(np.arange(10).reshape(5, 2), list("abcde"), sample_weight=[1, 0, 0, 3, 1], random_state=7))
 case("resample-weighted-noreplace", lambda: resample(np.arange(4), sample_weight=[1.0, 1.0, 1.0, 1.0], replace=False))
 case("resample-weighted-length", lambda: resample(np.arange(4), sample_weight=[1.0, 1.0], random_state=0))
+# n_samples checked as validate_params checks it: an int of at least 1 (a bool counts, a float or a string doesn't)
+# or None, before anything is drawn; shuffle's through resample
+for rep in (False, True):
+    for n in (-1, 0, 1, 1.5, 2.0, None, np.int64(2), "2"):
+        case(f"resample-n-check replace={rep} n={n!r}", lambda: resample([1, 2, 3], replace=rep, n_samples=n, random_state=0))
+case("resample-n-check bool", lambda: resample([1, 2, 3], replace=False, n_samples=True, random_state=0))
+for n in (-1, 0, 2, None):
+    case(f"shuffle-n-check n={n!r}", lambda: shuffle([1, 2, 3], n_samples=n, random_state=0))

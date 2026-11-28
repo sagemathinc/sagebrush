@@ -155,11 +155,19 @@ def confusion_matrix(y_true, y_pred, *, labels=None, sample_weight=None, normali
     else:
         dtype = np.float64
 
-    # (scipy's coo_array((w, (i, j))).toarray(): each entry added in order, duplicates summed, as bincount sums
-    # them; integer weights other than the default ones are summed exactly as long as the counts stay below 2**53)
+    # (scipy's coo_array((w, (i, j))).toarray(): each entry added in order, duplicates summed; integer weights in
+    # an int64 accumulator, as scikit-learn's, never through float64, so a cell is exact (or, past what Sagebrush's
+    # int64 holds, refused), float weights by bincount)
     flat_index = y_true.astype(np.int64) * n_labels + y_pred.astype(np.int64)
     if dtype == np.int64 and bool(np.all(sample_weight == 1)):
         flat = np.bincount(flat_index, minlength=n_labels * n_labels)
+    elif dtype == np.int64:
+        # (each cell's integer sum: the weights grouped by cell (a stable sort, in their order within it) and each
+        # group summed in int64 on its own, so no cell's sum depends on another's)
+        order = np.argsort(flat_index, kind="stable")
+        ws = sample_weight.astype(np.int64)[order]
+        bounds = np.searchsorted(flat_index[order], np.arange(n_labels * n_labels + 1), side="left").tolist()
+        flat = np.array([ws[bounds[k]:bounds[k + 1]].sum() for k in range(n_labels * n_labels)], dtype=np.int64)
     else:
         flat = np.bincount(flat_index, weights=sample_weight.astype(np.float64), minlength=n_labels * n_labels)
     cm = flat.astype(dtype).reshape(n_labels, n_labels)

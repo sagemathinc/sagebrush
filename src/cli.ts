@@ -11,6 +11,7 @@ import { readFileSync, readSync, writeSync, mkdirSync, appendFileSync, writeFile
 import { dirname, resolve, join } from "path";
 import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
+import { isatty } from "tty";
 import * as readline from "readline";
 import { PassThrough } from "stream";
 import { oneLine } from "./terminal-text";
@@ -435,8 +436,28 @@ function clearLine(rl: readline.Interface) {
   (rl as any).cursor = 0;
 }
 
+/** A disappearing terminal can report an I/O error before SIGHUP is delivered (in particular, readline writes
+ * its cursor after the visible prompt). Take the same exit path; other stream errors remain fatal. */
+function terminalHangup(hangup: () => void) {
+  const error = (e: NodeJS.ErrnoException) => {
+    if (e.code === "EIO" || e.code === "EPIPE" || e.code === "ECONNRESET") hangup();
+    else throw e;
+  };
+  process.stdin.on("error", error);
+  process.stdout.on("error", error);
+  return { error, dispose: () => {
+    process.stdin.off("error", error);
+    process.stdout.off("error", error);
+  } };
+}
+
 function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<number> {
   removeFiguresOnSignal();
+  const terminal = terminalHangup(() => {
+    removeFigures();
+    process.removeAllListeners("SIGHUP");
+    process.kill(process.pid, "SIGHUP");
+  });
   const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
   if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
   // (the session's step, shared with the Terminal's prompt: src/repl-step.ts; the language's library and
@@ -462,6 +483,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
   }
   // (completion in the prompt's language: src/interactive.ts completeIn)
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main, mode), history, historySize: 1000, terminal: process.stdin.isTTY });
+  rl.on("error", terminal.error); // (readline forwards input errors too)
   const ps1 = () => session.ps1();
   const ps2 = () => session.ps2();
   let buf: string[] = [];
@@ -474,6 +496,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
       done = true;
       R.stdout.flush();
       rl.close();
+      terminal.dispose();
       resolveExit(code);
     };
     rl.on("line", (line) => {
@@ -576,9 +599,11 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
   const die = (sig: NodeJS.Signals) => {
     removeFiguresHere();
     raw(false);
+    void worker.terminate();
     process.removeAllListeners(sig);
     process.kill(process.pid, sig);
   };
+  const terminal = terminalHangup(() => die("SIGHUP"));
   // (Ctrl-C while an input runs, the key or a SIGINT: the flag, as the launcher sets it. Another while the first is
   // still unseen: within GRACE of it, the same press (a double tap lands both before any call could have polled);
   // from GRACE to 2 s, or one before the worker has handed over its flag: SIGINT's default action)
@@ -668,6 +693,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
       process.stdin.pause();
       raw(false);
       removeFiguresHere();
+      terminal.dispose();
       if (interrupted) return die("SIGINT");
       resolveExit(code);
     };
@@ -704,14 +730,23 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
         ask({ complete: line }).then((m) => cb(null, m.complete ?? [[], line]));
       };
       rl = readline.createInterface({ input: inp, output: process.stdout, completer, history, historySize: 1000, terminal: tty });
+      rl.on("error", terminal.error);
       let buf: string[] = [];
+      // (the next prompt; once readline has closed at the input's end, while its last line ran, the prompt is
+      // written as readline would have, and the close below ends the session)
+      let closed = false;
+      const promptWith = (p: string) => {
+        if (!closed) {
+          rl!.setPrompt(p);
+          rl!.prompt();
+        } else if (!tty) process.stdout.write(p);
+      };
       // (one line at a time, from feed: the next is given once this one is done)
       const take = async (line: string) => {
         buf.push(line);
         const src = buf.join("\n");
         if ((await ask({ incomplete: src })).incomplete) {
-          rl!.setPrompt(ps2);
-          rl!.prompt();
+          promptWith(ps2);
           return;
         }
         buf = [];
@@ -735,8 +770,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
             return close(st.end);
           }
         }
-        rl!.setPrompt(ps1);
-        rl!.prompt();
+        promptWith(ps1);
       };
       // (the line being taken: at the input's end, readline closes once it has its last line, which runs first)
       let taking: Promise<void> = Promise.resolve();
@@ -756,6 +790,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
         rl!.prompt();
       });
       rl.on("close", () => {
+        closed = true;
         taking.then(() => {
           if (done) return;
           if (tty) process.stdout.write("\n");
@@ -1077,6 +1112,10 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     process.exitCode = await promptFront(given, lim);
     return;
   }
+  // (a program's stdin that is a pipe or a file: input() reads its lines, as CPython's does; a terminal's isn't read.
+  // isatty(0), never process.stdin: opening that stream puts a pipe in non-blocking mode, and stdin's readSync then
+  // spins on EAGAIN while a slow writer has nothing to send)
+  if (!interactive && !isatty(0)) R.stdinInput = true;
   const sys = R.importModule("sys");
   sys.argv.length = 0;
   sys.argv.push(cmd !== null ? "-c" : mod !== null ? mod : file ?? "", ...argv);

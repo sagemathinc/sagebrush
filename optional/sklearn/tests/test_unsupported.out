@@ -22,3 +22,5 @@ dtype('<U2')
 !! NotImplementedError: sklearn.pipeline.Pipeline(memory=...) is not in Sagebrush's sklearn 0.x subset
 == pipeline.routing
 !! NotImplementedError: sklearn's metadata routing is not in Sagebrush's sklearn 0.x subset
+== cm.int-weights-past-2**53
+!! NotImplementedError: int64 values beyond 2**53 are not supported yet

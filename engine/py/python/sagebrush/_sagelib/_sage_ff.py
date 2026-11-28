@@ -1177,7 +1177,7 @@ _ENGINE_POLY_MIN_WORK = 256
 def _engine_poly(f, p, a, b):
     """The engine's nmod_poly_<f> of coefficient lists a and b (IntegerMod
     elements, no trailing zeros, both nonzero) modulo p."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     return call("nmod_poly_" + f, p=str(p), a=",".join(str(c._v) for c in a), b=",".join(str(c._v) for c in b))
 
 
@@ -2971,7 +2971,7 @@ class RingExtensionElement_ff:
     def vector(self, base=None):
         """The coordinates over base (default: the extension's base), a
         vector of its VectorSpace, as Sage's; over the extension itself (a
-        vector of dimension 1 over L, in Sage) refused (astra CORR-FF2-4)."""
+        vector of dimension 1 over L, in Sage) refused (the correctness review CORR-FF2-4)."""
         L = self._L
         if L._check_base(base) is not L._F:
             raise NotImplementedError("the vector of an element over the extension itself is not supported yet")
@@ -3332,8 +3332,8 @@ def _ff_subfields(self, degree=0, name=None):
     list): the prime field, each proper subfield by its Conway embedding,
     and this field by the identity; computed by the shared core, for fields
     of at most 2^20 elements, admitted as a whole before anything is made
-    (daybreak2 LIMIT-PR53-1).  A proper subfield is named as Sage names it
-    (astra CORR-PR53-2): for one degree, name itself; else name with its
+    (the limits review LIMIT-PR53-1).  A proper subfield is named as Sage names it
+    (the correctness review CORR-PR53-2): for one degree, name itself; else name with its
     degree appended, or name[degree] for a dict (which must have every
     degree); with no name, the prefix field of a prefix field, else this
     field's name with the degree appended.
@@ -4320,7 +4320,7 @@ class Polynomial_ff:
         if f.degree() == 0:
             items = []  # a nonzero constant: a unit, no irreducible factors
         elif isinstance(B, IntegerModRing_) and B._n < 2 ** 32:
-            from sagebrush._engine import call
+            from _sagebrush_lib._engine import call
             p = B._n
             res = call("factor_mod", f=[str(int(c)) for c in f._c], p=p)
             items = [(Polynomial_ff(self._ring, [_elt(B, int(c)) for c in g]), int(e)) for g, e in res]

@@ -26,3 +26,7 @@ case("digits.images", lambda: digest(load_digits().images))
 case("digits.n_class", lambda: [digest(a) for a in load_digits(n_class=3, return_X_y=True)])
 case("digits.n_class-frame", lambda: load_digits(n_class=2, as_frame=True).frame.shape)
 case("iris.filename", lambda: (load_iris().filename, load_iris().data_module))
+# n_class checked as validate_params checks it: an int in [1, 10] (a bool counts), before anything is loaded
+import numpy as np
+for n in (0, -1, 1, 2, 10, 11, 2.5, True, np.int64(3), "3"):
+    case(f"digits-n_class-check {n!r}", lambda: (lambda b: (b.data.shape, sorted(set(b.target.tolist()))))(load_digits(n_class=n)))

@@ -1,0 +1,141 @@
+# Reductions without an identity (max, min, amax, amin, maximum/minimum/fmax/fmin.reduce, nanmax, nanmin) into an
+# out= of another dtype, in NumPy's two steps: each position's first element (index 0 along the reduced axes) cast into
+# out ("invalid value encountered in cast"), then the rest reduced in the loop's dtype from out's value read back and
+# cast into out ("... in reduce"). And accumulations into out= (ufunc.accumulate, cumsum, cumprod): computed in the loop
+# both dtypes convert to, each result cast into out ("... in cast", then "... in accumulate").
+import numpy as np
+import warnings
+
+nan, inf = np.nan, np.inf
+A = np.array
+
+
+def o(*shape, dt=np.int8):
+    return np.zeros(shape, dt)
+
+
+def show(label, f):
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        try:
+            r = np.asarray(f()).tolist()
+        except Exception as e:
+            r = "%s: %s" % (type(e).__name__, e)
+    print(label, "->", r, [str(m.message) for m in w])
+
+
+A2 = A([[nan, 1.0], [2.0, 3.0]])
+B2 = A([[1.0, 2.0], [nan, 3.0]])
+
+print("== the first element is cast, then the rest reduced from out's value")
+show("max [nan, 1]", lambda: np.max(A([nan, 1.0]), out=o()))
+show("max [1, nan]", lambda: np.max(A([1.0, nan]), out=o()))
+show("max [nan, nan]", lambda: np.max(A([nan, nan]), out=o()))
+show("max [nan]", lambda: np.max(A([nan]), out=o()))
+show("max [1e10]", lambda: np.max(A([1e10]), out=o()))
+show("max [1e10, 1]", lambda: np.max(A([1e10, 1.0]), out=o()))
+show("max [1, 1e10]", lambda: np.max(A([1.0, 1e10]), out=o()))
+show("max [300.7, 1]", lambda: np.max(A([300.7, 1.0]), out=o()))
+show("max [1, 300.7]", lambda: np.max(A([1.0, 300.7]), out=o()))
+show("max [300.7, 100]", lambda: np.max(A([300.7, 100.0]), out=o()))
+show("max [3e9, 2]", lambda: np.max(A([3e9, 2.0]), out=o()))
+show("min [3e9, 2]", lambda: np.min(A([3e9, 2.0]), out=o()))
+show("min [-inf, 2]", lambda: np.min(A([-inf, 2.0]), out=o()))
+show("max [1, 2, nan, 3]", lambda: np.max(A([1.0, 2.0, nan, 3.0]), out=o()))
+show("min [-1, 5] into uint8", lambda: np.min(A([-1.0, 5.0]), out=o(dt=np.uint8)))
+show("min [5, -1] into uint8", lambda: np.min(A([5.0, -1.0]), out=o(dt=np.uint8)))
+show("max [-3e19, 1] into uint32", lambda: np.max(A([-3e19, 1.0]), out=o(dt=np.uint32)))
+show("max [1.5, 2.5] into int64", lambda: np.max(A([1.5, 2.5]), out=o(dt=np.int64)))
+show("max [nan, 1] into float32", lambda: np.max(A([nan, 1.0]), out=o(dt=np.float32)))
+show("max ints [300, 100] into int8", lambda: np.max(A([300, 100]), out=o()))
+show("max ints [100, 300] into int8", lambda: np.max(A([100, 300]), out=o()))
+show("max int8 into int64", lambda: np.max(A([100, 120], np.int8), out=o(dt=np.int64)))
+show("max bools into int8", lambda: np.max(A([True, False]), out=o()))
+show("max into bool", lambda: np.max(A([2.0, 0.0]), out=o(dt=np.bool_)))
+show("max float64 out (same dtype)", lambda: np.max(A([nan, 1.0]), out=o(dt=np.float64)))
+
+print("== axes, layouts and views")
+show("max 2d None, [0,0] bad", lambda: np.max(A2, out=o()))
+show("max 2d None, [1,0] bad", lambda: np.max(B2, out=o()))
+show("max 2d axis 0, [0,0] bad", lambda: np.max(A2, axis=0, out=o(2)))
+show("max 2d axis 0, [1,0] bad", lambda: np.max(B2, axis=0, out=o(2)))
+show("max 2d axis 1, [1,0] bad", lambda: np.max(B2, axis=1, out=o(2)))
+show("max 2d axis 1, [0,0] bad", lambda: np.max(A2, axis=1, out=o(2)))
+show("max 2d axis (0, 1)", lambda: np.max(A2, axis=(0, 1), out=o()))
+show("max 2d axis (1, 0)", lambda: np.max(A2, axis=(1, 0), out=o()))
+show("max 2d axis -1", lambda: np.max(A2, axis=-1, out=o(2)))
+show("max 3 rows axis 0", lambda: np.max(A([[1.0, nan, 2.0], [3.0, 4.0, 5.0]]), axis=0, out=o(3)))
+show("max one column axis 1", lambda: np.max(A([[nan], [1.0]]), axis=1, out=o(2)))
+show("max one column all bad", lambda: np.max(A([[nan], [nan]]), axis=1, out=o(2)))
+show("max one column, second bad", lambda: np.max(A([[1.0], [nan]]), axis=1, out=o(2)))
+show("max one row axis 0", lambda: np.max(A([[nan, 5.0]]), axis=0, out=o(2)))
+show("max [[nan], [1]] axis 0", lambda: np.max(A([[nan], [1.0]]), axis=0, out=o(1)))
+show("max reversed, last bad", lambda: np.max(A([1.0, 2.0, nan])[::-1], out=o()))
+show("max reversed, first bad", lambda: np.max(A([nan, 2.0, 1.0])[::-1], out=o()))
+show("max reversed both axes", lambda: np.max(A([[1.0, 2.0], [3.0, nan]])[::-1, ::-1], out=o()))
+show("max reversed axis 1 only", lambda: np.max(A([[1.0, 2.0], [nan, 4.0]])[:, ::-1], axis=1, out=o(2)))
+show("max reversed other axis", lambda: np.max(A([[nan, 2.0], [3.0, 4.0]])[::-1], axis=1, out=o(2)))
+show("max transposed", lambda: np.max(A2.T, axis=0, out=o(2)))
+show("max Fortran order", lambda: np.max(np.asfortranarray(B2), out=o()))
+show("max strided", lambda: np.max(A([nan, 9.0, 1.0, 9.0, 2.0])[::2], out=o()))
+show("max keepdims", lambda: np.max(A([[nan, 1.0]]), axis=1, keepdims=True, out=o(1, 1)))
+show("max keepdims 2d", lambda: np.max(A([[nan, 1.0], [2.0, nan]]), axis=0, keepdims=True, out=o(1, 2)))
+show("max keepdims None", lambda: np.max(A2, keepdims=True, out=o(1, 1)))
+
+print("== spellings")
+show("amax", lambda: np.amax(A([nan, 1.0]), out=o()))
+show("amin", lambda: np.amin(A([nan, 1.0]), out=o()))
+show("method max", lambda: A([nan, 1.0]).max(out=o()))
+show("method min axis", lambda: A2.min(axis=1, out=o(2)))
+show("maximum.reduce", lambda: np.maximum.reduce(A([nan, 1.0]), out=o()))
+show("minimum.reduce [1, nan]", lambda: np.minimum.reduce(A([1.0, nan]), out=o()))
+show("maximum.reduce axis None", lambda: np.maximum.reduce(A2, axis=None, out=o()))
+show("maximum.reduce dtype float32", lambda: np.maximum.reduce(A([nan, 1.0]), dtype=np.float32, out=o()))
+show("fmax.reduce", lambda: np.fmax.reduce(A([nan, 300.7]), out=o()))
+show("fmin.reduce", lambda: np.fmin.reduce(A([1.0, nan]), out=o()))
+
+print("== nanmax and nanmin")
+show("nanmax [nan, 300.7]", lambda: np.nanmax(A([nan, 300.7]), out=o()))
+show("nanmax [1, 300.7]", lambda: np.nanmax(A([1.0, 300.7]), out=o()))
+show("nanmax [nan, nan]", lambda: np.nanmax(A([nan, nan]), out=o()))
+show("nanmin [-inf, 2]", lambda: np.nanmin(A([-inf, 2.0]), out=o()))
+show("nanmax 2d axis 0", lambda: np.nanmax(A([[nan, 300.7], [1.0, nan]]), axis=0, out=o(2)))
+show("nanmax all-NaN row", lambda: np.nanmax(A([[nan, nan], [1.0, 2.0]]), axis=1, out=o(2)))
+
+print("== with initial (or where and initial): no first-element step")
+show("max initial", lambda: np.max(A([nan, 1.0]), initial=5.0, out=o()))
+show("max initial 300.7", lambda: np.max(A([1.0, 2.0]), initial=300.7, out=o()))
+show("max where", lambda: np.max(A([nan, 1.0]), where=[False, True], initial=0.0, out=o()))
+show("max where, no initial", lambda: np.max(A([nan, 1.0]), where=[True, True], out=o()))
+show("min of nothing", lambda: np.min(np.zeros(0), out=o()))
+
+print("== accumulations into out")
+show("cumsum [1, 2, 3]", lambda: np.cumsum(A([1.0, 2.0, 3.0]), out=o(3)))
+show("cumsum [nan, 1]", lambda: np.cumsum(A([nan, 1.0]), out=o(2)))
+show("cumsum [1, nan]", lambda: np.cumsum(A([1.0, nan]), out=o(2)))
+show("cumsum [1, 2, nan, 3]", lambda: np.cumsum(A([1.0, 2.0, nan, 3.0]), out=o(4)))
+show("cumsum [nan]", lambda: np.cumsum(A([nan]), out=o(1)))
+show("cumsum [300.7, 1]", lambda: np.cumsum(A([300.7, 1.0]), out=o(2)))
+show("cumsum [1, 300]", lambda: np.cumsum(A([1.0, 300.0]), out=o(2)))
+show("cumsum [1, inf]", lambda: np.cumsum(A([1.0, inf]), out=o(2)))
+show("cumsum halves", lambda: np.cumsum(np.full(6, 0.5), out=o(6)))
+show("cumsum ints [300, 100]", lambda: np.cumsum(A([300, 100]), out=o(2)))
+show("cumsum int8 into int64", lambda: np.cumsum(A([100, 100], np.int8), out=o(2, dt=np.int64)))
+show("cumsum float32 into float64", lambda: np.cumsum(np.full(5, 0.1, np.float32), out=o(5, dt=np.float64))[-1])
+show("cumsum 2d axis 0", lambda: np.cumsum(B2, axis=0, out=o(2, 2)))
+show("cumsum 2d axis 1", lambda: np.cumsum(B2, axis=1, out=o(2, 2)))
+show("cumsum 2d None", lambda: np.cumsum(B2, out=o(4)))
+show("cumsum method", lambda: A([0.5, 0.5, 0.5]).cumsum(out=o(3)))
+show("cumprod [1, inf]", lambda: np.cumprod(A([1.0, inf]), out=o(2)))
+show("cumprod [2.5, 2]", lambda: np.cumprod(A([2.5, 2.0]), out=o(2)))
+show("add.accumulate [1, nan]", lambda: np.add.accumulate(A([1.0, nan]), out=o(2)))
+show("add.accumulate dtype float64", lambda: np.add.accumulate(A([1.0, nan]), out=o(2), dtype=np.float64))
+show("add.accumulate halves", lambda: np.add.accumulate(np.full(6, 0.5), out=o(6)))
+show("add.accumulate float32 into float64", lambda: np.add.accumulate(np.full(5, 0.1, np.float32), out=o(5, dt=np.float64))[-1])
+show("add.accumulate 2d axis 0", lambda: np.add.accumulate(A([[1.0, nan], [2.0, 3.0]]), axis=0, out=o(2, 2)))
+show("add.accumulate reversed", lambda: np.add.accumulate(A([nan, 1.0, 2.0])[::-1], out=o(3)))
+show("add.accumulate int64 into int8", lambda: np.add.accumulate(A([100, 100]), out=o(2)))
+show("add.accumulate int8 into int64", lambda: np.add.accumulate(A([100, 100], np.int8), out=o(2, dt=np.int64)))
+show("maximum.accumulate [1, nan, 2]", lambda: np.maximum.accumulate(A([1.0, nan, 2.0]), out=o(3)))
+show("maximum.accumulate [300.7, 1]", lambda: np.maximum.accumulate(A([300.7, 1.0]), out=o(2)))
+show("multiply.accumulate [0.5, 4]", lambda: np.multiply.accumulate(A([0.5, 4.0]), out=o(2)))

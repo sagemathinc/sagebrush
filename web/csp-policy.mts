@@ -34,6 +34,15 @@ export function pagePolicy(scriptHashes: string[] = [], frameAncestors: "'self'"
   ].join("; ");
 }
 
+// A space in 3D (/space/, web/space): the page's policy, narrowed. It reads and shows only this site's files (the
+// viewer, its chunks, the engine's worker and modules, a space and a file's text), so nothing of another origin is
+// fetched or shown: no https: in connect-src or img-src, and no loopback socket (no agent pairing on this page).
+export function spacePolicy(scriptHashes: string[] = []): string {
+  return pagePolicy(scriptHashes)
+    .replace("img-src 'self' data: blob: https: http:", "img-src 'self' data: blob:")
+    .replace("connect-src 'self' data: blob: https: http: ws://127.0.0.1:* ws://localhost:*", "connect-src 'self' data: blob:");
+}
+
 // A public GitHub repository's notebook or folder page (/gh/..., web/gh): the
 // shared-collection page's policy (as given: production's, or a preview's),
 // its fetches to the three hosts the page reads GitHub from (the API, raw

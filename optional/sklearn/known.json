@@ -60,6 +60,11 @@
       "case": "pipeline.routing",
       "printed": "!! NotImplementedError: sklearn's metadata routing is not in Sagebrush's sklearn 0.x subset",
       "reason": "metadata routing (enable_metadata_routing=True) is not in the subset; with it off, parameters pass to steps by stepname__parameter, as in scikit-learn"
+    },
+    {
+      "case": "cm.int-weights-past-2**53",
+      "printed": "!! NotImplementedError: int64 values beyond 2**53 are not supported yet",
+      "reason": "integer sample weights are summed exactly in an int64 cell, as scikit-learn's; Sagebrush's int64 holds integers up to 2**53 exactly and refuses a cell past it rather than round it"
     }
   ],
   "tolerances": [

@@ -3,6 +3,7 @@ load_breast_cancer and load_digits, with return_X_y and as_frame. Their data is 
 (CC BY 4.0, NOTICE.md). Other names of sklearn.datasets raise NotImplementedError: they are not in Sagebrush's
 sklearn 0.x subset (load_diabetes among them, until its data's license is settled)."""
 
+import numbers
 import base64
 import csv
 import io
@@ -131,6 +132,10 @@ def load_breast_cancer(*, return_X_y=False, as_frame=False):
 
 def load_digits(*, n_class=10, return_X_y=False, as_frame=False):
     """Load and return the digits dataset (classification)."""
+    # (validate_params' Interval(Integral, 1, 10, closed="both"), before anything is loaded)
+    if not (isinstance(n_class, numbers.Integral) and 1 <= n_class <= 10):
+        from ..utils._sk_param import InvalidParameterError
+        raise InvalidParameterError(f"The 'n_class' parameter of load_digits must be an int in the range [1, 10]. Got {n_class!r} instead.")
     from . import _sk_data_digits as d
 
     data = _sk_load_gzip_csv(d.GZIP_BASE64)
