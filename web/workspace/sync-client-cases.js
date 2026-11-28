@@ -5237,6 +5237,53 @@ async function sealedPull() {
   await stop(b2);
 }
 
+// (M2b) A sealed op that doesn't verify halts the index, but not notebooks: their requests still go on the same
+// connection (every document key they use is the ledger's, verified before the halt and frozen by it). Any other halt,
+// a rebuild's here, still stops them.
+async function docsUnderSealedHalt() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = client(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "docs under a sealed halt: A synced");
+  // (B's notebooks' sync, keyed, its link to the connection kept)
+  const keys = { account: f.provider.account, current: async () => { throw new Error("no patch is sealed in this case"); }, find: async () => null };
+  const ds = new W.DocSync({ keys });
+  const was = ds.connected.bind(ds);
+  let link = null;
+  ds.connected = (l) => { link = l; return was(l); };
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit }, docs: ds });
+  check(await until(() => settled(wb, b) && link !== null), "docs under a sealed halt: B synced, its notebooks' sync connected");
+  const ask = () => link.ask(link.reserve(), { t: "pull", owner: link.owner, doc: "d0c5d0c5d0c5", epoch: 1, after: 0 });
+  const before = await ask();
+  await ctl("set", { set: { tamperIndexEnv: 1, tamperFor: wb.device, serverNotices: true } });
+  await wa.mkdir("/halts-b");
+  check(await until(() => b.debug().halted === "sealed-halt", 15_000), "docs under a sealed halt: B's index halted at the op that doesn't verify: " + J(b.debug().halted));
+  const under = await ask();
+  const busy = (r) => r?.t === "error" && r.code === "busy" && /not connected/.test(r.detail?.message ?? "");
+  const bare = (r) => { const { req, ...rest } = r ?? {}; return J(rest); };
+  check(!busy(before) && !busy(under) && bare(under) === bare(before), "docs under a sealed halt: a notebook's request still reaches the server, answered as before the halt: " + J({ before, under }));
+  await ctl("set", { set: { tamperIndexEnv: 0, serverNotices: false } });
+  await stop(b);
+  await stop(a);
+  // (the control: a rebuild's halt (invalid) stops notebooks as before)
+  const wc = await fresh();
+  const ds2 = new W.DocSync({});
+  const was2 = ds2.connected.bind(ds2);
+  let link2 = null;
+  ds2.connected = (l) => { link2 = l; return was2(l); };
+  const c0 = client(wc);
+  check(await until(() => c0.status.state === "synced"), "docs under a halt, control: synced");
+  await stop(c0);
+  await wc.mkdir("/r1");
+  await ctl("set", { set: { fakeOps: [{ code: "invalid", detail: { message: "too many refused ops: rebuild from the server's log" } }] } });
+  const c = client(wc, { docs: ds2 });
+  check(await until(() => c.debug().halted === "invalid" && link2 !== null), "docs under a halt, control: a rebuild's halt (invalid): " + J(c.debug().halted));
+  const r = await link2.ask(link2.reserve(), { t: "pull", owner: link2.owner, doc: "d0c5d0c5d0c6", epoch: 1, after: 0 });
+  check(busy(r), "docs under a halt, control: under any other halt notebooks still get busy, nothing sent: " + J(r));
+  await stop(c);
+}
 async function sealedPullHalt() {
   // (a sealed op served altered: B halts at it, deterministically, nothing of it applied, the cursor where it was; for
   // every kind of change, the reference lists' form included (never another error, which would end the connection and
@@ -5970,7 +6017,7 @@ async function docKeyExact() {
   await stop(b2);
 }
 
-const CASES = { sealedDocsRefused, blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
+const CASES = { docsUnderSealedHalt, sealedDocsRefused, blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

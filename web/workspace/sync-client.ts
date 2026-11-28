@@ -205,6 +205,15 @@ export type ClientOptions = {
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
+/**
+ * (M2b) The index halts under which notebooks' sync goes on, on the same connection. A sealed op that doesn't verify
+ * (sealed-halt), or the sealed log full (sealed-log-full), stops the index, but the documents' keys this device holds
+ * are the ledger's, which only verified pages ever wrote and the halt freezes: a declaration newer than the halt is
+ * never read (an exact lookup's catch-up and a declare both reject "halted"), so every patch is sealed and opened
+ * only under keys verified before the halt. Every other halt (not a current device, an account sealed against a
+ * plaintext client, a rebuild, a conflict) stops notebooks too.
+ */
+const DOCS_UNDER_HALT: ReadonlySet<string> = new Set(["sealed-halt", "sealed-log-full"]);
 const mismatchKey = (ns: string, dseq: number) => key(ns, "mismatch:" + String(dseq).padStart(16, "0"));
 /** this workspace's stored bytes were once found longer or shorter than their metadata (LIMIT-PR58-2) */
 const UNTRUSTED = "sync:bytes-untrusted";
@@ -868,7 +877,7 @@ export class SyncClient {
       owner: c.account,
       reserve: () => ++c.req,
       ask: (req, msg) => new Promise((answer) => {
-        if (this.conn !== c || !c.writable || c.halted) return answer({ t: "error", code: "busy", detail: { message: "not connected" } });
+        if (this.conn !== c || !c.writable || (c.halted && !DOCS_UNDER_HALT.has(c.halted))) return answer({ t: "error", code: "busy", detail: { message: "not connected" } });
         c.pending.set(req, { kind: "doc", answer });
         this.send(c, { ...msg, req });
       }),
