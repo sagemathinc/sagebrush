@@ -1063,11 +1063,35 @@ method(BaseException, "__repr__", (self: any) => {
   return `${typeName(self)}(${a.length === 1 ? repr(a[0]) : a.map(repr).join(", ")})`;
 });
 method(BaseException, "with_traceback", (self: any, _tb: any) => self);
-method(BaseException, "add_note", (self: any, note: string) => {
-  (self.__notes__ ??= []).push(note);
+// (as CPython's BaseException_add_note: a str (a subclass too), into __notes__, which must be a list if present)
+method(BaseException, "add_note", (self: any, ...args: any[]) => {
+  if (args.length !== 1) raise(T.TypeError, `BaseException.add_note() takes exactly one argument (${args.length} given)`);
+  const note = args[0];
+  if (!isinstance(note, T.str)) raise(T.TypeError, `add_note() argument must be str, not ${note === null ? "None" : typeName(note)}`);
+  if (self.__notes__ === undefined) self.__notes__ = [];
+  else if (!isinstance(self.__notes__, T.list)) raise(T.TypeError, "Cannot add note: __notes__ is not a list");
+  self.__notes__.push(note);
   return null;
 });
-for (const [k, v] of [["__cause__", null], ["__context__", null], ["__suppress_context__", false], ["__traceback__", null]] as const) BaseException.$dict.set(k, v);
+// (BaseException's getset descriptors, as CPython's: args any iterable stored as a tuple, never deleted; __cause__
+// and __context__ None or an exception, __cause__'s assignment setting __suppress_context__, a bool; the runtime's
+// own writes set the same properties directly)
+const noDelete = (name: string) => () => raise(T.TypeError, `${name} may not be deleted`);
+getset(BaseException, "args", (o) => o.args ?? tuple([]), (o, v) => void (o.args = tuple(O.toArray(v))), noDelete("args"));
+const excOrNone = (v: any, what: string) => {
+  if (v !== null && !isinstance(v, BaseException)) raise(T.TypeError, `exception ${what} must be None or derive from BaseException`);
+  return v;
+};
+getset(BaseException, "__cause__", (o) => o.__cause__ ?? null, (o, v) => {
+  o.__cause__ = excOrNone(v, "cause");
+  o.__suppress_context__ = true;
+}, noDelete("__cause__"));
+getset(BaseException, "__context__", (o) => o.__context__ ?? null, (o, v) => void (o.__context__ = excOrNone(v, "context")), noDelete("__context__"));
+getset(BaseException, "__suppress_context__", (o) => o.__suppress_context__ ?? false, (o, v) => {
+  if (typeof v !== "boolean") raise(T.TypeError, "attribute value type must be bool");
+  o.__suppress_context__ = v;
+}, () => raise(T.TypeError, "can't delete numeric/char attribute"));
+BaseException.$dict.set("__traceback__", null);
 
 function exc(name: string, base: PyType, extra?: (cls: PyType) => void): PyType {
   const cls = objectType(name, [base], new Map(), "builtins");
@@ -1766,6 +1790,36 @@ export function floatCall(x: any = 0): any {
 }
 const float = builtinType("float", [object], floatCall);
 bindClass(FloatBox, float);
+// float.from_number(x), as CPython 3.14's: a real number only (no str), as PyFloat_AsDouble takes it (a float
+// subclass's value, an int subclass's __float__, else __index__); an int past a double's range OverflowError; a
+// subclass called with the float
+// (an int's conversion to a double past its range: an exact int, or an int subclass through int's own __float__, as
+// PyLong_AsDouble raises; a subclass's own __float__ returning infinity is its value)
+export function intDoubleOverflow(x: any, v: number): void {
+  if (Number.isFinite(v)) return;
+  const n = x;
+  if (isinstance(n, T.int) && !isinstance(n, float) && lookupType(typeOf(n), "__float__") === lookupType(T.int, "__float__"))
+    raise(T.OverflowError, "int too large to convert to float");
+}
+// (a from_number classmethod: one positional argument, as CPython's METH_O, in its words)
+export function fromNumberMethod(owner: string, f: (cls: any, x: any) => any): PyClassMethod {
+  const fn = pyfn((cls: any, ...args: any[]) => {
+    if (args.length !== 1) raise(T.TypeError, `${owner}.from_number() takes exactly one argument (${args.length} given)`);
+    return f(cls, args[0]);
+  }, "from_number");
+  (fn as any).$kw = (pos: any[], names: string[], _values: any[]) => {
+    if (names.length) raise(T.TypeError, `${owner}.from_number() takes no keyword arguments`);
+    return fn(...pos);
+  };
+  return new PyClassMethod(fn);
+}
+float.$dict.set("from_number", fromNumberMethod("float", (cls: any, x: any) => {
+  const v = asDouble(x);
+  if (v === undefined) raise(T.TypeError, `must be real number, not ${typeName(x)}`);
+  intDoubleOverflow(x, v);
+  const r = O.mkfloat(v);
+  return cls === float ? r : callObj(cls, [r]);
+}));
 method(float, "is_integer", (x: any) => isInt(O.fv(x)!));
 method(float, "conjugate", (x: any) => x);
 method(float, "__float__", (x: any) => (typeof x === "number" || x instanceof FloatBox ? x : O.mkfloat(O.fv(x)!))); // (a subclass's value as a float)
@@ -3766,8 +3820,38 @@ getset(object, "__dict__", (o) => {
     }
   }
   const fromhex = (cls: any, s: any) => {
-    if (s instanceof PyBytes) s = decode(s, "ascii");
-    if (typeof s !== "string") raise(T.TypeError, `fromhex() argument must be str, not ${typeName(s)}`);
+    // (a str, or any bytes-like object read byte by byte, as CPython 3.14's: bytes, bytearray, a memoryview, an
+    // array; a byte past ASCII is a non-hexadecimal one at its position)
+    if (typeof s !== "string" && isinstance(s, T.str)) s = unbox(s);
+    if (typeof s !== "string") {
+      // (a contiguous buffer only, as PyObject_GetBuffer's PyBUF_SIMPLE: a strided memoryview CPython's BufferError; a
+      // Python-level exporter (PEP 688) through its __buffer__(0), the view released after with __release_buffer__)
+      let buf: Uint8Array | undefined = s instanceof PyBytes ? s.a.subarray(0, s.n) : O.bufferViewOf(s);
+      if (buf === undefined && O.bufferOf(s) !== undefined) raise(T.BufferError, "memoryview: underlying buffer is not C-contiguous");
+      if (buf === undefined && lookupType(typeOf(s), "__buffer__") !== undefined) {
+        const exporter = s;
+        const view = O.lookupSpecial(exporter, "__buffer__")(exporter, 0);
+        if (typeOf(view) !== T.memoryview) raise(T.TypeError, "__buffer__ returned non-memoryview object");
+        buf = O.bufferViewOf(view);
+        if (buf === undefined) raise(T.BufferError, "memoryview: underlying buffer is not C-contiguous");
+        buf = buf.slice();
+        // (an exception from __release_buffer__ is CPython's unraisable one: reported there, the result kept)
+        if (lookupType(typeOf(exporter), "__release_buffer__") !== undefined) {
+          try {
+            O.lookupSpecial(exporter, "__release_buffer__")(exporter, view);
+          } catch (e) {
+            // (Sagebrush has no unraisable hook: a Python exception from it lets the result stand, as CPython's; but a
+            // KeyboardInterrupt, a Stop whose flag is already consumed, goes on, so the Stop is never lost (CPython
+            // would report it as unraisable), and a runtime fault or limit, no Python exception, is never hidden)
+            if (e === null || typeof e !== "object" || !isinstance(e, T.BaseException) || isinstance(e, T.KeyboardInterrupt)) throw e;
+          }
+        }
+      }
+      if (buf === undefined) raise(T.TypeError, `fromhex() argument must be str or bytes-like, not ${typeName(s)}`);
+      let t = "";
+      for (let i = 0; i < buf.length; i++) t += String.fromCharCode(buf[i]);
+      s = t;
+    }
     // Whitespace may only separate bytes.
     const out: number[] = [];
     for (let i = 0; i < s.length; ) {
@@ -3775,12 +3859,17 @@ getset(object, "__dict__", (o) => {
         i++;
         continue;
       }
+      // (a hex digit with nothing after it: CPython 3.14's own words for an odd count)
+      if (i + 1 === s.length && /[0-9a-fA-F]/.test(s[i])) raise(T.ValueError, "fromhex() arg must contain an even number of hexadecimal digits");
       if (!/^[0-9a-fA-F]{2}$/.test(s.slice(i, i + 2))) raise(T.ValueError, `non-hexadecimal number found in fromhex() arg at position ${/[0-9a-fA-F]/.test(s[i]) ? i + 1 : i}`);
       out.push(parseInt(s.slice(i, i + 2), 16));
       i += 2;
     }
     const a = Uint8Array.from(out);
-    return cls === T.bytearray ? new PyByteArray(a) : new PyBytes(a);
+    // (as CPython's: the base's own value, else the class (a subclass of either) called with the bytes, its __new__
+    // and __init__ run)
+    if (cls === T.bytearray) return new PyByteArray(a);
+    return cls === T.bytes ? new PyBytes(a) : callObj(cls, [new PyBytes(a)]);
   };
   T.bytes.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));
   T.bytearray.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));

@@ -14776,6 +14776,11 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
+ "src/runtime/types.ts :: intDoubleOverflow :: raise(T.OverflowError, \"int too large to convert to float\"); #0": {
+  "class": "none",
+  "owner": "python runtime",
+  "reason": "CPython's own semantics, not a Sagebrush cap: from_number of an int past the largest double (int's own conversion) raises this same OverflowError as CPython 3.14's PyLong_AsDouble; no size, memory or work bound (Codex audit P01)"
+ },
  "src/runtime/types.ts :: intOfScan :: const m = intDigits.max; #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
