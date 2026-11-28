@@ -113,7 +113,7 @@ export function modularSpace(repo: string) {
   // ---- a 3D plot: dim S_k(Gamma0(N)) over N and k (computed by Sagebrush: dims.json)
   const dims = JSON.parse(readFileSync(join(here, "modular-dims.json"), "utf8"));
   nodes.push({ id: "p-dims", kind: "plot3d", title: "dim S_k(Gamma0(N)): N = 1..40, k = 2..24", lang: "sage", group: "samples", near: "s-dims",
-    text: "pts = [(N, k, Gamma0(N).dimension_cusp_forms(k) / 3)\n       for N in range(1, 41) for k in range(2, 26, 2)]\npoint3d(pts, size=8, color='purple')",
+    text: "pts = [(N, k, Gamma0(N).dimension_cusp_forms(k))\n       for N in range(1, 41) for k in range(2, 26, 2)]\npoint3d(pts, size=8, color='purple')",
     surface: { x: dims.N, y: dims.k, z: dims.dim } });
   link("s-dims", "p-dims");
   link("overview", "p-dims");
