@@ -13,7 +13,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, isChainGeneration, toB64, clientOf, type SealedOp, fields, has, isDevice, isDocId, isNat,
-  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
+  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, enc, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
@@ -733,21 +733,39 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
   }
 
-  /** The log after `after`, a page at a time (§5.2, §8). */
+  /**
+   * The log after `after`, a page at a time (§5.2, §8): at most indexPage ops and indexPageBytes of them in UTF-8 (the
+   * first always), so a non-ASCII path counts as the bytes it is on the wire. The rows are read from the cursor one at a
+   * time and the reading stops at the page's end, so what is held is the page and the row past it (the cursor steps one
+   * more ahead), never the indexPage + 1 rows a page could take (S13).
+   */
   private index(after: number): { ops: Row[]; more: boolean } {
-    const rows = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent, env, head, adds, releases, chain_gen, signer, sig FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1).toArray() as Row[];
+    const cur = this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent, env, head, adds, releases, chain_gen, signer, sig FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', after, LIMITS.indexPage + 1);
     const ops: Row[] = [];
-    let bytes = 0;
-    for (const r of rows.slice(0, LIMITS.indexPage)) {
+    let bytes = 0, more = false;
+    for (const r of cur as Iterable<Row>) {
+      if (ops.length === LIMITS.indexPage) {
+        more = true;
+        break;
+      }
       const o: Record<string, unknown> = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== null));
       // (a sealed op: its references as the lists they were sent as)
       for (const k of ["adds", "releases"]) if (typeof o[k] === "string") o[k] = JSON.parse(o[k] as string);
-      const n = JSON.stringify(o).length;
-      if (ops.length > 0 && bytes + n > LIMITS.indexPageBytes) return { ops, more: true };
+      const n = enc.encode(JSON.stringify(o)).length;
+      if (ops.length > 0 && bytes + n > LIMITS.indexPageBytes) {
+        more = true;
+        break;
+      }
       bytes += n;
       ops.push(o);
     }
-    return { ops, more: rows.length > LIMITS.indexPage };
+    if (testMode(this.env)) this.indexRead = { rows: cur.rowsRead, bytes };
+    return { ops, more };
+  }
+  /** Tests only: the rows the last index page read from storage, and its UTF-8 bytes (S13) */
+  private indexRead = { rows: 0, bytes: 0 };
+  async testIndexRead(): Promise<{ rows: number; bytes: number } | null> {
+    return testMode(this.env) ? this.indexRead : null;
   }
 
   // ---- batches (§4.3, §5.3)
