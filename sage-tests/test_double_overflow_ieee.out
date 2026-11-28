@@ -1,0 +1,68 @@
+RDF exp(-709) | 1.216780750623423e-308
+RDF exp(-720) | 2.0322308024e-313
+RDF exp(-745) | 5e-324
+RDF sinh(710) finite | True
+RDF cosh(-710) finite | True
+RDF tanh(710) | 1.0
+RDF tanh(-1000) | -1.0
+SR tanh(RDF(10^6)) | 1.0
+CDF exp(1000) | +infinity
+CDF sinh(1000) | +infinity
+CDF cosh(-746) | +infinity
+CDF exp(710+3i) | -infinity + 3.1526135940644185e+307*I
+SR exp(CDF(710+3i)) | -infinity + 3.1526135940644185e+307*I
+SR sinh(CDF(1000+i)) | +infinity + +infinity*I
+SR cosh(CDF(-1000+i)) | +infinity - +infinity*I
+SR tanh(CDF(1000+i)) | 1.0
+CDF sinh(710.5+i pi/3) | 9.208086724008932e+307 + 1.5948874046483924e+308*I
+SR sinh(CDF(710.5+i pi/3)) | 9.208086724008932e+307 + 1.5948874046483924e+308*I
+SR sinh(CDF(-710.5+i pi/3)) | -9.208086724008932e+307 + 1.5948874046483924e+308*I
+CDF cosh(710.5+i pi/3) | 9.208086724008932e+307 + 1.5948874046483924e+308*I
+SR cosh(CDF(-710.5+i pi/3)) | 9.208086724008932e+307 - 1.5948874046483924e+308*I
+SR exp (1000, inf) | NaN + NaN*I
+SR sinh (1000, inf) | NaN + NaN*I
+SR cosh (1000, inf) | NaN + NaN*I
+SR tanh (1000, inf) | NaN + NaN*I
+SR exp (1000, nan) | NaN + NaN*I
+SR sinh (1000, nan) | NaN + NaN*I
+SR cosh (1000, nan) | NaN + NaN*I
+SR tanh (1000, nan) | NaN + NaN*I
+SR exp (nan, 1) | NaN + NaN*I
+SR sinh (nan, 1) | NaN + NaN*I
+SR cosh (nan, 1) | NaN + NaN*I
+SR tanh (nan, 1) | NaN + NaN*I
+SR exp (inf, 1) | +infinity + +infinity*I
+SR sinh (inf, 1) | +infinity + +infinity*I
+SR cosh (inf, 1) | +infinity + +infinity*I
+SR tanh (inf, 1) | 1.0
+SR exp (710, inf) | NaN + NaN*I
+SR sinh (710, inf) | NaN + NaN*I
+SR cosh (710, inf) | NaN + NaN*I
+SR tanh (710, inf) | NaN + NaN*I
+CDF exp(+inf) | +infinity
+RDF tanh(+inf) | 1.0
+RDF tanh(-inf) | -1.0
+CDF sinh (1000, 5.00000000000000e-324) | +infinity + 4.866722286500082e+110*I
+CDF cosh (1000, 5.00000000000000e-324) | +infinity + 4.866722286500082e+110*I
+SR sinh (1000, 5.00000000000000e-324) | +infinity + 4.866722286500082e+110*I
+SR cosh (1000, 5.00000000000000e-324) | +infinity + 4.866722286500082e+110*I
+CDF sinh (1000, -5.00000000000000e-324) | +infinity - 4.866722286500082e+110*I
+CDF cosh (1000, -5.00000000000000e-324) | +infinity - 4.866722286500082e+110*I
+SR sinh (1000, -5.00000000000000e-324) | +infinity - 4.866722286500082e+110*I
+SR cosh (1000, -5.00000000000000e-324) | +infinity - 4.866722286500082e+110*I
+CDF sinh (-1000, 5.00000000000000e-324) | -infinity + 4.866722286500082e+110*I
+CDF cosh (-1000, 5.00000000000000e-324) | +infinity - 4.866722286500082e+110*I
+SR sinh (-1000, 5.00000000000000e-324) | -infinity + 4.866722286500082e+110*I
+SR cosh (-1000, 5.00000000000000e-324) | +infinity - 4.866722286500082e+110*I
+CDF tanh (1000, 1.00000000000000e308) | 1.0
+CDF tanh (1000, 1.00000000000000e308) imag | -0.0
+CDF tanh (-1000, -1.00000000000000e308) | -1.0
+CDF tanh (-1000, -1.00000000000000e308) imag | 0.0
+CDF tanh (0.500000000000000, 1.00000000000000e308) | 0.5512345821481115 - 0.3791059869481057*I
+CDF tanh (0.500000000000000, 1.00000000000000e308) imag | -0.3791059869481057
+CDF tanh (2, -1.70000000000000e308) | 0.98878040528907 + 0.03466066108563915*I
+CDF tanh (2, -1.70000000000000e308) imag | 0.03466066108563915
+SR tanh (1000, 1.00000000000000e308) | 1.0
+SR tanh (1000, 1.00000000000000e308) imag | -0.0
+SR tanh (-1000, -1.00000000000000e308) | -1.0
+SR tanh (-1000, -1.00000000000000e308) imag | 0.0

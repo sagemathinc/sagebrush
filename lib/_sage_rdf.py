@@ -23,6 +23,17 @@ def _frepr(x):
     return float.__repr__(float(x))
 
 
+def _cexp(z):
+    """e^z for a complex double, as C99's cexp (IEEE): each part overflowing
+    on its own past the doubles (_sage_rdf_big, loaded then: cmath.exp
+    raises there)."""
+    try:
+        return cmath.exp(z)
+    except (OverflowError, ValueError):
+        import _sage_rdf_big
+        return _sage_rdf_big._cexp_parts(z)
+
+
 def _double(x):
     """float(x), with an integer or rational past the doubles as an infinity
     of its sign, as Sage converts it to RDF (float() raises OverflowError)."""
@@ -459,8 +470,17 @@ class RealDoubleElement(float):
 
             sage: RDF(1).exp()
             2.718281828459045
+
+        Past the doubles, +infinity, as Sage (Python's math.exp raises)::
+
+            sage: RDF(710).exp(), RDF(-746).exp()
+            (+infinity, 0.0)
         """
-        return RealDoubleElement(math.exp(float(self)))
+        x = float(self)
+        try:
+            return RealDoubleElement(math.exp(x))
+        except OverflowError:
+            return RealDoubleElement(float("inf"))
 
     def log(self, base=None):
         """The natural logarithm (or to the given base).
@@ -545,8 +565,17 @@ class RealDoubleElement(float):
 
             sage: RDF(1).sinh()
             1.1752011936438014
+
+        Past the doubles, an infinity of the argument's sign, as Sage::
+
+            sage: RDF(711).sinh(), RDF(-1000).sinh()
+            (+infinity, -infinity)
         """
-        return RealDoubleElement(math.sinh(float(self)))
+        x = float(self)
+        try:
+            return RealDoubleElement(math.sinh(x))
+        except OverflowError:
+            return RealDoubleElement(math.copysign(float("inf"), x))
 
     def cosh(self):
         """The hyperbolic cosine.
@@ -555,8 +584,16 @@ class RealDoubleElement(float):
 
             sage: RDF(1).cosh()
             1.5430806348152437
+
+        Past the doubles, +infinity, as Sage::
+
+            sage: RDF(-1000).cosh()
+            +infinity
         """
-        return RealDoubleElement(math.cosh(float(self)))
+        try:
+            return RealDoubleElement(math.cosh(float(self)))
+        except OverflowError:
+            return RealDoubleElement(float("inf"))
 
     def tanh(self):
         """The hyperbolic tangent.
@@ -1200,8 +1237,60 @@ class ComplexDoubleElement:
 
             sage: CDF(1, 1).exp()
             1.4686939399158851 + 2.2873552871788423*I
+
+        Past the doubles, each part on its own, as IEEE's cexp (Python's
+        cmath.exp raises; Sage's GSL gives +infinity*I for the second's
+        imaginary part, a double, and NaN*I for the third's, 0)::
+
+            sage: CDF(1000, 1).exp(), CDF(710, 3).exp(), CDF(1000).exp()
+            (+infinity + +infinity*I, -infinity + 3.1526135940644185e+307*I, +infinity)
         """
-        return ComplexDoubleElement._of(cmath.exp(self._z))
+        return ComplexDoubleElement._of(_cexp(self._z))
+
+    def sinh(self):
+        """The hyperbolic sine, as IEEE's csinh: each part overflowing on its
+        own.
+
+        EXAMPLES::
+
+            sage: CDF(1, 1).sinh()
+            0.6349639147847361 + 1.2984575814159773*I
+            sage: CDF(1000, 1).sinh(), CDF(-1000, 1).sinh()
+            (+infinity + +infinity*I, -infinity + +infinity*I)
+        """
+        import _sage_rdf_big
+        return ComplexDoubleElement._of(_sage_rdf_big._csinh_cosh(self._z, False))
+
+    def cosh(self):
+        """The hyperbolic cosine, as IEEE's ccosh: each part overflowing on
+        its own.
+
+        EXAMPLES::
+
+            sage: CDF(1, 1).cosh()
+            0.8337300251311491 + 0.9888977057628651*I
+            sage: CDF(-1000, 1).cosh()
+            +infinity - +infinity*I
+        """
+        import _sage_rdf_big
+        return ComplexDoubleElement._of(_sage_rdf_big._csinh_cosh(self._z, True))
+
+    def tanh(self):
+        """The hyperbolic tangent, by Sage's formula (GSL's complex tanh:
+        D = cos(y)^2 + sinh(x)^2, the imaginary part sin(2y)/(2D), with
+        sin(2y)/2 as sin(y) cos(y) where 2y leaves the doubles); for a large
+        real part, past sinh's doubles, +-1 with a signed 0 imaginary part, as
+        that formula gives it.
+
+        EXAMPLES::
+
+            sage: CDF(1, 1).tanh()
+            1.0839233273386946 + 0.27175258531951174*I
+            sage: CDF(1000, 1).tanh()
+            1.0
+        """
+        import _sage_rdf_big
+        return ComplexDoubleElement._of(_sage_rdf_big._ctanh(self._z))
 
     def log(self):
         """The principal logarithm.

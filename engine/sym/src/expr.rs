@@ -777,7 +777,10 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
             let (re, im) = n.to_c64();
             let m = re.exp();
             let k = n.fk().unwrap_or(crate::num::Fk::RR);
-            let r = if im == 0.0 { Num::Float(m, 0.0, k) } else { Num::fl(m * im.cos(), m * im.sin(), k) };
+            // (each part on its own, as IEEE's cexp: e^(710 + 3i)'s imaginary
+            // part is a double where e^710 alone is not)
+            let em = |f: f64| crate::num::exp_mul(re, f, false);
+            let r = if im == 0.0 { Num::Float(m, 0.0, k) } else { Num::fl(em(im.cos()), em(im.sin()), k) };
             // (an RR or CC value past the doubles refused: e^x is never 0)
             crate::num::check_float_value("exp", &[(re, im)], &r, false, |i| i == 1 && im == 0.0);
             return num(r);

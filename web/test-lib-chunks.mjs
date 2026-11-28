@@ -89,6 +89,14 @@ const fe = ec.manifest.files;
 ok(fe["_sage_ec_ff.py"] === "mod-sage-ec-ff", "_sage_ec_ff: mod-sage-ec-ff");
 ok(["_sage_ec.py", "_sage_ec_cubic.py", "_sage_lazy.py"].every((f) => fe[f] === "sage-more") && fe["sage_all.py"] === "sage", "the other Sage extras stay in sage-more, sage_all in sage: " + JSON.stringify(fe));
 ok(ec.manifest.chunks["mod-sage-ec-ff"]?.src && !ec.manifest.chunks["mod-sage-ec-ff"].pre && !ec.manifest.modes.sage.includes("mod-sage-ec-ff"), "mod-sage-ec-ff: sources only, and Sage mode's start doesn't fetch it");
+// (the modules Sage mode imports on first use, sage_all's lazy imports and RDF/CDF past the doubles: each its own
+// group, mod-sage-<name>, sources only, fetched by no mode's start; another Sage extra stays in sage-more)
+const lz = libChunks({ "core.py": "", "sage_all.py": "", "_sage_hmf.py": "H = 1\n", "_sage_sandpile.py": "S = 1\n", "_sage_milp.py": "M = 1\n",
+  "_sage_rdf_big.py": "R = 1\n", "_sage_ec.py": "" },
+  { py: rec({ "py|core": mod("core.py") }), sage: rec({ "py|core": mod("core.py"), "py|sage_all": mod("sage_all.py") }) }, "b");
+const lzf = lz.manifest.files, own = { "_sage_hmf.py": "mod-sage-hmf", "_sage_sandpile.py": "mod-sage-sandpile", "_sage_milp.py": "mod-sage-milp", "_sage_rdf_big.py": "mod-sage-rdf-big" };
+ok(Object.entries(own).every(([f, g]) => lzf[f] === g) && lzf["_sage_ec.py"] === "sage-more", "the lazily imported Sage modules: each its own mod-sage group; _sage_ec in sage-more: " + JSON.stringify(lzf));
+ok(Object.values(own).every((g) => lz.manifest.chunks[g]?.src && !lz.manifest.chunks[g].pre && Object.values(lz.manifest.modes).every((m) => !m.includes(g))), "each: sources only, and no mode's start fetches it");
 // (GF(p) echelon's binary route, _sage_ffmat_bin, is its own group, mod-sage-ffmat-bin, apart from the
 // _sage_ffmat that Magma's start loads (mod-sage-ffmat): that start fetches none of it)
 const fb = libChunks({ "core.py": "", "_magma.py": "", "_sage_ffmat.py": "M = 1\n", "_sage_ffmat_bin.py": "B = 1\n" },
