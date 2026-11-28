@@ -1029,9 +1029,19 @@ const STRS = { mark: "strings" };
 // fromPy makes an object array if its caller takes one, as NumPy's np.array)
 const OBJS = { mark: "objects" };
 const NO_ATTR = { mark: "no __array__" };
+// (an exception raised by an object's own __array__, looking it up (a property, a descriptor, __getattribute__) or
+// calling it: kept by identity, so an index's conversion propagates it as NumPy's prepare_index does, never turning
+// it into its own IndexError)
+const PROTOCOL_RAISED = new WeakSet<object>();
 function arrayMethod(x: any): any {
   if (x === null || typeof x !== "object" || x instanceof NDArray || x instanceof DType || pyScalar(x) !== null) return undefined;
-  const m = Obj.getattr(x, "__array__", NO_ATTR);
+  let m: any;
+  try {
+    m = Obj.getattr(x, "__array__", NO_ATTR);
+  } catch (e) {
+    if (e !== null && typeof e === "object") PROTOCOL_RAISED.add(e);
+    throw e;
+  }
   return m === NO_ATTR ? undefined : m;
 }
 function hasArrayProtocol(x: any): boolean {
@@ -1047,9 +1057,6 @@ function protocolSeq(x: any): boolean {
 function isArrayLike(v: any): boolean {
   return v instanceof NDArray || Array.isArray(v) || hasArrayProtocol(v);
 }
-// (an exception raised by an object's own __array__ method: kept by identity, so an index's conversion propagates it
-// as NumPy's prepare_index does, never turning it into its own IndexError)
-const PROTOCOL_RAISED = new WeakSet<object>();
 function viaArrayProtocol(x: any, dt: DType | null, copyKw: any): any {
   if (isSeq(x) && !protocolSeq(x)) {
     const items = seqItems(x);

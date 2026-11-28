@@ -30,3 +30,23 @@ for key in ([{}], [None], [[0, 1], "a"], [1.5]):
         print(a[key])
     except Exception as e:
         print("plain", type(e).__name__)
+# an error raised looking __array__ up (a property), not calling it: propagated the same way
+def lookup(base, exc):
+    class L(base):
+        @property
+        def __array__(self):
+            raise exc("lookup failed")
+    return L
+for base in (list, tuple):
+    for exc in (TypeError, NotImplementedError):
+        L = lookup(base, exc)
+        for name, key in (("top", L([0])), ("nested", [L([0]), L([1])]), ("in tuple", (L([0, 1]),))):
+            try:
+                print(base.__name__, exc.__name__, "lookup", name, a[key].tolist())
+            except Exception as e:
+                print(base.__name__, exc.__name__, "lookup", name, type(e).__name__, e)
+            b = a.copy()
+            try:
+                b[key] = 9; print(base.__name__, exc.__name__, "lookup", name, "write", b.tolist())
+            except Exception as e:
+                print(base.__name__, exc.__name__, "lookup", name, "write", type(e).__name__, e, b.tolist())
