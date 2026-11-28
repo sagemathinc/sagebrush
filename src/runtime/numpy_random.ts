@@ -9,7 +9,7 @@ import * as Obj from "./object";
 import * as O from "./ops";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype } from "./numpy";
-import { glibcLog as crlog, glibcExp, glibcLog1p, LOG_TABLES, EXP_TABLES } from "./libm";
+import { glibcLog as crlog, glibcExp, glibcLog1p, glibcPow, LOG_TABLES, EXP_TABLES } from "./libm";
 import { KI, WI, FI, KE, WE, FE, ZIGGURAT_NOR_R, ZIGGURAT_NOR_INV_R, ZIGGURAT_EXP_R } from "./ziggurat_data";
 import { wasmRandom } from "./kernels";
 
@@ -333,6 +333,40 @@ function loggam(x: number): number {
   }
   return gl;
 }
+// RandomState's gamma (NumPy's legacy_standard_gamma): Marsaglia and Tsang's method from the legacy gauss for a
+// shape of at least 1, the legacy rejection method below 1 (its pow and log glibc's), the exponential at 1
+function legacyStandardGamma(g: MT19937, shape: number): number {
+  if (shape === 1.0) return -crlog(1.0 - g.nextDouble());
+  if (shape === 0.0) return 0.0;
+  if (shape < 1.0) {
+    for (;;) {
+      const U = g.nextDouble();
+      const V = -crlog(1.0 - g.nextDouble());
+      if (U <= 1.0 - shape) {
+        const X = glibcPow(U, 1.0 / shape);
+        if (X <= V) return X;
+      } else {
+        const Y = -crlog((1 - U) / shape);
+        const X = glibcPow(1.0 - shape + shape * Y, 1.0 / shape);
+        if (X <= V + Y) return X;
+      }
+    }
+  }
+  const b = shape - 1.0 / 3.0;
+  const c = 1.0 / Math.sqrt(9 * b);
+  for (;;) {
+    let X: number, V: number;
+    do {
+      X = legacyGauss(g);
+      V = 1.0 + c * X;
+    } while (V <= 0.0);
+    V = V * V * V;
+    const U = g.nextDouble();
+    if (U < 1.0 - 0.0331 * (X * X) * (X * X)) return b * V;
+    if (crlog(U) < 0.5 * X * X + b * (1.0 - V + crlog(V))) return b * V;
+  }
+}
+
 function poisson(g: Gen, lam: number): number {
   if (lam >= 10) {
     const slam = Math.sqrt(lam), loglam = crlog(lam);
@@ -355,6 +389,106 @@ function poisson(g: Gen, lam: number): number {
     if (prod > enlam) X += 1;
     else return X;
   }
+}
+
+// NumPy's binomial (random_binomial, distributions.c; the legacy RandomState's too): p reflected to at most 1/2,
+// then inversion when n p <= 30, else Kachitvichyanukul and Schmeiser's BTPE.  n is an int64, carried as N: its
+// double (where the C code converts n, rounded to nearest as C rounds) and its integer offsets n + c exactly
+// before the one rounding (where the C code adds in int64 first, wrapping as it does past 2^63), so n beyond 2^53
+// draws NumPy's numbers too.
+type BinomN = { d: number; b: bigint; off: (c: number) => number; gt: (y: number) => boolean };
+function binomN(b: bigint): BinomN {
+  const d = Number(b);
+  if (Number.isSafeInteger(d)) return { d, b, off: (c) => d + c, gt: (y) => y > d };
+  return { d, b, off: (c) => Number(BigInt.asIntN(64, b + BigInt(c))), gt: (y) => BigInt(y) > b };
+}
+// (qn: the Generator's exp(n log1p(-p)), the legacy RandomState's exp(n log(q)))
+function binomialInversion(g: Gen, N: BinomN, p: number, legacy: boolean): number {
+  const n = N.d, q = 1.0 - p, qn = glibcExp(n * (legacy ? crlog(q) : glibcLog1p(-p))), np = n * p;
+  const bound = Math.trunc(Math.min(n, np + 10.0 * Math.sqrt(np * q + 1)));
+  let X = 0, px = qn, U = g.nextDouble();
+  while (U > px) {
+    X++;
+    if (X > bound) {
+      X = 0;
+      px = qn;
+      U = g.nextDouble();
+    } else {
+      U -= px;
+      px = (N.off(1 - X) * p * px) / (X * q);
+    }
+  }
+  return X;
+}
+// (p <= 1/2 here: the caller reflects)
+function binomialBtpe(g: Gen, N: BinomN, p: number, legacy: boolean): number {
+  const n = N.d, r = Math.min(p, 1.0 - p), q = 1.0 - r;
+  const fm = n * r + r, m = Math.floor(fm);
+  const p1 = Math.floor(2.195 * Math.sqrt(n * r * q) - 4.6 * q) + 0.5;
+  const xm = m + 0.5, xl = xm - p1, xr = xm + p1, c = 0.134 + 20.5 / (15.3 + m);
+  let a = (fm - xl) / (fm - xl * r);
+  const laml = a * (1.0 + a / 2.0);
+  a = (xr - fm) / (xr * q);
+  const lamr = a * (1.0 + a / 2.0);
+  const p2 = p1 * (1.0 + 2.0 * c), p3 = p2 + c / laml, p4 = p3 + c / lamr;
+  const nrq = n * r * q;
+  // (Stirling's tail terms: the Generator's 13860, the third and fourth subtracted (NumPy's correction to the 1988
+  // paper); the legacy RandomState's 13680, all four added, as NumPy keeps them)
+  const K = legacy ? 13680 : 13860, sg = legacy ? 1 : -1;
+  const tail = (t: number, t2: number) => (K - (462 - (132 - (99 - 140 / t2) / t2) / t2) / t2) / t / 166320;
+  for (;;) {
+    const u = g.nextDouble() * p4;
+    let v = g.nextDouble();
+    let y: number;
+    if (u <= p1) return Math.floor(xm - p1 * v + u);
+    if (u <= p2) {
+      const x = xl + (u - p1) / c;
+      v = v * c + 1.0 - Math.abs(m - x + 0.5) / p1;
+      if (v > 1.0) continue;
+      y = Math.floor(x);
+    } else if (u <= p3) {
+      y = Math.floor(xl + crlog(v) / laml);
+      if (y < 0 || v === 0.0) continue;
+      v = v * (u - p2) * laml;
+    } else {
+      y = Math.floor(xr - crlog(v) / lamr);
+      if (N.gt(y) || v === 0.0) continue;
+      v = v * (u - p3) * lamr;
+    }
+    const k = Math.abs(y - m);
+    if (!(k > 20 && k < nrq / 2.0 - 1)) {
+      const s = r / q, aa = s * N.off(1);
+      let F = 1.0;
+      if (m < y) for (let i = m + 1; i <= y; i++) F *= aa / i - s;
+      else if (m > y) for (let i = y + 1; i <= m; i++) F /= aa / i - s;
+      if (v > F) continue;
+      return y;
+    }
+    const rho = (k / nrq) * ((k * (k / 3.0 + 0.625) + 0.16666666666666666) / nrq + 0.5);
+    // (-k * k in int64, as the C code: wrapped past 2^63, which k past 3037000499 reaches when n is near 2^63)
+    const t = (k <= 3037000499 ? -k * k : Number(BigInt.asIntN(64, -BigInt(k) * BigInt(k)))) / (2 * nrq);
+    const A = crlog(v);
+    if (A < t - rho) return y;
+    if (A > t + rho) continue;
+    // (z and w from n's double, as the C code; n - m + 0.5 from the exact n - m)
+    const x1 = y + 1, f1 = m + 1, z = n + 1 - m, w = n - y + 1;
+    if (A > xm * crlog(f1 / x1) + (N.off(-m) + 0.5) * crlog(z / w) + (y - m) * crlog((w * r) / (x1 * q)) +
+        tail(f1, f1 * f1) + tail(z, z * z) + sg * tail(x1, x1 * x1) + sg * tail(w, w * w)) continue;
+    return y;
+  }
+}
+// (legacy: the RandomState's, which draws for n = 0 and p = 0 too, one uniform each, where the Generator's doesn't;
+// the result exactly, a bigint where n - y is past 2^53)
+function binomial(g: Gen, N: BinomN, p: number, legacy: boolean): number | bigint {
+  if (!legacy && (N.b === 0n || p === 0.0)) return 0;
+  if (p <= 0.5) {
+    const y = p * N.d <= 30.0 ? binomialInversion(g, N, p, legacy) : binomialBtpe(g, N, p, legacy);
+    return Number.isSafeInteger(y) ? y : BigInt(y);
+  }
+  const q = 1.0 - p;
+  const y = q * N.d <= 30.0 ? binomialInversion(g, N, q, legacy) : binomialBtpe(g, N, q, legacy);
+  const r = N.b - BigInt(y), d = Number(r);
+  return Number.isSafeInteger(d) ? d : r;
 }
 
 // ------------------------------------------------------------------ the module
@@ -415,7 +549,15 @@ newBuiltinModule("_nprandom", (m) => {
   fn("doubles", (g: Gen, size: any) => fill(size, "float64", () => g.nextDouble(), g, 0));
   fn("legacy_gauss", (g: MT19937, size: any) => fill(size, "float64", () => legacyGauss(g), g, 1));
   fn("legacy_exponential", (g: MT19937, size: any) => fill(size, "float64", () => -crlog(1.0 - g.nextDouble()), g, 2));
+  fn("legacy_gamma", (g: MT19937, shape: any, size: any) => fill(size, "float64", () => legacyStandardGamma(g, O.fv(shape) ?? Number(shape))));
   fn("poisson", (g: Gen, lam: any, size: any) => fill(size, "int64", () => poisson(g, O.fv(lam) ?? Number(lam))));
+  // (n an int64, exactly; a scalar result exactly, a Python int; with a size, n below 2**53, where every draw is a
+  // double (numpy.random draws past that one by one, into int64 storage's own admission))
+  fn("binomial", (g: Gen, n: any, p: any, size: any, legacy: any) => {
+    const N = binomN(BigInt(n)), pp = O.fv(p) ?? Number(p), leg = !!legacy;
+    if (shape(size) === null) return binomial(g, N, pp, leg);
+    return fill(size, "int64", () => binomial(g, N, pp, leg) as number);
+  });
   // integers in [low, high] (inclusive) by the legacy masked method or Lemire's
   fn("bounded", (g: Gen, low: any, high: any, size: any, lemire: any) => {
     const lo = Number(low), rng = Number(high) - lo;

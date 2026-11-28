@@ -64,6 +64,28 @@ queue the label is read from the queued pull request (`gh-readonly-queue/.../pr-
 so a track pull goes into the queue alone. Only the merger applies the label,
 only to a track's pull into master (decided by William, Nov 22 2026).
 
+### Master merges into a track
+
+The other direction: a change into a track (a pull request, a queue entry or a
+push onto `track/*`) that merges master in brings every master pull request
+since the track's last sync, and each of those already passed this backstop on
+master. So such a change is also measured against the master commit it merges
+(its "side": the newest commit on `origin/master`'s first-parent line that the
+tested commit contains, when the track's base doesn't already contain it; track
+work that master merged in turn is never a side), and a bundle fails only when its
+growth is over the limit against **both** the track's base and that master
+commit. A byte present in either parent was gated where it landed. A bundle the
+master side doesn't have is the track's own, gated against the base alone.
+The size-base job builds and records the side (`side-record.json`) beside the
+base, under the same recipe and pins; a missing or mismatched side record fails
+closed, as a base record does. A change into a track that brings no new master
+commits has no side and is gated as before. When one bundle's growth is over the
+limit against both parents (the track's own growth and master's each too large
+for it), the sync fails: sync master in smaller steps, or ask the merger for a
+ruling. (Ruling by @sagebrush, Nov 26 2026,
+after a master sync into `track/numeric` carried 85 master pull requests' growth
+as one transition.)
+
 There are no stored budgets, growth markers, tightness rules, epochs, or
 old-toolchain migration builds. No allowance is carried forward or refilled.
 

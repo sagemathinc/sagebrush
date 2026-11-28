@@ -56,7 +56,8 @@ const JB = "b1b1b1b1-000d-4b1b-8b1b-b1b1b1b1b10d"; // a job's bounds and its cou
 const RS = "b1b1b1b1-000e-4b1b-8b1b-b1b1b1b1b10e"; // a rebuild's reset, paged
 const CU = "b1b1b1b1-000f-4b1b-8b1b-b1b1b1b1b10f"; // list cursors: none outlives its grant or its expiry
 const DV = "b1b1b1b1-0010-4b1b-8b1b-b1b1b1b1b110"; // a document's revision in list and stat
-const listed = [BF, BU, CP, CA, RD, LV, MS, LB, RX, EM, NE, JR, JB, RS, CU, DV].join(",");
+const RV = "b1b1b1b1-0011-4b1b-8b1b-b1b1b1b1b111"; // the agents' reserved folder, /.agents: as if it weren't there
+const listed = [BF, BU, CP, CA, RD, LV, MS, LB, RX, EM, NE, JR, JB, RS, CU, DV, RV].join(",");
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
 const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret" };
@@ -131,7 +132,7 @@ async function socket(s, device) {
       }, 5000);
     });
   };
-  ws.send(JSON.stringify({ t: "hello", v: 2, device, name: "test", index_after: 0 }));
+  ws.send(JSON.stringify({ t: "hello", v: 3, device, name: "test", index_after: 0 }));
   await next((m) => m.t === "welcome");
   await next((m) => m.t === "index");
   let req = 0, dseq = 0;
@@ -755,6 +756,37 @@ await section("reads: scope, Trash by where it came from, pages, the examined bo
   await ix(RD, { bounds: { examined: 20_000, cursorMs: 15 * 60_000, cursorSweep: 100 } });
   ok(stored === before && stored >= 1 && typeof k2 === "string", "(nothing swept while it expired: the sweep held off, " + before + " -> " + stored + " cursors)");
   ok(stale.status === 400 && stale.message === "cursor: unknown or expired; list again from the start", "an expired cursor that is still stored is refused at use: " + JSON.stringify({ status: stale.status, message: stale.message }));
+  ws.close();
+});
+
+await section("the agents' reserved folder: /.agents and what's in it answer as if they weren't there, to every grant, / included", async () => {
+  const s = await enabled(RV);
+  const ws = await socket(s, "b6b6b6b6b6b6b6b6");
+  const mem = mkdirOp("/.agents/memory");
+  await ws.ops([mkdirOp("/.agents"), mem, mkdirOp("/.agents/memory/agent"), mkdirOp("/A"), mkdirOp("/.agentsX")]);
+  await ws.ops([{ op: "remove", path: "/.agents/memory", to: "/Trash/memory", kind: "folder", fid: mem.fid }]);
+  const refused = await post(s, "/api/sync/v1/grants", { agent: "fs-sync", scopes: [{ path: "/.agents/memory", access: "write" }] });
+  ok(refused.status === 400, "a grant with a scope in /.agents is refused when it is made: " + refused.status);
+  const t = await grant(s, [{ path: "/", access: "write" }]), tA = await grant(s, [{ path: "/A", access: "write" }]);
+  ok((await until(RV, "ready")).state === "ready", "(ready)");
+  const top = await agent(t, "list", { folder: "/" });
+  ok(top.status === 200 && JSON.stringify(top.entries.map((e) => e.path).sort()) === JSON.stringify(["/.agentsX", "/A"]), "a / grant's list of / leaves /.agents out, and only it: " + JSON.stringify(top.entries?.map((e) => e.path)));
+  const deep = await listAll(t, "/");
+  ok(Array.isArray(deep) && deep.length > 0 && !deep.some((e) => e.path === "/.agents" || e.path.startsWith("/.agents/")), "and its recursive list of / too: " + JSON.stringify(deep.map?.((e) => e.path)));
+  const none = await agent(t, "list", { folder: "/nothere" });
+  for (const [g, name] of [[t, "a / grant"], [tA, "an /A grant"]]) {
+    for (const f of ["/.agents", "/.agents/memory/agent", "/.agents/nothere"]) {
+      const r = await agent(g, "list", { folder: f });
+      ok(r.status === 404 && JSON.stringify({ ...r, path: 0 }) === JSON.stringify({ ...none, path: 0 }), `${name}: list ${f} is the same 404 missing as a folder that isn't there: ` + JSON.stringify(r));
+    }
+    for (const p of ["/.agents", "/.agents/memory/agent"]) {
+      const r = await agent(g, "stat", { path: p });
+      ok(r.status === 200 && r.entry === null, `${name}: stat ${p} is nothing, as for a path that isn't there: ` + JSON.stringify(r));
+    }
+  }
+  const tr = await agent(t, "list", { folder: "/Trash" });
+  ok(tr.status === 200 && !JSON.stringify(tr).includes("memory") && (await agent(t, "stat", { path: "/Trash/memory" })).entry === null, "what went to Trash from /.agents isn't shown, by list or stat: " + JSON.stringify(tr.entries?.map((e) => e.path)));
+  ok((await agent(t, "stat", { path: "/.agentsX" })).entry?.path === "/.agentsX" && (await agent(t, "stat", { path: "/A" })).entry?.path === "/A", "/.agentsX and /A, ordinary paths, are seen as ever");
   ws.close();
 });
 

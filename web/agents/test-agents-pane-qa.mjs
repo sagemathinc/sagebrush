@@ -204,6 +204,10 @@ try {
   const ci=closingTrace.indexOf('Closing…');ok(ci>=0&&!closingTrace.slice(ci+1).includes('Saved'),'S3: a save that completes while the notebook closes never says Saved over Closing…',closingTrace);
 
   // (a script, the same way)
+  // (every resize watcher a code editor starts is counted, and let go when it disconnects: R1 below)
+  await P.ev(`(() => { const live = (window.__codeWatchers = { live: new Set(), made: 0 }); const o = ResizeObserver.prototype.observe, d = ResizeObserver.prototype.disconnect;
+    ResizeObserver.prototype.observe = function (t, ...a) { if (t?.matches?.('textarea.code-edit')) (live.live.add(this), live.made++); return o.call(this, t, ...a); };
+    ResizeObserver.prototype.disconnect = function () { live.live.delete(this); return d.call(this); }; return true; })()`);
   made = await H.call("workspace.create", { path: "/qa.py", content: { text: "print(1)\n" } });
   ok(!made.error, "the agent wrote /qa.py", made.error);
   show("t-py", "/qa.py", "code");
@@ -254,14 +258,27 @@ try {
     return { hidden: a.hidden, href: a.getAttribute('href'), target: a.target, rel: a.rel, text: a.textContent, right: ra.left >= rt.right && ra.right <= rc.left, row: Math.abs((ra.top + ra.bottom) / 2 - (rc.top + rc.bottom) / 2) < 3, inBody: !!document.querySelector('${HOST} .file-path a') }; })()`);
   const st = await H.call("workspace.stat", { path: "/mandel.py" }).catch(() => null);
   ok(!o.hidden && /^\/\?code=[0-9a-f]+$/.test(o.href ?? "") && o.target === "_blank" && /noopener/.test(o.rel) && /^Open/.test(o.text), "O1: the head has Open, the code file's own page (/?code=<its id>), in a new tab", { o, st });
+  // (exactly the file's own page, as the workspace's stat names it to the agent, not only an address of that shape)
+  const entryOf = (r) => r?.result?.entry ?? r?.entry ?? r?.result ?? r;
+  const pageOf = (e) => { try { const u = new URL(e.url); return u.pathname + u.search; } catch { return null; } };
+  const codeEntry = entryOf(st);
+  ok(!!pageOf(codeEntry) && o.href === pageOf(codeEntry), "O1: Open is exactly this file's page, as the workspace names it", { href: o.href, entry: codeEntry });
   ok(o.right && o.row, "O1: at the head's right, after the tabs, in the row of Copy and Close", o);
   ok(!o.inBody, "O1: the small text link under the head is gone (one way, the head's)", o);
   await P.ev(`([...document.querySelectorAll('#artifacts .pane-head [data-tab]')].find((t) => /qa\.ipynb/.test(t.textContent)).click(), true)`);
   await P.until(`(document.querySelector('#artifacts .pane-head a.open-full:not([hidden])')?.getAttribute('href') ?? '').startsWith('/?nb=')`, 10000).catch(() => {});
   const onb = await P.ev(`document.querySelector('#artifacts .pane-head a.open-full:not([hidden])')?.getAttribute('href') ?? null`);
   ok((onb ?? "").startsWith("/?nb="), "O2: on the notebook's tab, Open is the notebook's page (/?nb=<its id>)", onb);
+  const nbEntry = entryOf(await H.call("workspace.stat", { path: "/qa.ipynb" }).catch(() => null));
+  ok(!!pageOf(nbEntry) && onb === pageOf(nbEntry), "O2: exactly this notebook's page, as the workspace names it", { onb, entry: nbEntry });
   const page = await P.ev(`fetch(${"document.querySelector('#artifacts .pane-head a.open-full').getAttribute('href')"}).then((r) => r.status)`);
   ok(page === 200, "O2: that address answers 200", page);
+  // ======================================================================== R1: the resize watcher goes with the editor
+  const before = await P.ev(`({ live: window.__codeWatchers.live.size, made: window.__codeWatchers.made })`);
+  await P.ev(`(document.querySelector('#close').click(), true)`);
+  await P.until(`!document.body.classList.contains('has-artifact')`, 15000).catch(() => {});
+  const after = await P.ev(`({ live: window.__codeWatchers.live.size, made: window.__codeWatchers.made, open: document.body.classList.contains('has-artifact') })`);
+  ok(before.made >= 1 && before.live >= 1 && !after.open && after.live === 0, "R1: the code editors' resize watchers are let go when the pane closes (none left watching)", { before, after });
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

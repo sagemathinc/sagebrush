@@ -23,6 +23,7 @@ import "./progress-module";
 import * as Prog from "./progress";
 import "./raster";
 import "./mpcore";
+import "./skltree";
 import * as Cx from "./complex";
 import * as FO from "./file-once";
 import { cIntArg } from "./argconv";
@@ -383,6 +384,18 @@ Obj.hooks.excThrown = (e: any) => {
 
 // ------------------------------------------------------------------ globals, locals, exec, eval
 
+// dir() at a module's top level: its names, and a lazy namespace's names that aren't loaded yet (Sage mode's session,
+// lib/_sage_lazy.py _Session), which a use would load; exec's separate locals list only themselves
+export function dirModule(g: any): any[] {
+  const ks = sortedKeys(Obj.moduleLocals(g));
+  const more = lazyUnloaded(g);
+  return more.length ? [...new Set([...ks, ...more])].sort() : ks;
+}
+// A lazy namespace's names not loaded yet (dir(), tab completion: src/interactive.ts); none for any other namespace
+export function lazyUnloaded(g: any): string[] {
+  const lazy = g[Obj.NS_GLOBALS] === undefined ? g[Obj.NS_LAZY] : undefined;
+  return lazy === undefined ? [] : (O.toArray(Obj.callObj(Obj.getattr(lazy, "_unloaded"), [])) as string[]);
+}
 export function sortedKeys(d: any): any[] {
   if (Obj.typeOf(d) === T.dict) return O.toArray(d).sort();
   const a = mappingKeys(d);
@@ -544,6 +557,15 @@ export function globalLoads(G: any): any {
 }
 // `del name` at a module's top level, or of a name declared global
 export function delName(ns: any, k: string): void {
+  // (a lazy namespace, Sage mode's session: the name is deleted for good, a later use a NameError rather than its
+  // domain loaded again; one of its names not loaded yet deletes as a bound one does, lib/_sage_lazy.py _Session)
+  const lazy = ns[Obj.NS_GLOBALS] === undefined ? ns[Obj.NS_LAZY] : undefined;
+  if (lazy !== undefined) {
+    const unloaded = Obj.callObj(Obj.getattr(lazy, "_delete"), [k]) === true;
+    if (ns[k] === undefined && !unloaded) raise(T.NameError, `name '${k}' is not defined`);
+    delete ns[k];
+    return;
+  }
   // (a layered namespace checks its locals itself; elsewhere a builtin's
   // name is unbound too, unlike a load's, CPython's DELETE_NAME/GLOBAL)
   if (ns[Obj.NS_GLOBALS] === undefined && ns[k] === undefined) raise(T.NameError, `name '${k}' is not defined`);
@@ -572,18 +594,20 @@ function sourceOf(src: any, fn: string): [string, string] {
 export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any, bl?: any): any {
   const [text, filename] = sourceOf(src, "exec");
   const sage = src instanceof CodeObject && src.sage;
-  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals, bl), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename, { sage });
+  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals, bl), src instanceof CodeObject && (src.mode === "single" || src.mode === "cell") ? src.mode : "exec", filename, { sage });
   return null;
 }
 export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any, bl?: any): any {
-  if (src instanceof CodeObject && src.mode === "exec") return execIn(src, globals, locals, g, callerLocals, bl);
+  if (src instanceof CodeObject && (src.mode === "exec" || src.mode === "cell")) return execIn(src, globals, locals, g, callerLocals, bl);
   const [text, filename] = sourceOf(src, "eval");
   const sage = src instanceof CodeObject && src.sage;
   return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals, bl), "eval", filename, { sage });
 }
 function compileSource(src: any, filename: any, mode: any, sage: boolean): CodeObject {
   const [text] = sourceOf(src, "compile");
-  if (mode !== "exec" && mode !== "eval" && mode !== "single") raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
+  // ("cell", Sage code only: a notebook cell's rule, its final expression shown through the display hook (compile.ts
+  //  displayLast), for a LaTeX sageblock's last-line value; compile() itself keeps CPython's three modes)
+  if (mode !== "exec" && mode !== "eval" && mode !== "single" && !(sage && mode === "cell")) raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
   M.loader.exec(text, null, mode === "eval" ? "check-eval" : mode === "single" ? "check-single" : "check", String(filename), { sage });
   return new CodeObject(text, String(filename), mode, sage);
 }
@@ -594,6 +618,20 @@ Obj.builtin(compileBuiltin, "compile");
 B.builtins.compile = compileBuiltin;
 // compile() for Sage source (lib/sage_all.py's timeit): 2^3 is a power and
 // 1/2 exact when the code object runs
+// Sage mode's session namespace (lib/_sage_lazy.py session): `session`, a _Session, supplies the names a global load
+// misses there (builtinName) and hears of `del` (delName); only that namespace, never a library module's
+// (with the dict alone: its session, or None, for a copy of it to have one too, _sage_lazy.session_copy)
+B.builtins.__pyjs_lazy_namespace__ = Obj.builtin((g: any, session: any = undefined) => {
+  if (!(g instanceof Obj.PyDict)) raise(T.TypeError, "__pyjs_lazy_namespace__() needs a namespace's dict");
+  // (a module's namespace object behind its dict, globals()'s or the module's __dict__'s, and the dict itself, which
+  // exec/eval over it reads, Obj.namespaceOf)
+  const m = (g as any).$m;
+  const behind = m instanceof Obj.ObjMap || m instanceof Obj.AttrMap ? m.o : null;
+  if (session === undefined) return (g as any)[Obj.NS_LAZY] ?? behind?.[Obj.NS_LAZY] ?? null;
+  (g as any)[Obj.NS_LAZY] = session;
+  if (behind !== null) behind[Obj.NS_LAZY] = session;
+  return null;
+}, "__pyjs_lazy_namespace__");
 B.builtins.__pyjs_compile_sage__ = Obj.builtin((src: any, filename: any, mode: any) => compileSource(src, filename, mode, true), "__pyjs_compile_sage__");
 B.builtins.open = Obj.builtin((...a: any[]) => Obj.callObj(Obj.getattr(M.importModule("_pyjs_open"), "open"), a), "open");
 B.builtins.open.$kw = (pos: any[], names: string[], values: any[]) => Obj.callKw(Obj.getattr(M.importModule("_pyjs_open"), "open"), pos, names, values);
@@ -1042,6 +1080,8 @@ function pyFrames(sites: any[]): Frame[] {
     // (a leading $ is the compiler's own function: a module's top level or a
     // comprehension, never a def, whose name comes from a Python identifier)
     const raw = String(cs.getFunctionName() ?? "");
+    // (a global name's miss, the module's $N helper (src/emit.ts): part of the line that used the name, not a frame)
+    if (raw === "$N") continue;
     const kind = raw.startsWith("$") && raw.endsWith("$$") ? raw.slice(1, -2) : undefined;
     let name = kind !== undefined ? kind : raw.endsWith("$$") ? raw.slice(0, -2) : raw;
     if (kind === "module" || raw === "") name = "<module>";
@@ -1514,6 +1554,8 @@ export const R: any = {
   realGlobals: Obj.realGlobals,
   localsDict,
   sortedKeys,
+  dirModule,
+  lazyUnloaded,
   delName,
   originalBuiltins,
   builtinsOf: M.builtinsOf,
