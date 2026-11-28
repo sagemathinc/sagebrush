@@ -96,6 +96,11 @@
    "reason": "files: cat(file =) is refused until Rill's files go through the file gate (A1.7)",
    "sha256": "733032151ea9e824e6603265181dece9357edc1184d2af299cc47e61cc0ccfa8"
   },
+  "rill-tests/list/test_1.R#list-4": {
+   "class": "not-implemented",
+   "reason": "str() and list replacement ($<-), later A3 PRs",
+   "sha256": "8d201146cee379845bd7e734f4a6b358461a093cac573cb1da37a6363887d441"
+  },
   "rill-tests/parse/test_1.R#arg-empty-name": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",
@@ -105,11 +110,6 @@
    "class": "not-implemented",
    "reason": "lists and matrices (A1.6)",
    "sha256": "8b7aaaef1dca50c35a148bcf82ea5fe5c1e1a53b96c95206010d98acf3ef3f70"
-  },
-  "rill-tests/parse/test_1.R#dollar-string": {
-   "class": "not-implemented",
-   "reason": "lists and matrices (A1.6)",
-   "sha256": "9d46844ccd501dfdda3ff9e98bfef61de9e357b810d37de59915052746430494"
   },
   "rill-tests/parse/test_1.R#dots-index": {
    "class": "not-implemented",
@@ -196,15 +196,10 @@
    "reason": "closures and control flow (A1.3)",
    "sha256": "9c1431d5e15e098382921c66b492c4aa4c38dc3c43677da9d83e9879680a6733"
   },
-  "rill-tests/parse/test_2.R#tok-bracket-chain": {
-   "class": "not-implemented",
-   "reason": "lists and matrices (A1.6)",
-   "sha256": "95c99b7d6906e8bf88e8d62155fefb3aff2c120fb361b455c731a8a1099939f6"
-  },
   "rill-tests/parse/test_2.R#tok-dollar-call": {
    "class": "not-implemented",
-   "reason": "lists and matrices (A1.6)",
-   "sha256": "22e6f6e2d8a8a291d3ebe5e52e3de1643a87060e21c798b9e9ab39811678aa87"
+   "reason": "functions as values and closures (A1.3); lists are in",
+   "sha256": "9c1431d5e15e098382921c66b492c4aa4c38dc3c43677da9d83e9879680a6733"
   },
   "rill-tests/parse/test_2.R#tok-else-in-function": {
    "class": "not-implemented",
@@ -256,11 +251,6 @@
    "reason": "closures and control flow (A1.3)",
    "sha256": "c89aa5b746f3afb656e2f32f8b7bbcf1ed446033a5bada8bcc0b8bbc0b64b3a8"
   },
-  "rill-tests/parse/test_3.R#tok-bb-close-single": {
-   "class": "not-implemented",
-   "reason": "lists and matrices (A1.6)",
-   "sha256": "e69d8498c018384b79b424e558d2c32ec670eb632dd9825aff0357aaf4137e45"
-  },
   "rill-tests/parse/test_3.R#tok-formals-dots-default": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",
@@ -281,20 +271,10 @@
    "reason": "closures and control flow (A1.3)",
    "sha256": "9c1431d5e15e098382921c66b492c4aa4c38dc3c43677da9d83e9879680a6733"
   },
-  "rill-tests/parse/test_3.R#tok-placeholder-pipe-extract": {
-   "class": "not-implemented",
-   "reason": "lists: list() and $ on a list (A1.6)",
-   "sha256": "c0bf449434b6bcaaff24b3d8005f4a43734bd463b05371cf623b901a74ee1077"
-  },
   "rill-tests/parse/test_3.R#tok-string-bell-etc": {
    "class": "not-implemented",
    "reason": "the builtin nchar (A1.2b)",
    "sha256": "5e909dbf6c8ff0a7fc2c1293baee84f1361adb7726f584de3d6dcee6ddec952c"
-  },
-  "rill-tests/parse/test_3.R#tok-unmatched-close-bb": {
-   "class": "not-implemented",
-   "reason": "lists and matrices (A1.6)",
-   "sha256": "e69d8498c018384b79b424e558d2c32ec670eb632dd9825aff0357aaf4137e45"
   },
   "rill-tests/parse/test_5.R#depth-for-4996": {
    "class": "not-implemented",

@@ -1,0 +1,43 @@
+{
+ "cases": [
+  {
+   "id": "unlist-free-named-vector",
+   "status": 0,
+   "stderr": "",
+   "stdout": "d.a  d2  d3 \n  1   2   3 \n"
+  },
+  {
+   "id": "unlist-free-single-name",
+   "status": 0,
+   "stderr": "",
+   "stdout": "d.e  d2 \n  3   4 \n"
+  },
+  {
+   "id": "unlist-free-untagged-list",
+   "status": 0,
+   "stderr": "",
+   "stdout": "d.e   d \n  3   4 \n"
+  },
+  {
+   "id": "unlist-free-two-named",
+   "status": 0,
+   "stderr": "",
+   "stdout": "d.a d.b \n  1   2 \nd.a d.b \n  1   2 \n"
+  },
+  {
+   "id": "unlist-free-tagged-list-inside",
+   "status": 0,
+   "stderr": "",
+   "stdout": "d.x   d \n  4   5 \nd.x1 d.x2    d \n   4    6    5 \n"
+  },
+  {
+   "id": "unlist-free-vector-only",
+   "status": 0,
+   "stderr": "",
+   "stdout": "d1 d2 \n 1  2 \nd.a  d2 \n  1   2 \n"
+  }
+ ],
+ "file": "rill-tests/list/test_4.R",
+ "format": "rill-out",
+ "v": 1
+}

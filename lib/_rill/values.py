@@ -40,6 +40,24 @@ class RVector:
         return "RVector(%s, %r)" % (self.type, self.data)
 
 
+class RList:
+    """A list (R's generic vector): its elements, each a value (an RVector, an RList or NULL), and its attributes
+    (A3's lists: names only).  A class of its own, not an RVector type, so every builtin written for atomic
+    vectors refuses a list instead of reading it as one."""
+    __slots__ = ("data", "attrs")
+    type = "list"
+
+    def __init__(self, data, attrs=None):
+        self.data = data
+        self.attrs = attrs
+
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        return "RList(%r)" % (self.data,)
+
+
 def lgl(data, attrs=None):
     return RVector("logical", data, attrs)
 

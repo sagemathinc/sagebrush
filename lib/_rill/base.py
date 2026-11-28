@@ -11,14 +11,15 @@ Each builtin is called as f(session, call, args) with args a list of
 
 import math
 
-from . import fmt, mem
+from . import fmt, lists, mem
+from .lists import double_bracket, is_list, list_, unlist_
 from .access import (as_character, as_complex, as_double, as_integer, as_logical, character_, complex_, dollar,
                      double_, index, integer_, is_character, is_complex, is_double, is_finite, is_infinite,
                      is_integer, is_logical, is_na, is_nan, is_null, is_numeric, is_vector, length_, logical_,
                      names_, options, refuse_raw)
 from .args import DOTS, Closure, Primitive
 from .eval import NotSupported, RError
-from .values import NULL, RVector
+from .values import NULL, RList, RVector
 
 INT_MAX = 2147483647
 COLON_FUZZ = 2.0 ** -23  # `:`'s length allowance, single precision's epsilon (R 4.5.3, rill-tests/core/test_3.R)
@@ -524,9 +525,88 @@ def print_value(sess, v, digits=None):
         sess.write_out(fmt.deparse(v) + "\n")
         return
     opts = fmt.Options(sess.options["digits"] if digits is None else digits, sess.options["scipen"], sess.options["width"])
+    if isinstance(v, RList):
+        _print_list(sess, v, opts)
+        return
     with _print_reservation(v):
         if fmt.print_value(v, sess.write_out, opts) is None:
             raise NotSupported("printing this value")
+
+
+def _print_list(sess, v, opts):
+    """print() of a list, as R 4.5.3 prints one (rill-tests/list/): each element under its tag ($name, $`name`,
+    $<NA>, or [[k]] where it has none), the tags of nested lists prefixed by their parents', each element followed
+    by a blank line; an empty list is list() (named list() with names).  Every element is checked, and the peak
+    reserved, before anything is written: one leaf is laid out at a time, so the peak is the largest leaf's layout
+    with the longest tag (§8.5).  The walks keep their own stacks (nesting is as deep as the evaluator allows)."""
+    write = sess.write_out
+    strings = extra = tag_chars = 0
+    stack = [(v, 0)]  # (list, the characters of its tag prefix)
+    while stack:
+        x, prefix = stack.pop()
+        lists._only_names(x, "printing")
+        names = lists.names_of(x)
+        for i, e in enumerate(x.data):
+            t = prefix + _list_tag_width(names.data[i] if names is not None else "", i)
+            tag_chars = max(tag_chars, t)
+            if isinstance(e, RList):
+                stack.append((e, t))
+            elif e is not NULL and not (isinstance(e, RVector) and (not e.attrs or set(e.attrs) == {"names"})):
+                raise NotSupported("printing a list holding this value")
+            elif e is not NULL:
+                k, b = _print_need(e)
+                strings, extra = max(strings, k), max(extra, b)
+    if not v.data:
+        write("named list()\n" if v.attrs else "list()\n")
+        return
+    # (a tag is built, then written with its newline: twice its characters)
+    with mem.reserve(0, "character", (strings, "character"), extra_bytes=extra + 2 * (tag_chars + 1)):
+        _write_list(v, write, opts)
+
+
+def _list_tag_width(nm, i):
+    """The characters of _list_tag(nm, i), counted without building it: the sizing walk runs before the
+    reservation is admitted (§8.5)."""
+    if nm is None:
+        return len("$<NA>")
+    if nm == "":
+        return len("[[]]") + len(str(i + 1))
+    if fmt.syntactic(nm):
+        return 1 + len(nm)
+    # ($`name`, a backslash or backtick inside escaped by a backslash: fmt.deparse_symbol)
+    return 3 + len(nm) + nm.count("\\") + nm.count("`")
+
+
+def _list_tag(nm, i):
+    """An element's own part of its tag: $name, $`name`, $<NA>, or [[k]] where it has no name."""
+    if nm is None:
+        return "$<NA>"
+    if nm == "":
+        return "[[%d]]" % (i + 1)
+    return "$" + fmt.deparse_symbol(nm)
+
+
+def _write_list(v, write, opts):
+    frames = [(v, "", 0)]
+    while frames:
+        x, prefix, i = frames.pop()
+        if i >= len(x.data):
+            if frames:
+                write("\n")
+            continue
+        frames.append((x, prefix, i + 1))
+        names = lists.names_of(x)
+        tag = prefix + _list_tag(names.data[i] if names is not None else "", i)
+        write(tag + "\n")
+        e = x.data[i]
+        if isinstance(e, RList) and e.data:
+            frames.append((e, tag, 0))
+            continue
+        if isinstance(e, RList):
+            write("named list()\n" if e.attrs else "list()\n")
+        else:
+            fmt.print_value(e, write, opts)
+        write("\n")
 
 
 def _print_reservation(v):
@@ -535,8 +615,14 @@ def _print_reservation(v):
     and the laid-out output, every element padded to the widest, with its line labels, held twice (the lines and
     their join).  A named vector adds its names, each up to ten times its length, as a second row per line.  The
     width is the widest element's bound, so a single long string pads every row (astra's R2)."""
+    strings, extra = _print_need(v)
+    return mem.reserve(0, "character", (strings, "character"), extra_bytes=extra)
+
+
+def _print_need(v):
+    """print(v)'s peak as (element strings, bytes beyond them), _print_reservation's rule."""
     if not isinstance(v, RVector):
-        return mem.reserve(0, "character")
+        return 0, 0
     n = len(v.data)
     # (the widest element and the total, as running scalars: nothing proportional to the vector exists before
     # the reservation is admitted; astra's R2)
@@ -561,7 +647,7 @@ def _print_reservation(v):
                 w = x
     label = len("[%d]" % n) + 1
     laid_out = rows * n * (w + 1) + n * label
-    return mem.reserve(0, "character", (rows * n, "character"), extra_bytes=total + 2 * laid_out)
+    return rows * n, total + 2 * laid_out
 
 
 # the most characters print() writes for one character of a string: \\U{01fffe} (fmt.escape_string)
@@ -676,6 +762,9 @@ FORMALS = {
     "complex": Closure("length.out", "real", "imaginary", "modulus", "argument"),
     "is.vector": Closure("x", "mode", required=("x",)),
     "options": Closure(DOTS),
+    "list": Closure(DOTS),
+    "is.list": Primitive("x"),
+    "unlist": Closure("x", "recursive", "use.names", required=("x",)),
 }
 for _f in ("as.logical", "as.integer", "as.numeric", "as.double", "as.character", "as.complex"):
     FORMALS[_f] = Primitive("x", dots=True, least=0)
@@ -725,7 +814,17 @@ BUILTINS["is.finite"] = is_finite
 BUILTINS["is.infinite"] = is_infinite
 BUILTINS["is.vector"] = is_vector
 BUILTINS["options"] = options
+# A3: lists (lists.py)
+BUILTINS["list"] = list_
+BUILTINS["is.list"] = is_list
+BUILTINS["[["] = double_bracket
+BUILTINS["unlist"] = unlist_
 BUILTINS["raw"] = refuse_raw
 BUILTINS["as.raw"] = refuse_raw
 # base's constants (values, not functions)
 VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False])}
+# (base's letters and LETTERS: the 26 lowercase and uppercase Latin letters)
+LOWER_LETTERS = RVector("character", list("abcdefghijklmnopqrstuvwxyz"))
+UPPER_LETTERS = RVector("character", list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+VALUES["letters"] = LOWER_LETTERS
+VALUES["LETTERS"] = UPPER_LETTERS

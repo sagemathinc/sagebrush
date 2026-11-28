@@ -24,12 +24,14 @@ UNMEASURED_OPERATION_BYTES = 1 << 28
 # the host's bytes per element of each type, for reservations, measured on the CLI's engine (Node 24.21.0): the
 # resident growth of a list of 10^6 elements, two runs (doubles 44.8 and 59.4 B, integers 27.8 and 31.1, logicals
 # about 2 plus their 8-byte slot, short strings 125.1 and 129.0, None 8.1), rounded up; a complex is two doubles
-ELEMENT_BYTES = {"logical": 8, "integer": 32, "double": 64, "complex": 128, "character": 136}
+ELEMENT_BYTES = {"logical": 8, "integer": 32, "double": 64, "complex": 128, "character": 136,
+                 # a list's slot: one reference to a value the list shares, never copies (a 64-bit pointer)
+                 "list": 8}
 # the parser's tokens and tree per character of source, held while a program runs (an upper bound: at most one
 # token per character, each with its tree node)
 PARSE_BYTES_PER_CHAR = 256
 # R's bytes per element, for R's message
-R_ELEMENT_BYTES = {"logical": 4, "integer": 4, "double": 8, "complex": 16, "character": 8}
+R_ELEMENT_BYTES = {"logical": 4, "integer": 4, "double": 8, "complex": 16, "character": 8, "list": 8}
 
 _open = [0]     # the bytes reserved by operations still running in this session
 
@@ -86,7 +88,7 @@ class Reservation:
 
 
 NOUNS = {"logical": "logical values", "integer": "integers", "double": "numbers", "complex": "complex numbers",
-         "character": "strings"}
+         "character": "strings", "list": "list elements"}
 
 
 def reserve(n, type, *temporaries, extra_bytes=0):

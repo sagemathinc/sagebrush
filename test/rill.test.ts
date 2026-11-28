@@ -184,6 +184,11 @@ s.evaluate(parse("w <- c(a = z)")[0])
 s.evaluate(parse("j <- 50:1")[0])
 s.evaluate(parse("t10 <- 1:10")[0])
 s.evaluate(parse("t100 <- 1:100")[0])
+# (review: the tags in the peak, their widths, and one leaf's peak) lists to print: a 1,003-character non-syntactic tag over a short leaf, and three equal
+# leaves (built here, so their own reservations aren't the peak measured)
+TAGL = chr(96) + "t " * 501 + "t" + chr(96)
+s.evaluate(parse("lt <- list(%s = 1)" % TAGL)[0])
+s.evaluate(parse("lz <- list(z, z, z)")[0])
 mem.SMALL_BYTES = 0
 cases = {
   "1:100": 100 * 32,
@@ -213,6 +218,10 @@ cases = {
   "complex(50)": 50 * 128 + 50 * 64 * 2,
   "is.na(z)": 50 * 8,
   "w[x]": 50 * 64 + 50 * 32 + 50 * 136,
+  # a list's print: the largest leaf's layout (as print(x) of it) and its longest tag, built then written with its
+  # newline; the tag $ and the quoted t t ... t is 1,006 characters, [[k]] 5; three equal leaves are one leaf's peak, not three
+  "print(lt)": 136 + 24 + 2 * (1 * (24 + 1) + 1 * len("[1] ")) + 2 * (1006 + 1),
+  "print(lz)": 50 * 136 + 24 * 50 + 2 * (50 * (24 + 1) + 50 * len("[50] ")) + 2 * (5 + 1),
 }
 TAG = "t" * 1001
 cases["c(%s = x)" % TAG] = 50 * 32 * 2 + 50 * 136 * 2 + 4 * (50 * 1001 + 91)
@@ -277,6 +286,66 @@ print(json.dumps({"peak": peak[0], "printed": len("".join(out))}))
     `);
     assert.ok(got.printed > 100000, `the layout pads every row (${got.printed} characters)`);
     assert.ok(got.peak >= 2 * got.printed + 100 * 136, `reserved ${got.peak} for ${got.printed} characters of output, held twice, and 100 element strings`);
+  });
+}
+
+// (review) printing a list reserves its whole peak before its first tag is written: a refusal, wherever the
+// largest leaf is (first, later, nested), leaves no partial output, and the reservation covers that leaf's layout;
+// the sizing walk counts the tags without building one (review: a 1,003-character tag was built before any reservation)
+const LONG_TAG = "`" + "t ".repeat(501) + "t`";
+for (const [where, src, leaf] of [["first leaf", "list(a = numeric(2000), 1)", "numeric(2000)"],
+                                  ["later leaf", "list(1, 2, b = numeric(2000))", "numeric(2000)"],
+                                  ["nested leaf", "list(1, c = list(2, numeric(2000)))", "numeric(2000)"],
+                                  ["long tag", `list(${LONG_TAG} = 1)`, "1"]]) {
+  test(`§8.5: a list's print reserves its peak before writing (${where})`, () => {
+    const got = py(`
+import json
+from _rill import _memguard, base, fmt, mem
+from _rill.eval import Session
+from _rill.parse import parse
+out = []
+s = Session(out.append, out.append)
+s.evaluate(parse("x <- ${src}")[0])
+s.evaluate(parse("y <- ${leaf}")[0])
+mem.SMALL_BYTES = 0
+peak = [0]
+real_enter = mem.Reservation.__enter__
+def spy(self):
+    r = real_enter(self)
+    peak[0] = max(peak[0], mem.open_bytes())
+    return r
+mem.Reservation.__enter__ = spy
+mem._allowance = lambda: (10 ** 9, None)
+s.evaluate(parse("print(y)")[0])
+leaf = peak[0]
+peak[0] = 0
+del out[:]
+s.evaluate(parse("print(x)")[0])
+whole, printed = peak[0], len("".join(out))
+del out[:]
+built = [0]
+def counting(f):
+    def g(*a):
+        built[0] += 1
+        return f(*a)
+    return g
+base._list_tag = counting(base._list_tag)
+fmt.deparse_symbol = counting(fmt.deparse_symbol)
+mem._allowance = lambda: (whole - 1 - mem.open_bytes(), None)
+try:
+    s.evaluate(parse("print(x)")[0])
+    short = "admitted"
+except _memguard.SagebrushMemoryError:
+    short = "refused"
+print(json.dumps({"leaf": leaf, "whole": whole, "printed": printed, "short": short, "after": len("".join(out)),
+                  "open": mem.open_bytes(), "built": built[0]}))
+`);
+    assert.ok(got.printed > 0, "the list printed");
+    assert.ok(got.whole >= got.leaf, `the list's reservation ${got.whole} covers its largest leaf's ${got.leaf}`);
+    assert.equal(got.short, "refused", "one byte short is refused");
+    assert.equal(got.after, 0, "a refusal writes nothing");
+    assert.equal(got.built, 0, "a refusal builds no tag");
+    assert.equal(got.open, 0, "nothing left reserved");
   });
 }
 

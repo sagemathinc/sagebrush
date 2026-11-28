@@ -3,7 +3,8 @@ the read-only `[`, `$`'s error, the constructors, the as.* coercions, the is.*
 tests and options().  What each prints, warns and refuses is R 4.5.3's
 (rill-tests/access/, rill-tests/args/, rill-tests/print/); each result's
 whole peak is reserved before it is built (§8.5).  Atomic vectors only:
-lists, attributes but names, classes and raw are later PRs' (A1.6), refused.
+attributes but names, classes and raw are later PRs', refused; the list forms of length, names, `[` and `$` are
+lists.py's.
 
 Each is called as f(session, call, args), args being (formal or name, value)
 after R's matching (args.py; base.FORMALS holds their signatures).
@@ -14,7 +15,7 @@ import re
 
 from . import mem
 from .eval import NotSupported, RError
-from .values import MISSING, NULL, RVector
+from .values import MISSING, NULL, RList, RVector
 
 INT_MAX = 2147483647
 TYPES = ("logical", "integer", "double", "complex", "character")
@@ -34,7 +35,7 @@ def _arg(args, formal, default=MISSING):
 
 
 def _names(v):
-    return v.attrs.get("names") if isinstance(v, RVector) and v.attrs else None
+    return v.attrs.get("names") if isinstance(v, (RVector, RList)) and v.attrs else None
 
 
 def _with_names(t, data, names):
@@ -44,12 +45,17 @@ def _with_names(t, data, names):
 # ---------------------------------------------------------------- length and names
 
 def length_(sess, call, args):
-    v = _atomic(args[0][1], "length()")
+    v = args[0][1]
+    if isinstance(v, RList):
+        return RVector("integer", [len(v.data)])
+    v = _atomic(v, "length()")
     return RVector("integer", [0 if v is NULL else len(v.data)])
 
 
 def names_(sess, call, args):
-    v = _atomic(args[0][1], "names()")
+    v = args[0][1]
+    if not isinstance(v, RList):
+        v = _atomic(v, "names()")
     nm = _names(v)
     if nm is None:
         return NULL
@@ -63,6 +69,9 @@ def index(sess, call, args):
     """x[i], read-only (`[<-` is A1.5's)."""
     if len(args) > 2:
         raise RError("incorrect number of dimensions", call)
+    if isinstance(args[0][1], RList):
+        from .lists import index_list
+        return index_list(args[0][1], args[1][1] if len(args) > 1 else MISSING, call)
     x = _atomic(args[0][1], "`[`")
     if x is NULL:
         return NULL
@@ -126,7 +135,8 @@ def _positions(i, x, call):
         where = {}
         if names is not None:
             for k, nm in enumerate(names.data):
-                if nm is not None and nm not in where:
+                # (an empty name never matches, not even "": list(a = 1, 2)[""] is $<NA> NULL, R 4.5.3)
+                if nm and nm not in where:
                     where[nm] = k
         return [where.get(s) if s is not None else None for s in i.data]
     raise NotSupported("a %s index" % i.type)
@@ -138,6 +148,9 @@ def dollar(sess, call, args):
         return NULL
     if isinstance(x, RVector):
         raise RError("$ operator is invalid for atomic vectors", call)
+    if isinstance(x, RList):
+        from .lists import dollar_list
+        return dollar_list(x, call)
     raise NotSupported("$ on this kind of value")
 
 

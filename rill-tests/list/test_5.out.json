@@ -1,0 +1,61 @@
+{
+ "cases": [
+  {
+   "id": "list-empty-name-double-bracket",
+   "status": 0,
+   "stderr": "",
+   "stdout": "NULL\nNULL\n"
+  },
+  {
+   "id": "list-empty-name-dollar",
+   "status": 0,
+   "stderr": "",
+   "stdout": "NULL\n"
+  },
+  {
+   "id": "list-empty-name-bracket",
+   "status": 0,
+   "stderr": "",
+   "stdout": "$<NA>\nNULL\n\n"
+  },
+  {
+   "id": "list-empty-name-bracket-mixed",
+   "status": 0,
+   "stderr": "",
+   "stdout": "$<NA>\nNULL\n\n$a\n[1] 1\n\n[[1]]\nNULL\n\n"
+  },
+  {
+   "id": "atomic-empty-name-bracket",
+   "status": 0,
+   "stderr": "",
+   "stdout": "<NA> \n  NA \n   a <NA> \n   1   NA \n[1] NA\n"
+  },
+  {
+   "id": "atomic-empty-name-double-bracket",
+   "status": 1,
+   "stderr": "Error in c(a = 1, 2)[[\"\"]] : subscript out of bounds\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "atomic-empty-name-double-bracket-inexact",
+   "status": 1,
+   "stderr": "Error in c(a = 1)[[\"\", exact = FALSE]] : subscript out of bounds\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "unlist-named-arguments",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2\na b \n1 2 \n"
+  },
+  {
+   "id": "unlist-positional-flags",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2\n"
+  }
+ ],
+ "file": "rill-tests/list/test_5.R",
+ "format": "rill-out",
+ "v": 1
+}
