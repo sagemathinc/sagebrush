@@ -547,7 +547,7 @@ def _print_list(sess, v, opts):
         lists._only_names(x, "printing")
         names = lists.names_of(x)
         for i, e in enumerate(x.data):
-            t = prefix + len(_list_tag(names.data[i] if names is not None else "", i))
+            t = prefix + _list_tag_width(names.data[i] if names is not None else "", i)
             tag_chars = max(tag_chars, t)
             if isinstance(e, RList):
                 stack.append((e, t))
@@ -562,6 +562,19 @@ def _print_list(sess, v, opts):
     # (a tag is built, then written with its newline: twice its characters)
     with mem.reserve(0, "character", (strings, "character"), extra_bytes=extra + 2 * (tag_chars + 1)):
         _write_list(v, write, opts)
+
+
+def _list_tag_width(nm, i):
+    """The characters of _list_tag(nm, i), counted without building it: the sizing walk runs before the
+    reservation is admitted (§8.5)."""
+    if nm is None:
+        return len("$<NA>")
+    if nm == "":
+        return len("[[]]") + len(str(i + 1))
+    if fmt.syntactic(nm):
+        return 1 + len(nm)
+    # ($`name`, a backslash or backtick inside escaped by a backslash: fmt.deparse_symbol)
+    return 3 + len(nm) + nm.count("\\") + nm.count("`")
 
 
 def _list_tag(nm, i):

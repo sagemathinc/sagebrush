@@ -278,19 +278,23 @@ print(json.dumps({"peak": peak[0], "printed": len("".join(out))}))
 }
 
 // (review) printing a list reserves its whole peak before its first tag is written: a refusal, wherever the
-// largest leaf is (first, later, nested), leaves no partial output, and the reservation covers that leaf's layout
-for (const [where, src] of [["first leaf", "list(a = numeric(2000), 1)"], ["later leaf", "list(1, 2, b = numeric(2000))"],
-                            ["nested leaf", "list(1, c = list(2, numeric(2000)))"]]) {
+// largest leaf is (first, later, nested), leaves no partial output, and the reservation covers that leaf's layout;
+// the sizing walk counts the tags without building one (Codex P2: a 1,003-character tag before any reservation)
+const LONG_TAG = "`" + "t ".repeat(501) + "t`";
+for (const [where, src, leaf] of [["first leaf", "list(a = numeric(2000), 1)", "numeric(2000)"],
+                                  ["later leaf", "list(1, 2, b = numeric(2000))", "numeric(2000)"],
+                                  ["nested leaf", "list(1, c = list(2, numeric(2000)))", "numeric(2000)"],
+                                  ["long tag", `list(${LONG_TAG} = 1)`, "1"]]) {
   test(`§8.5: a list's print reserves its peak before writing (${where})`, () => {
     const got = py(`
 import json
-from _rill import _memguard, mem
+from _rill import _memguard, base, fmt, mem
 from _rill.eval import Session
 from _rill.parse import parse
 out = []
 s = Session(out.append, out.append)
 s.evaluate(parse("x <- ${src}")[0])
-s.evaluate(parse("y <- numeric(2000)")[0])
+s.evaluate(parse("y <- ${leaf}")[0])
 mem.SMALL_BYTES = 0
 peak = [0]
 real_enter = mem.Reservation.__enter__
@@ -307,6 +311,14 @@ del out[:]
 s.evaluate(parse("print(x)")[0])
 whole, printed = peak[0], len("".join(out))
 del out[:]
+built = [0]
+def counting(f):
+    def g(*a):
+        built[0] += 1
+        return f(*a)
+    return g
+base._list_tag = counting(base._list_tag)
+fmt.deparse_symbol = counting(fmt.deparse_symbol)
 mem._allowance = lambda: (whole - 1 - mem.open_bytes(), None)
 try:
     s.evaluate(parse("print(x)")[0])
@@ -314,12 +326,13 @@ try:
 except _memguard.SagebrushMemoryError:
     short = "refused"
 print(json.dumps({"leaf": leaf, "whole": whole, "printed": printed, "short": short, "after": len("".join(out)),
-                  "open": mem.open_bytes()}))
+                  "open": mem.open_bytes(), "built": built[0]}))
 `);
     assert.ok(got.printed > 0, "the list printed");
     assert.ok(got.whole >= got.leaf, `the list's reservation ${got.whole} covers its largest leaf's ${got.leaf}`);
     assert.equal(got.short, "refused", "one byte short is refused");
     assert.equal(got.after, 0, "a refusal writes nothing");
+    assert.equal(got.built, 0, "a refusal builds no tag");
     assert.equal(got.open, 0, "nothing left reserved");
   });
 }
