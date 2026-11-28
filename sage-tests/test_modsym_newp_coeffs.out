@@ -85,3 +85,7 @@ warm [int(3), ZZ(2)] -> [-1, -2]
 1 [QQ(3)/2, 3] -> TypeError: unable to convert rational 3/2 to an integer
 1 [0.0] -> [0]
 1 [0.5] -> TypeError: cannot convert non-integral float to integer
+[2.0, 0.5] -> TypeError: 'float' object cannot be interpreted as an integer
+[2.0, 5] -> TypeError: 'float' object cannot be interpreted as an integer
+[2.0, 0.5] -> TypeError: 'float' object cannot be interpreted as an integer
+[5, 2.0] -> TypeError: 'float' object cannot be interpreted as an integer

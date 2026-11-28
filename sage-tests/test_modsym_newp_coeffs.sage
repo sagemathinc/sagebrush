@@ -36,3 +36,11 @@ for i, M in [(0, CuspForms(11, 2)), (1, CuspForms(37, 2))]:
         except Exception as e:
             r = "%s: %s" % (type(e).__name__, e)
         print(i, L, '->', r)
+# an error stores nothing: a float past the degree beside a bad index, then beside a good one
+f = CuspForms(32, 2).gen(0) * 1
+for L in ['[2.0, 0.5]', '[2.0, 5]', '[2.0, 0.5]', '[5, 2.0]']:
+    try:
+        r = f.coefficients(eval(L))
+    except Exception as e:
+        r = "%s: %s" % (type(e).__name__, e)
+    print(L, '->', r)

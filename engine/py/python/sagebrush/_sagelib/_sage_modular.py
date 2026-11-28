@@ -1781,12 +1781,15 @@ class ModularFormElement:
             c = self._coeffs(max(int(prec), 1))
             import operator
             top = max((i for i in range(min(len(c), int(prec))) if c[i]), default=-1)
+            new = {}
             for n in Y:
                 # (each index read as the q-expansion to that precision reads
                 # it: 0 below 0 and past its degree, else as an index, with
                 # Python's and Sage's errors for a float or a non-integral
                 # rational)
-                known[n] = QQ(0) if n < 0 or n > top else QQ(c[operator.index(n)])
+                new[n] = QQ(0) if n < 0 or n > top else QQ(c[operator.index(n)])
+            # (kept only once every index was read: an error stores nothing)
+            known.update(new)
         return [known[n] for n in X]
 
     def is_cuspidal(self):
