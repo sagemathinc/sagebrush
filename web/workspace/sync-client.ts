@@ -1189,9 +1189,9 @@ export class SyncClient {
   private pull(c: Conn) {
     // (a halt, of any kind, freezes the index where it stopped: no page asked for, however the pull was asked (a notice,
     // the idle pull, a page, a catch-up), so what notebooks read under a sealed halt is what was verified before it.
-    // A rebuild's own log, read under the halt that asked for it, is the one exception: never with the sealing module,
-    // where the rebuild is itself a halt (sealed-rebuild))
-    if (this.conn !== c || (c.halted && !c.logMode) || c.pulling || c.largeHalt || (this.cursor >= c.target && !c.discover)) return;
+    // A rebuild's own log, read under the halt that asked for it, is the one exception, and only without the sealing
+    // module, where the rebuild is itself a halt (sealed-rebuild): a log read under it never reopens the index)
+    if (this.conn !== c || (c.halted && !(c.logMode && !this.opts.e2e)) || c.pulling || c.largeHalt || (this.cursor >= c.target && !c.discover)) return;
     // (nothing else is sent on this connection while the announce is pending: the pull waits for its answer, its
     // target and discovery kept (r5, CORR-D11-R4-1))
     if (this.announcing(c)) return this.defer(c, "pull");

@@ -5342,6 +5342,12 @@ async function docKeysFrozenAtHalt() {
   check(afterNotice === pulls && afterIdle === pulls && b.stats.pulls === pulls, "frozen at a halt: a live notice, the idle pull and a liveness check send no pull_index: " + J(seen));
   check(b.debug().cursor === haltCursor && b.debug().halted === "sealed-halt", "frozen at a halt: B's cursor where it halted, the halt kept: " + J(seen));
   check(cur === null && ex.code === "halted", "frozen at a halt: no key declared after the halt readable (current none, exact \"halted\"): " + J(seen));
+  // (a rebuild's log read is the freeze's one exception, and never with the sealing module: a log mode set under a
+  // sealed halt (no path sets one today) still asks for nothing)
+  b.conn.logMode = true;
+  await ctl("notice", { head: haltCursor + 20 });
+  await sleep(300);
+  check(b.stats.pulls === pulls && b.debug().cursor === haltCursor, "frozen at a halt: a log mode under a sealed halt asks for no page: " + J({ pulls: b.stats.pulls - pulls, cursor: b.debug().cursor }));
   await ctl("set", { set: { serverNotices: false } });
   await stop(b);
   // (2) a page in flight at a halt
