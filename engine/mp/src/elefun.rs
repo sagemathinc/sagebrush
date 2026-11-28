@@ -5,7 +5,9 @@
 //! session's and each giving what the reference's gives for the same
 //! history), and mpf_exp, mpf_log, mpf_cos/mpf_sin, mpf_pow, exp_fixed,
 //! cos_sin_fixed, log_int_fixed.  Float parameter choices go through glibm
-//! (CPython's pow and log).
+//! (CPython's pow and log).  One reviewed exception to the reference's
+//! results: mpf_pow rounded up or down replaces a result provably on the
+//! wrong side of the true value (pow_directed_side).
 
 use crate::fail::{failed, raise, too_big};
 use crate::consts::{e_fixed, ln2_fixed, pi_fixed};
@@ -16,7 +18,7 @@ use crate::intmath::isqrt_fast_python;
 use crate::mpc::{mpc_abs, mpf_shift as mpf_shift_i64, Mpc};
 use crate::mpf::{
     finf, fnan, fninf, fone, from_int, from_int_man_exp, fzero, mpf_add, mpf_div, mpf_mul, mpf_neg, mpf_perturb,
-    mpf_pow_int, mpf_sqrt, normalize, to_fixed, Mpf, Rnd,
+    mpf_pos, mpf_pow_int, mpf_sqrt, normalize, to_fixed, Mpf, Rnd,
 };
 use crate::nat::Nat;
 use crate::Fail;
@@ -733,7 +735,47 @@ pub fn mpf_pow(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
         return fone();
     }
     let c = mpf_log(s, prec + 10, rnd);
-    mpf_exp(&mpf_mul(t, &c, 0, Rnd::Down), prec, rnd)
+    let r = mpf_exp(&mpf_mul(t, &c, 0, Rnd::Down), prec, rnd);
+    pow_directed_side(s, t, prec, rnd, r)
+}
+
+/// s^t bounded at wp bits (s > 0): below the true value (upper = false) or
+/// above it, log, the product and exp each rounded on the bound's side
+/// (exp is increasing, so the argument is rounded the same way).
+fn pow_bound(s: &Mpf, t: &Mpf, wp: u64, upper: bool) -> Mpf {
+    let lrnd = if (t.sign == 0) == upper { Rnd::Ceiling } else { Rnd::Floor };
+    let c = mpf_log(s, wp, lrnd);
+    let a = mpf_mul(t, &c, 0, Rnd::Down);
+    mpf_exp(&a, wp, if upper { Rnd::Ceiling } else { Rnd::Floor })
+}
+
+/// The reference's directed result r of s^t, unless it is provably on the
+/// wrong side of the true value: then the bound on the right side, rounded
+/// as asked.  (Its log is rounded in the result's direction, which a
+/// negative t turns around: 17498112^(-31/4) rounded up was below the true
+/// value.  A result on its side, the exact ones and the correctly rounded
+/// ones among them, is the reference's, unchanged; nearest is not checked.)
+fn pow_directed_side(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, r: Mpf) -> Mpf {
+    // (s > 0, so the result is positive: up is ceiling, down is floor)
+    let up = match rnd {
+        Rnd::Ceiling | Rnd::Up => true,
+        Rnd::Floor | Rnd::Down => false,
+        Rnd::Nearest => return r,
+    };
+    if r.man.is_zero() {
+        return r;
+    }
+    let wp = 2 * prec + 64;
+    // (r - bound: r below the lower bound when rounded up, above the upper
+    // one when rounded down, is on the wrong side)
+    let below = pow_bound(s, t, wp, !up);
+    let d = mpf_add(&r, &below, 0, Rnd::Down, true);
+    let wrong = !d.man.is_zero() && (d.sign == 1) == up;
+    if !wrong {
+        return r;
+    }
+    let other = pow_bound(s, t, wp, up);
+    mpf_pos(&other, prec, rnd)
 }
 
 /// libmpc's mpc_exp(z, prec, rnd)
