@@ -13,7 +13,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, isChainGeneration, toB64, clientOf, type SealedOp, fields, has, isDevice, isDocId, isNat,
-  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
+  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, isKeyedAddress, isSealedSlice, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
@@ -880,6 +880,16 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private async batch(att: Attachment, device: string, b: Batch): Promise<BatchOut> {
     this.admit(att.account, true);
     if (b.owner !== undefined && b.owner !== this.get("account_hash")) throw new SyncError("unknown_doc", "documents shared with you come in phase 3");
+    // (an end-to-end account's notebooks take sealed patches only, as its index takes sealed ops only: every patch inline,
+    // of a sealed slice's form; a plain one is refused whole, before anything is held or forwarded)
+    if (this.encrypted()) {
+      let at = 0;
+      for (const p of b.patches) {
+        const slice = b.body.subarray(at, at + p.size);
+        at += p.size;
+        if (p.blobs !== undefined || !isSealedSlice(slice)) throw new SyncError("conflict", "this account's sync is end-to-end encrypted: notebook changes in the clear aren't taken", { reason: "sealed_account" });
+      }
+    }
     const wait = this.batches.take();
     if (wait) throw new SyncError("rate", "too many batches", { retry_after: wait });
     await this.ensureDoc(b.doc, b.kind);
@@ -1761,6 +1771,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!isSha(a.ct_sha256)) return { error: { code: "invalid", message: "the bytes' SHA-256 (x-sb-ct-sha256) is required" } };
     // (no storage, no sync: refused before anything reads a table, CORR-00F-1)
     if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    // (an end-to-end account's blobs are named by keyed addresses only: a bare SHA-256 could never be referenced there)
+    if (this.encrypted() && !isKeyedAddress(a.sha256)) return { error: { code: "conflict", message: "this account's sync is end-to-end encrypted: a blob is named by its keyed address", detail: { reason: "sealed_account" } } };
     const b = attempt(() => this.bound(a.bind?.account, a.bind?.generation));
     if ("error" in b) return b;
     const l = await this.limits();
@@ -1907,6 +1919,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return attempt(() => {
       this.admit(a.account, false);
       this.bound(a.bind?.account, a.bind?.generation);
+      if (this.encrypted() && !a.blobs.every((x) => isKeyedAddress(x.address))) throw new SyncError("conflict", "this account's sync is end-to-end encrypted: a blob is named by its keyed address", { reason: "sealed_account" });
       // (with chunked files on, a whole file's hash is answered too, design/tiered-files.md §4.1 "First, is the whole
       // file already there?": held as a verified manifest, or being verified, which the client then drives)
       const files = tieredOn(this.env) && this.hasFiles();

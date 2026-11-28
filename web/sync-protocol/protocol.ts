@@ -185,6 +185,22 @@ export const isHash = isSha;
  * where an address is meant: a plaintext op's sha256 and every ct_sha256 stay isSha. */
 export const ADDRESS = /^(?:a1:)?[0-9a-f]{64}$/;
 export const isAddress = (s: unknown): s is string => typeof s === "string" && ADDRESS.test(s);
+/** A versioned keyed address only ("a1:" and 64 hex): what an end-to-end account's blobs are named by. */
+export const isKeyedAddress = (s: unknown): s is string => typeof s === "string" && /^a1:[0-9a-f]{64}$/.test(s);
+/**
+ * Whether a patch's payload has a sealed slice's form (web/workspace/doc-seal.ts): the format byte 0x01, its key
+ * generation (a cekId of 1 to 256 bytes of UTF-8, after its u32 length, then a u64 key epoch of at most 2^53 - 1), then
+ * at least a seal id (32 bytes) and one chunk's tag (16). The server can't open it; this is the form an end-to-end
+ * account's patches must have, so a client sending plain patches into one is refused, never stored.
+ */
+export function isSealedSlice(slice: Uint8Array): boolean {
+  if (slice.length < 1 + 4 || slice[0] !== 0x01) return false;
+  const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength);
+  const len = view.getUint32(1);
+  if (len < 1 || len > 256 || slice.length < 1 + 4 + len + 8 + 32 + 16) return false;
+  try { new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(slice.subarray(5, 5 + len)); } catch { return false; }
+  return view.getBigUint64(5 + len) <= BigInt(Number.MAX_SAFE_INTEGER);
+}
 export const isDevice = (s: unknown): s is string => typeof s === "string" && DEVICE.test(s);
 export const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 
