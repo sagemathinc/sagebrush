@@ -32,9 +32,12 @@ window.__SB_SIGNER_RAN__ = true;
       return;
     }
     if ((probe.control === "csp-off" || probe.control === "frame+cap") && probe.other) {
-      const f = document.createElement("iframe");
-      f.src = probe.other + "/sframe";
-      document.body.append(f);
+      // (frame+cap: and a second frame, on the postMessage path with a forged Origin header)
+      for (const path of probe.control === "frame+cap" ? ["/sframe", "/sforge"] : ["/sframe"]) {
+        const f = document.createElement("iframe");
+        f.src = probe.other + path;
+        document.body.append(f);
+      }
     }
     if (probe.control === "guard-off" && probe.other) setTimeout(() => { location.href = probe.other + "/stop"; }, 1500);
   })();

@@ -6,6 +6,11 @@
 //   - started with the controls' variables set (SAGEBRUSH_APP_SIGNER_CONTROL=cap+check, SAGEBRUSH_APP_NAV_CONTROL=wide),
 //     it still refuses: no call reaches a signing command and nothing signs, the approvals window isn't opened by the
 //     self-test's probe, the main page's signing call is refused, and the other server's pages reach nothing.
+/** K3: why a run that expects the release build (SAGEBRUSH_EXPECT_RELEASE=1, the signed job's) fails, or null. */
+export function expectation(expectRelease, controls) {
+  return expectRelease === "1" && controls !== "out" ? `this run expects the release build (SAGEBRUSH_EXPECT_RELEASE=1), and the app says its controls are ${controls === "in" ? "compiled in" : "(not said)"}` : null;
+}
+
 /** The build's own word: "in", "out", or null if it didn't say. */
 export function controlsMode(err) {
   return /^\[app\] self-test controls: compiled (in|out)$/m.exec(err)?.[1] ?? null;

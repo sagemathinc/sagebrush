@@ -1,7 +1,18 @@
 // The app's own commands are declared here, so that a capability can allow
 // them (the page is served from http://127.0.0.1, an origin that gets only
 // what capabilities/default.json grants).
+#[path = "src/build_guard.rs"]
+mod build_guard;
+
 fn main() {
+    // (K1: a signed build never has the self-test's controls, src/build_guard.rs)
+    let var = |k: &str| std::env::var(k).ok();
+    let (signed, team, macos_team) = (var("SAGEBRUSH_SIGNED_BUILD"), var("SAGEBRUSH_TEAM_ID"), var("SAGEBRUSH_MACOS_TEAM_ID"));
+    if let Some(why) = build_guard::refusal(var("CARGO_FEATURE_SELFTEST_CONTROLS").is_some(), signed.as_deref(), &[team.as_deref(), macos_team.as_deref()]) {
+        panic!("{why}");
+    }
+    println!("cargo:rerun-if-env-changed=SAGEBRUSH_SIGNED_BUILD");
+    println!("cargo:rerun-if-env-changed=SAGEBRUSH_TEAM_ID");
     // The commit this app is built from, for About and the page's version stamp (src/version.rs): git's HEAD, else
     // CI's GITHUB_SHA, else "unknown" (a build outside a checkout)
     let sha = |s: &str| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());

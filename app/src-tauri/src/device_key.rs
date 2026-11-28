@@ -105,10 +105,20 @@ fn signed_team() -> Option<&'static str> {
     (signed && team.len() == 10 && team.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())).then_some(team)
 }
 
-/// Whether this app may enroll as `native`: a signed build whose running code, and whole bundle, check as its team's.
+/// Whether this app may enroll as `native`: a signed build without the self-test's controls (K2: whatever else let
+/// one through, the controls never sit in front of a real key), whose running code, and whole bundle, check as its
+/// team's.
 pub fn native_tier() -> Result<(), &'static str> {
-    let Some(team) = signed_team() else { return Err("not a signed build") };
+    let team = tier_team(cfg!(feature = "selftest-controls"), signed_team())?;
     code_signed_by(team)
+}
+/// The team a build may enroll under, before its code is checked: refused for a self-test build first, then for one
+/// that isn't signed.
+fn tier_team(controls: bool, team: Option<&'static str>) -> Result<&'static str, &'static str> {
+    if controls {
+        return Err("a self-test build");
+    }
+    team.ok_or("not a signed build")
 }
 
 #[cfg(target_os = "macos")]
@@ -231,9 +241,22 @@ mod tests {
     }
 
     #[test]
+    fn a_self_test_build_is_never_native() {
+        // (K2: with the controls, refused before any signature check, even with a team)
+        assert_eq!(tier_team(true, Some("ABCDE12345")), Err("a self-test build"));
+        assert_eq!(tier_team(true, None), Err("a self-test build"));
+        assert_eq!(tier_team(false, None), Err("not a signed build"));
+        assert_eq!(tier_team(false, Some("ABCDE12345")), Ok("ABCDE12345"));
+        // (and this build, as built)
+        if cfg!(feature = "selftest-controls") {
+            assert_eq!(native_tier(), Err("a self-test build"));
+        }
+    }
+
+    #[test]
     fn a_build_without_the_signed_flag_is_browser_tier() {
         // (cargo test builds are never the signed release job's)
-        if option_env!("SAGEBRUSH_SIGNED_BUILD").is_none() {
+        if option_env!("SAGEBRUSH_SIGNED_BUILD").is_none() && !cfg!(feature = "selftest-controls") {
             assert_eq!(signed_team(), None);
             assert_eq!(native_tier(), Err("not a signed build"));
         }

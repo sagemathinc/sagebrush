@@ -54,7 +54,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture, judge, python } from "./run-judge.mjs";
 import { signerVerdict } from "./signer-judge.mjs";
-import { controlsMode, controlNamesIn, releaseSignerVerdict, CONTROL_NAMES } from "./release-judge.mjs";
+import { controlsMode, controlNamesIn, releaseSignerVerdict, expectation, CONTROL_NAMES } from "./release-judge.mjs";
 
 const RUN_MS = 360000;
 
@@ -78,6 +78,13 @@ console.log(passed ? "self-test passed" : `self-test failed (exit code ${res.cod
 const controls = controlsMode(res.err);
 console.log(`the self-test's controls: ${controls === "in" ? "compiled in (the self-test's build)" : controls === "out" ? "compiled out (a release build)" : "FAIL the app didn't say"}`);
 if (!controls) passed = false;
+// (K3: a run told it has the release build, the signed job's, SAGEBRUSH_EXPECT_RELEASE=1, fails unless the build says
+// it has no controls)
+const unexpected = expectation(process.env.SAGEBRUSH_EXPECT_RELEASE, controls);
+if (unexpected) {
+  console.log(`FAIL ${unexpected}`);
+  passed = false;
+}
 const engine = fileURLToPath(new URL("../engine/main.mjs", here)), root = fileURLToPath(new URL("../dist", here));
 if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(join(root, "sagebrush-worker.js"))) {
   console.log("\nthe self-test again, with the engine subprocess");
@@ -185,15 +192,17 @@ if (passed) {
 function otherServer() {
   const seen = [];
   const page = (name) => `<!doctype html><script>
-    const say = (v) => fetch("/report?p=${name}&v=" + encodeURIComponent(v)).catch(() => {});
+    const say = (v) => ${name === "sforge" ? `void (window.__sbImgs ||= []).push(Object.assign(new Image(), { src: "/report?p=${name}&v=" + encodeURIComponent(v) }))` : `fetch("/report?p=${name}&v=" + encodeURIComponent(v)).catch(() => {})`};
     say("loaded");
     (async () => {
       try { const w = await window.__TAURI__.core.invoke("disk_where"); say("REACHED disk_where " + String(w).length); }
       catch (e) { say("refused: " + String(e && e.message || e).slice(0, 80)); }
       try { const x = await window.__TAURI__.fs.exists("/"); say("REACHED fs.exists " + x); }
       catch (e) { say("fs refused: " + String(e && e.message || e).slice(0, 80)); }
-      // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded)
-      try { const x = await window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }); say("REACHED signer " + String(x).slice(0, 40)); }
+      // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded; /sforge's
+      // page may not fetch (its CSP), so Tauri's script sends on the postMessage path, where a header is the caller's
+      // to set: it claims the signer page's Origin)
+      try { const x = await window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }${name === "sforge" ? `, { headers: { Origin: "tauri://localhost" } }` : ""}); say("REACHED signer " + String(x).slice(0, 40)); }
       catch (e) { say("signer refused: " + String(e && e.message || e).slice(0, 80)); }
     })();
   <\/script>`;
@@ -201,7 +210,8 @@ function otherServer() {
     const u = new URL(req.url, "http://x");
     if (u.pathname === "/report") seen.push(`${u.searchParams.get("p")}: ${u.searchParams.get("v")}`);
     else seen.push(`${u.pathname.slice(1) || "/"}: requested`);
-    res.writeHead(200, { "Content-Type": "text/html", "Cross-Origin-Resource-Policy": "cross-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Access-Control-Allow-Origin": "*" });
+    // (/sforge: its reports go to this server by image, since its page may not fetch)
+    res.writeHead(200, { "Content-Type": "text/html", "Cross-Origin-Resource-Policy": "cross-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Access-Control-Allow-Origin": "*", ...(u.pathname === "/sforge" ? { "Content-Security-Policy": "connect-src 'none'" } : {}) });
     res.end(u.pathname === "/report" ? "" : page(u.pathname.slice(1)));
   });
   return new Promise((ok) => server.listen(0, "127.0.0.1", () => ok({ origin: `http://127.0.0.1:${server.address().port}`, seen, close: () => server.close() })));

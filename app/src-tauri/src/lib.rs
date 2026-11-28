@@ -38,6 +38,9 @@ mod fleet_sig;
 #[cfg(desktop)]
 #[allow(dead_code)]
 mod device_key;
+// (what build.rs refuses to build: its rows run here)
+#[cfg(test)]
+mod build_guard;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
 //  comes next; until then only its tests and the self-test's bundle report call it)
 #[cfg(desktop)]
@@ -492,9 +495,15 @@ fn retarget(pending: &mut [(String, String)], gone: &str, left: Vec<(String, Str
 }
 
 // the page's commands: the engine's on the desktop too
+// (on the desktop each request's grants, as Tauri resolved them from its URL, are noted first for a signing command:
+//  signer.rs note_caller, N1)
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::disk_reveal, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now, signer::signer_probe_sign]
+    let commands: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = Box::new(tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::disk_reveal, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now, signer::signer_probe_sign]);
+    move |invoke| {
+        signer::note_caller(invoke.message.command(), invoke.acl.as_deref());
+        commands(invoke)
+    }
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {

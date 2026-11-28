@@ -11,7 +11,8 @@
 //   - Its commands are in a capability of their own (capabilities/signer.json: the signer window, local pages only);
 //     the page's capability never lists them.  And each command checks, itself, that its caller is the signer window
 //     on that page (signer_caller_ok), so a weakened capability alone still signs nothing.
-//   - And each checks that the request came from that page's own document, not a frame in it (caller_origin_ok, N1).
+//   - And each checks that Tauri resolved the request as the app's own document, not a frame of another origin in it
+//     (acl_local, from the request's URL, never a header: N1).
 // The self-test (app/selftest/run.mjs, "signer") counts, from this module's log lines, the calls that reached the
 // command ("[signer] dispatch …"), their callers ("[signer] caller …") and the signatures made ("… signed").  Its
 // controls and the stand-in command are compiled into the self-test's build only (C1, lib.rs SELFTEST_CONTROLS).
@@ -421,23 +422,41 @@ pub fn signer_caller_ok(label: &str, url: &Url, control: Option<&str>) -> bool {
     label == LABEL && signer_page(url, control)
 }
 
-/// Whether the document that sent a signing command's request is the signer's page itself, not a frame in it (N1):
-/// the request's Origin, which the web view sets for the calling document and no page can, is the app protocol's,
-/// exactly (tauri://localhost; http(s)://tauri.localhost on Windows).  signer_caller_ok reads the window's top-level
-/// page, which a frame's call shares; a frame of any other origin, a sandboxed one ("null") or a request without an
-/// Origin is refused.  Every signing command checks both.
-#[cfg_attr(not(feature = "selftest-controls"), allow(dead_code))]
-pub fn caller_origin_ok(origin: Option<&str>) -> bool {
-    matches!(origin, Some("tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost"))
+/// Whether the document that sent a signing command's request is the app's own (N1): Tauri's word, from the request's
+/// URL as the web view gives it (the calling document's, which a frame doesn't share with its window), the same URL it
+/// resolves capabilities from, never a header, which on the postMessage path is the caller's to set.  The command's
+/// grants resolved for this request must include a local one (the app protocol's pages); a request matched only by a
+/// remote origin's grant (a frame of another server in the signer page, or another window's page) is refused.
+/// signer_caller_ok reads the window's top-level page, which a frame's call shares: every signing command checks both.
+pub fn acl_local(acl: Option<&[tauri::utils::acl::resolved::ResolvedCommand]>) -> bool {
+    acl.is_some_and(|a| a.iter().any(|c| matches!(c.context, tauri::utils::acl::ExecutionContext::Local)))
 }
-/// A request's Origin as the self-test's log shows it: an origin's own serialization, "null", or "none"/"other".
+thread_local! {
+    /// The invoke handler's acl_local for the signing command it is about to run on this thread (lib.rs handlers): a
+    /// synchronous command runs on the thread its request was handled on, and takes it once; none (another thread, or
+    /// taken already) is not local.
+    static CALLER_LOCAL: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// The signing commands (each takes its caller's word, caller_local).
+pub const SIGNING_COMMANDS: &[&str] = &["signer_probe_sign"];
+/// Called by the invoke handler for every request, before the command runs: for a signing command, Tauri's word on its
+/// caller is kept for it; for any other, any word left is cleared.
+pub fn note_caller(command: &str, acl: Option<&[tauri::utils::acl::resolved::ResolvedCommand]>) {
+    let word = SIGNING_COMMANDS.contains(&command).then(|| acl_local(acl));
+    CALLER_LOCAL.with(|c| c.set(word));
+}
+/// The signing command's caller, as noted for it: local only if the handler said so for this very request.
+#[cfg_attr(not(feature = "selftest-controls"), allow(dead_code))]
+pub fn caller_local() -> bool {
+    CALLER_LOCAL.with(|c| c.take()).unwrap_or(false)
+}
+/// A request's Origin header as the self-test's log shows it (information only, never a check): an origin's own
+/// serialization, "null", or "none"/"other".
 #[cfg_attr(not(feature = "selftest-controls"), allow(dead_code))]
 pub fn origin_code(origin: Option<&str>) -> String {
     match origin {
         None => "none".into(),
-        Some("null") => "null".into(),
-        // (the app protocol's own: tauri: has no tuple origin in the URL standard)
-        Some(o) if caller_origin_ok(Some(o)) => o.into(),
+        Some(o @ ("null" | "tauri://localhost")) => o.into(),
         Some(o) => match o.parse::<Url>() {
             Ok(u) if u.origin().is_tuple() && u.origin().ascii_serialization() == o => o.into(),
             _ => "other".into(),
@@ -574,10 +593,11 @@ static SIGNED: AtomicU64 = AtomicU64::new(0);
 #[tauri::command]
 pub fn signer_probe_sign(webview: tauri::Webview, request: tauri::ipc::Request<'_>, msg: String) -> Result<String, String> {
     let url = webview.url().map_err(|e| format!("no page: {e}"))?;
-    let from = request.headers().get("origin").map(|v| v.to_str().unwrap_or("\u{fffd}").to_owned());
+    let local = caller_local();
+    let header = request.headers().get("origin").map(|v| v.to_str().unwrap_or("\u{fffd}").to_owned());
     let n = DISPATCHED.fetch_add(1, Ordering::SeqCst) + 1;
     eprintln!("[signer] dispatch {n} from {} at {}", webview.label(), url.origin().ascii_serialization());
-    eprintln!("[signer] caller {n}: {}", origin_code(from.as_deref()));
+    eprintln!("[signer] caller {n}: {} (Origin header {})", if local { "local" } else { "remote" }, origin_code(header.as_deref()));
     if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_none() {
         eprintln!("[signer] refused {n}: not a self-test");
         return Err("not available".into());
@@ -587,7 +607,7 @@ pub fn signer_probe_sign(webview: tauri::Webview, request: tauri::ipc::Request<'
         eprintln!("[signer] refused {n}: not the signer window's page");
         return Err("only the approvals window signs".into());
     }
-    if c.as_deref() != Some("cap+check") && !caller_origin_ok(from.as_deref()) {
+    if c.as_deref() != Some("cap+check") && !local {
         eprintln!("[signer] refused {n}: not the signer page's own document");
         return Err("only the approvals window's page signs".into());
     }
@@ -599,7 +619,7 @@ pub fn signer_probe_sign(webview: tauri::Webview, request: tauri::ipc::Request<'
 #[cfg(all(desktop, not(feature = "selftest-controls")))]
 #[tauri::command]
 pub fn signer_probe_sign(webview: tauri::Webview, msg: String) -> Result<String, String> {
-    let _ = msg;
+    let _ = (msg, caller_local());
     eprintln!("[signer] refused: no stand-in in this build ({})", webview.label());
     Err("not available".into())
 }
@@ -664,28 +684,31 @@ mod tests {
     }
 
     #[test]
-    fn only_the_signer_page_s_own_document_signs() {
-        // (N1: the calling document's Origin, exactly the app protocol's)
-        for ok in ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"] {
-            assert!(caller_origin_ok(Some(ok)), "{ok}");
-        }
-        // (a frame of the other local server, a sandboxed frame, any other origin, near misses, or none: no)
-        for bad in [
-            "http://127.0.0.1:49314",
-            "null",
-            "tauri://localhost/",
-            "tauri://localhost:1",
-            "tauri://evil",
-            "http://tauri.localhost:8080",
-            "http://tauri.localhost.evil.example",
-            "https://sagebrush.space",
-            "TAURI://localhost",
-            "",
-        ] {
-            assert!(!caller_origin_ok(Some(bad)), "{bad}");
-        }
-        assert!(!caller_origin_ok(None));
-        // (and as the log shows it: an origin's own serialization, else a fixed word, never the header's text)
+    fn only_a_request_tauri_resolves_as_local_signs() {
+        use tauri::utils::acl::{resolved::ResolvedCommand, ExecutionContext};
+        let local = ResolvedCommand { context: ExecutionContext::Local, ..Default::default() };
+        let remote = ResolvedCommand { context: ExecutionContext::Remote { url: "http://127.0.0.1:49314/*".parse().unwrap() }, ..Default::default() };
+        // (N1: a local grant among those resolved for this request; only remote ones, none, or no access: no)
+        assert!(acl_local(Some(&[local.clone()])));
+        assert!(acl_local(Some(&[remote.clone(), local.clone()])));
+        assert!(!acl_local(Some(&[remote.clone()])));
+        assert!(!acl_local(Some(&[])));
+        assert!(!acl_local(None));
+        // (the word is kept for a signing command only, and taken once: a second take, or another command's request
+        // in between, is not local)
+        note_caller("signer_probe_sign", Some(&[local.clone()]));
+        assert!(caller_local());
+        assert!(!caller_local(), "taken once");
+        note_caller("signer_probe_sign", Some(&[local.clone()]));
+        note_caller("disk_where", Some(&[local.clone()]));
+        assert!(!caller_local(), "another command's request clears it");
+        note_caller("signer_probe_sign", Some(&[remote]));
+        assert!(!caller_local());
+        // (on another thread nothing was noted: not local)
+        note_caller("signer_probe_sign", Some(&[local]));
+        assert!(!std::thread::spawn(caller_local).join().unwrap());
+        assert!(caller_local());
+        // (the Origin header is only logged, and as an origin or a fixed word, never its text)
         assert_eq!(origin_code(Some("http://127.0.0.1:49314")), "http://127.0.0.1:49314");
         assert_eq!(origin_code(Some("tauri://localhost")), "tauri://localhost");
         assert_eq!(origin_code(Some("null")), "null");
