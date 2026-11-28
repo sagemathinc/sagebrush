@@ -1577,9 +1577,13 @@ def _reshape(a, shape, order="C", copy=None):
     return _np.reshape(a, _shape(shape), o, 0 if copy is None else 1 if copy else 2)
 
 
-def reshape(a, shape=None, order="C", *, newshape=None, copy=None):
-    # (newshape=, NumPy 1's name for shape, kept in the signature but refused as NumPy 2.5 refuses it)
-    if newshape is not None:
+_NO_NEWSHAPE = object()
+
+
+def reshape(a, shape=None, order="C", *, newshape=_NO_NEWSHAPE, copy=None):
+    # (newshape=, NumPy 1's name for shape, kept in the signature but refused, whatever its value, None too, as
+    # NumPy 2.5 refuses it)
+    if newshape is not _NO_NEWSHAPE:
         raise TypeError("reshape() got an unexpected keyword argument 'newshape'")
     return _reshape(asarray(a), shape, order, copy)
 
@@ -1615,7 +1619,9 @@ def _ravel(a, order, copy):
         o = "F" if a.flags.f_contiguous and not a.flags.c_contiguous else "C"
     if o == "K":
         if not a.flags.c_contiguous:
-            a = a.transpose(_keep_order(a.strides))
+            # (a length-1 axis's stride counts as 0, as NumPy's iterator sets it, npyiter_fill_axisdata, before the
+            # axes are ordered)
+            a = a.transpose(_keep_order([0 if n == 1 else s for n, s in zip(a.shape, a.strides)]))
         o = "C"
     if not copy and (a.flags.c_contiguous if o == "C" else a.flags.f_contiguous):
         return _np.reshape(a, (-1,), o, 0)
