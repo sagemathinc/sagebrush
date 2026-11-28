@@ -19,7 +19,7 @@ import * as F from "./format";
 import * as Ty from "./types";
 import { PyComplex } from "./complex";
 import { newBuiltinModule } from "./modules";
-import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow, glibcPowf } from "./libm";
+import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glibcPow, glibcPowf, glibcHypot } from "./libm";
 import { gemmBuffers, noRoom, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
 import { ND_MATMUL_MIN, ndMatmul, useNd } from "./nd";
 import * as FD from "./fdlibm";
@@ -1363,7 +1363,7 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   fmax: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.max(x, y)) },
   fmin: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.min(x, y)) },
   arctan2: { f: CR.atan2, out: "float" },
-  hypot: { f: CR.hypot, out: "float" },
+  hypot: { f: glibcHypot, out: "float" }, // (glibc's, as NumPy calls it: libm.ts)
   copysign: { f: (x, y) => withSign(x, signBit(y)), out: "float" },
   logaddexp: { f: (x, y) => { const m = Math.max(x, y); return m === -Infinity ? m : m + glibcLog1p(glibcExp(-Math.abs(x - y))); }, out: "float" },
   equal: { f: (x, y) => +(x === y), out: "bool", c: (a, b, c, d) => [+(a === c && b === d), 0] },
