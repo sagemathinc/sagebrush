@@ -165,6 +165,30 @@ function precompiled(source: string, filename: string, name: string, sage: boole
   if (m === undefined || m === null || typeof m !== "object" || m.path !== rel || typeof m.code !== "string" || !Array.isArray(m.lineMap)) return null;
   return { code: m.code, lineMap: m.lineMap };
 }
+// (the library modules recorded without their docstrings: the path prefixes web/build.ts lists in
+// SAGEBRUSH_PRECOMPILE_NODOC, comma-separated, each a front end whose functions' __doc__ nothing reads; their sources
+// keep the docstrings, and a module compiled at run time has them)
+const NO_DOCSTRINGS = (process.env?.SAGEBRUSH_PRECOMPILE_NODOC ?? "").split(",").filter((p) => p !== "");
+const strippedDocs = (rel: string) => NO_DOCSTRINGS.some((p) => rel.startsWith(p));
+/** Removes the docstrings from CPython's tree: each class and function body's becomes a pass in its place (so the
+ * body keeps its shape and no later string literal becomes the docstring), and a module's is removed (so a following
+ * `from __future__` import stays first; a module docstring isn't compiled into the code in any case). */
+export function stripDocstrings(node: any): void {
+  if (node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const n of node) stripDocstrings(n);
+    return;
+  }
+  const t = node._type;
+  if ((t === "Module" || t === "FunctionDef" || t === "AsyncFunctionDef" || t === "ClassDef") && Array.isArray(node.body)) {
+    const first = node.body[0];
+    if (first?._type === "Expr" && first.value?._type === "Constant" && typeof first.value.value === "string") {
+      if (t === "Module") node.body.shift();
+      else node.body[0] = { _type: "Pass", lineno: first.lineno, col_offset: first.col_offset, end_lineno: first.end_lineno, end_col_offset: first.end_col_offset };
+    }
+  }
+  for (const k of Object.keys(node)) if (k !== "_type") stripDocstrings(node[k]);
+}
 // (making them: every library module compiled in this process, written at exit)
 const recording: Record<string, Compiled & { path: string }> | null = process.versions?.node && process.env.SAGEBRUSH_PRECOMPILE_OUT ? {} : null;
 if (recording !== null) {
@@ -185,7 +209,7 @@ function compileCached(source: string, filename: string, name: string, sage: boo
   const pre = precompiled(source, filename, name, sage);
   if (pre !== null) return { compiled: pre, script: new Script(pre.code, { filename: jsName }) };
   if (recording !== null && precompiledPath(filename) !== null) {
-    const compiled = compile(source, filename, name, false, false, { sage });
+    const compiled = compile(source, filename, name, false, false, strippedDocs(precompiledPath(filename)!) ? { sage, transform: stripDocstrings } : { sage });
     recording[precompiledKey(name, sage)] = { ...compiled, path: precompiledPath(filename)! };
     return { compiled, script: new Script(compiled.code, { filename: jsName }) };
   }
