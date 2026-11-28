@@ -1,8 +1,11 @@
 //! How long a Stop in the browser can go unnoticed during F4 over GF(p):
-//! the longest wall time between two polls of the WebAssembly host, as the
+//! the longest stretch between two polls of the WebAssembly host, as the
 //! interrupt crate's test hooks simulate them (every check_coarse, every
 //! 1024th check), on cyclic-7 and cyclic-8 mod 32003, on one thread as in
-//! WebAssembly.  One test: the hooks are global.
+//! WebAssembly.  The bound is on the polling thread's CPU time (the work
+//! between two polls): a loaded host stretches the wall time of the same
+//! work (it failed a wall-time bound at 350 to 790 ms), not its CPU time.
+//! The wall time is printed beside it.  One test: the hooks are global.
 
 use num_traits::One;
 use sagebrush_bigint::BigInt;
@@ -36,6 +39,12 @@ fn cyclic(n: usize, p: u64) -> Vec<QPoly> {
         .collect()
 }
 
+/// The longest stretch between two host polls, as a share of cyclic-8's
+/// whole run (CPU time), where the system reports it: 1.10% measured (two
+/// runs on an idle n2-standard-16, Nov 28), 4.68% with every check_coarse in
+/// f4.rs removed; the bound sits between, about twice from each.
+const MAX_SHARE: f64 = 0.025;
+
 #[test]
 fn f4_host_poll_gap() {
     // WebAssembly runs F4 on one thread
@@ -45,16 +54,31 @@ fn f4_host_poll_gap() {
         hooks::reset();
         hooks::trace();
         let t = std::time::Instant::now();
+        let cpu0 = hooks::thread_cpu_ns();
         let g = groebner_p(&fs, Order::DegRevLex, 32003).unwrap();
+        let cpu_run = hooks::thread_cpu_ns().zip(cpu0).map(|(b, a)| b.saturating_sub(a));
         let secs = t.elapsed().as_secs_f64();
         let poll = hooks::max_poll_gap_ns();
+        let cpu = hooks::max_poll_gap_cpu_ns();
         let gap = hooks::max_gap_ns();
         let total = hooks::total();
         hooks::reset();
-        eprintln!("cyclic-{}: {} elements in {:.2} s; {} checks; longest gap between checks {:.2} ms, between host polls {:.2} ms", n, g.len(), secs, total, gap as f64 / 1e6, poll as f64 / 1e6);
+        eprintln!("cyclic-{}: {} elements in {:.2} s; {} checks; longest gap between checks {:.2} ms, between host polls {:.2} ms ({:.2} ms of CPU time)", n, g.len(), secs, total, gap as f64 / 1e6, poll as f64 / 1e6, cpu as f64 / 1e6);
         assert!(poll > 0, "cyclic-{}: no host poll traced", n);
-        // the 250 ms Stop bound (before the coarse checks in the row loops
-        // this was 4.1 s on cyclic-8, and 0.07 s after)
-        assert!(poll <= 250_000_000, "cyclic-{}: {:.2} ms between two host polls, past the 250 ms Stop bound", n, poll as f64 / 1e6);
+        // the 250 ms Stop bound, on the work between two polls (before the
+        // coarse checks in the row loops this was 4.1 s on cyclic-8, and
+        // 0.07 s after); where the system reports no thread CPU time, the
+        // wall time stands in
+        let (t, what) = if hooks::thread_cpu_ns().is_some() { (cpu, "CPU time") } else { (poll, "wall time") };
+        assert!(t <= 250_000_000, "cyclic-{}: {:.2} ms of {} between two host polls, past the 250 ms Stop bound", n, t as f64 / 1e6, what);
+        // and, on cyclic-8, the longest stretch as a share of the whole run's
+        // CPU time: the polls' density, whatever the machine's speed (a fast
+        // machine runs even an unpolled row loop under 250 ms: 239 ms on an
+        // idle VM with every check_coarse removed)
+        if let (8, Some(run)) = (n, cpu_run) {
+            let share = cpu as f64 / run as f64;
+            eprintln!("cyclic-8: the longest stretch between host polls is {:.2}% of the run's {:.2} s of CPU time", 100.0 * share, run as f64 / 1e9);
+            assert!(share <= MAX_SHARE, "cyclic-8: {:.2}% of the run's CPU time between two host polls, past {:.1}%", 100.0 * share, 100.0 * MAX_SHARE);
+        }
     }
 }
