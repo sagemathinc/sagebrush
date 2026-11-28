@@ -583,3 +583,19 @@ fn the_hosts_bound_on_the_fast_routes_extra_words_holds() {
     // (the bound is not loose by much: the largest ratio seen)
     assert!(worst > 0.5, "worst {worst}");
 }
+
+#[test]
+fn conjugacy_classes_bin_reply_and_refusals() {
+    // Sym(3) by (0 1) and (0 1 2): 3 classes, by (order, length, rep); the
+    // representatives' images as words, n a class
+    let gens: Vec<u64> = vec![1, 0, 2, 1, 2, 0];
+    let r = results(&call_bin(&frame("conjugacy_classes_bin", &[u641(&[3]), u641(&gens)]))).expect("an ok reply");
+    assert_eq!(r, vec![vec![0, 1, 2, 0, 2, 1, 1, 2, 0], vec![1, 3, 2], vec![1, 2, 3]]);
+    // the trivial group, no generators: one class
+    let r = results(&call_bin(&frame("conjugacy_classes_bin", &[u641(&[4]), u641(&[])]))).expect("an ok reply");
+    assert_eq!(r, vec![vec![0, 1, 2, 3], vec![1], vec![1]]);
+    // refused in the domain: a degree of 0, images not n each, an image past n, not a permutation
+    for (n, g) in [(0u64, vec![]), (3, vec![1, 0]), (3, vec![0, 1, 3]), (3, vec![0, 0, 1])] {
+        assert!(results(&call_bin(&frame("conjugacy_classes_bin", &[u641(&[n]), u641(&g)]))).is_err(), "{} {:?}", n, g);
+    }
+}

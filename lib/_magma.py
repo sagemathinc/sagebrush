@@ -7795,9 +7795,9 @@ def Sqrt(x):
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
     "Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
-    "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
-    "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
-    "Stabilizer Submatrix Subsets Sym Trace Vector").split())
+    "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Nclasses Ngens "
+    "Norm Normalise Normalize NumberOfClasses Orbit Orbits PrimeField Root RootsInSplittingField Solution "
+    "SquarefreeFactorization Stabilizer Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
 
@@ -12004,6 +12004,21 @@ def DihedralGroup(n):
     if n > _SYM_MAX:
         raise MagmaError("DihedralGroup(n) for n above %d is not supported yet" % _SYM_MAX, "'DihedralGroup'")
     return _MDihedralGroup(n)
+
+
+@_signature("NumberOfClasses", "GrpPerm", ret="RngIntElt")
+def _number_of_classes(G):
+    """The number of conjugacy classes of a permutation group
+    (lib/_magma_classes.py, loaded when first used)."""
+    import _magma_classes
+    return _magma_classes.number_of_classes(G)
+
+
+@_signature("Nclasses", "GrpPerm", ret="RngIntElt")
+def _nclasses(G):
+    """The number of conjugacy classes (the same as NumberOfClasses)."""
+    import _magma_classes
+    return _magma_classes.number_of_classes(G)
 
 
 @_signature("ConjugacyClasses", "GrpPerm", ret="SeqEnum")

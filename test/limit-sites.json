@@ -8399,6 +8399,32 @@
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary ops' plumbing (the table's fields, the request-cap arithmetic, mapping a refusal or invariant to its reply code); refuses nothing itself"
  },
+ "engine/web/src/bin_ops.rs :: classes :: if n == 0 || n > u64::from(u32::MAX) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' admission: a degree of at least one point that the group engine's u32 points can hold (a representational need, not a size bound); the frame cap bounds the request, and the caller admits the enumeration and the reply by memory first"
+ },
+ "engine/web/src/bin_ops.rs :: classes :: let len = classes_reply_len(n, c).ok_or(fail(Code::Cap, 0, \"a reply too large to frame\"))?; #0": {
+  "class": "none",
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' plumbing (the reply's exact length; an overflow is a typed refusal); refuses nothing itself"
+ },
+ "engine/web/src/bin_ops.rs :: classes :: let need = (c as u64).checked_mul(n as u64).and_then(|w| w.checked_mul(8)).and_then(|b| b.checked_add(len as u64)).ok_or(fail(Code::Cap, 0, \"a memory bound too large\"))?; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' reservation bound (the representatives' words and the reply) overflowing its u64: refused as Cap, as the echelon's; the ledger decides the rest"
+ },
+ "engine/web/src/bin_ops.rs :: classes :: sagebrush_ledger::EngineError::Memory(_) => fail(Code::Cap, 0, \"the call's memory reservation was refused\"), #0": {
+  "class": "none",
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' plumbing: the ledger's refusal mapped to its reply code (Cap), as the other binary ops do; the ledger decides"
+ },
  "engine/web/src/bin_ops.rs :: echelon :: if p >= MAX_P || !is_prime(p) { #0": {
   "class": "1",
   "disposition": {
@@ -8559,6 +8585,14 @@
   },
   "owner": "engine web + finite-field polynomials",
   "reason": "the binary GF(p)[x] ops' admission: the JSON ops' length caps and the modulus range, per op; past them the library keeps its Python path, so no user computation is limited"
+ },
+ "engine/web/src/bin_ops.rs :: spec :: return Some(OpSpec { min_args: 2, max_args: 2, request_cap: wire::FRAME_CAP }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "engine web + permutation groups",
+  "reason": "the binary classes' admission: two arguments and the frame cap as its request cap, as the echelon's; the caller admits by memory first"
  },
  "engine/web/src/bin_ops.rs :: spec :: return Some(OpSpec { min_args: 3, max_args: 3, request_cap: wire::FRAME_CAP }); #0": {
   "class": "1",
@@ -11783,6 +11817,26 @@
   "class": "coverage",
   "owner": "Magma compatibility",
   "reason": "the point count over GF(p) for p >= 2^64 is not available (Sage mode's counting, which needs SEA there): turned into Magma mode's refusal in words; an unsupported case, not a cap"
+ },
+ "lib/_magma_classes.py :: _admit_classes :: allow = _m._COLLECT_MAX * _m._COLLECT_COST #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_classes.py :: _admit_classes :: e = _m._memory_error(_m._memguard.memory_guard(what, need, allow, \"one computation\", fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma_classes.py :: _classes_refusal :: fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
   "class": "2",
@@ -16914,6 +16968,66 @@
   "owner": "permutation groups (@sagebrush-sage2)",
   "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
  },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: _refuse_class(1, 0, per, limit, order) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: _refuse_class(cap + 1, cap, per, limit, order) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: cap = (limit - 2 * per) // per #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: if cap < 1: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: if len(queue) == cap: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: ConjugacyClass._elements :: limit = _capacity.heap_figure() // 4 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
  "lib/sage_permgroup.py :: PermutationGroup.is_isomorphic :: if n > _ISO_MAX: #0": {
   "class": "coverage",
   "owner": "permutation groups (@sagebrush-sage2)",
@@ -16933,6 +17047,96 @@
   "class": "coverage",
   "owner": "permutation groups (@sagebrush-sage2)",
   "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
+ },
+ "lib/sage_permgroup.py :: _admit_elements :: e = _memguard.memory_guard(\"Listing %s of a permutation group of order %d\" % (what, order), need, limit, \"one computation\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_elements :: if need > limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_elements :: need, limit = count * per + fixed, _capacity.heap_figure() // 4 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_output :: e = _memguard.memory_guard(\"Listing %s of a permutation group of order %d\" % (what, order), need, limit, \"one computation\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_output :: if need > limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _admit_output :: need, limit = count * _class_output_bytes(n), _capacity.heap_figure() // 4 #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _refuse_class :: def _refuse_class(k, held, per, limit, order): #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _refuse_class :: e = _memguard.memory_guard(\"Listing a conjugacy class of a permutation group of order %d\" % order, (k + 2) * per, limit, \"one computation\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
+ },
+ "lib/sage_permgroup.py :: _refuse_class :: limit read when the listing began; held: the elements it holds.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sage permutation groups/runtime memory"
  },
  "lib/sage_plot.py :: Graphics._bound :: return ar[k] if k in ar else self.get_minmax_data()[k] #0": {
   "class": "none",
