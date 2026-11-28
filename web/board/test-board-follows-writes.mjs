@@ -205,7 +205,7 @@ try {
   const example = `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}`;
   await R.send("Page.navigate", { url: example });
   check(await R.until("!!window.sagebrush?.board?.snapshot?.()?.doc", 60000), "an example board, opened in the runner");
-  await R.ev(`(window.sagebrush.board.load({ title: "Spins", nodes: [{ id: "spin", code: "while True:\n    pass" }] }), 1)`);
+  await R.ev(`(window.sagebrush.board.load({ title: "Spins", nodes: [{ id: "spin", code: "while True:\\n    pass" }] }), 1)`);
   check(await R.until(`window.sagebrush.board.outputs ? (window.sagebrush.board.snapshot().doc.title === "Spins") : false`, 15000), "…its code running, left so");
   await sleep(3000);
   await R.send("Page.navigate", { url: "about:blank" });
