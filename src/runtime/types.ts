@@ -3839,8 +3839,11 @@ getset(object, "__dict__", (o) => {
         if (lookupType(typeOf(exporter), "__release_buffer__") !== undefined) {
           try {
             O.lookupSpecial(exporter, "__release_buffer__")(exporter, view);
-          } catch (_e) {
-            // (Sagebrush has no unraisable hook: the result stands, as CPython's)
+          } catch (e) {
+            // (Sagebrush has no unraisable hook: a Python exception from it lets the result stand, as CPython's; but a
+            // KeyboardInterrupt, a Stop whose flag is already consumed, goes on, so the Stop is never lost (CPython
+            // would report it as unraisable), and a runtime fault or limit, no Python exception, is never hidden)
+            if (e === null || typeof e !== "object" || !isinstance(e, T.BaseException) || isinstance(e, T.KeyboardInterrupt)) throw e;
           }
         }
       }

@@ -162,3 +162,10 @@ del log[:]
 show("bytes.fromhex(StridedBuf())", lambda: (bytes.fromhex(StridedBuf()), list(log)))
 print("log after strided |", log)
 show("bytes.fromhex(BadRelease())", lambda: bytes.fromhex(BadRelease()))
+# any Python exception from __release_buffer__ lets the result stand (CPython reports it as unraisable); a
+# KeyboardInterrupt is Sagebrush's deliberate exception, a Stop never lost (test/runtime-core.test.ts)
+for exc in (SystemExit(3), GeneratorExit(), ValueError('v')):
+    class R:
+        def __buffer__(self, flags): return memoryview(b"41")
+        def __release_buffer__(self, view, exc=exc): raise exc
+    show(f"release raising {type(exc).__name__}", lambda: bytes.fromhex(R()))
