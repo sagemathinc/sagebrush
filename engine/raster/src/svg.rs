@@ -290,15 +290,15 @@ pub fn color(s: &str) -> Result<Option<Rgba>, String> {
 }
 
 /// "var(--name, fallback)": the fallback (the drawing has no CSS variables)
-fn unvar(v: &str) -> String {
+fn unvar(v: &str) -> &str {
     let t = v.trim();
     if let Some(inner) = t.strip_prefix("var(").and_then(|r| r.strip_suffix(')')) {
         if let Some(i) = inner.find(',') {
             return unvar(inner[i + 1..].trim());
         }
-        return String::new();
+        return "";
     }
-    t.to_string()
+    t
 }
 
 fn number(s: &str) -> Result<f32, String> {
@@ -593,7 +593,7 @@ struct Style {
     bold: bool,
     italic: bool,
     anchor: Anchor,
-    baseline: String,
+    baseline: std::rc::Rc<str>,
     dash: Option<Vec<f32>>,
     dash_offset: f32,
     cap: LineCap,
@@ -632,12 +632,12 @@ impl Style {
 
 /// The element's properties: presentation attributes, then style="..."
 /// (which wins), as (name, value).
-fn properties(el: &Element) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = el.attrs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+fn properties(el: &Element) -> Vec<(&str, &str)> {
+    let mut out: Vec<(&str, &str)> = el.attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     if let Some(st) = el.attr("style") {
         for decl in st.split(';') {
             if let Some(i) = decl.find(':') {
-                out.push((decl[..i].trim().to_string(), unvar(&decl[i + 1..])));
+                out.push((decl[..i].trim(), unvar(&decl[i + 1..])));
             }
         }
     }
@@ -666,43 +666,43 @@ const UNSUPPORTED: &[&str] = &[
 fn apply(style: &mut Style, el: &Element, parent_font: f32) -> Result<f32, String> {
     let mut opacity = 1.0f32;
     for (k, v) in properties(el) {
-        let v = v.trim().to_string();
-        match k.as_str() {
-            "fill" => style.fill = paint_value(&v)?,
-            "stroke" => style.stroke = paint_value(&v)?,
+        let v = v.trim();
+        match k {
+            "fill" => style.fill = paint_value(v)?,
+            "stroke" => style.stroke = paint_value(v)?,
             "color" => {
-                if let Some(c) = color(&v)? {
+                if let Some(c) = color(v)? {
                     style.color = c
                 }
             }
-            "stroke-width" => style.stroke_width = number(&v)?,
-            "fill-opacity" => style.fill_opacity = number(&v)?.clamp(0.0, 1.0),
-            "stroke-opacity" => style.stroke_opacity = number(&v)?.clamp(0.0, 1.0),
-            "opacity" => opacity = number(&v)?.clamp(0.0, 1.0),
+            "stroke-width" => style.stroke_width = number(v)?,
+            "fill-opacity" => style.fill_opacity = number(v)?.clamp(0.0, 1.0),
+            "stroke-opacity" => style.stroke_opacity = number(v)?.clamp(0.0, 1.0),
+            "opacity" => opacity = number(v)?.clamp(0.0, 1.0),
             "font-size" => {
                 style.font_size = if let Some(p) = v.strip_suffix('%') {
                     number(p)? / 100.0 * parent_font
                 } else if let Some(e) = v.strip_suffix("em") {
                     number(e)? * parent_font
                 } else {
-                    number(&v)?
+                    number(v)?
                 }
             }
             "font-weight" => style.bold = v == "bold" || v == "bolder" || v.parse::<u32>().map(|w| w >= 600).unwrap_or(false),
             "font-style" => style.italic = v == "italic" || v == "oblique",
             "text-anchor" => {
-                style.anchor = match v.as_str() {
+                style.anchor = match v {
                     "middle" => Anchor::Middle,
                     "end" => Anchor::End,
                     _ => Anchor::Start,
                 }
             }
-            "dominant-baseline" | "alignment-baseline" => style.baseline = v.clone(),
+            "dominant-baseline" | "alignment-baseline" => style.baseline = v.into(),
             "stroke-dasharray" => {
                 style.dash = if v == "none" {
                     None
                 } else {
-                    let d = numbers(&v)?;
+                    let d = numbers(v)?;
                     if d.iter().all(|x| *x == 0.0) || d.is_empty() {
                         None
                     } else {
@@ -710,22 +710,22 @@ fn apply(style: &mut Style, el: &Element, parent_font: f32) -> Result<f32, Strin
                     }
                 }
             }
-            "stroke-dashoffset" => style.dash_offset = number(&v)?,
+            "stroke-dashoffset" => style.dash_offset = number(v)?,
             "stroke-linecap" => {
-                style.cap = match v.as_str() {
+                style.cap = match v {
                     "round" => LineCap::Round,
                     "square" => LineCap::Square,
                     _ => LineCap::Butt,
                 }
             }
             "stroke-linejoin" => {
-                style.join = match v.as_str() {
+                style.join = match v {
                     "round" => LineJoin::Round,
                     "bevel" => LineJoin::Bevel,
                     _ => LineJoin::Miter,
                 }
             }
-            "stroke-miterlimit" => style.miter = number(&v)?,
+            "stroke-miterlimit" => style.miter = number(v)?,
             "fill-rule" | "clip-rule" => style.fill_rule = if v == "evenodd" { FillRule::EvenOdd } else { FillRule::Winding },
             "visibility" => style.visible = !(v == "hidden" || v == "collapse"),
             "display" => {
@@ -947,7 +947,10 @@ fn draw_path(pix: &mut Pixmap, path: &tiny_skia::Path, st: &Style, t: Transform,
 
 /// The mask of el's clip-path (accounted for in ctx: the caller releases it).
 fn clip_mask<'a>(ctx: &mut Ctx<'a>, el: &Element, t: Transform, parent: Option<&Mask>) -> Result<Option<Mask>, Fail> {
-    let Some(v) = properties(el).into_iter().rev().find(|(k, _)| k == "clip-path").map(|(_, v)| v) else {
+    if el.attr("clip-path").is_none() && el.attr("style").is_none() {
+        return Ok(None);
+    }
+    let Some(v) = properties(el).into_iter().rev().find(|(k, _)| *k == "clip-path").map(|(_, v)| v) else {
         return Ok(None);
     };
     let v = v.trim();
@@ -1093,7 +1096,7 @@ fn draw_text(ctx: &mut Ctx, pix: &mut Pixmap, el: &Element, st: &Style, t: Trans
     let em = st.font_size;
     let (asc, desc) = (face.ascender / face.units_per_em, face.descender / face.units_per_em);
     // the baseline, from the text element's font (CSS dominant-baseline)
-    let shift_y = match st.baseline.as_str() {
+    let shift_y = match &*st.baseline {
         "middle" => 0.5 * 0.547 * em,
         "central" => (asc + desc) / 2.0 * em,
         "hanging" => 0.8 * asc * em,

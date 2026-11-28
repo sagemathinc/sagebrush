@@ -4,12 +4,15 @@
 //   GET  /api/fleet/v1/host/chain    a host's signed read of its fleet's device chain (core chain-service.mjs; the
 //                                    chain-read note r1.2)
 //   /api/fleet/v1/{fleet,chain,hosts,hosts/<id>/grants}   the person's own fleet (person.ts; the reads scope r4)
+//   POST /api/fleet/v1/host/pair[/result], /api/fleet/v1/pairings/{lookup,approve}   host pairing (pairing.ts; the
+//                                    pairing service note d3)
 //
 // The handler holds every rule; this file supplies its ctx: the Worker's clock, the body read with a cap and a
 // deadline, the scheme and the source address, the D1 store (store.ts) and the lease key. It logs nothing.
 import { fleetCore } from "../../workspace/fleet/install.ts";
-import { bucket, chainEntries, chainPage, hostGen, hostRow, issueLease, spendRequestNonce, type D1 } from "./store.ts";
+import { bucket, chainEntries, chainPage, grantRead, hostGen, hostRow, issueLease, spendRequestNonce, type D1 } from "./store.ts";
 import { handlePerson, type PersonDeps } from "./person.ts";
+import { handlePairing, type PairingHooks } from "./pairing.ts";
 import type { ShareEnv } from "../share/server.ts";
 
 /** ShareEnv: the person's routes read the site's own session (SHARE_DB, AUTH_PROVIDER, ...; person.ts shareSession). */
@@ -24,6 +27,7 @@ export interface FleetEnv extends ShareEnv {
 
 const LEASE_ROUTE = "/api/fleet/v1/host/lease";
 const CHAIN_ROUTE = "/api/fleet/v1/host/chain";
+const GRANT_ROUTE = "/api/fleet/v1/host/grant";
 
 /** The body, at most `max` + 1 bytes and within `ms`: null past either bound (the handler then refuses it). */
 async function readBody(req: Request, max: number, ms: number): Promise<Uint8Array | null> {
@@ -56,6 +60,8 @@ const bare = (status: number) => new Response(null, { status, headers: { "cache-
 export interface FleetHooks {
   /** runs after the handler's checks and its issue-time sample, immediately before the lease batch */
   beforeIssue?: (db: D1) => Promise<void>;
+  /** the pairing routes' seams (pairing.ts) */
+  pairing?: PairingHooks;
 }
 
 /**
@@ -66,7 +72,10 @@ export async function handleFleet(req: Request, env: FleetEnv, hooks: FleetHooks
   const url = new URL(req.url);
   const mine = await handlePerson(req, url, env, fleetCore, person);
   if (mine) return mine;
+  const pairing = await handlePairing(req, url, env, fleetCore, person, hooks.pairing);
+  if (pairing) return pairing;
   if (url.pathname === CHAIN_ROUTE) return chainRead(req, url, env);
+  if (url.pathname === GRANT_ROUTE) return grantReadRoute(req, url, env);
   if (url.pathname !== LEASE_ROUTE) return null;
   const db = env.FLEET_DB;
   if (!db || !env.FLEET_AUD || !env.LEASE_KEY_ID || !env.LEASE_KEY_SEED) return bare(503);
@@ -140,3 +149,39 @@ async function chainRead(req: Request, url: URL, env: FleetEnv): Promise<Respons
   }, ctx);
   return new Response(r.body.length ? r.body : null, { status: r.status, headers: r.headers });
 }
+
+/**
+ * GET /api/fleet/v1/host/grant: the core's handler over FLEET_DB (the grant-read note r0.4), with a body cap of 0. Its
+ * nonces are the chain read's own store: one domain per fleet and host, so a nonce spent on either read is a replay on
+ * the other.
+ */
+async function grantReadRoute(req: Request, url: URL, env: FleetEnv): Promise<Response> {
+  const db = env.FLEET_DB;
+  if (!db || !env.FLEET_AUD) return bare(503);
+  const core = fleetCore();
+  const body = await readBody(req, 0, core.GRANT_READ_MS);
+  if (body === null) return bare(408);
+  const ctx = {
+    aud: env.FLEET_AUD,
+    // (the Worker's own clock, read by the handler once)
+    get now() { return Date.now(); },
+    host: async (h: string) => {
+      const r = await hostRow(db, h);
+      return r && { fleet: r.fleet, sign_key: core.unb64(r.sign_key, 32), revoked: r.revoked === 1 };
+    },
+    currentGen: (fleet: string, host: string) => hostGen(db, fleet, host),
+    bucket: (key: string, limit: number, windowMs: number) => bucket(db, key, limit, windowMs, Date.now(), core.newId()),
+    nonces: { spend: (d: { fleet: string; host: string; nonce: string; now: number }) => spendRequestNonce(db, d, core.CHAIN_NONCE_KEEP_MS) },
+    grant: { read: (fleet: string, host: string, gen: number | null) => grantRead(db, fleet, host, gen) },
+  };
+  const r = await core.handleGrantRead({
+    method: req.method,
+    target: url.pathname + url.search,
+    scheme: url.protocol === "https:" ? "https" : url.protocol.replace(/:$/, ""),
+    source: req.headers.get("cf-connecting-ip") ?? "unknown",
+    header: req.headers.get("sagebrush-sig"),
+    body,
+  }, ctx);
+  return new Response(r.body.length ? r.body : null, { status: r.status, headers: r.headers });
+}
+

@@ -8,8 +8,11 @@ export interface Runner {
   /** the agent kinds it last reported, in its order ([] for none): a hint for a picker, never a choice, since a page
    *  asks for a kind by name and the runner's hello answer decides */
   agents: string[];
-  /** when it reported them (ms), or null */
+  /** when it reported them (ms), or null: the relay stamps it as it admits the runner's leg, so it is also when the
+   *  computer last connected with an agent */
   agents_at: number | null;
+  /** when it was set up (`sagebrush remote login`, s), or null */
+  created: number | null;
 }
 
 /** The runner's own agent-name pattern and its most kinds (relay.py's AGENT_NAME and AGENT_KINDS). */
@@ -45,8 +48,18 @@ export async function listComputers(f: typeof fetch = fetch): Promise<{ availabl
   const peers = Array.isArray(j?.peers) ? j.peers : [];
   const runners = peers
     .filter((p: any) => p && p.kind === "runner" && typeof p.remote_id === "string" && p.remote_id.length > 0 && p.remote_id.length <= 200)
-    .map((p: any) => ({ remote_id: p.remote_id, name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 80) : p.remote_id.slice(0, 12), ...runnerAgents(p) }));
+    .map((p: any) => ({ remote_id: p.remote_id, name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 80) : p.remote_id.slice(0, 12), ...runnerAgents(p), created: Number.isSafeInteger(p.created) && p.created >= 0 ? p.created : null }));
   return { available: j?.available === true, runners };
+}
+
+/** Remove one of your computers (POST /api/remote/v1/revoke): it can't connect again until `sagebrush remote login` is
+ *  run on it again, and its live legs end (the relay's revoke).  Throws with the site's reason if it isn't removed. */
+export async function removeComputer(remoteId: string, f: typeof fetch = fetch): Promise<void> {
+  const r = await f("/api/remote/v1/revoke", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ remote_id: remoteId }) });
+  if (r.status === 401 || r.status === 403) throw Object.assign(new Error("sign in to remove it"), { signedOut: true });
+  // (404: already removed, here or in another tab: what was asked for holds)
+  if (r.status === 404) return;
+  if (!r.ok) throw new Error(r.status === 503 ? "the site couldn't remove it just now: try again" : `the site couldn't remove it (HTTP ${r.status})`);
 }
 
 /** Whether this account can use its computers here (the peers answer's `available`, literally true; anything else,

@@ -276,7 +276,7 @@ export function execModule(source: string, filename: string, name: string, isPac
   R.scripts.set(jsName, { filename, lines: source.split("\n"), lineMap: compiled.lineMap, globals: new WeakRef(m) });
   const fn = script.runInThisContext();
   try {
-    if (sage) R.loader.exec("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
+    if (sage) R.loader.exec("import _sage_lazy as _sage_lazy_; _sage_lazy_.session(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
     pyEntry(fn, m, R, frameState);
   } catch (e) {
     for (const k of keys) dictDelete(R.sysModules, k);
@@ -777,6 +777,14 @@ R.builtins.__pyjs_package_file__ = (p: any) => {
 R.builtins.__pyjs_package_registry__ = () => {
   const reg = packageRegistry();
   return reg === null ? null : JSON.stringify(reg);
+};
+// (the active optional set's distributions as JSON, {name: version}, or null without a set: importlib.metadata.version
+// answers for them, lib/importlib/metadata)
+R.builtins.__pyjs_optional_distributions__ = () => {
+  if (optional === null) return null;
+  const out: Record<string, string> = {};
+  for (const p of optional.plan.packages.values()) if (p.distribution !== null) out[p.distribution.name] = p.distribution.version;
+  return JSON.stringify(out);
 };
 /** Tests only: replace the registry (null: none). */
 export function setPackageRegistry(r: Registry | null): void {

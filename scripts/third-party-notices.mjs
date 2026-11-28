@@ -45,6 +45,7 @@ const PARTS = {
   expat: () => section("libexpat"),
   numpy: () => section("NumPy"),
   scipy: () => section("SciPy"),
+  sklearn: () => section("scikit-learn"),
   matplotlib: () => section("matplotlib"),
   dragon4: () => section("Dragon4"),
   dejavu: () => section("DejaVu Sans"),
@@ -72,7 +73,7 @@ const PACKAGES = [
   // the desktop app's native code (app/src-tauri: Tauri, Wry, Tao, its
   // plugins, the platforms' bindings); its page carries the notebook's notices
   { file: "app/THIRD-PARTY-NOTICES-native.txt", what: "the desktop app's native code (app/src-tauri)", manifest: "app/src-tauri", crates: ["sagebrush-app"], parts: [], mpl: true, native: true },
-  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web", "sagebrush-raster"], parts: ["cpython", "expat", "numpy", "dragon4", "scipy", "matplotlib", "arm", "fdlibm", "marimo", "smalljac", "psage", "cremona", "turbo", "dejavu", ...PYPI_PARTS], artistic: "packages/sagebrush", web: true },
+  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web", "sagebrush-raster"], parts: ["cpython", "expat", "numpy", "dragon4", "scipy", "sklearn", "matplotlib", "arm", "fdlibm", "marimo", "smalljac", "psage", "cremona", "turbo", "dejavu", ...PYPI_PARTS], artistic: "packages/sagebrush", web: true },
 ];
 
 const metas = new Map();

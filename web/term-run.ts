@@ -83,7 +83,7 @@ function mainModule(file: string, sage: boolean): any {
   m.__file__ = file;
   m.__builtins__ = R.builtins;
   R.dictSet(R.sysModules, "__main__", m);
-  if (sage) R.loader.exec("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
+  if (sage) R.loader.exec("import _sage_lazy as _sage_lazy_; _sage_lazy_.session(globals()); del _sage_lazy_\n", m, "exec", "<sage>");
   return m;
 }
 

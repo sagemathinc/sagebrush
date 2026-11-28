@@ -1,9 +1,10 @@
 // ci: web-runner order=596 runner=bun
 // Your computers as the pages list them (remote-runners.ts): the peer list's runners, each with the agent kinds it last
 // reported, taken only as a list of at most 4 unique names of the runner's own pattern (else none), and its time only
-// with such a list, a non-negative whole number of ms.
+// with such a list, a non-negative whole number of ms; when it was set up (s), only as such a number; and Remove's request
+// (POST /api/remote/v1/revoke {remote_id}): done on 200, and on 404 (already removed), else the site's reason.
 //   bun web/workspace/test-remote-runners.mjs
-import { listRunners, runnerAgents } from "./remote-runners.ts";
+import { listRunners, removeComputer, runnerAgents } from "./remote-runners.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -34,6 +35,26 @@ for (const [at, what] of [[-1, "a negative time"], [1.5, "a fractional time"], [
   const t = runnerAgents({ agents: src });
   src.push("x");
   ok(JSON.stringify(t.agents) === '["claude"]', "the list is the page's own copy");
+}
+
+{
+  const rs = await listRunners(answer({ peers: [peer({ created: 1794000000 }), peer({ remote_id: "rB", created: -1 }), peer({ remote_id: "rC", created: "1794000000" }), peer({ remote_id: "rD", created: 1.5 }), peer({ remote_id: "rE" })], available: true }));
+  ok(rs[0].created === 1794000000 && rs.slice(1).every((r) => r.created === null), `when it was set up: a whole non-negative number only, else null (${JSON.stringify(rs.map((r) => r.created))})`);
+}
+{
+  const asked = [];
+  const site = (status) => async (url, init) => { asked.push({ url, ...init }); return new Response(status === 200 ? '{"ok":true}' : "{}", { status }); };
+  await removeComputer("rAB", site(200));
+  const a = asked[0];
+  ok(a.url === "/api/remote/v1/revoke" && a.method === "POST" && a.credentials === "same-origin" && a.headers["content-type"] === "application/json" && a.body === '{"remote_id":"rAB"}', `Remove: POST /api/remote/v1/revoke {remote_id}, this site's session (${JSON.stringify(a)})`);
+  let e404 = null;
+  try { await removeComputer("rAB", site(404)); } catch (e) { e404 = e; }
+  ok(e404 === null, "404 (already removed, here or in another tab): done");
+  for (const [status, re, what] of [[503, /try again/, "503: try again"], [500, /HTTP 500/, "500: the status"], [401, /sign in/, "401: sign in"]]) {
+    let err = null;
+    try { await removeComputer("rAB", site(status)); } catch (e) { err = e; }
+    ok(err !== null && re.test(err.message) && (status !== 401 || err.signedOut === true), `${what} (${err?.message})`);
+  }
 }
 
 if (failures) { console.log(`test-remote-runners: ${failures} failed`); process.exit(1); }

@@ -20,7 +20,7 @@ import { sha256Hex } from "./runtime/sha256";
 
 /** The Core API contract (§6): the major version, and the feature level, which rises with every addition. */
 export const CORE_API = 1;
-export const CORE_API_LEVEL = 68;
+export const CORE_API_LEVEL = 73;
 
 const KiB = 1024, MiB = 1024 * KiB;
 /** Hard limits of set format v1 (§3.4), the same in every host and in the publisher. */
@@ -239,6 +239,8 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const DIR = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const ID = /^@sagebrush\/([a-z0-9][a-z0-9-]{0,63})@(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// (a distribution's project name, as PyPI allows it: letters and digits, with . _ - inside)
+const DIST = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$/;
 const BUILD = /^[0-9a-f]{16}$/;
 /** A path inside a package: no "..", no absolute or empty parts, plain characters (scripts/packages.mjs's rule). */
 export const safePath = (p: unknown): p is string =>
@@ -274,6 +276,8 @@ export interface PackagePlan {
   requires: string[];
   core_req: { api: number; level: number };
   provides: Record<string, Record<string, string[]>>;
+  /** the distribution it stands for (importlib.metadata.version answers its version), or null */
+  distribution: { name: string; version: string } | null;
   src: ChunkRef;
   pre: Record<string, ChunkRef>; // core build id -> chunk
   cost: Record<string, { src: Cost; pre?: Cost }>; // core build id -> measured costs
@@ -344,6 +348,7 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
   const modules = new Map<string, string>();
   const dirs = new Set<string>();
   const names = new Set<string>();
+  const distributions = new Map<string, string>(); // normalized distribution name -> package id
   let edges = 0;
   for (const id of ids.sort()) {
     const what = `package ${id.slice(0, 80)}`;
@@ -368,7 +373,7 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
       js.set(id, { id, dir: p.dir, js: { ...ref, host_req: nat(p.js.host_req, `${what}.js.host_req`, 1_000_000) } });
       continue;
     }
-    exactKeys(p, ["dir", "root", "files", "modules", "requires", "core_req", "src", "pre", "cost"], ["provides"], what);
+    exactKeys(p, ["dir", "root", "files", "modules", "requires", "core_req", "src", "pre", "cost"], ["provides", "distribution"], what);
     // (one version per package name, distinct directories: rule 5)
     if (p.dir !== m![1] || !DIR.test(p.dir)) fail(`${what}: dir must be its id's name`);
     const name = id.slice(0, id.lastIndexOf("@"));
@@ -430,6 +435,19 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
         }
       }
     }
+    // (the distribution it stands for: a project name, its own id's version, one package per name in a set)
+    let distribution: { name: string; version: string } | null = null;
+    if (p.distribution !== undefined) {
+      if (!isObj(p.distribution)) fail(`${what}: distribution must be {name, version}`);
+      exactKeys(p.distribution, ["name", "version"], [], `${what}.distribution`);
+      const dn = p.distribution.name, dv = p.distribution.version;
+      if (typeof dn !== "string" || !DIST.test(dn)) fail(`${what}: distribution.name must be a project name`);
+      if (dv !== id.slice(id.lastIndexOf("@") + 1)) fail(`${what}: distribution.version must be the package's own version`);
+      const norm = dn.toLowerCase().replace(/[-_.]+/g, "-");
+      if (distributions.has(norm)) fail(`${what}: distribution ${dn} is also ${distributions.get(norm)}'s`);
+      distributions.set(norm, id);
+      distribution = { name: dn, version: dv };
+    }
     const src = chunkRef(p.src, `${what}.src`);
     if (!isObj(p.pre)) fail(`${what}: pre must map build ids to chunks`);
     const pre: Record<string, ChunkRef> = Object.create(null);
@@ -448,7 +466,7 @@ export function admitIndex(S: string, bytes: Uint8Array, build: string, reserved
     }
     packages.set(id, {
       id, dir: p.dir, root: p.root, files: Object.assign(Object.create(null), p.files), modules: [...p.modules], requires: [...p.requires],
-      core_req: { api, level }, provides, src, pre, cost: costs,
+      core_req: { api, level }, provides, distribution, src, pre, cost: costs,
     });
   }
   if (edges > L.requiresEdges) fail(`a package set has at most ${L.requiresEdges} requires edges`);

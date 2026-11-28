@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 import { buildExamplesInto, latexPreview, notebookHtml, outputHtml, zip, esc, handlerIn, SITE_CAPS } from "./build-examples.ts";
-import { sitemapXml, buildSitemap, ROBOTS, docsIndexJson, DOCS_INDEX_PATH } from "./build-sitemap.ts";
+import { sitemapXml, buildSitemap, ROBOTS, docsIndexJson, DOCS_INDEX_PATH, DOCS_PAGES_FILE } from "./build-sitemap.ts";
 import { sha256, fontsMark, filesJson } from "../scripts/examples-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -296,14 +296,26 @@ check(z1.equals(zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.
   const art = [{ url: "/", date: "2026-11-05" }, { url: "/articles/groebner/06-gcd-and-factoring", date: "2026-11-05" }, { url: "/articles/", date: "2026-11-05" }];
   const blog = [{ url: "/blog/", date: "2026-11-05" }, { url: "/blog/sagebrush", date: "2026-11-05" }];
   await buildSitemap({ out: site, articles: () => art, blog: () => blog, examples: (o) => buildExamplesInto(o, FIX), docs: () => docs });
-  const idx = JSON.parse(readFileSync(join(site, "docs-index.json"), "utf8"));
+  check(DOCS_PAGES_FILE === "docs-pages.json" && !existsSync(join(site, "docs-index.json")), "the page list is docs-pages.json, and the sitemap's build writes nothing at docs-index.json (the Sage function index's address)");
+  const idx = JSON.parse(readFileSync(join(site, DOCS_PAGES_FILE), "utf8"));
   const want = ["/articles/", "/articles/groebner/06-gcd-and-factoring", "/blog/", "/blog/sagebrush", "/docs/", "/docs/sharing"];
-  check(JSON.stringify(Object.keys(idx)) === '["v","paths"]' && idx.v === 1 && JSON.stringify(idx.paths) === JSON.stringify(want), "docs-index.json lists exactly the docs, articles and blog pages, sorted; no example, no home page: " + JSON.stringify(idx));
+  check(JSON.stringify(Object.keys(idx)) === '["v","paths"]' && idx.v === 1 && JSON.stringify(idx.paths) === JSON.stringify(want), "docs-pages.json lists exactly the docs, articles and blog pages, sorted; no example, no home page: " + JSON.stringify(idx));
   check(idx.paths.every((p) => DOCS_INDEX_PATH.test(p)), "...each one a slug path the agent accepts");
   for (const bad of ["/docs/Sharing", "/docs/a b", "/docs/a?x=1", "/docs/a#b", "/docs/a%20b", "/docs/../s/x", "/docs/a.html", "/docs/a/b/c/d/e", "/docs/_x", "/docs/" + "a".repeat(81)])
     throws(() => docsIndexJson([{ url: bad }]), /can't be in the docs index/, `a docs page whose URL isn't a slug path fails the build, not left out: ${JSON.stringify(bad)}`);
   throws(() => docsIndexJson(Array.from({ length: 1001 }, (_, i) => ({ url: `/docs/p${i}` }))), /over 1000/, "over 1000 pages in the index fails the build");
   check(docsIndexJson([{ url: "/examples/x/" }, { url: "/s/abcdefghijk2" }, { url: "/" }]) === '{"v":1,"paths":[]}\n', "...and pages outside docs, articles and blog are never in it");
+  // (the site as this checkout built it, where web/site/ is here: its docs-index.json is still the Sage function index,
+  //  byte for byte web/dist's, the file the page's search loads and sw.js records; the page list is beside it)
+  const built = join(here, "site", "public");
+  if (existsSync(join(built, "sitemap.xml")) && existsSync(join(here, "dist", "docs-index.json"))) {
+    const fn = readFileSync(join(built, "docs-index.json")), dist = readFileSync(join(here, "dist", "docs-index.json"));
+    check(fn.equals(dist), `the built site's docs-index.json is web/dist's function index, byte for byte (${fn.length} vs ${dist.length} bytes): nothing overwrote it`);
+    const sw = /"docs-index\.json":\{"sha256":"([0-9a-f]{64})","size":(\d+)/.exec(readFileSync(join(built, "sw.js"), "utf8"));
+    check(sw !== null && sw[1] === sha256(fn) && Number(sw[2]) === fn.length, "...and the built site's sw.js records that file's SHA-256 and size for it");
+    const pages = existsSync(join(built, DOCS_PAGES_FILE)) ? JSON.parse(readFileSync(join(built, DOCS_PAGES_FILE), "utf8")) : {};
+    check(JSON.stringify(Object.keys(pages)) === '["v","paths"]' && pages.v === 1 && pages.paths.length > 0 && pages.paths.every((p) => DOCS_INDEX_PATH.test(p)), "the built site's docs-pages.json is the page list: {v: 1, paths}, each one a slug path the agent accepts");
+  } else console.log("(the built site's docs-index.json and docs-pages.json: not built here)");
 }
 
 // ---- grader's E26: a rebuild into the same folder drops an example the corpus no longer has

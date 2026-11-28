@@ -35,6 +35,29 @@ pub fn tick(k: u64) {
     }
 }
 
+/// A scalar loop's counter: `step()` once per iteration ticks every [`STRIDE`] iterations, so a loop polls
+/// inside itself however long it runs; `finish()` ticks the rest.
+#[derive(Default)]
+pub struct Ticker(u64);
+
+impl Ticker {
+    #[inline]
+    pub fn step(&mut self) {
+        self.0 += 1;
+        if self.0 == STRIDE {
+            tick(STRIDE);
+            self.0 = 0;
+        }
+    }
+
+    #[inline]
+    pub fn finish(self) {
+        if self.0 > 0 {
+            tick(self.0);
+        }
+    }
+}
+
 /// Visit `0..n` in chunks of at most [`STRIDE`] elements, ticking after each
 /// chunk with its length: the shape of every bulk copy and scan.
 pub fn chunks<E>(n: usize, mut f: impl FnMut(usize, usize) -> Result<(), E>) -> Result<(), E> {
