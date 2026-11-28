@@ -32,6 +32,8 @@ const A = "de71ce00-0001-4e2e-8e2e-e2e2e2e2e201";
 const LOST = "de71ce00-0002-4e2e-8e2e-e2e2e2e2e202", REFUSED = "de71ce00-0003-4e2e-8e2e-e2e2e2e2e203", DARK = "de71ce00-0004-4e2e-8e2e-e2e2e2e2e204";
 // (one answered 503 with no entry: kept, unconfirmed)
 const LATE = "de71ce00-0005-4e2e-8e2e-e2e2e2e2e205";
+// (one whose append fails while another device's genesis lands first)
+const OTHER = "de71ce00-0006-4e2e-8e2e-e2e2e2e2e206";
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const rl = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
@@ -40,7 +42,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"],
     name: "on", routes: ["sagebrush.test/*"], outboundService: async () => Response.json(plan), ratelimits: rl("4301"),
     durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
-    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: [A, LOST, REFUSED, DARK, LATE].join(","), SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" },
+    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: [A, LOST, REFUSED, DARK, LATE, OTHER].join(","), SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" },
   }],
 }));
 const db = await mf.getD1Database("SHARE_DB", "on");
@@ -52,7 +54,7 @@ const db = await mf.getD1Database("SHARE_DB", "on");
 const at = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init });
 const signIn = async (id) => (await at("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: J({ token: "dev-token", account_id: id }) })).headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
 const sessions = {};
-for (const [k, id] of Object.entries({ A, LOST, REFUSED, DARK, LATE })) {
+for (const [k, id] of Object.entries({ A, LOST, REFUSED, DARK, LATE, OTHER })) {
   sessions[k] = await signIn(id);
   ok((await at("/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions[k], origin: SITE, "content-type": "application/json" }, body: "{}" })).status === 200, `(sync on for ${k})`);
 }
@@ -82,7 +84,9 @@ window.deviceOf = (acct) => idb((d) => d.get(acct));
 // lost after it was forwarded, an append refused before it, the chain unreadable, or the chain served as given)
 window.transport = (as, f = {}) => async (method, path, body) => {
   const isAppend = method === "POST" && path.endsWith("/e2e/chain"), isChain = method === "GET" && path.includes("/e2e/chain");
+  if (isAppend) f.posted = true;
   if (isAppend && f.refuse) return { status: f.refuse, json: {} };
+  if (isChain && f.otherAfter && f.posted) { const r = await window.transport(as)(method, path, body); return { status: 200, json: { ...r.json, entries: [f.otherAfter] } }; }
   if (isChain && f.dark && f.dark()) return { status: 502, json: {} };
   if (isChain && f.before) await f.before();
   if (isChain && f.serve) { const r = await window.transport(as)(method, path, body); return { status: 200, json: { ...r.json, entries: f.serve(r.json.entries) } }; }
@@ -268,6 +272,15 @@ try {
       return { first, left: left === null, retry };
     })()`);
     ok(refused.first.code === "server" && refused.left && refused.retry.ok === 64, "genesis whose append is refused (409) before it applies leaves no device behind, and trying again succeeds", refused);
+    // (another device's genesis first after this one's append failed: this device goes, no recovery code, try again)
+    const other = await P.ev(`(async () => {
+      const acct = (await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "OTHER" } })).json()).account;
+      let first;
+      try { first = { ok: (await K.DeviceKeys.create("laptop", transport("OTHER", { refuse: 503, otherAfter: JSON.stringify({ body: { op: "genesis", from: "another device" } }) }))).recoveryCode }; }
+      catch (e) { first = { code: e.code, message: e.message }; }
+      return { first, left: !!(await deviceOf(acct)) };
+    })()`);
+    ok(other.first.code === "server" && /try again/.test(other.first.message) && !other.first.ok && other.left === false, "genesis that finds another device's genesis first (its own append failed) forgets this device, returns no recovery code, and says to try again", other);
     // (a 5xx with no entry, twice: the append may still land, so the device stays, unconfirmed, and isn't forgotten)
     const late = await P.ev(`(async () => {
       const acct = (await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "LATE" } })).json()).account;
