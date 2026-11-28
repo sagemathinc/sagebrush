@@ -115,3 +115,41 @@ class SeqN:
 for T in (np.float64, np.float32, np.complex128, np.complex64):
     for n, it in ((1, [1.5, 2.5, 3.5]), (5, [1.5, 2.5]), (0, [1.5]), (2, [1.5, 2.5]), (3, [])):
         show(f"{T.__name__}(SeqN(len={n}, {it}))", lambda: T(SeqN(n, it)))
+# two parts' signed zeros kept (the imaginary part as given, no +0.0 seed), and complex64's parts rounded to float32,
+# exact values as hex; a plain sequence with a negative __len__ is no sequence: NumPy's error for an unconvertible scalar
+for T in (np.complex64, np.complex128):
+    for a, b in ((0, -0.0), (-0.0, 0), (-0.0, -0.0), (0.0, 0.0), (np.complex64(1 + 0j), -0.0), (np.complex64(complex(1, -0.0)), -0.0),
+                 (np.complex64(complex(1, -0.0)), 0.0), (np.complex64(1 + 0j), np.complex64(complex(-0.0, 1))), (0.1, 0.2), (1 / 3, 2 / 3),
+                 (np.float64(0.1), np.float64(0.2)), (16777217, 0)):
+        z = T(a, b)
+        print(f"parts {T.__name__}({a!r}, {b!r}) |", repr(z), float(z.real).hex(), float(z.imag).hex())
+    for v in (0.1 + 0.2j, 1 / 3 + 2j / 3, complex(16777217, -0.0)):
+        z = T(v)
+        print(f"one part {T.__name__}({v!r}) |", float(z.real).hex(), float(z.imag).hex())
+class NegLen:
+    def __len__(self): return -1
+    def __getitem__(self, i):
+        if i >= 2: raise IndexError
+        return 1.5
+for T in (np.float64, np.float32, np.complex128, np.complex64):
+    try:
+        print(f"{T.__name__}(NegLen()) |", repr(T(NegLen())))
+    except Exception as e:
+        print(f"{T.__name__}(NegLen()) |", type(e).__name__, e)
+# a 0-d array as either part, as NumPy takes it: as the real part both its parts (an imaginary part added), as the
+# imaginary part its float(); a larger array NumPy's TypeError; a subclass of complex64 rounds to float32 too
+for T in (np.complex64, np.complex128):
+    for p in (np.array(2.0), np.array(2), np.array(True), np.array(2.0, np.float32), np.array(1 + 1j), np.array(1 + 1j, np.complex64),
+              np.array([2.0]), np.array("2"), np.array(-0.0)):
+        for args in ((2, p), (p, 2), (p, p)):
+            try:
+                z = T(*args)
+                print(f"0-d part {T.__name__}{args!r} |", type(z).__name__, repr(z), float(z.real).hex(), float(z.imag).hex())
+            except Exception as e:
+                print(f"0-d part {T.__name__}{args!r} |", type(e).__name__, e)
+class C64(np.complex64): pass
+class C128(np.complex128): pass
+for nm, f in (("C64(1/3, 1/7)", lambda: C64(1 / 3, 1 / 7)), ("C64(1/3+1j/7)", lambda: C64(1 / 3 + 1j / 7)), ("C128(1/3, 1/7)", lambda: C128(1 / 3, 1 / 7))):
+    z = f()
+    print(f"subclass {nm} |", type(z).__name__, float(z.real).hex(), float(z.imag).hex())
+print("float32 rounding |", float(np.complex64(0.1, 0.2).real), float(np.complex64(0.1, 0.2).imag))

@@ -191,11 +191,18 @@ def _arith(cls):
     return cls
 
 
-def _as_array_arg(v):
+def _as_array_arg(v, complex_=False):
     """A scalar type's array-like argument as asarray takes it: a plain sequence object (__len__ and __getitem__, not
-    a list or tuple) read item by item, as NumPy's sequence protocol reads it"""
+    a list or tuple) read item by item, as NumPy's sequence protocol reads it; one whose __len__ is negative is no
+    sequence, NumPy's error for a scalar it can't convert (a float type's ValueError, a complex type's TypeError)"""
     if isinstance(v, (list, tuple, ndarray, range)) or hasattr(v, "__array__"):
         return v
+    try:
+        len(v)
+    except ValueError:
+        if complex_:
+            raise TypeError("must be real number, not %s" % type(v).__name__) from None
+        raise ValueError("setting an array element with a sequence.") from None
     # (items read until IndexError, as NumPy's: __len__ neither truncates nor extends them)
     out = []
     while True:
@@ -350,7 +357,7 @@ class complex128(complex, complexfloating):
 
     def __new__(cls, *args):
         if len(args) == 1 and _array_like(args[0]):
-            a = asarray(_as_array_arg(args[0]), complex128)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
+            a = asarray(_as_array_arg(args[0], True), complex128)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
             return a[()] if a.ndim == 0 else a
         if len(args) == 2:
             return _complex_parts(cls, *args)
@@ -368,16 +375,35 @@ class complex128(complex, complexfloating):
 
 def _complex_parts(cls, re, im):
     """np.complex64(re, im) and np.complex128(re, im), as NumPy's: each part a real number (a Python int, float or
-    bool, a NumPy integer, floating or bool scalar) or an np.complex64, of which the real part brings both its parts
-    and the imaginary part only its real one; anything else (a Python complex, np.complex128, a str, None) NumPy's
-    TypeError"""
+    bool, a NumPy integer, floating or bool scalar), an np.complex64 or a 0-d array (a larger one NumPy's TypeError);
+    the real part, if an np.complex64 or a 0-d array, brings both its parts, its imaginary part added to the given
+    one (no +0.0 seed otherwise, so np.complex64(0, -0.0) keeps its -0.0); the imaginary part only its float(), or an
+    np.complex64's real part; anything else (a Python complex, np.complex128, a str, None) NumPy's TypeError; a
+    complex64 (or a subclass of it) rounds both parts to float32"""
     def ok(x):
-        return (isinstance(x, (_builtins.int, _builtins.float, integer, floating)) and not isinstance(x, _builtins.complex)) or isinstance(x, complex64)
+        return ((isinstance(x, (_builtins.int, _builtins.float, integer, floating)) and not isinstance(x, _builtins.complex))
+                or isinstance(x, (complex64, ndarray)))
     if not (ok(re) and ok(im)):
         raise TypeError("Could not convert arguments into a complex scalar. '%r' given." % ((re, im),))
-    r, i = (float(re.real), float(re.imag)) if isinstance(re, complex64) else (float(re), 0.0)
-    i += float(im.real) if isinstance(im, complex64) else float(im)
-    if cls is complex64:
+    for x in (re, im):
+        if isinstance(x, ndarray) and x.ndim != 0:
+            raise TypeError("only 0-dimensional arrays can be converted to Python scalars")
+    if isinstance(im, complex64):
+        i = float(im.real)
+    elif isinstance(im, ndarray):
+        i = float(im.item())
+    else:
+        i = float(im)
+    if isinstance(re, ndarray):
+        if re.dtype.kind in "USO":
+            raise TypeError("Unable to convert dtype('%s') to complex" % re.dtype.str)
+        z = complex(re.item())
+        r, i = z.real, z.imag + i
+    elif isinstance(re, complex64):
+        r, i = float(re.real), float(re.imag) + i
+    else:
+        r = float(re)
+    if issubclass(cls, complex64):
         r, i = _f32(r), _f32(i)
     return complex.__new__(cls, r, i)
 
@@ -403,7 +429,7 @@ class complex64(complex, complexfloating):
 
     def __new__(cls, *args):
         if len(args) == 1 and _array_like(args[0]):
-            a = asarray(_as_array_arg(args[0]), complex64)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
+            a = asarray(_as_array_arg(args[0], True), complex64)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
             return a[()] if a.ndim == 0 else a
         if len(args) == 2:
             return _complex_parts(cls, *args)
