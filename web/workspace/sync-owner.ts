@@ -276,11 +276,14 @@ export class SyncOwner {
     void this.reconcile();
   }
 
-  /** The account's keys when its sync is end to end: the sealing module's key provider this owner's clients are made
-   * with, or null (a page's document keys, doc-keys.ts pageDocKeys). */
+  /** The account's keys when its sync is end to end: the key provider of the client this owner started sealed (its
+   * start decided by sync-e2e.ts), or the one it was given (tests); else null. Read when a page makes its DocSync
+   * (doc-keys.ts pageDocKeys), after the owner's client runs, never at page load. */
   e2eKeys(): NonNullable<ClientOptions["e2e"]>["keys"] | null {
-    return this.opts.e2e?.keys ?? null;
+    return this.started?.keys ?? this.opts.e2e?.keys ?? null;
   }
+  // (the sealing module and key provider of the client started sealed, kept from its start; null for a plain one)
+  private started: NonNullable<ClientOptions["e2e"]> | null = null;
   /** (sync 2c-3, DEV's switch: web/workspace/doc-sync-switch.ts) notebooks' contents on this page's connection:
    * every client made from now on carries `docs`, and one running now is made again with it (its new connection's
    * welcome then connects it). */
@@ -446,11 +449,13 @@ export class SyncOwner {
     const start = await this.decideStart(l, decide);
     if (this.suspended || this.life !== l) return;
     if (start.kind === "blocked") {
+      this.started = null;
       this.own = { ...(await this.offView()), reason: start.reason };
       this.changed();
       if (start.retry) this.later();
       return;
     }
+    this.started = start.kind === "sealed" ? start.e2e : null;
     const c = startSync(this.w, {
       ...clientOpts,
       ...(start.kind === "sealed" ? { e2e: start.e2e } : {}),

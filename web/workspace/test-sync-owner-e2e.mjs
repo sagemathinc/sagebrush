@@ -33,8 +33,24 @@ writeFileSync(entry, [
   `export { Workspace } from ${J(join(here, "api.ts"))};`,
   `export * as S from ${J(join(here, "sync-e2e.ts"))};`,
   `export { accountHash } from ${J(join(here, "..", "sync-protocol", "protocol.ts"))};`,
+  `export { pageDocKeys } from ${J(join(here, "doc-keys.ts"))};`,
+  `export { DocSync } from ${J(join(here, "doc-sync.ts"))};`,
 ].join("\n"));
 const js = execFileSync("bun", ["build", entry, "--format", "esm", "--target", "browser"], { encoding: "utf8", maxBuffer: 64 << 20 });
+// (the same page with file contents sealed (CONTENT_SEALED true), for the rows of a sealed start: the constant
+// rewritten in this test's own bundle only, by a build plugin; the product's stays false until the turn-on)
+const sealedBuild = join(dir, "sealed-build.mjs");
+writeFileSync(sealedBuild, `const r = await Bun.build({ entrypoints: [${J(entry)}], format: "esm", target: "browser", plugins: [{ name: "content-sealed", setup(b) {
+  b.onLoad({ filter: /sync-e2e\\.ts$/ }, async (a) => {
+    const t = await Bun.file(a.path).text(), was = "export const CONTENT_SEALED = false;";
+    if (!t.includes(was)) throw new Error("CONTENT_SEALED isn't as this test expects");
+    return { contents: t.replace(was, "export const CONTENT_SEALED = true;"), loader: "ts" };
+  });
+} }] });
+if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
+process.stdout.write(await r.outputs[0].text());
+`);
+const jsSealed = execFileSync("bun", [sealedBuild], { encoding: "utf8", maxBuffer: 64 << 20 });
 rmSync(dir, { recursive: true, force: true });
 // (the E2E chunk as the site serves it, here a fake whose DeviceKeys.load gives what the page set)
 const chunk = `export const DeviceKeys = { load: async () => window.chunkKeys ?? null };
@@ -42,7 +58,7 @@ export const sealOps = () => {}, sopsItem = () => {}, envHashOf = () => {}, veri
 export class SealedHalt extends Error {}
 window.chunkLoads = (window.chunkLoads ?? 0) + 1;`;
 const ACCOUNT = "0e2e0e2e-0001-4e2e-8e2e-e2e2e2e2e201";
-const html = `<!doctype html><script type="module">import * as m from "/s.js"; Object.assign(window, m);
+const page = (src) => `<!doctype html><script type="module">import * as m from "${src}"; Object.assign(window, m);
 // (the owner's fetch: the session is the namespace's account; the E2E chain read as the case gives it; anything else
 // (the client's own requests) never answered, so a client started stays running)
 window.asked = [];
@@ -79,11 +95,14 @@ window.seedDevice = async () => {
 };
 window.state = () => ({ client: !!o.client, e2e: o.client?.opts?.e2e ?? null, own: o.own, retries: o.stats.retries, waiting: clock.waits.filter((w) => w.live).map((w) => w.ms) });
 window.ready = true;</script>`;
+const html = page("/s.js"), htmlSealed = page("/s2.js");
 const server = createServer((req, res) => {
   const u = new URL(req.url, "http://x");
   if (u.pathname === "/s.js") return res.writeHead(200, { "content-type": "text/javascript" }).end(js);
   if (u.pathname === "/sagebrush-e2e.js") return res.writeHead(200, { "content-type": "text/javascript" }).end(chunk);
   if (u.pathname === "/") return res.writeHead(200, { "content-type": "text/html" }).end(html);
+  if (u.pathname === "/sealed") return res.writeHead(200, { "content-type": "text/html" }).end(htmlSealed);
+  if (u.pathname === "/s2.js") return res.writeHead(200, { "content-type": "text/javascript" }).end(jsSealed);
   res.writeHead(404).end();
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -92,9 +111,9 @@ const ORIGIN = `http://127.0.0.1:${server.address().port}`;
 const B = await browser();
 try {
   const P = await B.tab();
-  const load = async () => {
+  const load = async (at = "/") => {
     const n = P.loads;
-    await P.send("Page.navigate", { url: ORIGIN + "/" });
+    await P.send("Page.navigate", { url: ORIGIN + at });
     for (const t = Date.now(); P.loads === n && Date.now() - t < 10000; ) await new Promise((r) => setTimeout(r, 50));
     await P.until(`window.ready === true`, 10000);
   };
@@ -167,6 +186,29 @@ try {
     })()`);
     ok(r.fired >= 1 && !r.client && r.own.reason === S.UNREADABLE && r.waiting.length === 1,
       "a start decision that hangs is given up after the owner's wait: no client, the reason, and a try again waiting", r);
+  }
+
+  // ---- the page's document keys (doc-keys.ts pageDocKeys) come from the client the owner started, read once that
+  // start is decided: none for a plain start or a blocked one, and the sealed client's own keys for a sealed one, so a
+  // DocSync made then seals every patch; an end-to-end client never connects a DocSync made without keys
+  {
+    await load();
+    // (this browser's E2E state from the rows above gone first: with it, a 404 is a downgrade, not a plain start)
+    const plain = await P.ev(`(async () => { await new Promise((r) => { const q = indexedDB.deleteDatabase("sagebrush-e2e-v1"); q.onsuccess = q.onerror = q.onblocked = r; }); chain = { status: 404, body: {} }; const s = await owned(); const k = pageDocKeys(o); return { client: s.client, keys: o.e2eKeys(), dk: k === undefined, sealed: new DocSync({ keys: k }).sealed }; })()`);
+    ok(plain.client && plain.keys === null && plain.dk && plain.sealed === false, "a plain start: the owner has no keys, the page's document keys are none, and a DocSync made then sends patches as before", plain);
+    await load();
+    const blocked = await P.ev(`(async () => { const s = await owned({ e2eStart: async () => ({ kind: "blocked", reason: S.FORKED, retry: false }) }); return { client: s.client, keys: o.e2eKeys(), dk: pageDocKeys(o) === undefined }; })()`);
+    ok(!blocked.client && blocked.keys === null && blocked.dk, "a blocked start: no client, no keys, no document keys", blocked);
+    await load("/sealed");
+    const sealed = await P.ev(`(async () => {
+      const keys = { account: "abcdefghijklmnopqrstuvwxya", device: { id: "d", sign: async () => new Uint8Array(64) }, recoveryUnconfirmed: false, chain: async () => ({ head: "h", currentEpoch: 1 }), epochKeys: async () => null };
+      const kit = { sealOps() {}, sopsItem() {}, envHashOf() {}, verifyRow() {}, PULL_START: 1, SealedHalt: class extends Error {}, sealFile() {}, openFile() {}, sealedSize: () => 0 };
+      const s = await owned({ e2eStart: async () => ({ kind: "sealed", e2e: { keys, kit }, recoveryUnconfirmed: false }) });
+      const k = pageDocKeys(o);
+      return { client: s.client, same: o.e2eKeys() === keys, clientKeys: o.client?.opts?.e2e?.keys === keys, dk: k !== undefined, sealed: new DocSync({ keys: k }).sealed };
+    })()`);
+    ok(sealed.client && sealed.same && sealed.clientKeys && sealed.dk && sealed.sealed === true,
+      "a sealed start (file contents sealed, in this test's bundle): the owner's keys are the started client's own, and a DocSync made then is keyed, sealing every patch", sealed);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

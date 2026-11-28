@@ -329,7 +329,7 @@ export class SyncClient {
   private dkAdmitting = false;
   private answered: string[] = [];
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, sealedHalt: "" as string, releasesDropped: 0, releaseChecks: 0, releaseCheckFailures: 0, dkCatchUps: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, blobConflicts: 0, sealedHalt: "" as string, releasesDropped: 0, releaseChecks: 0, releaseCheckFailures: 0, dkCatchUps: 0, docsRefused: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -859,7 +859,12 @@ export class SyncClient {
     this.fetchKick(c);
     this.kick();
     // (2c-3: notebooks' contents on this connection, once it is writable and not halted)
-    if (this.opts.docs && c.writable && !c.halted) void this.opts.docs.connected({
+    // (an end-to-end client never connects notebooks that would go unsealed: a DocSync made without keys is refused here,
+    // the one place it is given a connection, before any patch is sent; its notebooks wait, said in the stats)
+    if (this.opts.docs && this.opts.e2e && !this.opts.docs.sealed) {
+      this.stats.docsRefused++;
+      console.warn("sync: an end-to-end client was given notebooks' sync without keys: not connected");
+    } else if (this.opts.docs && c.writable && !c.halted) void this.opts.docs.connected({
       owner: c.account,
       reserve: () => ++c.req,
       ask: (req, msg) => new Promise((answer) => {

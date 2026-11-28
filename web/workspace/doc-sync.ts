@@ -61,6 +61,8 @@ export class DocSync {
    * account has end-to-end keys (doc-keys.ts), and otherwise patches go as they always have.  A pulled page then opens in full before any of it is applied, and a slice that
    * doesn't open stops the notebook ("e2e"). */
   constructor(private opts: { now?: () => number; retryMs?: number; askMs?: number; onPage?: (p: { doc: string; applied: number; at: number }) => void; keys?: DocKeys } = {}) {}
+  /** Whether every patch is sealed on the wire (it was made with keys): an end-to-end sync client connects no other. */
+  get sealed(): boolean { return this.opts.keys !== undefined; }
   // (a request and its answer, or, if none comes in time (a lost answer on a live socket), a transient `busy`: the
   // flight never waits for good, and what it sent is sent again later (its rows stay until an ack))
   private ask(link: DocLink, req: number, m: Record<string, unknown>): Promise<Record<string, unknown>> {

@@ -5351,12 +5351,12 @@ const docSyncReady = (async () => {
   const owner = SyncOwner.of(w).start();
   const allowed = (wait) => docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning(wait) });
   if (!(await allowed(20_000))) await untilAllowed({ onChange: (f) => owner.onChange(f), running: () => owner.clientRunning(0), allowed: () => allowed(0) });
-  // (the account's end-to-end keys, when it has them: every patch then sealed on the wire (web/workspace/doc-keys.ts))
-  const keys = pageDocKeys(owner);
   return (await enableDocSync({
     loadHistory,
-    // (a document's changes stored from another device: its Files entry's last-modified time, here too)
-    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}), keys }),
+    // (a document's changes stored from another device: its Files entry's last-modified time, here too; and the
+    // account's end-to-end keys, read now, from the client the owner started (web/workspace/doc-keys.ts): every patch
+    // then sealed on the wire)
+    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}), keys: pageDocKeys(owner) }),
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     register: registerJournalWriter,
     setReadOnly: (ro) => nb.setReadOnly(ro),
