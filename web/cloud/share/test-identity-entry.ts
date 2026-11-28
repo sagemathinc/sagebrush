@@ -7,19 +7,22 @@ import { handleRemote } from "../remote/server.ts";
 
 // (tests only: the bulk-end hooks, registered at import as the sync service registers its own, recording each call;
 // off until a row arms them, and each can be made to fail)
-const hooks = { on: false, failEnding: false, failEnded: false, calls: [] as { hook: string; account: string; sessions?: EndedSession[]; live?: number }[] };
+const hooks = { on: false, failEnding: false, failEnded: false, n: 0, calls: [] as { hook: string; account: string; sessions?: EndedSession[]; live?: number; mark?: unknown; before?: unknown }[] };
 let hookDb: ShareEnv["SHARE_DB"] = undefined;
 onSessionsEnded({
   ending: async (_env, account) => {
     if (!hooks.on) return;
     // (how many of the account's sessions exist when it runs: all of them, since it runs before the delete)
     const live = Number((await hookDb!.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(account).first<{ n: number }>())?.n);
-    hooks.calls.push({ hook: "ending", account, live });
+    // (a value of this call's own, which core must hand back to this call's ended and no other)
+    const mark = `call-${++hooks.n}`;
+    hooks.calls.push({ hook: "ending", account, live, mark });
     if (hooks.failEnding) throw new Error("ending failed (test)");
+    return mark;
   },
-  ended: async (_env, account, sessions) => {
+  ended: async (_env, account, sessions, before) => {
     if (!hooks.on) return;
-    hooks.calls.push({ hook: "ended", account, sessions });
+    hooks.calls.push({ hook: "ended", account, sessions, before });
     if (hooks.failEnded) throw new Error("ended failed (test)");
   },
 });

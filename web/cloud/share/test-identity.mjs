@@ -1381,7 +1381,7 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   const { calls } = await hooks({});
   const got = calls.find((c) => c.hook === "ended");
   const gotEnds = Object.fromEntries((got?.sessions ?? []).map((s) => [s.session, s.ends]));
-  ok(r.status === 200 && calls.length === 1 && got.account === acct && Object.keys(before).length === 3 && JSON.stringify(Object.keys(gotEnds).sort()) === JSON.stringify(Object.keys(before).sort()) && Object.keys(before).every((h) => gotEnds[h] === before[h]) && "late-session-hash" in gotEnds && hashOf(a.session) in gotEnds, `H1 sign-out everywhere hands exactly the sessions it deleted to the ended hook, each with its latest end, the one made just before included (${r.status}, ${JSON.stringify(calls.map((c) => [c.hook, c.sessions?.length]))})`);
+  ok(r.status === 200 && calls.length === 2 && calls[0].hook === "ending" && calls[0].live === 3 && got.before === calls[0].mark && got.account === acct && Object.keys(before).length === 3 && JSON.stringify(Object.keys(gotEnds).sort()) === JSON.stringify(Object.keys(before).sort()) && Object.keys(before).every((h) => gotEnds[h] === before[h]) && "late-session-hash" in gotEnds && hashOf(a.session) in gotEnds, `H1 sign-out everywhere runs the ending hook first (all three sessions there), then hands exactly the sessions it deleted to ended, each with its latest end, the one made just before included, and with ending's own value (${r.status}, ${JSON.stringify(calls.map((c) => [c.hook, c.sessions?.length]))})`);
 
   // a failing ended hook: the sign-out still answers 200 and every session is gone
   const f = await signIn("user_01HOOKF", "session_01HF1");
@@ -1399,17 +1399,40 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   await hooks({ on: true });
   const dr = await postJ("/__disable", null, { account: dAcct });
   const dc = (await hooks({})).calls;
-  ok(dr.status === 200 && dc.length === 2 && dc[0].hook === "ending" && dc[0].live === 2 && dc[1].hook === "ended" && dc[1].sessions.length === 2, `H3 a disable runs the ending hook first (both sessions still there), then hands both deleted sessions to ended (${JSON.stringify(dc.map((c) => [c.hook, c.live ?? c.sessions?.length]))})`);
+  ok(dr.status === 200 && dc.length === 2 && dc[0].hook === "ending" && dc[0].live === 2 && dc[1].hook === "ended" && dc[1].sessions.length === 2 && dc[1].before === dc[0].mark, `H3 a disable runs the ending hook first (both sessions still there), then hands both deleted sessions to ended (${JSON.stringify(dc.map((c) => [c.hook, c.live ?? c.sessions?.length]))})`);
 
-  // a disable whose ending hook fails: refused, nothing changed (not disabled, sessions kept, no generation bump)
+  // sign-out everywhere whose ending hook fails: 503, nothing changed (every session kept), no ended call
+  {
+    const e1 = await signIn("user_01HOOKE", "session_01HE1");
+    await signIn("user_01HOOKE", "session_01HE2");
+    const eAcct = await acctOf("session_01HE1");
+    await hooks({ on: true, failEnding: true });
+    const er = await postJ("/auth/logout-everywhere", e1.session);
+    const ec = (await hooks({})).calls;
+    const eLeft = (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(eAcct).first()).n;
+    ok(er.status === 503 && ec.length === 1 && ec[0].hook === "ending" && eLeft === 2, `H5 sign-out everywhere whose ending hook fails: 503, both sessions kept, no ended call (${er.status}, ${eLeft}, ${JSON.stringify(ec.map((c) => c.hook))})`);
+  }
+
+  // two bulk ends at once, for two accounts: each ended call gets its own ending's value, never the other's
+  {
+    const p1 = await signIn("user_01HOOKP", "session_01HP1"), q1 = await signIn("user_01HOOKQ", "session_01HQ1");
+    await hooks({ on: true });
+    const [pr, qr] = await Promise.all([postJ("/auth/logout-everywhere", p1.session), postJ("/auth/logout-everywhere", q1.session)]);
+    const pc = (await hooks({})).calls;
+    const marks = Object.fromEntries(pc.filter((c) => c.hook === "ending").map((c) => [c.account, c.mark]));
+    const ended2 = pc.filter((c) => c.hook === "ended");
+    ok(pr.status === 200 && qr.status === 200 && ended2.length === 2 && ended2.every((c) => c.before === marks[c.account]) && new Set(ended2.map((c) => c.before)).size === 2, `H6 two sign-outs everywhere at once: each ended call gets its own request's ending value (${JSON.stringify(pc.map((c) => [c.hook, c.mark ?? c.before]))})`);
+  }
+
+  // a disable whose ending hook fails still happens: disabled, every session gone, ended still called (with no value)
   await signIn("user_01HOOKX", "session_01HX1");
   const xAcct = await acctOf("session_01HX1");
-  const x0 = await db.prepare("SELECT generation, disabled FROM accounts WHERE account_id = ?1").bind(xAcct).first();
+  const x0 = await db.prepare("SELECT generation FROM accounts WHERE account_id = ?1").bind(xAcct).first();
   await hooks({ on: true, failEnding: true });
   const xr = await postJ("/__disable", null, { account: xAcct });
   const xc = (await hooks({})).calls;
   const x1 = await db.prepare("SELECT generation, disabled, (SELECT COUNT(*) FROM sessions WHERE account_id = ?1) AS n FROM accounts WHERE account_id = ?1").bind(xAcct).first();
-  ok(xr.status === 503 && xc.length === 1 && xc[0].hook === "ending" && x1.n === 1 && x1.disabled === null && x1.generation === x0.generation, `H4 a disable whose ending hook fails is refused with nothing changed: not disabled, the session kept, no ended call (${xr.status}, ${JSON.stringify(x1)})`);
+  ok(xr.status === 200 && xc.length === 2 && xc[0].hook === "ending" && xc[1].hook === "ended" && xc[1].sessions.length === 1 && xc[1].before === undefined && x1.n === 0 && x1.disabled !== null && x1.generation === x0.generation + 1, `H4 a disable whose ending hook fails still happens: disabled, its session gone, ended still called (${xr.status}, ${JSON.stringify(x1)}, ${JSON.stringify(xc.map((c) => c.hook))})`);
 }
 
 await mf.dispose();

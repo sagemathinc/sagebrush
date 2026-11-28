@@ -888,15 +888,18 @@ export async function outboxCounts(db: D1): Promise<{ queued: number; exhausted:
 /** A session ended in bulk (sign-out everywhere, disable): its token hash, and its latest end (seconds), the longest it
  * could have lasted. */
 export type EndedSession = { session: string; ends: number };
-type EndingHook = (env: ShareEnv, account: string) => Promise<void>;
-type EndedHook = (env: ShareEnv, account: string, sessions: EndedSession[]) => Promise<void>;
+type EndingHook = (env: ShareEnv, account: string) => Promise<unknown>;
+type EndedHook = (env: ShareEnv, account: string, sessions: EndedSession[], before: unknown) => Promise<void>;
 let endingHook: EndingHook | null = null;
 let endedHook: EndedHook | null = null;
 /**
  * What else ends an account's sessions, registered once at import by the code that holds them (the sync service's
- * sockets), each given the request's bindings: `ending` runs before a disable deletes them, and a failure refuses the disable with nothing changed;
- * `ended` gets exactly the sessions each bulk end deleted, after the delete, so none made meanwhile is missed.  Neither
- * is set here: without them, ending sessions is only this module's.
+ * sockets), each given the request's bindings.  `ending` runs before every bulk end (sign-out everywhere, disable)
+ * deletes anything; a failure refuses a sign-out everywhere with nothing changed (it can be asked again), but never a
+ * disable.  `ended` gets exactly the sessions that bulk end
+ * deleted, after the delete, so none made meanwhile is missed, with what this same call's `ending` returned (its own
+ * record, scoped to the request: nothing is shared between requests).  Neither is set here: without them, ending
+ * sessions is only this module's.
  */
 export function onSessionsEnded(hooks: { ending?: EndingHook; ended?: EndedHook }): void {
   endingHook = hooks.ending ?? null;
@@ -904,10 +907,10 @@ export function onSessionsEnded(hooks: { ending?: EndingHook; ended?: EndedHook 
 }
 /** The deleted sessions handed on.  They are gone already, so a failure is the hook's to handle (it logs it), never the
  * request's answer. */
-async function sessionsEnded(env: ShareEnv, account: string, sessions: EndedSession[]): Promise<void> {
+async function sessionsEnded(env: ShareEnv, account: string, sessions: EndedSession[], before: unknown): Promise<void> {
   if (!endedHook || sessions.length === 0) return;
   try {
-    await endedHook(env, account, sessions);
+    await endedHook(env, account, sessions, before);
   } catch {
     // (the hook handles its own failures; one that throws anyway doesn't fail a bulk end that already happened)
   }
@@ -931,10 +934,16 @@ async function endAllSessions(db: D1, account: string, reason: "everywhere" | "d
 }
 
 /** Disable an account: no sign-in, every session ended at once (the admin action that needs I3's proof calls this).
- * The registered `ending` hook first: if it fails, nothing is disabled. */
+ * The registered `ending` hook first; a disable always happens, even if it fails (D1's disable is the authoritative
+ * stop, and `ended` still gets every deleted session). */
 export async function disableAccount(env: ShareEnv, account: string): Promise<void> {
-  if (endingHook) await endingHook(env, account);
-  await sessionsEnded(env, account, await endAllSessions(env.SHARE_DB!, account, "disabled", true));
+  let before: unknown;
+  try {
+    before = endingHook ? await endingHook(env, account) : undefined;
+  } catch {
+    // (the hook's own failure, never a reason to leave an account enabled)
+  }
+  await sessionsEnded(env, account, await endAllSessions(env.SHARE_DB!, account, "disabled", true), before);
 }
 
 async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response> {
@@ -1631,6 +1640,9 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
     db.prepare("INSERT INTO accounts (account_id, created, deleting) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET deleting = ?2, email = NULL, name = NULL, last_active = NULL").bind(account, t),
     // (with WorkOS sign-in: the account's WorkOS sessions queued for revoking, in the batch that drops them)
     ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'deleted', ?2, ?2 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, t)] : []),
+    // (its sessions end here, not through endAllSessions, so the onSessionsEnded hooks don't see them: safe, since this
+    // batch marks the account deleting, which fails every live() check, and the sync service's own purge removes the
+    // account's sockets and objects)
     db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
     // (the sessions' admin grants with them: admin-visibility-plan r1h §1.8)
     db.prepare("DELETE FROM admin_grants WHERE account_id = ?1").bind(account),
@@ -1969,9 +1981,15 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
     // asking WorkOS, so it works past the hour, past the grace and while WorkOS is down; same-origin was checked above)
     const s = await sessionForSignOut(req, env);
     if (!s) return err(401, "sign in first");
-    // (the sync service revoked every session it could see before this ran, cloud's web/sync/server.ts; the sessions
-    // this deleted go to it too, so one made in between is revoked as well)
-    await sessionsEnded(env, s.id, await endAllSessions(env.SHARE_DB, s.id, "everywhere"));
+    // (the registered hooks: `ending` first, which can refuse the sign-out with nothing changed (then sign out again);
+    // `ended` after, with the sessions this deleted, so one made in between is handed on too)
+    let before: unknown;
+    try {
+      before = endingHook ? await endingHook(env, s.id) : undefined;
+    } catch {
+      return err(503, "signing out didn't finish; try again");
+    }
+    await sessionsEnded(env, s.id, await endAllSessions(env.SHARE_DB, s.id, "everywhere"), before);
     ctx.waitUntil(drainRevokes(env, 25, 6000));
     return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
   }
