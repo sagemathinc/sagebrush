@@ -1630,8 +1630,9 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && w.big !== undefined && !Number.isFinite(w.v) && ct.kind === "f") raise(T.OverflowError, "int too large to convert to float");
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkWeak(ct, w);
   if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatLoop(op, A, B, ct);
-  // (power and the shifts have no bool loop in NumPy: two bools take its first integer loop, int8)
-  if ((op === "power" || op === "left_shift" || op === "right_shift") && ct.kind === "b") ct = D.int8;
+  // (power, the shifts, floor_divide and remainder have no bool loop in NumPy: two bools take its first integer
+  // loop, int8)
+  if ((op === "power" || op === "left_shift" || op === "right_shift" || op === "floor_divide" || op === "remainder") && ct.kind === "b") ct = D.int8;
   const rt = spec.out === "bool" ? D.bool : ct;
   const a = A.arr, b = B.arr;
   const kop = op === "power" ? powerExponent(ct, b) : op === "multiply" && (ct === D.int32 || ct === D.uint32) ? "multiply imul" : op; // the kernel

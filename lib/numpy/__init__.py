@@ -50,6 +50,10 @@ little_endian = True
 class generic:
     """Base of NumPy's scalar types."""
     __slots__ = ()
+    # (read by the runtime's binary operators: a builtin bool, float or
+    # complex on the left gives way to these scalars' reflected methods, as
+    # NumPy's own decline them; src/runtime/ops.ts binaryNumeric)
+    _pyjs_numpy_scalar = True
 
     @property
     def dtype(self):
@@ -209,6 +213,9 @@ def _bits(cls):
 @_arith
 class float64(float, floating):
     __slots__ = ()
+    # (a real float subclass in NumPy too: the builtin operators' usual order
+    # already gives NumPy's result, so not the scalars' reflected-first rule)
+    _pyjs_numpy_scalar = False
     __hash__ = float.__hash__
 
     def __new__(cls, v=0.0):
@@ -333,6 +340,9 @@ bool_ = bool  # NumPy 2 calls it np.bool, with np.bool_ an alias
 @_arith
 class complex128(complex, complexfloating):
     __slots__ = ()
+    # (a real complex subclass in NumPy too: the builtin operators' usual order
+    # already gives NumPy's result, so not the scalars' reflected-first rule)
+    _pyjs_numpy_scalar = False
     __hash__ = complex.__hash__
 
     def __repr__(self):

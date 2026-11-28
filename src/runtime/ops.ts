@@ -399,10 +399,16 @@ function binaryNumeric(a: any, b: any, op: string): any {
   const seqMul = op === "mul";
   const left = (x: any) => (seqMul && seqRepeats(x) ? undefined : special(x, name));
   const right = (x: any) => (seqMul && seqRepeats(x) ? undefined : special(x, rname));
+  // (NumPy's scalar types subclass int here, and np.float32 float, where NumPy's do not, only np.float64 being a
+  // float: a builtin bool, float or complex on the left took such a scalar as one of its own, True - np.uint8(3)
+  // the int -2, where NumPy's declines it and the scalar's reflected method answers, np.uint8(254); so that
+  // method goes first, as there. A builtin int on the left already gives way, to its subclass)
+  // (np.float64 and np.complex128 are real float and complex subclasses in NumPy too, and opt out)
+  const npFirst = (ta === T.bool || ta === T.float || ta === T.complex) && tb !== ta && lookupType(tb, "_pyjs_numpy_scalar") === true;
   // As CPython's slot: the override test first (it may run user code that
   // replaces a method), then each method fetched when it is called.
-  if (ta !== tb && tb.$mro.includes(ta) && (lookupType(tb, rname) !== undefined || lookupType(tb, name) !== undefined)
-      && overloaded(ta, tb, rname)) {
+  if (npFirst || (ta !== tb && tb.$mro.includes(ta) && (lookupType(tb, rname) !== undefined || lookupType(tb, name) !== undefined)
+      && overloaded(ta, tb, rname))) {
     // A subclass's reflected method gets priority.
     const fb = right(b);
     if (fb !== undefined) {
