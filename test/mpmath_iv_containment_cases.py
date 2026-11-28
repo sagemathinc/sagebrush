@@ -40,3 +40,28 @@ print("log(1 + 2^-21) at 24 bits:", iv.log(iv.mpf(1) + iv.mpf(2) ** -21)._mpi_)
 iv.prec = 53
 print("exact:", iv.exp(0)._mpi_, iv.log(1)._mpi_, iv.atan2(0, 1)._mpi_)
 print("pi:", iv.pi._mpi_)
+# the gamma family: gamma, rgamma, loggamma and factorial near ties, the reported small cases, and exact values
+iv.prec = 3
+x = iv.mpf(2) ** -24
+print("gamma, rgamma of 2^-24 at 3 bits:", iv.gamma(x)._mpi_, iv.rgamma(x)._mpi_)
+iv.prec = 24
+print("loggamma(1/4) at 24 bits:", iv.loggamma(iv.mpf(1) / 4)._mpi_)
+iv.prec = 53
+print("exact:", iv.gamma(5)._mpi_, iv.rgamma(3)._mpi_, iv.loggamma(1)._mpi_, iv.loggamma(2)._mpi_, iv.factorial(4)._mpi_, iv.rgamma(-2)._mpi_)
+random.seed(2476)
+gfns = {"gamma": (iv.gamma, mp.gamma), "rgamma": (iv.rgamma, mp.rgamma), "loggamma": (iv.loggamma, mp.loggamma), "factorial": (iv.factorial, mp.factorial)}
+gcnt = {n: 0 for n in gfns}; gbad = {n: 0 for n in gfns}
+for prec in [2, 3, 5, 8, 16, 24, 53, 64]:
+    for k in range(1, 61, 2):
+        for base in (2.0 ** -k, 1 + 2.0 ** -k, 2 - 2.0 ** -k, 0.25 + 2.0 ** -k, random.uniform(0.01, 30), float(k)):
+            for name, (f, tf) in gfns.items():
+                iv.prec = prec
+                x = iv.mpf(base)
+                r = f(x)
+                mp.prec = prec + 400
+                vals = [tf(mp.mpf(x.a)), tf(mp.mpf(x.b))]
+                gcnt[name] += 1
+                if not (mp.mpf(r.a) <= min(vals) and max(vals) <= mp.mpf(r.b)):
+                    gbad[name] += 1
+for name in gfns:
+    print("near ties,", name, ":", gcnt[name], "cases,", gbad[name], "miss")
