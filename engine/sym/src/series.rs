@@ -72,6 +72,9 @@ impl Series {
     }
 
     pub fn mul(&self, o: &Series) -> Series {
+        // (a Stop point: a product is quadratic in the precision, and a
+        // fractional power's base may be expanded far, A07's review)
+        sagebrush_interrupt::check();
         if self.c.is_empty() || o.c.is_empty() {
             return Series { v: self.v + o.v, c: vec![] };
         }
@@ -114,7 +117,16 @@ impl Series {
     /// self^r for a rational r (the valuation times r must be an integer).
     pub fn pow_rat(&self, r: &crate::num::Q) -> R<Series> {
         if self.c.is_empty() {
-            return Ok(self.clone());
+            // (zero through t^(P-1): the valuation is at least P, so for r > 0
+            // self^r vanishes through t^(ceil(P r) - 1) only, not through
+            // t^(P-1) (a fourth root of O(t^8) is O(t^2): Codex audit A07-F1);
+            // for r < 0 it has a pole of unknown order)
+            if !num_traits::Signed::is_positive(r) {
+                return Err(SymError::Value("division by a series that vanishes to this order".into()));
+            }
+            let p = (crate::num::Q::from_integer(self.prec().into()) * r).ceil().to_integer();
+            let p = num_traits::ToPrimitive::to_i64(&p).ok_or_else(|| SymError::NotImplemented("a series precision past 2^63".into()))?;
+            return Ok(Series { v: p, c: vec![] });
         }
         let vr = crate::num::Q::from_integer(self.v.into()) * r;
         if !vr.is_integer() {
@@ -159,7 +171,10 @@ impl Series {
             acc = acc.add(&term.scale(&binom));
         }
         let mut s = acc.scale(&pow(&a0, &re));
-        s.v += num_traits::ToPrimitive::to_i64(&vr.to_integer()).unwrap();
+        // (a valuation v r past i64, x^(2^63) for one, is refused: unwrapped,
+        // it panicked, Codex's review of A07)
+        let shift = num_traits::ToPrimitive::to_i64(&vr.to_integer()).ok_or_else(|| SymError::NotImplemented("a series whose valuation is past 2^63".into()))?;
+        s.v = s.v.checked_add(shift).ok_or_else(|| SymError::NotImplemented("a series whose valuation is past 2^63".into()))?;
         Ok(s)
     }
 
@@ -255,9 +270,20 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
             let bs = series(b, x, prec + 2)?;
             if let Some(k) = p.as_i64() {
                 if k >= 0 {
+                    // (by squaring: log k products, not k; each a Stop point, as
+                    // is every product)
                     let mut r = Series::constant(&one(), prec + 2);
-                    for _ in 0..k {
-                        r = r.mul(&bs);
+                    let mut sq = bs;
+                    let mut e = k;
+                    while e > 0 {
+                        sagebrush_interrupt::check();
+                        if e & 1 == 1 {
+                            r = r.mul(&sq);
+                        }
+                        e >>= 1;
+                        if e > 0 {
+                            sq = sq.mul(&sq);
+                        }
                     }
                     return Ok(r.truncate(prec));
                 }
@@ -266,16 +292,50 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
                 // t^(prec-1) needs P >= prec + v (|k| + 1) (2 - v |k| was used:
                 // 1/(x^2 - x^3) lost x^2 + x^3, the systematic review's
                 // R2-SYMALG-F7)
-                let extra = bs.v.max(0) * (k.abs() + 1) + 2;
-                let bs = series(b, x, prec + extra)?;
+                // (|k| and the precision checked: -k and k.abs() wrapped for
+                // k = -2^63, and x^(-2^63) expanded as 1/x, Codex audit A07-F3)
+                let past = || SymError::NotImplemented("a series of a power with an exponent or precision past 2^63".into());
+                let mk = k.checked_neg().ok_or_else(past)?;
+                let extra = bs.v.max(0).checked_mul(mk.checked_add(1).ok_or_else(past)?).and_then(|e| e.checked_add(2)).ok_or_else(past)?;
+                let bs = series(b, x, prec.checked_add(extra).ok_or_else(past)?)?;
                 let mut r = bs.inv()?;
                 let base = r.clone();
-                for _ in 1..(-k) {
+                for _ in 1..mk {
                     r = r.mul(&base);
                 }
                 return Ok(r.truncate(prec));
             }
             if let Some(r) = p.as_rat() {
+                // b = t^v (c0 + ...) known through t^(P-1) has P - v known
+                // terms, and so has b^r, from t^(v r): through t^(prec-1)
+                // needs P >= prec + v - v r.  A base known to vanish through
+                // t^(P-1) has v >= P, and for r > 0 its power vanishes through
+                // t^(ceil(P r) - 1): through t^(prec-1) once P r >= prec.
+                // (The base through t^(prec+1) alone made (x^8 + x^10)^(1/4)
+                // through t^2 zero: Codex audit A07-F1.)
+                let q = |z: i64| crate::num::Q::from_integer(z.into());
+                let ceil = |z: crate::num::Q| -> R<i64> {
+                    num_traits::ToPrimitive::to_i64(&z.ceil().to_integer()).ok_or_else(|| SymError::NotImplemented("a series precision past 2^63".into()))
+                };
+                let mut bs = bs;
+                let mut have = prec + 2;
+                if bs.c.is_empty() && num_traits::Signed::is_positive(r) {
+                    // (the precision doubled until the base shows a term or
+                    // reaches ceil(prec / r): the work follows the base's
+                    // valuation, not 1/r; (x^20)^(1/400) asked for x^20
+                    // through t^1600 at once)
+                    let need = ceil(q(prec) / r)?.max(have);
+                    while bs.c.is_empty() && have < need {
+                        have = have.saturating_mul(2).min(need);
+                        bs = series(b, x, have)?;
+                    }
+                }
+                if !bs.c.is_empty() {
+                    let need = ceil(q(prec) + q(bs.v) - q(bs.v) * r)?.checked_add(2).ok_or_else(|| SymError::NotImplemented("a series precision past 2^63".into()))?;
+                    if need > have {
+                        bs = series(b, x, need)?;
+                    }
+                }
                 return Ok(bs.pow_rat(r)?.truncate(prec));
             }
             // a symbolic or irrational exponent: through the derivatives, only

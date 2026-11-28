@@ -4286,6 +4286,16 @@
   "owner": "symbolic engine",
   "row": "inv-44"
  },
+ "engine/sym/tests/audit_a07.rs ::  :: use sagebrush_sym::{expr::*, limit::{limit, Dir}, parse::parse, series::taylor, simplify::simplify_full, to_string}; #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "a test's import of the limit function: refuses nothing"
+ },
+ "engine/sym/tests/audit_a07.rs :: lim :: to_string(&limit(&parse(f), \"x\", &zero(), dir)) #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "a test calling the limit function (a mathematical limit): refuses nothing"
+ },
  "engine/sym/tests/stage2_interrupt.rs ::  :: use sagebrush_poly::{Budget, Limits}; #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"

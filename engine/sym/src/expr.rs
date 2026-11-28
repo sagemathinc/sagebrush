@@ -839,7 +839,12 @@ fn num_pow(b: &Num, x: &Num) -> Expr {
     // positive rational: integer part of the exponent, then perfect powers
     let fl = r.floor().to_integer();
     let frac = &r - Q::from_integer(fl.clone());
-    let int_part = Num::rat(br.clone()).pow_int(fl.to_i64().unwrap_or(0));
+    // (an integer part past i64 stays in the power as written: taken as 0, 4^(18446744073709551617/2)
+    // was 2, Codex audit A07-F2)
+    let Some(fl) = fl.to_i64() else {
+        return raw(Kind::Pow(num(b.clone()), num(x.clone())));
+    };
+    let int_part = Num::rat(br.clone()).pow_int(fl);
     let fp = frac.numer().to_u32().unwrap(); // 0 < fp < k
     let (an, bn) = power_parts(br.numer(), fp, k32);
     let (ad, bd) = power_parts(br.denom(), fp, k32);

@@ -50,7 +50,11 @@ pub fn expand_trig(e: &Expr) -> Expr {
                 return if matches!(f, Fun::Tan | Fun::Tanh) { r } else { crate::expand::expand(&r) };
             }
             if let Some((n, v)) = integer_multiple(u) {
-                return multiple_angle(f, n, &v);
+                // (a multiple past u32 stays as written: `as u32` truncated it,
+                // and its expansion would have that many terms anyway)
+                if u32::try_from(n.unsigned_abs()).is_ok() {
+                    return multiple_angle(f, n, &v);
+                }
             }
         }
     }
