@@ -4,7 +4,9 @@
 //! smaller operand as one sticky bit) is wrong in 16 of these 80 cases,
 //! precisions 1 to 256, both signs, every rounding.  tests/data/add-sticky.txt:
 //! cases of corpus.rs's form, the expected value MPFR's (gmpy2 at 512 bits,
-//! then rounded); the last, 53 bits to nearest, is 1, not 1 + 2^-52.
+//! then rounded); then 53 bits to nearest, 1, not 1 + 2^-52; and last, from
+//! a random corpus of mpmath's own cases, (2^64 + 1.5) - 1.7069... rounded
+//! down to 23 bits: 0x7fffff 2^41, where mpmath gave 2^64, above the sum.
 use sagebrush_mp::fail::checked;
 use sagebrush_mp::mpf::{mpf_add, Rnd};
 mod common;
@@ -25,6 +27,6 @@ fn the_smaller_operand_within_the_larger_ones_bits() {
         }
         n += 1;
     }
-    assert_eq!(n, 81);
+    assert_eq!(n, 82);
     assert!(bad.is_empty(), "{} of {} wrong:\n{}", bad.len(), n, bad.join("\n"));
 }
