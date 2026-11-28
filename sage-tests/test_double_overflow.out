@@ -1,0 +1,148 @@
+exp -708 | 3.307553003638408e-308
+SR exp -708 | 3.307553003638408e-308
+exp 700 | 1.0142320547350045e+304
+SR exp 700 | 1.0142320547350045e+304
+exp 709 | 8.218407461554972e+307
+SR exp 709 | 8.218407461554972e+307
+exp 710 | +infinity
+SR exp 710 | +infinity
+exp 711 | +infinity
+SR exp 711 | +infinity
+exp 745 | +infinity
+SR exp 745 | +infinity
+exp 1000 | +infinity
+SR exp 1000 | +infinity
+exp 1000000 | +infinity
+SR exp 1000000 | +infinity
+exp -1000000 | 0.0
+SR exp -1000000 | 0.0
+sinh 700 | 5.0711602736750225e+303
+SR sinh 700 | 5.0711602736750225e+303
+cosh 700 | 5.0711602736750225e+303
+SR cosh 700 | 5.0711602736750225e+303
+sinh 709 | 4.109203730777486e+307
+SR sinh 709 | 4.109203730777486e+307
+cosh 709 | 4.109203730777486e+307
+SR cosh 709 | 4.109203730777486e+307
+sinh 711 | +infinity
+SR sinh 711 | +infinity
+cosh 711 | +infinity
+SR cosh 711 | +infinity
+sinh 745 | +infinity
+SR sinh 745 | +infinity
+cosh 745 | +infinity
+SR cosh 745 | +infinity
+sinh -746 | -infinity
+SR sinh -746 | -infinity
+cosh -746 | +infinity
+SR cosh -746 | +infinity
+sinh 1000 | +infinity
+SR sinh 1000 | +infinity
+cosh 1000 | +infinity
+SR cosh 1000 | +infinity
+sinh -1000 | -infinity
+SR sinh -1000 | -infinity
+cosh -1000 | +infinity
+SR cosh -1000 | +infinity
+sinh 1000000 | +infinity
+SR sinh 1000000 | +infinity
+cosh 1000000 | +infinity
+SR cosh 1000000 | +infinity
+sinh -1000000 | -infinity
+SR sinh -1000000 | -infinity
+cosh -1000000 | +infinity
+SR cosh -1000000 | +infinity
+tanh -700 | -1.0
+tanh 1 | 0.7615941559557649
+tanh 20 | 1.0
+tanh 700 | 1.0
+exp (1000, 1) | +infinity + +infinity*I
+SR exp (1000, 1) | +infinity + +infinity*I
+sinh (1000, 1) | +infinity + +infinity*I
+cosh (1000, 1) | +infinity + +infinity*I
+tanh (1000, 1) | 1.0
+exp (-1000, 1) | 0.0
+SR exp (-1000, 1) | 0.0
+sinh (-1000, 1) | -infinity + +infinity*I
+cosh (-1000, 1) | +infinity - +infinity*I
+tanh (-1000, 1) | -1.0
+exp (2000, -2) | -infinity - +infinity*I
+SR exp (2000, -2) | -infinity - +infinity*I
+sinh (2000, -2) | -infinity - +infinity*I
+cosh (2000, -2) | -infinity - +infinity*I
+tanh (2000, -2) | 1.0
+exp (746, 2) | -infinity + +infinity*I
+SR exp (746, 2) | -infinity + +infinity*I
+sinh (746, 2) | -infinity + +infinity*I
+cosh (746, 2) | -infinity + +infinity*I
+tanh (746, 2) | 1.0
+exp (1000, -1) | +infinity - +infinity*I
+SR exp (1000, -1) | +infinity - +infinity*I
+sinh (1000, -1) | +infinity - +infinity*I
+cosh (1000, -1) | +infinity - +infinity*I
+tanh (1000, -1) | 1.0
+exp (-746, 1) | 0.0
+SR exp (-746, 1) | 0.0
+sinh (-746, 1) | -infinity + +infinity*I
+cosh (-746, 1) | +infinity - +infinity*I
+tanh (-746, 1) | -1.0
+exp (750, 1.50000000000000) | +infinity + +infinity*I
+SR exp (750, 1.50000000000000) | +infinity + +infinity*I
+sinh (750, 1.50000000000000) | +infinity + +infinity*I
+cosh (750, 1.50000000000000) | +infinity + +infinity*I
+tanh (750, 1.50000000000000) | 1.0
+sinh (1, 1) | 0.6349639147847361 + 1.2984575814159773*I
+cosh (1, 1) | 0.8337300251311491 + 0.9888977057628651*I
+tanh (1, 1) | 1.0839233273386946 + 0.27175258531951174*I
+sinh (0.500000000000000, -2) | -0.21685216292078974 - 1.0253473885839877*I
+cosh (0.500000000000000, -2) | -0.4692579782290534 - 0.473830620416407*I
+tanh (0.500000000000000, -2) | 1.3212865837711916 + 0.8508781211449377*I
+sinh (-3, 0.250000000000000) | -9.706443456311078 + 2.490779438191711*I
+cosh (-3, 0.250000000000000) | 9.754682765293257 - 2.4784619203578266*I
+tanh (-3, 0.250000000000000) | -0.9956560179073012 + 0.0023664441570039906*I
+sinh (20, 1) | 131067936.90343815 + 204126217.3879959*I
+cosh (20, 1) | 131067936.90343815 + 204126217.3879959*I
+tanh (20, 1) | 1.0 + 7.726035185161155e-18*I
+sinh (-0.250000000000000, 7) | -0.19044499511656315 + 0.6776245843638835*I
+cosh (-0.250000000000000, 7) | 0.7775846611584262 - 0.1659629068142717*I
+tanh (-0.250000000000000, 7) | -0.41214052443903926 + 0.783483233844164*I
+sinh (100, 2) | -5.593257224174655e+42 + 1.222149000029709e+43*I
+cosh (100, 2) | -5.593257224174655e+42 + 1.222149000029709e+43*I
+tanh (100, 2) | 1.0 - 2.0946726893646755e-87*I
+sinh (710, 3) | -1.1058190279723804e+308 + 1.5763067970322092e+307*I
+cosh (710, 3) | -1.1058190279723804e+308 + 1.5763067970322092e+307*I
+tanh (710, 3) | 1.0
+exp (1000, inf) | NaN + NaN*I
+sinh (1000, inf) | NaN + NaN*I
+cosh (1000, inf) | NaN + NaN*I
+tanh (1000, inf) | NaN + NaN*I
+exp (1000, nan) | NaN + NaN*I
+sinh (1000, nan) | NaN + NaN*I
+cosh (1000, nan) | NaN + NaN*I
+tanh (1000, nan) | NaN + NaN*I
+exp (nan, 1) | NaN + NaN*I
+sinh (nan, 1) | NaN + NaN*I
+cosh (nan, 1) | NaN + NaN*I
+tanh (nan, 1) | NaN + NaN*I
+exp (inf, 1) | +infinity + +infinity*I
+sinh (inf, 1) | +infinity + +infinity*I
+cosh (inf, 1) | +infinity + +infinity*I
+tanh (inf, 1) | 1.0
+exp (-inf, 1) | 0.0
+sinh (-inf, 1) | -infinity + +infinity*I
+cosh (-inf, 1) | +infinity - +infinity*I
+tanh (-inf, 1) | -1.0
+exp (710, inf) | NaN + NaN*I
+sinh (710, inf) | NaN + NaN*I
+cosh (710, inf) | NaN + NaN*I
+tanh (710, inf) | NaN + NaN*I
+exp (1000, -inf) | NaN + NaN*I
+sinh (1000, -inf) | NaN + NaN*I
+cosh (1000, -inf) | NaN + NaN*I
+tanh (1000, -inf) | NaN + NaN*I
+exp (5, inf) | NaN + NaN*I
+sinh (5, inf) | NaN + NaN*I
+cosh (5, inf) | NaN + NaN*I
+tanh (5, inf) | NaN + NaN*I
+tanh (0.5, inf) | NaN + NaN*I
+tanh (-0.5, -inf) | NaN + NaN*I
