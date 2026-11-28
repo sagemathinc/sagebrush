@@ -121,7 +121,7 @@ PARI's `quadclassunit`, which does not certify:
     |d| = 10^20 (6x at 10^32-10^36), quartics from about 10^33 (3.6x at
     10^41). Quintics and sextics are 5-122x slower at every size tested.
     Rerun: `sagebrush bench nf --large`.
-- **Integer algorithms:** factoring (Pollard rho and ECM), the Hermite and
+- **Integer algorithms:** factoring (Pollard rho, ECM and the quadratic sieve), the Hermite and
   Smith normal forms, exact LLL, and complex roots to any precision.
 
 **Exact linear algebra and polynomial arithmetic** (`engine/arith`,
@@ -267,7 +267,7 @@ POSIX defaults.
   `solve_right` and `solve_left` (`sagebrush.linalg`; checked by
   `sage-tests/test_linalg.sage`), and over ZZ `hermite_form`,
   `elementary_divisors`, `smith_form` and `LLL`. Also
-  `roots(RR)`, `roots(CC)`, and `factor(n)` by ECM. In Magma mode:
+  `roots(RR)`, `roots(CC)`, and `factor(n)` by ECM and the quadratic sieve. In Magma mode:
   `NumberField`, `QuadraticField`, `MaximalOrder`, `IntegralBasis`,
   `ClassGroup`, `ClassNumber`, `UnitGroup`, `Signature`, `Decomposition`,
   `Matrix`, `HermiteForm`, `SmithForm`, `ElementaryDivisors` and `LLL`.
@@ -575,7 +575,7 @@ use sagebrush_bigint::BigInt;
 
 fn main() -> Result<(), String> {
     let z = |v: &[i64]| v.iter().map(|&c| BigInt::from(c)).collect::<Vec<_>>();
-    // 2^128 + 1 = 59649589127497217 * 5704689200685129054721 (ECM)
+    // 2^128 + 1 = 59649589127497217 * 5704689200685129054721 (the quadratic sieve)
     let n: BigInt = (BigInt::from(1) << 128u32) + 1;
     println!("{:?}", sagebrush_classgroup::api::factor_integer(&n)?);
     // Q[x]/(x^3 - 11): h = 2, R = 5.5872066260609077619 (assuming GRH: see k.certified)

@@ -1,5 +1,6 @@
 //! Factoring integers: trial division, Miller-Rabin, perfect powers,
-//! Pollard-Brent rho and the elliptic curve method (ecm.rs).
+//! Pollard-Brent rho, the elliptic curve method (ecm.rs) and the quadratic
+//! sieve (siqs.rs).
 
 use sagebrush_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive, Zero};
@@ -133,26 +134,94 @@ fn strong_lucas_prp(n: &BigInt) -> bool {
 pub const TRIAL_BOUND: u64 = 1 << 16;
 /// One Pollard-Brent rho attempt's iterations.
 pub const RHO_ITERS: u64 = 1 << 20;
+const ECM_SEED: u64 = 0x2545_F491_4F6C_DD1D;
 /// Rho and ECM work modulo at most this many bits.
 pub const SPLIT_BITS_MAX: u64 = 1024;
 
+/// The levels of ECM's schedule run before the quadratic sieve on a
+/// composite of `bits` bits: they find a small factor for a fraction of the
+/// sieve's cost, which depends on n's size alone.
+pub fn ecm_levels_before_siqs(bits: u64) -> usize {
+    match bits {
+        0..=179 => 0,
+        180..=229 => 1,
+        _ => 2,
+    }
+}
+
 /// A nontrivial factor of a composite n (no factors below 2^16): a perfect
 /// power's root, then Pollard-Brent rho (in Montgomery arithmetic; factors
-/// up to ~10^12), then the elliptic curve method with bounds that keep
-/// growing until it succeeds (Stop interrupts).  None only when no method
-/// applies: rho and ECM work on at most 1024 bits.
-fn split(n: &BigInt) -> Option<BigInt> {
+/// up to ~10^12).  Then, for n of siqs::MIN_BITS to siqs::MAX_BITS bits, a
+/// few levels of ECM and the quadratic sieve; otherwise, or if the sieve
+/// finds nothing, the elliptic curve method with bounds that keep growing
+/// until it succeeds (Stop interrupts).  None only when no method applies:
+/// rho and ECM work on at most 1024 bits.
+fn split(n: &BigInt) -> Result<Option<BigInt>, FactorError> {
     for k in (2..=n.bits() as u32 / 16).rev() {
         let r = num_integer::Roots::nth_root(n, k);
         if r.pow(k) == *n {
-            return Some(r);
+            return Ok(Some(r));
         }
     }
-    let nu = n.to_biguint()?;
+    let Some(nu) = n.to_biguint() else { return Ok(None) };
     if let Some(d) = super::ecm::rho(&nu, RHO_ITERS, 0x9E37_79B9) {
-        return Some(BigInt::from(d));
+        return Ok(Some(BigInt::from(d)));
     }
-    super::ecm::ecm_until_found(&nu, 0x2545_F491_4F6C_DD1D).map(BigInt::from)
+    let bits = n.bits() as u64;
+    if (super::siqs::MIN_BITS..=super::siqs::MAX_BITS).contains(&bits) {
+        if let Some(d) = super::ecm::ecm_levels(&nu, ECM_SEED, ecm_levels_before_siqs(bits)) {
+            return Ok(Some(BigInt::from(d)));
+        }
+        // (a refused reservation is the error: memory never picks the route)
+        let d = super::siqs::siqs(&nu, 1).map_err(|e| match e {
+            sagebrush_ledger::EngineError::Memory(r) => FactorError::Memory(r),
+            e => FactorError::Message(e.to_string()),
+        })?;
+        if let Some(d) = d {
+            return Ok(Some(BigInt::from(d)));
+        }
+    }
+    Ok(super::ecm::ecm_until_found(&nu, ECM_SEED).map(BigInt::from))
+}
+
+/// Why factor_typed gave no factorization: the memory ledger refused a
+/// reservation (the quadratic sieve's), typed so that the host raises its
+/// MemoryError, or a message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FactorError {
+    Memory(sagebrush_ledger::Refusal),
+    Message(String),
+}
+
+// (the typed error carried up the class group's paths to the engine call:
+// a message converts into it, and it into its message, so a path that
+// keeps String still compiles; only the paths typed end to end keep a
+// refusal typed)
+impl From<String> for FactorError {
+    fn from(m: String) -> Self {
+        FactorError::Message(m)
+    }
+}
+
+impl From<&str> for FactorError {
+    fn from(m: &str) -> Self {
+        FactorError::Message(m.to_string())
+    }
+}
+
+impl From<FactorError> for String {
+    fn from(e: FactorError) -> Self {
+        e.to_string()
+    }
+}
+
+impl std::fmt::Display for FactorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FactorError::Memory(r) => write!(f, "{}", sagebrush_ledger::EngineError::Memory(r.clone())),
+            FactorError::Message(m) => f.write_str(m),
+        }
+    }
 }
 
 /// The factorization of |n| > 0 as sorted (prime, exponent) pairs; the
@@ -160,6 +229,11 @@ fn split(n: &BigInt) -> Option<BigInt> {
 /// 3.3e24).  A composite is never reported as a prime: one that cannot be
 /// split (beyond 1024 bits, where rho and ECM do not apply) is an error.
 pub fn factor(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
+    factor_typed(n).map_err(|e| e.to_string())
+}
+
+/// factor, with a memory refusal kept typed.
+pub fn factor_typed(n: &BigInt) -> Result<Vec<(BigInt, u32)>, FactorError> {
     let mut n = n.abs();
     let mut out: Vec<(BigInt, u32)> = vec![];
     let push = |p: BigInt, out: &mut Vec<(BigInt, u32)>| {
@@ -187,11 +261,11 @@ pub fn factor(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
         sagebrush_interrupt::check();
         if is_probable_prime(&m) {
             push(m, &mut out);
-        } else if let Some(d) = split(&m) {
+        } else if let Some(d) = split(&m)? {
             stack.push(&m / &d);
             stack.push(d);
         } else {
-            return Err(format!("cannot factor a composite of {} bits: rho and ECM work on at most 1024 bits", m.bits()));
+            return Err(FactorError::Message(format!("cannot factor a composite of {} bits: rho and ECM work on at most 1024 bits", m.bits())));
         }
     }
     out.sort();
@@ -234,6 +308,25 @@ mod tests {
         assert!(!is_probable_prime(&n));
         let e = factor(&n).unwrap_err();
         assert!(e.contains("1128 bits"), "{}", e);
+    }
+
+    // Composites in the quadratic sieve's range, balanced and not, through
+    // the whole pipeline.
+    #[test]
+    fn factors_in_the_sieve_range() {
+        // 2^80 - 65 and 2^80 - 143; 2^61 - 1 and 2^89 - 1 and 2^31 - 1;
+        // 1000003^2 times 2^89 - 1
+        let cases: [&[(&str, u32)]; 3] = [
+            &[("1208925819614629174706033", 1), ("1208925819614629174706111", 1)],
+            &[("2147483647", 1), ("2305843009213693951", 1), ("618970019642690137449562111", 1)],
+            &[("1000003", 2), ("618970019642690137449562111", 1)],
+        ];
+        for want in cases {
+            let want: Vec<(BigInt, u32)> = want.iter().map(|&(p, e)| (p.parse().unwrap(), e)).collect();
+            let n: BigInt = want.iter().map(|(p, e)| p.pow(*e)).product();
+            assert!((super::super::siqs::MIN_BITS..=super::super::siqs::MAX_BITS).contains(&(n.bits() as u64)));
+            assert_eq!(factor(&n).unwrap(), want);
+        }
     }
 
     // Every factor reported is a probable prime and the product is n.

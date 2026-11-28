@@ -32,6 +32,9 @@ try {
   mkdirSync(join(repo, "engine"));
   const git = gitIn(repo);
   git("init", "-q", "-b", "master");
+  // (the repository's own identity, as the wasm-pins job sets one: pinCommit's git has no other, on a runner)
+  git("config", "user.name", "pins");
+  git("config", "user.email", "pins@example.invalid");
   git("remote", "add", "origin", remote);
   const old = Object.fromEntries(MODULES.map((n) => [n, { sha256: "0".repeat(64), bytes: 1 }]));
   writeFileSync(join(repo, "engine", "lib.rs"), "fn f() {}\n");

@@ -1,0 +1,427 @@
+{
+ "summaries": {
+  "space/src/main.ts#scene": "The module's top: its imports, **codeRoom** (which parses a file's text into a room with **jsRoom** or **pythonRoom**, each loaded on first use), the page parts found under the viewer's root element, and the three.js renderer, camera, orbit controls, lights and the light and dark themes.",
+  "space/src/main.ts#ground": "The floor under the space: a large tiled plane, placed at 0 on the ground or just under the lowest object when floating (**placeGround**), and the terraces and ramps built as instanced meshes (**buildTerraces**). **groundAt** says how high the ground is at a point, and **walkable** lists what you can stand on.",
+  "space/src/main.ts#objects": "Each object becomes a slab with a glyph above it (**makeObject**); semantic zoom (**stepZoom**) swaps in a title or face texture as you come near, and landmarks label groups from afar. **load** checks a space, builds its objects, links and arrows, places them on the ground or in the air, and frames the view with **homeView** and **frame**.",
+  "space/src/main.ts#flying": "Camera flights and the Back and Forward history: **flyTo** and **flyToView** start a flight to an object's view (**viewOf**), **stepFlight** moves along an arc (or blinks when walking), and **go** pops a view, leaving a room when Back passes the place it was entered. **setGround** morphs the objects between the ground and the floating layout.",
+  "space/src/main.ts#picking": "Mouse picking: **pick** raycasts against the objects, hovering makes one glow and shows its title, and a click (not a drag) calls **openOverlay**; walking, a click on the floor goes there.",
+  "space/src/main.ts#selection": "The selected object: **setSelected** makes it glow, colors its links, writes #sel=ID to the address and sends a space3d:select event (and a message to the page around an embedded view). **openOverlay** remembers the view and flies to the object, and **showOverlay** builds the drawer: tour card, Enter button, summary, highlighted code or runner, output and links.",
+  "space/src/main.ts#tours": "Guided tours from the space's tours list: **startTour** and **tourStep** move from stop to stop (leaving rooms first, skipping stops not in the space), the drawer shows the stop's narration, and a pill shows where the tour is when you wander off. This part also holds **closeOverlay**, **viewOffset** and the KaTeX **typeset** loader.",
+  "space/src/main.ts#rooms": "Entering an object: **enterKind** decides what can be entered (a folder, a Python, Sage, JavaScript or TypeScript file, a class, an import, a notebook, a .space.json), **roomFor** builds its room, and **enterRoom** loads it, remembering the way back. **leaveRoom** restores the outer space; **fullText** fetches a file's text, from the site or, through **askPage**, from the page that opened the view.",
+  "space/src/main.ts#running": "Editing and running code: **mountRunner** puts an editor and Run button in the drawer, **runNode** runs the code with **run**, keeps output, figures and 3D scenes on the object and redraws its face, and Run all runs every runnable object in order. **save** and **restore** keep edits in localStorage; this part also has the theme toggle, fold, full screen and keyboard handling.",
+  "space/src/main.ts#walking": "Walking with a mouse: you stand at eye height on the ground, drag to look (**look**), walk with W A S D or the wheel (**walkBy**, which climbs steps but not terrace sides), jump with Space, and fall under gravity (**stepWalk**). Clicking the floor goes there (**floorAt**, **goToFloor**); G switches to flying (**setDeskWalk**).",
+  "space/src/main.ts#search": "Full-text search: **buildIndex** lowercases each object's title, summary, text, output and group, and **search** keeps the objects containing every word, ranked by title hits and counts, with a snippet; a click opens the object.",
+  "space/src/main.ts#start": "Which space to show: **start** reads spaces.json and loads the ?space= file (or intro.space.json), selecting #sel=ID if given. Embedded (?embed=1), **embed** instead waits for space-load messages from the parent page, answers space-file replies, and says space-ready.",
+  "space/src/main.ts#headset": "The bridge to xr.ts: an API object (views, tours, rooms, running, the floor, the theme) handed to **setupXR**, which is loaded only when **supported** reports VR or AR. Also the frame loop **tick**, which steps flights, walking, zoom and landmarks and renders, and the window.space3d API for scripts and tests.",
+  "space/src/xr.ts#setup": "**setupXR** starts here: it enables three.js's WebXR, puts the camera in a rig, creates the controller input with **createInput**, and makes the blink fader, the walking vignette, the disc under your feet and the floor mark.",
+  "space/src/xr.ts#menumesh": "The wrist menu's mesh: a small plane with a canvas texture, tilted, which is attached to the left controller and drawn by **drawMenu**.",
+  "space/src/xr.ts#controllers": "Two controllers, each with a ray line; on connect the left one gets the wrist menu, and each controller's select event calls **onSelect**.",
+  "space/src/xr.ts#moving": "Moving the rig in a headset: **flyRig** and **flyPose** go to a view (a blink when walking, a glide when flying), **teleport** steps to a floor point, and **goBack** and **goForward** use stacks that remember how many rooms deep each place was.",
+  "space/src/xr.ts#panel": "The reading panel: a canvas-textured plane that **draw** fills with the title, tour narration, summary, links, highlighted code (via **codeRuns**), output and buttons. **open** places it beside the object after flying there, and **press** handles its buttons: tour stops, Enter, Run, scroll, wrap and close.",
+  "space/src/xr.ts#menu": "The wrist menu: **drawMenu** paints Back, Forward, See all, Run all, Tour, Fly and Exit, greying those that do nothing now, and **menuPress** carries them out.",
+  "space/src/xr.ts#pointing": "**hit** raycasts a controller's ray at the panel, the wrist menu (from the other hand), the objects and, when walking, the floor; **onSelect** turns the hit into a menu press, a panel press, a teleport or opening an object.",
+  "space/src/xr.ts#frame": "**step** runs every frame in a headset: it advances flights, sizes each ray to what it hits, glows the object pointed at, and reads the thumbsticks: the left one walks, the right one turns in 30-degree steps (and moves up and down when flying); A or X closes the panel, B or Y goes back.",
+  "space/src/xr.ts#enter": "**enter** requests an immersive VR or AR session on a click, uses the local-floor reference space when it can, puts the rig where the camera was, and hands the session to three.js; **leave** puts the camera, background and fog back when it ends.",
+  "space/src/code.ts": "Code highlighting with Sagebrush's one highlighter: **drawCode** fills an element with highlighted text, **editor** is a textarea over a highlighted copy that runs on Shift+Enter or Ctrl+Enter, and **codeRuns** gives colored runs per line for drawing on a canvas.",
+  "space/src/coderoom.ts": "**buildRoom** turns a parser's outline (entities and import portals) into a directed room: one object per function, class or block, links for calls and uses, unlinked objects moved to a shelf, then laid out with **layered** and checked with **checkSpace**.",
+  "space/src/ground.ts": "Ground layouts: **groundPlan** stands a room as a grandstand of terraced rows (with stands for imports and unlinked objects) or spreads any other space's plan on the floor, with mounds under objects placed high. **supportAt** gives the ground's height at a point.",
+  "space/src/jsroom.ts": "A JavaScript or TypeScript file's room from Babel's parser: **jsRoom** collects functions, classes, types, runs of top-level code and imports, with what each refers to, and passes them to **buildRoom**. **resolveJs** finds the file a relative import leads to.",
+  "space/src/keep.ts": "**keepEdit** stores an object's edits and last output in localStorage under a byte and count budget, dropping the oldest copies first and the figures of a copy that is too large.",
+  "space/src/layout.ts": "**layout** is a force-directed placement in 3D or on a plane: repulsion between all pairs, springs along links, a pull towards each group's centre, objects with a position kept fixed, and a near object started beside the one it names.",
+  "space/src/nbroom.ts": "**notebookRoom** makes a notebook's room: code cells with their saved outputs and text cells as notes, linked from the cell that defines a name to each later cell that reads it (via **cellNames**), then laid out with **layered**.",
+  "space/src/pyroom.ts": "A Python or Sage file's room from a real parse (Sage's preparser first): **pythonRoom** makes objects for functions, classes, blocks of top-level code and imported modules, linked by the file's own references; a class's room holds its methods. **cellNames** gives a notebook cell's defined and read names.",
+  "space/src/read.ts": "What the viewer may read, and how much: **sameSite** and **readable** allow only this site or Sagebrush's repository pinned at one commit, **readText** fetches without redirects within a byte cap, and **checkSpace** checks a whole space against LIMITS before anything is drawn.",
+  "space/src/roomlayout.ts": "**layered** lays out a room by depth in its links: entry points at the top and what they call below, cycles sharing a level, barycenter sweeps to reduce crossings, wide levels wrapped into rows, imports in a column on the left and unlinked objects on a shelf.",
+  "space/src/run.ts": "Running code with Sagebrush's engine in a Web Worker, one per language, started on first use (**engine**). **run** collects output and displays, **interrupt** stops it, and **sceneObject** turns a 3D scene into three.js meshes, lines and points.",
+  "space/src/sizes.ts": "**sizeOf** gives an object's slab size by its kind, grown with its length in lines (or a folder's file count), or the size the object asks for.",
+  "space/src/tex.ts": "**texToText** and **math** turn TeX math into plain Unicode text (fractions, roots, Greek letters, super- and subscripts) for drawing on canvases, where KaTeX can't.",
+  "space/src/treeroom.ts": "**treeRoom** makes a folder's room from a space's tree: its subfolders (entered in turn) and files, linked by the imports between them. **resolveImport** finds the file a Python import leads to.",
+  "workspace/space3d.ts": "The site's hooks into the 3D view. **openIn3D** opens a folder of the file browser in a framed viewer, sends it the folder's tree with line counts and Python imports, and answers its file reads only for that tree, within limits; **mountSpace** shows a .space.json in the chat pane, follows the file as it changes, and writes the selection back to it.",
+  "xr-input.js": "WebXR helpers shared with the 3D plot viewer: **supported** says whether a browser can enter VR or AR, and **createInput** reads both controllers each frame (dead-zoned thumbsticks, held buttons and new presses, grip pose).",
+  "space/index.html": "The viewer's page: the [data-space3d] root with its named parts (the control panel, title, buttons, tour menu, search box, drawer, tour pill, fade and help card), their light and dark styles, and the script that starts the viewer.",
+  "space/format.md": "The .space.json format: objects (notes, files, runnable code, 3D plots) with ids, groups, summaries and links, plus tours, a tree of files shown as rooms, the floating layout option and the selected object."
+ },
+ "links": [
+  [
+   "space/src/main.ts#scene",
+   "space/src/jsroom.ts"
+  ],
+  [
+   "space/src/main.ts#scene",
+   "space/src/pyroom.ts"
+  ],
+  [
+   "space/src/main.ts#scene",
+   "space/src/read.ts"
+  ],
+  [
+   "space/src/main.ts#scene",
+   "space/index.html"
+  ],
+  [
+   "space/src/main.ts#ground",
+   "space/src/ground.ts"
+  ],
+  [
+   "space/src/main.ts#objects",
+   "space/src/layout.ts"
+  ],
+  [
+   "space/src/main.ts#objects",
+   "space/src/ground.ts"
+  ],
+  [
+   "space/src/main.ts#objects",
+   "space/src/sizes.ts"
+  ],
+  [
+   "space/src/main.ts#objects",
+   "space/src/run.ts"
+  ],
+  [
+   "space/src/main.ts#objects",
+   "space/src/treeroom.ts"
+  ],
+  [
+   "space/src/main.ts#objects",
+   "space/src/read.ts"
+  ],
+  [
+   "space/src/main.ts#objects",
+   "space/src/main.ts#running"
+  ],
+  [
+   "space/src/main.ts#objects",
+   "space/src/main.ts#rooms"
+  ],
+  [
+   "space/src/main.ts#flying",
+   "space/src/main.ts#rooms"
+  ],
+  [
+   "space/src/main.ts#flying",
+   "space/src/main.ts#selection"
+  ],
+  [
+   "space/src/main.ts#flying",
+   "space/src/main.ts#walking"
+  ],
+  [
+   "space/src/main.ts#picking",
+   "space/src/main.ts#selection"
+  ],
+  [
+   "space/src/main.ts#picking",
+   "space/src/main.ts#walking"
+  ],
+  [
+   "space/src/main.ts#selection",
+   "space/src/main.ts#flying"
+  ],
+  [
+   "space/src/main.ts#selection",
+   "space/src/main.ts#rooms"
+  ],
+  [
+   "space/src/main.ts#selection",
+   "space/src/main.ts#running"
+  ],
+  [
+   "space/src/main.ts#selection",
+   "space/src/code.ts"
+  ],
+  [
+   "space/src/main.ts#tours",
+   "space/src/main.ts#rooms"
+  ],
+  [
+   "space/src/main.ts#rooms",
+   "space/src/treeroom.ts"
+  ],
+  [
+   "space/src/main.ts#rooms",
+   "space/src/jsroom.ts"
+  ],
+  [
+   "space/src/main.ts#rooms",
+   "space/src/nbroom.ts"
+  ],
+  [
+   "space/src/main.ts#rooms",
+   "space/src/read.ts"
+  ],
+  [
+   "space/src/main.ts#rooms",
+   "space/src/main.ts#scene"
+  ],
+  [
+   "space/src/main.ts#rooms",
+   "space/src/main.ts#objects"
+  ],
+  [
+   "space/src/main.ts#running",
+   "space/src/run.ts"
+  ],
+  [
+   "space/src/main.ts#running",
+   "space/src/code.ts"
+  ],
+  [
+   "space/src/main.ts#running",
+   "space/src/keep.ts"
+  ],
+  [
+   "space/src/main.ts#walking",
+   "space/src/main.ts#ground"
+  ],
+  [
+   "space/src/main.ts#search",
+   "space/src/main.ts#selection"
+  ],
+  [
+   "space/src/main.ts#start",
+   "space/src/main.ts#objects"
+  ],
+  [
+   "space/src/main.ts#headset",
+   "xr-input.js"
+  ],
+  [
+   "space/src/main.ts#headset",
+   "space/src/xr.ts#setup"
+  ],
+  [
+   "space/src/main.ts#headset",
+   "space/src/main.ts#running"
+  ],
+  [
+   "space/src/main.ts#headset",
+   "space/src/main.ts#rooms"
+  ],
+  [
+   "space/src/xr.ts#setup",
+   "xr-input.js"
+  ],
+  [
+   "space/src/xr.ts#controllers",
+   "space/src/xr.ts#pointing"
+  ],
+  [
+   "space/src/xr.ts#pointing",
+   "space/src/xr.ts#panel"
+  ],
+  [
+   "space/src/xr.ts#pointing",
+   "space/src/xr.ts#menu"
+  ],
+  [
+   "space/src/xr.ts#pointing",
+   "space/src/xr.ts#moving"
+  ],
+  [
+   "space/src/xr.ts#panel",
+   "space/src/xr.ts#moving"
+  ],
+  [
+   "space/src/xr.ts#panel",
+   "space/src/code.ts"
+  ],
+  [
+   "space/src/xr.ts#panel",
+   "space/src/main.ts#headset"
+  ],
+  [
+   "space/src/xr.ts#menu",
+   "space/src/xr.ts#moving"
+  ],
+  [
+   "space/src/xr.ts#frame",
+   "space/src/xr.ts#pointing"
+  ],
+  [
+   "space/src/xr.ts#enter",
+   "space/src/main.ts#headset"
+  ],
+  [
+   "workspace/space3d.ts",
+   "space/src/read.ts"
+  ],
+  [
+   "workspace/space3d.ts",
+   "space/src/main.ts#start"
+  ],
+  [
+   "space/src/jsroom.ts",
+   "space/src/coderoom.ts"
+  ],
+  [
+   "space/src/coderoom.ts",
+   "space/src/roomlayout.ts"
+  ],
+  [
+   "space/src/pyroom.ts",
+   "space/src/roomlayout.ts"
+  ],
+  [
+   "space/src/nbroom.ts",
+   "space/src/pyroom.ts"
+  ],
+  [
+   "space/src/nbroom.ts",
+   "space/src/roomlayout.ts"
+  ],
+  [
+   "space/src/treeroom.ts",
+   "space/src/roomlayout.ts"
+  ],
+  [
+   "space/src/roomlayout.ts",
+   "space/src/sizes.ts"
+  ]
+ ],
+ "tours": [
+  {
+   "id": "click",
+   "title": "How a click becomes a flight",
+   "steps": [
+    {
+     "node": "space/src/main.ts#picking",
+     "text": "It starts with the mouse: on pointerup, a click that moved less than 4 pixels is a click, not a drag. **pick** raycasts from the mouse into the scene and returns the object under it, and **openOverlay** is called with it."
+    },
+    {
+     "node": "space/src/main.ts#selection",
+     "text": "**openOverlay** first pushes the current view onto Back's history, then **showOverlay** builds the drawer and **setSelected** marks the object, and finally **flyTo** is asked to go there."
+    },
+    {
+     "node": "space/src/main.ts#flying",
+     "text": "**flyTo** asks **viewOf** where to stand: in front of the slab's face, or on the ground in front of it. **flyToView** records a flight, and **stepFlight** moves the camera along an arc each frame, or blinks there when you are walking."
+    },
+    {
+     "node": "space/src/main.ts#headset",
+     "text": "The frame loop **tick** is what moves it: outside a headset it calls **stepFlight**, then the zoom and landmark steps, and renders the scene."
+    },
+    {
+     "node": "space/src/main.ts#objects",
+     "text": "As the camera arrives, **stepZoom** sees the object is near and makes its face texture, nearest objects first, so what you flew to sharpens into its title, summary and first lines."
+    }
+   ]
+  },
+  {
+   "id": "room",
+   "title": "How a file becomes a room",
+   "steps": [
+    {
+     "node": "space/src/main.ts#selection",
+     "text": "When a file is open in the drawer, **showOverlay** asks **enterKind** whether it can be entered; if so it shows an Enter button, which calls **enterRoom**."
+    },
+    {
+     "node": "space/src/main.ts#rooms",
+     "text": "**enterRoom** calls **roomFor**, which fetches the file's whole text with **fullText** and hands it to **codeRoom**. Before loading the room it saves the outer space on scopes and marks the way back in the history."
+    },
+    {
+     "node": "space/src/main.ts#scene",
+     "text": "**codeRoom** refuses text over ROOM_TEXT bytes and picks a parser by the file's extension: **jsRoom** for JavaScript and TypeScript, **pythonRoom** otherwise, each loaded the first time it is needed."
+    },
+    {
+     "node": "space/src/pyroom.ts",
+     "text": "**pythonRoom** parses the file (Sage's preparser first for .sage) and makes an object per function, class, block of top-level code and imported module, linked by calls and uses; **finish** shelves the unlinked ones."
+    },
+    {
+     "node": "space/src/roomlayout.ts",
+     "text": "**layered** places the room by depth in its links: what nothing calls at the top, what it calls below, imports in a column on the left, and it records each object's row for the ground's terraces."
+    },
+    {
+     "node": "space/src/main.ts#objects",
+     "text": "Back in **enterRoom**, **load** draws the room as any space: **groundPlan** turns the rows into a grandstand of terraces, and on the ground the view is framed from the room's door."
+    }
+   ]
+  },
+  {
+   "id": "run",
+   "title": "How Run works",
+   "steps": [
+    {
+     "node": "space/src/main.ts#selection",
+     "text": "For a code or 3D plot object, **showOverlay** builds a run bar (a language menu, Run and Stop) and an editor area, and calls **mountRunner**."
+    },
+    {
+     "node": "space/src/code.ts",
+     "text": "**editor** is a textarea over a highlighted copy of its text; Shift+Enter or Ctrl+Enter calls its onRun, and every change is reported so it can be saved."
+    },
+    {
+     "node": "space/src/main.ts#running",
+     "text": "**runNode** picks the language, calls **run**, and streams live output into the drawer. When it finishes it keeps the output, the last SVG or PNG, and any 3D scene on the object, and clears the face textures so they are drawn again."
+    },
+    {
+     "node": "space/src/run.ts",
+     "text": "**run** gets one engine per language from **engine**, which loads Sagebrush's notebook module and starts a Web Worker on first use; output and displays arrive through callbacks. A 3D scene becomes a real object through **sceneObject**."
+    },
+    {
+     "node": "space/src/keep.ts",
+     "text": "After a run, **save** calls **keepEdit**, which stores the edited code and output in localStorage within its byte budget; **restore** brings them back the next time the space loads, unless the file has changed."
+    }
+   ]
+  },
+  {
+   "id": "openin3d",
+   "title": "Open in 3D: from the file browser to the room",
+   "steps": [
+    {
+     "node": "workspace/space3d.ts",
+     "text": "**openIn3D** opens a full-window frame of the viewer at /space/?embed=1, lists the folder, and builds a space whose tree holds each file's path, length and kind, with Python imports read from the text files."
+    },
+    {
+     "node": "space/src/read.ts",
+     "text": "Before sending, the page checks the space with **checkSpace**, the same check the viewer applies, so a folder too large to show is refused with a message instead."
+    },
+    {
+     "node": "space/src/main.ts#start",
+     "text": "Inside the frame, **embed** says space-ready and waits; on the space-load message it calls **load** with the space."
+    },
+    {
+     "node": "space/src/main.ts#objects",
+     "text": "**load** sees a space carrying a tree and no objects, so it shows the top folder's room by calling **treeRoom**."
+    },
+    {
+     "node": "space/src/treeroom.ts",
+     "text": "**treeRoom** makes an object per subfolder and file, links them by the imports between them, and lays them out with **layered**. Each file's src points to the workspace."
+    },
+    {
+     "node": "space/src/main.ts#rooms",
+     "text": "When you open or enter one of those files, **fullText** sees a workspace: src and calls **askPage**, which sends a space-read message; the page answers with space-file, only for files of that tree."
+    }
+   ]
+  },
+  {
+   "id": "vr",
+   "title": "VR: from Enter VR to the panel",
+   "steps": [
+    {
+     "node": "space/src/main.ts#headset",
+     "text": "At startup the viewer asks **supported** about VR and AR; only if one is available does it import xr.ts, call **setupXR** with its API object, and show the Enter VR or Enter AR button."
+    },
+    {
+     "node": "space/src/xr.ts#setup",
+     "text": "**setupXR** turns on three.js's WebXR, puts the camera inside a rig, and creates the controller input with **createInput**."
+    },
+    {
+     "node": "space/src/xr.ts#enter",
+     "text": "A click on Enter VR calls **enter**, which requests the immersive session, places the rig where the camera stood, scales it so a slab is about a metre wide, and hands the session to three.js."
+    },
+    {
+     "node": "space/src/xr.ts#frame",
+     "text": "Every frame, **step** casts each controller's ray with **hit**, glows what it points at, and reads the thumbsticks to walk and turn."
+    },
+    {
+     "node": "space/src/xr.ts#pointing",
+     "text": "Pulling the trigger fires **onSelect**: a hit on an object calls **open** with it; on the floor it teleports, and on the menu or panel it presses a button."
+    },
+    {
+     "node": "space/src/xr.ts#panel",
+     "text": "**open** draws the panel's canvas with the object's title, summary, links, code and output, selects the object, flies the rig to its view with **flyRig**, and places the panel to the right, facing you."
+    }
+   ]
+  }
+ ],
+ "overview": "# The 3D view, in 3D\n\nA **space** is a board in 3D: objects such as notes, source files, runnable code and 3D plots, placed by their links and groups, read from a `.space.json` file. This space shows the source of the viewer itself.\n\nThe viewer (**space/src/main.ts**) loads a space, checks it (**read.ts**), lays it out (**layout.ts**, or **ground.ts** on the floor), and draws each object as a slab whose face sharpens as you come near. You walk or fly, click an object to read it in the drawer, search, and go Back and Forward.\n\n- Folders, code files, classes and notebooks can be **entered** as rooms: **treeroom.ts**, **pyroom.ts**, **jsroom.ts** with **coderoom.ts**, and **nbroom.ts**, laid out by **roomlayout.ts**.\n- Code objects can be edited and **run** in the browser (**run.ts**, **code.ts**, **keep.ts**).\n- In a headset, **xr.ts** adds controllers, a reading panel and a wrist menu, using **xr-input.js**.\n- **workspace/space3d.ts** opens a folder of your files in the view (Open in 3D) and shows a .space.json in the chat pane.\n\nmain.ts and xr.ts are split into their sections, one object each. Pick a guided tour from the panel to follow a path through the code."
+}

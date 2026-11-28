@@ -4,8 +4,7 @@
   "workflow": ".github/workflows/ci.yml",
   "events": [
     "merge_group",
-    "push refs/heads/master",
-    "push refs/heads/track/*"
+    "push refs/heads/master"
   ],
   "jobs": [
     "census",
