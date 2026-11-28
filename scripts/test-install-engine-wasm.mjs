@@ -2,12 +2,12 @@
 // scripts/install-engine-wasm.mjs: a fresh engine module with identical bytes
 // leaves `git diff --quiet wasm/` clean, whatever the build output's mode.
 //   node scripts/test-install-engine-wasm.mjs
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installWasm, namesLocalCargoHome, remappedRustflags } from "./install-engine-wasm.mjs";
+import { LOCK_BUSY, installWasm, lockedCommand, namesLocalCargoHome, relaunchUnderTargetLock, remappedRustflags, removeTargetIfIdle, targetLockPath } from "./install-engine-wasm.mjs";
 
 let failures = 0;
 const ok = (c, what) => (c ? console.log("ok  ", what) : (failures++, console.log("FAIL", what)));
@@ -77,6 +77,81 @@ try {
   ok(!namesLocalCargoHome(new TextEncoder().encode("panicked at /home/runner/.cargo/registry/src/x.rs:1"), env), "CI's Cargo home is fine");
   ok(!namesLocalCargoHome(named, { CARGO_HOME: "/home/runner/.cargo" }), "on CI's own runner nothing is local");
   ok(!namesLocalCargoHome(new TextEncoder().encode("/home/someone/.cargo2/x"), env), "a longer path that only starts the same is not the Cargo home");
+}
+// the target's build lock, a kernel lock (flock on Linux, lockf on macOS): one target's spellings name one lock; a
+// build runs again holding it, so two never overlap and a second says once that it waits; a holder killed outright
+// releases it; a target is pruned only while its lock is free, and its lock file stays
+{
+  ok(JSON.stringify(lockedCommand("/t.lock", ["node", "b.mjs"], { platform: "linux" })) === JSON.stringify(["flock", "-E", "75", "/t.lock", "node", "b.mjs"]), "Linux: flock, a conflict exiting 75");
+  ok(JSON.stringify(lockedCommand("/t.lock", ["rm"], { wait: false, platform: "linux" })) === JSON.stringify(["flock", "-E", "75", "-n", "/t.lock", "rm"]), "Linux, not waiting: flock -n");
+  ok(JSON.stringify(lockedCommand("/t.lock", ["rm"], { wait: false, platform: "darwin" })) === JSON.stringify(["lockf", "-k", "-t", "0", "/t.lock", "rm"]), "macOS, not waiting: lockf -t 0 (its timeout exits 75)");
+  ok(lockedCommand("/t.lock", ["rm"], { platform: "win32" }) === null && LOCK_BUSY === 75, "elsewhere: no lock command");
+  const d = mkdtempSync(join(tmpdir(), "install-engine-wasm-lock-"));
+  try {
+    const target = join(d, "target");
+    mkdirSync(target); // (as cargo makes it)
+    const lock = targetLockPath(target);
+    const alias = join(d, "alias");
+    fs.symlinkSync(target, alias);
+    ok(targetLockPath(alias) === lock && lock === fs.realpathSync(target) + ".lock", "a target reached through a symlink has the real path's lock");
+    // (a target not made yet, or removed by another pruner meanwhile: the same lock, and the target isn't made)
+    const later = join(d, "later");
+    const before = targetLockPath(later);
+    ok(!fs.existsSync(later) && before === join(fs.realpathSync(d), "later") + ".lock", "a missing target's lock is beside its parent's real path, and the target isn't made");
+    mkdirSync(later);
+    ok(targetLockPath(later) === before, "the same lock once the target exists");
+    ok(relaunchUnderTargetLock(target, ["false"], { env: { ...process.env, SAGEBRUSH_TARGET_LOCK: lock } }) === null, "the run that holds the lock goes on (null), it doesn't relaunch");
+    // (no flock or lockf on this machine: the build goes on unlocked, saying so, and pruning is "unsupported", never
+    // a success that skipped the work)
+    const bare = { ...process.env, PATH: join(d, "no-such-bin") };
+    const said = [];
+    ok(relaunchUnderTargetLock(target, ["false"], { env: bare, log: (m) => said.push(m) }) === null && said.length === 1 && /no flock or lockf/.test(said[0]), "no lock tool: the build goes on (null), saying so");
+    ok(removeTargetIfIdle(target, { env: bare }) === "unsupported" && fs.existsSync(target), "no lock tool: pruning is unsupported, the target stays");
+    if (spawnSync("flock", ["--version"]).status === 0) {
+      // (two real builds, each relaunching itself under the lock, the second through the alias: one, then the other)
+      const order = join(d, "order.txt"), script = join(d, "child.mjs");
+      writeFileSync(script, `import { relaunchUnderTargetLock } from ${JSON.stringify(new URL("./install-engine-wasm.mjs", import.meta.url).href)};
+import { appendFileSync } from "node:fs";
+const locked = relaunchUnderTargetLock(process.argv[2], [process.execPath, process.argv[1], process.argv[2]]);
+if (locked !== null) process.exit(locked);
+appendFileSync(${JSON.stringify(order)}, "start\\n");
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+appendFileSync(${JSON.stringify(order)}, "end\\n");
+`);
+      const r = spawnSync("bash", ["-c", `"${process.execPath}" "${script}" "${target}" 2>"${d}/e1" & sleep 0.1; "${process.execPath}" "${script}" "${alias}" 2>"${d}/e2" & wait`]);
+      const waited = readFileSync(join(d, "e2"), "utf8");
+      ok(r.status === 0 && readFileSync(order, "utf8") === "start\nend\nstart\nend\n", "two builds on one target (one through a symlink): one, then the other");
+      ok((waited.match(/waiting for another build/g) ?? []).length === 1, "the second says once that it waits");
+      // (a build that itself exits 75 is not taken for a held lock: it runs once and its status is passed on)
+      const runs = join(d, "runs.txt"), s75 = join(d, "exit75.mjs");
+      writeFileSync(s75, `import { relaunchUnderTargetLock } from ${JSON.stringify(new URL("./install-engine-wasm.mjs", import.meta.url).href)};
+import { appendFileSync } from "node:fs";
+const locked = relaunchUnderTargetLock(process.argv[2], [process.execPath, process.argv[1], process.argv[2]], { log: () => {} });
+if (locked !== null) process.exit(locked);
+appendFileSync(${JSON.stringify(runs)}, "run\\n");
+process.exit(75);
+`);
+      const r75 = spawnSync(process.execPath, [s75, target]);
+      ok(r75.status === 75 && readFileSync(runs, "utf8") === "run\n", "a build exiting 75 runs once, and its 75 is passed on");
+      // (a holder killed outright: the kernel releases its lock)
+      const holder = spawn("flock", [lock, "sleep", "30"], { detached: true, stdio: "ignore" });
+      const until = Date.now() + 5000;
+      while (spawnSync("flock", ["-n", "-E", "75", lock, "true"]).status !== 75 && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      ok(removeTargetIfIdle(target) === "busy" && fs.existsSync(target), "a target whose lock a build holds is not pruned");
+      ok(removeTargetIfIdle(alias) === "busy" && fs.existsSync(target), "nor through a symlink to it (the real path's lock)");
+      process.kill(-holder.pid, "SIGKILL");
+      holder.unref();
+      let freed = false;
+      while (!freed && Date.now() < until + 5000) {
+        freed = spawnSync("flock", ["-n", "-E", "75", lock, "true"]).status === 0;
+        if (!freed) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+      ok(freed, "a holder killed outright releases the lock (no stale lock to recover)");
+      ok(removeTargetIfIdle(target) === "removed" && !fs.existsSync(target) && fs.existsSync(lock), "a free target is pruned under its lock, and its lock file stays");
+    } else console.log("skip: no flock here (the lock rows run on Linux CI)");
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);
