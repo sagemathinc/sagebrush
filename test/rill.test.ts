@@ -242,6 +242,8 @@ cases = {
   # (cat: the element strings, the output and its separators, and the join's pieces: an element and a separator
   # each, and the newline's slot, PIECE_BYTES each, and the list's and output's headers, JOIN_BYTES)
   "cat(x)": 50 * 136 + 24 * 50 + 50 + 10 * (50 + 50 + 1) + 128,
+  # (a zero-length argument writes its separator alone: one more separator's text and piece, 51 in all)
+  "cat(x, character(0))": 50 * 136 + 24 * 50 + 51 + 10 * (50 + 51 + 1) + 128,
   "print(x)": 50 * 136 + 24 * 50 + 2 * (50 * (24 + 1) + 50 * len("[50] ")),
   # (grader's M5) doubles at their own cost: the result and both operands coerced
   "z + z": 50 * 64 * 3,
