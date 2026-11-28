@@ -335,13 +335,17 @@ export class RemoteClient {
     // (the abort is watched from the first moment: one that happens while
     // waiting for the response's headers cancels that wait too)
     if (signal?.aborted) throw new StreamError("aborted", { aborted: true });
+    // (the cursor is sent exactly: a safe non-negative integer, or its decimal string. A gateway's seq grows with
+    // its session and passes 2^31 in a long one, so a 32-bit conversion would turn a valid cursor into another)
+    const cursor = typeof after === "string" && /^(0|[1-9]\d{0,15})$/.test(after) ? Number(after) : after;
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw new StreamError(`the events cursor isn't a non-negative safe integer: ${String(after).slice(0, 32)}`);
     let reader = null;
     const onAbort = () => reader?.cancel().catch(() => {});
     signal?.addEventListener?.("abort", onAbort);
     try {
       let res;
       try {
-        res = await this.send("GET", `${path}/events`, undefined, { accept: "text/event-stream", signal, query: `?after=${Number(after) | 0}` });
+        res = await this.send("GET", `${path}/events`, undefined, { accept: "text/event-stream", signal, query: `?after=${cursor}` });
       } catch (e) {
         if (signal?.aborted) throw new StreamError("aborted", { aborted: true });
         throw new StreamError(`the event stream could not be opened: ${String(e?.message ?? e).slice(0, 200)}`);

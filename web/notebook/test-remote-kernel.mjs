@@ -190,6 +190,24 @@ const lastRun = (fake) => fake.runs.get([...fake.runs.keys()].pop());
   fake.raw("GET", /^\/caps\/ev4\/events$/, () => new Response(streamOf(["data: ", "x".repeat(EVENT_RAW_MAX - 6), "\n"]), { status: 200 }));
   const e4 = await within(events("/caps/ev4"));
   check(!e4.timeout && !e4.e, "P1A-D2-2 an unfinished event of exactly the raw cap, its separator begun: not refused");
+  // the events cursor is sent exactly, past 2^31 and 2^32 too (a 32-bit conversion turned 2^31 into -2^31 and 2^32
+  // into 0); a cursor that isn't a non-negative safe integer is refused before anything is sent
+  const sentAfter = async (after) => {
+    fake.raw("GET", /^\/caps\/cur\/events$/, () => new Response(streamOf([]), { status: 200 }));
+    const n0 = fake.fetches.length;
+    let err = null;
+    try { for await (const _ of client.events("/caps/cur", after)) {} } catch (e) { err = e; }
+    const url = fake.fetches.slice(n0).find((u) => String(u).includes("/caps/cur/events"));
+    return { q: url ? new URL(String(url)).searchParams.get("after") : null, err };
+  };
+  for (const [after, want] of [[0, "0"], [2 ** 31 - 1, "2147483647"], [2 ** 31, "2147483648"], [2 ** 32, "4294967296"], [2 ** 32 + 1, "4294967297"], [Number.MAX_SAFE_INTEGER, "9007199254740991"], ["2147483648", "2147483648"]]) {
+    const r = await sentAfter(after);
+    check(r.q === want && !r.err, `the events cursor ${typeof after === "string" ? JSON.stringify(after) : after} is sent as after=${want} (got ${r.q})`);
+  }
+  for (const after of [-1, 1.5, 2 ** 53, NaN, "x", "-1", "01", "9007199254740992", null]) {
+    const r = await sentAfter(after);
+    check(r.q === null && r.err instanceof StreamError, `the events cursor ${String(after)} is refused before anything is sent`);
+  }
   // request bodies: each class at its cap is sent, one byte past it is not
   for (const [method, path, cap, what] of [["POST", "/bindings/bx/runs", BODY_MAX.run, "a run"], ["PUT", "/bindings/bx/files/f", BODY_MAX.put, "a file chunk"], ["POST", "/bindings", BODY_MAX.other, "anything else"]]) {
     const n0 = fake.fetches.length;
