@@ -91,6 +91,15 @@ export function pauseBoard(ref: string): boolean {
   try { if (marked(sessionStorage, ref)) return true; } catch {}
   try { return marked(localStorage, ref); } catch { return false; }
 }
+/** Whether a mark can be kept now, in either storage: a probe written, read back and taken away again. Asked before
+ * a board is made from a file, so that one is never made that couldn't be marked. */
+const PROBE = "sagebrush-board-paused-probe";
+export function canMark(): boolean {
+  for (const get of [() => sessionStorage, () => localStorage]) {
+    try { const s = get(); s.setItem(PROBE, "1"); const kept = s.getItem(PROBE) === "1"; s.removeItem(PROBE); if (kept) return true; } catch {}
+  }
+  return false;
+}
 /** Boards made in this tab whose mark couldn't be kept and that couldn't be taken away again: waiting, for this tab's life. */
 const unmarked = new Set<string>();
 export function isPaused(ref: string) {
@@ -101,17 +110,21 @@ export function unpause(ref: string) {
   try { sessionStorage.removeItem(PAUSED + ref); } catch {}
   try { localStorage.removeItem(PAUSED + ref); } catch {}
 }
-/** A board just made from a file brought in: marked as waiting, or, if it can't be, taken away again and refused. */
+/** A board just made from a file brought in: marked as waiting. If the mark can't be kept after all (the probe said
+ * it could), the board is deleted for good (put in Trash, then that Trash entry emptied: a board in Trash, restored,
+ * would run); if even that fails, it waits for this page's life and the person is told where it is, to delete it. */
+const NOT_KEPT = "its code couldn't be kept waiting for you to run it in this tab, so it wasn't made";
 async function imported(ws: Workspace, e: Entry): Promise<Entry> {
   if (e.kind !== "board" || pauseBoard(e.ref!)) return e;
+  let at = e.path;
   try {
-    await ws.remove(e.path, { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created });
+    at = (await ws.remove(e.path, { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created })).path;
+    await ws.emptyTrash([at]);
   } catch {
-    // (still there, unmarked: it waits for this tab's life, and the person is told to delete it)
     unmarked.add(e.ref!);
-    throw new Error(`its code couldn't be kept waiting for you to run it in this tab, and the board made (${e.path}) couldn't be removed: delete it`);
+    throw new Error(`its code couldn't be kept waiting for you to run it in this tab, and the board made (${at}) couldn't be deleted: delete it`);
   }
-  throw new Error("its code couldn't be kept waiting for you to run it in this tab, so it wasn't made");
+  throw new Error(NOT_KEPT);
 }
 /** What an upload said, for the page it opens (a refusal never lost to the navigation): taken once. */
 const NOTICE = "sagebrush-upload-notice";
@@ -158,6 +171,7 @@ export async function uploadFiles(ws: Workspace, all: File[], folder: string, o:
       } else doc = as === "notebook" ? fromFile(name, await f.text(), o.mode) : boardJson(await f.text());
       const p = freePath(folder, splitExt(name)[0], as === "board" ? ".board.json" : ".ipynb", (x) => taken.has(x));
       if (!p) throw new Error("no free name in this folder");
+      if (as === "board" && !canMark()) throw new Error(NOT_KEPT);
       const e = await imported(ws, await ws.create(p, { content: doc }));
       taken.add(p);
       out.made.push(e);
@@ -237,6 +251,7 @@ export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: {
   }
   const p = freePath(folder, splitExt(name)[0], as === "board" ? ".board.json" : ".ipynb", (x) => taken.has(x));
   if (!p) throw new Error("no free name beside it");
+  if (as === "board" && !canMark()) throw new Error(NOT_KEPT);
   const made = await imported(ws, await ws.create(p, { content: doc }));
   if (myst) o.said?.(earlier ? "The .md changed since your last copy, so this is a new copy; your earlier one is kept." : `Opened a notebook copy of "${name}" beside it. The .md isn't changed.`);
   return made;
