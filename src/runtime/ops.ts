@@ -1956,6 +1956,9 @@ export function genStep(g: any, isThrow: boolean, arg: any): IteratorResult<any>
   // (a body that can run: started and not finished; an exception thrown into a new or finished generator comes
   // back as it is, its StopIteration never PEP 479's RuntimeError, as CPython's)
   const live = g.$started === true && g.$finished !== true;
+  // (a step into a generator that is running, a re-entrant next() from its own body: refused before anything about
+  // it changes, so the running step's state stays its own)
+  if (g.$running === true) raise(T.ValueError, "generator already executing");
   if (g.$started !== true) {
     if (!isThrow && arg !== undefined && arg !== null) raise(T.TypeError, "can't send non-None value to a just-started generator");
     g.$started = true;

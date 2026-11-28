@@ -1008,10 +1008,11 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
     // (nonempty __slots__ on a variable-size builtin base, as CPython's type_new: its TypeError; a library class that
     // emulates a C type's extra fields, time.struct_time's, says so with __sagebrush_native_slots__, taken out of the
     // namespace here)
-    const nativeSlots = ns.has("__sagebrush_native_slots__");
+    // (the marker honoured only in the library's own time module; any slot counts, __dict__ and __weakref__ too)
+    const nativeSlots = ns.has("__sagebrush_native_slots__") && (module === "time" || module === "_pytime");
     ns.delete("__sagebrush_native_slots__");
     const solid0 = solidBase(bases.length ? bases[0] : object);
-    if (slotNames.length && !nativeSlots && (solid0 === T.int || solid0 === T.tuple || solid0 === T.bytes)) raise(T.TypeError, `nonempty __slots__ not supported for subtype of '${bases[0].$name}'`);
+    if (items.length && !nativeSlots && (solid0 === T.int || solid0 === T.tuple || solid0 === T.bytes)) raise(T.TypeError, `nonempty __slots__ not supported for subtype of '${bases[0].$name}'`);
   }
   // (several bases whose instance layouts can't be one, as CPython's best_base: a class with slots of its own beside a
   // base with another layout; only where a slotted class is involved, the builtin bases' own checks being elsewhere)
@@ -1058,9 +1059,11 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   }
   const kwNames = [...kw.keys()], kwValues = [...kw.values()];
   if (isub === undefined || isubOwner === object) {
-    if (kw.size) raise(T.TypeError, `${name}.__init_subclass__() takes no keyword arguments`);
+    if (kw.size) raise(T.TypeError, `${cls.$qualname ?? name}.__init_subclass__() takes no keyword arguments`);
   } else if (isub instanceof PyClassMethod) callKw(isub.f, [cls], kwNames, kwValues);
-  else if (typeof isub === "function") callKw(isub, [cls], kwNames, kwValues);
+  // (a plain function: one set on the class after it was made, as a class body's def is a classmethod already; super
+  // passes it no instance, as CPython's)
+  else if (typeof isub === "function") callKw(isub, [], kwNames, kwValues);
   else {
     const g = isub !== null && typeof isub === "object" ? lookupType(typeOf(isub), "__get__") : undefined;
     callKw(g !== undefined ? callDescrGet(g, isub, null, cls) : isub, [], kwNames, kwValues);

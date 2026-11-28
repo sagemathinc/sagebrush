@@ -273,10 +273,10 @@ export function yfr(v: any): any {
   return v ?? null;
 }
 
-// (a context manager's hooks as CPython's BEFORE_WITH: __enter__ looked up and bound, then __exit__, then __enter__
+// (a context manager's hooks as CPython 3.14's: __exit__ looked up and bound, then __enter__, then __enter__
 // called; each bound as a special method is (a function, a staticmethod or classmethod, a callable object, a
-// descriptor's __get__, run at the lookup). The emitted code asks for __exit__ first, so withExit binds both and
-// leaves the bound __enter__ for withEnter)
+// descriptor's __get__, run at the lookup). The emitted code asks for __exit__ first: withExit binds both, in that
+// order, and leaves the bound __enter__ for withEnter)
 function bindHook(m: any, name: string): (...args: any[]) => any {
   const raw = Obj.lookupType(Obj.typeOf(m), name);
   if (typeof raw === "function") {
@@ -288,23 +288,26 @@ function bindHook(m: any, name: string): (...args: any[]) => any {
   return (...args: any[]) => Obj.callObj(bound, args);
 }
 let pendingEnter: [any, (...args: any[]) => any] | null = null;
-const enterMissing = (m: any) => raise(T.TypeError, `'${typeName(m)}' object does not support the context manager protocol (missed __enter__ method)`);
+const protocolMissing = (m: any, hook: string) => raise(T.TypeError, `'${Obj.typeOf(m).$qualname ?? typeName(m)}' object does not support the context manager protocol (missed ${hook} method)`);
+const enterMissing = (m: any) => protocolMissing(m, "__enter__");
 export function withEnter(m: any): any {
   let f: (...args: any[]) => any;
   if (pendingEnter !== null && pendingEnter[0] === m) {
     f = pendingEnter[1];
     pendingEnter = null;
   } else {
+    pendingEnter = null;
     if (Obj.lookupType(Obj.typeOf(m), "__enter__") === undefined) enterMissing(m);
     f = bindHook(m, "__enter__");
   }
   return f();
 }
 export function withExit(m: any): (t: any, v: any, tb: any) => any {
+  pendingEnter = null;
+  if (Obj.lookupType(Obj.typeOf(m), "__exit__") === undefined) protocolMissing(m, "__exit__");
+  const f = bindHook(m, "__exit__");
   if (Obj.lookupType(Obj.typeOf(m), "__enter__") === undefined) enterMissing(m);
   const enter = bindHook(m, "__enter__");
-  if (Obj.lookupType(Obj.typeOf(m), "__exit__") === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the context manager protocol (missed __exit__ method)`);
-  const f = bindHook(m, "__exit__");
   pendingEnter = [m, enter];
   return (t, v, tb) => f(t, v, tb);
 }
