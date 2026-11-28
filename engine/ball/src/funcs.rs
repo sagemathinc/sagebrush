@@ -364,6 +364,13 @@ fn atan_reduced(z: &Ball, wp: u64) -> Ball {
     let s = isqrt_u64(wp) / 2 + 1;
     let wp2 = wp + s + 16;
     let one = Ball::one();
+    // (a z of at most 2^-wp2: atan z = z (1 - z^2/3 + ...), so |atan z - z|
+    // <= |z|^3/3 <= |z| 2^-2wp2; z^2 could underflow the exponent range,
+    // which made the square root below None and panicked, at 2^-(2^40))
+    let zb = z.upper_abs();
+    if zb <= Mag::pow2(-(wp2 as i64)) {
+        return z.add_error(zb.mul_2exp(-2 * wp2 as i64));
+    }
     let mut z = z.clone();
     for _ in 0..s {
         let d = one.add(&one.add(&z.sqr(wp2), wp2).sqrt(wp2).expect("1 + z^2 > 0"), wp2);
@@ -381,9 +388,16 @@ fn atan_point(m: &BigInt, e: i64, wp: u64) -> Ball {
     let gt1 = crate::ball::cmp_dyadic(&m.abs(), e, &BigInt::one(), 0) == Ordering::Greater;
     if gt1 {
         // atan x = sign(x) pi/2 - atan(1/x)
-        let inv = x.recip(wp2).expect("x != 0");
         let hp = pi(wp2).mul_2exp(-1);
         let hp = if m.is_negative() { hp.neg() } else { hp };
+        // (|x| >= 2^(e + bits(m) - 1), so |atan(1/x)| <= |1/x| <= 2^-that: at
+        // most 2^-wp2, pi/2 within it.  Near the range's end 1/x at wp2 bits
+        // left the exponent range, and its atan panicked, at 2^(2^40 - 2))
+        let top = e.saturating_add(m.bits() as i64 - 1);
+        if top >= wp2 as i64 {
+            return hp.add_error(Mag::pow2(-top));
+        }
+        let inv = x.recip(wp2).expect("x != 0");
         return hp.sub(&atan_reduced(&inv, wp2), wp2);
     }
     atan_reduced(&x, wp2)
