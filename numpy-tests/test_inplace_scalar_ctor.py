@@ -39,3 +39,21 @@ for T in (np.complex128, np.complex64):
 for T in (np.float64, np.float32):
     show(f"{T.__name__}('1.5')", lambda: T("1.5"))
     show(f"{T.__name__} of a 0-d array is a scalar", lambda: isinstance(T(np.array(2.5)), np.generic))
+# a bool target squared refused (NumPy's square loop of bools is int8's); the cast checked before computing, so the
+# refusal never depends on the values; the constructors' array-likes: a range, an object with __array__
+for v in (2, np.int64(2), np.array(2), True, 3):
+    def sq(v=v):
+        a = np.array([True, False]); a **= v; return a
+    show(f"bool **= {v!r}", sq)
+for vals in ([False, True], [True, True]):
+    for s in (np.uint64(1), np.int64(1), 1, np.float64(1.0)):
+        def sub(vals=vals, s=s):
+            a = np.array(vals); a -= s; return a
+        show(f"bool {vals} -= {s!r}", sub)
+class AL:
+    def __array__(self, dtype=None, copy=None):
+        return np.array([1, 2], dtype=dtype)
+for T in (np.float64, np.float32, np.complex128, np.complex64):
+    show(f"{T.__name__}(range(3))", lambda: T(range(3)))
+    show(f"{T.__name__}(__array__)", lambda: T(AL()))
+    show(f"{T.__name__}(range(0))", lambda: T(range(0)))

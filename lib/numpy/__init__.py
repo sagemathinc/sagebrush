@@ -191,13 +191,22 @@ def _arith(cls):
     return cls
 
 
+def _array_like(v):
+    """A scalar type's argument NumPy converts as an array: a sequence (a range, a list, ... not a str, bytes or a
+    mapping), an ndarray or an object with __array__"""
+    if isinstance(v, (list, tuple, ndarray, range)) or hasattr(v, "__array__"):
+        return True
+    return (hasattr(v, "__len__") and hasattr(v, "__getitem__") and not isinstance(v, (str, bytes, bytearray, dict))
+            and not hasattr(v, "keys"))
+
+
 @_arith
 class float64(float, floating):
     __slots__ = ()
     __hash__ = float.__hash__
 
     def __new__(cls, v=0.0):
-        if isinstance(v, (list, tuple, ndarray)):
+        if _array_like(v):
             a = asarray(v, float64)  # as NumPy: a sequence gives an array, a 0-d array its scalar
             return a[()] if a.ndim == 0 else a
         return float.__new__(cls, v)
@@ -222,7 +231,7 @@ class float32(float, floating):
     __hash__ = float.__hash__
 
     def __new__(cls, v=0.0):
-        if isinstance(v, (list, tuple, ndarray)):
+        if _array_like(v):
             a = asarray(v, float32)
             return a[()] if a.ndim == 0 else a
         return float.__new__(cls, _f32(v))
@@ -326,7 +335,7 @@ class complex128(complex, complexfloating):
     __hash__ = complex.__hash__
 
     def __new__(cls, *args):
-        if len(args) == 1 and isinstance(args[0], (list, tuple, ndarray)):
+        if len(args) == 1 and _array_like(args[0]):
             a = asarray(args[0], complex128)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
             return a[()] if a.ndim == 0 else a
         return complex.__new__(cls, *args)
@@ -345,7 +354,7 @@ class complex64(complex, complexfloating):
     __hash__ = complex.__hash__
 
     def __new__(cls, *args):
-        if len(args) == 1 and isinstance(args[0], (list, tuple, ndarray)):
+        if len(args) == 1 and _array_like(args[0]):
             a = asarray(args[0], complex64)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
             return a[()] if a.ndim == 0 else a
         return complex.__new__(cls, *args)
