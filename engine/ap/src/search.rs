@@ -83,6 +83,8 @@ pub fn x_coordinates(b2: i128, b4: i128, b6: i128, rmax: u64, smax: u64, limit: 
             // host itself, not only every 1024th check
             blocks += 1;
             if blocks % 64 == 0 {
+                // (a phase of its own: the tests count these polls)
+                let _p = sagebrush_interrupt::enter("ap.search poll");
                 sagebrush_interrupt::check_coarse();
             } else {
                 sagebrush_interrupt::check();

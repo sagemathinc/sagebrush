@@ -44,25 +44,30 @@
   "owner": "elliptic curves (engine)",
   "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it; these lines refuse nothing"
  },
- "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: assert_eq!(total, 1 + (2 * rmax + 1).div_ceil(W) + 1); #0": {
-  "class": "none",
-  "owner": "elliptic curves (engine)",
-  "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it; these lines refuse nothing"
- },
  "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: fn search_stops_inside_the_scan_and_at_the_limit() { #0": {
   "class": "none",
   "owner": "elliptic curves (engine)",
   "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it; these lines refuse nothing"
  },
- "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns()); #0": {
+ "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let blocks = (2 * rmax + 1).div_ceil(W); #0": {
   "class": "none",
   "owner": "elliptic curves (engine)",
-  "reason": "the Stop test of the point search reads the hooks' longest gaps (max_gap_ns, max_poll_gap_ns); it refuses nothing"
+  "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it, and max_gap_ns the hooks' longest gap; these lines refuse nothing"
+ },
+ "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it, and max_gap_ns the hooks' longest gap; these lines refuse nothing"
  },
  "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let r = catch(|| search(rmax, 1, 1000)); #0": {
   "class": "none",
   "owner": "elliptic curves (engine)",
   "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it; these lines refuse nothing"
+ },
+ "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let r = catch(|| search(rmax, 1, 1000)); #1": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it, and max_gap_ns the hooks' longest gap; these lines refuse nothing"
  },
  "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let rmax = 10_000_000u64; #0": {
   "class": "none",

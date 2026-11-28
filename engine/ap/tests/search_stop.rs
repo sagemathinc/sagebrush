@@ -23,18 +23,25 @@ fn search_stops_inside_the_scan_and_at_the_limit() {
     let rmax = 10_000_000u64;
     hooks::reset();
     hooks::trace();
-    let t = std::time::Instant::now();
     let want = search(rmax, 1, 1000);
-    let scan = t.elapsed().as_nanos() as u64;
     let total = hooks::total();
-    let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns());
+    let gap = hooks::max_gap_ns();
+    let polls = hooks::traced("ap.search poll");
     hooks::reset();
-    assert_eq!(total, 1 + (2 * rmax + 1).div_ceil(W) + 1);
+    let blocks = (2 * rmax + 1).div_ceil(W);
+    assert_eq!(total, 1 + blocks + 1);
     assert!((gap as f64) < 50e6, "longest gap between checks {} ms", gap as f64 / 1e6);
-    // a WebAssembly host is asked every 64 of the ~4000 blocks
-    // (check_coarse): the longest gap between its polls is about 1/60 of the
-    // scan; with only every 1024th check polling, it would be about 1/4
-    assert!(poll * 16 < scan, "longest gap between host polls {} ns, of a {} ns scan", poll, scan);
+    // every 64th block's check asks a WebAssembly host itself
+    // (check_coarse), not only every 1024th check: counted exactly, without
+    // timing, and a Stop there is seen
+    assert_eq!(polls.len() as u64, blocks / 64);
+    hooks::reset();
+    hooks::arm_at(polls[polls.len() / 2]);
+    let r = catch(|| search(rmax, 1, 1000));
+    let phase = hooks::stopped_in();
+    hooks::reset();
+    sagebrush_interrupt::clear();
+    assert!(r.is_err() && phase == "ap.search poll", "Stop at a host poll: {}", phase);
     for x in [(0, 1), (1, 1), (-1, 1), (2, 1), (6, 1)] {
         assert!(want.contains(&x), "{:?}", x);
     }
