@@ -27,6 +27,8 @@ import { RESET_BUTTON, RESET_CONFIRM, RESET_DONE } from "./sync-reset";
 import { learnMore } from "../docs-link";
 import { signInUrl } from "../share-client/upload";
 import { syncConfirmDocs } from "./doc-sync-switch";
+import { e2eSection } from "./sync-e2e-panel";
+import type { E2EChunk } from "./sync-e2e";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -189,7 +191,9 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   const sec = h("div", { className: "sync" });
   // (until sync's status is read: said, never a blank section)
   sec.append(h("h4", { textContent: "Sync" }), h("p", { className: "note", textContent: "Checking sync…" }));
-  into.append(sec);
+  // (end-to-end encryption's own section, beside sync's: drawn only where the E2E routes answer, DEV for now)
+  const e2eBox = h("div", { className: "sync-e2e" });
+  into.append(sec, e2eBox);
   let last: { status: Status; account: string | null; email?: string | null; verified: boolean } | null = null;
   // (whether this browser synced before (a lease kept): then a sync that is off for the account is said, not hidden)
   let usedHere = false;
@@ -217,6 +221,23 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     return a.ok ? { ...a, life: before } : a;
   };
   const poll = new PanelPoll(boundStatus, (a) => answered(a), opts.random, opts.after);
+  let lastE2EKey = "";
+  const e2e = e2eSection(e2eBox, {
+    chain: async () => {
+      const r = await f("/api/sync/v1/e2e/chain?from=0", { credentials: "same-origin" });
+      const b = r.status === 200 ? ((await r.json().catch(() => null)) as { entries?: unknown } | null) : null;
+      return { status: r.status, entries: b?.entries };
+    },
+    chunk: () => import(/* @vite-ignore */ new URL("/sagebrush-e2e.js", location.href).href) as Promise<E2EChunk>,
+    // (the account the server confirmed for this answer, only: never a guess)
+    hash: async () => (last?.verified ? last.account : null),
+    sync: () => ({ on: !!last && last.status.state !== "off", used: usedHere || (!!last && last.status.state !== "off") }),
+    enable: () => enableOnce(),
+    reason: () => owner.own.reason,
+    reconcile: () => void owner.reconcile(),
+    confirm: confirmFn,
+    prompt: (text, value) => (host.prompt ? host.prompt(text) : prompt(text, value)),
+  });
   const unsub = owner.onChange(() => { if (last && !poll.closed) draw(); });
 
   function answered(a: Answer) {
@@ -261,6 +282,13 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!last) return;
     const st = last.status;
     renderGen++;
+    // (encryption's section read again only when what it depends on changes (sync's state, the owner's reason, this
+    // browser's use), not on every progress redraw, and never while a turn-on or reset is under way there)
+    const e2eKey = JSON.stringify([st.available, st.state, owner.own.reason ?? null, usedHere]);
+    if (st.available && e2eKey !== lastE2EKey && !e2e.busy()) {
+      lastE2EKey = e2eKey;
+      void e2e.refresh();
+    }
     sec.replaceChildren();
     // (off the allowlist: nothing at all, unless this browser synced before: then what changed, and as whom)
     if (!st.available && st.reason === "not_allowlisted") {

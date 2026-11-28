@@ -255,9 +255,11 @@ export class DeviceKeys implements OpKeys {
     await done(tx);
     const text = new TextDecoder().decode(entry);
     // (the append's status, or null when its answer was lost on the way)
-    let status: number | null = null;
+    let status: number | null = null, why: unknown = undefined;
     try {
-      status = (await t("POST", `${API}/chain`, { entry: text, keyring: null, wrappers })).status;
+      const r = await t("POST", `${API}/chain`, { entry: text, keyring: null, wrappers });
+      status = r.status;
+      why = (r.json as { reason?: unknown } | null)?.reason;
     } catch { /* (decided below, from the chain) */ }
     if (status !== 201) {
       // (a failed or lost append: the chain says which. This entry first: it applied, and genesis finishes. Another
@@ -279,6 +281,8 @@ export class DeviceKeys implements OpKeys {
       }
       if (applied === "no") {
         await forget(c.account, rec.id);
+        // (the server's own reason, when it refused genesis because the account already syncs in the clear)
+        if (refused && why === "plaintext_log") throw new DeviceKeysError("plaintext_log", "this account's sync already holds files in the clear: delete your synced data first");
         throw new DeviceKeysError("server", "the key chain couldn't be started; try again");
       }
       if (applied === "unknown") throw new DeviceKeysError("server", "the key chain couldn't be started; reload the page");
