@@ -174,8 +174,9 @@ if (passed) {
 // it loads a frame and a window of the other server's and sends its own window there, and must stay, its commands
 // still working.  The other server's pages (/frame, /open, /top) try the commands too and say so to it: none may
 // reach them.  The controls (SAGEBRUSH_APP_NAV_CONTROL): "open", the window's navigation guard left out: the other
-// server's page loads in the window, and the commands, granted to the page's exact origin only, still refuse it;
-// "wide", that and the commands granted to every http://127.0.0.1 port (as before): the page loads and reaches them.
+// server's page and frame load in the window, and the commands, granted to the page's exact origin only, still refuse
+// them; "wide", that and the commands granted to every http://127.0.0.1 port (as before): the page loads and reaches
+// them.
 function otherServer() {
   const seen = [];
   const page = (name) => `<!doctype html><script>
@@ -209,21 +210,33 @@ async function navLaunch(control) {
   console.log(`launch${control === "open" ? " (navigation guard left out)" : control === "wide" ? " (navigation guard left out, commands for every port)" : ""}: ${line} (exit ${res.code})`);
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   const reached = o.seen.filter((s) => / REACHED|: REACHED/.test(s));
-  return { line, code: res.code, reached, topLoaded: o.seen.includes("top: loaded") };
+  const frameLoaded = o.seen.includes("frame: loaded");
+  // (the frame's own positive, on Windows and in the "open" control: it loaded, and both its command calls were
+  // refused, the capability showing)
+  const frameRefused = frameLoaded && o.seen.some((x) => x.startsWith("frame: refused")) && o.seen.some((x) => x.startsWith("frame: signer refused"));
+  return { line, code: res.code, reached, topLoaded: o.seen.includes("top: loaded"), frameLoaded, frameRefused };
 }
 if (passed) {
   console.log("\nwho can reach the app's commands: a notebook output's frame, another local server's pages");
   const r = await navLaunch(false);
-  const good = r.code === 0 && /^ok persist: nav at /m.test(r.line) && !r.reached.length && !r.topLoaded;
-  console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : "the probe failed (above)"}`);
+  // (the other origin's frame: refused before it loads by the window's navigation guard where the web view asks it about
+  // a frame's navigation (macOS and Linux, nav.rs may_load); WebView2 asks only about the window's own, so on Windows
+  // the frame loads and the exact-origin capability alone refuses it: there it must have loaded and had both its calls
+  // (disk_where and the signing command) refused, so a frame that silently never ran fails too)
+  const frameGuarded = process.platform === "win32" ? r.frameRefused : !r.frameLoaded;
+  const good = r.code === 0 && /^ok persist: nav at /m.test(r.line) && !r.reached.length && !r.topLoaded && frameGuarded;
+  console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : !frameGuarded ? (process.platform === "win32" ? "another origin's frame didn't load and show both its calls refused (the capability's positive)" : "another origin's frame loaded in the window: its navigation guard didn't refuse it") : "the probe failed (above)"}`);
   passed = good;
   // (the controls: each must show what its part keeps out)
   for (const control of passed ? ["open", "wide"] : []) {
     console.log(`\nthe control: the same, ${control === "open" ? "the navigation guard left out (the page may leave; the commands must still refuse the other origin)" : "the guard left out and the commands for every port (the other origin's page must reach them)"}`);
     const c = await navLaunch(control);
     const topReached = c.reached.some((s) => s.startsWith("top: REACHED"));
-    const why = control === "open" ? c.topLoaded && !c.reached.length : c.topLoaded && topReached;
-    console.log(why ? `the control ${control === "open" ? "showed the exact-origin grant holding on its own" : "failed, for its reason, as it must: the other origin's page reached the commands"}` : `FAIL the control didn't show its reason (${control === "open" ? "the other origin's page loaded, refused the commands" : "the other origin's page loaded and reached the commands"}): ${c.line}`);
+    // ("open": the other origin's frame too must load, and have both its calls refused, on every OS: so the launch
+    // without the control, where it never loaded on macOS and Linux, shows the guard refusing it, not a frame that
+    // couldn't load at all; and the capability refusing it without the guard)
+    const why = control === "open" ? c.topLoaded && c.frameRefused && !c.reached.length : c.topLoaded && topReached;
+    console.log(why ? `the control ${control === "open" ? "showed the exact-origin grant holding on its own" : "failed, for its reason, as it must: the other origin's page reached the commands"}` : `FAIL the control didn't show its reason (${control === "open" ? "the other origin's page and frame loaded, refused the commands" : "the other origin's page loaded and reached the commands"}): ${c.line}${control === "open" ? ` (top ${c.topLoaded ? "loaded" : "not loaded"}, frame ${c.frameLoaded ? (c.frameRefused ? "loaded and refused" : "loaded, its calls not both refused") : "not loaded"})` : ""}`);
     passed &&= why;
   }
 }

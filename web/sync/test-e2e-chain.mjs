@@ -61,6 +61,7 @@ const K3 = "e2e2e2e2-000e-4e2e-8e2e-e2e2e2e2e20e"; // epoch 1's keyring
 const K4 = "e2e2e2e2-0011-4e2e-8e2e-e2e2e2e2e211"; // a stray stored keyring before epoch 1
 const O = "e2e2e2e2-000f-4e2e-8e2e-e2e2e2e2e20f"; // the reset preflight and work bucket
 const Q = "e2e2e2e2-0010-4e2e-8e2e-e2e2e2e2e210"; // invalid resets, then a valid one
+const G = "e2e2e2e2-0012-4e2e-8e2e-e2e2e2e2e212"; // a provisioned GPU machine (the restricted tier)
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -69,7 +70,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, B, P, M, R, C, U, X, Y, Z, V, K1, K2, K3, O, Q, K4].join(",");
+const listed = [A, B, P, M, R, C, U, X, Y, Z, V, K1, K2, K3, O, Q, K4, G].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -122,11 +123,11 @@ const AUD = "https://dev.sagebrush.space";
 function account(id) {
   const ctx = { aud: AUD, account: e2eIdOf(id) };
   const W = { ctx, state: null, secrets: new Map(), devices: [] };
-  W.device = async (name) => {
+  W.device = async (name, kind = "browser") => {
     const did = newId();
     const sign = await keyFromSeed(random(32));
     const kem = await E.newKem();
-    return { id: did, sign, kem, rec: { id: did, name, kind: "browser", sign: b64(sign.raw), kem: b64(kem.publicRaw) }, signer: E.deviceSigner(did, sign) };
+    return { id: did, sign, kem, rec: { id: did, name, kind, sign: b64(sign.raw), kem: b64(kem.publicRaw) }, signer: E.deviceSigner(did, sign) };
   };
   W.epoch = async (state) => {
     const n = state ? state.epoch.n + 1 : 0;
@@ -156,9 +157,10 @@ function account(id) {
     W.rk = rk;
     return { ...p, d, ep };
   };
-  W.add = async (state, by) => {
-    const nd = await W.device("phone");
-    const draft = E.nextBody(state, ctx, "add", { device: nd.rec, pop: null });
+  /** `nd`: the device to add (a new phone by default); `extra`: more body fields (a provisioned add's labels). */
+  W.add = async (state, by, nd = null, extra = {}) => {
+    nd ??= await W.device("phone");
+    const draft = E.nextBody(state, ctx, "add", { device: nd.rec, pop: null, ...extra });
     const pre = await E.preEntryHash(draft);
     const ch = await E.challenge(hpke, nd.kem.publicRaw, pre);
     const mac = await E.respond(hpke, nd.kem, ch.enc, pre);
@@ -697,6 +699,47 @@ await section("the enrollment mailbox", async () => {
   for (let i = 0; i < 16; i++) opened.push((await put(newId(), 1, "m")).status);
   ok(opened.filter((x) => x === 201).length === 15 || opened.every((x) => x === 201), "(sessions opened up to the bound)");
   ok((await put(newId(), 1, "m")).status === 413, "a 17th live session is refused");
+});
+
+await section("the provisioned tier: the store refuses what a provisioned key signs", async () => {
+  // (notes provisioned-machine-enrollment r12.1 §1, r3: the server's chain store replays with the same core, so a
+  //  service that relays an entry its machine signed, or makes one, can't get it stored)
+  const s = await enabled(G), W = account(G);
+  const g = await W.genesis();
+  ok((await answer(await post(s, G, "/api/sync/v1/e2e/chain", g.body))).status === 201, "genesis");
+  const gpu = await W.device("gpu-a100-3f2c", "provisioned");
+  const labels = { reservation: "rsv_01JD8Y3Q", instance: "runpod:7f3a9c", retire_on: E.RETIRE_ON, approved: "start" };
+  // (an add made by hand, with no package: the device side's own check refuses these before posting)
+  const rawAdd = async (state, by, nd) => {
+    const draft = E.nextBody(state, W.ctx, "add", { device: nd.rec, pop: null });
+    const pre = await E.preEntryHash(draft);
+    const ch = await E.challenge(hpke, nd.kem.publicRaw, pre);
+    const entry = await E.sealEntry(by.signer, { ...draft, pop: { enc: b64(ch.enc), mac: b64(await E.respond(hpke, nd.kem, ch.enc, pre)) } }, by.sign, { device: nd.sign });
+    return { entry: text(entry), keyring: null, wrappers: [] };
+  };
+  ok((await answer(await post(s, G, "/api/sync/v1/e2e/chain", await rawAdd(g.next, g.d, gpu)))).reason === "bad_form", "a provisioned add without its labels is refused (bad_form)");
+  const add = await W.add(g.next, g.d, gpu, { provisioned: labels });
+  const ar = await answer(await post(s, G, "/api/sync/v1/e2e/chain", add.body));
+  ok(ar.status === 201 && ar.seq === 1, "the laptop's add of the machine, with its labels, is stored: " + ar.status);
+  W.devices.push(gpu);
+  const wg = await answer(await get(s, G, `/api/sync/v1/e2e/wrapper?kind=device&id=${gpu.id}`));
+  ok(wg.status === 200 && wg.epoch === 0, "the machine has its epoch wrapper, like any device");
+  // (the machine signs: an add, a removal of the laptop, an epoch; each refused, nothing stored)
+  const phone = await rawAdd(add.next, gpu, await W.device("phone"));
+  const ep = await W.epoch(add.next);
+  const rmLaptop = await E.sealEntry(gpu.signer, E.nextBody(add.next, W.ctx, "remove", { remove: g.d.id, epoch: ep.epoch }), gpu.sign);
+  const epoch = await E.sealEntry(gpu.signer, E.nextBody(add.next, W.ctx, "epoch", { epoch: ep.epoch }), gpu.sign);
+  const refused = [];
+  for (const [what, body] of [["add", phone], ["remove", { entry: text(rmLaptop), keyring: b64(ep.ring.bytes), wrappers: [] }], ["epoch", { entry: text(epoch), keyring: b64(ep.ring.bytes), wrappers: [] }]]) {
+    const r = await answer(await post(s, G, "/api/sync/v1/e2e/chain", body));
+    if (r.status !== 400 || r.reason !== "provisioned_signer") refused.push([what, r.status, r.reason]);
+  }
+  const ch = await answer(await get(s, G, "/api/sync/v1/e2e/chain"));
+  ok(refused.length === 0 && ch.entries.length === 2 && ch.head.hash === add.next.head, "the machine's add, removal and epoch are each refused (provisioned_signer); the chain is still [genesis, add]", refused);
+  // (the laptop removes it: the next epoch, wrappers to the laptop and recovery only)
+  const rm = await W.remove(add.next, g.d, gpu);
+  const rr = await answer(await post(s, G, "/api/sync/v1/e2e/chain", rm.body));
+  ok(rr.status === 201 && (await get(s, G, `/api/sync/v1/e2e/wrapper?kind=device&id=${gpu.id}`)).status === 404, "the laptop's removal of the machine is stored, and the machine has no wrapper any more");
 });
 
 await section("deleting the synced data keeps the chain; deleting the account doesn't", async () => {

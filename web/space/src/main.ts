@@ -14,7 +14,7 @@ import { drawCode, editor, codeRuns } from "./code.ts";
 import { run, interrupt, sceneObject, SCENE } from "./run.ts";
 import { sizeOf } from "./sizes.ts";
 import { treeRoom, resolveImport } from "./treeroom.ts";
-import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
+import { checkSpace, readText, readable, sameSite, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
 import { EDIT, keepEdit } from "./keep.ts";
 import { supported as xrSupported } from "../../xr-input.js";
 import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.ts";
@@ -1260,8 +1260,8 @@ const fetched = new Map();
 async function fullText(nd) {
   if (!nd.src || nd._full) return String(nd.text ?? "");
   const src = String(nd.src), mine = src.startsWith("workspace:");
-  const key = mine ? src : sameSite(src).href;
-  if (!fetched.has(key)) fetched.set(key, mine ? askPage(decodeURIComponent(src.slice("workspace:".length))) : readText(sameSite(src)));
+  const key = mine ? src : readable(src).href;
+  if (!fetched.has(key)) fetched.set(key, mine ? askPage(decodeURIComponent(src.slice("workspace:".length))) : readText(readable(src)));
   let text;
   try { text = await fetched.get(key); } catch (e) { fetched.delete(key); throw e; }
   nd.text = text; nd._full = true;
@@ -1746,10 +1746,15 @@ renderer.domElement.addEventListener("pointermove", (ev) => {
 });
 // (a touch while walking: flying, which is how touch moves (drag to turn, pinch to zoom))
 renderer.domElement.addEventListener("pointerdown", (ev) => { if (deskWalk && ev.pointerType === "touch") setDeskWalk(false); });
+// (the wheel walks you forward or back by how far it turned: a mouse's notch, about 100 pixels, is a step of 3; a
+//  trackpad's scroll and pinch (a pinch comes as wheel events with Ctrl held) send many small turns a second, each a
+//  small step, where one of 3 per event ran away)
+const WHEEL_PX = { 0: 1, 1: 16, 2: 800 }; // (pixels per deltaMode unit: pixels, lines, pages)
 renderer.domElement.addEventListener("wheel", (ev) => {
   if (!deskWalk || xr.presenting) return;
   ev.preventDefault();
-  walkBy(-Math.sign(ev.deltaY) * 3, 0);
+  const px = ev.deltaY * (WHEEL_PX[ev.deltaMode] ?? 1);
+  walkBy(-Math.sign(px) * Math.min(3, Math.abs(px) * 0.03), 0);
 }, { passive: false });
 function walkBy(forward, sideways) {
   const fwd = new THREE.Vector3().subVectors(controls.target, camera.position).setY(0);

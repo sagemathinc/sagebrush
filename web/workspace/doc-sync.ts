@@ -12,6 +12,7 @@
 // (web/notebook/journal.js).  One flight per notebook: a pull and a send of one notebook never overlap here.
 import { applyPage, acked, markSent, readCursor, readJournal, recordClaim, syncedKey, unsent } from "../notebook/journal-rows.js";
 import { IdbPatchStore, openHistoryDb, tellHistory, tellAcked } from "../notebook/stores.js";
+// @ts-expect-error patchflow 0.16.0 is an ES module whose index.d.ts re-exports "./client-id" without an extension, which nodenext resolution does not follow (the JS export is there)
 import { makeClientId } from "patchflow";
 import { chainStart, hex, fromHex, verifyChainPage, type ChainedBatch, type ChainState } from "../sync-protocol/doc-protocol";
 import { toB64, fromB64, LIMITS } from "../sync-protocol/protocol";
@@ -275,7 +276,7 @@ export class DocSync {
       const from: ChainState = cursor ? { seq: cursor.after, recv: cursor.recv, chain: fromHex(cursor.chain) } : chainStart(link.owner, id, epoch);
       const page: ChainedBatch[] = items.map((b) => ({ seq: b.seq as number, recv: b.recv as number, epoch, author: String(b.author), writer: String(b.writer), envs: JSON.stringify(b.patches), body: fromB64(b.body, LIMITS.batchBytes), chain: String(b.chain) }));
       const v = verifyChainPage({ epoch }, from, page);
-      if (!v.ok) return this.stop(id, "chain", `${v.why} at seq ${v.at}`, conn);
+      if (v.ok === false) return this.stop(id, "chain", `${v.why} at seq ${v.at}`, conn);
       // (each patch: its envelope and its payload slice, the stored patch again; one that carries its own time or
       // parents is refused, as sync-server §5.2 says)
       const rows: { time: string; env: Record<string, unknown> }[] = [];
