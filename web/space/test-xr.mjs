@@ -16,7 +16,7 @@ const here = new URL(".", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 300) : "")); if (!c) failures++; };
-setTimeout(() => { console.log("FAIL the suite didn't end in 300 s"); process.exit(1); }, 300_000).unref();
+setTimeout(() => { console.log("FAIL the suite didn't end in 300 s"); void finish(1); }, 300_000).unref();
 
 // ---- the emulator, as one classic script that runs before the page's own (forceInstall: headless Chromium has a
 //      navigator.xr of its own, with no device); built from a file beside this one, so 'iwer' resolves
@@ -35,7 +35,19 @@ const server = spawn("python3", [join(here, "..", "serve.py"), String(port)], { 
 const profile = mkdtempSync(join(tmpdir(), "space-xr-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist",
   "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1400,900", "about:blank"], { stdio: "ignore" });
-process.on("exit", () => { chrome.kill("SIGKILL"); server.kill("SIGKILL"); });
+// (cleanup, bounded: Chrome is stopped and waited for (at most 5 s) before its profile is removed; the exit handler is
+//  the last resort, for an exit that didn't come through finish)
+const chromeGone = new Promise((r) => chrome.once("exit", r));
+let cleaned = false;
+const cleanup = async () => {
+  if (cleaned) return;
+  cleaned = true;
+  chrome.kill("SIGKILL"); server.kill("SIGKILL");
+  await Promise.race([chromeGone, sleep(5000)]);
+  rmSync(profile, { recursive: true, force: true });
+};
+const finish = async (code) => { await cleanup().catch(() => {}); process.exit(code); };
+process.on("exit", () => { chrome.kill("SIGKILL"); server.kill("SIGKILL"); if (!cleaned) try { rmSync(profile, { recursive: true, force: true }); } catch {} });
 let cdpPort;
 for (let i = 0; i < 200 && !cdpPort; i++) { try { cdpPort = Number(readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]); } catch {} await sleep(100); }
 const targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json();
@@ -207,12 +219,16 @@ await frames(2);
 await tap("right", "trigger");
 ok(await until(`space3d.xr.panel?.id === 'd:geometry' && space3d.xr.panel.buttons.includes('enter')`, 5000), "a folder's panel offers Enter", await ev(`space3d.xr.panel`));
 await until(`space3d.xr.history.flying === false`, 3000);
+const levels = [];
+const boundary = async () => levels.push({ room: await ev(`space3d.room`), pos: await ev(`space3d.xr.rig.position.toArray().map((x) => +x.toFixed(2))`) });
+await boundary();
 await ev(`space3d.xr.press('enter'), true`);
 ok(await until(`space3d.room === 'project › geometry/' && space3d.xr.panel === null`, 8000), "Enter puts you in its room", { room: await ev(`space3d.room`) });
 await until(`space3d.xr.history.flying === false`, 3000);
 await ev(`(() => { space3d.xr.open(space3d.space.nodes.find((n) => n.id === 'p:geometry/report.py')); return true; })()`);
 ok(await until(`(space3d.xr.panel?.buttons ?? []).includes('enter')`, 8000), "a Python file's panel offers Enter", await ev(`space3d.xr.panel`));
 await until(`space3d.xr.history.flying === false`, 3000);
+await boundary();
 await ev(`space3d.xr.press('enter'), true`);
 ok(await until(`space3d.room === 'project › geometry/ › report.py'`, 10000), "Enter parses the file into its room", { room: await ev(`space3d.room`), status: await ev(status) });
 const rel = await ev(`space3d.space.nodes.find((n) => n.kind === "import" && /shapes/.test(n.title))?.id ?? null`);
@@ -220,12 +236,23 @@ await until(`space3d.xr.history.flying === false`, 3000);
 await ev(`(() => { space3d.xr.open(space3d.space.nodes.find((n) => n.id === ${JSON.stringify(rel)})); return true; })()`);
 ok(!!rel && await until(`(space3d.xr.panel?.buttons ?? []).includes('enter')`, 5000), "its relative import's panel offers Go there", await ev(`space3d.xr.panel`));
 await until(`space3d.xr.history.flying === false`, 3000);
+await boundary();
 await ev(`space3d.xr.press('enter'), true`);
 ok(await until(`/shapes\\.py$/.test(space3d.room ?? '')`, 10000), "Go there leads to the imported file", { room: await ev(`space3d.room`) });
-for (let i = 0; i < 8 && (await ev(`space3d.room`)) !== null; i++) {
-  await until(`space3d.xr.history.flying === false`, 3000);
-  await ev(`space3d.xr.menuPress('back'), true`);
-  await sleep(500);
+// (Back out, room by room: moves made inside a room are undone first; then Back leaves exactly the room you are in, to
+//  where you stood when you entered it (never to the view of everything, nor to a place in another room))
+ok(levels.length === 3, "three rooms were entered", levels.map((l) => l.room));
+for (const want of levels.slice().reverse()) {
+  const from = await ev(`space3d.room`);
+  for (let i = 0; i < 4 && (await ev(`space3d.room`)) === from; i++) {
+    await until(`space3d.xr.history.flying === false`, 3000);
+    await ev(`space3d.xr.menuPress('back'), true`);
+    await sleep(300);
+  }
+  await until(`space3d.xr.history.flying === false`, 5000);
+  const got = { room: await ev(`space3d.room`), pos: await ev(`space3d.xr.rig.position.toArray().map((x) => +x.toFixed(2))`) };
+  const d = Math.hypot(...got.pos.map((x, k) => x - want.pos[k]));
+  ok(got.room === want.room && d < 0.05, `Back leaves ${from} for ${want.room ?? "the top"}, to where you stood when you entered`, { got, want: want.pos });
 }
 ok((await ev(`space3d.room`)) === null && (await ev(`space3d.space.nodes.some((n) => n.id === 'd:geometry')`)), "Back (wrist menu) brings you out room by room, to the top", { room: await ev(`space3d.room`) });
 // (a notebook's panel doesn't fetch it, as the drawer doesn't: a notebook is read only when entered)
@@ -239,6 +266,52 @@ await ev(`space3d.xr.menuPress('exit'), true`);
 ok(await until(`!space3d.xr.presenting`), "and Exit VR leaves");
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 
+// ---- starting a session: no floor reference space, no reference space at all, and a session ended while starting.
+//      Each wraps the next granted session's requestReferenceSpace; a failure leaves the page as it was, never presenting
+const startWith = (how, button = "vr") => ev(`(() => {
+  const nx = navigator.xr, real = nx.requestSession.bind(nx);
+  window.__sess = null;
+  nx.requestSession = async (...a) => {
+    nx.requestSession = real;
+    const s = await real(...a), rrs = s.requestReferenceSpace.bind(s);
+    window.__sess = { ended: false, ends: 0 }; s.addEventListener("end", () => (window.__sess.ended = true));
+    const end = s.end.bind(s); s.end = () => { window.__sess.ends++; return end(); };
+    s.requestReferenceSpace = (type) => {
+      if (${JSON.stringify(how)} === "no-floor" && type === "local-floor") return Promise.reject(new DOMException("no floor", "NotSupportedError"));
+      if (${JSON.stringify(how)} === "none") return Promise.reject(new DOMException("none", "NotSupportedError"));
+      if (${JSON.stringify(how)} === "end") { void s.end(); return Promise.reject(new DOMException("ended", "InvalidStateError")); }
+      return rrs(type);
+    };
+    return s;
+  };
+  document.querySelector('[data-c="${button}"]').click();
+  return true;
+})()`);
+const restored = `!space3d.xr.presenting && space3d.controls.enabled && ${VR}.textContent === "Enter VR"`;
+await startWith("no-floor");
+ok(await until(`space3d.xr.presenting`, 8000), "a headset without a floor reference space still enters (the local space, the floor an eye's height below)");
+await ev(`space3d.xr.menuPress('exit'), true`);
+ok(await until(restored, 5000), "and leaves");
+const cam0 = await ev(`space3d.camera.position.toArray().map((x) => +x.toFixed(2))`);
+await startWith("none");
+ok(await until(`window.__sess?.ended === true`, 8000) && await until(restored, 5000), "with no reference space at all: the session is ended, never presenting, the page as it was", { sess: await ev(`window.__sess`), status: await ev(status) });
+ok(/couldn't start/.test(await ev(status)), "and it says it couldn't start", await ev(status));
+ok(JSON.stringify(await ev(`space3d.camera.position.toArray().map((x) => +x.toFixed(2))`)) === JSON.stringify(cam0), "the camera is where it was");
+// (AR, failing while it starts: the background it cleared comes back, the controls work again, and the session is
+//  ended once)
+await startWith("none", "ar");
+ok(await until(`window.__sess?.ended === true`, 8000) && await until(`!space3d.xr.presenting && space3d.controls.enabled && ${AR}.textContent === "Enter AR"`, 5000), "AR failing while it starts: never presenting, the controls back", { sess: await ev(`window.__sess`), status: await ev(status) });
+ok((await ev(`space3d.camera.parent.background !== null && window.__sess.ends === 1`)) === true, "its background is back, and the session was ended once", await ev(`({ bg: space3d.camera.parent.background !== null, ends: window.__sess.ends })`));
+await startWith("end");
+ok(await until(`window.__sess?.ended === true`, 8000) && await until(restored, 5000), "a session that ends while starting: never presenting, the page as it was", { sess: await ev(`window.__sess`), status: await ev(status) });
+await sleep(500);
+ok(!(await ev(`space3d.xr.presenting`)), "and it stays not presenting");
+await startWith("ok");
+ok(await until(`space3d.xr.presenting`, 8000), "and the next Enter VR works");
+await ev(`space3d.xr.menuPress('exit'), true`);
+ok(await until(restored, 5000), "and leaves");
+ok(errors.length === 0, "no page errors", errors.slice(0, 3));
+
 // ---- without a headset: neither button is offered, and the headset's code isn't loaded
 await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: added.result.identifier });
 await send("Page.navigate", { url: `http://127.0.0.1:${port}/space/?space=intro.space.json` });
@@ -247,4 +320,4 @@ await sleep(1500);
 ok((await ev(`${VR}.hidden && ${AR}.hidden`)) === true, "without a headset, neither Enter VR nor Enter AR is offered");
 ok((await ev(`performance.getEntriesByType("resource").filter((r) => /\\/chunks\\/xr-[^/]*\\.js$/.test(r.name)).length`)) === 0, "and the headset's code isn't loaded");
 console.log(failures ? `${failures} FAILED` : "all passed");
-process.exit(failures ? 1 : 0);
+await finish(failures ? 1 : 0);

@@ -29,7 +29,7 @@ export function setupXR(api) {
   scene.add(rig);
   rig.add(camera);
   const input = createInput();
-  let session = null, mode = null, saved = null;
+  let session = null, mode = null, saved = null, starting = null;
   // (walking or flying; kept for the next visit)
   let walk = keep.get("space3d:xr-move") !== "fly";
   // (the blink: black around the eyes, faded in and out)
@@ -360,7 +360,8 @@ export function setupXR(api) {
       const ok = await api.enter(nd);
       if (!ok) { if (shown === nd) { state = "couldn't enter it"; draw(); } return; }
       close();
-      backStack.push({ ...from, leave: true }); fwdStack.length = 0;
+      // (the marker belongs to the room just entered: Back there leaves it, to where you stood in the room outside)
+      backStack.push({ ...from, depth: api.depth(), leave: true }); fwdStack.length = 0;
       // (through an import that named one thing: to it, its panel open; else the view of the whole room)
       const f = api.focus();
       if (f) { open(f, false); const v = api.viewOf(f); flyRig(v.to, v.toT, 700, false); }
@@ -518,21 +519,42 @@ export function setupXR(api) {
   // ---------------------------------------------------------------- entering and leaving
   // (on the person's click only: the browser asks for that; entering again while in one leaves it)
   async function enter(m = "immersive-vr") {
-    if (session) return session.end();
+    if (session || starting) return (session ?? starting).end();
     // (WebXR's types aren't in the page's type check: the session is the browser's, handed to three.js)
     const nx = (navigator as unknown as { xr?: { requestSession(mode: string, init?: object): Promise<any> } }).xr;
     if (!nx) throw new Error(`this browser has no ${m === "immersive-ar" ? "AR" : "VR"}`);
     const s = await nx.requestSession(m, { optionalFeatures: ["local-floor"] });
-    // (where you'll stand: where the camera is, facing where it looks)
-    saved = { pos: camera.position.clone(), quat: camera.quaternion.clone(), bg: scene.background, fog: scene.fog };
-    const dir = new THREE.Vector3().subVectors(controls.target, camera.position);
-    rig.position.copy(camera.position).add(new THREE.Vector3(0, -EYE * SCALE, 0));
-    rig.rotation.set(0, Math.atan2(-dir.x, -dir.z), 0);
-    rig.scale.setScalar(SCALE);
-    controls.enabled = false;
-    if (m === "immersive-ar") { scene.background = null; scene.fog = null; api.ground().visible = false; }
+    // (from here the session is granted: until it is set up, a second click ends it, and a session that ends or fails
+    //  meanwhile puts the page back as it was, never presenting)
+    starting = s;
+    let ended = false;
+    const onEnd = () => { ended = true; };
+    s.addEventListener("end", onEnd);
+    try {
+      // (the floor where the headset knows it (local-floor, an optional feature); else the start of your head, with
+      //  the floor an eye's height below it)
+      const floor = await s.requestReferenceSpace("local-floor").then(() => true, () => false);
+      renderer.xr.setReferenceSpaceType(floor ? "local-floor" : "local");
+      // (where you'll stand: where the camera is, facing where it looks)
+      saved = { pos: camera.position.clone(), quat: camera.quaternion.clone(), bg: scene.background, fog: scene.fog };
+      const dir = new THREE.Vector3().subVectors(controls.target, camera.position);
+      rig.position.copy(camera.position).add(new THREE.Vector3(0, floor ? -EYE * SCALE : 0, 0));
+      rig.rotation.set(0, Math.atan2(-dir.x, -dir.z), 0);
+      rig.scale.setScalar(SCALE);
+      controls.enabled = false;
+      if (m === "immersive-ar") { scene.background = null; scene.fog = null; api.ground().visible = false; }
+      await renderer.xr.setSession(s);
+      if (ended) throw new Error("the headset's session ended while it was starting");
+    } catch (e) {
+      s.removeEventListener("end", onEnd);
+      leave();
+      if (!ended) await s.end().catch(() => {});
+      throw e;
+    } finally {
+      starting = null;
+    }
+    s.removeEventListener("end", onEnd);
     s.addEventListener("end", leave);
-    await renderer.xr.setSession(s);
     session = s; mode = m;
     api.changed(true, m);
     drawMenu();
