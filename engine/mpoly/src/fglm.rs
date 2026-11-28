@@ -67,6 +67,9 @@ pub fn fglm_p(pk: Packing, o1: Order, g: &[P], o2: Order, md: &Modulus) -> Resul
     if !zero_dimensional(pk, g) {
         return Ok(None);
     }
+    // (Stop is checked in every loop below, once per monomial or row: their
+    // work grows with the quotient's dimension, not the input's size)
+    let setup = sagebrush_interrupt::enter("fglm.staircase");
     let guard = pk.guard();
     let lead: Vec<u64> = g.iter().map(|f| f[0].0).collect();
     let divides = |a: u64, b: u64| ((b | guard) - a) & guard == guard;
@@ -81,6 +84,7 @@ pub fn fglm_p(pk: Packing, o1: Order, g: &[P], o2: Order, md: &Modulus) -> Resul
     let mut index: HashMap<u64, usize> = HashMap::from([(0, 0)]);
     let mut k = 0;
     while k < stair.len() {
+        sagebrush_interrupt::check();
         let b = stair[k];
         k += 1;
         for &u in &unit {
@@ -96,9 +100,11 @@ pub fn fglm_p(pk: Packing, o1: Order, g: &[P], o2: Order, md: &Modulus) -> Resul
     }
     let d = stair.len();
     // the border and its normal forms, by one reduction
+    sagebrush_interrupt::phase("fglm.border");
     let mut border: Vec<u64> = vec![];
     let mut seen: HashSet<u64> = HashSet::new();
     for &b in &stair {
+        sagebrush_interrupt::check();
         for &u in &unit {
             let c = b + u;
             if !index.contains_key(&c) && seen.insert(c) {
@@ -127,8 +133,10 @@ pub fn fglm_p(pk: Packing, o1: Order, g: &[P], o2: Order, md: &Modulus) -> Resul
     let red = spelim::reduce_auto(&Pivots { p: p as u32, rows: at }, &rows, nc, crate::threads());
     // NF(c): the unit row reduced (its leading entry cancelled), on the
     // staircase
+    sagebrush_interrupt::phase("fglm.normal_forms");
     let mut nf: HashMap<u64, Vec<(u32, u32)>> = HashMap::new();
     for (w, r) in border.iter().zip(red) {
+        sagebrush_interrupt::check();
         let mut v = Vec::with_capacity(r.len());
         for (&c, &x) in r.cols.iter().zip(&r.vals) {
             let Some(&j) = index.get(&cols[c as usize].1) else {
@@ -140,8 +148,10 @@ pub fn fglm_p(pk: Packing, o1: Order, g: &[P], o2: Order, md: &Modulus) -> Resul
         nf.insert(*w, v);
     }
     // the multiplication by x_i on the staircase: column b is NF(x_i b)
+    sagebrush_interrupt::phase("fglm.mult");
     let mult: Vec<Vec<Vec<(u32, u32)>>> = unit.iter().map(|&u| {
         stair.iter().map(|&b| {
+            sagebrush_interrupt::check();
             let c = b + u;
             match index.get(&c) {
                 Some(&j) => vec![(j as u32, 1)],
@@ -149,11 +159,16 @@ pub fn fglm_p(pk: Packing, o1: Order, g: &[P], o2: Order, md: &Modulus) -> Resul
             }
         }).collect()
     }).collect();
+    drop(setup);
     // the walk in the target order
+    let _walk = sagebrush_interrupt::enter("fglm.walk");
     let red64 = |x: u64| x % p;
     let apply = |i: usize, v: &[u32]| -> Vec<u32> {
         let mut acc = vec![0u64; d];
         for (b, &x) in v.iter().enumerate() {
+            if b & 4095 == 0 {
+                sagebrush_interrupt::check();
+            }
             if x != 0 {
                 for &(j, y) in &mult[i][b] {
                     let a = &mut acc[j as usize];
@@ -207,10 +222,14 @@ pub fn fglm_p(pk: Packing, o1: Order, g: &[P], o2: Order, md: &Modulus) -> Resul
         let mut w: Vec<u64> = v.iter().map(|&x| x as u64).collect();
         let mut comb: Vec<u64> = vec![0; smon.len()];
         for k in 0..ech.len() {
+            if k & 1023 == 0 {
+                sagebrush_interrupt::check();
+            }
             let c = w[piv[k]];
             if c == 0 {
                 continue;
             }
+            sagebrush_interrupt::check();
             let f = p - c;
             for (a, &b) in w.iter_mut().zip(&ech[k]) {
                 if b != 0 {

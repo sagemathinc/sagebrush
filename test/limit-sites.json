@@ -670,12 +670,28 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_CPU_NS.fetch_max(c.saturating_sub(last), Relaxed); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
  "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
   "class": "none",
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/interrupt/src/lib.rs :: drop :: static MAX_POLL_GAP_CPU_NS: AtomicU64 = AtomicU64::new(0); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
  "engine/interrupt/src/lib.rs :: drop :: static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: max_poll_gap_cpu_ns :: MAX_POLL_GAP_CPU_NS.load(Relaxed) #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/interrupt/src/lib.rs :: max_poll_gap_cpu_ns :: pub fn max_poll_gap_cpu_ns() -> u64 { #0": {
   "class": "none",
   "owner": "sage"
  },
@@ -698,6 +714,10 @@
  "engine/interrupt/src/lib.rs :: set_memory_share :: MEMORY_SHARE.store(share.unwrap_or(u64::MAX), Relaxed); #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "engine/interrupt/src/lib.rs :: trace :: MAX_POLL_GAP_CPU_NS.store(0, Relaxed); #0": {
+  "class": "none",
+  "owner": "sage"
  },
  "engine/interrupt/src/lib.rs :: trace :: MAX_POLL_GAP_NS.store(0, Relaxed); #0": {
   "class": "none",
@@ -1364,6 +1384,10 @@
   "class": "2+3",
   "owner": "multivariate engine",
   "row": "inv-36"
+ },
+ "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let cpu = hooks::max_poll_gap_cpu_ns(); #0": {
+  "class": "none",
+  "owner": "sage"
  },
  "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let gap = hooks::max_gap_ns(); #0": {
   "class": "none",

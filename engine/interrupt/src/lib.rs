@@ -173,6 +173,10 @@ pub mod hooks {
     static COUNTS: [AtomicU64; MAX_PHASES] = [const { AtomicU64::new(0) }; MAX_PHASES];
     static TOTAL: AtomicU64 = AtomicU64::new(0);
     static ARMED: AtomicU64 = AtomicU64::new(0);
+    // a Stop armed in a phase: its index (as CURRENT's, 0 none) and the
+    // count of that phase's checks at which it is requested
+    static ARMED_PHASE: AtomicUsize = AtomicUsize::new(0);
+    static ARMED_PHASE_AT: AtomicU64 = AtomicU64::new(0);
     static STOPPED: AtomicUsize = AtomicUsize::new(0);
     static TRACING: AtomicBool = AtomicBool::new(false);
     static TRACE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
@@ -183,15 +187,31 @@ pub mod hooks {
     static FINE: AtomicU64 = AtomicU64::new(0);
     static LAST_POLL_NS: AtomicU64 = AtomicU64::new(0);
     static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0);
+    // the same polls' gaps in the calling thread's CPU time (on-CPU
+    // nanoseconds, Linux's /proc/thread-self/schedstat): what the work
+    // between two polls costs, not how long a loaded host kept it waiting
+    static LAST_POLL_CPU_NS: AtomicU64 = AtomicU64::new(0);
+    static MAX_POLL_GAP_CPU_NS: AtomicU64 = AtomicU64::new(0);
 
     fn now_ns() -> u64 {
         static START: OnceLock<Instant> = OnceLock::new();
         START.get_or_init(Instant::now).elapsed().as_nanos() as u64
     }
 
+    /// The calling thread's CPU time, in nanoseconds, where the system
+    /// reports it (Linux).
+    pub fn thread_cpu_ns() -> Option<u64> {
+        std::fs::read_to_string("/proc/thread-self/schedstat").ok()?.split_whitespace().next()?.parse().ok()
+    }
+
     pub(crate) fn count(coarse: bool) {
         let cur = CURRENT.load(Relaxed);
-        COUNTS[cur].fetch_add(1, Relaxed);
+        let in_phase = COUNTS[cur].fetch_add(1, Relaxed) + 1;
+        if cur != 0 && ARMED_PHASE.load(Relaxed) == cur && in_phase == ARMED_PHASE_AT.load(Relaxed) && !super::REQUESTED.load(Relaxed) {
+            ARMED_PHASE.store(0, Relaxed);
+            STOPPED.store(cur, Relaxed);
+            super::request();
+        }
         let t = TOTAL.fetch_add(1, Relaxed) + 1;
         if TRACING.load(Relaxed) {
             TRACE.lock().unwrap_or_else(|e| e.into_inner()).push(cur as u8);
@@ -206,6 +226,12 @@ pub mod hooks {
                 let last = LAST_POLL_NS.swap(n, Relaxed);
                 if last != 0 {
                     MAX_POLL_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed);
+                }
+                if let Some(c) = thread_cpu_ns() {
+                    let last = LAST_POLL_CPU_NS.swap(c, Relaxed);
+                    if last != 0 {
+                        MAX_POLL_GAP_CPU_NS.fetch_max(c.saturating_sub(last), Relaxed);
+                    }
                 }
             }
         }
@@ -225,6 +251,8 @@ pub mod hooks {
         FINE.store(0, Relaxed);
         LAST_POLL_NS.store(0, Relaxed);
         MAX_POLL_GAP_NS.store(0, Relaxed);
+        LAST_POLL_CPU_NS.store(0, Relaxed);
+        MAX_POLL_GAP_CPU_NS.store(0, Relaxed);
         TRACING.store(true, Relaxed);
     }
 
@@ -247,6 +275,15 @@ pub mod hooks {
     /// browser could go unnoticed.
     pub fn max_poll_gap_ns() -> u64 {
         MAX_POLL_GAP_NS.load(Relaxed)
+    }
+
+    /// The longest CPU time of the polling thread between two traced polls
+    /// of the WebAssembly host, in nanoseconds (0 where the system doesn't
+    /// report a thread's CPU time): the work a Stop could wait behind,
+    /// unaffected by the host's load (a loaded host stretches the wall
+    /// time of the same work).  One thread's: for computations on one.
+    pub fn max_poll_gap_cpu_ns() -> u64 {
+        MAX_POLL_GAP_CPU_NS.load(Relaxed)
     }
 
     /// The phase that was current when an armed Stop was requested.
@@ -278,11 +315,23 @@ pub mod hooks {
         CURRENT.store(0, Relaxed);
         TOTAL.store(0, Relaxed);
         ARMED.store(0, Relaxed);
+        ARMED_PHASE.store(0, Relaxed);
         STOPPED.store(0, Relaxed);
         TRACING.store(false, Relaxed);
         for c in COUNTS.iter() {
             c.store(0, Relaxed);
         }
+    }
+
+    /// Request Stop at the k-th check (k >= 1) made in phase `name` from
+    /// now, however many checks other phases make first.
+    pub fn arm_in_phase(name: &'static str, k: u64) {
+        let prev = CURRENT.load(Relaxed);
+        set_phase(name);
+        let i = CURRENT.load(Relaxed);
+        CURRENT.store(prev, Relaxed);
+        ARMED_PHASE_AT.store(COUNTS[i].load(Relaxed) + k.max(1), Relaxed);
+        ARMED_PHASE.store(i, Relaxed);
     }
 
     /// Request Stop at the k-th check from now (k >= 1).
