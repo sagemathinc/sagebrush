@@ -4011,6 +4011,21 @@ class PolynomialRing_ff_:
             [z^2, z^2 + 1, z^2 + z, z^2 + z + 1]
             sage: list(GF(3)['u'].monics(max_degree=1))
             [1, u, u + 1, u + 2]
+
+        The field's elements are drawn as they are needed, never all at
+        once::
+
+            sage: F = GF(1000003); P = F['t']; cls = type(F); field_iter = cls.__iter__; drawn = []  # sagebrush only
+            sage: def counted(self):  # sagebrush only
+            ....:     for x in field_iter(self):
+            ....:         drawn.append(1)
+            ....:         yield x
+            sage: cls.__iter__ = counted  # sagebrush only
+            sage: list(P.monics(of_degree=0)), len(drawn), next(P.monics(of_degree=3)), len(drawn)  # sagebrush only
+            ([1], 0, t^3, 3)
+            sage: cls.__iter__ = field_iter  # sagebrush only
+            sage: P = GF(4294967311)['t']; list(P.monics(of_degree=0)), next(P.monics(of_degree=3))
+            ([1], t^3)
         """
         if (of_degree is None) == (max_degree is None):
             raise ValueError("you should pass exactly one of of_degree and max_degree")
@@ -4067,15 +4082,25 @@ class PolynomialRing_ff_:
         return num // den
 
     def _monic_polys(self, n):
-        els = list(self._base)
-        q = len(els)
-        for idx in range(q ** n):
-            c = []
-            t = idx
-            for _ in range(n):
-                c.append(els[t % q])
-                t //= q
-            yield Polynomial_ff(self, c + [self._base.one()])
+        # (the coefficients below x^n as an odometer over the field's own
+        # order, the constant term fastest: one iterator per digit, never
+        # the field's list)
+        B = self._base
+        its = [iter(B) for _ in range(n)]
+        c = [next(it) for it in its]
+        while True:
+            yield Polynomial_ff(self, c + [B.one()])
+            i = 0
+            while i < n:
+                try:
+                    c[i] = next(its[i])
+                    break
+                except StopIteration:
+                    its[i] = iter(B)
+                    c[i] = next(its[i])
+                    i += 1
+            if i == n:
+                return
 
     def __getitem__(self, names):
         raise NotImplementedError("iterated polynomial rings")
@@ -4950,11 +4975,32 @@ class Polynomial_ff:
             x^5 + 6*x^3 + 9*x + 100
             sage: R(5).minpoly_mod(f), (x^2 + 1).minpoly_mod(x^2 + 1)
             (x + 96, x)
+
+        Its workspace (the reduced powers and their combinations) is
+        admitted before any of it is built::
+
+            sage: import sys; old = getattr(sys, "_sagebrush_heap_limit", None)  # sagebrush only
+            sage: P = type(x); padded = P.padded_list; built = []  # sagebrush only
+            sage: P.padded_list = lambda self, n=None: (built.append(1), padded(self, n))[1]  # sagebrush only
+            sage: sys._sagebrush_heap_limit = 4 * 2 * 10^6  # sagebrush only
+            sage: try:  # sagebrush only
+            ....:     (x^2).minpoly_mod(x^200 + 3*x + 1)
+            ....: except MemoryError as e:
+            ....:     print(type(e).__name__, len(built))
+            SagebrushMemoryError 0
+            sage: (x^2).minpoly_mod(x^10 + 3*x + 1).degree()  # sagebrush only
+            10
+            sage: sys._sagebrush_heap_limit = old; P.padded_list = padded  # sagebrush only
         """
         self._need_field("minpoly_mod")
         m = self._coerce(other)
         n = m.degree()
         B = self._ring._base
+        from _sage_ffmat import _admit_size
+        # (live at once: at most n + 1 reduced rows of n coordinates and n + 1
+        # combination coefficients, with a working row and combination,
+        # admitted before any is built)
+        _admit_size(B, n + 1, 2 * n + 2, 2)
         a = self % m
         # (reduced rows: each power's coordinates, eliminated against the
         # ones before, with the combination of powers that produced it)
@@ -5099,6 +5145,11 @@ class Polynomial_ff:
         g = self._coerce(other)
         m, n = self.degree(), g.degree()
         N = m + n
+        from _sage_ffmat import _admit_size
+        if N > 0:
+            # (live at once: the rows, their flattened entries and the
+            # matrix, admitted before any is built)
+            _admit_size(self._ring._base, N, N, 3)
         rows = []
         for k in range(n - 1, -1, -1):
             rows.append(list(reversed(self.shift(k).padded_list(N))))
@@ -5117,6 +5168,25 @@ class Polynomial_ff:
             [2, x + 1]
             sage: (x^2 + 1).subresultants(x^2 + 1)
             []
+
+        The Sylvester matrix and the subresultants admit their whole
+        workspace before building a row; with too little memory they are
+        refused, and smaller ones still work::
+
+            sage: import sys; old = getattr(sys, "_sagebrush_heap_limit", None)  # sagebrush only
+            sage: P = type(x); padded = P.padded_list; built = []  # sagebrush only
+            sage: P.padded_list = lambda self, n=None: (built.append(1), padded(self, n))[1]  # sagebrush only
+            sage: sys._sagebrush_heap_limit = 4 * 2 * 10^6  # sagebrush only
+            sage: for f in (lambda: (x^60 + 1).sylvester_matrix(x^60 + x), lambda: (x^60 + 1).subresultants(x^60 + x)):  # sagebrush only
+            ....:     try:
+            ....:         f()
+            ....:     except MemoryError as e:
+            ....:         print(type(e).__name__, len(built))
+            SagebrushMemoryError 0
+            SagebrushMemoryError 0
+            sage: (x^10 + 1).sylvester_matrix(x^10 + x).det(), (x^10 + 1).subresultants(x^10 + x)[0]  # sagebrush only
+            (2, 2)
+            sage: sys._sagebrush_heap_limit = old; P.padded_list = padded  # sagebrush only
         """
         self._need_field("subresultants")
         f, g = self, self._coerce(other)
@@ -5126,8 +5196,13 @@ class Polynomial_ff:
         B = self._ring._base
         from _sage_ffmat import matrix
         out = []
+        from _sage_ffmat import _admit_size
         for j in range(n):
             L = m + n - j
+            # (live at once: the L-wide rows, a minor's flattened entries,
+            # its matrix and the determinant's working copy, admitted before
+            # any is built)
+            _admit_size(B, L, L, 4)
             rows = [list(reversed(f.shift(k).padded_list(L))) for k in range(n - j - 1, -1, -1)]
             rows += [list(reversed(g.shift(k).padded_list(L))) for k in range(m - j - 1, -1, -1)]
             N = m + n - 2 * j

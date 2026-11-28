@@ -270,8 +270,10 @@ class Vector(list):
             return Vector(_norm(a / other) for a in self)
 
     def __rtruediv__(self, other):
-        if type(other) is int and other == 0:
-            # (an integer 0 over a vector: 0 in its fraction field, as Sage)
+        if type(other) in (int, type(_sa().ZZ(0))) and other == 0:
+            # (an integer 0 over a vector: 0 in its fraction field, as Sage;
+            # an int, or under CPython the int subclass that is Sage's
+            # Integer; not a bool)
             return _sa().SR(0) if self.base_ring() is _sa().SR else _sa().QQ(0)
         if _is_scalar(other):
             # (Sage's coercion error, by the two parents)

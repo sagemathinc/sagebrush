@@ -810,6 +810,42 @@
    "ok": false,
    "exc": "TypeError",
    "msg": "unable to convert '1/2/' to a rational"
+  },
+  {
+   "case": "Integer(0) / v2",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "Integer(0) / w3",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "0 / v2",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "0 / w3",
+   "ok": true,
+   "type": "Rational",
+   "str": "0"
+  },
+  {
+   "case": "Integer(2) / v2",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for /: 'Integer Ring' and 'Vector space of dimension 2 over Rational Field'"
+  },
+  {
+   "case": "QQ(0) / v2",
+   "ok": false,
+   "exc": "TypeError",
+   "msg": "unsupported operand parent(s) for /: 'Rational Field' and 'Vector space of dimension 2 over Rational Field'"
   }
  ]
 }

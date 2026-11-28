@@ -750,6 +750,15 @@ class FFMatrixMethods:
             [(100, [(1, 100)], 1), (3, [(1, 1)], 1)]
             sage: matrix(GF(3), [[2, 0, 0], [0, 0, -1], [0, 1, 0]]).eigenvectors_right(extend=False)
             [(2, [(1, 0, 0)], 1)]
+            sage: e = matrix(GF(101), [[1, 2], [2, 1]]).eigenvectors_right(); items = [e]; items.append(items); items
+            [[(100, [(1, 100)], 1), (3, [(1, 1)], 1)], [...]]
+            sage: t = (e, []); t[1].append(t); t
+            ([(100, [(1, 100)], 1), (3, [(1, 1)], 1)], [(...)])
+            sage: import sage_all; print(sage_all._pretty_sequences(items))  # sagebrush only
+            [[(100, [(1, 100)], 1), (3, [(1, 1)], 1)], [...]]
+            sage: [e, e]
+            [[(100, [(1, 100)], 1), (3, [(1, 1)], 1)],
+             [(100, [(1, 100)], 1), (3, [(1, 1)], 1)]]
             sage: matrix(GF(3), [[2, 0, 0], [0, 0, -1], [0, 1, 0]]).eigenvectors_right(None, False)
             Traceback (most recent call last):
             ...

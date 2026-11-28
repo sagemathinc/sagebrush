@@ -13178,6 +13178,21 @@
   "owner": "finite fields + configuration",
   "reason": "domain refusal: resultant, discriminant and is_square over Z/n with n composite (not a field) are not implemented; not a size or work limit"
  },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: import sys; old = getattr(sys, \"_sagebrush_heap_limit\", None) # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = 4 * 2 * 10^6 # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = old; P.padded_list = padded # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.nth_root :: NotImplementedError: nth_root of degree 2 of a polynomial over a field with several such roots is not supported yet #0": {
   "class": "none",
   "owner": "finite fields + configuration",
@@ -13196,6 +13211,21 @@
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
   "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.subresultants :: sage: import sys; old = getattr(sys, \"_sagebrush_heap_limit\", None) # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.subresultants :: sage: sys._sagebrush_heap_limit = 4 * 2 * 10^6 # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.subresultants :: sage: sys._sagebrush_heap_limit = old; P.padded_list = padded # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
  },
  "lib/_sage_ff.py :: _ff_bounded :: return lambda: NotImplementedError(\"%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most %s elements%s)\" % (what, A, B, _ffsub().embed_max_text(), _ffsub().work_clause())) #0": {
   "class": "3",

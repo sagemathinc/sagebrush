@@ -4289,14 +4289,18 @@ def _has_sequence(v, depth=0):
     return False
 
 
-def _pretty(v, indent):
+def _pretty(v, indent, path=()):
     # IPython's pretty printing, as Sage's display: a list or tuple on one
     # line when it fits in 79 columns and its items are one line each, else
-    # one item per line, indented by the nesting depth
+    # one item per line, indented by the nesting depth; a container already
+    # on the path from the top is printed [...] or (...), as IPython does
     seq = getattr(v, "_display_as_list", False)
     if seq or type(v) in (list, tuple):
         o, c = ("(", ")") if type(v) is tuple else ("[", "]")
-        parts = [_pretty(x, indent + 1) for x in v]
+        if id(v) in path:
+            return o + "..." + c
+        path = path + (id(v),)
+        parts = [_pretty(x, indent + 1, path) for x in v]
         tail = "," if type(v) is tuple and len(v) == 1 else ""
         flat = o + ", ".join(parts) + tail + c
         if "\n" not in flat and indent + len(flat) <= 79:
