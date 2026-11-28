@@ -24,6 +24,8 @@ export interface AccountEpochs {
   epochKeys(n: number): Promise<EpochKeys | null>;
 }
 const NUL = "\u0000";
+/** The most times one sealing resolves a document's generation (a stale declaration, then epochs begun meanwhile). */
+export const RESOLVES = 3;
 
 export function docKeys(src: { epochs: AccountEpochs; declarations: DocDeclarations }): DocKeys {
   const { epochs, declarations } = src, account = epochs.account;
@@ -65,17 +67,28 @@ export function docKeys(src: { epochs: AccountEpochs; declarations: DocDeclarati
       const { head, currentEpoch } = await epochs.chain();
       const had = current.get(doc);
       if (had && had.head === head) return had.gen;
-      // (a declaration re-sealed under a newer head than it names is refused "stale": the chain read again, once)
-      // (and a declaration confirmed after the chain began a new epoch answers for its own: that generation is retired
-      //  at the new head, so nothing is sealed under it; the new epoch's is resolved instead, once)
-      const gen = resolve(doc, head, currentEpoch).catch(async (e) => {
-        if ((e as { code?: string })?.code !== "stale") throw e;
-        const now = await epochs.chain(true);
-        return resolve(doc, now.head, now.currentEpoch);
-      }).then(async (g) => {
-        const now = await epochs.chain();
-        return now.currentEpoch === g.keyEpoch ? g : resolve(doc, now.head, now.currentEpoch);
-      });
+      // (a declaration re-sealed under a newer head than it names is refused "stale": the chain read again, once; and
+      //  one confirmed after the chain began a new epoch answers for its own, retired at the new head, so the new
+      //  epoch's is resolved instead. At most RESOLVES tries in all, and a generation is used only if it is still of the
+      //  current epoch when it is answered: otherwise the sealing fails (closed), never sealed under a retired one)
+      const gen = (async () => {
+        let view = { head, currentEpoch }, staleSeen = false;
+        for (let i = 0; i < RESOLVES; i++) {
+          let g: KeyGeneration;
+          try {
+            g = await resolve(doc, view.head, view.currentEpoch);
+          } catch (e) {
+            if ((e as { code?: string })?.code !== "stale" || staleSeen) throw e;
+            staleSeen = true;
+            view = await epochs.chain(true);
+            continue;
+          }
+          const now = await epochs.chain();
+          if (now.currentEpoch === g.keyEpoch) return g;
+          view = now;
+        }
+        throw new Error("e2e: the account's epoch kept changing while this notebook's key was declared");
+      })();
       const entry = { head, gen };
       current.set(doc, entry);
       gen.catch(() => { if (current.get(doc) === entry) current.delete(doc); });
@@ -100,7 +113,8 @@ export interface KeySource {
 /** A page's DocKeys, or undefined while its account has no end-to-end keys: then DocSync carries patches as before.
  * The declarations are asked of the owner's client at each call: DocSync runs only on the tab whose client runs, and a
  * client made again (a new connection, a lease taken over) answers from the same confirmed ledger. With no client
- * running, a call is refused ("ended"), which stops the notebook (e2e) until the page is reloaded. */
+ * running, every call is refused ("ended"), a generation already resolved included, which stops the notebook (e2e)
+ * until the page is reloaded. */
 export function pageDocKeys(src: KeySource): DocKeys | undefined {
   const epochs = src.e2eKeys();
   if (!epochs) return undefined;
@@ -109,7 +123,7 @@ export function pageDocKeys(src: KeySource): DocKeys | undefined {
     if (!c) throw new DocKeyError("ended", "no sync client on this page");
     return c.docDeclarations();
   };
-  return docKeys({
+  const keys = docKeys({
     epochs,
     declarations: {
       current: async (doc, head) => decl().current(doc, head),
@@ -117,4 +131,7 @@ export function pageDocKeys(src: KeySource): DocKeys | undefined {
       declare: async (d: KeyDeclaration) => decl().declare(d),
     },
   });
+  // (the client asked for on every sealing, not only when the index is: a generation cached at this head is no answer
+  // once no client runs. A lookup asks the index every time, so it is refused then already)
+  return { ...keys, current: async (doc) => { decl(); return keys.current(doc); } };
 }

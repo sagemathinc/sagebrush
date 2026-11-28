@@ -4,8 +4,9 @@
 // generation (once, however many sealings ask at the same time), which another device of the account opens from the
 // declaration alone; the index asked once per chain head; a new epoch, or a retired generation, mints anew while older
 // patches still open; a declaration race settles on the index's answer, one refused as stale is minted again once, and
-// one confirmed after a new epoch began isn't sealed under; a failure caches nothing; and a page's keys come from its
-// sync owner. (The wrapping itself, e2e/doc-cek.ts, is test-e2e-doc-cek.mjs's.)
+// one confirmed after a new epoch began isn't sealed under, at most RESOLVES tries in all; a failure caches nothing;
+// and a page's keys come from its sync owner, refused once no client runs. (The wrapping itself, e2e/doc-cek.ts, is
+// test-e2e-doc-cek.mjs's.)
 //   CHROME=google-chrome bun web/workspace/test-doc-keys.mjs
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -36,7 +37,7 @@ const html = `<!doctype html><script type="module">import * as m from "/s.js"; O
 window.code = async (f) => { try { await f(); return "ok"; } catch (e) { return e?.code ?? String(e?.message ?? e); } };
 window.ACCT = "e2e-acct-1";
 window.store = () => {
-  const decls = [], calls = { current: 0, exact: 0, declare: 0 }, s = { decls, calls, retired: new Set(), race: null, failOnce: false, stale: 0, onStale: null, onDeclare: null };
+  const decls = [], calls = { current: 0, exact: 0, declare: 0 }, s = { decls, calls, retired: new Set(), race: null, failOnce: false, stale: 0, onStale: null, onDeclare: null, eachDeclare: null };
   const key = (d) => d.document + "/" + d.cekId + "/" + d.keyEpoch;
   s.api = {
     current: async (doc, head) => { calls.current++; for (let i = decls.length - 1; i >= 0; i--) if (decls[i].document === doc && !s.retired.has(key(decls[i]))) return decls[i]; return null; },
@@ -47,6 +48,7 @@ window.store = () => {
       if (s.failOnce) { s.failOnce = false; throw new Error("offline"); }
       if (s.stale > 0) { s.stale--; s.onStale?.(); throw Object.assign(new Error("stale head"), { code: "stale" }); }
       if (s.onDeclare) { const f = s.onDeclare; s.onDeclare = null; f(); }
+      s.eachDeclare?.();
       if (s.race) { decls.push(s.race); s.race = null; return decls[decls.length - 1]; }
       decls.push(d); return d;
     },
@@ -231,11 +233,34 @@ try {
       const q = K.pageDocKeys({ e2eKeys: () => b.api, client: { docDeclarations: () => st.api } });
       out.opened = Array.from(await S.openSlice(q, W(${J(DOC)}, 1), s));
       out.declares = st.calls.declare;
+      // (the client gone at the same head: the generation just resolved isn't answered from the cache)
+      owner.client = null;
+      out.cachedEnded = await code(() => p.current(${J(DOC)}));
+      out.findEnded = await code(() => p.find(${J(DOC)}, S.readPrefix(s).cekId, 1));
       return out;
     })()`);
     ok(r.none === true, "K-9: an owner without the sealing module gives no keys: DocSync carries patches as before", r);
     ok(r.account === "e2e-acct-1" && r.noClient === "ended", "K-9: with it, the keys are the account's; with no client running on the page, a sealing is refused (ended)", r);
     ok(J(r.opened) === J([4]) && r.declares === 1, "K-9: once a client runs, its declarations are the ones asked: a patch sealed through one page's keys opens through another's", r);
+    ok(r.cachedEnded === "ended" && r.findEnded === "ended", "K-9: once no client runs, every call is refused (ended), a generation already resolved at the same head included", r);
+  }
+
+  // ---- K-12: epochs begun while each declaration waits: resolved again, at most RESOLVES times, then closed
+  {
+    const r = await P.ev(`(async () => {
+      const fills = { 1: 0x61, 2: 0x62, 3: 0x63, 4: 0x64, 5: 0x65 };
+      const st = store(), a = account(fills), p = K.docKeys({ epochs: a.api, declarations: st.api });
+      let moves = 2;
+      st.eachDeclare = () => { if (moves-- > 0) { a.currentEpoch++; a.head = "h-e" + a.currentEpoch; } };
+      const g = await p.current(${J(DOC)});
+      const twice = { epoch: g.keyEpoch, now: a.currentEpoch, decls: st.decls.map((d) => d.keyEpoch) };
+      const st2 = store(), b = account(fills), q = K.docKeys({ epochs: b.api, declarations: st2.api });
+      st2.eachDeclare = () => { b.currentEpoch++; b.head = "h-e" + b.currentEpoch; };
+      const always = await code(() => q.current(${J(DOC)}));
+      return { twice, always, declares: st2.calls.declare, resolves: K.RESOLVES };
+    })()`);
+    ok(r.twice.epoch === 3 && r.twice.now === 3 && J(r.twice.decls) === J([1, 2, 3]), "K-12: an epoch begun as each of two declarations is confirmed: the third, of the current epoch, is the one used", r);
+    ok(/kept changing/.test(r.always) && r.declares === r.resolves, "K-12: an epoch begun at every confirmation: after RESOLVES declarations the sealing fails, never sealed under a retired generation", r);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));
