@@ -212,6 +212,6 @@ yt, yp = [0, 1, 0, 1, 0], [0, 1, 0, 0, 0]
 for w in ([2**52 + 1, 1, 2**52 - 3, 3, 1], np.array([2**52 + 1, 1, 2**52 - 3, 3, 1], np.int64), np.array([5, 6, 7, 8, 9], np.int32), np.array([True, False, True, True, True]), None):
     case(f"cm.int-weights {type(w).__name__} {getattr(w, 'dtype', '')}", lambda: (lambda m: (m.dtype.name, m.tolist()))(confusion_matrix(yt, yp, sample_weight=w)))
 # beta: NaN is in no interval, refused before anything is computed (Python's and NumPy's NaN), +inf still accepted
-for beta in (float("nan"), np.nan, np.float64("nan"), float("inf"), 0.5):
+for beta in (float("nan"), np.nan, np.float64("nan"), np.float32("nan"), float("inf"), 0.5):
     case(f"fbeta.beta {beta!r}", lambda: fbeta_score([0, 1], [0, 1], beta=beta))
     case(f"prfs.beta {beta!r}", lambda: hx(precision_recall_fscore_support([0, 1], [0, 1], beta=beta)))

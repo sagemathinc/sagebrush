@@ -126,7 +126,7 @@
     "py/sklearn/naive_bayes.py": "0252117534ed7da78b91221c5070a148729c474648ca30562420251de3a30165",
     "py/sklearn/neighbors.py": "f698b255cbec7e6176e4e4b447a297f13ed39eb82367a7b22a26b84391f84a29",
     "py/sklearn/neural_network.py": "1945587b906532ee3ad7617e7cd5fd0f96f23bde8cef57ace137d4877a482707",
-    "py/sklearn/pipeline.py": "7ef5c7ba6a95613d9dac7bec54b7311383fc6e0321c113fdb34c09d155e54c5f",
+    "py/sklearn/pipeline.py": "b0858dab05ce487e078e548cc6ce7add4aa21d6fdb91421e84c43e7c357a2dd5",
     "py/sklearn/preprocessing/__init__.py": "f181ec8c179405a5d53b1fa0d920c59ce1c88b42a6be8759301232b0563b26d7",
     "py/sklearn/preprocessing/_sk_data.py": "32ac5e74e2f7f71469551d0a3246064ba2d68117cbd9a0c937ac8019887b1d44",
     "py/sklearn/random_projection.py": "ecbe2ab02e1820a7b73c252cdd84cbaa4b90bb50f6a9043d88c7830de217fb9c",
@@ -140,6 +140,6 @@
     "py/sklearn/utils/_sk_param.py": "5f0280c001ed153259f16588ac58c31ee609a8ec8aa22ff20581ed6eb192ede3",
     "py/sklearn/utils/_sk_stats.py": "b6a56655a2d52acd8b5fe86a3dcd403145082202989d8d75f2c180a3a1182536",
     "py/sklearn/utils/multiclass.py": "bd647cdf04de425fbe041004921ea8901368bc56b5bd72f8fdc6a00734a8c853",
-    "py/sklearn/utils/validation.py": "fe29416b09fbb883387667bbe28106f8676d994813746500402a1b39b4a42848"
+    "py/sklearn/utils/validation.py": "8d3b76d82d1d175a422b44a1efd5b6e71915ecb9bb64de09569c83cac43c1a2f"
   }
 }

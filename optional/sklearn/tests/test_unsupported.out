@@ -24,3 +24,5 @@ dtype('<U2')
 !! NotImplementedError: sklearn's metadata routing is not in Sagebrush's sklearn 0.x subset
 == cm.int-weights-past-2**53
 !! NotImplementedError: int64 values beyond 2**53 are not supported yet
+== cm.int-weights-running-sum-past-2**53
+!! NotImplementedError: int64 values beyond 2**53 are not supported yet

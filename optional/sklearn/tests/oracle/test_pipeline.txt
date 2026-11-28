@@ -131,3 +131,11 @@ array([[0.93820225]])
 !! InvalidParameterError: The 'verbose' parameter of Pipeline must be an instance of 'bool' or an instance of 'numpy.bool'. Got 'yes' instead.
 == param.memory
 !! InvalidParameterError: The 'memory' parameter of Pipeline must be None, an instance of 'str' or an object implementing 'cache'. Got 5 instead.
+== pipeline.set_output identity None
+!! ValueError: Unable to configure output for _SkIdentity() because `set_output` is not available.
+== pipeline.set_output identity default
+!! ValueError: Unable to configure output for _SkIdentity() because `set_output` is not available.
+== pipeline.set_output identity pandas
+!! ValueError: Unable to configure output for _SkIdentity() because `set_output` is not available.
+== pipeline.set_output scaler default
+"Pipeline(steps=[('standardscaler', StandardScaler()),\n                ('_skfitonly', _SkFitOnly())])"

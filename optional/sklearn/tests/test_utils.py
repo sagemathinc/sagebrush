@@ -78,3 +78,5 @@ for rep in (False, True):
 case("resample-n-check bool", lambda: resample([1, 2, 3], replace=False, n_samples=True, random_state=0))
 for n in (-1, 0, 2, None):
     case(f"shuffle-n-check n={n!r}", lambda: shuffle([1, 2, 3], n_samples=n, random_state=0))
+# n_samples checked before random_state: an invalid count is the n_samples error even beside an invalid seed
+case("resample-n-check before random_state", lambda: resample([1, 2, 3], n_samples=-1, random_state="x"))

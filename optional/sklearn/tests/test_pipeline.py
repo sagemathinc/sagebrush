@@ -127,3 +127,25 @@ for cid, fn in [
     ("memory", lambda: Pipeline([("a", Double())], memory=5).fit(X)),
 ]:
     case("param." + cid, sorted_sets(fn))
+
+# Pipeline.set_output: a transforming step without set_output is refused, whatever the container (scikit-learn's
+# _safe_set_output); one with it is configured; a final estimator that doesn't transform is passed over
+from sklearn.base import BaseEstimator, TransformerMixin
+
+
+class _SkIdentity(BaseEstimator):
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        return X
+
+
+class _SkFitOnly(BaseEstimator):
+    def fit(self, X, y=None):
+        return self
+
+
+for tr in (None, "default", "pandas"):
+    case(f"pipeline.set_output identity {tr}", lambda tr=tr: repr(Pipeline([("i", _SkIdentity()), ("s", StandardScaler())]).set_output(transform=tr)))
+case("pipeline.set_output scaler default", lambda: repr(make_pipeline(StandardScaler(), _SkFitOnly()).set_output(transform="default")))

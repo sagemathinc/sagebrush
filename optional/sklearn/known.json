@@ -64,7 +64,12 @@
     {
       "case": "cm.int-weights-past-2**53",
       "printed": "!! NotImplementedError: int64 values beyond 2**53 are not supported yet",
-      "reason": "integer sample weights are summed exactly in an int64 cell, as scikit-learn's; Sagebrush's int64 holds integers up to 2**53 exactly and refuses a cell past it rather than round it"
+      "reason": "integer sample weights are summed exactly in int64 within each cell, as scikit-learn's; Sagebrush's int64 holds integers up to 2**53 exactly and refuses a cell when a weight or a running sum within it passes 2**53, even if the cell's final count fits, rather than round it"
+    },
+    {
+      "case": "cm.int-weights-running-sum-past-2**53",
+      "printed": "!! NotImplementedError: int64 values beyond 2**53 are not supported yet",
+      "reason": "as cm.int-weights-past-2**53: the cell's count, 2**53 - 1, fits, but its running sum passes 2**53 on the way, so Sagebrush refuses where scikit-learn gives [[9007199254740991]]"
     }
   ],
   "tolerances": [

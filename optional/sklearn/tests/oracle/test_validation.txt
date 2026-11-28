@@ -270,3 +270,17 @@ True
 !! ValueError: Complex data not supported
 [[1.+2.j 0.+0.j]]
 
+== copy-order-F frame
+(True, False, True, [[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]])
+== copy-order-F int frame float64
+(True, False, True, [[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]])
+== copy-order-F int frame int64
+(True, False, True, [[1, 4], [2, 5], [3, 6]])
+== copy-order-F ndarray C
+(True, False, True, [[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]])
+== complex-into uint8
+!! ValueError: Complex data not supported
+[[1.+2.j 0.+0.j]]
+
+== complex-into object
+('O', [[(1+2j), 0j]])

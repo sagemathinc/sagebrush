@@ -155,10 +155,14 @@ class Pipeline(_BaseComposition):
 
     def set_output(self, *, transform=None):
         """Set the output container when "transform" and "fit_transform" are called."""
+        # (scikit-learn's _safe_set_output for each step: a step that transforms (or fit_transforms, when a container
+        # is named) must have set_output, else the ValueError; a step that doesn't transform is passed over)
         for _, _, step in self._iter():
-            if _sk_has(step, lambda s: s.set_output) and (
-                    _sk_has(step, lambda s: s.transform) or _sk_has(step, lambda s: s.fit_transform)):
-                step.set_output(transform=transform)
+            if not (_sk_has(step, lambda s: s.transform) or (_sk_has(step, lambda s: s.fit_transform) and transform is not None)):
+                continue
+            if not _sk_has(step, lambda s: s.set_output):
+                raise ValueError(f"Unable to configure output for {step} because `set_output` is not available.")
+            step.set_output(transform=transform)
         return self
 
     def get_params(self, deep=True):

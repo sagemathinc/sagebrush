@@ -323,6 +323,9 @@ def check_array(array, accept_sparse=False, *, accept_large_sparse=True, dtype="
 
     if copy and (array is array_orig or from_pandas):
         array = np.array(array, dtype=dtype, order=order, copy=True)
+        # (the order asked for kept: Sagebrush's np.array copies in C order whatever order= says)
+        if order == "F" and array.ndim > 1 and not array.flags["F_CONTIGUOUS"]:
+            array = np.asfortranarray(array)
 
     if force_writeable and not array.flags.writeable:
         # (a read-only input, such as a pandas frame's values, when a writeable output is asked for: a copy, so that

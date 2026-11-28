@@ -184,3 +184,5 @@ array([3, 5, 3, 3, 5, 5, 2, 3])
 [3, 2]
 == shuffle-n-check n=None
 [3, 2, 1]
+== resample-n-check before random_state
+!! InvalidParameterError: The 'n_samples' parameter of resample must be an int in the range [1, inf) or None. Got -1 instead.

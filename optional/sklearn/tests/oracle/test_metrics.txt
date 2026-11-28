@@ -364,6 +364,10 @@ True
 !! InvalidParameterError: The 'beta' parameter of fbeta_score must be a float in the range [0.0, inf]. Got np.float64(nan) instead.
 == prfs.beta np.float64(nan)
 !! InvalidParameterError: The 'beta' parameter of precision_recall_fscore_support must be a float in the range [0.0, inf]. Got np.float64(nan) instead.
+== fbeta.beta np.float32(nan)
+!! InvalidParameterError: The 'beta' parameter of fbeta_score must be a float in the range [0.0, inf]. Got np.float32(nan) instead.
+== prfs.beta np.float32(nan)
+!! InvalidParameterError: The 'beta' parameter of precision_recall_fscore_support must be a float in the range [0.0, inf]. Got np.float32(nan) instead.
 == fbeta.beta inf
 1.0
 == prfs.beta inf
