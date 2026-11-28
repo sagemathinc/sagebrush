@@ -5303,6 +5303,72 @@ async function docsUnderSealedHalt() {
   check(busy(r), "docs under a halt, control: under any other halt notebooks still get busy, nothing sent: " + J(r));
   await stop(c);
 }
+// (M2b) A halt freezes the index where it stopped: nothing past its cursor is asked for or applied, so the document
+// keys notebooks read under it are the ones verified before it. (1) B halts at an op that doesn't verify; the server
+// then serves valid envelopes again, and A declares a new document's key: a live notice, the idle pull and a liveness
+// check ask B for nothing, its cursor stays, and neither current nor exact gives the new key (exact: "halted"). (2) A
+// page asked for before a halt and answered after it (the sealed log full meanwhile): nothing of it applied.
+async function docKeysFrozenAtHalt() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  const pb = await f.device();
+  const wa = await fresh(), wb = await fresh();
+  const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
+  check(await until(() => settled(wa, a)), "frozen at a halt: A synced");
+  const clock = fakeClock(), net = fakeNet(true);
+  const b = viewClient(wb, { e2e: { keys: pb, kit: f.kit }, clock, net });
+  check(await until(() => settled(wb, b)), "frozen at a halt: B synced");
+  await ctl("set", { set: { tamperIndexEnv: 1, tamperFor: wb.device, serverNotices: true } });
+  await wa.mkdir("/frozen-b");
+  check(await until(() => b.debug().halted === "sealed-halt", 15_000), "frozen at a halt: B halted at the op that doesn't verify: " + J(b.debug().halted));
+  const haltCursor = b.debug().cursor, pulls = b.stats.pulls;
+  await ctl("set", { set: { tamperIndexEnv: 0, serverNotices: true } });
+  const doc = crypto.randomUUID(), D = await declFor(f, f.provider, doc, 1);
+  const declared = await outcome(a.docDeclarations().declare(D), 15_000);
+  check(declared.ok?.cekId === D.cekId, "frozen at a halt: A's new document key confirmed, after B's halt");
+  // (a live notice past B's cursor, the idle pull's wake, and a liveness check (the network back))
+  await ctl("notice", { head: haltCursor + 10 });
+  await sleep(300);
+  const afterNotice = b.stats.pulls;
+  await clock.advance(W.CLIENT.idlePullMs + 1000);
+  await sleep(300);
+  const afterIdle = b.stats.pulls;
+  net.back();
+  await sleep(500);
+  const db = b.docDeclarations();
+  const cur = await db.current(doc, f.server.head);
+  const ex = await outcome(db.exact(doc, D.cekId, 1), 1_000);
+  const seen = { haltCursor, cursor: b.debug().cursor, halted: b.debug().halted, pulls: { notice: afterNotice - pulls, idle: afterIdle - afterNotice, live: b.stats.pulls - afterIdle }, current: cur?.cekId === D.cekId, exact: ex.ok ? ex.ok.cekId === D.cekId : ex.code ?? "pending" };
+  check(afterNotice === pulls && afterIdle === pulls && b.stats.pulls === pulls, "frozen at a halt: a live notice, the idle pull and a liveness check send no pull_index: " + J(seen));
+  check(b.debug().cursor === haltCursor && b.debug().halted === "sealed-halt", "frozen at a halt: B's cursor where it halted, the halt kept: " + J(seen));
+  check(cur === null && ex.code === "halted", "frozen at a halt: no key declared after the halt readable (current none, exact \"halted\"): " + J(seen));
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(b);
+  // (2) a page in flight at a halt
+  const pc = await f.device();
+  const wc = await fresh();
+  const c = viewClient(wc, { e2e: { keys: pc, kit: f.kit } });
+  check(await until(() => settled(wc, c)), "frozen at a halt, in flight: C synced");
+  await ctl("set", { set: { holdPulled: 1, serverNotices: true } });
+  const doc2 = crypto.randomUUID(), D2 = await declFor(f, f.provider, doc2, 1);
+  const declared2 = await outcome(a.docDeclarations().declare(D2), 15_000);
+  check(declared2.ok?.cekId === D2.cekId, "frozen at a halt, in flight: A's new document key confirmed");
+  check(await until(async () => (await ctl("log")).got.some((g) => g.held), 10_000), "frozen at a halt, in flight: C's pull answered, the answer held on its way");
+  const before = c.debug().cursor;
+  await ctl("sealedCap", { n: 0 });
+  await wc.mkdir("/frozen-c");
+  check(await until(() => c.debug().halted === "sealed-log-full", 15_000), "frozen at a halt, in flight: C halted (the sealed log full) with the page out: " + J(c.debug().halted));
+  await ctl("release");
+  await sleep(1_000);
+  const cur2 = await c.docDeclarations().current(doc2, f.server.head);
+  const ex2 = await outcome(c.docDeclarations().exact(doc2, D2.cekId, 1), 1_000);
+  const seen2 = { before, cursor: c.debug().cursor, halted: c.debug().halted, current: cur2?.cekId === D2.cekId, exact: ex2.ok ? ex2.ok.cekId === D2.cekId : ex2.code ?? "pending" };
+  check(c.debug().cursor === before && cur2 === null && ex2.code === "halted", "frozen at a halt, in flight: the page answered after the halt applied nothing (the cursor kept, the new key unreadable): " + J(seen2));
+  await ctl("sealedCap", { n: 1_000_000 });
+  await ctl("set", { set: { serverNotices: false } });
+  await stop(c);
+  await stop(a);
+}
 async function sealedPullHalt() {
   // (a sealed op served altered: B halts at it, deterministically, nothing of it applied, the cursor where it was; for
   // every kind of change, the reference lists' form included (never another error, which would end the connection and
@@ -6036,7 +6102,7 @@ async function docKeyExact() {
   await stop(b2);
 }
 
-const CASES = { docsUnderSealedHalt, sealedDocsRefused, blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
+const CASES = { docsUnderSealedHalt, docKeysFrozenAtHalt, sealedDocsRefused, blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

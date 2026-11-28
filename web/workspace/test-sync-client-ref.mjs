@@ -164,6 +164,8 @@ const ctl = {
   tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null, tamperIndexHead: null, tamperIndexField: null,
   /** the next n pulled index pages (answers to pull_index) dropped */
   dropPulled: 0,
+  /** the next n pulled index pages held until `release` (an answer in flight while the page does something else) */
+  holdPulled: 0,
   /** the next n pulled index pages answered {ops: [], more: true} instead (a page that moves nothing) */
   emptyMore: 0,
   /** HTTP answers faked: [{method, path (a part of it), status, body, times}] */
@@ -456,7 +458,7 @@ async function control(body) {
     // (a frame of the server's own, pushed to every page socket as the server would push it (no req): 2c-3's docWire)
     case "frame": { let sent = 0; for (const f of toPage) { f(JSON.stringify(body.frame)); sent++; } return { sent }; }
     case "notice": { let sent = 0; for (let i = 0; i < (body.times ?? 1); i++) for (const f of toPage) { f(JSON.stringify({ t: "index_changed", head: body.head })); sent++; } return { sent }; }
-    case "reset": Object.assign(ctl, { tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null, tamperIndexHead: null, tamperIndexField: null, fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null, serverNotices: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
+    case "reset": Object.assign(ctl, { tamperAckHash: 0, tamperIndexEnv: 0, tamperIndexEnvBad: 0, tamperFor: null, tamperIndexHead: null, tamperIndexField: null, fakeOps: [], dropAcks: 0, closeAfterDrop: false, closeOnOpen: 0, rewriteWelcome: null, holdPut: false, holdGet: false, rebuilt: [], rebuiltReal: false, dropIndex: 0, dropPulled: 0, holdPulled: 0, emptyMore: 0, fakeHttp: [], fakePull: [], switchOnUpgrade: null, switchOnPut: null, delayFakePut: null, serverNotices: false }); for (const f of held.splice(0)) f(); resetLog(); return { ok: true };
     // (3b's control-only commands: a held wait released only by release/reset or the barrier (K-B, K-R1); a timer
     // (K-I, K-J); K-L2's armed late op; K-R2's reset of exactly its one untracked read)
     case "hang": await new Promise((ok) => held.push(ok)); return { ok: true };
@@ -786,6 +788,12 @@ const websocket = {
         ctl.emptyMore--;
         log.got.at(-1).faked = true;
         d.send(JSON.stringify({ t: "index", req: m.req, ops: [], more: true }));
+        return;
+      }
+      if (m.t === "index" && m.req !== undefined && ctl.holdPulled > 0) {
+        ctl.holdPulled--;
+        log.got.at(-1).held = true;
+        held.push(() => d.send(text));
         return;
       }
       if (m.t === "index" && m.req !== undefined && ctl.dropPulled > 0) {

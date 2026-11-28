@@ -911,9 +911,9 @@ export class SyncClient {
     c.probing = false;
     if (this.conn !== c || this.stopped) return;
     const t0 = this.clock.now();
-    // (a pull only where pull() itself would send one now: never past the server's timer (retry_after), the bucket,
-    // a slice's rest, a rebuild or its announce, a large move's halt, or the cap on requests in flight)
-    const may = !c.pulling && !c.rebuilding && !c.largeHalt && !this.announcing(c) && c.pages < CLIENT.replayPages && c.pending.size < CLIENT.inflight && this.left(c.ns, "index") <= 0;
+    // (a pull only where pull() itself would send one now: never under a halt, past the server's timer (retry_after),
+    // the bucket, a slice's rest, a rebuild or its announce, a large move's halt, or the cap on requests in flight)
+    const may = !c.halted && !c.pulling && !c.rebuilding && !c.largeHalt && !this.announcing(c) && c.pages < CLIENT.replayPages && c.pending.size < CLIENT.inflight && this.left(c.ns, "index") <= 0;
     if (may && this.pullBucket.take(1, t0) <= 0) {
       c.pulling = true;
       this.stats.pulls++;
@@ -970,6 +970,10 @@ export class SyncClient {
       if (c.logMode && isNat(m.req)) return this.logPage(c, m.ops as Record<string, unknown>[], m.more);
       return;
     }
+    // (halted: nothing of a page applied, one asked for before the halt included; the index stays where it stopped.
+    // Every halt notebooks go on under (a sealed op, the sealed log full) is set on this chain, so none is set while
+    // a page is being applied)
+    if (c.halted) return;
     c.pages++;
     this.stats.pages++;
     const ops: IndexOp[] = [];
@@ -1183,7 +1187,11 @@ export class SyncClient {
   /** The next page of the log, if the cursor is short of the target: one pull at a time, paced (a bucket), at
    * most CLIENT.replayPages pages a slice, then a rest of CLIENT.replayRestMs before the next slice. */
   private pull(c: Conn) {
-    if (this.conn !== c || c.pulling || c.largeHalt || (this.cursor >= c.target && !c.discover)) return;
+    // (a halt, of any kind, freezes the index where it stopped: no page asked for, however the pull was asked (a notice,
+    // the idle pull, a page, a catch-up), so what notebooks read under a sealed halt is what was verified before it.
+    // A rebuild's own log, read under the halt that asked for it, is the one exception: never with the sealing module,
+    // where the rebuild is itself a halt (sealed-rebuild))
+    if (this.conn !== c || (c.halted && !c.logMode) || c.pulling || c.largeHalt || (this.cursor >= c.target && !c.discover)) return;
     // (nothing else is sent on this connection while the announce is pending: the pull waits for its answer, its
     // target and discovery kept (r5, CORR-D11-R4-1))
     if (this.announcing(c)) return this.defer(c, "pull");
