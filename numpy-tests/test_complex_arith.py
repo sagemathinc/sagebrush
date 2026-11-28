@@ -129,9 +129,11 @@ with np.errstate(all="ignore"):
     print("complex64 special grid scalarmath", hashlib.sha256(np.array([gr32[i] * gi32[i] for i in range(6561)], np.complex64).tobytes()).hexdigest()[:16])
 
 # The stated divergence: complex64 with a negative-stride operand is NumPy's plain float32 loop (its scalar
-# fallback), where Sagebrush keeps the fused multiply-add of every other layout. Each part's gap from the fused
-# result is bounded by 2**-23 * (|ar*br| + |ai*bi|) (re) and 2**-23 * (|ar*bi| + |ai*br|) (im); printed as the
-# bound holding, true under both.
+# fallback), where Sagebrush keeps the fused multiply-add of every other layout. Where the plain loop's partial
+# products and the parts are finite and normal float32 values, each part's gap from the fused result is bounded by
+# 2**-23 * (|ar*br| + |ai*bi|) (re) and 2**-23 * (|ar*bi| + |ai*br|) (im); printed as the bound holding, true under
+# both. Outside that range the two can differ further: a partial product past float32's largest value makes the
+# plain part inf where the fused one is finite, and a subnormal part adds an absolute 2**-149 per rounding.
 a = (rs.randn(2000) + 1j * rs.randn(2000)).astype(np.complex64)
 b = (rs.randn(2000) + 1j * rs.randn(2000)).astype(np.complex64)
 x, ref, br = a * b[::-1], a * b[::-1].copy(), b[::-1]
@@ -139,3 +141,23 @@ ar, ai = a.real.astype(float), a.imag.astype(float)
 ok = (np.all(np.abs(x.real.astype(float) - ref.real) <= 2.0 ** -23 * (np.abs(ar * br.real) + np.abs(ai * br.imag)))
       and np.all(np.abs(x.imag.astype(float) - ref.imag) <= 2.0 ** -23 * (np.abs(ar * br.imag) + np.abs(ai * br.real))))
 print("complex64 negative stride within the stated bound", bool(ok))
+
+# Past the bound's range, each negative-stride part is the fused result or the plain one (printed as that holding,
+# true under both): a partial product overflowing (2**64 + 2**63 j squared: the plain real part inf, the fused one
+# 3 * 2**126), infinities and NaN among the operands, and subnormal parts.
+f32 = np.float32
+def plain(p, q):
+    with np.errstate(all="ignore"):
+        return (f32(f32(p.real) * f32(q.real)) - f32(f32(p.imag) * f32(q.imag)), f32(f32(p.real) * f32(q.imag)) + f32(f32(p.imag) * f32(q.real)))
+def same(u, v):
+    return (np.isnan(u) and np.isnan(v)) or u == v
+E = [2.0**64 + 2.0**63 * 1j, 2.0**63 + 2.0**64 * 1j, 1e-20 + 1e-20j, 3e-39 + 1e-39j, 1e38 - 1e38j, complex(np.inf, 1), complex(1, np.nan), 2.0**-75 + 2.0**-76 * 1j]
+for p0 in E:
+    for q0 in E:
+        p = np.array([p0, p0], np.complex64)
+        q = np.array([q0, q0], np.complex64)
+        with np.errstate(all="ignore"):
+            fused, neg = (p * q)[0], (p * q[::-1])[0]
+        pr, pi = plain(p[0], q[0])
+        print("complex64 negative stride, fused or plain:", p0, q0, bool((same(neg.real, fused.real) or same(neg.real, pr)) and (same(neg.imag, fused.imag) or same(neg.imag, pi))))
+
