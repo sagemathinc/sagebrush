@@ -1817,6 +1817,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (the binding again, in the transaction that answers or allocates: the generation may have been retired and
       // the next one turned on during the awaits above, astra's narrowed CORR-PR58-1)
       this.bound(a.bind?.account, a.bind?.generation);
+      // (and the sealed-account rule again: a key chain may have begun during the awaits; a bare address is refused
+      // then, even one held meanwhile, never answered "have")
+      if (this.encrypted() && !isKeyedAddress(a.sha256)) throw new SyncError("conflict", "this account's sync is end-to-end encrypted: a blob is named by its keyed address", { reason: "sealed_account" });
       // (held already: "have" only for exactly these bytes, this hash and size; anything else at this address is a
       // conflict naming what is held, never adopted or replaced)
       const h = this.held(a.sha256);
@@ -1986,6 +1989,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   // ---- chunked files (design/tiered-files.md §4.1, §4.3, §5.1), behind tieredOn (DEV only)
 
   /** The files table: made the first time it is needed, so no account's schema changes while the switch is off. */
+  /** Whether a chunked file's manifest is registered (the table exists only once one has been). */
+  private plaintextManifest(): boolean {
+    return !!this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'files'") && !!this.one("SELECT 1 AS x FROM files LIMIT 1");
+  }
   private ensureFiles() {
     this.sql.exec("CREATE TABLE IF NOT EXISTS files (sha256 TEXT PRIMARY KEY, reg TEXT NOT NULL, mdigest TEXT NOT NULL, vinc TEXT NOT NULL, size INTEGER NOT NULL, manifest TEXT NOT NULL, keys TEXT NOT NULL, state TEXT NOT NULL, position INTEGER NOT NULL, sha_state TEXT, hold_until INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS files_hold ON files (hold_until) WHERE refs <= 0 AND state <> 'live'");
@@ -2061,9 +2068,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const room = await attemptAsync(() => this.room(bytes, "file"));
       if ("error" in room) return room;
     }
+    // (tests: held here, after every await, so a key chain can begin before the write)
+    await gate(this.env, "manifest-write");
     return attempt(() => this.ctx.storage.transactionSync(() => {
       this.admit(a.account, true);
       this.bound(a.bind?.account, a.bind?.generation);
+      // (the sealed-account rule again, after the awaits: a key chain begun meanwhile takes no manifest, new or renewed)
+      if (this.encrypted()) throw new SyncError("conflict", "this account's sync is end-to-end encrypted: chunked files aren't taken", { reason: "sealed_account" });
       this.ensureFiles();
       const now = Date.now();
       const had = this.one("SELECT mdigest, state, position FROM files WHERE sha256 = ?", m.sha256);
@@ -2652,6 +2663,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           // (its notebooks too: a document is made by its first batch alone (ensureDoc), with no index op, so its
           // patches would otherwise be plaintext ones left in a sealed account)
           if (this.one("SELECT 1 AS x FROM ops LIMIT 1") || this.one("SELECT 1 AS x FROM docs LIMIT 1")) throw new SyncError("conflict", "this account's sync already holds changes in the clear: delete your synced data first", { reason: "plaintext_log" });
+          // (and its files in the clear: a blob held or being uploaded at a bare SHA-256, or a chunked file's manifest,
+          // which lists its chunks' hashes. A finalize's answer (finalized) names a holding already counted here, and a
+          // notebook's pins are its documents', which docs covers)
+          if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 NOT LIKE 'a1:%' LIMIT 1") || this.one("SELECT 1 AS x FROM reservations WHERE sha256 NOT LIKE 'a1:%' LIMIT 1") || this.plaintextManifest()) throw new SyncError("conflict", "this account's sync already holds files in the clear: delete your synced data first", { reason: "plaintext_log" });
         },
         work: () => {
           const wait = this.e2eResetWork.take(1, this.e2eNow());
@@ -2718,10 +2733,18 @@ export class SyncAccount extends DurableObject<SyncEnv> {
 
   /** Tests only: shift or freeze the E2E clock (freeze: true holds it at this moment, false lets it run), and count the
    * E2E rows. */
-  async testE2E(a: { sealedCap?: number; sealedHold?: number; shareRefs?: { sha256: string; n: number }; shift?: number; freeze?: boolean; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
+  async testE2E(a: { plant?: "reservation" | "manifest"; dropBare?: boolean; sealedCap?: number; sealedHold?: number; shareRefs?: { sha256: string; n: number }; shift?: number; freeze?: boolean; failCommit?: boolean; hold?: number; bounds?: { entries?: number; reserve?: number; pageBytes?: number }; corrupt?: "state_hash" | "hash"; keyrings?: "drop-last" | "swap-last" | "stray-first" }): Promise<Record<string, number> | null> {
     if (!testMode(this.env)) return null;
     if (a.sealedCap !== undefined) this.sealedCap = a.sealedCap;
     if (a.sealedHold !== undefined) this.sealedHold = a.sealedHold;
+    // (files in the clear as an upload in progress or a registered chunked file leaves them, one row each; and the bare
+    // holdings dropped, so a held manifest's own check is what decides)
+    if (a.plant === "reservation" && this.exists()) this.sql.exec("INSERT INTO reservations (id, sha256, bytes, key, expires, ct_sha256) VALUES (?, ?, 1, ?, ?, ?)", randomHex(16), "e".repeat(64), "s/planted/" + randomHex(8), Date.now() + 60_000, "e".repeat(64));
+    if (a.plant === "manifest" && this.exists()) {
+      this.ensureFiles();
+      this.sql.exec("INSERT INTO files (sha256, reg, mdigest, vinc, size, manifest, keys, state, position, sha_state, hold_until, refs, created) VALUES (?, ?, ?, ?, 1, '{}', '[]', 'verifying', 0, NULL, ?, 0, ?)", "f".repeat(64), randomHex(16), "f".repeat(64), randomHex(16), Date.now() + 60_000, Date.now());
+    }
+    if (a.dropBare && this.exists()) this.sql.exec("DELETE FROM holdings WHERE sha256 NOT LIKE 'a1:%'");
     // (a blob's shared count raised as a document's pin or a chunked file's manifest raises it: no index add)
     if (a.shareRefs && this.exists()) this.sql.exec("UPDATE holdings SET refs = refs + ? WHERE sha256 = ?", a.shareRefs.n, a.shareRefs.sha256);
     if (a.shift !== undefined) this.e2eShift = a.shift;
@@ -2740,6 +2763,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const there = this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?", t);
       out[t] = there ? Number(this.one(`SELECT COUNT(*) AS n FROM ${t}`)!.n) : -1;
     }
+    if (this.exists()) Object.assign(out, { plain_holdings: Number(this.one("SELECT COUNT(*) AS n FROM holdings WHERE sha256 NOT LIKE 'a1:%'")!.n), plain_reservations: Number(this.one("SELECT COUNT(*) AS n FROM reservations WHERE sha256 NOT LIKE 'a1:%'")!.n), plain_files: this.plaintextManifest() ? Number(this.one("SELECT COUNT(*) AS n FROM files")!.n) : 0 });
     if (this.e2eStore) Object.assign(out, { preflights: this.e2eStore.counters.preflights, transitions: this.e2eStore.counters.transitions, replays: this.e2eStore.counters.replays });
     return out;
   }

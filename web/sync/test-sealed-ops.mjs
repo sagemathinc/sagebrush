@@ -60,6 +60,11 @@ const F = "5ea1ed00-000b-4e2e-8e2e-e2e2e2e2e20b"; // a sealed op in flight when 
 const G = "5ea1ed00-000c-4e2e-8e2e-e2e2e2e2e20c"; // a plaintext op raced against genesis
 const D = "5ea1ed00-000d-4e2e-8e2e-e2e2e2e2e20d"; // an end-to-end account's notebooks and blobs: sealed only
 const NB = "5ea1ed00-000e-4e2e-8e2e-e2e2e2e2e20e"; // a notebook in the clear, then genesis
+const BH = "5ea1ed00-000f-4e2e-8e2e-e2e2e2e2e20f"; // a blob held at a bare SHA-256, then genesis
+const BR = "5ea1ed00-0010-4e2e-8e2e-e2e2e2e2e210"; // an upload in progress at a bare SHA-256, then genesis
+const BM = "5ea1ed00-0011-4e2e-8e2e-e2e2e2e2e211"; // a chunked file's manifest, then genesis
+const RR = "5ea1ed00-0012-4e2e-8e2e-e2e2e2e2e212"; // a bare upload held past its first check while genesis lands
+const MR = "5ea1ed00-0013-4e2e-8e2e-e2e2e2e2e213"; // a manifest held past its first check while genesis lands
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -68,7 +73,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R, P, S, X, Y, Z, K, L, F, G, D, NB].join(",");
+const listed = [A, N, R, P, S, X, Y, Z, K, L, F, G, D, NB, BH, BR, BM, RR, MR].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_TIERED: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -803,6 +808,63 @@ await section("a notebook in the clear, with no index op: no key chain begins ov
   const grb = await gr.json().catch(() => ({}));
   ok(gr.status === 409 && grb.reason === "plaintext_log" && (await seam(NB, {})).e2e_chain <= 0, "genesis over an account whose only plaintext is a notebook's: refused (409, plaintext_log), no chain stored: " + J({ status: gr.status, body: grb }));
   ws.ws.close();
+});
+
+await section("files in the clear: no key chain begins over them, and none lands once one has begun", async () => {
+  const gateOn = (name, on) => at(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
+  const refusedGenesis = async (id, s, what) => {
+    const gr = await post(s, id, "/api/sync/v1/e2e/chain", (await account(id).genesis()).body);
+    const grb = await gr.json().catch(() => ({}));
+    ok(gr.status === 409 && grb.reason === "plaintext_log" && (await seam(id, {})).e2e_chain <= 0, `genesis over ${what}: refused (409, plaintext_log), no chain stored: ` + J({ status: gr.status, body: grb }));
+  };
+  // (genesis over what is already there: a held blob, an upload in progress, a chunked file's manifest)
+  const sh = await enabled(BH);
+  const hb = Buffer.from("BH's blob in the clear");
+  ok((await putBlob(sh, hb, sha(hb))).status === 201, "(BH: a blob held at its bare SHA-256)");
+  await refusedGenesis(BH, sh, "a blob held at a bare SHA-256");
+  const sr = await enabled(BR);
+  ok((await seamAll(BR, { plant: "reservation" })).plain_reservations === 1, "(BR: an upload in progress at a bare SHA-256)");
+  await refusedGenesis(BR, sr, "an upload in progress at a bare SHA-256");
+  const sm = await enabled(BM);
+  ok((await seamAll(BM, { plant: "manifest" })).plain_files === 1, "(BM: a chunked file's manifest registered)");
+  await refusedGenesis(BM, sm, "a chunked file's manifest");
+  // (a bare upload past its first check, held before its allocation, while genesis lands: refused at the allocation,
+  // nothing reserved or held)
+  const srr = await enabled(RR);
+  const rb = Buffer.from("RR's blob, late");
+  await gateOn("reserve-allocate", true);
+  const late = putBlob(srr, rb, sha(rb));
+  await new Promise((r) => setTimeout(r, 300));
+  const g1 = await post(srr, RR, "/api/sync/v1/e2e/chain", (await account(RR).genesis()).body);
+  ok(g1.status === 201, "(RR: genesis lands while the upload is held)");
+  await gateOn("reserve-allocate", false);
+  const lr = await late;
+  const lrb = await lr.json().catch(() => ({}));
+  const after = await seamAll(RR, {});
+  ok(lr.status === 409 && lrb.reason === "sealed_account" && after.plain_reservations === 0 && after.plain_holdings === 0, "a bare upload held past its first check while genesis lands: refused at its allocation (409, sealed_account), nothing reserved or held: " + J({ status: lr.status, body: lrb, after }));
+  // (a manifest past its first check, held before its write, while genesis lands: refused at the write, no row. Its
+  // chunks, held in the clear, would refuse genesis themselves: dropped meanwhile (a seam), so the write's own check
+  // is what decides; without it, the write would fail on the missing chunks instead)
+  const keep = plan.max_file_bytes;
+  plan.max_file_bytes = 64 << 20;
+  try {
+    const smr = await enabled(MR);
+    const c1 = randomBytes(8 << 20), c2 = randomBytes(1 << 20), all = Buffer.concat([c1, c2]);
+    for (const c of [c1, c2]) ok((await putBlob(smr, c, sha(c))).status === 201, "(MR: a chunk held, " + c.length + " bytes)");
+    const m = { v: 1, cdc: "fastcdc-gear-v1/1M/4M/8M", sha256: sha(all), size: all.length, chunks: [[sha(c1), c1.length], [sha(c2), c2.length]] };
+    await gateOn("manifest-write", true);
+    const reg = post(smr, MR, "/api/sync/v1/manifest", { manifest: m });
+    await new Promise((r) => setTimeout(r, 300));
+    await seamAll(MR, { dropBare: true });
+    const g2 = await post(smr, MR, "/api/sync/v1/e2e/chain", (await account(MR).genesis()).body);
+    ok(g2.status === 201, "(MR: genesis lands while the manifest is held)");
+    await gateOn("manifest-write", false);
+    const mr = await reg;
+    const mrb = await mr.json().catch(() => ({}));
+    ok(mr.status === 409 && mrb.reason === "sealed_account" && (await seamAll(MR, {})).plain_files === 0, "a manifest held past its first check while genesis lands: refused at its write (409, sealed_account), no row: " + J({ status: mr.status, body: mrb }));
+  } finally {
+    plan.max_file_bytes = keep;
+  }
 });
 
 await section("the sync generation: an op in flight when the synced data is deleted, and a replay after", async () => {
