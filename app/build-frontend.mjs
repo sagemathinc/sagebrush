@@ -54,6 +54,9 @@ if (!checkOnly) {
   if (ex.status !== 0) throw new Error(`app/build-examples.ts failed (${ex.error?.message ?? "exit " + ex.status}): the gallery isn't in app/dist`);
   // the app's native code's notices (scripts/third-party-notices.mjs), beside the page's
   cpSync(join(here, "THIRD-PARTY-NOTICES-native.txt"), join(out, "THIRD-PARTY-NOTICES-native.txt"));
+  // the approvals window's page (app/signer/, app/src-tauri/src/signer.rs): shown on the app protocol only, never
+  // served at the page's origin (lib.rs serve_page refuses /signer/)
+  cpSync(join(here, "signer"), join(out, "signer"), { recursive: true });
 }
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 
@@ -136,6 +139,7 @@ const NOT_IN_APP = new Map([
   ["gh", "a GitHub notebook's address: the site's"],
   ["nb", "the local server's notebook addresses (sagebrush notebook), not the app's"],
   ["tmp", "a path in the interpreter's own file system, not a page"],
+  ["space", "3D view examples (web/workspace/browser.ts): offered only on the site's listed hosts (web/build.ts SPACE_HOSTS), never in the app"],
 ]);
 const goesTo = new Set();
 for (const f of pageFiles) for (const m of readFileSync(join(out, f), "utf8").matchAll(/["'`]\/([a-z][a-z0-9-]*)\/(?:\?|["'`])/g)) goesTo.add(m[1]);

@@ -29,6 +29,8 @@ mod engine;
 mod windows;
 #[cfg(desktop)]
 mod leave;
+#[cfg(desktop)]
+mod signer;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
 //  comes next; until then only its tests and the self-test's bundle report call it)
 #[cfg(desktop)]
@@ -68,10 +70,11 @@ fn startup_files(app: tauri::AppHandle, webview: tauri::Webview, state: tauri::S
 fn startup_files(state: tauri::State<Pending>) -> Vec<String> {
     state.0.lock().unwrap().drain(..).map(|(_, p)| p).collect()
 }
-/// The pending files for window `label`, taken; the others left.
+/// The pending files for window `label` (a notebook page, the only page that asks), taken, with the unassigned ones
+/// (files_target: none waiting for a window that opens files), each once; the others left.
 #[allow(dead_code)]
 fn take_pending(pending: &mut Vec<(String, String)>, label: &str) -> Vec<String> {
-    let (mine, rest): (Vec<_>, Vec<_>) = pending.drain(..).partition(|(to, _)| to == label);
+    let (mine, rest): (Vec<_>, Vec<_>) = pending.drain(..).partition(|(to, _)| to == label || to == UNASSIGNED);
     *pending = rest;
     mine.into_iter().map(|(_, p)| p).collect()
 }
@@ -235,7 +238,8 @@ fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener, files: st
     std::thread::spawn(move || {
         for req in server.incoming_requests() {
             let path = req.url().split(['?', '#']).next().unwrap_or("").to_string();
-            let known = path == "/" || files.contains(&path) || (path.ends_with('/') && files.contains(&format!("{path}index.html")));
+            // (the approvals window's page is shown on the app protocol only: never at the page's origin, signer.rs)
+            let known = !path.starts_with("/signer/") && (path == "/" || files.contains(&path) || (path.ends_with('/') && files.contains(&format!("{path}index.html"))));
             let Some(asset) = assets.get(path.clone()).filter(|_| known) else {
                 let page = req.headers().iter().any(|h| {
                     (h.field.equiv("Sec-Fetch-Dest") && h.value.as_str() == "document") || (h.field.equiv("Accept") && h.value.as_str().contains("text/html"))
@@ -305,9 +309,11 @@ static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 #[cfg(desktop)]
 struct Leaving(Mutex<leave::Leave>);
 
+/// The windows a close or a quit asks to write what they have: every window of the app's page (the approvals window has
+/// nothing to write, and closes at once: signer.rs).
 #[cfg(desktop)]
 fn window_labels(app: &tauri::AppHandle) -> Vec<String> {
-    app.webview_windows().keys().cloned().collect()
+    app.webview_windows().keys().filter(|l| l.as_str() != signer::LABEL).cloned().collect()
 }
 /// What leave.rs decided, done (never under its lock: a window destroyed here tells it so, on this thread).
 #[cfg(desktop)]
@@ -359,6 +365,26 @@ fn leave_do(app: &tauri::AppHandle, acts: Vec<leave::Act>) {
             }
         }
     }
+}
+
+/// A new window is about to be built (windows.rs window_open): whether it may (not once a quit has begun), reserved.
+#[cfg(desktop)]
+pub(crate) fn leave_begin_open(app: &tauri::AppHandle) -> bool {
+    app.state::<Leaving>().0.lock().unwrap().begin_open()
+}
+/// Window `label`, reserved, was built: destroyed at once if a quit began meanwhile; whether it was.
+#[cfg(desktop)]
+pub(crate) fn leave_opened(app: &tauri::AppHandle, label: &str) -> bool {
+    let acts = app.state::<Leaving>().0.lock().unwrap().opened(label);
+    let destroyed = !acts.is_empty();
+    leave_do(app, acts);
+    destroyed
+}
+/// A reserved window wasn't built after all.
+#[cfg(desktop)]
+pub(crate) fn leave_open_failed(app: &tauri::AppHandle) {
+    let acts = app.state::<Leaving>().0.lock().unwrap().open_failed();
+    leave_do(app, acts);
 }
 
 /// The asking window is writing what it has to disk before it goes.
@@ -423,8 +449,10 @@ fn files_waiting(app: &tauri::AppHandle, to: &str) {
 
 /// The window to open the files the system hands over (#1541): of `windows` (label, its page's path, focused), the
 /// focused one whose page is the notebook's ("/", which opens files: web/index.html), else "main" if its page is the
-/// notebook's, else another whose page is, else "main" (gone, or on a board: the files wait for its next notebook
-/// page to ask, startup_files).  Never a board's page, which has nothing that opens them.
+/// notebook's, else another whose page is, else none (UNASSIGNED: no window's page opens files now, main gone or on a
+/// board; the first notebook page to ask takes them, startup_files).  Never a board's page, which has nothing that
+/// opens them.
+pub(crate) const UNASSIGNED: &str = "";
 #[allow(dead_code)]
 fn files_target(windows: Vec<(String, String, bool)>) -> String {
     let notebook = |p: &str| p == "/" || p == "/index.html";
@@ -434,29 +462,32 @@ fn files_target(windows: Vec<(String, String, bool)>) -> String {
         .or_else(|| windows.iter().find(|(l, p, _)| l == "main" && notebook(p)))
         .or_else(|| windows.iter().find(|(_, p, _)| notebook(p)))
         .map(|(l, _, _)| l.clone())
-        .unwrap_or_else(|| "main".into())
+        .unwrap_or_else(|| UNASSIGNED.into())
 }
 
-/// Window `gone` closed: the files still waiting for it, for the window files_target chooses among `left` (none left:
-/// they stay); that window, if any moved.
+/// Window `gone` closed: the files still waiting for it, and any waiting for a window no longer among `left` (an
+/// orphan), go to the window files_target chooses among `left`, or become unassigned if it chooses none; returned: that
+/// window, if any file moved to one (to be told).  Files already unassigned are never moved here: they wait for the
+/// first notebook page that asks (startup_files).  With no window left, everything stays as it is.
 #[allow(dead_code)]
 fn retarget(pending: &mut [(String, String)], gone: &str, left: Vec<(String, String, bool)>) -> Option<String> {
     if left.is_empty() {
         return None;
     }
+    let alive: Vec<String> = left.iter().map(|(l, _, _)| l.clone()).collect();
     let to = files_target(left);
     let mut moved = false;
-    for e in pending.iter_mut().filter(|(t, _)| t == gone) {
+    for e in pending.iter_mut().filter(|(t, _)| t == gone || (t != UNASSIGNED && !alive.contains(t))) {
         e.0 = to.clone();
         moved = true;
     }
-    moved.then_some(to)
+    (moved && to != UNASSIGNED).then_some(to)
 }
 
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::disk_reveal, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::disk_reveal, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now, signer::signer_probe_sign]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -519,7 +550,14 @@ pub fn run() {
         .collect();
     // (macOS's menu bar: Tauri's default, with About naming the commit, version.rs)
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(version::menu);
+    let builder = builder.menu(version::menu).on_menu_event(|app, e| {
+        // (Approvals…: the approvals window, from the app's own menu: no page can open it, signer.rs)
+        if e.id() == version::APPROVALS {
+            if let Err(why) = signer::open(app) {
+                eprintln!("[app] {why}");
+            }
+        }
+    });
     builder
         .setup(move |app| {
             // (a self-test reports the agent bundle's check, as the launcher will run it: app/selftest/run-judge.mjs)
@@ -549,22 +587,48 @@ pub fn run() {
             let control = std::env::var("SAGEBRUSH_APP_NAV_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
             let open = matches!(control.as_deref(), Some("open" | "wide"));
             // (the app's commands for this page's exact origin only, nav.rs page_capability; before the window exists)
-            app.add_capability(if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) })?;
+            let page_cap = if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) };
+            // (a self-test's signer controls, signer.rs: the signing command in the page's capability too, so the check
+            // must see the command's own caller check hold, or with it left out, sign)
+            #[cfg(desktop)]
+            let page_cap = if matches!(signer::control().as_deref(), Some("cap" | "cap+check")) {
+                let mut c: serde_json::Value = serde_json::from_str(&page_cap)?;
+                if let Some(p) = c["permissions"].as_array_mut() {
+                    p.push("allow-signer-probe-sign".into());
+                }
+                c.to_string()
+            } else {
+                page_cap
+            };
+            app.add_capability(page_cap)?;
             // (the web view data folders of the last launch's other windows, gone before any window opens, windows.rs)
             #[cfg(desktop)]
             if let Ok(d) = disk::data_dir(app.handle()) {
                 windows::clear_webview_dirs(&d);
+                // (and a previous launch's approvals window folder, before that window can open: signer.rs)
+                eprintln!("[signer] startup data folder: {}", signer::startup_cleanup(&d).code());
             }
             #[cfg(desktop)]
             app.manage(windows::PagePort(port));
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
             let window = page_window(app, "main", url, port, open);
             window.build()?;
+            // (a self-test's probe of the approvals window, run.mjs "signer": the window opened as the menu opens it)
+            #[cfg(desktop)]
+            if std::env::var("SAGEBRUSH_APP_PERSIST").is_ok_and(|p| p.starts_with("signer:")) && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+                signer::open(app.handle())?;
+            }
             Ok(())
         })
         .build(context)
         .expect("error while starting Sagebrush")
         .run(|_app, _event| {
+            // (an exit: the approvals window, and only it, closed first, and an exit with a code held until its folder
+            //  is removed: signer.rs)
+            #[cfg(desktop)]
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &_event {
+                signer::on_exit_requested(_app, *code, api);
+            }
             // (a window closed or the app quit by the person: held until the page has written its changes to disk)
             #[cfg(desktop)]
             match &_event {
@@ -573,7 +637,7 @@ pub fn run() {
                     let acts = _app.state::<Leaving>().0.lock().unwrap().quit(window_labels(_app));
                     leave_do(_app, acts);
                 }
-                tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if !EXITING.load(std::sync::atomic::Ordering::SeqCst) => {
+                tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if !EXITING.load(std::sync::atomic::Ordering::SeqCst) && label != signer::LABEL => {
                     api.prevent_close();
                     let acts = _app.state::<Leaving>().0.lock().unwrap().close(label, window_labels(_app));
                     leave_do(_app, acts);
@@ -603,6 +667,10 @@ pub fn run() {
                 // launch's clear, windows.rs)
                 if let Ok(d) = disk::data_dir(_app) {
                     windows::clear_webview_dirs(&d);
+                    // (the approvals window's too, if it was opened in this session: signer.rs; up to 10 s on Windows)
+                    if let Some(gone) = signer::remove_at_exit(&d, _app.get_webview_window(signer::LABEL).is_some()) {
+                        eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
+                    }
                 }
             }
             // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, each for
@@ -620,7 +688,10 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 let to = files_target(_app.webview_windows().iter().map(|(l, w)| (l.clone(), w.url().map(|u| u.path().to_string()).unwrap_or_default(), w.is_focused().unwrap_or(false))).collect());
                 _app.state::<Pending>().0.lock().unwrap().extend(files.into_iter().map(|p| (to.clone(), p)));
-                files_waiting(_app, &to);
+                // (unassigned: no window to tell; the next notebook page asks as it starts)
+                if to != UNASSIGNED {
+                    files_waiting(_app, &to);
+                }
             }
         });
 }
@@ -634,16 +705,17 @@ mod tests {
         assert_eq!(super::files_target(vec![w("main", "/", false), w("doc-1", "/", true)]), "doc-1");
         // (a board focused: never it; the first window)
         assert_eq!(super::files_target(vec![w("main", "/", false), w("doc-1", "/board/", true)]), "main");
-        assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-2", "/board/", true)]), "main");
+        // (no notebook page at all, main on a board: unassigned, for the first notebook page that asks)
+        assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-2", "/board/", true)]), super::UNASSIGNED);
         // (none focused)
         assert_eq!(super::files_target(vec![w("doc-3", "/index.html", false)]), "doc-3");
         assert_eq!(super::files_target(vec![w("doc-3", "/index.html", true)]), "doc-3");
         // (main on a board, a board focused: the notebook window, never main (a review's row))
         assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-1", "/board/", true), w("doc-2", "/", false)]), "doc-2");
-        // (main gone: another notebook window; only boards: kept for main)
+        // (main gone: another notebook window; only boards, or none: unassigned, never the closed main)
         assert_eq!(super::files_target(vec![w("doc-4", "/board/", true), w("doc-5", "/", false)]), "doc-5");
-        assert_eq!(super::files_target(vec![w("doc-4", "/board/", true)]), "main");
-        assert_eq!(super::files_target(vec![]), "main");
+        assert_eq!(super::files_target(vec![w("doc-4", "/board/", true)]), super::UNASSIGNED);
+        assert_eq!(super::files_target(vec![]), super::UNASSIGNED);
     }
 
     #[test]
@@ -654,7 +726,7 @@ mod tests {
         assert_eq!(super::retarget(&mut p, "doc-1", vec![w("main", "/board/", false), w("doc-2", "/", false)]), Some("doc-2".into()));
         assert_eq!(p, vec![("doc-2".to_string(), "/a.ipynb".to_string()), ("main".to_string(), "/b.ipynb".to_string())]);
         // (a window with no files waiting closed: nothing moved, nobody told)
-        assert_eq!(super::retarget(&mut p, "doc-9", vec![w("main", "/", false)]), None);
+        assert_eq!(super::retarget(&mut p, "doc-9", vec![w("main", "/", false), w("doc-2", "/", false)]), None);
         // (the last window closed: they stay, nobody told)
         assert_eq!(super::retarget(&mut p, "doc-2", vec![]), None);
         assert_eq!(p[0].0, "doc-2");
@@ -670,6 +742,49 @@ mod tests {
         assert_eq!(super::take_pending(&mut p, "main"), Vec::<String>::new());
         assert_eq!(super::take_pending(&mut p, "doc-1"), vec!["/b.ipynb"]);
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn a_file_opened_with_main_closed_and_only_a_board_left_goes_to_the_next_notebook_window_once() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        // (main closed, a board left: the system hands over a file; no window opens files: unassigned, nobody told)
+        let to = super::files_target(vec![w("doc-1", "/board/", true)]);
+        assert_eq!(to, super::UNASSIGNED);
+        let mut p = vec![(to, "/x.ipynb".to_string())];
+        // (the board asking, as no board does, or closing changes nothing of it)
+        assert_eq!(super::retarget(&mut p, "doc-1", vec![w("doc-2", "/board/", false)]), None);
+        assert_eq!(p[0].0, super::UNASSIGNED);
+        // (a new notebook window, doc-3, its page asking as it starts: it takes it, once; another window then nothing)
+        assert_eq!(super::take_pending(&mut p, "doc-3"), vec!["/x.ipynb"]);
+        assert_eq!(super::take_pending(&mut p, "doc-3"), Vec::<String>::new());
+        assert_eq!(super::take_pending(&mut p, "doc-4"), Vec::<String>::new());
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn unassigned_files_are_never_moved_by_a_close() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        // (a close with a notebook window left moves the closed window's own file there, told; the unassigned one stays)
+        let mut p = vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string()), ("doc-1".to_string(), "/d.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut p, "doc-1", vec![w("doc-2", "/", true)]), Some("doc-2".into()));
+        assert_eq!(p, vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string()), ("doc-2".to_string(), "/d.ipynb".to_string())]);
+        // (only unassigned files: nothing moves, nobody told)
+        let mut q = vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut q, "doc-3", vec![w("doc-2", "/", true)]), None);
+        assert_eq!(q[0].0, super::UNASSIGNED);
+    }
+
+    #[test]
+    fn files_waiting_for_a_window_that_is_gone_are_re_homed_at_the_next_close() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        // (a file waiting for doc-7, which is gone without its close moving it: the next close re-homes it too)
+        let mut p = vec![("doc-7".to_string(), "/o.ipynb".to_string()), ("main".to_string(), "/m.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut p, "doc-8", vec![w("main", "/", false), w("doc-9", "/", true)]), Some("doc-9".into()));
+        assert_eq!(p, vec![("doc-9".to_string(), "/o.ipynb".to_string()), ("main".to_string(), "/m.ipynb".to_string())]);
+        // (re-homed to none, with no notebook page left: unassigned, nobody told)
+        let mut q = vec![("doc-7".to_string(), "/o.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut q, "doc-8", vec![w("doc-1", "/board/", false)]), None);
+        assert_eq!(q[0].0, super::UNASSIGNED);
     }
 }
 

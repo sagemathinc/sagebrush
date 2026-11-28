@@ -61,8 +61,8 @@ void mountVersionStamp(document.getElementById("sbversion"));
 declare const __SB_LATEX__: boolean | undefined;
 declare const __SB_LATEX_HOSTS__: string[];
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
-// (the 3D view, in builds that have it and on its listed hosts, matched exactly: web/build.ts's SPACE_DEFINE, DEV only for
-//  now; its code is a chunk of its own, fetched when a .space.json is shown)
+// (the 3D view, in builds that have it and on its listed hosts, matched exactly: web/build.ts's SPACE_DEFINE, DEV and
+//  PROD; its code is a chunk of its own, fetched when a .space.json is shown)
 declare const __SB_SPACE__: boolean | undefined;
 declare const __SB_SPACE_HOSTS__: string[];
 

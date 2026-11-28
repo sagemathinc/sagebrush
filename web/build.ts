@@ -36,14 +36,13 @@ const LATEX_DEFINE = LATEX
 // (the board page: the hosts where a .tex file in its file panel opens the LaTeX editor (U1); none in a build without it)
 const BOARD_TEX_HOSTS = LATEX ? (LATEX_DEFINE as Record<string, string>).__SB_LATEX_HOSTS__ : "[]";
 // The 3D view's hooks into the site (web/workspace/space3d.ts: Open in 3D in the file browser, and a .space.json in the
-// Agents chat): on DEV only for now, PROD later. Built unless SAGEBRUSH_SPACE=0, and offered only on the hosts listed
-// here, matched exactly (the browser tests reach DEV's name on this machine: web/space/test-own-files.mjs). Turning PROD
-// on is adding its host. Their code is a chunk of its own, sagebrush-space3d.js, fetched when one is used: the pages
+// Agents chat): on DEV and PROD. Built unless SAGEBRUSH_SPACE=0, and offered only on the hosts listed
+// here, matched exactly (the browser tests reach both names on this machine: web/space/test-own-files.mjs). Their code is a chunk of its own, sagebrush-space3d.js, fetched when one is used: the pages
 // carry the menu entries and the host check. (The board page's file panel doesn't offer it yet: its builds define it
 // false, so nothing of it is in them.)
 const SPACE_MODE = process.env.SAGEBRUSH_SPACE || "1";
 if (!["0", "1"].includes(SPACE_MODE)) throw new Error(`SAGEBRUSH_SPACE must be unset, 0 or 1, not ${JSON.stringify(SPACE_MODE)}`);
-const SPACE_HOSTS = ["dev.sagebrush.space"];
+const SPACE_HOSTS = ["dev.sagebrush.space", "sagebrush.space"];
 const SPACE_DEFINE = SPACE_MODE === "0" ? { __SB_SPACE__: "false", __SB_SPACE_HOSTS__: "[]" } : { __SB_SPACE__: "true", __SB_SPACE_HOSTS__: JSON.stringify(SPACE_HOSTS) };
 // (web/site/ when it is here; see web/site-dir.mts)
 const { siteDir, hasSite } = await import("./site-dir.mts");

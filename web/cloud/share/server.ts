@@ -295,6 +295,8 @@ const guard = (db: D1, cond: string, ...binds: unknown[]) => [
 interface Who { id: string; session: string }
 const LIVE = "EXISTS (SELECT 1 FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?2 AND s.account_id = ?1 AND s.expires > ?3 AND a.deleting IS NULL)";
 const live = (db: D1, who: Who) => guard(db, LIVE, who.id, who.session, now());
+/** Whether `who`'s session is still live, outside any transaction: what a failed guarded write is answered by. */
+const isLive = async (db: D1, who: Who) => (await db.prepare(`SELECT ${LIVE} AS x`).bind(who.id, who.session, now()).first<{ x: number }>())?.x === 1;
 /**
  * The admin page's grant for a session (admin-visibility r2, ADM-C2), at time t: written only while that exact
  * session is live for the same account, not being deleted, checked in the INSERT itself, so a sign-out, purge or
@@ -1562,14 +1564,19 @@ async function mine(env: ShareEnv, id: string): Promise<Response> {
  * the files no other version of the owner's uses, in one transaction.  Its
  * files stop being served at once; R2 follows (drain).
  */
-async function deleteCollection(env: ShareEnv, account: string, cid: string): Promise<{ bytes: number }> {
+async function deleteCollection(env: ShareEnv, who: Who, cid: string): Promise<{ bytes: number } | "ended" | "gone"> {
   const db = env.SHARE_DB!;
+  const account = who.id;
   const t = now();
   // (held files this collection uses that no other collection of the owner's does)
   const unused = `SELECT h.sha256 FROM holdings h WHERE h.account_id = ?1 AND h.sha256 IN (SELECT vb.sha256 FROM version_blobs vb JOIN versions v ON v.hash = vb.version WHERE v.collection = ?2)
     AND NOT EXISTS (SELECT 1 FROM version_blobs vb JOIN versions v ON v.hash = vb.version WHERE vb.sha256 = h.sha256 AND v.owner = ?1 AND v.collection <> ?2)`;
   const b = await db.prepare(`SELECT COALESCE(SUM(size), 0) AS n FROM holdings WHERE account_id = ?1 AND sha256 IN (${unused})`).bind(account, cid).first<{ n: number }>();
-  await db.batch([
+  // (the session and the ownership checked again inside the transaction: a sign-out, or a twin delete, during the
+  // awaits above leaves everything as it was)
+  const stmts = [
+    ...live(db, who),
+    ...guard(db, "EXISTS (SELECT 1 FROM collections WHERE id = ?2 AND owner = ?1)", account, cid),
     db.prepare("INSERT OR IGNORE INTO r2_deletes (key, created) SELECT manifest_key, ?2 FROM versions WHERE collection = ?1").bind(cid, t),
     db.prepare(`INSERT OR IGNORE INTO r2_deletes (key, created) SELECT key, ?3 FROM holdings WHERE account_id = ?1 AND sha256 IN (${unused})`).bind(account, cid, t),
     db.prepare(`DELETE FROM holdings WHERE account_id = ?1 AND sha256 IN (${unused})`).bind(account, cid),
@@ -1580,7 +1587,14 @@ async function deleteCollection(env: ShareEnv, account: string, cid: string): Pr
     db.prepare("UPDATE upload_receipts SET state = 'retired', retired = ?3 WHERE owner = ?1 AND collection = ?2 AND state = 'committed'").bind(account, cid, t),
     // (and at most RETIRED_RECEIPTS_MAX of them per account, the newest)
     db.prepare("DELETE FROM upload_receipts WHERE owner = ?1 AND state = 'retired' AND rowid NOT IN (SELECT rowid FROM upload_receipts WHERE owner = ?1 AND state = 'retired' ORDER BY retired DESC, rowid DESC LIMIT ?2)").bind(account, RETIRED_RECEIPTS_MAX),
-  ]);
+  ];
+  try {
+    await db.batch(stmts);
+  } catch (e) {
+    if (!(await isLive(db, who))) return "ended";
+    if (!(await db.prepare("SELECT 1 AS x FROM collections WHERE id = ?1 AND owner = ?2").bind(cid, account).first())) return "gone";
+    throw e;
+  }
   return { bytes: b?.n ?? 0 };
 }
 
@@ -1710,18 +1724,29 @@ export async function signedWith(req: Request, key: string | undefined, body: st
  * account or operation.  The sync service binds through this too, before it
  * touches any account object (design/sync-server.md §7.1, CORR-E9C-1).
  */
-export async function bindPurge(env: ShareEnv, account: string, rid: string, kind: "admin" | "self"): Promise<"accepted" | "conflict"> {
+export async function bindPurge(env: ShareEnv, account: string, rid: string, kind: "admin" | "self", who?: Who): Promise<"accepted" | "conflict" | "ended"> {
   const db = env.SHARE_DB!;
   const h = await accountHash(account);
-  await db.prepare("INSERT INTO purges (request_id, account_hash, account_id, kind, status, created) VALUES (?1, ?2, ?3, ?4, 'pending', ?5) ON CONFLICT(request_id) DO NOTHING").bind(rid, h, account, kind, now()).run();
+  const insert = db.prepare("INSERT INTO purges (request_id, account_hash, account_id, kind, status, created) VALUES (?1, ?2, ?3, ?4, 'pending', ?5) ON CONFLICT(request_id) DO NOTHING").bind(rid, h, account, kind, now());
+  // (a person's own purge is admitted only while the session asking is live, in the same transaction; once admitted it
+  // runs to the end without it, since the purge itself removes it)
+  if (who) {
+    try {
+      await db.batch([...live(db, who), insert]);
+    } catch (e) {
+      if (!(await isLive(db, who))) return "ended";
+      throw e;
+    }
+  } else await insert.run();
   const p = await db.prepare("SELECT account_hash, kind, collection FROM purges WHERE request_id = ?1").bind(rid).first<{ account_hash: string; kind: string; collection: string | null }>();
   // (a request id names one operation: the same id for another account is refused)
   return !p || p.account_hash !== h || p.kind !== kind || p.collection !== null ? "conflict" : "accepted";
 }
 
 /** Start (or resume) deleting all of an account's shared data. */
-async function startPurge(env: ShareEnv, ctx: Ctx, account: string, rid: string, kind: "admin" | "self"): Promise<"accepted" | "conflict"> {
-  if ((await bindPurge(env, account, rid, kind)) === "conflict") return "conflict";
+async function startPurge(env: ShareEnv, ctx: Ctx, account: string, rid: string, kind: "admin" | "self", who?: Who): Promise<"accepted" | "conflict" | "ended"> {
+  const b = await bindPurge(env, account, rid, kind, who);
+  if (b !== "accepted") return b;
   ctx.waitUntil(runPurge(env, rid));
   return "accepted";
 }
@@ -1975,7 +2000,9 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   if (g && m === "DELETE") {
     const c = await env.SHARE_DB.prepare("SELECT owner FROM collections WHERE id = ?1").bind(g[1]).first<{ owner: string }>();
     if (!c || c.owner !== id) return err(404, "no such collection");
-    const r = await deleteCollection(env, id, g[1]);
+    const r = await deleteCollection(env, who, g[1]);
+    if (r === "ended") return err(401, "sign in first");
+    if (r === "gone") return err(404, "no such collection");
     // (a record of it, kept DELETION_RECORD_DAYS and at most DELETION_RECORDS_MAX per account, HARD-SHARE-3)
     const h = await accountHash(id);
     await env.SHARE_DB.batch([
@@ -1989,7 +2016,7 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
     const b = (await req.json().catch(() => null)) as { confirm?: string } | null;
     if (b?.confirm !== "delete") return err(400, 'send {"confirm": "delete"}');
     const rid = crypto.randomUUID();
-    await startPurge(env, ctx, id, rid, "self");
+    if ((await startPurge(env, ctx, id, rid, "self", who)) === "ended") return err(401, "sign in first");
     return json({ ok: true, request_id: rid }, 200, { "set-cookie": cookie(SESSION, "", 0) });
   }
   return err(404, "not found");

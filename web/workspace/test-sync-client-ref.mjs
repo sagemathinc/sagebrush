@@ -1806,7 +1806,8 @@ try {
   if (!c.ok) fails.push("not everything was cleaned up: " + c.line);
 }
 if (fails.length) {
-  console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  "));
+  // (each failing check by name, each on its own line marked FAIL, so a CI log alone says which)
+  console.error(`FAIL: ${fails.length} of ${results.length} checks` + fails.map((f) => "\n  FAIL " + f).join(""));
   process.exit(1);
 }
 const skipped = CLOUD_ONLY.filter(selected).length;
