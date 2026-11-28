@@ -868,6 +868,14 @@ class _NoValueType:
 _NoValue = _NoValueType()
 
 
+def _dtype_class(dt):
+    """NumPy's name of dt's DType class, as its loop errors print it: <class 'numpy.dtypes.Int64DType'>"""
+    dt = _dtype_of(dt)
+    k = {"b": "Bool", "i": "Int", "u": "UInt", "f": "Float", "c": "Complex"}.get(dt.kind)
+    name = k + ("" if dt.kind == "b" else str(dt.itemsize * 8)) if k else dt.name.capitalize()
+    return "<class 'numpy.dtypes.%sDType'>" % name
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -890,13 +898,41 @@ class ufunc:
         if casting not in _CASTINGS:
             raise ValueError("casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got %r)" % (casting,))
         scalars = not _builtins.any(isinstance(x, ndarray) for x in args)
+        if where is None:
+            where = False  # (NumPy's: None computes no lane, out left as it is)
+        if dtype is None:
+            args = self._bool_loop(args)
+        if where is not True and self._op == "power":
+            # (a lane where= leaves out is never computed, as NumPy's: an integer power's negative exponent there no
+            # refusal; an array operand's (a list's or tuple's too) left-out lanes given the exponent and base 1, which
+            # raise nothing; the operands admitted first, a weak scalar out of its dtype's range NumPy's OverflowError)
+            m = asarray(where)
+            if m.dtype.kind == "b":
+                args = tuple(asarray(x) if isinstance(x, (list, tuple)) else x for x in args)
+                if dtype is None:
+                    self._result_dtype(args)
+                else:
+                    # (against the explicit dtype under the casting rule, as the computation would admit them)
+                    dt = self._loop(dtype)
+                    self._admit(args, dt, casting)
+                    # (each array operand converted to the loop's dtype, every lane, as NumPy's: an object element that
+                    # doesn't convert NumPy's ValueError, out untouched, even in a lane where= leaves out)
+                    # (None into a float dtype is NaN, into a complex one NaN in both parts, as NumPy's cast makes it)
+                    none = complex(nan, nan) if dt.kind == "c" else nan
+                    args = tuple((x if dt.kind not in "fc" else asarray([none if v is None else v for v in x.ravel().tolist()], object).reshape(x.shape)).astype(dt)
+                                 if isinstance(x, ndarray) and x.dtype.kind == "O" else x for x in args)
+                # (a scalar operand is in every lane: given as 1 only when no lane is computed)
+                none = not m.any()
+                args = tuple(_np.where3(m, x, array(1, dtype=x.dtype)) if isinstance(x, ndarray)
+                             else type(x)(1) if none and isinstance(x, (_builtins.int, _builtins.float)) and not isinstance(x, _builtins.bool)
+                             else x for x in args)
         if dtype is not None:
             # (the loop is resolved from dtype before computing, as NumPy's:
             # the inputs cast to it under the casting rule, then the operation
             # in it; but a comparison's dtype names only its output, bool)
             dt = self._loop(dtype)
             if self._op not in _BOOL_OUT:
-                pairs = [self._cast_in(x, i, dt, casting) for i, x in enumerate(args)]
+                pairs = self._admit(args, dt, casting)
                 _out_cast(self.__name__, dt, out, casting)
                 r = self._apply_cast(pairs)
             else:
@@ -933,6 +969,21 @@ class ufunc:
             return empty((0,), asarray(x).dtype)
         return asarray(self._apply([dummy(x) for x in args])).dtype
 
+    def _bool_loop(self, args):
+        """bool operands (a list or tuple of bools too) as NumPy's loops take them: square, conjugate (the ufunc), the
+        shifts, floor_divide and remainder have no bool loop and compute in int8; positive and sign have none at all,
+        NumPy's UFuncTypeError"""
+        op = self._op
+        if op not in ("square", "conjugate", "positive", "sign", "left_shift", "right_shift", "floor_divide", "remainder"):
+            return args
+        args = tuple(asarray(x) if isinstance(x, (list, tuple)) else x for x in args)
+        isbool = [isinstance(x, (_builtins.bool, bool_)) or (isinstance(x, ndarray) and x.dtype.kind == "b") for x in args]
+        if not _builtins.all(isbool):
+            return args
+        if op in ("positive", "sign"):
+            raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types <class 'numpy.dtypes.BoolDType'> -> None" % self.__name__)
+        return tuple(asarray(x).astype(int8) if isinstance(x, ndarray) else int8(x) for x in args)
+
     def _loop(self, dtype):
         """dtype's loop, or NumPy's TypeError where the ufunc has none (a
         comparison's output is bool, a float function's a float, a bitwise
@@ -941,9 +992,19 @@ class ufunc:
         op = self._op
         if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
                 else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
-                else dt.kind == "c" and op in ("floor_divide", "remainder")):
+                else dt.kind == "c" and op in ("floor_divide", "remainder")
+                or dt.kind == "b" and op in ("square", "reciprocal", "power", "floor_divide", "remainder")):
             raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
+        if dt.kind == "b" and op in ("positive", "sign"):
+            raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types <class 'numpy.dtypes.BoolDType'> -> None" % self.__name__)
         return dt
+
+    def _admit(self, args, dt, casting):
+        """The inputs cast to the loop's dtype, as _cast_in casts each, in NumPy's order: a weak Python scalar's range
+        (its OverflowError) before an array's cast under the casting rule (its UFuncTypeError)"""
+        weak = [isinstance(x, (_builtins.bool, _builtins.int, _builtins.float, _builtins.complex)) and not isinstance(x, generic) for x in args]
+        done = {i: self._cast_in(x, i, dt, casting) for i, x in enumerate(args) if weak[i]}
+        return [done[i] if weak[i] else self._cast_in(x, i, dt, casting) for i, x in enumerate(args)]
 
     def _cast_in(self, x, i, dt, casting):
         """Input i cast to the loop's dtype, if the casting rule allows it"""
@@ -1040,6 +1101,9 @@ class ufunc:
             dt = self._loop(dtype)
             congruent = (self._op in ("add", "multiply") and a.dtype.kind == "f" and dt.kind == "u" and
                          dt.itemsize == 8 and (initial is None or masked))
+            # (a real sum in a complex dtype: sum converts each element as it reads it, NumPy's buffered loop, not a
+            # whole-array cast first)
+            congruent = congruent or (self._op == "add" and a.dtype.kind in "biuf" and dt.kind == "c" and (initial is None or masked))
             if a.dtype != dt and not congruent:
                 # (accumulated in dtype, as NumPy's: the conversion is the reduction's, and its warning says so)
                 old = _np._cast_label("reduce")
@@ -1047,6 +1111,11 @@ class ufunc:
                     a = a.astype(dt)
                 finally:
                     _np._cast_label(old)
+        if where is not True and self._op in ("fmax", "fmin"):
+            # (a masked fmax or fmin: nanmax's or nanmin's, a NaN skipped as fmax skips it, from initial, which a mask
+            # needs, fmax having no identity (nanmax's ValueError, as NumPy's); an unmasked lane of NaN only gives
+            # initial)
+            return (nanmax if self._op == "fmax" else nanmin)(a, axis=axis, keepdims=keepdims, where=where, initial=initial)
         if self._op in quick and (initial is None or masked) and not (dtype is not None and _wraps_in(self._op, dt)):
             # (a sum without an identity starts from its first element: a product's 1 changes nothing; a where= mask
             # goes to the functions that take it, #2088)
@@ -1096,7 +1165,20 @@ class ufunc:
             # float array into an int out accumulates in float, each result cast into out; an invalid conversion
             # warns "... in cast", then "... in accumulate")
             out = _one_out(out)
-            r = asarray(self.accumulate(a, axis, dtype if dtype is not None else result_type(asarray(a).dtype, out.dtype)))
+            if self._op in _BOOL_OUT and self._op not in ("logical_or", "logical_and", "logical_xor") and asarray(a).dtype.kind != "b":
+                # (a comparison's bool output is not its operands' dtype: NumPy's refusal, out untouched)
+                # (NumPy's: into a bool out, no loop of (bool, the input's dtype); into another, none of its dtype)
+                if out.dtype.kind != "b":
+                    raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
+                raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types (%s, %s) -> None"
+                                      % (self.__name__, _dtype_class(out.dtype), _dtype_class(asarray(a).dtype)))
+            # (the loop NumPy resolves from out's dtype and the input's, no value computed: logical_or's bool one into a
+            # bool out from ints, true_divide's float one into an int out; none, bitwise_or's into a float out, its
+            # TypeError, out untouched)
+            # (a logical ufunc's loop is bool whatever out's dtype: its own, the results converted into out)
+            dt_in = (dtype if dtype is not None else None if self._op in ("logical_or", "logical_and", "logical_xor")
+                     else self._acc_loop(out.dtype, asarray(a).dtype))
+            r = asarray(self.accumulate(a, axis, dt_in))
             if r.shape != out.shape:
                 raise ValueError("provided out is the wrong size for the accumulation.")
             _store(out, r, "cast")
@@ -1111,15 +1193,33 @@ class ufunc:
             return cumsum(a, axis=axis, dtype=dtype)
         if self._op == "multiply" and not (dtype is not None and _wraps_in(self._op, dt)):
             return cumprod(a, axis=axis, dtype=dtype)
+        # (the loop resolved first, as NumPy's, from the dtypes, no value computed: the ufunc's result dtype for the
+        # operand's (logical_or's bool for an int array), a loop it doesn't have refused even for one element or none;
+        # a comparison's, whose bool output is not its operands' dtype, refused but for bools; the first element cast
+        # to it)
+        if self._op in _BOOL_OUT and self._op not in ("logical_or", "logical_and", "logical_xor") and a.dtype.kind != "b":
+            # (a fresh NumPy's refusal; only after an out= call does its loop cache make it a UFuncTypeError)
+            raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
+        rdt = self._acc_loop(a.dtype, a.dtype)
         if a.shape[axis] == 0:
-            return a.copy()  # (empty, of its dtype and shape)
+            return zeros(a.shape, rdt)  # (empty, of the loop's dtype and the operand's shape)
         a = moveaxis(a, axis, 0)
         res = []
         acc = None
         for i in range(a.shape[0]):
-            acc = a[i] if acc is None else self(acc, a[i])
+            acc = a[i].astype(rdt) if acc is None else self(acc, a[i])
             res.append(acc)
-        return moveaxis(array(res), 0, axis)
+        return moveaxis(array(res, dtype=rdt), 0, axis)
+
+    def _acc_loop(self, dt1, dt2):
+        """accumulate's loop dtype for operands of dt1 and dt2, as NumPy resolves it, no value computed: the ufunc's on
+        empty operands (bools as _bool_loop takes them), its TypeError where it has none; a complex maximum, minimum,
+        fmax or fmin's the promoted dtype, an empty or one-element accumulation needing no operation"""
+        if self._op in ("maximum", "minimum", "fmax", "fmin"):
+            dt = result_type(dt1, dt2)
+            if dt.kind == "c":
+                return dt
+        return self._result_dtype(self._bool_loop((empty((0,), dt1), empty((0,), dt2))))
 
     def outer(self, A, B, **kw):
         A, B = asarray(A), asarray(B)
@@ -1190,7 +1290,11 @@ def float_power(x, y):
 
 
 def conjugate(x):
+    # (the ufunc has no bool loop: a bool operand (a list of bools too) computes in int8, as NumPy's; the method
+    # keeps bool)
     x = asarray(x)
+    if x.dtype.kind == "b":
+        x = x.astype(int8)
     return x.conj() if x.ndim else x.conj()[()]
 
 
@@ -1797,19 +1901,36 @@ min = amin
 def argmax(a, axis=None, out=None, *, keepdims=False):
     a = asarray(a)
     r = _np.argmax(a, axis)
-    # (a 0-d array keeps no axis: NumPy's result is the scalar)
-    if keepdims and axis is not None and a.ndim:
-        r = expand_dims(r, axis)
-    return r
+    # (a 0-d array keeps no axis: NumPy's result is the scalar; the whole array's with keepdims, one of each axis)
+    if keepdims and a.ndim:
+        r = expand_dims(r, axis) if axis is not None else asarray(r).reshape((1,) * a.ndim)
+    return _arg_out(r, out, "argmax")
 
 
 def argmin(a, axis=None, out=None, *, keepdims=False):
     a = asarray(a)
     r = _np.argmin(a, axis)
-    # (a 0-d array keeps no axis: NumPy's result is the scalar)
-    if keepdims and axis is not None and a.ndim:
-        r = expand_dims(r, axis)
-    return r
+    # (a 0-d array keeps no axis: NumPy's result is the scalar; the whole array's with keepdims, one of each axis)
+    if keepdims and a.ndim:
+        r = expand_dims(r, axis) if axis is not None else asarray(r).reshape((1,) * a.ndim)
+    return _arg_out(r, out, "argmin")
+
+
+def _arg_out(r, out, name):
+    # (argmax/argmin's out=: the result written into it, which must have its shape and a dtype that casts to the index
+    # (intp) safely, as NumPy checks it (int8 and bool outs taken, float and uint64 ones refused), and out returned)
+    if out is None:
+        return r
+    if not isinstance(out, ndarray):
+        raise TypeError("output must be an array")
+    r = asarray(r)
+    if out.shape != r.shape:
+        raise ValueError("output array does not match result of np.%s." % name)
+    if not can_cast(out.dtype, int64, "safe"):
+        raise TypeError("Cannot cast %s from dtype('%s') to dtype('int64') according to the rule 'safe'"
+                        % ("scalar" if out.ndim == 0 else "array data", out.dtype.name))
+    out[...] = r
+    return out
 
 
 def ptp(a, axis=None, out=None, keepdims=False):
@@ -1904,8 +2025,7 @@ def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
         raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
                          "specify 'initial'" % name)
     a = asarray(a)
-    if a.dtype.kind == "c":
-        a = _nanfill(a, -inf if is_max else inf)
+    # (a complex array's NaNs are skipped by the runtime's complex fold too, so an all-NaN slice stays NaN)
     if initial is None:
         if a.size == 0 and _count(a, axis) == 0:
             raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
@@ -3034,7 +3154,10 @@ def setdiff1d(a, b, assume_unique=False):
     return unique(array([v for v in asarray(a).ravel().tolist() if v not in bs], dtype=asarray(a).dtype))
 
 
-def diff(a, n=1, axis=-1, prepend=None, append=None):
+_NO_DIFF_EXTRA = object()
+
+
+def diff(a, n=1, axis=-1, prepend=_NO_DIFF_EXTRA, append=_NO_DIFF_EXTRA):
     # (NumPy's order: n = 0 gives back the input itself, unconverted; a negative n and a 0-d input refused; then the
     # axis read as an index, as normalize_axis_index reads it: a list, tuple or np.bool_ refused, a float in its own
     # words, #1944)
@@ -3048,16 +3171,17 @@ def diff(a, n=1, axis=-1, prepend=None, append=None):
     if isinstance(axis, float):
         raise TypeError("integer argument expected, got float")
     axis = _normalize_axis_index(axis, a.ndim)
-    if prepend is not None or append is not None:
+    # (prepend=/append= given, None too, are values, as NumPy's: only an omitted one adds nothing)
+    if prepend is not _NO_DIFF_EXTRA or append is not _NO_DIFF_EXTRA:
         parts = []
         for extra, first in ((prepend, True), (append, False)):
-            if extra is None:
+            if extra is _NO_DIFF_EXTRA:
                 continue
             p = asarray(extra)
             if p.ndim == 0:
                 s = list(a.shape)
                 s[axis] = 1
-                p = broadcast_to(p, s)
+                p = full(s, p[()], dtype=object) if p.dtype.kind == "O" else broadcast_to(p, s)
             parts.append((first, p))
         a = concatenate([p for f, p in parts if f] + [a] + [p for f, p in parts if not f], axis=axis)
     for _ in range(n):
@@ -3065,6 +3189,20 @@ def diff(a, n=1, axis=-1, prepend=None, append=None):
         hi = [slice(None)] * a.ndim
         lo[axis] = slice(None, -1)
         hi[axis] = slice(1, None)
+        if a.dtype.kind == "O":
+            # (object elements subtracted as Python subtracts them, element by element along the axis: their own
+            # results or errors, as NumPy's object loop)
+            m = moveaxis(a, axis, -1)
+            # (the result's shape exactly, never a -1: an empty one, any axis of length 0 or the last one used up, too;
+            # each difference stored as it is, a list one too, never discovered as nested)
+            shape = m.shape[:-1] + (_builtins.max(m.shape[-1] - 1, 0),)
+            d = empty(shape, dtype=object)
+            import itertools
+
+            for ix in itertools.product(*(range(k) for k in shape)):
+                d[ix] = m[ix[:-1] + (ix[-1] + 1,)] - m[ix]
+            a = moveaxis(d, -1, axis)
+            continue
         a = a[tuple(hi)] - a[tuple(lo)] if a.dtype.kind != "b" else not_equal(a[tuple(hi)], a[tuple(lo)])
     return a
 
