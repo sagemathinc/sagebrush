@@ -43,7 +43,11 @@ import { readPage } from "../../scripts/notebook-page.mjs";
 // (document key declarations in the sealed index (web/workspace/sync-dockeys.ts: the op's form and the ledger's page,
 // which the outbox and the confirmed index reach in this chunk): measured by CI 472 522 / 131 940 against 472 124 /
 // 131 769 (+398 / +171); the ceilings at that measurement + 64)
-const LIMIT_RAW = 472586, LIMIT_GZIP = 132004;
+// (board copies carry their pictures (Nov 28 2026): Workspace.duplicate copies a board's picture files, each admitted
+// on its own, and cp measures and charges them before copying, both reached in this chunk through Workspace and
+// ShellHost: measured 475 317 / 133 047 merged on master 2a6ef128's 472 522 / 131 940 (+2 795 / +1 107, bun 1.4.4,
+// Node 24.21.0's gzip -9); daybreak2 ruled the ceilings at that measurement + 64)
+const LIMIT_RAW = 475381, LIMIT_GZIP = 133111;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
