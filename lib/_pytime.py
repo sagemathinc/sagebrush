@@ -138,6 +138,9 @@ class struct_time(tuple):
     fields' descriptions for details."""
 
     __slots__ = ("_extra",)
+    # (CPython's C struct sequence keeps its extra fields beside the tuple; a Python tuple subclass may not have slots,
+    # so the runtime is told this one emulates the C layout)
+    __sagebrush_native_slots__ = True
     n_sequence_fields = 9
     n_fields = 11
     n_unnamed_fields = 0

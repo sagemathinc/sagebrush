@@ -236,16 +236,17 @@ export function yieldFrom(x: any): any {
     throw(e: any) {
       // generator.throw(typ, val): a delegate's own throw() gets the
       // arguments unchanged, as in CPython.
+      // (a GeneratorExit closes the delegate, as CPython's: never its throw(), however it was thrown in)
+      if (Obj.isinstance(e, T.GeneratorExit)) {
+        const c = Obj.getattr(target, "close", null);
+        if (c !== null) Obj.callObj(c, []);
+        throw e;
+      }
       const raw = e?.$rawThrow;
       if (raw !== undefined) {
         const t0 = Obj.getattr(target, "throw", null);
         if (t0 !== null) return step(() => Obj.callObj(t0, raw));
         if (raw.invalid) throw Obj.markRaised(Obj.T.TypeError(raw.invalid));
-      }
-      if (Obj.isinstance(e, T.GeneratorExit)) {
-        const c = Obj.getattr(target, "close", null);
-        if (c !== null) Obj.callObj(c, []);
-        throw e;
       }
       const t = Obj.getattr(target, "throw", null);
       // CPython's CLEANUP_THROW: a StopIteration thrown in at a `yield from`
@@ -272,15 +273,43 @@ export function yfr(v: any): any {
   return v ?? null;
 }
 
+// (a context manager's hooks as CPython 3.14's: __exit__ looked up and bound, then __enter__, then __enter__
+// called; each bound as a special method is (a function, a staticmethod or classmethod, a callable object, a
+// descriptor's __get__, run at the lookup). The emitted code asks for __exit__ first: withExit binds both, in that
+// order, and leaves the bound __enter__ for withEnter)
+function bindHook(m: any, name: string): (...args: any[]) => any {
+  const raw = Obj.lookupType(Obj.typeOf(m), name);
+  if (typeof raw === "function") {
+    const f = Obj.dunderFn(raw);
+    return (...args: any[]) => f(m, ...args);
+  }
+  const g = raw !== null && typeof raw === "object" ? Obj.lookupType(Obj.typeOf(raw), "__get__") : undefined;
+  const bound = g !== undefined ? Obj.callDescrGet(g, raw, m, Obj.typeOf(m)) : raw;
+  return (...args: any[]) => Obj.callObj(bound, args);
+}
+let pendingEnter: [any, (...args: any[]) => any] | null = null;
+const protocolMissing = (m: any, hook: string) => raise(T.TypeError, `'${Obj.typeOf(m).$qualname ?? typeName(m)}' object does not support the context manager protocol (missed ${hook} method)`);
+const enterMissing = (m: any) => protocolMissing(m, "__enter__");
 export function withEnter(m: any): any {
-  const f = Ty.lookupDunder(m, "__enter__");
-  if (f === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the context manager protocol`);
-  return f(m);
+  let f: (...args: any[]) => any;
+  if (pendingEnter !== null && pendingEnter[0] === m) {
+    f = pendingEnter[1];
+    pendingEnter = null;
+  } else {
+    pendingEnter = null;
+    if (Obj.lookupType(Obj.typeOf(m), "__enter__") === undefined) enterMissing(m);
+    f = bindHook(m, "__enter__");
+  }
+  return f();
 }
 export function withExit(m: any): (t: any, v: any, tb: any) => any {
-  const f = Ty.lookupDunder(m, "__exit__");
-  if (f === undefined) raise(T.TypeError, `'${typeName(m)}' object does not support the context manager protocol (missed __exit__ method)`);
-  return (t, v, tb) => f(m, t, v, tb);
+  pendingEnter = null;
+  if (Obj.lookupType(Obj.typeOf(m), "__exit__") === undefined) protocolMissing(m, "__exit__");
+  const f = bindHook(m, "__exit__");
+  if (Obj.lookupType(Obj.typeOf(m), "__enter__") === undefined) enterMissing(m);
+  const enter = bindHook(m, "__enter__");
+  pendingEnter = [m, enter];
+  return (t, v, tb) => f(t, v, tb);
 }
 
 // A bare `raise` outside any except clause of its own function: the
