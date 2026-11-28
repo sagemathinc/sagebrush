@@ -189,6 +189,14 @@ export function kwMerge(names: string[], values: any[], mapping: any, f?: any): 
   });
 }
 
+// An explicit keyword after a ** mapping, at its place in the call: a name the call has already given is refused,
+// as CPython's merge of the keywords in order refuses it
+export function kwPut(names: string[], values: any[], key: string, value: any, f?: any): void {
+  if (names.includes(key)) raise(T.TypeError, `${f === undefined ? "" : funcStr(f) + " "}got multiple values for keyword argument '${key}'`);
+  names.push(key);
+  values.push(value);
+}
+
 export function callEx(f: any, pos: any[], names: string[], values: any[], maps: any[]): any {
   for (const m of maps) kwMerge(names, values, m, f);
   return Obj.callKw(f, pos, names, values);
@@ -204,7 +212,8 @@ export function dictOf(...kv: any[]): Obj.PyDict {
 // natively; anything else gets an adaptor that forwards send() and throw()
 // and turns StopIteration(value) into the result of the `yield from`.
 export function yieldFrom(x: any): any {
-  if (Array.isArray(x) && (x as any).$cls === undefined) return x;
+  // (a list or a tuple too: its iterator through the adaptor, so that send(), throw() and close() reach it as
+  // CPython's, not a JS array's native delegation)
   const it = O.iter(x);
   if (it instanceof O.GenIter) return O.delegateTo(it.g);
   const target = it instanceof O.ProtoIter ? it.o : it;
@@ -1534,6 +1543,8 @@ export const R: any = {
   siteGet: Obj.siteGet,
   siteSet: Obj.siteSet,
   siteCall: Obj.siteCall,
+  siteMethod: Obj.siteMethod,
+  callLooked: Obj.callLooked,
   callObj: Obj.callObj,
   callKw: Obj.callKw,
   tooManyArgs: Obj.tooManyArgs,
@@ -1593,6 +1604,7 @@ export const R: any = {
   dflt,
   kwdflt,
   kwMerge,
+  kwPut,
   classDef,
   builtins: B.builtins,
   gname: B.gname,

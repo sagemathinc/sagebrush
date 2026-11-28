@@ -1336,6 +1336,74 @@ ${ways}
 };`)(S, callMethodMiss, builtinKind, hasOwn);
 }
 
+// A method call's two halves, for a call whose arguments may run code: CPython looks the method up on the receiver
+// before it evaluates the arguments (an argument that rebinds the method, or a descriptor's side effects, comes
+// after).  look(o) resolves name on o and returns a function g to call with o first: the same caches as siteCall's
+// (a class's Python function, a builtin kind's method), or else, on a type's own function or a miss, callLooked,
+// with the attribute getattr found, then and there, left in look.o to pass it instead of o.  The emitted code reads
+// look.o into a temporary at once when g is callLooked, before any argument runs, so that an argument re-entering
+// the same site disturbs neither; nothing is allocated but the arguments of a callLooked call.
+export const callLooked = (f: any, ...args: any[]): any => callObj(f, args);
+export function siteMethod(name: string): ((o: any) => (o: any, ...args: any[]) => any) & { o: any } {
+  const S: any = { next: 0, bk: 0, bfn: null, tc: undefined, tv: -1, tf: null };
+  for (let i = 0; i < CALL_WAYS; i++) {
+    S["c" + i] = null;
+    S["v" + i] = -1;
+    S["f" + i] = null;
+  }
+  const p = JSON.stringify(name);
+  const ways = Array.from({ length: CALL_WAYS }, (_, i) => `    if (k === S.c${i} && k.$ver === S.v${i}) return S.f${i};`).join("\n");
+  const look = new Function("S", "miss", "kind", "hasOwn", "generic", `"use strict"; return function look(o) {
+  if (o != null) {
+    const k = o.$cls;
+    if (k !== undefined && (o[${p}] === undefined || (k.$jsBase !== null && !hasOwn.call(o, ${p})))) {
+${ways}
+    }
+  }
+  if (o === S.tc && o.$ver === S.tv) { look.o = S.tf; return generic; }
+  if (S.bk !== 0 && kind(o) === S.bk) return S.bfn;
+  return miss(look, o, ${p}, S);
+};`)(S, lookMethodMiss, builtinKind, hasOwn, callLooked);
+  look.o = undefined;
+  return look;
+}
+
+// (callMethodMiss's resolution, recording the function instead of calling it)
+function lookMethodMiss(look: any, o: any, name: string, S: any): (o: any, ...args: any[]) => any {
+  if (isType(o)) {
+    const f = getattr(o, name);
+    if (typeof f === "function" && lookupType(typeOf(o), name) === undefined) {
+      S.tc = o;
+      S.tv = o.$ver;
+      S.tf = f;
+    }
+    look.o = f;
+    return callLooked;
+  }
+  if (o !== null && typeof o === "object" && o.$cls !== undefined) {
+    const cls: PyType = o.$cls;
+    if (!cls.$customGet && !(cls.$ctor !== null && hasOwn.call(o, name))) {
+      const d = lookupType(cls, name);
+      if (typeof d === "function" && d.$pyfn === true && d.$static !== true) {
+        fillCallSite(S, cls, d);
+        return d;
+      }
+    }
+  } else {
+    const k = builtinKind(o);
+    if (k !== 0) {
+      const d = T[KIND_TYPE[k]].$dict.get(name) ?? lookupType(T[KIND_TYPE[k]], name);
+      if (typeof d === "function" && d.$pyfn === true) {
+        S.bk = k;
+        S.bfn = d;
+        return d;
+      }
+    }
+  }
+  look.o = getattr(o, name);
+  return callLooked;
+}
+
 // ------------------------------------------------------------------ exceptions
 
 // Raised Python exceptions are thrown as the exception instance itself.  The

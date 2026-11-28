@@ -477,7 +477,9 @@ export class Emitter {
       }
       const spec = p.spec === null ? '""' : this.fstring(p.spec);
       if (p.text) pieces.push(q(p.text));
-      pieces.push(`fmt(${this.ex(p.expr)}, ${p.conv === null ? "null" : q(p.conv)}, ${spec})`);
+      // (a conversion is applied before a specification with fields of its own runs, as CPython's order)
+      if (p.conv !== null && p.spec !== null && p.spec.some((x) => typeof x !== "string")) pieces.push(`fmt(R.fconv(${this.ex(p.expr)}, ${q(p.conv)}), null, ${spec})`);
+      else pieces.push(`fmt(${this.ex(p.expr)}, ${p.conv === null ? "null" : q(p.conv)}, ${spec})`);
     }
     // (fcat joins the pieces refusing to join lone surrogates into one
     // character, CORR-C4D-1; one piece is a string already)
@@ -487,10 +489,15 @@ export class Emitter {
   compare(e: Extract<A.Expr, { k: "Compare" }>): string {
     const one = (op: string, a: string, b: string): string => {
       switch (op) {
-        case "in":
-          return `contains(${b}, ${a})`;
-        case "not in":
-          return `!contains(${b}, ${a})`;
+        // (the item first, then the container, as CPython evaluates them: contains takes them the other way)
+        case "in": {
+          const t = this.temp();
+          return `(${t} = ${a}, contains(${b}, ${t}))`;
+        }
+        case "not in": {
+          const t = this.temp();
+          return `(${t} = ${a}, !contains(${b}, ${t}))`;
+        }
         case "is":
           return b === "null" ? `(${a} === null)` : `is(${a}, ${b})`;
         case "is not":
@@ -605,8 +612,21 @@ export class Emitter {
     const simple = !e.args.some((a) => a.k === "Starred") && e.keywords.length === 0;
     if (simple) {
       if (f.k === "Attribute") {
-        const s = this.site("siteCall", f.attr, e.args.length);
-        return `${s}(${[this.attrBase(f.value), ...e.args.map((a) => this.ex(a))].join(", ")})`;
+        // (no argument that can run code: one call does it.  Otherwise the method is looked up on the receiver
+        // first, then the arguments run, as CPython's order: siteMethod's two halves, the method in a temporary)
+        if (e.args.every((a) => a.k === "Const")) {
+          const s = this.site("siteCall", f.attr, e.args.length);
+          return `${s}(${[this.attrBase(f.value), ...e.args.map((a) => this.ex(a))].join(", ")})`;
+        }
+        const s = this.site("siteMethod", f.attr);
+        const recv = this.temp(), meth = this.temp();
+        const pre = [`${recv} = ${this.attrBase(f.value)}`, `${meth} = ${s}(${recv})`, `${meth} === R.callLooked && (${recv} = ${s}.o)`];
+        const args = e.args.map((a) => {
+          const at = this.temp();
+          pre.push(`${at} = ${this.ex(a)}`);
+          return at;
+        });
+        return `(${pre.join(", ")}, ${meth}(${[recv, ...args].join(", ")}))`;
       }
       // Evaluate the callee and arguments into temporaries so the generated
       // code stays linear in the nesting depth.
@@ -621,17 +641,22 @@ export class Emitter {
     }
     const fn = callee ?? this.ex(f);
     const pos = this.items(e.args);
-    const names: string[] = [], values: string[] = [], maps: string[] = [];
+    const names: string[] = [];
     for (const k of e.keywords) {
-      if (k.arg === null) maps.push(this.ex(k.value));
-      else {
-        if (names.includes(q(k.arg))) this.fail(`keyword argument repeated: ${k.arg}`, e.line);
-        names.push(q(k.arg));
-        values.push(this.ex(k.value));
-      }
+      if (k.arg === null) continue;
+      if (names.includes(q(k.arg))) this.fail(`keyword argument repeated: ${k.arg}`, e.line);
+      names.push(q(k.arg));
     }
-    if (maps.length === 0) return `callKw(${fn}, ${pos}, [${names.join(", ")}], [${values.join(", ")}])`;
-    return `callEx(${fn}, ${pos}, [${names.join(", ")}], [${values.join(", ")}], [${maps.join(", ")}])`;
+    if (e.keywords.every((k) => k.arg !== null)) return `callKw(${fn}, ${pos}, [${names.join(", ")}], [${e.keywords.map((k) => this.ex(k.value)).join(", ")}])`;
+    // (with a ** mapping: each keyword in the call's order, a mapping merged where it stands, so that it is read
+    // before a later keyword's value runs and the names keep the call's order, as CPython's)
+    const tf = this.temp(), tp = this.temp(), tn = this.temp(), tv = this.temp();
+    const parts = [`${tf} = ${fn}`, `${tp} = ${pos}`, `${tn} = []`, `${tv} = []`];
+    for (const k of e.keywords) {
+      if (k.arg === null) parts.push(`R.kwMerge(${tn}, ${tv}, ${this.ex(k.value)}, ${tf})`);
+      else parts.push(`R.kwPut(${tn}, ${tv}, ${q(k.arg)}, ${this.ex(k.value)}, ${tf})`);
+    }
+    return `(${parts.join(", ")}, callKw(${tf}, ${tp}, ${tn}, ${tv}))`;
   }
 
   // globals(), locals(), vars(), dir(), eval() and exec() need the caller's
@@ -650,8 +675,27 @@ export class Emitter {
     const localsExpr = (): string => {
       if (scope.kind === "module") return "R.moduleLocals($g)";
       if (scope.kind === "class") return "R.classLocals($ns)";
-      const ls = [...scope.bound].filter((x) => !scope.globals.has(x));
-      const vs = ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x)));
+      let ls = [...scope.bound].filter((x) => !scope.globals.has(x));
+      let vs = ls.map((x) => (resolve(scope, x).kind === "global" ? "undefined" : js(x)));
+      // (an inlined comprehension in a function: the function's locals too, as CPython 3.12+ inlines it into the
+      // function's frame; each comprehension's own names over the names around it.  At the top level and in a
+      // class, only the comprehension's own, as CPython's)
+      if (scope.kind === "comp" && !scope.isGenerator) {
+        const chain: Scope[] = [];
+        let s: Scope = scope;
+        while (s.kind === "comp" && !s.isGenerator && s.parent !== null) {
+          chain.push(s);
+          s = s.parent;
+        }
+        if (s.kind === "function" && !s.annotation) {
+          const seen = new Map<string, string>();
+          for (const c of [s, ...chain.reverse()]) {
+            for (const x of c.bound) if (!c.globals.has(x) && resolve(c, x).kind !== "global") seen.set(x, js(x));
+          }
+          ls = [...seen.keys()];
+          vs = [...seen.values()];
+        }
+      }
       // (an annotation scope's: its format parameter, and in a class the
       // class's namespace, __classdict__, as CPython's)
       if (scope.annotation) {
@@ -1050,12 +1094,13 @@ export class Emitter {
     const call = st.iter as Extract<A.Expr, { k: "Call" }>;
     this.loop(st.orelse, () => {
       const f = this.temp(), it = this.temp(), i = this.temp(), end = this.temp(), step = this.temp(), v = this.temp();
+      // (the callable first, then the arguments, as CPython: an argument that rebinds range comes after)
+      this.w(`${f} = ${this.load("range")};`);
       const args = call.args.map((a) => {
         const t = this.temp();
         this.w(`${t} = ${this.ex(a)};`);
         return t;
       });
-      this.w(`${f} = ${this.load("range")};`);
       const [start, stop, stp] = args.length === 1 ? ["0", args[0], "1"] : args.length === 2 ? [args[0], args[1], "1"] : args;
       const ints = args.map((a) => `typeof ${a} === "number" && Number.isInteger(${a})`).join(" && ");
       this.w(`if (${f} === R.originalBuiltins.range && ${ints}${args.length === 3 ? ` && ${stp} !== 0` : ""}) { ${i} = ${start}; ${end} = ${stop}; ${step} = ${stp}; ${it} = null; }`);
@@ -1209,17 +1254,27 @@ export class Emitter {
     const decs = this.evalDecorators(st.decorators).map((d) => (d as any).id as string);
     const scope = this.fn.scope.child(st);
     const bases = this.items(st.bases);
-    const kwNames = st.keywords.filter((k) => k.arg !== null).map((k) => q(k.arg!));
-    const kwValues = st.keywords.filter((k) => k.arg !== null).map((k) => this.ex(k.value));
     // (the builtins' __build_class__ first, CPython's LOAD_BUILD_CLASS,
     // before the bases and the body)
     const bc = this.temp();
     this.w(`${bc} = R.buildClassOf($B);`);
     const b = this.temp();
     this.w(`${b} = ${bases};`);
-    // (the keywords before the body, as __build_class__'s arguments)
+    // (the keywords before the body, as __build_class__'s arguments; with a ** mapping, each in the statement's
+    // order, the mapping merged where it stands, its metaclass included, as a call's)
     const kv = this.temp();
-    this.w(`${kv} = [${kwValues.join(", ")}];`);
+    let kwNames: string;
+    if (st.keywords.every((k) => k.arg !== null)) {
+      kwNames = `[${st.keywords.map((k) => q(k.arg!)).join(", ")}]`;
+      this.w(`${kv} = [${st.keywords.map((k) => this.ex(k.value)).join(", ")}];`);
+    } else {
+      kwNames = this.temp();
+      this.w(`${kwNames} = []; ${kv} = [];`);
+      for (const k of st.keywords) {
+        if (k.arg === null) this.w(`R.kwMerge(${kwNames}, ${kv}, ${this.ex(k.value)}, ${bc});`);
+        else this.w(`R.kwPut(${kwNames}, ${kv}, ${q(k.arg)}, ${this.ex(k.value)}, ${bc});`);
+      }
+    }
     const { lines, decls } = this.nested(scope, "", null, [], () => {
       const body = st.body;
       this.w(`$ns.set("__module__", R.classModuleIn($ns, $G, $B)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
@@ -1251,7 +1306,7 @@ export class Emitter {
     // frame has returned before the metaclass, __init_subclass__ or
     // __set_name__ run, so their tracebacks and sys._getframe don't show it)
     const ns = this.temp();
-    this.w(`${ns} = R.classNamespace(${q(st.name)}, ${b}, [${kwNames.join(", ")}], ${kv}, ${bc});`);
+    this.w(`${ns} = R.classNamespace(${q(st.name)}, ${b}, ${kwNames}, ${kv}, ${bc});`);
     const c = this.temp();
     this.w(`${c} = (function ${js(st.name)}$($ns) {`);
     this.indent++;
@@ -1270,7 +1325,7 @@ export class Emitter {
     if (cell) this.w(`return ${cell};`);
     this.indent--;
     this.w(`})(${ns});`);
-    this.w(`${c} = classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, ${ns}, [${kwNames.join(", ")}], ${kv}, ${c}, ${bc});`);
+    this.w(`${c} = classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, ${ns}, ${kwNames}, ${kv}, ${c}, ${bc});`);
     this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
   }
 
