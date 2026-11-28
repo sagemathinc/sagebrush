@@ -2,6 +2,7 @@
 # element (logical_or of ints is bool; a loop the ufunc doesn't have refused even for one element or none); square,
 # np.conjugate and the shifts compute bool operands in int8, positive and sign refuse them; and a where= lane left
 # out of an integer power is never computed.
+import math
 import numpy as np
 def show(tag, f):
     try:
@@ -150,3 +151,11 @@ for vals in (["bad", "2"], ["2", "bad"], [2, 3], ["2", "3"], [2.5, "3"], [None, 
                 if None in vals and w is True:
                     continue  # (not here: the unmasked call's None into a float, NaN in NumPy, Sagebrush's TypeError)
                 show(f"power masked object {vals} {e!r} {dt.__name__} where={w}", lambda: masked_obj(np.array(vals, object), e, dt, w))
+# None into a complex dtype: NaN in both parts, as NumPy's cast makes it (nan+nanj, never nan+0j)
+for dt in (np.complex64, np.complex128):
+    for w in ([True, False], np.bool_(True), [False, True]):
+        def none_c(dt=dt, w=w):
+            o = np.array([7, 7], dt)
+            np.power(np.array([None, 2], object), 1, dtype=dt, casting="unsafe", where=w, out=o)
+            return [(math.isnan(z.real), math.isnan(z.imag), repr(z)) for z in o.tolist()]
+        show(f"power masked None {dt.__name__} where={w}", none_c)

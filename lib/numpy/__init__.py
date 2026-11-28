@@ -917,8 +917,9 @@ class ufunc:
                     self._admit(args, dt, casting)
                     # (each array operand converted to the loop's dtype, every lane, as NumPy's: an object element that
                     # doesn't convert NumPy's ValueError, out untouched, even in a lane where= leaves out)
-                    # (None into a float or complex dtype is NaN, as NumPy's cast makes it)
-                    args = tuple((x if dt.kind not in "fc" else asarray([nan if v is None else v for v in x.ravel().tolist()], object).reshape(x.shape)).astype(dt)
+                    # (None into a float dtype is NaN, into a complex one NaN in both parts, as NumPy's cast makes it)
+                    none = complex(nan, nan) if dt.kind == "c" else nan
+                    args = tuple((x if dt.kind not in "fc" else asarray([none if v is None else v for v in x.ravel().tolist()], object).reshape(x.shape)).astype(dt)
                                  if isinstance(x, ndarray) and x.dtype.kind == "O" else x for x in args)
                 # (a scalar operand is in every lane: given as 1 only when no lane is computed)
                 none = not m.any()
