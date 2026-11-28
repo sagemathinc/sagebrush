@@ -137,3 +137,19 @@ show("floor_divide dtype=bool several axes", lambda: np.floor_divide.reduce(np.o
 show("floor_divide bool several axes", lambda: np.floor_divide.reduce(np.ones((2, 2), bool), axis=None))
 show("subtract bool call", lambda: np.subtract(np.array([True]), np.array([False])))
 show("subtract dtype=bool call", lambda: np.subtract([1, 2], [1, 1], dtype=bool))
+# max and min's initial= converted as NumPy converts it on every path, masked or not, the functions, the method and the
+# ufunc reductions: a NumPy scalar cast into an unsigned dtype (np.int64(-3) into uint8 253), a Python int checked;
+# not here: a negative NumPy scalar into uint64, past 2**53, which Sagebrush refuses
+MM = {"none": None, "T": True, "F": False, "0dT": np.array(True), "0dF": np.array(False), "lst": [True, False], "lstF": [False, False], "arr": np.array([False, True])}
+for dt in (np.uint8, np.uint16, np.int8, np.int64, np.uint64, np.float32, np.bool_):
+    x = np.array([3, 4], dt)
+    for v in (np.int64(-3), np.int8(-1), np.uint64(300), np.int64(300), -3, 300, 1.5, np.float64(-1.0), True, np.complex128(1j), 1j):
+        if dt is np.uint64 and isinstance(v, np.generic) and v.real < 0:
+            continue
+        for mn, m in MM.items():
+            kw = {} if m is None else {"where": m}
+            for nm, f in (("max", np.max), ("min", np.min), ("maximum", np.maximum.reduce), ("minimum", np.minimum.reduce),
+                          ("method max", lambda x, **k: x.max(**k)), ("method min", lambda x, **k: x.min(**k))):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    show(f"minmax initial {dt.__name__} {v!r} {mn} {nm}", lambda: repr(f(x, initial=v, **kw)))

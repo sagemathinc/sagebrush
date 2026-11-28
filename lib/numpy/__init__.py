@@ -1905,14 +1905,16 @@ def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
             raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
                              "specify 'initial'" % ("maximum" if is_max else "minimum"))
         return (_np.amax if is_max else _np.amin)(a, axis, keepdims, None, first)
-    # (a scalar, converted as NumPy converts it: by float() into a float dtype, so its messages are float()'s; a
-    # plain float into float64 needs no array; the runtime's fold starts from it)
+    # (a scalar, converted as NumPy converts it, _initial_in: a Python number checked against the dtype's range, a
+    # NumPy scalar cast into an unsigned one, np.int64(-3) into uint8 253; a plain float into float64 needs no array;
+    # the runtime's fold starts from it)
     if type(initial) is float and a.dtype.name == "float64":
         ini = initial
     else:
         if isinstance(initial, (list, tuple)) or (isinstance(initial, ndarray) and initial.ndim != 0):
             raise ValueError("setting an array element with a sequence.")
-        ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype).item()
+        ini = _initial_in(initial, a.dtype)
+        ini = ini.item() if isinstance(ini, generic) else ini
     if mask is not True:
         # (a masked element takes no part: a float one is filled with -inf for max, +inf for min, which loses to
         # any element or initial and ties only itself, so it cannot settle a tie such as +0 against -0; an integer
