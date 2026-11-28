@@ -10,6 +10,9 @@
 //! - The sum check: the counted live bytes may not exceed the baseline at
 //!   the audit's start plus residents, outstanding obligations and a slack
 //!   ([`set_slack`]); a breach is counted in [`breaches`].
+//! - The per-scope check: inside a reservation's scope, the live bytes may
+//!   not grow, since the scope began, past that reservation's amount and the
+//!   slack; a breach is counted in [`scope_breaches`].
 //!
 //! Install it in a test binary:
 //!
@@ -33,6 +36,9 @@ static BREACHES: AtomicU64 = AtomicU64::new(0);
 // sum (residents and outstanding obligations), each read at an allocation
 // inside an engine entry: a bound's tightness, [`peaks`])
 static PEAK_LIVE: AtomicU64 = AtomicU64::new(0);
+// (allocations inside a reservation's scope after which the live bytes grew past that reservation since the scope
+// began, plus the slack: [`scope_breaches`])
+static SCOPE_BREACHES: AtomicU64 = AtomicU64::new(0);
 static PEAK_COVER: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
@@ -63,6 +69,12 @@ fn check_alloc(size: u64) {
         let live = LIVE.load(Relaxed);
         let cover = crate::RES_MIRROR.load(Relaxed) + crate::O_MIRROR.load(Relaxed);
         let bound = BASE.load(Relaxed) + cover + SLACK.load(Relaxed);
+        if in_engine && covered {
+            let (amount, began) = crate::SCOPE_TOP.try_with(|t| t.get()).unwrap_or((u64::MAX, 0));
+            if amount != u64::MAX && live.saturating_sub(began) > amount.saturating_add(SLACK.load(Relaxed)) {
+                SCOPE_BREACHES.fetch_add(1, Relaxed);
+            }
+        }
         if in_engine {
             PEAK_LIVE.fetch_max(live.saturating_sub(BASE.load(Relaxed)), Relaxed);
             PEAK_COVER.fetch_max(cover, Relaxed);
@@ -126,6 +138,7 @@ pub fn start(slack: u64) {
     VIOLATIONS.store(0, Relaxed);
     BREACHES.store(0, Relaxed);
     PEAK_LIVE.store(0, Relaxed);
+    SCOPE_BREACHES.store(0, Relaxed);
     PEAK_COVER.store(0, Relaxed);
 }
 
@@ -148,6 +161,14 @@ pub fn breaches() -> u64 {
 /// sum, each read at an allocation inside an engine entry.
 pub fn peaks() -> (u64, u64) {
     (PEAK_LIVE.load(Relaxed), PEAK_COVER.load(Relaxed))
+}
+
+/// Allocations inside a reservation's scope after which the live bytes had
+/// grown, since the scope began, past that reservation's amount plus the
+/// slack: an allocation its own reservation doesn't cover, though the sum of
+/// every reservation might.
+pub fn scope_breaches() -> u64 {
+    SCOPE_BREACHES.load(Relaxed)
 }
 
 /// The counted live bytes.

@@ -59,6 +59,9 @@ fn every_allocation_of_an_order_is_reserved_first() {
         let (n, last) = audit::violations();
         assert_eq!(n, 0, "degree {}: {} allocations without a reservation, the last of {} bytes", f.len() - 1, n, last);
         assert_eq!(audit::breaches(), 0, "degree {}: live bytes above the reserved sum", f.len() - 1);
+        // (and each reservation covers what is allocated under its own scope, not only the sum of them all: a
+        // reservation of 0 at one site is caught even where another's headroom would hide it in the sum)
+        assert_eq!(audit::scope_breaches(), 0, "degree {}: an allocation beyond its own reservation", f.len() - 1);
         let (peak, cover) = audit::peaks();
         assert!(cover <= 2 * peak + SLACK, "degree {}: {} reserved at most, for {} live at most", f.len() - 1, cover, peak);
         eprintln!("degree {}: live at most {} bytes, reserved at most {} ({:.2}x); disc {} bits", f.len() - 1, peak, cover, cover as f64 / peak as f64, d.bits());

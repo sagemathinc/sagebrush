@@ -363,8 +363,8 @@ impl Order {
         // (the radical kept by its measured size, the rest of its work released)
         let ips = scratch(zmat(&ip))?;
         drop(s);
-        // (ip's entries are at most p, its pivots p or 1)
-        let mut keep = Held::new(vec(n as u64, 24) + n as u64 * vec(n as u64, big(bp)))?;
+        // (the radical's inverse, charged as measured by inverse_charged; nothing else lives under it)
+        let mut keep = Held::new(0)?;
         let ipq_bytes = vec(n as u64, 24) + n as u64 * vec(n as u64, rat(bp, 1));
         let qs = scratch(ipq_bytes)?;
         let ipq = {
@@ -488,7 +488,7 @@ pub fn equation_disc(f: &[BigInt]) -> Result<BigInt, FactorError> {
         ps.push(BigInt::from(n as u64));
         for k in 1..2 * n - 1 {
             if k % 64 == 0 {
-                sagebrush_interrupt::check();
+                poll("nf power sums poll");
             }
             let mut v = if k <= n { -(BigInt::from(k as u64) * coeff(n - k)) } else { BigInt::zero() };
             for i in 1..=k.min(n) {

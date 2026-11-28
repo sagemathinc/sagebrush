@@ -58,6 +58,8 @@ fn stop_inside_the_table_and_round_2() {
     // discriminant's determinant (15), each O(n^2) big-number operations
     assert!(stop_at(&f, "nf inverse poll") >= 16, "the inverse's coarse polls");
     assert!(stop_at(&f, "nf det poll") >= 15, "the determinant's coarse polls");
+    // x^48 - 2: the power sums for disc(f) poll every 64 of their 95
+    assert!(stop_at(&binomial(48, 2), "nf power sums poll") >= 1, "the power sums' coarse poll");
     // x^6 - 192 = x^6 - 2^6 3: t / 2 is integral, so Round 2 enlarges at 2,
     // polling at each step and at each row of its map
     let g = binomial(6, 192);

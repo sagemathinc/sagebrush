@@ -41,6 +41,33 @@ fn every_allocation_inside_an_entry_is_attributed() {
     assert!(audit::violations().0 >= 1, "attribution catches the masked allocation");
     drop(w);
     drop(r);
+
+    // the per-scope check: an allocation under a reservation's scope past
+    // that reservation (here one of 0 bytes, beside another with 1 MiB of
+    // headroom, so the sum check passes) is a scope breach; within it, none
+    audit::start(4 << 10);
+    let big = reserve("headroom", 1 << 20).unwrap();
+    let none = reserve("none", 0).unwrap();
+    {
+        let _s = none.scope();
+        let v: Vec<u8> = black_box(Vec::with_capacity(64 << 10));
+        drop(v);
+    }
+    assert_eq!(audit::breaches(), 0, "the sum check alone does not see it");
+    assert!(audit::scope_breaches() >= 1, "the per-scope check catches the allocation its reservation doesn't cover");
+    audit::start(4 << 10);
+    let fits = reserve("fits", 128 << 10).unwrap();
+    {
+        let _s = fits.scope();
+        let v: Vec<u8> = black_box(Vec::with_capacity(64 << 10));
+        drop(v);
+        // (and a scope inside it with no amount of its own, a span's, checks nothing)
+        let _t = sagebrush_ledger::Scope::enter();
+        let v: Vec<u8> = black_box(Vec::with_capacity(256 << 10));
+        drop(v);
+    }
+    assert_eq!(audit::scope_breaches(), 0, "an allocation within its reservation, or under a scope without one");
+    drop((big, none, fits));
     op.finish().unwrap();
 
     // outside any engine entry nothing is attributed (the harness's own
