@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 const mod = join(__dirname, "..", "..", "web", "interrupt-classify.mjs");
 
 function run(js: string): any {
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, leakRowOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, stopGate, withWaiver, waiverErrors, ciFailing, STOP_BOUND_MS, POLL_GAP_MS, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles, finalDropCandidate, markFinalShutdown, sessionEnd, WAIT_SELF_EXIT_MS } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `import { leakControlOutcome, leakRowOutcome, classify, classifyXK, classifyCell, xkRowOutcome, rowOutcome, againstBaseline, stopGate, withWaiver, waiverErrors, ciFailing, STOP_BOUND_MS, POLL_GAP_MS, leakCheck, cliffOf, browserLeak, browserFailure, widenedPick, workerRoles, finalDropCandidate, markFinalShutdown, sessionEnd, WAIT_SELF_EXIT_MS, needsLeakConfirm, confirmLeak, CONFIRM_REPS, CONFIRM_FROM } from ${JSON.stringify(mod)};\nconsole.log(JSON.stringify(${js}));`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -704,4 +704,49 @@ test("leak check from a case's leak_from: a one-time heap step before it passes,
   assert.equal(run(`leakCheck(${ser([500e3, 540e3, 580e3, 620e3, 660e3, 700e3])}, 20, "rss", 4)`).ok, false);
   // (a window with fewer than two repeats is unmeasured)
   assert.equal(run(`leakCheck(${ser([500e3, 500e3, 500e3, 500e3])}, 20, "rss", 4)`), null);
+});
+
+test("an RSS growth failure of the short check is confirmed on a longer series: a plateau passes, a per-repeat leak still fails", () => {
+  const ser = (rss: number[], threads = 8) => JSON.stringify(rss.map((r, k) => ({ i: k + 1, rss_kb: r, threads })));
+  assert.deepEqual(run(`[CONFIRM_REPS, CONFIRM_FROM]`), [10, 6]);
+  // (E3a on track/math 689e4757, CI run 46159713325: the allocator's one climb split over repeats 5 and 6)
+  const e3aFail = [506708, 544432, 545600, 559964, 605680, 669480];
+  const first = run(`leakCheck(${ser(e3aFail)}, 20, "rss", 4)`);
+  assert.equal(first.ok, false);
+  assert.equal(first.growth_kb, 109516);
+  assert.equal(run(`needsLeakConfirm(${JSON.stringify(first)})`), true);
+  // (not confirmed: a thread change, a survivor, an invalid sample, a pass, the full check, heap+external)
+  assert.equal(run(`needsLeakConfirm(leakCheck(${ser([5e5, 5e5, 5e5, 5e5, 5e5, 5e5])}.map((x, k) => k === 5 ? { ...x, threads: 9 } : x), 20, "rss", 4))`), false);
+  assert.equal(run(`needsLeakConfirm({ ...${JSON.stringify(first)}, survived_kill: [123] })`), false);
+  assert.equal(run(`needsLeakConfirm({ ...${JSON.stringify(first)}, invalid: true })`), false);
+  assert.equal(run(`needsLeakConfirm(leakCheck(${ser([5e5, 5e5, 5e5, 5e5, 5e5, 5e5])}, 20, "rss", 4))`), false);
+  assert.equal(run(`needsLeakConfirm(leakCheck(${ser(Array.from({ length: 20 }, (_, k) => 5e5 + k * 40e3))}, 20, "rss", 4))`), false);
+  assert.equal(run(`needsLeakConfirm(leakCheck(${JSON.stringify([1, 2, 3, 4, 5].map((i) => ({ i, rss_kb: 5e5, threads: 8, mem_kb: 1e5 + i * 30e3 })))}, 20, "heap+external"))`), false);
+  // (a plateau: the shapes of passing runs of the same tree, the climb done by the confirming series' second half)
+  for (const plateau of [
+    [519776, 578432, 669320, 669408, 688904, 679920, 680120, 679800, 680300, 680010],
+    [506708, 544432, 545600, 559964, 605680, 669480, 669600, 669550, 670100, 669900],
+    [595832, 733756, 728432, 726872, 766676, 766752, 766800, 766700, 767000, 766900],
+  ]) {
+    const r = run(`confirmLeak(${JSON.stringify(first)}, ${ser(plateau)})`);
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.check, "short, confirmed");
+    assert.deepEqual([r.from, r.to], [6, 10]);
+    assert.deepEqual(r.confirm.first, { from: 4, to: 6, growth_kb: 109516, allowed_kb: 65536 });
+  }
+  // (a leak per repeat that fails the short check, the least such (33 MB a repeat over its two steps) and a larger
+  // one, fails the confirmation too: 4 steps past the allowance)
+  for (const rate of [33.5e3, 48e3]) {
+    const leak = Array.from({ length: 10 }, (_, k) => 5e5 + k * rate);
+    const short = run(`leakCheck(${ser(leak.slice(0, 6))}, 20, "rss", 4)`);
+    assert.equal(short.ok, false, "the short check fails it");
+    const r = run(`confirmLeak(${JSON.stringify(short)}, ${ser(leak)})`);
+    assert.equal(r.ok, false, `a ${rate} KB a repeat leak must still fail: ${JSON.stringify(r)}`);
+    assert.ok(r.growth_kb > r.allowed_kb);
+  }
+  // (a confirming series that changes its threads fails; one that can't be measured keeps the first failure)
+  assert.equal(run(`confirmLeak(${JSON.stringify(first)}, ${ser([6e5, 6e5, 6e5, 6e5, 6e5, 6e5, 6e5, 6e5, 6e5, 6e5])}.map((x, k) => k === 9 ? { ...x, threads: 9 } : x))`).ok, false);
+  const unmeasured = run(`confirmLeak(${JSON.stringify(first)}, ${ser([6e5, 6e5, 6e5])})`);
+  assert.equal(unmeasured.ok, false);
+  assert.equal(unmeasured.confirm.measured, false);
 });
