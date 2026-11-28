@@ -461,8 +461,9 @@ fn files_target(windows: Vec<(String, String, bool)>) -> String {
 }
 
 /// Window `gone` closed: the files still waiting for it, and any waiting for a window no longer among `left` (an
-/// orphan), for the window files_target chooses among `left`; that window, if any moved to one.  The unassigned stay
-/// so, for the first notebook page that asks; with no window left, everything stays as it is.
+/// orphan), go to the window files_target chooses among `left`, or become unassigned if it chooses none; returned: that
+/// window, if any file moved to one (to be told).  Files already unassigned are never moved here: they wait for the
+/// first notebook page that asks (startup_files).  With no window left, everything stays as it is.
 #[allow(dead_code)]
 fn retarget(pending: &mut [(String, String)], gone: &str, left: Vec<(String, String, bool)>) -> Option<String> {
     if left.is_empty() {
@@ -716,6 +717,19 @@ mod tests {
         assert_eq!(super::take_pending(&mut p, "doc-3"), Vec::<String>::new());
         assert_eq!(super::take_pending(&mut p, "doc-4"), Vec::<String>::new());
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn unassigned_files_are_never_moved_by_a_close() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        // (a close with a notebook window left moves the closed window's own file there, told; the unassigned one stays)
+        let mut p = vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string()), ("doc-1".to_string(), "/d.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut p, "doc-1", vec![w("doc-2", "/", true)]), Some("doc-2".into()));
+        assert_eq!(p, vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string()), ("doc-2".to_string(), "/d.ipynb".to_string())]);
+        // (only unassigned files: nothing moves, nobody told)
+        let mut q = vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut q, "doc-3", vec![w("doc-2", "/", true)]), None);
+        assert_eq!(q[0].0, super::UNASSIGNED);
     }
 
     #[test]

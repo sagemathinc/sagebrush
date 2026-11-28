@@ -232,6 +232,28 @@ mod tests {
     }
 
     #[test]
+    fn a_window_that_fails_to_build_outside_a_quit_exits_nothing() {
+        // (no quit: a failed build only releases its reservation; the app goes on, and a later quit exits as usual)
+        let mut l = Leave::default();
+        assert!(l.begin_open());
+        assert_eq!(l.open_failed(), vec![]);
+        assert!(!l.quitting());
+        assert_eq!(l.quit(w(&["main"])), vec![Act::AskQuit(w(&["main"])), Act::Watch(s("main"))]);
+        assert_eq!(l.done("main"), vec![Act::Exit]);
+    }
+
+    #[test]
+    fn a_window_destroyed_while_another_is_being_built_waits_for_the_build() {
+        // (the quit's only window destroyed while a reserved window is still being built: no exit yet; built: destroyed
+        // at once, and then the exit)
+        let mut l = Leave::default();
+        assert!(l.begin_open());
+        l.quit(w(&["main"]));
+        assert_eq!(l.destroyed("main"), vec![]);
+        assert_eq!(l.opened("doc-5"), vec![Act::Destroy(s("doc-5")), Act::Exit]);
+    }
+
+    #[test]
     fn a_window_built_as_the_quit_began_and_asked_by_it_counts_as_answered_when_destroyed() {
         // (built just before the quit listed the windows, so the quit asked it too)
         let mut l = Leave::default();
