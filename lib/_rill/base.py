@@ -536,22 +536,44 @@ def print_value(sess, v, digits=None):
 def _print_list(sess, v, opts):
     """print() of a list, as R 4.5.3 prints one (rill-tests/list/): each element under its tag ($name, $`name`,
     $<NA>, or [[k]] where it has none), the tags of nested lists prefixed by their parents', each element followed
-    by a blank line; an empty list is list() (named list() with names).  Every element is checked before anything
-    is written, and the walk keeps its own stack (nesting is as deep as the evaluator allows)."""
+    by a blank line; an empty list is list() (named list() with names).  Every element is checked, and the peak
+    reserved, before anything is written: one leaf is laid out at a time, so the peak is the largest leaf's layout
+    with the longest tag (§8.5).  The walks keep their own stacks (nesting is as deep as the evaluator allows)."""
     write = sess.write_out
-    leaves = []
-    stack = [v]
+    strings = extra = tag_chars = 0
+    stack = [(v, 0)]  # (list, the characters of its tag prefix)
     while stack:
-        x = stack.pop()
+        x, prefix = stack.pop()
         lists._only_names(x, "printing")
-        for e in x.data:
+        names = lists.names_of(x)
+        for i, e in enumerate(x.data):
+            t = prefix + len(_list_tag(names.data[i] if names is not None else "", i))
+            tag_chars = max(tag_chars, t)
             if isinstance(e, RList):
-                stack.append(e)
+                stack.append((e, t))
             elif e is not NULL and not (isinstance(e, RVector) and (not e.attrs or set(e.attrs) == {"names"})):
                 raise NotSupported("printing a list holding this value")
+            elif e is not NULL:
+                k, b = _print_need(e)
+                strings, extra = max(strings, k), max(extra, b)
     if not v.data:
         write("named list()\n" if v.attrs else "list()\n")
         return
+    # (a tag is built, then written with its newline: twice its characters)
+    with mem.reserve(0, "character", (strings, "character"), extra_bytes=extra + 2 * (tag_chars + 1)):
+        _write_list(v, write, opts)
+
+
+def _list_tag(nm, i):
+    """An element's own part of its tag: $name, $`name`, $<NA>, or [[k]] where it has no name."""
+    if nm is None:
+        return "$<NA>"
+    if nm == "":
+        return "[[%d]]" % (i + 1)
+    return "$" + fmt.deparse_symbol(nm)
+
+
+def _write_list(v, write, opts):
     frames = [(v, "", 0)]
     while frames:
         x, prefix, i = frames.pop()
@@ -561,13 +583,7 @@ def _print_list(sess, v, opts):
             continue
         frames.append((x, prefix, i + 1))
         names = lists.names_of(x)
-        nm = names.data[i] if names is not None else ""
-        if nm is None:
-            tag = prefix + "$<NA>"
-        elif nm == "":
-            tag = prefix + "[[%d]]" % (i + 1)
-        else:
-            tag = prefix + "$" + fmt.deparse_symbol(nm)
+        tag = prefix + _list_tag(names.data[i] if names is not None else "", i)
         write(tag + "\n")
         e = x.data[i]
         if isinstance(e, RList) and e.data:
@@ -576,8 +592,7 @@ def _print_list(sess, v, opts):
         if isinstance(e, RList):
             write("named list()\n" if e.attrs else "list()\n")
         else:
-            with _print_reservation(e):
-                fmt.print_value(e, write, opts)
+            fmt.print_value(e, write, opts)
         write("\n")
 
 
@@ -587,8 +602,14 @@ def _print_reservation(v):
     and the laid-out output, every element padded to the widest, with its line labels, held twice (the lines and
     their join).  A named vector adds its names, each up to ten times its length, as a second row per line.  The
     width is the widest element's bound, so a single long string pads every row (astra's R2)."""
+    strings, extra = _print_need(v)
+    return mem.reserve(0, "character", (strings, "character"), extra_bytes=extra)
+
+
+def _print_need(v):
+    """print(v)'s peak as (element strings, bytes beyond them), _print_reservation's rule."""
     if not isinstance(v, RVector):
-        return mem.reserve(0, "character")
+        return 0, 0
     n = len(v.data)
     # (the widest element and the total, as running scalars: nothing proportional to the vector exists before
     # the reservation is admitted; astra's R2)
@@ -613,7 +634,7 @@ def _print_reservation(v):
                 w = x
     label = len("[%d]" % n) + 1
     laid_out = rows * n * (w + 1) + n * label
-    return mem.reserve(0, "character", (rows * n, "character"), extra_bytes=total + 2 * laid_out)
+    return rows * n, total + 2 * laid_out
 
 
 # the most characters print() writes for one character of a string: \\U{01fffe} (fmt.escape_string)

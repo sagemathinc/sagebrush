@@ -135,7 +135,8 @@ def _positions(i, x, call):
         where = {}
         if names is not None:
             for k, nm in enumerate(names.data):
-                if nm is not None and nm not in where:
+                # (an empty name never matches, not even "": list(a = 1, 2)[""] is $<NA> NULL, R 4.5.3)
+                if nm and nm not in where:
                     where[nm] = k
         return [where.get(s) if s is not None else None for s in i.data]
     raise NotSupported("a %s index" % i.type)

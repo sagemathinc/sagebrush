@@ -149,7 +149,10 @@ def _element(x, k):
 
 
 def _match_name(names, s, exact):
-    """The position of name s: the first exact match; with exact False, else the only name s begins."""
+    """The position of name s: the first exact match; with exact False, else the only name s begins.  An empty s
+    matches nothing, not even an empty name (R 4.5.3: list(a = 1, 2)[[""]] and $"" are NULL)."""
+    if s == "":
+        return None
     for k, nm in enumerate(names):
         if nm == s:
             return k
@@ -182,9 +185,12 @@ def dollar_list(x, call):
 def unlist_(sess, call, args):
     """unlist(x, recursive = TRUE, use.names = TRUE): a list's atomic elements, at any depth, as one vector of
     their highest type, named as c() names its arguments' elements, nested tags joined by "." (R 4.5.3)."""
-    x = args[0][1]
+    # (each argument by the formal it matched: unlist(use.names = FALSE, x = l) is legal R)
+    x = next((v for name, v in args if name == "x"), NULL)
     use_names = True
-    for name, v in args[1:]:
+    for name, v in args:
+        if name == "x":
+            continue
         flag = v.data[0] if isinstance(v, RVector) and v.type == "logical" and len(v.data) == 1 else None
         if name == "use.names" and flag is not None:
             use_names = flag

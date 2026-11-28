@@ -277,6 +277,53 @@ print(json.dumps({"peak": peak[0], "printed": len("".join(out))}))
   });
 }
 
+// (review) printing a list reserves its whole peak before its first tag is written: a refusal, wherever the
+// largest leaf is (first, later, nested), leaves no partial output, and the reservation covers that leaf's layout
+for (const [where, src] of [["first leaf", "list(a = numeric(2000), 1)"], ["later leaf", "list(1, 2, b = numeric(2000))"],
+                            ["nested leaf", "list(1, c = list(2, numeric(2000)))"]]) {
+  test(`§8.5: a list's print reserves its peak before writing (${where})`, () => {
+    const got = py(`
+import json
+from _rill import _memguard, mem
+from _rill.eval import Session
+from _rill.parse import parse
+out = []
+s = Session(out.append, out.append)
+s.evaluate(parse("x <- ${src}")[0])
+s.evaluate(parse("y <- numeric(2000)")[0])
+mem.SMALL_BYTES = 0
+peak = [0]
+real_enter = mem.Reservation.__enter__
+def spy(self):
+    r = real_enter(self)
+    peak[0] = max(peak[0], mem.open_bytes())
+    return r
+mem.Reservation.__enter__ = spy
+mem._allowance = lambda: (10 ** 9, None)
+s.evaluate(parse("print(y)")[0])
+leaf = peak[0]
+peak[0] = 0
+del out[:]
+s.evaluate(parse("print(x)")[0])
+whole, printed = peak[0], len("".join(out))
+del out[:]
+mem._allowance = lambda: (whole - 1 - mem.open_bytes(), None)
+try:
+    s.evaluate(parse("print(x)")[0])
+    short = "admitted"
+except _memguard.SagebrushMemoryError:
+    short = "refused"
+print(json.dumps({"leaf": leaf, "whole": whole, "printed": printed, "short": short, "after": len("".join(out)),
+                  "open": mem.open_bytes()}))
+`);
+    assert.ok(got.printed > 0, "the list printed");
+    assert.ok(got.whole >= got.leaf, `the list's reservation ${got.whole} covers its largest leaf's ${got.leaf}`);
+    assert.equal(got.short, "refused", "one byte short is refused");
+    assert.equal(got.after, 0, "a refusal writes nothing");
+    assert.equal(got.open, 0, "nothing left reserved");
+  });
+}
+
 // (grader's M4) R's size wording past 1 Gb, from a refusal under a small allowance: 402653184 integers are R's
 // 1.5 Gb (1:2e8 is its 762.9 Mb, rill-tests/mem/)
 test("§8.5: a refusal states R's size in Mb or Gb", () => {
