@@ -1441,6 +1441,10 @@ class _RealField:
         if isinstance(x, _Fraction):
             import _sage_real
             _sage_real._rational_bits(x)
+        if getattr(type(x), "_real_field_value", None) is not None:
+            # (a number field element: at 53 bits through its embedding, with
+            # Sage's errors, then as that number)
+            x = _rr_mp()(x)
         try:
             f = float(x)
         except OverflowError:
