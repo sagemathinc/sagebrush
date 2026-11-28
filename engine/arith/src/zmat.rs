@@ -363,6 +363,7 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
     // and the residual): Stop is polled within it, not only between steps
     let _phase = sagebrush_interrupt::enter("arith.solve_lift");
     let mut poll = Poll::new();
+    let a_bits = a.max_bits();
     loop {
         if r128.is_none() && a64.is_some() {
             let lim = BigInt::from(1i128 << 120);
@@ -396,6 +397,7 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
             }
         };
         // r = (r - a digit) / p
+        let residual = sagebrush_interrupt::enter("arith.solve_residual");
         match (&mut r128, &a64) {
             (Some(rv), Some(a64)) => {
                 for i in 0..n {
@@ -411,9 +413,12 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                 }
             }
             _ => {
+                // (a big-integer multiply-add costs about a's entries' size
+                // in words when they leave i64)
+                let aw = if a64.is_some() { 1 } else { mul_weight(a_bits, 64, usize::MAX as u64) as usize };
                 for i in 0..n {
                     for j in 0..k {
-                        poll.add(n);
+                        poll.add(n.saturating_mul(aw));
                         let s: BigInt = match &a64 {
                             Some(a64) => {
                                 let mut s = 0i128;
@@ -431,12 +436,16 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                 }
             }
         }
+        drop(residual);
         // (each a multiply-add of p^iter's size, in words)
-        let pkw = 1 + (pk.bits() / 64) as usize;
-        for (xi, &di) in x.iter_mut().zip(&digit.d) {
-            poll.add(pkw);
-            if di != 0 {
-                *xi += &pk * BigInt::from(di);
+        {
+            let _x = sagebrush_interrupt::enter("arith.solve_x");
+            let pkw = 1 + (pk.bits() / 64) as usize;
+            for (xi, &di) in x.iter_mut().zip(&digit.d) {
+                poll.add(pkw);
+                if di != 0 {
+                    *xi += &pk * BigInt::from(di);
+                }
             }
         }
         pk *= &bp;

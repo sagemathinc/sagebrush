@@ -44,6 +44,16 @@
   "owner": "exact linear algebra (engine/arith)",
   "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
  },
+ "engine/arith/src/zmat.rs :: solve :: let a_bits = a.max_bits(); #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the residual's poll weight from a's entries' sizes (max_bits, usize::MAX cap): how often Stop is polled, not a limit"
+ },
+ "engine/arith/src/zmat.rs :: solve :: let aw = if a64.is_some() { 1 } else { mul_weight(a_bits, 64, usize::MAX as u64) as usize }; #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the residual's poll weight from a's entries' sizes (max_bits, usize::MAX cap): how often Stop is polled, not a limit"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
