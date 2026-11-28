@@ -1,0 +1,97 @@
+{
+ "cases": [
+  {
+   "id": "cat-sep-newline",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\nb\n"
+  },
+  {
+   "id": "cat-sep-newline-one",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\nb\n"
+  },
+  {
+   "id": "cat-sep-newline-none",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\nend\n"
+  },
+  {
+   "id": "cat-sep-newline-inside",
+   "status": 0,
+   "stderr": "",
+   "stdout": "ax\nyb\n"
+  },
+  {
+   "id": "cat-sep-space-newline",
+   "status": 0,
+   "stderr": "",
+   "stdout": "1 \n2 \n3\n"
+  },
+  {
+   "id": "cat-sep-newline-empty-string",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\n\n"
+  },
+  {
+   "id": "cat-sep-newline-null",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\nb\n"
+  },
+  {
+   "id": "cat-zero-length",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a  b|\na--b|\n b|\na |\n"
+  },
+  {
+   "id": "cat-zero-length-newline",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\n\nb\n\nend\n"
+  },
+  {
+   "id": "cat-null-skipped",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a b|\na-x-y-b|\n"
+  },
+  {
+   "id": "cat-no-newline-sep",
+   "status": 0,
+   "stderr": "",
+   "stdout": "ab|\na b|\n"
+  },
+  {
+   "id": "cat-null-first",
+   "status": 0,
+   "stderr": "",
+   "stdout": " b|\n-b|\n-b|\n"
+  },
+  {
+   "id": "cat-null-first-zero-length",
+   "status": 0,
+   "stderr": "",
+   "stdout": "-|\n--b|\n-b|\n"
+  },
+  {
+   "id": "cat-null-first-newline",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nb\n\n\n\nend\n"
+  },
+  {
+   "id": "cat-null-last",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a|\na-b|\n|\n-x-y|\na\nend\n"
+  }
+ ],
+ "file": "rill-tests/core/test_4.R",
+ "format": "rill-out",
+ "v": 1
+}
