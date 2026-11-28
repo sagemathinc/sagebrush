@@ -40,8 +40,7 @@
     "web-runner",
     "web-runner-sync",
     "web-sync",
-    "web-sync-ops",
-    "webkit"
+    "web-sync-ops"
   ],
   "not_for": {
     "wasm-modules": [
