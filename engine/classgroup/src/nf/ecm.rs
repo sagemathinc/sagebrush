@@ -494,9 +494,14 @@ pub fn ecm_until_found(n: &BigUint, seed: u64) -> Option<BigUint> {
 /// (B1 = 2000, 11000, 50000, 250000, 1000000; B2 = 50 B1 up to 10^7),
 /// or None.
 pub fn ecm(n: &BigUint, seed: u64) -> Option<BigUint> {
+    ecm_levels(n, seed, SCHEDULE.len())
+}
+
+/// The first `levels` levels of SCHEDULE.
+pub fn ecm_levels(n: &BigUint, seed: u64, levels: usize) -> Option<BigUint> {
     let mut primes: Vec<u64> = vec![];
     let mut s = seed | 1;
-    for &(b1, curves) in &SCHEDULE {
+    for &(b1, curves) in SCHEDULE.iter().take(levels) {
         // B2 = 50 B1, at most 10^7 (the primes are sieved up to B2)
         let b2 = fixed_b2(b1);
         if primes.last().map_or(true, |&p| p < b2) {

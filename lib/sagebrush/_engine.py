@@ -32,7 +32,33 @@ def _with_limits(fn, args):
 
 def call(fn, **args):
     args = _with_limits(fn, args)
-    r = _json.loads(_sbengine.call(_json.dumps(dict(fn=fn, **args))))
+    return unwrap_reply(_json.loads(_sbengine.call(_json.dumps(dict(fn=fn, **args)))))
+
+
+def unwrap_reply(r):
+    """A reply's value, or its error raised: the memory ledger's refusal
+    ("memory") as the memory guards' MemoryError (_memguard.engine_refusal).
+
+    EXAMPLES::
+
+        sage: from sagebrush._engine import unwrap_reply  # sagebrush only
+        sage: unwrap_reply({"ok": [2, 3]})
+        [2, 3]
+        sage: m = {"what": "the quadratic sieve", "row": "native", "need": 194000000, "allowance": 2**30, "live": 2**30 - 10**7,
+        ....:      "outstanding": 0, "total": 2**32, "status": "observed", "joint": False, "retired": 0}
+        sage: try:
+        ....:     unwrap_reply({"memory": m})
+        ....: except MemoryError as e:
+        ....:     print(type(e).__name__, e.what, e.need_bytes)
+        SagebrushMemoryError The quadratic sieve 194000000
+        sage: unwrap_reply({"error": "factor of 0"})
+        Traceback (most recent call last):
+        ...
+        ValueError: factor of 0
+    """
+    if "memory" in r:
+        import _memguard
+        raise _memguard.engine_refusal(r["memory"])
     if "error" in r:
         if r.get("internal"):
             # a failed proved invariant (an engine bug), never a resource

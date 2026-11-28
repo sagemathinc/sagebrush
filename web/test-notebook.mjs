@@ -268,7 +268,8 @@ try {
   ok(/Not run: cell \d+, which this cell depends on, was interrupted/.test(out), "...a cell reading its variables waits for it: " + out.trim());
   out = await runCode("print(globals()['keep'] + 1)");
   ok(out.includes("42"), "...and the interpreter kept them: " + out.trim());
-  out = await runAndStop("factor(100000000000000000000000012349 * 300000000000000000000000000823)", 1500);
+  // (a 79-digit semiprime, above the quadratic sieve's range)
+  out = await runAndStop("factor(1000000000000000000000000000000000000003 * 3000000000000000000000000000000000000037)", 1500);
   ok(/KeyboardInterrupt/.test(out), "Stop interrupts the Rust engine (ECM): " + JSON.stringify(out.trim().slice(-60)));
   out = await runCode("print(globals()['keep'], factor(2^64 + 1))");
   ok(out.includes("41 274177 * 67280421310721"), "...the engine works after it, variables kept: " + out.trim());

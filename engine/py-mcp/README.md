@@ -38,7 +38,7 @@ pip install sagebrush-mcp        # or: uvx sagebrush-mcp@latest
   and comments on a `.tex`, through the page they pair.
 
 What the session covers:
-- **Integers:** factoring (ECM), primality.
+- **Integers:** factoring (ECM and the quadratic sieve), primality.
 - **Polynomials:** factoring and roots over ZZ and QQ.
 - **Number fields:** maximal orders, prime decomposition, class groups,
   units and regulators (assuming GRH, as Sage and PARI do).

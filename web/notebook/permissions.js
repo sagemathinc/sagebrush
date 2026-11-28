@@ -35,6 +35,26 @@ const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); retu
 export const GRANT_CAPS = Object.freeze({ perKind: 32, pathChars: 1024, hostChars: 253, storedDenials: 20000, sessionDenialsPerDoc: 256, sessionDenialsPage: 4096, sessionDocs: 4096, docsKept: 2000 });
 export const GRANT_KINDS = Object.freeze(["write", "read", "net"]);
 
+/** Whether `e` is a stored document entry as this code writes one ({write, read, net: [scope], denied: [[kind, scope,
+ * seq]], t}): each kind an array within GRANT_CAPS.perKind of scopes already in their canonical form, each denial a
+ * [kind, canonical scope, integer] triple, `t` an integer. Anything else, a string where an array goes included,
+ * isn't one, and grants nothing: read from storage (the page's or the desktop app's grants.json), it is left out,
+ * never read as a scope (a string's `includes("/")` or its spread characters would be). */
+export function validGrantEntry(e) {
+  if (!e || typeof e !== "object" || Array.isArray(e)) return false;
+  for (const k of GRANT_KINDS) {
+    if (!(k in e)) continue;
+    const a = e[k];
+    if (!Array.isArray(a) || a.length > GRANT_CAPS.perKind || !a.every((x) => typeof x === "string" && canonicalScope(k, x) === x)) return false;
+  }
+  if ("denied" in e) {
+    const d = e.denied;
+    if (!Array.isArray(d) || d.length > GRANT_CAPS.storedDenials) return false;
+    if (!d.every((x) => Array.isArray(x) && x.length === 3 && GRANT_KINDS.includes(x[0]) && typeof x[1] === "string" && canonicalScope(x[0], x[1]) === x[1] && Number.isSafeInteger(x[2]))) return false;
+  }
+  return !("t" in e) || Number.isSafeInteger(e.t);
+}
+
 /** A grant's scope in its one canonical form, or null if it isn't one. Write and read: a workspace folder ("/", or
  * "/a/b"; no ".", ".." or empty segment, no trailing "/"). Net: an exact host with its port explicit, the host
  * lowercase and in its ASCII (IDNA) form, the port normalized first ("H.org", "h.org:443" and "h.org:00443" are all
@@ -87,9 +107,17 @@ export function createPermissions() {
   // and this page's session (doc -> {write, read, net: Set, denied: Map "kind\0scope" -> seq}, insertion = age)
   const session = new Map();
   let sessionSeq = 0, sessionDenials = 0;
-  const stored = () => { const r = read(GRANTS, null); return r && r.v === 1 && r.docs && typeof r.docs === "object" ? r : { v: 1, seq: 0, docs: {} }; };
+  // (read whole: an entry that isn't one this code writes (validGrantEntry) is left out, so it grants nothing; the
+  // others, their denials with them, kept)
+  const stored = () => {
+    const r = read(GRANTS, null);
+    if (!(r && r.v === 1 && r.docs && typeof r.docs === "object" && !Array.isArray(r.docs))) return { v: 1, seq: 0, docs: {} };
+    if (!Number.isSafeInteger(r.seq ?? 0)) r.seq = 0;
+    for (const [d, e] of Object.entries(r.docs)) if (!validGrantEntry(e)) delete r.docs[d];
+    return r;
+  };
   // (whether `doc`'s scoped record lets its code write anywhere: a write grant of "/", stored or once)
-  const writesAll = (doc) => (stored().docs[doc]?.write ?? []).includes("/") || !!session.get(doc)?.write.has("/");
+  const writesAll = (doc) => { const w = stored().docs[doc]?.write; return (Array.isArray(w) && w.includes("/")) || !!session.get(doc)?.write.has("/"); };
   const key = (kind, s) => kind + "\u0000" + s;
   const empty = (x) => !x || (GRANT_KINDS.every((k) => !(x[k]?.length ?? x[k]?.size)) && !(x.denied?.length ?? x.denied?.size));
   // (a document's session entry, made only within GRANT_CAPS.sessionDocs: null past it; pruned when left empty)
@@ -158,6 +186,19 @@ export function createPermissions() {
     if (ok && pending) settled();
     return ok;
   };
+  // ("Don't allow file changes": every write grant of `doc` taken away, stored and once, folders included, and "/"
+  // denied, stored, in one write; the once grants go even if storage can't keep it, which only narrows)
+  const stopWrites = (doc) => {
+    session.get(doc)?.write.clear();
+    const ok = commit(doc, (d, r) => {
+      d.write = [];
+      d.denied = [...(d.denied ?? []).filter((x) => !(x[0] === "write" && x[1] === "/")), ["write", "/", ++r.seq]];
+      return true;
+    });
+    prune(doc);
+    tell(doc);
+    return ok;
+  };
   const migrate = () => {
     const raw = read(GRANTS, null);
     if (raw && raw.v !== 1) return; // (a record of another version: not this code's to rewrite)
@@ -196,9 +237,9 @@ export function createPermissions() {
       if (perm !== "files" || !doc) return true;
       // (suspended: an Allow isn't made, nor held in this page for later)
       if (on && suspended) return false;
-      // (the switch is the scoped record's write scope "/": on, a stored grant of it; off, a stored denial of it, which
-      // removes the grant, stored and once)
-      const kept = on ? api.grant(doc, "write", "/").ok : api.deny(doc, "write", "/", { stored: true });
+      // (the switch is the scoped record's write scope "/": on, a stored grant of it; off, "Don't allow file changes":
+      // every write grant goes, "/" and each folder, stored and once, and a stored denial of "/" is kept, as its words say)
+      const kept = on ? api.grant(doc, "write", "/").ok : stopWrites(doc);
       if (kept) unkept.delete(doc);
       else unkept.set(doc, { files: !!on }); // (not kept: in effect in this page anyway, and the caller says so)
       tell(doc);
@@ -312,7 +353,7 @@ export function createPermissions() {
       const held = unkept.get(doc);
       if (held) return held.files ? ["/"] : [];
       const e = stored().docs[doc] ?? {}, ss = session.get(doc);
-      const all = [...new Set([...(e.write ?? []), ...(ss?.write ?? [])].map((t) => canonicalScope("write", t)).filter((t) => t !== null))];
+      const all = [...new Set([...(Array.isArray(e.write) ? e.write : []), ...(ss?.write ?? [])].map((t) => canonicalScope("write", t)).filter((t) => t !== null))];
       return all.includes("/") ? ["/"] : all.sort();
     },
     /** Whether "Don't allow" was said for a folder covering `path` (stored or this session): its prompt stays silent. */
