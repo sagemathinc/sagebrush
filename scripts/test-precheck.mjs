@@ -5,11 +5,11 @@
 // $RUSTFLAGS), fetches the pins only for their own source, builds once and copies from the cache after.
 //   node scripts/test-precheck.mjs
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { STEPS, workflowLines } from "./precheck.mjs";
-import { SOURCE_PATHS, check, ensure, isPinnedSource, sourceKey } from "./engine-cache.mjs";
+import { SOURCE_PATHS, check, ensure, isPinnedSource, keepTargets, pruneTargets, sourceKey, targetFor } from "./engine-cache.mjs";
 import { MODULES } from "./wasm-modules.mjs";
 
 let failures = 0;
@@ -50,8 +50,9 @@ try {
     log: () => {},
     fetch: () => calls.fetch++,
     // (a build writes the four modules, its bytes naming the build)
-    build: () => {
+    build: (root, env) => {
       calls.build++;
+      calls.target = env.CARGO_TARGET_DIR;
       for (const name of MODULES) writeFileSync(join(repo, "wasm", name), `${name} build ${calls.build}\n`);
     },
   };
@@ -102,6 +103,68 @@ try {
     ok(dirtyKey !== before && sourceKey(repo, E).key !== before, `${p} is part of the key (uncommitted and committed)`);
   }
   ok(["engine", ...BUILD_SCRIPTS].every((p) => SOURCE_PATHS.includes(p)), "the source paths name engine/ and every build script");
+
+  // each checkout builds in its own cargo target (a shared one let cargo keep another checkout's module), under the
+  // cache's targets/ or $CARGO_TARGET_DIR, named by the checkout's real path
+  const tgt = targetFor(repo, E);
+  ok(tgt.startsWith(join(cache, "targets", "checkout-")), "a checkout's target is under the cache's targets/");
+  ok(calls.target === targetFor(repo, F), "the build ran in that target");
+  const alias = join(tmpdir(), `engine-cache-alias-${process.pid}`);
+  symlinkSync(repo, alias);
+  try {
+    ok(targetFor(alias, E) === tgt, "the same checkout through a symlink: the same target");
+  } finally {
+    rmSync(alias, { force: true });
+  }
+  const other = mkdtempSync(join(tmpdir(), "engine-cache-other-"));
+  try {
+    ok(targetFor(other, E) !== tgt, "another checkout: another target");
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
+  ok(targetFor(repo, { ...E, CARGO_TARGET_DIR: "/t" }).startsWith("/t/checkout-"), "under $CARGO_TARGET_DIR when it is set");
+  ok(keepTargets({}) === 6 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "2" }) === 2 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "0" }) === 6 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "x" }) === 6, "the targets kept: $SAGEBRUSH_ENGINE_TARGETS, default 6");
+  // pruning: the most recently used kept; a target whose lock a build holds is kept (the remover reports it busy);
+  // one gone meanwhile is no error; and a pruning failure never fails the build it follows
+  const tp = join(repo, ".targets");
+  const names = [...Array(7).keys()].map((i) => `checkout-${String(i).padStart(16, "0")}`);
+  names.forEach((n, i) => {
+    mkdirSync(join(tp, n, "deps"), { recursive: true });
+    writeFileSync(join(tp, n, "deps", "x.rlib"), Buffer.alloc(1 << 20));
+    const t = new Date(Date.now() - (i + 1) * 3600e3); // (names[0] the most recently used)
+    utimesSync(join(tp, n), t, t);
+  });
+  const logs = [];
+  const remove = (path) => {
+    if (path.endsWith(names[5])) return "busy";
+    if (path.endsWith(names[2])) rmSync(join(tp, names[3]), { recursive: true, force: true }); // (another pruner)
+    rmSync(path, { recursive: true, force: true });
+    return "removed";
+  };
+  pruneTargets(join(tp, names[6]), { SAGEBRUSH_ENGINE_TARGETS: "2" }, (m) => logs.push(m), remove);
+  const left = readdirSync(tp).filter((n) => n.startsWith("checkout-")).sort();
+  ok(JSON.stringify(left) === JSON.stringify([names[0], names[1], names[5], names[6]].sort()), `pruned to the 2 most recently used, the one a build holds and the one just built (${left.join(" ")})`);
+  ok(logs.filter((m) => /removed the cargo target checkout-0+[24] \(1 MiB, last used /.test(m)).length === 2 && logs.some((m) => /removed the cargo target checkout-0+3 \(0 MiB/.test(m)), "each removed target is logged with its size and last use; one gone meanwhile is 0 MiB, no error");
+  ok(logs.some((m) => /kept the cargo target checkout-0+5: a build holds it/.test(m)), "a target a build holds is kept, and said so");
+  ok(/4 checkout targets in .*, 4 MiB$/.test(logs.at(-1)), `the total kept is logged (${logs.at(-1)})`);
+  // (no lock tool: pruning stops at the first target, saying so once, and removes nothing)
+  const ulogs = [];
+  let calls2 = 0;
+  pruneTargets(join(tp, names[6]), { SAGEBRUSH_ENGINE_TARGETS: "1" }, (m) => ulogs.push(m), () => (calls2++, "unsupported"));
+  ok(calls2 === 1 && ulogs.filter((m) => /not pruned/.test(m)).length === 1 && readdirSync(tp).filter((n) => n.startsWith("checkout-")).length === 4, "no lock tool: pruning stops at once, said once, nothing removed");
+  const G = { ...E, RUSTFLAGS: "-Cdebuginfo=1" }, glogs = [];
+  const built = ensure({ root: repo, env: G, ...stubs, log: (m) => glogs.push(m), prune: () => { throw new Error("EACCES (injected)"); } });
+  ok(built === "built" && check({ root: repo, env: G }).ok && glogs.some((m) => /pruning the cargo targets failed: EACCES/.test(m)), "a pruning failure is logged, after the build is stored and installed");
+  // (another checkout's pruning removes this target right after its build: no error, the build is stored and installed)
+  const H = { ...E, RUSTFLAGS: "-Cdebuginfo=0" };
+  let gone = false;
+  const pruned = ensure({ root: repo, env: H, ...stubs, build: (root, env) => {
+    stubs.build(root, env);
+    rmSync(env.CARGO_TARGET_DIR, { recursive: true, force: true });
+    gone = true;
+  } });
+  ok(gone && pruned === "built" && check({ root: repo, env: H }).ok, "a target removed by another pruner right after the build: the build is stored and installed all the same");
+  git("checkout", "-q", "--", "wasm"); // (the tree as committed again, for the branch below)
 
   git("checkout", "-q", "-b", "side", "base");
   writeFileSync(join(repo, "wasm", "pins.json"), '{"other": 1}\n');

@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installWasm, stripCustomSections } from "./install-engine-wasm.mjs";
+import { installWasm, stripCustomSections, relaunchUnderTargetLock } from "./install-engine-wasm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -31,4 +31,9 @@ export function buildMp(target = join(process.env.CARGO_TARGET_DIR ?? join(root,
   return installWasm(stripped, join(root, "wasm", "sagebrush-mp.wasm"));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) console.log(`mp: ${buildMp()} bytes`);
+// (run on its own: holding the target's lock as build-engine.mjs does, install-engine-wasm.mjs relaunchUnderTargetLock)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const locked = relaunchUnderTargetLock(process.env.CARGO_TARGET_DIR ?? join(root, "engine", "target"), [process.execPath, process.argv[1], ...process.argv.slice(2)]);
+  if (locked !== null) process.exit(locked);
+  console.log(`mp: ${buildMp()} bytes`);
+}

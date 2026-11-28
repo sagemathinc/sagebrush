@@ -5487,11 +5487,15 @@ async function releaseGenerationMid() {
   const a = viewClient(wa, { e2e: { keys: f.provider, kit: f.kit } });
   check(await until(() => settled(wa, a)), "release generation mid: A synced");
   await threeAdds(id, wa, a, "/m.txt");
-  const ns1 = nsOf(a), view1 = await metaGet(wa.ws, `sync:${ns1}:cursor`), gen1 = Number(ns1.split(":")[1]);
-  let reached, go, a2 = null;
+  const ns1 = nsOf(a), gen1 = Number(ns1.split(":")[1]);
+  // (A's view as the request is asked: its cursor can still move while the request starts (its own echoes are still
+  // being applied), so the request's view is bounded by A's cursor just before the call and A's cursor at the hold,
+  // both A's namespace's, never read again after the switch)
+  let reached, go, a2 = null, viewBefore = null, viewAtHold = null;
   const atLog = new Promise((r) => { reached = r; }), gate = new Promise((r) => { go = r; });
-  W.DROP_HOOK.beforeLog = async () => { reached(); await gate; };
+  W.DROP_HOOK.beforeLog = async () => { viewAtHold = await metaGet(wa.ws, `sync:${ns1}:cursor`); reached(); await gate; };
   try {
+    viewBefore = await metaGet(wa.ws, `sync:${ns1}:cursor`);
     const drop = wa.dropVersions("/m.txt");
     check(await Promise.race([atLog.then(() => true), sleep(15_000).then(() => false)]), "(release generation mid: the request held before its log, its deletion done)");
     await stop(a);
@@ -5509,7 +5513,7 @@ async function releaseGenerationMid() {
   }
   const ops = await new Promise((ok, no) => { const r = wa.ws.transaction("ops").objectStore("ops").getAll(); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
   const logged = ops.filter((o) => o.op === "dropVersions").at(-1);
-  check(logged?.viewNs === ns1 && logged?.view === view1, "release generation mid: the request names the namespace and view it was asked in (A's), not the one current when it was logged: " + J({ logged, ns1, view1, ns2: nsOf(a2) }));
+  check(logged?.viewNs === ns1 && Number.isInteger(logged?.view) && logged.view >= viewBefore && logged.view <= viewAtHold, "release generation mid: the request names the namespace and view it was asked in (A's: its view between A's cursor just before it and at its hold), not the one current when it was logged: " + J({ logged, ns1, viewBefore, viewAtHold, ns2: nsOf(a2) }));
   // (B's history made after: adopted, then two writes, each settled; then an op after the request, and nothing released)
   check(await until(async () => settled(wa, a2) && (await refRows(id)).length >= 1, 15_000), "(release generation mid: the file adopted into the new generation)");
   await wa.write("/m.txt", "four");
