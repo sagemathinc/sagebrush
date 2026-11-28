@@ -42,6 +42,7 @@ import { answered, asksOf, ASK_LIMITS } from "./ask";
 import { uuid, type AnswerChannel } from "./channel";
 import { setOwn, boardLink, layout, isBoard, isNote, type AskAnswer, type DocAsk, formatError, pageCount, pageOf, pageView, codeOrder, type CodeCell, cleanDoc, anyCode, canonical, templateOf, lookOf, shownPages, type BoardDoc, type BoardPage, type MeasuredNote, type DocNode, type DocNote, type BoardMode } from "./doc";
 import type { BoardCode, Evaluated } from "./code";
+import { codeDigest, runnableOf, mayRun, approve, allowOnce, forget, wasStopped, markStopped, clearStopped, SEED } from "./capability";
 import type { DocEntry } from "../docsearch";
 import { BoardCodes } from "./codes";
 import { overCap, sameOutputs } from "./preview";
@@ -171,6 +172,11 @@ export interface BoardHost {
    * presses "Run this board's code" (an interim, until design/capabilities.md's gate); `codeResumed` when they do. */
   codePaused?: boolean;
   codeResumed?(): void;
+  /** The board page's gate on code by capability (capability.ts): `confined`, whether its interpreter is meant to be
+   * the runner's sandbox (code there runs, whoever wrote it); unconfined, code runs only if approved. `ref`: the board,
+   * for "its last run was stopped" (it opens paused); `approved`, told when an approval is made (the desktop app keeps
+   * it in grants.json). With it, codePaused is not read. */
+  codeGate?: { confined: boolean; ref?: string; approved?(): void };
   /** File ▸ New window (the desktop app's board page, #1541); none: not drawn */
   newWindow?(): void;
   /** Sagebrush's own board page: the File menu shows what the host can't do here disabled
@@ -233,7 +239,7 @@ function addStyle() {
 // (the toolbar's Code: a note with code in the board's language)
 const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbag-slot="1" data-sbag-inline style="display:flex;min-width:0;flex:0 1 auto"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret sb-caret" aria-hidden="true"></span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="term" hidden title="A bash shell on your workspace's files">Terminal</button><button data-sbb="termend" hidden title="Stop the shell and clear its output and command history">End terminal session…</button><button data-sbb="agent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button><button data-sbb="review" hidden title="Review what an agent changed in its branches">Review changes…</button><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><button data-sbb="sharebtn" title="Share this board" aria-haspopup="dialog" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Share</button><span data-sbb="acct"></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><span data-sbag-slot="1" data-sbag-inline style="display:flex;min-width:0;flex:0 1 auto"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret sb-caret" aria-hidden="true"></span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="forgetrun" hidden title="This board's code runs here only with your approval: forget it, so that it waits for Run again">Forget the approval of this code</button><button data-sbb="term" hidden title="A bash shell on your workspace's files">Terminal</button><button data-sbb="termend" hidden title="Stop the shell and clear its output and command history">End terminal session…</button><button data-sbb="agent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button><button data-sbb="review" hidden title="Review what an agent changed in its branches">Review changes…</button><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><button data-sbb="sharebtn" title="Share this board" aria-haspopup="dialog" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Share</button><span data-sbb="acct"></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
@@ -334,8 +340,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (the parts, found within root by their data-sbb: no ids, which two
   // boards on a page, or the host's own elements, would share)
   const $ = (part: string) => root.querySelector<HTMLElement>(`[data-sbb="${part}"]`)!;
-  // (code paused until the person runs it: a board brought in from a file, host.codePaused)
-  let paused = !!host.codePaused;
+  // (code paused until the person runs it: a board brought in from a file, host.codePaused, where there is no gate;
+  // with one, as the gate decides: capability.ts)
+  let paused = !host.codeGate && !!host.codePaused;
   // The one File menu, as the notebook's (design/workspace-files.md §3):
   // drawn by filemenu.ts with this board's keys; what isn't here, disabled
   renderFileMenu($("filemenu"), {
@@ -494,7 +501,44 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
    * destroyed) and drew nothing. */
   // (the board's language, as the toolbar's Code says it)
   let codeMode = "python";
-  async function show(d: BoardDoc, view = false, ifStill?: BoardDoc): Promise<boolean> {
+  // Whether the board's code may run where it runs (capability.ts; Codex S14 F1, William's ruling of Nov 28): in the
+  // runner always; unconfined only if this code, its digest, is approved. Decided on the very cells given to the
+  // engine; an edit of the person's carries the approval of the code it edited, never over code it didn't approve (D4).
+  let gateGen = 0, lastDigest: string | null = null, lastEmpty = true, lastIds: string[] = [];
+  // (N1: stopped by the person, or left running as the page goes: opened paused next time)
+  const stoppedNow = (states: string[]) => { const ref = host.codeGate?.ref; if (ref && code && lastIds.some((id) => states.includes(code!.state(id)))) markStopped(ref); };
+  const onPageHide = () => stoppedNow(["running", "queued"]);
+  if (host.codeGate?.ref) globalThis.addEventListener?.("pagehide", onPageHide);
+  /** the digest of the code shown, as last decided (Run approves it) */
+  let shownDigest: string | null = null;
+  // (N1: a board whose last run the person stopped, or left running, opens paused until they run it)
+  let stoppedHere = !!host.codeGate?.ref && wasStopped(host.codeGate.ref);
+  const confinedNow = () => !!host.codeGate && (code ? code.confined(host.codeGate.confined) : host.codeGate.confined);
+  function holdCode(why: "unconfined" | "stopped" | "imported", any: boolean) {
+    paused = true;
+    $("runpaused").title = why === "stopped" ? "This board's code was stopped the last time it ran: it hasn't run yet" : why === "unconfined" ? "Files can't be protected here, and this code hasn't been approved: it hasn't run yet" : "This board came from a file you brought in: its code hasn't run yet";
+    $("runpaused").hidden = !any;
+  }
+  async function gateSync(d: BoardDoc, order: CodeCell[], by: "person" | "elsewhere" | "load") {
+    const cells = withPreviews(d, order, byPage), mode = d.mode ?? "python", gate = host.codeGate;
+    let digest: string | null = null;
+    if (gate) {
+      const g = ++gateGen;
+      digest = await codeDigest(cells, d, mode, d.seed ?? SEED);
+      if (g !== gateGen || destroyed) return;
+      const empty = !order.length && !runnableOf(d)?.length;
+      if (by === "person" && !confinedNow() && (lastEmpty || mayRun(lastDigest))) { if (approve(digest)) gate.approved?.(); }
+      lastDigest = digest;
+      lastEmpty = empty;
+      shownDigest = digest;
+      lastIds = cells.map((x) => x.id);
+      if (stoppedHere) return holdCode("stopped", order.length > 0);
+      if (!confinedNow() && !mayRun(digest)) return holdCode("unconfined", order.length > 0);
+      if (paused) { paused = false; $("runpaused").hidden = true; }
+    } else if (paused) { $("runpaused").hidden = !order.length; return; }
+    if (order.length || code) engine()?.sync(cells, mode, d.seed, digest).catch((e) => console.warn("board: code items:", e));
+  }
+  async function show(d: BoardDoc, view = false, ifStill?: BoardDoc, by: "person" | "elsewhere" | "load" = "load"): Promise<boolean> {
     const g = loadGen, over = () => destroyed || g !== loadGen;
     if (over()) return false;
     // (another document than the one shown, during a drag or resize: the
@@ -580,9 +624,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     cellOf = new Map(order.filter((c) => c.page === pageIx).map((c) => [c.item, c.id]));
     for (const it of items) if (it.code !== undefined) it.order = nth.get(cellOf.get(it.id) ?? it.id);
     if (!view) for (const c of order) if (c.id !== c.item) byPage.add(c.item);
-    // (a board brought in from a file: its code waits for the person's "Run this board's code")
-    if (paused) $("runpaused").hidden = !order.length;
-    else if (!view && (order.length || code)) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e));
+    // (the code given to run, unless it waits for the person's "Run this board's code": capability.ts)
+    if (!view) void gateSync(d, order, by);
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     // (the toolbar's Code: the board's language; its tool's title reads it
     // when the toolbar's menu is drawn, UI-231-1, and what is drawn already,
@@ -688,6 +731,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const page = pageIx + 1, key = askKey(page, id);
     const c = engine(), a = askOn(page, id);
     if (viewing || !c || !a?.check) return;
+    // (a check is the board's code too: unconfined, it runs only if the board's code as it is now may run)
+    if (host.codeGate && (paused || !confinedNow())) {
+      const d0 = doc!, digest = await codeDigest(withPreviews(d0, codeOrder(d0), byPage), d0, d0.mode ?? "python", d0.seed ?? SEED);
+      if (paused || (!confinedNow() && !mayRun(digest))) return holdCode(stoppedHere ? "stopped" : "unconfined", true);
+      if (doc !== d0) return;
+    }
     const mode: BoardMode = doc!.mode ?? "python", ms = a.checkMs ?? 2000, test = a.check;
     // (what it ran on: a completion for another document, another engine, or
     // a question whose answer or check changed meanwhile is dropped, CORR-A19-4)
@@ -991,8 +1040,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   function engine(): BoardCodes | null {
     if (code || !host.code) return code;
     const c = (code = new BoardCodes((mode) => host.code!(doc!, mode)));
-    c.onChange = () => { board.codeStates(); relayout(); drawer?.changed(); };
+    c.onChange = () => { board.codeStates(); relayout(); drawer?.changed(); stoppedNow(["interrupted"]); };
     c.onRan = (ids) => { keepPreviews(c, ids).catch((e) => console.warn("board: previews:", e)); };
+    // (a language's sync held at the gate: its interpreter turned out unconfined, the code not approved)
+    c.onHeld = () => { if (!destroyed && doc) holdCode("unconfined", codeOrder(doc).length > 0); };
     c.cache = host.outputs ?? null;
     c.cacheId = outputsId;
     c.usePictures(docPixels);
@@ -1365,13 +1416,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   }).catch(fail);
 
   // editing, and keeping what was edited
-  const editor = new Editor(board, () => doc, async (d) => {
+  const editor = new Editor(board, () => doc, async (d, by = "person") => {
     // (an edit, an agent's say, while a version is looked at: the board as it is)
     closeTimeTravel(false);
     notice = "";
     const prev = doc, g = loadGen;
     // (not drawn, the board destroyed meanwhile: the edit is still saved; another board loaded: not)
-    if (!(await show(d))) {
+    if (!(await show(d, false, undefined, by))) {
       if (destroyed && g === loadGen) {
         // (and a version of it: recorded before the history is closed, CORR-54B-2)
         const kept = cleanDoc(d);
@@ -1404,11 +1455,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // (written elsewhere: shown, its new and changed code not run until the person runs it, with "Run this board's
       //  code"; what didn't change keeps its outputs.  Set before it is drawn, and put back if it stands down)
       const wasPaused = paused, wasTitle = $("runpaused").title;
-      if (from?.held) {
+      if (from?.held && !host.codeGate) {
         paused = true;
         $("runpaused").title = "This board was changed elsewhere: its new and changed code hasn't run yet";
       }
-      if (!(await show(d, false, from?.fenced ? prev : undefined))) {
+      if (!(await show(d, false, from?.fenced ? prev : undefined, "elsewhere"))) {
         paused = wasPaused;
         $("runpaused").title = wasTitle;
         return false;
@@ -1881,7 +1932,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // astra, on 3df6006)
     loadGen++;
     pageGen++;
-    await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); }, false, true, "page");
+    await editor.commit((cur) => { for (const k of Object.keys(cur)) delete (cur as any)[k]; Object.assign(cur, d); }, false, true, "page", "elsewhere");
     // (its own caption from its start: not the last document's intro and
     // tour, the welcome's on /board/, friction 7)
     step(-1, true);
@@ -1909,15 +1960,41 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (with the host's files: Upload's rule, design §3, any files, several)
   if (host.files?.upload) { picker.multiple = true; picker.removeAttribute("accept"); }
   // "Run this board's code": the person's consent, for a board brought in from a file (or a cell's own ▶)
-  function resumeCode() {
+  async function resumeCode() {
     if (!paused) return;
+    const d = doc, gate = host.codeGate;
+    if (gate && d) {
+      // (the person's Run: this code, as it is now, approved; and not opened paused again for a stop)
+      const order = codeOrder(d), cells = withPreviews(d, order, byPage), mode = d.mode ?? "python";
+      const digest = await codeDigest(cells, d, mode, d.seed ?? SEED);
+      if (doc !== d || destroyed) return;
+      if (!digest) return say("This board's code can't be approved here: it has parts this page doesn't know, and files can't be protected here.");
+      if (approve(digest)) gate.approved?.();
+      else { allowOnce(digest); say("Your approval of this code couldn't be kept in this browser: it runs now, in this page only."); }
+      stoppedHere = false;
+      if (gate.ref) clearStopped(gate.ref);
+      lastDigest = shownDigest = digest;
+      lastEmpty = !order.length && !runnableOf(d)?.length;
+      paused = false;
+      $("runpaused").hidden = true;
+      host.codeResumed?.();
+      if (order.length) engine()?.sync(cells, mode, d.seed, digest).catch((e) => console.warn("board: code items:", e));
+      return;
+    }
     paused = false;
     $("runpaused").hidden = true;
     host.codeResumed?.();
-    const d = doc;
     if (d) { const order = codeOrder(d); if (order.length) engine()?.sync(withPreviews(d, order, byPage), d.mode ?? "python", d.seed).catch((e) => console.warn("board: code items:", e)); }
   }
   $("runpaused").onclick = resumeCode;
+  // ("Forget the approval of this code" (D6): shown where an approval is what lets it run, unconfined)
+  $("menubtn").addEventListener("click", () => { $("forgetrun").hidden = !host.codeGate || confinedNow() || !shownDigest || !mayRun(shownDigest); });
+  $("forgetrun").onclick = () => {
+    if (!forget(shownDigest)) return say("The approval couldn't be forgotten in this browser.");
+    host.codeGate?.approved?.();
+    if (doc && !confinedNow()) holdCode("unconfined", codeOrder(doc).length > 0);
+    say("This board's code waits for Run again.");
+  };
   // (what is being written kept first, and kept by the host: else this board stays, nothing uploaded
   // and why said, as New board's (astra's CORR-4B3-2))
   async function uploadToHost(files: File[]) {
@@ -2540,7 +2617,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     freeze: (on: boolean) => editor.holdForLeaving(on),
     /** The board's title made `t` if it is `was` (its file renamed by the
      * page, CORR-0B0-2): saved as a change of this page's, not a step to undo. */
-    retitle: (t: string, was: string) => (doc && (doc.title ?? "") === was ? editor.commit((d) => { d.title = t; }, false, false, "page") : Promise.resolve(null)),
+    retitle: (t: string, was: string) => (doc && (doc.title ?? "") === was ? editor.commit((d) => { d.title = t; }, false, false, "page", "elsewhere") : Promise.resolve(null)),
     /** Unmount: what is being written is kept first; then nothing of the
      * board is left (its listeners and effects, the code engine and its
      * interpreter, TimeTravel's history, its elements; its stylesheet with
@@ -2550,6 +2627,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       // what is being written is still kept, saved though not drawn; Find's
       // mark still coming dropped, F33)
       destroyed = true;
+      globalThis.removeEventListener?.("pagehide", onPageHide);
       board.onItemClick = null;
       board.cancelClick();
       findGen++;
@@ -2628,8 +2706,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       snapshot: () => ({ doc, page: pageIx, pages: doc ? pageCount(doc) : 0, step: at, camera: board.camera, view: board.view(), items: placed, routed, edges: board.edgeList().map(({ id, from, to, points, label, lx, ly, src }) => ({ id, from, to, points, label, lx, ly, src })), selectedEdge: board.selectedEdge }),
       /** Resolves once the store's document, the one the page opened with, is shown (or none was to come): true if it was. */
       opened: async () => !!opened && (await opened.then(() => doc !== null)),
-      /** Change the document (undoable, as an edit): f gets a copy to modify. */
-      edit: (f: (d: BoardDoc) => void) => editor.commit(f, false, true, "page"),
+      /** Change the document (undoable, as an edit): f gets a copy to modify. (An agent's edit: it approves no code.) */
+      edit: (f: (d: BoardDoc) => void) => editor.commit(f, false, true, "page", "elsewhere"),
+      /** (tests only, on a loopback page: an edit as the person's own in Edit, which carries its code's approval) */
+      ...(/^(127\.0\.0\.1|localhost)$/.test(globalThis.location?.hostname ?? "") ? { personEditForTests: (f: (d: BoardDoc) => void) => editor.commit(f) } : {}),
       /** Run code items (all when none are given), then what depends on them; resolves to outputs(). */
       run: async (ids?: string[]) => {
         const c = engine();

@@ -28,6 +28,8 @@ export interface EngineParts {
   worker(mod: any): any;
   analyzer(): Worker;
   assets(): { assetBase?: string; assetUrl?: (name: string) => string | undefined };
+  /** whether its worker is meant to be the runner (before one is made: capability.ts's gate reads it then) */
+  confined?: boolean;
 }
 
 /** The engine whose files are at `base` (sagebrush-notebook.js, the worker,
@@ -40,12 +42,14 @@ export function siteEngine(base: URL, runner = true): EngineParts {
     worker: (mod) => (runner ? new mod.RunnerWorker(new URL("runner/", base).href, { fallback: plain }) : plain()),
     analyzer: () => new Worker(new URL("sagebrush-analyze.js", base)),
     assets: () => ({ assetBase: new URL(".", base).href }),
+    confined: runner,
   };
 }
 
 import { PREVIEW_MS, makePreview, previewLabel, type Preview } from "./preview";
 import { CACHE_MS, DOC_CAP, ENTRY_MAX, cachedLabel, sizeOf, type CachedOutputs, type OutputCache } from "./outcache";
 import { within } from "./idb-open";
+import { gateWorker } from "./capability";
 
 /** The seed of a board without one of its own (BoardDoc.seed). */
 export const BOARD_SEED = "0".repeat(64);
@@ -104,7 +108,22 @@ export class BoardCode {
   private parts: EngineParts;
 
   /** @param engine the engine's parts, or where its files are (siteEngine(base, opts.runner)) */
-  constructor(engine: URL | EngineParts, private opts: { runner?: boolean; observeRunner?: (kernel: any, mod: any) => () => void } = { runner: true }) {
+  /** (capability.ts) the code given last, by its digest: what an unconfined worker may run only while it is approved */
+  private token: string | null = null;
+  private worker: any = null;
+  private mod: any = null;
+  /** told when a sync was held at the gate: the worker turned out unconfined and the code isn't approved */
+  onHeld?: () => void;
+  /** Whether its worker is the runner's sandboxed frame (and not its fallback, nor a plain worker): before it is made,
+   * whether it is meant to be. */
+  confined(): boolean {
+    const w = this.worker;
+    if (!w) return this.parts.confined ?? false;
+    return !!this.mod?.RunnerWorker && w instanceof this.mod.RunnerWorker && !w.inner;
+  }
+  /** @param engine the engine's parts, or where its files are (siteEngine(base, opts.runner)); `gate` (the board
+   * page's, capability.ts): an unconfined worker given code only while its digest may run */
+  constructor(engine: URL | EngineParts, private opts: { runner?: boolean; observeRunner?: (kernel: any, mod: any) => () => void; gate?: { mayRun(digest: string | null): boolean } } = { runner: true }) {
     this.parts = engine instanceof URL ? siteEngine(engine, opts.runner ?? true) : engine;
     this.ready = this.start().then(() => true, (e) => {
       console.warn("board: code items cannot run here:", e);
@@ -116,7 +135,12 @@ export class BoardCode {
   private async start() {
     const mod = await this.parts.module();
     if (this.closed) throw new Error("closed");
-    const kernel = (this.kernel = new mod.WorkerKernel({ createWorker: () => this.parts.worker(mod) }));
+    this.mod = mod;
+    const gate = this.opts.gate;
+    const kernel = (this.kernel = new mod.WorkerKernel({ createWorker: () => {
+      const w = (this.worker = this.parts.worker(mod));
+      return gate ? gateWorker(w, () => this.confined(), () => gate.mayRun(this.token)) : w;
+    } }));
     this.stopRunnerInfo = this.opts.observeRunner?.(kernel, mod);
     kernel.start();
     // (the analyzer of the reactive notebook: a worker of its own, as on the notebook page)
@@ -233,9 +257,15 @@ export class BoardCode {
    * changes what others read: those rerun), and the new ones and those whose
    * code changed run, then what depends on them.  Resolves to the ids run.
    */
-  sync(items: { id: string; code: string; preview?: Preview }[], mode: BoardMode = "python", seed?: string): Promise<string[]> {
+  sync(items: { id: string; code: string; preview?: Preview }[], mode: BoardMode = "python", seed?: string, digest: string | null = null): Promise<string[]> {
     // (one after another: a sync sees what the one before it did)
-    return this.queued(() => this.syncNow(items, mode, seed ?? BOARD_SEED));
+    return this.queued(() => this.syncNow(items, mode, seed ?? BOARD_SEED, digest));
+  }
+  // (capability.ts, D1: decided where the code is given, on the same items: unconfined and not approved, nothing given)
+  private gated(digest: string | null): boolean {
+    if (!this.opts.gate || this.confined() || this.opts.gate.mayRun(digest)) return false;
+    this.onHeld?.();
+    return true;
   }
   // (syncs and runs one after another: a sync, its language's interpreter
   // among what it changes, never during a run, CORR-79B-2)
@@ -251,8 +281,9 @@ export class BoardCode {
   mode: BoardMode = "python";
   /** the board's seed (BoardDoc.seed) */
   seed = BOARD_SEED;
-  private async syncNow(items: { id: string; code: string; preview?: Preview }[], mode: BoardMode, seed: string): Promise<string[]> {
+  private async syncNow(items: { id: string; code: string; preview?: Preview }[], mode: BoardMode, seed: string, digest: string | null): Promise<string[]> {
     if (!(await this.ready)) return [];
+    if (this.gated(digest)) return [];
     const nb = this.nb;
     const now = nb.cells().filter((c: any) => c.type === "code");
     const before = new Map<string, string>(now.map((c: any) => [c.id, c.ta.value]));
@@ -268,6 +299,9 @@ export class BoardCode {
       this.started = false;
       if (this.closed) return [];
     }
+    // (again after that wait: nothing is awaited from here to where the code is given)
+    if (this.gated(digest)) return [];
+    this.token = digest;
     this.mode = mode;
     this.seed = seed;
     const changed = items.filter((it) => relang || before.get(it.id) !== it.code).map((it) => it.id);

@@ -68,6 +68,7 @@ export class BoardCodes {
     e.mode = mode;
     e.onChange = () => this.onChange?.();
     e.onRan = (ids) => this.onRan?.(ids);
+    e.onHeld = () => this.onHeld?.();
     e.cache = this.cache;
     e.cacheId = this.cacheId;
     if (this.pictures !== null) e.usePictures(this.pictures);
@@ -103,7 +104,15 @@ export class BoardCodes {
    * MAX_LANGUAGES none: those items say so); an engine whose language
    * has no items left is given none.  Resolves to the ids run.
    */
-  async sync(items: Item[], mode: BoardMode = "python", seed?: string): Promise<string[]> {
+  /** told when a language's sync was held at the gate (capability.ts): its worker unconfined, the code not approved */
+  onHeld?: () => void;
+  /** Whether every language's worker is the runner's sandboxed frame (none made yet: whether `planned` is). */
+  confined(planned: boolean): boolean {
+    const es = [...this.engines.values()];
+    return es.length ? es.every((e) => e.confined()) : planned;
+  }
+  /** `digest` (capability.ts): what these items are, as approved or not; each language's engine checks it as it gives them. */
+  async sync(items: Item[], mode: BoardMode = "python", seed?: string, digest: string | null = null): Promise<string[]> {
     const parts = new Map<BoardMode, Item[]>();
     // (an item whose language changed, in the same document: its stored
     // preview is the other language's output, so it is not shown as this
@@ -128,10 +137,10 @@ export class BoardCodes {
         continue;
       }
       for (const it of its) this.modeOf.set(it.id, m);
-      runs.push(this.engine(m)!.sync(its.map(({ mode: _, ...rest }) => rest), m, seed ?? BOARD_SEED));
+      runs.push(this.engine(m)!.sync(its.map(({ mode: _, ...rest }) => rest), m, seed ?? BOARD_SEED, digest));
     }
     // (a language with no items now: its cells gone)
-    for (const [m, e] of this.engines) if (!parts.has(m)) runs.push(e.sync([], m, seed ?? BOARD_SEED));
+    for (const [m, e] of this.engines) if (!parts.has(m)) runs.push(e.sync([], m, seed ?? BOARD_SEED, digest));
     return (await Promise.all(runs)).flat();
   }
 

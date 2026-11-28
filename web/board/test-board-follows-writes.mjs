@@ -1,9 +1,13 @@
 // ci: web-browser/board-c order=160
 // An open board follows its writes made elsewhere (web/board/page.ts, followWrites), in headless Chromium: another tab
 // of this browser writes the board through the workspace, as an agent paired with the notebook page does, and the
-// board shows the new version at once, without a reload.  Its new and changed code doesn't run until the person runs
-// it ("Run this board's code"), whoever wrote it (write access isn't leave to run code); then it runs once, and what
-// didn't change keeps its outputs.  The board's own edits are never taken for a write made elsewhere (no "changed
+// board shows the new version at once, without a reload.  Whether its new and changed code runs is decided by where it
+// runs (web/board/capability.ts, William's ruling of Nov 28): in the runner (a sandbox with nothing of the person's)
+// it runs at once, whoever wrote it; unconfined (?runner=0 here: a plain worker with the page's storage) it waits
+// until the person runs it ("Run this board's code"), then runs once, what didn't change keeping its outputs, and that
+// decision outlives a reload (Codex S14 F1): a change written while the board is open, or while no page has it open,
+// still waits after a reload; code the person ran runs at the next open; an edit of the person's doesn't approve
+// another writer's code held meanwhile.  The board's own edits are never taken for a write made elsewhere (no "changed
 // elsewhere" copy).  An edit made here while a version from elsewhere is still being drawn (its pictures read) wins:
 // that version stands down, and the edit's save meets the write as a conflict, so both are kept (the board shows the
 // other version, the person's is a board of its own, said), whether it waited on its pictures or on KaTeX, loaded the
@@ -81,10 +85,14 @@ try {
   await A.send("Page.navigate", { url: `${base}board/?new=python` });
   check(await A.until("/doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot?.()?.doc", 60000), "the board page makes a board of the workspace");
   const id = await A.ev("new URLSearchParams(location.search).get('doc').slice('local:'.length)");
+  // (unconfined from here on: a plain worker, where code runs only once approved)
+  const unconfined = `${base}board/?doc=local:${id}&runner=0`;
+  await A.send("Page.navigate", { url: unconfined });
+  check(await A.until("!!window.sagebrush?.board?.snapshot?.()?.doc", 60000), "the board, opened unconfined (a plain worker: ?runner=0)");
   const W = "window.sagebrush.workspace";
   check(await A.until(`${W}.list("/").then((l) => l.some((e) => e.kind === "board" && e.ref === ${JSON.stringify(id)}))`, 20000), "…listed in the workspace");
   const path = await A.ev(`${W}.list("/").then((l) => l.find((e) => e.kind === "board" && e.ref === ${JSON.stringify(id)}).path)`);
-  const origin0 = await A.ev("performance.timeOrigin");
+  let origin0 = await A.ev("performance.timeOrigin");
   const items = "window.sagebrush.board.snapshot().items.length";
   const outOf = (nid) => `window.sagebrush.board.outputs().then((os) => String(os.find((o) => o.id === ${JSON.stringify(nid)})?.output ?? ''))`;
 
@@ -110,13 +118,18 @@ try {
   check(await A.until(`${items} === 3`, 15000), "the open board shows the write at once", await A.ev(`${items}`).catch(() => null));
   await sleep(3000);
   check(!/42/.test(await A.ev(outOf("sq"))) && !(await A.ev(`${runBtn}.hidden`)), "…its new code not run, whoever wrote it: Run is offered", { sq: await A.ev(outOf("sq")), title: await A.ev(`${runBtn}.title`) });
-  check(/changed elsewhere/.test(await A.ev(`${runBtn}.title`)), "…Run's title says why", await A.ev(`${runBtn}.title`));
+  check(/can't be protected here/.test(await A.ev(`${runBtn}.title`)), "…Run's title says why", await A.ev(`${runBtn}.title`));
   check((await A.ev(outOf("keep"))) === kept, "…the unchanged item keeps its output");
   check(await A.ev("performance.timeOrigin") === origin0, "…without a reload");
+  // (F1: held across a reload, no page subscribed meanwhile)
+  await A.send("Page.navigate", { url: unconfined });
+  check(await A.until(`!!window.sagebrush?.board?.snapshot?.()?.doc && ${items} === 3`, 60000), "reloaded: the board as written elsewhere");
+  await sleep(3000);
+  check(!/42/.test(await A.ev(outOf("sq"))) && !(await A.ev(`${runBtn}.hidden`)), "…its new code still not run after the reload: Run is offered", { sq: await A.ev(outOf("sq")) });
   await runIt();
   check(await A.until(`${outOf("sq")}.then((o) => /42/.test(o))`, 60000) && await A.ev(`${runBtn}.hidden`), "the person's Run runs the new code", await A.ev(outOf("sq")).catch(() => null));
   await sleep(1500);
-  check((await A.ev(outOf("keep"))) === kept, "…and only it: the unchanged item isn't run again");
+  check(/^at \d/.test(await A.ev(outOf("keep"))), "…the unchanged item has its output");
   // (a change to its code and a new item: shown, not run, until the person runs them, once)
   const rev3 = await write({ title: "Followed", nodes: [KEEP, { id: "intro", title: "About", text: "Its square: $x^2$." }, { id: "sq", title: "A square", code: "x = 6\nprint(x * 8)" }, { id: "more", title: "More", code: "print(x + 100)" }], edges: [] });
   check(rev3 === rev2 + 1, "tab B writes it again: changed code and a new item", rev3);
@@ -125,12 +138,49 @@ try {
   check(/42/.test(await A.ev(outOf("sq"))) && !/106/.test(await A.ev(outOf("more"))) && !(await A.ev(`${runBtn}.hidden`)), "…its changed and new code not run until the person runs it", { sq: await A.ev(outOf("sq")), more: await A.ev(outOf("more")) });
   await runIt();
   check(await A.until(`${outOf("sq")}.then((o) => /48/.test(o))`, 60000) && await A.until(`${outOf("more")}.then((o) => /106/.test(o))`, 60000), "the person's Run runs the changed code and the new item", { sq: await A.ev(outOf("sq")), more: await A.ev(outOf("more")) });
-  check((await A.ev(outOf("keep"))) === kept, "…the unchanged item still not run again");
+  // (F1: code the person ran runs at the next open)
+  await A.send("Page.navigate", { url: unconfined });
+  check(await A.until(`!!window.sagebrush?.board?.snapshot?.()?.doc && ${items} === 4`, 60000) && await A.until(`${outOf("more")}.then((o) => /106/.test(o))`, 60000) && await A.ev(`${runBtn}.hidden`), "reloaded: the code the person ran runs by itself, no Run offered", { more: await A.ev(outOf("more")).catch(() => null) });
+  // (an edit of the person's to approved code: runs at once, approved as it is made)
+  await A.ev("window.sagebrush.board.editing(true), 1");
+  await A.ev(`window.sagebrush.board.personEditForTests((d) => { d.nodes.find((n) => n.id === "more").code = "print(x + 200)"; }).then(() => 1)`);
+  check(await A.until(`${outOf("more")}.then((o) => /206/.test(o))`, 60000) && await A.ev(`${runBtn}.hidden`), "the person's own edit of approved code runs at once", await A.ev(outOf("more")).catch(() => null));
+  // (D4: another writer's code held, then the person edits another item: that edit approves nothing of the held code)
+  const rev4 = await write({ title: "Followed", nodes: [KEEP, { id: "intro", title: "About", text: "Its square: $x^2$." }, { id: "sq", title: "A square", code: "x = 6\nprint(x * 8)" }, { id: "more", title: "More", code: "print(x + 200)" }, { id: "theirs", title: "Theirs", code: "print('THEIRS RAN')" }], edges: [] });
+  check(typeof rev4 === "number" && await A.until(`${items} === 5`, 15000) && await A.until(`!${runBtn}.hidden`, 10000), "another writer's new code: held, Run offered");
+  await A.ev(`window.sagebrush.board.personEditForTests((d) => { d.nodes.find((n) => n.id === "more").code = "print(x + 300)"; }).then(() => 1)`);
+  await sleep(3000);
+  check(!/THEIRS RAN/.test(await A.ev(outOf("theirs"))) && !/306/.test(await A.ev(outOf("more"))) && !(await A.ev(`${runBtn}.hidden`)), "…the person's edit of another item meanwhile doesn't approve it: nothing runs, Run still offered", { theirs: await A.ev(outOf("theirs")), more: await A.ev(outOf("more")) });
+  // (F1: a change written while no page has the board open waits at its first open)
+  await A.send("Page.navigate", { url: "about:blank" });
+  const rev5 = await write({ title: "Followed", nodes: [KEEP, { id: "late", title: "Late", code: "print('LATE RAN')" }], edges: [] });
+  check(typeof rev5 === "number", "written while no page has the board open");
+  await A.send("Page.navigate", { url: unconfined });
+  check(await A.until(`!!window.sagebrush?.board?.snapshot?.()?.doc && ${items} === 2`, 60000), "opened after: the board as written");
+  await sleep(3000);
+  check(!/LATE RAN/.test(await A.ev(outOf("late"))) && !(await A.ev(`${runBtn}.hidden`)), "…its code not run: Run is offered at the first open");
+  await runIt();
+  check(await A.until(`${outOf("late")}.then((o) => /LATE RAN/.test(o))`, 60000), "…and runs when the person presses it");
+
+  // in the runner (the sandbox: nothing of the person's in reach), a change written elsewhere runs at once, unasked
+  const created3 = await A.send("Target.createTarget", { url: "about:blank" });
+  const R = await tab((await (async () => { for (let i = 0; i < 100; i++) { const l = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); const p = l.find((x) => x.id === created3.targetId); if (p) return p; await sleep(100); } throw new Error("tab R not found"); })()).webSocketDebuggerUrl);
+  await R.send("Page.navigate", { url: `${base}board/?doc=local:${id}` });
+  check(await R.until(`!!window.sagebrush?.board?.snapshot?.()?.doc && crossOriginIsolated === true`, 60000), "the board opened with the runner (a cross-origin-isolated page)");
+  const rev6 = await write({ title: "Followed", nodes: [KEEP, { id: "sandboxed", title: "Sandboxed", code: "print('IN THE RUNNER', 6 * 7)" }], edges: [] });
+  check(typeof rev6 === "number" && await R.until(`window.sagebrush.board.snapshot().items.length === 2`, 15000), "a change written elsewhere, shown in the runner's page");
+  check(await R.until(`window.sagebrush.board.outputs().then((os) => /IN THE RUNNER 42/.test(String(os.find((o) => o.id === "sandboxed")?.output ?? "")))`, 90000) && await R.ev(`document.querySelector("[data-sbb=runpaused]").hidden`), "…its code runs at once, whoever wrote it: no Run asked for");
+  await R.send("Page.navigate", { url: "about:blank" });
+  await A.send("Page.navigate", { url: unconfined });
+  await A.until("!!window.sagebrush?.board?.snapshot?.()?.doc", 60000);
+  // (what follows is without a reload from here)
+  origin0 = await A.ev("performance.timeOrigin");
 
   // the board's own edit, here: saved over the version it shows, never taken for a write made elsewhere
   await A.ev("window.sagebrush.board.editing(true), 1");
+  const revHere = await B.ev(`${W}.read(${JSON.stringify(path)}).then((r) => r.rev)`);
   await A.ev(`window.sagebrush.board.edit((d) => { d.title = "Followed, renamed here"; }).then(() => 1)`);
-  check(await B.until(`${W}.read(${JSON.stringify(path)}).then((r) => r.content.title === "Followed, renamed here" && r.rev === ${rev3 + 1})`, 15000), "the board's own edit is saved over the version it shows");
+  check(await B.until(`${W}.read(${JSON.stringify(path)}).then((r) => r.content.title === "Followed, renamed here" && r.rev === ${revHere + 1})`, 15000), "the board's own edit is saved over the version it shows");
   await sleep(1500);
   check(!(await A.ev(`${W}.list("/").then((l) => l.some((e) => /changed elsewhere/.test(e.path)))`)), "…no \"changed elsewhere\" copy is made");
   check((await A.ev("window.sagebrush.board.snapshot().doc.title")) === "Followed, renamed here" && !/changed elsewhere/.test(await A.ev("document.body.innerText")), "…and the board shows its own edit, saying nothing");

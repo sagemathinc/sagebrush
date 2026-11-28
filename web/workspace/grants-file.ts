@@ -20,6 +20,7 @@
 //     No ordering is read from the record itself (its seq is a page's own); the app's check is the order.
 
 import { validGrantEntry, GRANT_CAPS } from "../notebook/permissions.js";
+import { validApprovals, mergeApprovals } from "../board/approvals";
 
 export const GRANTS_KEY = "sagebrush-grants";
 // The record's base, in the record itself (so it is kept with the record in one write; permissions.js keeps fields it
@@ -33,7 +34,7 @@ export const GRANTS_KEY = "sagebrush-grants";
 // flight: the record in localStorage is about twice the size of the permissions it holds, both within GRANT_CAPS's
 // bounds.)
 type Mark = { text: string; at: number };
-type Rec = { v: 1; seq?: number; migrated?: number; w?: string; docs: Record<string, unknown>; seenFile?: string; pending?: Record<string, Mark> };
+type Rec = { v: 1; seq?: number; migrated?: number; w?: string; docs: Record<string, unknown>; seenFile?: string; pending?: Record<string, Mark>; approvals?: Record<string, number> };
 /** How long another window's write may be in flight: past it, its mark is no longer waited for (a write is one local
  * call to the app). */
 export const MARK_MS = 120_000;
@@ -57,6 +58,8 @@ export function parseGrants(text: unknown): Rec | null {
     if (!(r && typeof r === "object" && r.v === 1 && r.docs && typeof r.docs === "object" && !Array.isArray(r.docs))) return null;
     // (each document's entry as the page writes one (validGrantEntry), or left out: it grants nothing)
     for (const [d, e] of Object.entries(r.docs)) if (!validGrantEntry(e)) delete r.docs[d];
+    // (a board's code approved to run unconfined (web/board/approvals.ts): only what that code writes, else none)
+    if (r.approvals !== undefined) { const a = validApprovals(r.approvals); if (Object.keys(a).length) r.approvals = a; else delete r.approvals; }
     // (the record's own fields: a base that isn't a text, or a mark that isn't one, is left out)
     if (r.seenFile !== undefined && typeof r.seenFile !== "string") delete r.seenFile;
     delete r.pendingFile;
@@ -161,7 +164,7 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
   const me = hex(8), now = opts.now ?? (() => Date.now());
   // (grants.json as this page last read or wrote it: its text, which a write must find there, and its documents, the
   // merge's base)
-  let seen = "", base: Record<string, unknown> = {};
+  let seen = "", base: Record<string, unknown> = {}, baseApprovals: Record<string, number> = {};
   let tail: Promise<unknown> = Promise.resolve();
   const one = <T>(f: () => Promise<T>): Promise<T> => { const p = tail.then(f, f); tail = p.catch(() => {}); return p; };
   const read = async () => { const t = await invoke("grants_read"); return typeof t === "string" ? t : ""; };
@@ -201,23 +204,28 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
       const shared = parseGrants(landed ? landed[1].text : cur.seenFile), known = !!shared || over.length > 0 || seen !== "";
       let merged = mergeGrants(shared ? shared.docs : base, file, local, known);
       for (const t of over) { const p = parseGrants(t); if (p) merged = narrower(merged, mergeGrants(p.docs, file, local, known)); }
+      // (the approvals of boards' code, the same three ways, a removal by either side winning, and over every mark too:
+      // one approval stays only if every merge keeps it; no base known, this page's own)
+      let approvals = known ? mergeApprovals(shared ? shared.approvals : baseApprovals, kept?.approvals, cur.approvals) : validApprovals({ ...validApprovals(kept?.approvals), ...validApprovals(cur.approvals) });
+      for (const t of over) { const p = parseGrants(t); if (p) { const o = mergeApprovals(p.approvals, kept?.approvals, cur.approvals); approvals = Object.fromEntries(Object.entries(approvals).filter(([k]) => k in o)); } }
       for (const [k, e] of Object.entries(merged)) { const id = await idOf(ws, k); if (id) docs[id] = e; }
       if (storage.getItem(GRANTS_KEY) !== raw) { if (tries < 20) continue; throw new Error("grants: the record kept changing here while it was merged"); }
       const ids = new Set([...Object.keys(cur.docs), ...Object.keys(docs)]);
-      const changed = [...ids].filter((id) => J(cur.docs[id]) !== J(docs[id])).length;
+      const changed = [...ids].filter((id) => J(cur.docs[id]) !== J(docs[id])).length + (J(validApprovals(cur.approvals)) !== J(approvals) ? 1 : 0);
       // (seq: permissions.js's own counter, kept no lower than grants.json's; never read as an order here)
       // (the merge and what it was merged over, in one write: neither is ever kept without the other)
       // (nothing here and nothing to keep, grants.json no record either: no record made)
       const sameMarks = J(keepMarks) === J(cur.pending ?? {});
       if (changed || !sameMarks || (cur.seenFile !== text && (raw !== null || kept))) {
-        const { pending: _, ...rest } = cur;
-        storage.setItem(GRANTS_KEY, J({ ...rest, seq: Math.max(Number(cur.seq) || 0, Number(kept?.seq) || 0), docs, ...(kept?.migrated === 1 || cur.migrated === 1 ? { migrated: 1 } : {}), seenFile: text, ...(Object.keys(keepMarks).length ? { pending: keepMarks } : {}) }));
+        const { pending: _, approvals: __, ...rest } = cur;
+        storage.setItem(GRANTS_KEY, J({ ...rest, ...(Object.keys(approvals).length ? { approvals } : {}), seq: Math.max(Number(cur.seq) || 0, Number(kept?.seq) || 0), docs, ...(kept?.migrated === 1 || cur.migrated === 1 ? { migrated: 1 } : {}), seenFile: text, ...(Object.keys(keepMarks).length ? { pending: keepMarks } : {}) }));
       }
       // (only once the merge is kept here: a merge that couldn't be stored (localStorage full) leaves grants.json unseen,
       // so the next try merges it again rather than taking it for done)
       seen = text;
       base = file;
-      return { changed, ahead: J(merged) !== J(file) };
+      baseApprovals = kept?.approvals ?? {};
+      return { changed, ahead: J(merged) !== J(file) || J(approvals) !== J(validApprovals(kept?.approvals)) };
     }
   };
   const sync = {
@@ -260,6 +268,7 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
           await invoke("grants_write", { json, expect: seen });
           seen = json;
           base = rec.docs;
+          baseApprovals = rec.approvals ?? {};
           // (its own mark goes, and only its own; the base moves on only if no merge moved it since the mark, else that
           // merge's base stands)
           try { mark((r) => { const { [me]: _, ...rest } = r.pending ?? {}; const { pending: __, ...out } = r; return { ...out, ...(r.seenFile === was ? { seenFile: json } : {}), ...(Object.keys(rest).length ? { pending: rest } : {}) }; }); } catch (e) { console.warn("grants.json:", e); }
@@ -280,7 +289,7 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
 /** The record as grants.json keeps it: each document by where it is now. */
 export async function grantsToKeep(ws: GrantsWorkspace, storage: Store = localStorage): Promise<Rec> {
   const cur = parseGrants(storage.getItem(GRANTS_KEY)) ?? { v: 1, seq: 0, docs: {} };
-  const out: Rec = { v: 1, seq: Number(cur.seq) || 0, ...(cur.migrated === 1 ? { migrated: 1 } : {}), docs: {} };
+  const out: Rec = { v: 1, seq: Number(cur.seq) || 0, ...(cur.migrated === 1 ? { migrated: 1 } : {}), ...(cur.approvals ? { approvals: cur.approvals } : {}), docs: {} };
   for (const [id, e] of Object.entries(cur.docs)) {
     if (id.startsWith("file:")) out.docs[id] = e;
     else {
@@ -396,4 +405,10 @@ export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: ()
   };
   // (`changed`: a change of the record this page must write, as its own Allow is: grantsSync's merge left it ahead)
   return { flush, save: flush, changed, get unwritten() { return written < changes; } };
+}
+
+/** This page's record written to grants.json now, over what is there (merged in first, as any write is): a board
+ * page's, which keeps no grants sync of its own, when it approves code (web/board/approvals.ts). */
+export function saveGrants(ws: GrantsWorkspace, invoke: Invoke, storage: Store = localStorage): Promise<void> {
+  return grantsSync(ws, invoke, storage).write();
 }

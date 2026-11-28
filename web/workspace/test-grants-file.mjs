@@ -645,6 +645,39 @@ for (const back of ["writer", "A's text"]) {
   delete globalThis.localStorage;
 }
 
+// boards' code approvals (web/board/approvals.ts) in grants.json too, beside the grants: back at the next launch (the
+// web view forgets its storage); forgotten in one window, not brought back by another's merge; malformed, none
+{
+  const H = (c) => "host:" + c.repeat(64);
+  const fresh = () => { const m = new Map(); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) }; };
+  const same = (x, y) => J(Object.entries(x ?? {}).sort()) === J(Object.entries(y ?? {}).sort());
+  const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+  f.set(J({ v: 1, seq: 1, docs: {} }));
+  const s1 = fresh(), A = grantsSync(w, f.invoke, s1);
+  await A.restore();
+  s1.setItem(GRANTS_KEY, J({ ...JSON.parse(s1.getItem(GRANTS_KEY)), approvals: { [H("a")]: 10, [H("b")]: 11 } }));
+  await A.write();
+  ok(same(parseGrants(f.kept()).approvals, { [H("a")]: 10, [H("b")]: 11 }), "approvals: written to grants.json with the grants");
+  // (the next launch: nothing in this web view's storage)
+  const s2 = fresh(), B = grantsSync(w, f.invoke, s2);
+  await B.restore();
+  ok(same(JSON.parse(s2.getItem(GRANTS_KEY)).approvals, { [H("a")]: 10, [H("b")]: 11 }), "approvals: back at the next launch");
+  // (two windows: B forgets a; A, which still has it, merges B's write: a stays forgotten)
+  const r2 = JSON.parse(s2.getItem(GRANTS_KEY));
+  s2.setItem(GRANTS_KEY, J({ ...r2, approvals: { [H("b")]: 11 } }));
+  await B.write();
+  await A.adopt();
+  ok(J(JSON.parse(s1.getItem(GRANTS_KEY)).approvals) === J({ [H("b")]: 11 }), "approvals: forgotten in one window, not brought back by the other's merge", JSON.parse(s1.getItem(GRANTS_KEY)).approvals);
+  // (and A's own write after that keeps it forgotten)
+  await A.write();
+  ok(!(H("a") in (parseGrants(f.kept()).approvals ?? {})), "approvals: …nor by the other's next write");
+  // (malformed in grants.json: approves nothing)
+  f.set(J({ v: 1, seq: 30, docs: {}, approvals: { "files:x": 1, [H("c")]: "1", "host:abc": 2 } }));
+  const s3 = fresh();
+  await grantsSync(w, f.invoke, s3).restore();
+  ok(JSON.parse(s3.getItem(GRANTS_KEY) ?? "{}").approvals === undefined, "approvals: malformed ones in grants.json approve nothing");
+}
+
 // a notebook changed on both sides since the base, scope by scope: a grant taken back by either is gone, one made by
 // either is in, a denial from either kept (the later of two), never more than either side's caps
 {
