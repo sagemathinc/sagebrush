@@ -33,9 +33,15 @@ const stampPath = (root) => join(root, "wasm", ".installed.json");
 const sidecarPath = (name, root) => join(root, "wasm", `${name}.local.json`);
 
 // The source of the modules: everything scripts/build-engine.mjs reads, engine/ (its toolchain file too) and the
-// build scripts.  scripts/engine-cache.mjs keys its builds by the same paths.
+// build scripts, and what cargo reads above engine/: the repository root's .cargo/ (config.toml, or the legacy
+// config; cargo merges every parent directory's) and a root Cargo.toml and Cargo.lock (cargo looks upward for a
+// workspace).  Paths absent today count as absent ("-"), so adding one changes the source.  scripts/engine-cache.mjs
+// keys its builds by the same paths.
 export const SOURCE_PATHS = [
   "engine", // (with its rust-toolchain.toml)
+  ".cargo",
+  "Cargo.toml",
+  "Cargo.lock",
   "scripts/build-engine.mjs",
   "scripts/build-nd.mjs",
   "scripts/build-raster.mjs",

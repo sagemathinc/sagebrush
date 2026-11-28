@@ -53,7 +53,11 @@ try {
   build(MODULES[0], Buffer.from("\0asm\x01\0\0\0FRESH-BUILD"));
   const cur = checkFreshWasm({ cwd: dir, state: "current" });
   ok(cur.status === 1 && cur.message.startsWith("::error::") && cur.message.includes(MODULES[0]) && /isn't reproducible/.test(cur.message), "a mismatch with pins of this very source: an ERROR, naming the module");
-  const pen = checkFreshWasm({ cwd: dir, state: "pending" });
+  const pen = checkFreshWasm({ cwd: dir, state: "pending", env: {} });
+  for (const env of [{ GITHUB_REF_TYPE: "tag", GITHUB_REF: "refs/tags/app-v1.0.0" }, { GITHUB_REF: "refs/tags/v1.2.3" }]) {
+    const tag = checkFreshWasm({ cwd: dir, state: "pending", env });
+    ok(tag.status === 1 && /a release builds only/.test(tag.message), `a mismatch with pending pins on a tag (${env.GITHUB_REF}): an ERROR`);
+  }
   ok(pen.status === 0 && pen.message.startsWith("::notice::") && /pending/.test(pen.message) && pen.message.includes(MODULES[0]), "a mismatch with pending pins: reported, not an error");
   // a mode-only difference counts too
   build(MODULES[0], pinned[MODULES[0]]);
@@ -95,6 +99,20 @@ try {
   writeFileSync(join(dir, "engine", "lib.rs"), "fn main() { let _ = 1; }\n");
   git("commit", "-qam", "an engine change");
   ok(pinsState(dir) === "pending" && cli("push", { GITHUB_REF_NAME: "master" }) === 0, "an engine commit after the pin: pending, reported");
+  // what cargo reads above engine/ is source too: a root .cargo/config.toml (or the legacy .cargo/config), or a root
+  // Cargo.toml, makes the pins pending (a root [profile.release] changes the modules' bytes)
+  // (pins.json isn't committed in this fixture: pinsState reads the working file)
+  for (const [path, text] of [[".cargo/config.toml", "[profile.release]\noverflow-checks = true\n"], [".cargo/config", "[build]\n"], ["Cargo.toml", "[workspace]\n"]]) {
+    writeFileSync(pinsPath, formatPins(pinsOf(pinned), sourceOf(dir)));
+    ok(pinsState(dir) === "current", `before a root ${path}: current`);
+    mkdirSync(join(dir, ".cargo"), { recursive: true });
+    writeFileSync(join(dir, path), text);
+    git("add", "-A");
+    git("commit", "-qm", `a root ${path}`);
+    ok(pinsState(dir) === "pending", `a committed root ${path}: the pins are pending`);
+    git("rm", "-q", "-r", "--", path);
+    git("commit", "-qm", `no root ${path}`);
+  }
   // the track rules that remain (ci-paths.mjs and wasm-fetch-or-build.mjs build a track's engine)
   ok(onTrack({ event: "pull_request_target", baseRef: "track/math" }) && onTrack({ event: "push", ref: "refs/heads/track/math" }) && !onTrack({ event: "schedule", ref: "track/math" }) && !onTrack({ event: "pull_request", baseRef: "master", headRef: "track/math" }), "onTrack: a track's pushes and pull requests into it, never the pull into master or the schedule");
   ok(onTrack({ event: "merge_group", ref: "refs/heads/gh-readonly-queue/track/math/pr-7-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }) && !onTrack({ event: "merge_group", ref: "refs/heads/gh-readonly-queue/master/pr-7-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }), "onTrack: a queue group into a track, not one into master");

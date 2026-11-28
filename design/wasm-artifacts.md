@@ -508,7 +508,9 @@ depends on one.
 
 **The pins record their source.** `wasm/pins.json` gains `"source"`: the sha256 of the git object ids of the paths
 the modules are built from (`SOURCE_PATHS` in `scripts/wasm-modules.mjs`: `engine/`, its toolchain file included,
-and the five builders with the installer they import; `scripts/engine-cache.mjs` keys its builds by the same paths).
+the five builders with the installer they import, and what cargo reads above `engine/`: the root `.cargo/` (its
+`config.toml` or legacy `config`; cargo merges every parent's) and a root `Cargo.toml` and `Cargo.lock`, absent today
+and counted as absent. `scripts/engine-cache.mjs` keys its builds by the same paths).
 `wasm/pins.json` isn't one of them, so committing it keeps the source. Any checkout can tell, with no network and no
 build, which state its pins are in (`pinsState`, `node scripts/wasm-pins.mjs --state`):
 - **current:** they record this commit's own source, so they are its build;
@@ -532,8 +534,10 @@ engine moves).
   for a pull request whose pins are pending, even one that changes no engine file. The published modules of pending
   pins aren't its engine.
 - The other workflows (`.github/actions/wasm-modules`): with current pins they fetch, as before; with pending pins
-  they build the commit's own modules, labelled fresh. `release.yml` and the TestFlight build pass `release: true` and
-  only fetch: a commit whose pin is pending is refused (`wasm-fetch.mjs --release`).
+  they build the commit's own modules, labelled fresh. `release.yml`, the TestFlight build, and `app.yml`'s page on
+  a run that may sign (an `app-v` tag, a dispatch with `sign`) pass `release: true` and only fetch: a commit whose pin
+  is pending is refused (`wasm-fetch.mjs --release`). `check-fresh-wasm.mjs` also refuses a pending pin's build on
+  a tag.
 - `size-base`: a base whose pins are pending is built from its own source and measured as built, as a track's base
   already was. It is never measured with another commit's modules.
 - `engine-cache.mjs` (precheck): the pins are this tree's engine exactly when they are current and the tree has no
