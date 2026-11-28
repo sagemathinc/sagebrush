@@ -11,6 +11,10 @@
 //   - "csp-off" (the signer's page without its CSP, framing the other server's page): that page loaded in the frame,
 //     and said what its signing call got (refused), and still nothing of it reached the command: dispatches 1,
 //     signatures 1, the signer window's own;
+//   - "frame+cap" (that, and the command in the signer window's capability for the other server's origin too): the
+//     frame's call reaches the command (a dispatch in the signer window whose caller, the request's Origin, isn't the
+//     app protocol's), and the command's check of the calling document refuses it: signatures 1, the signer page's own
+//     (N1: the window's top-level page, which the frame shares, isn't the guard);
 //   - "guard-off" (the signer window's navigation guard left out, the window sent to the other server): that page
 //     loaded in the signer window and said what its signing call got (refused), and nothing of it reached the command:
 //     dispatches 1, signatures 1.
@@ -32,8 +36,11 @@
 // web view data folder (`left`: its entries, or null if it's gone) must be gone: nothing at all left, a framework's
 // empty profile included (and anything like stored web data is named: cookies, storage, databases, caches, sessions,
 // service workers, history).
+// (the app protocol's origins: a signature's caller must be one, but in "cap+check")
+export const APP_ORIGIN = /^(tauri:\/\/localhost|https?:\/\/tauri\.localhost)$/;
 export function signerLog(err) {
-  const dispatches = [...err.matchAll(/^\[signer\] dispatch (\d+) from (\S+) at (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[2], origin: m[3] }));
+  const callers = new Map([...err.matchAll(/^\[signer\] caller (\d+): (\S+)$/gm)].map((m) => [+m[1], m[2]]));
+  const dispatches = [...err.matchAll(/^\[signer\] dispatch (\d+) from (\S+) at (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[2], origin: m[3], caller: callers.get(+m[1]) ?? "unsaid" }));
   const signed = [...err.matchAll(/^\[signer\] signed (\d+) \(signature (\d+)\) for (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[3] }));
   return { dispatches, signed };
 }
@@ -91,6 +98,11 @@ export function signerVerdict({ err, out, seen, control, code, signal, problems,
       }
     }
   }
+  // (each signature's caller, the calling document's origin, the app protocol's: N1)
+  if (control !== "cap+check") {
+    const bad = signed.filter((x) => !APP_ORIGIN.test(dispatches.find((d) => d.n === x.n)?.caller ?? ""));
+    if (bad.length) why.push(`a signature for a caller that isn't the signer page's own document: ${bad.map((x) => `${x.n} (${dispatches.find((d) => d.n === x.n)?.caller ?? "no dispatch"})`).join(", ")}`);
+  }
   if (fromSigner(signed).length !== 1) why.push(`the approvals window's page signed ${fromSigner(signed).length} times, not once (the positive)`);
   switch (control ?? "") {
     case "":
@@ -103,6 +115,15 @@ export function signerVerdict({ err, out, seen, control, code, signal, problems,
       if (control === "guard-off" && !seen.includes("stop: loaded")) why.push("the other server's page didn't load in the signer window: the control didn't run");
       if (control === "guard-off" && !seen.some((x) => /^stop: signer (refused|REACHED)/.test(x))) why.push("the other server's page in the signer window didn't report its signing call: the control didn't finish");
       break;
+    case "frame+cap": {
+      const framed = dispatches.filter((d) => d.label === "signer" && !APP_ORIGIN.test(d.caller));
+      if (fromOthers(dispatches).length) why.push(`dispatches from other windows (${fromOthers(dispatches).length}): only the signer window's page and its frame may reach the command`);
+      if (!framed.length) why.push("no call from the frame in the signer page reached the command: the widened capability didn't take, or the frame didn't call");
+      if (signed.length !== 1) why.push(`signatures ${signed.length}, not 1: the frame's call signed`);
+      if (!seen.includes("sframe: loaded")) why.push("the other server's page didn't load in the signer page's frame: the control didn't run");
+      if (!seen.some((x) => /^sframe: signer refused/.test(x))) why.push("the other server's page in the signer page's frame didn't report its signing call refused");
+      break;
+    }
     case "cap":
       if (!fromOthers(dispatches).length) why.push("no call from another window reached the command: the weakened capability didn't take");
       if (fromOthers(signed).length) why.push(`another window's call signed (${fromOthers(signed).map((s) => s.label).join(", ")}): the caller check didn't hold`);

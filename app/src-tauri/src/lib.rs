@@ -522,6 +522,23 @@ fn selftest_agent_bundle(app: &tauri::AppHandle) {
     }
 }
 
+/// Whether this build has the self-test's controls (C1, the native signing design note): the guards a control leaves
+/// out (SAGEBRUSH_APP_SIGNER_CONTROL, SAGEBRUSH_APP_NAV_CONTROL), the stand-in signing command and the approvals
+/// window's probe.  Only the self-test's build has them (the cargo feature selftest-controls); a release build has
+/// none, whatever its environment, and says so in a self-test ("[app] self-test controls: compiled out").
+pub const SELFTEST_CONTROLS: bool = cfg!(feature = "selftest-controls");
+
+/// The self-test's navigation control (run.mjs "nav"): "open" leaves out the window's navigation guard, "wide" that and
+/// the commands for every http://127.0.0.1 port; in a self-test of a build with the controls only.
+#[cfg(feature = "selftest-controls")]
+fn nav_control() -> Option<String> {
+    std::env::var("SAGEBRUSH_APP_NAV_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
+}
+#[cfg(not(feature = "selftest-controls"))]
+fn nav_control() -> Option<String> {
+    None
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // (the self-test's tier probe: prints whether this build may enroll as native, then exits, before any window)
@@ -590,17 +607,20 @@ pub fn run() {
             let port = listener.local_addr()?.port();
             if std::env::var("SAGEBRUSH_APP_SELFTEST").is_ok() {
                 eprintln!("[app] the page is at http://127.0.0.1:{port}/");
+                eprintln!("[app] self-test controls: {}", if SELFTEST_CONTROLS { "compiled in" } else { "compiled out" });
             }
             serve_page(app.handle(), listener, files.clone())?;
             // (a self-test's controls, run.mjs: "open" leaves out the window's navigation guard; "wide" that and gives
             // the commands to every http://127.0.0.1 port, as before nav.rs, so the check must see a page reach them)
-            let control = std::env::var("SAGEBRUSH_APP_NAV_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
+            let control = nav_control();
             let open = matches!(control.as_deref(), Some("open" | "wide"));
             // (the app's commands for this page's exact origin only, nav.rs page_capability; before the window exists)
-            let page_cap = if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) };
+            let page_cap = nav::page_capability(port);
+            #[cfg(feature = "selftest-controls")]
+            let page_cap = if control.as_deref() == Some("wide") { page_cap.replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { page_cap };
             // (a self-test's signer controls, signer.rs: the signing command in the page's capability too, so the check
             // must see the command's own caller check hold, or with it left out, sign)
-            #[cfg(desktop)]
+            #[cfg(all(desktop, feature = "selftest-controls"))]
             let page_cap = if matches!(signer::control().as_deref(), Some("cap" | "cap+check")) {
                 let mut c: serde_json::Value = serde_json::from_str(&page_cap)?;
                 if let Some(p) = c["permissions"].as_array_mut() {
@@ -611,6 +631,16 @@ pub fn run() {
                 page_cap
             };
             app.add_capability(page_cap)?;
+            // (the signer's frame+cap control, signer.rs: the signing command in the signer window's capability for the
+            // other local server's origin too, so a frame of it in the signer's page reaches the command, whose check of
+            // the calling document's origin must refuse it)
+            #[cfg(all(desktop, feature = "selftest-controls"))]
+            if signer::control().as_deref() == Some("frame+cap") {
+                if let Some(other) = std::env::var("SAGEBRUSH_APP_PERSIST").ok().and_then(|p| p.strip_prefix("signer:").map(str::to_owned)) {
+                    let cap = serde_json::json!({ "identifier": "signer-frame-control", "windows": [signer::LABEL], "permissions": ["allow-signer-probe-sign"], "remote": { "urls": [format!("{other}/*")] } });
+                    app.add_capability(cap.to_string())?;
+                }
+            }
             // (the web view data folders of the last launch's other windows, gone before any window opens, windows.rs)
             #[cfg(desktop)]
             if let Ok(d) = disk::data_dir(app.handle()) {
@@ -624,7 +654,7 @@ pub fn run() {
             let window = page_window(app, "main", url, port, open);
             window.build()?;
             // (a self-test's probe of the approvals window, run.mjs "signer": the window opened as the menu opens it)
-            #[cfg(desktop)]
+            #[cfg(all(desktop, feature = "selftest-controls"))]
             if std::env::var("SAGEBRUSH_APP_PERSIST").is_ok_and(|p| p.starts_with("signer:")) && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
                 signer::open(app.handle())?;
             }

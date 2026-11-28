@@ -2,7 +2,7 @@
 // For now it shows nothing to approve: the keys and the pending list come in later changes.  In a self-test
 // (window.__SB_SIGNER_PROBE__, which only the app sets, and only then) it tries its stand-in signing command (the
 // positive: it must sign), then, in the controls, loads another local server's page in a frame or goes there itself
-// (which must never reach the command).
+// (which must never sign: in frame+cap the frame's call reaches the command, whose origin check refuses it).
 // A self-test's diagnostic (only when its probe is present): if the call is refused, the page reloads itself once with
 // ?probe=refused-acl or ?probe=refused, a fixed code the app logs; if it neither answers nor fails within 8 s,
 // ?probe=hung, and that is final: an answer or a failure arriving after it is ignored (no second report, no controls);
@@ -31,7 +31,7 @@ window.__SB_SIGNER_RAN__ = true;
       location.replace(location.pathname + "?probe=" + (acl ? "refused-acl" : "refused"));
       return;
     }
-    if (probe.control === "csp-off" && probe.other) {
+    if ((probe.control === "csp-off" || probe.control === "frame+cap") && probe.other) {
       const f = document.createElement("iframe");
       f.src = probe.other + "/sframe";
       document.body.append(f);

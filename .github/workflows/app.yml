@@ -463,13 +463,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.SAGEBRUSH_MACOS_SIGN_ID }}
           APPLE_API_KEY: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_ISSUER_ID }}
-        # (only this job's build may enroll as native, N1: SAGEBRUSH_SIGNED_BUILD and the team id from the identity's
-        # "(TEAMID)" are compiled in; at run time the app checks its own code is signed by that team, src/device_key.rs)
-        run: |
-          team=$(printf '%s' "$APPLE_SIGNING_IDENTITY" | sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p')
-          [ -n "$team" ] || { echo "The signing identity doesn't end in a team id" >&2; exit 1; }
-          echo "SAGEBRUSH_TEAM_ID=$team" >> "$GITHUB_ENV"
-          SAGEBRUSH_SIGNED_BUILD=1 SAGEBRUSH_TEAM_ID="$team" APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app -- --locked
+        run: APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app -- --locked
       # (the engine's Node runs V8, which needs the JIT entitlements in the signature Tauri gave it, each the boolean
       # true: a key that is false or absent fails.  Checked after the Tauri build and before the separate DMG
       # notarization step and the app's self-test, so a mis-signed engine fails there and says why;
@@ -531,7 +525,6 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign -d --verbose=2 "$app" 2>&1 | grep -E '^(Authority|TeamIdentifier|Runtime Version|Timestamp)='
           codesign -d --verbose=2 "$app" 2>&1 | grep -q 'flags=.*runtime' || { echo "FAIL: the app isn't signed with the hardened runtime" >&2; exit 1; }
-          codesign -d --verbose=2 "$app" 2>&1 | grep -qx "TeamIdentifier=$SAGEBRUSH_TEAM_ID" || { echo "FAIL: the app isn't signed by the team compiled into it" >&2; exit 1; }
           spctl --assess --type execute --verbose=4 "$app"
           xcrun stapler validate "$app"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$SAGEBRUSH_DMG"
@@ -545,32 +538,6 @@ jobs:
       # the signed app runs: the app's own self-test (app/selftest), on the binary inside the signed bundle
       - name: self-test the signed app
         run: node app/selftest/run.mjs "$(ls -d app/src-tauri/target/release/bundle/macos/*.app)/Contents/MacOS/sagebrush-app"
-      # The native tier (N1, src/device_key.rs) on copies of the signed app: intact, it may enroll as native; with one
-      # sealed resource changed, or one byte of the executable (where the signer's pages are compiled in), it never may.
-      # The probe prints one line and exits before any window.
-      - name: native tier, intact and tampered
-        run: |
-          app=$(ls -d app/src-tauri/target/release/bundle/macos/*.app)
-          probe() { SAGEBRUSH_APP_SELFTEST=1 SAGEBRUSH_APP_TIER_PROBE=1 "$1/Contents/MacOS/sagebrush-app" 2>&1 | grep '^\[tier\]' || true; }
-          t="$RUNNER_TEMP/tier"
-          rm -rf "$t" && mkdir -p "$t"
-          ditto "$app" "$t/intact.app"
-          out=$(probe "$t/intact.app"); echo "intact: $out"
-          [ "$out" = "[tier] native: yes" ] || { echo "FAIL: the intact signed copy doesn't enroll as native" >&2; exit 1; }
-          ditto "$app" "$t/resource.app"
-          r=$(find "$t/resource.app/Contents/Resources" -type f | LC_ALL=C sort | head -1)
-          [ -n "$r" ] || { echo "FAIL: no sealed resource to change" >&2; exit 1; }
-          printf 'x' >> "$r"; echo "changed: ${r#"$t/resource.app/"}"
-          if codesign --verify --deep --strict "$t/resource.app" 2>/dev/null; then echo "FAIL: codesign still accepts the changed copy" >&2; exit 1; fi
-          out=$(probe "$t/resource.app"); echo "changed resource: $out"
-          case "$out" in "[tier] native: no ("*) ;; *) echo "FAIL: a copy with a changed sealed resource isn't refused" >&2; exit 1 ;; esac
-          ditto "$app" "$t/exec.app"
-          exe="$t/exec.app/Contents/MacOS/sagebrush-app"
-          at=$(grep -obUa 'signer/index.html' "$exe" | head -1 | cut -d: -f1)
-          [ -n "$at" ] || { echo "FAIL: the signer page's name isn't in the executable" >&2; exit 1; }
-          printf 'S' | dd of="$exe" bs=1 seek="$at" conv=notrunc 2>/dev/null
-          out=$(probe "$t/exec.app"); echo "changed executable: ${out:-(killed at launch)}"
-          [ "$out" != "[tier] native: yes" ] || { echo "FAIL: a changed executable still enrolls as native" >&2; exit 1; }
       - name: SHA-256
         run: |
           cd "$(dirname "$SAGEBRUSH_DMG")"

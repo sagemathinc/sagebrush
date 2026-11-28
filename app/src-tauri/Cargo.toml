@@ -11,6 +11,12 @@ edition = "2021"
 name = "sagebrush_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# (the self-test's controls, each leaving one guard out, and its stand-in signing command: compiled in only where this
+# feature is on, which only the self-test's build turns on (C1, the native signing design note), never by the
+# environment; a release build has none of them, whatever it is started with: lib.rs SELFTEST_CONTROLS)
+[features]
+selftest-controls = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 sha2 = "0.10"

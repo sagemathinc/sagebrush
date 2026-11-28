@@ -45,7 +45,7 @@
 // bound.
 //
 //   node app/selftest/run.mjs <the app's executable>
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as httpCreateServer } from "node:http";
@@ -54,6 +54,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture, judge, python } from "./run-judge.mjs";
 import { signerVerdict } from "./signer-judge.mjs";
+import { controlsMode, controlNamesIn, releaseSignerVerdict, CONTROL_NAMES } from "./release-judge.mjs";
 
 const RUN_MS = 360000;
 
@@ -72,6 +73,11 @@ async function selftest(env = {}) {
 }
 let { passed, res } = await selftest({ SAGEBRUSH_APP_ENGINE: "off" });
 console.log(passed ? "self-test passed" : `self-test failed (exit code ${res.code})`);
+// (whether this build has the self-test's controls, in its own words: the self-test's build does; a release build
+// doesn't, and is checked for that instead, release-judge.mjs)
+const controls = controlsMode(res.err);
+console.log(`the self-test's controls: ${controls === "in" ? "compiled in (the self-test's build)" : controls === "out" ? "compiled out (a release build)" : "FAIL the app didn't say"}`);
+if (!controls) passed = false;
 const engine = fileURLToPath(new URL("../engine/main.mjs", here)), root = fileURLToPath(new URL("../dist", here));
 if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(join(root, "sagebrush-worker.js"))) {
   console.log("\nthe self-test again, with the engine subprocess");
@@ -217,8 +223,16 @@ if (passed) {
   const good = r.code === 0 && /^ok persist: nav at /m.test(r.line) && !r.reached.length && !r.topLoaded;
   console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : "the probe failed (above)"}`);
   passed = good;
+  // (a release build: started with the widest control's variable set, it still refuses the other origin, as above)
+  if (passed && controls === "out") {
+    console.log("\nwithout the controls (a release build): the same, SAGEBRUSH_APP_NAV_CONTROL=wide set");
+    const c = await navLaunch("wide");
+    const same = c.code === 0 && /^ok persist: nav at /m.test(c.line) && !c.reached.length && !c.topLoaded;
+    console.log(same ? "the variable changed nothing: only the app's own page reached its commands" : `FAIL a release build honoured the control: ${c.reached.length ? c.reached.join("; ") : c.topLoaded ? "the window loaded another origin's page" : c.line}`);
+    passed = same;
+  }
   // (the controls: each must show what its part keeps out)
-  for (const control of passed ? ["open", "wide"] : []) {
+  for (const control of passed && controls === "in" ? ["open", "wide"] : []) {
     console.log(`\nthe control: the same, ${control === "open" ? "the navigation guard left out (the page may leave; the commands must still refuse the other origin)" : "the guard left out and the commands for every port (the other origin's page must reach them)"}`);
     const c = await navLaunch(control);
     const topReached = c.reached.some((s) => s.startsWith("top: REACHED"));
@@ -267,9 +281,11 @@ if (passed) {
 // window from a page.  Then the controls, each leaving one guard out (SAGEBRUSH_APP_SIGNER_CONTROL): "cap" the command
 // in the page's capability too (other windows' calls reach it; its own check refuses them), "cap+check" that and no
 // check (another window's call signs: the probe sees the path it checks), "csp-off" the signer's page without its CSP,
-// framing the other server's page, and "guard-off" the signer window's navigation guard left out, the window sent to
-// that page (each loads there, and reaches nothing).  Calls that reached the command and signatures are counted from
-// the app's own log.
+// framing the other server's page, "frame+cap" that and the command in the signer window's capability for that
+// server's origin too (the frame's call reaches the command, whose check of the calling document's origin refuses it,
+// N1), and "guard-off" the signer window's navigation guard left out, the window sent to that page (each loads there,
+// and reaches nothing).  Calls that reached the command, their callers and signatures are counted from the app's own
+// log.  The controls are in the self-test's build only (C1): a release build runs release-judge.mjs's rows instead.
 // (what's in a folder, as relative paths, folders ending in "/"; null if it isn't there)
 function listTree(dir, rel = "") {
   if (!existsSync(dir)) return null;
@@ -298,8 +314,41 @@ async function signerLaunch(control) {
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   return v;
 }
-if (passed) {
-  for (const control of [null, "cap", "cap+check", "csp-off", "guard-off"]) {
+// (the app's own executable: an AppImage's is inside its compressed image, extracted to read it)
+function executable() {
+  if (!/\.AppImage$/.test(exe)) return exe;
+  const at = mkdtempSync(join(tmpdir(), "sagebrush-appimage-"));
+  const { APPIMAGE_EXTRACT_AND_RUN: _, ...env } = process.env;
+  const x = spawnSync(exe, ["--appimage-extract"], { cwd: at, stdio: "ignore", env, timeout: 120000 });
+  if (x.status !== 0) console.log(`(extracting the AppImage: exit ${x.status}${x.error ? `, ${x.error.message}` : ""})`);
+  return join(at, "squashfs-root", "usr", "bin", "sagebrush-app");
+}
+// (a release build: the executable holds none of the controls' names, and started with the signer's widest control
+// set, nothing reaches a signing command; release-judge.mjs)
+if (passed && controls === "out") {
+  console.log("\nwithout the controls (a release build): the executable, and a launch with SAGEBRUSH_APP_SIGNER_CONTROL=cap+check");
+  const bin = executable();
+  const found = existsSync(bin) ? controlNamesIn(readFileSync(bin)) : [`(no executable at ${bin})`];
+  console.log(found.length ? `FAIL the executable holds the controls' names: ${found.join(", ")}` : "the executable holds none of the controls' names");
+  const o = await otherServer();
+  const r = await launch({ SAGEBRUSH_APP_PERSIST: `signer:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: mkdtempSync(join(tmpdir(), "sagebrush-app-data-")), SAGEBRUSH_APP_SIGNER_CONTROL: "cap+check" }, 120000);
+  await new Promise((ok) => setTimeout(ok, 1000));
+  o.close();
+  const v = releaseSignerVerdict({ err: r.err, out: r.out, seen: o.seen, code: r.code, signal: r.signal, problems: r.problems });
+  console.log(`launch (SAGEBRUSH_APP_SIGNER_CONTROL=cap+check): ${persistLine(r)} (exit ${r.code})`);
+  console.log(v.ok ? "the variable changed nothing: no call reached a signing command" : `FAIL ${v.why.join("; ")}`);
+  passed = !found.length && v.ok;
+}
+if (passed && controls === "in") {
+  // (the search's positive: the self-test's build holds every name a release build must not)
+  const bin = executable();
+  const found = existsSync(bin) ? controlNamesIn(readFileSync(bin)) : [];
+  const all = found.length === CONTROL_NAMES.length;
+  console.log(all ? `\nthe executable holds the controls' names (${found.length}), as the self-test's build must` : `\nFAIL the self-test's build's executable doesn't hold all the controls' names: the search can't see them (found ${found.join(", ") || "none"}${existsSync(bin) ? "" : `; no executable at ${bin}`})`);
+  passed = all;
+}
+if (passed && controls === "in") {
+  for (const control of [null, "cap", "cap+check", "csp-off", "frame+cap", "guard-off"]) {
     console.log(`\nthe approvals window${control ? `, the control "${control}"` : ": only its own page signs"}`);
     const v = await signerLaunch(control);
     console.log(v.ok ? "as it must" : `FAIL ${v.why.join("; ")}`);
