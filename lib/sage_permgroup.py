@@ -931,6 +931,69 @@ class PermutationGroup:
         """
         return self.derived_subgroup().order() == self.order()
 
+    # --- conjugacy classes (engine/group's classes)
+    def _class_rows(self):
+        """[(representative images, length)], in Sagebrush's canonical order:
+        each class's least element (by its images), the classes by the order
+        of their elements, then their length, then their representative.
+        The engine enumerates the group, admitted first by the memory guard."""
+        if "classes" not in self._cache and self._n == 0:
+            # (the trivial group on no points: its one class, the identity's;
+            # the engine's binary op takes a degree of at least 1)
+            self._cache["classes"] = [((), 1)]
+        if "classes" not in self._cache:
+            order, n = int(self.order()), self._n
+            _admit_elements(order, _element_bytes(n), "the conjugacy classes", order, _ENUM_FIXED)
+            count = self._q("conjugacy_class_count")
+            # (then their output, by their number, before the engine writes it)
+            try:
+                _admit_output(count, n, "the %d conjugacy classes" % count, order)
+            except BaseException:
+                self._q("conjugacy_classes_clear")
+                raise
+            reps, lengths, _ = _bin_classes(n, [list(g) for g in self._gens])
+            self._cache["classes"] = [(tuple(reps[i * n:(i + 1) * n]), lengths[i]) for i in range(count)]
+            del reps
+        return self._cache["classes"]
+
+    def conjugacy_classes_representatives(self):
+        """A representative of each conjugacy class.  Sagebrush's canonical
+        choice and order (each class's least element; by element order, then
+        class length), not GAP's, except for SymmetricGroup(n), whose classes
+        are GAP's.
+
+        EXAMPLES::
+
+            sage: PermutationGroup(['(1,2,3,4)', '(1,3)']).conjugacy_classes_representatives()  # sagebrush only
+            [(), (1,3)(2,4), (2,4), (1,2)(3,4), (1,2,3,4)]
+            sage: len(AlternatingGroup(5).conjugacy_classes_representatives())
+            5
+        """
+        return [self._elt(r) for r, _ in self._class_rows()]
+
+    def conjugacy_classes(self):
+        """The conjugacy classes, in the order of
+        conjugacy_classes_representatives().
+
+        EXAMPLES::
+
+            sage: [c.cardinality() for c in DihedralGroup(5).conjugacy_classes()]
+            [1, 5, 2, 2]
+        """
+        return [ConjugacyClass(self, self._elt(r), k) for r, k in self._class_rows()]
+
+    def conjugacy_class(self, g):
+        """The conjugacy class of the element g.
+
+        EXAMPLES::
+
+            sage: G = PermutationGroup(['(1,2,3,4)', '(1,3)'])
+            sage: G.conjugacy_class(G('(1,3)')).cardinality()
+            2
+        """
+        g = self(g) if not isinstance(g, PermutationGroupElement) or g.parent() is not self else g
+        return ConjugacyClass(self, g)
+
     def is_simple(self):
         """Whether the group is simple.  Rigorous answers: abelian groups (simple
         iff of prime order), non-perfect groups (not simple), A_n (n >= 5: a
@@ -988,6 +1051,207 @@ class PermutationGroup:
         return CycleTypeSample(d, int(samples))
 
 
+def _partitions_count(n):
+    """The number of partitions of n (Euler's pentagonal recurrence)."""
+    p = [1] + [0] * n
+    for m in range(1, n + 1):
+        t, k = 0, 1
+        while k * (3 * k - 1) // 2 <= m:
+            sign = 1 if k % 2 else -1
+            t += sign * p[m - k * (3 * k - 1) // 2]
+            if k * (3 * k + 1) // 2 <= m:
+                t += sign * p[m - k * (3 * k + 1) // 2]
+            k += 1
+        p[m] = t
+    return p[n]
+
+
+# a group element's share of the engine's peak while it lists the classes by
+# enumerating the group, measured (Nov 2026, the engine native and in wasm32):
+# at most 8n + 212 bytes; and the enumeration's own fixed part, at most 1 KB
+# (LIMIT-CLS-1)
+def _element_bytes(n):
+    return 8 * n + 256
+
+
+_ENUM_FIXED = 4096
+
+
+# a class's row once decoded (its representative's tuple, a new int each past
+# 256 under CPython), measured: at most 40n + 700 bytes under CPython, 16n +
+# 1000 in pyjs; and a ConjugacyClass's element while it is listed (a tuple
+# held in a set and a list), measured: at most 8n + 100 under CPython, in
+# pyjs 2960 bytes at n = 300 and 6881 at 600, a slope of 13.1 a point
+# (LIMIT-CLS-1)
+def _row_bytes(n):
+    return 40 * n + 1024
+
+
+def _held_bytes(n):
+    return 16 * n + 1024
+
+
+def _admit_elements(count, per, what, order, fixed=0):
+    """The memory guard's refusal when count items of per bytes each (and
+    fixed more) of a group of this order (before the engine enumerates
+    them, or held so far) don't fit a quarter of the heap, the share of one
+    computation."""
+    import _capacity
+    need, limit = count * per + fixed, _capacity.heap_figure() // 4
+    if need > limit:
+        import _memguard
+        e = _memguard.memory_guard("Listing %s of a permutation group of order %d" % (what, order), need, limit, "one computation")
+        e.capacity = _capacity.capacity()
+        raise e
+
+
+# a class's share of the output's peak: its decoded row and its words in the
+# engine's reply (8n + 16), alive together (LIMIT-CLS-1)
+def _class_output_bytes(n):
+    return _row_bytes(n) + 8 * n + 16
+
+
+def _bin_classes(n, gens):
+    """The classes the engine counted for the group of degree n generated by
+    gens (images on 0 .. n-1), fetched by the binary op conjugacy_classes_bin
+    (SBW1, engine/wire: words, no text): memoryviews ('Q') of the
+    representatives' images (n a class), the lengths and the orders."""
+    import array
+    from _sagebrush_lib._engine import call_bin
+    words = array.array("Q", [x for g in gens for x in g])
+    u641 = lambda w: b"".join([(12 + 8 * len(w)).to_bytes(4, "little"), b"U641", len(w).to_bytes(8, "little"), w.tobytes()])
+    op = b"conjugacy_classes_bin"
+    r = call_bin(b"".join([b"SBW1", len(op).to_bytes(4, "little"), op, (2).to_bytes(4, "little"), u641(array.array("Q", (n,))), u641(words)]))
+    del words
+    if r is None:
+        raise RuntimeError("Sagebrush engine: no binary entry point for conjugacy_classes_bin")
+    r = memoryview(r)
+    if bytes(r[:4]) != b"SBW1":
+        raise RuntimeError("Sagebrush engine: a malformed SBW1 reply")
+    if bytes(r[4:6]) == b"er":
+        code = int.from_bytes(r[6:8], "little")
+        text = bytes(r[18:18 + int.from_bytes(r[16:18], "little")]).decode("ascii", "replace")
+        if code == 7:
+            import _memguard
+            raise _memguard.memory_guard("The conjugacy classes' output", 0, 0, "one computation",
+                                         unmeasured="the engine's memory ledger refused its reservation")
+        raise RuntimeError("Sagebrush engine: conjugacy_classes_bin: %s" % text)
+    out, i = [], 10
+    for _ in range(int.from_bytes(r[6:10], "little")):
+        m, k = int.from_bytes(r[i:i + 4], "little"), int.from_bytes(r[i + 8:i + 16], "little")
+        if bytes(r[i + 4:i + 8]) != b"U641" or m != 12 + 8 * k:
+            raise RuntimeError("Sagebrush engine: a malformed SBW1 reply")
+        out.append(r[i + 16:i + 16 + 8 * k].cast("Q"))
+        i += 4 + m
+    if i != len(r):
+        raise RuntimeError("Sagebrush engine: a malformed SBW1 reply")
+    return out
+
+
+def _admit_output(count, n, what, order):
+    """The memory guard's refusal when the engine's output for count classes
+    of degree n doesn't fit a quarter of the heap."""
+    import _capacity
+    need, limit = count * _class_output_bytes(n), _capacity.heap_figure() // 4
+    if need > limit:
+        import _memguard
+        e = _memguard.memory_guard("Listing %s of a permutation group of order %d" % (what, order), need, limit, "one computation")
+        e.capacity = _capacity.capacity()
+        raise e
+
+
+def _refuse_class(k, held, per, limit, order):
+    """The memory guard's refusal of a conjugacy class's k-th element: k
+    elements and two candidates' charges, per bytes each, past the allowance
+    limit read when the listing began; held: the elements it holds."""
+    import _capacity, _memguard
+    e = _memguard.memory_guard("Listing a conjugacy class of a permutation group of order %d" % order, (k + 2) * per, limit, "one computation")
+    e.capacity = _capacity.capacity()
+    e.held_count = held
+    raise e
+
+
+class ConjugacyClass:
+    """A conjugacy class of a permutation group (Sage's ConjugacyClass): its
+    representative, its cardinality, membership and its elements.
+
+    EXAMPLES::
+
+        sage: G = SymmetricGroup(4)
+        sage: C = G.conjugacy_class(G('(1,2)')); C
+        Conjugacy class of cycle type [2, 1, 1] in Symmetric group of order 4! as a permutation group
+        sage: C.cardinality(), G('(3,4)') in C, G('(1,2,3)') in C
+        (6, True, False)
+    """
+
+    def __init__(self, group, rep, length=None):
+        self._group, self._rep, self._length, self._set = group, rep, length, None
+
+    def __repr__(self):
+        if isinstance(self._group, SymmetricGroup):
+            return "Conjugacy class of cycle type %s in %r" % (list(self._rep.cycle_type()), self._group)
+        return "Conjugacy class of %s in %r" % (self._rep, self._group)
+
+    def group(self):
+        return self._group
+
+    def representative(self):
+        return self._rep
+
+    def _elements(self):
+        """The class's elements' images: the conjugates of the
+        representative by the group's generators, closed under them."""
+        if self._set is None:
+            G = self._group
+            gens = [(g._im, tuple(sorted(range(G._n), key=lambda i: g._im[i]))) for g in G.gens()]
+            # (the class's length isn't known before it is listed: each new
+            # element is admitted before it is held, against the allowance
+            # read once, a quarter of the heap, less two elements' charges for
+            # the candidate conjugate built and tested beside those held: the
+            # one being built and, until it is, the one before it)
+            import _capacity
+            per, order = _held_bytes(G._n), int(G.order())
+            limit = _capacity.heap_figure() // 4
+            cap = (limit - 2 * per) // per
+            if cap < 1:
+                _refuse_class(1, 0, per, limit, order)
+            start = tuple(self._rep._im)
+            seen, queue = {start}, [start]
+            for x in queue:
+                for s, si in gens:
+                    # (s^-1 x s, left to right: i -> s[x[si[i]]])
+                    y = tuple(s[x[si[i]]] for i in range(G._n))
+                    if y not in seen:
+                        if len(queue) == cap:
+                            _refuse_class(cap + 1, cap, per, limit, order)
+                        seen.add(y)
+                        queue.append(y)
+                    y = None
+            self._set = seen
+        return self._set
+
+    def cardinality(self):
+        if self._length is None:
+            self._length = len(self._elements())
+        return _Int(self._length)
+
+    def __len__(self):
+        return int(self.cardinality())
+
+    def __contains__(self, g):
+        # (as Sage's: g made an element of the class's group first, which
+        # drops fixed points past its degree, or refuses g if it isn't one)
+        im = self._group(g)._im
+        return tuple(im) + tuple(range(len(im), self._group._n)) in self._elements()
+
+    def list(self):
+        """The elements, least first (Sagebrush's order, not GAP's)."""
+        return [self._group._elt(x) for x in sorted(self._elements())]
+
+    def __iter__(self):
+        return iter(self.list())
+
+
 class CycleTypeSample(dict):
     """Cycle types among random group elements: {cycle type: count in the
     sample}; not numbers of group elements (Sagebrush)."""
@@ -1031,6 +1295,43 @@ class SymmetricGroup(_Named):
 
     def __init__(self, n):
         pass
+
+    def _class_rows(self):
+        """GAP's classes of the symmetric group (Sage's), one for each cycle
+        type, without enumerating the group: the types ordered by their
+        cycle lengths above 1, largest first, compared lexicographically
+        ([], [2], [2, 2], [3], [3, 2], ...), each represented by its cycles
+        from the longest on 1, 2, ... in turn (checked against Sage 10.9 for
+        n up to 8).  One class for each partition of n, each a permutation
+        of n points: admitted by the memory guard."""
+        if "classes" not in self._cache:
+            import math
+            n = self._n
+            types = []
+            def parts(rest, top, acc):
+                if rest == 0:
+                    types.append(acc)
+                    return
+                for k in range(min(rest, top), 0, -1):
+                    parts(rest - k, k, acc + [k])
+            _admit_elements(_partitions_count(n), _row_bytes(n), "the conjugacy classes", math.factorial(n))
+            parts(n, n, [])
+            rows = []
+            for lam in types:
+                big = [k for k in lam if k > 1]
+                im, a = list(range(n)), 0
+                for k in big:
+                    for j in range(k):
+                        im[a + j] = a + (j + 1) % k
+                    a += k
+                length = math.factorial(n)
+                for k in set(lam):
+                    m = lam.count(k)
+                    length //= k ** m * math.factorial(m)
+                rows.append((big, tuple(im), length))
+            rows.sort(key=lambda t: t[0])
+            self._cache["classes"] = [(im, k) for _, im, k in rows]
+        return self._cache["classes"]
 
 
 class AlternatingGroup(_Named):
