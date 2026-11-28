@@ -8,6 +8,13 @@ def show(tag, f):
         r = f(); print(tag, "|", r.dtype.name, r.shape, r.tolist())
     except Exception as e:
         print(tag, "| !!", type(e).__name__, e)
+# a comparison's accumulate, refused but for bools: a fresh NumPy's TypeError and message (these rows first: after an
+# out= call NumPy's loop cache makes it a UFuncTypeError)
+for u in ("equal", "not_equal", "less", "less_equal", "greater", "greater_equal"):
+    show(f"{u}.accumulate ints", lambda: getattr(np, u).accumulate([1, 1, 2]))
+    show(f"{u}.accumulate floats", lambda: getattr(np, u).accumulate(np.array([1., 2.])))
+    show(f"{u}.accumulate bools", lambda: getattr(np, u).accumulate(np.array([True, False, True])))
+    show(f"{u}.accumulate empty bools", lambda: getattr(np, u).accumulate(np.array([], bool)))
 for f in (np.logical_or, np.logical_and, np.logical_xor):
     for x in (np.array([2, 0, 3], np.int32), np.array([-2., 1., 0.]), np.array([0, 0]), np.array([5], np.int8), np.array([], np.int32), np.array([[1, 0], [0, 0]], np.uint8)):
         show(f"{f.__name__} {x.dtype.name} {x.shape}", lambda: f.accumulate(x))
@@ -78,12 +85,13 @@ for u, x, odt in (("bitwise_or", np.array([1, 2], np.int8), np.float64), ("left_
                   ("equal", np.array([1, 2]), bool), ("equal", np.array([True, False]), bool), ("maximum", np.array([2], np.uint8), np.complex128)):
     show(f"{u}.accumulate out {np.dtype(odt).name}", lambda: (lambda o: (getattr(np, u).accumulate(x, out=o), o)[1])(np.full(2 if x.size == 2 else 1, 7, odt)))
     show(f"{u}.accumulate out {np.dtype(odt).name} untouched", lambda: (lambda o: (_try(lambda: getattr(np, u).accumulate(x, out=o)), o)[1])(np.full(2 if x.size == 2 else 1, 7, odt)))
-for u in ("equal", "less", "greater", "not_equal"):
-    show(f"{u}.accumulate ints", lambda: getattr(np, u).accumulate([1, 1, 2]))
-    show(f"{u}.accumulate bools", lambda: getattr(np, u).accumulate(np.array([True, False, True])))
-    show(f"{u}.accumulate empty bools", lambda: getattr(np, u).accumulate(np.array([], bool)))
 for u in ("left_shift", "floor_divide", "remainder", "maximum", "logical_xor"):
     show(f"{u}.accumulate bools", lambda: getattr(np, u).accumulate(np.array([True, False, True])))
+for u, odt in (("equal", bool), ("less", bool), ("not_equal", np.uint8), ("greater_equal", np.float64)):
+    try:
+        getattr(np, u).accumulate(np.array([1, 2]), out=np.zeros(2, odt))
+    except Exception as e:
+        print(f"{u}.accumulate out {np.dtype(odt).name} message |", type(e).__name__, e)
 # masked power: a weak scalar admitted first (its range); list and tuple operands; where=None computing no lane
 show("power masked weak -129", lambda: np.power(np.array([2, 3], np.int8), -129, out=np.array([7, 7], np.int8), where=False))
 show("power masked weak 300 uint8", lambda: np.power(np.array([2, 3], np.uint8), 300, out=np.array([7, 7], np.uint8), where=False))
@@ -107,3 +115,20 @@ for u in ("floor_divide", "remainder", "left_shift", "power", "add", "bitwise_an
     show(f"{u} bool scalars", lambda: getattr(np, u)(True, np.True_))
     show(f"{u} bool and int", lambda: getattr(np, u)(B, np.array([1, 2])))
     show(f"{u} dtype=bool", lambda: getattr(np, u)(B, B, dtype=bool))
+# masked power with an explicit dtype: the operands admitted against it under the casting rule before masked lanes
+# are replaced, as the unmasked call admits them (a weak -129 into int8 NumPy's OverflowError, a refused cast its
+# UFuncTypeError)
+for base in (np.int8, np.uint8):
+    for e in (-129, 300, -1, 2):
+        for dt in (np.int8, np.uint8, np.int64):
+            for casting in ("same_kind", "safe", "unsafe"):
+                for w in (False, [False, True]):
+                    if e == 300 and dt is np.int64:
+                        continue  # (2**300 wrapped in int64: past 2**53, which Sagebrush refuses)
+                    show(f"power masked {base.__name__} {e} dtype={dt.__name__} {casting} where={w}",
+                         lambda: (lambda o: (np.power(np.array([2, 3], base), e, dtype=dt, casting=casting, where=w, out=o), o)[1])(np.array([7, 7], dt)))
+for x in (np.array([1, 2], np.uint8), np.array([1., 2.], np.float32), np.array([1j, 2j])):
+    try:
+        np.greater.accumulate(x, out=np.zeros(2, bool))
+    except Exception as e:
+        print(f"greater.accumulate {x.dtype.name} out bool message |", type(e).__name__, e)

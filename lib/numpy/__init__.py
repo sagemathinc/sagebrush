@@ -868,6 +868,14 @@ class _NoValueType:
 _NoValue = _NoValueType()
 
 
+def _dtype_class(dt):
+    """NumPy's name of dt's DType class, as its loop errors print it: <class 'numpy.dtypes.Int64DType'>"""
+    dt = _dtype_of(dt)
+    k = {"b": "Bool", "i": "Int", "u": "UInt", "f": "Float", "c": "Complex"}.get(dt.kind)
+    name = k + ("" if dt.kind == "b" else str(dt.itemsize * 8)) if k else dt.name.capitalize()
+    return "<class 'numpy.dtypes.%sDType'>" % name
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -903,6 +911,9 @@ class ufunc:
                 args = tuple(asarray(x) if isinstance(x, (list, tuple)) else x for x in args)
                 if dtype is None:
                     self._result_dtype(args)
+                else:
+                    # (against the explicit dtype under the casting rule, as the computation would admit them)
+                    self._admit(args, self._loop(dtype), casting)
                 # (a scalar operand is in every lane: given as 1 only when no lane is computed)
                 none = not m.any()
                 args = tuple(_np.where3(m, x, array(1, dtype=x.dtype)) if isinstance(x, ndarray)
@@ -914,7 +925,7 @@ class ufunc:
             # in it; but a comparison's dtype names only its output, bool)
             dt = self._loop(dtype)
             if self._op not in _BOOL_OUT:
-                pairs = [self._cast_in(x, i, dt, casting) for i, x in enumerate(args)]
+                pairs = self._admit(args, dt, casting)
                 _out_cast(self.__name__, dt, out, casting)
                 r = self._apply_cast(pairs)
             else:
@@ -980,6 +991,13 @@ class ufunc:
         if dt.kind == "b" and op in ("positive", "sign"):
             raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types <class 'numpy.dtypes.BoolDType'> -> None" % self.__name__)
         return dt
+
+    def _admit(self, args, dt, casting):
+        """The inputs cast to the loop's dtype, as _cast_in casts each, in NumPy's order: a weak Python scalar's range
+        (its OverflowError) before an array's cast under the casting rule (its UFuncTypeError)"""
+        weak = [isinstance(x, (_builtins.bool, _builtins.int, _builtins.float, _builtins.complex)) and not isinstance(x, generic) for x in args]
+        done = {i: self._cast_in(x, i, dt, casting) for i, x in enumerate(args) if weak[i]}
+        return [done[i] if weak[i] else self._cast_in(x, i, dt, casting) for i, x in enumerate(args)]
 
     def _cast_in(self, x, i, dt, casting):
         """Input i cast to the loop's dtype, if the casting rule allows it"""
@@ -1134,7 +1152,11 @@ class ufunc:
             out = _one_out(out)
             if self._op in _BOOL_OUT and self._op not in ("logical_or", "logical_and", "logical_xor") and asarray(a).dtype.kind != "b":
                 # (a comparison's bool output is not its operands' dtype: NumPy's refusal, out untouched)
-                raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types" % self.__name__)
+                # (NumPy's: into a bool out, no loop of (bool, the input's dtype); into another, none of its dtype)
+                if out.dtype.kind != "b":
+                    raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
+                raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types (%s, %s) -> None"
+                                      % (self.__name__, _dtype_class(out.dtype), _dtype_class(asarray(a).dtype)))
             # (the loop NumPy resolves from out's dtype and the input's, no value computed: logical_or's bool one into a
             # bool out from ints, true_divide's float one into an int out; none, bitwise_or's into a float out, its
             # TypeError, out untouched)
@@ -1161,9 +1183,8 @@ class ufunc:
         # a comparison's, whose bool output is not its operands' dtype, refused but for bools; the first element cast
         # to it)
         if self._op in _BOOL_OUT and self._op not in ("logical_or", "logical_and", "logical_xor") and a.dtype.kind != "b":
-            # (NumPy's class: equal's a UFuncTypeError, the others' a TypeError)
-            raise (_UFuncTypeError if self._op == "equal" else TypeError)("the resolved dtypes are not compatible with %s.accumulate. Resolved (dtype(%r), dtype(%r), dtype('bool'))"
-                            % (self.__name__, a.dtype.name, a.dtype.name))
+            # (a fresh NumPy's refusal; only after an out= call does its loop cache make it a UFuncTypeError)
+            raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
         rdt = self._acc_loop(a.dtype, a.dtype)
         if a.shape[axis] == 0:
             return zeros(a.shape, rdt)  # (empty, of the loop's dtype and the operand's shape)
