@@ -129,3 +129,21 @@ Rational Field
 [ 1, 2, 3 ]
 Integer Ring
 [ 1, 1/2, 3, 1/4 ]
+
+>> print Insert([1,2], 2^30, 9);
+               ^
+Runtime error in 'Insert': Argument 2 (1073741824) is too large
+
+
+>> print Insert([1,2], true, 9);
+               ^
+Runtime error in 'Insert': Bad argument types
+Argument types given: SeqEnum[RngIntElt], BoolElt, RngIntElt
+
+
+>> print Insert([1,2], 3/1, 9);
+               ^
+Runtime error in 'Insert': Bad argument types
+Argument types given: SeqEnum[RngIntElt], FldRatElt, RngIntElt
+
+1000

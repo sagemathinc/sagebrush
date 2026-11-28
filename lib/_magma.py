@@ -9385,12 +9385,19 @@ def Insert(s, i, x):
         raise _bad_types("Insert", (s, i, x), _located("Insert"))
     if i < 1:
         raise MagmaError("Argument 2 must be positive", "'Insert'", True, _located("Insert"))
+    if i >= 1 << 30:
+        # (Magma's own bound on the position, said before anything is made)
+        raise MagmaError("Argument 2 (%d) is too large" % i, "'Insert'", True, _located("Insert"))
     x = _lift("Insert", s, x, "Cannot coerce element into the universe")
     s = _own(s) if isinstance(s, MSeq) else _as_seq(s)
-    # (past the end: undefined elements up to position i, as Magma's; a
-    # Python insert would put x at the end)
-    while len(s) < i - 1:
-        s.append(_UNDEF)
+    # (past the end: undefined elements up to position i, as Magma's (a
+    # Python insert would put x at the end), admitted by the collection
+    # bound before they are made, in one extend)
+    pad = i - 1 - len(s)
+    if pad > 0:
+        if len(s) + pad + 1 > _COLLECT_MAX:
+            raise _collect_refusal()
+        s.extend([_UNDEF] * pad)
     s.insert(i - 1, x)
     _settle(s)
     return s

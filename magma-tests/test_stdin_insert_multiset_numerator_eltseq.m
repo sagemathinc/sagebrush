@@ -48,3 +48,8 @@ U := Eltseq(Matrix(Rationals(),0,2,[])); print U, Universe(U);
 print Eltseq(N) cat [Rationals() | 7];
 Append(~S, 3); print S, Universe(S);
 Append(~T, 1/4); print T;
+// Insert's position: Magma's bound (2^30) and argument types
+print Insert([1,2], 2^30, 9);
+print Insert([1,2], true, 9);
+print Insert([1,2], 3/1, 9);
+print #Insert([1,2], 1000, 9);
