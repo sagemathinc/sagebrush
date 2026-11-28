@@ -95,6 +95,18 @@ show('repeated across mappings', lambda: kw(**{'a': 1}, **{'a': 2}))
 show('repeated value runs first', lambda: kw(**{'a': 1}, a=note('value', 2)))
 show('not a mapping', lambda: kw(a=1, **note('m', 3)))
 show('non-string key', lambda: kw(**{1: 2}))
+show('repeated in a run: the run runs first', lambda: kw(**{'a': 0}, a=note('dup'), b=note('later'), **note('m', {})))
+show('non-string key: later keywords run first', lambda: kw(**{1: 0}, a=note('later')))
+show('non-string key, then repeated', lambda: kw(**{1: 0}, **{'a': 1}, a=note('later')))
+show('non-string key, then a mapping', lambda: kw(**{1: 0}, **note('m2', {'x': 1})))
+
+
+class KeysMapping:
+    def keys(self): note('keys'); return [1, 'b']
+    def __getitem__(self, k): note('get %r' % (k,)); return 5
+
+
+show('a mapping with a non-string key, read whole', lambda: kw(**KeysMapping(), c=note('c')))
 
 
 # 4. range's callable loaded before its arguments
@@ -191,6 +203,20 @@ def class_repeat():
 
 
 show('class keyword repeated', class_repeat)
+
+
+def class_repeat_run():
+    class R(Base, **{'a': 0}, a=note('dup'), b=note('later')):
+        pass
+
+
+def class_non_string():
+    class R(Base, **{1: 0}, a=note('later')):
+        pass
+
+
+show('class keyword repeated in a run', class_repeat_run)
+show('class non-string key', class_non_string)
 
 
 def class_not_mapping():

@@ -652,11 +652,25 @@ export class Emitter {
     // before a later keyword's value runs and the names keep the call's order, as CPython's)
     const tf = this.temp(), tp = this.temp(), tn = this.temp(), tv = this.temp();
     const parts = [`${tf} = ${fn}`, `${tp} = ${pos}`, `${tn} = []`, `${tv} = []`];
+    // (a run of explicit keywords: its values all run, then it is merged, kwBatch; a mapping merged where it
+    // stands, keys that aren't strings kept for the call's check, kwStrings, as CPython's)
+    let run: [string, string][] = [];
+    const flush = () => {
+      if (run.length) parts.push(`R.kwBatch(${tn}, ${tv}, [${run.map((r) => r[0]).join(", ")}], [${run.map((r) => r[1]).join(", ")}], ${tf})`);
+      run = [];
+    };
     for (const k of e.keywords) {
-      if (k.arg === null) parts.push(`R.kwMerge(${tn}, ${tv}, ${this.ex(k.value)}, ${tf})`);
-      else parts.push(`R.kwPut(${tn}, ${tv}, ${q(k.arg)}, ${this.ex(k.value)}, ${tf})`);
+      if (k.arg === null) {
+        flush();
+        parts.push(`R.kwMerge(${tn}, ${tv}, ${this.ex(k.value)}, ${tf}, true)`);
+      } else {
+        const t = this.temp();
+        parts.push(`${t} = ${this.ex(k.value)}`);
+        run.push([q(k.arg), t]);
+      }
     }
-    return `(${parts.join(", ")}, callKw(${tf}, ${tp}, ${tn}, ${tv}))`;
+    flush();
+    return `(${parts.join(", ")}, R.kwStrings(${tn}), callKw(${tf}, ${tp}, ${tn}, ${tv}))`;
   }
 
   // globals(), locals(), vars(), dir(), eval() and exec() need the caller's
@@ -1270,10 +1284,23 @@ export class Emitter {
     } else {
       kwNames = this.temp();
       this.w(`${kwNames} = []; ${kv} = [];`);
+      let run: [string, string][] = [];
+      const flush = () => {
+        if (run.length) this.w(`R.kwBatch(${kwNames}, ${kv}, [${run.map((r) => r[0]).join(", ")}], [${run.map((r) => r[1]).join(", ")}], ${bc});`);
+        run = [];
+      };
       for (const k of st.keywords) {
-        if (k.arg === null) this.w(`R.kwMerge(${kwNames}, ${kv}, ${this.ex(k.value)}, ${bc});`);
-        else this.w(`R.kwPut(${kwNames}, ${kv}, ${q(k.arg)}, ${this.ex(k.value)}, ${bc});`);
+        if (k.arg === null) {
+          flush();
+          this.w(`R.kwMerge(${kwNames}, ${kv}, ${this.ex(k.value)}, ${bc}, true);`);
+        } else {
+          const t = this.temp();
+          this.w(`${t} = ${this.ex(k.value)};`);
+          run.push([q(k.arg), t]);
+        }
       }
+      flush();
+      this.w(`R.kwStrings(${kwNames});`);
     }
     const { lines, decls } = this.nested(scope, "", null, [], () => {
       const body = st.body;
