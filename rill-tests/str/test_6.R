@@ -9,3 +9,10 @@ formatC(2, digits = 0, width = 0)
 #-- formatC-string-width
 formatC("x", width = 0); formatC("x", digits = -1); formatC("x", digits = 1); formatC("x", digits = 3, width = 0)
 formatC(c("ab", "c"), digits = 5, width = -3)
+#-- formatC-integer-float-format
+formatC(12345L, format = "f"); formatC(12345L, format = "f", digits = NULL); formatC(12345L, format = "f", width = 0); formatC(12345L, format = "f", digits = 2)
+formatC(12345L, format = "e"); formatC(12345L, format = "e", digits = NULL); formatC(12345L, format = "e", width = 0); formatC(12345L, format = "e", digits = 2)
+formatC(12345L, format = "E"); formatC(12345L, format = "E", digits = NULL); formatC(12345L, format = "E", width = 0); formatC(12345L, format = "E", digits = 2)
+formatC(12345L, format = "g"); formatC(12345L, format = "g", digits = NULL); formatC(12345L, format = "g", width = 0); formatC(12345L, format = "g", digits = 2)
+formatC(12345L, format = "G"); formatC(12345L, format = "G", digits = NULL); formatC(12345L, format = "G", width = 0); formatC(12345L, format = "G", digits = 2)
+formatC(12345L); formatC(12345L, width = 0); formatC(2L, format = "f", width = 0); formatC(c(1L, NA), format = "e")

@@ -547,7 +547,8 @@ def formatC(sess, call, args):
         raise NotSupported("formatC(format = \"d\") of doubles")
     # (a double's precision is 4 when digits isn't given, in every format: R 4.5.3, formatC(3.14159) is "3.142",
     # formatC(1/3, format = "f") "0.3333", format = "e" "3.3333e-01")
-    if x.type == "double" and digits is None:
+    if form in ("f", "e", "E", "g", "G") and digits is None:
+        # (an integer's too: R 4.5.3, formatC(12345L, format = "g") is "1.234e+04", format = "f" "12345.0000")
         digits = 4
     if digits is not None and digits < 0:
         # (a negative digits is C's default precision, 6: R 4.5.3, formatC(1/3, digits = -1) is "0.333333", and
