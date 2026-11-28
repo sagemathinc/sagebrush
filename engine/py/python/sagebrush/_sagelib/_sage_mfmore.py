@@ -338,6 +338,76 @@ class QSpaceMethods:
         sage: res = lambda n, bits: n * (ms._SLOT + ms._INT + (bits + 7) // 8 + 8)  # sagebrush only
         sage: s["traces copy"] >= res(40, 0), s["rank scratch"] >= res(3 * 40, w), s["rank state"] >= res(40, w)  # sagebrush only
         (True, True, True)
+
+    Their lifetimes: an orbit's trace copy and rank state live in its own
+    frame (_orbit_rows) and are released by the caller once it has
+    returned, so they are still charged at its return; a dependent
+    translate lives in _translate's frame, still charged at its return and
+    released before the next translate; and when the trace bound doubles,
+    the previous rows stay charged through the next engine call. After it
+    all only the kept rows and their copies remain charged::
+
+        sage: def fresh(N):  # sagebrush only
+        ....:     for c in (sm._QBASIS, sm._NEWROWS):
+        ....:         for key in [key for key in c if key[0] == N]:
+        ....:             del c[key]
+        sage: log = []; orbit_rows, translate, engine = sm._orbit_rows, sm._translate, sm._mf  # sagebrush only
+        sage: def made(ch, start, step):  # sagebrush only
+        ....:     return sum(b for t, b in ch.steps[start:] if t == step)
+        sage: def orbit_spy(o, M, k, prec, bound, ch, pbits):  # sagebrush only
+        ....:     before, start = ch.used, len(ch.steps)
+        ....:     out = orbit_rows(o, M, k, prec, bound, ch, pbits)
+        ....:     log.append(("orbit", before, ch.used, out[1], made(ch, start, "traces copy") + made(ch, start, "rank state")))
+        ....:     return out
+        sage: def translate_spy(t, m, M, k, prec, ech, ch, pbits):  # sagebrush only
+        ....:     before, start = ch.used, len(ch.steps)
+        ....:     v, vres = translate(t, m, M, k, prec, ech, ch, pbits)
+        ....:     log.append(("translate", before, ch.used, v is None, made(ch, start, "translate")))
+        ....:     return v, vres
+        sage: sm._orbit_rows, sm._translate = orbit_spy, translate_spy  # sagebrush only
+        sage: fresh(37); ch = ms._Charge("A check"); ch.steps = []  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = sm._new_cusp_rows(37, 2, 30)
+        sage: orbits = [e for e in log if e[0] == "orbit"]; len(orbits)  # sagebrush only
+        2
+        sage: all(after - before >= held + scratch for _, before, after, held, scratch in orbits)  # sagebrush only
+        True
+        sage: orbits[1][1] - orbits[0][1] == orbits[0][2] - orbits[0][1] - orbits[0][4]  # (the first orbit's copy and state released just after it)  # sagebrush only
+        True
+        sage: log.clear(); fresh(103)  # sagebrush only
+        sage: ch = ms._Charge("A check"); ch.steps = []  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = sm._new_cusp_rows(103, 2, 10)
+        sage: tr = [e for e in log if e[0] == "translate"]; i = next(i for i, e in enumerate(tr) if e[3])  # sagebrush only
+        sage: tr[i][2] - tr[i][1] == tr[i][4], tr[i + 1][1] == tr[i][1]  # (dependent: charged at return, released before the next)  # sagebrush only
+        (True, True)
+        sage: calls = []  # sagebrush only
+        sage: class Engine:  # sagebrush only
+        ....:     def __getattr__(self, name):
+        ....:         f = getattr(engine, name)
+        ....:         if name != "newforms":
+        ....:             return f
+        ....:         def newforms(*a, **kw):
+        ....:             calls.append(ms._CUR[0].used)
+        ....:             return f(*a, **kw)
+        ....:         return newforms
+        sage: shorted = []  # sagebrush only
+        sage: def short_once(*a):  # sagebrush only
+        ....:     out = orbit_spy(*a)
+        ....:     if not shorted:
+        ....:         shorted.append(out[1])
+        ....:         return out[0], out[1], True, out[3]
+        ....:     return out
+        sage: sm._mf, sm._orbit_rows = Engine(), short_once; fresh(11); ch = ms._Charge("A check"); ch.steps = []  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = sm._new_cusp_rows(11, 2, 30)
+        sage: traces = [b for t, b in ch.steps if t == "traces"]; len(calls), len(traces)  # sagebrush only
+        (3, 3)
+        sage: calls[2] - calls[1] >= traces[2] + shorted[0] - traces[0]  # (the bound doubled; the first bound's traces and rows still charged at the next call)  # sagebrush only
+        True
+        sage: ch.used == sum(ms._row_bytes(r) for r in sm._NEWROWS[(11, 2)][1]) + len(sm._NEWROWS[(11, 2)][1]) * 30 * ms._SLOT  # sagebrush only
+        True
+        sage: sm._orbit_rows, sm._translate, sm._mf = orbit_rows, translate, engine  # sagebrush only
     """
 
     def _all_cusp(self):

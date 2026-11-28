@@ -1519,11 +1519,66 @@ def _new_cusp_rows(M, k, prec):
         return _new_cusp_rows_charged(M, k, prec, key, ch)
 
 
+def _orbit_rows(o, M, k, prec, bound, ch, pbits):
+    """One orbit's independent Hecke translates of its trace form: (rows,
+    their bytes, whether the traces ran short, the bytes of the orbit's
+    trace copy and rank state, for the caller to release once this frame,
+    and they with it, is gone)."""
+    import _sage_modsym as ms
+    r = int(o["dim"])
+    # (the orbit's traces, copied: at Deligne's bound; and below, its modular
+    # rank state, a row of prec residues per kept translate)
+    tres = _step(ch, "traces copy", _reserve_rows(ch, 1, len(o["traces"]) + 1, _deligne_bits(k, bound, r), frac=False))
+    t = [0] + [int(x) for x in o["traces"]]
+    ech = _ModpEchelon()
+    rows, held, state = [], 0, 0
+    m = got = 0
+    while got < r:
+        m += 1
+        if (prec - 1) * m >= len(t):
+            return rows, held, True, _step(ch, "rank state", state) + tres
+        if m > 64 * r + 64:
+            raise RuntimeError("internal error: the Hecke translates of orbit %s of level %d weight %d stopped at rank %d of %d"
+                               % (o.get("letter"), M, k, got, r))
+        v, vres = _translate(t, m, M, k, prec, ech, ch, pbits)
+        if v is None:
+            # (a dependent translate, gone with _translate's frame: released)
+            ch.give(vres)
+            continue
+        # (kept: settled to its size, and its residues kept in the rank state)
+        rows.append(v)
+        got += 1
+        b = ms._row_bytes(v)
+        held += b
+        d = vres - b
+        if d >= 0:
+            ch.give(d)
+        else:
+            ch.take(-d)
+        state += _reserve_rows(ch, 1, prec, pbits, frac=False)
+    return rows, held, False, _step(ch, "rank state", state) + tres
+
+
+def _translate(t, m, M, k, prec, ech, ch, pbits):
+    """(T_m of the trace form t, the bytes reserved for it) when it raises
+    the rank in ech, else (None, those bytes)."""
+    import _sage_modsym as ms
+    before = ch.used
+    v = _hecke_qexp(t, m, M, k, prec)
+    vres = _step(ch, "translate", ch.used - before)
+    # (the rank test's scratch: v's integers, then at most three rows of
+    # residues at once, its reduction and normalized row)
+    sres = _step(ch, "rank scratch", _reserve_rows(ch, 1, prec, ms._maxbits(v), frac=False) + _reserve_rows(ch, 3, prec, pbits, frac=False))
+    added = ech.add([int(x) for x in v])
+    ch.give(sres)
+    return (v if added else None), vres
+
+
 def _new_cusp_rows_charged(M, k, prec, key, ch):
     nd = _mf_engine_dims(M, k)["new"]
     # (the engine's traces: at most nd orbits, prec coefficients each, at
     # Deligne's bound)
-    held = _reserve_rows(ch, nd, prec + 1, _deligne_bits(k, prec, nd), frac=False)
+    held = _step(ch, "traces", _reserve_rows(ch, nd, prec + 1, _deligne_bits(k, prec, nd), frac=False))
     data = _mf.newforms(M, k, None, bound=prec)
     orbits = data["newforms"] if isinstance(data, dict) else data
     # (the translates T_1, ..., T_m of an orbit of dimension r reached rank r
@@ -1533,57 +1588,22 @@ def _new_cusp_rows_charged(M, k, prec, key, ch):
     bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1
     import _sage_modsym as ms
     while True:
-        res = _reserve_rows(ch, nd, bound + 1, _deligne_bits(k, bound, nd), frac=False)
+        res = _step(ch, "traces", _reserve_rows(ch, nd, bound + 1, _deligne_bits(k, bound, nd), frac=False))
         data = _mf.newforms(M, k, None, bound=bound)
-        # (the previous traces and rows are dropped)
+        orbits = data["newforms"] if isinstance(data, dict) else data
+        # (the previous traces and rows are dropped, then released; the
+        # previous orbits' trace copies and rank states went with their
+        # frames, released as each returned)
+        rows, short = [], False
         ch.give(held)
         held = res
-        orbits = data["newforms"] if isinstance(data, dict) else data
-        rows, short = [], False
         pbits = _WORD_PRIME.bit_length()
         for o in orbits:
-            r = int(o["dim"])
-            # (the orbit's traces, copied: at Deligne's bound; and below, its
-            # modular rank state, a row of prec residues per kept translate:
-            # both charged until the orbit is done)
-            tres = _step(ch, "traces copy", _reserve_rows(ch, 1, len(o["traces"]) + 1, _deligne_bits(k, bound, r), frac=False))
-            t = [0] + [int(x) for x in o["traces"]]
-            ech = _ModpEchelon()
-            state = 0
-            m = got = 0
-            while got < r:
-                m += 1
-                if (prec - 1) * m >= len(t):
-                    short = True
-                    break
-                if m > 64 * r + 64:
-                    raise RuntimeError("internal error: the Hecke translates of orbit %s of level %d weight %d stopped at rank %d of %d"
-                                       % (o.get("letter"), M, k, got, r))
-                before = ch.used
-                v = _hecke_qexp(t, m, M, k, prec)
-                vres = ch.used - before
-                # (the rank test's scratch: v's integers, then at most three
-                # rows of residues at once, its reduction and normalized row)
-                sres = _step(ch, "rank scratch", _reserve_rows(ch, 1, prec, ms._maxbits(v), frac=False) + _reserve_rows(ch, 3, prec, pbits, frac=False))
-                added = ech.add([int(x) for x in v])
-                ch.give(sres)
-                if added:
-                    # (kept: settled to its size, and its residues kept in the
-                    # rank state; dropped: released)
-                    rows.append(v)
-                    got += 1
-                    b = ms._row_bytes(v)
-                    held += b
-                    d = vres - b
-                    if d >= 0:
-                        ch.give(d)
-                    else:
-                        ch.take(-d)
-                    state += _reserve_rows(ch, 1, prec, pbits, frac=False)
-                else:
-                    ch.give(vres)
-            # (the orbit's traces and rank state are dropped)
-            ch.give(_step(ch, "rank state", state) + tres)
+            orows, oheld, short, scratch = _orbit_rows(o, M, k, prec, bound, ch, pbits)
+            # (the orbit's traces and rank state went with its frame)
+            ch.give(scratch)
+            rows += orows
+            held += oheld
             if short:
                 break
         if not short:
