@@ -868,18 +868,53 @@ class _NoValueType:
 _NoValue = _NoValueType()
 
 
+def _initial_in(initial, rdt):
+    """A reduction's initial= in its accumulator's dtype rdt, as NumPy converts it: into an integer dtype a Python int,
+    bool or float (truncated) is a Python int, out of range NumPy's OverflowError, and so is a NumPy scalar into a
+    signed dtype; a NumPy scalar into an unsigned dtype is cast; into any other dtype a cast"""
+    # (a Python complex into a real dtype: NumPy converts it by int() or float(), whose TypeError it raises; into bool
+    # its truth; a NumPy complex scalar is cast, below, its imaginary part dropped with the ComplexWarning)
+    if isinstance(initial, _builtins.complex) and not isinstance(initial, generic) and rdt.kind != "c":
+        if rdt.kind == "b":
+            return bool_(initial)
+        if rdt.kind in "iu":
+            raise TypeError("int() argument must be a string, a bytes-like object or a real number, not 'complex'")
+        raise TypeError("float() argument must be a string or a real number, not 'complex'")
+    if rdt.kind in "iu" and not isinstance(initial, ndarray) and not (isinstance(initial, generic) and rdt.kind == "u"):
+        if isinstance(initial, (_builtins.int, _builtins.float, generic)) and not isinstance(initial, (complexfloating, _builtins.complex)):
+            return array(_builtins.int(initial), dtype=rdt)[()]
+    return asarray(initial).astype(rdt)[()]
+
+
+def _ufunc_where(where):
+    """A ufunc's where= as its bool mask, as NumPy's _wheremask_converter makes it: an array only by a safe cast (a bool
+    array; an integer or float one a TypeError, before anything is computed or written), any other value (a list, a
+    Python or NumPy scalar) converted as np.array(where, dtype=bool) converts it"""
+    if where is True:
+        return True
+    if where is None:
+        # (np.array(None, dtype=bool): False, so nothing is written)
+        return array(False)
+    if isinstance(where, ndarray) and where.dtype.kind != "b":
+        what = "scalar" if where.ndim == 0 else "array data"
+        raise TypeError(f"Cannot cast {what} from {where.dtype!r} to dtype('bool') according to the rule 'safe'")
+    return array(where, dtype=bool_)
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
         self.nin = nin
         self.nout = 1
         self._op = op or name
-        self.identity = identity
+        # (NumPy's ufunc.identity: the reduction's start, add's 0 to hypot's 0, None where there is none)
+        self.identity = identity if identity is not None else {"hypot": 0}.get(self._op, self._IDENTITY.get(self._op))
 
     def __repr__(self):
         return "<ufunc '%s'>" % self.__name__
 
     def __call__(self, *args, out=None, dtype=None, where=True, casting="same_kind", **kw):
+        where = _ufunc_where(where)
         if len(args) != self.nin:
             if len(args) == self.nin + 1 and out is None:
                 out = args[-1]
@@ -941,7 +976,9 @@ class ufunc:
         op = self._op
         if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
                 else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
-                else dt.kind == "c" and op in ("floor_divide", "remainder")):
+                else (dt.kind in "bc" and op in ("floor_divide", "remainder", "fmod")) or (dt.kind == "b" and op in ("power", "subtract"))):
+            if op == "subtract":
+                raise TypeError("numpy boolean subtract, the `-` operator, is not supported, use the bitwise_xor, the `^` operator, or the logical_xor function instead.")
             raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
         return dt
 
@@ -1020,6 +1057,12 @@ class ufunc:
             _reduce_out_check(self.__name__, asarray(a), axis, keepdims, out)
             if dtype is None:
                 dtype = result_type(asarray(a).dtype, out.dtype)
+                # (a ufunc with no loop in that dtype (hypot, logical_and into an int out): its own loop, the result
+                # converted into out)
+                try:
+                    self._loop(dtype)
+                except TypeError:
+                    dtype = None
             if self._op in ("maximum", "minimum", "fmax", "fmin") and initial in (None, _NoValue) and where is True:
                 r = _into_two_steps(a, axis, out, keepdims, self._op in ("maximum", "fmax"), self._op in ("fmax", "fmin"),
                                     _dtype_of(dtype))
@@ -1030,6 +1073,19 @@ class ufunc:
         if initial is _NoValue:
             initial = None
         a = asarray(a)
+        # (NumPy's order: the mask's conversion, the loop resolved (none, as a bool subtract's or dtype=bool's for
+        # floor_divide, its TypeError), then several axes refused for a ufunc that isn't reorderable, before the mask
+        # is broadcast)
+        if where is not True:
+            _ufunc_where(where)
+        if isinstance(axis, tuple) and len(axis) > 1 or (axis is None and a.ndim > 1):
+            if self._op not in self._REORDERABLE:
+                if dtype is not None:
+                    self._loop(dtype)
+                else:
+                    with errstate(all="ignore"):
+                        self(ones(1, a.dtype), ones(1, a.dtype))
+                raise ValueError("reduction operation '%s' is not reorderable, so at most one axis may be specified" % self.__name__)
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
         masked = where is not True and self._op in ("add", "multiply", "maximum", "minimum")
@@ -1047,7 +1103,7 @@ class ufunc:
                     a = a.astype(dt)
                 finally:
                     _np._cast_label(old)
-        if self._op in quick and (initial is None or masked) and not (dtype is not None and _wraps_in(self._op, dt)):
+        if self._op in quick and (where is True or masked) and (initial is None or masked) and not (dtype is not None and _wraps_in(self._op, dt)):
             # (a sum without an identity starts from its first element: a product's 1 changes nothing; a where= mask
             # goes to the functions that take it, #2088)
             kw = {"initial": None} if first and self._op == "add" else {}
@@ -1066,27 +1122,71 @@ class ufunc:
                 if r.ndim == 0:
                     r = r[()]
             return r
+        # (every other reduction: one fold, where= read too)
+        return self._fold(a, axis, dtype, keepdims, initial, None if where is True else _where_mask(a, where, axis))
+
+    # (the ufuncs whose reduction has an identity: a masked or empty reduction's start without initial)
+    _IDENTITY = {"add": 0, "multiply": 1, "logical_or": False, "logical_and": True, "logical_xor": False,
+                 "bitwise_or": 0, "bitwise_xor": 0, "bitwise_and": -1, "hypot": 0, "logaddexp": -inf}
+    # (the ufuncs whose reduction may take several axes at once, NumPy's reorderable ones)
+    _REORDERABLE = frozenset(("add", "multiply", "logical_or", "logical_and", "logical_xor", "bitwise_or", "bitwise_xor",
+                              "bitwise_and", "maximum", "minimum", "fmax", "fmin", "hypot", "logaddexp", "gcd", "lcm"))
+
+    def _fold(self, a, axis, dtype, keepdims, initial, mask):
+        """reduce's general case, as NumPy's: the reduced axes (several only for a reorderable ufunc; a 0-d array's
+        axis 0 or -1 reduces over none) folded in order; each result from initial (cast to the reduction's own dtype,
+        a Python int out of its range NumPy's OverflowError), else from the ufunc's identity where it needs one (a
+        mask, no elements; none is NumPy's ValueError), else from the first element; a mask (where=, broadcast to a,
+        checked first) takes in only the elements it keeps"""
         nd = a.ndim
-        if axis is None:
-            a, axis = a.ravel(), 0
-        a = moveaxis(a, axis, 0)
-        if a.shape[0] == 0:
-            # (the identity, or initial, in dtype, for each of the other axes)
-            ident = initial if initial is not None else {"add": 0, "multiply": 1}.get(self._op)
-            if ident is None:
-                raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
-            acc = full(a.shape[1:], ident, dtype=dt if dtype is not None else None)
-            if acc.ndim == 0 and not keepdims:
-                return acc[()]
+        if nd == 0 and axis is not None:
+            for x in (axis if isinstance(axis, tuple) else (axis,)):
+                _axes(zeros(1), x)
+            axes = ()
         else:
-            acc = a[0] if initial is None else self(initial, a[0])
-            if a.shape[0] == 1 and isinstance(acc, ndarray):
-                acc = acc.copy()  # (a view of the input otherwise: the result is new, CORR-904-1)
-            for i in range(1, a.shape[0]):
-                acc = self(acc, a[i])
+            axes = _axes(a, axis)
+        # (several axes for a ufunc that isn't reorderable: refused by reduce, before the mask)
+        m = None if mask is None else broadcast_to(mask, a.shape)
+        rest = [k for k in range(nd) if k not in axes]
+        order = list(axes) + rest
+        rshape = tuple(a.shape[k] for k in rest)
+        rn = 1
+        for k in axes:
+            rn *= a.shape[k]
+        t = a.transpose(order).reshape((rn,) + rshape)
+        mt = None if m is None else m.transpose(order).reshape((rn,) + rshape)
+        own = initial is not None
+        # (the accumulator's dtype, the loop's, as NumPy resolves it first (a bool subtract's TypeError before the
+        # identity's ValueError): the ufunc's on two of the input's elements (already in dtype, if given), true_divide's
+        # float64 on ints, an add or multiply of bools or small ints in the default int, uint64 if unsigned, as np.sum's;
+        # each element, the first too, taken into it)
+        with errstate(all="ignore"):
+            one = ones(1, a.dtype)
+            rdt = asarray(self(one, one)).dtype
+        if dtype is None and self._op in ("add", "multiply") and rdt.kind in "biu" and rdt.itemsize < 8:
+            rdt = _dtype_of("uint64" if rdt.kind == "u" else "int64")
+        t = t.astype(rdt) if t.dtype != rdt else t
+        if initial is None and (m is not None or rn == 0):
+            initial = self._IDENTITY.get(self._op)
+            if initial is None:
+                if m is not None:
+                    raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to specify 'initial'" % self.__name__)
+                raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
+        if initial is not None:
+            # (initial given: converted as NumPy converts it, _initial_in; the ufunc's own identity, bitwise_and's -1,
+            # stored as NumPy stores it, all bits set in an unsigned dtype too)
+            init = _initial_in(initial, rdt) if own else asarray(initial).astype(rdt)[()]
+            acc = full(rshape, init, dtype=rdt)
+            start = 0
+        else:
+            acc = t[0].copy() if isinstance(t[0], ndarray) else t[0]
+            start = 1
+        for k in range(start, rn):
+            acc = self(acc, t[k]) if mt is None else where(mt[k], self(acc, t[k]), acc)
+        acc = asarray(acc)
         if keepdims:
-            acc = asarray(acc).reshape((1,) * nd) if a.ndim == 1 else expand_dims(acc, axis)
-        return acc
+            acc = acc.reshape(tuple(1 if k in axes else a.shape[k] for k in range(nd)))
+        return acc[()] if acc.ndim == 0 else acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
         if asarray(a).ndim == 0:
@@ -1153,14 +1253,14 @@ class ufunc:
             # (the flat position's index in a, C order)
             i = []
             for n in reversed(shape):
-                p, c = divmod(p, n)
+                p, c = _builtins.divmod(p, n)
                 i.append(c)
             i = tuple(reversed(i))
             r = self(a[i]) if self.nin == 1 else self(a[i], bs[k])
             a[i] = asarray(r).astype(a.dtype)[()]
 
 
-_BINARY = ["add", "subtract", "multiply", "true_divide", "floor_divide", "remainder", "power",
+_BINARY = ["add", "subtract", "multiply", "true_divide", "floor_divide", "remainder", "fmod", "power",
            "maximum", "minimum", "fmax", "fmin", "arctan2", "hypot", "copysign", "logaddexp",
            "equal", "not_equal", "less", "less_equal", "greater", "greater_equal",
            "logical_and", "logical_or", "logical_xor", "bitwise_and", "bitwise_or", "bitwise_xor",
@@ -1183,6 +1283,96 @@ bitwise_not = bitwise_invert = invert
 pow = power
 acos, asin, atan, atan2 = arccos, arcsin, arctan, arctan2
 acosh, asinh, atanh = arccosh, arcsinh, arctanh
+
+
+class _ufunc2(ufunc):
+    """A ufunc of two outputs, each another ufunc's: divmod, floor_divide and
+    remainder in one call, as NumPy's"""
+    def __init__(self, name, first, second):
+        ufunc.__init__(self, name, 2)
+        self.nout = 2
+        self._parts = (first, second)
+
+    def __call__(self, *args, out=None, **kw):
+        # (no bool loop: refused in divmod's own name, before its parts are asked)
+        if kw.get("dtype") is not None and _dtype_of(kw["dtype"]).kind == "b":
+            raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
+        if len(args) in (3, 4) and out is not None:
+            raise TypeError("cannot specify 'out' as both a positional and keyword argument")
+        if len(args) < 2 or len(args) > 4:
+            raise TypeError("%s() takes from 2 to 4 positional arguments but %d %s given"
+                            % (self.__name__, len(args), "was" if len(args) == 1 else "were"))
+        if len(args) > 2:
+            out = args[2:] + (None,) * (4 - len(args))
+            args = args[:2]
+        if out is None:
+            out = (None, None)
+        elif not isinstance(out, tuple):
+            raise TypeError("'out' must be a tuple of arrays")
+        elif len(out) != 2:
+            raise ValueError("The 'out' tuple must have exactly one entry per ufunc output")
+        for o in out:
+            if o is not None and not isinstance(o, ndarray):
+                raise TypeError("return arrays must be of ArrayType")
+        _out_writeable(out)
+        where = kw.pop("where", True)
+        if where is not True:
+            # (a copy, so a mask that is also an out is read as it was, as NumPy reads it, after the first write too)
+            where = _ufunc_where(where)
+        # (both results computed before either out is written, so an out that is also an input is read as it was; every
+        # out checked first, so a refusal leaves them all as they were)
+        res = [f(*args, **kw) for f in self._parts]
+        outs = [o for o in out if o is not None]
+        # (the loop's shape, as NumPy's iterator makes it: the inputs', every out's and where='s)
+        ws = [] if where is True else [asarray(where).shape]
+        full = None
+        if outs or ws:
+            shapes = [asarray(x).shape for x in args] + [o.shape for o in outs] + ws
+            try:
+                full = broadcast_shapes(*shapes)
+            except ValueError:
+                raise ValueError("operands could not be broadcast together with shapes %s "
+                                 % " ".join(_shape_text(t) for t in shapes)) from None
+            for o in outs:
+                if o.shape != full:
+                    raise ValueError("non-broadcastable output operand with shape %s doesn't match the broadcast shape %s"
+                                     % (_shape_text(o.shape), _shape_text(full)))
+        got = [None, None]
+        # (the order NumPy 2.5's loops write in, which shows when one array is given as both outs: the quotient first,
+        # so it ends with the remainder, except a float loop into outs of its own dtype, which ends with the quotient)
+        dt = asarray(res[0]).dtype
+        for k in ((1, 0) if dt.kind == "f" and _builtins.all(o.dtype == dt for o in outs) else (0, 1)):
+            o, r = out[k], res[k]
+            if o is not None:
+                o[...] = r if where is True else _np.where3(where, r, o)
+            elif full is not None and asarray(r).shape != full:
+                # (an out or where= can drive the loop's shape, as NumPy's iterator: a None slot's new array has it too)
+                o = broadcast_to(asarray(r), full).copy()
+            got[k] = r if o is None else o
+        return tuple(got)
+
+    def reduce(self, *args, **kw):
+        raise ValueError("reduce only supported for functions returning a single value")
+
+    def accumulate(self, *args, **kw):
+        raise ValueError("accumulate only supported for functions returning a single value")
+
+    def reduceat(self, *args, **kw):
+        raise ValueError("reduceat only supported for functions returning a single value")
+
+    def at(self, *args, **kw):
+        raise ValueError("Only single output ufuncs supported at this time")
+
+
+divmod = _ufunc2("divmod", floor_divide, remainder)
+
+
+def fix(x, out=None):
+    # (deprecated in NumPy 2.5, with this warning: np.trunc's values, dtype and errors)
+    import warnings
+    warnings.warn("numpy.fix is deprecated. Use numpy.trunc instead, which is faster and follows the Array API standard.",
+                  DeprecationWarning, stacklevel=2)
+    return trunc(x, out=out)
 
 
 def float_power(x, y):
@@ -1518,7 +1708,12 @@ def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, wh
     # (without an identity, each sum starts from its first element, as NumPy's)
     r = _np.sum(a, axis, keepdims, dtype, initial is None, m)
     if initial is not None and initial is not _NoValue:
-        r = r + initial
+        # (initial in the sum's own dtype, converted as NumPy converts it: int8 data with initial=1.5 sums to int64 153)
+        rdt = asarray(r).dtype
+        r = r + _initial_in(initial, rdt)
+        if asarray(r).dtype != rdt:
+            r = asarray(r).astype(rdt)
+            r = r[()] if r.ndim == 0 else r
     return _out(r, out, "reduce")
 
 
@@ -1710,14 +1905,16 @@ def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
             raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
                              "specify 'initial'" % ("maximum" if is_max else "minimum"))
         return (_np.amax if is_max else _np.amin)(a, axis, keepdims, None, first)
-    # (a scalar, converted as NumPy converts it: by float() into a float dtype, so its messages are float()'s; a
-    # plain float into float64 needs no array; the runtime's fold starts from it)
+    # (a scalar, converted as NumPy converts it, _initial_in: a Python number checked against the dtype's range, a
+    # NumPy scalar cast into an unsigned one, np.int64(-3) into uint8 253; a plain float into float64 needs no array;
+    # the runtime's fold starts from it)
     if type(initial) is float and a.dtype.name == "float64":
         ini = initial
     else:
         if isinstance(initial, (list, tuple)) or (isinstance(initial, ndarray) and initial.ndim != 0):
             raise ValueError("setting an array element with a sequence.")
-        ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype).item()
+        ini = _initial_in(initial, a.dtype)
+        ini = ini.item() if isinstance(ini, generic) else ini
     if mask is not True:
         # (a masked element takes no part: a float one is filled with -inf for max, +inf for min, which loses to
         # any element or initial and ties only itself, so it cannot settle a tie such as +0 against -0; an integer
@@ -1821,10 +2018,16 @@ def ptp(a, axis=None, out=None, keepdims=False):
 
 
 def all(a, axis=None, out=None, keepdims=False, *, where=True):
+    # (where= as logical_and.reduce takes it: the masked elements count as True)
+    if where is not True:
+        return _out(logical_and.reduce(asarray(a), axis=axis, keepdims=keepdims, where=where), out, "reduce")
     return _out(_np.all(asarray(a), axis, keepdims), out, "reduce")
 
 
 def any(a, axis=None, out=None, keepdims=False, *, where=True):
+    # (where= as logical_or.reduce takes it: the masked elements count as False)
+    if where is not True:
+        return _out(logical_or.reduce(asarray(a), axis=axis, keepdims=keepdims, where=where), out, "reduce")
     return _out(_np.any(asarray(a), axis, keepdims), out, "reduce")
 
 
@@ -2557,7 +2760,7 @@ def array_split(ary, indices_or_sections, axis=0):
     n = a.shape[axis]
     if isinstance(indices_or_sections, int):
         k = indices_or_sections
-        each, extra = divmod(n, k)
+        each, extra = _builtins.divmod(n, k)
         bounds = [0]
         for i in range(k):
             bounds.append(bounds[-1] + each + (1 if i < extra else 0))
@@ -3982,11 +4185,11 @@ def _m_std(self, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, whe
 
 
 def _m_all(self, axis=None, out=None, keepdims=False, *, where=True):
-    return all(self, axis, out, keepdims)
+    return all(self, axis, out, keepdims, where=where)
 
 
 def _m_any(self, axis=None, out=None, keepdims=False, *, where=True):
-    return any(self, axis, out, keepdims)
+    return any(self, axis, out, keepdims, where=where)
 
 
 def _m_argsort(self, axis=-1, kind=None, order=None, *, stable=None):

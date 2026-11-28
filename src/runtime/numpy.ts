@@ -376,6 +376,7 @@ const BIG_OPS: Record<string, (a: bigint, b: bigint) => bigint> = {
   square: (a) => a * a,
   floor_divide: bdiv,
   remainder: (a, b) => (b === 0n ? 0n : a - bdiv(a, b) * b),
+  fmod: (a, b) => (b === 0n ? 0n : a % b),
   bitwise_and: (a, b) => a & b,
   bitwise_or: (a, b) => a | b,
   bitwise_xor: (a, b) => a ^ b,
@@ -383,6 +384,9 @@ const BIG_OPS: Record<string, (a: bigint, b: bigint) => bigint> = {
   right_shift: (a, b) => (b < 0n || b >= 64n ? (a < 0n ? -1n : 0n) : a >> b),
   maximum: (a, b) => (a > b ? a : b),
   minimum: (a, b) => (a < b ? a : b),
+  // (on integers, which have no NaN, fmax and fmin are maximum and minimum)
+  fmax: (a, b) => (a > b ? a : b),
+  fmin: (a, b) => (a < b ? a : b),
   // (modulo 2**64 as it goes: a huge exponent stays cheap)
   power: (a, b) => {
     let r = 1n, x = a & MASK64, e = b;
@@ -1539,6 +1543,9 @@ const BIN: Record<string, { f: Bin; c?: CBin; out?: "bool" | "float"; int?: Bin;
   true_divide: { f: (x, y) => x / y, out: "float", c: cdiv },
   floor_divide: { f: (x, y) => fdivmod(x, y)[0], int: (x, y) => (y === 0 ? 0 : Math.floor(x / y)) },
   remainder: { f: (x, y) => fdivmod(x, y)[1], int: (x, y) => (y === 0 ? 0 : x - Math.floor(x / y) * y) },
+  // (C's fmod, as NumPy's: the remainder of the quotient truncated toward zero, with the dividend's sign; JavaScript's %
+  // is it exactly. An integer one: 0 for a zero divisor, as NumPy's; an int64 or uint64 one exactly, BIG_OPS's)
+  fmod: { f: (x, y) => x % y, int: (x, y) => (y === 0 ? 0 : x % y) },
   power: { f: glibcPow, c: cpow, int: ipow },
   maximum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.max(x, y)) },
   minimum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.min(x, y)) },
@@ -1768,6 +1775,7 @@ function stridedKernel(op: string): any {
 // and shape (out C-contiguous from its start and sharing no memory with the
 // operands unless it is one of them, laid out alike): else undefined, before
 // anything is computed.
+const BOOL_INT8_OPS = new Set(["power", "floor_divide", "remainder", "fmod"]);
 export function binary(op: string, x: any, y: any, out: NDArray | null = null, tryOut = false): any {
   const spec = BIN[op];
   if (out) outWritable(out);
@@ -1804,7 +1812,8 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && w.big !== undefined && !Number.isFinite(w.v) && ct.kind === "f") raise(T.OverflowError, "int too large to convert to float");
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkWeak(ct, w);
   if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatLoop(op, A, B, ct);
-  if (op === "power" && ct.kind === "b") ct = D.int8;
+  // (bool arithmetic NumPy has no bool loop for runs in int8, as NumPy's: power, and floor_divide, remainder and fmod)
+  if (BOOL_INT8_OPS.has(op) && ct.kind === "b") ct = D.int8;
   const rt = spec.out === "bool" ? D.bool : ct;
   // (a Python scalar takes a float32 loop's type before the loop runs, as NumPy casts it: 0.1 is the float32
   // nearest 0.1, so a float32 array times 0.1 rounds each product of two float32 values, and a comparison

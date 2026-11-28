@@ -13954,6 +13954,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
  },
+ "src/runtime/numpy.ts :: bdiv :: fmax: (a, b) => (a > b ? a : b), #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: fmax, NumPy's ufunc name (on integers maximum), not a limit"
+ },
  "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
   "class": "none",
   "owner": "python",

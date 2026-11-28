@@ -1158,6 +1158,57 @@
     "upstream_version": "NumPy 2.5.1"
   },
   {
+    "name": "numpy.fmod",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise remainder of division, with the sign of the dividend (C's fmod).",
+    "examples": [
+      {
+        "code": "np.fmod([7, -7], 2)",
+        "expected": "array([ 1, -1])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.divmod",
+    "kind": "function",
+    "signature": "(x1, x2)",
+    "summary": "Elementwise floor quotient and remainder together, (x1 // x2, x1 % x2).",
+    "examples": [
+      {
+        "code": "np.divmod([7, -7], 2)",
+        "expected": "(array([ 3, -4]), array([1, 1]))\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
+    "name": "numpy.fix",
+    "kind": "function",
+    "signature": "(x, out=None)",
+    "summary": "Round to the nearest integer towards zero (deprecated in NumPy 2.5 for numpy.trunc).",
+    "examples": [
+      {
+        "code": "np.fix([2.5, -2.5])",
+        "expected": "array([ 2., -2.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against NumPy 2.5.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "NumPy 2.5.1"
+  },
+  {
     "name": "numpy.mod",
     "kind": "function",
     "signature": "(x1, x2)",
