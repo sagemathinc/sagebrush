@@ -8728,13 +8728,23 @@
   "class": "3",
   "owner": "polynomial factorization"
  },
- "engine/web/src/lib.rs :: dispatch :: let (count, m) = sagebrush_ap::moments(&e, n, size(v, \"kmax\", Some(4), 64)?); #0": {
+ "engine/web/src/lib.rs :: dispatch :: let (count, m) = sagebrush_ap::moments(&e, n, kmax); #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "moments run with kmax already bounded and its result's bytes reserved; these lines refuse nothing themselves"
+ },
+ "engine/web/src/lib.rs :: dispatch :: let kmax = size(v, \"kmax\", Some(4), 64)?; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "elliptic curves (engine)",
-  "reason": "moments' kmax <= 64, the dispatcher's bound on a JSON argument (the same on every target); unchanged by this edit, which only takes n from ap_bound"
+  "reason": "moments' kmax <= 64, the dispatcher's bound on a JSON argument (the same on every target)"
+ },
+ "engine/web/src/lib.rs :: dispatch :: let n = ap_bound(v, \"moments\", 0, (kmax as u64).saturating_mul(2 * (8 + 32 + 32)).saturating_add(256))?; #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "moments run with kmax already bounded and its result's bytes reserved; these lines refuse nothing themselves"
  },
  "engine/web/src/lib.rs :: dispatch :: let prec = size(v, \"prec\", None, sagebrush_modsym::linalg::MAX_HECKE_PRIME)?; #0": {
   "class": "3",

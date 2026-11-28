@@ -81,9 +81,14 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     // the previous reply is freed first (the host copied it after the last
-    // call), so it never coexists with this call's memory
+    // call), so it never coexists with this call's memory; with it go the
+    // reservations held for it (the a_p lists': their reply is that buffer
+    // until the host has copied it)
     drop(std::mem::take(r));
+    AP_HELD.with(|h| h.borrow_mut().clear());
+    FOR_HOST.with(|f| f.set(true));
     *r = call(req).into_bytes();
+    FOR_HOST.with(|f| f.set(false));
     r.as_ptr()
 }
 
@@ -540,6 +545,9 @@ fn progress_selftest(v: &Value) -> Result<Value, String> {
 }
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
+/// The reply to a request.  Reservations held for the reply (AP_HELD) end
+/// once it is text, or, under sb_call (FOR_HOST), once the host has copied
+/// it: sb_call releases them with the previous reply.
 pub fn call(req: &str) -> String {
     // the capped ops' request sizes are admitted before serde copies
     // anything (the last top-level fn name is read by one scan that owns no
@@ -558,11 +566,15 @@ pub fn call(req: &str) -> String {
             return nmod_ops::run(op, req, f);
         }
     }
-    match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
+    let out = match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
         Err(e) => error_json(e),
     }
-    .to_string()
+    .to_string();
+    if !FOR_HOST.with(|f| f.get()) {
+        AP_HELD.with(|h| h.borrow_mut().clear());
+    }
+    out
 }
 
 /// The polynomials' factorization as modsym's factor callback (`run` gets
@@ -796,21 +808,31 @@ fn json_skip(b: &[u8], i: &mut usize) -> bool {
 /// ledger refuses the bytes.
 /// The bytes of one aplist entry and its JSON: (u64, Option<i64>) is 24,
 /// twice for the result Vec's growth (a doubling holds old and new);
-/// [p, a_p] as a serde_json Value is an array (32) holding two Values (64);
-/// its text is at most 45 characters (48), and the JSON Vec of values grows
-/// by doubling too (32 more).
-const AP_ENTRY_BYTES: u64 = 2 * 24 + 32 + 64 + 48 + 32;
+/// [p, a_p] as a serde_json Value is an array (32) holding two Values (64),
+/// and the JSON Vec of values grows by doubling too (32 more); its text is
+/// at most 45 characters (48), twice for the reply String's doubling.
+const AP_ENTRY_BYTES: u64 = 2 * 24 + 32 + 64 + 32 + 2 * 48;
 
-fn ap_bound(v: &Value, what: &str, per_prime: u64) -> Result<(u64, sagebrush_ledger::Reservation), String> {
+thread_local! {
+    /// The reservations of the a_p lists' sieve and result, held until
+    /// call() has serialized the reply (ap_bound pushes; call() clears).
+    static AP_HELD: std::cell::RefCell<Vec<sagebrush_ledger::Reservation>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Set while sb_call runs call(): the reply goes to the host's buffer.
+    static FOR_HOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn ap_bound(v: &Value, what: &str, per_prime: u64, fixed: u64) -> Result<u64, String> {
     let n = u(v, "n")?;
     let half = n.saturating_sub(1) / 2;
     if usize::try_from(half).is_err() {
         return Err(format!("{}: primes up to {} pass this engine's address space", what, n));
     }
     let count = sagebrush_ap::prime_count_bound(n) as u64;
-    let bytes = half.saturating_add(count.saturating_mul(8u64.saturating_add(per_prime)));
+    let bytes = half.saturating_add(count.saturating_mul(8u64.saturating_add(per_prime))).saturating_add(fixed);
     let r = sagebrush_ledger::reserve(what, bytes).map_err(|e| format!("{}: the sieve's {} bytes refused: {:?}", what, bytes, e))?;
-    Ok((n, r))
+    // (held through the reply's serialization, not dropped with the arm)
+    AP_HELD.with(|h| h.borrow_mut().push(r));
+    Ok(n)
 }
 
 fn u(v: &Value, k: &str) -> Result<u64, String> {
@@ -1840,7 +1862,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "aplist" => {
             let e = curve(v.get("a"))?;
             // (each prime's entry, its JSON value and its text)
-            let (n, _sieve) = ap_bound(v, "aplist", AP_ENTRY_BYTES)?;
+            let n = ap_bound(v, "aplist", AP_ENTRY_BYTES, 0)?;
             Ok(json!(sagebrush_ap::aplist(&e, n).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
         }
         "ec_height" => {
@@ -1952,15 +1974,18 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "aplist_many" => {
             let es = v.get("curves").and_then(Value::as_array).ok_or("missing curves")?.iter().map(|c| curve(Some(c))).collect::<Result<Vec<_>, _>>()?;
-            let (n, _sieve) = ap_bound(v, "aplist_many", AP_ENTRY_BYTES.saturating_mul(es.len() as u64))?;
+            let n = ap_bound(v, "aplist_many", AP_ENTRY_BYTES.saturating_mul(es.len() as u64), 0)?;
             let r = sagebrush_ap::aplist_many(&es, n);
             Ok(json!(r.into_iter().map(|l| l.into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()).collect::<Vec<_>>()))
         }
         "moments" => {
             let e = curve(v.get("a"))?;
-            // (its result is kmax moments, whatever n)
-            let (n, _sieve) = ap_bound(v, "moments", 0)?;
-            let (count, m) = sagebrush_ap::moments(&e, n, size(v, "kmax", Some(4), 64)?);
+            // (its result is kmax moments whatever n: per moment an f64, its
+            // Value and its text, twice for the doublings, and the reply's
+            // frame)
+            let kmax = size(v, "kmax", Some(4), 64)?;
+            let n = ap_bound(v, "moments", 0, (kmax as u64).saturating_mul(2 * (8 + 32 + 32)).saturating_add(256))?;
+            let (count, m) = sagebrush_ap::moments(&e, n, kmax);
             Ok(json!([count, m]))
         }
         _ => Err(format!("unknown fn '{}'", f)),
