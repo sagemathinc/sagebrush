@@ -17,6 +17,10 @@ const plain = (s: string) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\
 
 type Step = { send?: string } | { press: true } | { signal: NodeJS.Signals; group?: boolean } | { wait: number } | { until: RegExp; ms?: number };
 
+/** A measured allowance for a promptness bound: `base` ms on an idle machine, plus four of the session's own round
+ * trips of a trivial input (rtt), so that a loaded runner, slower at everything, isn't held to an idle one's clock. */
+const allowed = (base: number, rtt: number) => base + 4 * Math.max(0, rtt);
+
 /** The pids of the processes under PID (script's child: sagebrush itself, by exec). */
 const children = (pid: number) =>
   spawnSync("pgrep", ["-P", String(pid)], { encoding: "utf8" }).stdout.split("\n").filter(Boolean).map(Number);
@@ -38,15 +42,27 @@ async function prompt(args: string[], steps: Step[], env: Record<string, string>
   const t0 = Date.now();
   p.on("exit", (code) => (ended = { code, t: Date.now() - t0 }));
   const seen: Record<string, number> = {};
-  let pressedAt = 0;
+  // (rtt: each awaited pattern's time since the last input sent, a round trip at the prompt)
+  const rtt: Record<string, number> = {};
+  let pressedAt = 0, sentAt = 0;
+  // (an `until` looks only at the output after the last input, Ctrl-C or signal: a prompt already on the screen
+  // isn't the next one.  On a loaded runner the first inputs were still running when a stale match of the banner's
+  // prompt let the next steps go ahead, and the Ctrl-C meant for the long sum interrupted them instead.)
+  let mark = 0;
   try {
     for (const s of steps) {
-      if ("send" in s && s.send !== undefined) p.stdin!.write(s.send);
+      if ("send" in s && s.send !== undefined) {
+        mark = out.length;
+        sentAt = Date.now();
+        p.stdin!.write(s.send);
+      }
       if ("press" in s) {
+        mark = out.length;
         pressedAt = Date.now();
         p.stdin!.write("\x03");
       }
       if ("signal" in s) {
+        mark = out.length;
         pressedAt = Date.now();
         // (group: to sagebrush's process group, as a shell's kill -INT -PGID; script makes its child a group leader)
         for (const c of children(p.pid!)) process.kill(s.group ? -c : c, s.signal);
@@ -54,15 +70,17 @@ async function prompt(args: string[], steps: Step[], env: Record<string, string>
       if ("wait" in s) await sleep(s.wait);
       if ("until" in s) {
         const t = Date.now();
-        while (!s.until.test(plain(out)) && Date.now() - t < (s.ms ?? 20000) && ended === null) await sleep(20);
-        seen[String(s.until)] = s.until.test(plain(out)) ? Date.now() - pressedAt : -1;
+        const fresh = () => s.until.test(plain(out.slice(mark)));
+        while (!fresh() && Date.now() - t < (s.ms ?? 20000) && ended === null) await sleep(20);
+        seen[String(s.until)] = fresh() ? Date.now() - pressedAt : -1;
+        rtt[String(s.until)] = fresh() ? Date.now() - sentAt : -1;
       }
     }
     for (let t = Date.now(); ended === null && Date.now() - t < 10000; ) await sleep(20);
   } finally {
     if (ended === null) try { process.kill(-p.pid!, "SIGKILL"); } catch {}
   }
-  return { out: plain(out), ended: ended as { code: number | null; t: number } | null, seen };
+  return { out: plain(out), ended: ended as { code: number | null; t: number } | null, seen, rtt };
 }
 
 test("a Python loop at the prompt: Ctrl-C raises KeyboardInterrupt, and the session goes on", { skip: !hasScript && "no script(1)", timeout: 90000 }, async () => {
@@ -88,7 +106,11 @@ test("a call into the engine (Sage's factor): Ctrl-C stops it, KeyboardInterrupt
     // (a product of two primes of 40 digits, above the quadratic sieve's range: hours for the engine's factor_integer)
     { send: "n = next_prime(10^39) * next_prime(3 * 10^39)\r" },
     { until: /sage: $/ },
+    // (a round trip at the prompt, measured: the allowance below)
+    { send: "1 + 1\r" },
+    { until: /\n2\nsage: $/ },
     { send: "r = factor(n)\r" },
+    { until: /r = factor\(n\)\n$/ },
     { wait: 2000 },
     { press: true },
     { until: /KeyboardInterrupt\nsage: $/, ms: 10000 },
@@ -97,8 +119,9 @@ test("a call into the engine (Sage's factor): Ctrl-C stops it, KeyboardInterrupt
     { send: "exit()\r" },
   ]);
   assert.match(r.out, /in factor_integer\n[\s\S]*_sbengine\.call[\s\S]*\nKeyboardInterrupt\n/, r.out);
-  // (it stops within the matrix's Stop bound's order: the engine polls the flag)
-  assert.ok(r.seen[String(/KeyboardInterrupt\nsage: $/)] >= 0 && r.seen[String(/KeyboardInterrupt\nsage: $/)] < 2000, JSON.stringify(r.seen));
+  // (it stops within the matrix's Stop bound's order: the engine polls the flag; 2 s idle, measured slack under load)
+  const stopped = r.seen[String(/KeyboardInterrupt\nsage: $/)];
+  assert.ok(stopped >= 0 && stopped < allowed(2000, r.rtt[String(/\n2\nsage: $/)]), JSON.stringify({ seen: r.seen, rtt: r.rtt }));
   assert.match(r.out, /\n1024\n/, r.out);
   assert.equal(r.ended?.code, 0, r.out);
 });
@@ -254,14 +277,20 @@ for (const how of ["Ctrl-C", "kill -INT"] as const) {
 }
 
 // A session with state, then a long generator sum at the Sage prompt: Ctrl-C at the terminal, or SIGINT to the
-// process group, stops it within a second, and the state is still there and usable.
+// process group, stops it within a second (on a loaded machine, a second and four measured round trips), and the
+// state is still there and usable.
 for (const how of ["Ctrl-C", "kill -INT -pgid"] as const) {
   test(`Sage, a long sum at the prompt: ${how} stops it promptly, the session's state kept`, { skip: !hasScript && "no script(1)", timeout: 120000 }, async () => {
     const r = await prompt(["--sage"], [
       { until: /sage: $/, ms: 60000 },
       { send: "marker = 'kept'; P = matrix(QQ, [[1/2, 1/4], [1/5, 1/2]])\r" },
       { until: /\nsage: $/ },
+      // (a round trip at the prompt, measured: the allowance below)
+      { send: "1 + 1\r" },
+      { until: /\n2\nsage: $/ },
       { send: "sum(i*i for i in range(1000000000))\r" },
+      // (the sum's line taken, then a second of it running)
+      { until: /range\(1000000000\)\)\n$/ },
       { wait: 1000 },
       how === "Ctrl-C" ? { press: true } : { signal: "SIGINT", group: true },
       { until: /KeyboardInterrupt\nsage: $/, ms: 8000 },
@@ -269,7 +298,9 @@ for (const how of ["Ctrl-C", "kill -INT -pgid"] as const) {
       { until: /kept \[[^\n]*\n[^\n]*\]\nsage: $/ },
       { send: "exit()\r" },
     ]);
-    assert.ok(r.seen[String(/KeyboardInterrupt\nsage: $/)] >= 0 && r.seen[String(/KeyboardInterrupt\nsage: $/)] < 1000, JSON.stringify(r.seen) + r.out);
+    // (within a second on an idle machine, against the sum's minutes; on a loaded one, measured slack: allowed)
+    const stopped = r.seen[String(/KeyboardInterrupt\nsage: $/)];
+    assert.ok(stopped >= 0 && stopped < allowed(1000, r.rtt[String(/\n2\nsage: $/)]), JSON.stringify({ seen: r.seen, rtt: r.rtt }) + r.out);
     // (N = (I - Q)^-1 of the friction run's absorbing chain)
     assert.match(r.out, /kept \[5\/2 5\/4\]\n\[  1 5\/2\]/, r.out);
     assert.equal(r.ended?.code, 0, r.out);
