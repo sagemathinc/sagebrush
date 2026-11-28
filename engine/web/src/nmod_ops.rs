@@ -23,7 +23,8 @@
 //! - nmod_echelon: R + 28 E + 33 KiB             <= ECH_PEAK < 49 MiB;
 //! - nmod_poly_mul: R + 8 (la + lb) + 128 N      <= MUL_PEAK = 12 MiB;
 //! - nmod_poly_divrem: R + 16 (la + lb) + 32 ql + 128 N <= DIV_PEAK = 14 MiB;
-//! - nmod_poly_gcd: R + 28 (la + lb)             <= GCD_PEAK = 2 MiB.
+//! - nmod_poly_gcd: R + 8 (la + lb) + 128 N + 320 L + 4 KiB <= GCD_PEAK < 10 MiB
+//!   (L = max(la, lb); N = GCD_NTT_N, the padded transform length bound).
 
 use sagebrush_arith::nmod::{is_prime, Modulus};
 use sagebrush_arith::nmod_mat::Mat;
@@ -74,9 +75,9 @@ const NTT_N: usize = 1 << 16;
 pub const ECH_MAX_DIM: usize = 1024;
 pub const ECH_MAX_TEXT: usize = mul(ENTRY_TEXT, mul(ECH_MAX_DIM, ECH_MAX_DIM));
 pub const ECH_MAX_REQUEST: usize = add(ECH_MAX_TEXT, FIELDS);
-/// parse: R + 20 E (serde's "m") + 8 E; compute: R + 8 E + 28 KiB (the
-/// accumulator, a partial sum and the pivots); reply: R + 8 E + 20 E +
-/// 8 KiB.
+/// parse: R + 20 E (serde's "m") + 8 E; compute: R + 20 E (retained matrix
+/// text) + 8 E + 28 KiB (the accumulator, a partial sum and the pivots);
+/// reply: R + 8 E + 20 E + 8 KiB.
 pub const ECH_PEAK: usize = add(add(ECH_MAX_REQUEST, mul(28, mul(ECH_MAX_DIM, ECH_MAX_DIM))), 33 * 1024);
 /// Elimination and back substitution: at most 2 E min(rows, cols).
 pub const ECH_WORK: u64 = 2 * (ECH_MAX_DIM * ECH_MAX_DIM) as u64 * ECH_MAX_DIM as u64;
@@ -99,20 +100,68 @@ pub const DIV_PEAK: usize = add(add(DIV_MAX_REQUEST, mul(8, mul(8, DIV_MAX_LEN))
 /// Newton: 6 products of length 2^16 at most (the classical path: 59 2^15).
 pub const DIV_WORK: u64 = 6 * MUL_WORK;
 
-/// nmod_poly_gcd (Euclid): 1 <= la, lb <= GCD_MAX_LEN.
+/// nmod_poly_gcd: 1 <= la, lb <= GCD_MAX_LEN.  The half-gcd
+/// (nmod_poly::gcd_in) when both have more than 1000 coefficients, else
+/// Euclid's algorithm.  Its tables are built for products of length at
+/// most nmod_poly::gcd_table_len = 2 L, L = max(la, lb), so every
+/// transform, padded to a power of two, has at most
+/// next_power_of_two(2 L) <= GCD_NTT_N = 2 GCD_MAX_LEN points.
 pub const GCD_MAX_LEN: usize = 1 << 14;
 pub const GCD_MAX_REQUEST: usize = add(mul(2 * ENTRY_TEXT, GCD_MAX_LEN), FIELDS);
-/// parse: R + 28 (la + lb); then R + 8 (la + 2 lb) + 20 lb.
-pub const GCD_PEAK: usize = add(GCD_MAX_REQUEST, mul(28, 2 * GCD_MAX_LEN));
-/// lb (la + lb) + 129 lb + 128: the quotient rows of all Euclid steps
-/// number at most la + lb, each at most lb multiply-adds; an inversion
-/// per step and the final normalization.
-pub const GCD_WORK: u64 = (GCD_MAX_LEN as u64) * (2 * GCD_MAX_LEN as u64) + 129 * GCD_MAX_LEN as u64 + 128;
+pub const GCD_NTT_N: usize = 2 * GCD_MAX_LEN;
+/// Admission is by these static caps and closed forms, before any
+/// size-dependent work; there is no runtime reservation (as for the other
+/// ops here).  parse: R + 28 (la + lb).  compute: R + 8 (la + lb) (the
+/// inputs, owned by the gcd) + 96 N (at most three tables) + 32 N (one
+/// product's transform buffers and residues at a time) + 320 L for every
+/// other polynomial, each counted by its CAPACITY where it was allocated
+/// (trim and truncate keep it): a product's is under twice its length (an
+/// NTT prime's transform is truncated in place), a difference's at most
+/// twice its longer operand (resize), sums, copies and clones are exact.
+/// A half-gcd frame for inputs of length L, h = ceil(L / 2) (its calls'
+/// inputs have at most h coefficients, its matrices' entries at most
+/// h / 2 + 1 and their products at most h, a1 and b1 at most 1.25 L + 1,
+/// q at most h, d at most L), holds at most 16.5 L + 33 words (at its
+/// final matrix product) and 11 L + 20 while its second call runs, so the
+/// recursion holds S(L) <= max(16.5 L + 33, 11 L + 20 + S(h)) <= 23 L +
+/// 1024 words (1024: an Euclid base case, inputs shorter than 65); the
+/// gcd's loop adds at most 0.5 L + 2 (its later operands' capacities), so
+/// at most 188 L + 8208 bytes <= 320 L for L > 1000.  The table per object
+/// is in the commit that introduced the half-gcd here.  reply: R + 8 lg +
+/// 20 lg.
+pub const GCD_PEAK: usize = add(add(GCD_MAX_REQUEST, add(mul(16, GCD_MAX_LEN), GCD_FRAMES)), add(mul(128, GCD_NTT_N), 4096));
+/// The half-gcd's polynomials at the cap (nmod_poly::gcd_frame_bytes).
+const GCD_FRAMES: usize = match nmod_poly::gcd_frame_bytes(GCD_MAX_LEN, GCD_MAX_LEN) {
+    Some(x) => x as usize,
+    None => panic!("overflow"),
+};
+// (the shared bound is the one this op was admitted with)
+const _: () = assert!(GCD_FRAMES == 320 * GCD_MAX_LEN);
+/// Declared, not enforced at runtime (as for the other ops here): the
+/// bound of nmod_poly::gcd_work at the cap (its derivation is there).
+pub const GCD_WORK: u64 = match nmod_poly::gcd_work(GCD_MAX_LEN, GCD_MAX_LEN) {
+    Some(x) => x,
+    None => panic!("overflow"),
+};
+// the shared bound at the cap is this op's declared work, unchanged: 3
+// primes x 3 transforms of (N / 2) log N butterflies plus 40 N per
+// product of GCD_NTT_N = 2^15 points, 8 levels, 2^8 base cases counted
+// as 2^14 (GCD_MAX_LEN / 32), and Euclid's tail
+const _: () = {
+    let product: u64 = 9 * (GCD_NTT_N as u64 / 2) * 15 + 40 * GCD_NTT_N as u64;
+    assert!(
+        GCD_WORK
+            == 2 * (20 * product * 8 + (1 << 14) * (GCD_MAX_LEN as u64 / 32) + 10 * product)
+                + 1000 * (GCD_MAX_LEN as u64 + 1000)
+                + 129 * 1000
+                + 128
+    );
+};
 
 const _: () = assert!(ECH_PEAK <= 49 * MIB);
 const _: () = assert!(MUL_PEAK <= 12 * MIB);
 const _: () = assert!(DIV_PEAK <= 14 * MIB);
-const _: () = assert!(GCD_PEAK <= 2 * MIB);
+const _: () = assert!(GCD_PEAK <= 10 * MIB);
 
 /// The ops whose requests are capped before serde (looked up by the exact
 /// name of the request's last top-level "fn").
@@ -275,9 +324,18 @@ fn echelon(mut o: Map<String, Value>) -> Result<String, String> {
             parse_list(r, cols, true, m.n, &mut d, OP)?;
         }
     }
-    drop(s);
+    // (the text is dropped after the elimination, not before: freed first,
+    // its room was where the elimination's pivots (min(rows, cols) words,
+    // allocated at once) went, and the reply, a little longer than the text
+    // at the envelope, no longer fit there and grew the heap by its whole
+    // size.  Freed now, its room and the gap before it take the reply, as
+    // the peak counts it; the parse already holds the text and the matrix
+    // together, so the peak is unchanged.  The reply exceeds the text by
+    // about 121 bytes at the envelope and relies on reusing the text's
+    // hole, so reordering these allocations can move the growth test)
     let mut a = Mat { rows, cols, m, d };
     let (piv, det) = a.echelon(reduced, true);
+    drop(s);
     let _phase = sagebrush_interrupt::enter("reply");
     let mut out = Reply::new(if want_rows { ENTRY_TEXT * e } else { 0 } + ENTRY_TEXT * (piv.len() + 1) + 64);
     out.raw("{\"pivots\":\"");
@@ -364,11 +422,18 @@ fn poly_divrem(o: Map<String, Value>) -> Result<String, String> {
     Ok(out.done())
 }
 
-/// nmod_poly_gcd: {p, a, b} -> the monic gcd's coefficients, by Euclid's
-/// algorithm (a and b nonzero: the caller answers gcd(f, 0) = monic f).
+/// nmod_poly_gcd: {p, a, b} -> the monic gcd's coefficients, by the
+/// half-gcd (Euclid's algorithm when the shorter input has at most 1000
+/// coefficients) (a and b nonzero: the caller answers gcd(f, 0) = monic f).
 fn poly_gcd(o: Map<String, Value>) -> Result<String, String> {
     let (m, a, b) = two_polys(o, "nmod_poly_gcd", GCD_MAX_LEN)?;
-    let g = nmod_poly::gcd_classical(a, b, &m);
+    let len = nmod_poly::gcd_table_len(a.len(), b.len());
+    let g = if len == 0 {
+        nmod_poly::gcd_classical(a, b, &m)
+    } else {
+        let lt = ntt::LocalTables::new(&m, len);
+        nmod_poly::gcd_in(a, b, &m, &lt)
+    };
     let _phase = sagebrush_interrupt::enter("reply");
     let mut out = Reply::new(ENTRY_TEXT * g.len() + 2);
     out.list(&g);

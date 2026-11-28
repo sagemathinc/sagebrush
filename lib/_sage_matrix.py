@@ -5,6 +5,7 @@ prints them.  The exact linear algebra is the Rust engine's (sagebrush.linalg:
 multimodular and p-adic, certified; sagebrush.nf for the lattice algorithms).
 Dense; entries are Python ints or Sage Rationals."""
 
+import cmath as _cmath
 import sys as _sys
 from fractions import Fraction as _F
 
@@ -57,6 +58,15 @@ def _is_sr_scalar(x):
     return type(x).__name__ == "Expression" and hasattr(x, "_s") and not x.is_relational()
 
 
+def _is_scalar(x):
+    """An integer, a rational, an inexact real or complex number or a symbolic
+    expression: a number that c/M and c/v read as a scalar (a Python float
+    or complex is not: Sage refuses 1.5r/M)."""
+    if type(x) is float or type(x) is complex:
+        return False
+    return not isinstance(x, bool) and (isinstance(x, (int, _F)) or _inexact_parent(x) is not None or _is_sr_scalar(x))
+
+
 def _qq_entry(x):
     """x as an element of QQ when it is an integer: an integral entry of a
     QQ container is stored as an int (_norm), but Sage hands it out with
@@ -75,6 +85,9 @@ def _inexact_parent(o):
     """The field of o when o is an inexact real or complex number (RR, RDF, CC, CDF, RealField(p),
     ComplexField(p), a float literal), else None: a matrix or vector over ZZ or QQ meeting one
     moves to that field, as in Sage (RR(1.5)*M is over RR, not the exact 3/2 over QQ)."""
+    if type(o) is float or type(o) is complex:
+        # (a Python float or complex: RDF or CDF, as Sage, 1.5r*M over RDF)
+        return _sa().RDF if type(o) is float else _sa().CDF
     if isinstance(o, bool) or not hasattr(o, "parent"):
         return None
     try:
@@ -233,10 +246,15 @@ class Vector(list):
         return _over_qq(Vector(_norm(other * a) for a in self), self, other)
 
     def __truediv__(self, other):
+        if isinstance(other, Matrix) or isinstance(other, _ffmat().FFMatrix):
+            # (by a matrix: X with X*other = self, as Sage)
+            return _ffmat()._matrix_divide(self, other)
         L = self._inexact_lift(other)
         if L is not None:
             # (by the inverse, as Sage: v/CDF(1, 2) is v times 1/CDF(1, 2))
-            return L * (other.parent()(1) / other)
+            return L * (_inexact_parent(other)(1) / other)
+        if isinstance(other, (int, _F)) and not isinstance(other, bool) and other == 0:
+            raise ZeroDivisionError("rational division by zero")
         try:
             w = Vector(_norm(_F(a) / _F(other)) for a in self)
         except (TypeError, ValueError):
@@ -252,6 +270,17 @@ class Vector(list):
             return Vector(_norm(a / other) for a in self)
 
     def __rtruediv__(self, other):
+        if type(other) is int and other == 0:
+            # (an integer 0 over a vector: 0 in its fraction field, as Sage)
+            return _sa().SR(0) if self.base_ring() is _sa().SR else _sa().QQ(0)
+        if _is_scalar(other):
+            # (Sage's coercion error, by the two parents)
+            raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(other), self.parent()))
+        return NotImplemented
+
+    def __rpow__(self, b):
+        if _is_scalar(b):
+            raise TypeError("unsupported operand parent(s) for ^: '%s' and '%s'" % (_sa().parent(b), self.parent()))
         return NotImplemented
 
     # ---- symbolic entries
@@ -1553,6 +1582,20 @@ class Matrix:
         base = self._base if self._base is other._base else sa.QQ
         return base
 
+    def _finite(self, other, op):
+        """self as a matrix over the finite field (or Z/n) of other, an
+        FFMatrix not over a generic field, when self is over ZZ, as Sage
+        coerces ZZ into every ring; None for any other operand.  Over QQ or
+        another ring, or of the wrong shape for op (self op other), Sage's
+        TypeError (other was taken as a scalar, entry by entry)."""
+        if type(other).__name__ != "FFMatrix" or getattr(other._base, "_is_generic_field", False):
+            return None
+        bad = self.ncols() != other.nrows() if op == "*" else self.dimensions() != other.dimensions()
+        if bad or self._base is not _sa().ZZ:
+            raise TypeError("unsupported operand parent(s) for %s: '%s' and '%s'" % (op, self.parent(), other.parent()))
+        import _sage_ffmat
+        return _sage_ffmat.FFMatrix(other._base, self._rows, self.ncols())
+
     def _generic(self, other):
         """self as a matrix over the field of other (a QQbar matrix), or None."""
         base = getattr(other, "_base", None)
@@ -1568,12 +1611,90 @@ class Matrix:
             return None
         return self.change_ring(F)
 
+    def _sr_number(self, other):
+        """other, a Python float or complex made symbolic when self is over SR
+        (as Sage keeps it in SR: 1.5r*M is 1.5*x, not the exact 3/2)."""
+        return _sa().SR(other) if (type(other) is float or type(other) is complex) and self._base is _sa().SR else other
+
     def __truediv__(self, other):
-        # by an inexact number: over its field, times the inverse (Sage's M/RR(1.5))
+        """Each entry over a number: an integer or a rational over QQ, a symbolic
+        number over SR, an inexact one over its field (times its inverse).
+
+        EXAMPLES::
+
+            sage: M = matrix(ZZ, [[2, 4], [6, 8]]); M / 4, M / x
+            (
+            [1/2   1]  [2/x 4/x]
+            [3/2   2], [6/x 8/x]
+            )
+        """
+        if isinstance(other, Matrix) or isinstance(other, _ffmat().FFMatrix):
+            # (by a matrix: X with X*other = self, as Sage's other.solve_left(self))
+            return _ffmat()._matrix_divide(self, other)
         L = self._inexact_lift(other)
         if L is not None:
-            return L * (other.parent()(1) / other)
+            # (by the inverse, as Sage's M/RR(1.5))
+            return L * (_inexact_parent(other)(1) / other)
+        if isinstance(other, bool):
+            return NotImplemented
+        if (type(other) is float or type(other) is complex):
+            # (over SR: the symbolic entries times its inverse)
+            return self * _sa().SR(1 / other) if self._base is _sa().SR else NotImplemented
+        QQ = _sa().QQ
+        if isinstance(other, (int, _F)):
+            if other == 0:
+                raise ZeroDivisionError("symbolic division by zero" if self._base is _sa().SR else "rational division by zero")
+            return self * (QQ(1) / QQ(other))
+        if _is_sr_scalar(other):
+            return self * (1 / other)
+        m = _sys.modules.get("_sage_ff")
+        if m is not None and m.is_exact_algebraic(other) and self._base in (_sa().ZZ, QQ):
+            # (an element of a finite field: the matrix over its field, as Sage's M/GF(7)(3))
+            return self.change_ring(other.parent()) / other
         return NotImplemented
+
+    def __rtruediv__(self, other):
+        """A number over a square matrix: X with X*M = c times the identity,
+        as Sage solves it (c times the inverse, by its own field: over QQ
+        for an integer, SR for a symbolic number, RR for RR(1.5)).
+
+        EXAMPLES::
+
+            sage: M = matrix(QQ, [[1, 2], [3, 4]]); 2/M, x/M
+            (
+            [-4  2]  [  -2*x      x]
+            [ 3 -1], [ 3/2*x -1/2*x]
+            )
+        """
+        if not _is_scalar(other):
+            return NotImplemented
+        F = _inexact_parent(other)
+        if F is not None and type(F).__name__ == "RealDoubleField_" and self._base is not _sa().SR:
+            # (solved in RDF, as Sage: numpy's solve on the transpose)
+            return other / self.change_ring(F)
+        n = self.nrows()
+        if isinstance(other, (int, _F)) and other == 0:
+            # (an exact 0: X = 0 solves X*M = 0, any shape, as Sage; n x n,
+            # its size checked first: a tall matrix's is larger than itself)
+            _shape(n, n)
+            return Matrix(_sa().QQ if self._base is _sa().ZZ else self._base, [[0] * n for _ in range(n)], n)
+        if not self.is_square():
+            raise TypeError("unsupported operand parent(s) for /: '%s' and '%s'" % (_sa().parent(other), self.parent()))
+        # (the inverse in this matrix's own ring, then the product: CC(1, 2)/M
+        # is CC(1, 2) times M's exact inverse, moved to CC)
+        try:
+            inv = self.inverse()
+        except ZeroDivisionError:
+            if F is not None and type(F).__name__ == "ComplexDoubleField_":
+                # (CDF solves numerically: numpy's error, as Sage, 0 too)
+                from numpy.linalg import LinAlgError
+                raise LinAlgError("Singular matrix") from None
+            if other == 0:
+                # (0 = X*M has the solution 0)
+                Z = self if self._base is not _sa().ZZ else self.change_ring(_sa().QQ)
+                return other * (Z - Z)
+            raise ValueError("matrix equation has no solutions") from None
+        return other * inv
 
     def _scalar_matrix(self, c, op):
         """c times the identity, for M + c, c - M and the like (Sage reads
@@ -1615,12 +1736,16 @@ class Matrix:
             sage: Z = matrix(QQ, 0, 3, []); (Z + 0).dimensions(), (0 - Z).dimensions(), (-Z).dimensions()
             ((0, 3), (0, 3), (0, 3))
         """
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return L + other
         g = self._generic(other)
         if g is not None:
             return g + other
+        f = self._finite(other, "+")
+        if f is not None:
+            return f + other
         if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self + self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+")
         if not isinstance(other, Matrix):
@@ -1629,6 +1754,7 @@ class Matrix:
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __radd__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return other + L
@@ -1637,12 +1763,16 @@ class Matrix:
         return NotImplemented
 
     def __sub__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return L - other
         g = self._generic(other)
         if g is not None:
             return g - other
+        f = self._finite(other, "-")
+        if f is not None:
+            return f - other
         if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self - self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-")
         if not isinstance(other, Matrix):
@@ -1651,6 +1781,7 @@ class Matrix:
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __rsub__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return other - L
@@ -1662,12 +1793,16 @@ class Matrix:
         return Matrix(self._base, [[-a for a in r] for r in self._rows], self.ncols())
 
     def __mul__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return L * other
         g = self._generic(other)
         if g is not None:
             return g * other
+        f = self._finite(other, "*")
+        if f is not None:
+            return f * other
         if isinstance(other, Matrix):
             if self.ncols() != other.nrows():
                 raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (self.parent(), other.parent()))
@@ -1704,6 +1839,7 @@ class Matrix:
         return Matrix(base, [[a * other for a in r] for r in self._rows], self.ncols())
 
     def __rmul__(self, other):
+        other = self._sr_number(other)
         L = self._inexact_lift(other)
         if L is not None:
             return other * L
@@ -1782,6 +1918,12 @@ class Matrix:
             b = b * b
             e >>= 1
         return r
+
+    def __rpow__(self, b):
+        # (a number to a matrix power: Sage's refusal, as its exponent is not an integer)
+        if _is_scalar(b):
+            raise NotImplementedError("non-integral exponents not supported")
+        return NotImplemented
 
     def __invert__(self):
         return self.inverse()
@@ -1948,7 +2090,10 @@ class Matrix:
             for i, p in enumerate(piv):
                 X[p] = R[i][n:]
         if is_vec:
-            return Vector(_norm(r[0]) for r in X)
+            # (over QQ, integral entries too, as Sage's solution vector)
+            w = Vector(_norm(r[0]) for r in X)
+            w._ring = _sa().QQ
+            return w
         return Matrix(_sa().QQ, X, Bm.ncols())
 
     def solve_left(self, B):
@@ -1961,6 +2106,8 @@ class Matrix:
             (-1, 2)
         """
         if isinstance(B, Matrix):
+            if B.ncols() != self.ncols():
+                raise ValueError("number of columns of self must equal number of columns of right-hand side")
             return self.transpose().solve_right(B.transpose()).transpose()
         return self.transpose().solve_right(B)
 
@@ -3558,64 +3705,26 @@ def _smith_field_shapes(m, n):
 
 def _smith_uv(a, n=None):
     """Smith form with transforms over ZZ: (D, U, V), U a V = D (a has n
-    columns)."""
+    columns), by the engine (sagebrush.linalg; the transforms come from one
+    exact inverse when the matrix is square and nonsingular, and otherwise,
+    singular or rectangular, from Hermite forms of both sides around a
+    nonsingular core: valid transforms, but not the ones the classical
+    elimination gave before, and much smaller).  D does not depend on the
+    route."""
     m, n = len(a), (len(a[0]) if a else 0) if n is None else n
     # (the transforms are m x m and n x n: a 2^22 x 1 matrix would ask
     # for 2^44 entries)
     _shape(m, m)
     _shape(n, n)
-    A = [list(r) for r in a]
-    U = [[int(i == j) for j in range(m)] for i in range(m)]
-    V = [[int(i == j) for j in range(n)] for i in range(n)]
-
-    def rowop(M, i, j, q):  # row_i -= q row_j
-        M[i] = [x - q * y for x, y in zip(M[i], M[j])]
-
-    def colop(M, i, j, q):  # col_i -= q col_j
-        for r in M:
-            r[i] -= q * r[j]
-
-    for t in range(min(m, n)):
-        while True:
-            nz = [(abs(A[i][j]), i, j) for i in range(t, m) for j in range(t, n) if A[i][j]]
-            if not nz:
-                break
-            _, i, j = min(nz)
-            A[t], A[i] = A[i], A[t]
-            U[t], U[i] = U[i], U[t]
-            for r in A:
-                r[t], r[j] = r[j], r[t]
-            for r in V:
-                r[t], r[j] = r[j], r[t]
-            done = True
-            for i in range(t + 1, m):
-                q = A[i][t] // A[t][t]
-                if q:
-                    rowop(A, i, t, q)
-                    rowop(U, i, t, q)
-                if A[i][t]:
-                    done = False
-            for j in range(t + 1, n):
-                q = A[t][j] // A[t][t]
-                if q:
-                    colop(A, j, t, q)
-                    colop(V, j, t, q)
-                if A[t][j]:
-                    done = False
-            if not done:
-                continue
-            bad = next(((i, j) for i in range(t + 1, m) for j in range(t + 1, n) if A[i][j] % A[t][t]), None)
-            if bad:
-                i, _ = bad
-                A[t] = [x + y for x, y in zip(A[t], A[i])]
-                U[t] = [x + y for x, y in zip(U[t], U[i])]
-                continue
-            if A[t][t] < 0:
-                A[t] = [-x for x in A[t]]
-                U[t] = [-x for x in U[t]]
-            break
     ZZ = _sa().ZZ
-    return Matrix(ZZ, A, n), Matrix(ZZ, U, m), Matrix(ZZ, V, n)
+    if m == 0 or n == 0:
+        D = [[0] * n for _ in range(m)]
+        U = [[int(i == j) for j in range(m)] for i in range(m)]
+        V = [[int(i == j) for j in range(n)] for i in range(n)]
+    else:
+        from _sagebrush_lib import linalg
+        D, U, V, _ = linalg._smith_form([[int(x) for x in r] for r in a])
+    return Matrix(ZZ, D, n), Matrix(ZZ, U, m), Matrix(ZZ, V, n)
 
 
 def _is_padic(R):
@@ -4289,6 +4398,14 @@ def _cc_or_none(o):
     m = _sys.modules.get("_sage_ff")
     if m is not None and m.is_exact_algebraic(o):
         return None
+    if type(o).__name__ == "Expression":
+        # (a symbolic expression takes the number into SR, as Sage: CC(1, 2)*SR(0)
+        # is the symbolic 0, not CC's; complex() of it gave CC)
+        return None
+    if type(o).__name__ in ("ComplexNumberMP", "RealNumberMP") and o.prec() < 53:
+        # (a coarser field's number: the operation is in that field, its own
+        # reflected one, as Sage's coercion: CC(1) + ComplexField(20)(1))
+        return None
     try:
         return _cc(o)
     except (TypeError, ValueError):
@@ -4303,7 +4420,263 @@ def _cc(o):
         from _sage_lang import _RealBig as _RR_BIG
     if isinstance(o, _RR_BIG):
         raise NotImplementedError("CC arithmetic with %s, an element of RR past the double range, is not available in sagebrush yet (CC holds doubles)" % (o,))
+    if type(o).__name__ in ("ComplexNumberMP", "RealNumberMP"):
+        # (a finer field's number comes into CC: refused beyond the doubles)
+        import _sage_real
+        return _sage_real._cc_complex(o)
     return complex(o)
+
+
+def _cc_div(a, b):
+    """a / b in CC, as Sage's _div_: n = c^2 + d^2, p = c/n, q = d/n, then
+    (p a + q b) + (p b - q a) I, each step rounded (not Python's complex
+    division, which scales and rounds differently).  By zero NaN + NaN*I,
+    as Sage's.  On tame operands with tame p and q each step is a double
+    operation that rounds as MPFR does; otherwise the 53-bit MP field does
+    it, and an infinite or NaN operand too (a step's 0 in the doubles is a
+    tiny number there, and 0 * infinity NaN where Sage's is infinite)."""
+    (x, y), (c, d) = (a.real, a.imag), (b.real, b.imag)
+    if b == 0:
+        return ComplexNumber(float("nan"), float("nan"))
+    if not (_cc_tame(a) and _cc_tame(b)):
+        return _cc_slow("/", a, b)
+    n = c * c + d * d
+    p, q = c / n, d / n
+    if not _cc_tame(complex(p, q)) or (p == 0 and c != 0) or (q == 0 and d != 0):
+        # (a quotient that may have underflowed, to 0 too)
+        return _cc_slow("/", a, b)
+    return ComplexNumber(p * x + q * y, p * y - q * x)
+
+
+def _cc_inv(z):
+    """1/z in CC as a complex, as Sage's __invert__: m = a^2 + b^2, then
+    a/m and -b/m, each rounded (0 gives NaN + NaN*I); None when a step may
+    have left the normal doubles, or a part is infinite or NaN (the MP field
+    does it then)."""
+    a, b = z.real, z.imag
+    if not _cc_tame(z):
+        return None
+    m = a * a + b * b
+    if m == 0:
+        return complex(float("nan"), float("nan"))
+    r = complex(a / m, -b / m)
+    if not _cc_tame(r) or (r.real == 0 and a != 0) or (r.imag == 0 and b != 0):
+        # (a quotient that may have underflowed, to 0 too)
+        return None
+    return r
+
+
+# CC past the doubles.  Sage's CC is MPFR at 53 bits, whose exponents reach
+# 2^62; a ComplexNumber holds two doubles, which round as MPFR does only
+# inside the normal doubles (2^-1022 to 2^1024).  An operation whose double
+# result may have left them (a part that overflowed, underflowed or is
+# subnormal) is done again in the 53-bit MP complex field, step by step as
+# Sage's CC does it: a ComplexNumber when each part is a double, else
+# NotImplementedError, never a double's infinity or zero.  An infinite or
+# NaN operand keeps the double result, as before.
+_NORMAL_MIN, _INF = 2.2250738585072014e-308, float("inf")
+_isfinite = _cmath.isfinite
+# (the parts of a product of two tame numbers, and their sums, are normal
+# doubles or exact: the products are within 2^-1020..2^1020)
+_TAME_LO, _TAME_HI = 2.0 ** -510, 2.0 ** 510
+# (a result part at least this far above 2^-1022 is MPFR's even when a
+# product inside it underflowed: the error is below half its ulp)
+_KEPT_LO = 2.0 ** -969
+
+
+def _cc_tame(z):
+    """Whether each part of the complex z is 0 or within 2^-510..2^510."""
+    x, y = abs(z.real), abs(z.imag)
+    return (x == 0 or _TAME_LO <= x <= _TAME_HI) and (y == 0 or _TAME_LO <= y <= _TAME_HI)
+
+
+def _cc_finite(*zs):
+    """Whether each part of each complex z is finite."""
+    return all(map(_isfinite, zs))
+
+
+def _cc_quot_kept(r, a, b):
+    """Whether the parts of the double quotient r = a / b of tame numbers
+    are Sage's range: normal doubles, or zeros whose products in Sage's
+    formula ((ac + bd) / n, (bc - ad) / n) are all zero."""
+    re, im = abs(r.real), abs(r.imag)
+    if _NORMAL_MIN <= re < _INF and _NORMAL_MIN <= im < _INF:
+        return True
+    (p, q), (c, d) = (a.real, a.imag), (b.real, b.imag)
+    return (_NORMAL_MIN <= re < _INF or (re == 0 and (p == 0 or c == 0) and (q == 0 or d == 0))) and \
+        (_NORMAL_MIN <= im < _INF or (im == 0 and (q == 0 or c == 0) and (p == 0 or d == 0)))
+
+
+def _cc_pow_kept(r, b, e):
+    """Whether the parts of the double power r = b ** e (e not an integer)
+    are Sage's, exp(log(b) e): each finite and at least 2^-969, or an
+    imaginary part that is exactly 0 in Sage's too (a positive real b to a
+    real e)."""
+    x, y = abs(r.real), abs(r.imag)
+    return _KEPT_LO <= x < _INF and (_KEPT_LO <= y < _INF or (
+        y == 0 and b.imag == 0 and b.real > 0 and complex(e).imag == 0))
+
+
+def _cc_ipow(z, n):
+    """z ** n in CC for an integer n, as Sage's generic_power: 1/z first
+    for n < 0 (Sage's ~z: m = a^2 + b^2, then a/m and -b/m), then the
+    powers z^(2^i) from the lowest set bit, each multiplied in as apow *
+    res.  Each step is a double operation on tame operands, which rounds
+    as MPFR does; None when an operand is not tame (the 53-bit MP field
+    then does the whole power)."""
+    if n == 0:
+        return ComplexNumber(1.0, 0.0)
+    if not _cc_tame(z):
+        return None
+    if n < 0:
+        apow = _cc_inv(z)
+        if apow is None:
+            return None
+        if apow != apow:
+            # (Sage's 1/0: 0/0 in each part)
+            return ComplexNumber(apow)
+        n = -n
+    else:
+        apow = z
+    while not n & 1:
+        if not _cc_tame(apow):
+            return None
+        apow = apow * apow
+        n >>= 1
+    res = apow
+    n >>= 1
+    while n:
+        # (the operands of each multiplication, checked just before it)
+        if not _cc_tame(apow):
+            return None
+        apow = apow * apow
+        if n & 1:
+            if not (_cc_tame(apow) and _cc_tame(res)):
+                return None
+            res = apow * res
+        n >>= 1
+    return ComplexNumber(res)
+
+
+def _cc_slow(op, a, b):
+    """a op b (complex numbers, or an exponent b) in Sage's CC, the 53-bit
+    MP complex field: a ComplexNumber, or NotImplementedError past the
+    doubles."""
+    import _sage_real
+    C = _sage_real._cc_mp()
+    x = C(a)
+    if op == "~":
+        return _sage_real._cc_from_mp(~x)
+    if op == "^":
+        y = int(b) if isinstance(b, int) or type(b).__name__ == "Integer" else C(complex(b))
+        v = x ** y
+    elif op == "r^":
+        v = C(complex(b)) ** x
+    else:
+        y = C(b)
+        v = x + y if op == "+" else x - y if op == "-" else x * y if op == "*" else x / y
+    return _sage_real._cc_from_mp(v)
+
+
+def _cc_sum(r, a, b, op):
+    """The sum or difference r = a op b in CC: a subnormal or zero sum of
+    doubles is exact, so only an overflow is done again."""
+    if _isfinite(r) or not _cc_finite(a, b):
+        return ComplexNumber(r)
+    return _cc_slow(op, a, b)
+
+
+def _cc_mul(a, b):
+    """a * b in CC."""
+    r = a * b
+    if (_cc_tame(a) and _cc_tame(b)) or not _cc_finite(a, b):
+        return ComplexNumber(r)
+    return _cc_slow("*", a, b)
+
+
+def _cc_pow(z, e, rev=False):
+    """z ** e in CC (e ** z for rev), z and e complex, or e an integer."""
+    if not rev and (isinstance(e, int) or type(e).__name__ == "Integer"):
+        n = int(e)
+        if not _isfinite(z):
+            # (an infinite or NaN z: the doubles' power, as before)
+            return ComplexNumber(z ** n)
+        r = _cc_ipow(z, n)
+        return r if r is not None else _cc_slow("^", z, n)
+    try:
+        r = e ** z if rev else z ** e
+    except (OverflowError, ZeroDivisionError):
+        r = None
+    if r is not None and _cc_pow_kept(r, e if rev else z, z if rev else e):
+        return ComplexNumber(r)
+    ce = complex(e)
+    if not _cc_finite(z, ce):
+        if r is None:
+            raise OverflowError("complex exponentiation")
+        return ComplexNumber(r)
+    return _cc_slow("r^" if rev else "^", z, e)
+
+
+def _hypot_rn(x, y):
+    """sqrt(x^2 + y^2) for doubles x and y, correctly rounded (MPFR's
+    mpfr_hypot, which Sage's CC sqrt uses; math.hypot is not guaranteed
+    correctly rounded): the exact sum of squares in integers, its integer
+    square root, and round to nearest even on 53 bits.  x and y finite,
+    their result a normal double.
+    """
+    import math
+    na, da = abs(x).as_integer_ratio()
+    nb, db = abs(y).as_integer_ratio()
+    d = max(da, db)
+    # (|z| = sqrt(n) / d, d a power of two)
+    n = (na * (d // da)) ** 2 + (nb * (d // db)) ** 2
+    if n == 0:
+        return 0.0
+    e = max(0, 60 - n.bit_length() // 2)
+    m = n << (2 * e)
+    r = math.isqrt(m)
+    sticky = r * r != m
+    drop = r.bit_length() - 53
+    q, rem = divmod(r, 1 << drop)
+    half = 1 << (drop - 1)
+    if rem > half or (rem == half and (sticky or q & 1)):
+        q += 1
+    return math.ldexp(float(q), drop - e - (d.bit_length() - 1))
+
+
+def _cc_sqrt(z):
+    """The square root of the element z of CC, as Sage's ComplexNumber.sqrt
+    (MPFR's steps): on the real line sqrt(x), or sqrt(-x) I for x < 0; else
+    a = sqrt((|z| + x)/2), b = y/a/2, from -z where x < 0 and |y| < |x| (no
+    cancellation), |z| correctly rounded.  On tame parts each step is a
+    normal double operation that rounds as MPFR does, and an infinite or NaN
+    part takes the same steps; otherwise the 53-bit MP field does it (a
+    part past the doubles refused)."""
+    import math
+    z = complex(z)
+    x, y = z.real, z.imag
+    finite = _isfinite(z)
+    if finite and not _cc_tame(z):
+        import _sage_real
+        return _sage_real._cc_from_mp(_sage_real._cc_mp()(z).sqrt())
+    if y == 0:
+        # (Sage's branch on the real line: sqrt(-0.0) is -0.0, and a NaN x
+        # is NaN with an imaginary part +0.0, MPFR's sign test failing)
+        if x >= 0 or x != x:
+            return ComplexNumber(math.sqrt(x), 0.0)
+        return ComplexNumber(0.0, math.sqrt(-x))
+    avoid = x < 0 and abs(y) < abs(x)
+    # (an infinite or NaN part: the same steps in the doubles, whose special
+    # values are MPFR's; hypot of an infinity is +infinity, NaN or not)
+    a2 = _hypot_rn(x, y) if finite else math.hypot(x, y)
+    a2 = ((a2 - x) if avoid else (a2 + x)) / 2
+    re = math.sqrt(a2)
+    im = y / re / 2
+    if avoid:
+        re, im = im, re
+        if y < 0:
+            re, im = -re, -im
+    return ComplexNumber(re, im)
 
 
 class ComplexNumber(complex):
@@ -4315,6 +4688,107 @@ class ComplexNumber(complex):
         1.00000000000000 + 2.00000000000000*I
         sage: z * z, z.abs(), z.real(), z.imag()
         (-3.00000000000000 + 4.00000000000000*I, 2.23606797749979, 1.00000000000000, 2.00000000000000)
+
+    Sage's CC has MPFR's exponents.  Where its value is a double and the
+    doubles' arithmetic leaves them on the way, the value is Sage's::
+
+        sage: ~CC(2^1023, 2^1023), exp(CC(709.8, 0.5))
+        (5.56268464626800e-309 - 5.56268464626800e-309*I, 1.60513379967388e308 + 8.76888591294264e307*I)
+
+    Past the doubles, an error, never a double's infinity or zero (Sage
+    has these values)::
+
+        sage: CC(2^1023, 1) * 4  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 3.59538626972463e308 + 4.00000000000000*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2, 0)^-1075  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 2.47032822920623e-324 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: exp(CC(1000, 1))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.06443396562763e434 + 1.65775768045351e434*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-600, 0) * CC(2^-600, 0)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 5.80771375621750e-362 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+
+    A part that is 0 in the doubles is kept only where it is an exact 0 in
+    Sage's value too (here the doubles lose a nonzero part)::
+
+        sage: exp(CC(-1000, 0))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 5.07595889754946e-435 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(1/4, 2^-1074)^2  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 0.0625000000000000 + 2.47032822920623e-324*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(1/4, 2^-1074)^CC(2, 0)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 0.0625000000000000 + 2.47032822920623e-324*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-60, 2^-1020)^2  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 7.52316384526264e-37 + 1.54395514325390e-325*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-1020, 2^-60)^2  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: -7.52316384526264e-37 + 1.54395514325390e-325*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-60, 2^-1020)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 6.52530446799852e-55 + 2.00875142464325e-343*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+
+    Sage's methods (exp, sin, ..., norm, arg) are Sage's, and so are the
+    functions of an element of CC, which are its methods: an element of CC,
+    however real its value; past the doubles, an error::
+
+        sage: CC(1, 2).exp(), exp(CC(1, 0)), parent(exp(CC(1, 0)))
+        (-1.13120438375681 + 2.47172667200482*I, 2.71828182845905, Complex Field with 53 bits of precision)
+        sage: CC(1000, 1).exp()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.06443396562763e434 + 1.65775768045351e434*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: sech(CC(800, 1))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 3.96352219093270e-348 - 6.17282007699970e-348*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+
+    Each step of an integer power is checked, not only its result (an odd
+    power squares past the doubles, then multiplies back), and so is 1/z::
+
+        sage: CC(2^400, 0)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.72184794563858e361 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-400, 0)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 5.80771375621750e-362 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^400, 0)^-3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 5.80771375621750e-362 in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^400, 1)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.72184794563858e361 + 2.00040432986396e241*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(0, 2^400)^3  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: -1.72184794563858e361*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: CC(2^-375, 2^465)^-1  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.43171197843571e-393 - 1.04966814180736e-140*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        sage: sqrt(CC(4, 2^-1074))  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 2.00000000000000 + 1.23516411460312e-324*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
     """
 
     def _latex_(self):
@@ -4414,14 +4888,101 @@ class ComplexNumber(complex):
         return _sa().RealNumber(self.imag)
 
     def abs(self):
-        """The absolute value.
+        """The absolute value, as Sage's: sqrt(RN(RN(a^2) + RN(b^2))), each
+        step rounded (not hypot's correctly rounded |z|).
 
         EXAMPLES::
 
-            sage: CC(3, 4).abs()
-            5.00000000000000
+            sage: CC(3, 4).abs(), abs(CC(1, 2))
+            (5.00000000000000, 2.23606797749979)
+
+        Past the doubles, Sage's value (in RR, which holds it)::
+
+            sage: CC(2^1023, 2^1023).abs(), CC(2^-1074, 2^-1074).abs()
+            (1.27116100615365e308, 6.98714337051313e-324)
         """
-        return _sa().RealNumber(abs(complex(self)))
+        import math
+        z = complex(self)
+        a, b = z.real, z.imag
+        if _cc_tame(z) or not _cc_finite(z):
+            # (tame parts: their squares and sum are normal doubles or 0, and
+            # IEEE's square root is correctly rounded, as MPFR's; an infinite
+            # or NaN part: IEEE's values are MPFR's)
+            return _sa().RealNumber(math.sqrt(a * a + b * b))
+        # (Sage's abs with MPFR's exponents)
+        import _sage_real
+        import _sage_lang
+        return _sage_lang._rr_from_mp(_sage_real._cc_mp()(z).abs())
+
+    __abs__ = abs
+
+    def sqrt(self, all=False):
+        """The principal square root, as Sage's: an exact 0 real part on the
+        negative real axis; with all, both roots, [r, -r] (only [0] for 0).
+
+        EXAMPLES::
+
+            sage: CC(-4, 0).sqrt(), CC(3, 4).sqrt()
+            (2.00000000000000*I, 2.00000000000000 + 1.00000000000000*I)
+            sage: CC(-4, 0).sqrt(all=True), CC(0).sqrt(all=True)
+            ([2.00000000000000*I, -2.00000000000000*I], [0.000000000000000])
+        """
+        r = _cc_sqrt(self)
+        if not all:
+            return r
+        return [r] if r == 0 else [r, -r]
+
+    def log(self, base=None):
+        """The principal logarithm, log|z| + arg(z) I with -pi < arg(z) <= pi
+        (to a base: both parts over log(base)), as Sage's: a NaN part gives
+        NaN + NaN*I.
+
+        EXAMPLES::
+
+            sage: CC(2, 1).log(), CC(-1).log(), CC(-2).log()
+            (0.804718956217050 + 0.463647609000806*I, 3.14159265358979*I, 0.693147180559945 + 3.14159265358979*I)
+            sage: CC(-1).log(2), CC(0).log(), CC(2, 1).log(1)
+            (4.53236014182719*I, -infinity, +infinity + +infinity*I)
+
+        |z| as Sage's CC computes it, each step rounded (here 1 - 2^-53, not
+        the correctly rounded 1)::
+
+            sage: CC(-0.5, 0.8660254037844386).log()
+            -1.11022302462516e-16 + 2.09439510239320*I
+
+        An argument below the doubles is refused (Sage's imaginary part is 1e-400)::
+
+            sage: CC(1e100, 1e-300).log()  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: 230.258509299405 + 1.00000000000000e-400*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+        """
+        import _sage_real
+        z = complex(self)
+        if z.real != z.real:
+            return ComplexNumber(z.real, z.real)
+        if z.imag != z.imag:
+            return ComplexNumber(z.imag, z.imag)
+        # (each part as Sage's CC computes it: _cc_log)
+        rho, theta = _sage_real._cc_log(z.real, z.imag)
+        if z.imag != 0 and abs(theta) < _NORMAL_MIN and abs(z.real) < _INF:
+            # (an argument below the normal doubles: atan2(y, x) underflowed,
+            # where Sage's is nonzero; the 53-bit MP field's, refused past the
+            # doubles)
+            C = _sage_real._cc_mp()
+            return _sage_real._cc_from_mp(C(z).log() if base is None else C(z).log(base))
+        if base is None:
+            return ComplexNumber(rho, theta)
+        # (both parts over log(base), the correctly rounded logarithm in RR, each
+        # quotient as MPFR's: over log(1) = +0, +-infinity, or NaN for 0 / 0)
+        lb = float(_sage_real.RealField_(53, "RNDN")(float(_sa().RR(base))).log())
+
+        def over(x):
+            if lb:
+                return x / lb
+            import math
+            return math.nan if x == 0 or x != x else math.copysign(math.inf, x) * math.copysign(1.0, lb)
+        return ComplexNumber(over(rho), over(theta))
 
     def __add__(self, o):
         # (a matrix over a field answers for itself: complex(M) was the
@@ -4431,7 +4992,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(complex(self) + c)
+        return _cc_sum(complex(self) + c, complex(self), c, "+")
 
     __radd__ = __add__
 
@@ -4441,7 +5002,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(complex(self) - c)
+        return _cc_sum(complex(self) - c, complex(self), c, "-")
 
     def __rsub__(self, o):
         if getattr(o, "_is_ffmatrix", False):
@@ -4449,7 +5010,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(c - complex(self))
+        return _cc_sum(c - complex(self), c, complex(self), "-")
 
     def __mul__(self, o):
         if getattr(o, "_is_ffmatrix", False):
@@ -4457,7 +5018,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(complex(self) * c)
+        return _cc_mul(complex(self), c)
 
     __rmul__ = __mul__
 
@@ -4467,7 +5028,7 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(complex(self) / c)
+        return _cc_div(complex(self), c)
 
     def __rtruediv__(self, o):
         if getattr(o, "_is_ffmatrix", False):
@@ -4475,19 +5036,29 @@ class ComplexNumber(complex):
         c = _cc_or_none(o)
         if c is None:
             return NotImplemented
-        return ComplexNumber(c / complex(self))
+        return _cc_div(c, complex(self))
+
+    def __invert__(self):
+        # (Sage's __invert__, not 1/self: their zeros' signs differ)
+        z = complex(self)
+        r = _cc_inv(z)
+        return ComplexNumber(r) if r is not None else _cc_slow("~", z, None)
 
     def __neg__(self):
         return ComplexNumber(-complex(self))
 
     def __pow__(self, e, mod=None):
         # (pow(z, e, m): Sage's CC ignores the modulus)
+        if type(e).__name__ == "Expression":
+            # (a symbolic exponent: exp(log(z)*e), the logarithm in CC, as Sage:
+            # CC(1, 2)^x is e^((0.804718956217050 + 1.10714871779409*I)*x))
+            return _sa().exp(_sa().log(self) * e)
         _cc(e)
         if type(e).__name__ in ("RealNumberMP", "_RealLiteralMP") and e._R._prec != 53:
             # (Sage's power is in the coarser complex field: not available,
             # refused as before rather than rounded into CC, CORR-C9B-1)
             raise TypeError("unable to convert %r to a real number" % complex(self))
-        return ComplexNumber(complex(self) ** e)
+        return _cc_pow(complex(self), e)
 
     def __float__(self):
         # (as Sage: NaN for a NaN real part, the real part for a zero
@@ -4501,7 +5072,7 @@ class ComplexNumber(complex):
         raise TypeError("can't convert complex to int; use int(abs(z))")
 
     def __rpow__(self, b):
-        return ComplexNumber(_cc(b) ** complex(self))
+        return _cc_pow(complex(self), _cc(b), rev=True)
 
     def __eq__(self, o):
         # (an element of RR past the doubles compares by its value: its
@@ -4518,6 +5089,186 @@ class ComplexNumber(complex):
         return r if r is NotImplemented else not r
 
     __hash__ = complex.__hash__
+
+
+
+# Sage's methods of CC's elements: the transcendental ones are the 53-bit MP
+# field's, which are Sage's ComplexNumber methods step by step (MPFR's
+# exponents and all); a value past the doubles is refused, never an infinity
+# or a zero (_sage_real._cc_from_mp).  The functions of an element of CC
+# (exp(z), sin(z), ...) are these methods too, as in Sage.
+def _cc_mp_method(name, what, value):
+    def method(self):
+        import _sage_real
+        return _sage_real._cc_from_mp(getattr(_sage_real._cc_mp()(complex(self)), name)())
+    method.__name__ = method.__qualname__ = name
+    method.__doc__ = """%s, as Sage's ComplexNumber.%s computes it.
+
+        EXAMPLES::
+
+            sage: CC(1, 2).%s()
+            %s
+        """ % (what[0].upper() + what[1:], name, name, value)
+    return method
+
+
+_CC_MP_METHODS = (
+    ("exp", "the exponential", "-1.13120438375681 + 2.47172667200482*I"),
+    ("sin", "the sine", "3.16577851321617 + 1.95960104142161*I"),
+    ("cos", "the cosine", "2.03272300701967 - 3.05189779915180*I"),
+    ("tan", "the tangent", "0.0338128260798967 + 1.01479361614663*I"),
+    ("cot", "the cotangent", "0.0327977555337526 - 0.984329226458191*I"),
+    ("sec", "the secant", "0.151176298265577 + 0.226973675393722*I"),
+    ("csc", "the cosecant", "0.228375065599687 - 0.141363021612408*I"),
+    ("sinh", "the hyperbolic sine", "-0.489056259041294 + 1.40311925062204*I"),
+    ("cosh", "the hyperbolic cosine", "-0.642148124715520 + 1.06860742138278*I"),
+    ("tanh", "the hyperbolic tangent", "1.16673625724092 - 0.243458201185725*I"),
+    ("coth", "the hyperbolic cotangent", "0.821329797493852 + 0.171383612909185*I"),
+    ("sech", "the hyperbolic secant", "-0.413149344266940 - 0.687527438655479*I"),
+    ("csch", "the hyperbolic cosecant", "-0.221500930850509 - 0.635493799253900*I"),
+)
+for _n, _w, _v in _CC_MP_METHODS:
+    setattr(ComplexNumber, _n, _cc_mp_method(_n, _w, _v))
+
+
+def _cc_norm(self):
+    """The norm, |self|^2, as Sage's: RN(RN(a^2) + RN(b^2)), an element of RR.
+
+    EXAMPLES::
+
+        sage: CC(1, 2).norm()
+        5.00000000000000
+    """
+    import _sage_real
+    import _sage_lang
+    return _sage_lang._rr_from_mp(_sage_real._cc_mp()(complex(self)).norm())
+
+
+def _cc_arg(self):
+    """The argument in (-pi, pi], atan2(imag, real) correctly rounded, an
+    element of RR, as Sage's.
+
+    EXAMPLES::
+
+        sage: CC(1, 2).arg(), CC(-1, 0).argument()
+        (1.10714871779409, 3.14159265358979)
+    """
+    import _sage_real
+    import _sage_lang
+    return _sage_lang._rr_from_mp(_sage_real._cc_mp()(complex(self)).arg())
+
+
+ComplexNumber.norm = _cc_norm
+ComplexNumber.arg = ComplexNumber.argument = _cc_arg
+
+
+def _cc_predicates():
+    """Sage's tests of an element of CC."""
+    inf = float("inf")
+
+    def is_real(self):
+        """Whether the imaginary part is 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(1, 0).is_real(), CC(1, 2).is_real()
+            (True, False)
+        """
+        return complex(self).imag == 0
+
+    def is_imaginary(self):
+        """Whether the real part is 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(0, 2).is_imaginary(), CC(1, 2).is_imaginary()
+            (True, False)
+        """
+        return complex(self).real == 0
+
+    def is_zero(self):
+        """Whether self is 0.
+
+        EXAMPLES::
+
+            sage: CC(0, 0).is_zero(), CC(0, 1).is_zero()
+            (True, False)
+        """
+        return complex(self) == 0
+
+    def is_one(self):
+        """Whether self is 1.
+
+        EXAMPLES::
+
+            sage: CC(1, 0).is_one(), CC(1, 2).is_one()
+            (True, False)
+        """
+        return complex(self) == 1
+
+    def is_NaN(self):
+        """Whether a part is NaN, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(float("nan"), 0).is_NaN(), CC(0, float("nan")).is_NaN(), CC(1, 2).is_NaN()
+            (True, True, False)
+        """
+        z = complex(self)
+        return z.real != z.real or z.imag != z.imag
+
+    def is_infinity(self):
+        """Whether a part is infinite, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(1, oo).is_infinity(), CC(-oo, 0).is_infinity(), CC(1, 2).is_infinity()
+            (True, True, False)
+        """
+        z = complex(self)
+        return abs(z.real) == inf or abs(z.imag) == inf
+
+    def is_positive_infinity(self):
+        """Whether self is +infinity: the real part +infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(oo, 0).is_positive_infinity(), CC(oo, 1).is_positive_infinity()
+            (True, False)
+        """
+        z = complex(self)
+        return z.real == inf and z.imag == 0
+
+    def is_negative_infinity(self):
+        """Whether self is -infinity: the real part -infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CC(-oo, 0).is_negative_infinity(), CC(oo, 0).is_negative_infinity()
+            (True, False)
+        """
+        z = complex(self)
+        return z.real == -inf and z.imag == 0
+
+    def prec(self):
+        """The precision of CC, 53 bits.
+
+        EXAMPLES::
+
+            sage: CC(1, 2).prec()
+            53
+        """
+        return 53
+
+    for f in (is_real, is_imaginary, is_zero, is_one, is_NaN, is_infinity, is_positive_infinity,
+              is_negative_infinity, prec):
+        setattr(ComplexNumber, f.__name__, f)
+
+
+_cc_predicates()
+
 
 
 class ComplexField_:
@@ -4588,13 +5339,18 @@ class ComplexField_:
 
     prec = precision
 
-    def __call__(self, re=0, im=0):
+    def __call__(self, re=0, im=None):
         """A complex number from a number or real and imaginary parts.
 
         EXAMPLES::
 
             sage: CC(1/2), CC(1, -1)
             (0.500000000000000, 1.00000000000000 - 1.00000000000000*I)
+
+        A complex number keeps its parts, a -0.0 too::
+
+            sage: float(CC(CC(1, -0.0)).imag()), float(CC(complex(1, -0.0)).imag())
+            (-0.0, -0.0)
             sage: CC('1e400')  # sagebrush only (Sage: 1.00000000000000e400)
             Traceback (most recent call last):
             ...
@@ -4604,6 +5360,9 @@ class ComplexField_:
             ...
             NotImplementedError: CC('1e-400j'): complex numbers beyond the range of doubles are not available in sagebrush yet
         """
+        one = im is None
+        if one:
+            im = 0
         for x in (re, im):
             if isinstance(x, str) and "_" in x:
                 # (Python's complex() accepts digit separators, Sage does
@@ -4612,7 +5371,12 @@ class ComplexField_:
         # (re + im i by parts: complex(im) * 1j made a NaN or infinite
         # imaginary part NaN + NaN j, spoiling the real part)
         a, b = complex(re), complex(im)
-        z = complex(a.real - b.imag if b.imag else a.real, a.imag + b.real if a.imag else b.real)
+        if one:
+            # (one number: its own parts, a -0.0 imaginary part too; a plain
+            # complex, not the argument itself when it is an element of CDF)
+            z = complex(a.real, a.imag)
+        else:
+            z = complex(a.real - b.imag if b.imag else a.real, a.imag + b.real if a.imag else b.real)
         # (CC's numbers are doubles: CC('1e400') was +infinity, CC('1e-400') 0)
         for x in (re, im):
             if _beyond_doubles(x):

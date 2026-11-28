@@ -16,10 +16,10 @@ import math
 
 from collections.abc import Mapping as _Mapping
 from _graphics import Line, Patches, Segments, colormap, nice_ticks, to_color
-from sage_plot import Graphics, _split
+from sage_plot import Graphics, _split, GRAPHICS_OPTIONS as _GRAPHICS_OPTIONS
 
 __all__ = ["contour_plot", "density_plot", "implicit_plot", "region_plot", "plot_vector_field",
-           "plot_slope_field", "colormaps"]
+           "plot_slope_field", "colormaps", "matrix_plot"]
 
 
 def _fn(f, names):
@@ -621,3 +621,141 @@ def plot_slope_field(f, xrange, yrange, plot_points=20, color="blue", headlength
     what = "slope field of y' = %s at %d points" % (f, len(segs))
     return Graphics([Segments(segs, heads=bool(headlength), color=to_color(color, "blue"), thickness=1.2, what=what,
                               bbox=(xa, xb, ya, yb))], **gopts)
+
+
+# --- matrix_plot
+
+# (MatrixPlot's options as Sage lists them, each with its description)
+_MATRIX_PLOT_OPTIONS = {
+    "cmap": "the name of a predefined colormap,\n                        a list of colors, or an instance of a\n                        matplotlib Colormap. Type: import matplotlib.cm; matplotlib.cm.datad.keys()\n                        for available colormap names.",
+    "colorbar": "Include a colorbar indicating the levels (dense matrices only)",
+    "colorbar_options": "a dictionary of options for colorbars",
+    "flip_y": "If False, draw the matrix with the first row on the bottom of the graph",
+    "marker": "The marker for sparse plots",
+    "markersize": "The marker size for sparse plots",
+    "norm": "The normalization function",
+    "subdivision_options": "Options (boundaries and style) of the subdivisions",
+    "subdivisions": "If True, draw subdivisions of the matrix",
+    "vmax": "The maximum value",
+    "vmin": "The minimum value",
+    "zorder": "The layer level in which to draw",
+}
+
+
+class _MatrixOptions(dict):
+    """MatrixPlot's options: Sage's, callable as its options() method is."""
+
+    def __call__(self):
+        return dict(self)
+
+
+class MatrixPlot:
+    """matrix_plot's primitive: the matrix's cells over the box [x0, x1] x [y0, y1],
+    drawn as one picture (imshow's)."""
+
+    def __init__(self, nrows, ncols, box, inner, options):
+        self._nrows, self._ncols, self._box, self._inner = nrows, ncols, box, inner
+        self.kind = inner.kind
+        self.options = _MatrixOptions(options)
+
+    def bbox(self):
+        x0, x1, y0, y1 = self._box
+        return (min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1))
+
+    def legend(self):
+        return None
+
+    def svg(self, P):
+        return self._inner.svg(P)
+
+    def describe(self):
+        return "matrix plot of a %d by %d matrix" % (self._nrows, self._ncols)
+
+    def __repr__(self):
+        return "MatrixPlot defined by a %d x %d data grid" % (self._nrows, self._ncols)
+
+
+def _matrix_rows(mat):
+    """(nrows, ncols, rows of floats) of a matrix, a 2D array or a list of lists."""
+    if callable(getattr(mat, "nrows", None)) and callable(getattr(mat, "ncols", None)):
+        nr, nc = int(mat.nrows()), int(mat.ncols())
+        return nr, nc, [[float(mat[i, j]) for j in range(nc)] for i in range(nr)]
+    try:
+        rows = [list(r) for r in mat]
+    except TypeError:
+        raise TypeError("mat must be a Matrix or a two dimensional array") from None
+    nc = len(rows[0]) if rows else 0
+    if any(len(r) != nc for r in rows):
+        raise TypeError("mat must be a Matrix or a two dimensional array")
+    return len(rows), nc, [[float(v) for v in r] for r in rows]
+
+
+def _int_ticks(lo, hi):
+    """Integer tick positions over [lo, hi], about six of them (Sage's ticks_integer)."""
+    if not hi > lo:
+        return [float(round(lo))]
+    _, step = nice_ticks(lo, hi)
+    step = max(1, int(math.ceil(step)))
+    return [float(k * step) for k in range(int(math.ceil(lo / step)), int(math.floor(hi / step)) + 1)]
+
+
+def matrix_plot(mat, xrange=None, yrange=None, **options):
+    """A matrix (or a 2D array, or a list of lists) as a picture, each entry a
+    cell colored by its value between vmin and vmax (the smallest and largest
+    entries by default) in the colormap cmap ('Greys' by default): the first
+    row at the top (flip_y=False: at the bottom), a frame with integer ticks.
+    (Sagebrush's matrices are dense: a sparse one is drawn as Sage draws a
+    dense one, every cell colored, not its nonzero entries as markers.)  xrange and yrange
+    give the picture's box; colorbar=True adds the colormap's bar.
+
+    EXAMPLES::
+
+        sage: M = matrix([[1, 3, 5, 1], [2, 4, 5, 6], [1, 3, 5, 7]])
+        sage: P = matrix_plot(M); P
+        Graphics object consisting of 1 graphics primitive
+        sage: P[0]
+        MatrixPlot defined by a 3 x 4 data grid
+        sage: P.get_minmax_data()
+        {'xmax': 3.5, 'xmin': -0.5, 'ymax': 2.5, 'ymin': -0.5}
+        sage: matrix_plot(M, cmap='jet', colorbar=True)
+        Graphics object consisting of 1 graphics primitive
+    """
+    import numpy as np
+    from _graphics import Image, image_rgba, png_url
+    nr, nc, rows = _matrix_rows(mat)
+    opts = {"cmap": "Greys", "colorbar": False, "colorbar_options": {"orientation": "vertical", "format": None},
+            "flip_y": True, "marker": ".", "norm": None, "subdivision_options": {"boundaries": None, "style": None},
+            "subdivisions": False, "vmax": None, "vmin": None}
+    gopts = {k: options.pop(k) for k in list(options) if k in _GRAPHICS_OPTIONS}
+    opts.update(options)
+    if opts["norm"] is not None:
+        raise NotImplementedError("matrix_plot's norm option is not implemented in Sagebrush: use vmin and vmax")
+    cmap = opts["cmap"]
+    if isinstance(cmap, (list, tuple)):
+        raise NotImplementedError("matrix_plot's cmap as a list of colors is not implemented in Sagebrush: use a colormap's name")
+    bad = _unknown(cmap, (-0.5, nc - 0.5, -0.5, nr - 0.5), dict(gopts))
+    if bad is not None:
+        return bad
+    xa, xb = (float(xrange[0]), float(xrange[1])) if xrange is not None else (-0.5, nc - 0.5)
+    ya, yb = (float(yrange[0]), float(yrange[1])) if yrange is not None else (-0.5, nr - 0.5)
+    flip = bool(opts["flip_y"])
+    F = np.array(rows, dtype=float).reshape(nr, nc)
+    finite = F[np.isfinite(F)]
+    lo = float(opts["vmin"]) if opts["vmin"] is not None else (float(finite.min()) if finite.size else 0.0)
+    hi = float(opts["vmax"]) if opts["vmax"] is not None else (float(finite.max()) if finite.size else 1.0)
+    px = image_rgba(F, cmap, lo, hi) if nr and nc else np.zeros((1, 1, 4), dtype=np.uint8)
+    # (row i at y near i, whichever way the axis runs: flip_y inverts the axis, the rows stay)
+    inner = Image(png_url(px), xa, xb, ya, yb, first_row_y=ya, first_col_x=xa,
+                  pixelated=True, what="matrix plot of a %d by %d matrix" % (nr, nc))
+    prim = MatrixPlot(nr, nc, (xa, xb, ya, yb), inner, opts)
+    if opts["colorbar"]:
+        prim._colorbar = (cmap, lo, hi)
+    unknown = {k: v for k, v in options.items() if k not in _MATRIX_PLOT_OPTIONS}
+    if unknown:
+        prim._sage_ignored = (unknown, _MATRIX_PLOT_OPTIONS)
+    gopts.setdefault("frame", True)
+    gopts.setdefault("axes", False)
+    gopts.setdefault("aspect_ratio", 1)
+    g = Graphics([prim], **gopts)
+    g._options.update({"flip_y": flip, "ticks_integer": True})
+    return g

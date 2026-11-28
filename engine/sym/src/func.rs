@@ -155,6 +155,19 @@ pub fn eval(f: Fun, args: Vec<Expr>) -> Expr {
             value_error(format!("{}() takes exactly {} argument{} ({} given)", f.name(), n, if n == 1 { "" } else { "s" }, args.len()));
         }
     }
+    // a real of RealField(p) among numbers: the value in its field is the
+    // front end's (mp_calls), as Sage's RealNumber methods compute it; only
+    // the identities of a real (abs, conjugate, real and imaginary parts)
+    // are the engine's
+    if args.iter().any(|a| a.is_mp()) && args.iter().all(|a| a.is_num()) {
+        let nan = args.iter().any(|a| a.as_num().is_some_and(|n| n.mp_nan()));
+        if !nan && matches!(f, Fun::Abs | Fun::Conjugate | Fun::RealPart | Fun::ImagPart) {
+            if let Some(v) = exact(&f, &args) {
+                return v;
+            }
+        }
+        return raw(Kind::Fun(f, args));
+    }
     if crate::special::is_special(&f) {
         return crate::special::eval(f, args);
     }
@@ -176,7 +189,9 @@ pub fn eval(f: Fun, args: Vec<Expr>) -> Expr {
         // (a real-valued function is over the real parent: abs(SR(CDF(3, 4))) is RDF's 5.0)
         let k = if matches!(f, Fun::Abs | Fun::RealPart | Fun::ImagPart | Fun::Arg) { k.to_real() } else { k };
         if let Some((re, im)) = float_eval(&f, &v) {
-            return num(Num::fl(re, im, k));
+            let r = Num::fl(re, im, k);
+            check_float_value(&f, &v, &r);
+            return num(r);
         }
     }
     if let Some(v) = exact(&f, &args) {
@@ -429,6 +444,9 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                     Num::Exact(a, b) => sqrt(&qnum(a * a + b * b)),
                     // (a float is float_eval's, which eval runs first)
                     Num::Float(..) => return None,
+                    Num::Mp(m) => num(Num::mp(if m.signbit() { m.neg() } else { (**m).clone() })),
+                    // (Sage's abs_c, the front end's: mp_calls)
+                    Num::Mpc(_) => return None,
                 });
             }
             if let Kind::Fun(Fun::Abs, _) = &x.kind {
@@ -585,6 +603,11 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                 Num::Exact(a, b) => Num::Exact(a.clone(), -b.clone()),
                 // (a float is float_eval's, which eval runs first)
                 Num::Float(..) => return None,
+                Num::Mp(_) => n.clone(),
+                // (a zero imaginary part: the number itself, as Sage's real
+                // numeric)
+                Num::Mpc(z) if z.im.is_zero() => n.clone(),
+                Num::Mpc(z) => Num::mpc(z.conjugate()),
             }))
         }
         Fun::RealPart => {
@@ -592,6 +615,11 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             Some(num(match n {
                 Num::Exact(a, _) => Num::rat(a.clone()),
                 Num::Float(a, _, k) => Num::Float(*a, 0.0, k.to_real()),
+                Num::Mp(_) => n.clone(),
+                // (an element of RealField(p), as Sage's real(); with a zero
+                // imaginary part the number itself, as Sage's real numeric)
+                Num::Mpc(z) if z.im.is_zero() => n.clone(),
+                Num::Mpc(z) => Num::mp(z.re.clone()),
             }))
         }
         Fun::ImagPart => {
@@ -599,6 +627,11 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             Some(num(match n {
                 Num::Exact(_, b) => Num::rat(b.clone()),
                 Num::Float(_, b, k) => Num::Float(*b, 0.0, k.to_real()),
+                // (an exact 0, as Sage: imag_part(SR(RealField(100)(2))) is 0)
+                Num::Mp(_) => Num::zero(),
+                // (the exact 0 for a zero one, as Sage's real numeric)
+                Num::Mpc(z) if z.im.is_zero() => Num::zero(),
+                Num::Mpc(z) => Num::mp(z.im.clone()),
             }))
         }
         Fun::Arg => {
@@ -674,11 +707,21 @@ fn cdiv(a: C, b: C) -> C {
     let d = b.0 * b.0 + b.1 * b.1;
     ((a.0 * b.0 + a.1 * b.1) / d, (a.1 * b.0 - a.0 * b.1) / d)
 }
+/// |a|: sqrt(x^2 + y^2), or hypot where the squares leave the doubles
+/// (|CC(2^600, 1)| is not infinite, nor |CC(1e-300, 1e-300)| 0)
+fn cabs(a: C) -> f64 {
+    let n = (a.0 * a.0 + a.1 * a.1).sqrt();
+    if n.is_normal() || (a.0 == 0.0 && a.1 == 0.0) || !n.is_finite() && !(a.0.is_finite() && a.1.is_finite()) {
+        n
+    } else {
+        a.0.hypot(a.1)
+    }
+}
 fn clog(a: C) -> C {
-    ((a.0 * a.0 + a.1 * a.1).sqrt().ln(), a.1.atan2(a.0))
+    (cabs(a).ln(), a.1.atan2(a.0))
 }
 fn csqrt(a: C) -> C {
-    let r = (a.0 * a.0 + a.1 * a.1).sqrt();
+    let r = cabs(a);
     let re = ((r + a.0) / 2.0).sqrt();
     let im = ((r - a.0) / 2.0).sqrt();
     (re, if a.1 < 0.0 { -im } else { im })
@@ -715,6 +758,52 @@ fn cacos(z: C) -> C {
 fn catan(z: C) -> C {
     let iz = cmul(I, z);
     cmul((0.0, 0.5), csub(clog(csub(ONE, iz)), clog(cadd(ONE, iz))))
+}
+
+/// Refuses f's RR or CC value r at v where its doubles may have left the
+/// normal ones (Sage's has MPFR's exponents): a 0 part is kept where Sage's
+/// value has an exact 0 there, infinities at a pole (a real argument 0, 1
+/// or -1: log(0), atanh(1), cot(0)); the functions whose values are exact
+/// (floor, sign, the parts, ...) and binomial's exact 0s keep theirs.
+fn check_float_value(f: &Fun, v: &[C], r: &Num) {
+    let (x, y) = v[0];
+    let real = v.iter().all(|z| z.1 == 0.0);
+    let special = real && v.len() == 1 && (x == 0.0 || x == 1.0 || x == -1.0);
+    let zero_ok = |i: usize| match f {
+        Fun::Sign | Fun::Floor | Fun::Ceil | Fun::Conjugate | Fun::RealPart | Fun::ImagPart | Fun::Heaviside | Fun::Binomial => true,
+        // (real-valued; arg and atan2 are 0 on the positive real axis only)
+        Fun::Arg => i == 1 || y == 0.0,
+        Fun::Atan2 => i == 1 || x == 0.0,
+        Fun::Abs => i == 1 || (x == 0.0 && y == 0.0),
+        // (the exact 0s of Sage's values, as the front end's tables for an
+        // element of CC, lib/_sage_expr.py's _CC_REAL_ON_REALS and the
+        // others: real on the real line; the real part of the odd functions
+        // and the imaginary part of the even ones on the imaginary axis;
+        // arccos(2) and arccosh(1/2) imaginary; and at 0, 1 or -1, as
+        // log(1) and log(-1)'s real part)
+        _ => {
+            let n = f.name();
+            let n = n.as_str();
+            if v.len() != 1 {
+                false
+            } else if i == 1 {
+                real || (x == 0.0 && matches!(n, "cos" | "cosh" | "sec" | "sech")) || special
+            } else {
+                special
+                    || (x == 0.0 && matches!(n, "sin" | "tan" | "sinh" | "tanh" | "cot" | "csc" | "coth" | "csch" | "arcsin"))
+                    || (x == 0.0 && n == "arctan" && y.abs() < 1.0)
+                    || (x == 0.0 && matches!(n, "arcsinh" | "arctanh") && y.abs() <= 1.0)
+                    || (real && n == "arccos" && x >= 1.0)
+                    || (real && n == "arccosh" && x.abs() <= 1.0)
+                    || (n == "log" && x == 0.0 && y.abs() == 1.0)
+            }
+        }
+    };
+    let copies = matches!(f, Fun::Conjugate | Fun::RealPart | Fun::ImagPart);
+    if copies {
+        return;
+    }
+    crate::num::check_float_value(&f.name(), v, r, special, zero_ok);
 }
 
 /// f at complex floats (real arguments in the real domain stay real).
@@ -756,7 +845,8 @@ pub fn float_eval(f: &Fun, v: &[C]) -> Option<C> {
         Fun::Asech => if real && x > 0.0 && x <= 1.0 { r((1.0 / x).acosh()) } else { None },
         Fun::Acsch => if real { r((1.0 / x).asinh()) } else { None },
         Fun::Log => if real && x > 0.0 { r(x.ln()) } else { Some(clog(z)) },
-        Fun::Abs => r((z.0 * z.0 + z.1 * z.1).sqrt()),
+        // (|x| itself on the real line: x^2 leaves the doubles first)
+        Fun::Abs => r(if real { x.abs() } else { cabs(z) }),
         Fun::Sign => if real { r(if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }) } else { None },
         Fun::Floor => if real { r(x.floor()) } else { None },
         Fun::Ceil => if real { r(x.ceil()) } else { None },

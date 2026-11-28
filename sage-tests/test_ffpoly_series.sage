@@ -1,0 +1,46 @@
+# GF(p) polynomial: inverse_series_trunc, power_trunc, multiplication_trunc (Sage mode), as Sage gives them.
+R.<x> = GF(101)[]
+f = x^5 + 3*x + 1
+F9.<a> = GF(9)
+S.<y> = F9[]
+T.<z> = GF(2)[]
+def show(label, f):
+    try:
+        r = f()
+        print(label, "->", repr(r), flush=True)
+    except Exception as e:
+        print(label, "->", "%s: %s" % (type(e).__name__, str(e).split(chr(10))[0]), flush=True)
+show('(1 + x).inverse_series_trunc(6)', lambda: (1 + x).inverse_series_trunc(6))
+show('(x^2 + 3).inverse_series_trunc(4)', lambda: (x^2 + 3).inverse_series_trunc(4))
+show('f.inverse_series_trunc(1)', lambda: f.inverse_series_trunc(1))
+show('f.inverse_series_trunc(12)', lambda: f.inverse_series_trunc(12))
+show('(f * f.inverse_series_trunc(12)).truncate(12)', lambda: (f * f.inverse_series_trunc(12)).truncate(12))
+show('x.inverse_series_trunc(3)', lambda: x.inverse_series_trunc(3))
+show('(x + 1).inverse_series_trunc(0)', lambda: (x + 1).inverse_series_trunc(0))
+show('(1 + z).inverse_series_trunc(8)', lambda: (1 + z).inverse_series_trunc(8))
+show('(a + y).inverse_series_trunc(4)', lambda: (a + y).inverse_series_trunc(4))
+show('f.power_trunc(3, 4)', lambda: f.power_trunc(3, 4))
+show('f.power_trunc(0, 3)', lambda: f.power_trunc(0, 3))
+show('f.power_trunc(0, 0)', lambda: f.power_trunc(0, 0))
+show('f.power_trunc(2, 0)', lambda: f.power_trunc(2, 0))
+show('f.multiplication_trunc(f, 0)', lambda: f.multiplication_trunc(f, 0))
+show('f.power_trunc(1, 2)', lambda: f.power_trunc(1, 2))
+show('f.power_trunc(20, 6)', lambda: f.power_trunc(20, 6))
+show('(x + 1).power_trunc(101, 102)', lambda: (x + 1).power_trunc(101, 102))
+show('x.power_trunc(5, 5)', lambda: x.power_trunc(5, 5))
+show('x.power_trunc(5, 6)', lambda: x.power_trunc(5, 6))
+show('(1 + z).power_trunc(7, 5)', lambda: (1 + z).power_trunc(7, 5))
+show('f.multiplication_trunc(x^2 + 1, 4)', lambda: f.multiplication_trunc(x^2 + 1, 4))
+show('f.multiplication_trunc(f, 7)', lambda: f.multiplication_trunc(f, 7))
+show('f.multiplication_trunc(x^5, 5)', lambda: f.multiplication_trunc(x^5, 5))
+show('f.multiplication_trunc(x^5, 6)', lambda: f.multiplication_trunc(x^5, 6))
+show('f.multiplication_trunc(R(0), 3)', lambda: f.multiplication_trunc(R(0), 3))
+show('(a*y + 1).multiplication_trunc(y + a, 2)', lambda: (a*y + 1).multiplication_trunc(y + a, 2))
+show('(x + 1).inverse_mod(x^2 + 1)', lambda: (x + 1).inverse_mod(x^2 + 1))
+show('f.multiplication_trunc(f, -1)', lambda: f.multiplication_trunc(f, -1))
+show('(z + 1).multiplication_trunc(z + 1, 0)', lambda: (z + 1).multiplication_trunc(z + 1, 0))
+show('(z + 1).multiplication_trunc(z + 1, -1)', lambda: (z + 1).multiplication_trunc(z + 1, -1))
+show('(y + a).multiplication_trunc(y, 0)', lambda: (y + a).multiplication_trunc(y, 0))
+show('(y + a).multiplication_trunc(y + 1, -2)', lambda: (y + a).multiplication_trunc(y + 1, -2))
+show('f.power_trunc(2, -1)', lambda: f.power_trunc(2, -1))
+show('(z + 1).power_trunc(2, 0)', lambda: (z + 1).power_trunc(2, 0))

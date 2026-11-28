@@ -1,7 +1,19 @@
 """Polynomials over Z (sagebrush.poly): factoring (engine/poly), products,
-gcds and exact division (engine/arith), in Rust."""
+gcds and exact division (engine/arith), in Rust; and truncated power series
+over Z and Q, the Euler product and sigma_k (engine/arith's zseries).
 
-from ._engine import call
+A series is its coefficients mod q^n, constant term first; over Q, integer
+numerators a and a positive denominator da (the series a / da).  The
+results are reduced as Sage shows them: a list of ints, or of Fractions in
+lowest terms, trailing zeros dropped.  raw=True gives the engine's
+unreduced (numerators, denominator) instead, for a caller that reduces once
+at the end.  Inputs and outputs travel in hex, which both sides convert in
+linear time.
+"""
+
+from fractions import Fraction as _Fraction
+
+from ._engine import call, call_hex
 
 
 def factor(f):
@@ -22,8 +34,282 @@ def _dec(s):
 
 
 def mul(a, b):
-    """The product of integer polynomials (constant term first)."""
-    return _dec(call("poly_mul", a=_enc(a), b=_enc(b), wire="csv"))
+    """The product of integer polynomials (constant term first, trailing
+    zeros dropped): Kronecker substitution on one NTT product in the
+    engine, refused past its caps (a product of at most 2^25 bits).
+
+    >>> from sagebrush.poly import mul
+    >>> mul([1, 1], [-1, 1])
+    [-1, 0, 1]
+    >>> mul([0, 0], [1, 2])
+    []
+    """
+    return _ints(call_hex("poly_mul", _hex(a), _hex(b)))
+
+
+def qmul(a, b):
+    """The product of rational polynomials (int or Fraction coefficients,
+    constant term first), in lowest terms with trailing zeros dropped: the
+    engine's qpoly_mul (the common denominators, one integer product, each
+    coefficient reduced), refused past its caps.
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qmul
+    >>> qmul([Fraction(1, 2), 1], [Fraction(-1, 3), 1])
+    [Fraction(-1, 6), Fraction(1, 6), 1]
+    >>> qmul([0, 0], [Fraction(1, 2)])
+    []
+    """
+    r = call_hex("qpoly_mul", _qhex(a), _qhex(b))
+    return [_token(t) for t in r.split(",")] if r else []
+
+
+# (the coefficient types qclear accepts, by exact type: int and Fraction, and
+# the Sage layer's own Integer, Rational and the int a Rational's numerator()
+# returns, which it registers here; any
+# other type, a subclass of these included, is refused before its fields or
+# its formatting are touched.  Values are read through int's and Fraction's
+# own methods, never through the object's)
+_QCLEAR_INTS = {int}
+_QCLEAR_FRACTIONS = {_Fraction}
+_numerator = _Fraction.numerator.fget
+_denominator = _Fraction.denominator.fget
+
+
+def qclear(coeffs):
+    """(d, the integer coefficients of d * f) for a polynomial f over QQ
+    (coefficients constant first, ints and Fractions), d the lcm of the
+    denominators of its nonzero coefficients: the engine's qpoly_clear, one
+    integer per coefficient, in order, trailing zeros kept.
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qclear
+    >>> qclear([Fraction(1, 2), 3, Fraction(-5, 6), 0])
+    (6, [3, 18, -5, 0])
+    >>> qclear([])
+    (1, [])
+    """
+    toks = []
+    for c in coeffs:
+        # (by identity with the registered classes only: no hash, attribute
+        # or other hook of the coefficient's class runs)
+        t, kind = type(c), 0
+        for k in _QCLEAR_INTS:
+            if t is k:
+                kind = 1
+                break
+        else:
+            for k in _QCLEAR_FRACTIONS:
+                if t is k:
+                    kind = 2
+                    break
+        if kind == 1:
+            toks.append(format(int.__index__(c), "x"))
+        elif kind == 2:
+            # (the stored parts through Fraction's own properties, their int
+            # values through int's own __index__: no hook of a subclass runs,
+            # and anything not an int raises TypeError)
+            n, d = int.__index__(_numerator(c)), int.__index__(_denominator(c))
+            toks.append(format(n, "x") if d == 1 else format(n, "x") + "/" + format(d, "x"))
+        else:
+            raise TypeError("qclear: a coefficient that is not exactly an int or a Fraction")
+    r = call("qpoly_clear", a=",".join(toks))
+    c = r["c"]
+    return int(r["d"], 16), ([int(t, 16) for t in c.split(",")] if c else [])
+
+
+def _zhex(coeffs):
+    # (exact integer classes only, matched by identity with the registered
+    # ones, read through int's own __index__: no hook of the coefficient's
+    # class runs, and the refusal reads nothing of it)
+    toks = []
+    for c in coeffs:
+        t = type(c)
+        for k in _QCLEAR_INTS:
+            if t is k:
+                toks.append(format(int.__index__(c), "x"))
+                break
+        else:
+            raise TypeError("zdivrem: a coefficient that is not exactly an int")
+    return ",".join(toks)
+
+
+def zdivrem(a, b):
+    """(q, r) with a = q b + r in Z[x], by Sage's rule (constant term first,
+    trailing zeros dropped): from the top degree down, a coefficient at least
+    |lc(b)| in size gives the floor of its quotient by lc(b), a smaller one
+    none and stays in r (so r may keep a degree >= deg b).  The engine's
+    zpoly_divrem, refused past its caps.
+
+    >>> from sagebrush.poly import zdivrem
+    >>> zdivrem([0, 1], [1, 2])
+    ([], [0, 1])
+    >>> zdivrem([1, 0, 3], [1, 2])
+    ([0, 1], [1, -1, 1])
+    >>> zdivrem([-1, 0, 0, 1], [-1, 1])
+    ([1, 1, 1], [])
+    """
+    r = call("zpoly_divrem", a=_zhex(a), b=_zhex(b))
+    return _ints(r["q"]), _ints(r["r"])
+
+
+def _qtokens(coeffs, who):
+    # (qclear's exact types: int and Fraction, and the Sage layer's
+    # registered classes, matched by identity and read through int's and
+    # Fraction's own methods; the refusal reads nothing of the class)
+    toks = []
+    for c in coeffs:
+        t = type(c)
+        for k in _QCLEAR_INTS:
+            if t is k:
+                toks.append(format(int.__index__(c), "x"))
+                break
+        else:
+            for k in _QCLEAR_FRACTIONS:
+                if t is k:
+                    n, d = int.__index__(_numerator(c)), int.__index__(_denominator(c))
+                    toks.append(format(n, "x") if d == 1 else format(n, "x") + "/" + format(d, "x"))
+                    break
+            else:
+                raise TypeError(who + ": a coefficient that is not exactly an int or a Fraction")
+    return ",".join(toks)
+
+
+def qdivrem(a, b):
+    """(q, r) with a = q b + r and deg r < deg b in Q[x] (int and Fraction
+    coefficients, constant term first; results in lowest terms, trailing
+    zeros dropped): the engine's qpoly_divrem, refused past its caps.
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qdivrem
+    >>> qdivrem([1, 0, 0, 1], [1, 2])
+    ([Fraction(1, 8), Fraction(-1, 4), Fraction(1, 2)], [Fraction(7, 8)])
+    >>> qdivrem([-1, 0, 1], [Fraction(-1, 2), Fraction(1, 2)])
+    ([2, 2], [])
+    """
+    r = call("qpoly_divrem", a=_qtokens(a, "qdivrem"), b=_qtokens(b, "qdivrem"))
+    q, rr = r["q"], r["r"]
+    return ([_token(t) for t in q.split(",")] if q else []), ([_token(t) for t in rr.split(",")] if rr else [])
+
+
+def _qlist(r):
+    return [_token(t) for t in r.split(",")] if r else []
+
+
+def qscale(a, s, ints=False, raw=False):
+    """s * a for a polynomial a over Q and a rational s (int and Fraction
+    coefficients, constant term first; results in lowest terms, trailing
+    zeros dropped): the engine's qpoly_scale, refused past its caps.  With
+    ints=True, None unless every result coefficient is an integer (read from
+    the reply's tokens, before any is decoded); with raw=True the reply's
+    tokens themselves (a caller that decodes them once into its own type).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qscale
+    >>> qscale([1, Fraction(-2, 3), 0], Fraction(3, 4))
+    [Fraction(3, 4), Fraction(-1, 2)]
+    >>> qscale([4, 2], Fraction(1, 2), ints=True), qscale([3, 2], Fraction(1, 2), ints=True)
+    ([2, 1], None)
+    """
+    r = call_hex("qpoly_scale", _qtokens(a, "qscale"), _qtokens((s,), "qscale"))
+    if ints and "/" in r:
+        return None
+    return r if raw else _qlist(r)
+
+
+def qderivative(a, k=1, raw=False):
+    """The k-th derivative of a polynomial a over Q (int and Fraction
+    coefficients, constant term first; lowest terms, trailing zeros
+    dropped): the engine's qpoly_derivative, refused past its caps (raw=True:
+    the reply's tokens).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qderivative
+    >>> qderivative([1, Fraction(1, 2), 0, 5], 2)
+    [0, 30]
+    >>> qderivative([1, 2], 5)
+    []
+    """
+    if type(k) is not int or k < 0:
+        raise ValueError("qderivative: the order is a nonnegative int")
+    r = call_hex("qpoly_derivative", _qtokens(a, "qderivative"), format(k, "x"))
+    return r if raw else _qlist(r)
+
+
+def qintegral(a, c=0, raw=False):
+    """The integral of a polynomial a over Q with constant term c (int and
+    Fraction coefficients, constant term first; lowest terms, trailing zeros
+    dropped): the engine's qpoly_integral, refused past its caps (raw=True:
+    the reply's tokens).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qintegral
+    >>> qintegral([3, 0, Fraction(1, 2)])
+    [0, 3, 0, Fraction(1, 6)]
+    >>> qintegral([], Fraction(-1, 7))
+    [Fraction(-1, 7)]
+    """
+    r = call_hex("qpoly_integral", _qtokens(a, "qintegral"), _qtokens((c,), "qintegral"))
+    return r if raw else _qlist(r)
+
+
+def qadd(a, b, raw=False):
+    """a + b for polynomials a and b over Q (int and Fraction coefficients,
+    constant term first; results in lowest terms, trailing zeros dropped):
+    the engine's qpoly_add, refused past its caps (raw=True: the reply's
+    tokens).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qadd
+    >>> qadd([Fraction(1, 6), 1], [Fraction(1, 3), -1])
+    [Fraction(1, 2)]
+    """
+    r = call_hex("qpoly_add", _qtokens(a, "qadd"), _qtokens(b, "qadd"))
+    return r if raw else _qlist(r)
+
+
+def qsub(a, b, raw=False):
+    """a - b for polynomials a and b over Q (as qadd): the engine's
+    qpoly_sub, refused past its caps.
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qsub
+    >>> qsub([1, Fraction(1, 2)], [1, Fraction(1, 2)]), qsub([7], [1, 0, -1])
+    ([], [6, 0, 1])
+    """
+    r = call_hex("qpoly_sub", _qtokens(a, "qsub"), _qtokens(b, "qsub"))
+    return r if raw else _qlist(r)
+
+
+def zfdiv(a, b, raw=False):
+    """floor(a_i / b) for each coefficient of an integer polynomial a
+    (exact ints, constant term first; trailing zeros dropped) and a nonzero
+    integer b: the engine's zpoly_fdiv, refused past its caps (raw=True: the
+    reply's tokens).
+
+    >>> from sagebrush.poly import zfdiv
+    >>> zfdiv([5, -7, 0, 2], 3), zfdiv([1, 1], 3)
+    ([1, -3], [])
+    """
+    r = call_hex("zpoly_fdiv", _zhex(a), _zhex((b,)))
+    return r if raw else _ints(r)
+
+
+def qeval(a, v, raw=False):
+    """a(v) for a polynomial a over Q and a rational v (int and Fraction
+    coefficients, constant term first), in lowest terms: the engine's
+    qpoly_eval (the common denominator, then Horner on integers), refused
+    past its caps (raw=True: the reply's token).
+
+    >>> from fractions import Fraction
+    >>> from sagebrush.poly import qeval
+    >>> qeval([1, 0, 1], Fraction(1, 3)), qeval([1, 2, 3], Fraction(1, 3))
+    (Fraction(10, 9), 2)
+    >>> qeval([], 5)
+    0
+    """
+    r = call_hex("qpoly_eval", _qtokens(a, "qeval"), _qtokens((v,), "qeval"))
+    return r if raw else _token(r)
 
 
 def gcd(a, b):
@@ -36,3 +322,113 @@ def divexact(a, b):
     """a / b if b divides a in Z[x], else None."""
     r = call("poly_divexact", a=_enc(a), b=_enc(b), wire="csv")
     return None if r is None else _dec(r)
+
+
+def _hex(f):
+    return ",".join([format(int(c), "x") for c in f])
+
+
+def _qhex(f):
+    # (a token per coefficient: "num" for an integer, "num/den" otherwise)
+    return ",".join([format(c, "x") if type(c) is int else
+                     format(c.numerator, "x") + ("/" + format(c.denominator, "x") if c.denominator != 1 else "")
+                     for c in f])
+
+
+def _ints(s):
+    return [int(t, 16) for t in s.split(",")] if s else []
+
+
+# (a reduced token "n/d" is already in lowest terms: no second gcd where
+# the interpreter has the coprime constructor)
+_coprime = getattr(_Fraction, "_from_coprime_ints", None)
+
+
+def _token(t):
+    n, _, d = t.partition("/")
+    if not d:
+        return int(n, 16)
+    return _coprime(int(n, 16), int(d, 16)) if _coprime else _Fraction(int(n, 16), int(d, 16))
+
+
+def _series(r, raw):
+    c, d = r["c"], r.get("d")
+    if d is not None:
+        num, den = _ints(c), int(d, 16)
+        if raw:
+            return num, den
+        # (a reduced request's "d" is 1: over Z the integers themselves;
+        # the engine reduces over Q, so there is no second pass here)
+        if den != 1:
+            raise RuntimeError("series: an unreduced reply to a reduced request")
+        return num
+    if raw:
+        raise RuntimeError("series: a reduced reply to a raw request")
+    return [_token(t) for t in c.split(",")] if c else []
+
+
+def series_mul(a, b, n, da=1, db=1, raw=False):
+    """(a / da)(b / db) mod q^n, a and b integer coefficients (constant term
+    first), da and db positive integers: a list of ints or Fractions in
+    lowest terms (trailing zeros dropped), or with raw=True the unreduced
+    (numerators, denominator).  The values are Sage's (truncated power series
+    over QQ):
+
+    >>> from sagebrush.poly import series_mul
+    >>> series_mul([1, 1], [1, -1], 4)
+    [1, 0, -1]
+    >>> series_mul([1, 1], [1, 2], 3, da=2, db=3)
+    [Fraction(1, 6), Fraction(1, 2), Fraction(1, 3)]
+    >>> series_mul([1, 1], [1, 2], 3, da=2, db=3, raw=True)
+    ([1, 3, 2], 6)
+    """
+    args = dict(a=_hex(a[:n]), b=_hex(b[:n]), n=int(n))
+    if da != 1:
+        args["da"] = format(int(da), "x")
+    if db != 1:
+        args["db"] = format(int(db), "x")
+    if raw:
+        args["raw"] = True
+    return _series(call("series_mul", **args), raw)
+
+
+def series_pow(a, k, n, da=1, raw=False):
+    """(a / da)^k mod q^n, k >= 0 (k = 0 gives 1, as Sage's f^0, also for
+    the zero series): as series_mul.
+
+    >>> from sagebrush.poly import series_pow
+    >>> series_pow([1, 1], 3, 3, da=2)
+    [Fraction(1, 8), Fraction(3, 8), Fraction(3, 8)]
+    >>> series_pow([0, 1], 0, 3)
+    [1]
+    """
+    args = dict(a=_hex(a[:n]), k=int(k), n=int(n))
+    if da != 1:
+        args["da"] = format(int(da), "x")
+    if raw:
+        args["raw"] = True
+    return _series(call("series_pow", **args), raw)
+
+
+def series_euler(n):
+    """prod_{m >= 1} (1 - q^m) mod q^n: its coefficients (1, -1, -1, 0, 0,
+    1, 0, 1, ...: Euler's pentagonal number theorem), trailing zeros
+    dropped.
+
+    >>> from sagebrush.poly import series_euler
+    >>> series_euler(8)
+    [1, -1, -1, 0, 0, 1, 0, 1]
+    """
+    s = call("series_euler", n=int(n))
+    return [int(t) for t in s.split(",")] if s else []
+
+
+def sigma_table(k, n):
+    """[sigma_k(1), ..., sigma_k(n)], sigma_k(m) the sum of d^k over the
+    divisors d of m.
+
+    >>> from sagebrush.poly import sigma_table
+    >>> sigma_table(1, 6)
+    [1, 3, 4, 7, 6, 12]
+    """
+    return _ints(call("sigma_table", k=int(k), n=int(n)))

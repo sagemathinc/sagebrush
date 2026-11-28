@@ -5,6 +5,7 @@ printed as Sage prints them.  Dense, coefficients constant term first."""
 
 from fractions import Fraction as _F
 import re as _re
+import sys as _sys
 
 
 def _sa():
@@ -20,6 +21,55 @@ def _norm(c):
     if f.denominator == 1:
         return _sa().Integer(f.numerator)
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
+
+
+# (a class's own MRO, read through type's slot: no attribute hook of an
+# untrusted class or metaclass runs)
+_type_mro = type.__dict__["__mro__"].__get__
+
+
+def _int_value(x):
+    """x's value when its class is int or derives from it (bool, Sage's
+    integers, Sagebrush's bundled numpy integers, IntEnum), found by
+    identity along the class's MRO and read through int's own __index__;
+    else None.  No hook of x's class or metaclass runs.  (CPython NumPy's
+    integers, numpy.int64 and the like, don't derive from int: refused.)"""
+    for k in _type_mro(type(x)):
+        if k is int:
+            return int.__index__(x)
+    return None
+
+
+# (the real number classes a numeric symbolic exponent's value may have,
+# float-based, by module and name: an integral one counts, as Sage)
+_REAL_FLOATS = (("_sage_lang", ("RealNumber", "_RealLiteral")), ("_sage_rdf", ("RealDoubleElement",)))
+
+
+def _is_polynomial(x):
+    """Whether x's class is Polynomial itself, by identity (type(x):
+    isinstance would read the instance's own __class__, a hook of an
+    untrusted value).  A subclass is declined, as any other unclassified
+    operand: its fields would be read through its own attribute hooks."""
+    return type(x) is Polynomial
+
+
+def _from_tokens(ring, r):
+    """The polynomial of ring whose coefficients are an engine reply's tokens
+    (hex, `[-]num[/den]` in lowest terms, constant first, trailing zeros
+    dropped): each coefficient made once, an int or a Rational (the decoding
+    pass; no arithmetic)."""
+    p = Polynomial.__new__(Polynomial)
+    p._ring = ring
+    if not r:
+        p._c = []
+        return p
+    rat = _sa().Rational._from_coprime_ints
+    c = []
+    for tok in r.split(","):
+        n, _, d = tok.partition("/")
+        c.append(rat(int(n, 16), int(d, 16)) if d else int(n, 16))
+    p._c = c
+    return p
 
 
 def _qq_coeff(a):
@@ -430,6 +480,22 @@ class RationalField(_Ring):
     def __reduce__(self):
         # (one QQ: a pickle or a copy of it is QQ itself, as in Sage)
         return "QQ"
+
+    def degree(self):
+        """The degree over QQ: 1 (QQ as the number field of degree 1, as in
+        Sage: so a newform's hecke_eigenvalue_field().degree() is 1 for every
+        rational newform).
+
+        EXAMPLES::
+
+            sage: QQ.degree(), QQ.absolute_degree()
+            (1, 1)
+            sage: Newforms(11, names='a')[0].hecke_eigenvalue_field().degree()
+            1
+        """
+        return 1
+
+    absolute_degree = degree
 
 
 QQ = RationalField("Rational Field", True)
@@ -1038,12 +1104,28 @@ class Polynomial:
 
     # ---- arithmetic
     def _coerce(self, other):
-        if isinstance(other, Polynomial):
+        if _is_polynomial(other):
             if other._ring._name != self._ring._name:
                 raise TypeError("unsupported operation on polynomials in %s and %s" % (self._ring._name, other._ring._name))
             return other
-        if isinstance(other, (int, _F)) or type(other).__name__ in ("Rational",):
-            return Polynomial(self._ring, [other])
+        if type(other) is _sa().Rational:
+            # (an element of QQ, integral or not: the constant is over QQ,
+            # so the result is, as Sage's coercion takes the parents, not
+            # the values)
+            return Polynomial(self._qq_ring(), [other])
+        # (an integer, its class int or derived from it, by identity along
+        # its MRO, its value read through int's own method; a fraction by
+        # the identity of its class against the registered ones: no hash,
+        # equality or subclass hook of an untrusted class runs, as
+        # Fraction's ABC isinstance would)
+        n = _int_value(other)
+        if n is not None:
+            return Polynomial(self._ring, [n])
+        t = type(other)
+        from _sagebrush_lib import poly
+        for k in poly._QCLEAR_FRACTIONS:
+            if t is k:
+                return Polynomial(self._ring, [other])
         return None
 
     def _make(self, coeffs, other=None):
@@ -1063,8 +1145,10 @@ class Polynomial:
         if o is None:
             L = self._inexact(other)
             return NotImplemented if L is None else L + other
-        n = max(len(self._c), len(o._c))
-        return self._make([self[i] + o[i] for i in range(n)], o)
+        # (in the engine: sagebrush.poly.qadd, refused past its caps)
+        from _sagebrush_lib import poly
+        ring = o._ring if o._ring._base is QQ else self._ring
+        return _from_tokens(ring, poly.qadd(self._c, o._c, raw=True))
 
     def __radd__(self, other):
         o = self._coerce(other)
@@ -1074,7 +1158,9 @@ class Polynomial:
         return self.__add__(other)
 
     def __neg__(self):
-        return Polynomial(self._ring, [-a for a in self._c])
+        # (in the engine: sagebrush.poly.qscale by -1, its tokens' signs flipped)
+        from _sagebrush_lib import poly
+        return _from_tokens(self._ring, poly.qscale(self._c, -1, raw=True))
 
     def __pos__(self):
         return self
@@ -1084,14 +1170,19 @@ class Polynomial:
         if o is None:
             L = self._inexact(other)
             return NotImplemented if L is None else L - other
-        return self + (-o)
+        # (in the engine: sagebrush.poly.qsub, one call)
+        from _sagebrush_lib import poly
+        ring = o._ring if o._ring._base is QQ else self._ring
+        return _from_tokens(ring, poly.qsub(self._c, o._c, raw=True))
 
     def __rsub__(self, other):
         o = self._coerce(other)
         if o is None:
             L = self._inexact(other)
             return NotImplemented if L is None else other - L
-        return o + (-self)
+        from _sagebrush_lib import poly
+        ring = self._ring if self._ring._base is QQ else o._ring
+        return _from_tokens(ring, poly.qsub(o._c, self._c, raw=True))
 
     def __mul__(self, other):
         o = self._coerce(other)
@@ -1100,20 +1191,25 @@ class Polynomial:
             return NotImplemented if L is None else L * other
         if not self._c or not o._c:
             return self._make([], o)
-        if len(self._c) * len(o._c) > 2500:
-            # long products in the engine (NTT / Kronecker substitution)
-            from _sagebrush_lib import poly
-            da, ca = self._integral()
-            db, cb = o._integral()
-            c = poly.mul(ca, cb)
-            d = da * db
-            return self._make(c if d == 1 else [_F(x, d) for x in c], o)
-        r = [0] * (len(self._c) + len(o._c) - 1)
-        for i, a in enumerate(self._c):
-            if a:
-                for j, b in enumerate(o._c):
-                    r[i + j] += a * b
-        return self._make(r, o)
+        from _sagebrush_lib import poly
+        if len(o._c) == 1 or len(self._c) == 1:
+            # a constant (a number, or a polynomial of degree 0), in either
+            # order: each coefficient scaled in the engine (qpoly_scale),
+            # with no common denominator to clear
+            f, c = (self, o._c[0]) if len(o._c) == 1 else (o, self._c[0])
+            ring = o._ring if o._ring._base is QQ else self._ring
+            return _from_tokens(ring, poly.qscale(f._c, c, raw=True))
+        # every product in the engine, by the ring: ZZ[x] by poly_mul (one
+        # integer product), QQ[x] by qpoly_mul (the common denominators, the
+        # product and each coefficient's reduction, all in Rust)
+        if self._ring._base is ZZ and o._ring._base is ZZ:
+            # (the engine's coefficients are already ints, trailing zeros
+            # dropped: Polynomial's normalization pass would change nothing)
+            r = Polynomial.__new__(Polynomial)
+            r._ring = self._ring
+            r._c = poly.mul(self._c, o._c)
+            return r
+        return self._make(poly.qmul(self._c, o._c), o)
 
     def __rmul__(self, other):
         o = self._coerce(other)
@@ -1128,7 +1224,27 @@ class Polynomial:
         raise RuntimeError("Use ** for exponentiation, not '^', which means xor\nin Python, and has the wrong precedence.")
 
     def __pow__(self, n):
-        n = int(n)
+        """self^n for an integer n (an int, a Sage integer, a Rational with
+        denominator 1, an element of Z/nZ, a symbolic expression whose
+        value is an integer), as Sage.  The exponent is classified without
+        running any of its hooks; a float, a real number, a string or a
+        Python Fraction is refused, as Sage refuses them.  A fractional
+        power is made for the constants 0, 1 and -1 only.
+
+        EXAMPLES::
+
+            sage: R.<t> = ZZ[]
+            sage: (t + 1)^3, t^QQ(2)
+            (t^3 + 3*t^2 + 3*t + 1, t^2)
+            sage: try:
+            ....:     t^1.5
+            ....: except TypeError as e:
+            ....:     print(e)
+            no canonical coercion of this exponent to Rational Field
+        """
+        n = self._exponent(n)
+        if type(n) is tuple:
+            return self._root_power(*n)
         if n < 0:
             raise ValueError("negative exponent")
         r, b = Polynomial(self._ring, [1]), self
@@ -1138,6 +1254,61 @@ class Polynomial:
             b = b * b
             n >>= 1
         return r
+
+    @staticmethod
+    def _exponent(n):
+        # (an int, p/q as a pair for a fractional Rational, else TypeError, as
+        # Sage.  An integer by identity along its class's MRO, read through
+        # int's own method; a Rational, an element of Z/nZ (its lift) or a
+        # symbolic expression whose value is an integer (SR(2), x/x,
+        # SR(2.0)) by the identity of its class, read through that class's
+        # own methods: no hook of n runs.  Anything else is refused, a
+        # Python Fraction too, as Sage refuses it; the old int(n) truncated
+        # a fractional exponent toward zero, a wrong value)
+        k = _int_value(n)
+        if k is not None:
+            return k
+        t = type(n)
+        if t is _sa().Rational:
+            from _sagebrush_lib import poly
+            p, q = int.__index__(poly._numerator(n)), int.__index__(poly._denominator(n))
+            return p if q == 1 else (p, q)
+        ff = _sys.modules.get("_sage_ff")
+        if ff is not None:
+            d = ff.__dict__
+            for name in ("IntegerMod_int", "IntegerMod_int64", "IntegerMod_gmp"):
+                if d.get(name) is t:
+                    return int.__index__(t.lift(n))
+        ex = _sys.modules.get("_sage_expr")
+        if ex is not None and ex.__dict__.get("Expression") is t:
+            try:
+                v = t.pyobject(n)
+            except (TypeError, ValueError):
+                v = None
+            k = _int_value(v)
+            if k is not None:
+                return k
+            import _sage_rpoly
+            if _sage_rpoly._known(type(v), _REAL_FLOATS) and float.is_integer(v):
+                return float.__trunc__(v)
+        raise TypeError("no canonical coercion of this exponent to Rational Field")
+
+    def _root_power(self, p, q):
+        # self^(p/q), p/q in lowest terms with q > 1: Sage's q-th root of
+        # self to the p, made here for the constants 0, 1 and -1, as Sage
+        # (0 to a negative power and an even root of -1 are its errors)
+        c = self._c
+        if not c:
+            if p < 0:
+                raise ZeroDivisionError("negative exponent in power of zero")
+            return self
+        if c == [1]:
+            return self
+        if c == [-1]:
+            if q % 2 == 0:
+                raise ValueError("cannot take even root of negative number")
+            return self if p % 2 else Polynomial(self._ring, [1])
+        raise NotImplementedError("a polynomial to a fractional power (an n-th root) is not implemented in Sagebrush")
 
     def __eq__(self, other):
         try:
@@ -1168,65 +1339,119 @@ class Polynomial:
             ((0, t), (t, t^2 - t + 1), (-2*t + 1, t^2 - 1))
         """
         o = self._coerce(other)
-        if o is None or not o._c:
+        if o is None:
+            # (no common parent: Sage's quo_rem by a real number is over
+            # its field, not made here)
+            raise TypeError("no common canonical parent for this polynomial and the divisor")
+        if not o._c:
             raise ZeroDivisionError("division by zero polynomial")
-        r = [_F(a) for a in self._c]
-        d = [_F(a) for a in o._c]
-        q = [_F(0)] * max(len(r) - len(d) + 1, 0)
-        for i in range(len(q) - 1, -1, -1):
-            c = r[i + len(d) - 1] / d[-1]
-            q[i] = c
-            if c:
-                for j, b in enumerate(d):
-                    r[i + j] -= c * b
-        qq, rr = Polynomial(self._qq_ring(), q), Polynomial(self._qq_ring(), r[: len(d) - 1])
         if self._ring._base is ZZ and o._ring._base is ZZ:
-            if all(isinstance(a, int) for a in qq._c + rr._c):
-                qq, rr = Polynomial(self._ring, qq._c), Polynomial(self._ring, rr._c)
-            else:
-                # Sage's division in ZZ[x] by a non-monic divisor: from the
-                # top down to the divisor's degree, a coefficient at least
-                # the leading coefficient in size gives the floor of their
-                # quotient, a smaller one none, and the remainder keeps what
-                # is left (x.quo_rem(2*x + 1) is (0, x))
-                r = list(self._c)
-                b = list(o._c)
-                lb, db = b[-1], len(b) - 1
-                q = [0] * max(len(r) - db, 0)
-                for i in range(len(r) - 1, db - 1, -1):
-                    if abs(r[i]) >= abs(lb):
-                        c = r[i] // lb
-                        q[i - db] = c
-                        for j, bj in enumerate(b):
-                            r[i - db + j] -= c * bj
-                qq, rr = Polynomial(self._ring, q), Polynomial(self._ring, r)
-        return qq, rr
+            # (Sage's rule in ZZ[x], in the engine: sagebrush.poly.zdivrem)
+            from _sagebrush_lib import poly
+            q, r = poly.zdivrem(self._c, o._c)
+            return Polynomial(self._ring, q), Polynomial(self._ring, r)
+        # (exact division in QQ[x], in the engine: sagebrush.poly.qdivrem)
+        from _sagebrush_lib import poly
+        q, r = poly.qdivrem(self._c, o._c)
+        return Polynomial(self._qq_ring(), q), Polynomial(self._qq_ring(), r)
+
+    def _floor_divisor(self, other):
+        """other as an int when it is an integer (its class int or derived
+        from it, by identity: bool, Sage's, Sagebrush's bundled numpy's,
+        IntEnum; not CPython NumPy's, which don't derive from int) or a Rational
+        with denominator 1, else None: Sage's // of a ZZ polynomial by a number
+        is the floor of each coefficient."""
+        from _sagebrush_lib import poly
+        n = _int_value(other)
+        if n is not None:
+            return n
+        if type(other) is _sa().Rational:
+            if int.__index__(poly._denominator(other)) == 1:
+                return int.__index__(poly._numerator(other))
+            raise TypeError("no conversion of this rational to integer")
+        return None
 
     def __floordiv__(self, other):
-        if isinstance(other, int) and self._ring._base is ZZ:
-            return Polynomial(self._ring, [a // other for a in self._c])
-        return self.quo_rem(other)[0]
+        """Over ZZ by a number: the floor of each coefficient (in the
+        engine, sagebrush.poly.zfdiv); otherwise quo_rem's quotient, as Sage.
+
+        EXAMPLES::
+
+            sage: R.<t> = ZZ[]
+            sage: (3*t + 5)//2, (-t - 1)//3, divmod(-t - 1, 3)
+            (t + 2, -t - 1, (0, -t - 1))
+        """
+        if self._ring._base is ZZ:
+            n = self._floor_divisor(other)
+            if n is not None:
+                if n == 0:
+                    raise ZeroDivisionError("division by zero")
+                from _sagebrush_lib import poly
+                return _from_tokens(self._ring, poly.zfdiv(self._c, n, raw=True))
+        # (an operand nobody classifies, 1.5 or a string: declined, so
+        # Python's TypeError unless the operand's own reflected method
+        # answers)
+        o = self._coerce(other)
+        return NotImplemented if o is None else self.quo_rem(o)[0]
 
     def __mod__(self, other):
-        if isinstance(other, int) and self._ring._base is ZZ:
-            return Polynomial(self._ring, [a % other for a in self._c])
-        return self.quo_rem(other)[1]
+        """quo_rem's remainder, as Sage (over ZZ by a number too: (-t-1) % 3
+        is -t - 1, not the floor remainder)."""
+        o = self._coerce(other)
+        return NotImplemented if o is None else self.quo_rem(o)[1]
 
     def __divmod__(self, other):
-        return self.quo_rem(other)
+        o = self._coerce(other)
+        return NotImplemented if o is None else self.quo_rem(o)
+
+    def _plain(self):
+        # (self as a Polynomial itself: a subclass's own fields, read
+        # through its own access, for an operand that declines subclasses)
+        if type(self) is Polynomial:
+            return self
+        p = Polynomial.__new__(Polynomial)
+        p._ring, p._c = self._ring, self._c
+        return p
+
+    def __rfloordiv__(self, other):
+        o = self._coerce(other)
+        return NotImplemented if o is None else o.quo_rem(self._plain())[0]
+
+    def __rmod__(self, other):
+        # (a Rational % a polynomial is a TypeError in Sage, though // is
+        # defined, and a ZeroDivisionError by zero; an integer's is
+        # quo_rem's remainder)
+        o = self._rational_left(other, "Rational modulo by zero")
+        return NotImplemented if o is None else o.quo_rem(self._plain())[1]
+
+    def __rdivmod__(self, other):
+        o = self._rational_left(other, "rational division by zero")
+        return NotImplemented if o is None else o.quo_rem(self._plain())
+
+    def _rational_left(self, other, by_zero):
+        # (a Rational on the left of % or divmod: Sage's ZeroDivisionError
+        # by zero, else declined, so a TypeError)
+        if type(other) is _sa().Rational:
+            if not self._c:
+                raise ZeroDivisionError(by_zero)
+            return None
+        return self._coerce(other)
 
     def __truediv__(self, other):
         o = self._coerce(other)
         if o is None:
             L = self._inexact(other)
             return NotImplemented if L is None else L / other
-        if not isinstance(other, Polynomial) and o.degree() <= 0:
+        if not _is_polynomial(other) and o.degree() <= 0:
             # a number: a polynomial over the fraction field of the base
             # (x/2 is 1/2*x in QQ[x])
             if not o._c:
                 raise ZeroDivisionError("rational division by zero")
+            # each coefficient times 1/c in the engine (qpoly_scale), over
+            # QQ whatever the values ((2t + 4)/2 is t + 2 in QQ[t], as Sage)
+            from _sagebrush_lib import poly
             c = _F(o._c[0])
-            return Polynomial(self._qq_ring(), [_F(a) / c for a in self._c]) if self._ring._base is QQ or c.denominator != 1 or any(_F(a) / c != int(_F(a) / c) for a in self._c) else Polynomial(self._ring, [int(_F(a) / c) for a in self._c])
+            return _from_tokens(self._qq_ring(), poly.qscale(self._c, 1 / c, raw=True))
         # a polynomial: an element of the fraction field, even when the
         # division is exact (x/x is 1 in Frac(ZZ[x]), as Sage)
         if not o._c:
@@ -1239,15 +1464,22 @@ class Polynomial:
         return _sage_frac.FractionFieldElement(a, b)
 
     def __rtruediv__(self, other):
-        # a number over a polynomial: 2/x in Frac(ZZ[x]), 1/2/x in
-        # Frac(QQ[x]), 2/R(4) is 1/2 in Frac(R), as Sage
-        if self._coerce(other) is None:
-            return NotImplemented
+        # a number over a polynomial: 2/x in Frac(ZZ[x]), QQ(2)/x and 1/2/x
+        # in Frac(QQ[x]) (by the number's parent, not its value), 2/R(4) is
+        # 1/2 in Frac(R), as Sage
+        # (from the classified constant, never the operand itself: an int
+        # subclass's own __int__ or numerator is not read)
+        o = self._coerce(other)
+        if o is None:
+            # (an inexact number: over its field, as Sage, RR(1.5)/t in Frac(RR[t]))
+            # (a Python float or complex is refused, as Sage)
+            L = None if (type(other) is float or type(other) is complex) else self._inexact(other)
+            return NotImplemented if L is None else other / L
         if not self._c:
             raise ZeroDivisionError("fraction field element division by zero")
         import _sage_frac
-        R = self._ring if self._ring._base is QQ or _F(other).denominator == 1 else self._qq_ring()
-        return _sage_frac.FractionFieldElement(R(other), Polynomial(R, self._c))
+        R = self._qq_ring() if o._ring._base is QQ else self._ring
+        return _sage_frac.FractionFieldElement(Polynomial(R, o._c), Polynomial(R, self._c))
 
     # ---- evaluation and calculus
     def __call__(self, *args, **kwds):
@@ -1266,6 +1498,23 @@ class Polynomial:
             v = kwds[self._ring._name]
         else:
             (v,) = args
+        from _sagebrush_lib import poly
+        # (an exact type, compared by identity only: no hash or equality of
+        # the point's class runs while classifying it)
+        t, Q = type(v), _sa().Rational
+        routed = t is Q
+        for k in poly._QCLEAR_INTS:
+            if routed:
+                break
+            routed = t is k
+        if routed:
+            # an exact integer or rational point: in the engine (qpoly_eval,
+            # one token in lowest terms), in QQ when the ring or the point
+            # is, else in ZZ, as Sage
+            n, _, d = poly.qeval(self._c, v, raw=True).partition("/")
+            if self._ring._base is QQ or t is Q:
+                return Q._from_coprime_ints(int(n, 16), int(d, 16) if d else 1)
+            return int(n, 16)
         r = 0
         for a in reversed(self._c):
             r = r * v + a
@@ -1283,14 +1532,13 @@ class Polynomial:
             (3*x^2 + 2, 3*x^2)
             sage: (x^3).derivative(2), (x^3).derivative(x, 0), (x^3).derivative(x, 2, x)
             (6*x, x^3, 6)
+
+        In the engine (sagebrush.poly.qderivative), refused past its caps.
         """
         k = _derivative_count(args, self._ring.gen(), self._ring._name)
-        c = list(self._c)
-        for _ in range(k):
-            if not c:
-                break
-            c = [i * a for i, a in enumerate(c)][1:]
-        return Polynomial(self._ring, c)
+        # (in the engine: sagebrush.poly.qderivative, refused past its caps)
+        from _sagebrush_lib import poly
+        return _from_tokens(self._ring, poly.qderivative(self._c, int(k), raw=True))
 
     diff = differentiate = derivative
 
@@ -1302,8 +1550,11 @@ class Polynomial:
             sage: R.<x> = QQ[]
             sage: (3*x^2 + 1).integral()
             x^3 + x
+
+        In the engine (sagebrush.poly.qintegral), refused past its caps.
         """
-        return Polynomial(self._qq_ring(), [0] + [_F(a) / (i + 1) for i, a in enumerate(self._c)])
+        from _sagebrush_lib import poly
+        return _from_tokens(self._qq_ring(), poly.qintegral(self._c, 0, raw=True))
 
     def change_ring(self, R):
         """The polynomial with its coefficients converted to the ring R.
@@ -1369,9 +1620,18 @@ class Polynomial:
             sage: R.<x> = QQ[]
             sage: (2*x^2 + 3).monic()
             x^2 + 3/2
+
+        In the engine (sagebrush.poly.qscale), refused past its caps.
         """
+        if not self._c:
+            # (the zero polynomial has no leading coefficient to divide by,
+            # as Sage)
+            raise ZeroDivisionError("rational division by zero")
         lc = _F(self.leading_coefficient())
-        return Polynomial(self._qq_ring() if lc not in (1,) else self._ring, [_F(a) / lc for a in self._c])
+        if lc == 1:
+            return Polynomial(self._ring, self._c)
+        from _sagebrush_lib import poly
+        return _from_tokens(self._qq_ring(), poly.qscale(self._c, 1 / lc, raw=True))
 
     def content(self):
         """The gcd of the coefficients (over ZZ), as Sage's content().
@@ -1390,14 +1650,13 @@ class Polynomial:
         return g if self._ring._base is ZZ else _F(1)
 
     def _integral(self):
-        """(d, the integer coefficients of d * self)."""
-        if all(isinstance(a, int) for a in self._c):
+        """(d, the integer coefficients of d * self): over ZZ the coefficients
+        themselves; over QQ the engine's (sagebrush.poly.qclear: d the lcm
+        of the nonzero coefficients' denominators)."""
+        if self._ring._base is ZZ:
             return 1, list(self._c)
-        from math import lcm
-        d = 1
-        for a in self._c:
-            d = lcm(d, _F(a).denominator)
-        return d, [int(_F(a) * d) for a in self._c]
+        from _sagebrush_lib import poly
+        return poly.qclear(self._c)
 
     def gcd(self, other):
         """The gcd: monic over QQ; over ZZ with positive leading coefficient
@@ -1411,7 +1670,11 @@ class Polynomial:
             sage: (x^2 - 1).gcd(x^2 + 2*x + 1)
             x + 1
         """
-        o = other if isinstance(other, Polynomial) else Polynomial(self._qq_ring(), [other])
+        # (a number as the constant of its parent's ring, classified without
+        # running any of its hooks: gcd(5t, 5) is 5 in ZZ[t], as Sage)
+        o = self._coerce(other)
+        if o is None:
+            raise TypeError("unsupported operand for gcd")
         over_zz = self._ring._base is ZZ and o._ring._base is ZZ
         if not self._c or not o._c:
             # Sage returns the other one unchanged (monic over QQ)
@@ -1516,7 +1779,8 @@ class Polynomial:
         for g, e in fs:
             lc = g[-1]
             unit *= _F(lc) ** e
-            items.append((Polynomial(self._ring, [_F(a) / lc for a in g]), e))
+            # (each factor made monic in the engine: qpoly_scale by 1/lc)
+            items.append((_from_tokens(self._ring, poly.qscale(g, _F(1, lc), raw=True)), e))
         return PolyFactorization(items, _norm(unit), field=True)
 
     def is_irreducible(self):

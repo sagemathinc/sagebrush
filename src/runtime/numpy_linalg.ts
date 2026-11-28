@@ -12,7 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmQRQtb, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
-import { useNd, ndCholesky, ndLu, ndMemoryMax, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
+import { useNd, ndCholesky, ndLu, ndMemoryMax, ndPath, ndProducts, ndRequestWarm, ndScratch, ndThreads, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -1446,6 +1446,12 @@ newBuiltinModule("_nplinalg", (m) => {
   fn("_kernels", () => {
     const p = ndPath();
     return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN, ndWarmState(), ndMemoryMax()]);
+  });
+  // engine/nd's thread pool for large matrix products (src/runtime/nd.ts): (the threads a product gets now, the
+  // pool's state, why not more, and the products so far as (participants, count) pairs)
+  fn("_threads", () => {
+    const t = ndThreads();
+    return tuple([t.threads, t.state, t.why, tuple(ndProducts().map(([k, c]) => tuple([k, c])))]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of

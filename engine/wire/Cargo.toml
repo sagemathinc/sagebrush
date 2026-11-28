@@ -1,0 +1,12 @@
+[package]
+name = "sagebrush-wire"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The engine's binary call framing (SBW1): a parser of untrusted bytes with zero-allocation admission, canonical typed payloads and closed-form bounds, for every binary engine entry point"
+
+# No dependencies: core and alloc only, so the parser is fuzzable on its own
+[dependencies]
+
+[lints]
+workspace = true

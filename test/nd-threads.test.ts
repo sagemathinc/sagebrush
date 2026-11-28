@@ -84,6 +84,36 @@ out.teams = T.teams - t0;`);
   });
 }
 
+test("ndProducts (np.linalg._threads): each product by the participants it ran on; a failover's product and the ones after it on one", { timeout: 60000 }, () => {
+  const r = scenario(`
+out.none = nd.ndProducts();
+nd.ndTest({ helpers: 3 });
+product();
+out.first = nd.ndProducts();
+out.ready = await ready();
+product();
+product();
+out.threaded = nd.ndProducts();`);
+  assert.equal(r.error, undefined);
+  assert.deepEqual(r.none, []);
+  // (the first product starts the pool, so it runs before the pool is up: one participant)
+  assert.deepEqual(r.first, [[1, 1]]);
+  assert.equal(r.ready.threads, 4);
+  assert.deepEqual(r.threaded, [[1, 1], [4, 2]]);
+  const f = scenario(`
+nd.ndTest({ helpers: 3, fault: "exit", stallMs: 1000 });
+product();
+await ready();
+product();
+product();
+out.products = nd.ndProducts();
+out.teams = T.teams;`);
+  assert.equal(f.error, undefined);
+  // (the second product's team lost a helper: it is computed again on one thread, and counted there only)
+  assert.equal(f.teams, 1);
+  assert.deepEqual(f.products, [[1, 3]]);
+});
+
 test("8 threads, 20 runs in one process: each the one-thread bytes (pins 2, 7: oversubscribed on CI)", { timeout: 120000 }, () => {
   const r = scenario(`
 nd.ndTest({ helpers: 7 });

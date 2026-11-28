@@ -1,0 +1,26 @@
+[package]
+name = "bench-core-native"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bench-only driver: the engine's routines called natively, without the Sage layer or the request wire (never shipped)"
+
+[dependencies]
+sagebrush-arith = { path = "../../../engine/arith" }
+sagebrush-bigint = { path = "../../../engine/bigint" }
+sagebrush-poly = { path = "../../../engine/poly" }
+sagebrush-classgroup = { path = "../../../engine/classgroup" }
+
+# (the engine's parallel paths on natively, as in every shipped native build:
+# the Python wheel, the Node addon and the CLI enable sagebrush-par/parallel;
+# off in the wasm column, as in the product's WebAssembly)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sagebrush-par = { path = "../../../engine/par", features = ["parallel"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+# (its own workspace: never a member of engine/'s, so never in a shipped build)
+[workspace]

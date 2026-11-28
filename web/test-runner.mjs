@@ -388,12 +388,12 @@ try {
   // no domain's group, mod-sage-*, web/lib-chunks.mts)
   ok(libFetched.every((g) => !g.startsWith("mod-sage-")), "Sage's start fetches no domain's group (mod-sage-*): " + JSON.stringify(libFetched));
   // (GF, lib/_sage_ff.py, is a domain's, mod-sage-ff, and finite-field matrices, lib/_sage_ffmat.py, another's,
-  // mod-sage-ffmat: the first matrix over GF(p) fetches exactly those two groups, once; the expected line is SageMath
-  // 10.9's output of the same statement)
+  // mod-sage-ffmat: the first matrix over GF(p) fetches exactly those two groups, once, and its first echelon (the rank)
+  // the binary route's, mod-sage-ffmat-bin; the expected line is SageMath 10.9's output of the same statement)
   const fetchedBefore = libFetched.length;
   const ffm = (await run("M = matrix(GF(7), [[1, 2], [3, 4]]); print(M * vector(GF(7), [1, 1]), M.rank())")).trim();
-  ok(ffm === "(3, 0) 2" && JSON.stringify(libFetched.slice(fetchedBefore)) === JSON.stringify(["mod-sage-ff", "mod-sage-ffmat"]),
-    "a matrix over GF(p) fetches exactly mod-sage-ff and mod-sage-ffmat, once, and gives Sage's answer: " + JSON.stringify([ffm, libFetched.slice(fetchedBefore)]));
+  ok(ffm === "(3, 0) 2" && JSON.stringify(libFetched.slice(fetchedBefore)) === JSON.stringify(["mod-sage-ff", "mod-sage-ffmat", "mod-sage-ffmat-bin"]),
+    "a matrix over GF(p) fetches exactly mod-sage-ff and mod-sage-ffmat, then its echelon mod-sage-ffmat-bin, each once, and gives Sage's answer: " + JSON.stringify([ffm, libFetched.slice(fetchedBefore)]));
   // (a package's module, packages/cremona-small: its chunk through the frame,
   // checked against the registry, src/compile.ts)
   const ec = (await run("EllipticCurve('11a1').ainvs()")).trim();

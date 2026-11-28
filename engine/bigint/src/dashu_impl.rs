@@ -26,6 +26,122 @@ pub struct BigInt(pub IBig);
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct BigUint(pub UBig);
 
+use crate::XgcdFallback;
+
+fn ilimbs(x: &IBig) -> usize {
+    (x.unsigned_abs().bit_len().div_ceil(64)).max(1)
+}
+
+/// Whether (g, x, y) is a certified extended gcd of (a, b): x a + y b = g
+/// makes g a multiple of the gcd, and g (positive) dividing a and b makes
+/// it the gcd.
+#[doc(hidden)]
+pub fn xgcd_certified(a: &IBig, b: &IBig, g: &IBig, x: &IBig, y: &IBig) -> bool {
+    x * a + y * b == *g && *g > IBig::ZERO && (a % g).is_zero() && (b % g).is_zero()
+}
+
+/// Whether the backend's answer for the inverse of a (0 < a < m) modulo m
+/// is certified: with g = 1, x a = 1 (mod m); with g > 1 (no inverse), g
+/// dividing a and m.
+#[doc(hidden)]
+pub fn modinv_certified(a: &IBig, m: &IBig, g: &IBig, x: &IBig) -> bool {
+    if g.is_one() {
+        (x * a - IBig::ONE) % m == IBig::ZERO
+    } else {
+        *g > IBig::ONE && (a % g).is_zero() && (m % g).is_zero()
+    }
+}
+
+/// (g, x, y) with x a + y b = g = gcd(a, b) >= 0: the plain extended Euclid
+/// on |a| and |b|, the reference the checked extended gcd falls back to;
+/// each step's sizes into `steps`: the dividend's and divisor's limbs, and
+/// the two coefficients' it updates.
+#[doc(hidden)]
+pub fn xgcd_euclid(a: &IBig, b: &IBig, steps: &mut Vec<[usize; 4]>) -> (IBig, IBig, IBig) {
+    let (mut r0, mut r1) = (IBig::from(a.unsigned_abs()), IBig::from(b.unsigned_abs()));
+    let (mut s0, mut s1, mut t0, mut t1) = (IBig::ONE, IBig::ZERO, IBig::ZERO, IBig::ONE);
+    while !r1.is_zero() {
+        steps.push([ilimbs(&r0), ilimbs(&r1), ilimbs(&s1), ilimbs(&t1)]);
+        let (q, r) = (&r0).div_rem(&r1);
+        let s = &s0 - &q * &s1;
+        let t = &t0 - &q * &t1;
+        (r0, r1, s0, s1, t0, t1) = (r1, r, s1, s, t1, t);
+    }
+    if *a < IBig::ZERO {
+        s0 = -s0;
+    }
+    if *b < IBig::ZERO {
+        t0 = -t0;
+    }
+    (r0, s0, t0)
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static FORCE_FALLBACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The fallbacks taken while recording (tests: the exact charge).
+    static RECORDED: std::cell::RefCell<Option<Vec<XgcdFallback>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests: notes a fallback taken, when recording (nothing otherwise).
+fn record(f: &XgcdFallback) {
+    #[cfg(feature = "test-hooks")]
+    RECORDED.with(|r| {
+        if let Some(v) = r.borrow_mut().as_mut() {
+            v.push(f.clone());
+        }
+    });
+    let _ = f;
+}
+
+/// Whether a test forces the fallback (always false without the test hooks).
+fn fallback_forced() -> bool {
+    #[cfg(feature = "test-hooks")]
+    {
+        FORCE_FALLBACK.with(|c| c.get())
+    }
+    #[cfg(not(feature = "test-hooks"))]
+    {
+        false
+    }
+}
+
+/// Tests (feature `test-hooks`): runs `f` with the checked extended gcd
+/// taking its fallback whatever dashu returns (to pin the fallback's
+/// charge), on this thread, then restores it (unwinding too).
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn with_xgcd_fallback_forced<T>(f: impl FnOnce() -> T) -> T {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FORCE_FALLBACK.with(|c| c.set(self.0));
+        }
+    }
+    let _reset = Reset(FORCE_FALLBACK.with(|c| c.replace(true)));
+    f()
+}
+
+/// Tests (feature `test-hooks`): [`with_xgcd_fallback_forced`], and every
+/// fallback taken in `f`, in order (to price each site's charge exactly).
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn with_xgcd_fallback_recorded<T>(f: impl FnOnce() -> T) -> (T, Vec<XgcdFallback>) {
+    struct Reset(Option<Vec<XgcdFallback>>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            let prev = self.0.take();
+            RECORDED.with(|r| *r.borrow_mut() = prev);
+        }
+    }
+    let prev = RECORDED.with(|r| r.borrow_mut().replace(vec![]));
+    let reset = Reset(prev);
+    let x = with_xgcd_fallback_forced(f);
+    let taken = RECORDED.with(|r| r.borrow_mut().take()).unwrap_or_default();
+    drop(reset);
+    (x, taken)
+}
+
 // ---- formatting and parsing
 
 macro_rules! fmt_via_inner {
@@ -756,12 +872,7 @@ impl num_integer::Integer for BigInt {
         self.0.bit(0)
     }
     fn extended_gcd(&self, other: &Self) -> num_integer::ExtendedGcd<Self> {
-        if self.0.is_zero() && other.0.is_zero() {
-            // num-integer's algorithm gives (0, 1, 0)
-            return num_integer::ExtendedGcd { gcd: BigInt(IBig::ZERO), x: BigInt(IBig::ONE), y: BigInt(IBig::ZERO) };
-        }
-        let (g, x, y) = (&self.0).gcd_ext(&other.0);
-        num_integer::ExtendedGcd { gcd: BigInt(IBig::from(g)), x: BigInt(x), y: BigInt(y) }
+        self.extended_gcd_metered(other).0
     }
 }
 
@@ -985,8 +1096,43 @@ impl BigInt {
     /// The inverse of self mod m, in [0, m) for m > 0 and (m, 0] for m < 0
     /// (num-bigint's semantics), or None.
     pub fn modinv(&self, m: &BigInt) -> Option<BigInt> {
+        self.modinv_metered(m).0
+    }
+
+    /// [`num_integer::Integer::extended_gcd`], checked: dashu's result is
+    /// certified (x a + y b = g, two products and a compare, and g dividing a
+    /// and b, two exact divisions), and when
+    /// they fail, a plain extended Euclid computes the result, whose operand
+    /// sizes are returned for the caller's meter (the metered sites charge
+    /// the check with the gcd and the fallback when it ran; the work is
+    /// returned, never kept in a global).  A failed check is a debug
+    /// assertion too: dashu's gcd_ext must not be wrong.
+    #[doc(hidden)]
+    pub fn extended_gcd_metered(&self, other: &Self) -> (num_integer::ExtendedGcd<Self>, Option<XgcdFallback>) {
+        if self.0.is_zero() && other.0.is_zero() {
+            // num-integer's algorithm gives (0, 1, 0)
+            return (num_integer::ExtendedGcd { gcd: BigInt(IBig::ZERO), x: BigInt(IBig::ONE), y: BigInt(IBig::ZERO) }, None);
+        }
+        let (g, x, y) = (&self.0).gcd_ext(&other.0);
+        let g = IBig::from(g);
+        if !fallback_forced() && xgcd_certified(&self.0, &other.0, &g, &x, &y) {
+            return (num_integer::ExtendedGcd { gcd: BigInt(g), x: BigInt(x), y: BigInt(y) }, None);
+        }
+        debug_assert!(fallback_forced(), "dashu's gcd_ext gave wrong Bezout coefficients for {:?}, {:?}", self.0, other.0);
+        let mut f = XgcdFallback::default();
+        let (g, x, y) = xgcd_euclid(&self.0, &other.0, &mut f.steps);
+        record(&f);
+        (num_integer::ExtendedGcd { gcd: BigInt(g), x: BigInt(x), y: BigInt(y) }, Some(f))
+    }
+
+    /// [`BigInt::modinv`], checked as [`BigInt::extended_gcd_metered`]: the
+    /// inverse x is verified (x a = 1 mod m: a product and a reduction), or
+    /// its absence (g > 1 dividing a and m: two exact divisions), and
+    /// recomputed by the plain extended Euclid when that fails.
+    #[doc(hidden)]
+    pub fn modinv_metered(&self, m: &BigInt) -> (Option<BigInt>, Option<XgcdFallback>) {
         if m.0.is_zero() {
-            return None;
+            return (None, None);
         }
         let mm = IBig::from((&m.0).unsigned_abs());
         let a = {
@@ -994,12 +1140,27 @@ impl BigInt {
             if r < IBig::ZERO { r + &mm } else { r }
         };
         if a.is_zero() {
-            return if mm.is_one() { Some(BigInt(IBig::ZERO)) } else { None };
+            return (if mm.is_one() { Some(BigInt(IBig::ZERO)) } else { None }, None);
         }
         let (g, x, _) = (&a).gcd_ext(&mm);
-        if !g.is_one() {
-            return None;
-        }
+        let g = IBig::from(g);
+        let mut fallback = None;
+        let x = if !fallback_forced() && modinv_certified(&a, &mm, &g, &x) {
+            if !g.is_one() {
+                return (None, None);
+            }
+            x
+        } else {
+            debug_assert!(fallback_forced(), "dashu's gcd_ext gave a wrong inverse of {:?} mod {:?}", a, mm);
+            let mut f = XgcdFallback::default();
+            let (g, x, _) = xgcd_euclid(&a, &mm, &mut f.steps);
+            record(&f);
+            fallback = Some(f);
+            if !g.is_one() {
+                return (None, fallback);
+            }
+            x
+        };
         let mut x = x % &mm;
         if x < IBig::ZERO {
             x += &mm;
@@ -1007,7 +1168,7 @@ impl BigInt {
         if m.0 < IBig::ZERO && !x.is_zero() {
             x -= &mm;
         }
-        Some(BigInt(x))
+        (Some(BigInt(x)), fallback)
     }
     pub fn to_str_radix(&self, radix: u32) -> String {
         self.0.in_radix(radix as u8).to_string()

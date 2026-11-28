@@ -225,6 +225,30 @@ class RealNumber(float):
         Traceback (most recent call last):
         ...
         NotImplementedError: CC arithmetic with 1.35829852904939e331, an element of RR past the double range, is not available in sagebrush yet (CC holds doubles)
+
+    In a symbolic expression an element of RR or CC is a double too: where
+    the doubles' steps leave them, the value is Sage's (done again in the
+    53-bit MP field, Sage's steps) or an error, never an infinity or a lost
+    part::
+
+        sage: SR(RR(2^600)) * SR(RR(2^-600)), SR(RR(1.5)) / SR(CC(1e300, 1e300))
+        (1.00000000000000, 7.50000000000000e-301 - 7.50000000000000e-301*I)
+        sage: SR(RR(2^1000)) * 2^30  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.15052360631188e310, an element of RR past the double range, has no symbolic form in sagebrush yet
+        sage: (SR(CC(2^1000, 1)) * 2^30).n()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: 1.15052360631188e310 + 1.07374182400000e9*I, an element of CC past the double range, has no symbolic form in sagebrush yet
+        sage: SR(RR(1000)).exp()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: exp(1000.00000000000): the value in RR, past the double range, is not available in sagebrush yet
+        sage: SR(CC(1000, 1)).exp()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: exp(1000.00000000000 + 1.00000000000000*I): the value in CC, past the double range, is not available in sagebrush yet
     """
 
     __slots__ = ()
@@ -477,7 +501,15 @@ class RealNumber(float):
 
             sage: RR(10).log(), RR(8).log(2)
             (2.30258509299405, 3.00000000000000)
+
+        Of a negative number, CC's logarithm, as Sage's::
+
+            sage: RR(-2).log(), RR(-8).log(2)
+            (0.693147180559945 + 3.14159265358979*I, 3.00000000000000 + 4.53236014182719*I)
         """
+        if float.__float__(self) < 0:
+            import _sage_matrix
+            return _sage_matrix.ComplexNumber(float.__float__(self), 0.0).log(base)
         if base is None and float.__float__(self) == 0:
             # (log(+-0) is -infinity, as MPFR's)
             return RealNumber(-_INF)
@@ -680,14 +712,22 @@ class RealNumber(float):
         return RealNumber(float(_sage_real.RealField(60)(_sage_real._gamma(Fraction(float(self)), 60))))
 
     def log_gamma(self):
-        """The logarithm of the gamma function (positive numbers).
+        """The logarithm of the gamma function; of a negative number, its
+        principal branch in CC, as Sage's (not log(gamma(x))).
 
         EXAMPLES::
 
             sage: RR(10).log_gamma(), RR(1e308).log_gamma()
             (12.8018274800815, 7.08196208642166e310)
+            sage: RR(-2.1).log_gamma()
+            1.53171380819509 - 9.42477796076938*I
         """
-        if not float(self) > 0:
+        x = float.__float__(self)
+        if x < 0:
+            # (the principal branch, in CC, as Sage's: _sage_real._log_gamma_neg)
+            import _sage_real
+            return _sage_real.RealField_(53, "RNDN")(x).log_gamma()
+        if not x > 0:
             raise NotImplementedError("log_gamma of a real number <= 0 (complex in Sage) is not available for RR elements in sagebrush yet; use log_gamma(x)")
         return _rr_fn(self, _m.lgamma, "log_gamma")
 
@@ -751,6 +791,46 @@ class RealNumber(float):
             True
         """
         return float(self) == 0
+
+    def is_infinity(self):
+        """Whether +infinity or -infinity.
+
+        EXAMPLES::
+
+            sage: RR(1).is_infinity(), RR('-inf').is_infinity(), RR('nan').is_infinity()
+            (False, True, False)
+        """
+        return _m.isinf(self)
+
+    def is_positive_infinity(self):
+        """Whether +infinity.
+
+        EXAMPLES::
+
+            sage: RR('inf').is_positive_infinity(), RR('-inf').is_positive_infinity(), RR(1).is_positive_infinity()
+            (True, False, False)
+        """
+        return float(self) == _m.inf
+
+    def is_negative_infinity(self):
+        """Whether -infinity.
+
+        EXAMPLES::
+
+            sage: RR('-inf').is_negative_infinity(), RR('inf').is_negative_infinity()
+            (True, False)
+        """
+        return float(self) == -_m.inf
+
+    def is_NaN(self):
+        """Whether NaN.
+
+        EXAMPLES::
+
+            sage: RR('nan').is_NaN(), RR('inf').is_NaN(), RR(1).is_NaN()
+            (True, False, False)
+        """
+        return _m.isnan(self)
 
     def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
         """The decimal string (with digits significant digits).

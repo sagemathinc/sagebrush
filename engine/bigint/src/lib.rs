@@ -36,7 +36,46 @@ pub(crate) fn check_interrupt() {
     sagebrush_interrupt::check();
 }
 #[cfg(not(feature = "num-backend"))]
-pub use dashu_impl::{BigInt, BigUint, Sign};
+pub use dashu_impl::{modinv_certified, xgcd_certified, xgcd_euclid, BigInt, BigUint, Sign};
+#[cfg(all(not(feature = "num-backend"), feature = "test-hooks"))]
+pub use dashu_impl::{with_xgcd_fallback_forced, with_xgcd_fallback_recorded};
+
+/// An extended gcd's fallback, when the backend's coefficients failed their
+/// check: the plain extended Euclid's steps, each the 64-bit limbs of its
+/// dividend, its divisor and the two coefficients it updates (the caller's
+/// meter prices them; this crate has no meter).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct XgcdFallback {
+    pub steps: Vec<[usize; 4]>,
+}
+
+/// The extended gcd of a and b, checked (x a + y b = g; on dashu, a plain
+/// extended Euclid when the check fails), and its fallback's work for the
+/// caller's meter (None: no fallback ran).  num-bigint's own extended gcd
+/// is returned as it is.
+pub fn extended_gcd_metered(a: &BigInt, b: &BigInt) -> (num_integer::ExtendedGcd<BigInt>, Option<XgcdFallback>) {
+    #[cfg(not(feature = "num-backend"))]
+    {
+        a.extended_gcd_metered(b)
+    }
+    #[cfg(feature = "num-backend")]
+    {
+        (num_integer::Integer::extended_gcd(a, b), None)
+    }
+}
+
+/// The inverse of a mod m, checked as [`extended_gcd_metered`], and its
+/// fallback's work.
+pub fn modinv_metered(a: &BigInt, m: &BigInt) -> (Option<BigInt>, Option<XgcdFallback>) {
+    #[cfg(not(feature = "num-backend"))]
+    {
+        a.modinv_metered(m)
+    }
+    #[cfg(feature = "num-backend")]
+    {
+        (a.modinv(m), None)
+    }
+}
 
 /// Rationals over [`BigInt`].
 pub type BigRational = num_rational::Ratio<BigInt>;

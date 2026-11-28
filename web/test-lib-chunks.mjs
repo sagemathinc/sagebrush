@@ -100,6 +100,12 @@ ok(sageDomainRoot("_sage_graph", noStart, { _sage_graph: ["sage_plot"] }) === "_
   "_sage_graph (DEPS: sage_plot) keeps its own group; _sage_crystals (DEPS: _sage_lie) still follows");
 ok(fe["sagebrush/__init__.py"] === "sage-more", "the sagebrush package stays in sage-more: " + JSON.stringify(fe));
 ok(ec.manifest.chunks["mod-sage-ec-ff"]?.src && !ec.manifest.chunks["mod-sage-ec-ff"].pre && !ec.manifest.modes.sage.includes("mod-sage-ec-ff"), "mod-sage-ec-ff: sources only, and Sage mode's start doesn't fetch it");
+// (GF(p) echelon's binary route, _sage_ffmat_bin, is its own group, mod-sage-ffmat-bin, apart from the
+// _sage_ffmat that Magma's start loads (mod-sage-ffmat): that start fetches none of it)
+const fb = libChunks({ "core.py": "", "_magma.py": "", "_sage_ffmat.py": "M = 1\n", "_sage_ffmat_bin.py": "B = 1\n" },
+  { py: rec({ "py|core": mod("core.py") }), magma: rec({ "py|core": mod("core.py"), "py|_magma": mod("_magma.py"), "py|_sage_ffmat": mod("_sage_ffmat.py") }) }, "b");
+ok(fb.manifest.files["_sage_ffmat.py"] === "mod-sage-ffmat" && fb.manifest.files["_sage_ffmat_bin.py"] === "mod-sage-ffmat-bin", "_sage_ffmat: mod-sage-ffmat, _sage_ffmat_bin: mod-sage-ffmat-bin: " + JSON.stringify(fb.manifest.files));
+ok(fb.manifest.chunks["mod-sage-ffmat-bin"]?.src && !fb.manifest.chunks["mod-sage-ffmat-bin"].pre && Object.values(fb.manifest.modes).every((g) => !g.includes("mod-sage-ffmat-bin")), "mod-sage-ffmat-bin: sources only, and no mode's start fetches it");
 // (Rill's routing, design/rill.md §6.1 and §6.5: Rill's start is checked last, so a file another start uses stays in
 // core, sci or sage; the start's own files are rill; Rill's other files go by family, never mod-rill; no other mode's
 // start fetches a Rill group; and the offline inventory's Rill item owns every rill-* group)

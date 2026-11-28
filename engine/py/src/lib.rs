@@ -358,13 +358,28 @@ fn charpoly<'py>(py: Python<'py>, n: u64, k: usize, q: u64, chi: Option<(u64, Ve
 
 fn python_factorer(factor: Py<PyAny>) -> impl Fn(&[BigInt]) -> Vec<(Vec<BigInt>, u32)> + Sync {
     move |f: &[BigInt]| {
-        Python::attach(|py| {
+        let r = Python::attach(|py| {
             factor
                 .call1(py, (py1(f),))
                 .and_then(|r| r.extract::<Vec<(Vec<PyInt>, u32)>>(py))
-                .map(|v| v.into_iter().map(|(g, e)| (g.iter().map(sagebrush_bigint::from_num).collect(), e)).collect())
-                .unwrap_or_default()
-        })
+                .map(|v| v.into_iter().map(|(g, e)| (g.iter().map(sagebrush_bigint::from_num).collect(), e)).collect::<Vec<_>>())
+                .map_err(|e| e.is_instance_of::<PyKeyboardInterrupt>(py))
+        });
+        match r {
+            Ok(v) => v,
+            // (a Ctrl-C while the callback ran, Python's own or a nested
+            // engine call's KeyboardInterrupt: this call's Stop, unwound
+            // here with the Stop's own payload, which guarded's catch
+            // reports as KeyboardInterrupt, at once and not as an empty
+            // factorization the op would report as a bad callback.  No
+            // global request is set, so no other call, on this thread or
+            // another, is stopped by it; the callers of the factorer run
+            // on the calling thread, outside any parallel job)
+            Err(true) => std::panic::panic_any(sagebrush_interrupt::Interrupted),
+            // (any other error: an empty factorization, which the op
+            // refuses as not irreducible, as before)
+            Err(false) => Vec::new(),
+        }
     }
 }
 
@@ -433,6 +448,63 @@ fn newforms<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, chi: Opti
     Ok(d)
 }
 
+/// An engine op's admission: its peak bytes reserved in the ledger, held
+/// until the op returns (no work budget here: the op's work bound is its
+/// documentation, and Stop is polled throughout).
+struct LedgerAdmit {
+    what: &'static str,
+    held: Option<sagebrush_ledger::Reservation>,
+}
+
+impl sagebrush_modsym::hecke_q::Admit for LedgerAdmit {
+    fn admit(&mut self, _work: u64, bytes: u64) -> Result<(), String> {
+        let r = sagebrush_ledger::reserve(self.what, bytes).map_err(|e| format!("{}: {} bytes refused: {:?}", self.what, bytes, e))?;
+        self.held = Some(r);
+        Ok(())
+    }
+}
+
+/// T_q (q prime) on S_k(Gamma0(n)) (or its new subspace) in its reduced
+/// echelon q-expansion basis (sagebrush_modsym::hecke_q): "dim", "pivots", "basis" (integer
+/// rows a_0..a_(prec-1)) and "matrix" (rows: the images of the basis
+/// elements), both over the denominator "den"; "stats", the twisted
+/// traces' prime loops (primes used, primes set aside by reason, setups
+/// with a combination functional or seeded candidates); "units", the meter
+/// units the op tallied per family (cost::Family order).
+#[pyfunction]
+#[pyo3(signature = (n, k, factor, q, prec, new_only=false, threads=0))]
+#[allow(clippy::too_many_arguments)]
+fn cusp_hecke_matrix<'py>(py: Python<'py>, n: u64, k: usize, factor: Py<PyAny>, q: u64, prec: usize, new_only: bool, threads: usize) -> PyResult<Bound<'py, PyDict>> {
+    lk(n, Some(k))?;
+    let f = python_factorer(factor);
+    let (h, units) = run(py, threads, || {
+        let mut admit = LedgerAdmit { what: "cusp_hecke_matrix", held: None };
+        let before = sagebrush_arith::cost::tallied();
+        let h = sagebrush_modsym::hecke_q::cusp_hecke_matrix(n, k, q, prec, new_only, &f, &mut admit);
+        let after = sagebrush_arith::cost::tallied();
+        h.map(|h| (h, after.0.iter().zip(before.0).map(|(a, b)| a.wrapping_sub(b)).collect::<Vec<u64>>()))
+    })?.map_err(err)?;
+    let d = PyDict::new(py);
+    d.set_item("dim", h.dim)?;
+    d.set_item("pivots", h.pivots.clone())?;
+    d.set_item("basis", py2(&h.basis))?;
+    d.set_item("matrix", py2(&h.matrix))?;
+    d.set_item("den", py1(std::slice::from_ref(&h.den)).pop())?;
+    let st = PyDict::new(py);
+    st.set_item("e", h.stats.e)?;
+    st.set_item("primes", h.stats.primes)?;
+    st.set_item("seeded", h.stats.seeded)?;
+    st.set_item("combined", h.stats.combined)?;
+    let rej = PyDict::new(py);
+    for (r, c) in sagebrush_modsym::traces::Reject::ALL.iter().zip(h.stats.rejected) {
+        rej.set_item(r.name(), c)?;
+    }
+    st.set_item("rejected", rej)?;
+    d.set_item("stats", st)?;
+    d.set_item("units", units)?;
+    Ok(d)
+}
+
 /// One symbolic-engine call (engine/sym/src/api.rs): "op\x1fargs..." ->
 /// "ok\x1fresults..." or "err\x1fKind\x1fmessage".
 #[pyfunction]
@@ -455,6 +527,95 @@ fn call(py: Python<'_>, request: String) -> PyResult<String> {
 fn mpoly_call<'py>(py: Python<'py>, request: Vec<u8>) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
     let r = guarded(py, move || sagebrush_mpoly::call_framed(&request))?;
     Ok(pyo3::types::PyBytes::new(py, &r))
+}
+
+/// The run of bytes the binary call copies or answers between two checks
+/// for signals, when it takes its request in pieces.
+const BIN_CHUNK: usize = 1 << 20;
+
+/// The most pieces a binary request may come in (the Sage-mode echelon's
+/// are at most a frame of 64 KiB pieces, about 2^12): the bookkeeping of
+/// the pieces' references stays bounded (8 bytes each).
+const BIN_MAX_PIECES: usize = 1 << 16;
+
+/// A binary call (SBW1, engine/wire), shared with the WebAssembly build
+/// (sb_bin_call): the reply, `ok` or `er` in band.
+///
+/// - A `bytes` request is borrowed, not copied: PyO3 gives a `bytes`
+///   argument as a slice of its buffer, valid while the argument is alive
+///   (for the whole call), and sound with the GIL released in `guarded`, as
+///   a `bytes` object is immutable.  The reply is one `bytes`.
+/// - A `list` of `bytes` pieces (the Sage-mode echelon's frame-sized
+///   requests) is copied into one owned buffer with the GIL held, in runs of
+///   [`BIN_CHUNK`] bytes with a check for signals after each (a pending
+///   Ctrl-C is a KeyboardInterrupt, before the engine runs); only then is
+///   the GIL released, the engine running on the owned buffer.  The reply is
+///   a list of `bytes` pieces of at most [`BIN_CHUNK`] bytes, made with a
+///   check for signals after each: no copy of a frame-sized buffer is ever
+///   one uninterruptible step.
+/// - Anything else (a `bytearray`, a `memoryview`) is a TypeError: no
+///   mutable buffer is ever borrowed across the GIL's release.
+#[pyfunction]
+fn call_bin<'py>(py: Python<'py>, request: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    use pyo3::exceptions::{PyMemoryError, PyRuntimeError, PyTypeError};
+    use pyo3::types::{PyBytes, PyList};
+    if let Ok(b) = request.cast::<PyBytes>() {
+        let req = b.as_bytes();
+        let r = guarded(py, move || sagebrush_web::bin_ops::call_bin(req))?;
+        return Ok(PyBytes::new(py, &r).into_any());
+    }
+    let Ok(list) = request.cast::<PyList>() else {
+        return Err(PyTypeError::new_err("call_bin takes bytes, or a list of bytes pieces"));
+    };
+    // (before anything is allocated: the pieces' count, their kind and
+    // their summed size, with checked arithmetic, against the frame cap; a
+    // request past it is refused here, never assembled, whatever pieces it
+    // is made of, the same bytes object repeated included)
+    if list.len() > BIN_MAX_PIECES {
+        return Err(PyValueError::new_err(format!("call_bin: a request in more than {} pieces", BIN_MAX_PIECES)));
+    }
+    let mut total = 0usize;
+    for item in list.iter() {
+        let b = item.cast::<PyBytes>().map_err(|_| PyTypeError::new_err("call_bin: every piece must be bytes"))?;
+        total = total.checked_add(b.as_bytes().len()).ok_or_else(|| PyValueError::new_err("call_bin: a request past the frame cap"))?;
+    }
+    if total > sagebrush_web::bin_ops::FRAME_CAP {
+        return Err(PyValueError::new_err(format!("call_bin: a request of {} bytes, past the frame cap of {}", total, sagebrush_web::bin_ops::FRAME_CAP)));
+    }
+    // (then the pieces held, each a bytes: a signal handler run between the
+    // copy's runs can't change what is copied)
+    let mut pieces: Vec<Bound<'py, PyBytes>> = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        pieces.push(item.cast_into::<PyBytes>().map_err(|_| PyTypeError::new_err("call_bin: every piece must be bytes"))?);
+    }
+    if pieces.iter().map(|b| b.as_bytes().len()).sum::<usize>() != total {
+        return Err(PyRuntimeError::new_err("call_bin: the request's pieces changed while checked"));
+    }
+    let mut req: Vec<u8> = Vec::new();
+    req.try_reserve_exact(total).map_err(|_| PyMemoryError::new_err("call_bin: the request's buffer could not be allocated"))?;
+    let mut since = 0usize;
+    for b in &pieces {
+        for part in b.as_bytes().chunks(BIN_CHUNK) {
+            req.extend_from_slice(part);
+            since += part.len();
+            if since >= BIN_CHUNK {
+                py.check_signals()?;
+                since = 0;
+            }
+        }
+    }
+    drop(pieces);
+    if req.len() != total {
+        return Err(PyRuntimeError::new_err("call_bin: the request's pieces changed while copied"));
+    }
+    py.check_signals()?;
+    let r = guarded(py, move || sagebrush_web::bin_ops::call_bin(&req))?;
+    let out = PyList::empty(py);
+    for part in r.chunks(BIN_CHUNK) {
+        out.append(PyBytes::new(py, part))?;
+        py.check_signals()?;
+    }
+    Ok(out.into_any())
 }
 
 /// A PNG call's failure as the browser's _sbraster raises it
@@ -873,6 +1034,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     mf.add_function(wrap_pyfunction!(charpoly, &mf)?)?;
     mf.add_function(wrap_pyfunction!(newspace, &mf)?)?;
     mf.add_function(wrap_pyfunction!(newforms, &mf)?)?;
+    mf.add_function(wrap_pyfunction!(cusp_hecke_matrix, &mf)?)?;
     m.add_submodule(&mf)?;
     let raster = PyModule::new(m.py(), "raster")?;
     raster.add_function(wrap_pyfunction!(raster_render, &raster)?)?;
@@ -895,5 +1057,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
     m.add_function(wrap_pyfunction!(sym_call, m)?)?;
     m.add_function(wrap_pyfunction!(mpoly_call, m)?)?;
+    m.add_function(wrap_pyfunction!(call_bin, m)?)?;
     m.add_function(wrap_pyfunction!(call, m)?)
 }

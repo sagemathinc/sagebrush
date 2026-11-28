@@ -167,7 +167,7 @@ dependencies = [
 [[package]]
 name = "dashu-base"
 version = "0.6.1"
-source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
+source = "git+https://github.com/sagemathinc/dashu?rev=36ff7ad5b9225198bf6a322a70f0947e9376cece#36ff7ad5b9225198bf6a322a70f0947e9376cece"
 dependencies = [
  "num-modular",
 ]
@@ -175,7 +175,7 @@ dependencies = [
 [[package]]
 name = "dashu-int"
 version = "0.6.2"
-source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
+source = "git+https://github.com/sagemathinc/dashu?rev=36ff7ad5b9225198bf6a322a70f0947e9376cece#36ff7ad5b9225198bf6a322a70f0947e9376cece"
 dependencies = [
  "cfg-if",
  "dashu-base",
@@ -746,9 +746,11 @@ dependencies = [
  "dashu-int",
  "num-integer",
  "num-traits",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-par",
+ "sagebrush-wire",
 ]
 
 [[package]]
@@ -871,11 +873,14 @@ dependencies = [
 name = "sagebrush-modsym"
 version = "0.1.0"
 dependencies = [
+ "num-integer",
  "num-traits",
  "rayon",
  "sagebrush-ap",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
+ "sagebrush-modsym",
  "sagebrush-par",
  "sagebrush-poly",
  "serde_json",
@@ -956,6 +961,7 @@ version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
 ]
@@ -975,6 +981,7 @@ dependencies = [
  "p256",
  "pyo3",
  "sagebrush-ap",
+ "sagebrush-arith",
  "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-ledger",
@@ -1044,9 +1051,14 @@ dependencies = [
  "sagebrush-poly",
  "sagebrush-primes",
  "sagebrush-sym",
+ "sagebrush-wire",
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "sagebrush-wire"
+version = "0.1.0"
 
 [[package]]
 name = "sec1"

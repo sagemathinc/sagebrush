@@ -14,6 +14,7 @@ on:
     paths:
       - "optional/**"
       - "scripts/optional-packages.mjs"
+      - "scripts/optional-wasm.mjs"
       - "scripts/core-api-surface.mjs"
       - "core-api-surface.json"
       - "src/pkgset.ts"
@@ -46,24 +47,33 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      # (the four WebAssembly modules wasm/pins.json names, published: design/wasm-artifacts.md section 6)
-      - uses: ./.github/actions/wasm-modules
-        with:
-          artifact: "false"
+      # (the four WebAssembly modules wasm/pins.json names, published: design/wasm-artifacts.md section 6.  On a
+      # track a pin can be unpublished until the track's pull into master: then every later step is skipped and
+      # the job says "skipped (track pin unpublished)", scripts/optional-wasm.mjs)
+      - name: the published modules
+        id: wasm
+        run: node scripts/optional-wasm.mjs
       # (build-cli runs bun; the same pin as ci.yml's checks job)
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.wasm.outputs.skip != 'true'
         with:
           bun-version: "1.4.4"
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: node scripts/build-cli.mjs
+      - if: steps.wasm.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.wasm.outputs.skip != 'true'
+        run: pnpm run build
+      - if: steps.wasm.outputs.skip != 'true'
+        run: node scripts/build-cli.mjs
       - name: format and contract lint
+        if: steps.wasm.outputs.skip != 'true'
         run: node scripts/optional-packages.mjs check
       - name: build a package set (with this build's precompiled code)
+        if: steps.wasm.outputs.skip != 'true'
         run: |
           out="$(mktemp -d "${RUNNER_TEMP}/sagebrush-pkgset.XXXXXX")"
           S="$(node scripts/optional-packages.mjs build --out "$out" --pre)"
           echo "PKGSET=$out/pkgset/$S.json" >> "$GITHUB_ENV"
           echo "package set $S"
       - name: package tests
+        if: steps.wasm.outputs.skip != 'true'
         run: node scripts/optional-packages.mjs test --pkgset "$PKGSET"

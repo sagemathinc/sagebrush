@@ -353,6 +353,10 @@ export type NdTestHooks = {
   noTerminate?: boolean; memoryFault?: boolean; rebootstrap?: boolean; rebootstrapMidJob?: boolean;
   malformed?: true | "id16" | "ctl32" | "ctlEnd" | "unshared" | "fault"; badStack?: boolean;
 };
+// The large products of this session by the participants each actually ran on (1: this thread alone), for
+// np.linalg._threads(): what a benchmark checks its threaded columns by. Counting only; nothing reads it to decide.
+const used = new Map<number, number>();
+const tally = (t: number) => used.set(t, (used.get(t) ?? 0) + 1);
 const tst = { hooks: null as NdTestHooks | null, made: 0, terminated: 0, exited: 0, products: 0, teams: 0, failovers: 0, abandoned: [] as WebAssembly.Memory[], unstopped: [] as Crew[] };
 
 /** For the tests only: set the hooks (null: none), and see the counters (workers made, terminated and exited,
@@ -361,6 +365,11 @@ const tst = { hooks: null as NdTestHooks | null, made: 0, terminated: 0, exited:
 export function ndTest(hooks?: NdTestHooks | null): typeof tst {
   if (hooks !== undefined) tst.hooks = hooks;
   return tst;
+}
+
+/** The large products so far, by the participants each ran on: [[participants, products], ...], ascending. */
+export function ndProducts(): [number, number][] {
+  return [...used.entries()].sort((a, b) => a[0] - b[0]);
 }
 
 /** The pool's state, for np.linalg._kernels() and the tests: the threads a large product gets now, and why not more. */
@@ -520,10 +529,14 @@ export function ndMatmul(A: Float64Array, B: Float64Array, n: number, m: number,
   if (threads === "none") startPool();
   const P = pool?.ready ? pool : null;
   const t = gemmOn(A, B, n, m, p, P);
-  if (typeof t !== "string") return t;
+  if (typeof t !== "string") {
+    tally(P ? P.helpers + 1 : 1);
+    return t;
+  }
   failover(t);
   const one = gemmOn(A, B, n, m, p, null);
   if (typeof one === "string") throw new Error(one);
+  tally(1);
   return one;
 }
 

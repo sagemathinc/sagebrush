@@ -18,8 +18,8 @@ sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
 sagebrush-bigint = { path = "../bigint" }
 # glibc's log and pow, the core's float parameter choices (engine/glibm)
 sagebrush-glibm = { path = "../glibm" }
-dashu-int = { git = "https://github.com/sagemathinc/dashu", rev = "2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f" }
-dashu-base = { git = "https://github.com/sagemathinc/dashu", rev = "2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f" }
+dashu-int = { git = "https://github.com/sagemathinc/dashu", rev = "36ff7ad5b9225198bf6a322a70f0947e9376cece" }
+dashu-base = { git = "https://github.com/sagemathinc/dashu", rev = "36ff7ad5b9225198bf6a322a70f0947e9376cece" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sagebrush-wasmheap = { path = "../wasmheap" }

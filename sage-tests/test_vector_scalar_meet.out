@@ -1,0 +1,750 @@
+Finite Field of size 2 | Finite Field of size 3
+TypeError
+TypeError
+Finite Field of size 2 | Finite Field of size 5
+TypeError
+TypeError
+Finite Field of size 2 | Finite Field in a of size 2^2
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Finite Field of size 2 | Finite Field in b of size 3^2
+TypeError
+TypeError
+Finite Field of size 2 | Ring of integers modulo 1
+TypeError
+TypeError
+Finite Field of size 2 | Ring of integers modulo 4
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Finite Field of size 2 | Ring of integers modulo 6
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Finite Field of size 2 | Ring of integers modulo 8
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Finite Field of size 2 | Ring of integers modulo 9
+TypeError
+TypeError
+Finite Field of size 2 | Ring of integers modulo 12
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Finite Field of size 2 | Ring of integers modulo 30
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Finite Field of size 2 | Ring of integers modulo 18446744073709551616
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Finite Field of size 2 | Ring of integers modulo 36472996377170786403
+TypeError
+TypeError
+Finite Field of size 3 | Finite Field of size 2
+TypeError
+TypeError
+Finite Field of size 3 | Finite Field of size 5
+TypeError
+TypeError
+Finite Field of size 3 | Finite Field in a of size 2^2
+TypeError
+TypeError
+Finite Field of size 3 | Finite Field in b of size 3^2
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Finite Field of size 3 | Ring of integers modulo 1
+TypeError
+TypeError
+Finite Field of size 3 | Ring of integers modulo 4
+TypeError
+TypeError
+Finite Field of size 3 | Ring of integers modulo 6
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Finite Field of size 3 | Ring of integers modulo 8
+TypeError
+TypeError
+Finite Field of size 3 | Ring of integers modulo 9
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Finite Field of size 3 | Ring of integers modulo 12
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Finite Field of size 3 | Ring of integers modulo 30
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Finite Field of size 3 | Ring of integers modulo 18446744073709551616
+TypeError
+TypeError
+Finite Field of size 3 | Ring of integers modulo 36472996377170786403
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Finite Field of size 5 | Finite Field of size 2
+TypeError
+TypeError
+Finite Field of size 5 | Finite Field of size 3
+TypeError
+TypeError
+Finite Field of size 5 | Finite Field in a of size 2^2
+TypeError
+TypeError
+Finite Field of size 5 | Finite Field in b of size 3^2
+TypeError
+TypeError
+Finite Field of size 5 | Ring of integers modulo 1
+TypeError
+TypeError
+Finite Field of size 5 | Ring of integers modulo 4
+TypeError
+TypeError
+Finite Field of size 5 | Ring of integers modulo 6
+TypeError
+TypeError
+Finite Field of size 5 | Ring of integers modulo 8
+TypeError
+TypeError
+Finite Field of size 5 | Ring of integers modulo 9
+TypeError
+TypeError
+Finite Field of size 5 | Ring of integers modulo 12
+TypeError
+TypeError
+Finite Field of size 5 | Ring of integers modulo 30
+Vector space of dimension 3 over Finite Field of size 5
+(1, 3, 0)
+Vector space of dimension 3 over Finite Field of size 5
+(1, 3, 0)
+Finite Field of size 5 | Ring of integers modulo 18446744073709551616
+TypeError
+TypeError
+Finite Field of size 5 | Ring of integers modulo 36472996377170786403
+TypeError
+TypeError
+Finite Field in a of size 2^2 | Finite Field of size 2
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Finite Field in a of size 2^2 | Finite Field of size 3
+TypeError
+TypeError
+Finite Field in a of size 2^2 | Finite Field of size 5
+TypeError
+TypeError
+Finite Field in a of size 2^2 | Finite Field in b of size 3^2
+TypeError
+TypeError
+Finite Field in a of size 2^2 | Ring of integers modulo 1
+TypeError
+TypeError
+Finite Field in a of size 2^2 | Ring of integers modulo 4
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Finite Field in a of size 2^2 | Ring of integers modulo 6
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Finite Field in a of size 2^2 | Ring of integers modulo 8
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Finite Field in a of size 2^2 | Ring of integers modulo 9
+TypeError
+TypeError
+Finite Field in a of size 2^2 | Ring of integers modulo 12
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Finite Field in a of size 2^2 | Ring of integers modulo 30
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Finite Field in a of size 2^2 | Ring of integers modulo 18446744073709551616
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Finite Field in a of size 2^2 | Ring of integers modulo 36472996377170786403
+TypeError
+TypeError
+Finite Field in b of size 3^2 | Finite Field of size 2
+TypeError
+TypeError
+Finite Field in b of size 3^2 | Finite Field of size 3
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Finite Field in b of size 3^2 | Finite Field of size 5
+TypeError
+TypeError
+Finite Field in b of size 3^2 | Finite Field in a of size 2^2
+TypeError
+TypeError
+Finite Field in b of size 3^2 | Ring of integers modulo 1
+TypeError
+TypeError
+Finite Field in b of size 3^2 | Ring of integers modulo 4
+TypeError
+TypeError
+Finite Field in b of size 3^2 | Ring of integers modulo 6
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Finite Field in b of size 3^2 | Ring of integers modulo 8
+TypeError
+TypeError
+Finite Field in b of size 3^2 | Ring of integers modulo 9
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Finite Field in b of size 3^2 | Ring of integers modulo 12
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Finite Field in b of size 3^2 | Ring of integers modulo 30
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Finite Field in b of size 3^2 | Ring of integers modulo 18446744073709551616
+TypeError
+TypeError
+Finite Field in b of size 3^2 | Ring of integers modulo 36472996377170786403
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Ring of integers modulo 1 | Finite Field of size 2
+TypeError
+TypeError
+Ring of integers modulo 1 | Finite Field of size 3
+TypeError
+TypeError
+Ring of integers modulo 1 | Finite Field of size 5
+TypeError
+TypeError
+Ring of integers modulo 1 | Finite Field in a of size 2^2
+TypeError
+TypeError
+Ring of integers modulo 1 | Finite Field in b of size 3^2
+TypeError
+TypeError
+Ring of integers modulo 1 | Ring of integers modulo 4
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ring of integers modulo 1 | Ring of integers modulo 6
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ring of integers modulo 1 | Ring of integers modulo 8
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ring of integers modulo 1 | Ring of integers modulo 9
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ring of integers modulo 1 | Ring of integers modulo 12
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ring of integers modulo 1 | Ring of integers modulo 30
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ring of integers modulo 1 | Ring of integers modulo 18446744073709551616
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ring of integers modulo 1 | Ring of integers modulo 36472996377170786403
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ambient free module of rank 3 over Ring of integers modulo 1
+(0, 0, 0)
+Ring of integers modulo 4 | Finite Field of size 2
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Ring of integers modulo 4 | Finite Field of size 3
+TypeError
+TypeError
+Ring of integers modulo 4 | Finite Field of size 5
+TypeError
+TypeError
+Ring of integers modulo 4 | Finite Field in a of size 2^2
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Ring of integers modulo 4 | Finite Field in b of size 3^2
+TypeError
+TypeError
+Ring of integers modulo 4 | Ring of integers modulo 1
+TypeError
+TypeError
+Ring of integers modulo 4 | Ring of integers modulo 6
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 4 | Ring of integers modulo 8
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 4 | Ring of integers modulo 9
+TypeError
+TypeError
+Ring of integers modulo 4 | Ring of integers modulo 12
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 4 | Ring of integers modulo 30
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 4 | Ring of integers modulo 18446744073709551616
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 4 | Ring of integers modulo 36472996377170786403
+TypeError
+TypeError
+Ring of integers modulo 6 | Finite Field of size 2
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Ring of integers modulo 6 | Finite Field of size 3
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Ring of integers modulo 6 | Finite Field of size 5
+TypeError
+TypeError
+Ring of integers modulo 6 | Finite Field in a of size 2^2
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Ring of integers modulo 6 | Finite Field in b of size 3^2
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Ring of integers modulo 6 | Ring of integers modulo 1
+TypeError
+TypeError
+Ring of integers modulo 6 | Ring of integers modulo 4
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 6 | Ring of integers modulo 8
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 6 | Ring of integers modulo 9
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 6 | Ring of integers modulo 12
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ring of integers modulo 6 | Ring of integers modulo 30
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ring of integers modulo 6 | Ring of integers modulo 18446744073709551616
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 6 | Ring of integers modulo 36472996377170786403
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 8 | Finite Field of size 2
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Ring of integers modulo 8 | Finite Field of size 3
+TypeError
+TypeError
+Ring of integers modulo 8 | Finite Field of size 5
+TypeError
+TypeError
+Ring of integers modulo 8 | Finite Field in a of size 2^2
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Ring of integers modulo 8 | Finite Field in b of size 3^2
+TypeError
+TypeError
+Ring of integers modulo 8 | Ring of integers modulo 1
+TypeError
+TypeError
+Ring of integers modulo 8 | Ring of integers modulo 4
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 8 | Ring of integers modulo 6
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 8 | Ring of integers modulo 9
+TypeError
+TypeError
+Ring of integers modulo 8 | Ring of integers modulo 12
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 8 | Ring of integers modulo 30
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 8 | Ring of integers modulo 18446744073709551616
+Ambient free module of rank 3 over Ring of integers modulo 8
+(5, 4, 3)
+Ambient free module of rank 3 over Ring of integers modulo 8
+(5, 4, 3)
+Ring of integers modulo 8 | Ring of integers modulo 36472996377170786403
+TypeError
+TypeError
+Ring of integers modulo 9 | Finite Field of size 2
+TypeError
+TypeError
+Ring of integers modulo 9 | Finite Field of size 3
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Ring of integers modulo 9 | Finite Field of size 5
+TypeError
+TypeError
+Ring of integers modulo 9 | Finite Field in a of size 2^2
+TypeError
+TypeError
+Ring of integers modulo 9 | Finite Field in b of size 3^2
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Ring of integers modulo 9 | Ring of integers modulo 1
+TypeError
+TypeError
+Ring of integers modulo 9 | Ring of integers modulo 4
+TypeError
+TypeError
+Ring of integers modulo 9 | Ring of integers modulo 6
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 9 | Ring of integers modulo 8
+TypeError
+TypeError
+Ring of integers modulo 9 | Ring of integers modulo 12
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 9 | Ring of integers modulo 30
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 9 | Ring of integers modulo 18446744073709551616
+TypeError
+TypeError
+Ring of integers modulo 9 | Ring of integers modulo 36472996377170786403
+Ambient free module of rank 3 over Ring of integers modulo 9
+(3, 1, 8)
+Ambient free module of rank 3 over Ring of integers modulo 9
+(3, 1, 8)
+Ring of integers modulo 12 | Finite Field of size 2
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Ring of integers modulo 12 | Finite Field of size 3
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Ring of integers modulo 12 | Finite Field of size 5
+TypeError
+TypeError
+Ring of integers modulo 12 | Finite Field in a of size 2^2
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Ring of integers modulo 12 | Finite Field in b of size 3^2
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Ring of integers modulo 12 | Ring of integers modulo 1
+TypeError
+TypeError
+Ring of integers modulo 12 | Ring of integers modulo 4
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 12 | Ring of integers modulo 6
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ring of integers modulo 12 | Ring of integers modulo 8
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 12 | Ring of integers modulo 9
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 12 | Ring of integers modulo 30
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ring of integers modulo 12 | Ring of integers modulo 18446744073709551616
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 12 | Ring of integers modulo 36472996377170786403
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 30 | Finite Field of size 2
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Ring of integers modulo 30 | Finite Field of size 3
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Ring of integers modulo 30 | Finite Field of size 5
+Vector space of dimension 3 over Finite Field of size 5
+(1, 3, 0)
+Vector space of dimension 3 over Finite Field of size 5
+(1, 3, 0)
+Ring of integers modulo 30 | Finite Field in a of size 2^2
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Ring of integers modulo 30 | Finite Field in b of size 3^2
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Ring of integers modulo 30 | Ring of integers modulo 1
+TypeError
+TypeError
+Ring of integers modulo 30 | Ring of integers modulo 4
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 30 | Ring of integers modulo 6
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ring of integers modulo 30 | Ring of integers modulo 8
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 30 | Ring of integers modulo 9
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 30 | Ring of integers modulo 12
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ambient free module of rank 3 over Ring of integers modulo 6
+(3, 4, 5)
+Ring of integers modulo 30 | Ring of integers modulo 18446744073709551616
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 30 | Ring of integers modulo 36472996377170786403
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 18446744073709551616 | Finite Field of size 2
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field of size 2
+(1, 0, 1)
+Ring of integers modulo 18446744073709551616 | Finite Field of size 3
+TypeError
+TypeError
+Ring of integers modulo 18446744073709551616 | Finite Field of size 5
+TypeError
+TypeError
+Ring of integers modulo 18446744073709551616 | Finite Field in a of size 2^2
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Vector space of dimension 3 over Finite Field in a of size 2^2
+(1, 0, 1)
+Ring of integers modulo 18446744073709551616 | Finite Field in b of size 3^2
+TypeError
+TypeError
+Ring of integers modulo 18446744073709551616 | Ring of integers modulo 1
+TypeError
+TypeError
+Ring of integers modulo 18446744073709551616 | Ring of integers modulo 4
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 18446744073709551616 | Ring of integers modulo 6
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 18446744073709551616 | Ring of integers modulo 8
+Ambient free module of rank 3 over Ring of integers modulo 8
+(5, 4, 3)
+Ambient free module of rank 3 over Ring of integers modulo 8
+(5, 4, 3)
+Ring of integers modulo 18446744073709551616 | Ring of integers modulo 9
+TypeError
+TypeError
+Ring of integers modulo 18446744073709551616 | Ring of integers modulo 12
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ambient free module of rank 3 over Ring of integers modulo 4
+(1, 0, 3)
+Ring of integers modulo 18446744073709551616 | Ring of integers modulo 30
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Vector space of dimension 3 over Ring of integers modulo 2
+(1, 0, 1)
+Ring of integers modulo 18446744073709551616 | Ring of integers modulo 36472996377170786403
+TypeError
+TypeError
+Ring of integers modulo 36472996377170786403 | Finite Field of size 2
+TypeError
+TypeError
+Ring of integers modulo 36472996377170786403 | Finite Field of size 3
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field of size 3
+(0, 1, 2)
+Ring of integers modulo 36472996377170786403 | Finite Field of size 5
+TypeError
+TypeError
+Ring of integers modulo 36472996377170786403 | Finite Field in a of size 2^2
+TypeError
+TypeError
+Ring of integers modulo 36472996377170786403 | Finite Field in b of size 3^2
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Vector space of dimension 3 over Finite Field in b of size 3^2
+(0, 1, 2)
+Ring of integers modulo 36472996377170786403 | Ring of integers modulo 1
+TypeError
+TypeError
+Ring of integers modulo 36472996377170786403 | Ring of integers modulo 4
+TypeError
+TypeError
+Ring of integers modulo 36472996377170786403 | Ring of integers modulo 6
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 36472996377170786403 | Ring of integers modulo 8
+TypeError
+TypeError
+Ring of integers modulo 36472996377170786403 | Ring of integers modulo 9
+Ambient free module of rank 3 over Ring of integers modulo 9
+(3, 1, 8)
+Ambient free module of rank 3 over Ring of integers modulo 9
+(3, 1, 8)
+Ring of integers modulo 36472996377170786403 | Ring of integers modulo 12
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 36472996377170786403 | Ring of integers modulo 30
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Vector space of dimension 3 over Ring of integers modulo 3
+(0, 1, 2)
+Ring of integers modulo 36472996377170786403 | Ring of integers modulo 18446744073709551616
+TypeError
+TypeError

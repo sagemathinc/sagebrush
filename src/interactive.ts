@@ -20,7 +20,7 @@ export function needsMore(src: string, opts: { sage?: boolean } = {}): boolean {
   // A cell magic (%%time) takes the lines after it: they end with a blank line.
   if (/^\s*%%/.test(lines.find((l) => l.trim() !== "") ?? "")) return last.trim() !== "";
   try {
-    parse(ipythonSyntax(src) + "\n", "<stdin>", "exec", opts);
+    parse(ipythonSyntax(src, !!opts.sage) + "\n", "<stdin>", "exec", opts);
     return false;
   } catch (e: any) {
     return e instanceof PySyntaxError && /was never closed|unexpected EOF|unterminated triple-quoted|expected an indented block|incomplete input/.test(e.msg);

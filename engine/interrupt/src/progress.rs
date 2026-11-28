@@ -84,9 +84,9 @@ pub mod flag {
 /// `progress_tables` call at load returns them).  Index 0 is "" (none).
 /// Names a host registers at run time (a Python routine's own op, stage or
 /// unit) get indices from [`HOST_NAMES`] up, in that host's table.
-pub const OPS: &[&str] = &["", "factor", "groebner", "python"];
-pub const STAGES: &[&str] = &["", "trial division", "primality", "rho", "ECM", "SIQS", "F4", "FGLM", "python"];
-pub const UNITS: &[&str] = &["", "divisions", "tests", "curves", "iterations", "relations", "rows", "pairs", "steps", "items"];
+pub const OPS: &[&str] = &["", "factor", "groebner", "python", "smith form"];
+pub const STAGES: &[&str] = &["", "trial division", "primality", "rho", "ECM", "SIQS", "F4", "FGLM", "python", "inverse", "invariants", "attempts", "profile", "Compress", "core", "combine"];
+pub const UNITS: &[&str] = &["", "divisions", "tests", "curves", "iterations", "relations", "rows", "pairs", "steps", "items", "work units"];
 /// The first index of a host-registered name.
 pub const HOST_NAMES: u32 = 0x8000_0000;
 
@@ -390,6 +390,14 @@ pub fn name_index(name: &str) -> u32 {
     HOST_NAMES + i as u32
 }
 
+/// The index of an engine name in its table ([`OPS`], [`STAGES`] or
+/// [`UNITS`]); 0 (unnamed) if it isn't there.
+pub fn table_index(table: &[&str], name: &str) -> u32 {
+    let i = table.iter().position(|n| *n == name);
+    debug_assert!(i.is_some(), "{name} is not in the table");
+    i.unwrap_or(0) as u32
+}
+
 fn name_of(table: &[&str], i: u32) -> String {
     if i >= HOST_NAMES {
         return HOST.lock().unwrap_or_else(|e| e.into_inner()).get((i - HOST_NAMES) as usize).cloned().unwrap_or_default();
@@ -580,16 +588,18 @@ impl Call {
     /// Writes the report, at most every 0.5 s natively (cheap to call at
     /// every check); in wasm into the engine's frame, which the host copies.
     pub fn publish(&mut self) {
+        #[cfg(feature = "test-hooks")]
+        record::push(false, self.call_id, &self.report);
         #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
         {
-            self.flush();
+            self.write();
         }
         #[cfg(not(all(target_arch = "wasm32", feature = "wasm-host")))]
         {
             let t = now_ms();
             if t.saturating_sub(self.last_ms) >= PUBLISH_EVERY_MS {
                 self.last_ms = t;
-                self.flush();
+                self.write();
             }
         }
     }
@@ -621,6 +631,14 @@ impl Call {
 
     /// Writes the report now, whatever the time since the last write.
     pub fn flush(&mut self) {
+        #[cfg(feature = "test-hooks")]
+        record::push(true, self.call_id, &self.report);
+        self.write();
+    }
+
+    // (the write itself: a publish's is not a flush in the tests' record,
+    // which must not depend on the clock)
+    fn write(&mut self) {
         #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
         {
             if let Some(f) = self.frame {
@@ -641,6 +659,24 @@ impl Call {
                 store(i, &self.slot_words());
             }
         }
+    }
+}
+
+impl Call {
+    /// Ends a call whose owner is gone without its drop (a wasm trap runs
+    /// no destructors): its parent-chain entry and native slot are freed,
+    /// and its wasm frame, already forgotten by [`reset_frames`], is not
+    /// touched.  Stores and a lock only: no poll, no panic.
+    pub fn abandon(self) {
+        stack_remove(self.thread, self.call_id);
+        #[cfg(not(all(target_arch = "wasm32", feature = "wasm-host")))]
+        {
+            match self.slot {
+                Some(i) => release(i),
+                None => UNTRACKED.lock().unwrap_or_else(|e| e.into_inner()).retain(|u| u.0 != self.call_id),
+            }
+        }
+        std::mem::forget(self);
     }
 }
 
@@ -767,10 +803,64 @@ pub fn frames_ptr() -> *const u32 {
     wasm::ptr()
 }
 
-/// Forgets every frame (wasm; engine/web calls it at each call's start).
-#[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
+/// The run generation: a top-level engine call's start (and any frames
+/// reset) moves it, so state a trapped call left behind (wasm runs no
+/// destructors on a trap) is recognised as stale by its older generation.
+static GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// The current run generation (see [`reset_frames`]).
+pub fn generation() -> u64 {
+    GENERATION.load(Relaxed)
+}
+
+/// A new run: in wasm the frames are forgotten (engine/web calls it at each
+/// call's start, after a trap may have dropped one); on every target the
+/// run generation moves.
 pub fn reset_frames() {
-    wasm::reset()
+    #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
+    wasm::reset();
+    GENERATION.fetch_add(1, Relaxed);
+}
+
+/// The tests' record of every publish (before the native throttle) and
+/// every explicit flush, on this thread (feature `test-hooks`): the same
+/// on every target and at any speed (a publish's own write, which the
+/// clock decides natively, is not an event).
+#[cfg(feature = "test-hooks")]
+pub mod record {
+    use super::Report;
+    use std::cell::{Cell, RefCell};
+
+    /// One event: a flush (`written`) or a publish, its call and report.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Event {
+        pub written: bool,
+        pub call_id: u64,
+        pub report: Report,
+    }
+
+    thread_local! {
+        static ON: Cell<bool> = const { Cell::new(false) };
+        static EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Starts recording on this thread (clearing the record).
+    pub fn start() {
+        EVENTS.with(|e| e.borrow_mut().clear());
+        ON.with(|o| o.set(true));
+    }
+
+    /// Stops recording; the events so far.
+    pub fn take() -> Vec<Event> {
+        ON.with(|o| o.set(false));
+        EVENTS.with(|e| std::mem::take(&mut *e.borrow_mut()))
+    }
+
+    pub(super) fn push(written: bool, call_id: u64, report: &Report) {
+        if ON.with(|o| o.get()) {
+            EVENTS.with(|e| e.borrow_mut().push(Event { written, call_id, report: *report }));
+        }
+    }
 }
 
 #[cfg(test)]

@@ -292,6 +292,10 @@ impl Node {
     pub fn is_float(&self) -> bool {
         matches!(&self.kind, Kind::Num(Num::Float(..)))
     }
+    /// A number of RealField(p) or ComplexField(p), p != 53.
+    pub fn is_mp(&self) -> bool {
+        matches!(&self.kind, Kind::Num(Num::Mp(_) | Num::Mpc(_)))
+    }
     pub fn is_infinite(&self) -> bool {
         matches!(&self.kind, Kind::Const(Const::Infinity | Const::MinusInfinity | Const::UnsignedInfinity))
     }
@@ -579,6 +583,8 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
         let complex = match &coeff {
             Num::Exact(_, im) => !num_traits::Zero::is_zero(im),
             Num::Float(_, im, _) => *im != 0.0,
+            Num::Mp(_) => false,
+            Num::Mpc(x) => !x.im.is_zero(),
         };
         if complex && c != Const::UnsignedInfinity {
             return constant(Const::UnsignedInfinity);
@@ -678,6 +684,13 @@ pub fn div(a: &Expr, b: &Expr) -> Expr {
         }
         throw(SymError::DivisionByZero);
     }
+    // (an RR or CC number and a number: Sage's quotient, a times 1/b, checked
+    // past the doubles as a whole, Num::div)
+    if let (Some(x), Some(y)) = (a.as_num(), b.as_num()) {
+        if (x.fk().is_some() || y.fk().is_some()) && !x.fk_with(y).double() && !x.is_mp_kind() && !y.is_mp_kind() {
+            return num(x.div(y));
+        }
+    }
     mul(vec![a.clone(), pow(b, &int(-1))])
 }
 pub fn recip(a: &Expr) -> Expr {
@@ -759,11 +772,15 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
                 }
             }
         }
-        (Kind::Const(Const::E), Kind::Num(n)) if !n.is_exact() => {
+        // (e^x for x of RealField(p) is the front end's, mp_calls: its exp)
+        (Kind::Const(Const::E), Kind::Num(n)) if !n.is_exact() && !n.is_mp_kind() => {
             let (re, im) = n.to_c64();
             let m = re.exp();
             let k = n.fk().unwrap_or(crate::num::Fk::RR);
-            return num(if im == 0.0 { Num::Float(m, 0.0, k) } else { Num::fl(m * im.cos(), m * im.sin(), k) });
+            let r = if im == 0.0 { Num::Float(m, 0.0, k) } else { Num::fl(m * im.cos(), m * im.sin(), k) };
+            // (an RR or CC value past the doubles refused: e^x is never 0)
+            crate::num::check_float_value("exp", &[(re, im)], &r, false, |i| i == 1 && im == 0.0);
+            return num(r);
         }
         (Kind::Const(Const::Infinity), Kind::Num(n)) if n.is_positive() => return infinity(),
         (Kind::Const(Const::Infinity), Kind::Num(n)) if n.is_negative() => return zero(),
@@ -789,12 +806,41 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
 }
 
 fn num_pow(b: &Num, x: &Num) -> Expr {
+    // a real of RealField(p) to an integer: its correctly rounded power (Sage's
+    // mpfr_pow_si); a number of ComplexField(p) to an integer: Sage's
+    // generic_power; any other power with one is the front end's (mp_calls)
+    if b.is_mp_kind() || x.is_mp_kind() {
+        // (a power of NaN stays as it is, as Sage's NaN^2)
+        if b.mp_nan() {
+            return raw(Kind::Pow(num(b.clone()), num(x.clone())));
+        }
+        // (to an integer of any size, its parity and sign its own, never a
+        // rounded one's: SR(RealField(24)(-1))^(2^31 + 1) is -1)
+        if b.as_mp().is_some() || b.as_mpc().is_some() {
+            if let Some(n) = x.as_int().filter(|_| x.is_exact()) {
+                return num(crate::num::mp_pow(b, &n));
+            }
+        }
+        return raw(Kind::Pow(num(b.clone()), num(x.clone())));
+    }
     // an element of RDF or CDF to an exact integer: binary powering, as Sage's RDF (9.0 for
     // SR(RDF(3))^2, but 9.000000000000002 for SR(RDF(3))^RDF(2))
     // (CDF's power is always GSL's formula: SR(CDF(1, 2))^2 is -2.9999999999999987 + 4.0*I)
     if !b.is_exact() && b.fk_with(x) == crate::num::Fk::RDF {
         if let Some(n) = x.as_i64() {
             return num(b.pow_int(n));
+        }
+    }
+    // an element of CC to an exact integer: Sage's generic_power (the inverse
+    // first for a negative one; SR(CC(1, 1))^2 is 2.00000000000000*I, and
+    // 1/SR(CC(1, 1)) its __invert__'s), checked past the doubles (Num::pow_int)
+    if !b.is_exact() && b.fk_with(x) == crate::num::Fk::CC {
+        if let Some(n) = x.as_i64().filter(|_| x.is_exact()) {
+            return num(b.pow_int(n));
+        }
+        // (past i64 too, by the bits of n: SR(CC(0, 1))^(2^100) is 1)
+        if let Some(n) = x.as_int().filter(|_| x.is_exact()) {
+            return num(crate::num::pow_big_mp53(b, &n, &crate::print::to_string(&num(x.clone())), crate::num::Fk::CC));
         }
     }
     if !b.is_exact() || !x.is_exact() {
@@ -926,8 +972,54 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
     if k.double() {
         return double_pow(br, bi, xr, xi, k);
     }
+    // (an RR or CC value past the doubles refused: a nonzero base's power is
+    // never 0, its imaginary part 0 on the real branch)
+    // An integer power as Sage computes it (a real base to an exact or RR
+    // integer, mpfr_pow_si's correctly rounded value, as mpfr_pow's; a
+    // complex one to an exact integer, generic_power): its value or Sage's
+    let int_power = if bi == 0.0 && xi == 0.0 && !k.complex() && xr.fract() == 0.0 && xr.abs() < 9.0e15 {
+        Some(xr as i64)
+    } else {
+        x.as_i64().filter(|_| x.is_exact())
+    };
+    let checked = |r: Num| {
+        let v = [(br, bi), (xr, xi)];
+        if crate::num::float_value_off(&v, &r, false, |i| i == 1 && r.to_c64().1 == 0.0 && bi == 0.0 && xi == 0.0) {
+            match int_power {
+                Some(n) => return crate::num::pow_int_mp53(b, n, k),
+                None => crate::num::refuse_float_value("pow", &v, k),
+            }
+        }
+        r
+    };
+    // (a real base's integer power past x and 1/x is mpfr_pow_si's always:
+    // powf, wasm's libm, is not correctly rounded, SR(RR(-1.0001))^40000)
+    if let Some(n) = int_power.filter(|n| bi == 0.0 && !k.complex() && br.is_finite() && !(-1..=1).contains(n)) {
+        return crate::num::pow_int_mp53(b, n, k);
+    }
+    // (and to an integer past those: Sage's infinity or 0 past MPFR's
+    // exponents, SR(RR(2))^(10^20) is +infinity, refused short of them)
+    if int_power.is_none() && bi == 0.0 && xi == 0.0 && !k.complex() && br.is_finite() {
+        // (an RR exponent's parity is its double's: odd ones reach 2^53,
+        // past int_power's 9.0e15)
+        let n = if x.is_exact() {
+            x.as_int().filter(|n| !n.is_zero()).map(|n| ((crate::num::log2_big(&n), n.is_negative()), n.to_i128(), n.is_odd()))
+        } else {
+            Some(((xr.abs().log2(), xr < 0.0), Some(xr as i128).filter(|_| xr.abs() < 1.7e38), xr.abs() < 9007199254740992.0 && xr % 2.0 != 0.0)).filter(|_| xr.is_finite() && xr.fract() == 0.0 && xr != 0.0)
+        };
+        if let Some((nf, ne, odd)) = n {
+            // (-1 by the exponent's parity, which its double may have lost:
+            // SR(RR(-1))^(10^20 + 1) is -1)
+            if br.abs() == 1.0 {
+                return Num::Float(if br < 0.0 && odd { -1.0 } else { 1.0 }, 0.0, k);
+            }
+            if let Some(r) = crate::num::pow_past_doubles(br, 0.0, nf, ne, odd, &crate::print::to_string(&num(x.clone())), k) {
+                return r;
+            }
+        }
+    }
     if bi == 0.0 && xi == 0.0 && (br >= 0.0 || xr.fract() == 0.0) {
-        return Num::Float(br.powf(xr), 0.0, k);
+        return checked(Num::Float(br.powf(xr), 0.0, k));
     }
     if br == 0.0 && bi == 0.0 {
         return Num::Float(0.0, 0.0, k);
@@ -937,7 +1029,7 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
     let li = bi.atan2(br);
     let (er, ei) = (xr * lr - xi * li, xr * li + xi * lr);
     let m = er.exp();
-    Num::fl(m * ei.cos(), m * ei.sin(), k)
+    checked(Num::fl(m * ei.cos(), m * ei.sin(), k))
 }
 
 /// A power in RDF or CDF as Sage computes it: a real one exp(y log x) (2.0^0.5 is

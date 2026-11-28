@@ -17,9 +17,11 @@ use sagebrush_modsym::dirichlet::DirichletGroup;
 use sagebrush_modsym::general::{Character, GeneralSpace};
 use serde_json::{json, Value};
 
+pub mod bin_ops;
 mod hmf;
 mod hmfq;
 pub mod nmod_ops;
+pub mod series_ops;
 
 static mut REPLY: Vec<u8> = Vec::new();
 
@@ -56,6 +58,16 @@ pub extern "C" fn sb_reply_len() -> usize {
     unsafe { (*std::ptr::addr_of!(REPLY)).len() }
 }
 
+/// A top-level call starts: frames and live-progress state a trapped call
+/// left behind (a trap runs no destructors) are forgotten.
+fn new_run() {
+    sagebrush_interrupt::progress::reset_frames();
+    sagebrush_arith::smith::progress::reset();
+    sagebrush_poly::reset_binomial_units();
+    sagebrush_arith::nmod_mat::reset_fast_product();
+    sagebrush_sym::num::reset_steps();
+}
+
 #[no_mangle]
 // SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
 // the symbol unique);
@@ -65,6 +77,7 @@ pub extern "C" fn sb_reply_len() -> usize {
 // this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
+    new_run();
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     // the previous reply is freed first (the host copied it after the last
@@ -85,6 +98,7 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
 // this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
+    new_run();
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     drop(std::mem::take(r));
@@ -103,10 +117,31 @@ pub unsafe extern "C" fn sb_sym_call(ptr: *const u8, len: usize) -> *const u8 {
 // this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_mp_call(ptr: *const u8, len: usize) -> *const u8 {
+    new_run();
     let req = std::slice::from_raw_parts(ptr, len);
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     drop(std::mem::take(r));
     *r = sagebrush_mpoly::call_framed(req);
+    r.as_ptr()
+}
+
+/// A binary call (SBW1, engine/wire: bin_ops.rs): the reply, `ok` or `er`
+/// in band, is in the same buffer as sb_call's.  Never the headerless
+/// mpoly frames: those are sb_mp_call's.
+#[no_mangle]
+// SAFETY: an export of the engine's wasm ABI (no_mangle; the sb_ prefix keeps
+// the symbol unique);
+// the host wrote `len` request bytes at `ptr` (a block from sb_alloc), so the
+// slice is readable; REPLY is replaced on one thread with no other reference
+// to it live (wasm is single-threaded; natively only one-test ABI binaries call
+// this).  That is the supported boundary: any other native caller is unsupported.
+#[allow(unsafe_code)]
+pub unsafe extern "C" fn sb_bin_call(ptr: *const u8, len: usize) -> *const u8 {
+    new_run();
+    let req = std::slice::from_raw_parts(ptr, len);
+    let r = &mut *std::ptr::addr_of_mut!(REPLY);
+    drop(std::mem::take(r));
+    *r = bin_ops::call_bin(req);
     r.as_ptr()
 }
 
@@ -516,6 +551,12 @@ pub fn call(req: &str) -> String {
     // the capped ops' request sizes are admitted before serde copies
     // anything (the last top-level fn name is read by one scan that owns no
     // text: every other value skipped); unknown names go on as before
+    if let Some(op) = series_op(req) {
+        if req.len() > op.max_request {
+            return json!({ "error": format!("{}: the request has {} bytes, more than {}", op.name, req.len(), op.max_request) }).to_string();
+        }
+        return series_ops::run(op, req);
+    }
     if let Some(op) = capped_op(req) {
         if req.len() > op.max_request {
             return json!({ "error": format!("{}: the request has {} bytes, more than {}", op.name, req.len(), op.max_request) }).to_string();
@@ -575,6 +616,13 @@ fn error_json(e: String) -> Value {
     } else {
         json!({ "error": e })
     }
+}
+
+/// The row of [`series_ops::OPS`] named exactly by the request's last
+/// top-level "fn", if any.
+fn series_op(req: &str) -> Option<&'static series_ops::SeriesOp> {
+    static NAMES: [&str; 16] = [series_ops::OPS[0].name, series_ops::OPS[1].name, series_ops::OPS[2].name, series_ops::OPS[3].name, series_ops::OPS[4].name, series_ops::OPS[5].name, series_ops::OPS[6].name, series_ops::OPS[7].name, series_ops::OPS[8].name, series_ops::OPS[9].name, series_ops::OPS[10].name, series_ops::OPS[11].name, series_ops::OPS[12].name, series_ops::OPS[13].name, series_ops::OPS[14].name, series_ops::OPS[15].name];
+    last_fn(req, &NAMES).map(|i| &series_ops::OPS[i])
 }
 
 /// The row of [`nmod_ops::OPS`] named exactly by the request's last
@@ -751,6 +799,18 @@ fn json_skip(b: &[u8], i: &mut usize) -> bool {
 
 fn u(v: &Value, k: &str) -> Result<u64, String> {
     v.get(k).and_then(Value::as_u64).ok_or_else(|| format!("missing integer argument '{}'", k))
+}
+
+/// cusp_hecke_matrix's admission: its L bytes reserved in the ledger, held
+/// until the op returns.
+struct HeckeAdmit(Option<sagebrush_ledger::Reservation>);
+
+impl sagebrush_modsym::hecke_q::Admit for HeckeAdmit {
+    fn admit(&mut self, _work: u64, bytes: u64) -> Result<(), String> {
+        let r = sagebrush_ledger::reserve("cusp_hecke_matrix", bytes).map_err(|e| format!("cusp_hecke_matrix: {} bytes refused: {:?}", bytes, e))?;
+        self.0 = Some(r);
+        Ok(())
+    }
 }
 
 /// A size argument (a count, a bound, a weight, a number of points) at most
@@ -1580,6 +1640,27 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             Ok(json!(sagebrush_arith::zmat::det(&a).to_string()))
         }
         "mat_rank" => Ok(json!(sagebrush_arith::zmat::rank(&zmat(v.get("m"))?))),
+        "mat_smith_form" => {
+            // (D, U, V) with U m V = D; "cols" gives the width of a matrix
+            // with no rows
+            let mut a = zmat(v.get("m"))?;
+            if a.rows == 0 {
+                let c = v.get("cols").map_or(Some(0), Value::as_u64).ok_or("'cols' must be a nonnegative integer")?;
+                a.cols = usize::try_from(c).map_err(|_| "'cols' does not fit this target's index size")?;
+            }
+            // (L, before the transforms are allocated: their entries and
+            // D's, 8 bytes each at least, admitted by the memory ledger)
+            let need = sagebrush_arith::smith::floor_bytes(a.rows, a.cols).ok_or("mat_smith_form: the transforms' size overflows")?;
+            let _held = sagebrush_ledger::reserve("the Smith form's transforms", need).map_err(|e| e.to_string())?;
+            let s = sagebrush_arith::smith::smith_form(&a)?;
+            let route = match s.route {
+                sagebrush_arith::smith::Route::Cyclic => "cyclic",
+                sagebrush_arith::smith::Route::Trailing => "trailing",
+                sagebrush_arith::smith::Route::Classical => "classical",
+                sagebrush_arith::smith::Route::Hermite => "hermite",
+            };
+            Ok(json!({ "d": zrows(&s.d, v), "u": zrows(&s.u, v), "v": zrows(&s.v, v), "route": route, "attempts": s.attempts }))
+        }
         "mat_rref" => {
             let (n, den, piv) = sagebrush_arith::zmat::rref(&zmat(v.get("m"))?);
             Ok(json!({ "rows": zrows(&n, v), "den": den.to_string(), "pivots": piv }))
@@ -1643,11 +1724,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             }
             Ok(zrows(&a.mul(&b), v))
         }
-        // ---- sagebrush.poly: products and gcds in Z[x] ----
-        "poly_mul" => Ok(zvec(
-            &sagebrush_arith::zpoly::mul(&sagebrush_arith::zpoly::trim(bigs(v.get("a"))?), &sagebrush_arith::zpoly::trim(bigs(v.get("b"))?)),
-            v,
-        )),
+        // ---- sagebrush.poly: gcds and exact division in Z[x] (products:
+        // poly_mul, admitted before any parse, series_ops.rs) ----
         "poly_gcd" => Ok(zvec(&sagebrush_arith::zpoly::gcd(&bigs(v.get("a"))?, &bigs(v.get("b"))?), v)),
         "poly_divexact" => {
             let a = sagebrush_arith::zpoly::trim(bigs(v.get("a"))?);
@@ -1687,6 +1765,27 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 }).collect::<Vec<_>>());
             }
             Ok(out)
+        }
+        // ---- sagebrush.mf: T_q on S_k(Gamma0(N)) in its echelon basis ----
+        "cusp_hecke_matrix" => {
+            let (n, k) = (level(v)?, weight(v)?);
+            let q = u(v, "q")?;
+            // (a domain bound, prec - 1 below 2^30, not a cost cap: the op's
+            // admission refuses by its lower bound L)
+            let prec = size(v, "prec", None, sagebrush_modsym::linalg::MAX_HECKE_PRIME)?;
+            let new_only = v.get("new_only").and_then(Value::as_bool).unwrap_or(false);
+            let factor = |f: &[BigInt]| sagebrush_poly::try_factor(f).map(|r| r.1);
+            let mut admit = HeckeAdmit(None);
+            // (the units the op tallied, per family: the same on every
+            // target, the kernels' parallel jobs added at their joins)
+            let before = sagebrush_arith::cost::tallied();
+            let h = keeping_internal(&factor, |fac| sagebrush_modsym::hecke_q::cusp_hecke_matrix(n, k, q, prec, new_only, fac, &mut admit))?;
+            let after = sagebrush_arith::cost::tallied();
+            let units: Vec<String> = after.0.iter().zip(before.0).map(|(a, b)| a.wrapping_sub(b).to_string()).collect();
+            Ok(json!({ "dim": h.dim, "pivots": h.pivots, "basis": h.basis.iter().map(|r| big(r)).collect::<Vec<_>>(),
+                       "matrix": h.matrix.iter().map(|r| big(r)).collect::<Vec<_>>(), "den": big(std::slice::from_ref(&h.den))[0], "units": units,
+                       "stats": { "e": h.stats.e, "primes": h.stats.primes, "seeded": h.stats.seeded, "combined": h.stats.combined,
+                                  "rejected": sagebrush_modsym::traces::Reject::ALL.iter().zip(h.stats.rejected).map(|(r, c)| (r.name().to_string(), json!(c))).collect::<serde_json::Map<_, _>>() } }))
         }
         // ---- sagebrush.ap: traces of Frobenius of elliptic curves ----
         "ap" => {

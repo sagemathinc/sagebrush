@@ -127,7 +127,7 @@ pub fn solve1(e: &Expr, x: &str) -> Vec<Expr> {
 }
 
 fn has_float(e: &Expr) -> bool {
-    matches!(&e.kind, Kind::Num(crate::num::Num::Float(..))) || e.children().iter().any(has_float)
+    matches!(&e.kind, Kind::Num(crate::num::Num::Float(..) | crate::num::Num::Mp(_) | crate::num::Num::Mpc(_))) || e.children().iter().any(has_float)
 }
 
 fn contains_infinity(e: &Expr) -> bool {
@@ -640,6 +640,8 @@ fn singular_args(z: &Expr, x: &str, out: &mut Vec<Expr>) {
             match k {
                 crate::num::Num::Exact(a, _) => !a.is_positive(),
                 crate::num::Num::Float(re, _, _) => *re <= 0.0,
+                crate::num::Num::Mp(x) => x.sign() <= 0,
+                crate::num::Num::Mpc(x) => x.re.sign() <= 0,
             }
         });
         if nonpositive && !b.is_const(Const::E) && !out.contains(b) {

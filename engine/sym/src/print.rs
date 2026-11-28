@@ -179,13 +179,15 @@ pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
         }
     }
     let (da, db) = (degree(a), degree(b));
-    if da != db {
-        return db.partial_cmp(&da).unwrap_or(Ordering::Equal);
+    let c = crate::num::fcmp(db, da);
+    if c != Ordering::Equal {
+        return c;
     }
     // same degree: the smaller denominator first (2*x/(x - 1) - (x^2 + 1)/(x - 1)^2)
     let (qa, qb) = (degree(&numer_denom(a).1), degree(&numer_denom(b).1));
-    if qa != qb {
-        return qa.partial_cmp(&qb).unwrap_or(Ordering::Equal);
+    let c = crate::num::fcmp(qa, qb);
+    if c != Ordering::Equal {
+        return c;
     }
     // same degree: the transcendental kernels (functions, exponentials)
     // first, whatever the coefficients (_K2*cos(x) + _K1*sin(x)), then
@@ -285,7 +287,7 @@ fn atom_order(a: &Expr, b: &Expr) -> Ordering {
     }
     // same base: the higher power first
     let (ea, eb) = (degree_of_exp(&xa), degree_of_exp(&xb));
-    let c = eb.partial_cmp(&ea).unwrap_or(Ordering::Equal);
+    let c = crate::num::fcmp(eb, ea);
     if c != Ordering::Equal || xa == xb {
         return c;
     }
@@ -296,7 +298,7 @@ fn atom_order(a: &Expr, b: &Expr) -> Ordering {
         (Kind::Sym(_), Kind::Mul(_)) => Ordering::Greater,
         _ => {
             let (ca, cb) = (split_coeff(&xa).0.to_c64().0, split_coeff(&xb).0.to_c64().0);
-            cb.partial_cmp(&ca).unwrap_or(Ordering::Equal)
+            crate::num::fcmp(cb, ca)
         }
     }
 }
@@ -650,6 +652,29 @@ fn num_str(n: &Num) -> (String, u8) {
                 P_ATOM
             }
         }
+        // (as a float of RR: (+infinity)*x, (1.0000000000000000000000000000e-20)*x)
+        Num::Mp(x) => {
+            if x.sp == crate::mpnum::Sp::PosInf || s[1..].contains(['+', '-']) {
+                P_ADD
+            } else if s.starts_with('-') {
+                P_NEG
+            } else {
+                P_ATOM
+            }
+        }
+        // (as an element of CC: a pure imaginary one a product, 2.0000*I*x;
+        // a sum, a negative imaginary one or a signed exponent grouped)
+        Num::Mpc(z) => {
+            if z.re.is_zero() && !z.im.is_zero() && !s.starts_with('-') && !s[1..].contains(['+', '-']) {
+                P_MUL
+            } else if !z.im.is_zero() || z.re.sp == crate::mpnum::Sp::PosInf || s[1..].contains(['+', '-']) {
+                P_ADD
+            } else if s.starts_with('-') {
+                P_NEG
+            } else {
+                P_ATOM
+            }
+        }
     };
     (s, prec)
 }
@@ -820,7 +845,7 @@ fn print_mul(v: &[Expr]) -> (String, u8) {
         s.push('-');
     }
     let mut cstr = num_str(&c);
-    if neg_sign && matches!(c, Num::Float(a, b, _) if a == f64::INFINITY && b == 0.0) {
+    if neg_sign && (matches!(c, Num::Float(a, b, _) if a == f64::INFINITY && b == 0.0) || matches!(&c, Num::Mp(m) if m.sp == crate::mpnum::Sp::PosInf)) {
         // the sign pulled out of -infinity leaves no "+": Sage's -infinity*x
         cstr = ("infinity".to_string(), P_ATOM);
     }
@@ -935,6 +960,8 @@ fn latex(e: &Expr) -> (String, u8) {
             (s, P_ADD)
         }
         Kind::Mul(v) => latex_mul(v),
+        // (a negative exponent: over 1, as Sage writes it)
+        Kind::Pow(b, x) if over_one(b, x).is_some() => latex_mul(std::slice::from_ref(e)),
         Kind::Pow(b, x) => latex_pow(b, x, true),
         Kind::Fun(Fun::Abs, a) => (format!("{{\\left| {} \\right|}}", latex(&a[0]).0), P_ATOM),
         Kind::Fun(f, a) => {
@@ -1000,6 +1027,23 @@ fn latex_pow(b: &Expr, x: &Expr, alone: bool) -> (String, u8) {
     (format!("{}^{{{}}}", base, ex), P_POW)
 }
 
+/// The positive exponent of a power Sage's LaTeX writes over 1: one whose
+/// exponent prints with a leading minus, a negative real number or a product
+/// with a negative real coefficient (x^(-2), x^(-3/2), a x^(-b), 2^(-x));
+/// never a sum's (x^(-a - 1)), a complex one's (x^(-I)) or e's (e^(-x),
+/// 3 e^(-2): Sage keeps e^{\\left(-2\\right)}).
+fn over_one(b: &Expr, x: &Expr) -> Option<Expr> {
+    if b.is_const(Const::E) {
+        return None;
+    }
+    let negative = match &x.kind {
+        Kind::Num(n) => n.is_negative(),
+        Kind::Mul(_) => split_coeff(x).0.is_negative(),
+        _ => false,
+    };
+    negative.then(|| neg(x))
+}
+
 fn latex_mul(v: &[Expr]) -> (String, u8) {
     let mut coeff = Num::one();
     let mut numer: Vec<Expr> = vec![];
@@ -1010,8 +1054,8 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
             continue;
         }
         let (b, x) = base_exp(f);
-        if x.as_num().map_or(false, |n| n.is_negative()) {
-            denom.push(pow(&b, &neg(&x)));
+        if let Some(px) = over_one(&b, &x) {
+            denom.push(pow(&b, &px));
         } else {
             numer.push(f.clone());
         }

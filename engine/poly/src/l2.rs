@@ -2243,10 +2243,21 @@ mod tests {
     #[test]
     fn l2_bytes_fails_closed() {
         assert_eq!(l2_bytes(usize::MAX, 1, 1), None);
+        // (a row of usize::MAX entries has no u64 figure for a 64-bit usize;
+        // for a 32-bit one it has, about 1.3e12 bytes)
+        #[cfg(target_pointer_width = "64")]
         assert_eq!(l2_bytes(1, usize::MAX, 1), None);
+        #[cfg(not(target_pointer_width = "64"))]
+        assert!(l2_bytes(1, usize::MAX, 1).is_some());
         assert_eq!(l2_bytes(1, 1, u64::MAX), None);
         assert_eq!(l2_bytes(usize::MAX, usize::MAX, u64::MAX), None);
-        for (d, n, bits) in [(1usize << 32, 2, 64), (1 << 22, 1 << 22, 64), (1 << 16, 1 << 16, 1 << 20), (1 << 20, 3, 1 << 30), (3, 1 << 40, 1 << 24)] {
+        // (shapes past a 32-bit usize only where usize holds them; the
+        // widest a 32-bit one holds there)
+        #[cfg(target_pointer_width = "64")]
+        const WIDE: &[(usize, usize, u64)] = &[(1 << 32, 2, 64), (3, 1 << 40, 1 << 24)];
+        #[cfg(not(target_pointer_width = "64"))]
+        const WIDE: &[(usize, usize, u64)] = &[(usize::MAX, 2, 64), (3, usize::MAX, 1 << 24)];
+        for &(d, n, bits) in [(1 << 22, 1 << 22, 64), (1 << 16, 1 << 16, 1 << 20), (1 << 20, 3, 1 << 30)].iter().chain(WIDE) {
             if let Some(b) = l2_bytes(d, n, bits) {
                 // a figure, when there is one, is at least the rows' own size
                 assert!(b >= (d as u64) * (n as u64) * (bits / 8), "{d} {n} {bits}: {b}");

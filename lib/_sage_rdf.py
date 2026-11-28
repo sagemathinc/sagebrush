@@ -399,7 +399,11 @@ class RealDoubleElement(float):
             if type(e).__name__ in ("ComplexDoubleElement", "Expression"):
                 # (a symbolic exponent: the symbolic power, as Sage's RDF(1.5)^x is 1.5^x)
                 return NotImplemented
-            y = float(e)
+            try:
+                y = float(e)
+            except TypeError:
+                # (no number: the other operand's power, M.__rpow__)
+                return NotImplemented
         if x == 0:
             # (0.0 or -0.0 itself for a positive or NaN exponent)
             if y < 0:
@@ -605,6 +609,46 @@ class RealDoubleElement(float):
             (True, False)
         """
         return float(self).is_integer()
+
+    def is_infinity(self):
+        """Whether +infinity or -infinity.
+
+        EXAMPLES::
+
+            sage: RDF(1).is_infinity(), RDF(-oo).is_infinity(), RDF(float('nan')).is_infinity()
+            (False, True, False)
+        """
+        return math.isinf(self)
+
+    def is_positive_infinity(self):
+        """Whether +infinity.
+
+        EXAMPLES::
+
+            sage: RDF(oo).is_positive_infinity(), RDF(-oo).is_positive_infinity()
+            (True, False)
+        """
+        return float(self) == math.inf
+
+    def is_negative_infinity(self):
+        """Whether -infinity.
+
+        EXAMPLES::
+
+            sage: RDF(-oo).is_negative_infinity(), RDF(oo).is_negative_infinity()
+            (True, False)
+        """
+        return float(self) == -math.inf
+
+    def is_NaN(self):
+        """Whether NaN.
+
+        EXAMPLES::
+
+            sage: RDF(float('nan')).is_NaN(), RDF(1).is_NaN()
+            (True, False)
+        """
+        return math.isnan(self)
 
     def real(self):
         """The number itself.
@@ -905,6 +949,14 @@ class ComplexDoubleElement:
         if m is not None and m.is_exact_algebraic(o):
             # (an element of Zmod(n), a finite field or a number field refuses CDF, as Sage)
             return None
+        if type(o).__name__ == "Expression":
+            # (a symbolic expression takes the number into SR, as Sage: CDF(1, 2)*SR(0)
+            # is the symbolic 0)
+            return None
+        if type(o).__name__ in ("ComplexNumberMP", "RealNumberMP") and o.prec() < 53:
+            # (a coarser field's number: the operation is in that field, its own
+            # reflected one, as Sage's coercion: CDF(1) + ComplexField(20)(1))
+            return None
         try:
             return complex(o)
         except (TypeError, ValueError):
@@ -962,10 +1014,13 @@ class ComplexDoubleElement:
         if type(e).__name__ == "Expression":
             # (a symbolic exponent: the symbolic power, as Sage's CDF(1, 2)^x)
             return NotImplemented
+        w = self._c(e)
+        if w is None:
+            # (no number: the other operand's power, M.__rpow__)
+            return NotImplemented
         z = self._z
         if z == 0:
             return ComplexDoubleElement(0.0, 0.0)
-        w = self._c(e)
         # as Sage (GSL's gsl_complex_pow, with its log |z|)
         lr = _logabs(z.real, z.imag)
         th = math.atan2(z.imag, z.real)
@@ -979,6 +1034,8 @@ class ComplexDoubleElement:
     def __eq__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented  # (the matrix compares: c == A as A == c)
+        if type(o).__name__ == "Expression":
+            return NotImplemented  # (a symbolic relation, CDF(1, 2) == x, not False)
         v = self._c(o)
         return v is not None and v == self._z
 
@@ -1007,6 +1064,51 @@ class ComplexDoubleElement:
             (True, True, False)
         """
         return not self
+
+    def is_infinity(self):
+        """Whether a part is infinite, as Sage's.
+
+        EXAMPLES::
+
+            sage: i, n = float('inf'), float('nan')
+            sage: CDF(0, -i).is_infinity(), CDF(i, n).is_infinity(), CDF(1, 2).is_infinity()
+            (True, True, False)
+        """
+        return math.isinf(self._z.real) or math.isinf(self._z.imag)
+
+    def is_positive_infinity(self):
+        """Whether self is +infinity: the real part +infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: i, n = float('inf'), float('nan')
+            sage: CDF(i, 0).is_positive_infinity(), CDF(i, n).is_positive_infinity(), CDF(0, i).is_positive_infinity()
+            (True, False, False)
+        """
+        return self._z.real == math.inf and self._z.imag == 0
+
+    def is_negative_infinity(self):
+        """Whether self is -infinity: the real part -infinity, the imaginary
+        part 0, as Sage's.
+
+        EXAMPLES::
+
+            sage: CDF(float('-inf'), 0).is_negative_infinity(), CDF(float('inf'), 0).is_negative_infinity()
+            (True, False)
+        """
+        return self._z.real == -math.inf and self._z.imag == 0
+
+    def is_NaN(self):
+        """Whether a part is NaN, as Sage's.
+
+        EXAMPLES::
+
+            sage: n = float('nan')
+            sage: CDF(1, n).is_NaN(), CDF(float('inf'), n).is_NaN(), CDF(1, 2).is_NaN()
+            (True, True, False)
+        """
+        return math.isnan(self._z.real) or math.isnan(self._z.imag)
 
     @staticmethod
     def _of(z):
@@ -1220,6 +1322,23 @@ def _inverse(M):
     if not M.is_square():
         raise ArithmeticError("self must be a square matrix")
     return _from_array(M._base, np.linalg.inv(_array(M)))
+
+
+def _scalar_over(c, M):
+    """c/M: X with X*M = c times the identity, by numpy's solve of M^T X^T =
+    c I, as Sage solves it (2/M is exactly -4.0 where 2 times the inverse is
+    -3.9999999999999996); numpy's LinAlgError when M is singular."""
+    np = _np()
+    A, I = _array(M).T, np.eye(M.nrows())
+    import _sage_ffmat
+    if _sage_ffmat._complex_kind(c) is None:
+        return _from_array(M._base, np.linalg.solve(A, float(c) * I).T)
+    # (a complex c over a real matrix: its real and imaginary parts solved
+    # apart, as a complex solve of a real matrix does, the result in c's
+    # field: CDF, or CC for CC(1, 2)/matrix(RDF, ...) as Sage)
+    z = complex(c)
+    re, im = np.linalg.solve(A, z.real * I).T.tolist(), np.linalg.solve(A, z.imag * I).T.tolist()
+    return _from_array(c.parent(), np.array([[complex(a, b) for a, b in zip(r, s)] for r, s in zip(re, im)], dtype=complex))
 
 
 def _rank(M):

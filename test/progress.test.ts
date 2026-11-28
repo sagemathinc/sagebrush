@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { Worker } from "node:worker_threads";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import * as P from "../src/runtime/progress";
 
 // Live progress (design-estimates-progress r4 §6, §8 "Progress records";
@@ -411,5 +413,94 @@ test("past the engine's serial envelope (depth 128) no call is listed, so a repl
     P.endFrames(false);
     P.setCopyInterval(250);
   }
+  assert.deepEqual(P.snapshot(), []);
+});
+
+test("the Smith form's progress in the real engine: its frames an ordered subsequence of the producer's trace; a Stop mid-run, then a run reports afresh", () => {
+  const { engineCall } = require("../src/runtime/engine");
+  const I = require("../src/runtime/interrupt");
+  // the input of engine/arith/tests/smith_progress.rs's the_host_tests_trace,
+  // diag(1, 2, 3, 1, 2, 3, ...) of order 256, whose producer trace (every
+  // publish and flush) is pinned beside it
+  const n = 256;
+  const req = JSON.stringify({ fn: "mat_smith_form", m: Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? String(1 + (i % 3)) : "0"))) });
+  const trace = readFileSync(join(__dirname, "../../engine/arith/tests/smith_progress_trace.txt"), "utf8").split("\n").filter((l) => l && !l.startsWith("#"));
+  // a copied record on the wire's terms: stage, done, the fraction's u32 word, beyond_forecast
+  const wire = (r: any) => `${r.stage || "-"} ${r.count.done} ${r.time_fraction ? Math.round(r.time_fraction.value * 0xffffffff) : "-"} ${r.beyond_forecast ? 1 : 0}`;
+  // the same event: stage, done and the flag exactly, the fraction's word within 1 (the
+  // forecast's log2 and exp2 may differ by an ulp between the native and wasm libm)
+  const same = (a: string, b: string) => {
+    const [x, y] = [a.split(" "), b.split(" ")];
+    if (x[0] !== y[0] || x[1] !== y[1] || x[3] !== y[3]) return false;
+    return x[2] === y[2] || (x[2] !== "-" && y[2] !== "-" && Math.abs(Number(x[2]) - Number(y[2])) <= 1);
+  };
+  // every copy one of the producer's events, in order (greedy: a copy matches the first
+  // producer event at or after the previous match)
+  const subsequence = (copies: string[], what: string) => {
+    let k = 0;
+    for (const c of copies) {
+      while (k < trace.length && !same(trace[k], c)) k++;
+      assert.ok(k < trace.length, `${what}: a copy that is not the producer's next event: ${c}`);
+      k++;
+    }
+  };
+  const run = (stopAt: number | null) => {
+    const seen: any[] = [];
+    let stopped = false;
+    P.setCopyInterval(0);
+    P.setSyncHookForTests(() => {
+      const s = P.snapshot().filter((r) => r.op === "smith form");
+      if (s.length) seen.push(s[0]);
+      if (stopAt !== null && !stopped && s.length && s[0].count.done >= stopAt) {
+        stopped = true;
+        I.requestCtrlC();
+      }
+    });
+    let out: any = null, err: any = null;
+    try {
+      out = JSON.parse(engineCall(req));
+    } catch (e) {
+      err = e;
+    } finally {
+      P.setSyncHookForTests(null);
+      P.setCopyInterval(250);
+      I.consumeCtrlC();
+    }
+    return { seen, out, err };
+  };
+  // a whole run: a frame, interior counts, the stages, and every copy one
+  // of the producer's events, in order
+  const whole = run(null);
+  assert.equal(whole.err, null);
+  assert.equal(whole.out.ok.route, "trailing");
+  assert.ok(whole.seen.length > 0, "no Smith frame copied");
+  const bad = whole.seen.filter((r) => !(r.count.unit === "work units" && r.count.label === "counted" && r.stage_count === (r.stage === "inverse" ? undefined : 3)));
+  assert.deepEqual(bad.slice(0, 2), []);
+  const final = Number(trace[trace.length - 1].split(" ")[1]);
+  assert.ok(whole.seen.some((r) => r.count.done > 0 && r.count.done < final), "no interior count");
+  // (the stages the copies reach, in order: part A is short here and polls
+  // the host too rarely to be sure of a copy)
+  const stages = [...new Set(whole.seen.map((r) => r.stage))];
+  assert.deepEqual(stages.filter((x) => x !== "invariants"), ["inverse", "attempts"]);
+  assert.deepEqual(stages, ["inverse", "invariants", "attempts"].filter((x) => stages.includes(x)));
+  const copies = whole.seen.map(wire).filter((w, i, a) => i === 0 || w !== a[i - 1]);
+  subsequence(copies, "the whole run");
+  assert.ok(copies.length > 10, `only ${copies.length} distinct copies`);
+  assert.deepEqual(P.snapshot(), [], "the call ended with the engine call");
+  // a Stop mid-run traps the instance, which the host retires: no frame
+  // survives it, and the next run (on a new instance: the engine's own
+  // reset and generation defenses are tested natively, as a retained
+  // instance would need them) reports from 0 and completes
+  const stopped = run(final / 4);
+  assert.notEqual(stopped.err, null, "the Stop did not interrupt the call");
+  assert.deepEqual(P.snapshot(), [], "a frame survived the trap");
+  const ids = new Set(stopped.seen.map((r) => r.call_id));
+  const again = run(null);
+  assert.equal(again.err, null);
+  assert.equal(again.out.ok.route, "trailing");
+  // (the host numbers the calls: a new id for the new call)
+  assert.ok(again.seen.length > 0 && again.seen.every((r) => !ids.has(r.call_id)), "the trapped call's id reappeared");
+  assert.ok(again.seen[0].count.done < final / 4, "the new run's count did not start afresh");
+  subsequence(again.seen.map(wire).filter((w, i, a) => i === 0 || w !== a[i - 1]), "after the trap");
   assert.deepEqual(P.snapshot(), []);
 });

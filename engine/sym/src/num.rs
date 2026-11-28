@@ -2,7 +2,8 @@
 //! Gaussian rationals (so I is a number, I^2 = -1, (1 + I)^2 = 2*I) and
 //! 53-bit complex floats (printed as Sage prints elements of RR and CC).
 
-use crate::err::{throw, SymError};
+use crate::err::{not_implemented, throw, SymError};
+use crate::mpnum::{self, Mp, Mpc, Sp};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::{BigInt, BigRational};
@@ -63,6 +64,11 @@ pub enum Num {
     Exact(Q, Q),
     /// re + im*I, 53-bit floats, of a parent (Fk; a real one has im 0)
     Float(f64, f64, Fk),
+    /// a real of RealField(prec), prec != 53 (mpnum)
+    Mp(Box<Mp>),
+    /// a number of ComplexField(prec), prec != 53 (mpnum), complex even
+    /// when its imaginary part is 0, as Sage's
+    Mpc(Box<Mpc>),
 }
 
 /// The parent a symbolic float keeps, as Sage keeps it (1d-i): RR or CC (printed with 15 digits,
@@ -155,7 +161,39 @@ impl Num {
     pub fn fk(&self) -> Option<Fk> {
         match self {
             Num::Float(_, _, k) => Some(*k),
-            Num::Exact(..) => None,
+            Num::Exact(..) | Num::Mp(_) | Num::Mpc(_) => None,
+        }
+    }
+    /// The real of RealField(p), p != 53, if this is one
+    pub fn as_mp(&self) -> Option<&Mp> {
+        match self {
+            Num::Mp(x) => Some(x),
+            _ => None,
+        }
+    }
+    pub fn mp(x: Mp) -> Num {
+        Num::Mp(Box::new(x))
+    }
+    /// The number of ComplexField(p), p != 53, if this is one
+    pub fn as_mpc(&self) -> Option<&Mpc> {
+        match self {
+            Num::Mpc(x) => Some(x),
+            _ => None,
+        }
+    }
+    pub fn mpc(x: Mpc) -> Num {
+        Num::Mpc(Box::new(x))
+    }
+    /// A number of RealField(p) or ComplexField(p), p != 53.
+    pub fn is_mp_kind(&self) -> bool {
+        matches!(self, Num::Mp(_) | Num::Mpc(_))
+    }
+    /// A number of RealField(p) or ComplexField(p) with a NaN part.
+    pub fn mp_nan(&self) -> bool {
+        match self {
+            Num::Mp(m) => m.sp == Sp::NaN,
+            Num::Mpc(z) => z.has_nan(),
+            _ => false,
         }
     }
     /// The parent of a result of self and o: a float's, or the meet of two
@@ -183,6 +221,8 @@ impl Num {
         match self {
             Num::Exact(a, b) => a.is_zero() && b.is_zero(),
             Num::Float(a, b, _) => *a == 0.0 && *b == 0.0,
+            Num::Mp(x) => x.is_zero(),
+            Num::Mpc(x) => x.is_zero(),
         }
     }
     pub fn is_one(&self) -> bool {
@@ -195,6 +235,8 @@ impl Num {
         match self {
             Num::Exact(_, b) => b.is_zero(),
             Num::Float(_, b, _) => *b == 0.0,
+            Num::Mp(_) => true,
+            Num::Mpc(x) => x.im.is_zero(),
         }
     }
     /// An exact rational (real).
@@ -218,12 +260,16 @@ impl Num {
         match self {
             Num::Exact(a, b) => b.is_zero() && a.is_negative(),
             Num::Float(a, b, _) => *b == 0.0 && *a < 0.0,
+            Num::Mp(x) => x.sign() < 0,
+            Num::Mpc(x) => x.im.is_zero() && x.re.sign() < 0,
         }
     }
     pub fn is_positive(&self) -> bool {
         match self {
             Num::Exact(a, b) => b.is_zero() && a.is_positive(),
             Num::Float(a, b, _) => *b == 0.0 && *a > 0.0,
+            Num::Mp(x) => x.sign() > 0,
+            Num::Mpc(x) => x.im.is_zero() && x.re.sign() > 0,
         }
     }
     /// For printing a term with " - ": the real part (or, if 0, the
@@ -233,6 +279,8 @@ impl Num {
             // as printed, the imaginary part first (-2*I + 1): Sage's sign
             Num::Exact(a, b) => b.is_negative() || (b.is_zero() && a.is_negative()),
             Num::Float(a, b, _) => *a < 0.0 || (*a == 0.0 && *b < 0.0),
+            Num::Mp(x) => x.sign() < 0,
+            Num::Mpc(x) => x.re.sign() < 0 || (x.re.is_zero() && x.im.sign() < 0),
         }
     }
 
@@ -240,11 +288,13 @@ impl Num {
         match self {
             Num::Exact(a, b) => (q_to_f64(a), q_to_f64(b)),
             Num::Float(a, b, _) => (*a, *b),
+            Num::Mp(x) => (x.to_f64(), 0.0),
+            Num::Mpc(x) => (x.re.to_f64(), x.im.to_f64()),
         }
     }
     pub fn to_float(&self) -> Num {
         match self {
-            Num::Float(..) => self.clone(),
+            Num::Float(..) | Num::Mp(_) | Num::Mpc(_) => self.clone(),
             _ => {
                 let (a, b) = self.to_c64();
                 Num::fl(a, b, Fk::RR)
@@ -256,14 +306,20 @@ impl Num {
         match self {
             Num::Exact(a, b) => Num::Exact(-a.clone(), -b.clone()),
             Num::Float(a, b, k) => Num::Float(-a, -b, *k),
+            Num::Mp(x) => Num::mp(x.neg()),
+            Num::Mpc(x) => Num::mpc(x.neg()),
         }
     }
     pub fn add(&self, o: &Num) -> Num {
         match (self, o) {
             (Num::Exact(a, b), Num::Exact(c, d)) => Num::Exact(a + c, b + d),
+            (Num::Mpc(x), o) | (o, Num::Mpc(x)) => mpc_binop(x, o, '+'),
+            (Num::Mp(x), o) => mp_binop(x, o, '+', false),
+            (o, Num::Mp(x)) => mp_binop(x, o, '+', true),
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
-                Num::fl(a + c, b + d, self.fk_with(o))
+                let (r, left) = tracked(|| Num::fl(step(a + c, false), step(b + d, false), self.fk_with(o)));
+                rr_cc(r, &[self, o], left, |_| false, |v| v[0].add(&v[1]))
             }
         }
     }
@@ -285,6 +341,9 @@ impl Num {
             // an exact one is the identity: 1 + 0*I times inf + I in the complex formula has
             // 0*inf = NaN (a product's coefficient starts from 1)
             (Num::Exact(a, b), o) | (o, Num::Exact(a, b)) if a.is_one() && b.is_zero() => o.clone(),
+            (Num::Mpc(x), o) | (o, Num::Mpc(x)) => mpc_binop(x, o, '*'),
+            (Num::Mp(x), o) => mp_binop(x, o, '*', false),
+            (o, Num::Mp(x)) => mp_binop(x, o, '*', true),
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
                 let k = self.fk_with(o);
@@ -292,11 +351,15 @@ impl Num {
                 // imaginary parts are NaN for an infinite or NaN number (inf*0), and RR('inf')*x
                 // became (NaN - NaN*I)*x (Sage: (+infinity)*x). A real times a complex is the
                 // complex formula, as Sage (SR(RR(2))*SR(CC(infinity, 1)) is +infinity + NaN*I)
-                if b == 0.0 && d == 0.0 {
-                    Num::fl(a * c, 0.0, k)
-                } else {
-                    Num::fl(a * c - b * d, a * d + b * c, k)
-                }
+                let p = |x: f64, y: f64| step(x * y, x != 0.0 && y != 0.0);
+                let (r, left) = tracked(|| {
+                    if b == 0.0 && d == 0.0 {
+                        Num::fl(p(a, c), 0.0, k)
+                    } else {
+                        Num::fl(step(p(a, c) - p(b, d), false), step(p(a, d) + p(b, c), false), k)
+                    }
+                });
+                rr_cc(r, &[self, o], left, |_| false, |v| v[0].mul(&v[1]))
             }
         }
     }
@@ -313,17 +376,75 @@ impl Num {
                 Num::Exact(a / &n, -b / &n)
             }
             // a real one as a real (1/inf is 0, not inf/inf = NaN)
-            Num::Float(a, b, k) if *b == 0.0 => Num::Float(1.0 / a, 0.0, *k),
-            Num::Float(a, b, k) => {
-                let n = a * a + b * b;
-                Num::Float(a / n, -b / n, *k)
+            Num::Float(a, b, k) if *b == 0.0 => {
+                let (r, left) = tracked(|| Num::Float(step(1.0 / a, true), 0.0, *k));
+                rr_cc(r, &[self], left, |_| false, |v| v[0].inv())
             }
+            // (a part of 1/z is 0 only where z's is: a/n and b/n underflow)
+            Num::Float(a, b, k) => {
+                let (r, left) = tracked(|| {
+                    let n = step(step(a * a, *a != 0.0) + step(b * b, *b != 0.0), false);
+                    Num::Float(step(a / n, *a != 0.0), step(-b / n, *b != 0.0), *k)
+                });
+                let lost = |i: usize| if i == 0 { *a != 0.0 } else { *b != 0.0 };
+                rr_cc(r, &[self], left, lost, |v| v[0].inv())
+            }
+            // 1/x in its field, rounded once
+            Num::Mp(x) => Num::mp(mpnum::arith(&Mp::fin(&BigInt::one(), 0, x.prec), x, '/', x.prec)),
+            // (Sage's __invert__, each step rounded)
+            Num::Mpc(x) => Num::mpc(x.inv()),
         }
     }
     pub fn div(&self, o: &Num) -> Num {
+        // (an RR or CC quotient checked as a whole: Sage's is self times 1/o,
+        // each in the MP field)
+        if let Num::Float(_, _, k) = if matches!(self, Num::Float(..)) { self } else { o } {
+            if !k.double() && !IN_STEPS.with(|p| p.get()) {
+                let (r, left) = in_steps(|| self.mul(&o.inv()));
+                let a = self.to_c64();
+                let lost = |i: usize| if r.to_c64().1 == 0.0 && o.to_c64().1 == 0.0 && a.1 == 0.0 { i == 0 && a.0 != 0.0 } else { true };
+                return rr_cc(r.clone(), &[self, o], left, lost, |v| v[0].mul(&v[1].inv()));
+            }
+        }
         self.mul(&o.inv())
     }
     pub fn pow_int(&self, e: i64) -> Num {
+        if let Num::Mp(x) = self {
+            if e < 0 && x.is_zero() {
+                // (as 1/0 of a float)
+                throw(SymError::DivisionByZero);
+            }
+            // (x^e correctly rounded, as Sage's mpfr_pow_si: not 1/x then
+            // its powers)
+            return Num::mp(mpnum::pow_int(x, e));
+        }
+        if let Num::Mpc(x) = self {
+            if e < 0 && x.is_zero() {
+                throw(SymError::DivisionByZero);
+            }
+            // (Sage's generic_power: the inverse first for e < 0, then
+            // binary powering, each product Sage's)
+            return Num::mpc(x.pow_int(e));
+        }
+        // (an RR or CC power is checked as a whole, against Sage's: a 0 part
+        // of a nonzero number's power may be lost, for a real one as
+        // mpfr_pow_si, a complex one as generic_power)
+        if let Num::Float(a, b, k) = self {
+            if !k.double() && e != 0 && !IN_STEPS.with(|p| p.get()) {
+                // (a real one past x and 1/x is Sage's correctly rounded
+                // mpfr_pow_si, never binary powering's doubles, whose error
+                // grows with e: SR(RR(-1.0001))^40000 is 54.5872322227789)
+                if *b == 0.0 && !k.complex() && a.is_finite() && *a != 0.0 && !(-1..=1).contains(&e) {
+                    return pow_int_mp53(self, e, *k);
+                }
+                if let Some(r) = pow_past_doubles(*a, *b, ((e as f64).abs().log2(), e < 0), Some(e as i128), e % 2 != 0, &e, *k) {
+                    return r;
+                }
+                let (r, left) = in_steps(|| self.pow_int(e));
+                let lost = |i: usize| if *b == 0.0 { i == 0 && *a != 0.0 } else { true };
+                return rr_cc(r, &[self], left, lost, |v| v[0].pow_int(e));
+            }
+        }
         // (by the exponent's magnitude: -e overflows at i64::MIN, the review's
         // RDF(2)^(-2^63))
         if e < 0 {
@@ -335,6 +456,8 @@ impl Num {
     /// self^e by binary powering.
     pub fn pow_uint(&self, e: u64) -> Num {
         match self {
+            Num::Mp(x) => Num::mp(mpnum::pow_big(x, &BigInt::from(e))),
+            Num::Mpc(x) => Num::mpc(x.pow_big(&BigInt::from(e))),
             Num::Exact(a, b) if b.is_zero() => {
                 // r and base are powers of the reduced a, so a product has
                 // at least bits(r) + bits(base) - 1 bits: refuse before
@@ -390,10 +513,38 @@ impl Num {
     pub fn cmp(&self, o: &Num) -> Ordering {
         match (self, o) {
             (Num::Exact(a, b), Num::Exact(c, d)) => a.cmp(c).then(b.cmp(d)),
+            // (the value, then a total order on equal ones: -0 and +0, the
+            // precisions)
+            // (NaN after every number, so that the order is total)
+            (Num::Mp(x), Num::Mp(y)) => (x.sp == Sp::NaN)
+                .cmp(&(y.sp == Sp::NaN))
+                .then_with(|| x.cmp_value(y))
+                .then_with(|| x.hash_key().cmp(&y.hash_key()))
+                .then(x.prec.cmp(&y.prec)),
+            (Num::Mpc(x), Num::Mpc(y)) => {
+                let nan = |m: &Mp| m.sp == Sp::NaN;
+                let part = |a: &Mp, b: &Mp| nan(a).cmp(&nan(b)).then_with(|| a.cmp_value(b)).then_with(|| a.hash_key().cmp(&b.hash_key()));
+                part(&x.re, &y.re).then_with(|| part(&x.im, &y.im)).then(x.prec().cmp(&y.prec()))
+            }
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
-                a.partial_cmp(&c).unwrap_or(Ordering::Equal).then(b.partial_cmp(&d).unwrap_or(Ordering::Equal))
+                // (then the doubles' bits: -0 and +0, NaNs, equal values of two kinds)
+                fcmp(a, c).then(fcmp(b, d)).then(self.kind_rank().cmp(&o.kind_rank())).then_with(|| match (self, o) {
+                    (Num::Float(a, b, _), Num::Float(c, d, _)) => (a.to_bits(), b.to_bits()).cmp(&(c.to_bits(), d.to_bits())),
+                    _ => Ordering::Equal,
+                })
             }
+        }
+    }
+
+    /// The order of equal values of different kinds: a float before an exact
+    /// number, as Sage prints f(0.500000000000000) + f(1/2) whatever the order
+    /// the terms come in.
+    fn kind_rank(&self) -> u8 {
+        match self {
+            Num::Float(..) => 0,
+            Num::Mp(_) | Num::Mpc(_) => 1,
+            Num::Exact(..) => 2,
         }
     }
 
@@ -409,6 +560,10 @@ impl PartialEq for Num {
             (Num::Exact(a, b), Num::Exact(c, d)) => a == c && b == d,
             // (the parent is not part of the value: Sage merges (x + RDF(1))*(x + RR(1)) into a square)
             (Num::Float(a, b, _), Num::Float(c, d, _)) => a.to_bits() == c.to_bits() && b.to_bits() == d.to_bits(),
+            // (the precision neither: by value, NaN equal to NaN and -0 not
+            // +0, as the doubles' bits)
+            (Num::Mp(x), Num::Mp(y)) => x.same_value(y),
+            (Num::Mpc(x), Num::Mpc(y)) => x.same_value(y),
             _ => false,
         }
     }
@@ -429,6 +584,15 @@ impl Hash for Num {
                 1u8.hash(h);
                 a.to_bits().hash(h);
                 b.to_bits().hash(h);
+            }
+            Num::Mp(x) => {
+                2u8.hash(h);
+                x.hash_key().hash(h);
+            }
+            Num::Mpc(x) => {
+                3u8.hash(h);
+                x.re.hash_key().hash(h);
+                x.im.hash_key().hash(h);
             }
         }
     }
@@ -499,7 +663,9 @@ pub fn double_str(x: f64) -> String {
 /// 10^{20} (RR)
 fn sci_latex(s: String) -> String {
     match s.split_once('e') {
-        Some((m, e)) => format!("{} \\times 10^{{{}}}", m, e.trim_start_matches('+').trim_start_matches('0').replace("-0", "-")),
+        // (the exponent's digits as printed, a "+" dropped: RR's 1.50000000000000e-7 is
+        // 10^{-7}, RDF's 2.5e-07 is 10^{-07}, as Sage)
+        Some((m, e)) => format!("{} \\times 10^{{{}}}", m, e.trim_start_matches('+')),
         None => s,
     }
 }
@@ -553,6 +719,8 @@ impl Num {
                     format!("{} + {}", f(*a), im)
                 }
             }
+            Num::Mp(x) => x.sage_str(),
+            Num::Mpc(x) => x.sage_str(),
         }
     }
 
@@ -598,6 +766,489 @@ impl Num {
                 } else {
                     format!("{} + {}", f(*a), im)
                 }
+            }
+            Num::Mp(x) => x.latex(),
+            Num::Mpc(x) => x.latex(),
+        }
+    }
+}
+
+/// A total order of doubles for sorting: NaN after every number (and equal
+/// to NaN), -0 equal to 0, the rest by value (partial_cmp's Equal for NaN
+/// made sorts of terms with NaN inconsistent, a panic in the sort).
+pub fn fcmp(x: f64, y: f64) -> Ordering {
+    match (x.is_nan(), y.is_nan()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        _ => x.partial_cmp(&y).unwrap_or(Ordering::Equal),
+    }
+}
+
+// ------------------------------------------------------------------ RR and CC past the doubles
+
+// Sage's RR and CC are MPFR numbers at 53 bits, whose exponents reach far
+// past a double's; a symbolic RR or CC number here holds doubles.  Where
+// every double step of an operation (each product, quotient and sum, the
+// steps of an inverse, a quotient a times 1/b and an integer power
+// included) stays among the normal doubles, the steps are MPFR's, each
+// rounded alike, and the result is Sage's.  Where one left them (step(): a
+// product or quotient of nonzero numbers 0 or subnormal, or a step infinite
+// or NaN), or an operand is not tame (each part 0 or of magnitude 2^-510 to
+// 2^510), or a part of the result is infinite, NaN, subnormal or a lost 0,
+// the operation is done again in the 53-bit MP field, Sage's steps: its
+// value is kept when each part is a double, and refused when it is not
+// (never an infinity or a 0 that Sage does not have, nor a part an
+// underflowed step lost; https://github.com/sagemathinc/sagebrush/issues/1949).
+
+const TAME_MIN: f64 = f64::from_bits(513 << 52); // 2^-510
+const TAME_MAX: f64 = f64::from_bits(1533 << 52); // 2^510
+
+fn tame(x: f64) -> bool {
+    x == 0.0 || (TAME_MIN..=TAME_MAX).contains(&x.abs())
+}
+
+/// An infinite, NaN or subnormal double: a value that left the normal ones.
+fn off(x: f64) -> bool {
+    !x.is_finite() || (x != 0.0 && x.abs() < f64::MIN_POSITIVE)
+}
+
+thread_local! {
+    // (set while an integer power or a quotient steps through its products:
+    // it is checked as a whole, Sage's mpfr_pow_si, generic_power or a times
+    // 1/b, not each step)
+    static IN_STEPS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    // (set when a double step left the normal doubles, step(): where it did,
+    // the operation is not MPFR's and is done again in the 53-bit MP field)
+    static LEFT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// x, a double step's result, noted (LEFT) where it left the normal
+/// doubles: infinite or NaN, or 0 or subnormal where `nonzero` (a product
+/// or quotient of nonzero numbers, which MPFR keeps normal).
+fn step(x: f64, nonzero: bool) -> f64 {
+    if !x.is_finite() || (nonzero && x.abs() < f64::MIN_POSITIVE) {
+        LEFT.with(|l| l.set(true));
+    }
+    x
+}
+
+/// f() and whether a step of it left the normal doubles (LEFT, kept for
+/// an enclosing call).
+fn tracked(f: impl FnOnce() -> Num) -> (Num, bool) {
+    let before = LEFT.with(|l| l.replace(false));
+    let r = f();
+    let left = LEFT.with(|l| l.get());
+    LEFT.with(|l| l.set(before || left));
+    (r, left)
+}
+
+/// f() with the RR and CC checks of its steps suspended (IN_STEPS), the
+/// previous state restored after it (a nested call keeps its caller's), and
+/// whether any of its steps left the normal doubles.
+fn in_steps(f: impl FnOnce() -> Num) -> (Num, bool) {
+    struct Done(bool);
+    impl Drop for Done {
+        fn drop(&mut self) {
+            IN_STEPS.with(|p| p.set(self.0));
+        }
+    }
+    let _done = Done(IN_STEPS.with(|p| p.replace(true)));
+    tracked(f)
+}
+
+/// A top-level call starts: the RR and CC checks are on and no step is
+/// noted, whatever a trapped call left (a trap runs no destructors, so
+/// in_steps' restore may not run).
+pub fn reset_steps() {
+    IN_STEPS.with(|p| p.set(false));
+    LEFT.with(|l| l.set(false));
+}
+
+/// An operand of an RR or CC operation as a number of the 53-bit MP field,
+/// its own (an element of RR a real, of CC a complex one, an exact number
+/// real unless it has an imaginary part; mixed, the MP field's coercion
+/// does what Sage's does): a double exactly, an exact number rounded once.
+fn to_mp53(x: &Num) -> Num {
+    let q = |a: &Q| Mp::from_q(a.numer(), a.denom(), 53);
+    match x {
+        Num::Exact(a, b) if !b.is_zero() => Num::mpc(Mpc::new(q(a), q(b))),
+        Num::Exact(a, _) => Num::mp(q(a)),
+        Num::Float(a, b, k) if k.complex() || *b != 0.0 => Num::mpc(Mpc::new(Mp::from_f64(*a, 53), Mp::from_f64(*b, 53))),
+        Num::Float(a, _, _) => Num::mp(Mp::from_f64(*a, 53)),
+        _ => x.clone(),
+    }
+}
+
+/// r, the double result of an RR or CC operation on finite operands `ops`,
+/// or the 53-bit MP field's (`mp` on the operands there) where r may have
+/// left the doubles: a step of it did (`left`), an operand is not tame, a
+/// part of r is off, or a part of r is 0 where `zero_lost` says Sage's may
+/// not be.  That value is kept when each
+/// part is a double and refused when it is not.  RDF and CDF are doubles in
+/// Sage too, and an infinite or NaN operand takes the double steps (Sage's
+/// special values).
+fn rr_cc(r: Num, ops: &[&Num], left: bool, zero_lost: impl Fn(usize) -> bool, mp: impl FnOnce(&[Num]) -> Num) -> Num {
+    let Num::Float(re, im, k) = r else { return r };
+    if k.double() || IN_STEPS.with(|p| p.get()) {
+        return r;
+    }
+    let parts: Vec<(f64, f64)> = ops.iter().map(|x| x.to_c64()).collect();
+    let special = |x: &&Num| match x {
+        Num::Float(a, b, _) => !a.is_finite() || !b.is_finite(),
+        Num::Exact(..) => false,
+        _ => true,
+    };
+    if ops.iter().any(special) {
+        return r;
+    }
+    let suspect = left || parts.iter().any(|&(a, b)| !tame(a) || !tame(b)) || off(re) || off(im) || (re == 0.0 && zero_lost(0)) || (im == 0.0 && zero_lost(1));
+    if !suspect {
+        return r;
+    }
+    let v: Vec<Num> = ops.iter().map(|x| to_mp53(x)).collect();
+    from_mp53(&mp(&v), k)
+}
+
+/// The double value r of a function `name` at finite RR or CC arguments v,
+/// refused where it may have left the doubles (no MP version of the
+/// function here): a part infinite or NaN where `pole` does not allow it, a
+/// part subnormal, or 0 where `zero_ok` does not say Sage's value has an
+/// exact 0 there (part 0 real, 1 imaginary).
+pub fn check_float_value(name: &str, v: &[(f64, f64)], r: &Num, pole: bool, zero_ok: impl Fn(usize) -> bool) {
+    if float_value_off(v, r, pole, zero_ok) {
+        refuse_float_value(name, v, r.fk().unwrap_or(Fk::RR));
+    }
+}
+
+/// Whether check_float_value refuses r.
+pub fn float_value_off(v: &[(f64, f64)], r: &Num, pole: bool, zero_ok: impl Fn(usize) -> bool) -> bool {
+    let Num::Float(re, im, k) = *r else { return false };
+    if k.double() || v.iter().any(|&(a, b)| !a.is_finite() || !b.is_finite()) {
+        return false;
+    }
+    let bad = |x: f64, i: usize| if !x.is_finite() { !pole } else if x == 0.0 { !zero_ok(i) } else { x.abs() < f64::MIN_POSITIVE };
+    bad(re, 0) || bad(im, 1)
+}
+
+/// The refusal of a function's RR or CC value (parent k) at v past the doubles.
+pub fn refuse_float_value(name: &str, v: &[(f64, f64)], k: Fk) -> ! {
+    let args: Vec<String> = v.iter().map(|&(a, b)| crate::print::to_string(&crate::expr::num(Num::fl(a, b, k.to_real())))).collect();
+    let f = if k.complex() { "CC" } else { "RR" };
+    not_implemented(format!("{}({}): the value in {}, past the double range, is not available in sagebrush yet", name, args.join(", "), f))
+}
+
+/// b^n for an RR or CC number b (parent k) and an integer n, as Sage
+/// computes it in the 53-bit MP field (mpfr_pow_si for a real b, generic_power
+/// for a complex one): kept when each part is a double, refused otherwise.
+pub fn pow_int_mp53(b: &Num, n: i64, k: Fk) -> Num {
+    let (re, im) = b.to_c64();
+    if let Some(r) = pow_past_doubles(re, im, ((n as f64).abs().log2(), n < 0), Some(n as i128), n % 2 != 0, &n, k) {
+        return r;
+    }
+    from_mp53(&to_mp53(b).pow_int(n), k)
+}
+
+/// Where a power b^n of an MP number (or of an RR or CC one, in the 53-bit
+/// MP field) lies, decided before computing it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PowRange {
+    /// within the engine's MP numbers, or not past them for certain
+    Compute,
+    /// past MPFR's largest exponent: Sage's infinity (for a real b)
+    Inf,
+    /// past MPFR's smallest exponent: Sage's 0 (for a real b)
+    Zero,
+    /// past the engine's MP numbers (2^(+-mpnum::MAX_EXP)) for certain
+    Refuse,
+}
+
+/// The range of b^n from lb = log2 |b| and n, an integer (n_exact when it
+/// fits an i128, else n alone, as a double).  MPFR's numbers, Sage's, are
+/// finite from 2^(-2^62) below 2^(2^62 - 1) (emin = 1 - 2^62, emax = 2^62
+/// - 1).  When |b| is a power of 2, 2^t (lb_exact), and n is exact, log2
+/// |b^n| = t n is exact and so is the decision (SR(RR(2))^(2^62 - 1) is
+/// +infinity, SR(RR(2))^(2^62 - 2) refused past the engine's MP numbers).
+/// Otherwise by the estimate lb n, carried as its sign and log2 |lb n| =
+/// log2 |lb| + log2 |n| (lb as Mp::log2_abs gives it, n as log2 |n| and
+/// its sign), so that neither a tiny lb (R2048's 1 + 2^-2000) nor a huge
+/// n (2^2100) loses its scale: past 2^80 the sign decides (an infinity or
+/// a 0, far past MPFR's 2^62); below, the product is a double, with a
+/// margin for the error of lb (under 2^-40 relative) and, for a complex b,
+/// for its parts' combination (2^-44 absolute) and generic_power's drift
+/// (each of its about 2 log2 n products has a relative error of a few
+/// units of 2^-53, which later squarings double: under n 2^-48 in log2):
+/// all under 8 + |lb n| 2^-40, plus |n| 2^-44 for a complex b.
+pub fn pow_range(lb: (f64, f64), lb_exact: Option<i64>, n: (f64, bool), n_exact: Option<i128>, complex: bool) -> PowRange {
+    let max = crate::mpnum::MAX_EXP as i128;
+    if let (Some(t), Some(n)) = (lb_exact, n_exact) {
+        if let Some(l) = (t as i128).checked_mul(n) {
+            return if l >= (1i128 << 62) - 1 {
+                PowRange::Inf
+            } else if l < -(1i128 << 62) {
+                PowRange::Zero
+            } else if l + 1 > max || l + 1 < -max {
+                PowRange::Refuse
+            } else {
+                PowRange::Compute
+            };
+        }
+    }
+    let ((ls, ll), (nl, nneg)) = (lb, n);
+    if ls == 0.0 {
+        return PowRange::Compute;
+    }
+    let sign = if nneg { -ls } else { ls };
+    let l2 = ll + nl;
+    if l2 > 80.0 {
+        // (a complex b's absolute margin, |n| 2^-44, is then under |lb n|/16
+        // when |lb| > 2^-40; else its powers are computed, refused past the
+        // MP numbers as they leave them)
+        if complex {
+            return if ll > -40.0 { PowRange::Refuse } else { PowRange::Compute };
+        }
+        return if sign > 0.0 { PowRange::Inf } else { PowRange::Zero };
+    }
+    let est = sign * l2.exp2();
+    let margin = 8.0 + est.abs() * (-40f64).exp2() + if complex { nl.exp2() * (-44f64).exp2() } else { 0.0 };
+    let mpfr = 62f64.exp2();
+    let max = max as f64;
+    if est - margin >= mpfr - 1.0 {
+        PowRange::Inf
+    } else if est + margin < -mpfr {
+        PowRange::Zero
+    } else if est - margin > max || est + margin < -max - 1.0 {
+        PowRange::Refuse
+    } else {
+        PowRange::Compute
+    }
+}
+
+/// b^n for b of RealField(p) or ComplexField(p) (p != 53) and an integer n
+/// of any size, as Sage: a real one correctly rounded (mpfr_pow_z), with
+/// the parity and the sign from n itself, never a rounded n; an infinity
+/// or a 0 past MPFR's exponents; refused past the engine's MP numbers
+/// (pow_range).  A complex one is generic_power by the bits of n (CC's
+/// I^(2^100) is 1), refused past them.  A 0, an infinity, a NaN or +-1 is
+/// as to a small exponent of the same sign and parity.
+pub fn mp_pow(b: &Num, n: &BigInt) -> Num {
+    let small = || -> i64 {
+        let k = if n.is_odd() { 3 } else { 2 };
+        if n.is_negative() {
+            -k
+        } else {
+            k
+        }
+    };
+    if let Num::Mpc(z) = b {
+        if z.re.sp != Sp::Fin || z.im.sp != Sp::Fin || z.is_zero() {
+            return Num::mpc(z.pow_int(n.to_i64().unwrap_or_else(small)));
+        }
+        let (ls, ll, lb_exact) = z.log2_abs();
+        return match pow_range((ls, ll), lb_exact, (log2_big(n), n.is_negative()), n.to_i128(), true) {
+            PowRange::Compute => Num::mpc(z.pow_big(n)),
+            _ => mpnum::refuse_range(),
+        };
+    }
+    let Num::Mp(x) = b else { return b.pow_int(n.to_i64().unwrap_or_else(small)) };
+    if x.sp != Sp::Fin || x.m.is_zero() {
+        return Num::mp(mpnum::pow_int(x, n.to_i64().unwrap_or_else(small)));
+    }
+    let (ls, ll, lb_exact) = x.log2_abs();
+    if lb_exact == Some(0) {
+        return Num::mp(mpnum::pow_int(x, small()));
+    }
+    let neg = x.m.is_negative() && n.is_odd();
+    match pow_range((ls, ll), lb_exact, (log2_big(n), n.is_negative()), n.to_i128(), false) {
+        PowRange::Inf => Num::mp(Mp::special(x.prec, if neg { Sp::NegInf } else { Sp::PosInf })),
+        PowRange::Zero => Num::mp(Mp::zero(x.prec, neg)),
+        PowRange::Refuse => mpnum::refuse_range(),
+        PowRange::Compute => Num::mp(mpnum::pow_big(x, n)),
+    }
+}
+
+/// b^n for an element b of CC (parent k) and an integer n past i64, as
+/// Sage's generic_power by the bits of n (I^(2^100) is 1), refused past the
+/// doubles, before computing when for certain (pow_past_doubles).
+pub fn pow_big_mp53(b: &Num, n: &BigInt, shown: &dyn std::fmt::Display, k: Fk) -> Num {
+    let (re, im) = b.to_c64();
+    if let Some(r) = pow_past_doubles(re, im, (log2_big(n), n.is_negative()), n.to_i128(), n.is_odd(), shown, k) {
+        return r;
+    }
+    let v = match to_mp53(b) {
+        Num::Mpc(z) => Num::mpc(z.pow_big(n)),
+        v => mp_pow(&v, n),
+    };
+    from_mp53(&v, k)
+}
+
+/// lb = log2 |re + im*I| for finite doubles not both 0, as its sign and
+/// log2 |lb| (Mp::log2_abs's form), and the exact lb when it is a power of
+/// 2 (a part 0, the other +-2^t).
+pub fn log2_abs_c64(re: f64, im: f64) -> (f64, f64, Option<i64>) {
+    let (hi, lo) = if re.abs() >= im.abs() { (re.abs(), im.abs()) } else { (im.abs(), re.abs()) };
+    let exact = if lo == 0.0 && hi.is_normal() && hi.to_bits() & ((1u64 << 52) - 1) == 0 {
+        Some(((hi.to_bits() >> 52) as i64) - 1023)
+    } else if lo == 0.0 && hi > 0.0 && hi.is_subnormal() && (hi.to_bits() & (hi.to_bits() - 1)) == 0 {
+        Some(hi.to_bits().trailing_zeros() as i64 - 1074)
+    } else {
+        None
+    };
+    let lb = hi.log2() + 0.5 * (1.0 + (lo / hi) * (lo / hi)).log2();
+    (if lb == 0.0 { 0.0 } else { lb.signum() }, lb.abs().log2(), exact)
+}
+
+/// The power b^n of an RR or CC number b = re + im*I (parent k) to an
+/// integer n (as log2 |n| and its sign, n_exact when it fits an i128, odd its parity,
+/// shown as the refusal prints it) whose value is past the engine's MP
+/// numbers for certain (pow_range), decided before computing it.  Past
+/// MPFR's exponents, a real one is Sage's double: an infinity, or a 0,
+/// signed as the power; otherwise it is refused, as an RR or CC value past
+/// the doubles with no value of Sage's to show (SR(RR(2))^(10^6), not a
+/// refusal about its exact power's integer).  None where the power is to
+/// be computed.
+pub fn pow_past_doubles(re: f64, im: f64, n: (f64, bool), n_exact: Option<i128>, odd: bool, shown: &dyn std::fmt::Display, k: Fk) -> Option<Num> {
+    if !re.is_finite() || !im.is_finite() || (re == 0.0 && im == 0.0) {
+        return None;
+    }
+    let (ls, ll, lb_exact) = log2_abs_c64(re, im);
+    let real = im == 0.0 && !k.complex();
+    let neg = real && re < 0.0 && odd;
+    match pow_range((ls, ll), lb_exact, n, n_exact, !real) {
+        PowRange::Compute => None,
+        PowRange::Inf if real => Some(Num::Float(if neg { f64::NEG_INFINITY } else { f64::INFINITY }, 0.0, k)),
+        PowRange::Zero if real => Some(Num::Float(if neg { -0.0 } else { 0.0 }, 0.0, k)),
+        _ => {
+            let b = crate::print::to_string(&crate::expr::num(Num::fl(re, im, k.to_real())));
+            let f = if k.complex() { "CC" } else { "RR" };
+            not_implemented(format!("pow({}, {}): the value in {}, past the double range, is not available in sagebrush yet", b, shown, f))
+        }
+    }
+}
+
+/// A number of the 53-bit MP field as RR's or CC's doubles (parent k), or
+/// refused, with Sage's value, when a part is not a double.
+fn from_mp53(v: &Num, k: Fk) -> Num {
+    let back = |x: &Mp| {
+        let d = x.to_f64();
+        if Mp::from_f64(d, 53).same_value(x) {
+            Some(d)
+        } else {
+            None
+        }
+    };
+    let refuse = |s: String, f: &str| -> ! { not_implemented(format!("{}, an element of {} past the double range, has no symbolic form in sagebrush yet", s, f)) };
+    match v {
+        Num::Mp(x) => match back(x) {
+            Some(d) => Num::Float(d, 0.0, k),
+            None => refuse(x.sage_str(), if k.complex() { "CC" } else { "RR" }),
+        },
+        Num::Mpc(z) => match (back(&z.re), back(&z.im)) {
+            (Some(a), Some(b)) => Num::fl(a, b, k),
+            _ => refuse(z.sage_str(), "CC"),
+        },
+        _ => v.clone(),
+    }
+}
+
+/// x of RealField(p) (p > 53) or ComplexField(p) at 53 bits as a double, as
+/// Sage's coercion into RR or CC rounds it; refused when the 53-bit value
+/// is past the doubles (an element of RR or CC has no other symbolic form
+/// here).
+fn mp_to_53(x: &Mp) -> f64 {
+    let r = x.round_to(53);
+    let d = r.to_f64();
+    if !Mp::from_f64(d, 53).same_value(&r) {
+        not_implemented("a real number of RR past the doubles in a symbolic expression is not available in sagebrush yet");
+    }
+    d
+}
+
+/// x op o (op '+' or '*'; o op x when rev) for x of RealField(p), as Sage
+/// computes it on RealNumber (RealNumberMP's _binop): an exact number is
+/// rounded into RealField(p); another such real and x are rounded into the
+/// coarser field; against a double (RR or RDF) a finer field is the
+/// double's (RR's 53-bit arithmetic, the result in RR; RDF's double
+/// arithmetic, in RDF) and a coarser one takes the double rounded into it.
+/// Each result is rounded once.  Against a complex number, x is the complex
+/// x + 0*I of its field (mpc_binop).
+fn mp_binop(x: &Mp, o: &Num, op: char, rev: bool) -> Num {
+    let p = x.prec;
+    let ar = |a: &Mp, b: &Mp, q: u32| {
+        let (a, b) = if rev { (b, a) } else { (a, b) };
+        mpnum::arith(a, b, op, q)
+    };
+    match o {
+        Num::Mp(y) => {
+            let q = p.min(y.prec);
+            Num::mp(ar(&x.round_to(q), &y.round_to(q), q))
+        }
+        Num::Mpc(_) => mpc_binop(&Mpc::from_real(x), o, op),
+        Num::Exact(a, b) => {
+            if !b.is_zero() {
+                return mpc_binop(&Mpc::from_real(x), o, op);
+            }
+            Num::mp(ar(x, &Mp::from_q(a.numer(), a.denom(), p), p))
+        }
+        Num::Float(a, b, k) => {
+            if *b != 0.0 || k.complex() {
+                return mpc_binop(&Mpc::from_real(x), o, op);
+            }
+            if p < 53 {
+                return Num::mp(ar(x, &Mp::from_f64(*a, p), p));
+            }
+            if k.double() {
+                let (u, v) = if rev { (*a, x.to_f64()) } else { (x.to_f64(), *a) };
+                return Num::Float(if op == '+' { u + v } else { u * v }, 0.0, Fk::RDF);
+            }
+            let r = ar(&x.round_to(53), &Mp::from_f64(*a, 53), 53);
+            let d = r.to_f64();
+            // (an element of RR past the doubles has no symbolic form here)
+            if !Mp::from_f64(d, 53).same_value(&r) {
+                not_implemented("a real number of RR past the doubles in a symbolic expression is not available in sagebrush yet");
+            }
+            Num::Float(d, 0.0, Fk::RR)
+        }
+    }
+}
+
+/// x op o (op '+' or '*', both commutative here) for x of ComplexField(p),
+/// as Sage computes it on ComplexNumber: o is coerced into the pushout of
+/// the two parents and Sage's operation runs there, each step rounded.
+/// - an exact number: each part rounded into ComplexField(p);
+/// - a real or complex of another precision: both in the coarser field (a
+///   real as x + 0*I);
+/// - a double of any kind: for p < 53 rounded into ComplexField(p);
+///   otherwise against CDF x as a pair of doubles and CDF's arithmetic, and
+///   against RR, CC or RDF x rounded into CC and CC's, the result in CC.
+fn mpc_binop(x: &Mpc, o: &Num, op: char) -> Num {
+    let p = x.prec();
+    let run = |a: &Mpc, b: &Mpc| Num::mpc(if op == '+' { a.add(b, '+') } else { a.mul(b) });
+    match o {
+        Num::Mpc(y) => {
+            let q = p.min(y.prec());
+            run(&x.round_to(q), &y.round_to(q))
+        }
+        Num::Mp(y) => {
+            let q = p.min(y.prec);
+            run(&x.round_to(q), &Mpc::from_real(&y.round_to(q)))
+        }
+        Num::Exact(a, b) => run(x, &Mpc::new(Mp::from_q(a.numer(), a.denom(), p), Mp::from_q(b.numer(), b.denom(), p))),
+        Num::Float(a, b, k) => {
+            if p < 53 {
+                return run(x, &Mpc::new(Mp::from_f64(*a, p), Mp::from_f64(*b, p)));
+            }
+            // (CDF's arithmetic against CDF; against RR, CC or RDF, CC's: RDF
+            // meets ComplexField(p) in CC, as Sage's coercion)
+            let (xf, of) = if *k == Fk::CDF {
+                (Num::Float(x.re.to_f64(), x.im.to_f64(), Fk::CDF), o.clone())
+            } else {
+                (Num::Float(mp_to_53(&x.re), mp_to_53(&x.im), Fk::CC), Num::Float(*a, *b, if k.complex() { Fk::CC } else { Fk::RR }))
+            };
+            if op == '+' {
+                xf.add(&of)
+            } else {
+                xf.mul(&of)
             }
         }
     }
@@ -800,6 +1451,158 @@ pub fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
 
 #[cfg(test)]
 mod tests {
+    use crate::mpnum::{Mp, Sp};
+
+    fn mpq(n: i64, d: i64, p: u32) -> Num {
+        Num::mp(Mp::from_q(&BigInt::from(n), &BigInt::from(d), p))
+    }
+
+    #[test]
+    fn realfield_coercions() {
+        // two fields: the coarser one, each operand rounded into it first
+        let s = mpq(1, 3, 100).add(&mpq(1, 3, 20));
+        assert_eq!(s.as_mp().unwrap().prec, 20);
+        assert_eq!(s.sage_str(), "0.66667");
+        // an exact number is rounded into the field, the result rounded once
+        assert_eq!(mpq(1, 3, 100).add(&Num::rat(qr(1, 3))).sage_str(), "0.66666666666666666666666666667");
+        // RR against a finer field: RR's arithmetic; a coarser field takes RR's number
+        assert_eq!(mpq(1, 3, 100).add(&Num::float(1.0)), Num::Float(1.0 + 1.0 / 3.0, 0.0, Fk::RR));
+        assert_eq!(mpq(1, 3, 20).add(&Num::float(1.0)).sage_str(), "1.3333");
+        // RDF against a finer field: the double's arithmetic, in RDF
+        assert_eq!(Num::Float(1.0, 0.0, Fk::RDF).mul(&mpq(1, 3, 100)).fk(), Some(Fk::RDF));
+        assert_eq!(mpq(1, 3, 20).mul(&Num::Float(3.0, 0.0, Fk::RDF)).sage_str(), "1.0000");
+        // the exact identities: 0*x is 0, 1*x is x
+        assert!(mpq(1, 3, 100).mul(&Num::zero()).is_exact());
+        assert_eq!(Num::one().mul(&mpq(1, 3, 100)).as_mp().unwrap().prec, 100);
+        // an integer power is correctly rounded, 1/x too
+        assert_eq!(mpq(1, 3, 100).pow_int(-3).sage_str(), "27.000000000000000000000000000");
+        assert_eq!(mpq(3, 1, 100).inv(), mpq(1, 3, 100));
+        // equal values are equal and hash alike whatever their fields; -0 is not +0
+        assert_eq!(mpq(1, 2, 100), mpq(1, 2, 30));
+        assert_ne!(Num::mp(Mp::zero(100, true)), Num::mp(Mp::zero(100, false)));
+        assert_eq!(Num::mp(Mp::special(10, Sp::NaN)), Num::mp(Mp::special(90, Sp::NaN)));
+        let h = |n: &Num| {
+            use std::hash::{BuildHasher, BuildHasherDefault};
+            BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default().hash_one(n)
+        };
+        assert_eq!(h(&mpq(1, 2, 100)), h(&mpq(1, 2, 30)));
+        assert_eq!(mpq(-1, 2, 100).cmp(&mpq(1, 3, 10)), Ordering::Less);
+    }
+
+    #[test]
+    fn rr_cc_past_the_doubles() {
+        // (Sage's RR and CC have MPFR's exponents: a result past the doubles
+        // is refused with Sage's value, one whose steps left them is Sage's)
+        let rr = |x: f64| Num::Float(x, 0.0, Fk::RR);
+        let refused = |f: &dyn Fn() -> Num| match crate::err::catch(f) {
+            Err(SymError::NotImplemented(m)) => m,
+            r => panic!("not refused: {:?}", r),
+        };
+        let p = |e: i32| 2f64.powi(e);
+        assert_eq!(rr(p(600)).mul(&rr(p(-600))), rr(1.0));
+        assert_eq!(rr(p(-600)).div(&rr(p(-600))), rr(1.0));
+        assert!(refused(&|| rr(p(1000)).mul(&Num::int(1 << 30))).starts_with("1.15052360631188e310, an element of RR past the double range"));
+        assert!(refused(&|| rr(p(-600)).mul(&rr(p(-600)))).starts_with("5.80771375621750e-362, an element of RR"));
+        assert!(refused(&|| rr(1e300).pow_int(2)).starts_with("1.00000000000000e600, an element of RR"));
+        assert_eq!(rr(p(-1020)).inv(), rr(p(1020)));
+        assert!(refused(&|| Num::Float(p(600), 1.0, Fk::CC).mul(&Num::Float(p(600), 0.0, Fk::CC))).starts_with("1.72184794563858e361 + 4.14951556888099e180*I, an element of CC"));
+        // (an integer power of CC is Sage's generic_power, a quotient Sage's
+        // a times 1/b, each checked as a whole)
+        assert_eq!(Num::Float(1.0, 1.0, Fk::CC).pow_int(2), Num::Float(0.0, 2.0, Fk::CC));
+        assert!(refused(&|| rr(1.5).div(&Num::Float(p(600), 1.0, Fk::CC))).starts_with("3.61487979765433e-181 - 8.71157063432625e-362*I, an element of CC"));
+        // RDF and CDF are doubles in Sage too
+        assert_eq!(Num::Float(1e300, 0.0, Fk::RDF).mul(&Num::Float(1e300, 0.0, Fk::RDF)), Num::Float(f64::INFINITY, 0.0, Fk::RDF));
+        // (the checks are off only inside in_steps: a nested one restores its
+        // caller's state, and a top-level call turns them back on after a
+        // trap left them off)
+        let on = || !IN_STEPS.with(|p| p.get());
+        in_steps(|| {
+            in_steps(|| Num::zero());
+            assert!(!on());
+            Num::zero()
+        });
+        // (a step inside a quotient or a power that left the doubles is
+        // noted: 1/b's real part 2^-1200 is lost to the doubles, so a/a was
+        // 1 + 2^-800*I and a/b's real part 2^-800, Sage's 1 and 2^-799)
+        let a = Num::Float(p(-400), -p(400), Fk::CC);
+        let b = Num::Float(p(400), -p(-400), Fk::CC);
+        assert_eq!(a.div(&a), Num::Float(1.0, 0.0, Fk::CC));
+        assert_eq!(a.div(&b), Num::Float(p(-799), -1.0, Fk::CC));
+        // (and 1/a itself, 2^-1200 + 2^-400*I in Sage, is past the doubles)
+        assert!(refused(&|| a.pow_int(-1)).starts_with("5.80771375621750e-362 + 3.87259191484932e-121*I, an element of CC"));
+        assert!(on());
+        IN_STEPS.with(|p| p.set(true));
+        reset_steps();
+        assert!(on());
+        assert!(refused(&|| rr(p(-600)).mul(&rr(p(-600)))).starts_with("5.80771375621750e-362"));
+    }
+
+    #[test]
+    fn canonical_order_is_total() {
+        // (antisymmetric and transitive over NaN, signed zeros, infinities and
+        // values of each kind: a sort of terms with NaN panicked)
+        let mut v = vec![Num::zero(), Num::rat(qr(1, 2)), Num::rat(qr(-3, 1))];
+        for x in [f64::NAN, 0.0, -0.0, f64::INFINITY, f64::NEG_INFINITY, 1.5, -1.0, 2.0] {
+            v.push(Num::Float(x, 0.0, Fk::RR));
+        }
+        for p in [10, 100] {
+            v.push(Num::mp(Mp::special(p, Sp::NaN)));
+            v.push(Num::mp(Mp::special(p, Sp::PosInf)));
+            v.push(Num::mp(Mp::special(p, Sp::NegInf)));
+            v.push(Num::mp(Mp::zero(p, false)));
+            v.push(Num::mp(Mp::zero(p, true)));
+            v.push(mpq(1, 3, p));
+            v.push(mpq(-2, 1, p));
+            v.push(mpq(5, 1, p));
+        }
+        for a in &v {
+            for b in &v {
+                assert_eq!(a.cmp(b), b.cmp(a).reverse(), "{:?} {:?}", a, b);
+                for c in &v {
+                    if a.cmp(b) != Ordering::Greater && b.cmp(c) != Ordering::Greater {
+                        assert_ne!(a.cmp(c), Ordering::Greater, "{:?} {:?} {:?}", a, b, c);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A real of RealField(p) or a number of ComplexField(p) meets complex
+    /// numbers and doubles in Sage's pushout: ComplexField(p) for an exact
+    /// one, the coarser field, and for p > 53 CC against RR, CC and RDF and
+    /// CDF against CDF; for p < 53 ComplexField(p) against any double.
+    #[test]
+    fn complexfield_coercions_as_sage() {
+        let c = |p: u32| Num::mpc(Mpc::new(Mp::from_f64(1.0, p), Mp::from_f64(2.0, p)));
+        let kind = |n: Num| match n {
+            Num::Mpc(z) => format!("C{}", z.prec()),
+            Num::Mp(x) => format!("R{}", x.prec),
+            Num::Float(_, _, k) => format!("{:?}", k),
+            Num::Exact(..) => "Q".into(),
+        };
+        let (rdf, cdf, rr, cc) = (Num::Float(1.0, 0.0, Fk::RDF), Num::Float(1.0, 1.0, Fk::CDF), Num::float(1.0), Num::Float(1.0, 1.0, Fk::CC));
+        assert_eq!(kind(mpq(1, 3, 100).mul(&Num::i())), "C100");
+        for (a, b, k) in [
+            (c(100), rdf.clone(), "CC"),
+            (c(100), cdf.clone(), "CDF"),
+            (c(100), rr.clone(), "CC"),
+            (c(100), cc.clone(), "CC"),
+            (c(20), rdf.clone(), "C20"),
+            (c(20), cdf.clone(), "C20"),
+            (c(20), cc.clone(), "C20"),
+            (mpq(1, 3, 100), cdf.clone(), "CDF"),
+            (mpq(1, 3, 100), cc.clone(), "CC"),
+            (mpq(1, 3, 20), cdf.clone(), "C20"),
+            (mpq(1, 3, 20), cc.clone(), "C20"),
+            (c(100), mpq(1, 3, 200), "C100"),
+            (c(100), mpq(1, 3, 20), "C20"),
+            (c(100), c(200), "C100"),
+            (c(100), Num::Exact(qr(1, 3), qr(2, 7)), "C100"),
+        ] {
+            assert_eq!(kind(a.add(&b)), k, "{:?} + {:?}", a, b);
+            assert_eq!(kind(b.mul(&a)), k, "{:?} * {:?}", b, a);
+        }
+    }
     use super::*;
 
     /// 1d-i: a float keeps its parent; RDF and CDF print as Python's repr, and two parents meet
@@ -844,6 +1647,8 @@ mod tests {
         let real = |n: Num| match n {
             Num::Float(_, b, _) => b == 0.0,
             Num::Exact(_, b) => b.is_zero(),
+            Num::Mp(_) => true,
+            Num::Mpc(z) => z.im.is_zero(),
         };
         for (n, v) in [(inf.mul(&Num::one()), f64::INFINITY), (inf.mul(&Num::float(-2.0)), f64::NEG_INFINITY), (inf.inv(), 0.0)] {
             assert!(real(n.clone()), "{:?}", n);
@@ -895,6 +1700,107 @@ mod tests {
         assert_eq!(re(d(2.0).pow_int(-(i64::MIN + 1))), f64::INFINITY);
         assert_eq!(Num::one().pow_int(i64::MIN).sage_str(), "1");
         assert_eq!(Num::i().pow_int(i64::MIN).sage_str(), "1");
+    }
+
+    #[test]
+    fn mp_powers_past_the_precision() {
+        // (MPFR's range exactly, for a power of 2: finite from 2^(-2^62)
+        // below 2^(2^62 - 1); Sage's 2^(2^62 - 2) finite, 2^(2^62 - 1)
+        // +infinity, 0.5^(2^62) finite, 0.5^(2^62 + 1) 0)
+        let e62 = 1i128 << 62;
+        let r = |t: i64, n: i128| pow_range(((t as f64).signum(), (t as f64).abs().log2()), Some(t), ((n as f64).abs().log2(), n < 0), Some(n), false);
+        assert_eq!(r(1, e62 - 2), PowRange::Refuse);
+        assert_eq!(r(1, e62 - 1), PowRange::Inf);
+        assert_eq!(r(-1, e62), PowRange::Refuse);
+        assert_eq!(r(-1, e62 + 1), PowRange::Zero);
+        assert_eq!(r(2, e62 / 2), PowRange::Inf);
+        assert_eq!(r(2, e62 / 2 - 1), PowRange::Refuse);
+        assert_eq!(r(1, 4095), PowRange::Compute);
+        assert_eq!(r(1, 4096), PowRange::Refuse);
+        assert_eq!(r(-1, 4097), PowRange::Compute);
+        assert_eq!(r(-1, 4098), PowRange::Refuse);
+        // (a RealField(24) power: the exponent's parity and sign its own)
+        let mp = |v: f64, p: u32| Num::mp(Mp::from_f64(v, p));
+        let big = |s: &str| BigInt::parse_bytes(s.as_bytes(), 10).unwrap();
+        let s = |n: Num| n.as_mp().unwrap().sage_str();
+        assert_eq!(s(mp_pow(&mp(-1.0, 24), &BigInt::from(2147483649i64))), "-1.00000");
+        assert_eq!(s(mp_pow(&mp(-1.0, 24), &big("-1000000000000000000000000000001"))), "-1.00000");
+        assert_eq!(s(mp_pow(&mp(-1.0, 100), &big("1267650600228229401496703205377"))), "-1.0000000000000000000000000000");
+        assert_eq!(s(mp_pow(&mp(-2.0, 24), &BigInt::from((1i64 << 62) + 1))), "-infinity");
+        assert_eq!(s(mp_pow(&mp(-1.5, 24), &BigInt::from(i64::MAX))), "-infinity");
+        assert_eq!(s(mp_pow(&mp(-0.5, 24), &big("-1000000000000000000000000000001"))), "-infinity");
+        assert_eq!(s(mp_pow(&mp(-0.5, 24), &BigInt::from((1i64 << 62) + 1))), "-0.000000");
+        // (1.5^7002 is about 2^4095.9, 1.5^7003 past 2^4096)
+        assert_eq!(s(mp_pow(&mp(1.5, 24), &BigInt::from(7002))), mpnum::pow_int(&Mp::from_f64(1.5, 24), 7002).sage_str());
+        assert!(crate::err::catch(|| mp_pow(&mp(1.5, 24), &BigInt::from(7003))).is_err());
+        // (near 1, an exponent past i64 within the MP numbers: Sage's
+        // (1 + 2^-99)^(2^65) and (1 + 2^-99)^(-(2^65 + 1)) at 100 bits)
+        let near = Num::mp(Mp::fin(&((BigInt::one() << 99usize) + BigInt::one()), -99, 100));
+        let e65 = BigInt::one() << 65usize;
+        assert_eq!(s(mp_pow(&near, &e65)), "1.0000000000582076609151614731");
+        assert_eq!(s(mp_pow(&near, &-(&e65 + BigInt::one()))), "0.99999999994179233908822665867");
+        // (within 2^-64 of 1, past MPFR's exponents: Sage's
+        // (1 + 2^-70)^(2^140) is +infinity, -(1 - 2^-70)^(2^140 + 1) is -0)
+        let e140 = BigInt::one() << 140usize;
+        let up = Num::mp(Mp::fin(&((BigInt::one() << 70usize) + BigInt::one()), -70, 100));
+        let down = Num::mp(Mp::fin(&-((BigInt::one() << 70usize) - BigInt::one()), -70, 100));
+        assert_eq!(s(mp_pow(&up, &e140)), "+infinity");
+        assert_eq!(s(mp_pow(&down, &(&e140 + BigInt::one()))), "-0.00000000000000000000000000000");
+        // (a deviation from 1 and an exponent past the doubles: R2048's
+        // (1 + 2^-2000)^(2^2100) is +infinity, its reciprocal power 0, as
+        // R1100's (1 - 2^-1000)^(2^1100); (1 + 2^-2000)^(2^2060), finite in
+        // Sage, is past the MP numbers)
+        let one_eps = |p: u32, t: usize, up: bool| {
+            let m = BigInt::one() << t;
+            Num::mp(Mp::fin(&(if up { m + BigInt::one() } else { m - BigInt::one() }), -(t as i64), p))
+        };
+        let pw = |k: usize| BigInt::one() << k;
+        let inf = |n: Num| n.as_mp().unwrap().sp == Sp::PosInf;
+        let zero = |n: Num| n.as_mp().unwrap().is_zero();
+        assert!(inf(mp_pow(&one_eps(2048, 2000, true), &pw(2100))));
+        assert!(zero(mp_pow(&one_eps(2048, 2000, true), &-(pw(2100) + BigInt::one()))));
+        assert!(zero(mp_pow(&one_eps(1100, 1000, false), &pw(1100))));
+        assert!(inf(mp_pow(&one_eps(1100, 1000, false), &-pw(1100))));
+        assert!(crate::err::catch(|| mp_pow(&one_eps(2048, 2000, true), &pw(2060))).is_err());
+        // (a complex one: generic_power by the bits, I^(2^100) is 1, and
+        // pow_big is pow_int within i64)
+        let i = Mpc::new(Mp::zero(100, false), Mp::from_f64(1.0, 100));
+        let n100 = BigInt::one() << 100usize;
+        for (d, re, im) in [(0i64, 1.0, 0.0), (1, 0.0, 1.0), (2, -1.0, 0.0), (3, 0.0, -1.0)] {
+            let z = i.pow_big(&(&n100 + BigInt::from(d)));
+            assert!(z.re.to_f64() == re && z.im.to_f64() == im, "I^(2^100 + {})", d);
+        }
+        let z = Mpc::new(Mp::from_f64(0.6, 100), Mp::from_f64(0.8, 100));
+        for n in [5i64, -7, 1001, -4096] {
+            assert!(z.pow_big(&BigInt::from(n)).same_value(&z.pow_int(n)), "{}", n);
+        }
+        assert!(crate::err::catch(|| mp_pow(&Num::mpc(Mpc::new(Mp::from_f64(2.0, 100), Mp::from_f64(1.0, 100))), &n100)).is_err());
+    }
+
+    #[test]
+    fn rr_cc_huge_powers() {
+        // (an RR power is mpfr_pow_si's, correctly rounded, however large
+        // its exponent: Sage's values)
+        let rr = |x: f64| Num::Float(x, 0.0, Fk::RR);
+        let refused = |f: &dyn Fn() -> Num| match crate::err::catch(f) {
+            Err(SymError::NotImplemented(m)) => m,
+            r => panic!("not refused: {:?}", r),
+        };
+        assert_eq!(rr(-1.0001).pow_int(40000), rr(54.587232222778944));
+        assert_eq!(rr(1.0000001).pow_int(10_000_000), rr(2.7182816941320818));
+        assert_eq!(rr(0.9999999).pow_int(-1_000_000_000), rr(2.6881304409450066e43));
+        // (past the doubles: about RR, not about an exact power's integer)
+        assert!(refused(&|| rr(2.0).pow_int(1_000_000)).starts_with("pow(2.00000000000000, 1000000): the value in RR, past the double range"));
+        assert!(refused(&|| Num::Float(2.0, 1.0, Fk::CC).pow_int(1_000_000_000_000)).starts_with("pow(2.00000000000000 + 1.00000000000000*I, 1000000000000): the value in CC"));
+        // (past MPFR's exponents, Sage's infinity or 0, signed as the power)
+        assert_eq!(rr(2.0).pow_int(9_000_000_000_000_000_000), rr(f64::INFINITY));
+        assert_eq!(rr(-2.0).pow_int(9_000_000_000_000_000_001), rr(f64::NEG_INFINITY));
+        assert_eq!(rr(1e-300).pow_int(1_000_000_000_000_000_000), rr(0.0));
+        assert!(rr(-0.5).pow_int(9_000_000_000_000_000_001).to_c64().0.is_sign_negative());
+        assert_eq!(rr(2.0).pow_int(i64::MIN), rr(0.0));
+        // (the doubles' own powers stay as they were)
+        assert_eq!(rr(3.0).pow_int(2), rr(9.0));
+        assert_eq!(rr(2.0).pow_int(-1), rr(0.5));
     }
 
     #[test]

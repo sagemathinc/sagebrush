@@ -15,13 +15,14 @@ import sys as _sys_limit
 # session's memory, admitted before any copy: src/runtime/format.ts)
 _sys_limit.set_int_max_str_digits(0)
 from fractions import Fraction as _Fraction
+from copy import copy, deepcopy  # (globals in Sage)
 
 __all__ = [
     # permutation groups (Sagebrush's engine)
     "PermutationGroup", "PermutationGroupElement", "SymmetricGroup", "AlternatingGroup",
     "CyclicPermutationGroup", "DihedralGroup", "MathieuGroup", "PSL", "PGL", "KleinFourGroup", "TransitiveGroup", "TransitiveGroups",
     # modular forms and elliptic curves (Sagebrush's engines)
-    "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "DirichletGroup", "EllipticCurve",
+    "ModularSymbols", "ModularForms", "CuspForms", "Gamma0", "Cusp", "DirichletGroup", "EllipticCurve",
     "Newforms", "newform_orbits",
     # Hilbert modular forms over Q(sqrt(5)) (engine/hmf; PSAGE's names)
     "HilbertModularForms",
@@ -35,7 +36,7 @@ __all__ = [
     "matrix", "Matrix", "MatrixSpace", "identity_matrix", "zero_matrix", "diagonal_matrix", "CC", "vector",
     "block_matrix", "block_diagonal_matrix", "column_matrix", "kernel",
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
-    "PolynomialRing", "polygen", "parent",
+    "PolynomialRing", "polygen", "parent", "copy", "deepcopy",
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
     "prime_range", "prime_powers", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
@@ -72,7 +73,7 @@ __all__ = [
     "cylindrical_plot3d", "revolution_plot3d", "sphere", "point3d", "line3d", "text3d", "arrow3d",
     "polygon3d", "plot_vector_field3d", "tetrahedron", "cube", "octahedron",
     "dodecahedron", "icosahedron", "contour_plot", "density_plot", "implicit_plot",
-    "region_plot", "plot_vector_field", "plot_slope_field", "colormaps",
+    "region_plot", "plot_vector_field", "plot_slope_field", "colormaps", "matrix_plot",
     # interact
     "search_doc", "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
     "text_control",
@@ -3568,6 +3569,17 @@ def sqrt(x):
 
         sage: sqrt(16), sqrt(9/4), sqrt(2), sqrt(2.0)
         (4, 3/2, sqrt(2), 1.41421356237310)
+
+    Of an element of CC, Sage's sqrt: an exact 0 real part on the negative
+    real axis, |z| correctly rounded (here the bounds of its rounding, in
+    exact fractions)::
+
+        sage: sqrt(CC(-4, 0)), sqrt(CC(-3, 4)), sqrt(CC(0, 0))
+        (2.00000000000000*I, 1.00000000000000 + 2.00000000000000*I, 0.000000000000000)
+        sage: import random, math; from fractions import Fraction as F; from _sage_matrix import _hypot_rn  # sagebrush only
+        sage: random.seed(1); xs = [(math.ldexp(random.uniform(1, 2), random.randint(-60, 60)), math.ldexp(random.uniform(1, 2), random.randint(-60, 60))) for i in range(1000)]  # sagebrush only
+        sage: all((F(h) - F(math.ulp(h)) / 2) ** 2 <= F(x) ** 2 + F(y) ** 2 <= (F(h) + F(math.ulp(h)) / 2) ** 2 for x, y in xs for h in [_hypot_rn(x, y)])  # sagebrush only
+        True
     """
     if isinstance(x, float):
         if isinstance(x, _RealBig):
@@ -3582,6 +3594,11 @@ def sqrt(x):
         if x < 0:
             return CC(0, _math.sqrt(-x))
         return RealNumber(_math.sqrt(x))
+    if type(x).__name__ == "ComplexNumber":
+        # (an element of CC: Sage's sqrt, step by step, not its power z^0.5,
+        # which is exp(log(z)/2) and NaN at 0)
+        from _sage_matrix import _cc_sqrt
+        return _cc_sqrt(x)
     if isinstance(x, complex):
         return CC(x ** 0.5)
     if isinstance(x, int) and x >= 0:
@@ -4220,6 +4237,14 @@ _Integer = _install_int_methods(_sys.modules[__name__])
 if _Integer is not None:
     Integer = _Integer
 
+# (sagebrush.poly.qclear accepts Sage's own Integer and Rational by exact type,
+# and the int a Rational's numerator() or denominator() returns)
+import _sagebrush_lib.poly as _sb_poly
+_sb_poly._QCLEAR_FRACTIONS.add(Rational)
+_sb_poly._QCLEAR_INTS.add(_CallableInt)
+if isinstance(Integer, type):
+    _sb_poly._QCLEAR_INTS.add(Integer)
+
 
 # Sage shows a tuple or list of objects printed on several lines (matrices)
 # side by side, each bottom-aligned, the brackets on lines of their own:
@@ -4228,6 +4253,56 @@ if _Integer is not None:
 #   [0 1 0]  [1 0]
 #   [0 0 1], [0 1]
 #   )
+def _has_sequence(v, depth=0):
+    # (a Sage sequence, one that prints one item per line, inside lists and
+    # tuples: lib/_sage_ffmat_more.py's _Sequence marks itself)
+    if getattr(v, "_display_as_list", False):
+        return True
+    if type(v) in (list, tuple) and depth < 8:
+        return any(_has_sequence(x, depth + 1) for x in v)
+    return False
+
+
+def _pretty(v, indent):
+    # IPython's pretty printing, as Sage's display: a list or tuple on one
+    # line when it fits in 79 columns and its items are one line each, else
+    # one item per line, indented by the nesting depth
+    seq = getattr(v, "_display_as_list", False)
+    if seq or type(v) in (list, tuple):
+        o, c = ("(", ")") if type(v) is tuple else ("[", "]")
+        parts = [_pretty(x, indent + 1) for x in v]
+        tail = "," if type(v) is tuple and len(v) == 1 else ""
+        flat = o + ", ".join(parts) + tail + c
+        if "\n" not in flat and indent + len(flat) <= 79:
+            return flat
+        return o + (",\n" + " " * (indent + 1)).join(parts) + tail + c
+    return repr(v).replace("\n", "\n" + " " * indent)
+
+
+def _pretty_sequences(v):
+    """Sage's display of a value holding a Sage sequence (eigenvectors,
+    eigenspaces), whose repr prints one item per line but whose display
+    is IPython's pretty printing of a list; None for any other value.
+
+    EXAMPLES::
+
+        sage: matrix(GF(101), [[1, 2], [2, 1]]).eigenvectors_right()
+        [(100, [(1, 100)], 1), (3, [(1, 1)], 1)]
+        sage: matrix(GF(101), [[2, 1], [0, 3]]).eigenspaces_right()
+        [(3,
+          Vector space of degree 2 and dimension 1 over Finite Field of size 101
+          User basis matrix:
+          [1 1]),
+         (2,
+          Vector space of degree 2 and dimension 1 over Finite Field of size 101
+          User basis matrix:
+          [1 0])]
+    """
+    if not _has_sequence(v):
+        return None
+    return _pretty(v, 0)
+
+
 def _side_by_side(v):
     if type(v) not in (tuple, list) or not v:
         return None
@@ -4530,7 +4605,9 @@ def _install_displayhook():
             return
 
     def hook(v):
-        s = _side_by_side(v)
+        s = _pretty_sequences(v)
+        if s is None:
+            s = _side_by_side(v)
         if s is None and type(v) is dict:
             s = _sorted_dict_repr(v)
         if s is None:

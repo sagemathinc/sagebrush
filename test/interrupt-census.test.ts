@@ -23,16 +23,16 @@ for (const e of matrix.entries) {
 
 test("every exported engine entry point and every non-polling wasm module has a matrix entry", () => {
   const missing: string[] = [];
-  for (const tr of ["engineCall", "symCall", "mpCall"]) for (const n of census.transports[tr]) if (!listed.has(`${tr}:${n}`)) missing.push(`${tr}:${n}`);
+  for (const tr of ["engineCall", "symCall", "mpCall", "binCall"]) for (const n of census.transports[tr]) if (!listed.has(`${tr}:${n}`)) missing.push(`${tr}:${n}`);
   for (const m of census.transports.wasmModules) if (!m.reads_interrupt && !listed.has(`wasm:${m.module}`)) missing.push(`wasm:${m.module}`);
   assert.deepEqual(missing, [], "new entry points without a matrix entry (classify them in web/interrupt-matrix-gen.py): " + missing.join(", "));
 });
 
 test("no matrix entry names an engine entry point that no longer exists", () => {
   const known = new Set<string>();
-  for (const tr of ["engineCall", "symCall", "mpCall"]) for (const n of census.transports[tr]) known.add(`${tr}:${n}`);
+  for (const tr of ["engineCall", "symCall", "mpCall", "binCall"]) for (const n of census.transports[tr]) known.add(`${tr}:${n}`);
   for (const m of census.transports.wasmModules) known.add(`wasm:${m.module}`);
-  const stale = matrix.entries.map((e: any) => e.transport).filter((t: string) => /^(engineCall|symCall|mpCall|wasm):/.test(t) && !known.has(t));
+  const stale = matrix.entries.map((e: any) => e.transport).filter((t: string) => /^(engineCall|symCall|mpCall|binCall|wasm):/.test(t) && !known.has(t));
   assert.deepEqual(stale, []);
 });
 

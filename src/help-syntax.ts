@@ -28,6 +28,7 @@ export function helpSyntax(src: string): string {
 // IPython's syntax in a notebook cell or interactive input: magics
 // (src/magic-syntax.ts) and help lines.
 // The code magics run is then expanded in the parsed tree (magicTransform).
-export function ipythonSyntax(src: string): string {
-  return helpSyntax(magicSyntax(src));
+// In Sage mode, `time STATEMENT` is `%time STATEMENT` too, as in Sage.
+export function ipythonSyntax(src: string, sage = false): string {
+  return helpSyntax(magicSyntax(src, sage));
 }

@@ -164,7 +164,8 @@ export const HEAP_EXTERNAL_SAMPLE = `    _m = ""
         _m = ""
 `;
 
-// the leak criterion (r4 §6.1): from repeat 3 to the last, each metric grows at most
+// the leak criterion (r4 §6.1): from repeat 3 (or a case's leak_from, the repeat after which its heap
+// has settled: E3a's one-time high-water step at its larger sizes) to the last, each metric grows at most
 // max(64 MiB, 10%) and the thread count does not change.  samples: [{ i, rss_kb, threads }], one
 // per repeat.  20 repeats is the full check; fewer is the short one (CI), labelled as such.
 // Returns null when it can't be measured (fewer than 3 repeats, or no metric).
@@ -172,19 +173,19 @@ export const HEAP_EXTERNAL_SAMPLE = `    _m = ""
 // JS heap plus its external memory after a full collection, mem_kb, which RSS can't tell from the
 // garbage of the trials before it; P2a, leak follow-up): growth from repeat 3 against max(16 MiB,
 // 10%) of it.  A host without that figure (the browser) is measured by RSS, and says so.
-export function leakCheck(samples, full = 20, measure = "rss") {
+export function leakCheck(samples, full = 20, measure = "rss", from = 3) {
   // (a final sample read while the target was exiting is dropped, and the result says so; an exiting sample before
   // the last is invalid evidence: the target was going while trials still ran; and so is a sample error)
   const bad = samples.find((x) => x.sample_error);
-  if (bad) return { ok: false, invalid: true, why: `the leak sample at repeat ${bad.i} couldn't be read: ${bad.sample_error}`, from: 3, to: samples.at(-1)?.i ?? 0, threads_same: false };
+  if (bad) return { ok: false, invalid: true, why: `the leak sample at repeat ${bad.i} couldn't be read: ${bad.sample_error}`, from, to: samples.at(-1)?.i ?? 0, threads_same: false };
   const exitingAt = samples.findIndex((x) => x.exiting);
   if (exitingAt >= 0 && exitingAt < samples.length - 1) {
-    return { ok: false, invalid: true, why: `the target was exiting at repeat ${samples[exitingAt].i}, before the last`, from: 3, to: samples.at(-1)?.i ?? 0, threads_same: false };
+    return { ok: false, invalid: true, why: `the target was exiting at repeat ${samples[exitingAt].i}, before the last`, from, to: samples.at(-1)?.i ?? 0, threads_same: false };
   }
   const lastExiting = exitingAt >= 0;
   const dropped = lastExiting ? samples.at(-1) : null;
   if (lastExiting) samples = samples.slice(0, -1);
-  const r = leakCheckLive(samples, full, measure);
+  const r = leakCheckLive(samples, full, measure, from);
   return r && lastExiting ? { ...r, last_exiting: true, ...(dropped.why ? { last_exiting_why: dropped.why } : {}) } : r;
 }
 
@@ -254,13 +255,13 @@ export function sessionEnd(deps) {
   };
 }
 
-function leakCheckLive(samples, full, measure) {
-  const from = samples.find((x) => x.i === 3), last = samples.at(-1);
-  if (!from || !last || last.i <= 3) return null;
-  const tail = samples.filter((x) => x.i >= 3);
+function leakCheckLive(samples, full, measure, start = 3) {
+  const from = samples.find((x) => x.i === start), last = samples.at(-1);
+  if (!from || !last || last.i <= start) return null;
+  const tail = samples.filter((x) => x.i >= start);
   const threads = tail.map((x) => x.threads);
   const threadsSame = threads.every((t) => t === threads[0]);
-  const base = { check: last.i >= full ? "full" : "short", from: 3, to: last.i, threads_same: threadsSame };
+  const base = { check: last.i >= full ? "full" : "short", from: start, to: last.i, threads_same: threadsSame };
   if (measure === "heap+external" && tail.every((x) => Number.isFinite(x.mem_kb))) {
     const growth_kb = last.mem_kb - from.mem_kb;
     const allowed_kb = Math.max(16 * 1024, 0.1 * from.mem_kb);
