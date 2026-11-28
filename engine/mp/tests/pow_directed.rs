@@ -87,3 +87,45 @@ fn near_integer_exponents_on_their_side() {
     assert_eq!(up(&["1", "ffffffffffffffff", "-64", "64"], 1), "0 1 0 1");
     assert_eq!(up(&["1", &"f".repeat(48), "-192", "192"], 53), "0 10000000000001 -53 53");
 }
+
+/// Powers whose true value is representable, every directed rounding at 8,
+/// 24, 53 and 128 bits: on its side of that value, and promptly.  (A result
+/// already on its side keeps the reference's bytes, which may be a unit
+/// past the exact value: the claim is the side, not correct rounding.)
+/// (2^-28 to the
+/// 201/4, rounded up at 128 bits, is 2^-1407: a first result on the wrong
+/// side left bounds straddling the exact value, which never rounded alike, so
+/// the precision doubled to the session's limit, over 5 s, until the bound
+/// rounded on the right side was tested for exactness.)
+#[test]
+fn exact_powers_are_exact_and_prompt() {
+    // (s, t, s^t), each as sign, odd mantissa in hex, exponent, bit count
+    let cases: [[[&str; 4]; 3]; 6] = [
+        [["0", "1", "-28", "1"], ["0", "c9", "-2", "8"], ["0", "1", "-1407", "1"]],
+        [["0", "1", "-28", "1"], ["1", "c9", "-2", "8"], ["0", "1", "1407", "1"]],
+        [["0", "51", "-4", "7"], ["0", "3", "-2", "2"], ["0", "1b", "-3", "5"]],
+        [["0", "9", "0", "4"], ["0", "1", "-1", "1"], ["0", "3", "0", "2"]],
+        [["0", "1", "10", "1"], ["1", "3", "-1", "2"], ["0", "1", "-15", "1"]],
+        [["0", "19a1", "-16", "13"], ["0", "5", "-3", "3"], ["0", "f3", "-10", "8"]],
+    ];
+    let mut bad = vec![];
+    for [s, t, y] in cases {
+        for prec in [8, 24, 53, 128] {
+            for rnd in [Rnd::Ceiling, Rnd::Floor, Rnd::Down, Rnd::Up] {
+                let start = std::time::Instant::now();
+                let got = checked(|| mpf_pow(&parse(&s), &parse(&t), prec, rnd)).unwrap();
+                let ms = start.elapsed().as_millis();
+                // (got - s^t: at least 0 rounded up, at most 0 rounded down)
+                let d = mpf_add(&got, &parse(&y), 0, Rnd::Down, true);
+                let up = matches!(rnd, Rnd::Ceiling | Rnd::Up);
+                if !(d.man.is_zero() || (d.sign == 0) == up) || ms > 1000 {
+                    bad.push(format!("{:?}^{:?} at {} bits, {:?}: {} in {} ms", s, t, prec, rnd, show(&Ok(got)), ms));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+    // (the reported case: exactly 2^-1407, the bound rounded up being exact)
+    let r = checked(|| mpf_pow(&parse(&["0", "1", "-28", "1"]), &parse(&["0", "c9", "-2", "8"]), 128, Rnd::Up));
+    assert_eq!(show(&r), "0 1 -1407 1");
+}

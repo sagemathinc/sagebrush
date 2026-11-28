@@ -766,9 +766,13 @@ fn widen(x: &Mpf, wp: u64, up: bool) -> Mpf {
 /// result's direction, which a negative t turns around: 17498112^(-31/4)
 /// rounded up was below the true value.)  A Ziv loop: certified bounds lo <=
 /// s^t <= hi at wp bits decide the side of r, or else wp doubles; a wrong r
-/// gives way to the correct rounding, once lo and hi round alike.  An r equal
-/// to the true value never separates from it: an exactness test decides
-/// that where it fits the session's limb limit (pow_is_exact).  The loop ends
+/// gives way to the correct rounding, once lo and hi round alike.  An exact
+/// true value never separates from its bounds, so the bounds of a wrong r
+/// straddling it never round alike: an exactness test decides that where it
+/// fits the session's limb limit (pow_is_exact), of each distinct candidate
+/// once, r while it may be right, else the bound rounded on r's side (lo
+/// rounded up, or hi rounded down; 2^-28 to the 201/4 rounded up at 128 bits
+/// doubled its precision to the limit before).  The loop ends
 /// before its precision would pass that limit, keeping r: there, and only
 /// there, the side is not certified.  Nearest is not checked.
 fn pow_directed_side(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, r: Mpf) -> Mpf {
@@ -786,7 +790,8 @@ fn pow_directed_side(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, r: Mpf) -> Mpf {
         let d = mpf_add(x, y, 0, Rnd::Down, true);
         if d.man.is_zero() { Ordering::Equal } else if d.sign == 1 { Ordering::Less } else { Ordering::Greater }
     };
-    let mut exact: Option<Option<bool>> = None;
+    // (the candidates whose exactness was tested, none of them exact)
+    let mut tested: Vec<Mpf> = Vec::new();
     let mut wp = 2 * prec + 64;
     loop {
         let (lo, hi) = (pow_bound(s, t, wp, false), pow_bound(s, t, wp, true));
@@ -806,8 +811,12 @@ fn pow_directed_side(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, r: Mpf) -> Mpf {
         if wrong && a == b {
             return a;
         }
-        if !wrong && *exact.get_or_insert_with(|| pow_is_exact(&r, s, t)) == Some(true) {
-            return r;
+        let cand = if !wrong { &r } else if up { &a } else { &b };
+        if !tested.contains(cand) {
+            if pow_is_exact(cand, s, t) == Some(true) {
+                return cand.clone();
+            }
+            tested.push(cand.clone());
         }
         // (the next precision within the session's limb limit, else stop:
         // a wrong r gives way to the bound on its side, an undecided one
