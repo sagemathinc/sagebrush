@@ -26,7 +26,9 @@ export const GRANTS_KEY = "sagebrush-grants";
 // doesn't know): `seenFile`, grants.json's text as the record was last merged with or written to it, by whichever
 // window of the app did so, the base of every merge, so a window opening, or past its first merge, merges three ways
 // over the record it reads and a grant another window took back isn't read as this page's own; and `pendingFile`,
-// a write of grants.json begun whose end wasn't kept here, so either text may be grants.json's last.
+// a write of grants.json begun whose end wasn't kept here, so either text may be grants.json's last. (One copy of
+// grants.json's text: the record in localStorage is about twice the size of the permissions it holds, both within
+// GRANT_CAPS's bounds.)
 type Rec = { v: 1; seq?: number; migrated?: number; docs: Record<string, unknown>; seenFile?: string; pendingFile?: string };
 export interface GrantsWorkspace {
   stat(p: string): Promise<{ kind: string; ref: string | null } | undefined>;
@@ -159,8 +161,12 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
       }
       // (the base: grants.json as the shared record was last merged with or written to, by any window (seenFile), so a
       // window never merges over an older base than the record it reads; none kept: this page's own. A write whose
-      // end wasn't kept (pendingFile): merged over both, and only what both merges allow stays)
-      const shared = parseGrants(cur.seenFile), pending = parseGrants(cur.pendingFile), known = !!shared || !!pending || seen !== "";
+      // end wasn't kept (pendingFile), grants.json neither text: merged over both, and only what both merges allow stays)
+      // (grants.json as the marked write left it: it landed; as before it: it didn't; neither, another window's write
+      // since: not known, so both)
+      const landed = cur.pendingFile !== undefined && text === cur.pendingFile, missed = cur.pendingFile !== undefined && text === cur.seenFile;
+      const shared = parseGrants(landed ? cur.pendingFile : cur.seenFile), pending = landed || missed ? null : parseGrants(cur.pendingFile);
+      const known = !!shared || !!pending || seen !== "";
       const over = mergeGrants(shared ? shared.docs : base, file, local, known);
       const merged = pending ? narrower(over, mergeGrants(pending.docs, file, local, known)) : over;
       for (const [k, e] of Object.entries(merged)) { const id = await idOf(ws, k); if (id) docs[id] = e; }
@@ -192,7 +198,8 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
     adopt: () => one(async (): Promise<{ changed: number; ahead: boolean; failed?: unknown }> => {
       try {
         const text = await read();
-        if (text === seen) return { changed: 0, ahead: false };
+        // (the same text as last seen is nothing new, unless a write's end wasn't kept: then merged, so the mark is settled)
+        if (text === seen && parseGrants(storage.getItem(GRANTS_KEY))?.pendingFile === undefined) return { changed: 0, ahead: false };
         return await take(text);
       } catch (e) { console.warn("grants.json:", e); return { changed: 0, ahead: false, failed: e }; }
     }),
@@ -200,6 +207,9 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
      * then written again. */
     write: () => one(async () => {
       for (let tries = 0; tries < 10; tries++) {
+        // (an earlier write's end not kept (its mark still there): merged first, over both texts, as the next merge
+        // would, so a new mark never takes the place of one not yet reconciled)
+        if (parseGrants(storage.getItem(GRANTS_KEY))?.pendingFile !== undefined) await take(await read());
         const rec = await grantsToKeep(ws, storage), json = J(rec);
         // (the write marked in the record before it is made (none made if that can't be kept), its end after: one that
         // can't be kept leaves the mark, and the next merge holds to what both texts allow)
@@ -212,8 +222,9 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
           return;
         } catch (e) {
           if (!String((e as any)?.message ?? e).includes(CHANGED)) throw e;
-          // (refused by the app: not written, so its mark goes; any other failure leaves it, the write maybe made)
-          mark(({ pendingFile: _, ...r }) => r);
+          // (refused by the app: not written, so its own mark goes, and only its own; any other failure leaves it, the
+          // write maybe made)
+          mark(({ pendingFile, ...r }) => (pendingFile === json ? r : { ...r, pendingFile }));
           await take(await read());
         }
       }

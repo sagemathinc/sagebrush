@@ -21,6 +21,9 @@ const files = () => {
   return { invoke: async (c, a) => { calls.push(c); if (c === "grants_read") return now(); if (c === "grants_write") { if (a.expect !== now()) throw new Error("grants.json was changed by another window"); kept = a.json; return null; } throw new Error(c); }, kept: () => kept, set: (t) => (kept = t), calls };
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// (a change of the record as permissions.js makes one: the fields it doesn't know (the base grants-file.ts keeps in it)
+// kept)
+const withBase = (st, rec) => { const cur = JSON.parse(st.getItem(GRANTS_KEY) ?? "{}"); return J({ ...rec, ...("seenFile" in cur ? { seenFile: cur.seenFile } : {}), ...("pendingFile" in cur ? { pendingFile: cur.pendingFile } : {}) }); };
 
 // launch 1: two workspace notebooks and a notebook file allowed; one more id that's no notebook now
 const w1 = workspace({ "/a/one.ipynb": { kind: "notebook", ref: "r1" }, "/b/two.ipynb": { kind: "notebook", ref: "r2" }, "/data.csv": { kind: "file", ref: null } });
@@ -64,7 +67,7 @@ const fk = files(), sk = store({ [GRANTS_KEY]: J(rec1) });
 let changed = null;
 const k = keepGrants(w1, fk.invoke, (fn) => (changed = fn), sk, 50);
 changed();
-sk.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { write: ["/a", "/a2"], t: 10 } } }));
+sk.setItem(GRANTS_KEY, withBase(sk, { ...rec1, docs: { r1: { write: ["/a", "/a2"], t: 10 } } }));
 changed();
 await k.flush();
 // (two changes in a row: written as one or two writes, the last of them the record as it is after both; a change during
@@ -77,7 +80,7 @@ ok(nWrites >= 1 && nWrites <= 2 && J(parseGrants(fk.kept()).docs) === J({ "ws:/a
 {
   let release, mode = "hold", writes = 0, kept = "";
   const invoke = async (c, a) => {
-    if (c !== "grants_write") return "";
+    if (c !== "grants_write") return kept;
     writes++;
     if (mode === "hold") await new Promise((r) => (release = r));
     if (mode === "fail") throw new Error("disk full");
@@ -92,13 +95,13 @@ ok(nWrites >= 1 && nWrites <= 2 && J(parseGrants(fk.kept()).docs) === J({ "ws:/a
   await new Promise((r) => setTimeout(r, 100));
   ok(!flushed && g.unwritten, "a write held unfinished: flush() still waits, the change still unwritten");
   // (a denial made while that write is held: the record as it is then is written after it)
-  sh.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { denied: [["write", "/a", 11]], t: 11 } } }));
+  sh.setItem(GRANTS_KEY, withBase(sh, { ...rec1, docs: { r1: { denied: [["write", "/a", 11]], t: 11 } } }));
   changed();
   mode = "ok"; release();
   await f1;
   ok(flushed && !g.unwritten && J(parseGrants(kept).docs) === J({ "ws:/a/one.ipynb": { denied: [["write", "/a", 11]], t: 11 } }), "...released: flush() resolves only once the latest change (the denial made meanwhile) is in grants.json");
   mode = "fail";
-  sh.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { write: ["/again"], t: 12 } } }));
+  sh.setItem(GRANTS_KEY, withBase(sh, { ...rec1, docs: { r1: { write: ["/again"], t: 12 } } }));
   changed();
   const why = await g.flush().then(() => "resolved", (e) => String(e.message));
   ok(why === "grants.json: disk full" && g.unwritten, "a write that fails: flush() rejects, saying why, and the change stays unwritten: " + why);
@@ -130,7 +133,7 @@ ok(nWrites >= 1 && nWrites <= 2 && J(parseGrants(fk.kept()).docs) === J({ "ws:/a
   await g.flush();
   await new Promise((r) => setTimeout(r, 120));
   const before = writes;
-  sl.setItem(GRANTS_KEY, J({ ...rec1, docs: { r1: { write: ["/late"], t: 30 } } }));
+  sl.setItem(GRANTS_KEY, withBase(sl, { ...rec1, docs: { r1: { write: ["/late"], t: 30 } } }));
   changed();
   const done = await Promise.race([g.flush().then(() => "flushed"), new Promise((r) => setTimeout(() => r("stuck"), 1000))]);
   ok(done === "flushed" && writes === before + 1 && !g.unwritten && J(parseGrants(kept).docs) === J({ "ws:/a/one.ipynb": { write: ["/late"], t: 30 } }), "a retry firing after a successful flush: the next change is still written, and flush() resolves: " + J({ done, writes: writes - before }));
@@ -467,6 +470,66 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   await A.write();
   ok(f.kept().includes("/b") && f.kept().includes("/o") && JSON.parse(localStorage.getItem(GRANTS_KEY)).pendingFile === undefined, "a refused write: merged and written again, /b and the other window's /o both in, no mark left: " + f.kept());
   delete globalThis.localStorage;
+}
+
+// a write's end not kept, then more: a later write, a conflict, a fresh window, the same text adopted. Each starts as:
+// grants.json written with this page's /a, the record's base not moved on (storage fails just then), and the mark left
+{
+  const failedSettle = async () => {
+    const mem = new Map();
+    let failNext = false, failOnce = true;
+    globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { if (failNext) { failNext = false; throw new Error("The quota has been exceeded."); } mem.set(k, String(v)); }, removeItem: (k) => mem.delete(k) };
+    const { createPermissions } = await import("../notebook/permissions.js");
+    const perms = createPermissions();
+    const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+    let onRead = null;
+    const invoke = async (c, a) => { const r = await f.invoke(c, a); if (c === "grants_read" && onRead) { const h = onRead; onRead = null; h(); } if (c === "grants_write" && failOnce) failNext = !(failOnce = false); return r; };
+    f.set(J({ v: 1, seq: 1, docs: {} }));
+    const A = grantsSync(w, invoke, localStorage);
+    await A.restore();
+    perms.grant("id1", "write", "/a");
+    await A.write();
+    const rec = JSON.parse(localStorage.getItem(GRANTS_KEY));
+    const ready = f.kept().includes("/a") && rec.pendingFile === f.kept() && !rec.seenFile.includes("/a");
+    return { perms, f, w, A, invoke, ready, setOnRead: (h) => (onRead = h), done: () => delete globalThis.localStorage };
+  };
+  const revoked = J({ v: 1, seq: 20, docs: { "file:/x/o.ipynb": { write: ["/o"], t: 1 } } });
+  {
+    // (another window takes /a back; a later change here (/b) is written before that is adopted)
+    const { perms, f, A, ready, done } = await failedSettle();
+    f.set(revoked);
+    perms.grant("id1", "write", "/b");
+    await A.write();
+    ok(ready && !f.kept().includes('"/a"') && f.kept().includes("/b") && f.kept().includes("/o") && J(perms.writeTrees("id1")) === '["/b"]', "a write's end not kept, then a later write: the earlier write's mark is merged first; /a stays taken back, /b and the other window's /o written: " + f.kept());
+    done();
+  }
+  {
+    // (the other window's revocation lands just after this page's first read, so its write is refused (a conflict),
+    // then merged and written again)
+    const { perms, f, A, ready, setOnRead, done } = await failedSettle();
+    perms.grant("id1", "write", "/b");
+    setOnRead(() => f.set(revoked));
+    await A.write();
+    const rec = JSON.parse(localStorage.getItem(GRANTS_KEY));
+    ok(ready && !f.kept().includes('"/a"') && f.kept().includes("/b") && f.kept().includes("/o") && rec.pendingFile === undefined, "a write's end not kept, then a write refused by a conflict: only its own mark goes; /a stays taken back, /b and /o written, no mark left: " + f.kept());
+    done();
+  }
+  {
+    // (a fresh window, its own state empty, over the marked record)
+    const { perms, f, w, invoke, ready, done } = await failedSettle();
+    f.set(revoked);
+    await grantsSync(w, invoke, localStorage).restore();
+    ok(ready && perms.writeTrees("id1").length === 0 && JSON.parse(localStorage.getItem(GRANTS_KEY)).pendingFile === undefined, "a write's end not kept, then a fresh window over the record: /a stays taken back, the mark settled");
+    done();
+  }
+  {
+    // (nothing written since: grants.json is the text this page wrote, as it last saw it; adopted all the same)
+    const { perms, A, f, ready, done } = await failedSettle();
+    await A.adopt();
+    const rec = JSON.parse(localStorage.getItem(GRANTS_KEY));
+    ok(ready && rec.pendingFile === undefined && rec.seenFile === f.kept() && J(perms.writeTrees("id1")) === '["/a"]', "a write's end not kept, the same text adopted: the mark is settled (the write landed), /a kept");
+    done();
+  }
 }
 
 // a notebook changed on both sides since the base, scope by scope: a grant taken back by either is gone, one made by
