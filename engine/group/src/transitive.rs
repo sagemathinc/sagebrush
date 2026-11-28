@@ -27,7 +27,7 @@ use std::collections::HashMap;
 /// The base is P on every block: P's generators on one block of each orbit
 /// of A on the blocks (conjugation by A carries them over the rest), then
 /// A's generators permuting the blocks; A need not be transitive.
-pub fn wreath(p: &Group, a: &Group) -> Group {
+pub fn wreath(p: &Group, a: &Group) -> Result<Group, String> {
     let (b, na) = (p.n, a.n);
     let n = b * na;
     let mut gens = vec![];
@@ -57,12 +57,12 @@ pub fn wreath(p: &Group, a: &Group) -> Group {
     for s in &a.gens {
         gens.push(Perm((0..n as u32).map(|x| s.image(x / b as u32) * b as u32 + x % b as u32).collect()));
     }
-    Group::new(n, gens).unwrap()
+    Group::new(n, gens)
 }
 
 /// The smallest size of a nontrivial block (n if the group is primitive).
-pub fn min_block_size(g: &Group) -> usize {
-    g.blocks_containing(0).first().map_or(g.n, |b| b.len())
+pub fn min_block_size(g: &Group) -> Result<usize, String> {
+    Ok(g.blocks_containing(0)?.first().map_or(g.n, |b| b.len()))
 }
 
 /// A group's elements by cycle type, for conjugacy tests against it.
@@ -96,7 +96,8 @@ pub fn conjugate_profiled(h1: &Group, h2: &Group, prof: &Profile) -> Result<bool
         return Ok(false);
     }
     let mut g1 = h1.clone();
-    g1.reduce_gens();
+    // (only shortens the generating list: refused, the long one is kept)
+    let _ = g1.reduce_gens();
     let gs: Vec<Perm> = g1.gens.iter().filter(|g| !g.is_identity()).cloned().collect();
     if gs.is_empty() {
         return Ok(h2.is_trivial());
@@ -189,18 +190,18 @@ fn outer_s6(s6: &Group) -> Vec<Perm> {
 /// automorphism alpha (inner, conjugation by a transposition for Alt(b),
 /// and Sym(6)'s outer one); then G = <K, (u, 1) t> with t swapping the
 /// blocks, u in Sym(b), and |G| = 2|K|.
-fn two_block_groups(p: &Group, b: usize) -> Vec<Group> {
+fn two_block_groups(p: &Group, b: usize) -> Result<Vec<Group>, String> {
     let n = 2 * b;
     let on1 = |g: &Perm| Perm((0..n as u32).map(|x| if (x as usize) < b { g.image(x) } else { x }).collect());
     let on2 = |g: &Perm| Perm((0..n as u32).map(|x| if (x as usize) >= b { g.image(x - b as u32) + b as u32 } else { x }).collect());
     let both = |g: &Perm, h: &Perm| on1(g).mul(&on2(h));
-    let is_sym = p.order() == named::symmetric(b).order();
+    let is_sym = p.order() == named::symmetric(b)?.order();
     let mut kernels: Vec<Vec<Perm>> = vec![];
     // P x P
     kernels.push(p.gens.iter().map(&on1).chain(p.gens.iter().map(&on2)).collect());
     if is_sym {
         // equal signs: A x A and (t, t) for a transposition
-        let a = named::alternating(b);
+        let a = named::alternating(b)?;
         let t = Perm::from_cycles(b, &[vec![0, 1]]).unwrap();
         let mut k: Vec<Perm> = a.gens.iter().map(&on1).chain(a.gens.iter().map(&on2)).collect();
         k.push(both(&t, &t));
@@ -218,11 +219,11 @@ fn two_block_groups(p: &Group, b: usize) -> Vec<Group> {
         kernels.push(p.gens.iter().zip(im).map(|(g, h)| both(g, h)).collect());
     }
     let swap = Perm((0..n as u32).map(|x| (x + b as u32) % n as u32).collect());
-    let sym = named::symmetric(b);
+    let sym = named::symmetric(b)?;
     let all_u = sym.elements(100_000).unwrap();
     let mut out = vec![];
     for kg in kernels {
-        let kk = Group::new(n, kg.clone()).unwrap();
+        let kk = Group::new(n, kg.clone())?;
         let ko = kk.order();
         // (u, 1) t and (v u, 1) t with (v, 1) in K give the same group: one u per coset N1 u
         let n1: Vec<Perm> = all_u.iter().filter(|v| kk.contains(&on1(v))).cloned().collect();
@@ -238,26 +239,26 @@ fn two_block_groups(p: &Group, b: usize) -> Vec<Group> {
             let s = on1(u).mul(&swap);
             let mut gens = kg.clone();
             gens.push(s);
-            let g = Group::new(n, gens).unwrap();
+            let g = Group::new(n, gens)?;
             if g.order() == &ko * sagebrush_bigint::BigInt::from(2u32) {
                 out.push(g);
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Invariants for bucketing before the conjugacy test.
-fn invariant(g: &Group) -> Vec<String> {
-    let mut v = vec![g.order().to_string(), min_block_size(g).to_string(), g.blocks_containing(0).len().to_string(), g.stabilizer(0).orbits().len().to_string()];
-    v.push(g.derived_subgroup().order().to_string());
+fn invariant(g: &Group) -> Result<Vec<String>, String> {
+    let mut v = vec![g.order().to_string(), min_block_size(g)?.to_string(), g.blocks_containing(0)?.len().to_string(), g.stabilizer(0)?.orbits().len().to_string()];
+    v.push(g.derived_subgroup()?.order().to_string());
     // cycle types: exactly for small groups
     let mut rng = crate::perm::Rng::new(1);
     let (c, exact) = g.cycle_type_counts(200_000, 0, &mut rng);
     if exact {
         v.push(format!("{:?}", c));
     }
-    v
+    Ok(v)
 }
 
 /// The transitive groups of degree n up to conjugacy, smallest first
@@ -277,22 +278,32 @@ pub fn transitive_groups(n: usize) -> Result<Vec<Group>, String> {
     let limit = 300_000u64;
     for b in (2..n).filter(|b| n % b == 0) {
         let a = n / b;
-        let top = named::symmetric(a);
+        let top = named::symmetric(a)?;
         // the wreath products to search: S_b wr S_a if it is small enough,
         // else P wr S_a for each primitive P of degree b that fits
-        let full = wreath(&named::symmetric(b), &top);
+        let full = wreath(&named::symmetric(b)?, &top)?;
         let mut big: Vec<Group> = vec![];
         let ws: Vec<Group> = if full.order() <= limit.into() {
             vec![full]
         } else {
-            let prims = if b <= 9 { crate::lattice::transitive_groups_small(b)?.into_iter().filter(|g| g.is_primitive()).collect::<Vec<_>>() } else { primitive::primitive_groups(b)? };
+            let prims = if b <= 9 {
+                let mut v = vec![];
+                for g in crate::lattice::transitive_groups_small(b)? {
+                    if g.is_primitive()? {
+                        v.push(g);
+                    }
+                }
+                v
+            } else {
+                primitive::primitive_groups(b)?
+            };
             let mut v = vec![];
             for p in prims {
-                let w = wreath(&p, &top);
+                let w = wreath(&p, &top)?;
                 if w.order() <= limit.into() {
                     v.push(w);
-                } else if a == 2 && (p.order() == named::symmetric(b).order() || p.order() == named::alternating(b).order()) {
-                    big.extend(two_block_groups(&p, b));
+                } else if a == 2 && (p.order() == named::symmetric(b)?.order() || p.order() == named::alternating(b)?.order()) {
+                    big.extend(two_block_groups(&p, b)?);
                 } else {
                     return Err(format!("degree {}: the wreath product of a primitive group of order {} (degree {}) with S{} is too big for now", n, p.order(), b, a));
                 }
@@ -301,10 +312,10 @@ pub fn transitive_groups(n: usize) -> Result<Vec<Group>, String> {
         };
         let mut found: Vec<(Vec<String>, Group, Option<Profile>)> = vec![];
         let add = |g: Group, found: &mut Vec<(Vec<String>, Group, Option<Profile>)>| -> Result<(), String> {
-            if !g.is_transitive() || min_block_size(&g) != b {
+            if !g.is_transitive() || min_block_size(&g)? != b {
                 return Ok(());
             }
-            let inv = invariant(&g);
+            let inv = invariant(&g)?;
             for (k, h, prof) in found.iter_mut() {
                 if *k == inv {
                     if prof.is_none() {
@@ -328,7 +339,7 @@ pub fn transitive_groups(n: usize) -> Result<Vec<Group>, String> {
             trace(|| format!("b = {}: lattice of a wreath product of order {}: {} classes ({:?})", b, w.order(), lat.classes.len(), t0.elapsed()));
             for i in 0..lat.classes.len() {
                 sagebrush_interrupt::check();
-                add(lat.group(i), &mut found)?;
+                add(lat.group(i)?, &mut found)?;
             }
             trace(|| format!("b = {}: {} groups so far ({:?})", b, found.len(), t0.elapsed()));
         }
@@ -348,11 +359,11 @@ mod tests {
         // GAP 4.15.1's WreathProduct (on A's moved points, so these tops fix
         // none), and by that formula for tops with fixed points or none moved
         let g = |n: usize, cs: &[&[Vec<u32>]]| Group::new(n, cs.iter().map(|c| Perm::from_cycles(n, c).unwrap()).collect()).unwrap();
-        let order = |p: &Group, a: &Group| wreath(p, a).order().to_string();
-        let (c2, c3, s3) = (named::cyclic(2), named::cyclic(3), named::symmetric(3));
+        let order = |p: &Group, a: &Group| wreath(p, a).unwrap().order().to_string();
+        let (c2, c3, s3) = (named::cyclic(2).unwrap(), named::cyclic(3).unwrap(), named::symmetric(3).unwrap());
         // C2 wr <(0,1)(2,3)>: two orbits, GAP 32 (this was 8); C2 wr C3: 24
         assert_eq!(order(&c2, &g(4, &[&[vec![0, 1], vec![2, 3]]])), "32");
-        assert_eq!(order(&c2, &named::cyclic(3)), "24");
+        assert_eq!(order(&c2, &named::cyclic(3).unwrap()), "24");
         // C3 wr <(0,1), (2,3), (4,5)>: three orbits, GAP 5832; C3 wr <(0,1)(2,3)(4,5)>: 1458
         assert_eq!(order(&c3, &g(6, &[&[vec![0, 1]], &[vec![2, 3]], &[vec![4, 5]]])), "5832");
         assert_eq!(order(&c3, &g(6, &[&[vec![0, 1], vec![2, 3], vec![4, 5]]])), "1458");
@@ -364,7 +375,7 @@ mod tests {
         assert_eq!(order(&c2, &Group::trivial(2)), "4");
         assert_eq!(order(&c2, &Group::trivial(3)), "8");
         // the callers' transitive tops are unchanged: S3 wr S2, 72
-        assert_eq!(order(&s3, &named::symmetric(2)), "72");
+        assert_eq!(order(&s3, &named::symmetric(2).unwrap()), "72");
     }
 
     #[test]
@@ -372,7 +383,7 @@ mod tests {
         // two regular C2 x C2 x C2... : the two transitive D4 on 4 points are conjugate; C4 is not D4
         let d1 = Group::new(4, vec![Perm::from_cycles(4, &[vec![0, 1, 2, 3]]).unwrap(), Perm::from_cycles(4, &[vec![0, 2]]).unwrap()]).unwrap();
         let d2 = Group::new(4, vec![Perm::from_cycles(4, &[vec![0, 2, 1, 3]]).unwrap(), Perm::from_cycles(4, &[vec![0, 1]]).unwrap()]).unwrap();
-        let c4 = named::cyclic(4);
+        let c4 = named::cyclic(4).unwrap();
         assert!(conjugate_in_sym(&d1, &d2, 1000).unwrap());
         assert!(!conjugate_in_sym(&d1, &c4, 1000).unwrap());
         // PGL(2,5) on 6 points and S5 acting... both order 120 transitive on 6: conjugate (S5 has one transitive class on 6)

@@ -63,7 +63,8 @@ pub fn few_generators(h: &Group) -> Vec<Perm> {
         }
     }
     let mut g = h.clone();
-    g.reduce_gens();
+    // (only shortens the generating list: refused, the long one is kept)
+    let _ = g.reduce_gens();
     g.gens.clone()
 }
 

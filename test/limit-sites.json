@@ -487,10 +487,25 @@
   "class": "3",
   "owner": "class group/number fields"
  },
+ "engine/galois/src/lib.rs :: find_invariant :: Ok(Invariant { terms, degree: (n * (n - 1) / 2) as u32, max_exp: (n - 1) as u8, diffs: vec![], seeds: vec![] }) #0": {
+  "class": "none",
+  "owner": "Galois groups and permutation groups (engine/galois, engine/group)",
+  "reason": "an invariant's degree and exponent, and an example's printout of the largest number of blocks: computations, not limits (re-spelled for the fallible group API)"
+ },
+ "engine/galois/src/lib.rs :: find_invariant :: let mut best: Option<Invariant> = find_product_invariant(n, g, k)?.map(|(d, seeds)| Invariant { terms: vec![], degree: d.len() as u32, max_exp: 1, diffs: d, seeds }); #0": {
+  "class": "none",
+  "owner": "Galois groups and permutation groups (engine/galois, engine/group)",
+  "reason": "an invariant's degree and exponent, and an example's printout of the largest number of blocks: computations, not limits (re-spelled for the fallible group API)"
+ },
  "engine/galois/src/tables.rs ::  :: pub const MAX_DEGREE: usize = 23; #0": {
   "class": "3",
   "owner": "Galois groups/data",
   "row": "inv-43"
+ },
+ "engine/group/examples/profile16.rs :: main :: let t0 = Instant::now(); let mut mx = 0; for g in &groups { mx = mx.max(g.blocks_containing(0).unwrap().len()); } println!(\"blocks {:?} (max {})\", t0.elapsed(), mx); #0": {
+  "class": "none",
+  "owner": "Galois groups and permutation groups (engine/galois, engine/group)",
+  "reason": "an invariant's degree and exponent, and an example's printout of the largest number of blocks: computations, not limits (re-spelled for the fallible group API)"
  },
  "engine/hmf/src/classes.rs :: coprime_to :: const MAX_CLASSES: usize = 5000; #0": {
   "class": "2+3",

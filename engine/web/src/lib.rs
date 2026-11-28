@@ -1070,11 +1070,11 @@ fn perm_group(v: &Value) -> Result<Value, String> {
             "orbits" => json!(g.orbits()),
             "orbit" => json!(g.orbit(point()?)),
             "is_transitive" => json!(g.is_transitive()),
-            "is_primitive" => json!(g.is_primitive()),
+            "is_primitive" => json!(g.is_primitive()?),
             "is_abelian" => json!(g.is_abelian()),
-            "is_solvable" => json!(g.is_solvable()),
-            "transitivity" => json!(g.transitivity()),
-            "blocks" => json!(g.blocks_containing(v.get("point").and_then(Value::as_u64).filter(|&x| x < n as u64).ok_or("bad point")? as u32)),
+            "is_solvable" => json!(g.is_solvable()?),
+            "transitivity" => json!(g.transitivity()?),
+            "blocks" => json!(g.blocks_containing(v.get("point").and_then(Value::as_u64).filter(|&x| x < n as u64).ok_or("bad point")? as u32)?),
             "min_block" => {
                 let seed: Vec<u32> = u64s(v.get("block").ok_or("missing block")?, "block")?.into_iter().map(|x| if x < n as u64 { Ok(x as u32) } else { Err("a block is a list of points") }).collect::<Result<_, _>>()?;
                 if seed.is_empty() || seed.iter().any(|&x| x as usize >= n) {
@@ -1087,19 +1087,19 @@ fn perm_group(v: &Value) -> Result<Value, String> {
                 json!(g.block_system(&b))
             }
             "stabilizer" => {
-                let s = g.stabilizer(point()?);
+                let s = g.stabilizer(point()?)?;
                 json!({"gens": perm_json(&s.gens), "order": s.order().to_string()})
             }
             "normal_closure" => {
                 let x = perms(n, v.get("sub"))?;
-                let c = g.normal_closure(&x);
+                let c = g.normal_closure(&x)?;
                 json!({"gens": perm_json(&c.gens), "order": c.order().to_string()})
             }
             "derived_subgroup" => {
-                let d = g.derived_subgroup();
+                let d = g.derived_subgroup()?;
                 json!({"gens": perm_json(&d.gens), "order": d.order().to_string()})
             }
-            "derived_series" => json!(g.derived_series().iter().map(|d| json!({"gens": perm_json(&d.gens), "order": d.order().to_string()})).collect::<Vec<_>>()),
+            "derived_series" => json!(g.derived_series()?.iter().map(|d| json!({"gens": perm_json(&d.gens), "order": d.order().to_string()})).collect::<Vec<_>>()),
             "contains" => {
                 let x = perms(n, Some(&json!([v.get("g").ok_or("missing g")?])))?;
                 json!(g.contains(&x[0]))
@@ -1145,10 +1145,10 @@ fn perm_group_named(v: &Value) -> Result<Value, String> {
     let n = size(v, "n", None, 1 << 20)? as u64;
     let name = v.get("name").and_then(Value::as_str).ok_or("missing name")?;
     let g = match name {
-        "symmetric" => symmetric(n as usize),
-        "alternating" => alternating(n as usize),
-        "cyclic" => cyclic(n as usize),
-        "dihedral" => dihedral(n as usize),
+        "symmetric" => symmetric(n as usize)?,
+        "alternating" => alternating(n as usize)?,
+        "cyclic" => cyclic(n as usize)?,
+        "dihedral" => dihedral(n as usize)?,
         "mathieu" => mathieu(n as usize)?,
         "agl1" => agl1(n)?,
         "psl2" => pl2(n, false)?,

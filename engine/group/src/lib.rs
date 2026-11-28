@@ -35,15 +35,15 @@ mod tests {
     #[test]
     fn orders() {
         for n in 1..=12u64 {
-            assert_eq!(symmetric(n as usize).order(), fact(n), "S{}", n);
+            assert_eq!(symmetric(n as usize).unwrap().order(), fact(n), "S{}", n);
             if n >= 2 {
-                assert_eq!(alternating(n as usize).order() * BigInt::from(if n >= 2 { 2 } else { 1 }), fact(n).max(BigInt::from(2)), "A{}", n);
+                assert_eq!(alternating(n as usize).unwrap().order() * BigInt::from(if n >= 2 { 2 } else { 1 }), fact(n).max(BigInt::from(2)), "A{}", n);
             }
         }
-        assert_eq!(symmetric(30).order(), fact(30));
-        assert_eq!(alternating(23).order() * BigInt::from(2), fact(23));
-        assert_eq!(dihedral(7).order(), BigInt::from(14));
-        assert_eq!(cyclic(12).order(), BigInt::from(12));
+        assert_eq!(symmetric(30).unwrap().order(), fact(30));
+        assert_eq!(alternating(23).unwrap().order() * BigInt::from(2), fact(23));
+        assert_eq!(dihedral(7).unwrap().order(), BigInt::from(14));
+        assert_eq!(cyclic(12).unwrap().order(), BigInt::from(12));
         assert_eq!(agl1(23).unwrap().order(), BigInt::from(23 * 22));
         assert_eq!(pl2(23, false).unwrap().order(), BigInt::from(23 * (23 * 23 - 1) / 2));
         assert_eq!(pl2(13, true).unwrap().order(), BigInt::from(13 * (13 * 13 - 1)));
@@ -55,10 +55,10 @@ mod tests {
         for (n, order, k) in want {
             let g = mathieu(n).unwrap();
             assert_eq!(g.order(), BigInt::from(order), "M{}", n);
-            assert_eq!(g.transitivity(), k, "M{} is {}-transitive", n, k);
-            assert!(g.is_primitive());
+            assert_eq!(g.transitivity().unwrap(), k, "M{} is {}-transitive", n, k);
+            assert!(g.is_primitive().unwrap());
             // simple: its own derived subgroup
-            assert_eq!(g.derived_subgroup().order(), g.order());
+            assert_eq!(g.derived_subgroup().unwrap().order(), g.order());
         }
     }
 
@@ -71,45 +71,45 @@ mod tests {
         }
         // a transposition is not in M12 (it is in S12)
         assert!(!g.contains(&Perm::from_cycles(12, &[vec![0, 1]]).unwrap()));
-        let a = alternating(12);
+        let a = alternating(12).unwrap();
         assert!(a.contains_group(&g));
     }
 
     #[test]
     fn blocks() {
         // D_6 on a hexagon: blocks {0,3} (opposite), {0,2,4} (triangles)
-        let d = dihedral(6);
-        assert!(!d.is_primitive());
-        let bs = d.blocks_containing(0);
+        let d = dihedral(6).unwrap();
+        assert!(!d.is_primitive().unwrap());
+        let bs = d.blocks_containing(0).unwrap();
         assert_eq!(bs, vec![vec![0, 3], vec![0, 2, 4]]);
         assert_eq!(d.block_system(&[0, 3]).len(), 3);
         // GRP-F6: an unsorted block is the same set as its sorted images
-        assert_eq!(cyclic(4).block_system(&[2, 0]), vec![vec![0, 2], vec![1, 3]]);
-        assert!(symmetric(7).is_primitive());
-        assert!(dihedral(7).is_primitive());
-        assert!(!cyclic(8).is_primitive());
+        assert_eq!(cyclic(4).unwrap().block_system(&[2, 0]), vec![vec![0, 2], vec![1, 3]]);
+        assert!(symmetric(7).unwrap().is_primitive().unwrap());
+        assert!(dihedral(7).unwrap().is_primitive().unwrap());
+        assert!(!cyclic(8).unwrap().is_primitive().unwrap());
         // C_8 regular: blocks are the subgroups {0,4}, {0,2,4,6}
-        assert_eq!(cyclic(8).blocks_containing(0).len(), 2);
+        assert_eq!(cyclic(8).unwrap().blocks_containing(0).unwrap().len(), 2);
     }
 
     #[test]
     fn solvable() {
-        assert!(symmetric(4).is_solvable());
-        assert!(!symmetric(5).is_solvable());
-        assert!(agl1(23).unwrap().is_solvable());
-        assert_eq!(symmetric(4).derived_series().len(), 4); // S4 > A4 > V4 > 1
-        assert_eq!(symmetric(6).derived_subgroup().order(), alternating(6).order());
-        assert!(cyclic(9).is_abelian());
-        assert!(!dihedral(5).is_abelian());
-        assert!(symmetric(5).is_normal(&alternating(5)));
+        assert!(symmetric(4).unwrap().is_solvable().unwrap());
+        assert!(!symmetric(5).unwrap().is_solvable().unwrap());
+        assert!(agl1(23).unwrap().is_solvable().unwrap());
+        assert_eq!(symmetric(4).unwrap().derived_series().unwrap().len(), 4); // S4 > A4 > V4 > 1
+        assert_eq!(symmetric(6).unwrap().derived_subgroup().unwrap().order(), alternating(6).unwrap().order());
+        assert!(cyclic(9).unwrap().is_abelian());
+        assert!(!dihedral(5).unwrap().is_abelian());
+        assert!(symmetric(5).unwrap().is_normal(&alternating(5).unwrap()));
     }
 
     #[test]
     fn stabilizers() {
-        let s = symmetric(6);
-        assert_eq!(s.stabilizer(3).order(), fact(5));
-        assert_eq!(s.pointwise_stabilizer(&[0, 1]).order(), fact(4));
+        let s = symmetric(6).unwrap();
+        assert_eq!(s.stabilizer(3).unwrap().order(), fact(5));
+        assert_eq!(s.pointwise_stabilizer(&[0, 1]).unwrap().order(), fact(4));
         assert_eq!(s.orbits().len(), 1);
-        assert_eq!(s.stabilizer(3).orbits().len(), 2);
+        assert_eq!(s.stabilizer(3).unwrap().orbits().len(), 2);
     }
 }
