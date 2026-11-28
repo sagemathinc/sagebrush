@@ -24,19 +24,38 @@ use crate::embed::tuple_conjugator;
 use std::collections::HashMap;
 
 /// The wreath product P wr A on a*b points: block i is {i b, ..., i b + b - 1}.
+/// The base is P on every block: P's generators on one block of each orbit
+/// of A on the blocks (conjugation by A carries them over the rest), then
+/// A's generators permuting the blocks; A need not be transitive.
 pub fn wreath(p: &Group, a: &Group) -> Group {
     let (b, na) = (p.n, a.n);
     let n = b * na;
     let mut gens = vec![];
-    for g in &p.gens {
-        // g on block 0
-        gens.push(Perm((0..n as u32).map(|x| if (x as usize) < b { g.image(x) } else { x }).collect()));
+    let mut reached = vec![false; na];
+    for r in 0..na {
+        if reached[r] {
+            continue;
+        }
+        // r's orbit under A
+        reached[r] = true;
+        let mut todo = vec![r];
+        while let Some(i) = todo.pop() {
+            for s in &a.gens {
+                let j = s.image(i as u32) as usize;
+                if !reached[j] {
+                    reached[j] = true;
+                    todo.push(j);
+                }
+            }
+        }
+        // P's generators on block r
+        let lo = r * b;
+        for g in &p.gens {
+            gens.push(Perm((0..n).map(|x| if (lo..lo + b).contains(&x) { (lo + g.image((x - lo) as u32) as usize) as u32 } else { x as u32 }).collect()));
+        }
     }
     for s in &a.gens {
         gens.push(Perm((0..n as u32).map(|x| s.image(x / b as u32) * b as u32 + x % b as u32).collect()));
-    }
-    if na > 1 && a.gens.is_empty() {
-        // (a trivial top group is not transitive; not used)
     }
     Group::new(n, gens).unwrap()
 }
@@ -322,6 +341,31 @@ pub fn transitive_groups(n: usize) -> Result<Vec<Group>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wreath_intransitive_top() {
+        // P wr A has order |P|^(A's degree) |A|, A transitive or not: against
+        // GAP 4.15.1's WreathProduct (on A's moved points, so these tops fix
+        // none), and by that formula for tops with fixed points or none moved
+        let g = |n: usize, cs: &[&[Vec<u32>]]| Group::new(n, cs.iter().map(|c| Perm::from_cycles(n, c).unwrap()).collect()).unwrap();
+        let order = |p: &Group, a: &Group| wreath(p, a).order().to_string();
+        let (c2, c3, s3) = (named::cyclic(2), named::cyclic(3), named::symmetric(3));
+        // C2 wr <(0,1)(2,3)>: two orbits, GAP 32 (this was 8); C2 wr C3: 24
+        assert_eq!(order(&c2, &g(4, &[&[vec![0, 1], vec![2, 3]]])), "32");
+        assert_eq!(order(&c2, &named::cyclic(3)), "24");
+        // C3 wr <(0,1), (2,3), (4,5)>: three orbits, GAP 5832; C3 wr <(0,1)(2,3)(4,5)>: 1458
+        assert_eq!(order(&c3, &g(6, &[&[vec![0, 1]], &[vec![2, 3]], &[vec![4, 5]]])), "5832");
+        assert_eq!(order(&c3, &g(6, &[&[vec![0, 1], vec![2, 3], vec![4, 5]]])), "1458");
+        // S3 wr <(0,1)(2,3,4)>: orbits of sizes 2 and 3, GAP 46656
+        assert_eq!(order(&s3, &g(5, &[&[vec![0, 1], vec![2, 3, 4]]])), "46656");
+        // fixed blocks: S3 wr <(1,2)> on 3 blocks, 6^3 2 = 432; trivial tops of
+        // degree 2 and 3: the base alone, 4 and 8
+        assert_eq!(order(&s3, &g(3, &[&[vec![1, 2]]])), "432");
+        assert_eq!(order(&c2, &Group::trivial(2)), "4");
+        assert_eq!(order(&c2, &Group::trivial(3)), "8");
+        // the callers' transitive tops are unchanged: S3 wr S2, 72
+        assert_eq!(order(&s3, &named::symmetric(2)), "72");
+    }
 
     #[test]
     fn conjugacy_in_sym() {

@@ -2613,6 +2613,16 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/lib.rs :: try_is_squarefree :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the square-free decision within the default factoring limits, as try_factor: a refusal there is FactorLimit, never an answer"
+ },
+ "engine/poly/src/lib.rs :: try_is_squarefree :: pub fn try_is_squarefree(f: &[BigInt]) -> Result<bool, FactorLimit> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the square-free decision's signature: its limit is the default factoring budget's"
+ },
  "engine/poly/src/lib.rs :: zassenhaus :: if max_size == usize::MAX && lifted.len() > vanhoeij::ZASSENHAUS_MAX { #0": {
   "class": "none",
   "note": "the no-subset audit counter (plan r3 4.2)",
@@ -3118,6 +3128,11 @@
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "the certificate's search bound for X (Cramer's bound, a mathematical limit past which no integral X exists); not a resource cap"
+ },
+ "engine/poly/src/nf.rs :: a03_f2_shift_search_has_no_limit :: fn a03_f2_shift_search_has_no_limit() { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "a test (the shift search has no limit): refuses nothing"
  },
  "engine/poly/src/tests.rs :: a_huge_exponent_is_refused_by_its_reservation :: for k in [u64::MAX, u64::MAX / 2, u64::MAX / 4, 1 << 61] { #0": {
   "class": "none",

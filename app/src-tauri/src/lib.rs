@@ -29,6 +29,8 @@ mod engine;
 mod windows;
 #[cfg(desktop)]
 mod leave;
+#[cfg(desktop)]
+mod signer;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
 //  comes next; until then only its tests and the self-test's bundle report call it)
 #[cfg(desktop)]
@@ -236,7 +238,8 @@ fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener, files: st
     std::thread::spawn(move || {
         for req in server.incoming_requests() {
             let path = req.url().split(['?', '#']).next().unwrap_or("").to_string();
-            let known = path == "/" || files.contains(&path) || (path.ends_with('/') && files.contains(&format!("{path}index.html")));
+            // (the approvals window's page is shown on the app protocol only: never at the page's origin, signer.rs)
+            let known = !path.starts_with("/signer/") && (path == "/" || files.contains(&path) || (path.ends_with('/') && files.contains(&format!("{path}index.html"))));
             let Some(asset) = assets.get(path.clone()).filter(|_| known) else {
                 let page = req.headers().iter().any(|h| {
                     (h.field.equiv("Sec-Fetch-Dest") && h.value.as_str() == "document") || (h.field.equiv("Accept") && h.value.as_str().contains("text/html"))
@@ -306,9 +309,11 @@ static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 #[cfg(desktop)]
 struct Leaving(Mutex<leave::Leave>);
 
+/// The windows a close or a quit asks to write what they have: every window of the app's page (the approvals window has
+/// nothing to write, and closes at once: signer.rs).
 #[cfg(desktop)]
 fn window_labels(app: &tauri::AppHandle) -> Vec<String> {
-    app.webview_windows().keys().cloned().collect()
+    app.webview_windows().keys().filter(|l| l.as_str() != signer::LABEL).cloned().collect()
 }
 /// What leave.rs decided, done (never under its lock: a window destroyed here tells it so, on this thread).
 #[cfg(desktop)]
@@ -482,7 +487,7 @@ fn retarget(pending: &mut [(String, String)], gone: &str, left: Vec<(String, Str
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::disk_reveal, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::disk_reveal, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now, signer::signer_probe_sign]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -545,7 +550,14 @@ pub fn run() {
         .collect();
     // (macOS's menu bar: Tauri's default, with About naming the commit, version.rs)
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(version::menu);
+    let builder = builder.menu(version::menu).on_menu_event(|app, e| {
+        // (Approvals…: the approvals window, from the app's own menu: no page can open it, signer.rs)
+        if e.id() == version::APPROVALS {
+            if let Err(why) = signer::open(app) {
+                eprintln!("[app] {why}");
+            }
+        }
+    });
     builder
         .setup(move |app| {
             // (a self-test reports the agent bundle's check, as the launcher will run it: app/selftest/run-judge.mjs)
@@ -575,22 +587,48 @@ pub fn run() {
             let control = std::env::var("SAGEBRUSH_APP_NAV_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
             let open = matches!(control.as_deref(), Some("open" | "wide"));
             // (the app's commands for this page's exact origin only, nav.rs page_capability; before the window exists)
-            app.add_capability(if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) })?;
+            let page_cap = if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) };
+            // (a self-test's signer controls, signer.rs: the signing command in the page's capability too, so the check
+            // must see the command's own caller check hold, or with it left out, sign)
+            #[cfg(desktop)]
+            let page_cap = if matches!(signer::control().as_deref(), Some("cap" | "cap+check")) {
+                let mut c: serde_json::Value = serde_json::from_str(&page_cap)?;
+                if let Some(p) = c["permissions"].as_array_mut() {
+                    p.push("allow-signer-probe-sign".into());
+                }
+                c.to_string()
+            } else {
+                page_cap
+            };
+            app.add_capability(page_cap)?;
             // (the web view data folders of the last launch's other windows, gone before any window opens, windows.rs)
             #[cfg(desktop)]
             if let Ok(d) = disk::data_dir(app.handle()) {
                 windows::clear_webview_dirs(&d);
+                // (and a previous launch's approvals window folder, before that window can open: signer.rs)
+                eprintln!("[signer] startup data folder: {}", signer::startup_cleanup(&d).code());
             }
             #[cfg(desktop)]
             app.manage(windows::PagePort(port));
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
             let window = page_window(app, "main", url, port, open);
             window.build()?;
+            // (a self-test's probe of the approvals window, run.mjs "signer": the window opened as the menu opens it)
+            #[cfg(desktop)]
+            if std::env::var("SAGEBRUSH_APP_PERSIST").is_ok_and(|p| p.starts_with("signer:")) && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+                signer::open(app.handle())?;
+            }
             Ok(())
         })
         .build(context)
         .expect("error while starting Sagebrush")
         .run(|_app, _event| {
+            // (an exit: the approvals window, and only it, closed first, and an exit with a code held until its folder
+            //  is removed: signer.rs)
+            #[cfg(desktop)]
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &_event {
+                signer::on_exit_requested(_app, *code, api);
+            }
             // (a window closed or the app quit by the person: held until the page has written its changes to disk)
             #[cfg(desktop)]
             match &_event {
@@ -599,7 +637,7 @@ pub fn run() {
                     let acts = _app.state::<Leaving>().0.lock().unwrap().quit(window_labels(_app));
                     leave_do(_app, acts);
                 }
-                tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if !EXITING.load(std::sync::atomic::Ordering::SeqCst) => {
+                tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if !EXITING.load(std::sync::atomic::Ordering::SeqCst) && label != signer::LABEL => {
                     api.prevent_close();
                     let acts = _app.state::<Leaving>().0.lock().unwrap().close(label, window_labels(_app));
                     leave_do(_app, acts);
@@ -629,6 +667,10 @@ pub fn run() {
                 // launch's clear, windows.rs)
                 if let Ok(d) = disk::data_dir(_app) {
                     windows::clear_webview_dirs(&d);
+                    // (the approvals window's too, if it was opened in this session: signer.rs; up to 10 s on Windows)
+                    if let Some(gone) = signer::remove_at_exit(&d, _app.get_webview_window(signer::LABEL).is_some()) {
+                        eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
+                    }
                 }
             }
             // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event: kept for startup_files, each for

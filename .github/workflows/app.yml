@@ -107,6 +107,8 @@ jobs:
         with:
           node-version: 24
           cache: ${{ github.event_name != 'merge_group' && 'pnpm' || '' }}
+      - name: the signer page and its judge (node only)
+        run: node app/selftest/test-signer-page.mjs && node app/selftest/test-signer-judge.mjs
       # (the four WebAssembly modules wasm/pins.json names: this run's build on a track ref or an engine-changing pull
       # request, else the published ones: design/wasm-artifacts.md sections 4 and 6)
       - uses: ./.github/actions/wasm-modules
