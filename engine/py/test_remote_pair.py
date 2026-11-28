@@ -1150,9 +1150,9 @@ def test_agent_flags_reach_the_relay():
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         env = dict(os.environ, XDG_CONFIG_HOME=d, SAGEBRUSH_REMOTE_ORIGIN="https://127.0.0.1:9")  # (no key, nothing listens)
-        r = subprocess.run([sys.executable, "-m", "sagebrush.cli", "remote", "--serve-agents"], capture_output=True, text=True,
+        r = subprocess.run([sys.executable, "-m", "sagebrush.cli", "remote", "--serve-agents", "--agent-cmd"], capture_output=True, text=True,
                            timeout=60, env=env)
-        assert r.returncode == 2 and "--serve-agents needs --agent-cmd" in r.stderr and "unknown argument" not in r.stderr, (r.returncode, r.stderr)
+        assert r.returncode == 2 and "--agent-cmd needs the agent's command" in r.stderr and "unknown argument" not in r.stderr, (r.returncode, r.stderr)
         assert not os.listdir(d), os.listdir(d)  # (refused before any enrollment)
     import sagebrush.remote.relay as R
     seen, real = [], R.main

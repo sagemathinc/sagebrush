@@ -16,6 +16,7 @@ import { sizeOf } from "./sizes.ts";
 import { treeRoom, resolveImport } from "./treeroom.ts";
 import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
 import { EDIT, keepEdit } from "./keep.ts";
+import { supported as xrSupported } from "../../xr-input.js";
 import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.ts";
 // (the languages whose files are entered: by their names; each parser loaded the first time one of its files is)
 const CODE = { py: "python", sage: "python", js: "js", mjs: "js", cjs: "js", jsx: "js", ts: "js", mts: "js", cts: "js", tsx: "js" };
@@ -40,7 +41,7 @@ const part = <T extends HTMLElement = HTMLElement>(name: string): T => {
 };
 const ui = {
   view: part("view"), panel: part("panel"), title: part("title"), back: part<HTMLButtonElement>("back"), fwd: part<HTMLButtonElement>("fwd"),
-  home: part<HTMLButtonElement>("home"), move: part<HTMLButtonElement>("move"), dims: part<HTMLButtonElement>("dims"), fs: part<HTMLButtonElement>("fs"),
+  home: part<HTMLButtonElement>("home"), move: part<HTMLButtonElement>("move"), dims: part<HTMLButtonElement>("dims"), fs: part<HTMLButtonElement>("fs"), vr: part<HTMLButtonElement>("vr"), ar: part<HTMLButtonElement>("ar"),
   runall: part<HTMLButtonElement>("runall"), theme: part<HTMLButtonElement>("theme"), fold: part<HTMLButtonElement>("fold"), helpbtn: part<HTMLButtonElement>("helpbtn"),
   space: part<HTMLSelectElement>("space"), tour: part<HTMLSelectElement>("tour"), q: part<HTMLInputElement>("q"), results: part<HTMLUListElement>("results"),
   hover: part("hover"), status: part("status"), overlay: part("overlay"), tourpill: part("tourpill"), fade: part("fade"), helpcard: part("helpcard"),
@@ -1870,9 +1871,61 @@ async function start() {
 function fail(e) { ui.status.textContent = "couldn't load: " + (e?.message ?? e); }
 start().catch(fail);
 
-// ---------------------------------------------------------------- a headset: none here yet
-// (what the rest of the page asks of one: never presenting)
-const xr = { presenting: false, step(_dt: number) {}, roomChanged() {} };
+// ---------------------------------------------------------------- a headset (xr.ts): Enter VR, Enter AR
+// (offered only where the browser can enter one (web/xr-input.js); its code is loaded then, before any click, so a
+//  click enters at once, as the browser asks of a session; until then, and elsewhere, never presenting)
+let xr: any = { presenting: false, step(_dt: number) {}, roomChanged() {} };
+const xrApi = {
+  renderer, scene, camera, controls, runnable,
+  pickables: () => pickables,
+  select: (nd) => setSelected(nd ? nd.id : null),
+  // (the views the desktop goes to: an object's, and everything's)
+  viewOf: (nd, dist) => viewOf(space.nodes.indexOf(nd), dist),
+  // (a room's view of everything level with its middle: a headset turns you about the vertical only, so from above
+  //  the room would sit low in your view)
+  home: () => { if (!space) return null; const h = homeView(positions); return space.room && positions !== PG ? { ...h, to: h.to.clone().setY(h.toT.y) } : h; },
+  runAll: () => ui.runall.click(),
+  // (tours in a headset: the stop to show, and its narration)
+  tours: () => toursOf(),
+  tourNow: () => (tour ? { title: tour.t.title ?? "Tour", i: tour.i, n: tour.t.steps.length } : null),
+  startTour: (k) => { const t = toursOf()[k]; if (!t) return null; tour = { t, i: -1, space }; return tourStep(1); },
+  tourStep: (d) => tourStep(d),
+  endTour: () => endTour(),
+  run: (nd) => runNode(nd),
+  // (rooms in a headset: what can be entered, entering, and leaving)
+  canEnter: (nd) => !!enterKind(nd),
+  noRoomWhy: (nd) => noRoomWhy(nd),
+  focus: () => focusNode,
+  // (the floor: its mesh, to step along, and its height; at a point, the ground's there: a terrace, or the floor)
+  ground: () => ground,
+  walkable: () => walkable(),
+  floorY: (x, z) => (x === undefined ? floorY : groundAt(x, z)),
+  fullText: (nd) => fullText(nd),
+  linkLabels: (nd) => linkLabels(nd),
+  enter: (nd) => enterRoom(nd),
+  inRoom: () => scopes.length > 0,
+  depth: () => scopes.length,
+  has: (nd) => !!space?.nodes.includes(nd),
+  leave: () => leaveRoom(),
+  glow: (nd, v) => setGlow(nd, v),
+  theme: () => T,
+  changed(on, mode) {
+    ui.vr.textContent = on && mode === "immersive-vr" ? "Exit VR" : "Enter VR";
+    ui.ar.textContent = on && mode === "immersive-ar" ? "Exit AR" : "Enter AR";
+    if (!on) setDeskWalk(deskWalk); else floorMark.visible = false;
+  },
+};
+const xrFail = (e) => (ui.status.textContent = "couldn't start: " + (e?.message ?? e));
+ui.vr.onclick = () => { xr.enter?.("immersive-vr")?.catch(xrFail); };
+ui.ar.onclick = () => { xr.enter?.("immersive-ar")?.catch(xrFail); };
+void (async () => {
+  const [vr, ar] = await Promise.all([xrSupported("immersive-vr"), xrSupported("immersive-ar")]);
+  if (!vr && !ar) return;
+  const { setupXR } = await import("./xr.ts");
+  xr = setupXR(xrApi);
+  ui.vr.hidden = !vr;
+  ui.ar.hidden = !ar;
+})().catch(() => { /* (no headset here: the buttons stay hidden) */ });
 // (walking or flying, as kept)
 setDeskWalk(deskWalk);
 ui.move.onclick = () => setDeskWalk(!deskWalk);
@@ -1881,8 +1934,9 @@ let helpShown = false;
 function showHelp(on) { helpShown = !!on; ui.helpcard.hidden = !helpShown; }
 ui.helpbtn.onclick = () => showHelp(!helpShown);
 ui.helpcard.querySelector<HTMLElement>(".close").onclick = () => showHelp(false);
-let lastTick = performance.now();
+let lastTick = performance.now(), frames = 0;
 function tick(now) {
+  frames++;
   const dt = Math.max(0, Math.min(0.1, (now - lastTick) / 1000));
   lastTick = now;
   if (xr.presenting) xr.step(dt);
@@ -1921,6 +1975,9 @@ window.space3d = {
   get floorLinks() { return floorEdges; },
   get walking() { return deskWalk; },
   get feet() { return feetY(); },
+  // (the headset's, for its tests: presenting, its panel, its rig; and the frames drawn so far)
+  get xr() { return xr; },
+  get frames() { return frames; },
 };
 
 // (the page's API, for an agent driving it and for tests)

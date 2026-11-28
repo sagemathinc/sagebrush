@@ -814,19 +814,24 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
     kinds.dt = kinds.dt ? promote(kinds.dt, D.float64) : D.float64;
     return;
   }
-  // (a Python int that neither int64 nor uint64 holds: an object array, as NumPy's discovery)
-  if (w.big !== undefined && w.dt === null && (w.big > 18446744073709551615n || w.big < -9223372036854775808n)) {
+  // (a Python int that neither int64 nor uint64 holds: an object array, as NumPy's discovery; in any mix, before
+  // promotion, so it never becomes a float64)
+  if (w.big !== undefined && w.dt === null && (w.big > U64MAX || w.big < I64MIN)) {
     (kinds as { big?: bigint }).big ??= w.big;
     throw OBJS;
   }
-  const dt = scalarDtype(w);
-  kinds.dt = kinds.dt ? promoteScalar(kinds.dt, dt, w) : dt;
+  // (a Python int is int64, as NumPy discovers it, or uint64 from 2**63 up to 2**64 - 1, past int64; then the
+  // dtypes promote as any others: with an int64, a uint64 makes float64)
+  const dt = pyIntDtype(w);
+  kinds.dt = kinds.dt ? promote(kinds.dt, dt) : dt;
 }
-// Python scalars inside a list promote as values (an int and a float give float64).
-function promoteScalar(a: DType, b: DType, w: Weak): DType {
-  if (w.dt === null && a.kind !== "b" && b === D.int64 && a.isInt) return a.itemsize >= 8 ? a : D.int64;
-  return promote(a, b);
+// A scalar's discovered dtype: a Python int is int64, or uint64 from 2**63 up to 2**64 - 1, past int64 (a caller has
+// sent one past both to an object array already); anything else its own.
+function pyIntDtype(w: Weak): DType {
+  return w.kind === "i" && w.dt === null && w.big !== undefined && w.big > I64MAX && w.big <= U64MAX ? D.uint64 : scalarDtype(w);
 }
+// Whether a Python int is past both int64 and uint64: an object array's, as NumPy discovers it.
+const pyIntPastWide = (w: Weak | null) => w !== null && w.kind === "i" && w.dt === null && w.big !== undefined && (w.big > U64MAX || w.big < I64MIN);
 function setDim(shape: number[] & { leaf?: number }, d: number, n: number) {
   if (shape.length === d) shape.push(n);
   else if (shape.length < d) inhomogeneous(d, shape);
@@ -883,8 +888,12 @@ function checkWeak(dt: DType, w: Weak) {
   if (isWide(dt) && w.inexact) wideRefuse(dt);
 }
 function checkWeakRange(dt: DType, w: Weak) {
-  if (w.big !== undefined && (dt.kind === "u" && dt.itemsize === 8 ? w.big < I64MIN || w.big > U64MAX : w.big < I64MIN || w.big > I64MAX)) raise(T.OverflowError, "Python int too large to convert to C long");
+  if (w.big !== undefined) cLongRange(dt, w.big);
   checkPyInt(dt, w.v);
+}
+// (a Python int no C long holds: NumPy's OverflowError, whatever the integer dtype; uint64 takes its own range)
+function cLongRange(dt: DType, big: bigint) {
+  if (dt.kind === "u" && dt.itemsize === 8 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, "Python int too large to convert to C long");
 }
 const MINMAX_OPS: Record<string, boolean> = { maximum: true, minimum: true, fmax: true, fmin: true };
 function bigMinMax(op: string, ct: DType, arr: NDArray, big: bigint): NDArray {
@@ -932,6 +941,7 @@ function admitWide(v: any, dt: DType): number {
     return v + 0;
   }
   if (typeof v === "bigint") {
+    cLongRange(dt, v);
     const lo = dt.kind === "u" ? 0n : -(2n ** 63n), hi = dt.kind === "u" ? 2n ** 64n - 1n : 2n ** 63n - 1n;
     if (v < lo || v > hi) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
     const n = Number(v);
@@ -989,7 +999,13 @@ function toNum(v: any, dt?: DType): number {
   }
   if (typeof v === "boolean") return +v;
   if (typeof v === "bigint") {
-    if (dt && dt.isInt && dt.itemsize === 8 && (v > 18446744073709551615n || v < -9223372036854775808n)) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
+    if (dt && dt.isInt) {
+      cLongRange(dt, v);
+      // (the dtype's range, the int in the message as it is, not as a double; every non-wide integer dtype has one, and
+      // int64/uint64 went to admitWide above)
+      const rg = RANGE[dt.name];
+      if (rg && (v < BigInt(rg[0]) || v > BigInt(rg[1]))) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
+    }
     // (into int64 or uint64 only if a double holds it exactly)
     if (dt && isWide(dt) && BigInt(Number(v)) !== v) wideRefuse(dt);
     return Number(v);
@@ -4136,9 +4152,12 @@ function strFromPy(x: any, dtype: any, objOK = false): StrArray | NDArray {
       if (objOK && dtype === null) throw OBJS;
       strRefuse();
     }
+    // (a Python int past int64 and uint64 among strings: an object array, as NumPy's; one past int64 only counts as
+    // uint64's 20 characters)
+    if (objOK && dtype === null && pyIntPastWide(w)) throw OBJS;
     const s = F.str(v);
     vals.push(s);
-    len = Math.max(len, w.dt ? defaultLen(w.dt) : given ? cpLen(s) : ({ b: 5, i: 21, f: 32, c: 64 } as Record<string, number>)[w.kind]);
+    len = Math.max(len, w.dt ? defaultLen(w.dt) : given ? cpLen(s) : w.kind === "i" ? defaultLen(pyIntDtype(w)) : ({ b: 5, f: 32, c: 64 } as Record<string, number>)[w.kind]);
   };
   walk(x, 0);
   const n = sized ? sd.n : Math.max(1, len);
@@ -5289,7 +5308,8 @@ newBuiltinModule("_numpy", (m) => {
   });
   fn("full", (shape: any, value: any, dtype: any = null) => {
     // (an object dtype, or a value no number or string is, such as None: every element that value)
-    if (objSpec(dtype) || (dtype === null && !anyArray(value) && !isSeq(value) && pyScalar(value) === null && !strLike(value))) return objFull(shapeArg(shape), value);
+    // (or a Python int past both int64 and uint64, an object array's, as NumPy discovers it)
+    if (objSpec(dtype) || (dtype === null && !anyArray(value) && !isSeq(value) && (pyScalar(value) === null || pyIntPastWide(pyScalar(value))) && !strLike(value))) return objFull(shapeArg(shape), value);
     // (a sequence whose discovered dtype is object, such as [None, 1]: that object array, broadcast)
     if (dtype === null && isSeq(value) && !strLike(value)) {
       const r: any = fromPy(value, null, undefined, true);
@@ -5311,7 +5331,8 @@ newBuiltinModule("_numpy", (m) => {
       return a;
     }
     const v = operand(value);
-    const dt = dtype !== null ? toDtype(dtype) : v.weak ? scalarDtype(v.weak) : v.arr.dt;
+    // (a Python int discovered as an array's element is: uint64 past int64, #2031)
+    const dt = dtype !== null ? toDtype(dtype) : v.weak ? pyIntDtype(v.weak) : v.arr.dt;
     const a = empty(shapeArg(shape), dt);
     assign(a, isWide(dt) && !(value instanceof NDArray) && !isPyFloat(value) ? fromPy(value, dt) : v.arr);
     return a;
