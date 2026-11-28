@@ -399,6 +399,9 @@ def spearmanr(a, b=None, axis=0, nan_policy="propagate", alternative="two-sided"
     if x.size != y.size:
         raise ValueError("all the input array dimensions except for the concatenation axis must match exactly, but along "
                          "dimension 0, the array at index 0 has size %d and the array at index 1 has size %d" % (x.size, y.size))
+    if x.size <= 1:
+        # (an empty pair or a single observation: SciPy's (nan, nan), before it looks at NaNs, under every policy)
+        return SignificanceResult(_NAN, _NAN)
     bad = (x != x) | (y != y)
     if np.any(bad):
         if nan_policy == "raise":

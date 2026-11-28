@@ -134,4 +134,11 @@ for label, a, b, kw in [("2-d", x, y, {}), ("2-d and 1-d", np.arange(6.0).reshap
                         ("no nan omit", x, y, {"nan_policy": "omit"})]:
     out("spearmanr axis None %s" % label, lambda: tuple(st.spearmanr(a, b, axis=None, **kw)))
 out("spearmanr axis None one sample", lambda: tuple(st.spearmanr(x, axis=None)))
+# (an empty pair or a single observation: SciPy's (nan, nan) before it looks at NaNs, under every policy and axis)
+for label, a, b in [("one each", [1.0], [2.0]), ("one, nan", [1.0], [n]), ("nan, one", [n], [1.0]), ("nan, nan", [n], [n]),
+                    ("empty", [], []), ("1x1", [[n]], [[1.0]])]:
+    for pol in ("propagate", "omit", "raise"):
+        # (2-d samples along an axis stay refused: their correlation matrix isn't computed)
+        for axis in (None, 0) if label != "1x1" else (None,):
+            out("spearmanr %s %s axis %r" % (label, pol, axis), lambda: tuple(st.spearmanr(a, b, axis=axis, nan_policy=pol)))
 
