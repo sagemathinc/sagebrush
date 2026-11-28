@@ -1,12 +1,12 @@
 // Whether this page's sync runs end to end (plan notes m1-page-keys-plan M1d), decided before the client starts:
 // - this browser's own E2E state for the account (a device or a pin: e2e-here.ts) read first: with it, the server
-//   saying there's no chain (a 404, an empty chain) is never plain sync; it is no sync, with the reason (sec2's H1);
+//   saying there's no chain (a 404, an empty chain) is never plain sync; it is no sync, with the reason (the downgrade check);
 // - none, and the server's E2E routes off (404: every site but DEV for now) or the account's key chain empty (it
 //   hasn't turned end-to-end encryption on): plain sync, as before. (A browser with no E2E state can't tell that from a
 //   server that lies about it: the residual the plan notes name, closed by M1b's setup of a new browser)
 // - a chain, and this browser has a device for the account, verified under its pin: sealed sync,
 //   with the device's keys and the sealing kit (sagebrush-e2e.js, fetched only then), once file contents are sealed
-//   too (CONTENT_SEALED). Until then (sec2's H2: only the index is sealed; a file's bytes and their SHA-256 would go up
+//   too (CONTENT_SEALED). Until then (only the index is sealed; a file's bytes and their SHA-256 would go up
 //   as they are) no sync, with the reason;
 // - a chain, and no device here (another browser turned it on, or this one was reset): no sync here, and a reason to
 //   show. Never plain sync into an account whose index is sealed.
@@ -75,7 +75,7 @@ export async function e2eStart({
   if (r.status !== 200) return unreadable;
   const body = (await r.json().catch(() => null)) as { account?: unknown; entries?: unknown } | null;
   if (!body || !Array.isArray(body.entries) || typeof body.account !== "string") return unreadable;
-  // (the chain answer's E2E account is the one this page derives for the signed-in account (sec2's C1): another would
+  // (the chain answer's E2E account is the one this page derives for the signed-in account (the account binding): another would
   // put a device where this browser's own check (e2e-here.ts) never looks)
   let expect: string;
   try {
@@ -92,7 +92,7 @@ export async function e2eStart({
     return unreadable;
   }
   try {
-    const keys = await m.DeviceKeys.load(undefined, expect);
+    const keys = await m.DeviceKeys.load(expect);
     if (!keys) return { kind: "blocked", reason: NO_DEVICE, retry: false };
     if (!contentSealed) return { kind: "blocked", reason: CONTENTS_PENDING, retry: false };
     const kit = { sealOps: m.sealOps, sopsItem: m.sopsItem, envHashOf: m.envHashOf, verifyRow: m.verifyRow, PULL_START: m.PULL_START, SealedHalt: m.SealedHalt };

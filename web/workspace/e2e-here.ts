@@ -1,4 +1,4 @@
-// Whether this browser holds end-to-end state for an account (sync-e2e.ts; M1d, sec2's H1, tests6's T1): a device or
+// Whether this browser holds end-to-end state for an account (sync-e2e.ts; M1d, the downgrade check): a device or
 // a pin for it in this browser's E2E store (e2e/device-keys.ts), a fact the server can't change. Both are written by
 // genesis (the device before its append) and by a load, and both go only with "Reset this device". While either is
 // here, a server that says the account has no chain (a 404, an empty chain) gets no plain client from this browser.

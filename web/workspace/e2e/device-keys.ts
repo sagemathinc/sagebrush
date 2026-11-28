@@ -117,14 +117,14 @@ async function verifiedGenesis(E: ReturnType<typeof e2eCore>, entry: string, ctx
 }
 
 /** The server's chain for the signed-in account: its E2E account id, audience and entries. */
-async function fetchChain(t: Transport, expect?: string): Promise<{ account: string; aud: string; entries: string[] }> {
+async function fetchChain(t: Transport, expect: string | null): Promise<{ account: string; aud: string; entries: string[] }> {
   const r = await t("GET", `${API}/chain?from=0`);
   if (r.status !== 200) throw new DeviceKeysError("server", `the key chain couldn't be read (${r.status})`);
   const { account, aud, entries } = r.json as { account?: unknown; aud?: unknown; entries?: unknown };
   const E = e2eCore();
   if (typeof account !== "string" || typeof aud !== "string" || !E.AUDIENCES.includes(aud) || !Array.isArray(entries) || !entries.every((x) => typeof x === "string"))
     throw new DeviceKeysError("server", "the key chain's answer isn't one");
-  if (expect !== undefined && account !== expect) throw new DeviceKeysError("wrong_account", "the key chain's answer is for another account");
+  if (expect !== null && account !== expect) throw new DeviceKeysError("wrong_account", "the key chain's answer is for another account");
   return { account, aud, entries: entries as string[] };
 }
 
@@ -172,10 +172,10 @@ export class DeviceKeys implements OpKeys {
   }
 
   /** The device for the signed-in account, or null if this browser has none. Refuses a forked account, or a chain
-   * that doesn't extend this device's pin (marking it forked), or one this device isn't current in. `expect`: the E2E
-   * account id the page derived for the signed-in account (e2e-here.ts e2eAccountOf); a chain answer naming another is
-   * refused (wrong_account), so a device is only ever read and stored where the page's own checks look. */
-  static async load(t: Transport = sameOrigin, expect?: string): Promise<DeviceKeys | null> {
+   * that doesn't extend this device's pin (marking it forked), or one this device isn't current in. `expect` (required: the
+   * account binding): the E2E account id the page derived for the signed-in account (e2e-here.ts e2eAccountOf); a chain answer
+   * naming another is refused (wrong_account), so a device is only ever read and stored where the page's own checks look. */
+  static async load(expect: string, t: Transport = sameOrigin): Promise<DeviceKeys | null> {
     const E = e2eCore();
     const c = await fetchChain(t, expect);
     const rec = await get<DeviceRecord>("devices", c.account);
@@ -219,7 +219,7 @@ export class DeviceKeys implements OpKeys {
    * once and never stored (the caller shows it). Refused if the account already has a chain, or if the chain answer
    * names another E2E account than `expect` (as load).
    */
-  static async create(name: string, t: Transport = sameOrigin, expect?: string): Promise<{ keys: DeviceKeys; recoveryCode: string }> {
+  static async create(name: string, expect: string, t: Transport = sameOrigin): Promise<{ keys: DeviceKeys; recoveryCode: string }> {
     const E = e2eCore();
     const c = await fetchChain(t, expect);
     if (c.entries.length > 0) throw new DeviceKeysError("exists", "this account's key chain already exists");
@@ -262,7 +262,7 @@ export class DeviceKeys implements OpKeys {
       for (let i = 0; i < 2 && applied === "unknown"; i++) {
         if (i > 0) await new Promise((r) => setTimeout(r, GENESIS_RECHECK_MS));
         try {
-          const now = await fetchChain(t);
+          const now = await fetchChain(t, null);
           if (now.account !== c.account) break;
           if (now.entries[0] === text) applied = "yes";
           else if (now.entries.length > 0) { if (await verifiedGenesis(E, now.entries[0], ctx)) applied = "no"; }
@@ -291,7 +291,7 @@ export class DeviceKeys implements OpKeys {
       // inside its transaction, so it is never overwritten)
       await this.live();
       const pin = await get<PinRecord>("pins", this.account);
-      const c = await fetchChain(this.t);
+      const c = await fetchChain(this.t, null);
       if (c.account !== this.account) throw new DeviceKeysError("server", "the signed-in account changed");
       const next = await DeviceKeys.verify(E, c.entries, this.ctx, pin ?? E.pinOf(this.state), this.account);
       await advance(this.account, E.pinOf(next), next.hashes, next.base);

@@ -136,7 +136,7 @@ try {
       `this browser's device for the account, and the server answering ${what}: no client (never plain), the reason, no try again, and nothing else asked`, r);
   }
 
-  // ---- sec2's C1: a chain answer naming another E2E account than the signed-in account's: no client, final
+  // ---- the account binding: a chain answer naming another E2E account than the signed-in account's: no client, final
   {
     await load();
     const r = await P.ev(`(async () => { chain = { status: 200, body: { account: "abcdefghijklmnopqrstuvwxya", entries: ["genesis"] } }; return { ...(await owned()), loads: window.chunkLoads ?? 0 }; })()`);

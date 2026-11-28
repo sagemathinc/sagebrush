@@ -1,7 +1,7 @@
 // ci: web-sync.1 order=63 runner=bun
 // Whether a page's sync starts end to end (web/workspace/sync-e2e.ts; plan notes m1-page-keys-plan M1d), with a fake
 // server, a fake E2E chunk and this browser's marks in memory: with the account marked as syncing sealed here, the
-// server saying there's no chain (404, empty) is no sync, never plain (sec2's H1); with no mark, the E2E routes off or
+// server saying there's no chain (404, empty) is no sync, never plain (the downgrade check); with no mark, the E2E routes off or
 // an empty chain is plain sync, and the chunk is never fetched; a
 // chain with this browser's device is sealed sync with its keys and the whole sealing kit; a chain with no device here,
 // or one this device refused, is no sync, with the reason, never plain; and an answer that can't be read is no sync
@@ -70,12 +70,12 @@ for (const [what, srv] of [["the E2E routes off (404)", server(404, {})], ["an e
   ok(none.kind === "blocked" && none.reason === S.NO_DEVICE, "E2E state here (a pin, the device gone), and a chain: no sync, set it up again", none);
 }
 
-// ---- sec2's C1: the chain answer's E2E account must be the one this page derives for the signed-in account
+// ---- the account binding: the chain answer's E2E account must be the one this page derives for the signed-in account
 {
   let asked = null;
   const ch = chunk({ keys: { account: ACC, device: { id: "d" }, recoveryUnconfirmed: false } });
   const load = ch.load;
-  ch.load = async () => { const m = await load(); return { ...m, DeviceKeys: { load: async (t, expect) => { asked = expect; return m.DeviceKeys.load(); } } }; };
+  ch.load = async () => { const m = await load(); return { ...m, DeviceKeys: { load: async (expect) => { asked = expect; return m.DeviceKeys.load(); } } }; };
   const other = e2eAccountOf("cd".repeat(32));
   for (const [what, body] of [["a chain", { account: other, entries: ["genesis"] }], ["an empty chain", { account: other, entries: [] }]]) {
     const c2 = chunk({ keys: {} });
@@ -98,7 +98,7 @@ for (const [what, srv] of [["the E2E routes off (404)", server(404, {})], ["an e
 }
 
 // ---- file contents not sealed yet (CONTENT_SEALED, as shipped): a chain and this browser's device is no sync, with the
-// reason, never a client that would send file contents as they are (sec2's H2); the device still loaded, so its fork
+// reason, never a client that would send file contents as they are; the device still loaded, so its fork
 // marks apply
 {
   ok(S.CONTENT_SEALED === false, "as shipped, the sync client doesn't seal file contents yet (CONTENT_SEALED false)");
