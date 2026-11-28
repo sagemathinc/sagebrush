@@ -252,7 +252,12 @@ pub fn mpf_add(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, sub: bool) -> Mpf {
     if !sman.is_zero() && !tman.is_zero() {
         let offset = sexp.sub(texp);
         if offset.gt_i64(0) {
-            if offset.gt_i64(100) && prec != 0 {
+            // (t as one sticky bit below s's last: only where all of t lies
+            // below that bit, offset >= tbc; mpmath 1.3.0 asked only that t's
+            // top be prec + 4 under s's, so for an s of more than prec bits a
+            // t reaching into them was lost: (1 + 2^-1 + 2^-48) - (3 2^-49 +
+            // 2^-249), just under the tie 1.5, rounded to 2 at 1 bit, not 1)
+            if offset.gt_i64(100) && prec != 0 && !offset.lt_i64(tbc) {
                 // delta = sbc + sexp - tbc - texp
                 let delta = offset.add_i64(sbc - tbc);
                 if delta.gt_i64(prec as i64 + 4) {
@@ -269,7 +274,7 @@ pub fn mpf_add(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, sub: bool) -> Mpf {
             return normalize1(sg, man, texp.clone(), bc, if prec != 0 { prec } else { bc as u64 }, rnd);
         } else if offset.lt_i64(0) {
             let noff = offset.neg();
-            if noff.gt_i64(100) && prec != 0 {
+            if noff.gt_i64(100) && prec != 0 && !noff.lt_i64(sbc) {
                 // delta = tbc + texp - sbc - sexp
                 let delta = noff.add_i64(tbc - sbc);
                 if delta.gt_i64(prec as i64 + 4) {
