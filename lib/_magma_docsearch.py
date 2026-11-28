@@ -39,7 +39,9 @@ TABLE = {
     "IsSolvable": (["structures"], "Whether a permutation group is solvable."),
     "DerivedSubgroup": (["structures"], "The commutator subgroup of a permutation group."),
     "Ngens": (["structures"], "The number of generators of a permutation group."),
-    "ConjugacyClasses": (["structures"], "The conjugacy classes of a symmetric group: tuples <order, length, representative>, printed as a table."),
+    "NumberOfClasses": (["structures"], "The number of conjugacy classes of a permutation group."),
+    "Nclasses": (["structures"], "The number of conjugacy classes of a permutation group (the same as NumberOfClasses)."),
+    "ConjugacyClasses": (["structures"], "The conjugacy classes of a permutation group: tuples <order, length, representative>, printed as a table."),
     "IsIsomorphic": (["structures"], "Whether two quadratic fields, or the symmetric and dihedral groups, are isomorphic (the isomorphism itself is not given)."),
     "Identity": (["structures"], "The identity element of a group."),
     # structures and types
@@ -953,6 +955,14 @@ true""",
 > G := PermutationGroup<4 | (1,2,3,4), (1,3)>;
 > Ngens(G);
 2""",
+    "NumberOfClasses": """\
+> NumberOfClasses(Sym(40));
+37338
+> NumberOfClasses(Alt(5));
+5""",
+    "Nclasses": """\
+> Nclasses(DihedralGroup(7));
+5""",
     "ConjugacyClasses": """\
 > G := Sym(4);
 > #ConjugacyClasses(G);
@@ -1205,6 +1215,12 @@ SIGNATURES = {
     },
     "Ngens": {
         "GrpPerm": ("The number of the group's generators.", "> Ngens(Alt(4));\n2"),
+    },
+    "NumberOfClasses": {
+        "GrpPerm": ("The number of conjugacy classes (Sym(n)'s counted, for any n).", "> NumberOfClasses(Alt(6));\n7"),
+    },
+    "Nclasses": {
+        "GrpPerm": ("The number of conjugacy classes.", "> Nclasses(PermutationGroup<4 | (1,2,3,4), (1,3)>);\n5"),
     },
     "ConjugacyClasses": {
         "GrpPerm": ("A symmetric group's conjugacy classes, one for each cycle type, by the order of their elements, then their length.",

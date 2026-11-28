@@ -160,7 +160,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Random(1, 4);",
     "Universe({ {1} });",
     "H<h> := GF(2^11); J<j> := GF(2^10); h + j;",
-    "ConjugacyClasses(DihedralGroup(4));",
+    "ConjugacyClasses(PermutationGroup<12 | (1,2,3,4,5,6,7,8,9,10,11,12), (1,2)>);",
     "[ConjugacyClasses(Sym(2))];",
     "Sprint(ConjugacyClasses(Sym(2)));",
     "#ConjugacyClasses(Sym(80));",
@@ -194,7 +194,7 @@ test("what Sagebrush lacks is refused in words, never a Python exception, class 
     "Runtime error in 'Random': Random after SetSeed or GetSeed is not supported yet",
     "Runtime error in 'Universe': Universe of this SetEnum is not supported yet",
     "Runtime error in '+': arithmetic of elements of GF(2^11) and GF(2^10) is not supported yet (subfields are computed here only in fields of at most 10^7 elements",
-    "Runtime error in 'ConjugacyClasses': ConjugacyClasses of a dihedral group is not supported yet",
+    "The conjugacy classes of a permutation group of order 479001600 needs about",
     "Runtime error: printing the conjugacy classes inside another value or in a string is not supported yet",
     "conjugacy classes of Sym(80) needs about",
     "Runtime error in 'Conductor': Conductor of an elliptic curve over a finite field is not supported yet",
@@ -1785,12 +1785,15 @@ test("a permutation group's own lists and its engine work are admitted by the me
     "run('derived, 5 distinct generators at the bound', lambda: g.derived_subgroup(G))",
     "m._COLLECT_COST = need5 - 1",
     "run('derived, one byte past the bound', lambda: g.derived_subgroup(G))",
+    // (the chain's first level is the orbit of the engine's base point, the first point the first generator moves:
+    // here {5, 6}, not the orbit {1, 2, 3, 4} of the least moved point)
+    "print('base orbit', g._chain_bytes(6, [(1, 2, 3, 4, 6, 5), (2, 3, 4, 1, 5, 6)]) == 48 * 6 + 2 * 8 * 6)",
   ].join("\n");
   const r = spawnSync(process.execPath, [cli, "-c", py], { encoding: "utf8", timeout: WALL(120000) });
   assert.equal(r.stdout, [
     "degree 4, 1 generator admitted", "degree 9, no generator refused True", "degree 4, 2 generators refused True",
     "sub of degree 4, 2 generators refused True", "pairs budgeted True True",
-    "derived, 5 distinct generators at the bound admitted", "derived, one byte past the bound refused True", ""].join("\n"), r.stderr);
+    "derived, 5 distinct generators at the bound admitted", "derived, one byte past the bound refused True", "base orbit True", ""].join("\n"), r.stderr);
 });
 
 test("a permutation group of degree 600 whose order isn't known yet is computed, not refused by an estimate", () => {
@@ -1802,6 +1805,68 @@ test("a permutation group of degree 600 whose order isn't known yet is computed,
   // (nor once its order is known: only the chain's certain first level is charged, about 128 MB at degree 4000)
   const k = spawnSync(process.execPath, [cli, "--magma"], { input: "G := PermutationGroup< 4000 | [i mod 4000 + 1 : i in [1..4000]] >; Order(G); IsAbelian(G);\nC := CyclicGroup(4000); IsAbelian(C);\n", encoding: "utf8", timeout: WALL(300000) });
   assert.equal(k.stdout, "4000\ntrue\ntrue\n", k.stderr);
+});
+
+test("ConjugacyClasses of a group other than Sym(n) is admitted at its boundary, each element and each class by its measured peak (LIMIT-CLS-1)", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const py = [
+    "import _magma as m, _magma_classes as c, _magma_groups as g",
+    "def run(label, f):",
+    "    try:",
+    "        print(label, 'admitted', f())",
+    "    except m.MagmaError as e:",
+    "        print(label, 'refused', 'needs about' in str(e))",
+    "print('per element', c._element_bytes(4), c._element_bytes(1000), 'fixed', c._ENUM_FIXED, 'per class', c._class_output_bytes(20), c._class_output_bytes(300))",
+    // (the enumeration's peak per element, measured with the engine native and in wasm32 (the larger, native):
+    // Sym(9) 116 bytes, D(2000) 10136, C(5000) 40212; each charge covers it, and a heap just below the peak
+    // times the order is refused before the engine enumerates anything)
+    "def cyc(n): return tuple(list(range(2, n + 1)) + [1])",
+    "def dih(n): return [cyc(n), tuple([1] + list(range(n, 1, -1)))]",
+    "peaks = [('Sym(9)', g.MPermGroup(9, [cyc(9), (2, 1) + tuple(range(3, 10))], 362880), 116),",
+    "         ('D(2000)', g.MPermGroup(2000, dih(2000), 4000), 10136), ('C(5000)', g.MPermGroup(5000, [cyc(5000)], 5000), 40212)]",
+    "print('charges cover the peaks', [c._element_bytes(G.n) >= p for _, G, p in peaks])",
+    "for name, G, p in peaks:",
+    "    m._COLLECT_MAX, m._COLLECT_COST = 1, g.order(G) * p - 1",
+    "    run(name + ' below its peak', lambda: len(c._engine_classes(G)))",
+    "m._COLLECT_MAX, m._COLLECT_COST = 1, 12 * c._element_bytes(4) + c._ENUM_FIXED",
+    "run('Alt(4) at the bound', lambda: len(c._engine_classes(g.alt(4))))",
+    "m._COLLECT_COST -= 1",
+    "run('Alt(4) one byte past it', lambda: len(c._engine_classes(g.alt(4))))",
+    // (the output, admitted by the classes' number once the engine has counted them: an abelian group's are as
+    // many as its elements; C2^10 on 20 points, and C(300), whose images pass 256 (a new int each under CPython))
+    "def swap(i):",
+    "    im = list(range(1, 21)); im[2 * i], im[2 * i + 1] = im[2 * i + 1], im[2 * i]",
+    "    return tuple(im)",
+    "for name, G, k in [('C2^10', g.MPermGroup(20, [swap(i) for i in range(10)]), 1024), ('C(300)', g.MPermGroup(300, [cyc(300)]), 300)]:",
+    "    m._COLLECT_MAX, m._COLLECT_COST = 1, k * c._class_output_bytes(G.n)",
+    "    run(name + ', output at the bound', lambda: len(c._engine_classes(G)))",
+    "    m._COLLECT_COST -= 1",
+    "    run(name + ', output one byte past it', lambda: len(c._engine_classes(G)))",
+    "    run(name + ', its number of classes (no output)', lambda: c.number_of_classes(G))",
+    "run('then another group', lambda: len(c._engine_classes(g.alt(4))))",
+  ].join("\n");
+  const r = spawnSync(process.execPath, [cli, "-c", py], { encoding: "utf8", timeout: WALL(120000) });
+  assert.equal(r.stdout, ["per element 288 8256 fixed 4096 per class 2000 15440", "charges cover the peaks [True, True, True]",
+    "Sym(9) below its peak refused True", "D(2000) below its peak refused True", "C(5000) below its peak refused True",
+    "Alt(4) at the bound admitted 4", "Alt(4) one byte past it refused True",
+    "C2^10, output at the bound admitted 1024", "C2^10, output one byte past it refused True", "C2^10, its number of classes (no output) admitted 1024",
+    "C(300), output at the bound admitted 300", "C(300), output one byte past it refused True", "C(300), its number of classes (no output) admitted 300",
+    "then another group admitted 4", ""].join("\n"), r.stderr);
+});
+
+test("ConjugacyClasses of a group other than Sym(n): Sagebrush's canonical representatives (each class's least element) and order (element order, length, representative), pinned", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  const out = spawnSync(process.execPath, [cli, "--magma"], { input: "D := DihedralGroup(5); ConjugacyClasses(D);\nG := PermutationGroup<4 | (1,2,3,4), (1,3)>; [c[3] : c in ConjugacyClasses(G)];\n", encoding: "utf8", timeout: WALL(120000) }).stdout as string;
+  assert.equal(out, [
+    "Conjugacy Classes of group D", "-".repeat(28), "[1]     Order 1       Length 1      ", "        Rep Id(D)", "",
+    "[2]     Order 2       Length 5      ", "        Rep (2, 5)(3, 4)", "",
+    "[3]     Order 5       Length 2      ", "        Rep (1, 2, 3, 4, 5)", "",
+    "[4]     Order 5       Length 2      ", "        Rep (1, 3, 5, 2, 4)", "", "",
+    "[", "    Id(G),", "    (1, 3)(2, 4),", "    (2, 4),", "    (1, 2)(3, 4),", "    (1, 2, 3, 4)", "]", ""].join("\n"));
 });
 
 test("an intrinsic of several signatures refuses in words those Magma has and Sagebrush doesn't yet, and the index has an entry for each", () => {

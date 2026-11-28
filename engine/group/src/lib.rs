@@ -11,6 +11,7 @@
 //! a permutation group (1975).
 
 pub mod chain;
+pub mod classes;
 pub mod embed;
 pub mod group;
 pub mod lattice;
