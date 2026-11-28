@@ -1182,6 +1182,16 @@
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "a test, a cache's size bound or a saturation: refuses nothing"
  },
+ "engine/mp/src/elefun.rs :: pow_directed_side :: if next / 64 + 8 > crate::nat::max_limbs() as u64 / 4 { #0": {
+  "class": "none",
+  "owner": "mpmath core",
+  "reason": "the Ziv loop of a directed power ends before its precision would pass the session's limb limit (keeping the reference's result), and the exactness test runs only where it fits that limit: they refuse nothing"
+ },
+ "engine/mp/src/elefun.rs :: pow_is_exact :: let lim = 64 * crate::nat::max_limbs() as u64 / 2; #0": {
+  "class": "none",
+  "owner": "mpmath core",
+  "reason": "the Ziv loop of a directed power ends before its precision would pass the session's limb limit (keeping the reference's result), and the exactness test runs only where it fits that limit: they refuse nothing"
+ },
  "engine/mp/src/elefun.rs :: put :: if i >= DENSE_MAX { #0": {
   "class": "none",
   "owner": "mpmath core (@sagebrush-sage2)",
