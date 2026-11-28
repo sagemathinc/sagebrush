@@ -72,7 +72,7 @@ export function deleteNotebookRecord(db, id) {
     const tx = db.transaction(notebookScope(db), "readwrite");
     tx.objectStore("notebooks").delete(id);
     noteToken(tx, { ident: id, rev: 0, kind: "notebook", chain: null }).catch(() => { try { tx.abort(); } catch {} });
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => resolve(undefined);
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error("the delete was stopped"));
   });
@@ -314,7 +314,7 @@ function inertWalk(v, max) {
     if (e === SHAPE) return SHAPE;
     if (e === SKIP) continue;
     if (f.sum > max) return TOO_LARGE;
-    const [k, c] = e;
+    const [k, c] = /** @type {[string, object]} */ (e);
     const l = leaf(c);
     if (l === -1) return SHAPE;
     if (l !== null) { put(f, k, c); if ((f.sum += l) > max) return TOO_LARGE; continue; }
@@ -427,16 +427,21 @@ function open(name, stores, onVersionChange) {
     } catch { resolve(null); }
   });
 }
+/** @param {string} [name] @param {{ onVersionChange?: () => void }} [opts] */
 export const openDb = (name = "sagebrush", { onVersionChange } = {}) => open(name, { notebooks: { keyPath: "id" }, files: null }, onVersionChange);
+/** @param {{ onVersionChange?: () => void }} [opts] */
 export const openHistoryDb = ({ onVersionChange } = {}) => open("sagebrush-history", { history: { keyPath: ["nb", "time"] } }, onVersionChange);
 // "sagebrush-board-history": "history", boards' TimeTravel (web/board/history.ts), by [board id, patch id]: apart from notebooks'.
+/** @param {{ onVersionChange?: () => void }} [opts] */
 export const openBoardHistoryDb = ({ onVersionChange } = {}) => open("sagebrush-board-history", { history: { keyPath: ["nb", "time"] } }, onVersionChange);
 // "sagebrush-blobs": "blobs", file contents by their hash.  TimeTravel's
 // journal keeps only the hashes of the files a session read; replay and the
 // portable bundle find the bytes here.
+/** @param {{ onVersionChange?: () => void }} [opts] */
 export const openBlobDb = ({ onVersionChange } = {}) => open("sagebrush-blobs", { blobs: null }, onVersionChange);
 // "sagebrush-share-sent": "records", this browser's records of first uploads whose share request it sent, by
 // account|notebook (web/index.html, shareSent): its own database, so that no other one needs a version change.
+/** @param {{ onVersionChange?: () => void }} [opts] */
 export const openShareSentDb = ({ onVersionChange } = {}) => open("sagebrush-share-sent", { records: { keyPath: "key" } }, onVersionChange);
 
 /** The SHA-256 of bytes, in hex (a 53-bit hash, "c53:...", where there is no crypto.subtle: not a secure context). */
@@ -628,6 +633,11 @@ export class IdbPatchStore {
     // TimeTravel until 2c-1b, plan-sync-slice2-client r4 §2): its phase is the fence's when it was first read,
     // "journal" or "ok", and stays that: a store bound before the activation is refused after it, as any other)
     this.followPhase = !!opts.followPhase && !this.journal; this.boundPhase = undefined;
+    // (set by the journal's store (web/journal/store.js): the save's intent for the append under way, and whether this
+    // tab may write and mutate the notebook now)
+    /** @type {unknown} */ this.intent = undefined;
+    /** @type {(() => boolean) | undefined} */ this.writerOK = undefined;
+    /** @type {(() => boolean) | undefined} */ this.mutateOK = undefined;
   }
   // (the phase this store's writes go in)
   get phase() { return this.journal ? "journal" : this.followPhase ? (this.boundPhase ?? "ok") : "ok"; }
@@ -757,8 +767,8 @@ export class IdbPatchStore {
           if (this.owned && fenceRefusal(f.result?.fence, this.fence, this.phase)) return this.stopped(f.result?.fence);
           st.put({ nb: this.id, time: env.time, env });
         };
-        tx.oncomplete = () => ok();
-        tx.onerror = () => { console.warn("history:", tx.error); ok(); };
+        tx.oncomplete = () => ok(undefined);
+        tx.onerror = () => { console.warn("history:", tx.error); ok(undefined); };
       });
       });
     }).catch((e) => console.warn("history:", e)).finally(() => { if (this.owned) { backlog.entries--; backlog.bytes -= size; } });
@@ -784,10 +794,10 @@ export class IdbPatchStore {
           if (refused) { out = { refused }; stop(); return; }
           fn(st).then((r) => { out = r; if (r?.j === undefined) stop(); }, (e) => { out = { refused: e?.refusal ?? `not kept: ${e?.message ?? e}`, ...(e?.name === "QuotaExceededError" ? { quota: true } : {}) }; stop(); });
         };
-        tx.oncomplete = () => ok();
+        tx.oncomplete = () => ok(undefined);
         // (stopped, or failed: nothing of it written, whatever `fn` had said)
         // (the history database out of room: said as such, so the save's record is still written, marked (2c-1d-iii §1))
-        tx.onabort = () => { if (!out || out.j !== undefined) out = { refused: `not kept: ${tx.error?.message ?? "the write was stopped"}`, ...(tx.error?.name === "QuotaExceededError" ? { quota: true } : {}) }; ok(); };
+        tx.onabort = () => { if (!out || out.j !== undefined) out = { refused: `not kept: ${tx.error?.message ?? "the write was stopped"}`, ...(tx.error?.name === "QuotaExceededError" ? { quota: true } : {}) }; ok(undefined); };
         tx.onerror = () => {};
       });
       return out ?? { refused: "not kept" };

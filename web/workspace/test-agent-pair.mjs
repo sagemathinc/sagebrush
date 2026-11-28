@@ -4,7 +4,7 @@
 // before the person's grant, the grant's scope, the frame and call limits, and that revoking (or expiry) cuts
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
-import { failHint, agentSays, onlyCurrent, readConnect, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
+import { failHint, agentSays, onlyCurrent, readConnect, unusableSession, ONLY_CODE, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
 import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
 import { AgentPairing, AgentError, CHANGED_WHILE_RUNNING, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RETURN_MS } from "./agent-pair.ts";
 
@@ -778,7 +778,7 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
     //  and again after: a mutant whose allow() goes on is caught in either order (the grader's K14-ae ruling))
     const right = P.state;
     await sleep(100);
-    ok(right === "closed" && P.state === "closed" && P.grant === null && st.m.size === 0, "U-13.pending-kept: a revoke while a remembered allow() waits on its store wins: still closed after the store goes on", { right, state: P.state });
+    ok(right === "closed" && P.state === "closed" && P.grant === null && st.m.size === 0 && W.store.size === 0, "U-13.pending-kept: a revoke while a remembered allow() waits on its store wins: still closed, with no remembered material, after the store goes on", { right, state: P.state });
     S.srv.stop(true);
   }
 }
@@ -1348,5 +1348,47 @@ console.log(failures ? `${failures} failed` : "all passed");
     S2.srv.stop(true);
   }
 }
+
+// ---- Revoke's visible completion follows the local transaction, not merely the socket's close (#1585).
+{
+  const S = server(pairOk), W = fakeWs();
+  let release, began, deletes = 0;
+  const held = new Promise(r => { release = r; }), started = new Promise(r => { began = r; });
+  const put = W.storeApi.putAgentGrant;
+  W.storeApi.putAgentGrant = async (id, g) => { if (g === null) { deletes++; began(); await held; } return put(id, g); };
+  const P = mk(S, W);
+  await P.paired(); await P.allow({ folders: ["/A"], write: true, expires: Date.now() + 3600000 }, true);
+  let done = false;
+  const revoking = P.revoke("revoked by the person").then(() => { done = true; });
+  await started;
+  const again = P.revoke("revoked by the person");
+  await Promise.resolve();
+  ok(!done && deletes === 1 && P.cleanup === "revoking" && P.state === "closed" && P.grant === null && !P.remembers && !P.hello.session, "revoke held at delete: access and usable memory gone, revoking not completed, a second action does not start another delete");
+  release(); await Promise.all([revoking, again]);
+  ok(done && P.cleanup === null && W.store.size === 0, "revoke completes only after the held local delete commits");
+  S.srv.stop(true);
+}
+{
+  const S = server(pairOk), W = fakeWs();
+  let broken = true, deletes = 0;
+  const put = W.storeApi.putAgentGrant;
+  W.storeApi.putAgentGrant = async (id, g) => { if (g === null) { deletes++; if (broken) throw new Error("storage unavailable"); } return put(id, g); };
+  const P = mk(S, W);
+  await P.paired(); await P.allow({ folders: ["/A"], write: true, expires: Date.now() + 3600000 }, true);
+  await P.revoke("revoked by the person");
+  ok(P.cleanup === "pending" && P.state === "closed" && P.grant === null && !P.remembers && !P.hello.session && W.store.size === 1, "a failed delete is cleanup pending, never an active session or usable in-memory key");
+  ok(await P.revoke("revoked by the person") === false, "await Revoke does not report completed local cleanup when deletion fails");
+  broken = false; const retried = await P.retryCleanup();
+  ok(retried === true && P.cleanup === null && W.store.size === 0 && deletes >= 2, "retry local cleanup commits removal without restoring access");
+  S.srv.stop(true);
+}
+for (const [refusedFor, closeReason, expected] of [
+  ["unknown-session", "any server wording", true],
+  [null, "the agent refused: this agent no longer knows that page: ask the agent for a new code", true],
+  [null, "the agent refused: wrong session", true],
+  ["busy", "the agent refused: another page is paired with this agent", false],
+  [null, "the connection failed", false],
+  ["bad-code", "the agent refused: wrong code", false],
+]) ok(unusableSession({ refusedFor, closeReason }) === expected, `unusable remembered session classified precisely: ${refusedFor ?? closeReason}`);
 
 process.exit(failures ? 1 : 0);
