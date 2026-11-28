@@ -699,3 +699,39 @@ def _check_sample_weight(sample_weight, X, *, dtype=None, force_float_dtype=True
     if ensure_non_negative:
         check_non_negative(sample_weight, "`sample_weight`")
     return sample_weight
+
+
+def _sk_attr_or_none(estimator, read):
+    try:
+        return read(estimator)
+    except AttributeError:
+        return None
+
+
+def _check_feature_names_in(estimator, input_features=None, *, generate_names=True):
+    """Check input_features and generate names if needed (a str array: scikit-learn's is an object array)."""
+    feature_names_in_ = _sk_attr_or_none(estimator, lambda e: e.feature_names_in_)
+    n_features_in_ = _sk_attr_or_none(estimator, lambda e: e.n_features_in_)
+
+    if input_features is not None:
+        input_features = np.asarray(list(input_features))
+        if feature_names_in_ is not None and not np.array_equal(feature_names_in_, input_features):
+            raise ValueError("input_features is not equal to feature_names_in_")
+
+        if n_features_in_ is not None and len(input_features) != n_features_in_:
+            raise ValueError(
+                "input_features should have length equal to number of "
+                f"features ({n_features_in_}), got {len(input_features)}"
+            )
+        return input_features
+
+    if feature_names_in_ is not None:
+        return feature_names_in_
+
+    if not generate_names:
+        return
+
+    if n_features_in_ is None:
+        raise ValueError("Unable to generate feature names without n_features_in_")
+
+    return np.asarray([f"x{i}" for i in range(n_features_in_)])

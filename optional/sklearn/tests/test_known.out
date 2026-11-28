@@ -5,7 +5,7 @@
 == tolerance-text
 []
 == tolerances
-['sklearn.metrics.accuracy_score(normalize=False, sample_weight=...)']
+['sklearn.metrics.accuracy_score(normalize=False, sample_weight=...)', 'sklearn.preprocessing.StandardScaler().fit(X, sample_weight=...): mean_, var_ and scale_; and its transform']
 == no-test-exempted
 []
 == entry-fields
@@ -15,7 +15,7 @@
 == unique
 True
 == count
-(9, 9)
+(14, 14)
 == missing
 []
 == extra

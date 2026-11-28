@@ -3,9 +3,11 @@ cloning, tags), the classifier, regressor, transformer and meta-estimator mixins
 is_regressor. The HTML diagram repr is not in Sagebrush's sklearn 0.x subset: an estimator shows its text repr."""
 
 import copy
+import functools
 import inspect
 from collections import defaultdict
 
+from ._sk_config import config_context, get_config
 from ._sk_tags import Tags, TargetTags, ClassifierTags, RegressorTags, TransformerTags, get_tags
 
 
@@ -122,6 +124,16 @@ class BaseEstimator:
             valid_params[key].set_params(**sub_params)
         return self
 
+    def _validate_params(self):
+        """Validate types and values of constructor parameters (the class's _parameter_constraints)."""
+        from .utils._sk_param import validate_parameter_constraints
+
+        validate_parameter_constraints(
+            self._parameter_constraints,
+            self.get_params(deep=False),
+            caller_name=self.__class__.__name__,
+        )
+
     def __sklearn_clone__(self):
         return _clone_parametrized(self)
 
@@ -180,11 +192,29 @@ class TransformerMixin:
         tags.transformer_tags = TransformerTags()
         return tags
 
+    def set_output(self, *, transform=None):
+        """Set output container: only the default (NumPy arrays) is in Sagebrush's sklearn 0.x subset."""
+        if transform is None or transform == "default":
+            return self
+        raise NotImplementedError(
+            f"sklearn's set_output(transform={transform!r}) is not in Sagebrush's sklearn 0.x subset")
+
     def fit_transform(self, X, y=None, **fit_params):
         """Fit to data, then transform it."""
         if y is None:
             return self.fit(X, **fit_params).transform(X)
         return self.fit(X, y, **fit_params).transform(X)
+
+
+class OneToOneFeatureMixin:
+    """Provides `get_feature_names_out` for simple transformers."""
+
+    def get_feature_names_out(self, input_features=None):
+        """Get output feature names for transformation."""
+        from .utils.validation import _check_feature_names_in, check_is_fitted
+
+        check_is_fitted(self, attributes="n_features_in_")
+        return _check_feature_names_in(self, input_features)
 
 
 class MetaEstimatorMixin:
@@ -208,3 +238,27 @@ def is_classifier(estimator):
 def is_regressor(estimator):
     """Return True if the given estimator is (probably) a regressor."""
     return get_tags(estimator).estimator_type == "regressor"
+
+
+def _fit_context(*, prefer_skip_nested_validation):
+    """Decorator to run the fit methods of estimators within context managers: the parameters are validated
+    first, unless the configuration skips it or a partial_fit continues a fitted estimator."""
+
+    def decorator(fit_method):
+        @functools.wraps(fit_method)
+        def wrapper(self, *args, **kwargs):
+            from .utils.validation import _is_fitted
+
+            global_skip_validation = get_config()["skip_parameter_validation"]
+
+            partial_fit_and_fitted = fit_method.__name__ == "partial_fit" and _is_fitted(self)
+
+            if not global_skip_validation and not partial_fit_and_fitted:
+                self._validate_params()
+
+            with config_context(skip_parameter_validation=(prefer_skip_nested_validation or global_skip_validation)):
+                return fit_method(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator

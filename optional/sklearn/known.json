@@ -37,6 +37,31 @@
       "reason": "a name scikit-learn doesn't have either: AttributeError, as scikit-learn; the case shows the two kinds stay apart"
     },
     {
+      "case": "dummy.stratified",
+      "printed": "!! NotImplementedError: sklearn.dummy.DummyClassifier(strategy='stratified') is not in Sagebrush's sklearn 0.x subset (it needs numpy.random.RandomState.multinomial)",
+      "reason": "the stratified strategy draws with RandomState.multinomial, which needs NumPy's legacy binomial sampler; Sagebrush's numpy doesn't have it yet, so it refuses rather than draw other numbers"
+    },
+    {
+      "case": "scaler.set_output-pandas",
+      "printed": "!! NotImplementedError: sklearn's set_output(transform='pandas') is not in Sagebrush's sklearn 0.x subset",
+      "reason": "pandas (and polars) output containers are not in the subset; set_output with the default container works"
+    },
+    {
+      "case": "scaler.names-out-dtype",
+      "printed": "dtype('<U2')",
+      "reason": "get_feature_names_out gives the same names as a str array: scikit-learn's is an object array, which Sagebrush's numpy doesn't have yet"
+    },
+    {
+      "case": "pipeline.memory",
+      "printed": "!! NotImplementedError: sklearn.pipeline.Pipeline(memory=...) is not in Sagebrush's sklearn 0.x subset",
+      "reason": "caching fitted transformers goes through joblib.Memory and a directory; without it the pipeline fits its steps as scikit-learn does with memory=None"
+    },
+    {
+      "case": "pipeline.routing",
+      "printed": "!! NotImplementedError: sklearn's metadata routing is not in Sagebrush's sklearn 0.x subset",
+      "reason": "metadata routing (enable_metadata_routing=True) is not in the subset; with it off, parameters pass to steps by stepname__parameter, as in scikit-learn"
+    },
+    {
       "case": "cm.int-weights-past-2**53",
       "printed": "!! NotImplementedError: int64 values beyond 2**53 are not supported yet",
       "reason": "integer sample weights are summed exactly in int64 within each cell, as scikit-learn's; Sagebrush's int64 holds integers up to 2**53 exactly and refuses a cell when a weight or a running sum within it passes 2**53, even if the cell's final count fits, rather than round it"
@@ -52,6 +77,11 @@
       "function": "sklearn.metrics.accuracy_score(normalize=False, sample_weight=...)",
       "rule": "relative 1e-12 of the exactly rounded sum (math.fsum), enforced by test_metrics' acc.weighted-count-tolerance row; observed differences from scikit-learn are a few float64 ulps (4 in the review case)",
       "reason": "it is np.dot(score, sample_weight), and Sagebrush's np.dot doesn't reproduce OpenBLAS's ddot summation order (ruled: results through np.dot or @ may differ from scikit-learn by a few ulps; everything else is bit-exact)"
+    },
+    {
+      "function": "sklearn.preprocessing.StandardScaler().fit(X, sample_weight=...): mean_, var_ and scale_; and its transform",
+      "rule": "mean_, var_ and scale_: relative 1e-12 of reference values computed with math.fsum (over the rounded products w*x for mean_, and over w*(x - mean)**2 for var_); test_preprocessing's weighted-tolerance row checks mean_ and var_ on one fit of 1000 random weighted samples (scale_ is the square root of var_). The transform, (x - mean_) / scale_, carries mean_'s error as an absolute error of about a few ulp(mean_) / scale_, so near mean_ its relative error can be anything (a constant column gives -0x1p-50 here against scikit-learn's -0x1p-48). The small weighted rows (fit, transform, partial_fit, NaNs) match scikit-learn to the bit",
+      "reason": "the weighted sums are np.matmul(sample_weight, X), as in scikit-learn's _incremental_mean_and_var, and Sagebrush's matmul doesn't reproduce OpenBLAS's summation order (ruled: results through np.dot or @ may differ from scikit-learn by a few ulps; everything else is bit-exact). Weighted partial_fit goes through the same sums, so it can differ by a few ulps too; the row doesn't bound it"
     }
   ]
 }

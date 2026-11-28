@@ -8,21 +8,21 @@
   },
   {
     "file": "py/sklearn/base.py",
-    "line": 6,
+    "line": 7,
     "construct": "import",
     "target": "inspect",
     "reason": "an estimator's parameters are its __init__'s parameters (inspect.signature), the basis of get_params, set_params, clone and the repr, as scikit-learn's BaseEstimator._get_param_names; inspect.isclass in clone"
   },
   {
     "file": "py/sklearn/base.py",
-    "line": 95,
+    "line": 97,
     "construct": "name",
     "target": "getattr",
     "reason": "get_params reads each parameter, named by __init__'s signature, from the estimator itself (getattr(self, key)): the estimator API's definition"
   },
   {
     "file": "py/sklearn/base.py",
-    "line": 119,
+    "line": 121,
     "construct": "name",
     "target": "setattr",
     "reason": "set_params sets a parameter named by the caller on the estimator itself (setattr(self, key, value)), after checking it is one of get_params' names: the estimator API's definition"

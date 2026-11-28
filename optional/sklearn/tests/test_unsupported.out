@@ -12,6 +12,16 @@ dtype('<U2')
 !! NotImplementedError: sklearn.utils.compute_class_weight is not in Sagebrush's sklearn 0.x subset
 == missing.unknown
 !! AttributeError: module 'sklearn.utils' has no attribute 'no_such_name'
+== dummy.stratified
+!! NotImplementedError: sklearn.dummy.DummyClassifier(strategy='stratified') is not in Sagebrush's sklearn 0.x subset (it needs numpy.random.RandomState.multinomial)
+== scaler.set_output-pandas
+!! NotImplementedError: sklearn's set_output(transform='pandas') is not in Sagebrush's sklearn 0.x subset
+== scaler.names-out-dtype
+dtype('<U2')
+== pipeline.memory
+!! NotImplementedError: sklearn.pipeline.Pipeline(memory=...) is not in Sagebrush's sklearn 0.x subset
+== pipeline.routing
+!! NotImplementedError: sklearn's metadata routing is not in Sagebrush's sklearn 0.x subset
 == cm.int-weights-past-2**53
 !! NotImplementedError: int64 values beyond 2**53 are not supported yet
 == cm.int-weights-running-sum-past-2**53
