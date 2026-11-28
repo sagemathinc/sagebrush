@@ -21,6 +21,8 @@ import { asKey } from "../fleet/core/ed25519.mjs";
 import type { ChainView, OpKeys } from "../sync-seal.ts";
 
 const DB = "sagebrush-e2e-v1";
+/** After a lost genesis answer with no entry yet, how long before the chain is read once more */
+export const GENESIS_RECHECK_MS = 1500;
 const API = "/api/sync/v1/e2e";
 
 /** How the module reaches the sync server: same-origin requests with the session cookie (tests can give another). */
@@ -212,23 +214,32 @@ export class DeviceKeys implements OpKeys {
     s.add({ ...rec, recoveryShown: false } satisfies DeviceRecord, c.account);
     await done(tx);
     const text = new TextDecoder().decode(entry);
-    let posted = false;
+    // (the append's status, or null when its answer was lost on the way)
+    let status: number | null = null;
     try {
-      posted = (await t("POST", `${API}/chain`, { entry: text, keyring: null, wrappers })).status === 201;
-    } catch { /* (an answer lost on the way: decided below, from the chain) */ }
-    if (!posted) {
-      // (a failed or lost append: the chain says which. This entry first: it was applied, and genesis finishes. Another
-      // entry or none: it wasn't, and this device goes, so the person can try again)
-      let applied: boolean | null = null;
-      try {
-        const now = await fetchChain(t);
-        applied = now.account === c.account && now.entries[0] === text;
-      } catch { /* (the chain couldn't be read either: this device stays, its code marked as not shown) */ }
-      if (applied === null) throw new DeviceKeysError("server", "the key chain couldn't be started; reload the page");
-      if (!applied) {
+      status = (await t("POST", `${API}/chain`, { entry: text, keyring: null, wrappers })).status;
+    } catch { /* (decided below, from the chain) */ }
+    if (status !== 201) {
+      // (a failed or lost append: the chain says which. This entry first: it applied, and genesis finishes. Another entry
+      // first, or none after a definite refusal (4xx): it didn't, and this device goes, so the person can try again. None
+      // after a lost answer or a 5xx: the append may still land, so the chain is read once more after a pause, and if it
+      // still has none the device stays, marked as not having shown its code; a reload then says so)
+      const refused = status !== null && status >= 400 && status < 500;
+      let applied: "yes" | "no" | "unknown" = "unknown";
+      for (let i = 0; i < 2 && applied === "unknown"; i++) {
+        if (i > 0) await new Promise((r) => setTimeout(r, GENESIS_RECHECK_MS));
+        try {
+          const now = await fetchChain(t);
+          if (now.account !== c.account) break;
+          if (now.entries[0] === text) applied = "yes";
+          else if (now.entries.length > 0 || refused) applied = "no";
+        } catch { /* (the chain couldn't be read: still unknown) */ }
+      }
+      if (applied === "no") {
         await forget(c.account, rec.id);
         throw new DeviceKeysError("server", "the key chain couldn't be started; try again");
       }
+      if (applied === "unknown") throw new DeviceKeysError("server", "the key chain couldn't be started; reload the page");
     }
     await advance(c.account, E.pinOf(state), state.hashes, state.base);
     await shown(c.account, rec.id);
@@ -242,10 +253,12 @@ export class DeviceKeys implements OpKeys {
   async chain(refresh?: boolean): Promise<ChainView> {
     if (refresh) {
       const E = e2eCore();
-      const c = await fetchChain(this.t);
-      if (c.account !== this.account) throw new DeviceKeysError("server", "the signed-in account changed");
+      // (the stored pin first, then the chain: a fork mark another tab writes meanwhile is caught by advance's own check,
+      // inside its transaction, so it is never overwritten)
       const pin = await get<PinRecord>("pins", this.account);
       if (pin?.forked) throw new DeviceKeysError("forked", "this device saw a forked key chain");
+      const c = await fetchChain(this.t);
+      if (c.account !== this.account) throw new DeviceKeysError("server", "the signed-in account changed");
       const next = await DeviceKeys.verify(E, c.entries, this.ctx, pin ?? E.pinOf(this.state), this.account);
       await advance(this.account, E.pinOf(next), next.hashes, next.base);
       this.state = next;

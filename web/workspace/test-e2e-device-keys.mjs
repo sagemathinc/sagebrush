@@ -30,6 +30,8 @@ const SITE = "https://sagebrush.test";
 const A = "de71ce00-0001-4e2e-8e2e-e2e2e2e2e201";
 // (genesis whose append's answer is lost after it applied; one refused before it applied; one whose chain then can't be read)
 const LOST = "de71ce00-0002-4e2e-8e2e-e2e2e2e2e202", REFUSED = "de71ce00-0003-4e2e-8e2e-e2e2e2e2e203", DARK = "de71ce00-0004-4e2e-8e2e-e2e2e2e2e204";
+// (one answered 503 with no entry: kept, unconfirmed)
+const LATE = "de71ce00-0005-4e2e-8e2e-e2e2e2e2e205";
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const rl = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
@@ -38,7 +40,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"],
     name: "on", routes: ["sagebrush.test/*"], outboundService: async () => Response.json(plan), ratelimits: rl("4301"),
     durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
-    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: [A, LOST, REFUSED, DARK].join(","), SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" },
+    bindings: { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key", SYNC_ACCOUNTS: [A, LOST, REFUSED, DARK, LATE].join(","), SYNC_E2E: "1", SYNC_TEST_PIN_MS: "1000" },
   }],
 }));
 const db = await mf.getD1Database("SHARE_DB", "on");
@@ -50,7 +52,7 @@ const db = await mf.getD1Database("SHARE_DB", "on");
 const at = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init });
 const signIn = async (id) => (await at("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: J({ token: "dev-token", account_id: id }) })).headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
 const sessions = {};
-for (const [k, id] of Object.entries({ A, LOST, REFUSED, DARK })) {
+for (const [k, id] of Object.entries({ A, LOST, REFUSED, DARK, LATE })) {
   sessions[k] = await signIn(id);
   ok((await at("/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions[k], origin: SITE, "content-type": "application/json" }, body: "{}" })).status === 200, `(sync on for ${k})`);
 }
@@ -80,8 +82,9 @@ window.deviceOf = (acct) => idb((d) => d.get(acct));
 // lost after it was forwarded, an append refused before it, the chain unreadable, or the chain served as given)
 window.transport = (as, f = {}) => async (method, path, body) => {
   const isAppend = method === "POST" && path.endsWith("/e2e/chain"), isChain = method === "GET" && path.includes("/e2e/chain");
-  if (isAppend && f.refuse) return { status: 503, json: {} };
+  if (isAppend && f.refuse) return { status: f.refuse, json: {} };
   if (isChain && f.dark && f.dark()) return { status: 502, json: {} };
+  if (isChain && f.before) await f.before();
   if (isChain && f.serve) { const r = await window.transport(as)(method, path, body); return { status: 200, json: { ...r.json, entries: f.serve(r.json.entries) } }; }
   const r = await fetch(path, { method, headers: { "x-test-as": as, ...(body === undefined ? {} : { "content-type": "application/json" }) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const json = await r.json().catch(() => ({}));
@@ -171,6 +174,22 @@ try {
       "a fork another object met marks the account: a later load and an object already loaded are both refused (forked), the pin unmoved", r);
   }
 
+  // ---- C1: a fork mark another tab writes while this object's refresh is between its pin read and its advance survives:
+  // the refresh is refused (forked) and the mark is still there
+  {
+    await reset(); await putBack();
+    const r = await P.ev(`(async () => {
+      const f = { armed: false };
+      const k1 = await K.DeviceKeys.load(transport("A", { before: async () => { if (f.armed) { f.armed = false; await idb((d, p) => { const g = p.get(${acct}); g.onsuccess = () => p.put({ ...g.result, forked: { at: 1, code: "chain_fork" } }, ${acct}); }); } } }));
+      f.armed = true;
+      const refresh = await code(async () => k1.chain(true));
+      const after = await pinOf(${acct});
+      return { refresh, kept: !!after?.forked };
+    })()`);
+    ok(r.refresh.code === "forked" && r.kept, "a fork mark another tab writes during this object's refresh is kept: the refresh is refused (forked)", r);
+    await reset(); await putBack();
+  }
+
   // ---- T1: Reset this device forgets the pin and the fork mark too: the device enrolled again loads, pinned afresh
   {
     await reset();
@@ -241,14 +260,22 @@ try {
     // (its answer lost after it applied: the chain says so, and genesis finishes, its recovery code returned)
     const lost = await P.ev(`code(async () => { const { keys, recoveryCode } = await K.DeviceKeys.create("tablet", transport("LOST", { lose: true })); return { code: recoveryCode.length, unconfirmed: keys.recoveryUnconfirmed, again: !!(await K.DeviceKeys.load(transport("LOST"))), e0: !!(await keys.epochKeys(0)) }; })`);
     ok(lost.ok?.code === 64 && lost.ok.unconfirmed === false && lost.ok.again && lost.ok.e0, "genesis whose append's answer is lost after it applied finishes: the recovery code is returned, the device loads", lost);
-    // (refused before it applied: no device is left behind, and trying again works)
+    // (refused before it applied, definitely (a 4xx): no device is left behind, and trying again works)
     const refused = await P.ev(`(async () => {
-      const first = await code(async () => K.DeviceKeys.create("phone", transport("REFUSED", { refuse: true })));
+      const first = await code(async () => K.DeviceKeys.create("phone", transport("REFUSED", { refuse: 409 })));
       const left = await K.DeviceKeys.load(transport("REFUSED"));
       const retry = await code(async () => (await K.DeviceKeys.create("phone", transport("REFUSED"))).recoveryCode.length);
       return { first, left: left === null, retry };
     })()`);
-    ok(refused.first.code === "server" && refused.left && refused.retry.ok === 64, "genesis whose append is refused before it applies leaves no device behind, and trying again succeeds", refused);
+    ok(refused.first.code === "server" && refused.left && refused.retry.ok === 64, "genesis whose append is refused (409) before it applies leaves no device behind, and trying again succeeds", refused);
+    // (a 5xx with no entry, twice: the append may still land, so the device stays, unconfirmed, and isn't forgotten)
+    const late = await P.ev(`(async () => {
+      const acct = (await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "LATE" } })).json()).account;
+      const first = await code(async () => K.DeviceKeys.create("tv", transport("LATE", { refuse: 503 })));
+      const kept = await deviceOf(acct);
+      return { first, kept: !!kept, shown: kept?.recoveryShown ?? null };
+    })()`);
+    ok(late.first.code === "server" && late.kept && late.shown === false, "genesis answered 503 with no entry yet (read twice) keeps the device, marked unconfirmed, rather than forgetting it", late);
     // (its answer lost and the chain then unreadable: the device stays, marked as not having shown its recovery code)
     const dark = await P.ev(`(async () => {
       let posted = false;
