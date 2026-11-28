@@ -143,7 +143,9 @@ def show(obj, *more, **options):
 _RICH_DISPLAY = ("_repr_svg_", "_repr_png_", "_repr_html_", "_repr_mimebundle_", "_ipython_display_")
 from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, Cusp, DirichletGroup,
                            EllipticCurve, Newforms, newform_orbits)
-from _sage_hmf import HilbertModularForms
+# (loaded on first use: these modules cost the load heap Magma mode loads
+# with, heap-budget.json, and a script rarely touches them)
+_lazy_import("_sage_hmf", "HilbertModularForms", globals())
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
 from _sage_nf import NumberField, QuadraticField, CyclotomicField
 from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,
@@ -156,7 +158,8 @@ from _sage_series import PowerSeriesRing, LaurentSeriesRing, O
 from _sage_padic import Zp, Qp, ZpCR, QpCR
 from _sage_graph import Graph, DiGraph, graphs, digraphs
 true, false = True, False
-from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles, firing_graph, parallel_firing_graph
+_lazy_import("_sage_sandpile", ["Sandpile", "SandpileConfig", "SandpileDivisor", "sandpiles", "firing_graph",
+                                 "parallel_firing_graph"], globals())
 from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCharacterRing, WeightRing,
                        branching_rule, branching_rule_from_plethysm, BranchingRule, CartanMatrix)
 from _sage_crystals import crystals, Tableau, Word
@@ -164,7 +167,7 @@ from _sage_combinat import (Partition, Partitions, Compositions, Set, Subsets, C
                            number_of_partitions, stirling_number1, stirling_number2, bell_number)
 from _sage_polyhedra import Polyhedron, polytopes
 from _sage_manifolds import EuclideanSpace, FiniteRankFreeModule, rank, dim
-from _sage_milp import MixedIntegerLinearProgram
+_lazy_import("_sage_milp", "MixedIntegerLinearProgram", globals())
 from _sage_coding import (codes, channels, LinearCode, lfsr_sequence, lfsr_autocorrelation, lfsr_connection_polynomial,
                           IndexedSequence, AlphabeticStrings, SubstitutionCryptosystem, TranspositionCryptosystem)
 
