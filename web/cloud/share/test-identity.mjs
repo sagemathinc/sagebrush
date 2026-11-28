@@ -1406,6 +1406,20 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
     ok(all.status === 200 && fake.revoked.filter((x) => x === "session_01SHAREDE").length === 1 && left.n === 0, `V4 sign-out everywhere of two local sessions sharing a sid revokes it once, and no duplicate is left queued or retried (${JSON.stringify(left)}, ${fake.revoked})`);
   }
 
+  // and it queues one row, not one per local session (seen with WorkOS down, so nothing is delivered meanwhile)
+  {
+    const h1 = await signIn("user_01SHAREH", "session_01SHAREDH");
+    await signIn("user_01SHAREH", "session_01SHAREDH");
+    fake.revokeDown = true;
+    await post("/auth/logout-everywhere", h1.session);
+    await drain();
+    fake.revokeDown = false;
+    const queuedH = (await db.prepare("SELECT COUNT(*) AS n FROM revoke_outbox WHERE sid = 'session_01SHAREDH'").first()).n;
+    ok(queuedH === 1, `V4b sign-out everywhere of two local sessions sharing a sid queues it once (${queuedH} rows)`);
+    await db.prepare("UPDATE revoke_outbox SET next_at = 0 WHERE sid = 'session_01SHAREDH'").run();
+    await drain();
+  }
+
   // a row queued earlier and still waiting to be retried (WorkOS was down), then the same sid queued again by a later
   // end: the delivery of the later one retires the earlier, which would otherwise be answered 404 and retried to
   // exhaustion
@@ -1424,6 +1438,34 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
     fake.revokeRepeat404 = false;
     const left = (await db.prepare("SELECT COUNT(*) AS n FROM revoke_outbox WHERE sid = 'session_01SHAREDF'").first()).n;
     ok(waiting.n === 1 && waiting.a >= 1 && fake.revoked.filter((x) => x === "session_01SHAREDF").length === 1 && left === 0, `V5 an earlier queued revoke of a sid, still waiting to be retried, is retired by the later delivery of the same sid (${JSON.stringify(waiting)}, ${left} left)`);
+  }
+
+  // two drains at once, with two rows due for one account's sid: one drain owns the sid, so it's sent once, and its
+  // delivery retires the other row; nothing is answered 404 and left retrying
+  {
+    const g = await signIn("user_01SHAREG", "session_01SHAREDG");
+    const gAcct = (await db.prepare("SELECT account_id FROM sessions WHERE provider_sid = 'session_01SHAREDG'").first()).account_id;
+    await post("/auth/logout", g.session);
+    await drain();
+    for (let i = 0; i < 2; i++) await db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) VALUES ('session_01SHAREDG', ?1, 'test', 0, 0)").bind(gAcct).run();
+    fake.revoked = [];
+    fake.revokeRepeat404 = true;
+    let release, entered;
+    const entry = new Promise((r) => (entered = r));
+    fake.revokeEntered = entered;
+    fake.revokeGate = new Promise((r) => (release = r));
+    const first = drain();
+    await entry;
+    const second = drain();
+    await new Promise((r) => setTimeout(r, 300));
+    fake.revokeGate = null;
+    fake.revokeEntered = null;
+    release();
+    await Promise.all([first, second]);
+    await drain();
+    fake.revokeRepeat404 = false;
+    const left = (await db.prepare("SELECT COUNT(*) AS n FROM revoke_outbox WHERE sid = 'session_01SHAREDG'").first()).n;
+    ok(fake.revoked.filter((x) => x === "session_01SHAREDG").length === 1 && left === 0, `V6 two drains at once with two rows for one sid: it's sent once, and nothing is left retrying (${fake.revoked}, ${left} left)`);
   }
 
   // a sid no local session holds is still revoked as before

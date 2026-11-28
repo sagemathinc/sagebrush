@@ -874,7 +874,9 @@ export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): P
     // obligation is the holder's now, whose own end queues the sid again.  So the last local session to end revokes it)
     const [held, got] = await db.batch([
       db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND sid = ?2 AND attempts = ?3 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?4) AND EXISTS (SELECT 1 FROM sessions s WHERE s.provider_sid = ?2 AND s.account_id = revoke_outbox.account_id)").bind(r.id, r.sid, r.attempts, t),
-      db.prepare("UPDATE revoke_outbox SET claim = ?2, claim_until = ?3 WHERE id = ?1 AND sid = ?4 AND attempts = ?5 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?6)").bind(r.id, claim, t + CLAIM_S, r.sid, r.attempts, t),
+      // (and only while no other row for this account's sid is claimed: one drain at a time owns a sid, so two drains
+      // never send it together, and the one delivery then retires its siblings below)
+      db.prepare("UPDATE revoke_outbox SET claim = ?2, claim_until = ?3 WHERE id = ?1 AND sid = ?4 AND attempts = ?5 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?6) AND NOT EXISTS (SELECT 1 FROM revoke_outbox o WHERE o.sid = ?4 AND o.account_id IS revoke_outbox.account_id AND o.id != ?1 AND o.claim IS NOT NULL AND o.claim_until >= ?6)").bind(r.id, claim, t + CLAIM_S, r.sid, r.attempts, t),
     ]);
     if (Number(held.meta?.changes ?? 0) === 1) {
       out.held++;
@@ -884,8 +886,8 @@ export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): P
     if ((await revokeSession(c, r.sid)) === "revoked") {
       // (and the same account's other rows for this sid, met by this one delivery: the ends that remove several rows at
       // once queue each sid once (SELECT DISTINCT), but rows queued at different times can still name one sid, and a
-      // second delivery would be answered 404, retried until exhausted.  One claimed by another drain right now is left
-      // to that drain)
+      // second delivery would be answered 404, retried until exhausted.  None is claimed by another drain: the claim
+      // above refuses a sid already claimed; one whose claim lapsed meanwhile is left alone by the claim check, as before)
       await db.batch([
         db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND claim = ?2").bind(r.id, claim),
         db.prepare("DELETE FROM revoke_outbox WHERE sid = ?1 AND account_id IS ?2 AND id != ?3 AND sid_unknown = 0 AND (claim IS NULL OR claim_until < ?4)").bind(r.sid, r.account_id, r.id, now()),
