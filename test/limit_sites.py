@@ -90,10 +90,13 @@ CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
 # mailbox's host bounds, the length bound's reserve for removal and recovery, and the rates: class 1, never membership)
 # and the 3D view's rooms for Sage files (web/space/src/pyroom.ts): the preparser's work bound on a file's ranges
 # (ELLIPSIS_BUDGET, interim until the preparser rewrites ranges in one pass), which protects the page: class 1)
+# and the 3D view's hooks (web/workspace/space3d.ts): what Open in 3D reads to draw a folder and what the view may then
+# read through it, per opening (SPACE3D_LIMITS), a folder's files (LIMITS.files) and a selection's id: class 1)
+# and the 3D view's notebook rooms (web/space/src/nbroom.ts): their cells and code admitted before any is parsed: class 1)
 WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts", "web/stall-fetch.js", "web/workspace/checkpoint.ts", "web/latex/run-core.mjs",
        "web/latex/results-check.mjs", "web/output-shell/protocol.js", "web/output-shell/shell.js", "web/notebook/output-frames.js",
        "web/sync/entries.ts", "web/latex/engine/tikz.mjs", "web/sync/e2e-chain.ts",
-       "web/space/src/pyroom.ts"}
+       "web/space/src/pyroom.ts", "web/workspace/space3d.ts", "web/space/src/nbroom.ts"}
 
 
 def short(key):

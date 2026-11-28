@@ -31,6 +31,7 @@
 import { TRASH, kindOf, nameOf, parentOf, splitExt, within } from "./paths";
 import { notebookFileText, boardFileText } from "./file-bytes";
 import { Images } from "../board/images";
+import { boardPictureFiles } from "./board-pictures";
 
 export type DiskStat = { path: string; dir: boolean; size: number; mtime: number; sha256?: string | null };
 /** What the page expects a file to be (disk.rs Expect). */
@@ -205,7 +206,7 @@ export async function fileBytes(ws: any, p: string): Promise<Uint8Array | null> 
   const { entry, content } = await ws.read(p);
   if (entry.kind === "notebook") return enc.encode(notebookFileText(content));
   if (entry.kind === "board") {
-    const images = new Images();
+    const images = new Images(boardPictureFiles(ws, entry.ref));
     try { return enc.encode(await boardFileText(content, images)); } finally { images.dispose(); }
   }
   if (entry.kind === "file") return content instanceof Uint8Array ? content : typeof content === "string" ? enc.encode(content) : new Uint8Array(content);
@@ -917,13 +918,17 @@ export async function beforeLeave(m: DiskMirror | null, flushEditor?: () => Prom
   return !not.length;
 }
 
-/** A quit, or the window's close (lib.rs ask_quit): new changes stopped (`freeze`: the page's content, never this
+/** A quit ("sb-quit", every window), or this window's close ("sb-close" naming it, #1541; app/src-tauri/src/leave.rs
+ * decides which): new changes stopped (`freeze`: the page's content, never this
  * dialog, which is outside the page's body), then everything kept (keepAll), the whole of it within `timeoutMs`; then
- * the app quits.  If anything isn't kept by then, the person chooses: wait (and try again), or quit and lose it,
- * each thing named (never a quit that says nothing). */
-export function drainOnQuit(opts: { mirror: () => DiskMirror | null; invoke: (cmd: string, args?: any) => Promise<any>; listen: (ev: string, f: () => void) => unknown; freeze: () => void; flushEditor?: () => Promise<unknown>; timeoutMs?: number }) {
+ * this window says it is done (app_quit_now): it goes, and the app with it once every window is.  If anything isn't
+ * kept by then, the person chooses: wait (and try again), or quit (close) and lose it, each thing named (never a quit
+ * that says nothing). */
+export function drainOnQuit(opts: { mirror: () => DiskMirror | null; invoke: (cmd: string, args?: any) => Promise<any>; listen: (ev: string, f: (ev?: any) => void) => unknown; freeze: () => void; flushEditor?: () => Promise<unknown>; timeoutMs?: number; label?: string }) {
   let busy = false;
-  opts.listen("sb-quit", async () => {
+  // (this window's label: "sb-close" names the one window closing, #1541, app/src-tauri/src/leave.rs)
+  const me = opts.label ?? (globalThis as any).__TAURI_INTERNALS__?.metadata?.currentWebview?.label;
+  const drain = async (closing: boolean) => {
     if (busy) return;
     busy = true;
     await opts.invoke("app_quit_hold").catch(() => {});
@@ -942,7 +947,7 @@ export function drainOnQuit(opts: { mirror: () => DiskMirror | null; invoke: (cm
       box.replaceChildren(`Not saved yet (${count}): ${not.join("; ")}. `);
       const choice = await new Promise<"wait" | "quit">((r) => {
         const wait = Object.assign(document.createElement("button"), { textContent: "Wait" });
-        const quit = Object.assign(document.createElement("button"), { textContent: `Quit and lose ${count} unsaved item${count === 1 ? "" : "s"}` });
+        const quit = Object.assign(document.createElement("button"), { textContent: `${closing ? "Close" : "Quit"} and lose ${count} unsaved item${count === 1 ? "" : "s"}` });
         wait.onclick = () => r("wait");
         quit.onclick = () => r("quit");
         box.append(wait, " ", quit);
@@ -951,6 +956,9 @@ export function drainOnQuit(opts: { mirror: () => DiskMirror | null; invoke: (cm
       if (choice === "quit") break;
       box.replaceChildren("Saving your changes…");
     }
+    // (done: this window goes, and the app with it once every window is done, leave.rs)
     await opts.invoke("app_quit_now");
-  });
+  };
+  opts.listen("sb-quit", () => drain(false));
+  opts.listen("sb-close", (ev) => (ev?.payload?.label !== undefined && ev.payload.label === me ? drain(true) : undefined));
 }

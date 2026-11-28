@@ -3900,6 +3900,8 @@ function drawFileMenu() {
   renderFileMenu(fileMenu, {
     attr: "data-f",
     latex: latexHere,
+    // (File ▸ New window: the desktop app only, #1541)
+    newWindow: TAURI && desktopApp() ? "newwindow" : undefined,
     keys: { newNotebook: "new", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     // (the examples are the gallery's, which `sagebrush notebook`'s page doesn't carry: disabled there, saying where they are)
     disabled: { newFolder: none, fromExample: none || !!LOCAL, share: !!TAURI },
@@ -4041,6 +4043,16 @@ function openEntry(e, how = "here") {
   if (TAURI && desktopApp() && how === "here" && (e.kind === "notebook" || e.kind === "board")) return void claimHere(e).then((yes) => yes && openEntryHere(e, how));
   openEntryHere(e, how);
 }
+// (the desktop app's windows, #1541: File ▸ New window, the app's page in a window of its own; and a document opened
+// in a new window ("Open in a new window", a middle-click): one another window shows brings that window to the front
+// instead (app/src-tauri/src/windows.rs window_open))
+function newAppWindow() {
+  TAURI.core.invoke("window_open", { at: "/" }).catch((err) => announce(statusEl.textContent = `A new window didn't open: ${err?.message ?? err}`));
+}
+function openInAppWindow(e) {
+  // (?wsopen: a notebook opened by its path in the new window, a board passed on to its page from there)
+  TAURI.core.invoke("window_open", { at: "/?wsopen=" + encodeURIComponent(e.path), doc: e.path }).catch((err) => announce(statusEl.textContent = `${e.path} didn't open in a new window: ${err?.message ?? err}`));
+}
 // (the desktop app's windows, #1541: a notebook or board is open in one window at a time; opening one another window
 // shows brings that window to the front instead (app/src-tauri/src/windows.rs window_claim).  Whether to open it here:
 // always, but in the app)
@@ -4058,7 +4070,7 @@ function openEntryHere(e, how) {
     return void wsNow().then((w) => w && openPreview(w, e, { say: (t) => (savedEl.textContent = t), fail: (x) => (savedEl.textContent = String(x?.message ?? x)) }));
   }
   const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
-  if (how === "tab") return void window.open(url, "_blank", "noopener");
+  if (how === "tab") return void (TAURI && desktopApp() ? openInAppWindow(e) : window.open(url, "_blank", "noopener"));
   if (codePageUp) return void leaveCodePage(url);
   if (e.kind === "notebook") { saveNow(); openId(e.ref).then(wsTrackCurrent, sayNotLeft); }
   else toBoard(url);
@@ -4067,6 +4079,9 @@ const toggleFileMenu = menuOf(fileBtn, fileMenu);
 // (Ctrl+Alt+N a new notebook, Ctrl+O Open…: the File menu's keys)
 document.addEventListener("keydown", (e) => {
   const it = fileMenuKey(e);
+  // (Ctrl+Shift+N: a new window in the app, whatever page is over this one (the LaTeX editor's, the code page's); in a
+  // browser, the browser's own, untouched)
+  if (it === "newWindow") { if (TAURI && desktopApp()) { e.preventDefault(); newAppWindow(); } return; }
   // (the LaTeX editor's page over this one: its own File menu answers them, never both: one notebook a Ctrl+Alt+N)
   if (!it || document.querySelector(".tex-page")) return;
   e.preventDefault();
@@ -4339,6 +4354,7 @@ fileMenu.addEventListener("click", async (e) => {
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
     // (the file browser as a dialog; without the workspace, the notebooks of this browser as before)
+    case "newwindow": newAppWindow(); break;
     case "open": if (ws) openFilesDialog(ws, (e, how) => openEntry(e, how), () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined)); else await showOpen(); break;
     case "duplicate": {
       saveNow();
@@ -5824,7 +5840,7 @@ function wsShowFiles(on) {
   if (on && !wsBrowser && ws) {
     const openHere = (e, how) => {
       const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
-      if (how === "tab") return void window.open(url, "_blank", "noopener");
+      if (how === "tab") return void (TAURI && desktopApp() ? openInAppWindow(e) : window.open(url, "_blank", "noopener"));
       if (e.kind === "notebook" && !codePageUp) {
         saveNow();
         // (on a phone the files cover the page: out of the way of what was
@@ -5840,6 +5856,7 @@ function wsShowFiles(on) {
     };
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
+      windows: !!(TAURI && desktopApp()),
       // (Agents…: the agents page once this notebook is saved, as the board is opened; not saved, it stays, saying why.
       // Not in the desktop app, which has no agents page yet (#1542): no Agents… and no Files | Agents switch there)
       ...(desktopApp() ? {} : { agents: () => void toBoard("/agents/", "the agents page") }),
@@ -6221,7 +6238,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     const install = document.querySelector("#installbtn");
     if (install) install.remove();
     // files the system handed the app (double-clicked, or on the command line)
-    TAURI.event.listen("open-files", (ev) => { for (const p of ev.payload ?? []) openDiskFile(p); });
+    // (and files handed over later, for this window: the app tells this window alone, which asks for them, #1541)
+    window.__sbFilesWaiting = async () => { for (const p of await TAURI.core.invoke("startup_files")) await openDiskFile(p); };
     for (const p of await TAURI.core.invoke("startup_files")) await openDiskFile(p);
     const st = await TAURI.core.invoke("selftest_file");
     // (a quit, or the window closed: the notebook's save, the settings and every change on disk first)

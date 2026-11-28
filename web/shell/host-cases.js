@@ -731,6 +731,173 @@ async function cpDocuments(check) {
       }
     }
   }
+  // a board's pictures (#1872): its copy gets its picture files, each charged on its own (one op and its bytes);
+  // counted before anything is copied, so a limit they'd pass refuses the copy with nothing made; one the copy
+  // can't get (no file for a name the document gives) is said, as cp's error, once the rest is copied
+  {
+    const png = (fill, n) => { const u = new Uint8Array(n).fill(fill); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); return u; };
+    const N3 = "i" + "c3".repeat(16);
+    // (each picture named by its content, as a board names it: a file is copied only if its bytes are its name's)
+    const nm = async (u) => "i" + [...new Uint8Array(await crypto.subtle.digest("SHA-256", u)).slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const U = [null, png(1, 100), png(2, 250), png(3, 120), png(4, 90), png(5, 80), png(6, 90), png(7, 70), png(8, 60)];
+    const M = [null]; for (let i = 1; i < U.length; i++) M.push(await nm(U[i]));
+    const N1 = M[1], N2 = M[2];
+    const board = async (ws, p, names) => {
+      const e = await ws.create(p, { content: { title: "pics", nodes: [], images: Object.fromEntries(names.map((n) => [n, { w: 1, h: 1 }])) } });
+      return e.ref;
+    };
+    const { ws, host } = await fresh("cpdocs-pics");
+    const ref = await board(ws, "/p.board.json", [N1, N2]);
+    await ws.create(`/Attachments/board-${ref}/${N1}.png`, { content: U[1] });
+    await ws.create(`/Attachments/board-${ref}/${N2}.png`, { content: U[2] });
+    const size = await sizeOf(ws, "/p.board.json");
+    let run = host.run(PERSON);
+    let r = await run.invoke("cp p.board.json q.board.json");
+    let led = run.ledger();
+    const q = await ws.stat("/q.board.json");
+    const got = q ? (await ws.list(`/Attachments/board-${q.ref}`).catch(() => [])).map((e) => e.path).sort() : [];
+    check(r.kind === "exit" && r.code === 0 && same(got, [`/Attachments/board-${q?.ref}/${N1}.png`, `/Attachments/board-${q?.ref}/${N2}.png`].sort()) && led.ops === 3 && led.written_bytes === size + 350,
+      `cp of a board with two pictures: both copied to its copy's folder, each charged: ops 3, written_bytes ${led.written_bytes} = ${size} + 100 + 250 (${show(r)}; ${JSON.stringify(led)}; ${JSON.stringify(got)})`);
+    for (const [key, bash] of [["ops", { ops: 2 }], ["written_bytes", { written_bytes: size + 349 }]]) {
+      const h = new ShellHost(ws, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), { bash });
+      const run2 = h.run(PERSON);
+      const r2 = await run2.invoke("cp p.board.json r.board.json");
+      check(typed(r2, key) && !(await ws.stat("/r.board.json")) && run2.ledger().ops === 0 && run2.ledger().written_bytes === 0,
+        `cp of that board with room for the board but not its pictures (${key}): refused before anything is copied (${show(r2)})`);
+      h.endShell("case done");
+    }
+    // cp -r: the pictures in cp_entries, cp_bytes, ops and written_bytes too (each board's picture folder an entry)
+    await ws.mkdir("/t2");
+    const ref2 = await board(ws, "/t2/b.board.json", [M[3]]);
+    await ws.create(`/Attachments/board-${ref2}/${M[3]}.png`, { content: U[3] });
+    const s2 = await sizeOf(ws, "/t2/b.board.json");
+    run = host.run(PERSON);
+    r = await run.invoke("cp -r t2 t3");
+    led = run.ledger();
+    const c2 = await ws.stat("/t3/b.board.json");
+    check(r.kind === "exit" && r.code === 0 && !!c2 && !!(await ws.stat(`/Attachments/board-${c2.ref}/${M[3]}.png`)) && led.cp_entries === 2 + 2 && led.cp_bytes === s2 + 120 && led.written_bytes === s2 + 120 && led.ops === 3,
+      `cp -r of a folder with a board and its picture: copied; cp_entries ${led.cp_entries}, cp_bytes = written_bytes = ${s2} + 120, ops ${led.ops} (${show(r)}; ${JSON.stringify(led)})`);
+    // a name with no file: the copy is made, and cp says what it lacks
+    const ref3 = await board(ws, "/m.board.json", [M[4], N3]);
+    await ws.create(`/Attachments/board-${ref3}/${M[4]}.png`, { content: U[4] });
+    r = await host.exec(PERSON, "cp m.board.json n.board.json; echo rc=$?");
+    const n = await ws.stat("/n.board.json");
+    check(!!n && !!(await ws.stat(`/Attachments/board-${n.ref}/${M[4]}.png`)) && /rc=1/.test(r.stdout) && /without 1 of its pictures/.test(r.stderr),
+      `cp of a board one of whose pictures has no file: copied with the other, and cp says one is missing, status 1 (${show(r)})`);
+    // a picture the board keeps itself (an https: address, embedded data) isn't one its files must hold
+    await ws.create("/s.board.json", { content: { title: "src", nodes: [], images: { ihttps: { w: 1, h: 1, src: "https://example.com/p.png" }, idata: { w: 1, h: 1, src: "data:image/png;base64,iVBORw0KGgo=" }, [N3]: { w: 1, h: 1 } } } });
+    r = await host.exec(PERSON, "cp s.board.json s2.board.json; echo rc=$?");
+    check(!!(await ws.stat("/s2.board.json")) && /rc=1/.test(r.stdout) && /without 1 of its pictures/.test(r.stderr),
+      `cp of a board with an https: picture, an embedded one and one with neither a source nor a file: only the last is missing (${show(r)})`);
+    // cp -r's picture budget, kept: ops at the exact boundary (mkdir, board, picture: 3) and one below; cp_entries
+    // (file, folder, picture, picture folder: 4) one below; cp_bytes one below; refused, nothing made
+    for (const [what, bash, key] of [["ops 3", { ops: 3 }, null], ["ops 2", { ops: 2 }, "ops"], ["cp_entries 3", { cp_entries: 3 }, "cp_entries"], ["cp_bytes one short", { cp_bytes: s2 + 119 }, "cp_bytes"], ["written_bytes one short", { written_bytes: s2 + 119 }, "written_bytes"]]) {
+      const h = new ShellHost(ws, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), { bash });
+      const run2 = h.run(PERSON), dst = "/t" + what.replace(/\W+/g, "");
+      const r2 = await run2.invoke(`cp -r t2 ${dst.slice(1)}`);
+      const made = await ws.stat(dst);
+      check(key === null ? r2.kind === "exit" && r2.code === 0 && !!made && run2.ledger().ops === 3 : typed(r2, key) && !made && run2.ledger().ops === 0,
+        `cp -r of a board with a picture, ${what}: ${key === null ? "copied, at the exact boundary" : "refused naming " + key + ", nothing made"} (${show(r2)}; ${JSON.stringify(run2.ledger())})`);
+      h.endShell("case done");
+    }
+    // the pictures copied are those measured: one grown after the measurement, refused (ECONFLICT) with nothing
+    // copied; one whose file appeared after it, not copied (not charged) and said missing
+    {
+      const gref = await board(ws, "/g.board.json", [M[5]]);
+      await ws.create(`/Attachments/board-${gref}/${M[5]}.png`, { content: U[5] });
+      const h = new ShellHost(hookable({ duplicate: async () => { await ws.write(`/Attachments/board-${gref}/${M[5]}.png`, png(5, 160)); } })(ws), (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), {});
+      const run2 = h.run(PERSON);
+      const r2 = await run2.invoke("cp g.board.json g2.board.json");
+      check(r2.kind === "exit" && r2.code === 1 && /changed/.test(r2.stderr) && !(await ws.stat("/g2.board.json")) && run2.ledger().written_bytes === 0, `a picture grown after cp measured it: refused, nothing copied (${show(r2)})`);
+      h.endShell("case done");
+      const lref = await board(ws, "/l.board.json", [M[6]]);
+      const h2 = new ShellHost(hookable({ duplicate: async () => { await ws.create(`/Attachments/board-${lref}/${M[6]}.png`, { content: U[6] }); } })(ws), (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), {});
+      const run3 = h2.run(PERSON);
+      const r3 = await run3.invoke("cp l.board.json l2.board.json");
+      const l2 = await ws.stat("/l2.board.json");
+      check(r3.kind === "exit" && r3.code === 1 && /without 1 of its pictures/.test(r3.stderr) && !!l2 && !(await ws.stat(`/Attachments/board-${l2.ref}/${M[6]}.png`)) && run3.ledger().ops === 1,
+        `a picture file that appeared after cp measured the board: not copied, not charged, said missing (${show(r3)}; ${JSON.stringify(run3.ledger())})`);
+      h2.endShell("case done");
+    }
+    // a same-size rewrite of a picture after duplicate's check and before its read (the same file, the same size, a
+    // new revision, other bytes): refused (ECONFLICT), never a copy that would show the picture missing
+    {
+      const U9 = png(9, 64), M9 = await nm(U9);
+      const xref = await board(ws, "/x.board.json", [M9]);
+      const pic = `/Attachments/board-${xref}/${M9}.png`;
+      await ws.create(pic, { content: U9 });
+      const v = Object.create(ws);
+      let done = false;
+      v.readUpTo = async function (p, ...rest) { if (p === pic && !done) { done = true; await ws.write(pic, png(10, 64)); } return ws.readUpTo.apply(this, [p, ...rest]); };
+      const h = new ShellHost(v, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), {});
+      const r2 = await h.exec(PERSON, "cp x.board.json x2.board.json; echo rc=$?");
+      const x2 = await ws.stat("/x2.board.json");
+      check(done && /rc=1/.test(r2.stdout) && /changed/.test(r2.stderr) && !/without/.test(r2.stderr) && !(x2 && (await ws.stat(`/Attachments/board-${x2.ref}/${M9}.png`))),
+        `a same-size rewrite of a picture between duplicate's check and its read: refused (ECONFLICT), the picture not copied (${show(r2)})`);
+      h.endShell("case done");
+    }
+    // a same-size picture replaced (a new file under the same name) after cp measured it: refused, nothing copied
+    {
+      const fref = await board(ws, "/f.board.json", [M[5]]);
+      const fpic = `/Attachments/board-${fref}/${M[5]}.png`;
+      await ws.create(fpic, { content: U[5] });
+      const h = new ShellHost(hookable({ duplicate: async () => { await ws.remove(fpic); await ws.create(fpic, { content: png(9, 80) }); } })(ws), (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), {});
+      const run2 = h.run(PERSON);
+      const r2 = await run2.invoke("cp f.board.json f2.board.json");
+      check(r2.kind === "exit" && r2.code === 1 && /changed/.test(r2.stderr) && !(await ws.stat("/f2.board.json")) && run2.ledger().written_bytes === 0, `a same-size picture replaced after cp measured it: refused, nothing copied (${show(r2)})`);
+      h.endShell("case done");
+    }
+    // a revocation or a fence exactly at a picture's admit: the typed outcome (unavailable, row 3; interrupted, row 1),
+    // the board already made, no picture committed (kept from the tests review)
+    for (const mode of ["revoke", "fence"]) {
+      const { ws: w2 } = await fresh("pics-admit-" + mode);
+      const pu = png(4, 60), pn = await nm(pu);
+      const aa = await w2.mkdir("/AA");
+      const e = await w2.create("/AA/a.board.json", { content: { title: "admit", nodes: [], images: { [pn]: { w: 1, h: 1 } } } });
+      await w2.create(`/Attachments/board-${e.ref}/${pn}.png`, { content: pu });
+      const att = await w2.stat("/Attachments");
+      let live = "ok", hits = 0, run2;
+      const v = Object.create(w2);
+      v.duplicate = async function (p, to, o) {
+        const pa = o.pictures.admit;
+        return w2.duplicate.call(this, p, to, { ...o, pictures: { ...o.pictures, admit: (bytes) => { const a = pa(bytes); return (c) => { if (!hits++) { if (mode === "revoke") live = "revoked"; else run2.latch({ row: 1 }); } a(c); }; } } });
+      };
+      const h = new ShellHost(v, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), {});
+      const g = { kind: "grant", actor: "agent:test", folders: new Set([aa.fid, att.fid]), write: true, live: () => live };
+      run2 = h.run(mode === "revoke" ? g : PERSON);
+      const answer = await run2.invoke("cp /AA/a.board.json /AA/b.board.json");
+      const b = await w2.stat("/AA/b.board.json");
+      const files = b ? await w2.list(`/Attachments/board-${b.ref}`).catch(() => []) : [];
+      check(hits === 1 && !!b && files.length === 0 && run2.ledger().ops === 1 && (mode === "revoke" ? answer.kind === "unavailable" && answer.row === 3 : answer.kind === "interrupted" && answer.row === 1),
+        `a ${mode === "revoke" ? "revocation" : "fence"} exactly at a picture's admit: the typed outcome, the board made, no picture committed (${show(answer)})`);
+      h.endShell("case done");
+    }
+    // one cp's missing pictures are its own: a cp -r that loses a picture and then fails (a later board's picture
+    // changed), followed by a whole cp in the same run, which says nothing missing
+    {
+      await ws.mkdir("/w");
+      await board(ws, "/w/a.board.json", [N3]);
+      const zref = await board(ws, "/w/z.board.json", [M[7]]);
+      await ws.create(`/Attachments/board-${zref}/${M[7]}.png`, { content: U[7] });
+      await ws.create("/plain.board.json", { content: { title: "plain", nodes: [] } });
+      let k = 0;
+      const h = new ShellHost(hookable({ duplicate: async () => { if (++k === 2) await ws.write(`/Attachments/board-${zref}/${M[7]}.png`, png(7, 75)); } })(ws), (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), {});
+      const run2 = h.run(PERSON);
+      const r2 = await run2.invoke("cp -r w w2; echo rc1=$?; cp plain.board.json plain2.board.json; echo rc2=$?");
+      check(r2.kind === "exit" && /rc1=1/.test(r2.stdout) && /rc2=0/.test(r2.stdout) && !/without/.test(r2.stderr) && !!(await ws.stat("/plain2.board.json")),
+        `a cp -r that lost a picture and then failed, then a whole cp: the later cp says nothing missing (${show(r2)})`);
+      h.endShell("case done");
+    }
+    // a picture copy's own admission refused (outside the agent's grant): the refusal as it is, never "missing"
+    {
+      const A = await ws.mkdir("/AA");
+      const aref = await board(ws, "/AA/p.board.json", [M[8]]);
+      await ws.create(`/Attachments/board-${aref}/${M[8]}.png`, { content: U[8] });
+      const g = { kind: "grant", actor: "agent:test", folders: new Set([A.fid]), write: true, live: () => "ok" };
+      const r2 = await host.exec(g, "cp /AA/p.board.json /AA/q.board.json; echo rc=$?");
+      check(/rc=1/.test(r2.stdout) && /Permission denied/.test(r2.stderr) && !/without/.test(r2.stderr), `a picture copy outside the agent's grant: refused as such (Permission denied), not said missing (${show(r2)})`);
+    }
+  }
   // cp -r: a tree of files, folders, a notebook and a board, every entry copied; the ledger charged with the documents'
   // sizes, checked against boundedJson's own
   {

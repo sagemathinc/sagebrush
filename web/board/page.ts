@@ -10,7 +10,7 @@
 // What this host gives the board:
 // - store: the document from the address (or the file), and this browser's
 //   edits of it, kept in localStorage per source until Revert;
-// - images: pictures in this browser's IndexedDB (images.ts);
+// - images: pictures as workspace files, or in this browser's IndexedDB (images.ts);
 // - outputs: slow code items' outputs, kept between visits (outcache.ts);
 // - code: the notebook's engine (code.ts), Python in the runner, an
 //   opaque-origin sandboxed frame (?runner=0 on a loopback host: a plain worker);
@@ -47,7 +47,8 @@ import { IdbOutputCache, MemoryOutputCache, carriedOutputs } from "./outcache";
 import { boardFromText, fromMermaid } from "./mermaid";
 import { localFollow } from "./local-follow";
 import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
-import { Images } from "./images";
+import { Images, keepHere } from "./images";
+import { boardPictureFiles, copyBoardPictures, filePictureNames } from "../workspace/board-pictures";
 import { BoardHistory, type HistoryModule } from "./history";
 import { BoardRecordStore, boardKind, journalId } from "./journal";
 import { canon, boardMerge3 } from "./merge";
@@ -299,13 +300,24 @@ const PENDING_MAX = 8 * 2 ** 20;
  * page's changes) never more (CORR-30D-1). */
 /** (`as`: its provenance (design/capabilities.md §6): `person`, made by the person here (New board, a first
  * visit's blank board); `copyOf`, a copy of that board, its provenance; else made from elsewhere) */
-async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?: AbortSignal, as: { person?: true; copyOf?: string } = {}): Promise<string> {
+async function makeInWorkspace(w: Workspace, d: BoardDoc, here: boolean, signal?: AbortSignal, as: { person?: true; copyOf?: string; said?: string } = {}): Promise<string> {
   const top = new Set((await w.list("/")).map((e) => e.path));
   const p = freePath("/", safeTitle(d.title), ".board.json", (x) => top.has(x));
   if (!p) throw new Error("no free name for a new board");
   const opts = { content: d, mode: d.mode ?? "python", signal };
   const src = as.copyOf ? await w.pathOf("board", as.copyOf).then((q) => (q ? w.stat(q) : undefined)).catch(() => undefined) : undefined;
   const e = as.person ? await w.createByPerson(p, opts) : src ? await w.createCopyOf(src, p, opts) : await w.create(p, opts);
+  // (a copy's pictures: copied to its own folder, made as the copy was)
+  // (one that can't be copied as a file is kept in this browser, which the copy shows it from; one neither copied nor
+  // kept, the person is told about before the copy opens: `said`, what the copy is called to them)
+  if (as.copyOf && e.ref && d.images) {
+    const lost = await copyBoardPictures(w, as.copyOf, e.ref, filePictureNames(d.images), (q, content) => (src ? w.createCopyOf(src, q, { content }) : w.create(q, { content })), keepHere);
+    if (lost.length) {
+      const n = lost.length === 1 ? "one of its pictures" : `${lost.length} of its pictures`;
+      if (as.said) alert(`${as.said} is made, but without ${n}: they couldn't be copied into its folder or kept in this browser, so it shows them as missing.`);
+      else console.warn(`board copy ${e.ref}: ${lost.length} picture(s) not copied`);
+    }
+  }
   if (here) try { localStorage.setItem(hereKey(e.ref!), "1"); } catch {}
   return e.ref!;
 }
@@ -1111,6 +1123,9 @@ function openTex(e: Entry, tab: boolean): boolean {
 }
 function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
+  // (in the app, a new window of its own, by the document's path; one another window shows brought to the front instead:
+  // app/src-tauri/src/windows.rs window_open, #1541)
+  if (how === "tab" && desktopApp) return void (window as any).__TAURI__.core.invoke("window_open", { at: "/?wsopen=" + encodeURIComponent(e.path), doc: e.path }).catch((err: any) => alert(`${e.path} didn't open in a new window: ${err?.message ?? err}`));
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "board" && e.ref === source.slice(6)) return;
   // (in the app, a notebook or board another window shows: that window to the front instead, app/src-tauri/src/windows.rs
@@ -1267,6 +1282,8 @@ const host: BoardHost = {
   mode: local ? { start: modeOf(modeKey("board", source.slice(6))) === "edit", toggled: (on) => rememberMode(modeKey("board", source.slice(6)), on ? "edit" : "view") } : undefined,
   // (Sagebrush's board page: the one File menu as the notebook's, what it can't do here disabled)
   fullFileMenu: true,
+  // (File ▸ New window: the app's page in a window of its own, #1541)
+  ...(desktopApp ? { newWindow: () => void (window as any).__TAURI__.core.invoke("window_open", { at: "/" }).catch((err: any) => alert(`A new window didn't open: ${err?.message ?? err}`)) } : {}),
   // (a board brought in from a file, opened here: its code waits for the person, until they run it)
   codePaused: local && isPaused(source.slice(6)),
   codeResumed: () => { if (local) unpause(source.slice(6)); },
@@ -1475,8 +1492,8 @@ const host: BoardHost = {
       return id;
     },
   },
-  // pictures: kept in this browser by name
-  images: new Images(),
+  // pictures, by name: a workspace board's as its files (/Attachments/board-<id>), else kept in this browser
+  images: new Images(local && ws ? boardPictureFiles(ws, source.slice(6), { save: true }) : null),
   // slow code items' outputs, kept in this browser (outcache.ts); in an
   // exported file, those it carries (and what runs, until the page closes)
   outputs: bench ? undefined : file ? new MemoryOutputCache(carriedOutputs(fileOutputs())) : new IdbOutputCache(OWN_ENGINE?.id),
@@ -1559,7 +1576,7 @@ const host: BoardHost = {
   // (boards of their own here, which this one stays beside; not in an exported file)
   // (made, kept and listed first, or not gone to: HARD-7F9-1)
   newBoard: file ? undefined : ws ? (mode) => departFor("A new board", async (signal) => localUrl(await makeInWorkspace(ws, blankBoard(mode), true, signal, { person: true }))) : async (mode) => { if (!(await settled("A new board"))) return; const id = makeLocal(blankBoard(mode)); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "A new board"); },
-  duplicate: file ? undefined : ws ? (d) => departFor("The copy", async (signal) => localUrl(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"), signal, { copyOf: local ? source.slice(6) : undefined }))) : async (d) => { if (!(await settled("The copy"))) return; const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "The copy"); },
+  duplicate: file ? undefined : ws ? (d) => departFor("The copy", async (signal) => localUrl(await makeInWorkspace(ws, { ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here"), signal, { copyOf: local ? source.slice(6) : undefined, said: "The copy" }))) : async (d) => { if (!(await settled("The copy"))) return; const id = makeLocal({ ...JSON.parse(JSON.stringify(d)), title: (d.title || "Untitled board") + " (copy)" }, isHere(saveKey + "#here")); if (!id) throw new Error(STORAGE_REFUSED); await leaveFor(localUrl(id), "The copy"); },
   // The File menu's items that are the workspace's (design §3): a new
   // notebook, a folder, Open… (the file browser as a dialog), Recent, and
   // this board to Trash; none without the workspace, or in an exported file

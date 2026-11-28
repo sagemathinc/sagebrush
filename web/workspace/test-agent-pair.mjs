@@ -58,7 +58,7 @@ function fakeWs() {
       read: async (p) => { if (W.hang) await new Promise(() => {}); W.reads = (W.reads ?? 0) + 1; if (W.readHold) await W.readHold; if (!files.has(p)) throw Object.assign(new Error("no such entry"), { code: "missing" }); return { entry: entry(p), content: files.get(p), rev: W.rev ?? 1 }; },
       write: async (p, c) => { if (W.conflictOn.has(p)) throw Object.assign(new Error("changed elsewhere"), { code: "conflict" }); files.set(p, c); return { entry: entry(p), rev: 2 }; },
       create: async (p) => { files.set(p, ""); return entry(p); }, mkdir: async (p) => ({ path: p, kind: "folder" }),
-      rename: async (a, b) => { files.set(b, files.get(a)); files.delete(a); return entry(b); }, duplicate: async (p) => entry(p),
+      rename: async (a, b) => { files.set(b, files.get(a)); files.delete(a); return entry(b); }, duplicate: async (p, to) => ({ ...entry(to ?? p), ...(p.includes("pics") ? { picturesLeft: 2 } : {}) }),
       remove: async (p) => entry(p), history: async () => [], version: async () => W.versionBytes,
       // (as Workspace.restore: with expect, only that very entry, else "missing" and nothing moved)
       restore: async (p, expect) => { W.restoreArgs.push(expect); const cur = W.trash.get(p); if (!expect || !cur || cur.trashed.id !== expect.trashed?.id) throw Object.assign(new Error("already restored or deleted"), { code: "missing" }); W.trash.delete(p); files.set(cur.trashed.from, "restored"); return entry(cur.trashed.from); },
@@ -113,6 +113,10 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(r8.error?.data?.code === "limit" && /bytes/.test(r8.error.data.message) && W.files.get("/A/x.txt") === "hello", "contents over 8 MiB refused with their size, nothing written");
   const r9 = await S.request("workspace.write", { path: "/A/x.txt", content: { base64: btoa("hi") }, base: 1 });
   ok(r9.result?.rev === 2 && P.changes === 1, "a write inside the grant, counted");
+  // a board's copy made without some of its pictures (Workspace.duplicate's picturesLeft): the agent is told how many
+  const rd = await S.request("workspace.duplicate", { path: "/A/pics.board.json", to: "/A/pics2.board.json" });
+  const rd2 = await S.request("workspace.duplicate", { path: "/A/x.txt", to: "/A/x2.txt" });
+  ok(rd.result?.entry?.picturesLeft === 2 && rd2.result?.entry && !("picturesLeft" in rd2.result.entry), "a duplicate missing pictures says how many (picturesLeft); a whole one doesn't", { rd, rd2 });
   // (revoke: the server told, the socket closed, the agent cut off)
   await P.revoke();
   ok(await until(() => S.closed !== null), "revoke closes the socket");

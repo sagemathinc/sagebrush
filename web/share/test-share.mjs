@@ -958,6 +958,18 @@ async function purgeStatus(rid) {
   const bVer = await c.post(`/api/share/collections/${idN}/versions`, { files, license: "MIT" });
   ok(bDel.status === 404 && bVer.status === 404 && (await fetchSite(`/api/share/c/${idN}`)).status === 200, `another account can't delete it or publish a version of it (${bDel.status}, ${bVer.status}); it is unchanged`);
 
+  // (SEC G-O1: a page or an image someone shares is never run or rendered by the files domain, which shares its root
+  //  with the agent guest: an .html and an .svg, each with a script in it, come back as sandboxed attachments)
+  {
+    const page = Buffer.from("<!doctype html><script>parent.leak = 1</script><h1>hi</h1>"), pic = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const { col: pages } = await upload(c, [["page.html", page], ["pic.svg", pic]], "Pages");
+    for (const [what, bytes] of [["an .html upload", page], ["an .svg upload", pic]]) {
+      const r = await fileAt(pages, sha(bytes));
+      const h = (k) => r.headers.get(k) ?? "";
+      ok(r.status === 200 && h("content-type") === "application/octet-stream" && /^attachment/.test(h("content-disposition")) && h("x-content-type-options") === "nosniff" && /(^|;)\s*sandbox\s*(;|$)/.test(h("content-security-policy")) && !/allow-scripts/.test(h("content-security-policy")), `${what}: a sandboxed attachment without scripts, never a page or an image (${h("content-type")}; ${h("content-disposition")}; ${h("content-security-policy")})`);
+    }
+  }
+
   // (and every answer of this whole run, the share API's and the files Worker's, said noindex, nofollow)
   const bad = answered.filter((x) => x[2] !== N);
   const statuses = [...new Set(answered.map((x) => x[1]))].sort();

@@ -11,6 +11,7 @@
 import type { Entry, Op, Workspace } from "../api";
 import type { BoardDoc } from "../../board/doc";
 import { Images } from "../../board/images";
+import { boardPictureFiles } from "../board-pictures";
 import { BlobSink, counts, cutShort, ExportStopped, ExportWorker, OpfsSink, PickerSink, resetCounts, SLICE, Spool, ZipWriter, type Sink } from "./zip";
 import { unsafeMember, unsafeNamesWhy } from "./names";
 import { jsonLen, numLen as jsonNumLen, utf8Len } from "./bytes";
@@ -435,7 +436,7 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
           if (err instanceof Missing) { plan.unavailable.push({ path: e.path, kind: e.kind, why: e.remote ? ((await arrived(w, e, here)) ? "unopened" : "remote") : "missing" }); continue; }
           throw err;
         }
-        const images = new Images();
+        const images = new Images(boardPictureFiles(w, c.entry.ref));
         try { size = await measure(c.entry, c.content, pace, images, capOf(e.kind), capWhy(e.path, e.kind)); } finally { images.dispose(); }
       }
       if (size > capOf(e.kind)) throw new ExportStopped(capWhy(e.path, e.kind));
@@ -685,7 +686,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
           // (the member's cap, or what is left of the total if that is less: both checked on the bytes as they go)
           const left = cap("total") - total, docCap = capOf(e.kind);
           const max = Math.min(docCap, left), why = left < docCap ? `the export passed ${cap("total") / 2 ** 30} GiB while it was written (files grew meanwhile)` : capWhy(e.path, e.kind);
-          const images = new Images();
+          const images = new Images(boardPictureFiles(w, c.entry.ref));
           let m;
           await T().onMember?.(e.path);
           try {
@@ -697,7 +698,7 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
           const got = { rev: c.rev, size: m.usize, sha256: m.sha256! }, f = first;
           await timed("spool", () => manifestLine(man, c.entry, c.at, got, f));
           if (T().reference && (e.kind === "notebook" || e.kind === "board")) {
-            const ref = e.kind === "notebook" ? notebookFileText(c.content) : await boardFileText(c.content as BoardDoc, new Images());
+            const ref = e.kind === "notebook" ? notebookFileText(c.content) : await boardFileText(c.content as BoardDoc, new Images(boardPictureFiles(w, c.entry.ref)));
             const h = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(ref)));
             const st = T().stats;
             if (st) (st.refs ??= {})[e.path] = Array.from(h, (x) => x.toString(16).padStart(2, "0")).join("");
