@@ -1,0 +1,1379 @@
+Zmod(1)(0).nth_root(-3, all=True) | [0]
+Zmod(1)(0).nth_root(-3) is a root | True
+Zmod(1)(0).nth_root(-2, all=True) | [0]
+Zmod(1)(0).nth_root(-2) is a root | True
+Zmod(1)(0).nth_root(-1, all=True) | [0]
+Zmod(1)(0).nth_root(-1) is a root | True
+Zmod(1)(0).nth_root(0, all=True) | []
+Zmod(1)(0).nth_root(0) is a root | False
+Zmod(2)(0).nth_root(-3, all=True) | []
+Zmod(2)(0).nth_root(-3) is a root | ValueError
+Zmod(2)(0).nth_root(-2, all=True) | []
+Zmod(2)(0).nth_root(-2) is a root | ValueError
+Zmod(2)(0).nth_root(-1, all=True) | []
+Zmod(2)(0).nth_root(-1) is a root | ValueError
+Zmod(2)(0).nth_root(0, all=True) | []
+Zmod(2)(0).nth_root(0) is a root | ValueError
+Zmod(2)(1).nth_root(-3, all=True) | [1]
+Zmod(2)(1).nth_root(-3) is a root | True
+Zmod(2)(1).nth_root(-2, all=True) | [1]
+Zmod(2)(1).nth_root(-2) is a root | True
+Zmod(2)(1).nth_root(-1, all=True) | [1]
+Zmod(2)(1).nth_root(-1) is a root | True
+Zmod(2)(1).nth_root(0, all=True) | [1]
+Zmod(2)(1).nth_root(0) is a root | True
+Zmod(3)(0).nth_root(-3, all=True) | []
+Zmod(3)(0).nth_root(-3) is a root | ValueError
+Zmod(3)(0).nth_root(-2, all=True) | []
+Zmod(3)(0).nth_root(-2) is a root | ValueError
+Zmod(3)(0).nth_root(-1, all=True) | []
+Zmod(3)(0).nth_root(-1) is a root | ValueError
+Zmod(3)(0).nth_root(0, all=True) | []
+Zmod(3)(0).nth_root(0) is a root | ValueError
+Zmod(3)(1).nth_root(-3, all=True) | [1]
+Zmod(3)(1).nth_root(-3) is a root | True
+Zmod(3)(1).nth_root(-2, all=True) | [1, 2]
+Zmod(3)(1).nth_root(-2) is a root | True
+Zmod(3)(1).nth_root(-1, all=True) | [1]
+Zmod(3)(1).nth_root(-1) is a root | True
+Zmod(3)(1).nth_root(0, all=True) | [1, 2]
+Zmod(3)(1).nth_root(0) is a root | True
+Zmod(3)(2).nth_root(-3, all=True) | [2]
+Zmod(3)(2).nth_root(-3) is a root | True
+Zmod(3)(2).nth_root(-2, all=True) | []
+Zmod(3)(2).nth_root(-2) is a root | ValueError
+Zmod(3)(2).nth_root(-1, all=True) | [2]
+Zmod(3)(2).nth_root(-1) is a root | True
+Zmod(3)(2).nth_root(0, all=True) | []
+Zmod(3)(2).nth_root(0) is a root | ValueError
+Zmod(4)(0).nth_root(-3, all=True) | []
+Zmod(4)(0).nth_root(-3) is a root | ValueError
+Zmod(4)(0).nth_root(-2, all=True) | []
+Zmod(4)(0).nth_root(-2) is a root | ValueError
+Zmod(4)(0).nth_root(-1, all=True) | []
+Zmod(4)(0).nth_root(-1) is a root | ValueError
+Zmod(4)(0).nth_root(0, all=True) | []
+Zmod(4)(0).nth_root(0) is a root | ValueError
+Zmod(4)(1).nth_root(-3, all=True) | [1]
+Zmod(4)(1).nth_root(-3) is a root | True
+Zmod(4)(1).nth_root(-2, all=True) | [1, 3]
+Zmod(4)(1).nth_root(-2) is a root | True
+Zmod(4)(1).nth_root(-1, all=True) | [1]
+Zmod(4)(1).nth_root(-1) is a root | True
+Zmod(4)(1).nth_root(0, all=True) | [1, 2, 3]
+Zmod(4)(1).nth_root(0) is a root | True
+Zmod(4)(2).nth_root(-3, all=True) | []
+Zmod(4)(2).nth_root(-3) is a root | ValueError
+Zmod(4)(2).nth_root(-2, all=True) | []
+Zmod(4)(2).nth_root(-2) is a root | ValueError
+Zmod(4)(2).nth_root(-1, all=True) | []
+Zmod(4)(2).nth_root(-1) is a root | ValueError
+Zmod(4)(2).nth_root(0, all=True) | []
+Zmod(4)(2).nth_root(0) is a root | ValueError
+Zmod(4)(3).nth_root(-3, all=True) | [3]
+Zmod(4)(3).nth_root(-3) is a root | True
+Zmod(4)(3).nth_root(-2, all=True) | []
+Zmod(4)(3).nth_root(-2) is a root | ValueError
+Zmod(4)(3).nth_root(-1, all=True) | [3]
+Zmod(4)(3).nth_root(-1) is a root | True
+Zmod(4)(3).nth_root(0, all=True) | []
+Zmod(4)(3).nth_root(0) is a root | ValueError
+Zmod(5)(0).nth_root(-3, all=True) | []
+Zmod(5)(0).nth_root(-3) is a root | ValueError
+Zmod(5)(0).nth_root(-2, all=True) | []
+Zmod(5)(0).nth_root(-2) is a root | ValueError
+Zmod(5)(0).nth_root(-1, all=True) | []
+Zmod(5)(0).nth_root(-1) is a root | ValueError
+Zmod(5)(0).nth_root(0, all=True) | []
+Zmod(5)(0).nth_root(0) is a root | ValueError
+Zmod(5)(1).nth_root(-3, all=True) | [1]
+Zmod(5)(1).nth_root(-3) is a root | True
+Zmod(5)(1).nth_root(-2, all=True) | [1, 4]
+Zmod(5)(1).nth_root(-2) is a root | True
+Zmod(5)(1).nth_root(-1, all=True) | [1]
+Zmod(5)(1).nth_root(-1) is a root | True
+Zmod(5)(1).nth_root(0, all=True) | [1, 2, 3, 4]
+Zmod(5)(1).nth_root(0) is a root | True
+Zmod(5)(2).nth_root(-3, all=True) | [2]
+Zmod(5)(2).nth_root(-3) is a root | True
+Zmod(5)(2).nth_root(-2, all=True) | []
+Zmod(5)(2).nth_root(-2) is a root | ValueError
+Zmod(5)(2).nth_root(-1, all=True) | [3]
+Zmod(5)(2).nth_root(-1) is a root | True
+Zmod(5)(2).nth_root(0, all=True) | []
+Zmod(5)(2).nth_root(0) is a root | ValueError
+Zmod(5)(3).nth_root(-3, all=True) | [3]
+Zmod(5)(3).nth_root(-3) is a root | True
+Zmod(5)(3).nth_root(-2, all=True) | []
+Zmod(5)(3).nth_root(-2) is a root | ValueError
+Zmod(5)(3).nth_root(-1, all=True) | [2]
+Zmod(5)(3).nth_root(-1) is a root | True
+Zmod(5)(3).nth_root(0, all=True) | []
+Zmod(5)(3).nth_root(0) is a root | ValueError
+Zmod(5)(4).nth_root(-3, all=True) | [4]
+Zmod(5)(4).nth_root(-3) is a root | True
+Zmod(5)(4).nth_root(-2, all=True) | [2, 3]
+Zmod(5)(4).nth_root(-2) is a root | True
+Zmod(5)(4).nth_root(-1, all=True) | [4]
+Zmod(5)(4).nth_root(-1) is a root | True
+Zmod(5)(4).nth_root(0, all=True) | []
+Zmod(5)(4).nth_root(0) is a root | ValueError
+Zmod(6)(0).nth_root(-3, all=True) | []
+Zmod(6)(0).nth_root(-3) is a root | ValueError
+Zmod(6)(0).nth_root(-2, all=True) | []
+Zmod(6)(0).nth_root(-2) is a root | ValueError
+Zmod(6)(0).nth_root(-1, all=True) | []
+Zmod(6)(0).nth_root(-1) is a root | ValueError
+Zmod(6)(0).nth_root(0, all=True) | []
+Zmod(6)(0).nth_root(0) is a root | ValueError
+Zmod(6)(1).nth_root(-3, all=True) | [1]
+Zmod(6)(1).nth_root(-3) is a root | True
+Zmod(6)(1).nth_root(-2, all=True) | [1, 5]
+Zmod(6)(1).nth_root(-2) is a root | True
+Zmod(6)(1).nth_root(-1, all=True) | [1]
+Zmod(6)(1).nth_root(-1) is a root | True
+Zmod(6)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5]
+Zmod(6)(1).nth_root(0) is a root | True
+Zmod(6)(2).nth_root(-3, all=True) | []
+Zmod(6)(2).nth_root(-3) is a root | ValueError
+Zmod(6)(2).nth_root(-2, all=True) | []
+Zmod(6)(2).nth_root(-2) is a root | ValueError
+Zmod(6)(2).nth_root(-1, all=True) | []
+Zmod(6)(2).nth_root(-1) is a root | ValueError
+Zmod(6)(2).nth_root(0, all=True) | []
+Zmod(6)(2).nth_root(0) is a root | ValueError
+Zmod(6)(3).nth_root(-3, all=True) | []
+Zmod(6)(3).nth_root(-3) is a root | ValueError
+Zmod(6)(3).nth_root(-2, all=True) | []
+Zmod(6)(3).nth_root(-2) is a root | ValueError
+Zmod(6)(3).nth_root(-1, all=True) | []
+Zmod(6)(3).nth_root(-1) is a root | ValueError
+Zmod(6)(3).nth_root(0, all=True) | []
+Zmod(6)(3).nth_root(0) is a root | ValueError
+Zmod(6)(4).nth_root(-3, all=True) | []
+Zmod(6)(4).nth_root(-3) is a root | ValueError
+Zmod(6)(4).nth_root(-2, all=True) | []
+Zmod(6)(4).nth_root(-2) is a root | ValueError
+Zmod(6)(4).nth_root(-1, all=True) | []
+Zmod(6)(4).nth_root(-1) is a root | ValueError
+Zmod(6)(4).nth_root(0, all=True) | []
+Zmod(6)(4).nth_root(0) is a root | ValueError
+Zmod(6)(5).nth_root(-3, all=True) | [5]
+Zmod(6)(5).nth_root(-3) is a root | True
+Zmod(6)(5).nth_root(-2, all=True) | []
+Zmod(6)(5).nth_root(-2) is a root | ValueError
+Zmod(6)(5).nth_root(-1, all=True) | [5]
+Zmod(6)(5).nth_root(-1) is a root | True
+Zmod(6)(5).nth_root(0, all=True) | []
+Zmod(6)(5).nth_root(0) is a root | ValueError
+Zmod(7)(0).nth_root(-3, all=True) | []
+Zmod(7)(0).nth_root(-3) is a root | ValueError
+Zmod(7)(0).nth_root(-2, all=True) | []
+Zmod(7)(0).nth_root(-2) is a root | ValueError
+Zmod(7)(0).nth_root(-1, all=True) | []
+Zmod(7)(0).nth_root(-1) is a root | ValueError
+Zmod(7)(0).nth_root(0, all=True) | []
+Zmod(7)(0).nth_root(0) is a root | ValueError
+Zmod(7)(1).nth_root(-3, all=True) | [1, 2, 4]
+Zmod(7)(1).nth_root(-3) is a root | True
+Zmod(7)(1).nth_root(-2, all=True) | [1, 6]
+Zmod(7)(1).nth_root(-2) is a root | True
+Zmod(7)(1).nth_root(-1, all=True) | [1]
+Zmod(7)(1).nth_root(-1) is a root | True
+Zmod(7)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6]
+Zmod(7)(1).nth_root(0) is a root | True
+Zmod(7)(2).nth_root(-3, all=True) | []
+Zmod(7)(2).nth_root(-3) is a root | ValueError
+Zmod(7)(2).nth_root(-2, all=True) | [2, 5]
+Zmod(7)(2).nth_root(-2) is a root | True
+Zmod(7)(2).nth_root(-1, all=True) | [4]
+Zmod(7)(2).nth_root(-1) is a root | True
+Zmod(7)(2).nth_root(0, all=True) | []
+Zmod(7)(2).nth_root(0) is a root | ValueError
+Zmod(7)(3).nth_root(-3, all=True) | []
+Zmod(7)(3).nth_root(-3) is a root | ValueError
+Zmod(7)(3).nth_root(-2, all=True) | []
+Zmod(7)(3).nth_root(-2) is a root | ValueError
+Zmod(7)(3).nth_root(-1, all=True) | [5]
+Zmod(7)(3).nth_root(-1) is a root | True
+Zmod(7)(3).nth_root(0, all=True) | []
+Zmod(7)(3).nth_root(0) is a root | ValueError
+Zmod(7)(4).nth_root(-3, all=True) | []
+Zmod(7)(4).nth_root(-3) is a root | ValueError
+Zmod(7)(4).nth_root(-2, all=True) | [3, 4]
+Zmod(7)(4).nth_root(-2) is a root | True
+Zmod(7)(4).nth_root(-1, all=True) | [2]
+Zmod(7)(4).nth_root(-1) is a root | True
+Zmod(7)(4).nth_root(0, all=True) | []
+Zmod(7)(4).nth_root(0) is a root | ValueError
+Zmod(7)(5).nth_root(-3, all=True) | []
+Zmod(7)(5).nth_root(-3) is a root | ValueError
+Zmod(7)(5).nth_root(-2, all=True) | []
+Zmod(7)(5).nth_root(-2) is a root | ValueError
+Zmod(7)(5).nth_root(-1, all=True) | [3]
+Zmod(7)(5).nth_root(-1) is a root | True
+Zmod(7)(5).nth_root(0, all=True) | []
+Zmod(7)(5).nth_root(0) is a root | ValueError
+Zmod(7)(6).nth_root(-3, all=True) | [3, 5, 6]
+Zmod(7)(6).nth_root(-3) is a root | True
+Zmod(7)(6).nth_root(-2, all=True) | []
+Zmod(7)(6).nth_root(-2) is a root | ValueError
+Zmod(7)(6).nth_root(-1, all=True) | [6]
+Zmod(7)(6).nth_root(-1) is a root | True
+Zmod(7)(6).nth_root(0, all=True) | []
+Zmod(7)(6).nth_root(0) is a root | ValueError
+Zmod(8)(0).nth_root(-3, all=True) | []
+Zmod(8)(0).nth_root(-3) is a root | ValueError
+Zmod(8)(0).nth_root(-2, all=True) | []
+Zmod(8)(0).nth_root(-2) is a root | ValueError
+Zmod(8)(0).nth_root(-1, all=True) | []
+Zmod(8)(0).nth_root(-1) is a root | ValueError
+Zmod(8)(0).nth_root(0, all=True) | []
+Zmod(8)(0).nth_root(0) is a root | ValueError
+Zmod(8)(1).nth_root(-3, all=True) | [1]
+Zmod(8)(1).nth_root(-3) is a root | True
+Zmod(8)(1).nth_root(-2, all=True) | [1, 3, 5, 7]
+Zmod(8)(1).nth_root(-2) is a root | True
+Zmod(8)(1).nth_root(-1, all=True) | [1]
+Zmod(8)(1).nth_root(-1) is a root | True
+Zmod(8)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7]
+Zmod(8)(1).nth_root(0) is a root | True
+Zmod(8)(2).nth_root(-3, all=True) | []
+Zmod(8)(2).nth_root(-3) is a root | ValueError
+Zmod(8)(2).nth_root(-2, all=True) | []
+Zmod(8)(2).nth_root(-2) is a root | ValueError
+Zmod(8)(2).nth_root(-1, all=True) | []
+Zmod(8)(2).nth_root(-1) is a root | ValueError
+Zmod(8)(2).nth_root(0, all=True) | []
+Zmod(8)(2).nth_root(0) is a root | ValueError
+Zmod(8)(3).nth_root(-3, all=True) | [3]
+Zmod(8)(3).nth_root(-3) is a root | True
+Zmod(8)(3).nth_root(-2, all=True) | []
+Zmod(8)(3).nth_root(-2) is a root | ValueError
+Zmod(8)(3).nth_root(-1, all=True) | [3]
+Zmod(8)(3).nth_root(-1) is a root | True
+Zmod(8)(3).nth_root(0, all=True) | []
+Zmod(8)(3).nth_root(0) is a root | ValueError
+Zmod(8)(4).nth_root(-3, all=True) | []
+Zmod(8)(4).nth_root(-3) is a root | ValueError
+Zmod(8)(4).nth_root(-2, all=True) | []
+Zmod(8)(4).nth_root(-2) is a root | ValueError
+Zmod(8)(4).nth_root(-1, all=True) | []
+Zmod(8)(4).nth_root(-1) is a root | ValueError
+Zmod(8)(4).nth_root(0, all=True) | []
+Zmod(8)(4).nth_root(0) is a root | ValueError
+Zmod(8)(5).nth_root(-3, all=True) | [5]
+Zmod(8)(5).nth_root(-3) is a root | True
+Zmod(8)(5).nth_root(-2, all=True) | []
+Zmod(8)(5).nth_root(-2) is a root | ValueError
+Zmod(8)(5).nth_root(-1, all=True) | [5]
+Zmod(8)(5).nth_root(-1) is a root | True
+Zmod(8)(5).nth_root(0, all=True) | []
+Zmod(8)(5).nth_root(0) is a root | ValueError
+Zmod(8)(6).nth_root(-3, all=True) | []
+Zmod(8)(6).nth_root(-3) is a root | ValueError
+Zmod(8)(6).nth_root(-2, all=True) | []
+Zmod(8)(6).nth_root(-2) is a root | ValueError
+Zmod(8)(6).nth_root(-1, all=True) | []
+Zmod(8)(6).nth_root(-1) is a root | ValueError
+Zmod(8)(6).nth_root(0, all=True) | []
+Zmod(8)(6).nth_root(0) is a root | ValueError
+Zmod(8)(7).nth_root(-3, all=True) | [7]
+Zmod(8)(7).nth_root(-3) is a root | True
+Zmod(8)(7).nth_root(-2, all=True) | []
+Zmod(8)(7).nth_root(-2) is a root | ValueError
+Zmod(8)(7).nth_root(-1, all=True) | [7]
+Zmod(8)(7).nth_root(-1) is a root | True
+Zmod(8)(7).nth_root(0, all=True) | []
+Zmod(8)(7).nth_root(0) is a root | ValueError
+Zmod(9)(0).nth_root(-3, all=True) | []
+Zmod(9)(0).nth_root(-3) is a root | ValueError
+Zmod(9)(0).nth_root(-2, all=True) | []
+Zmod(9)(0).nth_root(-2) is a root | ValueError
+Zmod(9)(0).nth_root(-1, all=True) | []
+Zmod(9)(0).nth_root(-1) is a root | ValueError
+Zmod(9)(0).nth_root(0, all=True) | []
+Zmod(9)(0).nth_root(0) is a root | ValueError
+Zmod(9)(1).nth_root(-3, all=True) | [1, 4, 7]
+Zmod(9)(1).nth_root(-3) is a root | True
+Zmod(9)(1).nth_root(-2, all=True) | [1, 8]
+Zmod(9)(1).nth_root(-2) is a root | True
+Zmod(9)(1).nth_root(-1, all=True) | [1]
+Zmod(9)(1).nth_root(-1) is a root | True
+Zmod(9)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8]
+Zmod(9)(1).nth_root(0) is a root | True
+Zmod(9)(2).nth_root(-3, all=True) | []
+Zmod(9)(2).nth_root(-3) is a root | ValueError
+Zmod(9)(2).nth_root(-2, all=True) | []
+Zmod(9)(2).nth_root(-2) is a root | ValueError
+Zmod(9)(2).nth_root(-1, all=True) | [5]
+Zmod(9)(2).nth_root(-1) is a root | True
+Zmod(9)(2).nth_root(0, all=True) | []
+Zmod(9)(2).nth_root(0) is a root | ValueError
+Zmod(9)(3).nth_root(-3, all=True) | []
+Zmod(9)(3).nth_root(-3) is a root | ValueError
+Zmod(9)(3).nth_root(-2, all=True) | []
+Zmod(9)(3).nth_root(-2) is a root | ValueError
+Zmod(9)(3).nth_root(-1, all=True) | []
+Zmod(9)(3).nth_root(-1) is a root | ValueError
+Zmod(9)(3).nth_root(0, all=True) | []
+Zmod(9)(3).nth_root(0) is a root | ValueError
+Zmod(9)(4).nth_root(-3, all=True) | []
+Zmod(9)(4).nth_root(-3) is a root | ValueError
+Zmod(9)(4).nth_root(-2, all=True) | [4, 5]
+Zmod(9)(4).nth_root(-2) is a root | True
+Zmod(9)(4).nth_root(-1, all=True) | [7]
+Zmod(9)(4).nth_root(-1) is a root | True
+Zmod(9)(4).nth_root(0, all=True) | []
+Zmod(9)(4).nth_root(0) is a root | ValueError
+Zmod(9)(5).nth_root(-3, all=True) | []
+Zmod(9)(5).nth_root(-3) is a root | ValueError
+Zmod(9)(5).nth_root(-2, all=True) | []
+Zmod(9)(5).nth_root(-2) is a root | ValueError
+Zmod(9)(5).nth_root(-1, all=True) | [2]
+Zmod(9)(5).nth_root(-1) is a root | True
+Zmod(9)(5).nth_root(0, all=True) | []
+Zmod(9)(5).nth_root(0) is a root | ValueError
+Zmod(9)(6).nth_root(-3, all=True) | []
+Zmod(9)(6).nth_root(-3) is a root | ValueError
+Zmod(9)(6).nth_root(-2, all=True) | []
+Zmod(9)(6).nth_root(-2) is a root | ValueError
+Zmod(9)(6).nth_root(-1, all=True) | []
+Zmod(9)(6).nth_root(-1) is a root | ValueError
+Zmod(9)(6).nth_root(0, all=True) | []
+Zmod(9)(6).nth_root(0) is a root | ValueError
+Zmod(9)(7).nth_root(-3, all=True) | []
+Zmod(9)(7).nth_root(-3) is a root | ValueError
+Zmod(9)(7).nth_root(-2, all=True) | [2, 7]
+Zmod(9)(7).nth_root(-2) is a root | True
+Zmod(9)(7).nth_root(-1, all=True) | [4]
+Zmod(9)(7).nth_root(-1) is a root | True
+Zmod(9)(7).nth_root(0, all=True) | []
+Zmod(9)(7).nth_root(0) is a root | ValueError
+Zmod(9)(8).nth_root(-3, all=True) | [2, 5, 8]
+Zmod(9)(8).nth_root(-3) is a root | True
+Zmod(9)(8).nth_root(-2, all=True) | []
+Zmod(9)(8).nth_root(-2) is a root | ValueError
+Zmod(9)(8).nth_root(-1, all=True) | [8]
+Zmod(9)(8).nth_root(-1) is a root | True
+Zmod(9)(8).nth_root(0, all=True) | []
+Zmod(9)(8).nth_root(0) is a root | ValueError
+Zmod(10)(0).nth_root(-3, all=True) | []
+Zmod(10)(0).nth_root(-3) is a root | ValueError
+Zmod(10)(0).nth_root(-2, all=True) | []
+Zmod(10)(0).nth_root(-2) is a root | ValueError
+Zmod(10)(0).nth_root(-1, all=True) | []
+Zmod(10)(0).nth_root(-1) is a root | ValueError
+Zmod(10)(0).nth_root(0, all=True) | []
+Zmod(10)(0).nth_root(0) is a root | ValueError
+Zmod(10)(1).nth_root(-3, all=True) | [1]
+Zmod(10)(1).nth_root(-3) is a root | True
+Zmod(10)(1).nth_root(-2, all=True) | [1, 9]
+Zmod(10)(1).nth_root(-2) is a root | True
+Zmod(10)(1).nth_root(-1, all=True) | [1]
+Zmod(10)(1).nth_root(-1) is a root | True
+Zmod(10)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8, 9]
+Zmod(10)(1).nth_root(0) is a root | True
+Zmod(10)(2).nth_root(-3, all=True) | []
+Zmod(10)(2).nth_root(-3) is a root | ValueError
+Zmod(10)(2).nth_root(-2, all=True) | []
+Zmod(10)(2).nth_root(-2) is a root | ValueError
+Zmod(10)(2).nth_root(-1, all=True) | []
+Zmod(10)(2).nth_root(-1) is a root | ValueError
+Zmod(10)(2).nth_root(0, all=True) | []
+Zmod(10)(2).nth_root(0) is a root | ValueError
+Zmod(10)(3).nth_root(-3, all=True) | [3]
+Zmod(10)(3).nth_root(-3) is a root | True
+Zmod(10)(3).nth_root(-2, all=True) | []
+Zmod(10)(3).nth_root(-2) is a root | ValueError
+Zmod(10)(3).nth_root(-1, all=True) | [7]
+Zmod(10)(3).nth_root(-1) is a root | True
+Zmod(10)(3).nth_root(0, all=True) | []
+Zmod(10)(3).nth_root(0) is a root | ValueError
+Zmod(10)(4).nth_root(-3, all=True) | []
+Zmod(10)(4).nth_root(-3) is a root | ValueError
+Zmod(10)(4).nth_root(-2, all=True) | []
+Zmod(10)(4).nth_root(-2) is a root | ValueError
+Zmod(10)(4).nth_root(-1, all=True) | []
+Zmod(10)(4).nth_root(-1) is a root | ValueError
+Zmod(10)(4).nth_root(0, all=True) | []
+Zmod(10)(4).nth_root(0) is a root | ValueError
+Zmod(10)(5).nth_root(-3, all=True) | []
+Zmod(10)(5).nth_root(-3) is a root | ValueError
+Zmod(10)(5).nth_root(-2, all=True) | []
+Zmod(10)(5).nth_root(-2) is a root | ValueError
+Zmod(10)(5).nth_root(-1, all=True) | []
+Zmod(10)(5).nth_root(-1) is a root | ValueError
+Zmod(10)(5).nth_root(0, all=True) | []
+Zmod(10)(5).nth_root(0) is a root | ValueError
+Zmod(10)(6).nth_root(-3, all=True) | []
+Zmod(10)(6).nth_root(-3) is a root | ValueError
+Zmod(10)(6).nth_root(-2, all=True) | []
+Zmod(10)(6).nth_root(-2) is a root | ValueError
+Zmod(10)(6).nth_root(-1, all=True) | []
+Zmod(10)(6).nth_root(-1) is a root | ValueError
+Zmod(10)(6).nth_root(0, all=True) | []
+Zmod(10)(6).nth_root(0) is a root | ValueError
+Zmod(10)(7).nth_root(-3, all=True) | [7]
+Zmod(10)(7).nth_root(-3) is a root | True
+Zmod(10)(7).nth_root(-2, all=True) | []
+Zmod(10)(7).nth_root(-2) is a root | ValueError
+Zmod(10)(7).nth_root(-1, all=True) | [3]
+Zmod(10)(7).nth_root(-1) is a root | True
+Zmod(10)(7).nth_root(0, all=True) | []
+Zmod(10)(7).nth_root(0) is a root | ValueError
+Zmod(10)(8).nth_root(-3, all=True) | []
+Zmod(10)(8).nth_root(-3) is a root | ValueError
+Zmod(10)(8).nth_root(-2, all=True) | []
+Zmod(10)(8).nth_root(-2) is a root | ValueError
+Zmod(10)(8).nth_root(-1, all=True) | []
+Zmod(10)(8).nth_root(-1) is a root | ValueError
+Zmod(10)(8).nth_root(0, all=True) | []
+Zmod(10)(8).nth_root(0) is a root | ValueError
+Zmod(10)(9).nth_root(-3, all=True) | [9]
+Zmod(10)(9).nth_root(-3) is a root | True
+Zmod(10)(9).nth_root(-2, all=True) | [3, 7]
+Zmod(10)(9).nth_root(-2) is a root | True
+Zmod(10)(9).nth_root(-1, all=True) | [9]
+Zmod(10)(9).nth_root(-1) is a root | True
+Zmod(10)(9).nth_root(0, all=True) | []
+Zmod(10)(9).nth_root(0) is a root | ValueError
+Zmod(12)(0).nth_root(-3, all=True) | []
+Zmod(12)(0).nth_root(-3) is a root | ValueError
+Zmod(12)(0).nth_root(-2, all=True) | []
+Zmod(12)(0).nth_root(-2) is a root | ValueError
+Zmod(12)(0).nth_root(-1, all=True) | []
+Zmod(12)(0).nth_root(-1) is a root | ValueError
+Zmod(12)(0).nth_root(0, all=True) | []
+Zmod(12)(0).nth_root(0) is a root | ValueError
+Zmod(12)(1).nth_root(-3, all=True) | [1]
+Zmod(12)(1).nth_root(-3) is a root | True
+Zmod(12)(1).nth_root(-2, all=True) | [1, 5, 7, 11]
+Zmod(12)(1).nth_root(-2) is a root | True
+Zmod(12)(1).nth_root(-1, all=True) | [1]
+Zmod(12)(1).nth_root(-1) is a root | True
+Zmod(12)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+Zmod(12)(1).nth_root(0) is a root | True
+Zmod(12)(2).nth_root(-3, all=True) | []
+Zmod(12)(2).nth_root(-3) is a root | ValueError
+Zmod(12)(2).nth_root(-2, all=True) | []
+Zmod(12)(2).nth_root(-2) is a root | ValueError
+Zmod(12)(2).nth_root(-1, all=True) | []
+Zmod(12)(2).nth_root(-1) is a root | ValueError
+Zmod(12)(2).nth_root(0, all=True) | []
+Zmod(12)(2).nth_root(0) is a root | ValueError
+Zmod(12)(3).nth_root(-3, all=True) | []
+Zmod(12)(3).nth_root(-3) is a root | ValueError
+Zmod(12)(3).nth_root(-2, all=True) | []
+Zmod(12)(3).nth_root(-2) is a root | ValueError
+Zmod(12)(3).nth_root(-1, all=True) | []
+Zmod(12)(3).nth_root(-1) is a root | ValueError
+Zmod(12)(3).nth_root(0, all=True) | []
+Zmod(12)(3).nth_root(0) is a root | ValueError
+Zmod(12)(4).nth_root(-3, all=True) | []
+Zmod(12)(4).nth_root(-3) is a root | ValueError
+Zmod(12)(4).nth_root(-2, all=True) | []
+Zmod(12)(4).nth_root(-2) is a root | ValueError
+Zmod(12)(4).nth_root(-1, all=True) | []
+Zmod(12)(4).nth_root(-1) is a root | ValueError
+Zmod(12)(4).nth_root(0, all=True) | []
+Zmod(12)(4).nth_root(0) is a root | ValueError
+Zmod(12)(5).nth_root(-3, all=True) | [5]
+Zmod(12)(5).nth_root(-3) is a root | True
+Zmod(12)(5).nth_root(-2, all=True) | []
+Zmod(12)(5).nth_root(-2) is a root | ValueError
+Zmod(12)(5).nth_root(-1, all=True) | [5]
+Zmod(12)(5).nth_root(-1) is a root | True
+Zmod(12)(5).nth_root(0, all=True) | []
+Zmod(12)(5).nth_root(0) is a root | ValueError
+Zmod(12)(6).nth_root(-3, all=True) | []
+Zmod(12)(6).nth_root(-3) is a root | ValueError
+Zmod(12)(6).nth_root(-2, all=True) | []
+Zmod(12)(6).nth_root(-2) is a root | ValueError
+Zmod(12)(6).nth_root(-1, all=True) | []
+Zmod(12)(6).nth_root(-1) is a root | ValueError
+Zmod(12)(6).nth_root(0, all=True) | []
+Zmod(12)(6).nth_root(0) is a root | ValueError
+Zmod(12)(7).nth_root(-3, all=True) | [7]
+Zmod(12)(7).nth_root(-3) is a root | True
+Zmod(12)(7).nth_root(-2, all=True) | []
+Zmod(12)(7).nth_root(-2) is a root | ValueError
+Zmod(12)(7).nth_root(-1, all=True) | [7]
+Zmod(12)(7).nth_root(-1) is a root | True
+Zmod(12)(7).nth_root(0, all=True) | []
+Zmod(12)(7).nth_root(0) is a root | ValueError
+Zmod(12)(8).nth_root(-3, all=True) | []
+Zmod(12)(8).nth_root(-3) is a root | ValueError
+Zmod(12)(8).nth_root(-2, all=True) | []
+Zmod(12)(8).nth_root(-2) is a root | ValueError
+Zmod(12)(8).nth_root(-1, all=True) | []
+Zmod(12)(8).nth_root(-1) is a root | ValueError
+Zmod(12)(8).nth_root(0, all=True) | []
+Zmod(12)(8).nth_root(0) is a root | ValueError
+Zmod(12)(9).nth_root(-3, all=True) | []
+Zmod(12)(9).nth_root(-3) is a root | ValueError
+Zmod(12)(9).nth_root(-2, all=True) | []
+Zmod(12)(9).nth_root(-2) is a root | ValueError
+Zmod(12)(9).nth_root(-1, all=True) | []
+Zmod(12)(9).nth_root(-1) is a root | ValueError
+Zmod(12)(9).nth_root(0, all=True) | []
+Zmod(12)(9).nth_root(0) is a root | ValueError
+Zmod(12)(10).nth_root(-3, all=True) | []
+Zmod(12)(10).nth_root(-3) is a root | ValueError
+Zmod(12)(10).nth_root(-2, all=True) | []
+Zmod(12)(10).nth_root(-2) is a root | ValueError
+Zmod(12)(10).nth_root(-1, all=True) | []
+Zmod(12)(10).nth_root(-1) is a root | ValueError
+Zmod(12)(10).nth_root(0, all=True) | []
+Zmod(12)(10).nth_root(0) is a root | ValueError
+Zmod(12)(11).nth_root(-3, all=True) | [11]
+Zmod(12)(11).nth_root(-3) is a root | True
+Zmod(12)(11).nth_root(-2, all=True) | []
+Zmod(12)(11).nth_root(-2) is a root | ValueError
+Zmod(12)(11).nth_root(-1, all=True) | [11]
+Zmod(12)(11).nth_root(-1) is a root | True
+Zmod(12)(11).nth_root(0, all=True) | []
+Zmod(12)(11).nth_root(0) is a root | ValueError
+Zmod(15)(0).nth_root(-3, all=True) | []
+Zmod(15)(0).nth_root(-3) is a root | ValueError
+Zmod(15)(0).nth_root(-2, all=True) | []
+Zmod(15)(0).nth_root(-2) is a root | ValueError
+Zmod(15)(0).nth_root(-1, all=True) | []
+Zmod(15)(0).nth_root(-1) is a root | ValueError
+Zmod(15)(0).nth_root(0, all=True) | []
+Zmod(15)(0).nth_root(0) is a root | ValueError
+Zmod(15)(1).nth_root(-3, all=True) | [1]
+Zmod(15)(1).nth_root(-3) is a root | True
+Zmod(15)(1).nth_root(-2, all=True) | [1, 4, 11, 14]
+Zmod(15)(1).nth_root(-2) is a root | True
+Zmod(15)(1).nth_root(-1, all=True) | [1]
+Zmod(15)(1).nth_root(-1) is a root | True
+Zmod(15)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+Zmod(15)(1).nth_root(0) is a root | True
+Zmod(15)(2).nth_root(-3, all=True) | [2]
+Zmod(15)(2).nth_root(-3) is a root | True
+Zmod(15)(2).nth_root(-2, all=True) | []
+Zmod(15)(2).nth_root(-2) is a root | ValueError
+Zmod(15)(2).nth_root(-1, all=True) | [8]
+Zmod(15)(2).nth_root(-1) is a root | True
+Zmod(15)(2).nth_root(0, all=True) | []
+Zmod(15)(2).nth_root(0) is a root | ValueError
+Zmod(15)(3).nth_root(-3, all=True) | []
+Zmod(15)(3).nth_root(-3) is a root | ValueError
+Zmod(15)(3).nth_root(-2, all=True) | []
+Zmod(15)(3).nth_root(-2) is a root | ValueError
+Zmod(15)(3).nth_root(-1, all=True) | []
+Zmod(15)(3).nth_root(-1) is a root | ValueError
+Zmod(15)(3).nth_root(0, all=True) | []
+Zmod(15)(3).nth_root(0) is a root | ValueError
+Zmod(15)(4).nth_root(-3, all=True) | [4]
+Zmod(15)(4).nth_root(-3) is a root | True
+Zmod(15)(4).nth_root(-2, all=True) | [2, 7, 8, 13]
+Zmod(15)(4).nth_root(-2) is a root | True
+Zmod(15)(4).nth_root(-1, all=True) | [4]
+Zmod(15)(4).nth_root(-1) is a root | True
+Zmod(15)(4).nth_root(0, all=True) | []
+Zmod(15)(4).nth_root(0) is a root | ValueError
+Zmod(15)(5).nth_root(-3, all=True) | []
+Zmod(15)(5).nth_root(-3) is a root | ValueError
+Zmod(15)(5).nth_root(-2, all=True) | []
+Zmod(15)(5).nth_root(-2) is a root | ValueError
+Zmod(15)(5).nth_root(-1, all=True) | []
+Zmod(15)(5).nth_root(-1) is a root | ValueError
+Zmod(15)(5).nth_root(0, all=True) | []
+Zmod(15)(5).nth_root(0) is a root | ValueError
+Zmod(15)(6).nth_root(-3, all=True) | []
+Zmod(15)(6).nth_root(-3) is a root | ValueError
+Zmod(15)(6).nth_root(-2, all=True) | []
+Zmod(15)(6).nth_root(-2) is a root | ValueError
+Zmod(15)(6).nth_root(-1, all=True) | []
+Zmod(15)(6).nth_root(-1) is a root | ValueError
+Zmod(15)(6).nth_root(0, all=True) | []
+Zmod(15)(6).nth_root(0) is a root | ValueError
+Zmod(15)(7).nth_root(-3, all=True) | [7]
+Zmod(15)(7).nth_root(-3) is a root | True
+Zmod(15)(7).nth_root(-2, all=True) | []
+Zmod(15)(7).nth_root(-2) is a root | ValueError
+Zmod(15)(7).nth_root(-1, all=True) | [13]
+Zmod(15)(7).nth_root(-1) is a root | True
+Zmod(15)(7).nth_root(0, all=True) | []
+Zmod(15)(7).nth_root(0) is a root | ValueError
+Zmod(15)(8).nth_root(-3, all=True) | [8]
+Zmod(15)(8).nth_root(-3) is a root | True
+Zmod(15)(8).nth_root(-2, all=True) | []
+Zmod(15)(8).nth_root(-2) is a root | ValueError
+Zmod(15)(8).nth_root(-1, all=True) | [2]
+Zmod(15)(8).nth_root(-1) is a root | True
+Zmod(15)(8).nth_root(0, all=True) | []
+Zmod(15)(8).nth_root(0) is a root | ValueError
+Zmod(15)(9).nth_root(-3, all=True) | []
+Zmod(15)(9).nth_root(-3) is a root | ValueError
+Zmod(15)(9).nth_root(-2, all=True) | []
+Zmod(15)(9).nth_root(-2) is a root | ValueError
+Zmod(15)(9).nth_root(-1, all=True) | []
+Zmod(15)(9).nth_root(-1) is a root | ValueError
+Zmod(15)(9).nth_root(0, all=True) | []
+Zmod(15)(9).nth_root(0) is a root | ValueError
+Zmod(15)(10).nth_root(-3, all=True) | []
+Zmod(15)(10).nth_root(-3) is a root | ValueError
+Zmod(15)(10).nth_root(-2, all=True) | []
+Zmod(15)(10).nth_root(-2) is a root | ValueError
+Zmod(15)(10).nth_root(-1, all=True) | []
+Zmod(15)(10).nth_root(-1) is a root | ValueError
+Zmod(15)(10).nth_root(0, all=True) | []
+Zmod(15)(10).nth_root(0) is a root | ValueError
+Zmod(15)(11).nth_root(-3, all=True) | [11]
+Zmod(15)(11).nth_root(-3) is a root | True
+Zmod(15)(11).nth_root(-2, all=True) | []
+Zmod(15)(11).nth_root(-2) is a root | ValueError
+Zmod(15)(11).nth_root(-1, all=True) | [11]
+Zmod(15)(11).nth_root(-1) is a root | True
+Zmod(15)(11).nth_root(0, all=True) | []
+Zmod(15)(11).nth_root(0) is a root | ValueError
+Zmod(15)(12).nth_root(-3, all=True) | []
+Zmod(15)(12).nth_root(-3) is a root | ValueError
+Zmod(15)(12).nth_root(-2, all=True) | []
+Zmod(15)(12).nth_root(-2) is a root | ValueError
+Zmod(15)(12).nth_root(-1, all=True) | []
+Zmod(15)(12).nth_root(-1) is a root | ValueError
+Zmod(15)(12).nth_root(0, all=True) | []
+Zmod(15)(12).nth_root(0) is a root | ValueError
+Zmod(15)(13).nth_root(-3, all=True) | [13]
+Zmod(15)(13).nth_root(-3) is a root | True
+Zmod(15)(13).nth_root(-2, all=True) | []
+Zmod(15)(13).nth_root(-2) is a root | ValueError
+Zmod(15)(13).nth_root(-1, all=True) | [7]
+Zmod(15)(13).nth_root(-1) is a root | True
+Zmod(15)(13).nth_root(0, all=True) | []
+Zmod(15)(13).nth_root(0) is a root | ValueError
+Zmod(15)(14).nth_root(-3, all=True) | [14]
+Zmod(15)(14).nth_root(-3) is a root | True
+Zmod(15)(14).nth_root(-2, all=True) | []
+Zmod(15)(14).nth_root(-2) is a root | ValueError
+Zmod(15)(14).nth_root(-1, all=True) | [14]
+Zmod(15)(14).nth_root(-1) is a root | True
+Zmod(15)(14).nth_root(0, all=True) | []
+Zmod(15)(14).nth_root(0) is a root | ValueError
+Zmod(16)(0).nth_root(-3, all=True) | []
+Zmod(16)(0).nth_root(-3) is a root | ValueError
+Zmod(16)(0).nth_root(-2, all=True) | []
+Zmod(16)(0).nth_root(-2) is a root | ValueError
+Zmod(16)(0).nth_root(-1, all=True) | []
+Zmod(16)(0).nth_root(-1) is a root | ValueError
+Zmod(16)(0).nth_root(0, all=True) | []
+Zmod(16)(0).nth_root(0) is a root | ValueError
+Zmod(16)(1).nth_root(-3, all=True) | [1]
+Zmod(16)(1).nth_root(-3) is a root | True
+Zmod(16)(1).nth_root(-2, all=True) | [1, 7, 9, 15]
+Zmod(16)(1).nth_root(-2) is a root | True
+Zmod(16)(1).nth_root(-1, all=True) | [1]
+Zmod(16)(1).nth_root(-1) is a root | True
+Zmod(16)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+Zmod(16)(1).nth_root(0) is a root | True
+Zmod(16)(2).nth_root(-3, all=True) | []
+Zmod(16)(2).nth_root(-3) is a root | ValueError
+Zmod(16)(2).nth_root(-2, all=True) | []
+Zmod(16)(2).nth_root(-2) is a root | ValueError
+Zmod(16)(2).nth_root(-1, all=True) | []
+Zmod(16)(2).nth_root(-1) is a root | ValueError
+Zmod(16)(2).nth_root(0, all=True) | []
+Zmod(16)(2).nth_root(0) is a root | ValueError
+Zmod(16)(3).nth_root(-3, all=True) | [3]
+Zmod(16)(3).nth_root(-3) is a root | True
+Zmod(16)(3).nth_root(-2, all=True) | []
+Zmod(16)(3).nth_root(-2) is a root | ValueError
+Zmod(16)(3).nth_root(-1, all=True) | [11]
+Zmod(16)(3).nth_root(-1) is a root | True
+Zmod(16)(3).nth_root(0, all=True) | []
+Zmod(16)(3).nth_root(0) is a root | ValueError
+Zmod(16)(4).nth_root(-3, all=True) | []
+Zmod(16)(4).nth_root(-3) is a root | ValueError
+Zmod(16)(4).nth_root(-2, all=True) | []
+Zmod(16)(4).nth_root(-2) is a root | ValueError
+Zmod(16)(4).nth_root(-1, all=True) | []
+Zmod(16)(4).nth_root(-1) is a root | ValueError
+Zmod(16)(4).nth_root(0, all=True) | []
+Zmod(16)(4).nth_root(0) is a root | ValueError
+Zmod(16)(5).nth_root(-3, all=True) | [5]
+Zmod(16)(5).nth_root(-3) is a root | True
+Zmod(16)(5).nth_root(-2, all=True) | []
+Zmod(16)(5).nth_root(-2) is a root | ValueError
+Zmod(16)(5).nth_root(-1, all=True) | [13]
+Zmod(16)(5).nth_root(-1) is a root | True
+Zmod(16)(5).nth_root(0, all=True) | []
+Zmod(16)(5).nth_root(0) is a root | ValueError
+Zmod(16)(6).nth_root(-3, all=True) | []
+Zmod(16)(6).nth_root(-3) is a root | ValueError
+Zmod(16)(6).nth_root(-2, all=True) | []
+Zmod(16)(6).nth_root(-2) is a root | ValueError
+Zmod(16)(6).nth_root(-1, all=True) | []
+Zmod(16)(6).nth_root(-1) is a root | ValueError
+Zmod(16)(6).nth_root(0, all=True) | []
+Zmod(16)(6).nth_root(0) is a root | ValueError
+Zmod(16)(7).nth_root(-3, all=True) | [7]
+Zmod(16)(7).nth_root(-3) is a root | True
+Zmod(16)(7).nth_root(-2, all=True) | []
+Zmod(16)(7).nth_root(-2) is a root | ValueError
+Zmod(16)(7).nth_root(-1, all=True) | [7]
+Zmod(16)(7).nth_root(-1) is a root | True
+Zmod(16)(7).nth_root(0, all=True) | []
+Zmod(16)(7).nth_root(0) is a root | ValueError
+Zmod(16)(8).nth_root(-3, all=True) | []
+Zmod(16)(8).nth_root(-3) is a root | ValueError
+Zmod(16)(8).nth_root(-2, all=True) | []
+Zmod(16)(8).nth_root(-2) is a root | ValueError
+Zmod(16)(8).nth_root(-1, all=True) | []
+Zmod(16)(8).nth_root(-1) is a root | ValueError
+Zmod(16)(8).nth_root(0, all=True) | []
+Zmod(16)(8).nth_root(0) is a root | ValueError
+Zmod(16)(9).nth_root(-3, all=True) | [9]
+Zmod(16)(9).nth_root(-3) is a root | True
+Zmod(16)(9).nth_root(-2, all=True) | [3, 5, 11, 13]
+Zmod(16)(9).nth_root(-2) is a root | True
+Zmod(16)(9).nth_root(-1, all=True) | [9]
+Zmod(16)(9).nth_root(-1) is a root | True
+Zmod(16)(9).nth_root(0, all=True) | []
+Zmod(16)(9).nth_root(0) is a root | ValueError
+Zmod(16)(10).nth_root(-3, all=True) | []
+Zmod(16)(10).nth_root(-3) is a root | ValueError
+Zmod(16)(10).nth_root(-2, all=True) | []
+Zmod(16)(10).nth_root(-2) is a root | ValueError
+Zmod(16)(10).nth_root(-1, all=True) | []
+Zmod(16)(10).nth_root(-1) is a root | ValueError
+Zmod(16)(10).nth_root(0, all=True) | []
+Zmod(16)(10).nth_root(0) is a root | ValueError
+Zmod(16)(11).nth_root(-3, all=True) | [11]
+Zmod(16)(11).nth_root(-3) is a root | True
+Zmod(16)(11).nth_root(-2, all=True) | []
+Zmod(16)(11).nth_root(-2) is a root | ValueError
+Zmod(16)(11).nth_root(-1, all=True) | [3]
+Zmod(16)(11).nth_root(-1) is a root | True
+Zmod(16)(11).nth_root(0, all=True) | []
+Zmod(16)(11).nth_root(0) is a root | ValueError
+Zmod(16)(12).nth_root(-3, all=True) | []
+Zmod(16)(12).nth_root(-3) is a root | ValueError
+Zmod(16)(12).nth_root(-2, all=True) | []
+Zmod(16)(12).nth_root(-2) is a root | ValueError
+Zmod(16)(12).nth_root(-1, all=True) | []
+Zmod(16)(12).nth_root(-1) is a root | ValueError
+Zmod(16)(12).nth_root(0, all=True) | []
+Zmod(16)(12).nth_root(0) is a root | ValueError
+Zmod(16)(13).nth_root(-3, all=True) | [13]
+Zmod(16)(13).nth_root(-3) is a root | True
+Zmod(16)(13).nth_root(-2, all=True) | []
+Zmod(16)(13).nth_root(-2) is a root | ValueError
+Zmod(16)(13).nth_root(-1, all=True) | [5]
+Zmod(16)(13).nth_root(-1) is a root | True
+Zmod(16)(13).nth_root(0, all=True) | []
+Zmod(16)(13).nth_root(0) is a root | ValueError
+Zmod(16)(14).nth_root(-3, all=True) | []
+Zmod(16)(14).nth_root(-3) is a root | ValueError
+Zmod(16)(14).nth_root(-2, all=True) | []
+Zmod(16)(14).nth_root(-2) is a root | ValueError
+Zmod(16)(14).nth_root(-1, all=True) | []
+Zmod(16)(14).nth_root(-1) is a root | ValueError
+Zmod(16)(14).nth_root(0, all=True) | []
+Zmod(16)(14).nth_root(0) is a root | ValueError
+Zmod(16)(15).nth_root(-3, all=True) | [15]
+Zmod(16)(15).nth_root(-3) is a root | True
+Zmod(16)(15).nth_root(-2, all=True) | []
+Zmod(16)(15).nth_root(-2) is a root | ValueError
+Zmod(16)(15).nth_root(-1, all=True) | [15]
+Zmod(16)(15).nth_root(-1) is a root | True
+Zmod(16)(15).nth_root(0, all=True) | []
+Zmod(16)(15).nth_root(0) is a root | ValueError
+Zmod(21)(0).nth_root(-3, all=True) | []
+Zmod(21)(0).nth_root(-3) is a root | ValueError
+Zmod(21)(0).nth_root(-2, all=True) | []
+Zmod(21)(0).nth_root(-2) is a root | ValueError
+Zmod(21)(0).nth_root(-1, all=True) | []
+Zmod(21)(0).nth_root(-1) is a root | ValueError
+Zmod(21)(0).nth_root(0, all=True) | []
+Zmod(21)(0).nth_root(0) is a root | ValueError
+Zmod(21)(1).nth_root(-3, all=True) | [1, 4, 16]
+Zmod(21)(1).nth_root(-3) is a root | True
+Zmod(21)(1).nth_root(-2, all=True) | [1, 8, 13, 20]
+Zmod(21)(1).nth_root(-2) is a root | True
+Zmod(21)(1).nth_root(-1, all=True) | [1]
+Zmod(21)(1).nth_root(-1) is a root | True
+Zmod(21)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+Zmod(21)(1).nth_root(0) is a root | True
+Zmod(21)(2).nth_root(-3, all=True) | []
+Zmod(21)(2).nth_root(-3) is a root | ValueError
+Zmod(21)(2).nth_root(-2, all=True) | []
+Zmod(21)(2).nth_root(-2) is a root | ValueError
+Zmod(21)(2).nth_root(-1, all=True) | [11]
+Zmod(21)(2).nth_root(-1) is a root | True
+Zmod(21)(2).nth_root(0, all=True) | []
+Zmod(21)(2).nth_root(0) is a root | ValueError
+Zmod(21)(3).nth_root(-3, all=True) | []
+Zmod(21)(3).nth_root(-3) is a root | ValueError
+Zmod(21)(3).nth_root(-2, all=True) | []
+Zmod(21)(3).nth_root(-2) is a root | ValueError
+Zmod(21)(3).nth_root(-1, all=True) | []
+Zmod(21)(3).nth_root(-1) is a root | ValueError
+Zmod(21)(3).nth_root(0, all=True) | []
+Zmod(21)(3).nth_root(0) is a root | ValueError
+Zmod(21)(4).nth_root(-3, all=True) | []
+Zmod(21)(4).nth_root(-3) is a root | ValueError
+Zmod(21)(4).nth_root(-2, all=True) | [4, 10, 11, 17]
+Zmod(21)(4).nth_root(-2) is a root | True
+Zmod(21)(4).nth_root(-1, all=True) | [16]
+Zmod(21)(4).nth_root(-1) is a root | True
+Zmod(21)(4).nth_root(0, all=True) | []
+Zmod(21)(4).nth_root(0) is a root | ValueError
+Zmod(21)(5).nth_root(-3, all=True) | []
+Zmod(21)(5).nth_root(-3) is a root | ValueError
+Zmod(21)(5).nth_root(-2, all=True) | []
+Zmod(21)(5).nth_root(-2) is a root | ValueError
+Zmod(21)(5).nth_root(-1, all=True) | [17]
+Zmod(21)(5).nth_root(-1) is a root | True
+Zmod(21)(5).nth_root(0, all=True) | []
+Zmod(21)(5).nth_root(0) is a root | ValueError
+Zmod(21)(6).nth_root(-3, all=True) | []
+Zmod(21)(6).nth_root(-3) is a root | ValueError
+Zmod(21)(6).nth_root(-2, all=True) | []
+Zmod(21)(6).nth_root(-2) is a root | ValueError
+Zmod(21)(6).nth_root(-1, all=True) | []
+Zmod(21)(6).nth_root(-1) is a root | ValueError
+Zmod(21)(6).nth_root(0, all=True) | []
+Zmod(21)(6).nth_root(0) is a root | ValueError
+Zmod(21)(7).nth_root(-3, all=True) | []
+Zmod(21)(7).nth_root(-3) is a root | ValueError
+Zmod(21)(7).nth_root(-2, all=True) | []
+Zmod(21)(7).nth_root(-2) is a root | ValueError
+Zmod(21)(7).nth_root(-1, all=True) | []
+Zmod(21)(7).nth_root(-1) is a root | ValueError
+Zmod(21)(7).nth_root(0, all=True) | []
+Zmod(21)(7).nth_root(0) is a root | ValueError
+Zmod(21)(8).nth_root(-3, all=True) | [2, 8, 11]
+Zmod(21)(8).nth_root(-3) is a root | True
+Zmod(21)(8).nth_root(-2, all=True) | []
+Zmod(21)(8).nth_root(-2) is a root | ValueError
+Zmod(21)(8).nth_root(-1, all=True) | [8]
+Zmod(21)(8).nth_root(-1) is a root | True
+Zmod(21)(8).nth_root(0, all=True) | []
+Zmod(21)(8).nth_root(0) is a root | ValueError
+Zmod(21)(9).nth_root(-3, all=True) | []
+Zmod(21)(9).nth_root(-3) is a root | ValueError
+Zmod(21)(9).nth_root(-2, all=True) | []
+Zmod(21)(9).nth_root(-2) is a root | ValueError
+Zmod(21)(9).nth_root(-1, all=True) | []
+Zmod(21)(9).nth_root(-1) is a root | ValueError
+Zmod(21)(9).nth_root(0, all=True) | []
+Zmod(21)(9).nth_root(0) is a root | ValueError
+Zmod(21)(10).nth_root(-3, all=True) | []
+Zmod(21)(10).nth_root(-3) is a root | ValueError
+Zmod(21)(10).nth_root(-2, all=True) | []
+Zmod(21)(10).nth_root(-2) is a root | ValueError
+Zmod(21)(10).nth_root(-1, all=True) | [19]
+Zmod(21)(10).nth_root(-1) is a root | True
+Zmod(21)(10).nth_root(0, all=True) | []
+Zmod(21)(10).nth_root(0) is a root | ValueError
+Zmod(21)(11).nth_root(-3, all=True) | []
+Zmod(21)(11).nth_root(-3) is a root | ValueError
+Zmod(21)(11).nth_root(-2, all=True) | []
+Zmod(21)(11).nth_root(-2) is a root | ValueError
+Zmod(21)(11).nth_root(-1, all=True) | [2]
+Zmod(21)(11).nth_root(-1) is a root | True
+Zmod(21)(11).nth_root(0, all=True) | []
+Zmod(21)(11).nth_root(0) is a root | ValueError
+Zmod(21)(12).nth_root(-3, all=True) | []
+Zmod(21)(12).nth_root(-3) is a root | ValueError
+Zmod(21)(12).nth_root(-2, all=True) | []
+Zmod(21)(12).nth_root(-2) is a root | ValueError
+Zmod(21)(12).nth_root(-1, all=True) | []
+Zmod(21)(12).nth_root(-1) is a root | ValueError
+Zmod(21)(12).nth_root(0, all=True) | []
+Zmod(21)(12).nth_root(0) is a root | ValueError
+Zmod(21)(13).nth_root(-3, all=True) | [10, 13, 19]
+Zmod(21)(13).nth_root(-3) is a root | True
+Zmod(21)(13).nth_root(-2, all=True) | []
+Zmod(21)(13).nth_root(-2) is a root | ValueError
+Zmod(21)(13).nth_root(-1, all=True) | [13]
+Zmod(21)(13).nth_root(-1) is a root | True
+Zmod(21)(13).nth_root(0, all=True) | []
+Zmod(21)(13).nth_root(0) is a root | ValueError
+Zmod(21)(14).nth_root(-3, all=True) | []
+Zmod(21)(14).nth_root(-3) is a root | ValueError
+Zmod(21)(14).nth_root(-2, all=True) | []
+Zmod(21)(14).nth_root(-2) is a root | ValueError
+Zmod(21)(14).nth_root(-1, all=True) | []
+Zmod(21)(14).nth_root(-1) is a root | ValueError
+Zmod(21)(14).nth_root(0, all=True) | []
+Zmod(21)(14).nth_root(0) is a root | ValueError
+Zmod(21)(15).nth_root(-3, all=True) | []
+Zmod(21)(15).nth_root(-3) is a root | ValueError
+Zmod(21)(15).nth_root(-2, all=True) | []
+Zmod(21)(15).nth_root(-2) is a root | ValueError
+Zmod(21)(15).nth_root(-1, all=True) | []
+Zmod(21)(15).nth_root(-1) is a root | ValueError
+Zmod(21)(15).nth_root(0, all=True) | []
+Zmod(21)(15).nth_root(0) is a root | ValueError
+Zmod(21)(16).nth_root(-3, all=True) | []
+Zmod(21)(16).nth_root(-3) is a root | ValueError
+Zmod(21)(16).nth_root(-2, all=True) | [2, 5, 16, 19]
+Zmod(21)(16).nth_root(-2) is a root | True
+Zmod(21)(16).nth_root(-1, all=True) | [4]
+Zmod(21)(16).nth_root(-1) is a root | True
+Zmod(21)(16).nth_root(0, all=True) | []
+Zmod(21)(16).nth_root(0) is a root | ValueError
+Zmod(21)(17).nth_root(-3, all=True) | []
+Zmod(21)(17).nth_root(-3) is a root | ValueError
+Zmod(21)(17).nth_root(-2, all=True) | []
+Zmod(21)(17).nth_root(-2) is a root | ValueError
+Zmod(21)(17).nth_root(-1, all=True) | [5]
+Zmod(21)(17).nth_root(-1) is a root | True
+Zmod(21)(17).nth_root(0, all=True) | []
+Zmod(21)(17).nth_root(0) is a root | ValueError
+Zmod(21)(18).nth_root(-3, all=True) | []
+Zmod(21)(18).nth_root(-3) is a root | ValueError
+Zmod(21)(18).nth_root(-2, all=True) | []
+Zmod(21)(18).nth_root(-2) is a root | ValueError
+Zmod(21)(18).nth_root(-1, all=True) | []
+Zmod(21)(18).nth_root(-1) is a root | ValueError
+Zmod(21)(18).nth_root(0, all=True) | []
+Zmod(21)(18).nth_root(0) is a root | ValueError
+Zmod(21)(19).nth_root(-3, all=True) | []
+Zmod(21)(19).nth_root(-3) is a root | ValueError
+Zmod(21)(19).nth_root(-2, all=True) | []
+Zmod(21)(19).nth_root(-2) is a root | ValueError
+Zmod(21)(19).nth_root(-1, all=True) | [10]
+Zmod(21)(19).nth_root(-1) is a root | True
+Zmod(21)(19).nth_root(0, all=True) | []
+Zmod(21)(19).nth_root(0) is a root | ValueError
+Zmod(21)(20).nth_root(-3, all=True) | [5, 17, 20]
+Zmod(21)(20).nth_root(-3) is a root | True
+Zmod(21)(20).nth_root(-2, all=True) | []
+Zmod(21)(20).nth_root(-2) is a root | ValueError
+Zmod(21)(20).nth_root(-1, all=True) | [20]
+Zmod(21)(20).nth_root(-1) is a root | True
+Zmod(21)(20).nth_root(0, all=True) | []
+Zmod(21)(20).nth_root(0) is a root | ValueError
+Zmod(25)(0).nth_root(-3, all=True) | []
+Zmod(25)(0).nth_root(-3) is a root | ValueError
+Zmod(25)(0).nth_root(-2, all=True) | []
+Zmod(25)(0).nth_root(-2) is a root | ValueError
+Zmod(25)(0).nth_root(-1, all=True) | []
+Zmod(25)(0).nth_root(-1) is a root | ValueError
+Zmod(25)(0).nth_root(0, all=True) | []
+Zmod(25)(0).nth_root(0) is a root | ValueError
+Zmod(25)(1).nth_root(-3, all=True) | [1]
+Zmod(25)(1).nth_root(-3) is a root | True
+Zmod(25)(1).nth_root(-2, all=True) | [1, 24]
+Zmod(25)(1).nth_root(-2) is a root | True
+Zmod(25)(1).nth_root(-1, all=True) | [1]
+Zmod(25)(1).nth_root(-1) is a root | True
+Zmod(25)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+Zmod(25)(1).nth_root(0) is a root | True
+Zmod(25)(2).nth_root(-3, all=True) | [17]
+Zmod(25)(2).nth_root(-3) is a root | True
+Zmod(25)(2).nth_root(-2, all=True) | []
+Zmod(25)(2).nth_root(-2) is a root | ValueError
+Zmod(25)(2).nth_root(-1, all=True) | [13]
+Zmod(25)(2).nth_root(-1) is a root | True
+Zmod(25)(2).nth_root(0, all=True) | []
+Zmod(25)(2).nth_root(0) is a root | ValueError
+Zmod(25)(3).nth_root(-3, all=True) | [23]
+Zmod(25)(3).nth_root(-3) is a root | True
+Zmod(25)(3).nth_root(-2, all=True) | []
+Zmod(25)(3).nth_root(-2) is a root | ValueError
+Zmod(25)(3).nth_root(-1, all=True) | [17]
+Zmod(25)(3).nth_root(-1) is a root | True
+Zmod(25)(3).nth_root(0, all=True) | []
+Zmod(25)(3).nth_root(0) is a root | ValueError
+Zmod(25)(4).nth_root(-3, all=True) | [14]
+Zmod(25)(4).nth_root(-3) is a root | True
+Zmod(25)(4).nth_root(-2, all=True) | [12, 13]
+Zmod(25)(4).nth_root(-2) is a root | True
+Zmod(25)(4).nth_root(-1, all=True) | [19]
+Zmod(25)(4).nth_root(-1) is a root | True
+Zmod(25)(4).nth_root(0, all=True) | []
+Zmod(25)(4).nth_root(0) is a root | ValueError
+Zmod(25)(5).nth_root(-3, all=True) | []
+Zmod(25)(5).nth_root(-3) is a root | ValueError
+Zmod(25)(5).nth_root(-2, all=True) | []
+Zmod(25)(5).nth_root(-2) is a root | ValueError
+Zmod(25)(5).nth_root(-1, all=True) | []
+Zmod(25)(5).nth_root(-1) is a root | ValueError
+Zmod(25)(5).nth_root(0, all=True) | []
+Zmod(25)(5).nth_root(0) is a root | ValueError
+Zmod(25)(6).nth_root(-3, all=True) | [16]
+Zmod(25)(6).nth_root(-3) is a root | True
+Zmod(25)(6).nth_root(-2, all=True) | [11, 14]
+Zmod(25)(6).nth_root(-2) is a root | True
+Zmod(25)(6).nth_root(-1, all=True) | [21]
+Zmod(25)(6).nth_root(-1) is a root | True
+Zmod(25)(6).nth_root(0, all=True) | []
+Zmod(25)(6).nth_root(0) is a root | ValueError
+Zmod(25)(7).nth_root(-3, all=True) | [7]
+Zmod(25)(7).nth_root(-3) is a root | True
+Zmod(25)(7).nth_root(-2, all=True) | []
+Zmod(25)(7).nth_root(-2) is a root | ValueError
+Zmod(25)(7).nth_root(-1, all=True) | [18]
+Zmod(25)(7).nth_root(-1) is a root | True
+Zmod(25)(7).nth_root(0, all=True) | []
+Zmod(25)(7).nth_root(0) is a root | ValueError
+Zmod(25)(8).nth_root(-3, all=True) | [13]
+Zmod(25)(8).nth_root(-3) is a root | True
+Zmod(25)(8).nth_root(-2, all=True) | []
+Zmod(25)(8).nth_root(-2) is a root | ValueError
+Zmod(25)(8).nth_root(-1, all=True) | [22]
+Zmod(25)(8).nth_root(-1) is a root | True
+Zmod(25)(8).nth_root(0, all=True) | []
+Zmod(25)(8).nth_root(0) is a root | ValueError
+Zmod(25)(9).nth_root(-3, all=True) | [4]
+Zmod(25)(9).nth_root(-3) is a root | True
+Zmod(25)(9).nth_root(-2, all=True) | [8, 17]
+Zmod(25)(9).nth_root(-2) is a root | True
+Zmod(25)(9).nth_root(-1, all=True) | [14]
+Zmod(25)(9).nth_root(-1) is a root | True
+Zmod(25)(9).nth_root(0, all=True) | []
+Zmod(25)(9).nth_root(0) is a root | ValueError
+Zmod(25)(10).nth_root(-3, all=True) | []
+Zmod(25)(10).nth_root(-3) is a root | ValueError
+Zmod(25)(10).nth_root(-2, all=True) | []
+Zmod(25)(10).nth_root(-2) is a root | ValueError
+Zmod(25)(10).nth_root(-1, all=True) | []
+Zmod(25)(10).nth_root(-1) is a root | ValueError
+Zmod(25)(10).nth_root(0, all=True) | []
+Zmod(25)(10).nth_root(0) is a root | ValueError
+Zmod(25)(11).nth_root(-3, all=True) | [6]
+Zmod(25)(11).nth_root(-3) is a root | True
+Zmod(25)(11).nth_root(-2, all=True) | [4, 21]
+Zmod(25)(11).nth_root(-2) is a root | True
+Zmod(25)(11).nth_root(-1, all=True) | [16]
+Zmod(25)(11).nth_root(-1) is a root | True
+Zmod(25)(11).nth_root(0, all=True) | []
+Zmod(25)(11).nth_root(0) is a root | ValueError
+Zmod(25)(12).nth_root(-3, all=True) | [22]
+Zmod(25)(12).nth_root(-3) is a root | True
+Zmod(25)(12).nth_root(-2, all=True) | []
+Zmod(25)(12).nth_root(-2) is a root | ValueError
+Zmod(25)(12).nth_root(-1, all=True) | [23]
+Zmod(25)(12).nth_root(-1) is a root | True
+Zmod(25)(12).nth_root(0, all=True) | []
+Zmod(25)(12).nth_root(0) is a root | ValueError
+Zmod(25)(13).nth_root(-3, all=True) | [3]
+Zmod(25)(13).nth_root(-3) is a root | True
+Zmod(25)(13).nth_root(-2, all=True) | []
+Zmod(25)(13).nth_root(-2) is a root | ValueError
+Zmod(25)(13).nth_root(-1, all=True) | [2]
+Zmod(25)(13).nth_root(-1) is a root | True
+Zmod(25)(13).nth_root(0, all=True) | []
+Zmod(25)(13).nth_root(0) is a root | ValueError
+Zmod(25)(14).nth_root(-3, all=True) | [19]
+Zmod(25)(14).nth_root(-3) is a root | True
+Zmod(25)(14).nth_root(-2, all=True) | [3, 22]
+Zmod(25)(14).nth_root(-2) is a root | True
+Zmod(25)(14).nth_root(-1, all=True) | [9]
+Zmod(25)(14).nth_root(-1) is a root | True
+Zmod(25)(14).nth_root(0, all=True) | []
+Zmod(25)(14).nth_root(0) is a root | ValueError
+Zmod(25)(15).nth_root(-3, all=True) | []
+Zmod(25)(15).nth_root(-3) is a root | ValueError
+Zmod(25)(15).nth_root(-2, all=True) | []
+Zmod(25)(15).nth_root(-2) is a root | ValueError
+Zmod(25)(15).nth_root(-1, all=True) | []
+Zmod(25)(15).nth_root(-1) is a root | ValueError
+Zmod(25)(15).nth_root(0, all=True) | []
+Zmod(25)(15).nth_root(0) is a root | ValueError
+Zmod(25)(16).nth_root(-3, all=True) | [21]
+Zmod(25)(16).nth_root(-3) is a root | True
+Zmod(25)(16).nth_root(-2, all=True) | [6, 19]
+Zmod(25)(16).nth_root(-2) is a root | True
+Zmod(25)(16).nth_root(-1, all=True) | [11]
+Zmod(25)(16).nth_root(-1) is a root | True
+Zmod(25)(16).nth_root(0, all=True) | []
+Zmod(25)(16).nth_root(0) is a root | ValueError
+Zmod(25)(17).nth_root(-3, all=True) | [12]
+Zmod(25)(17).nth_root(-3) is a root | True
+Zmod(25)(17).nth_root(-2, all=True) | []
+Zmod(25)(17).nth_root(-2) is a root | ValueError
+Zmod(25)(17).nth_root(-1, all=True) | [3]
+Zmod(25)(17).nth_root(-1) is a root | True
+Zmod(25)(17).nth_root(0, all=True) | []
+Zmod(25)(17).nth_root(0) is a root | ValueError
+Zmod(25)(18).nth_root(-3, all=True) | [18]
+Zmod(25)(18).nth_root(-3) is a root | True
+Zmod(25)(18).nth_root(-2, all=True) | []
+Zmod(25)(18).nth_root(-2) is a root | ValueError
+Zmod(25)(18).nth_root(-1, all=True) | [7]
+Zmod(25)(18).nth_root(-1) is a root | True
+Zmod(25)(18).nth_root(0, all=True) | []
+Zmod(25)(18).nth_root(0) is a root | ValueError
+Zmod(25)(19).nth_root(-3, all=True) | [9]
+Zmod(25)(19).nth_root(-3) is a root | True
+Zmod(25)(19).nth_root(-2, all=True) | [2, 23]
+Zmod(25)(19).nth_root(-2) is a root | True
+Zmod(25)(19).nth_root(-1, all=True) | [4]
+Zmod(25)(19).nth_root(-1) is a root | True
+Zmod(25)(19).nth_root(0, all=True) | []
+Zmod(25)(19).nth_root(0) is a root | ValueError
+Zmod(25)(20).nth_root(-3, all=True) | []
+Zmod(25)(20).nth_root(-3) is a root | ValueError
+Zmod(25)(20).nth_root(-2, all=True) | []
+Zmod(25)(20).nth_root(-2) is a root | ValueError
+Zmod(25)(20).nth_root(-1, all=True) | []
+Zmod(25)(20).nth_root(-1) is a root | ValueError
+Zmod(25)(20).nth_root(0, all=True) | []
+Zmod(25)(20).nth_root(0) is a root | ValueError
+Zmod(25)(21).nth_root(-3, all=True) | [11]
+Zmod(25)(21).nth_root(-3) is a root | True
+Zmod(25)(21).nth_root(-2, all=True) | [9, 16]
+Zmod(25)(21).nth_root(-2) is a root | True
+Zmod(25)(21).nth_root(-1, all=True) | [6]
+Zmod(25)(21).nth_root(-1) is a root | True
+Zmod(25)(21).nth_root(0, all=True) | []
+Zmod(25)(21).nth_root(0) is a root | ValueError
+Zmod(25)(22).nth_root(-3, all=True) | [2]
+Zmod(25)(22).nth_root(-3) is a root | True
+Zmod(25)(22).nth_root(-2, all=True) | []
+Zmod(25)(22).nth_root(-2) is a root | ValueError
+Zmod(25)(22).nth_root(-1, all=True) | [8]
+Zmod(25)(22).nth_root(-1) is a root | True
+Zmod(25)(22).nth_root(0, all=True) | []
+Zmod(25)(22).nth_root(0) is a root | ValueError
+Zmod(25)(23).nth_root(-3, all=True) | [8]
+Zmod(25)(23).nth_root(-3) is a root | True
+Zmod(25)(23).nth_root(-2, all=True) | []
+Zmod(25)(23).nth_root(-2) is a root | ValueError
+Zmod(25)(23).nth_root(-1, all=True) | [12]
+Zmod(25)(23).nth_root(-1) is a root | True
+Zmod(25)(23).nth_root(0, all=True) | []
+Zmod(25)(23).nth_root(0) is a root | ValueError
+Zmod(25)(24).nth_root(-3, all=True) | [24]
+Zmod(25)(24).nth_root(-3) is a root | True
+Zmod(25)(24).nth_root(-2, all=True) | [7, 18]
+Zmod(25)(24).nth_root(-2) is a root | True
+Zmod(25)(24).nth_root(-1, all=True) | [24]
+Zmod(25)(24).nth_root(-1) is a root | True
+Zmod(25)(24).nth_root(0, all=True) | []
+Zmod(25)(24).nth_root(0) is a root | ValueError
+Zmod(27)(0).nth_root(-3, all=True) | []
+Zmod(27)(0).nth_root(-3) is a root | ValueError
+Zmod(27)(0).nth_root(-2, all=True) | []
+Zmod(27)(0).nth_root(-2) is a root | ValueError
+Zmod(27)(0).nth_root(-1, all=True) | []
+Zmod(27)(0).nth_root(-1) is a root | ValueError
+Zmod(27)(0).nth_root(0, all=True) | []
+Zmod(27)(0).nth_root(0) is a root | ValueError
+Zmod(27)(1).nth_root(-3, all=True) | [1, 10, 19]
+Zmod(27)(1).nth_root(-3) is a root | True
+Zmod(27)(1).nth_root(-2, all=True) | [1, 26]
+Zmod(27)(1).nth_root(-2) is a root | True
+Zmod(27)(1).nth_root(-1, all=True) | [1]
+Zmod(27)(1).nth_root(-1) is a root | True
+Zmod(27)(1).nth_root(0, all=True) | [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
+Zmod(27)(1).nth_root(0) is a root | True
+Zmod(27)(2).nth_root(-3, all=True) | []
+Zmod(27)(2).nth_root(-3) is a root | ValueError
+Zmod(27)(2).nth_root(-2, all=True) | []
+Zmod(27)(2).nth_root(-2) is a root | ValueError
+Zmod(27)(2).nth_root(-1, all=True) | [14]
+Zmod(27)(2).nth_root(-1) is a root | True
+Zmod(27)(2).nth_root(0, all=True) | []
+Zmod(27)(2).nth_root(0) is a root | ValueError
+Zmod(27)(3).nth_root(-3, all=True) | []
+Zmod(27)(3).nth_root(-3) is a root | ValueError
+Zmod(27)(3).nth_root(-2, all=True) | []
+Zmod(27)(3).nth_root(-2) is a root | ValueError
+Zmod(27)(3).nth_root(-1, all=True) | []
+Zmod(27)(3).nth_root(-1) is a root | ValueError
+Zmod(27)(3).nth_root(0, all=True) | []
+Zmod(27)(3).nth_root(0) is a root | ValueError
+Zmod(27)(4).nth_root(-3, all=True) | []
+Zmod(27)(4).nth_root(-3) is a root | ValueError
+Zmod(27)(4).nth_root(-2, all=True) | [13, 14]
+Zmod(27)(4).nth_root(-2) is a root | True
+Zmod(27)(4).nth_root(-1, all=True) | [7]
+Zmod(27)(4).nth_root(-1) is a root | True
+Zmod(27)(4).nth_root(0, all=True) | []
+Zmod(27)(4).nth_root(0) is a root | ValueError
+Zmod(27)(5).nth_root(-3, all=True) | []
+Zmod(27)(5).nth_root(-3) is a root | ValueError
+Zmod(27)(5).nth_root(-2, all=True) | []
+Zmod(27)(5).nth_root(-2) is a root | ValueError
+Zmod(27)(5).nth_root(-1, all=True) | [11]
+Zmod(27)(5).nth_root(-1) is a root | True
+Zmod(27)(5).nth_root(0, all=True) | []
+Zmod(27)(5).nth_root(0) is a root | ValueError
+Zmod(27)(6).nth_root(-3, all=True) | []
+Zmod(27)(6).nth_root(-3) is a root | ValueError
+Zmod(27)(6).nth_root(-2, all=True) | []
+Zmod(27)(6).nth_root(-2) is a root | ValueError
+Zmod(27)(6).nth_root(-1, all=True) | []
+Zmod(27)(6).nth_root(-1) is a root | ValueError
+Zmod(27)(6).nth_root(0, all=True) | []
+Zmod(27)(6).nth_root(0) is a root | ValueError
+Zmod(27)(7).nth_root(-3, all=True) | []
+Zmod(27)(7).nth_root(-3) is a root | ValueError
+Zmod(27)(7).nth_root(-2, all=True) | [2, 25]
+Zmod(27)(7).nth_root(-2) is a root | True
+Zmod(27)(7).nth_root(-1, all=True) | [4]
+Zmod(27)(7).nth_root(-1) is a root | True
+Zmod(27)(7).nth_root(0, all=True) | []
+Zmod(27)(7).nth_root(0) is a root | ValueError
+Zmod(27)(8).nth_root(-3, all=True) | [5, 14, 23]
+Zmod(27)(8).nth_root(-3) is a root | True
+Zmod(27)(8).nth_root(-2, all=True) | []
+Zmod(27)(8).nth_root(-2) is a root | ValueError
+Zmod(27)(8).nth_root(-1, all=True) | [17]
+Zmod(27)(8).nth_root(-1) is a root | True
+Zmod(27)(8).nth_root(0, all=True) | []
+Zmod(27)(8).nth_root(0) is a root | ValueError
+Zmod(27)(9).nth_root(-3, all=True) | []
+Zmod(27)(9).nth_root(-3) is a root | ValueError
+Zmod(27)(9).nth_root(-2, all=True) | []
+Zmod(27)(9).nth_root(-2) is a root | ValueError
+Zmod(27)(9).nth_root(-1, all=True) | []
+Zmod(27)(9).nth_root(-1) is a root | ValueError
+Zmod(27)(9).nth_root(0, all=True) | []
+Zmod(27)(9).nth_root(0) is a root | ValueError
+Zmod(27)(10).nth_root(-3, all=True) | [7, 16, 25]
+Zmod(27)(10).nth_root(-3) is a root | True
+Zmod(27)(10).nth_root(-2, all=True) | [10, 17]
+Zmod(27)(10).nth_root(-2) is a root | True
+Zmod(27)(10).nth_root(-1, all=True) | [19]
+Zmod(27)(10).nth_root(-1) is a root | True
+Zmod(27)(10).nth_root(0, all=True) | []
+Zmod(27)(10).nth_root(0) is a root | ValueError
+Zmod(27)(11).nth_root(-3, all=True) | []
+Zmod(27)(11).nth_root(-3) is a root | ValueError
+Zmod(27)(11).nth_root(-2, all=True) | []
+Zmod(27)(11).nth_root(-2) is a root | ValueError
+Zmod(27)(11).nth_root(-1, all=True) | [5]
+Zmod(27)(11).nth_root(-1) is a root | True
+Zmod(27)(11).nth_root(0, all=True) | []
+Zmod(27)(11).nth_root(0) is a root | ValueError
+Zmod(27)(12).nth_root(-3, all=True) | []
+Zmod(27)(12).nth_root(-3) is a root | ValueError
+Zmod(27)(12).nth_root(-2, all=True) | []
+Zmod(27)(12).nth_root(-2) is a root | ValueError
+Zmod(27)(12).nth_root(-1, all=True) | []
+Zmod(27)(12).nth_root(-1) is a root | ValueError
+Zmod(27)(12).nth_root(0, all=True) | []
+Zmod(27)(12).nth_root(0) is a root | ValueError
+Zmod(27)(13).nth_root(-3, all=True) | []
+Zmod(27)(13).nth_root(-3) is a root | ValueError
+Zmod(27)(13).nth_root(-2, all=True) | [5, 22]
+Zmod(27)(13).nth_root(-2) is a root | True
+Zmod(27)(13).nth_root(-1, all=True) | [25]
+Zmod(27)(13).nth_root(-1) is a root | True
+Zmod(27)(13).nth_root(0, all=True) | []
+Zmod(27)(13).nth_root(0) is a root | ValueError
+Zmod(27)(14).nth_root(-3, all=True) | []
+Zmod(27)(14).nth_root(-3) is a root | ValueError
+Zmod(27)(14).nth_root(-2, all=True) | []
+Zmod(27)(14).nth_root(-2) is a root | ValueError
+Zmod(27)(14).nth_root(-1, all=True) | [2]
+Zmod(27)(14).nth_root(-1) is a root | True
+Zmod(27)(14).nth_root(0, all=True) | []
+Zmod(27)(14).nth_root(0) is a root | ValueError
+Zmod(27)(15).nth_root(-3, all=True) | []
+Zmod(27)(15).nth_root(-3) is a root | ValueError
+Zmod(27)(15).nth_root(-2, all=True) | []
+Zmod(27)(15).nth_root(-2) is a root | ValueError
+Zmod(27)(15).nth_root(-1, all=True) | []
+Zmod(27)(15).nth_root(-1) is a root | ValueError
+Zmod(27)(15).nth_root(0, all=True) | []
+Zmod(27)(15).nth_root(0) is a root | ValueError
+Zmod(27)(16).nth_root(-3, all=True) | []
+Zmod(27)(16).nth_root(-3) is a root | ValueError
+Zmod(27)(16).nth_root(-2, all=True) | [7, 20]
+Zmod(27)(16).nth_root(-2) is a root | True
+Zmod(27)(16).nth_root(-1, all=True) | [22]
+Zmod(27)(16).nth_root(-1) is a root | True
+Zmod(27)(16).nth_root(0, all=True) | []
+Zmod(27)(16).nth_root(0) is a root | ValueError
+Zmod(27)(17).nth_root(-3, all=True) | [2, 11, 20]
+Zmod(27)(17).nth_root(-3) is a root | True
+Zmod(27)(17).nth_root(-2, all=True) | []
+Zmod(27)(17).nth_root(-2) is a root | ValueError
+Zmod(27)(17).nth_root(-1, all=True) | [8]
+Zmod(27)(17).nth_root(-1) is a root | True
+Zmod(27)(17).nth_root(0, all=True) | []
+Zmod(27)(17).nth_root(0) is a root | ValueError
+Zmod(27)(18).nth_root(-3, all=True) | []
+Zmod(27)(18).nth_root(-3) is a root | ValueError
+Zmod(27)(18).nth_root(-2, all=True) | []
+Zmod(27)(18).nth_root(-2) is a root | ValueError
+Zmod(27)(18).nth_root(-1, all=True) | []
+Zmod(27)(18).nth_root(-1) is a root | ValueError
+Zmod(27)(18).nth_root(0, all=True) | []
+Zmod(27)(18).nth_root(0) is a root | ValueError
+Zmod(27)(19).nth_root(-3, all=True) | [4, 13, 22]
+Zmod(27)(19).nth_root(-3) is a root | True
+Zmod(27)(19).nth_root(-2, all=True) | [8, 19]
+Zmod(27)(19).nth_root(-2) is a root | True
+Zmod(27)(19).nth_root(-1, all=True) | [10]
+Zmod(27)(19).nth_root(-1) is a root | True
+Zmod(27)(19).nth_root(0, all=True) | []
+Zmod(27)(19).nth_root(0) is a root | ValueError
+Zmod(27)(20).nth_root(-3, all=True) | []
+Zmod(27)(20).nth_root(-3) is a root | ValueError
+Zmod(27)(20).nth_root(-2, all=True) | []
+Zmod(27)(20).nth_root(-2) is a root | ValueError
+Zmod(27)(20).nth_root(-1, all=True) | [23]
+Zmod(27)(20).nth_root(-1) is a root | True
+Zmod(27)(20).nth_root(0, all=True) | []
+Zmod(27)(20).nth_root(0) is a root | ValueError
+Zmod(27)(21).nth_root(-3, all=True) | []
+Zmod(27)(21).nth_root(-3) is a root | ValueError
+Zmod(27)(21).nth_root(-2, all=True) | []
+Zmod(27)(21).nth_root(-2) is a root | ValueError
+Zmod(27)(21).nth_root(-1, all=True) | []
+Zmod(27)(21).nth_root(-1) is a root | ValueError
+Zmod(27)(21).nth_root(0, all=True) | []
+Zmod(27)(21).nth_root(0) is a root | ValueError
+Zmod(27)(22).nth_root(-3, all=True) | []
+Zmod(27)(22).nth_root(-3) is a root | ValueError
+Zmod(27)(22).nth_root(-2, all=True) | [4, 23]
+Zmod(27)(22).nth_root(-2) is a root | True
+Zmod(27)(22).nth_root(-1, all=True) | [16]
+Zmod(27)(22).nth_root(-1) is a root | True
+Zmod(27)(22).nth_root(0, all=True) | []
+Zmod(27)(22).nth_root(0) is a root | ValueError
+Zmod(27)(23).nth_root(-3, all=True) | []
+Zmod(27)(23).nth_root(-3) is a root | ValueError
+Zmod(27)(23).nth_root(-2, all=True) | []
+Zmod(27)(23).nth_root(-2) is a root | ValueError
+Zmod(27)(23).nth_root(-1, all=True) | [20]
+Zmod(27)(23).nth_root(-1) is a root | True
+Zmod(27)(23).nth_root(0, all=True) | []
+Zmod(27)(23).nth_root(0) is a root | ValueError
+Zmod(27)(24).nth_root(-3, all=True) | []
+Zmod(27)(24).nth_root(-3) is a root | ValueError
+Zmod(27)(24).nth_root(-2, all=True) | []
+Zmod(27)(24).nth_root(-2) is a root | ValueError
+Zmod(27)(24).nth_root(-1, all=True) | []
+Zmod(27)(24).nth_root(-1) is a root | ValueError
+Zmod(27)(24).nth_root(0, all=True) | []
+Zmod(27)(24).nth_root(0) is a root | ValueError
+Zmod(27)(25).nth_root(-3, all=True) | []
+Zmod(27)(25).nth_root(-3) is a root | ValueError
+Zmod(27)(25).nth_root(-2, all=True) | [11, 16]
+Zmod(27)(25).nth_root(-2) is a root | True
+Zmod(27)(25).nth_root(-1, all=True) | [13]
+Zmod(27)(25).nth_root(-1) is a root | True
+Zmod(27)(25).nth_root(0, all=True) | []
+Zmod(27)(25).nth_root(0) is a root | ValueError
+Zmod(27)(26).nth_root(-3, all=True) | [8, 17, 26]
+Zmod(27)(26).nth_root(-3) is a root | True
+Zmod(27)(26).nth_root(-2, all=True) | []
+Zmod(27)(26).nth_root(-2) is a root | ValueError
+Zmod(27)(26).nth_root(-1, all=True) | [26]
+Zmod(27)(26).nth_root(-1) is a root | True
+Zmod(27)(26).nth_root(0, all=True) | []
+Zmod(27)(26).nth_root(0) is a root | ValueError
+QQ((1,2)) | (1/2, Rational Field)
+QQ((6,-4)) | (-3/2, Rational Field)
+QQ((-3,9)) | (-1/3, Rational Field)
+QQ((int(3), int(4))) | (3/4, Rational Field)
+QQ(('1','2')) | (1/2, Rational Field)
+QQ((1,2), 3) | (1/2, Rational Field)
+QQ([1,2]) | TypeError
+QQ((1,0)) | ValueError
+QQ((1,2,3)) | TypeError
+QQ((1,)) | TypeError
+QQ(()) | TypeError

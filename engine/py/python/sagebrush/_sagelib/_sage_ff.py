@@ -1042,11 +1042,24 @@ class IntegerMod:
             return _ff_nth_root(self, k, all)
         n = self._parent._n
         k = int(k)
-        rs = [_elt(self._parent, v) for v in range(n) if pow(v, k, n) == self._v] if n < 10 ** 6 else None
+        # (as Sage's: for k < 0 the units r with r^k = self, none if self isn't
+        # one (pow(0, k, n) raised before any unit was tried); for k = 0 every
+        # nonzero residue if self is 1, else none (0 was counted, and given))
+        if k > 0:
+            ok = lambda v: pow(v, k, n) == self._v
+        elif k < 0:
+            ok = lambda v: _m.gcd(v, n) == 1 and pow(v, k, n) == self._v
+        else:
+            ok = lambda v: v != 0 and self._v == 1 % n
+        rs = [_elt(self._parent, v) for v in range(n) if ok(v)] if n < 10 ** 6 else None
         if rs is None:
             raise NotImplementedError("nth_root for large moduli")
         if all:
             return rs
+        if not rs and n == 1:
+            # (the trivial ring's one element, as Sage's, though all=True
+            # gives [] for k = 0)
+            return _elt(self._parent, 0)
         if not rs:
             raise ValueError("no %d-th root" % k)
         return rs[0]
