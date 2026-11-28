@@ -19,6 +19,24 @@
    "stdout": ""
   },
   {
+   "id": "format-nsmall-nan-error",
+   "status": 1,
+   "stderr": "Error in prettyNum(.Internal(format(x, trim, digits, nsmall, width, 3L,  : \n  invalid 'nsmall' argument\nCalls: format -> format.default -> prettyNum\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "format-nsmall-inf-error",
+   "status": 1,
+   "stderr": "Error in prettyNum(.Internal(format(x, trim, digits, nsmall, width, 3L,  : \n  invalid 'nsmall' argument\nCalls: format -> format.default -> prettyNum\nIn addition: Warning message:\nIn prettyNum(.Internal(format(x, trim, digits, nsmall, width, 3L,  :\n  NAs introduced by coercion to integer range\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "format-nsmall-minus-inf-error",
+   "status": 1,
+   "stderr": "Error in prettyNum(.Internal(format(x, trim, digits, nsmall, width, 3L,  : \n  invalid 'nsmall' argument\nCalls: format -> format.default -> prettyNum\nIn addition: Warning message:\nIn prettyNum(.Internal(format(x, trim, digits, nsmall, width, 3L,  :\n  NAs introduced by coercion to integer range\nExecution halted\n",
+   "stdout": ""
+  },
+  {
    "id": "sprintf-na-integer-precision",
    "status": 0,
    "stderr": "Warning message:\nIn sprintf(\"%08.0d\", c(1, -2147483648)) :\n  NAs introduced by coercion to integer range\n",

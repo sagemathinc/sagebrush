@@ -7,6 +7,12 @@ format(c(1, 2), nsmall = 20); format(1, nsmall = 2.5); format(1, nsmall = -0.5);
 format(c(1, 2), nsmall = 21)
 #-- format-nsmall-na-error
 format(1, nsmall = NA)
+#-- format-nsmall-nan-error
+format(1, nsmall = NaN)
+#-- format-nsmall-inf-error
+format(1, nsmall = Inf)
+#-- format-nsmall-minus-inf-error
+format(1, nsmall = -Inf)
 #-- sprintf-na-integer-precision
 sprintf("[%08.0d|%5.1d|%.1x|%5.2d|%-6.1i|%.0d]", NA_integer_, NA_integer_, NA_integer_, NA_integer_, NA_integer_, NA)
 sprintf("[%5.0f|%.1e|%6.1f|%.0g|%5.0f|%.0f]", NA_real_, NA_real_, NaN, Inf, NaN, -Inf)

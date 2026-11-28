@@ -476,7 +476,12 @@ def format_(sess, call, args):
             and len(nsmall.data) == 1 else MISSING
         if k is MISSING:
             raise NotSupported("format(nsmall =) other than one number")
-        if k is None or k != k or abs(k) == math.inf or not 0 <= int(k) <= 20:
+        if k is not None and k == k and (abs(k) == math.inf or not -_INT_MAX <= int(k) <= _INT_MAX):
+            # (R 4.5.3 makes it an integer first: format(1, nsmall = Inf) warns "NAs introduced by coercion to
+            # integer range" before its error)
+            sess.warn("NAs introduced by coercion to integer range", call)
+            k = None
+        if k is None or k != k or not 0 <= int(k) <= 20:
             raise RError("invalid 'nsmall' argument", call)
         nsmall = int(k)
     width = _arg(args, "width")
