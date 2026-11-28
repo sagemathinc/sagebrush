@@ -5267,6 +5267,23 @@ async function docsUnderSealedHalt() {
   await ctl("set", { set: { tamperIndexEnv: 0, serverNotices: false } });
   await stop(b);
   await stop(a);
+  // (the sealed log full: the index halts at its next send, and notebooks still go on)
+  const wf = await fresh();
+  const dsf = new W.DocSync({ keys });
+  const wasf = dsf.connected.bind(dsf);
+  let linkf = null;
+  dsf.connected = (l) => { linkf = l; return wasf(l); };
+  const cf = client(wf, { e2e: { keys: f.provider, kit: f.kit }, docs: dsf });
+  check(await until(() => settled(wf, cf) && linkf !== null), "docs under a full sealed log: synced, its notebooks' sync connected");
+  const askf = () => linkf.ask(linkf.reserve(), { t: "pull", owner: linkf.owner, doc: "d0c5d0c5d0c7", epoch: 1, after: 0 });
+  const beforeF = await askf();
+  await ctl("sealedCap", { n: 0 });
+  await wf.mkdir("/fills");
+  check(await until(() => cf.debug().halted === "sealed-log-full", 15_000), "docs under a full sealed log: the index halted (sealed-log-full): " + J(cf.debug().halted));
+  const underF = await askf();
+  check(!busy(beforeF) && !busy(underF) && bare(underF) === bare(beforeF), "docs under a full sealed log: a notebook's request still reaches the server, answered as before: " + J({ beforeF, underF }));
+  await ctl("sealedCap", { n: 1_000_000 });
+  await stop(cf);
   // (the control: a rebuild's halt (invalid) stops notebooks as before)
   const wc = await fresh();
   const ds2 = new W.DocSync({});
