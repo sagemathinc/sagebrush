@@ -70,6 +70,31 @@
    "out_sha256": "9546207c88bd5f120eb14fd6e6c2af77883576d1f4bf4302d135067d916d0978",
    "r_sha256": "0f874369ee2b76339423988c8d2a016eb174374ad64bf9c657c8e1048ad84889"
   },
+  "rill-tests/fac/test_2.R": {
+   "cases": 27,
+   "out_sha256": "fef28fc27e43c27dc71affb72c1e0501851e75f497cc2882b5cd41168eb3103d",
+   "r_sha256": "79663bb5ba378d5dd5e0beae90e0eb6701ffdea9a9b2eacf00f386529637ea96"
+  },
+  "rill-tests/fac/test_3.R": {
+   "cases": 7,
+   "out_sha256": "847664de3b83436d3c044ee5975aa910da1e98030bdeadb4b4b1813b18ae24fd",
+   "r_sha256": "94111a308ccc33f28682ad78dc8509fe43d369f43dbf09ea9490aa8e5ed3af1f"
+  },
+  "rill-tests/fac/test_4.R": {
+   "cases": 14,
+   "out_sha256": "961c73a4faabe4dccb19090aa540dc92d24e5a635a00458e4092c624e6fc24ba",
+   "r_sha256": "fba17667155a52a796bb0f3fa94d71514240c73c737ef5b395be6fe9887833ce"
+  },
+  "rill-tests/fac/test_5.R": {
+   "cases": 9,
+   "out_sha256": "4a82553adfbaed86b993a5247611748c1379cd74431fb7706113f0243b00f3cb",
+   "r_sha256": "14f1130abb3b7476f563e37ac033321daa136f803cb5bbcb697ccdb653282a64"
+  },
+  "rill-tests/fac/test_6.R": {
+   "cases": 7,
+   "out_sha256": "9a36649d647f90250a3c8dc47e82916606bc28533bc4f74af848d0b7b67cd3e7",
+   "r_sha256": "ac287853f7b0dfe30b23222eed0e1f62badd0a5d7f0483fa9d9993c4be56b0de"
+  },
   "rill-tests/fun/test_1.R": {
    "cases": 15,
    "out_sha256": "171464672e7aed21a65c49a9f6cee7150910ba7597c2a36178af863f1c0c3198",

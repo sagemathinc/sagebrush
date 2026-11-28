@@ -213,6 +213,10 @@ cases = {
   "complex(50)": 50 * 128 + 50 * 64 * 2,
   "is.na(z)": 50 * 8,
   "w[x]": 50 * 64 + 50 * 32 + 50 * 136,
+  # (review) cut: the codes, the numbers as doubles, the k + 1 breaks and the k labels, all before any
+  # of them is built (a number of breaks, and breaks given)
+  "cut(z, 4)": 50 * 32 + 50 * 64 + 5 * 64 + 4 * 136,
+  "cut(z, c(0, 10, 20, 60))": 50 * 32 + 50 * 64 + 4 * 64 + 3 * 136,
 }
 TAG = "t" * 1001
 cases["c(%s = x)" % TAG] = 50 * 32 * 2 + 50 * 136 * 2 + 4 * (50 * 1001 + 91)

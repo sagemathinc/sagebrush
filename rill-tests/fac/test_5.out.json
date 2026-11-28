@@ -1,0 +1,61 @@
+{
+ "cases": [
+  {
+   "id": "cut-dig-lab-negative",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"(0,0.15]\" \"(0.15,1]\"\n[1] \"(0,0.123457]\" \"(0.123457,1]\"\n[1] \"(1,1.0000001]\" \"(1.0000001,2]\"\n"
+  },
+  {
+   "id": "cut-dig-lab-zero",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"(0,0.1]\" \"(0.1,1]\"\n[1] \"(0,0.1]\" \"(0.1,1]\"\n"
+  },
+  {
+   "id": "cut-dig-lab-wide",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"(0,0.12345678899999999734]\" \"(0.12345678899999999734,1]\"\n"
+  },
+  {
+   "id": "cut-dig-lab-fifty",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"(0,0.1499999999999999944488848768742172978818416595459]\"\n[2] \"(0.1499999999999999944488848768742172978818416595459,1]\"\n"
+  },
+  {
+   "id": "cut-dig-lab-infinite",
+   "status": 1,
+   "stderr": "Error in cut.default(0.15, c(0, 0.15, 1), dig.lab = Inf) : \n  negative length vectors are not allowed\nCalls: cut -> cut.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "cut-dig-lab-nan",
+   "status": 1,
+   "stderr": "Error in dig.lab:max(12L, dig.lab) : NA/NaN argument\nCalls: cut -> cut.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "cut-intervals-infinite",
+   "status": 1,
+   "stderr": "Error in seq.int(rx[1L], rx[2L], length.out = nb) : \n  'length.out' must be a finite number\nCalls: cut -> cut.default\nIn addition: Warning message:\nIn cut.default(c(1, 2), Inf) : NAs introduced by coercion to integer range\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "cut-intervals-too-many",
+   "status": 1,
+   "stderr": "Error in seq.int(rx[1L], rx[2L], length.out = nb) : \n  'length.out' must be a finite number\nCalls: cut -> cut.default\nIn addition: Warning message:\nIn cut.default(c(1, 2), 3e+09) :\n  NAs introduced by coercion to integer range\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "cut-intervals-invalid",
+   "status": 1,
+   "stderr": "Error in cut.default(c(1, 2), -Inf) : invalid number of intervals\nCalls: cut -> cut.default\nExecution halted\n",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/fac/test_5.R",
+ "format": "rill-out",
+ "v": 1
+}

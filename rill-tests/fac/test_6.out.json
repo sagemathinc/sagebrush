@@ -1,0 +1,49 @@
+{
+ "cases": [
+  {
+   "id": "fac-label-no-levels",
+   "status": 0,
+   "stderr": "",
+   "stdout": "factor()\nLevels: L\n[1] 1\n[1] \"L\"\n"
+  },
+  {
+   "id": "fac-label-one-level",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] L\nLevels: L\n[1] L1 L2\nLevels: L1 L2\n"
+  },
+  {
+   "id": "fac-labels-wrong-length-no-levels",
+   "status": 1,
+   "stderr": "Error in factor(character(0), labels = c(\"L\", \"M\")) : \n  invalid 'labels'; length 2 should be 1 or 0\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "fac-exclude-drops-a-level",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] a    <NA>\nLevels: a\n[1] <NA> 1   \nLevels: 1\n"
+  },
+  {
+   "id": "fac-exclude-levels-given",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] <NA> a   \nLevels: a\n"
+  },
+  {
+   "id": "fac-exclude-keeps-na",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"L2\" \"L1\"\n"
+  },
+  {
+   "id": "fac-exclude-keeps-na-print",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] <NA> a   \nLevels: a <NA>\n"
+  }
+ ],
+ "file": "rill-tests/fac/test_6.R",
+ "format": "rill-out",
+ "v": 1
+}

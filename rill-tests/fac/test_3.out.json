@@ -1,0 +1,49 @@
+{
+ "cases": [
+  {
+   "id": "fac-nan-level",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.5 NaN 2  \nLevels: 1.5 2 NaN\n[1] NaN  <NA> 1   \nLevels: 1 NaN\n"
+  },
+  {
+   "id": "fac-refactor-keeps-order",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] a b a\nLevels: b a\n"
+  },
+  {
+   "id": "fac-refactor-ordered",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] lo hi\nLevels: lo < hi\n[1] x\nLevels: x\n"
+  },
+  {
+   "id": "fac-collation-punctuation",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1] a b ab  a_b a-b a.b a   _x  .x   x  x   a,b a;b a:b a!b a?b a'b\nLevels:  x _x .x a a b a_b a-b a,b a;b a:b a!b a?b a.b a'b ab x\n"
+  },
+  {
+   "id": "fac-collation-symbols",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1] \"a(b\" \"a)b\" \"a[b\" \"a]b\" \"a{b\" \"a}b\" \"a@b\" \"a*b\" \"a/b\" \"a&b\" \"a#b\" \"a%b\"\n[13] \"a^b\" \"a+b\" \"a<b\" \"a=b\" \"a>b\" \"a|b\" \"a~b\" \"a$b\" \"a0b\" \"aAb\"\n"
+  },
+  {
+   "id": "cut-negative-zero",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] (0,1]\nLevels: (0,1]\n"
+  },
+  {
+   "id": "cut-duplicate-breaks",
+   "status": 1,
+   "stderr": "Error in cut.default(1, c(0, 1, 1)) : 'breaks' are not unique\nCalls: cut -> cut.default\nExecution halted\n",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/fac/test_3.R",
+ "format": "rill-out",
+ "v": 1
+}
