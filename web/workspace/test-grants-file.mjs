@@ -2,7 +2,7 @@
 // The desktop app's file permissions across launches (web/workspace/grants-file.ts, #1565): the record kept in
 // grants.json by where each notebook is, and brought back at the next launch under the notebooks' new ids.
 //   bun web/workspace/test-grants-file.mjs
-import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
+import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY, GRANTS_SEEN_KEY } from "./grants-file.ts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -350,8 +350,9 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     s.stop();
   }
   // (the listener's first try fails, so the launch goes on, grants.json not yet read; another window has taken the
-  // grant back; a change here meanwhile is kept for later, not written: this page's record from before the read would
-  // put the old grant back.  Once grants.json is read and merged, the change is written)
+  // grant back; a change here meanwhile (a denial, of the same notebook) is kept for later, not written: the delay
+  // only stops that early write.  What keeps the revocation is the merge: three ways over the grants.json the record
+  // here was last merged with (GRANTS_SEEN_KEY), and, the notebook changed on both sides, scope by scope)
   {
     const { perms, s, release, f, w, invoke, sync } = await launch({ listenFails: 1 });
     release();
@@ -367,9 +368,55 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     await s.done;
     await k.flush();
     ok(!k.unwritten && J(parseGrants(f.kept()).docs["ws:/n.ipynb"]?.denied?.map((x) => x.slice(0, 2))) === J([["read", "/x"]]), "launch, listener failing: ...once grants.json is read and merged, the change held back is written, not lost: " + f.kept());
+    ok(!f.kept().includes("/allowed") && perms.writeTrees("id1").length === 0 && !JSON.stringify(parseGrants(localStorage.getItem(GRANTS_KEY))).includes("/allowed"), "launch, listener failing: ...and the grant the other window took back stays gone, here and in grants.json: " + f.kept());
     s.stop();
   }
   delete globalThis.localStorage;
+}
+
+// a second window of the same launch opening while the first hasn't yet adopted another window's revocation: the
+// record they share still holds the grant, but it was merged with the grants.json that had it (GRANTS_SEEN_KEY), so
+// the new window's first merge is three ways: the revocation is taken, not undone, and the first window keeps it
+{
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const { createPermissions } = await import("../notebook/permissions.js");
+  const perms = createPermissions();
+  const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+  const A = grantsSync(w, f.invoke, localStorage);
+  await A.restore();
+  ok(perms.grant("id1", "write", "/allowed").ok, "second window: the first allowed /allowed");
+  await A.write();
+  ok(localStorage.getItem(GRANTS_SEEN_KEY) === f.kept(), "second window: ...the grants.json it wrote kept beside the record");
+  f.set(J({ v: 1, seq: 30, docs: {} }));
+  const B = grantsSync(w, f.invoke, localStorage);
+  await B.restore();
+  ok(perms.writeTrees("id1").length === 0, "second window: opening, it takes the revocation (a three-way first merge): no grant: " + J(perms.writeTrees("id1")));
+  await B.write();
+  await A.adopt();
+  ok(!f.kept().includes("/allowed") && perms.writeTrees("id1").length === 0, "second window: ...it writes, the first adopts: the grant stays gone: " + f.kept());
+  // (a merge with no write after it keeps what it merged with too: another window allows /new, the first adopts it;
+  // then /new is taken back, and a third window opens before the first adopts that)
+  f.set(J({ v: 1, seq: 31, docs: { "ws:/n.ipynb": { write: ["/new"], t: 40 } } }));
+  await A.adopt();
+  ok(perms.writeTrees("id1").join() === "/new" && localStorage.getItem(GRANTS_SEEN_KEY) === f.kept(), "second window: a merge (adopt) keeps the grants.json it merged with beside the record");
+  f.set(J({ v: 1, seq: 32, docs: {} }));
+  await grantsSync(w, f.invoke, localStorage).restore();
+  ok(perms.writeTrees("id1").length === 0, "second window: ...so a window opening after /new was taken back takes that too: " + J(perms.writeTrees("id1")));
+  delete globalThis.localStorage;
+}
+
+// a notebook changed on both sides since the base, scope by scope: a grant taken back by either is gone, one made by
+// either is in, a denial from either kept (the later of two), never more than either side's caps
+{
+  const base = { "ws:/n": { write: ["/a", "/b"], denied: [["read", "/s", 1]], t: 1 } };
+  const file = { "ws:/n": { write: ["/a"], denied: [["read", "/s", 1], ["write", "/z", 5]], t: 5 } };
+  const local = { "ws:/n": { write: ["/a", "/b", "/c"], denied: [["write", "/z", 3]], t: 4 } };
+  const m = mergeGrants(base, file, local)["ws:/n"];
+  ok(J(m.write) === J(["/a", "/c"]) && J(m.denied) === J([["write", "/z", 5]]) && m.t === 5, "both changed: /b taken back (file), /c made (here), /s's denial taken out (here), /z's kept, the later: " + J(m));
+  const many = (p, n) => Array.from({ length: n }, (_, i) => `${p}${i}`);
+  const big = mergeGrants({ "ws:/n": { write: [], t: 1 } }, { "ws:/n": { write: many("/f", 20), t: 2 } }, { "ws:/n": { write: many("/l", 20), t: 3 } })["ws:/n"];
+  ok(big.write.length === 32 && parseGrants(J({ v: 1, docs: { x: big } }))?.docs.x, "both changed, more than a kind may hold: kept within its cap, so the entry stays whole");
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-grants-file: all ${checks} passed`);
