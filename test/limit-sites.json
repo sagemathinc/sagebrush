@@ -1365,6 +1365,31 @@
   "owner": "multivariate engine",
   "row": "inv-36"
  },
+ "engine/mpoly/src/lib.rs :: frames_declaring_more_than_they_hold_are_refused_before_allocating :: f[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/src/lib.rs :: frames_declaring_more_than_they_hold_are_refused_before_allocating :: for (flags, len) in [(0u8, u64::MAX), (1, u64::MAX), (0, 1 << 40), (1, (1 << 61) + 1)] { #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/src/lib.rs :: frames_declaring_more_than_they_hold_are_refused_before_allocating :: huge_args[k - 4..].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/src/lib.rs :: frames_declaring_more_than_they_hold_are_refused_before_allocating :: let r = record(0, 1, 8, 0, &u32::MAX.to_le_bytes(), &[]); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/src/lib.rs :: malformed_frames_never_panic :: let v = [0u32, 1, 2, 0x7fff_ffff, u32::MAX][next(5)].to_le_bytes(); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
  "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let gap = hooks::max_gap_ns(); #0": {
   "class": "none",
   "owner": "sage"
@@ -1372,6 +1397,21 @@
  "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let poll = hooks::max_poll_gap_ns(); #0": {
   "class": "none",
   "owner": "sage"
+ },
+ "engine/mpoly/tests/frames_alloc.rs :: malformed_counts_allocate_within_their_bytes :: (\"2^64 - 1 word terms\", frame(\"len\", &[&record(0, u64::MAX, &one, &[0; 32])])), #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/tests/frames_alloc.rs :: malformed_counts_allocate_within_their_bytes :: (\"a denominator of 2^31 - 1 words\", frame(\"len\", &[&record(0, 0, &u32::MAX.to_le_bytes(), &[])])), #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
+ },
+ "engine/mpoly/tests/frames_alloc.rs :: malformed_counts_allocate_within_their_bytes :: table[k - 4..].copy_from_slice(&u32::MAX.to_le_bytes()); #0": {
+  "class": "none",
+  "owner": "Sage multivariate polynomials (engine/mpoly)",
+  "reason": "test input: a malformed frame or record declaring a count past the bytes it holds (u32::MAX, u64::MAX), refused by the decoder; refuses nothing itself"
  },
  "engine/nd/examples/solve_bench.rs :: main :: let an = (0..n).map(|i| (0..n).map(|j| a0[i + j * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
   "class": "none",
