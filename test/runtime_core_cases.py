@@ -129,3 +129,10 @@ show("del __suppress_context__", del_suppress)
 for s in ("4", "4 1", "41 4", "", " ", "4x", "x4", "41 ", "4\t1"):
     show(f"fromhex {s!r}", lambda: bytes.fromhex(s))
     show(f"bytearray.fromhex {s!r}", lambda: bytearray.fromhex(s))
+# fromhex of any bytes-like object (a memoryview, an array, bytearray), read byte by byte; anything else CPython's
+# TypeError
+import array
+for fname, f in (("bytes.fromhex", bytes.fromhex), ("bytearray.fromhex", bytearray.fromhex), ("B.fromhex", B.fromhex), ("BA.fromhex", BA.fromhex)):
+    for label, x in (("memoryview(b'4142')", memoryview(b'4142')), ("bytearray(b'41 42')", bytearray(b'41 42')), ("array('B')", array.array('B', b'4142')),
+                     ("memoryview(b'\\xe9')", memoryview(b'\xe9')), ("b'\\xe9'", b'\xe9'), ("5", 5), ("None", None), ("memoryview(b'4')", memoryview(b'4'))):
+        show(f"{fname}({label})", lambda: f(x))

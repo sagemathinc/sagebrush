@@ -3820,8 +3820,16 @@ getset(object, "__dict__", (o) => {
     }
   }
   const fromhex = (cls: any, s: any) => {
-    if (s instanceof PyBytes) s = decode(s, "ascii");
-    if (typeof s !== "string") raise(T.TypeError, `fromhex() argument must be str, not ${typeName(s)}`);
+    // (a str, or any bytes-like object read byte by byte, as CPython 3.14's: bytes, bytearray, a memoryview, an
+    // array; a byte past ASCII is a non-hexadecimal one at its position)
+    if (typeof s !== "string" && isinstance(s, T.str)) s = unbox(s);
+    if (typeof s !== "string") {
+      const buf = s instanceof PyBytes ? s.a.subarray(0, s.n) : O.bufferOf(s);
+      if (buf === undefined) raise(T.TypeError, `fromhex() argument must be str or bytes-like, not ${typeName(s)}`);
+      let t = "";
+      for (let i = 0; i < buf.length; i++) t += String.fromCharCode(buf[i]);
+      s = t;
+    }
     // Whitespace may only separate bytes.
     const out: number[] = [];
     for (let i = 0; i < s.length; ) {
