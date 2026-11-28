@@ -34,3 +34,19 @@ show("uint32 multiply", lambda: np.array([4294967295], np.uint32) * np.uint32(42
 show("int32 multiply strided", lambda: np.array([[1, 2], [3, 4]], np.int32)[:, ::-1] * np.int32(2**30 + 1))
 show("bool left_shift", lambda: np.left_shift(np.array([True, False]), np.array([True, True])))
 show("bool right_shift", lambda: np.right_shift(np.True_, np.True_))
+# (shift counts below 0 or at least the width: 0 for <<, 0 or -1 by the sign for >>, as NumPy's npy_lshift and
+# npy_rshift give them, for scalars and arrays)
+for dt in ["int8", "int16", "int32", "uint8", "uint32"]:
+    t = getattr(np, dt)
+    bits = 8 * np.dtype(dt).itemsize
+    for c in ([-1, bits, bits + 1, 2 * bits] if dt.startswith("int") else [bits, bits + 1]):
+        show(f"{dt} 5 << {c}", lambda: t(5) << t(c))
+        show(f"{dt} 5 >> {c}", lambda: t(5) >> t(c))
+        if dt.startswith("int"):
+            show(f"{dt} -7 >> {c}", lambda: t(-7) >> t(c))
+show("int8 -7 >> -1 (int)", lambda: np.int8(-7) >> -1)
+show("3 >> int8 -7", lambda: 3 >> np.int8(-7))
+show("-1 >> int32 max", lambda: -1 >> np.int32(2**31 - 1))
+show("int8 array >> -1", lambda: np.right_shift(np.array([5, -7, -1, 100], np.int8), -1))
+show("int8 array << -1", lambda: np.left_shift(np.array([5, -7, -1, 100], np.int8), -1))
+show("int16 array >> 16", lambda: np.array([5, -7], np.int16) >> np.array([16, 17], np.int16))

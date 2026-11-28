@@ -1465,6 +1465,14 @@ function ipow32(x: number, y: number): number {
   }
   return r;
 }
+// (a shift of a loop of `bits` bits, as NumPy's npy_lshift and npy_rshift: a count below 0 or at least the
+// width gives 0 for <<, and 0 or -1 by the sign for >>; otherwise x * 2^y and floor(x / 2^y), exact in a double
+// (the store wraps the first, as C's shift does))
+function shiftKernel(op: string, bits: number): (x: number, y: number) => number {
+  return op === "left_shift"
+    ? (x, y) => (y < 0 || y >= bits ? 0 : x * 2 ** y)
+    : (x, y) => (y < 0 || y >= bits ? (x < 0 ? -1 : 0) : Math.floor(x / 2 ** y));
+}
 function ipow(x: number, y: number): number {
   if (y < 0) raise(T.ValueError, "Integers to negative integer powers are not allowed.");
   let r = 1;
@@ -1670,7 +1678,9 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
     });
     return res;
   }
-  const f0 = kop !== op ? POW_ONE[kop] : op === "power" && ct.isInt && ct.ctor !== Float64Array ? ipow32 : ct.isInt || ct.kind === "b" ? (spec.int ?? spec.f) : spec.f;
+  const f0 = kop !== op ? POW_ONE[kop] : op === "power" && ct.isInt && ct.ctor !== Float64Array ? ipow32
+    : op === "left_shift" || op === "right_shift" ? shiftKernel(op, 8 * ct.itemsize)
+    : ct.isInt || ct.kind === "b" ? (spec.int ?? spec.f) : spec.f;
   const f = wide ? (x: number, y: number) => wideExact(rt, op, f0(x, y), x, y) : f0;
   const store = rt.kind === "f" || (rt.isInt && rt.ctor !== Float64Array) ? null : rt;
   if (contigOut) {
