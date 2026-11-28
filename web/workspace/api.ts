@@ -25,7 +25,6 @@
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
 import { docValue } from "./notebook-form";
-import { embedAttachments, imageFolder } from "./image-store";
 import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, BRANCH_RUNS_KEY, mergeRun, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchRun, type BranchRuns, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
@@ -2053,7 +2052,9 @@ export class Workspace {
       if (e.kind === "notebook") {
         const { id: _i, rev: _r, updated: _u, ...doc } = c;
         // (a copy is another notebook, with its own folder: its source's images go into it embedded, read from the
-        //  source's own folder only, never as references to that folder, which the copy doesn't follow; as Save a copy)
+        //  source's own folder only, never as references to that folder, which the copy doesn't follow; as Save a copy.
+        //  Loaded here, not imported: the image store stays out of every bundle that holds the workspace (the terminal's))
+        const { embedAttachments, imageFolder } = await import("./image-store.ts");
         const { doc: copy } = await embedAttachments(doc, e.ref ? imageFolder("nb", e.ref) : null, async (q) => {
           const f = await this.stat(q);
           const b = f?.kind === "file" ? await this.contents(f) : undefined;

@@ -255,10 +255,10 @@ export const LATEX_LAZY_CAPS = {
   //  with bun 1.4.4 and node 24.21.0: 68,803 / 23,542, + 64)
   // (70,904 / 24,149: 2026-11-27: durable local grant cleanup and superseded reconnect ownership; CI eb19a26c
   //  70840/24085 +64 (#2346; web-artifacts, the shipped build of the head merged with master 2a6ef128, bun 1.4.4))
-  // (71,686 / 24,503: Nov 28 2026, PROVISIONAL at the merge of notebook images (#1962) with master: master's 70,904 /
-  //  24,149 plus #1962's own measured growth over the same base, +782 / +354 (image-store.ts's helpers and its
-  //  owner-folder check, which this chunk carries); renewed to measured + 64 from this head's CI build)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 71686, gzip: 24503 },
+  // (71,735 / 24,521: Nov 28 2026, notebook images (#1962) merged with master: image-store.ts's helpers and its
+  //  owner-folder check, which this chunk carries; measured by CI on the shipped build of the merge 1e35108e (bun 1.4.4):
+  //  71,671 / 24,457, + 64; to be read again on the build where the workspace loads the image store lazily)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 71735, gzip: 24521 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

@@ -71,8 +71,8 @@ check(LATEX_CAPS.raw === 311401 && LATEX_CAPS.gzip === 105893, "the caps are 311
 // (the examples' chunk, EXAMPLES, gone with the editor's own list of examples: the gallery's panel is the only one)
 // (agent 70,904 / 24,149 B: 2026-11-27: durable local grant cleanup and superseded reconnect ownership; CI eb19a26c
 //  70840/24085 +64 (#2346); was 68,867 / 23,606)
-// (agent 71,686 / 24,503 B: Nov 28 2026, provisional at #1962's merge with master: + its own +782 / +354)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [71686, 24503], TOOLS: [17874, 7471], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [20122, 7934], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [4473, 2270], HL: [4474, 2419] };
+// (agent 71,735 / 24,521 B: Nov 28 2026, #1962 merged with master: CI's 71,671 / 24,457 on 1e35108e, + 64)
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [71735, 24521], TOOLS: [17874, 7471], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [20122, 7934], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [4473, 2270], HL: [4474, 2419] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
