@@ -1894,6 +1894,21 @@ mod tests {
     use super::*;
     use crate::parse::parse;
 
+    // integrate_steps inside a traced integration restores the outer trace
+    // it found, not none (the guard's previous state)
+    #[test]
+    fn a_nested_traced_integration_restores_the_outer_trace() {
+        let x = parse("x");
+        let marker = Step { rule: "outer".into(), integrand: x.clone(), var: "x".into(), result: x.clone(), sub: vec![] };
+        TRACE.with(|t| *t.borrow_mut() = Some(vec![vec![marker]]));
+        assert!(integrate_steps(&parse("x^2"), "x").is_some());
+        let outer = TRACE.with(|t| t.borrow_mut().take());
+        let outer = outer.expect("the outer trace is back");
+        assert_eq!(outer.len(), 1);
+        assert_eq!(outer[0].len(), 1);
+        assert_eq!(outer[0][0].rule, "outer");
+    }
+
     fn check(f: &str, expect: Option<&str>) {
         let e = parse(f);
         let r = integrate(&e, "x");

@@ -11,6 +11,9 @@ use std::hint::black_box;
 
 struct Moving;
 
+/// The next reallocation fails (returns null, the old block kept), once.
+static FAIL_NEXT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 // SAFETY: alloc and dealloc forward to System; realloc allocates a new block
 // of the new size with the old alignment, copies the smaller of the two
 // sizes and frees the old block, as GlobalAlloc's default realloc does.
@@ -23,6 +26,9 @@ unsafe impl GlobalAlloc for Moving {
         System.dealloc(p, l)
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
+        if FAIL_NEXT.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            return std::ptr::null_mut();
+        }
         let q = System.alloc(Layout::from_size_align_unchecked(n, l.align()));
         if !q.is_null() {
             std::ptr::copy_nonoverlapping(p, q, l.size().min(n));
@@ -68,4 +74,13 @@ fn a_moving_reallocation_is_checked_at_its_peak() {
     // a shrink moves too: 2 MiB shrunk to 1 MiB holds 3 MiB at once
     assert!(resize(2 << 20, 1 << 20, 2 << 20) > 0, "the overlap of a moving shrink is a breach");
     assert_eq!(resize(2 << 20, 1 << 20, 3 << 20), 0);
+    // a failed reallocation releases the new size it counted, not the old
+    // block it kept
+    let mut v: Vec<u8> = black_box(Vec::with_capacity(1 << 20));
+    let live = audit::live();
+    FAIL_NEXT.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(v.try_reserve_exact(2 << 20).is_err(), "the reallocation failed");
+    assert_eq!(audit::live(), live, "the old block is still counted, the new one not");
+    assert_eq!(v.capacity(), 1 << 20);
+    drop(v);
 }
