@@ -7926,7 +7926,7 @@ def Sqrt(x):
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
     "Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
-    "GF Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
+    "FiniteField GF GaloisField Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
     "Normalise Normalize Numerator Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
     "Stabilizer Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
@@ -9122,10 +9122,7 @@ def _ff_promote(xs, what, where, pos=None):
 def GF(q, n=None):
     """GF(q) or GF(p, n): the finite field with q = p^n elements, defined
     (as in Magma) by the Conway polynomial."""
-    # (a finite field's element is no size, even one of its prime field, as
-    # Magma: Bad argument types, its types listed)
-    if _is_ff(q) or _is_ff(n):
-        raise _bad_types("GF", (q,) if n is None else (q, n), _located("GF"))
+    _gf_args("GF", q, n)
     q = _coerce_int(q)
     if n is None and q < 2:
         raise _arg_error("GF", "Argument 1 (%d) should be >= 2" % q)
@@ -9163,7 +9160,26 @@ def GF(q, n=None):
     return _ffwrap(K)
 
 
-FiniteField = GaloisField = GF
+def _gf_args(name, q, n):
+    # (a finite field's element is no size, even one of its prime field, as
+    # Magma: Bad argument types, its types listed, at the call of the name
+    # used)
+    if _is_ff(q) or _is_ff(n):
+        raise _bad_types(name, (q,) if n is None else (q, n), _located(name))
+
+
+def FiniteField(q, n=None):
+    """FiniteField(q) or FiniteField(p, n): GF(q), GF(p, n)."""
+    _gf_args("FiniteField", q, n)
+    return GF(q) if n is None else GF(q, n)
+
+
+def GaloisField(q, n=None):
+    """GaloisField(q) or GaloisField(p, n): GF(q), GF(p, n)."""
+    _gf_args("GaloisField", q, n)
+    return GF(q) if n is None else GF(q, n)
+
+
 
 
 def _ff_str(x):
