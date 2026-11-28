@@ -879,6 +879,9 @@ mod tests {
         // a + b w with a = MAX, b = MIN: 2a + b = 2^63 - 2 > 0, conjugate signs
         // by u^2 against 5 b^2 (2^63 - 2)^2 < 5 2^126: (Less, Greater)
         assert_eq!(Elt::new(i64::MAX, i64::MIN).signs(), (Ordering::Less, Ordering::Greater));
+        // past i128 (5 v^2 > 2^127) with 4 v^2 < u^2 < 5 v^2: only the exact
+        // factor 5 decides (u = -1.206 10^19, v = 6 10^18; Sage 10.10)
+        assert_eq!(Elt::new(-9030000000000000000, 6000000000000000000).signs(), (Ordering::Greater, Ordering::Less));
         let x = Elt::new(i64::MIN, i64::MIN);
         assert_eq!(x.div_exact(x), Some(Elt::int(1)));
         assert_eq!(m.div_exact(Elt::new(i64::MAX, 0)), Some(Elt::new(1, 1)));
