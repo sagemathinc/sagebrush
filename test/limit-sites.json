@@ -129,6 +129,11 @@
   "owner": "bigint",
   "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
  },
+ "engine/bigint/tests/audit_rows.rs :: bit_indices_and_shifts_past_32_bits :: for n in [1u64 << 32, (1 << 32) + 1, u64::MAX] { #0": {
+  "class": "none",
+  "owner": "big integers (engine/bigint)",
+  "reason": "a test's inputs: bit indices and shifts at and past 32 bits, up to u64::MAX; matched text that refuses nothing"
+ },
  "engine/classgroup/examples/lll_bench.rs :: main :: let b = sagebrush_poly::budget::Budget::unlimited(); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
