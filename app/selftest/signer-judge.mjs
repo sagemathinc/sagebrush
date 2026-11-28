@@ -9,9 +9,11 @@
 //   - "cap+check" (that, and no caller check): another window's call signs (signatures from other windows >= 1): the
 //     probe sees the path it checks;
 //   - "csp-off" (the signer's page without its CSP, framing the other server's page): that page loaded in the frame,
-//     and still nothing of it reached the command: dispatches 1, signatures 1, the signer window's own;
+//     and said what its signing call got (refused), and still nothing of it reached the command: dispatches 1,
+//     signatures 1, the signer window's own;
 //   - "guard-off" (the signer window's navigation guard left out, the window sent to the other server): that page
-//     loaded in the signer window, and nothing of it reached the command: dispatches 1, signatures 1.
+//     loaded in the signer window and said what its signing call got (refused), and nothing of it reached the command:
+//     dispatches 1, signatures 1.
 // In every run each caller the probe claims must have run and reported: the second window opened and its call
 // answered (in the app's log, "[page] signer second window: …"), and the other server's frame loaded and said what
 // its call got; a result that is missing, or comes after the run, fails by name.
@@ -97,7 +99,9 @@ export function signerVerdict({ err, out, seen, control, code, signal, problems,
       if (dispatches.length !== 1 || fromOthers(dispatches).length) why.push(`dispatches ${dispatches.length} (${fromOthers(dispatches).length} not the signer window's), not exactly the signer page's 1`);
       if (signed.length !== 1) why.push(`signatures ${signed.length}, not 1`);
       if (control === "csp-off" && !seen.includes("sframe: loaded")) why.push("the other server's page didn't load in the signer page's frame: the control didn't run");
+      if (control === "csp-off" && !seen.some((x) => /^sframe: signer (refused|REACHED)/.test(x))) why.push("the other server's page in the signer page's frame didn't report its signing call: the control didn't finish");
       if (control === "guard-off" && !seen.includes("stop: loaded")) why.push("the other server's page didn't load in the signer window: the control didn't run");
+      if (control === "guard-off" && !seen.some((x) => /^stop: signer (refused|REACHED)/.test(x))) why.push("the other server's page in the signer window didn't report its signing call: the control didn't finish");
       break;
     case "cap":
       if (!fromOthers(dispatches).length) why.push("no call from another window reached the command: the weakened capability didn't take");

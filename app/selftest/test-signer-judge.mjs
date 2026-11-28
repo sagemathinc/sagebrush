@@ -37,10 +37,10 @@ ok(v([d(1, "signer"), s(1, 1, "signer"), d(2, "main"), s(2, 2, "main")], { contr
 ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "main")], { control: "cap+check", out: reachedLine }).ok, "cap+check: no other window signing fails");
 
 // csp-off and guard-off: the other origin's page loaded there, and reached nothing
-ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: [...FRAME, "sframe: loaded", "sframe: refused: not allowed"] }).ok, "csp-off: the other server's page loaded in the signer page's frame, and reached nothing: passes");
+ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: [...FRAME, "sframe: loaded", "sframe: refused: not allowed", "sframe: signer refused: not allowed"] }).ok, "csp-off: the other server's page loaded in the signer page's frame, and reached nothing: passes");
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "csp-off" }).ok, "csp-off: the frame never loaded (the control didn't run) fails");
 ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer", "http://127.0.0.1:9")], { control: "csp-off", seen: [...FRAME, "sframe: loaded"] }).ok, "csp-off: the framed page reaching the command fails");
-ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off", seen: [...FRAME, "stop: loaded", "stop: refused: not allowed"] }).ok, "guard-off: the other server's page loaded in the signer window, and reached nothing: passes");
+ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off", seen: [...FRAME, "stop: loaded", "stop: refused: not allowed", "stop: signer refused: not allowed"] }).ok, "guard-off: the other server's page loaded in the signer window, and reached nothing: passes");
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "guard-off" }).ok, "guard-off: the page never loaded there fails");
 ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unknown control fails");
 
@@ -49,13 +49,13 @@ ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unkn
   const pg = (ev, at) => `[signer] page ${ev} ${at}`;
   const sent = "[signer] state check sent";
   const stop = [pg("started", "null/signer/index.html"), pg("finished", "null/signer/index.html"), sent, "[signer] state: ready=complete probe=yes tauri=yes ran=yes protocol=tauri body=yes", d(1, "signer"), s(1, 1, "signer"), pg("started", "http://127.0.0.1:9/stop"), pg("finished", "http://127.0.0.1:9/stop"), "[signer] state: not-signer-page"];
-  ok(v(stop, { control: "guard-off", seen: [...FRAME, "stop: loaded"] }).ok, "the state check: once on the signer page, none on the guard-off destination: passes");
+  ok(v(stop, { control: "guard-off", seen: [...FRAME, "stop: loaded", "stop: signer refused: not allowed"] }).ok, "the state check: once on the signer page, none on the guard-off destination: passes");
   ok(!v([...stop, sent], { control: "guard-off", seen: [...FRAME, "stop: loaded"] }).ok, "the state check: sent on the guard-off destination fails");
   ok(!v([sent, d(1, "signer"), s(1, 1, "signer")]).ok, "the state check: sent with no page loaded before it fails");
   ok(!v([pg("started", "null/signer/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok, "the state check: sent before the page finished loading fails");
   ok(!v([pg("finished", "http://127.0.0.1:9/sframe"), sent, d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: [...FRAME, "sframe: loaded"] }).ok, "the state check: sent on a frame's or another server's page fails");
   ok(!v([pg("finished", "null/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok, "the state check: sent on another app page fails");
-  ok(v([pg("finished", "http://tauri.localhost/signer/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok && v([pg("finished", "null/signer/probe-nocsp.html"), sent, d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: [...FRAME, "sframe: loaded"] }).ok, "the state check: on the signer page on Windows, and the csp-off page: passes");
+  ok(v([pg("finished", "http://tauri.localhost/signer/index.html"), sent, d(1, "signer"), s(1, 1, "signer")]).ok && v([pg("finished", "null/signer/probe-nocsp.html"), sent, d(1, "signer"), s(1, 1, "signer")], { control: "csp-off", seen: [...FRAME, "sframe: loaded", "sframe: signer refused: not allowed"] }).ok, "the state check: on the signer page on Windows, and the csp-off page: passes");
 }
 
 // the signer page must be its own document with its script run (the Linux failure: an empty document, ran=no)
@@ -107,6 +107,18 @@ ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "main"), s(2, 2, "main")], { cont
   const noFrameCall = v(good, { seen: FRAME.filter((x) => !x.startsWith("frame: signer")) });
   ok(!noFrameCall.ok && /frame didn't report its call/.test(why(noFrameCall)), "a caller missing: the other server's frame loaded but its call never reported fails, by name");
   ok(v(good).ok, "...and with every caller reported: passes");
+}
+
+// each control's destination must finish: loaded AND its signing call answered (refused); loaded alone (it stopped or
+// hung before trying) fails by name, while the ordinary frame's result can't stand in for it
+{
+  const good = [d(1, "signer"), s(1, 1, "signer")];
+  const why = (r) => r.why.join("; ");
+  const cspHalf = v(good, { control: "csp-off", seen: [...FRAME, "sframe: loaded"] });
+  ok(!cspHalf.ok && /signer page's frame didn't report its signing call/.test(why(cspHalf)), "csp-off: the framed destination loaded but never reported its signing call fails, by name");
+  const stopHalf = v(good, { control: "guard-off", seen: [...FRAME, "stop: loaded"] });
+  ok(!stopHalf.ok && /signer window didn't report its signing call/.test(why(stopHalf)), "guard-off: the destination loaded but never reported its signing call fails, by name");
+  ok(v(good, { control: "csp-off", seen: [...FRAME, "sframe: loaded", "sframe: signer refused: not allowed"] }).ok && v(good, { control: "guard-off", seen: [...FRAME, "stop: loaded", "stop: signer refused: not allowed"] }).ok, "...and each control with its destination's call refused: passes");
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-signer-judge: all ${checks} passed`);
