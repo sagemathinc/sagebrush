@@ -2,9 +2,10 @@
 
     python3 scipy-tests/run.py               # every scipy-tests/test_*.py
     python3 scipy-tests/run.py quad -v       # those whose name contains "quad", with diffs
+    python3 scipy-tests/run.py --dir D       # the test_*.py programs of directory D instead
 
 Each program runs under CPython with the real SciPy and NumPy and under
-sagebrush.  Their stdout (and exit status) must be identical, except lines
+sagebrush.  Both must exit with status 0, and their stdout must be identical, except lines
 from check() (scipy-tests/_check.py): those carry numbers and a tolerance,
 for results that agree with SciPy's within a tolerance rather than to the
 last bit (odeint is not LSODA).  Everything else, quad's values and error
@@ -14,7 +15,12 @@ import difflib, json, os, subprocess, sys, concurrent.futures as cf
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLI = os.path.join(os.path.dirname(HERE), "dist", "src", "cli.js")
-args = [a for a in sys.argv[1:] if not a.startswith("-")]
+argv = sys.argv[1:]
+if "--dir" in argv:
+    i = argv.index("--dir")
+    HERE = os.path.abspath(argv[i + 1])
+    del argv[i:i + 2]
+args = [a for a in argv if not a.startswith("-")]
 verbose = "-v" in sys.argv
 files = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".py") and (not args or any(a in f for a in args)))
 workers = min(8, max(1, int(os.environ.get("SAGEBRUSH_CPUS", "8"))))
@@ -63,8 +69,10 @@ def compare(ref, got):
 bad = 0
 with cf.ThreadPoolExecutor(workers) as ex:
     for f, ref, got in ex.map(one, files):
-        if ref[0] != got[0]:
-            notes = ["exit status: scipy %s, sagebrush %s" % (ref[0], got[0]), (got[2] or ref[2]).strip()[-1500:]]
+        # (a program that fails on both sides, a missing fixture say, is a failure, not an agreement: both must exit 0)
+        if ref[0] != 0 or got[0] != 0:
+            notes = ["exit status: scipy %s, sagebrush %s (both must be 0)" % (ref[0], got[0]),
+                     (got[2] if got[0] != 0 else ref[2]).strip()[-1500:]]
         else:
             notes = compare(ref[1], got[1])
         print("%-28s %s  (%d lines)" % (f, "DIFF" if notes else "ok", ref[1].count("\n")))
