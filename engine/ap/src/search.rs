@@ -47,6 +47,7 @@ pub fn x_coordinates(b2: i128, b4: i128, b6: i128, rmax: u64, smax: u64, limit: 
     let esq: Vec<Vec<bool>> = EXTRA.iter().map(|&m| sq(m)).collect();
     const W: i128 = 5 * 7 * 11 * 13;
     let mut out = Vec::new();
+    let mut blocks = 0u64;
     for sv in 1..=smax {
         sagebrush_interrupt::check();
         let s = sv as i128;
@@ -76,6 +77,18 @@ pub fn x_coordinates(b2: i128, b4: i128, b6: i128, rmax: u64, smax: u64, limit: 
             .collect();
         let mut base = lo;
         while base <= hi {
+            // one check per wheel block of W numerators (a few microseconds):
+            // a check per denominator alone left a Stop unseen for seconds at
+            // rmax = 3e9 (the audit's A17-F1); every 64th asks a WebAssembly
+            // host itself, not only every 1024th check
+            blocks += 1;
+            if blocks % 64 == 0 {
+                // (a phase of its own: the tests count these polls)
+                let _p = sagebrush_interrupt::enter("ap.search poll");
+                sagebrush_interrupt::check_coarse();
+            } else {
+                sagebrush_interrupt::check();
+            }
             let mut bres = [0usize; 9];
             for (k, &m) in EXTRA.iter().enumerate() {
                 bres[k] = base.rem_euclid(m) as usize;
@@ -104,12 +117,16 @@ pub fn x_coordinates(b2: i128, b4: i128, b6: i128, rmax: u64, smax: u64, limit: 
                 }
                 out.push((rv, sv));
                 if out.len() >= limit {
+                    // a Stop seen since the last check is not answered with
+                    // success
+                    sagebrush_interrupt::check();
                     return Ok(out);
                 }
             }
             base += W;
         }
     }
+    sagebrush_interrupt::check();
     Ok(out)
 }
 

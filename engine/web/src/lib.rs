@@ -62,15 +62,23 @@ pub extern "C" fn sb_reply_len() -> usize {
 /// left behind (a trap runs no destructors) are forgotten.
 fn new_run() {
     // (every export starts here, before it replaces REPLY: the reservations
-    // held for the previous reply (AP_HELD, the a_p lists') end with it, and
-    // a call() this export makes holds its own for the host's copy)
+    // held for the previous reply (AP_HELD, the a_p lists') end with it)
     AP_HELD.with(|h| h.borrow_mut().clear());
-    FOR_HOST.with(|f| f.set(true));
+    FOR_HOST.with(|f| f.set(false));
     sagebrush_interrupt::progress::reset_frames();
     sagebrush_arith::smith::progress::reset();
     sagebrush_poly::reset_binomial_units();
     sagebrush_arith::nmod_mat::reset_fast_product();
     sagebrush_sym::num::reset_steps();
+}
+
+/// sb_call's start: a new run, and the call() it makes holds the a_p lists'
+/// reservations for the host's copy of the reply (FOR_HOST).  Only sb_call
+/// sets the flag: the other exports make no call(), so a flag they left set
+/// would make a later native call() keep its holds.
+fn new_host_call() {
+    new_run();
+    FOR_HOST.with(|f| f.set(true));
 }
 
 #[no_mangle]
@@ -82,7 +90,7 @@ fn new_run() {
 // this).  That is the supported boundary: any other native caller is unsupported.
 #[allow(unsafe_code)]
 pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
-    new_run();
+    new_host_call();
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     // the previous reply is freed first (the host copied it after the last
@@ -546,8 +554,8 @@ fn progress_selftest(v: &Value) -> Result<Value, String> {
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 /// The reply to a request.  Reservations held for the reply (AP_HELD) end
-/// once it is text, or, under an export (FOR_HOST, set by new_run), once the
-/// host has copied it: the next export's new_run releases them with the
+/// once it is text, or, under sb_call (FOR_HOST, set by new_host_call), once
+/// the host has copied it: the next export's new_run releases them with the
 /// previous reply.  A native call() releases every hold of its thread, so a
 /// call() nested in another native one would release its caller's too
 /// (none is: dispatch never calls call()).
@@ -840,12 +848,7 @@ thread_local! {
 
 fn ap_bound(v: &Value, what: &str, per_prime: u64, fixed: u64) -> Result<u64, String> {
     let n = u(v, "n")?;
-    let half = n.saturating_sub(1) / 2;
-    if usize::try_from(half).is_err() {
-        return Err(format!("{}: primes up to {} pass this engine's address space", what, n));
-    }
-    let count = sagebrush_ap::prime_count_bound(n) as u64;
-    let bytes = half.saturating_add(count.saturating_mul(8u64.saturating_add(per_prime))).saturating_add(fixed);
+    let bytes = sagebrush_ap::sieve_bytes(n, per_prime, fixed).ok_or_else(|| format!("{}: primes up to {} pass this engine's address space", what, n))?;
     let r = sagebrush_ledger::reserve(what, bytes).map_err(|e| format!("{}: the sieve's {} bytes refused: {:?}", what, bytes, e))?;
     // (held through the reply's serialization, not dropped with the arm)
     AP_HELD.with(|h| h.borrow_mut().push(r));
