@@ -14529,6 +14529,11 @@
   "owner": "modular forms/runtime memory",
   "reason": "doctests that lower the heap figure to show the forms' admission refusing before building and working again"
  },
+ "lib/_sage_mfmore.py :: QSpaceMethods :: sage: bits = 2 + 1 * 2 + ms._maxbits(t[:58]) + 2; ch.used == 20 * (unit + (bits + 7) // 8) # (T_3 to 20: d(n) n^(k-1) max|a_j|) # sagebrush only #0": {
+  "class": "none",
+  "owner": "modular forms/runtime memory",
+  "reason": "a doctest checking a reservation's exact size on the running charge; it refuses nothing"
+ },
  "lib/_sage_mfmore.py :: QSpaceMethods :: sage: old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 200000 # sagebrush only #0": {
   "class": "none",
   "owner": "modular forms/runtime memory",

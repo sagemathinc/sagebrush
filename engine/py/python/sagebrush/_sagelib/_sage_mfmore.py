@@ -381,14 +381,14 @@ class QSpaceMethods:
         sage: tr = [e for e in log if e[0] == "translate"]; i = next(i for i, e in enumerate(tr) if e[3])  # sagebrush only
         sage: tr[i][2] - tr[i][1] == tr[i][4], tr[i + 1][1] == tr[i][1]  # (dependent: charged at return, released before the next)  # sagebrush only
         (True, True)
-        sage: calls = []  # sagebrush only
+        sage: calls, bounds = [], []  # sagebrush only
         sage: class Engine:  # sagebrush only
         ....:     def __getattr__(self, name):
         ....:         f = getattr(engine, name)
         ....:         if name != "newforms":
         ....:             return f
         ....:         def newforms(*a, **kw):
-        ....:             calls.append(ms._CUR[0].used)
+        ....:             calls.append(ms._CUR[0].used); bounds.append(kw.get("bound"))
         ....:             return f(*a, **kw)
         ....:         return newforms
         sage: shorted = []  # sagebrush only
@@ -421,7 +421,72 @@ class QSpaceMethods:
         True
         sage: ch.used == sum(ms._row_bytes(r) for r in sm._NEWROWS[(11, 2)][1]) + len(sm._NEWROWS[(11, 2)][1]) * 30 * ms._SLOT  # sagebrush only
         True
+        sage: nd = sm._mf_engine_dims(11, 2)["new"]; unit_int = ms._SLOT + ms._INT + 8  # sagebrush only
+        sage: traces[2] == nd * (bounds[2] + 1) * (unit_int + (sm._deligne_bits(2, bounds[2], nd) + 7) // 8)  # (the doubled bound's traces, at that bound)  # sagebrush only
+        True
         sage: sm._orbit_rows, sm._translate, sm._mf, sm._bound_rows = orbit_rows, translate, engine, bound_rows  # sagebrush only
+
+    Each helper's reservation lands on the running charge at its stated
+    size (Deligne's bound by hand: 1 + ceil(21/2) + 1 bits for weight 2 to
+    100 and one form; 3 + ceil(131/2) + 1 for weight 12 to 1000 and five)::
+
+        sage: sm._deligne_bits(2, 100, 1), sm._deligne_bits(12, 1000, 5)  # sagebrush only
+        (13, 69)
+        sage: unit = ms._SLOT + ms._FRAC + 8; t = [0] + [int(x) for x in CuspForms(11, 2).basis()[0].coefficients(60)]  # sagebrush only
+        sage: ch = ms._Charge("A check")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = sm._hecke_qexp(t, 3, 11, 2, 20)
+        sage: bits = 2 + 1 * 2 + ms._maxbits(t[:58]) + 2; ch.used == 20 * (unit + (bits + 7) // 8)  # (T_3 to 20: d(n) n^(k-1) max|a_j|)  # sagebrush only
+        True
+        sage: ch = ms._Charge("A check")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = sm._subs_qd(t, 2, 20)
+        sage: ch.used == 20 * ms._SLOT  # sagebrush only
+        True
+        sage: from fractions import Fraction as Fr; B = [[Fr(1), Fr(0), Fr(2)], [Fr(0), Fr(1), Fr(3)]]; V = [[Fr(2), Fr(3), Fr(13)]]  # sagebrush only
+        sage: ch = ms._Charge("A check")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     X = sm._solve_rows(B, V)
+        sage: aug = [[B[i][c] for i in range(2)] + [V[0][c]] for c in range(3)]  # sagebrush only
+        sage: [[int(x) for x in r] for r in X], ch.used == 3 * 3 * ms._SLOT + 2 * 3 * 3 * (unit + (2 * sm._minor_bits(aug) + 7) // 8)  # sagebrush only
+        ([[2, 3]], True)
+        sage: ch = ms._Charge("A check")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = sm._eis_rows(6, 2, 20)
+        sage: bk = sm._bernoulli(2); rows = 2 * len(sm._divisors(6)) + 2  # sagebrush only
+        sage: ch.used >= rows * 20 * (unit + (2 * 5 + bk.numerator.bit_length() + bk.denominator.bit_length() + 2 * 3 + 8 + 7) // 8)  # sagebrush only
+        True
+
+    A cache hit charges the copies it hands out, on the running charge; a
+    new entry is admitted before it is published::
+
+        sage: _ = sm._new_cusp_rows(11, 2, 30); ch = ms._Charge("A check")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     rows = sm._new_cusp_rows(11, 2, 30)
+        sage: ch.used == len(rows) * 30 * ms._SLOT  # sagebrush only
+        True
+        sage: S = CuspForms(37, 2); _ = S.q_integral_basis(6); ch = ms._Charge("A check")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = S.q_integral_basis(6)
+        sage: stored = [v for key, v in mm._QINT.items() if key[:2] == (37, 2)][0][1]  # sagebrush only
+        sage: ch.used == len(stored) * 6 * ms._SLOT + sum(ms._row_bytes(r[:6]) for r in stored)  # (the copies, then the series' coefficients)  # sagebrush only
+        True
+        sage: order = []; store = mm._QINT  # sagebrush only
+        sage: class Published(dict):  # sagebrush only
+        ....:     def __setitem__(self, key, v):
+        ....:         order.append("publish")
+        ....:         dict.__setitem__(self, key, v)
+        sage: class Taken(ms._Charge):  # sagebrush only
+        ....:     def take(self, nbytes):
+        ....:         order.append(("take", nbytes))
+        ....:         ms._Charge.take(self, nbytes)
+        sage: mm._QINT = Published(); ch = Taken("A check")  # sagebrush only
+        sage: with ms._Charging(ch):  # sagebrush only
+        ....:     _ = CuspForms(43, 2).q_integral_basis(6)
+        sage: kept = sum(ms._row_bytes(r) for r in mm._QINT[next(iter(mm._QINT))][1]); i = order.index("publish")  # sagebrush only
+        sage: order[i - 1] == ("take", kept)  # (its storage taken just before it is published)  # sagebrush only
+        True
+        sage: mm._QINT = store  # sagebrush only
     """
 
     def _all_cusp(self):
