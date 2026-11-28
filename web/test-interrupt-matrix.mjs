@@ -18,7 +18,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HEAP_EXTERNAL_SAMPLE, leakControlOutcome, leakRowOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome, sessionEnd, finalDropCandidate, markFinalShutdown } from "./interrupt-classify.mjs";
+import { CONFIRM_REPS, confirmLeak, needsLeakConfirm, HEAP_EXTERNAL_SAMPLE, leakControlOutcome, leakRowOutcome, againstBaseline, classify, classifyCell, cliffOf, leakCheck, ciFailing, waiverErrors, widenedPick, withWaiver, xkRowOutcome, sessionEnd, finalDropCandidate, markFinalShutdown } from "./interrupt-classify.mjs";
 import { killTracked, killTree, onStop, procStatus, procTable, promptSample, sessionTree, survivors, track, untrack } from "./interrupt-procs.mjs";
 // (SB_BASELINE: another baseline, for checking the harness: its tests pin their fake rows there, never in the real one)
 const BASELINE = JSON.parse(readFileSync(process.env.SB_BASELINE ?? new URL("./interrupt-baseline.json", import.meta.url), "utf8"));
@@ -421,8 +421,16 @@ async function runHost(host) {
       cells[k] = { cell: x.cell, ...(x.i != null ? { i: x.i } : {}), ...cls(rr.trials[0], rd), delay_ms: rd, retried_from_ms: x.delay_ms };
     }
     // a process that outlived its session's kill is a leaked worker: the row fails (r4 §1)
-    const left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
-    const leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss", leakFrom);
+    let left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
+    let leak0 = leakCheck(lr.samples, 20, c.leak_measure ?? "rss", leakFrom);
+    // (an RSS short check failed by growth alone is judged again on a longer fresh series, its second half only:
+    // an allocator plateau climbs once, a leak keeps growing; confirmLeak, interrupt-classify.mjs)
+    if (MODE !== "full" && needsLeakConfirm(leak0) && !overBudget()) {
+      const cr = await run("leak-confirm", Array(CONFIRM_REPS).fill(dr), leakAt ? leakAt.s : cal.s);
+      leak0 = confirmLeak(leak0, cr.samples, c.leak_measure ?? "rss");
+      // (the confirming session's processes count too: one that outlived its kill fails the row)
+      left = [...cal.attempts, ...sessions].flatMap((x) => x.left ?? []);
+    }
     const leak1 = left.length ? { ...(leak0 ?? {}), ok: false, survived_kill: left } : leak0;
     // (a final-drop candidate of the leak series, marked or not, is recorded with a measured leak, and on the row
     // itself (below) either way, so the report prints its end cause and its margin, grader's C1; an unmeasured leak

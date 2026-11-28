@@ -189,6 +189,33 @@ export function leakCheck(samples, full = 20, measure = "rss", from = 3) {
   return r && lastExiting ? { ...r, last_exiting: true, ...(dropped.why ? { last_exiting_why: dropped.why } : {}) } : r;
 }
 
+// A growth failure of an RSS short check is confirmed before it counts (E3a, track/math runs 46159713325 and
+// 46162160224): the process's resident set climbs once to an allocator plateau, 90 to 150 MB, then stays flat, and
+// when that climb lands inside the short window (here split over repeats 5 and 6: +46 and +64 MB) it reads as a
+// leak, while a passing run of the same tree climbed before the window.  No rule on one short series can tell that
+// from a real per-repeat leak, so such a failure (growth past the allowance, threads unchanged, nothing invalid, no
+// survivor) is judged again on a fresh session of CONFIRM_REPS repeats, over its second half only (CONFIRM_FROM to
+// the last): a leak that failed the short check (more than half the allowance a repeat over its two steps) grows
+// at least twice the allowance there and fails again; a plateau has climbed by then and passes.  The confirming
+// result is the row's, with the first one kept beside it.  --full's 20 repeats are judged as they are.
+export const CONFIRM_REPS = 10;
+export const CONFIRM_FROM = 6;
+export function needsLeakConfirm(leak) {
+  return (
+    !!leak && leak.ok === false && !leak.invalid && !leak.survived_kill && leak.threads_same === true && leak.check === "short" &&
+    typeof leak.measure === "string" && leak.measure.startsWith("rss") && Number.isFinite(leak.growth_kb) && Number.isFinite(leak.allowed_kb) &&
+    leak.growth_kb > leak.allowed_kb
+  );
+}
+// first: the short check's failing result; samples: the confirming session's.  An unmeasured confirmation keeps the
+// failure (a leak is never cleared by missing evidence).
+export function confirmLeak(first, samples, measure = "rss") {
+  const firstOf = { from: first.from, to: first.to, growth_kb: first.growth_kb, allowed_kb: first.allowed_kb };
+  const second = leakCheck(samples, CONFIRM_REPS, measure, CONFIRM_FROM);
+  if (second == null) return { ...first, confirm: { measured: false, why: `the confirming series (${CONFIRM_REPS} repeats, from ${CONFIRM_FROM}) wasn't measured: the first result stands` } };
+  return { ...second, check: "short, confirmed", confirm: { measured: true, first: firstOf } };
+}
+
 // A final sample read while the target was shutting down in user space, before the kernel's exit starts: its threads
 // already going, with no Z, X or PF_EXITING yet (#251's fake; PR 279's ci 40765663082: threads 7, 7, 7, 7, 3).  The
 // final sample is dropped as exiting only if the target itself, bound by its identity, is seen to exit on its own
