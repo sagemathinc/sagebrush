@@ -1,0 +1,116 @@
+G weighted lap() | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted lap(weighted=True) | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted lap(weighted=False) | ([(1, -1), (-1, 1)], Integer Ring)
+G weighted lap(indegree=True) | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted lap(indegree=False) | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted kirchhoff | ([(3, -3), (-3, 3)], Integer Ring)
+G weighted stc | 3
+H unweighted lap() | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted lap(weighted=True) | ([(3, -3), (-3, 3)], Integer Ring)
+H unweighted lap(weighted=False) | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted lap(indegree=True) | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted lap(indegree=False) | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted kirchhoff | ([(1, -1), (-1, 1)], Integer Ring)
+H unweighted stc | 1
+D weighted lap() | ([(0, -3), (0, 3)], Integer Ring)
+D weighted lap(weighted=True) | ([(0, -3), (0, 3)], Integer Ring)
+D weighted lap(weighted=False) | ([(0, -1), (0, 1)], Integer Ring)
+D weighted lap(indegree=True) | ([(0, -3), (0, 3)], Integer Ring)
+D weighted lap(indegree=False) | ([(3, -3), (0, 0)], Integer Ring)
+D weighted kirchhoff | ([(0, -3), (0, 3)], Integer Ring)
+D weighted stc | 3
+E unweighted lap() | ([(0, -1), (0, 1)], Integer Ring)
+E unweighted lap(weighted=True) | ([(0, -3), (0, 3)], Integer Ring)
+E unweighted lap(weighted=False) | ([(0, -1), (0, 1)], Integer Ring)
+E unweighted lap(indegree=True) | ([(0, -1), (0, 1)], Integer Ring)
+E unweighted lap(indegree=False) | ([(1, -1), (0, 0)], Integer Ring)
+E unweighted kirchhoff | ([(0, -1), (0, 1)], Integer Ring)
+E unweighted stc | 1
+W lap | ([(8, -3, -5), (-3, 5, -2), (-5, -2, 7)], Integer Ring)
+W stc | 31
+Q lap | ([(1/2, -1/2, 0), (-1/2, 5/2, -2), (0, -2, 2)], Rational Field)
+Q stc | 1
+DD lap {} | ([(5, -3, -1), (0, 3, -2), (-5, 0, 3)], Integer Ring)
+DD lap {'indegree': True} | ([(5, -3, -1), (0, 3, -2), (-5, 0, 3)], Integer Ring)
+DD lap {'indegree': False} | ([(4, -3, -1), (0, 2, -2), (-5, 0, 5)], Integer Ring)
+DD lap {'weighted': False} | ([(1, -1, -1), (0, 1, -1), (-1, 0, 2)], Integer Ring)
+DD stc | 9
+Finite Field of size 2 default | ([(1, 0, 1, 0, 0, 1, 1), (0, 1, 1, 0, 1, 0, 1), (0, 0, 0, 1, 1, 1, 1)], Finite Field of size 2)
+Finite Field of size 2 pos=(1, 2, 3) | ([(1, 1, 0, 0, 1, 1, 0), (1, 0, 1, 0, 0, 1, 1), (0, 0, 0, 1, 1, 1, 1)], Finite Field of size 2)
+Finite Field of size 2 pos=(4, 5, 6) | ([(1, 0, 1, 1, 1, 0, 0), (0, 1, 1, 1, 0, 1, 0), (1, 1, 0, 1, 0, 0, 1)], Finite Field of size 2)
+Finite Field of size 2 pos=(0, 2, 3) | ([(1, 1, 0, 0, 1, 1, 0), (0, 1, 1, 0, 1, 0, 1), (0, 0, 0, 1, 1, 1, 1)], Finite Field of size 2)
+Finite Field of size 2 pos=(3, 2, 1) | ([(0, 0, 0, 1, 1, 1, 1), (1, 0, 1, 0, 0, 1, 1), (1, 1, 0, 0, 1, 1, 0)], Finite Field of size 2)
+Finite Field of size 3 default | ([(1, 0, 0, 0, 0, 0, 1), (0, 1, 0, 0, 2, 1, 0), (0, 0, 1, 2, 2, 2, 2)], Finite Field of size 3)
+Finite Field of size 3 pos=(1, 2, 3) | ValueError systematic_positions are not an information set
+Finite Field of size 3 pos=(4, 5, 6) | ([(1, 1, 1, 2, 1, 0, 0), (1, 2, 1, 2, 0, 1, 0), (1, 0, 0, 0, 0, 0, 1)], Finite Field of size 3)
+Finite Field of size 3 pos=(0, 2, 3) | ValueError systematic_positions are not an information set
+Finite Field of size 3 pos=(3, 2, 1) | ValueError systematic_positions are not an information set
+Finite Field of size 5 default | ([(1, 0, 1, 0, 4), (0, 1, 1, 2, 3)], Finite Field of size 5)
+Finite Field of size 5 pos=(1, 2) | ([(4, 1, 0, 2, 4), (1, 0, 1, 0, 4)], Finite Field of size 5)
+Finite Field of size 5 pos=(3, 4) | ([(4, 3, 2, 1, 0), (4, 0, 4, 0, 1)], Finite Field of size 5)
+Finite Field of size 5 pos=(0, 2) | ([(1, 4, 0, 3, 1), (0, 1, 1, 2, 3)], Finite Field of size 5)
+Finite Field of size 5 pos=(2, 1) | ([(1, 0, 1, 0, 4), (4, 1, 0, 2, 4)], Finite Field of size 5)
+GF(2) non-information set (0,1) | ValueError systematic_positions are not an information set
+L stc | 2
+L stc root a | 1
+L stc root b | 2
+L stc root c | 1
+L stc root z | ValueError vertex (z) not in the graph
+DD stc root 0 | 9
+DD stc root 1 | 10
+DD stc root 2 | 15
+P stc root None | 2
+P stc root 0 | 2
+P stc root 3 | 0
+W stc root 2 | 31
+Graph() stc | 0
+DiGraph() stc | 0
+Graph(1) stc and parent | (1, Integer Ring)
+DiGraph(1) stc and parent | (1, Integer Ring)
+K4 stc and parent | (16, Integer Ring)
+W stc and parent | (31, Integer Ring)
+Q stc and parent | (1, Rational Field)
+DD stc and parent | (9, Integer Ring)
+path lap [('signless', True)] | ([(1, 1, 0), (1, 2, 1), (0, 1, 1)], Integer Ring)
+path lap [('normalized', True)] | ([(1, -1/2*sqrt(2), 0), (-1/2*sqrt(2), 1, -1/2*sqrt(2)), (0, -1/2*sqrt(2), 1)], Symbolic Ring)
+path lap [('normalized', True), ('signless', True)] | ([(1, 1/2*sqrt(2), 0), (1/2*sqrt(2), 1, 1/2*sqrt(2)), (0, 1/2*sqrt(2), 1)], Symbolic Ring)
+path lap [('indegree', False), ('signless', True)] | ([(1, 1, 0), (1, 2, 1), (0, 1, 1)], Integer Ring)
+W lap [('signless', True)] | ([(8, 3, 5), (3, 5, 2), (5, 2, 7)], Integer Ring)
+W lap [('normalized', True)] | ([(1, -3/20*sqrt(5)*sqrt(2), -5/28*sqrt(7)*sqrt(2)), (-3/20*sqrt(5)*sqrt(2), 1, -2/35*sqrt(7)*sqrt(5)), (-5/28*sqrt(7)*sqrt(2), -2/35*sqrt(7)*sqrt(5), 1)], Symbolic Ring)
+W lap [('normalized', True), ('signless', True)] | ([(1, 3/20*sqrt(5)*sqrt(2), 5/28*sqrt(7)*sqrt(2)), (3/20*sqrt(5)*sqrt(2), 1, 2/35*sqrt(7)*sqrt(5)), (5/28*sqrt(7)*sqrt(2), 2/35*sqrt(7)*sqrt(5), 1)], Symbolic Ring)
+W lap [('indegree', False), ('signless', True)] | ([(8, 3, 5), (3, 5, 2), (5, 2, 7)], Integer Ring)
+DD lap [('signless', True)] | ([(5, 3, 1), (0, 3, 2), (5, 0, 3)], Integer Ring)
+DD lap [('normalized', True)] | ([(1, -1/5*sqrt(5)*sqrt(3), -1/15*sqrt(5)*sqrt(3)), (0, 1, -2/3), (-1/3*sqrt(5)*sqrt(3), 0, 1)], Symbolic Ring)
+DD lap [('normalized', True), ('signless', True)] | ([(1, 1/5*sqrt(5)*sqrt(3), 1/15*sqrt(5)*sqrt(3)), (0, 1, 2/3), (1/3*sqrt(5)*sqrt(3), 0, 1)], Symbolic Ring)
+DD lap [('indegree', False), ('signless', True)] | ([(4, 3, 1), (0, 2, 2), (5, 0, 5)], Integer Ring)
+isolated lap [('signless', True)] | ([(1, 1, 0), (1, 1, 0), (0, 0, 0)], Integer Ring)
+isolated lap [('normalized', True)] | ([(1, -1, 0), (-1, 1, 0), (0, 0, 0)], Rational Field)
+isolated lap [('normalized', True), ('signless', True)] | ([(1, 1, 0), (1, 1, 0), (0, 0, 0)], Rational Field)
+isolated lap [('indegree', False), ('signless', True)] | ([(1, 1, 0), (1, 1, 0), (0, 0, 0)], Integer Ring)
+C pos=(-1, 1) | ValueError systematic positions must be a tuple of distinct integers in the range 0 to n-1 where n is the length of the code
+C pos=(0.500000000000000, 1) | ValueError systematic positions must be a tuple of distinct integers in the range 0 to n-1 where n is the length of the code
+C pos=('0', '1') | ValueError systematic positions must be a tuple of distinct integers in the range 0 to n-1 where n is the length of the code
+C pos=(0, 0) | ValueError systematic positions must be a tuple of distinct integers in the range 0 to n-1 where n is the length of the code
+C pos=(0, 4) | ValueError systematic positions must be a tuple of distinct integers in the range 0 to n-1 where n is the length of the code
+C pos=(0,) | ValueError systematic_positions must be a tuple of length equal to the dimension of the code
+C pos=(0, 1, 2) | ValueError systematic_positions must be a tuple of length equal to the dimension of the code
+C pos=() | ([(1, 0, 1, 1), (0, 1, 1, 0)], Finite Field of size 2)
+C pos=[] | ([(1, 0, 1, 1), (0, 1, 1, 0)], Finite Field of size 2)
+C pos=None | ([(1, 0, 1, 1), (0, 1, 1, 0)], Finite Field of size 2)
+C pos=[3, 1] | ([(1, 0, 1, 1), (0, 1, 1, 0)], Finite Field of size 2)
+C pos=(2, 0) | ([(0, 1, 1, 0), (1, 1, 0, 1)], Finite Field of size 2)
+C pos=(1.0, 2) | ValueError Constructing the Systematic encoder failed, possibly due to missing or incorrect parameters.
+The constructor requires no arguments.
+It takes the optional arguments ['systematic_positions'].
+See the documentation of sage.coding.linear_code_no_metric.LinearCodeSystematicEncoder for more details.
+C pos=(1.0, 2) | ValueError Constructing the Systematic encoder failed, possibly due to missing or incorrect parameters.
+The constructor requires no arguments.
+It takes the optional arguments ['systematic_positions'].
+See the documentation of sage.coding.linear_code_no_metric.LinearCodeSystematicEncoder for more details.
+C pos=(1, 2) | ([(1, 1, 0, 1), (1, 0, 1, 1)], Finite Field of size 2)
+C pos=(1, 2) | ([(1, 1, 0, 1), (1, 0, 1, 1)], Finite Field of size 2)
+C pos=(True, 2) | ([(1, 1, 0, 1), (1, 0, 1, 1)], Finite Field of size 2)
+C no keyword | ([(0, 1, 1, 0), (1, 0, 1, 1)], Finite Field of size 2)
+N stc, root 1 | (2, 0)
+C pos=iter(()) | ([(1, 0, 1, 1), (0, 1, 1, 0)], Finite Field of size 2)
+C pos=iter((1, 3)) | ([(0, 1, 1, 0), (1, 0, 1, 1)], Finite Field of size 2)
