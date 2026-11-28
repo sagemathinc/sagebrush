@@ -156,25 +156,50 @@ pub fn ecm_levels_before_siqs(bits: u64) -> usize {
 /// finds nothing, the elliptic curve method with bounds that keep growing
 /// until it succeeds (Stop interrupts).  None only when no method applies:
 /// rho and ECM work on at most 1024 bits.
-fn split(n: &BigInt) -> Option<BigInt> {
+fn split(n: &BigInt) -> Result<Option<BigInt>, FactorError> {
     for k in (2..=n.bits() as u32 / 16).rev() {
         let r = num_integer::Roots::nth_root(n, k);
         if r.pow(k) == *n {
-            return Some(r);
+            return Ok(Some(r));
         }
     }
-    let nu = n.to_biguint()?;
+    let Some(nu) = n.to_biguint() else { return Ok(None) };
     if let Some(d) = super::ecm::rho(&nu, RHO_ITERS, 0x9E37_79B9) {
-        return Some(BigInt::from(d));
+        return Ok(Some(BigInt::from(d)));
     }
     let bits = n.bits() as u64;
     if (super::siqs::MIN_BITS..=super::siqs::MAX_BITS).contains(&bits) {
-        let d = super::ecm::ecm_levels(&nu, ECM_SEED, ecm_levels_before_siqs(bits)).or_else(|| super::siqs::siqs(&nu, 1));
+        if let Some(d) = super::ecm::ecm_levels(&nu, ECM_SEED, ecm_levels_before_siqs(bits)) {
+            return Ok(Some(BigInt::from(d)));
+        }
+        // (a refused reservation is the error: memory never picks the route)
+        let d = super::siqs::siqs(&nu, 1).map_err(|e| match e {
+            sagebrush_ledger::EngineError::Memory(r) => FactorError::Memory(r),
+            e => FactorError::Message(e.to_string()),
+        })?;
         if let Some(d) = d {
-            return Some(BigInt::from(d));
+            return Ok(Some(BigInt::from(d)));
         }
     }
-    super::ecm::ecm_until_found(&nu, ECM_SEED).map(BigInt::from)
+    Ok(super::ecm::ecm_until_found(&nu, ECM_SEED).map(BigInt::from))
+}
+
+/// Why factor_typed gave no factorization: the memory ledger refused a
+/// reservation (the quadratic sieve's), typed so that the host raises its
+/// MemoryError, or a message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FactorError {
+    Memory(sagebrush_ledger::Refusal),
+    Message(String),
+}
+
+impl std::fmt::Display for FactorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FactorError::Memory(r) => write!(f, "{}", sagebrush_ledger::EngineError::Memory(r.clone())),
+            FactorError::Message(m) => f.write_str(m),
+        }
+    }
 }
 
 /// The factorization of |n| > 0 as sorted (prime, exponent) pairs; the
@@ -182,6 +207,11 @@ fn split(n: &BigInt) -> Option<BigInt> {
 /// 3.3e24).  A composite is never reported as a prime: one that cannot be
 /// split (beyond 1024 bits, where rho and ECM do not apply) is an error.
 pub fn factor(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
+    factor_typed(n).map_err(|e| e.to_string())
+}
+
+/// factor, with a memory refusal kept typed.
+pub fn factor_typed(n: &BigInt) -> Result<Vec<(BigInt, u32)>, FactorError> {
     let mut n = n.abs();
     let mut out: Vec<(BigInt, u32)> = vec![];
     let push = |p: BigInt, out: &mut Vec<(BigInt, u32)>| {
@@ -209,11 +239,11 @@ pub fn factor(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
         sagebrush_interrupt::check();
         if is_probable_prime(&m) {
             push(m, &mut out);
-        } else if let Some(d) = split(&m) {
+        } else if let Some(d) = split(&m)? {
             stack.push(&m / &d);
             stack.push(d);
         } else {
-            return Err(format!("cannot factor a composite of {} bits: rho and ECM work on at most 1024 bits", m.bits()));
+            return Err(FactorError::Message(format!("cannot factor a composite of {} bits: rho and ECM work on at most 1024 bits", m.bits())));
         }
     }
     out.sort();

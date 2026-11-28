@@ -218,6 +218,27 @@ def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False
     return "\n".join([TEXT["title"], line % fill, TEXT[host or where()]])
 
 
+def engine_refusal(m):
+    """The memory guards' error for the engine's memory ledger refusing a
+    reservation (an engine call's "memory" reply, m its figures): what was
+    refused, its need, and the room left in the engine's allowance.
+
+    EXAMPLES::
+
+        sage: from _memguard import engine_refusal
+        sage: m = {"what": "the quadratic sieve", "row": "native", "need": 194000000, "allowance": 2**30, "live": 2**30 - 10**7,
+        ....:      "outstanding": 0, "total": 2**32, "status": "observed", "joint": False, "retired": 0}
+        sage: e = engine_refusal(m)
+        sage: type(e).__name__, e.what, e.need_bytes, e.limit_bytes, e.record["row"]
+        ('SagebrushMemoryError', 'The quadratic sieve', 194000000, 10000000, 'native')
+        sage: print(str(e).splitlines()[1])
+        The quadratic sieve needs about 194 MB, but Sagebrush allows about 10 MB for the engine's computations here.
+    """
+    what = str(m.get("what") or "the computation")
+    room = max(0, int(m["allowance"]) - int(m["live"]) - int(m["outstanding"]))
+    return memory_guard(what[:1].upper() + what[1:], m["need"], room, "the engine's computations", record=m)
+
+
 def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None, fixed=False,
                  unmeasured=None):
     """The refusal of a memory guard, to raise: a SagebrushMemoryError with

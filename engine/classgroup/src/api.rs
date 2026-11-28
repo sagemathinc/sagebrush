@@ -21,6 +21,15 @@ pub fn factor_integer(n: &BigInt) -> Result<Vec<(BigInt, u32)>, String> {
     crate::nf::factor::factor(n)
 }
 
+/// factor_integer, with a memory refusal kept typed (the engine call's
+/// "memory" reply).
+pub fn factor_integer_typed(n: &BigInt) -> Result<Vec<(BigInt, u32)>, crate::nf::factor::FactorError> {
+    if n.abs() <= BigInt::one() {
+        return Ok(vec![]);
+    }
+    crate::nf::factor::factor_typed(n)
+}
+
 /// Whether n is prime: proven below 2^64, Baillie-PSW beyond (no known
 /// counterexample, not a proof; "composite" is proven); false for n < 2
 /// (Astra's audit, F7: -7 was "prime").

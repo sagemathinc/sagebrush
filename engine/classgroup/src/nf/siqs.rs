@@ -44,6 +44,9 @@ const SMALL: u32 = 30;
 /// The primes of a are at most this (and at most half the largest
 /// factor-base prime).
 const A_PRIME_MAX: f64 = 4000.0;
+/// At most this many values of a per run (a 250-bit n needs about 800):
+/// the set of those used is in memory_bound.  Past it, the sieve gives up.
+const A_MAX: usize = 1 << 14;
 
 #[derive(Clone, Debug)]
 pub struct Params {
@@ -116,7 +119,10 @@ pub fn memory_bound(bits: u64) -> u128 {
     let rels = want * (t + 2 * cols) + PARTIALS_MAX as u128 * want * (t + cols + 160);
     // the rows' odd columns, then the bits
     let matrix = want * cols + want * 2 * want.div_ceil(64) * 8;
-    primes + base + rels + matrix + 4 * nfb + 4096
+    // the values of a used: s indices each, in a hash set of up to twice
+    // as many slots
+    let used = 2 * A_MAX as u128 * (8 * s + 48);
+    primes + base + rels + matrix + used + 4 * nfb + 4096
 }
 
 #[derive(Clone, Debug, Default)]
@@ -380,17 +386,21 @@ fn clear_column(rows: &mut [u64], pivot: &[u64], stride: usize, w: usize, bit: u
 }
 
 /// A nontrivial factor of n (odd, composite, not a perfect power), or None
-/// if no dependency splits n, no polynomial is left, or the engine's memory
-/// budget (the host's share) does not admit the sieve's memory_bound: the
-/// caller's ECM goes on without it.  `seed` selects the polynomials: the
-/// same seed gives the same run.
-pub fn siqs(n: &BigUint, seed: u64) -> Option<BigUint> {
+/// if no dependency splits n or no new polynomial is left.  The sieve's
+/// memory_bound is reserved with the engine's memory ledger before anything
+/// is built and held while it runs; refused, the ledger's error, never
+/// another route (memory decides only whether the sieve runs).  `seed`
+/// selects the polynomials: the same seed gives the same run.
+pub fn siqs(n: &BigUint, seed: u64) -> Result<Option<BigUint>, sagebrush_ledger::EngineError> {
     let bits = n.bits() as u64;
-    // (reserved before anything is built, held while the sieve runs)
-    let budget = sagebrush_poly::Budget::default();
-    let _held = budget.reserve(u64::try_from(memory_bound(bits)).ok()).ok()?;
-    siqs_with(n, &params(bits), seed, &mut Stats::default())
+    // (memory_bound is far below 2^64 bytes for any n: the parameters stop
+    // growing at 250 bits)
+    let _held = sagebrush_ledger::reserve(WHAT, memory_bound(bits) as u64)?;
+    Ok(siqs_with(n, &params(bits), seed, &mut Stats::default()))
 }
+
+/// What the sieve's reservation is, in a refusal.
+pub const WHAT: &str = "the quadratic sieve";
 
 pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigUint> {
     let n = BigInt::from(n.clone());
@@ -470,7 +480,7 @@ pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Opt
             }
             idx.clear();
         }
-        if idx.is_empty() {
+        if idx.is_empty() || used.len() > A_MAX {
             return None;
         }
         let q: Vec<u64> = idx.iter().map(|&i| fb.p[i] as u64).collect();
@@ -701,7 +711,7 @@ mod tests {
         // (2^50 - 27)(2^50 - 35)(2^61 - 1): any proper factor
         let ps: Vec<BigUint> = ["1125899906842597", "1125899906842589", "2305843009213693951"].iter().map(|s| s.parse().unwrap()).collect();
         let n: BigUint = ps.iter().cloned().product();
-        let g = siqs(&n, 3).unwrap();
+        let g = siqs(&n, 3).unwrap().unwrap();
         assert!(!g.is_one() && g != n && (&n % &g).is_zero());
     }
 
@@ -719,22 +729,6 @@ mod tests {
             assert_eq!(fb.t[i] as u64 * fb.t[i] as u64 % p, rem_u64(&kn, p));
             assert!(fb.divides(i, 7 * p) && !fb.divides(i, 7 * p + 1));
         }
-    }
-
-    // The sieve's memory is admitted by the engine's budget: refused, siqs
-    // gives None (and factor() goes on by ECM); admitted, it runs.
-    #[test]
-    fn the_sieve_runs_only_when_its_memory_is_admitted() {
-        let (p, q): (BigUint, BigUint) = ("1125899906842597".parse().unwrap(), "1125899906842589".parse().unwrap());
-        let n = &p * &q;
-        let small = sagebrush_poly::Limits { memory: memory_bound(n.bits() as u64) as u64 - 1, ..sagebrush_poly::Limits::DEFAULT };
-        assert_eq!(sagebrush_poly::with_default_limits(small, || siqs(&n, 1)), None);
-        let enough = sagebrush_poly::Limits { memory: memory_bound(n.bits() as u64) as u64, ..sagebrush_poly::Limits::DEFAULT };
-        let g = sagebrush_poly::with_default_limits(enough, || siqs(&n, 1)).unwrap();
-        assert!(g == p || g == q);
-        let mut want = vec![(BigInt::from(q.clone()), 1), (BigInt::from(p.clone()), 1)];
-        want.sort();
-        assert_eq!(sagebrush_poly::with_default_limits(small, || super::super::factor::factor(&BigInt::from(n.clone()))).unwrap(), want, "ECM without the sieve");
     }
 
     #[test]

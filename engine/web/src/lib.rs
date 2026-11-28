@@ -504,8 +504,15 @@ fn progress_selftest(v: &Value) -> Result<Value, String> {
     Ok(json!({ "steps": steps, "calls": depth }))
 }
 
+thread_local! {
+    /// A memory refusal a dispatched op met, for call's typed "memory" reply
+    /// (in place of its error text).
+    static REFUSED: std::cell::RefCell<Option<sagebrush_ledger::Refusal>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 pub fn call(req: &str) -> String {
+    REFUSED.with(|c| c.borrow_mut().take());
     // the capped ops' request sizes are admitted before serde copies
     // anything (the last top-level fn name is read by one scan that owns no
     // text: every other value skipped); unknown names go on as before
@@ -519,7 +526,10 @@ pub fn call(req: &str) -> String {
     }
     match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
-        Err(e) => error_json(e),
+        Err(e) => match REFUSED.with(|c| c.borrow_mut().take()) {
+            Some(r) => json!({ "memory": memory_error_value(&r) }),
+            None => error_json(e),
+        },
     }
     .to_string()
 }
@@ -1368,7 +1378,17 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if n.sign() == sagebrush_bigint::Sign::NoSign {
                 return Err("factor of 0".into());
             }
-            Ok(json!(sagebrush_classgroup::api::factor_integer(&n)?.iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>()))
+            // (the memory ledger's refusal, the quadratic sieve's, is the
+            // typed "memory" reply: the host raises its MemoryError)
+            match sagebrush_classgroup::api::factor_integer_typed(&n) {
+                Ok(f) => Ok(json!(f.iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>())),
+                Err(sagebrush_classgroup::nf::factor::FactorError::Memory(r)) => {
+                    let m = sagebrush_ledger::EngineError::Memory(r.clone()).to_string();
+                    REFUSED.with(|c| *c.borrow_mut() = Some(r));
+                    Err(m)
+                }
+                Err(e) => Err(e.to_string()),
+            }
         }
         // the cost model of factor_integer, from n's size alone (estimates
         // plan r3 PR 2; nf/cost.rs): information only, it runs nothing

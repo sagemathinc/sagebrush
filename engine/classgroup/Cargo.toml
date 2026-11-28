@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 sagebrush-bigint = { path = "../bigint" }
 sagebrush-ball = { path = "../ball" }
 sagebrush-interrupt = { path = "../interrupt" }
+sagebrush-ledger = { path = "../ledger" }
 num-integer = "0.1"
 num-traits = "0.2"
 sagebrush-poly = { path = "../poly" }

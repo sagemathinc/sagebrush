@@ -548,6 +548,11 @@
   "class": "none",
   "owner": "class group/number fields"
  },
+ "engine/classgroup/src/nf/siqs.rs ::  :: const A_MAX: usize = 1 << 14; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's cap on the values of a per run (a 250-bit n needs about 800), so that the set of those used is in memory_bound: past it the sieve gives up and ECM goes on; nothing is refused"
+ },
  "engine/classgroup/src/nf/siqs.rs ::  :: const A_PRIME_MAX: f64 = 4000.0; #0": {
   "class": "none",
   "owner": "class group/number fields",
@@ -578,30 +583,20 @@
   "owner": "class group/number fields",
   "reason": "the quadratic sieve keeps at most this many partial relations per relation wanted, so that its memory has a bound (siqs::memory_bound); further ones are dropped, which can only slow the sieve: nothing is refused"
  },
+ "engine/classgroup/src/nf/siqs.rs :: memory_bound :: let used = 2 * A_MAX as u128 * (8 * s + 48); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve's cap on the values of a per run (a 250-bit n needs about 800), so that the set of those used is in memory_bound: past it the sieve gives up and ECM goes on; nothing is refused"
+ },
  "engine/classgroup/src/nf/siqs.rs :: new :: fb.plim.push(u64::MAX / p); #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs :: let _held = budget.reserve(u64::try_from(memory_bound(bits)).ok()).ok()?; #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "engine-budget-memory"
-   }
-  },
+ "engine/classgroup/src/nf/siqs.rs :: siqs_with :: if idx.is_empty() || used.len() > A_MAX { #0": {
+  "class": "none",
   "owner": "class group/number fields",
-  "reason": "the quadratic sieve reserves its memory_bound through the engine Budget (the host share) before anything is built; refused, the sieve is skipped and ECM goes on, nothing refused to the user"
- },
- "engine/classgroup/src/nf/siqs.rs :: siqs :: let budget = sagebrush_poly::Budget::default(); #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "engine-budget-memory"
-   }
-  },
-  "owner": "class group/number fields",
-  "reason": "the quadratic sieve reserves its memory_bound through the engine Budget (the host share) before anything is built; refused, the sieve is skipped and ECM goes on, nothing refused to the user"
+  "reason": "the quadratic sieve's cap on the values of a per run (a 250-bit n needs about 800), so that the set of those used is in memory_bound: past it the sieve gives up and ECM goes on; nothing is refused"
  },
  "engine/classgroup/src/nf/siqs.rs :: siqs_with :: if partials.len() < PARTIALS_MAX * want { #0": {
   "class": "none",
@@ -637,31 +632,6 @@
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
- },
- "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: assert_eq!(sagebrush_poly::with_default_limits(small, || siqs(&n, 1)), None); #0": {
-  "class": "none",
-  "owner": "class group/number fields",
-  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
- },
- "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: assert_eq!(sagebrush_poly::with_default_limits(small, || super::super::factor::factor(&BigInt::from(n.clone()))).unwrap(), want, \"ECM without the sieve\"); #0": {
-  "class": "none",
-  "owner": "class group/number fields",
-  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
- },
- "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: let enough = sagebrush_poly::Limits { memory: memory_bound(n.bits() as u64) as u64, ..sagebrush_poly::Limits::DEFAULT }; #0": {
-  "class": "none",
-  "owner": "class group/number fields",
-  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
- },
- "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: let g = sagebrush_poly::with_default_limits(enough, || siqs(&n, 1)).unwrap(); #0": {
-  "class": "none",
-  "owner": "class group/number fields",
-  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
- },
- "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: let small = sagebrush_poly::Limits { memory: memory_bound(n.bits() as u64) as u64 - 1, ..sagebrush_poly::Limits::DEFAULT }; #0": {
-  "class": "none",
-  "owner": "class group/number fields",
-  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
  },
  "engine/classgroup/src/realq.rs :: class_group_real_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
@@ -6678,6 +6648,11 @@
  "lib/_memguard.py :: SagebrushMemoryError.__init__ :: self.limit_bytes = limit_bytes #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "lib/_memguard.py :: engine_refusal :: sage: type(e).__name__, e.what, e.need_bytes, e.limit_bytes, e.record[\"row\"] #0": {
+  "class": "none",
+  "owner": "memory guards (lib/_memguard.py)",
+  "reason": "a doctest printing the memory guard error's figures (limit_bytes, the room it reports): refuses nothing"
  },
  "lib/_memguard.py :: memory_guard :: def memory_guard(what, need_bytes, limit_bytes, allowance_for, record=None, partial=None, checkpoint=None, fixed=False, #0": {
   "class": "none",
