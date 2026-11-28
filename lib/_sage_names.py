@@ -742,6 +742,7 @@ SHIM_NAMES = {
     'CycleTypeSample': 'sage_permgroup',
     'Cyclic': '_sage_mpoly',
     'Decoder': '_sage_coding',
+    'DecodingError': '_sage_coding',
     'DirichletCharacter': '_sage_modular',
     'DynkinDiagram_': '_sage_lie',
     'ElementaryCrystal': '_sage_crystals',

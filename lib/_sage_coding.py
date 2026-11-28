@@ -352,6 +352,13 @@ def _info_set(G):
     return list(G.echelon_form().pivots())
 
 
+class DecodingError(Exception):
+    """Raised when a decoder cannot decode a word, as Sage's DecodingError."""
+
+
+DecodingError.__module__ = "sage.coding.decoder"
+
+
 class Decoder:
     """A decoder for a code.
 
@@ -1584,16 +1591,31 @@ class GRSErrorErasureDecoder(Decoder):
             sage: D = C.decoder("ErrorErasure"); r = vector(GF(7), [2, 0, 0, 5, 6, 0]); e = vector(GF(2), [0, 1, 1, 0, 0, 0])
             sage: D.decode_to_message((r, e))
             (1, 1)
+
+        Five erasures leave one evaluation, too few for a message of length 2::
+
+            sage: D.decode_to_message((r, vector(GF(2), [1, 1, 1, 1, 1, 0])))
+            Traceback (most recent call last):
+            ...
+            DecodingError: Too many erasures in the received word
+            sage: D.decode_to_message((vector(GF(7), [2, 0, 0, 5, 1, 1]), e))
+            Traceback (most recent call last):
+            ...
+            DecodingError: Decoding failed because the number of errors exceeded the decoding radius
         """
         r, e = word_and_erasure_vector
         C = self._code
         F = C._base_field
         keep = [i for i in range(C._length) if e[i] == 0]
+        # the punctured code has minimum distance len(keep) - k + 1, so at
+        # least k evaluations must survive for the message to be determined
+        if len(keep) < C._dimension:
+            raise DecodingError("Too many erasures in the received word")
         pts = [C._pts[i] for i in keep]
         ys = [F(r[i]) / C._mult[i] for i in keep]
         f = _gao(F, pts, ys, C._dimension)
         if f is None:
-            raise ValueError("decoding failed")
+            raise DecodingError("Decoding failed because the number of errors exceeded the decoding radius")
         return _vector(F, f + [F(0)] * (C._dimension - len(f)))
 
     def decode_to_code(self, word_and_erasure_vector):
