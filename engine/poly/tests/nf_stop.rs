@@ -3,9 +3,11 @@
 
 use sagebrush_bigint::BigInt;
 
-/// The number-field factoring's shift search is a Stop point, and a Stop
-/// leaves no state: prod_{j=-32}^{31} (x - j a), a^2 = 2, which needs 65
-/// shifts (Codex audit A03-F2), stopped, then factored whole.
+/// A Stop during number-field factoring leaves no state: prod_{j=-32}^{31}
+/// (x - j a), a^2 = 2, which needs 65 shifts (Codex audit A03-F2), stopped,
+/// then factored whole.  (The Stop is requested before the call, so the first
+/// poll that sees it may be the budget's or the norm's, not the shift loop's
+/// own check: this row pins the no-state property, not that one poll.)
 #[test]
 fn number_field_shift_search_stops() {
     use sagebrush_poly::nf::{Field, KPoly};

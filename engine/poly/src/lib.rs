@@ -1144,6 +1144,8 @@ pub fn try_is_squarefree(f: &[BigInt]) -> Result<bool, FactorLimit> {
         return Ok(true);
     }
     let b = Budget::default();
+    // (the input admitted against the limits first, as try_factor_with does)
+    admit(&b, f)?;
     let p = prim(&b, f)?;
     let parts = squarefree_with(&b, &p)?;
     Ok(parts.len() == 1 && parts[0].1 == 1)
