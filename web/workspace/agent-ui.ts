@@ -590,7 +590,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
         let p: AgentPairing | null = null;
         try {
           if (k.grant.expires !== null && !(Date.now() < k.grant.expires)) break; // (expired while it waited)
-          p = make(k.port, { session: k.session, pairingId: id });
+          // (the session must be answered by the agent its grant was given to, name and client, as restoreWith's: another
+          //  agent's answer is closed before anything is granted, credited or kept anew; the remembered grant stays)
+          p = make(k.port, { session: k.session, pairingId: id, agent: { name: String(k.grant.agent ?? ""), client: String(k.grant.client ?? "") } });
           watch(p);
           await p.paired();
           // (superseded meanwhile by a pairing the person chose, or fenced by a release: this attempt goes, touching

@@ -389,6 +389,27 @@ try {
     const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
     ok(kept.length === 1 && kept[0] === kept0[0], `reload ${n}: the kept session is still the one in force (${kept[0] === undefined ? "lost" : kept[0] === kept0[0] ? "same" : "changed"})`);
   }
+  // (the remembered grant bound to its agent (Codex audit S05b): the same kept session, its grant now another agent's
+  //  (name and client); the server answering it is this one, "Test agent". The reconnect must close at the hello: no
+  //  grant reaches the server, no bar, and the kept grant is left as it was, its identity not rewritten. Then the record
+  //  put back, and reconnected, for the rows after)
+  {
+    const saved = await ev(`T.ws.agentGrants().then((g) => JSON.stringify(g))`);
+    await ev(`(async () => { for (const [id, k] of Object.entries(await T.ws.agentGrants())) await T.ws.putAgentGrant(id, { ...k, grant: { ...k.grant, agent: "Second agent", client: "test2" } }); return true; })()`);
+    const relabelled = await ev(`T.ws.agentGrants().then((g) => JSON.stringify(g))`);
+    await drive({ op: "grants" });
+    await drive({ op: "hellos" });
+    ok(await open(""), "another agent's grant: a reload");
+    await sleep(2500);
+    const hs = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === PORT);
+    const gs = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === PORT);
+    const bar = await ev(`!!document.querySelector(".sbag-bar")`);
+    const after = await ev(`T.ws.agentGrants().then((g) => JSON.stringify(g))`);
+    ok(hs.length >= 1 && gs.length === 0 && !bar && after === relabelled && (await ev(`T.ui.pairing?.state ?? "none"`)) !== "granted", `another agent's grant: the session answered by "Test agent" is closed at its hello, nothing granted, no bar, the kept grant unchanged (${hs.length} hellos, ${gs.length} grants, bar ${bar}, kept ${after === relabelled ? "unchanged" : "changed"})`);
+    await ev(`(async () => { for (const [id, k] of Object.entries(${saved})) await T.ws.putAgentGrant(id, k); return true; })()`);
+    ok(await open(""), "another agent's grant: the record put back, a reload");
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 15000) && (await grantedAtServer()), "another agent's grant: …its own agent reconnects as before");
+  }
   // (W4, the chip: a newer pairing started while one is shown (the remembered grant's reconnect, asked again while the
   //  agent is still connected; its hello answered 1 s late, so the newer pairing says nothing meanwhile): the old chip
   //  goes at once, and its Revoke and Turn off running code, pressed after, act on nothing, neither pairing)
