@@ -76,3 +76,24 @@ for dt in (np.float64, np.float32):
         show(f"{f.__name__} {dt.__name__} masked value", lambda: f.reduce(y, where=w2))
         w3 = np.arange(1000) % 3 != 0
         show(f"{f.__name__} {dt.__name__} every third out", lambda: f.reduce(y, where=w3))
+
+# keepdims through the general fold, hypot's identity, a complex mask refused in a reduction
+show("subtract keepdims", lambda: (lambda r: (r.shape, r.tolist()))(np.subtract.reduce(np.arange(12.).reshape(3, 4), axis=1, keepdims=True)))
+show("hypot keepdims", lambda: (lambda r: (r.shape, r.tolist()))(np.hypot.reduce(np.arange(12.).reshape(3, 4), axis=1, keepdims=True)))
+show("hypot masked", lambda: np.hypot.reduce(np.array([3., 4., 12.]), where=[True, True, False]))
+show("hypot empty", lambda: np.hypot.reduce(np.zeros(0)))
+show("add complex 0-d mask", lambda: np.add.reduce(A, where=np.array(1j)))
+show("sum complex mask", lambda: np.sum(A, where=np.array([1j, 0, 1, 0])))
+show("bitwise_or complex mask", lambda: np.bitwise_or.reduce(np.arange(4), where=np.array([1j, 0, 1, 0])))
+# initial= as NumPy converts it: Python numbers (a float truncated) checked against the dtype's range, NumPy scalars
+# checked into a signed dtype and cast into an unsigned one; np.sum's initial in the sum's own dtype
+for dt in (np.int8, np.uint8, np.int16, np.uint16):
+    x = np.array([100, 2, 50], dt)
+    for v in (np.int64(300), np.int64(-3), np.float64(300.0), np.uint64(300), np.int8(5), 300, -3, 1.5, 300.0, -1.5, np.float64(-1.0), True):
+        show(f"initial max {dt.__name__} {v!r}", lambda: repr(np.maximum.reduce(x, initial=v)))
+        # (not here: a negative NumPy scalar cast into an unsigned sum's uint64, a value past 2**53 Sagebrush refuses)
+        if not (dt in (np.uint8, np.uint16) and isinstance(v, np.generic) and v < 0):
+            show(f"initial sum {dt.__name__} {v!r}", lambda: repr(np.sum(x, initial=v)))
+        show(f"initial bitwise_and {dt.__name__} {v!r}", lambda: repr(np.bitwise_and.reduce(x, initial=v)))
+for u in ("add", "multiply", "bitwise_and", "bitwise_or", "bitwise_xor", "logical_and", "logical_or", "logical_xor", "maximum", "minimum", "subtract", "hypot"):
+    show(f"identity {u}", lambda: getattr(np, u).identity)

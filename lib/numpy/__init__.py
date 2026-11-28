@@ -868,6 +868,16 @@ class _NoValueType:
 _NoValue = _NoValueType()
 
 
+def _initial_in(initial, rdt):
+    """A reduction's initial= in its accumulator's dtype rdt, as NumPy converts it: into an integer dtype a Python int,
+    bool or float (truncated) is a Python int, out of range NumPy's OverflowError, and so is a NumPy scalar into a
+    signed dtype; a NumPy scalar into an unsigned dtype is cast; into any other dtype a cast"""
+    if rdt.kind in "iu" and not isinstance(initial, ndarray) and not (isinstance(initial, generic) and rdt.kind == "u"):
+        if isinstance(initial, (_builtins.int, _builtins.float, generic)) and not isinstance(initial, (complexfloating, _builtins.complex)):
+            return array(_builtins.int(initial), dtype=rdt)[()]
+    return asarray(initial).astype(rdt)[()]
+
+
 def _ufunc_where(where):
     """A ufunc's where= as its bool mask, as NumPy's _wheremask_converter makes it: an array only by a safe cast (a bool
     array; an integer or float one a TypeError, before anything is computed or written), any other value (a list, a
@@ -889,7 +899,8 @@ class ufunc:
         self.nin = nin
         self.nout = 1
         self._op = op or name
-        self.identity = identity
+        # (NumPy's ufunc.identity: the reduction's start, add's 0 to hypot's 0, None where there is none)
+        self.identity = identity if identity is not None else {"hypot": 0}.get(self._op, self._IDENTITY.get(self._op))
 
     def __repr__(self):
         return "<ufunc '%s'>" % self.__name__
@@ -1100,7 +1111,7 @@ class ufunc:
 
     # (the ufuncs whose reduction has an identity: a masked or empty reduction's start without initial)
     _IDENTITY = {"add": 0, "multiply": 1, "logical_or": False, "logical_and": True, "logical_xor": False,
-                 "bitwise_or": 0, "bitwise_xor": 0, "bitwise_and": -1, "hypot": 0.0}
+                 "bitwise_or": 0, "bitwise_xor": 0, "bitwise_and": -1, "hypot": 0}
     # (the ufuncs whose reduction may take several axes at once, NumPy's reorderable ones)
     _REORDERABLE = frozenset(("add", "multiply", "logical_or", "logical_and", "logical_xor", "bitwise_or", "bitwise_xor",
                               "bitwise_and", "maximum", "minimum", "fmax", "fmin", "hypot", "gcd", "lcm"))
@@ -1140,12 +1151,9 @@ class ufunc:
             # int), initial cast to it, as NumPy resolves the loop first)
             probe = self.reduce(t[:1] if rn else zeros((1,) + rshape, a.dtype), axis=0, dtype=dtype)
             rdt = asarray(probe).dtype
-            # (a Python int given as initial out of the dtype's range: NumPy's OverflowError; the ufunc's own identity,
-            # bitwise_and's -1, converted as NumPy stores it, all bits set in an unsigned dtype too)
-            if own and isinstance(initial, _builtins.int) and not isinstance(initial, _builtins.bool) and rdt.kind in "iu":
-                init = array(initial, dtype=rdt)[()]
-            else:
-                init = asarray(initial).astype(rdt)[()]
+            # (initial given: converted as NumPy converts it, _initial_in; the ufunc's own identity, bitwise_and's -1,
+            # stored as NumPy stores it, all bits set in an unsigned dtype too)
+            init = _initial_in(initial, rdt) if own else asarray(initial).astype(rdt)[()]
             acc = full(rshape, init, dtype=rdt)
             t = t.astype(rdt) if t.dtype != rdt else t
             start = 0
@@ -1679,7 +1687,12 @@ def sum(a, axis=None, dtype=None, out=None, keepdims=False, initial=_NoValue, wh
     # (without an identity, each sum starts from its first element, as NumPy's)
     r = _np.sum(a, axis, keepdims, dtype, initial is None, m)
     if initial is not None and initial is not _NoValue:
-        r = r + initial
+        # (initial in the sum's own dtype, converted as NumPy converts it: int8 data with initial=1.5 sums to int64 153)
+        rdt = asarray(r).dtype
+        r = r + _initial_in(initial, rdt)
+        if asarray(r).dtype != rdt:
+            r = asarray(r).astype(rdt)
+            r = r[()] if r.ndim == 0 else r
     return _out(r, out, "reduce")
 
 
