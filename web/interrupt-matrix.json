@@ -27,8 +27,8 @@
   },
   "registries": {
    "magma": {
-    "count": 188,
-    "sha": "df37ab5bf261b5bd"
+    "count": 189,
+    "sha": "2ee79289d53929d9"
    },
    "matlab": {
     "count": 264,
