@@ -151,5 +151,16 @@ ok(SEED === BOARD_SEED, "the digest's default seed is code.ts's BOARD_SEED");
   ok(JSON.parse(mem.get("sagebrush-board-stopped")).length === 200 && wasStopped("b249") && !wasStopped("b0"), "the stopped marks bounded (the 200 latest)");
 }
 
+// ---- a sandboxed frame, where merely reading localStorage throws: nothing approved, nothing marked, nothing thrown
+{
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("SecurityError: The document is sandboxed"); } });
+  let threw = null;
+  let r;
+  try { r = [approved("a".repeat(64)), mayRun("a".repeat(64)), approve("a".repeat(64)), forget("a".repeat(64)), forgetAll(), wasStopped("r")]; markStopped("r"); clearStopped("r"); } catch (e) { threw = String(e); }
+  Object.defineProperty(globalThis, "localStorage", real);
+  ok(threw === null && J(r) === J([false, false, false, false, false, false]), "a page whose localStorage can't even be read (a sandboxed frame): nothing approved, nothing marked, nothing thrown", { threw, r });
+}
+
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

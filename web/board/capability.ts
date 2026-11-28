@@ -15,7 +15,9 @@ import { pageCount, pageView, type BoardDoc, type BoardMode } from "./doc";
 /** The seed of a board without one of its own: code.ts's BOARD_SEED (a test checks they are one). */
 export const SEED = "0".repeat(64);
 type Store = Pick<Storage, "getItem" | "setItem">;
-const store = (): Store => globalThis.localStorage;
+// (this page's storage, reached only within each call's own try: in a sandboxed frame merely reading localStorage
+// throws, and then nothing is approved, nothing marked, and nothing thrown)
+const store = (): Store => ({ getItem: (k) => globalThis.localStorage.getItem(k), setItem: (k, v) => globalThis.localStorage.setItem(k, v) });
 const MODES: readonly string[] = ["python", "sage", "magma", "matlab"];
 
 // ---- the digest of what runs (D1, D2)

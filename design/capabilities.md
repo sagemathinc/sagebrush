@@ -2,6 +2,8 @@
 
 *Status: design, for review (astra audits the gate inventory, §4, against the code in all four modes; daybreak2 the limits). William, Oct 19 2026, 11:48 PDT: "Being able to do this at all is AMAZING ... Let's lean into it!" His answers to the questions are in §11 (Oct 19, 20:04 UTC): "we should always do the work to make sagebrush safer than normal cocalc… Where a choice comes up later, choose the safer one." Nothing here is built yet, except the fallback's rule in §2, built in workspace step 3b.*
 
+**Built (Nov 28 2026, after William's ruling: "it depends on where it is running and what it might do"):** whether a board's code runs is decided by where it runs (web/board/capability.ts). In the runner it has no capability, so it runs whoever wrote it, and the interim pause of a board brought in from a file is gone. Unconfined (the fallback of §2), it runs only once the person approves that very code, by its digest, kept per device (web/board/approvals.ts; on the desktop app also in grants.json). The read and write gates of §2 to §6 are still to come.
+
 ## 1. The model
 
 **Every board's code runs when the board opens, whatever its source:** made here, uploaded, opened from a link, dropped. This replaces the interim rule that a board brought in from a file opens with its code paused (workspace step 3b), once the gate below is built and only where it holds (§2).

@@ -19,7 +19,9 @@ export const APPROVALS_MAX = 2000;
 const GRANTS = "sagebrush-grants";
 const KEY = /^host:[0-9a-f]{64}$/;
 type Store = Pick<Storage, "getItem" | "setItem">;
-const store = (): Store => globalThis.localStorage;
+// (this page's storage, reached only within each call's own try: in a sandboxed frame merely reading localStorage
+// throws, and then nothing is approved, nothing marked, and nothing thrown)
+const store = (): Store => ({ getItem: (k) => globalThis.localStorage.getItem(k), setItem: (k, v) => globalThis.localStorage.setItem(k, v) });
 // (the record as it is, or a new one; null if it can't be read: then nothing is approved, and nothing is written)
 function record(s: Store): any | null {
   try {
