@@ -155,13 +155,14 @@ export function diffHtml(before: string, after: string): string {
     X.forEach(del);
     Y.forEach(add);
   } else if (n > 0 && m > 0) {
-    const L = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
-    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = X[i] === Y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    // (one flat table, (n + 1) x (m + 1), row i at i * w: memory in proportion to the admitted product, however skewed)
+    const w = m + 1, L = new Int32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i * w + j] = X[i] === Y[j] ? L[(i + 1) * w + j + 1] + 1 : Math.max(L[(i + 1) * w + j], L[i * w + j + 1]);
     let i = 0, j = 0;
     while (i < n || j < m) {
       // (a removed line before an added one, as git shows them)
       if (i < n && j < m && X[i] === Y[j]) rows.push(`<div class="dl"> ${esc(X[i++])}</div>`), j++;
-      else if (i < n && (j === m || L[i + 1][j] >= L[i][j + 1])) del(X[i++]);
+      else if (i < n && (j === m || L[(i + 1) * w + j] >= L[i * w + j + 1])) del(X[i++]);
       else add(Y[j++]);
     }
   } else {
