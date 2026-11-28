@@ -28,7 +28,7 @@ let failures = 0, count = 0;
 const ok = (c, msg, detail) => { count++; console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 const J = JSON.stringify;
 const SITE = "https://sagebrush.test";
-const IDS = { ONA: "e2e0a000-0001-4e2e-8e2e-e2e2e2e2e201", UNC: "e2e0a000-0002-4e2e-8e2e-e2e2e2e2e202", FRK: "e2e0a000-0003-4e2e-8e2e-e2e2e2e2e203", ESC: "e2e0a000-0004-4e2e-8e2e-e2e2e2e2e204", NEW1: "e2e0a000-0005-4e2e-8e2e-e2e2e2e2e205", SLOW: "e2e0a000-0006-4e2e-8e2e-e2e2e2e2e206", SWA: "e2e0a000-0007-4e2e-8e2e-e2e2e2e2e207", N1A: "e2e0a000-0008-4e2e-8e2e-e2e2e2e2e208", P3: "e2e0a000-0009-4e2e-8e2e-e2e2e2e2e209", RST: "e2e0a000-000a-4e2e-8e2e-e2e2e2e2e20a", N1B: "e2e0a000-000b-4e2e-8e2e-e2e2e2e2e20b" };
+const IDS = { ONA: "e2e0a000-0001-4e2e-8e2e-e2e2e2e2e201", UNC: "e2e0a000-0002-4e2e-8e2e-e2e2e2e2e202", FRK: "e2e0a000-0003-4e2e-8e2e-e2e2e2e2e203", ESC: "e2e0a000-0004-4e2e-8e2e-e2e2e2e2e204", NEW1: "e2e0a000-0005-4e2e-8e2e-e2e2e2e2e205", SLOW: "e2e0a000-0006-4e2e-8e2e-e2e2e2e2e206", SWA: "e2e0a000-0007-4e2e-8e2e-e2e2e2e2e207", N1A: "e2e0a000-0008-4e2e-8e2e-e2e2e2e2e208", P3: "e2e0a000-0009-4e2e-8e2e-e2e2e2e2e209", RST: "e2e0a000-000a-4e2e-8e2e-e2e2e2e2e20a", N1B: "e2e0a000-000b-4e2e-8e2e-e2e2e2e2e20b", E5A: "e2e0a000-000c-4e2e-8e2e-e2e2e2e2e20c", E6A: "e2e0a000-000d-4e2e-8e2e-e2e2e2e2e20d", E7A: "e2e0a000-000e-4e2e-8e2e-e2e2e2e2e20e" };
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const rl = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
@@ -399,6 +399,57 @@ try {
       return { first, second };
     })()`);
     ok(r.first === false && r.second === false, "a kept code whose device was reset meanwhile: never shown, and dropped (the next open shows nothing either)", r);
+  }
+
+  // ---- (E2462-5) a kept code whose confirm then fails: the failure said, nothing unhandled, the section not left busy
+  {
+    const r = await P.ev(`(async () => {
+      const unhandled = []; window.addEventListener("unhandledrejection", (e) => unhandled.push(String(e.reason)));
+      await as("E5A"); T.reason = undefined; T.sync = { on: false, used: false }; T.label = null;
+      let open; const gate = new Promise((r) => { open = r; });
+      const failing = { ...K, DeviceKeys: { ...K.DeviceKeys, load: (...a) => K.DeviceKeys.load(...a), create: async (...a) => { await gate; const m = await K.DeviceKeys.create(...a); return { ...m, confirm: async () => { throw new Error("the device store couldn't be written"); } }; } }, resetDevice: K.resetDevice };
+      const first = section({ chunk: async () => failing }); await first.refresh();
+      click("Turn on encrypted sync…"); await new Promise((r) => setTimeout(r, 100));
+      first.dispose(); open();
+      for (let i = 0; i < 200 && !(await deviceOf("E5A")); i++) await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 300));
+      const again = section(); await again.refresh();
+      const shown = await dialogUp();
+      if (shown) saveAndClose();
+      await new Promise((r) => setTimeout(r, 500));
+      return { shown, busy: again.busy(), text: text(), unhandled, stored: (await deviceOf("E5A"))?.recoveryShown };
+    })()`);
+    ok(r.shown && r.busy === false && r.unhandled.length === 0 && /couldn't be turned on/.test(r.text) && r.stored === false, "a kept code whose confirm fails: the failure said, nothing unhandled, the section not left busy, the device still unconfirmed", r);
+  }
+
+  // ---- (E2462-6) a kept code met by a load that fails transiently: kept, unshown, and shown at the next open
+  {
+    const r = await P.ev(`(async () => {
+      await slowOn("E6A", async (s) => { s.dispose(); });
+      const flaky = { ...K, DeviceKeys: { ...K.DeviceKeys, load: async () => { throw Object.assign(new Error("the key chain couldn't be read (503)"), { code: "server" }); } } };
+      await section({ chunk: async () => flaky }).refresh();
+      const during = await dialogUp(800);
+      await section().refresh();
+      const next = await dialogUp();
+      if (next) saveAndClose();
+      await new Promise((r) => setTimeout(r, 300));
+      return { during, next, stored: (await deviceOf("E6A"))?.recoveryShown };
+    })()`);
+    ok(r.during === false && r.next === true && r.stored === true, "a kept code met by a transient load failure: kept and unshown, then shown at the next open and confirmed", r);
+  }
+
+  // ---- a kept code met by a refusal (chain_reset): a definite answer, so dropped, never shown
+  {
+    const r = await P.ev(`(async () => {
+      await slowOn("E7A", async (s) => { s.dispose(); });
+      const refusing = { ...K, DeviceKeys: { ...K.DeviceKeys, load: async () => { throw Object.assign(new Error("reset"), { code: "chain_reset" }); } } };
+      await section({ chunk: async () => refusing }).refresh();
+      const during = await dialogUp(800);
+      await section().refresh();
+      const next = await dialogUp(800);
+      return { during, next, stored: (await deviceOf("E7A"))?.recoveryShown };
+    })()`);
+    ok(r.during === false && r.next === false && r.stored === false, "a kept code met by a refusal (chain_reset): dropped, never shown, the device left unconfirmed", r);
   }
 
   // ---- the E2E routes off: no section at all

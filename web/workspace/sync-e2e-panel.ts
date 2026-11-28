@@ -48,6 +48,8 @@ export const USED_LINE = "To encrypt this account's sync end to end, first delet
 export const UNCONFIRMED_LINE = "This browser's recovery code may never have been saved. Keep this browser until you know you have a saved recovery code. If you lose both, your encrypted files can't be recovered.";
 export const ON_LINE = "End-to-end encryption is on for your account, in this browser.";
 const LABEL_MAX = 64;
+// (DeviceKeys.load's refusals that answer definitely: no device here, another account's, or a chain this device refuses)
+const DEFINITE: ReadonlySet<string> = new Set(["no_device", "wrong_account", "forked", "chain_fork", "chain_reset", "chain_unanchored"]);
 
 /** Words for a turn-on that failed, by DeviceKeys' code: the person's words, never an internal message. */
 function failWords(e: unknown): string {
@@ -164,12 +166,15 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
    * leaves it unconfirmed, and the section says so), then sync turned on, unless the section went meanwhile. */
   async function finish(hash: string, code: string, confirm: () => Promise<void>) {
     working = true;
-    if (await showRecoveryCode(deps.modalHost ?? document.body, code)) await confirm();
-    // (sync turned on as asked, even if the panel closed while the dialog was open, else its next open would say
-    // encryption is on with sync off; but only for the account it was turned on for, never one signed in meanwhile)
-    if ((await deps.hash()) === hash) await deps.enable();
-    deps.reconcile();
-    working = false;
+    try {
+      if (await showRecoveryCode(deps.modalHost ?? document.body, code)) await confirm();
+      // (sync turned on as asked, even if the panel closed while the dialog was open, else its next open would say
+      // encryption is on with sync off; but only for the account it was turned on for, never one signed in meanwhile)
+      if ((await deps.hash()) === hash) await deps.enable();
+      deps.reconcile();
+    } finally {
+      working = false;
+    }
     await refresh();
   }
 
@@ -241,16 +246,22 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
       const hash = await deps.hash();
       if (disposed || mine !== gen || !pendingCode || pendingCode.hash !== hash) return;
       const p = pendingCode;
-      // (shown only for the very device it was made for, still here and still unconfirmed: a device reset meanwhile, in
-      // this tab or another, or a chain reset elsewhere, drops it, so no code is ever saved for a device that's gone)
-      let still = false;
+      // (shown only for the very device it was made for, loaded now and still unconfirmed. Dropped only on a definite
+      // answer: no device here (reset in this tab or another, or a chain reset elsewhere), another device, that one
+      // already confirmed, or a refusal (DEFINITE); so no code is ever saved for a device that's gone. A load that fails
+      // any other way (the network, the server, an unreadable answer, the chunk) keeps it, unshown, and the next refresh
+      // asks again, never a loop: it is the only copy)
+      let verdict: "show" | "drop" | "keep" = "keep";
       try {
         const k = await (await deps.chunk()).DeviceKeys.load(e2eAccountOf(hash));
-        still = !!k && k.device.id === p.device && k.recoveryUnconfirmed;
-      } catch { /* (no such device: dropped) */ }
-      if (disposed || mine !== gen || pendingCode !== p) return;
+        verdict = k && k.device.id === p.device && k.recoveryUnconfirmed ? "show" : "drop";
+      } catch (e) {
+        // (a refusal is a definite answer too: this device is gone, or isn't one this browser can use)
+        verdict = DEFINITE.has((e as { code?: string })?.code ?? "") ? "drop" : "keep";
+      }
+      if (disposed || mine !== gen || pendingCode !== p || verdict === "keep") return;
       pendingCode = null;
-      if (still) void finish(hash, p.code, p.confirm);
+      if (verdict === "show") void finish(hash, p.code, p.confirm).catch(async (e) => { await refresh(); fail(failWords(e)); });
     }
   }
 
