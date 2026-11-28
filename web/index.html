@@ -859,7 +859,7 @@ import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/con
 import { renderFileMenu, fileMenuKey, menuGroup } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { openGallery } from "./examples/open.ts";
-import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
+import { uploadFiles, openableAsFile, blobHead, convertCopy, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle, bundleContents } from "./notebook/bundle.js";
 import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.js";
 // (the terminal, plan-bash-shell r8c step 6: a preview, shown on preview/DEV hosts only, below; its module,
@@ -4719,8 +4719,9 @@ async function uploadHere(list, folder) {
   const single = list.length === 1;
   if (single && r.made.length === 1 && !r.kept.length) {
     const e = r.made[0];
-    // (a board brought in from a file: its code waits for the person; what was said carried to its page)
-    if (e.kind === "board") { pauseBoard(e.ref); carryNotice(refused); return openEntry(e); }
+    // (a board brought in from a file: its code waits for the person, marked where it was made (upload.ts); what
+    //  was said carried to its page)
+    if (e.kind === "board") { carryNotice(refused); return openEntry(e); }
     // (from the code page: opened on its own page, what was said carried there, as for a board)
     if (codePageUp) { carryNotice(refused); return openEntry(e); }
     saveNow();

@@ -79,11 +79,20 @@ const message = (e: unknown) => String((e as Error)?.message ?? e);
 
 /** A board opened from a file the person brought in (an upload, a drop, Open as…): its code waits for
  * them, "Run this board's code" (an interim, until design/capabilities.md's gate; @sagebrush, on astra's
- * CORR-4B3-1).  Kept for this tab, until they run it. */
+ * CORR-4B3-1).  Kept for this tab, until they run it.  Marked here, where every such board is made
+ * (uploadFiles, convertCopy), never by the pages that open one; fail-closed: a mark that can't be written
+ * means the board isn't made, and a mark that can't be read means waiting. */
 export const PAUSED = "sagebrush-board-paused:";
-export function pauseBoard(ref: string) { try { sessionStorage.setItem(PAUSED + ref, "1"); } catch {} }
-export function isPaused(ref: string) { try { return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return false; } }
+/** Marks `ref` as waiting; whether the mark is there (written and read back). */
+export function pauseBoard(ref: string): boolean { try { sessionStorage.setItem(PAUSED + ref, "1"); return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return false; } }
+export function isPaused(ref: string) { try { return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return true; } }
 export function unpause(ref: string) { try { sessionStorage.removeItem(PAUSED + ref); } catch {} }
+/** A board just made from a file brought in: marked as waiting, or, if it can't be, taken away again and refused. */
+async function imported(ws: Workspace, e: Entry): Promise<Entry> {
+  if (e.kind !== "board" || pauseBoard(e.ref!)) return e;
+  await ws.remove(e.path, { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created }).catch(() => {});
+  throw new Error("its code couldn't be kept waiting for you to run it in this tab, so it wasn't made");
+}
 /** What an upload said, for the page it opens (a refusal never lost to the navigation): taken once. */
 const NOTICE = "sagebrush-upload-notice";
 export function carryNotice(text: string) { try { if (text) sessionStorage.setItem(NOTICE, text.slice(0, 4000)); } catch {} }
@@ -129,7 +138,7 @@ export async function uploadFiles(ws: Workspace, all: File[], folder: string, o:
       } else doc = as === "notebook" ? fromFile(name, await f.text(), o.mode) : boardJson(await f.text());
       const p = freePath(folder, splitExt(name)[0], as === "board" ? ".board.json" : ".ipynb", (x) => taken.has(x));
       if (!p) throw new Error("no free name in this folder");
-      const e = await ws.create(p, { content: doc });
+      const e = await imported(ws, await ws.create(p, { content: doc }));
       taken.add(p);
       out.made.push(e);
       if (keep) await keep(e.ref!).catch((err) => refuse(`${name}: its history (${message(err)})`));
@@ -208,7 +217,7 @@ export async function convertCopy(ws: Workspace, entry: Entry, as: DocKind, o: {
   }
   const p = freePath(folder, splitExt(name)[0], as === "board" ? ".board.json" : ".ipynb", (x) => taken.has(x));
   if (!p) throw new Error("no free name beside it");
-  const made = await ws.create(p, { content: doc });
+  const made = await imported(ws, await ws.create(p, { content: doc }));
   if (myst) o.said?.(earlier ? "The .md changed since your last copy, so this is a new copy; your earlier one is kept." : `Opened a notebook copy of "${name}" beside it. The .md isn't changed.`);
   return made;
 }

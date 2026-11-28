@@ -12,6 +12,7 @@ import { TRASH, nameOf, splitExt } from "./paths";
 import { syncSection } from "./sync-panel";
 import { learnMore } from "../docs-link";
 import { restoreServerVersion, serverVersionBytes, serverVersions } from "./server-versions";
+import { PixelBudget, imageSizeOf } from "../image-size";
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
 declare const __SB_LATEX__: boolean | undefined;
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
@@ -171,7 +172,13 @@ export function renderPreview(name: string, bytes: Uint8Array): { el: HTMLElemen
   const note = (text: string) => h("p", { className: "note", textContent: text });
   if (kind === "image") {
     if (bytes.length > PREVIEW.imageBytes) return { el: note(`This picture is too large to preview here (${fmtSize(bytes.length)}): download it.`), dispose: () => {} };
-    // (an <img>, never inline: an SVG's scripts don't run in one)
+    // (an SVG isn't previewed: what drawing it costs has no bound here, its pictures inside included; download it)
+    if (ext === ".svg") return { el: note("An SVG picture isn't previewed here: download it."), dispose: () => {} };
+    // (decoded, a picture takes 4 bytes a pixel whatever its file's size: admitted by its header's size, as a
+    //  document's pictures are (web/image-size.ts), before any URL is made for it)
+    const why = new PixelBudget().take(imageSizeOf(IMAGES[ext], bytes));
+    if (why) return { el: note(`This picture can't be previewed here (${why}): download it.`), dispose: () => {} };
+    // (an <img>, never inline)
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: IMAGES[ext] }));
     const img = h("img", { src: url, alt: name });
     return { el: img, dispose: () => URL.revokeObjectURL(url) };
@@ -222,8 +229,9 @@ export async function openPreview(w: Workspace, e0: Entry, host: PreviewHost): P
   const versions = h("div", { className: "pv" });
   box.append(body, actions, versions);
   x.focus();
-  let shown: { dispose: () => void } | null = null;
-  onClose(() => shown?.dispose());
+  // (closed while it reads: nothing made after that, and anything made then let go at once)
+  let shown: { dispose: () => void } | null = null, closed = false;
+  onClose(() => { closed = true; shown?.dispose(); });
   const note = (text: string) => body.replaceChildren(h("p", { className: "note", textContent: text }));
   // (the file as it is now, by its index entry: its id and revision are
   // what Restore and Delete older versions are bound to; its size decides,
@@ -251,6 +259,7 @@ export async function openPreview(w: Workspace, e0: Entry, host: PreviewHost): P
     try {
       // (read only if it is still at most the limit, checked holding the lock and by the bytes read)
       const r = await w.readUpTo(e.path, kind === "image" ? PREVIEW.imageBytes : PREVIEW.readBytes);
+      if (closed) return;
       if (r.entry.fid !== e.fid) return note("This file was replaced while it was opened: open it again.");
       shown = renderPreview(name, r.content);
       body.replaceChildren(shown.el);
@@ -259,7 +268,7 @@ export async function openPreview(w: Workspace, e0: Entry, host: PreviewHost): P
       else note(err instanceof WorkspaceError ? err.message : String((err as Error)?.message ?? err));
     }
   }
-  await drawVersions(w, e, versions, host, close);
+  if (!closed) await drawVersions(w, e, versions, host, close);
 }
 
 // (a version action refused because the file changed since it was shown: said; the preview, now stale, closed)
