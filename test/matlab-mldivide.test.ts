@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -173,4 +173,17 @@ test("the TypeScript path's Cholesky gives engine/nd's bits for a symmetric posi
   assert.equal(nd.err, "Warning: Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  1.937844e-16.\n" +
     "Warning: Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  6.548781e-17.\n");
   assert.equal(ts.err, nd.err);
+});
+
+test("the TypeScript path's estimate does not overflow on a finite sum near the largest double", () => {
+  // (mldivide's fifth value is its rcond estimate. For A = 2^-1022 (I + P/8) at n = 2 the true rcond is 7/9; the
+  // alternating vector's solved sum is finite but above half the largest double, so doubling it before the
+  // division by 3n gave Infinity and an estimate of 0. The warning cannot show this, since 0 does not warn)
+  const code = [
+    "import numpy as np, _nplinalg",
+    "A = 2.0 ** -1022 * (np.eye(2) + np.roll(np.eye(2), 1, axis=1) / 8)",
+    "print(float(_nplinalg.mldivide(A, np.ones((2, 1)))[4]).hex())",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [cli, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_WASM: "1" } });
+  assert.equal(out.trim(), "0x1.8e38e38e38e39p-1");
 });
