@@ -34,7 +34,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { dropRows } from "../notebook/journal-rows.js";
 import { SYNC_NB } from "../notebook/sync-rows.js";
 import { isBoard } from "../board/doc";
-import { copyBoardPictures, type PictureKeep } from "./board-pictures";
+import { copyBoardPictures, filePictureNames, type PictureFile, type PictureKeep } from "./board-pictures";
 import { fromNbformat, kernelMode, withCellIds } from "../notebook/nbformat.js";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
@@ -2029,9 +2029,18 @@ export class Workspace {
    * was, each admitted on its own: by `pictures.admit(bytes)` (a fresh check for that picture and its size: the
    * shell's charge), else by `admit` (a check that keeps no state). A picture not copied is offered to
    * `pictures.keep`; `picturesLeft`, how many were neither copied nor kept (the copy shows those as missing). */
-  async duplicate(p: string, to?: string, opts: Collect & Admitted & { expect?: RenameExpect; pictures?: { admit?: (bytes: number) => (c: AdmitCheck) => void; keep?: PictureKeep } } = {}): Promise<Entry & { picturesLeft?: number }> {
+  /** `pictures.expect` (the shell's: the picture files as it measured them): only those copied, each only as it was
+   * then, else a WorkspaceError("conflict"). An admit's refusal of a picture (a limit, a revoked grant) is thrown as
+   * it is, after the board's copy is made: never counted as a picture that couldn't be copied. */
+  async duplicate(p: string, to?: string, opts: Collect & Admitted & { expect?: RenameExpect; pictures?: { admit?: (bytes: number) => (c: AdmitCheck) => void; keep?: PictureKeep; expect?: PictureFile[] } } = {}): Promise<Entry & { picturesLeft?: number }> {
     const collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     let pictures: { from: Entry; names: string[] } | undefined;
+    // (the picture files as measured: each still that file at that size, before anything is made; changed since, a
+    // conflict and nothing copied (each is held to it again as it is copied))
+    for (const f of opts.pictures?.expect ?? []) {
+      const st = await this.stat(f.path);
+      if (!st || st.kind !== "file" || (st.size ?? 0) !== f.size || (f.fid !== undefined && st.fid !== f.fid)) throw new WorkspaceError("conflict", `${f.path} was changed since it was measured`);
+    }
     const made = await this.locked(async () => {
       await this.admitAt(admit, "duplicate", "source", path(p));
       const e = await this.mustStat(p);
@@ -2063,7 +2072,7 @@ export class Workspace {
       // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
       if (e.kind === "board") {
         const doc = (c as BoardRecord).doc as { images?: Record<string, unknown> };
-        if (doc?.images && typeof doc.images === "object") pictures = { from: e, names: Object.keys(doc.images) };
+        if (doc?.images && typeof doc.images === "object") pictures = { from: e, names: filePictureNames(doc.images) };
         return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);
       }
       return this.make(dest, "file", c);
@@ -2071,8 +2080,12 @@ export class Workspace {
     if (!pictures || !pictures.names.length || !pictures.from.ref || !made.ref) return made;
     const src = pictures.from;
     const pa = opts.pictures?.admit;
+    // (an admit's own refusal, kept to be thrown as it is: saveImage takes any failed create as a picture not saved)
+    let refused: unknown;
+    const held = (a?: (c: AdmitCheck) => void) => a && ((c: AdmitCheck) => { try { a(c); } catch (err) { refused ??= err; throw err; } });
     const left = await copyBoardPictures(this, src.ref!, made.ref, pictures.names,
-      (q, content) => this.createAs(q, { content, collect: opts.collect, admit: pa ? pa(content.length) : opts.admit }, src.made), opts.pictures?.keep);
+      (q, content) => this.createAs(q, { content, collect: opts.collect, admit: held(pa ? pa(content.length) : opts.admit) }, src.made), opts.pictures?.keep,
+      { expect: opts.pictures?.expect, stale: (q) => new WorkspaceError("conflict", `${q} was changed since it was measured`), stopped: () => refused });
     return left.length ? { ...made, picturesLeft: left.length } : made;
   }
 

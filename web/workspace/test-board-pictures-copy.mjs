@@ -4,7 +4,7 @@
 // when they were read (null when there are none: never a file, unreadable), and reported when neither copied nor kept,
 // so the caller can tell the person: every name asked for is one of the three.
 //   bun web/workspace/test-board-pictures-copy.mjs
-import { copyBoardPictures, pictureFilesOf } from "./board-pictures.ts";
+import { copyBoardPictures, filePictureNames, pictureFilesOf } from "./board-pictures.ts";
 
 let failures = 0;
 const J = JSON.stringify;
@@ -70,6 +70,31 @@ const names = ["ione", "itwo", "ibrowser"];
   w.list = async () => { throw new Error("listing failed"); };
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w));
   ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]) && ![...w.files.keys()].some((p) => p.startsWith(B)), "a source folder that can't be listed: every name reported, nothing copied", lost);
+}
+
+{
+  // the names a board's files hold: not a picture with its own source (an https: address, embedded data)
+  ok(J(filePictureNames({ ia: { w: 1, h: 1 }, ib: { w: 1, h: 1, src: "https://example.com/b.png" }, ic: { src: "data:image/png;base64,AA==" }, id: { src: "" } })) === J(["ia", "id"]) && J(filePictureNames(null)) === "[]" && J(filePictureNames([1])) === "[]",
+    "the file pictures: those without a source of their own");
+}
+{
+  // held to what was measured (the shell's): only those files, each as it was; one changed since, stale, thrown
+  const w = ws();
+  const files = await pictureFilesOf(w, "a", ["ione", "itwo"]);
+  w.files.set(`${A}/itwo.png`, png(9).slice(0, 40));
+  let thrown = null;
+  try { await copyBoardPictures(w, "a", "b", ["ione", "itwo"], creator(w), undefined, { expect: files, stale: (p) => new Error("stale " + p) }); } catch (e) { thrown = e; }
+  ok(thrown?.message === `stale ${A}/itwo.png`, "a picture changed since it was measured: the caller's stale error thrown", String(thrown));
+  const w2 = ws();
+  const lost = await copyBoardPictures(w2, "a", "b", ["ione", "itwo"], creator(w2), undefined, { expect: (await pictureFilesOf(w2, "a", ["ione"])) });
+  ok(J(lost) === J(["itwo"]) && !w2.files.has(`${B}/itwo.png`) && w2.files.has(`${B}/ione.png`), "a file not measured isn't copied (it wasn't charged): reported", lost);
+}
+{
+  // the caller's own refusal at a picture's create (a limit, a revoked grant): thrown as it is, not a lost picture
+  const w = ws(), no = new Error("limit hit");
+  let stop = null, thrown = null;
+  try { await copyBoardPictures(w, "a", "b", ["ione", "itwo"], async () => { stop = no; throw no; }, undefined, { stopped: () => stop }); } catch (e) { thrown = e; }
+  ok(thrown === no && ![...w.files.keys()].some((p) => p.startsWith(B)), "the caller's refusal at the first picture: thrown as it is, nothing more copied", String(thrown));
 }
 
 console.log(failures ? `${failures} FAILED` : "test-board-pictures-copy: all passed");
