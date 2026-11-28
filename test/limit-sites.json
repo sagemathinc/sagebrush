@@ -4477,6 +4477,11 @@
   "owner": "modular symbols",
   "reason": "test code: the longest time between Stop checks while newforms computes trace forms; refuses nothing itself"
  },
+ "engine/modsym/tests/table_scans_poll.rs :: table_scans_poll :: let exps: Vec<u32> = (0..n).map(|x| chi.exponent(x as i64).unwrap_or(u32::MAX)).collect(); #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
  "engine/mp/src/abi.rs ::  :: const MAX_FACTORIAL_CACHE: i64 = 1000; #0": {
   "class": "none",
   "owner": "mpmath core (@sagebrush-sage2)",
