@@ -4422,7 +4422,7 @@
   "owner": "cusp_hecke_matrix",
   "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
  },
- "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^32 (the u64 kernels): ran out after {} drawn ({} set aside: {})\", e_top, drawn, stats.rejected_total(), stats.rejected_summary())); #0": {
+ "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^31 (the mod-ell kernels' domain): ran out after {} drawn ({} set aside: {})\", e_top, drawn, stats.rejected_total(), stats.rejected_summary())); #0": {
   "class": "3",
   "disposition": {
    "3": {
@@ -4430,9 +4430,9 @@
    }
   },
   "owner": "cusp_hecke_matrix",
-  "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
+  "reason": "primes = 1 mod e below 2^31 (the mod-ell kernels' domain), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 0.25 PiB), or once S(e) - c primes are set aside (S(1) = 50,697,537); FU-B5-1"
  },
- "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^32 (the u64 kernels): the CRT needs {}, there are {}\", e_top, count, head.len())); #0": {
+ "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^31 (the mod-ell kernels' domain): the CRT needs {}, there are {}\", e_top, count, head.len())); #0": {
   "class": "3",
   "disposition": {
    "3": {
@@ -4440,7 +4440,7 @@
    }
   },
   "owner": "cusp_hecke_matrix",
-  "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
+  "reason": "primes = 1 mod e below 2^31 (the mod-ell kernels' domain), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 0.25 PiB), or once S(e) - c primes are set aside (S(1) = 50,697,537); FU-B5-1"
  },
  "engine/modsym/src/traces.rs :: orbit_traces :: return Err(\"too many bad primes for traces (the limit of 16)\".into()); #0": {
   "class": "3",
@@ -4471,6 +4471,11 @@
   "class": "none",
   "owner": "cusp_hecke_matrix",
   "reason": "test assertions on the admission's saturating bounds at extreme inputs; refuse nothing"
+ },
+ "engine/modsym/tests/heilbronn_stop.rs :: heilbronn_kernels_stop :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "a test reading the longest time between Stop checks; it limits nothing"
  },
  "engine/modsym/tests/newforms_poll_gap.rs :: trace_coefficient_bound_poll_gap :: let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns()); #0": {
   "class": "none",
