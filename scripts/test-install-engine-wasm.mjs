@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { depInfoPaths, foreignSources, installWasm, namesLocalCargoHome, remappedRustflags, withTargetLock } from "./install-engine-wasm.mjs";
+import { installWasm, namesLocalCargoHome, remappedRustflags, removeLockOf, targetLockPath, withTargetLock } from "./install-engine-wasm.mjs";
 
 let failures = 0;
 const ok = (c, what) => (c ? console.log("ok  ", what) : (failures++, console.log("FAIL", what)));
@@ -78,46 +78,22 @@ try {
   ok(!namesLocalCargoHome(named, { CARGO_HOME: "/home/runner/.cargo" }), "on CI's own runner nothing is local");
   ok(!namesLocalCargoHome(new TextEncoder().encode("/home/someone/.cargo2/x"), env), "a longer path that only starts the same is not the Cargo home");
 }
-// a module's own sources: its dep-info names only this checkout's files (and the Cargo home's crates); another
-// checkout's, even one whose path only starts the same, is caught, and so is a dep-info naming nothing
-{
-  const d = mkdtempSync(join(tmpdir(), "install-engine-wasm-dep-"));
-  try {
-    const root = join(d, "mf2"), other = join(d, "ffopts"), near = join(d, "mf2b");
-    for (const r of [root, other, near]) mkdirSync(r);
-    const env = { CARGO_HOME: join(d, "cargo") };
-    const module = join(d, "sagebrush_web.wasm");
-    const dep = (...paths) => writeFileSync(join(d, "sagebrush_web.d"), `${module}: ${paths.join(" ")}\n\n${paths.map((p) => `${p}:`).join("\n")}\n`);
-    ok(JSON.stringify(depInfoPaths(`m.wasm: /a/b\\ c.rs /d.rs\n/a/b\\ c.rs:\n`)) === JSON.stringify(["/a/b c.rs", "/d.rs"]), "depInfoPaths: the first rule's sources, an escaped space kept in its path");
-    dep(`${root}/engine/web/src/lib.rs`, `${root}/engine/galois/src/../../group/tables/t.txt`, `${env.CARGO_HOME}/registry/src/x/lib.rs`);
-    ok(foreignSources(module, root, env).length === 0, "this checkout's sources and the Cargo home's crates: its own build");
-    dep(`${root}/engine/web/src/lib.rs`, `${other}/engine/galois/src/lib.rs`);
-    ok(JSON.stringify(foreignSources(module, root, env)) === JSON.stringify([`${other}/engine/galois/src/lib.rs`]), "a source of another checkout sharing the target: caught");
-    dep(`${near}/engine/web/src/lib.rs`);
-    ok(foreignSources(module, root, env).length === 1, "a checkout whose path only starts the same is another checkout");
-    writeFileSync(join(d, "sagebrush_web.d"), "");
-    ok(foreignSources(module, root, env).length === 1, "a dep-info naming no sources proves nothing: refused");
-    const link = join(d, "link");
-    fs.symlinkSync(root, link);
-    dep(`${fs.realpathSync(root)}/engine/web/src/lib.rs`);
-    ok(foreignSources(module, link, env).length === 0, "a checkout reached through a symlink: cargo names its real path, still its own");
-  } finally {
-    rmSync(d, { recursive: true, force: true });
-  }
-}
 // the target's build lock: fn runs with it held and it is gone after, also when fn throws; a live holder is waited
-// for (told once), a dead one's lock is taken over at once and a never-written one's after a minute, and another
-// host's holder isn't judged by this host's pids
+// for (told once), a dead one's lock is taken over at once, another host's holder is waited for, and a lock with no
+// holder record is taken over after a minute; one target spelled two ways is one lock; a takeover or a release never
+// removes a lock that isn't the one it judged
 {
   const d = mkdtempSync(join(tmpdir(), "install-engine-wasm-lock-"));
   try {
-    const target = join(d, "target"), lock = `${target}.lock`;
-    const held = (pid, host = "h") => {
+    const target = join(d, "target");
+    const lock = targetLockPath(target);
+    const holderOf = () => JSON.parse(readFileSync(join(lock, "holder.json"), "utf8"));
+    const held = (pid, host = "h", token = `t${pid}`) => {
       mkdirSync(lock);
-      writeFileSync(join(lock, "holder.json"), JSON.stringify({ pid, host, root: "/other" }));
+      writeFileSync(join(lock, "holder.json"), JSON.stringify({ token, pid, host, root: "/other" }));
     };
-    let inside = false;
-    ok(withTargetLock(target, () => ((inside = fs.existsSync(lock)), 7), { host: "h" }) === 7 && inside && !fs.existsSync(lock), "fn's value, with the lock held, and the lock gone after");
+    let inside = null;
+    ok(withTargetLock(target, () => ((inside = fs.existsSync(lock) ? holderOf() : null), 7), { host: "h" }) === 7 && inside?.pid === process.pid && !fs.existsSync(lock), "fn's value, with the lock held (its holder record written before it is taken), and the lock gone after");
     let threw = false;
     try {
       withTargetLock(target, () => {
@@ -135,18 +111,40 @@ try {
     held(4242);
     polls = 0;
     withTargetLock(target, () => {}, { host: "h", wait: 1, alive: () => (polls++, false) });
-    ok(polls === 1, "a holder no longer running left it stale: taken over at once");
+    ok(polls === 1 && !fs.existsSync(lock), "a holder no longer running left it stale: taken over at once");
     held(4242, "elsewhere");
     let ran = false, told = 0;
-    // (another host's build, its pid not running here: waited for until it releases the lock, which the log does)
+    // (another host's build, its pid meaningless here: waited for until it releases the lock, which the log does)
     withTargetLock(target, () => (ran = true), { host: "h", wait: 1, alive: () => false, log: () => (told++, rmSync(lock, { recursive: true, force: true })) });
     ok(ran && told === 1, "another host's holder is waited for, whatever this host's pids say");
     mkdirSync(lock);
+    writeFileSync(join(lock, "x"), "");
     const old = new Date(Date.now() - 120000);
     fs.utimesSync(lock, old, old);
     ran = false;
     withTargetLock(target, () => (ran = true), { host: "h", wait: 1 });
-    ok(ran, "a lock whose holder was never written, two minutes old: taken over");
+    ok(ran, "a lock with no holder record, two minutes old: taken over");
+    // (one target, two spellings: a symlink to it names the same lock)
+    const alias = join(d, "alias");
+    fs.symlinkSync(target, alias);
+    ok(targetLockPath(alias) === lock, "a target reached through a symlink has the real path's lock");
+    held(4242);
+    told = 0;
+    withTargetLock(alias, () => {}, { host: "h", wait: 1, alive: () => true, log: () => (told++, rmSync(lock, { recursive: true, force: true })) });
+    ok(told === 1, "a build through the alias waits for the holder of the real path's lock");
+    // (two waiters judged the same dead holder: the first took it over and holds a new lock; the second's takeover,
+    // still naming the dead holder, must leave the new lock in place)
+    held(4243, "h", "new-holder");
+    ok(!removeLockOf(lock, "t-dead", "second") && holderOf().token === "new-holder", "a takeover of a holder already replaced leaves the new holder's lock");
+    ok(removeLockOf(lock, "new-holder", "x") && !fs.existsSync(lock), "the lock it names is removed");
+    ok(!removeLockOf(lock, "anything", "x"), "no lock: nothing removed");
+    // (a release after the lock was taken from under it: the other holder's lock stays)
+    withTargetLock(target, () => {
+      rmSync(lock, { recursive: true, force: true });
+      held(4244, "h", "thief");
+    }, { host: "h" });
+    ok(fs.existsSync(lock) && holderOf().token === "thief", "a release removes only its own lock");
+    rmSync(lock, { recursive: true, force: true });
     // (two real processes on one target: their builds never overlap)
     const order = join(d, "order.txt"), script = join(d, "child.mjs");
     writeFileSync(script, `import { withTargetLock } from ${JSON.stringify(new URL("./install-engine-wasm.mjs", import.meta.url).href)};
@@ -159,6 +157,7 @@ withTargetLock(${JSON.stringify(target)}, () => {
 `);
     spawnSync("bash", ["-c", `"${process.execPath}" "${script}" & "${process.execPath}" "${script}" & wait`]);
     ok(readFileSync(order, "utf8") === "start\nend\nstart\nend\n", "two processes on one target: one build, then the other");
+    ok(fs.readdirSync(d).filter((n) => n.startsWith("target.lock.")).length === 0, "no lock directories left behind");
   } finally {
     rmSync(d, { recursive: true, force: true });
   }

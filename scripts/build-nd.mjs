@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installWasm, remappedRustflags } from "./install-engine-wasm.mjs";
+import { installWasm, remappedRustflags, withTargetLock } from "./install-engine-wasm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FLAGS = [
@@ -36,4 +36,6 @@ export function buildNd(target = join(process.env.CARGO_TARGET_DIR ?? join(root,
   return installWasm(built, join(root, "wasm", "sagebrush-nd.wasm"));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) console.log(`wasm/sagebrush-nd.wasm: ${buildNd()} bytes`);
+// (run on its own: with the target's build lock, as build-engine.mjs holds it, install-engine-wasm.mjs withTargetLock)
+if (import.meta.url === `file://${process.argv[1]}`)
+  withTargetLock(process.env.CARGO_TARGET_DIR ?? join(root, "engine", "target"), () => console.log(`wasm/sagebrush-nd.wasm: ${buildNd()} bytes`));

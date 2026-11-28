@@ -7,21 +7,24 @@
 //   - the source and the pins are those of the merge base with master (whose pins are always its own source's build,
 //     check-fresh-wasm.mjs), and $RUSTFLAGS is unset: the pinned modules are fetched (wasm-fetch.mjs);
 //   - otherwise, a cache entry for the key is copied in, after its bytes are checked against the entry's manifest;
-//   - otherwise, the engine is built (build-engine.mjs, into one shared cargo target) and stored under the key.
+//   - otherwise, the engine is built (build-engine.mjs, into this checkout's own cargo target, targetFor) and stored
+//     under the key.
 // The modules a build or the cache put in wasm/ get their sidecars (wasm-modules.mjs) and wasm/engine-source.local.json,
 // which names the key: --check fails when wasm/ isn't this tree's engine, so a test never runs a stale or borrowed one.
 //
 //   node scripts/engine-cache.mjs            make wasm/ this tree's engine (fetch, copy or build)
 //   node scripts/engine-cache.mjs --check    exit 1 unless wasm/ is this tree's engine; prints the run mode
 //   node scripts/engine-cache.mjs --key      print the key and whether it is the pinned source
-// The cache is $SAGEBRUSH_ENGINE_CACHE (default ~/.cache/sagebrush/engine); the newest KEEP entries are kept.
+// The cache is $SAGEBRUSH_ENGINE_CACHE (default ~/.cache/sagebrush/engine); the newest KEEP entries are kept, and the
+// checkouts' cargo targets under its targets/ (or $CARGO_TARGET_DIR), the $SAGEBRUSH_ENGINE_TARGETS most recently used.
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkModules, MODULES, ROOT, modulePath, sha256, writeJsonAtomic, writeSidecar } from "./wasm-modules.mjs";
+import { targetLockPath } from "./install-engine-wasm.mjs";
 
 export const SOURCE_PATHS = [
   "engine", // (with its rust-toolchain.toml)
@@ -34,6 +37,50 @@ export const SOURCE_PATHS = [
 ];
 const KEEP = 20;
 export const cacheDir = (env = process.env) => env.SAGEBRUSH_ENGINE_CACHE || join(homedir(), ".cache", "sagebrush", "engine");
+
+// The cargo target of this checkout's builds: its own, under $CARGO_TARGET_DIR or else the cache's targets/ (the
+// cache's filesystem), named by the checkout's real path.  A target shared between checkouts is unsound even with
+// one build at a time: cargo judges a crate fresh by its sources' times against the target's outputs, not by which
+// checkout the sources are in, so one checkout's build can keep another's module (Nov 28 2026: a track head with
+// #2297 got an engine without it; the module dated from another checkout's build, its dep-info from this one's).
+export function targetFor(root, env = process.env) {
+  const parent = env.CARGO_TARGET_DIR || join(cacheDir(env), "targets");
+  return join(parent, `checkout-${createHash("sha256").update(realpathSync(root)).digest("hex").slice(0, 16)}`);
+}
+
+// The checkouts' targets kept: the most recently used $SAGEBRUSH_ENGINE_TARGETS (default 6; each is about 450 MB).
+export const keepTargets = (env = process.env) => {
+  const n = Number(env.SAGEBRUSH_ENGINE_TARGETS ?? 6);
+  return Number.isInteger(n) && n >= 1 ? n : 6;
+};
+
+function bytesUnder(path) {
+  const s = lstatSync(path);
+  if (!s.isDirectory()) return s.size;
+  let total = 0;
+  for (const n of readdirSync(path)) total += bytesUnder(join(path, n));
+  return total;
+}
+const mib = (b) => `${(b / 2 ** 20).toFixed(0)} MiB`;
+
+// Prune the targets beside `target` to the keepTargets most recently used (a build marks its target used when it
+// starts and when it ends); a target being built (its lock present) and `target` itself are never removed.  Logs each
+// one removed and the total kept.
+export function pruneTargets(target, env = process.env, log = console.log) {
+  const parent = dirname(target);
+  const all = readdirSync(parent)
+    .filter((n) => /^checkout-[0-9a-f]{16}$/.test(n))
+    .map((n) => ({ n, path: join(parent, n), t: statSync(join(parent, n)).mtimeMs }))
+    .sort((a, b) => b.t - a.t);
+  for (const { n, path, t } of all.slice(keepTargets(env))) {
+    if (path === target || existsSync(`${realpathSync(path)}.lock`)) continue;
+    const size = bytesUnder(path);
+    rmSync(path, { recursive: true, force: true });
+    log(`engine: removed the cargo target ${n} (${mib(size)}, last used ${new Date(t).toISOString()})`);
+  }
+  const kept = readdirSync(parent).filter((n) => /^checkout-[0-9a-f]{16}$/.test(n));
+  log(`engine: ${kept.length} checkout targets in ${parent}, ${mib(kept.reduce((s, n) => s + bytesUnder(join(parent, n)), 0))}`);
+}
 const markerPath = (root) => join(root, "wasm", "engine-source.local.json");
 
 const gitIn = (root) => (args, opts = {}) =>
@@ -171,8 +218,16 @@ export function ensure({ root = ROOT, env = process.env, log = console.log, fetc
     return "cached";
   }
   log(`engine: building this tree's engine (${key.slice(0, 12)}${dirty ? ", with uncommitted changes" : ""})`);
-  const target = env.CARGO_TARGET_DIR || join(cache, "target");
+  const target = targetFor(root, env);
+  targetLockPath(target); // (made, if new)
+  const used = () => {
+    const now = new Date();
+    utimesSync(target, now, now);
+  };
+  used();
   build(root, { ...env, CARGO_TARGET_DIR: target });
+  used();
+  pruneTargets(target, env, log);
   // (the key again: a source edited during the build must not be stored under the old one)
   if (sourceKey(root, env).key !== key) throw new Error("engine-cache: the engine source changed during the build; run it again");
   const stored = store(root, key, cache);

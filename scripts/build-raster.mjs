@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installWasm } from "./install-engine-wasm.mjs";
+import { installWasm, withTargetLock } from "./install-engine-wasm.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -56,4 +56,6 @@ function stripCustomSections(b) {
   return Buffer.concat(parts);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) console.log(`raster: ${buildRaster()} bytes`);
+// (run on its own: with the target's build lock, as build-engine.mjs holds it, install-engine-wasm.mjs withTargetLock)
+if (import.meta.url === `file://${process.argv[1]}`)
+  withTargetLock(process.env.CARGO_TARGET_DIR ?? join(root, "engine", "target"), () => console.log(`raster: ${buildRaster()} bytes`));

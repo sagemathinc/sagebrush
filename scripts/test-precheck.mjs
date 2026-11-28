@@ -5,11 +5,11 @@
 // $RUSTFLAGS), fetches the pins only for their own source, builds once and copies from the cache after.
 //   node scripts/test-precheck.mjs
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { STEPS, workflowLines } from "./precheck.mjs";
-import { SOURCE_PATHS, check, ensure, isPinnedSource, sourceKey } from "./engine-cache.mjs";
+import { SOURCE_PATHS, check, ensure, isPinnedSource, keepTargets, pruneTargets, sourceKey, targetFor } from "./engine-cache.mjs";
 import { MODULES } from "./wasm-modules.mjs";
 
 let failures = 0;
@@ -50,8 +50,9 @@ try {
     log: () => {},
     fetch: () => calls.fetch++,
     // (a build writes the four modules, its bytes naming the build)
-    build: () => {
+    build: (root, env) => {
       calls.build++;
+      calls.target = env.CARGO_TARGET_DIR;
       for (const name of MODULES) writeFileSync(join(repo, "wasm", name), `${name} build ${calls.build}\n`);
     },
   };
@@ -102,6 +103,43 @@ try {
     ok(dirtyKey !== before && sourceKey(repo, E).key !== before, `${p} is part of the key (uncommitted and committed)`);
   }
   ok(["engine", ...BUILD_SCRIPTS].every((p) => SOURCE_PATHS.includes(p)), "the source paths name engine/ and every build script");
+
+  // each checkout builds in its own cargo target (a shared one let cargo keep another checkout's module), under the
+  // cache's targets/ or $CARGO_TARGET_DIR, named by the checkout's real path
+  const tgt = targetFor(repo, E);
+  ok(tgt.startsWith(join(cache, "targets", "checkout-")), "a checkout's target is under the cache's targets/");
+  ok(calls.target === targetFor(repo, F), "the build ran in that target");
+  const alias = join(tmpdir(), `engine-cache-alias-${process.pid}`);
+  symlinkSync(repo, alias);
+  try {
+    ok(targetFor(alias, E) === tgt, "the same checkout through a symlink: the same target");
+  } finally {
+    rmSync(alias, { force: true });
+  }
+  const other = mkdtempSync(join(tmpdir(), "engine-cache-other-"));
+  try {
+    ok(targetFor(other, E) !== tgt, "another checkout: another target");
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
+  ok(targetFor(repo, { ...E, CARGO_TARGET_DIR: "/t" }).startsWith("/t/checkout-"), "under $CARGO_TARGET_DIR when it is set");
+  ok(keepTargets({}) === 6 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "2" }) === 2 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "0" }) === 6 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "x" }) === 6, "the targets kept: $SAGEBRUSH_ENGINE_TARGETS, default 6");
+  // pruning: the most recently used kept, never one being built (its lock present) nor the one just built
+  const tp = join(repo, ".targets");
+  const names = [...Array(7).keys()].map((i) => `checkout-${String(i).padStart(16, "0")}`);
+  names.forEach((n, i) => {
+    mkdirSync(join(tp, n, "deps"), { recursive: true });
+    writeFileSync(join(tp, n, "deps", "x.rlib"), Buffer.alloc(1 << 20));
+    const t = new Date(Date.now() - (i + 1) * 3600e3); // (names[0] the most recently used)
+    utimesSync(join(tp, n), t, t);
+  });
+  mkdirSync(`${realpathSync(join(tp, names[5]))}.lock`); // (being built)
+  const logs = [];
+  pruneTargets(join(tp, names[6]), { SAGEBRUSH_ENGINE_TARGETS: "2" }, (m) => logs.push(m));
+  const left = readdirSync(tp).filter((n) => n.startsWith("checkout-") && !n.endsWith(".lock")).sort();
+  ok(JSON.stringify(left) === JSON.stringify([names[0], names[1], names[5], names[6]].sort()), `pruned to the 2 most recently used, the one being built and the one just built (${left.join(" ")})`);
+  ok(logs.filter((m) => /removed the cargo target checkout-0+[234] \(1 MiB, last used /.test(m)).length === 3, "each removed target is logged with its size and last use");
+  ok(/4 checkout targets in .*, 4 MiB$/.test(logs.at(-1)), `the total kept is logged (${logs.at(-1)})`);
 
   git("checkout", "-q", "-b", "side", "base");
   writeFileSync(join(repo, "wasm", "pins.json"), '{"other": 1}\n');

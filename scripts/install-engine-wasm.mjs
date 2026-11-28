@@ -8,6 +8,7 @@
 // set 0644, then renamed onto dst: a failed or interrupted write never leaves
 // a partial dst (CORR-213-1), and the temp is removed on failure.
 import * as fs from "node:fs";
+import { randomBytes } from "node:crypto";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -63,32 +64,6 @@ export function namesLocalCargoHome(bytes, env = process.env) {
   return home !== CI_CARGO_HOME && Buffer.from(bytes).includes(Buffer.from(home + "/"));
 }
 
-// The sources cargo's dep-info names for a module: its first rule, "module: source source ...", a space in a path
-// written "\ ".
-export function depInfoPaths(text) {
-  const line = text.split("\n")[0];
-  const i = line.indexOf(": ");
-  if (i < 0) return [];
-  return line
-    .slice(i + 2)
-    .split(/(?<!\\) +/)
-    .filter(Boolean)
-    .map((p) => p.replace(/\\ /g, " "));
-}
-
-// The sources of a built module (its dep-info, the .d beside it) that are neither this checkout's nor the Cargo
-// home's crates: [] for this checkout's own build.  A cargo target shared between checkouts (scripts/engine-cache.mjs)
-// holds one module at each path, so the module there may be another checkout's build, which would then be stored
-// under this tree's source key (an engine without #2297's group code under a key with it, Nov 28 2026).
-export function foreignSources(module, root, env = process.env, io = fs) {
-  const d = module.replace(/\.wasm$/, ".d");
-  const own = [root, io.realpathSync(root)].map((r) => r.replace(/\/+$/, "") + "/");
-  const home = cargoHome(env).replace(/\/+$/, "") + "/";
-  const paths = depInfoPaths(io.readFileSync(d, "utf8"));
-  if (paths.length === 0) return [`(${d} names no sources)`];
-  return paths.filter((p) => !p.startsWith(home) && !own.some((r) => p.startsWith(r)));
-}
-
 const pidAlive = (pid) => {
   try {
     process.kill(pid, 0);
@@ -98,28 +73,65 @@ const pidAlive = (pid) => {
   }
 };
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const readHolder = (dir, io) => {
+  try {
+    return JSON.parse(io.readFileSync(join(dir, "holder.json"), "utf8"));
+  } catch {
+    return null;
+  }
+};
 
-// fn() with the cargo target's build lock held: one build at a time in a target.  Cargo locks a target while it
-// compiles, but not the copy of the module out of it afterwards, so two checkouts sharing a target could each copy
-// the other's module.  The lock is a directory beside the target ("target.lock"), made atomically, with the holder's
-// pid and host in it; a holder on this host that is no longer running left it stale, and it is taken over (as is one
-// whose holder was never written, after a minute).
+/** The lock directory of a cargo target: beside its real path, so every spelling of one target names one lock. */
+export function targetLockPath(target, io = fs) {
+  io.mkdirSync(target, { recursive: true });
+  return io.realpathSync(target) + ".lock";
+}
+
+// Remove the lock if, and only if, it is the holder `token` names: it is first moved aside (a rename, atomic), then
+// its holder read there; another holder's lock (taken since `token`'s was judged) is put back.  Whether it was removed.
+export function removeLockOf(lock, token, mover, io = fs) {
+  const aside = `${lock}.aside.${mover}`;
+  try {
+    io.renameSync(lock, aside);
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    throw e;
+  }
+  if (readHolder(aside, io)?.token === token) {
+    io.rmSync(aside, { recursive: true, force: true });
+    return true;
+  }
+  try {
+    io.renameSync(aside, lock);
+  } catch {
+    // (a third build took the lock in between: the moved one's holder finds its lock gone when it releases it)
+  }
+  return false;
+}
+
+// fn() with the cargo target's build lock held: one build at a time in a target (two in one checkout, or a module
+// builder run on its own).  The lock is a directory beside the target's real path, renamed into place whole with its
+// holder record (token, pid, host, checkout) already in it.  A holder on this host that is no longer running left it
+// stale, and it is taken over; one on another host is waited for; a lock with no holder record (not one of these) is
+// taken over after a minute.  Takeover and release both go through removeLockOf, so neither removes another's lock.
 export function withTargetLock(target, fn, { log = console.error, wait = 2000, io = fs, alive = pidAlive, host = hostname() } = {}) {
-  const lock = target.replace(/\/+$/, "") + ".lock";
-  const holderPath = join(lock, "holder.json");
-  io.mkdirSync(dirname(lock), { recursive: true });
+  const lock = targetLockPath(target, io);
+  const token = `${host}.${process.pid}.${randomBytes(8).toString("hex")}`;
+  const mine = `${lock}.new.${token}`;
+  io.mkdirSync(mine);
+  io.writeFileSync(join(mine, "holder.json"), JSON.stringify({ token, pid: process.pid, host, root: process.cwd(), since: new Date().toISOString() }));
   let told = false;
   for (;;) {
     try {
-      io.mkdirSync(lock);
+      io.renameSync(mine, lock);
       break;
     } catch (e) {
-      if (e.code !== "EEXIST") throw e;
+      if (e.code !== "EEXIST" && e.code !== "ENOTEMPTY") {
+        io.rmSync(mine, { recursive: true, force: true });
+        throw e;
+      }
     }
-    let holder = null;
-    try {
-      holder = JSON.parse(io.readFileSync(holderPath, "utf8"));
-    } catch {}
+    const holder = readHolder(lock, io);
     let stale;
     try {
       stale = holder ? holder.host === host && !alive(holder.pid) : Date.now() - io.statSync(lock).mtimeMs > 60000;
@@ -127,7 +139,7 @@ export function withTargetLock(target, fn, { log = console.error, wait = 2000, i
       continue; // (released meanwhile)
     }
     if (stale) {
-      io.rmSync(lock, { recursive: true, force: true });
+      removeLockOf(lock, holder?.token, token, io);
       continue;
     }
     if (!told) {
@@ -137,9 +149,8 @@ export function withTargetLock(target, fn, { log = console.error, wait = 2000, i
     sleep(wait);
   }
   try {
-    io.writeFileSync(holderPath, JSON.stringify({ pid: process.pid, host, root: process.cwd(), since: new Date().toISOString() }));
     return fn();
   } finally {
-    io.rmSync(lock, { recursive: true, force: true });
+    removeLockOf(lock, token, token, io);
   }
 }
