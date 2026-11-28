@@ -110,6 +110,9 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
   not defined`).
 - A plot wider than the slide's text stops at the text's edge here; in
   the PDF it runs past the margin.
+- A `sageblock` whose last line is a plot shows that plot under its code
+  here, as a notebook cell does. Real SageTeX shows only the code; put
+  the plot in the document with `\sageplot{…}`.
 - The code can read, but not change, the `.tex` itself and the files in
   the document's folder that the code names: the modules it imports
   (`from helper import f` gives it `helper.py`), the files whose paths it
