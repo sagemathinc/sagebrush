@@ -86,7 +86,7 @@ for ne in range(_sage_const_7 ):
     for nerr in range(_sage_const_3 ):
         r = copy(c)
         for j in range(nerr):
-            r[_sage_const_5  - j] += _sage_const_1 
+            r[_sage_const_5  - j] += _sage_const_1
         print(ne, nerr, end=" ")
         show(lambda: D.decode_to_message((r, e)))
 e = vector(GF(_sage_const_2 ), [_sage_const_1 , _sage_const_1 , _sage_const_1 , _sage_const_1 , _sage_const_1 , _sage_const_0 ])
