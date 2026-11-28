@@ -1544,6 +1544,12 @@ jobs:
         run: rm -f engine/target/tmp/smith-estimate-rows.txt
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
+      # (the ledger's audit allocator is a test-only feature: its test files are cfg-gated on it,
+      # so the workspace run above runs none of them; each is a binary of its own, the audit's
+      # counters being process-wide)
+      - name: the ledger's audit allocator tests (feature ledger-audit)
+        working-directory: engine
+        run: cargo test -p sagebrush-ledger --features ledger-audit --test alloc --test alloc_moving
       # The report, pass or fail: its rows per corpus and seed in the job summary, the file
       # itself as an artifact.  Report-only: a missing report (the test isn't on this branch)
       # is a line in the summary, never a failure.
