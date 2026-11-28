@@ -26,7 +26,11 @@ fn sub(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
     mpf_add(s, t, prec, rnd, true)
 }
 
-/// mpf_cmp(s, t) for numbers that are not nan.
+/// mpf_cmp(s, t) for numbers that are not nan, as the reference's: equal
+/// exponents compare the mantissas, different highest bits decide, and only
+/// where the highest bits meet is t subtracted, at 5 bits.  (The exact
+/// difference across an exponent gap has the gap's size: the comparison of
+/// Cholesky([2^(2^30)])'s pivot with its tolerance asked for 2^24 limbs.)
 fn cmp(s: &Mpf, t: &Mpf) -> Ordering {
     if s.man.is_zero() || t.man.is_zero() {
         if s.is_fzero() {
@@ -46,12 +50,19 @@ fn cmp(s: &Mpf, t: &Mpf) -> Ordering {
     if s.sign != t.sign {
         return if s.sign == 0 { Ordering::Greater } else { Ordering::Less };
     }
-    // (finite, same sign: the sign of their exact difference)
-    let d = sub(s, t, 0, Rnd::Floor);
-    match mpf_sign(&d) {
-        0 => Ordering::Equal,
-        x if x > 0 => Ordering::Greater,
-        _ => Ordering::Less,
+    // (finite, same sign; a negative pair's order is its magnitudes' reversed)
+    let by_sign = |o: Ordering| if s.sign == 1 { o.reverse() } else { o };
+    if s.exp.cmp(&t.exp) == Ordering::Equal {
+        return by_sign(s.man.cmp_mag(&t.man));
+    }
+    let top = s.exp.add_i64(s.bc).cmp(&t.exp.add_i64(t.bc));
+    if top != Ordering::Equal {
+        return by_sign(top);
+    }
+    if sub(s, t, 5, Rnd::Floor).sign == 1 {
+        Ordering::Less
+    } else {
+        Ordering::Greater
     }
 }
 
@@ -63,35 +74,38 @@ fn gt(s: &Mpf, t: &Mpf) -> bool {
     !(s.is_fnan() || t.is_fnan()) && cmp(s, t) == Ordering::Greater
 }
 
-/// mpf_sum(xs, prec, rnd, absolute): the exact sum, rounded once.
+/// mpf_sum(xs, prec, rnd, absolute): the exact sum, rounded once.  (The
+/// exponents as the reference's integers, any size: an exponent past i64
+/// was taken as 0, so the least-squares solution of [2^E, 0]^T x = [1, 0]^T
+/// at E = 2^62 was 2^E, not 2^-E.  Each shift is at most max_extra past the
+/// operands' own bits.)
 fn mpf_sum(xs: &[Mpf], prec: u64, rnd: Rnd, absolute: bool) -> Mpf {
     use crate::int::Int;
     let mut man = Int::zero();
-    let mut exp: i64 = 0;
+    let mut exp = Exp::S(0);
     let max_extra = if prec == 0 { 1_000_000 } else { 2 * prec as i64 };
     let mut special: Option<Mpf> = None;
     for x in xs {
         if !x.man.is_zero() {
             let xman = Int::new(x.sign == 1 && !absolute, x.man.clone());
-            let xexp = x.exp.as_i64().unwrap_or(0);
-            let delta = xexp - exp;
-            if xexp >= exp {
-                if delta > max_extra && (man.is_zero() || delta - man.bits() as i64 > max_extra) {
+            let delta = x.exp.sub(&exp);
+            if !delta.is_neg() {
+                if delta.gt_i64(max_extra) && (man.is_zero() || delta.add_i64(-(man.bits() as i64)).gt_i64(max_extra)) {
                     man = xman;
-                    exp = xexp;
+                    exp = x.exp.clone();
                 } else {
-                    man = man.add(&xman.shl(delta as u64));
+                    man = man.add(&xman.shl(delta.as_shift()));
                 }
             } else {
-                let delta = -delta;
-                if delta - x.bc > max_extra {
+                let delta = delta.neg();
+                if delta.add_i64(-x.bc).gt_i64(max_extra) {
                     if man.is_zero() {
                         man = xman;
-                        exp = xexp;
+                        exp = x.exp.clone();
                     }
                 } else {
-                    man = man.shl(delta as u64).add(&xman);
-                    exp = xexp;
+                    man = man.shl(delta.as_shift()).add(&xman);
+                    exp = x.exp.clone();
                 }
             }
         } else if !x.exp.is_zero() {
@@ -102,7 +116,7 @@ fn mpf_sum(xs: &[Mpf], prec: u64, rnd: Rnd, absolute: bool) -> Mpf {
     if let Some(s) = special {
         return s;
     }
-    crate::mpf::from_int_man_exp(&man, &Exp::S(exp), prec, rnd)
+    crate::mpf::from_int_man_exp(&man, &exp, prec, rnd)
 }
 
 /// ctx.eps at prec: 2^(1 - prec).
