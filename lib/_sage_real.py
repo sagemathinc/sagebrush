@@ -1506,6 +1506,11 @@ def _to_real(R, x, base=10):
                 raise TypeError("unable to convert %r to a real number" % (x,))
             v = v._re
         return _to_real(R, v)
+    h = getattr(type(x), "_real_field_value", None)
+    if h is not None:
+        # (a number field element: as Sage, through its embedding at this
+        # precision, not through its double)
+        return h(x, R)
     if type(x).__name__ in ("AlgebraicNumber", "AlgebraicReal"):
         # correctly rounded from certified balls (a fixed prec + 10 digits
         # gave wrong digits, 0 or the wrong sign after cancellation)
@@ -3928,6 +3933,9 @@ class ComplexField_:
             if isinstance(v, ComplexNumberMP):
                 return ComplexNumberMP(self, R(v._re), R(v._im))
             return ComplexNumberMP(self, R(v), R(0))
+        h = getattr(type(x), "_complex_field_value", None)
+        if h is not None:
+            return h(x, self)
         if type(x).__name__ in ("AlgebraicNumber", "AlgebraicReal"):
             # each part correctly rounded, from certified balls
             re, im = x._rounded(R, self._prec)

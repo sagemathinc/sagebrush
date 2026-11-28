@@ -1,0 +1,40 @@
+# Number fields with an embedding: one field per embedding (the root nearest
+# the number given), its elements ordered and converted under it; and the
+# polynomial's variable and the options that make a field another one
+def show(label, f):
+    try:
+        v = f(); print(label, "|", v)
+    except Exception as e:
+        print(label, "|", type(e).__name__)
+x = polygen(QQ, 'x'); y = polygen(QQ, 'y')
+K1 = NumberField(x^2 - 2, 'a', embedding=1.4); K2 = NumberField(x^2 - 2, 'a', embedding=-1.4); K0 = NumberField(x^2 - 2, 'a')
+a1, a2, a0 = K1.gen(), K2.gen(), K0.gen()
+show("K1", lambda: K1); show("K2", lambda: K2); show("K0", lambda: K0)
+show("K1 == K2, K1 is K2", lambda: (K1 == K2, K1 is K2)); show("K1 == K0, K1 is K0", lambda: (K1 == K0, K1 is K0))
+show("K1 is NumberField(x^2 - 2, 'a', embedding=1.41)", lambda: K1 is NumberField(x^2 - 2, 'a', embedding=1.41))
+show("a1 < 0, a2 < 0", lambda: (a1 < 0, a2 < 0)); show("a1 > 1, a2 > -2", lambda: (a1 > 1, a2 > -2))
+show("a1.sign(), a2.sign()", lambda: (a1.sign(), a2.sign())); show("(a1 - 1) > 0, (a2 + 1) < 0", lambda: ((a1 - 1) > 0, (a2 + 1) < 0))
+show("3*a1 - 4 > 0, 3*a2 + 4 > 0", lambda: (3*a1 - 4 > 0, 3*a2 + 4 > 0)); show("a1 <= a1, a1 >= 2", lambda: (a1 <= a1, a1 >= 2))
+show("RR(a1), RR(a2)", lambda: (RR(a1), RR(a2))); show("RDF(a1), float(a2)", lambda: (RDF(a1), float(a2)))
+show("CC(a1), CC(a2)", lambda: (CC(a1), CC(a2))); show("RR(a1 + 1/3)", lambda: RR(a1 + 1/3)); show("RR(a0)", lambda: RR(a0))
+for f, e in [(x^2 - 3, 1.7), (x^2 - 3, -1.7), (x^3 - 2, 1.26), (x^2 - 5, 2.2), (x^2 - 7, -2.6), (x^3 - x - 1, 1.3)]:
+    K = NumberField(f, 'b', embedding=e); b = K.gen()
+    show("%s at %s: K, RR(b), RDF(b), b < 1, (b^2).sign()" % (f, e), lambda: (K, RR(b), RDF(b), b < 1, (b^2).sign()))
+L1 = NumberField(x^2 + 1, 'i', embedding=CC(0, 1)); L2 = NumberField(x^2 + 1, 'i', embedding=CC(0, -1))
+show("L1, L2", lambda: (L1, L2)); show("L1 is L2", lambda: L1 is L2); show("CC(L1.gen()), CC(L2.gen())", lambda: (CC(L1.gen()), CC(L2.gen())))
+show("CC(L1.gen() + 1/2)", lambda: CC(L1.gen() + 1/2))
+Q1 = QuadraticField(2, 'a'); Q2 = QuadraticField(2, 'a', embedding=-1.4); Q0 = QuadraticField(2, 'a', embedding=None)
+show("Q1, Q2, Q0", lambda: (Q1, Q2, Q0)); show("Q1 is Q2, Q1 is Q0, Q0 is K0", lambda: (Q1 is Q2, Q1 is Q0, Q0 is K0))
+show("Q1 is QuadraticField(2, 'a', embedding=1.4)", lambda: Q1 is QuadraticField(2, 'a', embedding=1.4))
+show("RR(Q1.gen()), RR(Q2.gen()), Q2.gen() < 0", lambda: (RR(Q1.gen()), RR(Q2.gen()), Q2.gen() < 0))
+show("QuadraticField(-5, 'c', embedding=CC(0, -2))", lambda: QuadraticField(-5, 'c', embedding=CC(0, -2)))
+show("CC of it", lambda: CC(QuadraticField(-5, 'c', embedding=CC(0, -2)).gen()))
+C5 = CyclotomicField(5); C5n = CyclotomicField(5, embedding=None); C5b = CyclotomicField(5, embedding=CC(exp(4*pi*I/5)))
+show("C5 is C5n, C5 is C5b, C5n is C5b", lambda: (C5 is C5n, C5 is C5b, C5n is C5b)); show("CC(C5.gen()), CC(C5b.gen())", lambda: (CC(C5.gen()), CC(C5b.gen())))
+show("C5 is CyclotomicField(5, embedding=CC(exp(2*pi*I/5)))", lambda: C5 is CyclotomicField(5, embedding=CC(exp(2*pi*I/5))))
+show("NF(x^2-2) == NF(y^2-2), is", lambda: (NumberField(x^2-2,'a') == NumberField(y^2-2,'a'), NumberField(x^2-2,'a') is NumberField(y^2-2,'a')))
+show("NF(y^2-2)", lambda: NumberField(y^2-2,'a'))
+show("latex_name", lambda: NumberField(x^2-2,'a') is NumberField(x^2-2,'a',latex_name='A'))
+show("assume_disc_small", lambda: NumberField(x^2-2,'a') is NumberField(x^2-2,'a',assume_disc_small=True))
+show("maximize_at_primes", lambda: NumberField(x^2-2,'a') is NumberField(x^2-2,'a',maximize_at_primes=[2]))
+show("same options, same field", lambda: NumberField(x^2-2,'a',maximize_at_primes=[2]) is NumberField(x^2-2,'a',maximize_at_primes=[2]))

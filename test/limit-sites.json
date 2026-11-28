@@ -8310,6 +8310,16 @@
   "owner": "Sage compatibility",
   "reason": "the word Maximal (the maximal order's name as Sage prints it), not a limit: nothing is refused"
  },
+ "lib/_sage_nf.py :: _field_options :: m = kwds.get(\"maximize_at_primes\") #0": {
+  "class": "none",
+  "owner": "Sage number fields",
+  "reason": "Sage's maximize_at_primes option of NumberField, a key of the field: the word, refusing nothing"
+ },
+ "lib/_sage_nf.py :: _field_options :: them: latex_name, assume_disc_small, maximize_at_primes.\"\"\" #0": {
+  "class": "none",
+  "owner": "Sage number fields",
+  "reason": "Sage's maximize_at_primes option of NumberField, a key of the field: the word, refusing nothing"
+ },
  "lib/_sage_numfun.py :: prime_pi_plot :: \"\"\"A plot of prime_pi(x) for xmin <= x <= xmax: a step line, with the #0": {
   "class": "none",
   "owner": "sagebrush-sage2",

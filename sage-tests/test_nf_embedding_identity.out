@@ -1,0 +1,42 @@
+K1 | Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?
+K2 | Number Field in a with defining polynomial x^2 - 2 with a = -1.414213562373095?
+K0 | Number Field in a with defining polynomial x^2 - 2
+K1 == K2, K1 is K2 | (False, False)
+K1 == K0, K1 is K0 | (False, False)
+K1 is NumberField(x^2 - 2, 'a', embedding=1.41) | True
+a1 < 0, a2 < 0 | (False, True)
+a1 > 1, a2 > -2 | (True, True)
+a1.sign(), a2.sign() | (1, -1)
+(a1 - 1) > 0, (a2 + 1) < 0 | (True, True)
+3*a1 - 4 > 0, 3*a2 + 4 > 0 | (True, False)
+a1 <= a1, a1 >= 2 | (True, False)
+RR(a1), RR(a2) | (1.41421356237309, -1.41421356237309)
+RDF(a1), float(a2) | (1.414213562373095, -1.414213562373095)
+CC(a1), CC(a2) | (1.41421356237309, -1.41421356237309)
+RR(a1 + 1/3) | 1.74754689570643
+RR(a0) | TypeError
+x^2 - 3 at 1.70000000000000: K, RR(b), RDF(b), b < 1, (b^2).sign() | (Number Field in b with defining polynomial x^2 - 3 with b = 1.732050807568878?, 1.73205080756888, 1.7320508075688772, False, 1)
+x^2 - 3 at -1.70000000000000: K, RR(b), RDF(b), b < 1, (b^2).sign() | (Number Field in b with defining polynomial x^2 - 3 with b = -1.732050807568878?, -1.73205080756888, -1.7320508075688772, True, 1)
+x^3 - 2 at 1.26000000000000: K, RR(b), RDF(b), b < 1, (b^2).sign() | (Number Field in b with defining polynomial x^3 - 2 with b = 1.259921049894873?, 1.25992104989487, 1.259921049894873, False, 1)
+x^2 - 5 at 2.20000000000000: K, RR(b), RDF(b), b < 1, (b^2).sign() | (Number Field in b with defining polynomial x^2 - 5 with b = 2.236067977499790?, 2.23606797749979, 2.23606797749979, False, 1)
+x^2 - 7 at -2.60000000000000: K, RR(b), RDF(b), b < 1, (b^2).sign() | (Number Field in b with defining polynomial x^2 - 7 with b = -2.645751311064591?, -2.64575131106459, -2.6457513110645907, True, 1)
+x^3 - x - 1 at 1.30000000000000: K, RR(b), RDF(b), b < 1, (b^2).sign() | (Number Field in b with defining polynomial x^3 - x - 1 with b = 1.324717957244746?, 1.32471795724475, 1.3247179572447458, False, 1)
+L1, L2 | (Number Field in i with defining polynomial x^2 + 1 with i = 1*I, Number Field in i with defining polynomial x^2 + 1 with i = -1*I)
+L1 is L2 | False
+CC(L1.gen()), CC(L2.gen()) | (1.00000000000000*I, -1.00000000000000*I)
+CC(L1.gen() + 1/2) | 0.500000000000000 + 1.00000000000000*I
+Q1, Q2, Q0 | (Number Field in a with defining polynomial x^2 - 2 with a = 1.414213562373095?, Number Field in a with defining polynomial x^2 - 2 with a = -1.414213562373095?, Number Field in a with defining polynomial x^2 - 2)
+Q1 is Q2, Q1 is Q0, Q0 is K0 | (False, False, False)
+Q1 is QuadraticField(2, 'a', embedding=1.4) | True
+RR(Q1.gen()), RR(Q2.gen()), Q2.gen() < 0 | (1.41421356237309, -1.41421356237309, True)
+QuadraticField(-5, 'c', embedding=CC(0, -2)) | Number Field in c with defining polynomial x^2 + 5 with c = -2.236067977499790?*I
+CC of it | -2.23606797749979*I
+C5 is C5n, C5 is C5b, C5n is C5b | (False, False, False)
+CC(C5.gen()), CC(C5b.gen()) | (0.309016994374947 + 0.951056516295154*I, -0.809016994374947 + 0.587785252292473*I)
+C5 is CyclotomicField(5, embedding=CC(exp(2*pi*I/5))) | False
+NF(x^2-2) == NF(y^2-2), is | (False, False)
+NF(y^2-2) | Number Field in a with defining polynomial y^2 - 2
+latex_name | False
+assume_disc_small | False
+maximize_at_primes | False
+same options, same field | True

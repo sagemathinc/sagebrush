@@ -369,7 +369,12 @@ def _algebraic_extension(R, gens):
         emb = repr(_sage_qqbar.AA(a)) if a._is_real() else repr(a)
         if emb in ("I", "-I"):
             emb = emb[:-1] + "1*I"  # (as Sage prints the embeddings of QQ[I], QQ[-I])
-        return _sage_nf._unique(_sage_nf.NumberField_absolute(f, name, emb))
+        K = _sage_nf.NumberField_absolute(f, name, emb)
+        # (its embedding, through RLF or CLF as Sage's QQ[...], so it orders
+        # as a real one; its elements convert as the algebraic numbers they
+        # are)
+        K._emb_root, K._emb_kind, K._emb_exact = _sage_qqbar.QQbar(a), ("RLF" if a._is_real() else "CLF"), True
+        return _sage_nf._unique(K)
     except (TypeError, ValueError, NotImplementedError) as e:
         # (e.g. a minimal polynomial with non-integral coefficients, as for
         # cos(2*pi/5): Sage's field is defined by x^2 + 1/2*x - 1/4)
