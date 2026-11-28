@@ -132,7 +132,10 @@ test("the exemption list's reach (bench/mpmath/exempt-141.json): each pattern ma
   }
   assert.equal(exempt("53n one.__pow__(two)\tmpf(0,1,0,1)", "53n one.__pow__(two)\tmpf(0,3,0,2)"), null);
   // (the fuzz rules: fuzz.py's own rows, positive and negative, for each pattern and its value check)
-  assert.ok(script("python", ["fuzz.py", "selftest"]).includes("selftest: 13 rows, 0 wrong"));
+  const selftest = script("python", ["fuzz.py", "selftest"]);
+  assert.ok(selftest.includes("selftest: 13 rows, 0 wrong"));
+  // (the correctly rounded rule, mpmath/mpmath#1251: a mismatch passes only where the core is right)
+  assert.ok(selftest.includes("selftest correctly rounded: 11 rows, 0 wrong"));
 });
 
 test("the fuzzer's cases in a shuffled order, in one session on the core: the same lines as in their own order", () => {

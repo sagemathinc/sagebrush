@@ -437,6 +437,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-mpoly (deps: bigint, arith, poly, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and its unchecked indexing is into numeric accumulator slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
+   "file": "engine/mpoly/tests/frames_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "9a7688ace56889a86bdf76de35c6ee8542de21b5d7f4b61b74acb189c4ef62cd",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator."
+  },
+  {
    "file": "engine/nd/src/micro.rs",
    "item": "fn avx2_fma_tile",
    "hash": "3515ae53bd5d1effd4a3efba984fff83b2a2877414026dd4135721c909b8ee19",

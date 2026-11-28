@@ -1387,36 +1387,81 @@ impl QPoly {
         v
     }
 
+    /// The polynomial of [`to_bytes`](QPoly::to_bytes)' bytes, from any
+    /// bytes: every count is checked against the bytes present before
+    /// anything is allocated for it (so what is allocated is bounded by
+    /// the bytes given), and the record must be one the representation
+    /// allows (refused otherwise): flags, packing (1 <= bits, n bits <=
+    /// 64), exponents within it, terms decreasing (no repeats), no zero
+    /// coefficient, a positive denominator, a modulus in [2, 2^63) with
+    /// denominator 1, nothing after the record.  Word coefficients sent as
+    /// big integers, and over Q a content shared with the denominator or
+    /// coefficients over GF(p) out of [0, p), are made canonical.
     pub fn from_bytes(b: &[u8]) -> Result<QPoly, String> {
         let mut r = Reader { b, i: 0 };
         if r.take(3)? != b"MP1" {
             return Err("not a Sagebrush polynomial".into());
         }
-        let kind = r.take(1)?[0];
-        let n = r.u32()? as usize;
-        let bits = r.u32()?;
-        let len = r.u64()? as usize;
-        let den = r.big()?;
-        let pm = if kind & 2 != 0 { r.u64()? } else { 0 };
-        let kind = kind & 1;
-        let mut exps = Vec::with_capacity(len);
-        for _ in 0..len {
-            exps.push(r.u64()?);
+        let flags = r.take(1)?[0];
+        if flags & !3 != 0 {
+            return Err("a polynomial record with unknown flags".into());
         }
-        let coeffs = if kind == 0 {
+        let n = usize::try_from(r.u32()?).map_err(|_| "too many variables")?;
+        let bits = r.u32()?;
+        if bits == 0 || bits > 64 || n as u64 * bits as u64 > 64 {
+            return Err("a polynomial record with an impossible packing".into());
+        }
+        let len = r.u64()?;
+        let den = r.big()?;
+        if !den.is_positive() {
+            return Err("a polynomial record with a denominator not positive".into());
+        }
+        let pm = if flags & 2 != 0 { r.u64()? } else { 0 };
+        if flags & 2 != 0 && (pm < 2 || pm >= 1 << 63 || !den.is_one()) {
+            return Err("a polynomial record with an impossible modulus".into());
+        }
+        let big = flags & 1 != 0;
+        // (the terms' bytes present: 8 an exponent, then 8 a word
+        // coefficient or at least 4 a big one)
+        let per = if big { 12 } else { 16 };
+        let len = usize::try_from(len).ok().filter(|&l| l.checked_mul(per).is_some_and(|need| need <= r.left())).ok_or("truncated polynomial")?;
+        let mut exps = Vec::with_capacity(len);
+        let used = if n == 0 { 0 } else { n as u32 * bits };
+        for t in 0..len {
+            let w = r.u64()?;
+            if used < 64 && w >> used != 0 {
+                return Err("a polynomial record with an exponent outside its packing".into());
+            }
+            if t > 0 && w >= exps[t - 1] {
+                return Err("a polynomial record with terms not decreasing".into());
+            }
+            exps.push(w);
+        }
+        let coeffs = if big {
             let mut c = Vec::with_capacity(len);
             for _ in 0..len {
-                c.push(r.u64()? as i64);
+                let x = r.big()?;
+                if x.is_zero() {
+                    return Err("a polynomial record with a zero coefficient".into());
+                }
+                c.push(x);
             }
-            Coeffs::Small(c)
+            Coeffs::shrink(c)
         } else {
             let mut c = Vec::with_capacity(len);
             for _ in 0..len {
-                c.push(r.big()?);
+                let x = r.u64()? as i64;
+                if x == 0 {
+                    return Err("a polynomial record with a zero coefficient".into());
+                }
+                c.push(x);
             }
-            Coeffs::Big(c)
+            Coeffs::Small(c)
         };
-        Ok(QPoly { num: ZPoly { n, bits, exps, coeffs }, den, p: pm })
+        if r.left() != 0 {
+            return Err("bytes after a polynomial record".into());
+        }
+        Ok(QPoly { num: ZPoly { n, bits, exps, coeffs }, den, p: pm }.normalize())
     }
 
     /// The terms as text: "e0,e1,...:c;..." with c an integer or p/q
@@ -1499,12 +1544,15 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn take(&mut self, k: usize) -> Result<&'a [u8], String> {
-        if self.i + k > self.b.len() {
-            return Err("truncated polynomial".into());
-        }
-        let s = &self.b[self.i..self.i + k];
-        self.i += k;
+        let end = self.i.checked_add(k).filter(|&e| e <= self.b.len()).ok_or("truncated polynomial")?;
+        let s = &self.b[self.i..end];
+        self.i = end;
         Ok(s)
+    }
+
+    /// The bytes not yet read.
+    fn left(&self) -> usize {
+        self.b.len() - self.i
     }
 
     fn u32(&mut self) -> Result<u32, String> {
@@ -1518,6 +1566,10 @@ impl<'a> Reader<'a> {
     fn big(&mut self) -> Result<BigInt, String> {
         let h = self.u32()?;
         let (k, neg) = ((h >> 1) as usize, h & 1 == 1);
+        // (the words present before they are allocated)
+        if k.checked_mul(8).is_none_or(|need| need > self.left()) {
+            return Err("truncated polynomial".into());
+        }
         let mut words = Vec::with_capacity(k);
         for _ in 0..k {
             words.push(self.u64()?);
@@ -1537,7 +1589,17 @@ impl<'a> Reader<'a> {
 pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
     let arg = |i: usize| -> Result<&[u8], String> { args.get(i).copied().ok_or_else(|| format!("{}: missing argument", op)) };
     let text = |i: usize| -> Result<&str, String> { std::str::from_utf8(arg(i)?).map_err(|_| "bad text".to_string()) };
-    let poly = |i: usize| -> Result<QPoly, String> { QPoly::from_bytes(arg(i)?) };
+    // (the polynomials of one call: one ring, the same variables and modulus)
+    let ring: std::cell::Cell<Option<(usize, u64)>> = std::cell::Cell::new(None);
+    let poly = |i: usize| -> Result<QPoly, String> {
+        let q = QPoly::from_bytes(arg(i)?)?;
+        match ring.get() {
+            None => ring.set(Some((q.num.n, q.p))),
+            Some(r) if r != (q.num.n, q.p) => return Err(format!("{}: polynomials of different rings", op)),
+            Some(_) => {}
+        }
+        Ok(q)
+    };
     let one = |p: QPoly| -> Result<Vec<Vec<u8>>, String> { Ok(vec![p.to_bytes()]) };
     match op {
         "new" => {
@@ -1568,7 +1630,7 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
                     return Err("the defining polynomial must be monic".into());
                 }
                 return if op == "mulred" {
-                    one(a.mul_reduce_z(&QPoly::from_bytes(arg(1)?)?, &m)?)
+                    one(a.mul_reduce_z(&poly(1)?, &m)?)
                 } else {
                     let e: u64 = text(1)?.parse().map_err(|_| "bad exponent")?;
                     one(a.pow_reduce_z(e, &m)?)
@@ -1579,7 +1641,7 @@ pub fn call(op: &str, args: &[&[u8]]) -> Result<Vec<Vec<u8>>, String> {
                 return Err("the defining polynomial must be monic".into());
             }
             if op == "mulred" {
-                let b = QPoly::from_bytes(arg(1)?)?;
+                let b = poly(1)?;
                 one(a.mul_reduce(&b, &m)?)
             } else {
                 let e: u64 = text(1)?.parse().map_err(|_| "bad exponent")?;
@@ -1760,6 +1822,11 @@ pub fn call_framed(req: &[u8]) -> Vec<u8> {
         let k = r.u32()? as usize;
         let op = std::str::from_utf8(r.take(k)?).map_err(|_| "bad op")?.to_string();
         let m = r.u32()? as usize;
+        // (each argument's length word present before the table is
+        // allocated: at most a quarter of the request's bytes)
+        if m.checked_mul(4).is_none_or(|need| need > r.left()) {
+            return Err("truncated polynomial".into());
+        }
         let mut args = Vec::with_capacity(m);
         for _ in 0..m {
             let l = r.u32()? as usize;
@@ -1789,6 +1856,181 @@ pub fn call_framed(req: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A framed request for op on polynomial (and text) arguments.
+    fn frame(op: &str, args: &[&[u8]]) -> Vec<u8> {
+        let mut v = (op.len() as u32).to_le_bytes().to_vec();
+        v.extend_from_slice(op.as_bytes());
+        v.extend_from_slice(&(args.len() as u32).to_le_bytes());
+        for a in args {
+            v.extend_from_slice(&(a.len() as u32).to_le_bytes());
+            v.extend_from_slice(a);
+        }
+        v
+    }
+
+    /// The message of an "er" reply (panics on "ok").
+    fn refusal(reply: &[u8]) -> String {
+        assert_eq!(&reply[..2], b"er", "accepted: {:?}", reply);
+        String::from_utf8_lossy(&reply[2..]).into_owned()
+    }
+
+    /// A record's header: flags, n, bits, len, den (a big), then the rest.
+    fn record(flags: u8, n: u32, bits: u32, len: u64, den: &[u8], rest: &[u8]) -> Vec<u8> {
+        let mut v = b"MP1".to_vec();
+        v.push(flags);
+        v.extend_from_slice(&n.to_le_bytes());
+        v.extend_from_slice(&bits.to_le_bytes());
+        v.extend_from_slice(&len.to_le_bytes());
+        v.extend_from_slice(den);
+        v.extend_from_slice(rest);
+        v
+    }
+
+    fn words(ws: &[u64]) -> Vec<u8> {
+        ws.iter().flat_map(|w| w.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn frames_declaring_more_than_they_hold_are_refused_before_allocating() {
+        // counts far past the bytes present (the table, the terms, a big
+        // integer's words): refused as truncated, nothing allocated for them
+        // (each would ask for gigabytes to terabytes)
+        let one = big_one();
+        let mut huge_args = frame("len", &[]);
+        let k = huge_args.len();
+        huge_args[k - 4..].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(refusal(&call_framed(&huge_args)).contains("truncated"));
+        for (flags, len) in [(0u8, u64::MAX), (1, u64::MAX), (0, 1 << 40), (1, (1 << 61) + 1)] {
+            let r = record(flags, 2, 8, len, &one, &words(&[1, 1]));
+            assert!(refusal(&call_framed(&frame("len", &[&r]))).contains("truncated"), "flags {} len {}", flags, len);
+        }
+        // a denominator declaring 2^31 - 1 words, holding none
+        let r = record(0, 1, 8, 0, &u32::MAX.to_le_bytes(), &[]);
+        assert!(refusal(&call_framed(&frame("len", &[&r]))).contains("truncated"));
+        // an argument length past the request
+        let mut f = frame("len", &[b"MP1"]);
+        let at = f.len() - 7;
+        f[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(refusal(&call_framed(&f)).contains("truncated"));
+    }
+
+    fn big_one() -> Vec<u8> {
+        let mut v = 2u32.to_le_bytes().to_vec();
+        v.extend_from_slice(&1u64.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn records_the_representation_does_not_allow_are_refused() {
+        let one = big_one();
+        let zero_den = 0u32.to_le_bytes().to_vec();
+        let mut minus_one = 3u32.to_le_bytes().to_vec();
+        minus_one.extend_from_slice(&1u64.to_le_bytes());
+        // x^2 y + 3 in 2 variables of 8 bits: words 0x0201, 0; coefficients 1, 3
+        let terms = |ws: &[u64], cs: &[u64]| [words(ws), words(cs)].concat();
+        let good = record(0, 2, 8, 2, &one, &terms(&[0x0201, 0], &[1, 3]));
+        assert_eq!(&call_framed(&frame("text", &[&good]))[..2], b"ok");
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("unknown flags", record(4, 2, 8, 2, &one, &terms(&[0x0201, 0], &[1, 3]))),
+            ("impossible packing", record(0, 2, 0, 0, &one, &[])),
+            ("impossible packing", record(0, 2, 33, 0, &one, &[])),
+            ("impossible packing", record(0, 9, 8, 0, &one, &[])),
+            ("outside its packing", record(0, 2, 8, 1, &one, &terms(&[1 << 16], &[1]))),
+            ("not decreasing", record(0, 2, 8, 2, &one, &terms(&[0, 0x0201], &[3, 1]))),
+            ("not decreasing", record(0, 2, 8, 2, &one, &terms(&[0x0201, 0x0201], &[1, 3]))),
+            ("zero coefficient", record(0, 2, 8, 2, &one, &terms(&[0x0201, 0], &[1, 0]))),
+            ("zero coefficient", record(1, 2, 8, 1, &one, &[words(&[0x0201]), 0u32.to_le_bytes().to_vec()].concat())),
+            ("denominator not positive", record(0, 2, 8, 0, &zero_den, &[])),
+            ("denominator not positive", record(0, 2, 8, 0, &minus_one, &[])),
+            ("impossible modulus", record(2, 2, 8, 0, &one, &words(&[1]))),
+            ("impossible modulus", record(2, 2, 8, 0, &one, &words(&[1 << 63]))),
+            ("impossible modulus", record(2, 2, 8, 0, &[2u32.to_le_bytes().to_vec(), words(&[3])].concat(), &words(&[7]))),
+            ("bytes after", [good.clone(), vec![0]].concat()),
+        ];
+        for (want, r) in cases {
+            let e = refusal(&call_framed(&frame("text", &[&r])));
+            assert!(e.contains(want), "{}: {}", want, e);
+        }
+        // made canonical, not refused: a word coefficient sent big, over Q a
+        // content shared with the denominator (2x/2 = x), over GF(7) 9 = 2
+        let mut nine_big = 2u32.to_le_bytes().to_vec();
+        nine_big.extend_from_slice(&2u64.to_le_bytes());
+        let half = record(1, 1, 8, 1, &nine_big, &[words(&[1]), nine_big.clone()].concat());
+        assert_eq!(QPoly::from_bytes(&half).unwrap().to_text(), "1:1");
+        let r = record(2, 1, 8, 1, &one, &[words(&[7]), words(&[1]), words(&[9])].concat());
+        assert_eq!(QPoly::from_bytes(&r).unwrap().to_text(), "1:2");
+    }
+
+    #[test]
+    fn one_call_one_ring() {
+        // the polynomials of a call share their variables and modulus
+        let a = QPoly::from_text(2, "1,0:1").unwrap().to_bytes();
+        let b = QPoly::from_text(3, "1,0,0:1").unwrap().to_bytes();
+        let c = QPoly { num: QPoly::from_text(2, "1,0:1").unwrap().num, den: BigInt::one(), p: 7 }.to_bytes();
+        for (x, y) in [(&a, &b), (&a, &c)] {
+            for op in ["add", "sub", "mul", "eq"] {
+                assert!(refusal(&call_framed(&frame(op, &[x, y]))).contains("different rings"), "{}", op);
+            }
+        }
+        assert_eq!(&call_framed(&frame("add", &[&a, &a]))[..2], b"ok");
+    }
+
+    #[test]
+    fn malformed_frames_never_panic() {
+        // every truncation of a few valid requests, and 20000 random byte
+        // mutations of them (flips, overwrites with 0, 0xff and counts):
+        // each reply is "ok" or "er", never a panic
+        let p = QPoly::from_text(3, "3,1,0:5;1,2,1:-7/3;0,0,4:123456789012345678901234567890;0,0,0:1").unwrap().to_bytes();
+        let q = QPoly::from_text(3, "1,0,0:1;0,1,0:2").unwrap().to_bytes();
+        let m = QPoly { num: QPoly::from_text(2, "2,1:3;0,1:5;0,0:1").unwrap().num.reduce_mod(101), den: BigInt::one(), p: 101 }.to_bytes();
+        let reqs = [frame("mul", &[&p, &q]), frame("add", &[&p, &p]), frame("text", &[&m]), frame("divrem", &[&p, &q]), frame("pow", &[&q, b"3"])];
+        let accepted = std::cell::Cell::new(0);
+        let refused = std::cell::Cell::new(0);
+        let run = |f: &[u8]| {
+            let r = std::panic::catch_unwind(|| call_framed(f));
+            let r = r.unwrap_or_else(|_| panic!("panicked on {:?}", f));
+            assert!(r.starts_with(b"ok") || r.starts_with(b"er"));
+            let c = if r.starts_with(b"ok") { &accepted } else { &refused };
+            c.set(c.get() + 1);
+        };
+        for f in &reqs {
+            for k in 0..f.len() {
+                run(&f[..k]);
+            }
+        }
+        let mut x = 0x2545F4914F6CDD1Du64;
+        let mut next = |m: usize| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x % m as u64) as usize
+        };
+        for _ in 0..20000 {
+            let mut f = reqs[next(reqs.len())].clone();
+            for _ in 0..1 + next(3) {
+                let at = next(f.len());
+                match next(4) {
+                    0 => f[at] ^= 1 << next(8),
+                    1 => f[at] = 0,
+                    2 => f[at] = 0xff,
+                    _ => {
+                        let v = [0u32, 1, 2, 0x7fff_ffff, u32::MAX][next(5)].to_le_bytes();
+                        for (k, b) in v.iter().enumerate() {
+                            if at + k < f.len() {
+                                f[at + k] = *b;
+                            }
+                        }
+                    }
+                }
+            }
+            run(&f);
+        }
+        // (both kinds of reply reached: the mutations aren't all refused at
+        // the first byte, nor all harmless)
+        eprintln!("malformed frames: {} accepted, {} refused", accepted.get(), refused.get());
+        assert!(accepted.get() > 1000 && refused.get() > 1000);
+    }
 
     fn lin(n: usize) -> ZPoly {
         // 1 + x1 + ... + xn
