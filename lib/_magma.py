@@ -4272,18 +4272,41 @@ def _join(a, b, pos=None):
     return _set_result(MSet(list(a) + list(b), k), "join", a, b, pos, "No valid universe containing all elements")
 
 
+def _multiplicity(x, s):
+    """x's multiplicity in the multiset s (equal elements of one universe)."""
+    e = s.keys.get(_key(x))
+    if e is None:
+        e = next((s.keys[_key(y)] for y in s.items if _cmpeq(x, y)), None)
+    return 0 if e is None else e[1]
+
+
+def _multi_counts(a, b, count):
+    """The multiset of a's elements, each count(its multiplicity in a, in b)
+    times (meet: the least; diff: the excess over b's)."""
+    out = []
+    for x in a.items:
+        out.extend([x] * count(a.keys[_key(x)][1], _multiplicity(x, b)))
+    return MSet(out, "multi")
+
+
 def _meet(a, b, pos=None):
     _set_pair("meet", a, b, pos, "No valid universe containing all elements")
     a, b = _ff_sets(a, b, "meet", pos, "No valid universe containing all elements")
-    return _set_result(MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "meet", a, b, pos,
-                       "No valid universe containing all elements", mode="meet")
+    if a.kind == b.kind == "multi":
+        r = _multi_counts(a, b, min)
+    else:
+        r = MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
+    return _set_result(r, "meet", a, b, pos, "No valid universe containing all elements", mode="meet")
 
 
 def _diff(a, b, pos=None):
     _set_pair("diff", a, b, pos, "No valid universe containing all elements")
     a, b = _ff_sets(a, b, "diff", pos, "No valid universe containing all elements")
-    return _set_result(MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "diff", a, b, pos,
-                       "No valid universe containing all elements", mode="first")
+    if a.kind == b.kind == "multi":
+        r = _multi_counts(a, b, lambda m, n: max(m - n, 0))
+    else:
+        r = MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
+    return _set_result(r, "diff", a, b, pos, "No valid universe containing all elements", mode="first")
 
 
 def _sdiff(a, b, pos=None):
@@ -5812,7 +5835,11 @@ def _ext_type(x):
     if isinstance(x, _MModMat):
         return "%s[%s]" % (_type_name(x), _ring_cat(x.base_ring()))
     if isinstance(x, _smat.Matrix):
-        return "%s[%s]" % ("AlgMatElt" if x.is_square() else "ModMatRngElt", _ring_cat(x.base_ring()))
+        # (a matrix that isn't square: over a field ModMatFldElt, as Magma's,
+        # else ModMatRngElt)
+        R = x.base_ring()
+        kind = "AlgMatElt" if x.is_square() else "ModMatFldElt" if getattr(R, "is_field", lambda: False)() else "ModMatRngElt"
+        return "%s[%s]" % (kind, _ring_cat(R))
     if isinstance(x, _Cat):
         return "Cat[%s]" % x
     if isinstance(x, _MCycField):
@@ -7858,8 +7885,8 @@ def Sqrt(x):
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
     "Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
-    "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
-    "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
+    "Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
+    "Normalise Normalize Numerator Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
     "Stabilizer Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
@@ -8589,6 +8616,10 @@ def Numerator(x):
         D, B = _fun_presentation_meta(x.F, x.v)
         _fun_preflight_result(x.F, D, B, budget, "numerator presentation")
         return x.F._parts(x.v)[0]
+    if isinstance(x, _MNFElt):
+        return x * Denominator(x)
+    if isinstance(x, (_smat.Matrix, _MVector)):
+        raise _bad_types("Numerator", (x,), _located("Numerator"))  # (Magma has none for matrices and vectors)
     return x.numerator if isinstance(x, _Fraction) else x
 
 
@@ -8598,7 +8629,22 @@ def Denominator(x):
         D, B = _fun_presentation_meta(x.F, x.v)
         _fun_preflight_result(x.F, D, B, budget, "denominator presentation")
         return x.F._parts(x.v)[1]
+    if isinstance(x, _MNFElt):
+        # (the least common denominator of its coordinates on 1, a, a^2, ..,
+        # as Magma's: 2 for (1 + a)/2 in Q(sqrt 5) too, integral or not)
+        return _coords_denominator(_Fraction(c) for c in x.parent()._to_user(x._c))
+    if isinstance(x, _smat.Matrix):
+        return _coords_denominator(_Fraction(c) for row in x.rows() for c in row)
+    if isinstance(x, _MVector):
+        return _coords_denominator(_Fraction(c) for c in x)
     return x.denominator if isinstance(x, _Fraction) else 1
+
+
+def _coords_denominator(cs):
+    d = 1
+    for c in cs:
+        d = d * c.denominator // _math.gcd(d, c.denominator)
+    return d
 
 
 def _fun_factor_key(item):
@@ -9335,8 +9381,16 @@ def Remove(s, i):
 
 
 def Insert(s, i, x):
+    if not isinstance(i, int) or isinstance(i, bool):
+        raise _bad_types("Insert", (s, i, x), _located("Insert"))
+    if i < 1:
+        raise MagmaError("Argument 2 must be positive", "'Insert'", True, _located("Insert"))
     x = _lift("Insert", s, x, "Cannot coerce element into the universe")
     s = _own(s) if isinstance(s, MSeq) else _as_seq(s)
+    # (past the end: undefined elements up to position i, as Magma's; a
+    # Python insert would put x at the end)
+    while len(s) < i - 1:
+        s.append(_UNDEF)
     s.insert(i - 1, x)
     _settle(s)
     return s
@@ -9488,6 +9542,9 @@ def Eltseq(x):
             raise MagmaError("Bad argument types\nArgument types given: %s[%s]" % (_type(x), et), "'Eltseq'", True)
     if isinstance(x, _MVectorSpace):
         raise _bad_types("Eltseq", (x,))
+    if isinstance(x, _smat.Matrix):
+        # (its entries, row by row, in its ring, as Magma's; not its rows)
+        return MSeq([c for row in x.rows() for c in row], x.base_ring())
     return MSeq(x)
 
 
