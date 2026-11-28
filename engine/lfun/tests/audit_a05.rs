@@ -51,6 +51,26 @@ fn a05_f2_reciprocal_and_division_keep_representable_results() {
             assert!(close(r, 1.0, 0.0, 1e-15), "2^{}: {:?}", k, r);
         }
     }
+    // each part on its own: z / 1 and z / i are exact, whatever the parts' sizes, independently,
+    // and the smaller part of a lopsided z survives (scaling the dividend by its own larger part
+    // flushed it: (1e308 + 1e-308 i) / 1 was 1e308)
+    let parts = [0.0, 5e-324, 1e-310, 1e-308, 1e-200, 1e-100, 0.5, 1.0, 3.0, 1e100, 1e200, 1e300, 1e308, f64::MAX];
+    for &x in &parts {
+        for &y in &parts {
+            for (sx, sy) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+                let z = C64::new(sx * x, sy * y);
+                let q1 = z / C64::ONE;
+                assert!(q1.re == z.re && q1.im == z.im, "{:?} / 1 = {:?}", z, q1);
+                let qi = z / C64::I;
+                assert!(qi.re == z.im && qi.im == -z.re, "{:?} / i = {:?}", z, qi);
+                let qm = z / C64::new(-2.0, 0.0);
+                assert!(qm.re == z.re / -2.0 && qm.im == z.im / -2.0, "{:?} / -2 = {:?}", z, qm);
+            }
+        }
+    }
+    // a lopsided divisor of moderate quotient: (1e308 + 1e-308 i) / (2 + 0 i) keeps its 5e-309
+    let q = C64::new(1e308, 1e-308) / C64::new(2.0, 0.0);
+    assert_eq!((q.re, q.im), (5e307, 5e-309));
     // controls: moderate inputs keep the bits Smith's formulas gave
     let c = C64::new(3.0, 4.0).recip();
     assert_eq!((c.re, c.im), (0.12, -0.16));

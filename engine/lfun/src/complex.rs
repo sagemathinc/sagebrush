@@ -74,23 +74,41 @@ impl C64 {
         self.re.is_finite() && self.im.is_finite()
     }
 
-    /// self / o with both scaled to parts near 1 by powers of two first (exact),
-    /// then the quotient scaled back: representable quotients stay representable
-    /// whatever the size of either part.  (Smith's 1/z overflowed its
-    /// denominator at 1e308 + 1e308 i and gave 0; division by way of the
-    /// reciprocal gave inf and NaN at 1e-309 + 1e-309 i, whose quotient by
-    /// itself is 1: Codex audit A05-F2.)
+    /// self / o with both scaled by the same power of two (exact), the one
+    /// that brings the divisor's larger part near 1: the quotient is the same,
+    /// and the divisor's reciprocal is then a moderate number.  (Smith's 1/z
+    /// overflowed its denominator at 1e308 + 1e308 i and gave 0; division by
+    /// way of the reciprocal gave inf and NaN at 1e-309 + 1e-309 i, whose
+    /// quotient by itself is 1: Codex audit A05-F2.)  The dividend is not
+    /// scaled by its own size: that flushed its smaller part, and (1e308 +
+    /// 1e-308 i) / 1 lost the 1e-308.  A dividend part that the common scaling
+    /// takes out of the doubles is a quotient part out of them too (to within
+    /// the divisor's factor of 2).
     fn div_scaled(self, o: C64) -> C64 {
-        let (ma, mb) = (self.re.abs().max(self.im.abs()), o.re.abs().max(o.im.abs()));
-        if !(ma.is_finite() && mb.is_finite() && mb > 0.0) || ma == 0.0 {
-            // (0, a zero divisor, infinities and NaNs as the plain formula gives them)
+        let mb = o.re.abs().max(o.im.abs());
+        if !(self.is_finite() && mb.is_finite() && mb > 0.0) {
+            // (a zero divisor, infinities and NaNs as the plain formula gives them)
             return self * o.recip_smith();
         }
-        let (ea, eb) = (ilog2(ma), ilog2(mb));
-        let a = C64::new(scale2(self.re, -ea), scale2(self.im, -ea));
+        let eb = ilog2(mb);
         let b = C64::new(scale2(o.re, -eb), scale2(o.im, -eb));
+        // (scaled up, the dividend could pass the doubles though the quotient
+        // doesn't, 1 / 1e-308 among them: it goes up to 2^1020 at most, and
+        // the rest of the factor is applied to the quotient, exactly; it is
+        // never scaled down for its own size, which would flush its smaller part)
+        let ma = self.re.abs().max(self.im.abs());
+        let mut k = -eb;
+        if k > 0 && ma > 0.0 && ilog2(ma) + k > 1020 {
+            k = (1020 - ilog2(ma)).max(0);
+        }
+        let a = C64::new(scale2(self.re, k), scale2(self.im, k));
         let q = a * b.recip_smith();
-        C64::new(scale2(q.re, ea - eb), scale2(q.im, ea - eb))
+        let rest = -eb - k;
+        if rest == 0 {
+            q
+        } else {
+            C64::new(scale2(q.re, rest), scale2(q.im, rest))
+        }
     }
 }
 
