@@ -54,26 +54,37 @@ fn swinnerton_dyer(k: usize) -> Vec<BigInt> {
     s
 }
 
-#[test]
-fn stop_inside_the_cld_bounds() {
-    let f = swinnerton_dyer(5);
-    let site = "cld bounds";
+/// Trace a factorization of `f`, then Stop at the middle check made in `site`: the call unwinds there, with
+/// no live reservation, and the next call works.  Returns how many checks the site made.
+fn stop_at(f: &[BigInt], site: &str) -> usize {
     sagebrush_interrupt::clear();
     hooks::reset();
     hooks::trace();
-    assert_eq!(try_factor_with(&f, &Budget::default()).unwrap().1, vec![(f.clone(), 1)]);
+    assert_eq!(try_factor_with(f, &Budget::default()).unwrap().1, vec![(f.to_vec(), 1)]);
     let idx = hooks::traced(site);
     hooks::reset();
-    // a check at each of the 32 bounds of every call (before, only the debit's one ahead of them all)
-    assert!(idx.len() >= 32, "{} checks in the bounds", idx.len());
+    assert!(!idx.is_empty(), "no checks at {site}");
     hooks::arm_at(idx[idx.len() / 2]);
     let b = Budget::default();
-    let r = sagebrush_interrupt::catch(|| try_factor_with(&f, &b).map(|x| x.1.len()));
+    let r = sagebrush_interrupt::catch(|| try_factor_with(f, &b).map(|x| x.1.len()));
     let at = hooks::stopped_in();
     hooks::reset();
     sagebrush_interrupt::clear();
-    assert!(r.is_err(), "not interrupted ({r:?})");
+    assert!(r.is_err(), "{site}: not interrupted ({r:?})");
     assert_eq!(at, site);
-    assert_eq!(b.live(), 0, "live reservation after Stop");
-    assert_eq!(try_factor_with(&f, &Budget::default()).unwrap().1, vec![(f.clone(), 1)]);
+    assert_eq!(b.live(), 0, "{site}: live reservation after Stop");
+    assert_eq!(try_factor_with(f, &Budget::default()).unwrap().1, vec![(f.to_vec(), 1)]);
+    idx.len()
+}
+
+#[test]
+fn stop_inside_the_cld_bounds() {
+    let f = swinnerton_dyer(5);
+    // a check at each of the 32 bounds of every call (before, only the debit's one ahead of them all)
+    let checks = stop_at(&f, "cld bounds");
+    assert!(checks >= 32, "{checks} checks in the bounds");
+    // and the coarse poll, which asks the WebAssembly host every time (a check, only every 1024th): a
+    // call's 32 * 33 terms make two, every 512 terms
+    let polls = stop_at(&f, "cld bounds poll");
+    assert!(polls >= 2, "{polls} coarse polls in the bounds");
 }

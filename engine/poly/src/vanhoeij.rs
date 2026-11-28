@@ -1153,13 +1153,15 @@ fn cld_bounds<'b>(b: &'b Budget, g: &[BigInt]) -> FResult<(Vec<BigInt>, Reservat
     let nn = BigInt::from(n as u64);
     let mut out = vec![];
     // n + 1 terms a bound, n bounds: Stop is checked at every bound and polled
-    // every BOUND_TERMS_PER_POLL terms (degree 8000 takes seconds)
+    // every BOUND_TERMS_PER_POLL terms (degree 8000 takes seconds; a check
+    // asks the WebAssembly host only every 1024th time, the coarse poll every time)
     let _h = sagebrush_interrupt::enter("cld bounds");
     let mut terms = 0usize;
     let mut term = || {
         terms += 1;
         if terms == BOUND_TERMS_PER_POLL {
             terms = 0;
+            let _p = sagebrush_interrupt::enter("cld bounds poll");
             sagebrush_interrupt::check_coarse();
         }
     };
@@ -1181,7 +1183,7 @@ fn cld_bounds<'b>(b: &'b Budget, g: &[BigInt]) -> FResult<(Vec<BigInt>, Reservat
 }
 
 /// Terms of the CLD bounds between two coarse polls of Stop.
-const BOUND_TERMS_PER_POLL: usize = 1 << 12;
+const BOUND_TERMS_PER_POLL: usize = 1 << 9;
 
 /// x * y mod (x^N, m), coefficients in [0, m).
 fn tmul(b: &Budget, x: &[BigInt], y: &[BigInt], nn: usize, m: &BigInt) -> FResult<Vec<BigInt>> {
