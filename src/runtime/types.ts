@@ -1063,11 +1063,33 @@ method(BaseException, "__repr__", (self: any) => {
   return `${typeName(self)}(${a.length === 1 ? repr(a[0]) : a.map(repr).join(", ")})`;
 });
 method(BaseException, "with_traceback", (self: any, _tb: any) => self);
-method(BaseException, "add_note", (self: any, note: string) => {
-  (self.__notes__ ??= []).push(note);
+// (as CPython's BaseException_add_note: a str (a subclass too), into __notes__, which must be a list if present)
+method(BaseException, "add_note", (self: any, note: any) => {
+  if (!isinstance(note, T.str)) raise(T.TypeError, `add_note() argument must be str, not ${note === null ? "None" : typeName(note)}`);
+  if (self.__notes__ === undefined) self.__notes__ = [];
+  else if (!isinstance(self.__notes__, T.list)) raise(T.TypeError, "Cannot add note: __notes__ is not a list");
+  self.__notes__.push(note);
   return null;
 });
-for (const [k, v] of [["__cause__", null], ["__context__", null], ["__suppress_context__", false], ["__traceback__", null]] as const) BaseException.$dict.set(k, v);
+// (BaseException's getset descriptors, as CPython's: args any iterable stored as a tuple, never deleted; __cause__
+// and __context__ None or an exception, __cause__'s assignment setting __suppress_context__, a bool; the runtime's
+// own writes set the same properties directly)
+const noDelete = (name: string) => () => raise(T.TypeError, `${name} may not be deleted`);
+getset(BaseException, "args", (o) => o.args ?? tuple([]), (o, v) => void (o.args = tuple(O.toArray(v))), noDelete("args"));
+const excOrNone = (v: any, what: string) => {
+  if (v !== null && !isinstance(v, BaseException)) raise(T.TypeError, `exception ${what} must be None or derive from BaseException`);
+  return v;
+};
+getset(BaseException, "__cause__", (o) => o.__cause__ ?? null, (o, v) => {
+  o.__cause__ = excOrNone(v, "cause");
+  o.__suppress_context__ = true;
+}, noDelete("__cause__"));
+getset(BaseException, "__context__", (o) => o.__context__ ?? null, (o, v) => void (o.__context__ = excOrNone(v, "context")), noDelete("__context__"));
+getset(BaseException, "__suppress_context__", (o) => o.__suppress_context__ ?? false, (o, v) => {
+  if (typeof v !== "boolean") raise(T.TypeError, "attribute value type must be bool");
+  o.__suppress_context__ = v;
+});
+BaseException.$dict.set("__traceback__", null);
 
 function exc(name: string, base: PyType, extra?: (cls: PyType) => void): PyType {
   const cls = objectType(name, [base], new Map(), "builtins");
@@ -1766,6 +1788,19 @@ export function floatCall(x: any = 0): any {
 }
 const float = builtinType("float", [object], floatCall);
 bindClass(FloatBox, float);
+// float.from_number(x), as CPython 3.14's: a real number only (no str), as PyFloat_AsDouble takes it (a float
+// subclass's value, an int subclass's __float__, else __index__); an int past a double's range OverflowError; a
+// subclass called with the float
+float.$dict.set("from_number", new PyClassMethod(pyfn((cls: any, ...args: any[]) => {
+  if (args.length !== 1) raise(T.TypeError, `float.from_number() takes exactly one argument (${args.length} given)`);
+  const x = args[0];
+  const v = asDouble(x);
+  if (v === undefined) raise(T.TypeError, `must be real number, not ${typeName(x)}`);
+  if (!Number.isFinite(v) && (typeof x === "bigint" || (isinstance(x, T.int) && !isinstance(x, float))))
+    raise(T.OverflowError, "int too large to convert to float");
+  const r = O.mkfloat(v);
+  return cls === float ? r : callObj(cls, [r]);
+}, "from_number")));
 method(float, "is_integer", (x: any) => isInt(O.fv(x)!));
 method(float, "conjugate", (x: any) => x);
 method(float, "__float__", (x: any) => (typeof x === "number" || x instanceof FloatBox ? x : O.mkfloat(O.fv(x)!))); // (a subclass's value as a float)
@@ -3780,7 +3815,10 @@ getset(object, "__dict__", (o) => {
       i += 2;
     }
     const a = Uint8Array.from(out);
-    return cls === T.bytearray ? new PyByteArray(a) : new PyBytes(a);
+    // (as CPython's: the base's own value, else the class (a subclass of either) called with the bytes, its __new__
+    // and __init__ run)
+    if (cls === T.bytearray) return new PyByteArray(a);
+    return cls === T.bytes ? new PyBytes(a) : callObj(cls, [new PyBytes(a)]);
   };
   T.bytes.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));
   T.bytearray.$dict.set("fromhex", new PyClassMethod(pyfn(fromhex, "fromhex")));

@@ -64,7 +64,8 @@ test("bench/mpmath runs the very suite pypi-tests/mpmath pins, over the shipped 
 // The Core API records a registry package's modules only as its sagebrush.json declares them (python.modules),
 // not every submodule the introspection reaches; what was already recorded stays (scripts/core-api-surface.mjs,
 // undeclared(); @sagebrush's ruling, Nov 9). So mpmath is recorded as `mpmath` alone, and the packages recorded
-// before keep their entries byte for byte (their hash below is master 2614c7ad's).
+// before keep their entries byte for byte (their hash below is master 2614c7ad's, but for the inherited `args`
+// descriptor every exception class gained at level 74, scipy.io's MatReadError's too).
 test("Core API: a registry package's undeclared submodules aren't recorded; earlier packages' records are unchanged", async () => {
   const { createHash } = await import("node:crypto");
   const api = JSON.parse(readFileSync(join(ROOT, "core-api-surface.json"), "utf8"));
@@ -75,5 +76,5 @@ test("Core API: a registry package's undeclared submodules aren't recorded; earl
   const keys = Object.keys(api.modules).filter((k) => roots.some((r) => k === r || k.startsWith(r + "."))).sort();
   assert.deepEqual(keys, ["scipy.io", "scipy.io.matlab", "sortedcontainers", "sortedcontainers.sorteddict", "sortedcontainers.sortedlist", "sortedcontainers.sortedset", "tabulate"]);
   const h = createHash("sha256").update(JSON.stringify(keys.map((k) => [k, api.modules[k]]))).digest("hex");
-  assert.equal(h, "d118195a220f49456f113c227cb57fd03915397cd8ddbe10d0a73beb95b91435", "their recorded entries, byte for byte");
+  assert.equal(h, "2275c9889ccfaed2d0ffceeb5d24ea8e207b4c3e71743aad4ace47057188923a", "their recorded entries, byte for byte");
 });

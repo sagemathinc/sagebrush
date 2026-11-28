@@ -2,7 +2,7 @@
 // generic dunder path: int/float return NotImplemented for complex operands
 // and complex.__radd__ etc. take over.
 
-import { T, FloatBox, NotImplemented, PyBytes, raise, typeName, tuple, unbox, typeOf, lookupType, bindArgs, sig, pyfn } from "./object";
+import { T, FloatBox, NotImplemented, PyBytes, raise, typeName, tuple, unbox, typeOf, lookupType, bindArgs, sig, pyfn, callObj } from "./object";
 import * as O from "./ops";
 import * as Ty from "./types";
 import { floatRepr, formatComplex, repr } from "./format";
@@ -415,7 +415,22 @@ Ty.subclassable(complexType, PyComplex, ["re", "im"]);
   Ty.getset(complexType, "imag", (a: any) => O.mkfloat(toC(a)![1]));
   // float has these too
   Ty.method(T.float, "__complex__", (x: any) => new PyComplex(O.fv(unbox(x))!, 0));
-  complexType.$dict.set("from_number", new Ty.PyClassMethod(pyfn((_c: any, x: any) => new PyComplex(...asComplex(x, "argument")), "from_number")));
+  // complex.from_number(x), as CPython 3.14's: a complex (a subclass's value, its hooks not called) as it is; else
+  // __complex__; else a real number as PyFloat_AsDouble takes it (a float subclass's value, an int subclass's
+  // __float__, else __index__), never a str; a subclass called with the complex
+  complexType.$dict.set("from_number", new Ty.PyClassMethod(pyfn((cls: any, x: any) => {
+    let c: [number, number];
+    if (unbox(x) instanceof PyComplex) c = toC(x)!;
+    else if (lookupType(typeOf(x), "__complex__") !== undefined) c = complexResult(O.lookupSpecial(x, "__complex__")(x));
+    else {
+      const v = Ty.asDouble(x);
+      if (v === undefined) raise(T.TypeError, `must be real number, not ${typeName(x)}`);
+      if (!Number.isFinite(v) && typeof x === "bigint") raise(T.OverflowError, "int too large to convert to float");
+      c = [v, 0];
+    }
+    const r = new PyComplex(c[0], c[1]);
+    return cls === complexType ? r : callObj(cls, [r]);
+  }, "from_number")));
 }
 void FloatBox;
 void PyBytes;
