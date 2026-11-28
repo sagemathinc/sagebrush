@@ -565,20 +565,20 @@ pub(crate) fn hecke_traces_primes(k: usize, dim: usize, len: usize, q: u64) -> (
 /// The first prime the twisted traces use: 2^30.
 pub const HECKE_PRIMES_FROM: u64 = 1 << 30;
 /// The end of the twisted traces' primes, a limit: the mod-ell kernels
-/// multiply in u64, so ell < 2^32.  The primes = 1 mod e in [2^30, 2^32),
-/// e = eisenstein_exponent(n) (phi(e) < sqrt(n), e = 1 for squarefree n),
-/// number S(e) = 148,880,193 for e <= 2, and 74,439,285, 37,219,306,
-/// 18,610,149, 24,812,622 and 4,550 for e = 4, 12, 16, 18 and 65536 (a
-/// sieve; examples/hecke_prime_supply.rs).
+/// (GeneralSpace::new_mod, charpoly and rref) take ell < 2^31.  The primes
+/// = 1 mod e in [2^30, 2^31), e = eisenstein_exponent(n) (phi(e) < sqrt(n),
+/// e = 1 for squarefree n), number S(e) = 50,697,537 for e <= 2, and
+/// 25,348,870, 12,673,787, 6,336,948, 8,449,765 and 1,530 for e = 4, 12, 16,
+/// 18 and 65536 (a sieve; examples/hecke_prime_supply.rs).
 /// Two refusals, both naming this limit:
 /// - up front, when the CRT count c exceeds S(e): only at weights near
-///   10^8, where L admits at least 2.0 PiB (the least over n <= 200, at n =
-///   1, k = 116,874,434 and q near 2^30; the example);
+///   4 10^7, where L admits at least 0.25 PiB (the least over n <= 200, at
+///   n = 1, k = 41,420,808 and q near 2^30; the example);
 /// - in the loop, once S(e) - c primes are set aside (Reject, counted per
 ///   reason in the statistics and the message), each dividing a fixed
 ///   nonzero integer of the space; bounds on those integers would make this
 ///   a proof (a follow-up).
-pub const HECKE_PRIMES_BELOW: u64 = 1 << 32;
+pub const HECKE_PRIMES_BELOW: u64 = 1 << 31;
 
 /// The primes ell = 1 mod `order` from HECKE_PRIMES_FROM up, ascending,
 /// below HECKE_PRIMES_BELOW.
@@ -646,7 +646,7 @@ pub fn orbit_hecke_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbit
 }
 
 /// orbit_hecke_traces with the primes given (any = 1 mod
-/// eisenstein_exponent(n), below 2^32): the tests' entry point for small primes, where
+/// eisenstein_exponent(n), below 2^31): the tests' entry point for small primes, where
 /// each Reject can fire.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn orbit_hecke_traces_from(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, len: usize, q: u64, primes: impl Iterator<Item = u64>) -> Result<(Vec<OrbitHecke>, HeckeTraceStats), String> {
@@ -681,7 +681,7 @@ pub(crate) fn orbit_hecke_traces_from(n: u64, k: usize, eps: &Character, res: &N
     let mut primes = primes;
     let head: Vec<u64> = primes.by_ref().take(usize::try_from(count).unwrap_or(usize::MAX)).collect();
     if (head.len() as u64) < count {
-        return Err(format!("twisted traces: the limit of primes = 1 mod {} below 2^32 (the u64 kernels): the CRT needs {}, there are {}", e_top, count, head.len()));
+        return Err(format!("twisted traces: the limit of primes = 1 mod {} below 2^31 (the mod-ell kernels' domain): the CRT needs {}, there are {}", e_top, count, head.len()));
     }
     let mut primes = head.into_iter().chain(primes);
     let mut residues: Vec<(u64, Vec<Vec<u64>>)> = vec![];
@@ -694,7 +694,7 @@ pub(crate) fn orbit_hecke_traces_from(n: u64, k: usize, eps: &Character, res: &N
     while modulus <= need {
         sagebrush_interrupt::check_coarse();
         let Some(ell) = primes.next() else {
-            return Err(format!("twisted traces: the limit of primes = 1 mod {} below 2^32 (the u64 kernels): ran out after {} drawn ({} set aside: {})", e_top, drawn, stats.rejected_total(), stats.rejected_summary()));
+            return Err(format!("twisted traces: the limit of primes = 1 mod {} below 2^31 (the mod-ell kernels' domain): ran out after {} drawn ({} set aside: {})", e_top, drawn, stats.rejected_total(), stats.rejected_summary()));
         };
         drawn += 1;
         debug_assert!(ell % e_top == 1 % e_top && ell < HECKE_PRIMES_BELOW);
@@ -725,8 +725,9 @@ pub(crate) fn orbit_hecke_traces_from(n: u64, k: usize, eps: &Character, res: &N
     }
     let sel = sel.ok_or("internal error: no prime selected the twisted basis")?;
     let total: usize = rel_deg.iter().map(|&w| 2 * w * len).sum();
-    // (a Stop check before the CRT, which has none of its own: a Stop here
-    // charges everything but the CRT, whose units are added once it is done)
+    // (a Stop check before the CRT, which checks once a digit: a Stop in
+    // it charges everything but the CRT, whose units are added once it is
+    // done)
     local.flush();
     sagebrush_interrupt::check_coarse();
     let ls: Vec<u64> = residues.iter().map(|r| r.0).collect();
@@ -887,6 +888,12 @@ pub fn orbit_traces(n: u64, k: usize, eps: &Character, res: &NewspaceOrbits, bou
 pub mod pins {
     use super::*;
     use crate::orbits::Factorer;
+
+    /// The CRT the twisted traces use (general_exact::crt), for the Stop
+    /// tests' check counts.
+    pub fn crt(residues: &[(u64, Vec<Vec<u64>>)], d: usize, phi: usize) -> Vec<Vec<BigInt>> {
+        crate::general_exact::crt(residues, d, phi)
+    }
 
     pub struct Fixture {
         n: u64,

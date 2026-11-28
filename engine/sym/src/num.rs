@@ -201,6 +201,39 @@ fn q_to_f64(x: &Q) -> f64 {
     }
 }
 
+/// x correctly rounded to a double (ties to even), for the order's key: a
+/// monotone projection, so exact reals keep their value order (q_to_f64
+/// divides the rounded numerator by the rounded denominator, not monotone:
+/// (2^53 + 1)/2^53 > (2^53 + 2)/(2^53 + 1) gave 1 and 1 + 2^-52).  A
+/// quotient of at least 55 bits and a sticky bit, then one rounding;
+/// past 2^1026 an infinity, under 2^-1100 a 0, as the rounding gives them.
+fn q_key_f64(x: &Q) -> f64 {
+    if x.is_zero() {
+        return 0.0;
+    }
+    let (n, d) = (x.numer().abs(), x.denom().clone());
+    // (n/d lies in [2^(e - 1), 2^(e + 1)))
+    let e = n.bits() as i64 - d.bits() as i64;
+    let v = if e > 1026 {
+        f64::INFINITY
+    } else if e < -1100 {
+        0.0
+    } else {
+        let sh = 56 - e;
+        let (num, den) = if sh >= 0 { (n << sh as usize, d) } else { (n, d << (-sh) as usize) };
+        let q = &num / &den;
+        let sticky = BigInt::from(if (&q * &den) == num { 0 } else { 1 });
+        let m: BigInt = (q << 1usize) + sticky;
+        let bits = m.bits() as u32;
+        Mp::fin(&m, -sh - 1, bits).to_f64()
+    };
+    if x.is_negative() {
+        -v
+    } else {
+        v
+    }
+}
+
 impl Num {
     pub fn int(n: i64) -> Num {
         Num::Exact(q(n), Q::zero())
@@ -571,31 +604,43 @@ impl Num {
     }
 
     /// Order of real numbers (for canonical sorting; complex numbers by
-    /// real then imaginary part).
+    /// real then imaginary part).  One key for every kind, so that the order
+    /// is total: the doubles (real part, then imaginary part, each part
+    /// correctly rounded: cmp_key), then the kind, then within the kind the
+    /// full value (an exact number's, an MP number's, a real one as a
+    /// complex one with imaginary part +0, then the precision), the doubles'
+    /// bits for floats.  Correct rounding to a double is monotone, so reals
+    /// keep their order by value; comparing the full
+    /// value first within a kind but the doubles across kinds was not
+    /// transitive (Mpc(1 + 2^-80, 5) > Mpc(1, 6), with CDF(1, 5.5) between
+    /// them by the doubles), and a sort of terms may panic on that.
     pub fn cmp(&self, o: &Num) -> Ordering {
-        match (self, o) {
+        let ((a, b), (c, d)) = (self.cmp_key(), o.cmp_key());
+        fcmp(a, c).then(fcmp(b, d)).then(self.kind_rank().cmp(&o.kind_rank())).then_with(|| match (self, o) {
             (Num::Exact(a, b), Num::Exact(c, d)) => a.cmp(c).then(b.cmp(d)),
-            // (the value, then a total order on equal ones: -0 and +0, the
-            // precisions)
-            // (NaN after every number, so that the order is total)
-            (Num::Mp(x), Num::Mp(y)) => (x.sp == Sp::NaN)
-                .cmp(&(y.sp == Sp::NaN))
-                .then_with(|| x.cmp_value(y))
-                .then_with(|| x.hash_key().cmp(&y.hash_key()))
-                .then(x.prec.cmp(&y.prec)),
-            (Num::Mpc(x), Num::Mpc(y)) => {
+            (Num::Float(a, b, _), Num::Float(c, d, _)) => (a.to_bits(), b.to_bits()).cmp(&(c.to_bits(), d.to_bits())),
+            (Num::Mp(_) | Num::Mpc(_), Num::Mp(_) | Num::Mpc(_)) => {
+                // (NaN after every number, +0 before -0, as the hash key orders them)
                 let nan = |m: &Mp| m.sp == Sp::NaN;
                 let part = |a: &Mp, b: &Mp| nan(a).cmp(&nan(b)).then_with(|| a.cmp_value(b)).then_with(|| a.hash_key().cmp(&b.hash_key()));
-                part(&x.re, &y.re).then_with(|| part(&x.im, &y.im)).then(x.prec().cmp(&y.prec()))
+                let parts = |n: &Num| match n {
+                    Num::Mp(x) => (Mpc::from_real(x), 0u8),
+                    Num::Mpc(z) => ((**z).clone(), 1u8),
+                    _ => unreachable!(),
+                };
+                let ((x, kx), (y, ky)) = (parts(self), parts(o));
+                part(&x.re, &y.re).then_with(|| part(&x.im, &y.im)).then(x.prec().cmp(&y.prec())).then(kx.cmp(&ky))
             }
-            _ => {
-                let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
-                // (then the doubles' bits: -0 and +0, NaNs, equal values of two kinds)
-                fcmp(a, c).then(fcmp(b, d)).then(self.kind_rank().cmp(&o.kind_rank())).then_with(|| match (self, o) {
-                    (Num::Float(a, b, _), Num::Float(c, d, _)) => (a.to_bits(), b.to_bits()).cmp(&(c.to_bits(), d.to_bits())),
-                    _ => Ordering::Equal,
-                })
-            }
+            _ => Ordering::Equal,
+        })
+    }
+
+    /// The doubles of the order's key: to_c64, but an exact number's parts
+    /// correctly rounded (q_key_f64; MP numbers' to_f64 already is).
+    fn cmp_key(&self) -> (f64, f64) {
+        match self {
+            Num::Exact(a, b) => (q_key_f64(a), q_key_f64(b)),
+            n => n.to_c64(),
         }
     }
 
@@ -1513,7 +1558,7 @@ pub fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
 
 #[cfg(test)]
 mod tests {
-    use crate::mpnum::{Mp, Sp};
+    use crate::mpnum::{Mp, Mpc, Sp};
 
     fn mpq(n: i64, d: i64, p: u32) -> Num {
         Num::mp(Mp::from_q(&BigInt::from(n), &BigInt::from(d), p))
@@ -1617,6 +1662,7 @@ mod tests {
             v.push(mpq(-2, 1, p));
             v.push(mpq(5, 1, p));
         }
+        v.extend(near_one());
         for a in &v {
             for b in &v {
                 assert_eq!(a.cmp(b), b.cmp(a).reverse(), "{:?} {:?}", a, b);
@@ -1626,6 +1672,173 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// Numbers of every kind near 1 and 1 + 5i: MP values that round to the
+    /// same double, reals against complex ones with imaginary part +-0,
+    /// mixed precisions, NaN parts, and floats and exact numbers between
+    /// them by the doubles.
+    fn near_one() -> Vec<Num> {
+        let one_plus = |p: u32| Mp::fin(&((BigInt::one() << 80usize) + 1), -80, p);
+        let c = |re: Mp, im: f64| {
+            let p = re.prec;
+            Num::mpc(Mpc::new(re, Mp::from_f64(im, p)))
+        };
+        let mut v = vec![];
+        for p in [60, 100, 200] {
+            v.push(Num::mp(one_plus(p)));
+            v.push(Num::mp(Mp::from_f64(1.0, p)));
+            v.push(c(Mp::from_f64(1.0, p), 0.0));
+            v.push(c(Mp::from_f64(1.0, p), -0.0));
+            v.push(c(one_plus(p), 0.0));
+            v.push(c(one_plus(p), 5.0));
+            v.push(c(Mp::from_f64(1.0, p), 6.0));
+            v.push(c(Mp::from_f64(1.0, p), f64::NAN));
+            v.push(c(Mp::special(p, Sp::NaN), 5.0));
+            v.push(Num::mpc(Mpc::new(Mp::zero(p, true), Mp::zero(p, false))));
+            v.push(Num::mpc(Mpc::new(Mp::zero(p, false), Mp::zero(p, true))));
+        }
+        for (a, b) in [(1.0, 0.0), (1.0, -0.0), (1.0, 5.5), (1.0, 5.0), (1.0, 6.0), (1.0, f64::NAN), (f64::NAN, 5.0)] {
+            v.push(Num::Float(a, b, Fk::CDF));
+        }
+        let tiny = Q::new(BigInt::one(), BigInt::from(10).pow(30u32));
+        v.push(Num::Exact(Q::one() + &tiny, qr(5, 1)));
+        v.push(Num::Exact(Q::one(), qr(6, 1)));
+        v.push(Num::Exact(Q::one() + &tiny, Q::zero()));
+        v.push(Num::Exact(Q::one(), Q::zero()));
+        v
+    }
+
+    /// Exact reals keep their value order: the key's doubles are correctly
+    /// rounded, so (2^53 + 1)/2^53 > (2^53 + 2)/(2^53 + 1) (the
+    /// numerator's and the denominator's doubles divided gave 1 and
+    /// 1 + 2^-52), and so do pairs that differ only below a double's
+    /// precision, near 1, near and under the subnormals, and past 2^1024.
+    #[test]
+    fn canonical_order_keeps_exact_value_order() {
+        let two = |k: u32| BigInt::one() << k as usize;
+        let r = |n: BigInt, d: BigInt| Num::rat(Q::new(n, d));
+        let (d53, d1100) = (two(53), two(1100));
+        let a = r(&d53 + 1, d53.clone());
+        let b = r(&d53 + 2, &d53 + 1);
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+        assert_eq!(b.cmp(&a), Ordering::Less);
+        let mut v = vec![a, b, Num::int(1), r(&d1100 + 1, d1100.clone()), r(&d1100 + 2, &d1100 + 1)];
+        // (near the least subnormal 2^-1074, under 2^-1100, past 2^1024)
+        for (n, d) in [(3, 1076), (5, 1077), (1, 1075), (1, 1200), (2, 1200)] {
+            v.push(r(BigInt::from(n), two(d)));
+        }
+        v.push(r(two(1100) + 1, BigInt::one()));
+        v.push(r(two(1100), BigInt::one()));
+        v.push(r(two(1030) * 3 + 1, BigInt::from(3)));
+        let neg: Vec<Num> = v.iter().map(|x| x.neg()).collect();
+        v.extend(neg);
+        // (the key's double is the correctly rounded one: RealField(53)'s
+        // in the normal range; 0.75 and 0.625 of 2^-1074 round to it, its
+        // half ties to 0; 2^1100 is past the doubles; 2^1024 - 2^971 is the
+        // largest double, and 2^1024 - 2^970, halfway to 2^1024, ties to
+        // the infinity, the largest double's mantissa being odd)
+        let key = |x: &Num| x.cmp_key().0;
+        for (n, d) in [(1i64, 3i64), (2, 3), (-7, 10), (1 << 53, (1 << 53) - 1), ((1 << 62) + 1, 3), (1, (1 << 62) + 1)] {
+            let x = r(BigInt::from(n), BigInt::from(d));
+            assert_eq!(key(&x), Mp::from_q(&BigInt::from(n), &BigInt::from(d), 53).to_f64(), "{}/{}", n, d);
+        }
+        assert_eq!(key(&r(BigInt::from(3), two(1076))), 5e-324);
+        assert_eq!(key(&r(BigInt::from(5), two(1077))), 5e-324);
+        assert_eq!(key(&r(BigInt::one(), two(1075))), 0.0);
+        assert_eq!(key(&r(BigInt::from(-3), two(1076))), -5e-324);
+        assert_eq!(key(&r(two(1100), BigInt::one())), f64::INFINITY);
+        assert_eq!(key(&r(two(1024) - two(971), BigInt::one())), 1.7976931348623157e308);
+        assert_eq!(key(&r(two(1024) - two(970), BigInt::one())), f64::INFINITY);
+        // (about 1.198e308, doubles: (2^1025 + 1)/3, an integer of 1024
+        // bits, and (2^1025 + 2)/3, whose numerator and denominator are
+        // 1024 bits apart, the clamp's edge)
+        for n in [two(1025) + 1u32, two(1025) + 2u32] {
+            let n: BigInt = n;
+            let big3 = r(n.clone(), BigInt::from(3));
+            assert_eq!(key(&big3), Mp::from_q(&n, &BigInt::from(3), 53).to_f64());
+            assert!(key(&big3).is_finite());
+        }
+        // (an imaginary part keyed alike: the same pair in it)
+        let (ia, ib) = (Num::Exact(Q::one(), Q::new(&d53 + 1, d53.clone())), Num::Exact(Q::one(), Q::new(&d53 + 2, &d53 + 1)));
+        assert_eq!(ia.cmp(&ib), Ordering::Greater);
+        assert_eq!(ib.cmp(&ia), Ordering::Less);
+        for x in &v {
+            for y in &v {
+                let (Num::Exact(p, _), Num::Exact(q, _)) = (x, y) else { unreachable!() };
+                assert_eq!(x.cmp(y), p.cmp(q), "{:?} {:?}", x, y);
+            }
+        }
+    }
+
+    /// Across kinds, real part then imaginary part: CDF(1, 5.5) after
+    /// Mpc(1 + 2^-80, 5) and before Mpc(1, 6), and so for exact numbers
+    /// (the order of the terms of a printed sum; a key of the real part
+    /// alone would still be total).
+    #[test]
+    fn canonical_order_real_then_imaginary_across_kinds() {
+        let one_plus = Mp::fin(&((BigInt::one() << 80usize) + 1), -80, 100);
+        let c = |re: Mp, im: f64| Num::mpc(Mpc::new(re, Mp::from_f64(im, 100)));
+        let f = Num::Float(1.0, 5.5, Fk::CDF);
+        let tiny = Q::new(BigInt::one(), BigInt::from(10).pow(30u32));
+        for (lo, hi) in [
+            (c(one_plus, 5.0), c(Mp::from_f64(1.0, 100), 6.0)),
+            (Num::Exact(Q::one() + &tiny, qr(5, 1)), Num::Exact(Q::one(), qr(6, 1))),
+        ] {
+            assert_eq!(lo.cmp(&f), Ordering::Less, "{:?}", lo);
+            assert_eq!(f.cmp(&hi), Ordering::Less, "{:?}", hi);
+            assert_eq!(lo.cmp(&hi), Ordering::Less, "{:?} {:?}", lo, hi);
+        }
+    }
+
+    /// A sum of f(n) for the numbers above, its terms sorted by the
+    /// canonical order: the same sum whatever order the terms come in (the
+    /// sort neither panics nor depends on it), each pair of neighbours in
+    /// order.
+    #[test]
+    fn canonical_order_sorts_function_arguments_alike() {
+        use crate::expr::{add, fun, num, Fun, Kind};
+        let f = |n: &Num| fun(Fun::User("f".into()), vec![num(n.clone())]);
+        // (one of each value: equal ones of two precisions would add up)
+        let mut v: Vec<Num> = vec![];
+        for n in near_one() {
+            if !v.contains(&n) {
+                v.push(n);
+            }
+        }
+        let arg = |t: &crate::expr::Expr| match &t.kind {
+            Kind::Fun(_, a) => match &a[0].kind {
+                Kind::Num(n) => n.clone(),
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+        let first = add(v.iter().map(f).collect());
+        let Kind::Add(terms) = &first.kind else { panic!("{:?}", first) };
+        for w in terms.windows(2) {
+            assert_ne!(arg(&w[0]).cmp(&arg(&w[1])), Ordering::Greater);
+        }
+        // (rotations and reversals of the input, with a stride mixing it)
+        let n = v.len();
+        for k in 0..n {
+            for stride in [1, 7, 13] {
+                if gcd_usize(stride, n) != 1 {
+                    continue;
+                }
+                let mut u: Vec<Num> = (0..n).map(|i| v[(k + i * stride) % n].clone()).collect();
+                assert_eq!(add(u.iter().map(f).collect()), first, "rotation {} stride {}", k, stride);
+                u.reverse();
+                assert_eq!(add(u.iter().map(f).collect()), first, "reversed rotation {} stride {}", k, stride);
+            }
+        }
+    }
+
+    fn gcd_usize(a: usize, b: usize) -> usize {
+        if b == 0 {
+            a
+        } else {
+            gcd_usize(b, a % b)
         }
     }
 

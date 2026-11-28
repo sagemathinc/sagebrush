@@ -344,15 +344,23 @@ pub(crate) fn crt(residues: &[(u64, Vec<Vec<u64>>)], d: usize, phi: usize) -> Ve
     let r = ls.len();
     // inv[a][b] = (l_0 ... l_(a-1))^-1 mod l_a, computed as a product.
     let inv: Vec<u64> = (0..r).map(|a| {
+        sagebrush_interrupt::check();
         let prod = (0..a).fold(1u64, |acc, b| mul(acc, ls[b] % ls[a], ls[a]));
         powmod(prod, ls[a] - 2, ls[a])
     }).collect();
-    let modulus = ls.iter().fold(BigUint::one(), |acc, &l| acc * l);
+    // (a growing product: a check per factor)
+    let modulus = ls.iter().fold(BigUint::one(), |acc, &l| {
+        sagebrush_interrupt::check();
+        acc * l
+    });
     let half = &modulus >> 1;
     let idx: Vec<(usize, usize)> = (0..=d).flat_map(|j| (0..phi).map(move |i| (j, i))).collect();
     let flat = par::map_slice(&idx, |&(j, i)| {
         let mut digits = vec![0u64; r];
         for a in 0..r {
+            // (O(r) work per digit: a check each, so a Stop during the CRT
+            // is seen within one digit)
+            sagebrush_interrupt::check();
             let l = ls[a];
             // value of the mixed-radix prefix mod l
             let mut acc = 0u64;
@@ -363,6 +371,8 @@ pub(crate) fn crt(residues: &[(u64, Vec<Vec<u64>>)], d: usize, phi: usize) -> Ve
         }
         let mut x = BigUint::zero();
         for a in (0..r).rev() {
+            // (Horner over a growing integer: a check per digit)
+            sagebrush_interrupt::check();
             x = x * ls[a] + digits[a];
         }
         if x > half { BigInt::from(x) - BigInt::from(modulus.clone()) } else { BigInt::from(x) }

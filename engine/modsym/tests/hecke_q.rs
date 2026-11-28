@@ -77,7 +77,7 @@ fn largest_e_and_the_supply() {
     assert!(first.iter().all(|&l| l % 18 == 1 && (HECKE_PRIMES_FROM..HECKE_PRIMES_BELOW).contains(&l)));
     assert!(first.windows(2).all(|w| w[0] < w[1]), "ascending");
     // the doc comment's S(65536)
-    assert_eq!(hecke_primes(65536).count(), 4550);
+    assert_eq!(hecke_primes(65536).count(), 1530);
 }
 
 fn units_of<T>(f: impl FnOnce() -> T) -> [u64; sagebrush_arith::cost::FAMILIES] {

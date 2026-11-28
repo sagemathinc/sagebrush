@@ -61,6 +61,11 @@ pub extern "C" fn sb_reply_len() -> usize {
 /// A top-level call starts: frames and live-progress state a trapped call
 /// left behind (a trap runs no destructors) are forgotten.
 fn new_run() {
+    // (every export starts here, before it replaces REPLY: the reservations
+    // held for the previous reply (AP_HELD, the a_p lists') end with it, and
+    // a call() this export makes holds its own for the host's copy)
+    AP_HELD.with(|h| h.borrow_mut().clear());
+    FOR_HOST.with(|f| f.set(true));
     sagebrush_interrupt::progress::reset_frames();
     sagebrush_arith::smith::progress::reset();
     sagebrush_poly::reset_binomial_units();
@@ -540,7 +545,17 @@ fn progress_selftest(v: &Value) -> Result<Value, String> {
 }
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
+/// The reply to a request.  Reservations held for the reply (AP_HELD) end
+/// once it is text, or, under an export (FOR_HOST, set by new_run), once the
+/// host has copied it: the next export's new_run releases them with the
+/// previous reply.  A native call() releases every hold of its thread, so a
+/// call() nested in another native one would release its caller's too
+/// (none is: dispatch never calls call()).
 pub fn call(req: &str) -> String {
+    // (the flag is taken, so an unwinding call leaves it cleared; natively the
+    // holds end with this call even if a Stop unwinds through it)
+    let for_host = FOR_HOST.with(|f| f.replace(false));
+    let _release = HeldRelease(!for_host);
     // the capped ops' request sizes are admitted before serde copies
     // anything (the last top-level fn name is read by one scan that owns no
     // text: every other value skipped); unknown names go on as before
@@ -558,11 +573,24 @@ pub fn call(req: &str) -> String {
             return nmod_ops::run(op, req, f);
         }
     }
-    match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
+    let out = match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
         Err(e) => error_json(e),
     }
-    .to_string()
+    .to_string();
+    out
+}
+
+/// Releases the reply's held reservations (AP_HELD) when dropped, if set:
+/// at the end of a native call(), returned or unwound.
+struct HeldRelease(bool);
+
+impl Drop for HeldRelease {
+    fn drop(&mut self) {
+        if self.0 {
+            AP_HELD.with(|h| h.borrow_mut().clear());
+        }
+    }
 }
 
 /// The polynomials' factorization as modsym's factor callback (`run` gets
@@ -785,6 +813,43 @@ fn json_skip(b: &[u8], i: &mut usize) -> bool {
         }
         *i += 1;
     }
+}
+
+/// The bound n of a sieve of primes (aplist, aplist_many, moments), with
+/// the bytes reserved in the ledger before anything is built: the sieve's
+/// (n - 1) / 2 flags and the primes, at most 1.26 n / log n of them, and
+/// `per_prime` bytes of result per prime (the result's entries and their
+/// JSON), held until the op returns; refused when the length passes this
+/// target's usize (on wasm32, n as usize truncated 2^32 + 5 to 5) or the
+/// ledger refuses the bytes.
+/// The bytes of one aplist entry and its JSON: (u64, Option<i64>) is 24,
+/// twice for the result Vec's growth (a doubling holds old and new);
+/// [p, a_p] as a serde_json Value is an array (32) holding two Values (64),
+/// and the JSON Vec of values grows by doubling too (32 more); its text is
+/// at most 45 characters (48), twice for the reply String's doubling.
+const AP_ENTRY_BYTES: u64 = 2 * 24 + 32 + 64 + 32 + 2 * 48;
+
+thread_local! {
+    /// The reservations of the a_p lists' sieve and result, held until
+    /// call() has serialized the reply (ap_bound pushes; call() clears).
+    static AP_HELD: std::cell::RefCell<Vec<sagebrush_ledger::Reservation>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Set by an export's new_run, taken by the call() it makes: the reply
+    /// goes to the host's buffer.
+    static FOR_HOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn ap_bound(v: &Value, what: &str, per_prime: u64, fixed: u64) -> Result<u64, String> {
+    let n = u(v, "n")?;
+    let half = n.saturating_sub(1) / 2;
+    if usize::try_from(half).is_err() {
+        return Err(format!("{}: primes up to {} pass this engine's address space", what, n));
+    }
+    let count = sagebrush_ap::prime_count_bound(n) as u64;
+    let bytes = half.saturating_add(count.saturating_mul(8u64.saturating_add(per_prime))).saturating_add(fixed);
+    let r = sagebrush_ledger::reserve(what, bytes).map_err(|e| format!("{}: the sieve's {} bytes refused: {:?}", what, bytes, e))?;
+    // (held through the reply's serialization, not dropped with the arm)
+    AP_HELD.with(|h| h.borrow_mut().push(r));
+    Ok(n)
 }
 
 fn u(v: &Value, k: &str) -> Result<u64, String> {
@@ -1813,7 +1878,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "aplist" => {
             let e = curve(v.get("a"))?;
-            Ok(json!(sagebrush_ap::aplist(&e, u(v, "n")?).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
+            // (each prime's entry, its JSON value and its text)
+            let n = ap_bound(v, "aplist", AP_ENTRY_BYTES, 0)?;
+            Ok(json!(sagebrush_ap::aplist(&e, n).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
         }
         "ec_height" => {
             // the canonical height on balls (ap/src/height.rs): exact endpoints
@@ -1924,12 +1991,18 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "aplist_many" => {
             let es = v.get("curves").and_then(Value::as_array).ok_or("missing curves")?.iter().map(|c| curve(Some(c))).collect::<Result<Vec<_>, _>>()?;
-            let r = sagebrush_ap::aplist_many(&es, u(v, "n")?);
+            let n = ap_bound(v, "aplist_many", AP_ENTRY_BYTES.saturating_mul(es.len() as u64), 0)?;
+            let r = sagebrush_ap::aplist_many(&es, n);
             Ok(json!(r.into_iter().map(|l| l.into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()).collect::<Vec<_>>()))
         }
         "moments" => {
             let e = curve(v.get("a"))?;
-            let (count, m) = sagebrush_ap::moments(&e, u(v, "n")?, size(v, "kmax", Some(4), 64)?);
+            // (its result is kmax moments whatever n: per moment an f64, its
+            // Value and its text, twice for the doublings, and the reply's
+            // frame)
+            let kmax = size(v, "kmax", Some(4), 64)?;
+            let n = ap_bound(v, "moments", 0, (kmax as u64).saturating_mul(2 * (8 + 32 + 32)).saturating_add(256))?;
+            let (count, m) = sagebrush_ap::moments(&e, n, kmax);
             Ok(json!([count, m]))
         }
         _ => Err(format!("unknown fn '{}'", f)),

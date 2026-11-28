@@ -9,19 +9,21 @@
 //! 2^30, the orbit dimension bounded by the space's, len = Sturm + 1), and
 //! the bytes L admits there (cusp_hecke_lower at prec = Sturm + 2): the
 //! ledger threshold is the least such L.  A lower bound on c gives the
-//! bracket.  S(e) is counted by a segmented sieve of [2^30, 2^32).
+//! bracket.  S(e) is counted by a segmented sieve of [HECKE_PRIMES_FROM,
+//! HECKE_PRIMES_BELOW) = [2^30, 2^31), the primes the mod-ell kernels take.
 //!
 //!     cargo run --release --example hecke_prime_supply [NMAX]
 
 use sagebrush_modsym::hecke_q::{cusp_dim, cusp_hecke_lower, sturm_bound};
 use sagebrush_modsym::newspace::eisenstein_exponent;
+use sagebrush_modsym::traces::{HECKE_PRIMES_BELOW, HECKE_PRIMES_FROM};
 use std::collections::BTreeMap;
 
 const Q: f64 = 1_073_741_789.0; // the largest prime below 2^30
 const SIGMA0_MAX: f64 = 1344.0; // max sigma0(n) for n < 2^30
 
 fn supply(es: &[u64]) -> BTreeMap<u64, u64> {
-    let (lo, hi): (u64, u64) = (1 << 30, 1 << 32);
+    let (lo, hi): (u64, u64) = (HECKE_PRIMES_FROM, HECKE_PRIMES_BELOW);
     let lim = 1u64 << 16;
     let mut small = vec![true; lim as usize + 1];
     small[0] = false;
@@ -85,7 +87,7 @@ fn main() {
     es.sort();
     es.dedup();
     let s = supply(&es);
-    println!("supply S(e) in [2^30, 2^32): {:?}", s);
+    println!("supply S(e) in [2^30, 2^31): {:?}", s);
     // (bytes at the threshold by the upper bound on c, and by the lower)
     let mut worst: Option<(u64, u64, u64, bool, u64, u64, u64)> = None;
     let mut rows = vec![];

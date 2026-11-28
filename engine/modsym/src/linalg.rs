@@ -98,6 +98,8 @@ pub fn heilbronn(q: i64) -> Vec<(i64, i64, i64, i64)> {
     }
     let mut out = vec![(1, 0, 0, q)];
     for r in -(q / 2)..=(q / 2) {
+        // (q + 1 continued fractions of O(log q) steps each: a check each)
+        sagebrush_interrupt::check();
         let (mut x1, mut x2, mut y1, mut y2, mut a, mut b) = (q, -r, 0i64, 1i64, -q, r);
         out.push((x1, x2, y1, y2));
         while b != 0 {

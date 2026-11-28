@@ -571,6 +571,39 @@ _MORE_MODSYM = frozenset([
 ])
 
 
+# the spaces' and newforms' methods that load on first use, from
+# lib/_sage_mfmore.py (as _MORE_GAMMA0 and _MORE_MODSYM from _sage_modsym)
+_MORE_QSPACE = frozenset([
+    "hecke_bound", "q_echelon_basis", "q_integral_basis", "echelon_basis", "eisenstein_series",
+    "cuspidal_submodule", "eisenstein_submodule", "_all_cusp", "_echelon_rows", "_q_integral", "_q_integral_rows",
+])
+_MORE_NEWFORM = frozenset([
+    "coefficient", "character", "padded_list", "qexp", "_cm_disc", "has_cm", "cm_discriminant",
+    "atkin_lehner_eigenvalue",
+])
+
+
+def _load_mfmore():
+    """Copy lib/_sage_mfmore.py's methods onto _QSpace and Newform (once);
+    True when they are there.
+
+    EXAMPLES::
+
+        sage: import _sage_modular  # sagebrush only
+        sage: _sage_modular._load_mfmore(), _sage_modular._MORE_NEWFORM <= set(dir(_sage_modular.Newform))  # sagebrush only
+        (True, True)
+    """
+    if "hecke_bound" not in _QSpace.__dict__:
+        import _sage_mfmore as m
+        for cls, more, names in ((_QSpace, m.QSpaceMethods, _MORE_QSPACE), (Newform, m.NewformMethods, _MORE_NEWFORM)):
+            got = {k for k in vars(more) if not k.startswith("__")}
+            if got != names:
+                raise AssertionError("_sage_mfmore and _MORE_* disagree: %s" % sorted(got ^ names))
+            for k in names:
+                setattr(cls, k, vars(more)[k])
+    return True
+
+
 def _load_modsym():
     """Copy lib/_sage_modsym.py's methods onto Gamma0 and ModularSymbols
     (once); True when they are there.
@@ -1312,8 +1345,59 @@ def _bernoulli(n):
     return _BERNOULLI[n]
 
 
+# ---- admission for the q-expansion bases (lib/_sage_modsym.py's ledger:
+# the active charge, or one of the basis's own): each list of coefficients
+# is reserved before it is built, at a proven bound on its bits, and the
+# caches publish only storage that was admitted
+
+def _ledger(what):
+    import _sage_modsym as ms
+    return ms._Charging(ms._CUR[0] or ms._Charge(what))
+
+
+def _reserve_rows(ch, rows, cols, bits, frac=True):
+    import _sage_modsym as ms
+    return ms._reserve(ch, rows * cols, bits, frac=frac)
+
+
+def _step(ch, step, nbytes):
+    # (a reservation recorded under its step's name on a charge that keeps
+    # a list ch.steps: the doctests' checks)
+    steps = getattr(ch, "steps", None)
+    if steps is not None:
+        steps.append((step, nbytes))
+    return nbytes
+
+
+def _deligne_bits(k, J, r=1):
+    """Bits bounding |a_j|, j <= J, of a trace form of an orbit of
+    dimension r: r d(j) j^((k-1)/2) <= r j^((k+1)/2)."""
+    return max(r, 1).bit_length() + ((k + 1) * max(J, 2).bit_length() + 1) // 2 + 1
+
+
+def _minor_bits(rows):
+    """Bits bounding every minor of rows scaled to integers row by row
+    (Hadamard: the product of the scaled rows' norms); an entry of their
+    reduced echelon form is a ratio of two such minors."""
+    from math import lcm
+    total = 0
+    for r in rows:
+        den = 1
+        for x in r:
+            den = lcm(den, _Fr(x).denominator)
+        n2 = 0
+        for x in r:
+            y = _Fr(x) * den
+            n2 += y.numerator * y.numerator
+        total += (n2.bit_length() + 1) // 2
+    return total + 1
+
+
 def _subs_qd(v, d, prec):
     """f(q^d) to precision prec, from f's coefficients v."""
+    import _sage_modsym as ms
+    ch = ms._charge()
+    ch.take(prec * ms._SLOT)
     out = [_Fr(0)] * prec
     for n in range(0, (prec - 1) // d + 1):
         out[n * d] = v[n]
@@ -1326,6 +1410,11 @@ def _hecke_qexp(v, n, N, k, prec):
     d^(k-1) a_(mn/d^2)(f); a_0(T_n f) = sum over d | n, (d, N) = 1, of d^(k-1) a_0(f)."""
     ds = [d for d in _divisors(n) if _gcd(d, N) == 1]
     pw = {d: d ** (k - 1) for d in ds}
+    import _sage_modsym as ms
+    ch = ms._charge()
+    # (|a_m(T_n f)| <= d(n) n^(k-1) max|a_j(f)|, j <= (prec - 1) n)
+    vb = ms._maxbits(v[:(prec - 1) * n + 1])
+    _reserve_rows(ch, 1, prec, n.bit_length() + (k - 1) * n.bit_length() + vb + 2)
     out = [_Fr(0)] * prec
     out[0] = sum(pw[d] for d in ds) * v[0]
     for m in range(1, prec):
@@ -1362,16 +1451,6 @@ class _ModpEchelon:
         self.rows.append([x * inv % p for x in v])
         self.piv.append(c)
         return True
-
-
-def _rref_exact(rows):
-    """The reduced row echelon form over QQ of rows (the engine's exact
-    elimination), without its zero rows."""
-    if not rows:
-        return []
-    from _sagebrush_lib import linalg
-    R, piv = linalg.rref(rows)
-    return [[_Fr(x) for x in R[i]] for i in range(len(piv))]
 
 
 # The primes the engine's cusp_hecke_matrix takes (its domain: below 2^30);
@@ -1426,7 +1505,12 @@ def _solve_rows(B, V):
         return [[] for _ in V]
     from _sagebrush_lib import linalg
     s = len(B[0])
+    import _sage_modsym as ms
+    ch = ms._charge()
+    ch.take(s * (d + len(V)) * ms._SLOT)
     aug = [[B[i][c] for i in range(d)] + [v[c] for v in V] for c in range(s)]
+    # (the engine's echelon form and the coordinates: ratios of minors)
+    _reserve_rows(ch, 2 * min(s, d + len(V)), d + len(V), 2 * _minor_bits(aug))
     R, piv = linalg.rref(aug)
     if list(piv) != list(range(d)):
         raise ValueError("not in the span")
@@ -1449,43 +1533,130 @@ def _new_cusp_rows(M, k, prec):
     key = (M, k)
     have = _NEWROWS.get(key)
     if have is not None and have[0] >= prec:
+        import _sage_modsym as ms
+        # (the copies handed out are this computation's)
+        ms._charge().take(len(have[1]) * prec * ms._SLOT)
         return [r[:prec] for r in have[1]]
     if k % 2 or k < 2 or _mf_engine_dims(M, k)["new"] == 0:
         _NEWROWS[key] = (prec, [])
         return []
+    with _ledger("The new cusp forms of level %d and weight %d to precision %d" % (M, k, prec)) as ch:
+        return _new_cusp_rows_charged(M, k, prec, key, ch)
+
+
+def _orbit_rows(o, M, k, prec, bound, ch, pbits):
+    """One orbit's independent Hecke translates of its trace form: (rows,
+    their bytes, whether the traces ran short, the bytes of the orbit's
+    trace copy and rank state, for the caller to release once this frame,
+    and they with it, is gone)."""
+    import _sage_modsym as ms
+    r = int(o["dim"])
+    # (the orbit's traces, copied: at Deligne's bound; and below, its modular
+    # rank state, a row of prec residues per kept translate)
+    tres = _step(ch, "traces copy", _reserve_rows(ch, 1, len(o["traces"]) + 1, _deligne_bits(k, bound, r), frac=False))
+    t = [0] + [int(x) for x in o["traces"]]
+    ech = _ModpEchelon()
+    rows, held, state = [], 0, 0
+    m = got = 0
+    while got < r:
+        m += 1
+        if (prec - 1) * m >= len(t):
+            return rows, held, True, _step(ch, "rank state", state) + tres
+        if m > 64 * r + 64:
+            raise RuntimeError("internal error: the Hecke translates of orbit %s of level %d weight %d stopped at rank %d of %d"
+                               % (o.get("letter"), M, k, got, r))
+        v, vres = _translate(t, m, M, k, prec, ech, ch, pbits)
+        if v is None:
+            # (a dependent translate, gone with _translate's frame: released)
+            ch.give(vres)
+            continue
+        # (kept: settled to its size, and its residues kept in the rank state)
+        rows.append(v)
+        got += 1
+        b = ms._row_bytes(v)
+        held += b
+        d = vres - b
+        if d >= 0:
+            ch.give(d)
+        else:
+            ch.take(-d)
+        state += _reserve_rows(ch, 1, prec, pbits, frac=False)
+    return rows, held, False, _step(ch, "rank state", state) + tres
+
+
+def _translate(t, m, M, k, prec, ech, ch, pbits):
+    """(T_m of the trace form t, the bytes reserved for it) when it raises
+    the rank in ech, else (None, those bytes)."""
+    import _sage_modsym as ms
+    before = ch.used
+    v = _hecke_qexp(t, m, M, k, prec)
+    vres = _step(ch, "translate", ch.used - before)
+    # (the rank test's scratch: v's integers, then at most three rows of
+    # residues at once, its reduction and normalized row)
+    sres = _step(ch, "rank scratch", _reserve_rows(ch, 1, prec, ms._maxbits(v), frac=False) + _reserve_rows(ch, 3, prec, pbits, frac=False))
+    added = ech.add([int(x) for x in v])
+    ch.give(sres)
+    return (v if added else None), vres
+
+
+def _orbit_dims(M, k, prec, nd, ch):
+    """(The largest orbit's dimension, the bytes reserved for the engine's
+    traces it was read from, for the caller to release once this frame,
+    and they with it, is gone.)"""
+    # (the engine's traces: at most nd orbits, prec coefficients each, at
+    # Deligne's bound)
+    res = _step(ch, "traces", _reserve_rows(ch, nd, prec + 1, _deligne_bits(k, prec, nd), frac=False))
     data = _mf.newforms(M, k, None, bound=prec)
     orbits = data["newforms"] if isinstance(data, dict) else data
+    return max(int(o["dim"]) for o in orbits), res
+
+
+def _bound_rows(M, k, prec, bound, nd, ch):
+    """One pass at a trace bound: (the orbits' independent translates,
+    their bytes, whether the traces ran short, the bytes reserved for the
+    engine's traces, for the caller to release once this frame, and the
+    traces and orbits with it, is gone)."""
+    res = _step(ch, "traces", _reserve_rows(ch, nd, bound + 1, _deligne_bits(k, bound, nd), frac=False))
+    data = _mf.newforms(M, k, None, bound=bound)
+    orbits = data["newforms"] if isinstance(data, dict) else data
+    pbits = _WORD_PRIME.bit_length()
+    rows, held, short = [], 0, False
+    for o in orbits:
+        orows, oheld, short, scratch = _orbit_rows(o, M, k, prec, bound, ch, pbits)
+        # (the orbit's traces and rank state went with its frame)
+        ch.give(scratch)
+        rows += orows
+        held += oheld
+        if short:
+            break
+    return rows, held, short, res
+
+
+def _new_cusp_rows_charged(M, k, prec, key, ch):
+    import _sage_modsym as ms
+    nd = _mf_engine_dims(M, k)["new"]
+    r_max, res = _orbit_dims(M, k, prec, nd, ch)
+    # (its traces went with its frame)
+    ch.give(res)
     # (the translates T_1, ..., T_m of an orbit of dimension r reached rank r
     # by m = 1.3 r at most on levels 23, 37, 389, weights 2 and 4; the bound
     # doubles when they don't)
-    r_max = max(int(o["dim"]) for o in orbits)
     bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1
+    rows, held = [], 0
     while True:
-        data = _mf.newforms(M, k, None, bound=bound)
-        orbits = data["newforms"] if isinstance(data, dict) else data
-        rows, short = [], False
-        for o in orbits:
-            r = int(o["dim"])
-            t = [0] + [int(x) for x in o["traces"]]
-            ech = _ModpEchelon()
-            m = got = 0
-            while got < r:
-                m += 1
-                if (prec - 1) * m >= len(t):
-                    short = True
-                    break
-                if m > 64 * r + 64:
-                    raise RuntimeError("internal error: the Hecke translates of orbit %s of level %d weight %d stopped at rank %d of %d"
-                                       % (o.get("letter"), M, k, got, r))
-                v = _hecke_qexp(t, m, M, k, prec)
-                if ech.add([int(x) for x in v]):
-                    rows.append(v)
-                    got += 1
-            if short:
-                break
+        # (a pass in its own frame: the previous pass's rows stay charged
+        # through it; its traces and orbits went with its frame; then the
+        # previous rows are dropped, and only then released)
+        new, nheld, short, res = _bound_rows(M, k, prec, bound, nd, ch)
+        ch.give(res)
+        prev, rows, held, new = held, new, nheld, None
+        ch.give(prev)
         if not short:
             break
         bound *= 2
+    # (the rows are kept; published once the copies handed out are
+    # admitted)
+    ch.take(len(rows) * prec * ms._SLOT)
     _NEWROWS[key] = (prec, rows)
     return [r[:prec] for r in rows]
 
@@ -1562,7 +1733,12 @@ def _eis_components(m, j, L, k, prec):
     a_n = sum over d | n of chibar(d) chi(n/d) d^(k-1); a_0 = 0 (chi is not trivial)."""
     phi_poly = _cyclotomic(m)
     deg = len(phi_poly) - 1
-    # zeta^e in the power basis: x^e mod Phi_m
+    import _sage_modsym as ms
+    ch = ms._charge()
+    # (x^e mod Phi_m: each reduction multiplies the coefficients by at most
+    # 1 + max |Phi_m's coefficients|)
+    gb = (1 + max(abs(c) for c in phi_poly)).bit_length()
+    _reserve_rows(ch, m, deg, m * gb + 1, frac=False)
     powers = []
     cur = [1] + [0] * (deg - 1)
     for e in range(m):
@@ -1572,6 +1748,8 @@ def _eis_components(m, j, L, k, prec):
         if top:
             nxt = [a - top * b for a, b in zip(nxt, phi_poly[:deg])]
         cur = nxt
+    # (|a_n| <= sigma_(k-1)(n) max |power coefficient| <= n^k 2^(m gb))
+    _reserve_rows(ch, deg, prec, k * prec.bit_length() + m * gb + 2)
     comps = [[_Fr(0)] * prec for _ in range(deg)]
     for n in range(1, prec):
         acc = [0] * deg
@@ -1593,6 +1771,13 @@ def _eis_rows(N, k, prec, new=False):
     if k % 2 or k < 2:
         return []
     rows = []
+    import _sage_modsym as ms
+    ch = ms._charge()
+    # (sigma_(k-1)(n) <= n^k, the constant term -B_k/2k or (t - 1)/24,
+    # E_2(q) - t E_2(q^t): one more bit and t's; each t a row)
+    bk = _bernoulli(k) if k >= 2 else _Fr(0)
+    _reserve_rows(ch, 2 * len(_divisors(N)) + 2, prec,
+                  k * prec.bit_length() + bk.numerator.bit_length() + bk.denominator.bit_length() + 2 * N.bit_length() + 8)
     # the trivial pair
     if k >= 4:
         base = [-_bernoulli(k) / (2 * k)] + [_Fr(sum(d ** (k - 1) for d in _divisors(n))) for n in range(1, prec)]
@@ -1640,7 +1825,16 @@ def _qbasis(N, k, which, prec):
     key = (N, k, which)
     have = _QBASIS.get(key)
     if have is not None and have[0] >= prec:
+        import _sage_modsym as ms
+        # (the copies handed out are this computation's)
+        ms._charge().take(len(have[1]) * prec * ms._SLOT)
         return [r[:prec] for r in have[1]]
+    with _ledger("The q-expansion basis of %s forms of level %d and weight %d to precision %d" % (which, N, k, prec)):
+        return _qbasis_charged(N, k, which, prec, key)
+
+
+def _qbasis_charged(N, k, which, prec, key):
+    import _sage_modsym as ms
     work = max(prec, _sturm_bound(N, k) + 2)
     d = _mf_engine_dims(N, k)
     if which == "cusp":
@@ -1657,10 +1851,16 @@ def _qbasis(N, k, which, prec):
         rows, want = _eis_rows(N, k, work, new=True), _part_dim(N, k, "eis_new")
     else:
         raise ValueError(which)
-    basis = _rref_exact(rows)
+    # (the reduced echelon form by _sage_modsym's charged elimination: each
+    # row reserved at a sound bound before it is computed)
+    basis = ms._echelon(rows, work)[0] if rows else []
     if want is not None and len(basis) != want:
         raise RuntimeError("internal error: the q-expansion basis of %s of weight %d level %d has rank %d, the dimension is %d"
                            % (which, k, N, len(basis), want))
+    # (the basis is kept: its storage, and the copies handed out, admitted
+    # before it is published)
+    ch = ms._CUR[0]
+    ch.take(sum(ms._row_bytes(r) for r in basis) + len(basis) * prec * ms._SLOT)
     _QBASIS[key] = (work, basis)
     return [r[:prec] for r in basis]
 
@@ -1772,17 +1972,50 @@ class ModularFormElement:
         return QQ(self._coeffs(n + 1)[n])
 
     def coefficients(self, X):
-        """The coefficients a_1, ..., a_X (X an integer), or a_n for n in X (a list).
+        """The coefficients a_1, ..., a_X (X an integer), or a_n for n in X
+        (any iterable of indices).
 
         EXAMPLES::
 
             sage: CuspForms(37, 2).basis()[1].coefficients(6)
             [0, 1, 2, -2, 1, -3]
+            sage: f = CuspForms(11, 2).gen(0); f.coefficients(range(1, 4)), f.coefficients((3, 1)), f.coefficients(set([2]))
+            ([1, -2, -1], [-1, 1], [-2])
+
+        As in Sage, X is read twice (once for the indices not yet known,
+        once for the answer), so a generator gives nothing; a negative
+        index gives 0 (but -2 alone asks for precision -1)::
+
+            sage: f.coefficients(n for n in [2, 3, 5]), f.coefficients([-1, 3])
+            ([], [0, -1])
         """
-        from sage_all import QQ
-        ns = list(range(1, int(X) + 1)) if not isinstance(X, (list, tuple)) else [int(n) for n in X]
-        c = self._coeffs((max(ns) if ns else 0) + 1)
-        return [QQ(c[n]) for n in ns]
+        from sage_all import QQ, ZZ
+        if isinstance(X, int):
+            # (a count: ints, Integers and bools, as Sage)
+            X = range(1, int(X) + 1)
+        # (the coefficients known so far, by index, as Sage keeps them: the
+        # precision is computed only for the indices not yet known)
+        known = self.__dict__.setdefault("_known_coefficients", {})
+        Y = [n for n in X if n not in known]
+        if Y:
+            # (the precision max + 1 as an Integer: Sage's errors for a
+            # non-integral one, and for a negative one)
+            prec = ZZ(max(Y) + 1)
+            if prec < 0:
+                raise ValueError("prec (= %s) must be nonnegative" % prec)
+            c = self._coeffs(max(int(prec), 1))
+            import operator
+            top = max((i for i in range(min(len(c), int(prec))) if c[i]), default=-1)
+            new = {}
+            for n in Y:
+                # (each index read as the q-expansion to that precision reads
+                # it: 0 below 0 and past its degree, else as an index, with
+                # Python's and Sage's errors for a float or a non-integral
+                # rational)
+                new[n] = QQ(0) if n < 0 or n > top else QQ(c[operator.index(n)])
+            # (kept only once every index was read: an error stores nothing)
+            known.update(new)
+        return [known[n] for n in X]
 
     def is_cuspidal(self):
         """Whether the form is a cusp form.
@@ -1890,6 +2123,14 @@ class _QSpace:
     def _amb(self):
         return self if self.is_ambient() else self._A
 
+    def __getattr__(self, name):
+        if name in _MORE_QSPACE and _load_mfmore():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_QSPACE)
+
     def _check_trivial(self):
         A = self._amb()
         if A._chi is not None and not A._chi.is_trivial():
@@ -1908,7 +2149,8 @@ class _QSpace:
         coefficients coeffs(prec) gives (ValueError if it is not in the space)."""
         prec = self.sturm_bound() + 2
         try:
-            return _solve_rows(self._qrows(prec), [coeffs(prec)])[0]
+            with _ledger("The coordinates of a form in %r" % self):
+                return _solve_rows(self._qrows(prec), [coeffs(prec)])[0]
         except ValueError:
             raise ValueError("the form is not in %s" % self)
 
@@ -2051,9 +2293,10 @@ class _QSpace:
         from sage_all import QQ, matrix
         A = self._amb()
         s = self.sturm_bound() + 2
-        rows = self._qrows((s - 1) * n + 1)
         try:
-            out = _solve_rows([r[:s] for r in rows], [_hecke_qexp(r, n, A._N, A._k, s) for r in rows])
+            with _ledger("The Hecke operator T_%d on %r" % (n, self)):
+                rows = self._qrows((s - 1) * n + 1)
+                out = _solve_rows([r[:s] for r in rows], [_hecke_qexp(r, n, A._N, A._k, s) for r in rows])
         except ValueError:
             raise RuntimeError("internal error: T_%d left the space %s" % (n, self))
         d = len(rows)
@@ -4978,6 +5221,14 @@ class Newform:
             '11.2.a.a'
         """
         return self._o.label()
+
+    def __getattr__(self, name):
+        if name in _MORE_NEWFORM and _load_mfmore():
+            return getattr(self, name)
+        raise AttributeError("'%s' object has no attribute '%s'" % (type(self).__name__, name))
+
+    def __dir__(self):
+        return sorted(set(object.__dir__(self)) | _MORE_NEWFORM)
 
     def __repr__(self):
         return repr(self.q_expansion(6))
