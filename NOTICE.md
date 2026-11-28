@@ -184,7 +184,12 @@ routes, `fastScalarPower`, from `fast_scalar_power` in
 `numpy/_core/src/multiarray/number.c`; `arange`'s length and values, from
 `_calc_length` and `PyArray_ArangeObj` in `numpy/_core/src/multiarray/ctors.c`
 and the `@NAME@_fill` loops of `numpy/_core/src/multiarray/arraytypes.c.src`;
-`linspace`'s arithmetic, from `numpy/_core/function_base.py`; and the
+`linspace`'s arithmetic, from `numpy/_core/function_base.py`; the default
+sort and argsort of object arrays, `objQuick` and `objHeap`, from `npy_quicksort`,
+`npy_aquicksort`, `npy_heapsort` and `npy_aheapsort` in
+`numpy/_core/src/npysort/quicksort_generic.cpp` and `heapsort.cpp`, with the
+comparison of `OBJECT_compare` in `numpy/_core/src/multiarray/arraytypes.c.src`;
+and the
 size in an array's MemoryError, from `_ArrayMemoryError._size_to_string` in
 `numpy/_core/_exceptions.py`), `src/runtime/numpy_random.ts`,
 `src/runtime/ziggurat_data.ts` and `kernels/src/random.rs` (MT19937 with
@@ -302,6 +307,49 @@ LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
 DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### scikit-learn (BSD 3-Clause)
+
+`engine/skltree` (`src/rng.rs`, `src/sort.rs`, `src/partition.rs`, and the
+tree code that builds on them) ports scikit-learn 1.9.1's C-level tree code
+line by line, to preserve scikit-learn's random draws, sorting order and
+dense-partitioning behavior for the decision-tree kernel: the XorShift `our_rand_r`
+and `rand_int` (`sklearn/utils/_random.pxd`, `sklearn/tree/_utils.pyx`),
+`simultaneous_sort` (`sklearn/utils/_sorting.pyx`) and the dense partitioner
+(`sklearn/tree/_partitioner.pyx`).  Each ported file names the files and
+functions it follows.
+
+```
+BSD 3-Clause License
+
+Copyright (c) 2007-2026 The scikit-learn developers.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 

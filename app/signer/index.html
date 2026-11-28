@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- (the signer's page: its own files only; no frames, no remote script, no plugins; IPC to the app) -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src ipc: http://ipc.localhost; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width">
+<title>Sagebrush: approvals</title>
+<link rel="stylesheet" href="signer.css">
+</head>
+<body>
+<main>
+<h1>Approvals</h1>
+<p id="status">Nothing to approve.</p>
+<p class="note">Approvals you make here are signed by this computer's Sagebrush app. Web pages can't open this window or send it anything.</p>
+</main>
+<script src="signer.js"></script>
+</body>
+</html>

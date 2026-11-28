@@ -43,6 +43,7 @@
   },
   "requires": [],
   "private_prefix": "_pd_",
+  "distribution": "pandas",
   "files": {
     "py/pandas/__init__.py": "12cef533b2f8781661a54d846e5e573c03a281613f6b7f6e3f043ef77179ebba",
     "py/pandas/_pd_arith.py": "cbaa8e92f9dda04954c4bf9006de05d61437d94d6b9f504e5c3fe43daed5c1b4",
@@ -57,7 +58,7 @@
     "py/pandas/_pd_excel.py": "abf67e23f9349dbf7eb1d582e97a0e44c4032898507c402f234f91247a17a48f",
     "py/pandas/_pd_frame.py": "ea8f4bdf3b7f8a586cbcba8aeaa1331a1f47ccb72074e34b4be4dda7b5c379d4",
     "py/pandas/_pd_frame_arith.py": "efd43ac42bfc88103dc2cdde3d5ad2cdf9a52c615ba0bd28c9377bcbeb092262",
-    "py/pandas/_pd_groupby.py": "c99b1f5633384564def2290eeb11dbbfd8876b08a4d0d46d154ece768931d623",
+    "py/pandas/_pd_groupby.py": "0523d2cbeafd039dd630f436ec67eae489e6d03c691d5e9cf7839746d6102f46",
     "py/pandas/_pd_index.py": "3c91132aa808854446a8b5f68cf220c86af61ef9e00ed249583dd5f132c161eb",
     "py/pandas/_pd_indexing.py": "7b7e20ebe672d60233259824a6277069e429b61b3c96e38d51918bf5b0c00bcf",
     "py/pandas/_pd_info.py": "8ba2a36c792d82121a94c207b8c3c773f17d713b711ece710a06ccab9e40bb9e",
