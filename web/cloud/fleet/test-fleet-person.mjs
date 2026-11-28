@@ -53,11 +53,13 @@ const all = async (sql, ...v) => (await db.prepare(sql).bind(...v).all()).result
 const exec = (sql, ...v) => db.prepare(sql).bind(...v).run();
 const snapshot = async () => JSON.stringify(await Promise.all(["fleet_accounts", "fleet_chain_entries", "fleet_chain_hashes", "fleet_hosts", "fleet_host_certs"].map((t) => all(`SELECT * FROM ${t} ORDER BY 1, 2`))));
 
-/** A request as the account (null: no session; "none" / "unavailable" / "throw": the session's own answer). */
-async function as(account, path, { method = "GET", body, session } = {}) {
+/** A request as the account (null: no session; "none" / "unavailable" / "throw": the session's own answer; `reauth`:
+ * the session's re-authentication time, as x-test-reauth-ms). */
+async function as(account, path, { method = "GET", body, session, reauth } = {}) {
   const headers = {};
   if (account) headers["x-test-account"] = account;
   if (session) headers["x-test-session"] = session;
+  if (reauth !== undefined) headers["x-test-reauth-ms"] = String(reauth);
   const r = await dispatch(mf, SITE + path, { method, headers, ...(body ? { body } : {}) });
   const bytes = new Uint8Array(await r.arrayBuffer());
   let json = null;
@@ -113,7 +115,7 @@ const grant = (f, bytes) => W.applyGrant(db, core, { fleet: f.fleet, aud: AUD, g
 
 // ---- P-1: the session
 {
-  for (const path of ["/api/fleet/v1/fleet", "/api/fleet/v1/chain", "/api/fleet/v1/hosts", `/api/fleet/v1/hosts/${core.newId()}/grants`]) {
+  for (const path of ["/api/fleet/v1/fleet", "/api/fleet/v1/chain", "/api/fleet/v1/hosts", `/api/fleet/v1/hosts/${core.newId()}/grants`, "/api/fleet/v1/session"]) {
     const none = await as(null, path);
     ok(none.status === 401 && errorOf(none) === "unauthenticated" && none.cache === "no-store", `P-1: ${path} with no session: 401`, none);
     ok((await as("acct", path, { session: "none" })).status === 401, `P-1: ${path} with an ended session: 401`);
@@ -122,6 +124,7 @@ const grant = (f, bytes) => W.applyGrant(db, core, { fleet: f.fleet, aud: AUD, g
   }
   ok((await as("acct", "/api/fleet/v1/chain", { method: "POST", body: "{}", session: "none" })).status === 401, "P-1: an append with no session: 401");
   ok((await as("acct", "/api/fleet/v1/hosts", { method: "POST", body: "{}" })).status === 405, "P-1: a POST to a read route: 405");
+  for (const method of ["POST", "PUT", "DELETE"]) ok((await as("acct", "/api/fleet/v1/session", { method, body: "{}" })).status === 405, `P-1: a ${method} to /session: 405`);
   ok((await as("bad account!", "/api/fleet/v1/fleet")).status === 500, "P-1: a session account outside the id grammar: 500, nothing read");
 }
 
@@ -154,6 +157,16 @@ const grant = (f, bytes) => W.applyGrant(db, core, { fleet: f.fleet, aud: AUD, g
     return { status: r.status, json };
   };
   const live = await sessionRow();
+  // (/session reads the row's own reauth_ms: NULL is null, a value is that value, and a new session never inherits one)
+  const s0 = await real(live2, live.token, "/api/fleet/v1/session");
+  ok(s0.status === 200 && s0.json?.account === live.account && s0.json?.reauth_ms === null, "P-1r: /session for a session never re-authenticated: reauth_ms null", s0);
+  const reMs = Date.now() - 1234;
+  await shareDb.prepare("UPDATE sessions SET reauth_ms = ?2 WHERE token_hash = ?1").bind(sha(live.token), reMs).run();
+  const s1 = await real(live2, live.token, "/api/fleet/v1/session");
+  ok(s1.status === 200 && s1.json?.reauth_ms === reMs, "P-1r: /session gives the row's reauth_ms", s1);
+  const other = await sessionRow({ account: live.account });
+  ok((await real(live2, other.token, "/api/fleet/v1/session")).json?.reauth_ms === null, "P-1r: another session of the same account doesn't share it (per session, not per account)");
+  ok((await real(live2, null, "/api/fleet/v1/session")).status === 401, "P-1r: /session with no cookie: 401");
   const r0 = await real(live2, live.token, "/api/fleet/v1/fleet");
   ok(r0.status === 404 && r0.json?.error === "no_fleet", "P-1r: a live session, read for real: authenticated (no_fleet), not 401", r0);
   // (its account is the session row's own: a genesis through the cookie binds THAT account, and the injected seam for the
@@ -472,6 +485,33 @@ const grant = (f, bytes) => W.applyGrant(db, core, { fleet: f.fleet, aud: AUD, g
   const r = await as(f.account, "/api/fleet/v1/hosts");
   ok(r.status === 429 && JSON.stringify(r.json) === JSON.stringify({ error: "rate", retry_after_s: 60 }), "P-10: request 121 in a minute: rate, retry_after_s 60", r.json);
   ok((await as(core.newId(), "/api/fleet/v1/fleet")).status === 404, "P-10: another account is unaffected");
+}
+
+// ---- P-11: /session, the page's re-authentication state (re-auth d2 §2, T6)
+{
+  const a = core.newId();
+  const t0 = Date.now();
+  const r = await as(a, "/api/fleet/v1/session", { reauth: t0 - 5000 });
+  const t1 = Date.now();
+  ok(r.status === 200 && r.cache === "no-store", "P-11: 200, no-store", r);
+  ok(JSON.stringify(Object.keys(r.json ?? {}).sort()) === JSON.stringify(["account", "fresh_ms", "now_ms", "reauth_ms"]), "P-11: exactly account, reauth_ms, now_ms, fresh_ms", r.json);
+  ok(r.json?.account === a && r.json?.reauth_ms === t0 - 5000, "P-11: the session's account and its reauth_ms", r.json);
+  ok(Number.isSafeInteger(r.json?.now_ms) && r.json.now_ms >= t0 && r.json.now_ms <= t1, "P-11: now_ms is the Worker's clock, an integer", { t0, t1, now: r.json?.now_ms });
+  for (const v of [undefined, "null"]) {
+    const n = await as(a, "/api/fleet/v1/session", v === undefined ? {} : { reauth: v });
+    ok(n.status === 200 && n.json?.reauth_ms === null, `P-11: a session never re-authenticated (${v ?? "absent"}): reauth_ms null`, n.json);
+  }
+  ok((await as(a, "/api/fleet/v1/session", { reauth: 0 })).json?.reauth_ms === 0, "P-11: reauth_ms 0 is 0, not null");
+  for (const v of ["-1", "1.5", "abc"]) ok((await as(a, "/api/fleet/v1/session", { reauth: v })).status === 500, `P-11: a session store giving reauth_ms ${v}: 500, never served`);
+  // (fresh_ms is the core's own freshness: an entry signed in exactly fresh_ms ago is accepted by the core's chain rule,
+  // one signed in a millisecond earlier is stale_auth)
+  const fresh = r.json?.fresh_ms;
+  ok(fresh === 300_000, "P-11: fresh_ms 300000", fresh);
+  const f = await fleetOf().init();
+  const g = await core.seal("sb.device-chain.v1", f.sN, f.body("genesis", { device: { id: f.nId, alg: "ed25519", key: core.b64(f.N.raw), name: "mac", tier: "native" }, recovery_key: { alg: "ed25519", key: core.b64(f.R.raw) } }), f.N);
+  const apply = (now) => core.applyChainEntry(null, g, { aud: AUD, fleet: f.fleet, now, checkAuthTime: true }).then(() => "ok", (e) => e.code);
+  const edge = await apply(NOW + fresh), past = await apply(NOW + fresh + 1);
+  ok(edge === "ok" && past === "stale_auth", "P-11: the core accepts a sign-in fresh_ms old and refuses one a millisecond older", { edge, past });
 }
 
 await mf.dispose();

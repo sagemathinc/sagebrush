@@ -1,0 +1,5 @@
+body { font: 15px system-ui, sans-serif; margin: 0; color: #222; background: #fafafa; }
+main { max-width: 34em; margin: 2em auto; padding: 0 1.2em; }
+h1 { font-size: 1.3em; }
+.note { color: #666; font-size: 13px; }
+@media (prefers-color-scheme: dark) { body { color: #ddd; background: #1e1e1e; } .note { color: #999; } }

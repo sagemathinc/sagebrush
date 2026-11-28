@@ -171,6 +171,8 @@ export interface BoardHost {
    * presses "Run this board's code" (an interim, until design/capabilities.md's gate); `codeResumed` when they do. */
   codePaused?: boolean;
   codeResumed?(): void;
+  /** File ▸ New window (the desktop app's board page, #1541); none: not drawn */
+  newWindow?(): void;
   /** Sagebrush's own board page: the File menu shows what the host can't do here disabled
    * (design/workspace-files.md §3); otherwise (the library in another site) it is hidden */
   fullFileMenu?: boolean;
@@ -339,6 +341,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   renderFileMenu($("filemenu"), {
     attr: "data-sbb",
     latex: !!host.files?.newLatex,
+    newWindow: host.newWindow ? "newwindow" : undefined,
     keys: { newNotebook: "newnotebook", newBoard: "newboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
     disabled: {
       newNotebook: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
@@ -360,6 +363,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     chosen: () => { $("filemenu").hidden = true; },
   });
   ($("home") as HTMLAnchorElement).href = host.home ?? "/";
+  if (host.newWindow) root.querySelector<HTMLElement>('[data-sbb="newwindow"]')!.onclick = () => host.newWindow!();
   // pictures: where the host keeps them (by name); a board that carries them (data: URLs) gives them up on the way in
   const images = host.images;
   board.imageUrl = (name) => images.url(name);

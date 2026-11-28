@@ -1,0 +1,978 @@
+// The signer window (Autonomous agents, app pairing r4's native tier; the contract is N1 r2, the
+// native signing design note): the one place the desktop app will sign for the person.  This first part has
+// no keys: it is the window, the guards around it, and a stand-in command the self-test signs with, so that what can and
+// can't reach the signing commands is shown before any key exists.
+//   - The window is made by Rust alone, from native UI the app owns (the macOS menu's "Approvals…"; the tray and the
+//     OS notification come later).  No page command opens it: a web page can't open it, point it at anything, or pass
+//     it anything.
+//   - It shows the app's own bundled page on the app protocol (tauri://localhost, http://tauri.localhost on Windows),
+//     another origin than the page's (http://127.0.0.1:<port>); the page's server never serves it (lib.rs serve_page).
+//     Its navigation guard keeps it on that one page; its page's CSP keeps out frames and remote script.
+//   - Its commands are in a capability of their own (capabilities/signer.json: the signer window, local pages only);
+//     the page's capability never lists them.  And each command checks, itself, that its caller is the signer window
+//     on that page (signer_caller_ok), so a weakened capability alone still signs nothing.
+// The self-test (app/selftest/run.mjs, "signer") counts, from this module's log lines, the calls that reached the
+// command ("[signer] dispatch …") and the signatures made ("… signed").
+use std::sync::atomic::{AtomicU64, Ordering};
+use tauri::Url;
+
+pub const LABEL: &str = "signer";
+/// The signer's page, in the app's bundled files (app/signer/, copied by app/build-frontend.mjs).
+pub const PAGE: &str = "signer/index.html";
+/// The same page without its CSP: the self-test's control only (SAGEBRUSH_APP_SIGNER_CONTROL=csp-off).
+const PAGE_NO_CSP: &str = "signer/probe-nocsp.html";
+
+/// The self-test's controls, each leaving one guard out (never outside a self-test):
+/// "cap": the signing command in the page's capability too; "cap+check": that and no caller check; "csp-off": the
+/// signer's page without its CSP; "guard-off": the signer window's navigation guard left out.
+pub fn control() -> Option<String> {
+    control_from(std::env::var("SAGEBRUSH_APP_SIGNER_CONTROL").ok(), std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
+}
+/// The control asked for (`asked`), honoured only in a self-test (`selftest`): never in a normal run.
+fn control_from(asked: Option<String>, selftest: bool) -> Option<String> {
+    asked.filter(|_| selftest)
+}
+
+/// Whether `url` is the app protocol's page `path` ("/signer/index.html"): tauri://localhost/… (macOS, Linux) or
+/// http(s)://tauri.localhost/… (Windows); nothing else, no other host, no user, no port.
+fn app_page(url: &Url, path: &str) -> bool {
+    let host_ok = match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" | "https" => url.host_str() == Some("tauri.localhost"),
+        _ => false,
+    };
+    host_ok && url.port().is_none() && url.username().is_empty() && url.password().is_none() && url.path() == path
+}
+/// The signer's pages the window may show: its page, and in the csp-off control only, that page without its CSP.
+fn signer_page(url: &Url, control: Option<&str>) -> bool {
+    app_page(url, &format!("/{PAGE}")) || (control == Some("csp-off") && app_page(url, &format!("/{PAGE_NO_CSP}")))
+}
+
+/// Whether the signer window may load `url` (its navigation guard): its own page only.
+pub fn may_load(url: &Url, control: Option<&str>) -> bool {
+    signer_page(url, control)
+}
+
+/// In the self-test's csp-off control only: whether `url` is the other local server the control frames, which the
+/// guard then lets load.  On macOS the navigation guard also sees a frame's loads, so without this the frame never
+/// loads and the control can't show that the capability and the command's check refuse it without the CSP.
+pub fn control_frame_ok(url: &Url, control: Option<&str>, other: Option<&Url>) -> bool {
+    control == Some("csp-off") && other.is_some_and(|o| matches!(o.scheme(), "http") && o.host_str() == Some("127.0.0.1") && o.origin() == url.origin())
+}
+
+/// The self-test's diagnostic codes for a signer page that didn't sign (a fixed set: nothing else is ever logged).
+pub const PROBE_CODES: [&str; 6] = ["no-probe", "no-tauri", "no-script", "refused-acl", "refused", "hung"];
+
+/// The check Rust runs in the signer window after its page loads, in a self-test only: if the probe's global or the
+/// IPC global is missing, or the page's own script didn't run (signer.js marks that first), the page reloads itself
+/// once with ?probe=<code> (the navigation guard logs the code).
+const PROBE_CHECK: &str = "(function(){if(location.search.indexOf('probe=')>=0)return;var c=!window.__SB_SIGNER_PROBE__?'no-probe':!(window.__TAURI__&&window.__TAURI__.core&&typeof window.__TAURI__.core.invoke==='function')?'no-tauri':!window.__SB_SIGNER_RAN__?'no-script':null;if(c)location.replace(location.pathname+'?probe='+c);})()";
+
+/// A self-test diagnostic report: the signer page's own URL with ?probe=<code>, the code one of PROBE_CODES.
+pub fn probe_report(url: &Url, control: Option<&str>) -> Option<&'static str> {
+    if !signer_page(url, control) {
+        return None;
+    }
+    let code = url.query_pairs().find(|(k, _)| k == "probe").map(|(_, v)| v.into_owned())?;
+    PROBE_CODES.iter().copied().find(|c| *c == code)
+}
+
+/// The self-test's reading of the signer window's state after its page loads (why a page that loaded never reported):
+/// a fixed expression, read and logged by Rust as fixed codes only ("[signer] state: …"), or "no-answer" if no answer
+/// arrives within STATE_WAIT, or "eval-failed" if it couldn't be sent; on any other page the window loads, it isn't
+/// sent ("not-signer-page").  It never navigates and never calls a command.
+const STATE_CHECK: &str = "(function(){try{var s=document.readyState,p=location.protocol,t=window.__TAURI__;return [s==='loading'?1:s==='interactive'?2:s==='complete'?3:0,window.__SB_SIGNER_PROBE__?1:0,(t&&t.core&&typeof t.core.invoke==='function')?1:0,window.__SB_SIGNER_RAN__===true?1:0,p==='tauri:'?1:p==='http:'?2:0,document.getElementById('status')?1:0];}catch(e){return [];}})()";
+pub const STATE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Every code a state line can hold, field by field (nothing the page says is ever logged as text).
+pub const STATE_CODES: [(&str, &[&str]); 6] = [
+    ("ready", &["other", "loading", "interactive", "complete"]),
+    ("probe", &["no", "yes"]),
+    ("tauri", &["no", "yes"]),
+    ("ran", &["no", "yes"]),
+    ("protocol", &["other", "tauri", "http"]),
+    ("body", &["no", "yes"]),
+];
+
+/// The state line for the check's answer (its JSON): each field's fixed code, or "unreadable" for anything else.
+pub fn state_line(answer: &str) -> String {
+    let v: Option<Vec<u64>> = serde_json::from_str(answer).ok();
+    match v {
+        Some(v) if v.len() == STATE_CODES.len() && v.iter().zip(STATE_CODES).all(|(n, (_, c))| (*n as usize) < c.len()) => {
+            STATE_CODES.iter().zip(&v).map(|((f, c), n)| format!("{f}={}", c[*n as usize])).collect::<Vec<_>>().join(" ")
+        }
+        _ => "unreadable".into(),
+    }
+}
+
+/// Whether the checks run for this load (the state check, and the probe check on a page not yet reloaded): in a
+/// self-test only, once the page has loaded, and only on the signer's own page (never another page the window or a
+/// frame in it loads, such as the guard-off control's destination, whose own scripts could run inside the check).
+pub fn check_due(selftest: bool, finished: bool, url: &Url, control: Option<&str>) -> bool {
+    selftest && finished && signer_page(url, control)
+}
+/// Whether the state check runs for this load: as check_due, and never on a page reloaded with a probe report.
+pub fn state_check_due(selftest: bool, finished: bool, url: &Url, control: Option<&str>) -> bool {
+    check_due(selftest, finished, url, control) && !url.query_pairs().any(|(k, _)| k == "probe")
+}
+
+/// The signer window's web view data folder, under the app's data folder: a name fixed here (never from a page or any
+/// input), not a document window's (windows.rs webview_dir: webviews/doc-<n> only).  Its own folder gives the window
+/// a web view context of its own (see open).
+pub const DATA_FOLDER: &str = "signer-webview";
+pub fn data_folder(data: &std::path::Path) -> std::path::PathBuf {
+    data.join(DATA_FOLDER)
+}
+
+/// Whether `m` is a real folder (no symlink) no one but its owner may write (on Unix: no group or other write bit).
+fn private_folder(m: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    let private = {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode() & 0o022 == 0
+    };
+    #[cfg(not(unix))]
+    let private = true;
+    m.file_type().is_dir() && private
+}
+#[cfg(unix)]
+fn owner(m: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    m.uid()
+}
+#[cfg(not(unix))]
+fn owner(_: &std::fs::Metadata) -> u32 {
+    0
+}
+
+/// The signer window's data folder, made fresh before the window opens, or refused.  The app's data folder `data`
+/// must be a real folder (no symlink) no one else may write; a previous signer folder there must be one too, with
+/// the same owner, and is removed; the new one is made owner-only (0700 on Unix) and must then have the same owner
+/// as `data` (the folder this process just made is its own, so `data` is this user's).  (Windows: no symlink, a
+/// folder; its per-user ACLs aren't checked here.)
+/// Whether a previous signer folder may be removed: a private folder (`private`: no symlink, no group or other write)
+/// whose owner (`owner`) is the app data folder's (`data_owner`); else it is refused and kept.
+fn may_remove_old(private: bool, owner: u32, data_owner: u32) -> bool {
+    private && owner == data_owner
+}
+pub fn prepare_data_folder(data: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let d = std::fs::symlink_metadata(data).map_err(|e| format!("the app's data folder: {e}"))?;
+    if !private_folder(&d) {
+        return Err("the app's data folder isn't a folder only its owner may write".into());
+    }
+    let f = data_folder(data);
+    match std::fs::symlink_metadata(&f) {
+        Ok(m) if may_remove_old(private_folder(&m), owner(&m), owner(&d)) => std::fs::remove_dir_all(&f).map_err(|e| format!("the approvals window's old data folder: {e}"))?,
+        Ok(_) => return Err("the approvals window's data folder isn't a folder only its owner may write".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("the approvals window's data folder: {e}")),
+    }
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut b = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    // (create, not create_all: it fails if anything is there again)
+    b.create(&f).map_err(|e| format!("the approvals window's data folder: {e}"))?;
+    let m = std::fs::symlink_metadata(&f).map_err(|e| format!("the approvals window's data folder: {e}"))?;
+    #[cfg(unix)]
+    let only_owner = {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode() & 0o077 == 0
+    };
+    #[cfg(not(unix))]
+    let only_owner = true;
+    if !(private_folder(&m) && only_owner && owner(&m) == owner(&d)) {
+        let _ = std::fs::remove_dir(&f);
+        return Err("the app's data folder isn't this user's".into());
+    }
+    Ok(f)
+}
+
+/// Whether the approvals window was opened in this session: set once its data folder was made for it (open), never
+/// read from the folder being there.  Only this enables the longer removal at exit on Windows.
+static OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn opened_this_session() -> bool {
+    OPENED.load(Ordering::SeqCst)
+}
+
+/// One checked attempt at removing the signer window's data folder: Some(true) if it's gone (or wasn't there),
+/// Some(false) if it's still there after a remove that failed (a file held open), None if it may not be removed: the
+/// fixed child of `data` must be a real folder (no symlink) no one else may write, with the same owner as `data`,
+/// itself a real folder no one else may write.  Anything else is left alone.
+fn remove_once(data: &std::path::Path) -> Option<bool> {
+    let f = data_folder(data);
+    let d = std::fs::symlink_metadata(data).ok()?;
+    if !private_folder(&d) {
+        return None;
+    }
+    match std::fs::symlink_metadata(&f) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(true),
+        Ok(m) if private_folder(&m) && owner(&m) == owner(&d) => Some(std::fs::remove_dir_all(&f).is_ok() || matches!(std::fs::symlink_metadata(&f), Err(e) if e.kind() == std::io::ErrorKind::NotFound)),
+        _ => None,
+    }
+}
+
+/// The signer window's data folder removed: true if it's gone.  Tried once, then, until the monotonic deadline `within`
+/// (if any), again every 100 ms, each try re-checking everything remove_once checks (a check that fails ends it: a
+/// failed remove never loosens a check).
+pub fn remove_data_folder_within(data: &std::path::Path, within: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        match remove_once(data) {
+            Some(true) => return true,
+            None => return false,
+            Some(false) if std::time::Instant::now() >= deadline => return false,
+            Some(false) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+}
+/// The signer window's data folder removed, one checked try (when the window closes).
+pub fn remove_data_folder(data: &std::path::Path) -> bool {
+    remove_data_folder_within(data, std::time::Duration::ZERO)
+}
+/// How long the app waits at exit, on Windows, for WebView2's processes to let go of the folder (only if the
+/// approvals window was opened in this session).
+pub const EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+/// The removal at exit, if the window was opened in this session (else nothing: the next launch's cleanup handles a
+/// crash's leftover).  Normally the window is gone by then and its folder already removed (on_exit_requested): one
+/// checked try.  If the window is still there (an exit that couldn't wait for it), up to EXIT_WAIT on Windows.
+pub fn remove_at_exit(data: &std::path::Path, window_alive: bool) -> Option<bool> {
+    let wait = if cfg!(windows) && window_alive { EXIT_WAIT } else { std::time::Duration::ZERO };
+    opened_this_session().then(|| remove_data_folder_within(data, wait))
+}
+
+/// The approvals window's lifecycle, serialized under one lock (LIFE): which window owns the folder now (a generation
+/// per open), whether its folder is being removed, and an exit held for that removal.
+///   - No window opens while a removal runs, or once an exit with a code is committed: a new window's fresh folder
+///     must never be what an old removal's next try deletes.
+///   - A removal starts only for the window that owns the folder now: a late Destroyed of an older one removes nothing.
+///   - The first held exit code is the one replayed; later requests during the removal don't change it.
+#[derive(Debug, Default)]
+pub struct Lifecycle {
+    gen: u64,
+    removing: bool,
+    exit: Option<i32>,
+    exiting: bool,
+    replaying: bool,
+}
+impl Lifecycle {
+    pub const fn new() -> Self {
+        Lifecycle { gen: 0, removing: false, exit: None, exiting: false, replaying: false }
+    }
+    /// A new window may open now: no removal running, no exit committed.
+    pub fn may_open(&self) -> bool {
+        !self.removing && !self.exiting
+    }
+    /// A window opens: its generation (it owns the folder from now).  Only after may_open.
+    pub fn begin_open(&mut self) -> u64 {
+        self.gen += 1;
+        self.gen
+    }
+    /// An exit request, with the window there or not: true if it's held (the caller prevents the exit).  An exit with
+    /// a code commits the exit (no window opens after it); the first code held is kept.  Once a held exit's removal
+    /// is done, its replay (and any exit after it) passes, even if the window is somehow still there (a failed close).
+    pub fn exit_requested(&mut self, code: Option<i32>, window_open: bool) -> bool {
+        if code.is_some() {
+            self.exiting = true;
+        }
+        if self.replaying {
+            return false;
+        }
+        if !window_open && !self.removing {
+            return false;
+        }
+        match code {
+            Some(c) => {
+                self.exit.get_or_insert(c);
+                true
+            }
+            None => false,
+        }
+    }
+    /// The removal for window `gen` begins: false if it may not (an older window's, or one already running).
+    pub fn cleanup_started(&mut self, gen: u64) -> bool {
+        if gen != self.gen || self.removing {
+            return false;
+        }
+        self.removing = true;
+        true
+    }
+    /// The window's close failed (no Destroyed will come): its removal begins now instead.
+    pub fn close_failed(&mut self) -> bool {
+        let g = self.gen;
+        self.cleanup_started(g)
+    }
+    /// What a close at exit led to: true if the removal must start now (the close failed, so no Destroyed comes).
+    pub fn closed(&mut self, failed: bool) -> bool {
+        failed && !self.replaying && self.close_failed()
+    }
+    /// The removal is done: the held exit's code, to make it again with.
+    pub fn cleanup_done(&mut self) -> Option<i32> {
+        self.removing = false;
+        let code = self.exit.take();
+        if code.is_some() {
+            self.replaying = true;
+        }
+        code
+    }
+}
+static LIFE: std::sync::Mutex<Lifecycle> = std::sync::Mutex::new(Lifecycle::new());
+
+/// The removal of the window's folder, off the main thread (up to EXIT_WAIT on Windows, one checked try elsewhere),
+/// logged as a fixed code; then a held exit is made with its first code.  Only after cleanup_started.
+#[cfg(desktop)]
+fn run_cleanup(handle: tauri::AppHandle, data: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        let gone = if cfg!(windows) { remove_data_folder_within(&data, EXIT_WAIT) } else { remove_data_folder(&data) };
+        eprintln!("[signer] data folder removed: {}", if gone { "yes" } else { "no" });
+        let code = LIFE.lock().unwrap().cleanup_done();
+        if let Some(c) = code {
+            handle.exit(c);
+        }
+    });
+}
+
+/// What the launch's cleanup found (logged as a fixed code, "[signer] startup data folder: …").
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Startup {
+    /// Nothing there.
+    Absent,
+    /// A previous launch's folder (a crash's, or one WebView2 held at exit), removed.
+    Removed,
+    /// A safe folder that couldn't be removed now (held open): open removes it again, or refuses.
+    Kept,
+    /// Something that may not be removed (a symlink, a file, a folder others may write or another's): left as it is;
+    /// the window then refuses to open (prepare_data_folder).
+    Refused,
+}
+impl Startup {
+    pub fn code(self) -> &'static str {
+        match self {
+            Startup::Absent => "absent",
+            Startup::Removed => "removed",
+            Startup::Kept => "kept",
+            Startup::Refused => "refused",
+        }
+    }
+}
+/// The launch's cleanup, before the approvals window can open: the same fixed folder and the same checks as every
+/// removal.
+pub fn startup_cleanup(data: &std::path::Path) -> Startup {
+    let there = std::fs::symlink_metadata(data_folder(data)).is_ok();
+    match remove_once(data) {
+        Some(true) if there => Startup::Removed,
+        Some(true) => Startup::Absent,
+        Some(false) => Startup::Kept,
+        None if !there => Startup::Absent,
+        None => Startup::Refused,
+    }
+}
+
+/// At an exit request: the approvals window, and only it, closed, so its web view lets go of its folder; an exit with
+/// a code (the app's own, not the person's quit, which lib.rs holds for the page's writes) is held until that folder
+/// is removed, then made again with the same code.
+#[cfg(desktop)]
+pub fn on_exit_requested(app: &tauri::AppHandle, code: Option<i32>, api: &tauri::ExitRequestApi) {
+    use tauri::Manager;
+    let window = app.get_webview_window(LABEL);
+    if LIFE.lock().unwrap().exit_requested(code, window.is_some()) {
+        api.prevent_exit();
+    }
+    if let Some(w) = window {
+        // (a failed close: no Destroyed will come, so the same checked, bounded removal now, then the held exit)
+        let failed = w.close().is_err();
+        if LIFE.lock().unwrap().closed(failed) {
+            match crate::disk::data_dir(app) {
+                Ok(data) => run_cleanup(app.clone(), data),
+                Err(_) => {
+                    let code = LIFE.lock().unwrap().cleanup_done();
+                    if let Some(c) = code {
+                        app.exit(c);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Whether a call of a signing command comes from the signer window on its own page.
+pub fn signer_caller_ok(label: &str, url: &Url, control: Option<&str>) -> bool {
+    label == LABEL && signer_page(url, control)
+}
+
+/// The signer window, made (or, if it is there, brought to the front).  Native UI the app owns calls this; no page can.
+#[cfg(desktop)]
+pub fn open(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window(LABEL) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    // (not while the last window's folder is being removed, nor once the app is exiting: Lifecycle)
+    let gen = {
+        let mut life = LIFE.lock().unwrap();
+        if !life.may_open() {
+            return Err("the approvals window is still closing".into());
+        }
+        life.begin_open()
+    };
+    let c = control();
+    let page = if c.as_deref() == Some("csp-off") { PAGE_NO_CSP } else { PAGE };
+    let guard_off = c.as_deref() == Some("guard-off");
+    let gc = c.clone();
+    let lc = c.clone();
+    // (the self-test's other local server, which the controls frame or visit)
+    let probe = std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
+    let other: Option<Url> = probe.as_deref().and_then(|p| p.strip_prefix("signer:")).and_then(|o| o.parse().ok());
+    let go = other.clone();
+    let selftest = probe.is_some();
+    let mut w = tauri::WebviewWindowBuilder::new(app, LABEL, tauri::WebviewUrl::App(page.into()))
+        .title("Sagebrush: approvals")
+        .inner_size(560.0, 640.0)
+        .disable_drag_drop_handler()
+        // (each load of the window's pages, by origin and path only: the self-test reads how far the page got; in a
+        //  self-test, once loaded, the fixed check of the probe's and the IPC's globals runs in the page, and the fixed
+        //  state check reads the page's state back as codes)
+        .on_page_load(move |w, p| {
+            let u = p.url();
+            let finished = !matches!(p.event(), tauri::webview::PageLoadEvent::Started);
+            eprintln!("[signer] page {} {}{}", if finished { "finished" } else { "started" }, u.origin().ascii_serialization(), u.path());
+            if check_due(selftest, finished, u, lc.as_deref()) {
+                let _ = w.eval(PROBE_CHECK);
+            }
+            if selftest && finished && !check_due(selftest, finished, u, lc.as_deref()) {
+                // (another page in the window, such as the guard-off control's destination: no check runs there)
+                eprintln!("[signer] state: not-signer-page");
+            }
+            if state_check_due(selftest, finished, u, lc.as_deref()) {
+                // (logged before it's sent, so the self-test sees which page each check ran on: signer-judge.mjs; the
+                //  first of the answer and the deadline logs, and the other then logs nothing)
+                eprintln!("[signer] state check sent");
+                let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let d = done.clone();
+                let sent = w.eval_with_callback(STATE_CHECK, move |a| {
+                    if !d.swap(true, Ordering::SeqCst) {
+                        eprintln!("[signer] state: {}", state_line(&a));
+                    }
+                });
+                if sent.is_err() {
+                    done.store(true, Ordering::SeqCst);
+                    eprintln!("[signer] state: eval-failed");
+                } else {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(STATE_WAIT);
+                        if !done.swap(true, Ordering::SeqCst) {
+                            eprintln!("[signer] state: no-answer");
+                        }
+                    });
+                }
+            }
+        })
+        .on_navigation(move |u| {
+            if selftest {
+                if let Some(code) = probe_report(u, gc.as_deref()) {
+                    eprintln!("[signer] probe report: {code}");
+                }
+            }
+            let yes = guard_off || may_load(u, gc.as_deref()) || control_frame_ok(u, gc.as_deref(), go.as_ref());
+            if !yes {
+                eprintln!("[signer] refused to load {}", u.origin().ascii_serialization());
+            }
+            yes
+        });
+    // (incognito, so the window keeps no web storage, and a web view context of its own: its own data folder, made
+    //  fresh here and removed when it closes.  Tauri keeps one context per data folder, and on Linux registers the app
+    //  protocol's and the IPC's handlers once per data folder: a window sharing the main window's (none, incognito, so
+    //  wry built it an ephemeral context of its own) got neither, and its page never loaded (CI, Nov 23).)
+    let data = crate::disk::data_dir(app)?;
+    let folder = prepare_data_folder(&data)?;
+    OPENED.store(true, Ordering::SeqCst);
+    w = w.incognito(true).data_directory(folder);
+    // (a self-test's probe of the window: what the page is to try, the other local server's origin)
+    if let Some(p) = probe {
+        if let Some(other) = p.strip_prefix("signer:") {
+            w = w.initialization_script(&format!("window.__SB_SIGNER_PROBE__ = {};", serde_json::json!({ "other": other, "control": c })));
+        }
+    }
+    let made = w.build().map_err(|e| format!("the approvals window didn't open: {e}"))?;
+    // (once the window is gone, its data folder goes too (run_cleanup), if this window still owns it)
+    let handle = app.clone();
+    made.on_window_event(move |e| {
+        if let tauri::WindowEvent::Destroyed = e {
+            if LIFE.lock().unwrap().cleanup_started(gen) {
+                run_cleanup(handle.clone(), data.clone());
+            }
+        }
+    });
+    Ok(())
+}
+
+static DISPATCHED: AtomicU64 = AtomicU64::new(0);
+static SIGNED: AtomicU64 = AtomicU64::new(0);
+
+/// The self-test's stand-in signing command (no key: it "signs" with a counter), so that who reaches a signing command
+/// is shown before any key exists.  Outside a self-test it signs nothing.  Each call is logged: dispatched (it reached
+/// the command), then signed or refused.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn signer_probe_sign(webview: tauri::Webview, msg: String) -> Result<String, String> {
+    let url = webview.url().map_err(|e| format!("no page: {e}"))?;
+    let n = DISPATCHED.fetch_add(1, Ordering::SeqCst) + 1;
+    eprintln!("[signer] dispatch {n} from {} at {}", webview.label(), url.origin().ascii_serialization());
+    if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_none() {
+        eprintln!("[signer] refused {n}: not a self-test");
+        return Err("not available".into());
+    }
+    let c = control();
+    if c.as_deref() != Some("cap+check") && !signer_caller_ok(webview.label(), &url, c.as_deref()) {
+        eprintln!("[signer] refused {n}: not the signer window's page");
+        return Err("only the approvals window signs".into());
+    }
+    let s = SIGNED.fetch_add(1, Ordering::SeqCst) + 1;
+    eprintln!("[signer] signed {n} (signature {s}) for {}", webview.label());
+    Ok(format!("probe-signature-{s}-{}", msg.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn u(s: &str) -> Url {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn a_control_is_honoured_only_in_a_self_test() {
+        for c in ["cap", "cap+check", "csp-off", "guard-off"] {
+            assert_eq!(control_from(Some(c.to_string()), true), Some(c.to_string()), "{c} in a self-test");
+            assert_eq!(control_from(Some(c.to_string()), false), None, "{c} outside a self-test: never");
+        }
+        assert_eq!(control_from(None, true), None);
+        assert_eq!(control_from(None, false), None);
+    }
+
+    #[test]
+    fn an_old_signer_folder_is_removed_only_if_private_and_the_data_folder_owners() {
+        assert!(may_remove_old(true, 501, 501));
+        // (another owner's, even private: refused and kept)
+        assert!(!may_remove_old(true, 0, 501));
+        assert!(!may_remove_old(true, 502, 501));
+        // (not private: refused, whoever owns it)
+        assert!(!may_remove_old(false, 501, 501));
+    }
+
+    #[test]
+    fn only_the_signer_window_on_its_own_page_signs() {
+        for ok in ["tauri://localhost/signer/index.html", "http://tauri.localhost/signer/index.html", "https://tauri.localhost/signer/index.html"] {
+            assert!(signer_caller_ok("signer", &u(ok), None), "{ok}");
+        }
+        // (another window, on the very same page: no)
+        for label in ["main", "doc-1", "signer2", "Signer", ""] {
+            assert!(!signer_caller_ok(label, &u("tauri://localhost/signer/index.html"), None), "{label}");
+        }
+        // (the signer window on any other page: no)
+        for bad in [
+            "http://127.0.0.1:49214/signer/index.html",
+            "http://127.0.0.1:49214/",
+            "tauri://localhost/",
+            "tauri://localhost/index.html",
+            "tauri://localhost/signer/probe-nocsp.html",
+            "tauri://evil/signer/index.html",
+            "http://tauri.localhost:8080/signer/index.html",
+            "http://user@tauri.localhost/signer/index.html",
+            "http://tauri.localhost.evil.example/signer/index.html",
+            "https://sagebrush.space/signer/index.html",
+            "file:///signer/index.html",
+            "about:blank",
+        ] {
+            assert!(!signer_caller_ok("signer", &u(bad), None), "{bad}");
+        }
+        // (the page without its CSP: in the self-test's csp-off control only)
+        assert!(signer_caller_ok("signer", &u("tauri://localhost/signer/probe-nocsp.html"), Some("csp-off")));
+        assert!(!signer_caller_ok("signer", &u("tauri://localhost/signer/probe-nocsp.html"), Some("cap")));
+    }
+
+    #[test]
+    fn the_signing_command_is_the_signer_window_s_alone() {
+        // (the signer's capability: that window, its local (app protocol) pages, no remote origin)
+        let c: serde_json::Value = serde_json::from_str(include_str!("../capabilities/signer.json")).unwrap();
+        assert_eq!(c["windows"], serde_json::json!(["signer"]));
+        assert_eq!(c["local"], true);
+        assert!(c.get("remote").is_none());
+        assert_eq!(c["permissions"], serde_json::json!(["allow-signer-probe-sign"]));
+        // (the page's capability, as the app adds it, never lists it; nor does its template's windows include the signer)
+        let p: serde_json::Value = serde_json::from_str(&crate::nav::page_capability(49214)).unwrap();
+        assert!(!p["permissions"].as_array().unwrap().iter().any(|x| x.as_str().is_some_and(|s| s.contains("signer"))), "{p}");
+        assert!(!p["windows"].as_array().unwrap().iter().any(|w| w == "signer" || w == "*"), "{p}");
+    }
+
+    #[test]
+    fn only_the_csp_off_control_lets_the_other_server_load() {
+        let other = u("http://127.0.0.1:49314");
+        assert!(control_frame_ok(&u("http://127.0.0.1:49314/sframe"), Some("csp-off"), Some(&other)));
+        for (url, control, o) in [
+            ("http://127.0.0.1:49314/sframe", None, Some(&other)),
+            ("http://127.0.0.1:49314/sframe", Some("cap"), Some(&other)),
+            ("http://127.0.0.1:49314/sframe", Some("guard-off"), Some(&other)),
+            ("http://127.0.0.1:49314/sframe", Some("csp-off"), None),
+            ("http://127.0.0.1:49315/sframe", Some("csp-off"), Some(&other)),
+            ("https://sagebrush.space/", Some("csp-off"), Some(&other)),
+        ] {
+            assert!(!control_frame_ok(&u(url), control, o), "{url} {control:?}");
+        }
+        // (an "other" that isn't a local http server is never let in)
+        let remote = u("https://example.com");
+        assert!(!control_frame_ok(&u("https://example.com/x"), Some("csp-off"), Some(&remote)));
+    }
+
+    #[test]
+    fn only_a_fixed_probe_code_on_the_signer_s_own_page_is_a_report() {
+        for code in PROBE_CODES {
+            assert_eq!(probe_report(&u(&format!("tauri://localhost/signer/index.html?probe={code}")), None), Some(code));
+        }
+        for bad in [
+            "tauri://localhost/signer/index.html",
+            "tauri://localhost/signer/index.html?probe=",
+            "tauri://localhost/signer/index.html?probe=secret-text",
+            "tauri://localhost/signer/index.html?probe=NO-TAURI",
+            "tauri://localhost/index.html?probe=no-tauri",
+            "http://127.0.0.1:49214/signer/index.html?probe=no-tauri",
+        ] {
+            assert_eq!(probe_report(&u(bad), None), None, "{bad}");
+        }
+        assert!(PROBE_CHECK.contains("location.replace") && !PROBE_CHECK.contains("invoke("), "the check never calls a command");
+        // (every code the check itself reports is a fixed one; app/selftest/test-signer-page.mjs runs it)
+        for code in ["no-probe", "no-tauri", "no-script"] {
+            assert!(PROBE_CHECK.contains(&format!("'{code}'")) && PROBE_CODES.contains(&code), "{code}");
+        }
+    }
+
+    #[test]
+    fn the_state_line_is_fixed_codes_only() {
+        assert_eq!(state_line("[3,1,1,1,1,1]"), "ready=complete probe=yes tauri=yes ran=yes protocol=tauri body=yes");
+        assert_eq!(state_line("[1,0,0,0,0,0]"), "ready=loading probe=no tauri=no ran=no protocol=other body=no");
+        assert_eq!(state_line("[2,1,1,0,2,1]"), "ready=interactive probe=yes tauri=yes ran=no protocol=http body=yes");
+        for bad in ["", "null", "[]", "[3,1,1,1,1]", "[3,1,1,1,1,1,1]", "[4,1,1,1,1,1]", "[3,2,1,1,1,1]", "[3,1,1,1,3,1]", "[-1,1,1,1,1,1]",
+            "[3,1,1,1,1,1.5]", "[\"complete\",1,1,1,1,1]", "{\"ready\":3}", "\"ready=complete\"", "[3,1,1,1,1,1] x"] {
+            assert_eq!(state_line(bad), "unreadable", "{bad}");
+        }
+        // (every value a line can hold is one of the fixed codes)
+        let fields: Vec<&str> = STATE_CODES.iter().map(|(f, _)| *f).collect();
+        assert_eq!(fields, ["ready", "probe", "tauri", "ran", "protocol", "body"]);
+        assert!(STATE_CODES.iter().all(|(_, c)| c.iter().all(|x| x.chars().all(|ch| ch.is_ascii_lowercase()))));
+        // (the check only reads: no navigation, no command, no network)
+        for no in ["location.replace", "location.href", "location.assign", "invoke(", "fetch(", "XMLHttpRequest", "src=", "open("] {
+            assert!(!STATE_CHECK.contains(no), "{no}");
+        }
+        assert_eq!(STATE_WAIT, std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn the_checks_run_in_a_self_test_on_the_signer_s_own_loaded_page_only() {
+        let page = u("tauri://localhost/signer/index.html");
+        for c in [None, Some("cap"), Some("cap+check"), Some("guard-off")] {
+            assert!(state_check_due(true, true, &page, c) && check_due(true, true, &page, c), "{c:?}");
+        }
+        let nocsp = u("tauri://localhost/signer/probe-nocsp.html");
+        assert!(state_check_due(true, true, &nocsp, Some("csp-off")) && check_due(true, true, &nocsp, Some("csp-off")));
+        assert!(!state_check_due(true, true, &nocsp, None) && !check_due(true, true, &nocsp, None), "the csp-off page outside its control");
+        assert!(!state_check_due(false, true, &page, None) && !check_due(false, true, &page, None), "never outside a self-test");
+        assert!(!state_check_due(true, false, &page, None) && !check_due(true, false, &page, None), "never before the page has loaded");
+        for reloaded in ["tauri://localhost/signer/index.html?probe=hung", "tauri://localhost/signer/index.html?probe=", "tauri://localhost/signer/index.html?x=1&probe=no-script"] {
+            assert!(!state_check_due(true, true, &u(reloaded), None), "{reloaded}");
+            assert!(check_due(true, true, &u(reloaded), None), "the probe check still runs there (and returns at once): {reloaded}");
+        }
+        // (never another page: the guard-off control's destination, the csp-off control's framed page, the main page,
+        //  any other app page or scheme), under every control
+        for other in [
+            "http://127.0.0.1:49214/stop",
+            "http://127.0.0.1:49214/sframe",
+            "http://127.0.0.1:49214/",
+            "http://127.0.0.1:49214/signer/index.html",
+            "tauri://localhost/index.html",
+            "tauri://localhost/signer/other.html",
+            "tauri://evil/signer/index.html",
+            "about:blank",
+            "data:text/html,x",
+            "https://example.com/signer/index.html",
+        ] {
+            for c in [None, Some("cap"), Some("cap+check"), Some("csp-off"), Some("guard-off")] {
+                assert!(!state_check_due(true, true, &u(other), c) && !check_due(true, true, &u(other), c), "{other} {c:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_signer_window_has_a_web_view_data_folder_of_its_own() {
+        let data = std::path::Path::new("/data");
+        assert_eq!(data_folder(data), std::path::Path::new("/data/signer-webview"));
+        // (no document window's folder is the signer's: those are doc-<n> only, and the main window has none)
+        assert!(crate::windows::webview_dir(data, LABEL).is_none() && crate::windows::webview_dir(data, "main").is_none());
+        assert_ne!(crate::windows::webview_dir(data, "doc-1"), Some(data_folder(data)));
+    }
+
+    fn temp() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("sb-signer-{}-{:x}", std::process::id(), rand_suffix()));
+        std::fs::create_dir(&d).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        d
+    }
+    fn rand_suffix() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        static N: AtomicU64 = AtomicU64::new(0);
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64 ^ (N.fetch_add(1, Ordering::SeqCst) << 48)
+    }
+
+    #[test]
+    fn the_data_folder_is_made_fresh_and_owner_only() {
+        let data = temp();
+        let f = prepare_data_folder(&data).unwrap();
+        assert_eq!(f, data.join("signer-webview"));
+        // (a previous one's contents are gone)
+        std::fs::create_dir_all(f.join("WebKit/LocalStorage")).unwrap();
+        std::fs::write(f.join("cookies.sqlite"), b"x").unwrap();
+        let f = prepare_data_folder(&data).unwrap();
+        assert_eq!(std::fs::read_dir(&f).unwrap().count(), 0, "made empty again");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[test]
+    fn the_data_folder_is_removed_and_only_ours() {
+        let data = temp();
+        assert!(remove_data_folder(&data), "none: gone already");
+        let f = prepare_data_folder(&data).unwrap();
+        std::fs::create_dir_all(f.join("EBWebView/Default/Cache")).unwrap();
+        std::fs::write(f.join("hsts-storage.sqlite"), b"x").unwrap();
+        assert!(remove_data_folder(&data) && !f.exists(), "removed with what's in it");
+        #[cfg(unix)]
+        {
+            // (a symlink in its place: not followed, its target untouched, and not reported gone)
+            let target = temp();
+            std::fs::write(target.join("keep"), b"x").unwrap();
+            std::os::unix::fs::symlink(&target, &f).unwrap();
+            assert!(!remove_data_folder(&data) && target.join("keep").exists());
+            std::fs::remove_file(&f).unwrap();
+            std::fs::remove_dir_all(&target).unwrap();
+            // (a folder others may write: left alone)
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::create_dir(&f).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o777)).unwrap();
+            assert!(!remove_data_folder(&data) && f.exists());
+        }
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_data_folder_is_refused_when_shared_or_substituted() {
+        use std::os::unix::fs::PermissionsExt;
+        // (an app data folder others may write)
+        for mode in [0o777, 0o775, 0o757, 0o722] {
+            let data = temp();
+            std::fs::set_permissions(&data, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(prepare_data_folder(&data).is_err(), "{mode:o}");
+            assert!(!data.join("signer-webview").exists(), "{mode:o}: nothing made");
+            std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
+            std::fs::remove_dir_all(&data).unwrap();
+        }
+        // (a symlink as the app data folder)
+        let real = temp();
+        let link = real.with_extension("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(prepare_data_folder(&link).is_err(), "a symlinked app data folder");
+        std::fs::remove_file(&link).unwrap();
+        // (a symlink, a file, or a folder others may write, as the signer folder: refused, and the target untouched)
+        let data = temp();
+        let target = temp();
+        std::fs::write(target.join("keep"), b"x").unwrap();
+        std::os::unix::fs::symlink(&target, data.join("signer-webview")).unwrap();
+        assert!(prepare_data_folder(&data).is_err(), "a symlinked signer folder");
+        assert!(target.join("keep").exists(), "the symlink's target is untouched");
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        std::fs::write(data.join("signer-webview"), b"x").unwrap();
+        assert!(prepare_data_folder(&data).is_err(), "a file as the signer folder");
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        std::fs::create_dir(data.join("signer-webview")).unwrap();
+        std::fs::set_permissions(data.join("signer-webview"), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(prepare_data_folder(&data).is_err(), "a signer folder others may write");
+        for d in [&data, &target, &real] {
+            std::fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_launch_s_cleanup_removes_only_a_safe_leftover() {
+        let data = temp();
+        assert_eq!(startup_cleanup(&data), Startup::Absent);
+        // (a crash's leftover, with what a web view keeps)
+        std::fs::create_dir_all(data.join("signer-webview/EBWebView/Default/Network")).unwrap();
+        std::fs::write(data.join("signer-webview/EBWebView/Default/Network/Cookies"), b"x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(data.join("signer-webview"), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        assert_eq!(startup_cleanup(&data), Startup::Removed);
+        assert!(!data.join("signer-webview").exists());
+        assert_eq!(Startup::Removed.code(), "removed");
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_launch_s_cleanup_refuses_and_keeps_a_substituted_leftover() {
+        use std::os::unix::fs::PermissionsExt;
+        let data = temp();
+        let target = temp();
+        std::fs::write(target.join("keep"), b"x").unwrap();
+        std::os::unix::fs::symlink(&target, data.join("signer-webview")).unwrap();
+        assert_eq!(startup_cleanup(&data), Startup::Refused, "a symlink");
+        assert!(target.join("keep").exists() && std::fs::symlink_metadata(data.join("signer-webview")).unwrap().file_type().is_symlink(), "kept as it is");
+        assert!(prepare_data_folder(&data).is_err(), "and the window then refuses to open");
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        std::fs::write(data.join("signer-webview"), b"x").unwrap();
+        assert_eq!(startup_cleanup(&data), Startup::Refused, "a file");
+        assert!(data.join("signer-webview").is_file());
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        std::fs::create_dir(data.join("signer-webview")).unwrap();
+        std::fs::write(data.join("signer-webview/x"), b"x").unwrap();
+        std::fs::set_permissions(data.join("signer-webview"), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(startup_cleanup(&data), Startup::Refused, "a folder others may write");
+        assert!(data.join("signer-webview/x").exists());
+        // (and an app data folder others may write: nothing removed)
+        std::fs::set_permissions(data.join("signer-webview"), std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(startup_cleanup(&data), Startup::Refused, "an app data folder others may write");
+        assert!(data.join("signer-webview/x").exists());
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for d in [&data, &target] {
+            std::fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_removal_s_retries_recheck_and_stop_at_once_on_a_refusal() {
+        // (a symlink substituted: refused at the first try, no waiting out the deadline)
+        let data = temp();
+        let target = temp();
+        std::os::unix::fs::symlink(&target, data.join("signer-webview")).unwrap();
+        let t = std::time::Instant::now();
+        assert!(!remove_data_folder_within(&data, std::time::Duration::from_secs(5)));
+        assert!(t.elapsed() < std::time::Duration::from_secs(1), "a refusal ends the retries");
+        assert!(target.exists());
+        std::fs::remove_file(data.join("signer-webview")).unwrap();
+        // (gone: true at once)
+        assert!(remove_data_folder_within(&data, EXIT_WAIT));
+        for d in [&data, &target] {
+            std::fs::remove_dir_all(d).unwrap();
+        }
+        assert_eq!(EXIT_WAIT, std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn the_exit_s_removal_runs_only_if_the_window_was_opened_in_this_session() {
+        // (the tests never open the window: a folder that's there doesn't count)
+        let data = temp();
+        let f = prepare_data_folder(&data).unwrap();
+        assert!(!opened_this_session());
+        assert_eq!(remove_at_exit(&data, true), None);
+        assert!(f.exists(), "not opened in this session: left for the next launch's cleanup");
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[test]
+    fn no_window_opens_while_the_last_one_s_folder_is_removed_and_a_late_destroyed_removes_nothing() {
+        let data = temp();
+        let mut life = Lifecycle::new();
+        // (window 1 opens and closes: its removal is held mid-way, between two tries)
+        assert!(life.may_open());
+        let g1 = life.begin_open();
+        prepare_data_folder(&data).unwrap();
+        assert!(life.cleanup_started(g1));
+        assert!(!life.may_open(), "a reopen while the removal runs is refused");
+        assert!(!life.cleanup_started(g1), "and one removal at a time");
+        assert_eq!(life.cleanup_done(), None);
+        // (window 2 opens afterwards: its fresh folder; window 1's late Destroyed removes nothing)
+        assert!(life.may_open());
+        let g2 = life.begin_open();
+        let f = prepare_data_folder(&data).unwrap();
+        std::fs::write(f.join("live"), b"x").unwrap();
+        assert!(!life.cleanup_started(g1), "an older window's Destroyed starts no removal");
+        assert!(f.join("live").exists(), "the new window's folder is untouched");
+        assert!(life.cleanup_started(g2));
+        assert!(remove_data_folder(&data) && !f.exists());
+        assert_eq!(life.cleanup_done(), None);
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[test]
+    fn an_exit_held_for_the_removal_replays_its_first_code() {
+        let mut life = Lifecycle::new();
+        let g = life.begin_open();
+        assert!(life.exit_requested(Some(1), true), "held while the window is there");
+        assert!(!life.may_open(), "no window opens once an exit is committed");
+        assert!(life.cleanup_started(g));
+        assert!(life.exit_requested(Some(0), false), "held again during the removal");
+        assert!(life.exit_requested(Some(2), false));
+        assert_eq!(life.cleanup_done(), Some(1), "the first code, not a later one");
+        assert!(!life.exit_requested(Some(1), false), "the replayed exit passes");
+        assert!(!life.may_open());
+        // (the person's quit (no code) isn't held here, and commits nothing)
+        let mut life = Lifecycle::new();
+        life.begin_open();
+        assert!(!life.exit_requested(None, true) && life.may_open());
+        // (an exit with no window and no removal passes at once, and still commits)
+        let mut life = Lifecycle::new();
+        assert!(!life.exit_requested(Some(0), false) && !life.may_open());
+    }
+
+    #[test]
+    fn a_failed_close_starts_the_removal_and_the_held_exit_still_comes() {
+        let mut life = Lifecycle::new();
+        let g = life.begin_open();
+        assert!(life.exit_requested(Some(3), true));
+        // (a close that worked starts nothing here: Destroyed does)
+        assert!(!life.closed(false));
+        assert!(life.may_open() == false && !life.removing);
+        // (the close fails: no Destroyed; the removal starts now)
+        assert!(life.closed(true));
+        assert!(!life.closed(true) && !life.close_failed() && !life.cleanup_started(g), "once");
+        assert_eq!(life.cleanup_done(), Some(3), "and the held exit is made with its code");
+    }
+
+    #[test]
+    fn a_replayed_exit_passes_even_if_the_window_is_still_registered() {
+        // (the close failed, so no Destroyed came and the window can still be there when the held exit is replayed)
+        let mut life = Lifecycle::new();
+        life.begin_open();
+        assert!(life.exit_requested(Some(3), true));
+        assert!(life.closed(true));
+        assert_eq!(life.cleanup_done(), Some(3));
+        assert!(!life.exit_requested(Some(3), true), "the replay isn't held again");
+        assert!(!life.closed(true), "nor does its close start another removal");
+        assert!(!life.exit_requested(Some(0), true), "nor any exit after it");
+        assert!(!life.may_open(), "and no window opens");
+        assert_eq!(life.cleanup_done(), None);
+    }
+
+    #[test]
+    fn the_signer_window_stays_on_its_page() {
+        assert!(may_load(&u("tauri://localhost/signer/index.html"), None));
+        for bad in ["http://127.0.0.1:49214/", "https://sagebrush.space/", "tauri://localhost/index.html", "about:blank", "data:text/html,x", "blob:tauri://localhost/x"] {
+            assert!(!may_load(&u(bad), None), "{bad}");
+        }
+    }
+}

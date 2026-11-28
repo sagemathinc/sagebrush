@@ -146,7 +146,10 @@ ok(parseTzIndex(realBytes) !== null, "real: the real index itself is accepted");
   only("PKu-packages", "packages an empty array", enc({ ...ix, packages: [] }), []);
   no("PKu-src", "a src sha256 not 64 lowercase hex", with0({ ...p0, src: { ...p0.src, sha256: p0.src.sha256.toUpperCase() } }));
   no("PKu-pre", "a pre entry with no sha256", with0({ ...p0, pre: { "0123456789abcdef": { size: 1 } } }));
-  only("PKu-pre-builds", "5 precompiled builds, each the src chunk", with0({ ...p0, pre: Object.fromEntries([1, 2, 3, 4, 5].map((i) => [`${i}`.repeat(16), p0.src])) }), [`pkg/${p0.src.sha256}.json`]);
+  // (the first package's builds replaced: its src chunk, and every other package's chunks as they are; the set
+  // holds pandas and sklearn)
+  const others = Object.entries(ix.packages).filter(([k]) => k !== id0).flatMap(([, p]) => [p.src.sha256, ...Object.values(p.pre).map((r) => r.sha256)]).map((h) => `pkg/${h}.json`);
+  only("PKu-pre-builds", "5 precompiled builds, each the src chunk", with0({ ...p0, pre: Object.fromEntries([1, 2, 3, 4, 5].map((i) => [`${i}`.repeat(16), p0.src])) }), [...new Set([...others, `pkg/${p0.src.sha256}.json`])]);
   only("PKu-count", "33 packages, each the first", enc({ ...ix, packages: Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`@sagebrush/p${i}@0.1.0`, p0])) }), [p0.src, ...Object.values(p0.pre)].map((r) => `pkg/${r.sha256}.json`));
   only("PKu-bytes", "262,145 bytes (the real index padded with spaces)", enc(JSON.stringify(ix) + " ".repeat(262145 - bytes.length)), pins);
   no("PKu-json", "not JSON", enc("{"));

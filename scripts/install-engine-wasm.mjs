@@ -8,6 +8,7 @@
 // set 0644, then renamed onto dst: a failed or interrupted write never leaves
 // a partial dst (CORR-213-1), and the temp is removed on failure.
 import * as fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -61,4 +62,59 @@ export function remappedRustflags(env = process.env) {
 export function namesLocalCargoHome(bytes, env = process.env) {
   const home = cargoHome(env);
   return home !== CI_CARGO_HOME && Buffer.from(bytes).includes(Buffer.from(home + "/"));
+}
+
+/** The lock file of a cargo target: beside its real path, so every spelling of one target names one lock (for a
+ * target not there yet, or removed meanwhile, beside its parent's real path; the target itself isn't made here). */
+export function targetLockPath(target, io = fs) {
+  try {
+    return io.realpathSync(target) + ".lock";
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+  io.mkdirSync(dirname(target), { recursive: true });
+  return join(io.realpathSync(dirname(target)), basename(target)) + ".lock";
+}
+
+// A command run holding a kernel lock on `lock`: flock(1) on Linux, lockf(1) on macOS; null elsewhere.  The kernel
+// releases the lock when the holder's descriptor closes, however it exits, so there is no stale lock to recover.
+// Without `wait`, a lock held elsewhere makes it exit LOCK_BUSY at once instead.
+export const LOCK_BUSY = 75; // (EX_TEMPFAIL: lockf's own timeout code, and the conflict code flock is given)
+export function lockedCommand(lock, argv, { wait = true, platform = process.platform } = {}) {
+  if (platform === "linux") return ["flock", "-E", String(LOCK_BUSY), ...(wait ? [] : ["-n"]), lock, ...argv];
+  if (platform === "darwin") return ["lockf", "-k", ...(wait ? [] : ["-t", "0"]), lock, ...argv];
+  return null;
+}
+
+const runLocked = (lock, argv, wait, env) => {
+  const cmd = lockedCommand(lock, argv, { wait });
+  if (!cmd) return null;
+  const r = spawnSync(cmd[0], cmd.slice(1), { stdio: "inherit", env: { ...env, SAGEBRUSH_TARGET_LOCK: lock } });
+  if (r.error?.code === "ENOENT") return null; // (no flock/lockf on this machine)
+  if (r.error) throw r.error;
+  return r.status ?? 1;
+};
+
+// Run this script again holding the cargo target's build lock, unless it already holds it: one build at a time in a
+// target (two in one checkout, or a module builder run on its own).  Returns the locked run's exit status for the
+// caller to exit with, or null when the caller is the locked run, or where there is no lock tool (then unlocked).
+export function relaunchUnderTargetLock(target, argv, { env = process.env, log = console.error } = {}) {
+  const lock = targetLockPath(target);
+  if (env.SAGEBRUSH_TARGET_LOCK === lock) return null;
+  // (a probe that can't exit LOCK_BUSY itself tells a held lock from the build's own exit status)
+  const probe = runLocked(lock, ["true"], false, env);
+  if (probe === null) {
+    log(`engine: no flock or lockf here: building without the target's lock (${target})`);
+    return null;
+  }
+  if (probe === LOCK_BUSY) log(`engine: waiting for another build in ${target} to finish`);
+  return runLocked(lock, argv, true, env) ?? 1;
+}
+
+// Remove a cargo target if no build holds its lock (the lock is taken without waiting, and held while it is removed):
+// "removed", "busy", "failed" (rm failed), or "unsupported" where there is no lock tool.  The lock file itself stays: removing it could
+// let two builds each lock a different file of that name.
+export function removeTargetIfIdle(target, { env = process.env } = {}) {
+  const status = runLocked(targetLockPath(target), ["rm", "-rf", target], false, env);
+  return status === null ? "unsupported" : status === LOCK_BUSY ? "busy" : status === 0 ? "removed" : "failed";
 }
