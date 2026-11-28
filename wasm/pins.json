@@ -1,10 +1,10 @@
 {
   "v": 1,
   "modules": {
-    "sagebrush-engine.wasm": { "sha256": "7e6cd07887871df8d9528d272a3d88c5035079a17be5b5eaaa813071e94f7c56", "bytes": 7604964 },
+    "sagebrush-engine.wasm": { "sha256": "565a49de08d038f6045082e1bf75ca442f09af8db60bf4b3dbdbb13c88ad1bf6", "bytes": 8633158 },
     "sagebrush-raster.wasm": { "sha256": "7223a22754fe428ace390f71056abc7e3a949d72fd351bd6736253156a8ce516", "bytes": 915955 },
-    "sagebrush-mp.wasm": { "sha256": "980fd1c307a188793f7ac9974f4e14aae054aff565bd30e9f8ec3ff2d8128925", "bytes": 207017 },
+    "sagebrush-mp.wasm": { "sha256": "10ae59d51caf4275be1fc86c5fb6a6a526e67923ec4b4dfdb50f4180b3bf3c42", "bytes": 209312 },
     "sagebrush-nd.wasm": { "sha256": "aa2033d2bbf4c27dff702837de60c8a5bbc20f347a511746bc05ffd51d191883", "bytes": 72841 },
-    "sagebrush-skltree.wasm": { "sha256": "65cc2a0b5f93106e7b39adf296542e560577414f278abcd45ef0ecea0bd8f212", "bytes": 38239 }
+    "sagebrush-skltree.wasm": { "sha256": "30c6577f436a97da4bc44e42ff1dd2d0163794f3a87decdfe5e0ec91f27a299d", "bytes": 38239 }
   }
 }
