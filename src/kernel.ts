@@ -51,14 +51,16 @@ function jupyterDataDir(args: string[]): string {
   if (i >= 0) {
     const p = args[i + 1];
     if (!p) throw new Error("--prefix needs a directory");
-    return join(p, "share", "jupyter");
+    // (absolute: kernel.json names the files installed under it, and Jupyter
+    // starts the kernel from wherever it is running, not from here)
+    return join(resolve(p), "share", "jupyter");
   }
   if (args.includes("--sys-prefix")) {
     const p = process.env.CONDA_PREFIX || process.env.VIRTUAL_ENV;
     if (!p) throw new Error("--sys-prefix: activate a conda or virtual environment first (or use --prefix DIR)");
     return join(p, "share", "jupyter");
   }
-  if (process.env.JUPYTER_DATA_DIR) return process.env.JUPYTER_DATA_DIR;
+  if (process.env.JUPYTER_DATA_DIR) return resolve(process.env.JUPYTER_DATA_DIR);
   if (process.platform === "darwin") return join(homedir(), "Library", "Jupyter");
   if (process.platform === "win32") return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "jupyter");
   return join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "jupyter");
@@ -617,7 +619,7 @@ export function kernelWorker(mode: Mode) {
     };
     run(GET_IPYTHON, host, "exec", "<init>");
     run(outputHistory(true), host, "exec", "<init>");
-    if (mode === "sage") run("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", main, "exec", "<sage>");
+    if (mode === "sage") run("import _sage_lazy as _sage_lazy_; _sage_lazy_.session(globals()); del _sage_lazy_\n", main, "exec", "<sage>");
     return { main, host };
   })();
   const FLUSH = "import sys as _s\n_p = _s.modules.get('matplotlib.pyplot')\nif _p is not None: _p._flush_figures()\n_o = _s.modules.get('_pyjs_open')\nif _o is not None: _o._flush_all()\n" + MAGIC_POST;

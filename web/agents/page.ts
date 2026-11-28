@@ -12,19 +12,24 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
-import { colorBlock } from "./code-color";
+import { blockLang, colorBlock } from "./code-color";
+import { drawTokens, tokensOf } from "../code/tokens";
+import { langOf } from "../code/langs";
+import { modeKey, modeOf, rememberMode, type DocMode } from "../doc-mode";
 import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
 import { ChatSession } from "../workspace/agent-chat/session";
-import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
+import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, artifactLabel, diffHtml, mirrorSectionNode } from "../workspace/agent-chat/view";
 import { Mirror, MIRROR_COPY, mirrorTitle, type RemoteConversation, type Section } from "../workspace/agent-chat/mirror";
+import { mountDictation } from "./dictation";
 import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Created, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
-import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import { mountAgentPairing, RELEASED, type RestoreState } from "../workspace/agent-ui";
 import { createdRunner } from "../workspace/agent-made";
 import { runVerbsFor } from "../workspace/run-holder";
 import { agentRunsFor } from "../workspace/agent-runs";
 import type { PageRun } from "../workspace/run-verbs";
+import type { SpaceHost } from "../workspace/space3d";
 import { createPermissions } from "../notebook/permissions.js";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
@@ -33,9 +38,9 @@ import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
-import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
+import { AgentLeg, legKey, listComputers, pageLegUrl, removeComputer, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
-import { filesIcon, modeSwitch, answerAgentsLive, FILES_TAB } from "../workspace/mode-switch";
+import { filesIcon, modeSwitch, answerAgentsLive, agentsTabLive, agentsTabRemembered, releaseAgentsTab, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
 import { entryUrl } from "../workspace/entry-url";
 import { threadMarkdown, turnMarkdown, userMarkdown } from "../workspace/agent-chat/transcript";
@@ -45,6 +50,8 @@ import { ownClaudeCommand } from "./own-claude";
 import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
 import { mountVersionStamp } from "../version";
+import { ATTACH_COPY, mountAttach } from "./attach";
+import { inGrant } from "../workspace/agent-grant";
 
 // (the build this site serves, under the chat list, for whoever tests it: web/version.ts; first, before anything that
 // waits, so it shows even while the workspace opens; nothing where the site doesn't say)
@@ -54,20 +61,14 @@ void mountVersionStamp(document.getElementById("sbversion"));
 declare const __SB_LATEX__: boolean | undefined;
 declare const __SB_LATEX_HOSTS__: string[];
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
+// (the 3D view, in builds that have it and on its listed hosts, matched exactly: web/build.ts's SPACE_DEFINE, DEV and
+//  PROD; its code is a chunk of its own, fetched when a .space.json is shown)
+declare const __SB_SPACE__: boolean | undefined;
+declare const __SB_SPACE_HOSTS__: string[];
 
 const STORE = "sagebrush-agents-preview-v1";
 // (the log mirror's cursors, by conversation: local and non-secret, M2)
 const MIRROR_CURSORS = "sagebrush-agents-mirror-v1";
-// (Open in Sagebrush: the file's own page, as the File menu opens it (web/workspace/entry-url.ts), by the entry's id,
-// found when the link is drawn; hidden for a file with no page of its own)
-function openFull(path: string): HTMLAnchorElement {
-  const a = Object.assign(document.createElement("a"), { className: "open-full", target: "_blank", rel: "noopener", textContent: "Open in Sagebrush", hidden: true });
-  void workspace?.stat(path).then((e) => {
-    const url = e && entryUrl(e);
-    if (url) Object.assign(a, { href: url, hidden: false });
-  }, () => {});
-  return a;
-}
 // The composer's draft, by chat, in this browser (as CoCalc keeps one, #1615): kept as it is typed, back when its chat is
 // shown again (after another chat, Files or a reload), gone once sent. One localStorage record; each chat's draft is
 // written alone into the record as read then, so another tab's drafts of other chats stay. Bounded, so the chats' own
@@ -190,6 +191,7 @@ const session = new ChatSession({
   emitted(thread, d, replayed) {
     if (d.type === "artifact") {
       // (one replayed from the agent's log after a reconnect is recorded, but never moves the pane)
+      // (shown: its tab back if the person had closed it, #1792, as renderArtifacts does for any artifact shown)
       if (!replayed) openArtifact = (d as { id: string }).id;
       // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
       const art = d as { kind?: string; path?: string };
@@ -253,7 +255,7 @@ const mirror = new Mirror({
   changed: () => {
     renderSidebar();
     renderMirrorSettings();
-    renderHeader(); // (the banner says where the chats are kept)
+    renderHeader(); // (the status's popover says where the chats are kept)
   },
 });
 /** The mirrored conversation shown instead of a thread of this browser's, or null. */
@@ -288,6 +290,8 @@ function submit(mode: UserEntry["mode"]) {
   // (a mirrored conversation is read-only: nothing is sent from it)
   if (mirrorOpen) return;
   // (not connected, in a chat the demo may not answer: Send is inert and the draft stays, A14 C1; a note still posts)
+  // (dictating stops as the message or note goes, its words heard so far in it: none is added after it)
+  dictation.finish();
   if (!session.submit(editor.value, mode)) return;
   if (mode !== "note") void mirror.kick(current().id);
   editor.value = "";
@@ -407,6 +411,8 @@ function renderThread() {
   }
   $("#empty").hidden = thread.entries.length > 0;
   $("#log-tools").hidden = thread.entries.length === 0;
+  // (#1792: everything the chat has made, to open again, even with the pane closed)
+  $("#all-arts-chat").hidden = !thread.artifacts.length;
   const nearEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const seen = new Set<string>();
   let prev: HTMLElement | null = null;
@@ -620,7 +626,10 @@ let leavingThread: string | null = null;
 /** Before a pane or thread closes: a running cell is stopped only if the person says so. */
 async function mayClosePane(threadId: string | null): Promise<boolean> {
   if (!threadId) return true;
-  const busy = [...hosts].filter(([k, h]) => k.startsWith(threadId + "\u0000") && h.nb?.isRunning());
+  return mayStopRunning([...hosts].filter(([k, h]) => k.startsWith(threadId + "\u0000") && h.nb?.isRunning()));
+}
+/** These hosts' running cells stopped, if the person says so (one tab closing, a pane or a thread). */
+async function mayStopRunning(busy: [string, Host][]): Promise<boolean> {
   if (!busy.length) return true;
   // (the notebook's popups close first: a modal dialog is above them, in the top layer)
   for (const p of document.querySelectorAll<HTMLElement>(".sbnb-pop:not(dialog)")) p.hidden = true;
@@ -631,6 +640,114 @@ async function mayClosePane(threadId: string | null): Promise<boolean> {
   if (answer !== "stop") return false;
   for (const [, h] of busy) h.nb?.interrupt();
   return true;
+}
+
+// #1792: an artifact's tab closed (its ×, or a middle click), its host saved or kept first as when the pane closes: the
+// next tab is shown, or the pane closes with the last. The artifact stays in the chat: its card there, the pane's All
+// artifacts, or the agent's writing it again bring the tab back.
+const closedOf = (t: Thread) => new Set((Array.isArray(t.closed) ? t.closed : []).filter((x): x is string => typeof x === "string"));
+function reopenTab(t: Thread, id: string) {
+  const c = closedOf(t);
+  if (!c.delete(id)) return;
+  t.closed = [...c];
+  save();
+}
+// (a second click while one close asks or saves changes nothing: the host's release is shared, each step checks the
+//  host is still this one, and a tab closed twice is closed once)
+const STOP_WAIT_MS = 5000;
+const TAB_COPY = { stillRunning: "A cell is still running in this notebook, so its tab stays open." } as const;
+async function closeTab(threadId: string, id: string) {
+  if (current().id !== threadId) return;
+  const k = hostKey(threadId, id);
+  {
+    const h = hosts.get(k);
+    if (h?.nb?.isRunning()) {
+      if (!(await mayStopRunning([[k, h]]))) return;
+      // (Stop and close: the interrupt lands, at most a few seconds; a cell still running after that (one started after
+      //  the person's answer, say an agent's, or one slow to stop) keeps the tab open, said: nothing is closed under it)
+      for (const t = Date.now(); h.nb?.isRunning() && Date.now() - t < STOP_WAIT_MS; ) await new Promise((r) => setTimeout(r, 50));
+      // (and a moment more: the notebook counts a cell queued or running as it is drawn, a beat after, so a run asked
+      //  for just after the stop is counted before it is judged)
+      await new Promise((r) => setTimeout(r, 150));
+      if (current().id !== threadId || hosts.get(k) !== h) return;
+      if (h.nb?.isRunning()) { toast(TAB_COPY.stillRunning, 6000); return; }
+    }
+    if (current().id !== threadId || hosts.get(k) !== h) return;
+    if (h) {
+      // (release freezes a notebook and ends its runs before it awaits anything: no cell starts while it saves)
+      const r: Released = h.release ? await h.release().catch((e) => ({ ok: false as const, why: String((e as Error)?.message ?? e) })) : { ok: true };
+      if (!r.ok) {
+        if (hosts.get(k) !== h) return; // (replaced or gone meanwhile: its refusal has nothing to show on)
+        // (it could neither save nor keep a copy: it stays, shown, with its bar, as on the pane's close)
+        h.bar = {
+          kind: "refused",
+          text: r.why,
+          actions: [
+            { label: "Try again", run: () => void closeTab(threadId, id) },
+            ...(h.download?.() ? [{ label: "Download a copy", run: () => saveDownload(h.download!()) }] : []),
+            { label: "Close without keeping", run: () => void (async () => { await h.dispose?.(); if (hosts.get(k) === h) hosts.delete(k); h.el.remove(); await closeTab(threadId, id); })() },
+          ],
+        };
+        if (current().id === threadId) { openArtifact = id; renderArtifacts(); }
+        return;
+      }
+      // (another host in its place meanwhile (the artifact opened again): that one stays, and so does its tab)
+      if (hosts.has(k) && hosts.get(k) !== h) return;
+    }
+    // (the keyboard's place, as it is now that the saving is done and before anything is taken away: on the tab shown
+    //  next, or the chat's All artifacts once the pane closes, if it was in the pane; elsewhere, it stays put)
+    const hadFocus = document.activeElement instanceof HTMLElement && $("#artifacts").contains(document.activeElement);
+    if (h) {
+      if (hosts.get(k) === h) hosts.delete(k);
+      h.el.remove();
+    }
+    if (current().id !== threadId) return;
+    const t = current(), closed = closedOf(t);
+    closed.add(id);
+    t.closed = [...closed];
+    save();
+    if (openArtifact === id) {
+      const i = t.artifacts.findIndex((x) => x.id === id);
+      const next = t.artifacts.slice(i + 1).find((x) => !closed.has(x.id)) ?? t.artifacts.slice(0, Math.max(i, 0)).reverse().find((x) => !closed.has(x.id));
+      openArtifact = next?.id ?? null;
+      if (!next) fullscreen = false;
+    }
+    renderArtifacts();
+    if (hadFocus) {
+      const tab = openArtifact ? document.querySelector<HTMLElement>(`#artifacts [data-tab="${CSS.escape(openArtifact)}"]`) : null;
+      const all = $("#all-arts-chat");
+      (tab ?? (all.hidden ? null : all))?.focus();
+    }
+  }
+}
+/** #1792: everything this chat has produced, closed tabs included: a click opens it (its tab back). */
+function artifactBrowser() {
+  const t = current(), closed = closedOf(t);
+  const dlg = Object.assign(document.createElement("dialog"), { className: "arts-dlg" });
+  dlg.setAttribute("aria-labelledby", "arts-dlg-t");
+  const h = Object.assign(document.createElement("h3"), { id: "arts-dlg-t", textContent: "Artifacts in this chat" });
+  const list = Object.assign(document.createElement("div"), { className: "arts-list" });
+  for (const x of t.artifacts) {
+    const b = Object.assign(document.createElement("button"), { type: "button", className: "arts-item" + (x.id === openArtifact ? " on" : "") });
+    b.dataset.art = x.id;
+    b.append(
+      Object.assign(document.createElement("span"), { className: "ai", textContent: artifactIcon(x) }),
+      Object.assign(document.createElement("span"), { className: "t", textContent: x.title }),
+      Object.assign(document.createElement("small"), { textContent: [artifactLabel(x).replace(/&[a-z]+;|&#\d+;/g, ""), closed.has(x.id) ? "closed" : x.id === openArtifact ? "shown" : ""].filter(Boolean).join(" · ") }),
+    );
+    b.onclick = () => { dlg.close(); if (current().id !== t.id) return; openArtifact = x.id; renderArtifacts(); };
+    list.append(b);
+  }
+  if (!t.artifacts.length) list.append(Object.assign(document.createElement("p"), { textContent: "Nothing yet: what the agent makes, and the files it opens, show here." }));
+  const close = Object.assign(document.createElement("button"), { type: "button", textContent: "Close" });
+  close.onclick = () => dlg.close();
+  const menu = document.createElement("menu");
+  menu.append(close);
+  dlg.append(h, list, menu);
+  dlg.addEventListener("close", () => dlg.remove(), { once: true });
+  document.body.append(dlg);
+  dlg.showModal();
+  (list.querySelector<HTMLElement>(".arts-item.on") ?? list.querySelector<HTMLElement>(".arts-item"))?.focus();
 }
 
 function renderArtifacts() {
@@ -651,29 +768,56 @@ function renderArtifacts() {
     renderBar(undefined);
     return;
   }
+  // (shown again: its tab is back, #1792)
+  reopenTab(thread, a.id);
+  const closed = closedOf(thread);
   // (the tab shown is seen: its "changed" mark goes)
   const seenHost = hosts.get(hostKey(thread.id, a.id));
   if (seenHost) seenHost.changed = false;
   // the head: tabs (a running notebook's name says so, and one the agent changed behind another), copy, full screen, close
-  const hk = JSON.stringify([thread.id, thread.artifacts.map((x) => [x.id, x.title, hosts.get(hostKey(thread.id, x.id))?.running ?? false, hosts.get(hostKey(thread.id, x.id))?.changed ?? false]), a.id, fullscreen]);
+  const hk = JSON.stringify([thread.id, thread.artifacts.map((x) => [x.id, x.title, hosts.get(hostKey(thread.id, x.id))?.running ?? false, hosts.get(hostKey(thread.id, x.id))?.changed ?? false, closed.has(x.id)]), a.id, fullscreen]);
   if (hk !== headKey) {
     headKey = hk;
+    // (a tab and its ×, #1792: closed ones aren't shown, the one shown always is)
     const tabs = thread.artifacts
+      .filter((x) => x.id === a.id || !closed.has(x.id))
       .map((x) => {
         const run = hosts.get(hostKey(thread.id, x.id))?.running;
         const changed = hosts.get(hostKey(thread.id, x.id))?.changed;
-        return `<button class="tab${x.id === a.id ? " on" : ""}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}${run ? ` <span class="tab-running">· running</span>` : ""}${changed ? ` <span class="tab-changed">· changed</span>` : ""}</button>`;
+        const on = x.id === a.id ? " on" : "";
+        return `<span class="tab-wrap${on}"><button class="tab${on}" data-tab="${esc(x.id)}">${artifactIcon(x)} ${esc(x.title)}${run ? ` <span class="tab-running">· running</span>` : ""}${changed ? ` <span class="tab-changed">· changed</span>` : ""}</button><button class="tab-x" type="button" data-close="${esc(x.id)}" title="Close" aria-label="Close ${esc(x.title)}">×</button></span>`;
       })
       .join("");
     // (the control that had the focus has it again after the head is redrawn: a tab, copy, full screen or close, BAC-6)
     const had = document.activeElement instanceof HTMLElement && head.contains(document.activeElement) ? document.activeElement : null;
-    const refocus = had ? (had.dataset.tab !== undefined ? `[data-tab="${CSS.escape(had.dataset.tab)}"]` : had.id ? `#${had.id}` : null) : null;
+    const refocus = had ? (had.dataset.tab !== undefined ? `[data-tab="${CSS.escape(had.dataset.tab)}"]` : had.dataset.close !== undefined ? `[data-close="${CSS.escape(had.dataset.close)}"]` : had.id ? `#${had.id}` : null) : null;
     head.innerHTML =
       `<div class="tabs">${tabs}</div>` +
+      `<button class="icon" id="all-arts" title="All artifacts in this chat">☰</button>` +
+      `<a class="open-full" id="open-main" target="_blank" rel="noopener" hidden title="Open in Sagebrush, in a new tab">Open ↗</a>` +
       `<button class="icon" id="copy" title="Copy">⧉</button>` +
       `<button class="icon" id="full" title="${fullscreen ? "Exit full screen" : "Full screen"}">${fullscreen ? "⤡" : "⤢"}</button>` +
       `<button class="icon" id="close" title="Close">✕</button>`;
-    for (const t of head.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
+    for (const t of head.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
+      t.onclick = () => ((openArtifact = t.dataset.tab!), renderArtifacts());
+      // (a middle click closes it, as a browser's tab; its mousedown doesn't start the page's autoscroll)
+      t.onmousedown = (e) => { if (e.button === 1) e.preventDefault(); };
+      t.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); void closeTab(thread.id, t.dataset.tab!); } };
+    }
+    for (const x of head.querySelectorAll<HTMLButtonElement>("[data-close]")) x.onclick = () => void closeTab(thread.id, x.dataset.close!);
+    $("#all-arts", head).onclick = () => artifactBrowser();
+    // (Open: the artifact's file on its own page in Sagebrush, as the File menu opens it (web/workspace/entry-url.ts), in a
+    //  new tab, so this page and its agent stay; found by the file's id when the head is drawn, and none for a file
+    //  with no page of its own, #1614)
+    const open = $<HTMLAnchorElement>("#open-main", head);
+    if (a.path && workspace)
+      void workspace.stat(a.path).then((e) => {
+        const url = e && entryUrl(e);
+        if (url && open.isConnected) {
+          Object.assign(open, { href: url, hidden: false });
+          open.setAttribute("aria-label", `Open ${a.title} in Sagebrush (a new tab)`);
+        }
+      }, () => {});
     $("#full", head).onclick = () => ((fullscreen = !fullscreen), renderArtifacts());
     $("#close", head).onclick = async () => {
       if (!(await mayClosePane(thread.id)) || current().id !== thread.id) return;
@@ -721,7 +865,6 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
   if (a.kind === "notebook" && a.path && workspace) {
     h.el.innerHTML = `<div class="file-path">${esc(a.path)} <span class="saved"></span> </div><div class="file-body"></div>`;
     const saved = $(".saved", h.el);
-    $(".file-path", h.el).append(openFull(a.path));
     const ui: NotebookUi = {
       saved: (t) => (saved.textContent = t),
       // (kept with this host, shown when it is the host shown: a hidden notebook's warning waits for it)
@@ -783,13 +926,26 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     keepFocus();
     return;
   }
+  // (a .space.json, where this build and host offer the 3D view: the viewer in a frame, following the file as the agent
+  //  writes it, and the person's selection written back to it; web/workspace/space3d.ts's mountSpace)
+  if (__SB_SPACE__ && a.path && workspace && __SB_SPACE_HOSTS__.includes(location.hostname) && /\.space\.json$/i.test(a.path)) {
+    const ws = workspace, path = a.path;
+    let m: SpaceHost | null = null, gone = false;
+    h.copy = () => m?.copy() ?? "";
+    h.dispose = async () => { gone = true; await m?.dispose(); };
+    void (import(new URL("../sagebrush-space3d.js", import.meta.url).href) as Promise<typeof import("../workspace/space3d")>).then(
+      (mod) => { if (!gone) m = mod.mountSpace(ws, path, h.el); },
+      (e) => { if (!gone) h.el.replaceChildren(`Couldn't load the 3D view: ${String(e?.message ?? e)}`); });
+    keepFocus();
+    return;
+  }
   // (a .tex, where this host serves the LaTeX editor's page (the build's hosts, as web/latex/boot.ts's latexOn): that
   //  page in a frame, embedded (web/latex page.ts's embed): Run, the PDF, comments and its leave guard, as on the LaTeX
   //  page; mountTexFrame. Elsewhere (the CLI's page) the editor itself, in mountFile)
   if (a.path && workspace && __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) && /\.tex$/i.test(a.path)) {
     const head = document.createElement("div"), body = document.createElement("div");
     head.className = "file-path";
-    head.append(a.path + " ", openFull(a.path));
+    head.append(a.path);
     body.className = "file-body";
     h.el.replaceChildren(head, body);
     const f = mountTexFrame(a.path, body);
@@ -842,8 +998,13 @@ async function keepFileCopy(path: string, text: string, signal?: AbortSignal): P
 }
 type Released = { ok: true } | { ok: false; why: string };
 type FileHost = { text: () => string; flush: () => Promise<void>; release: () => Promise<Released>; dispose: () => Promise<void>; download: () => { name: string; text: string; type: string } | null };
+// (a code or text file's colours, as the code page's (web/code/tokens.ts): up to this many characters; plain above)
+const FILE_COLOR_MAX = 256 * 1024;
 function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost {
   const path = a.path!;
+  // (✎ Edit / View, before the status: shown for a code or text file, below)
+  const toggle = Object.assign(document.createElement("button"), { type: "button", className: "mode-toggle", hidden: true });
+  saved.before(toggle);
   let alive = true;
   let open = true; // (this host's writer: closed at release, after which no write of its is admitted, ART-C4)
   let rev = -1; // (the revision the shown text is based on: known before anything is written)
@@ -891,9 +1052,6 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
   };
   say("Loading…");
   const tex = /\.tex$/i.test(path);
-  // (the file in Sagebrush, on its own page: a code or text file's (/?code=), a .tex file's where this build has no
-  //  LaTeX editor here; a file with no page of its own gets no link, openFull)
-  if (!tex || !__SB_LATEX__) saved.after(" ", openFull(path));
   type Latex = { mountEditor?: (root: HTMLElement, o: { text: string; onChange?(t: string): void; layout?: "split" | "preview" }) => { getText(): string; destroy(): void } };
   const latexMod: Promise<Latex | null> = tex && __SB_LATEX__ ? import(/* @vite-ignore */ LATEX_URL).catch(() => null) : Promise.resolve(null);
   // (the file as it is now: the agent may have written it again since this artifact)
@@ -927,13 +1085,63 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
         latest = () => ed.getText();
         destroyEditor = () => ed.destroy();
       } else {
-        const ta = document.createElement("textarea");
-        ta.className = "code-edit";
-        ta.spellcheck = false;
-        ta.value = text;
-        ta.oninput = () => changed(ta.value);
-        box.append(ta);
-        latest = () => ta.value;
+        // (code and text: in colour by its language, read only, with ✎ Edit to write in it here, the colours behind the
+        //  text as it is typed; opened as the person last left this file, View by default, as the code page opens it
+        //  (web/doc-mode.ts), #1618)
+        const lang = langOf(path) ?? blockLang(text, /\.([^./]+)$/.exec(path)?.[1] ?? "");
+        const paint = (el: HTMLElement, t: string) => (t.length <= FILE_COLOR_MAX ? drawTokens(el, tokensOf(t, lang)) : (el.textContent = t));
+        const key = fid ? modeKey("file", fid) : null;
+        let mode: DocMode = key ? modeOf(key) : "view";
+        const view = Object.assign(document.createElement("pre"), { className: "code code-view" });
+        const wrap = Object.assign(document.createElement("div"), { className: "code-wrap" });
+        const hl = Object.assign(document.createElement("pre"), { className: "code code-hl" });
+        hl.setAttribute("aria-hidden", "true");
+        const ta = Object.assign(document.createElement("textarea"), { className: "code-edit", spellcheck: false, wrap: "off" });
+        ta.setAttribute("aria-label", path);
+        wrap.append(hl, ta);
+        // (the colours end where the field's text does, short of its scrollbars, and scroll with it)
+        const fit = () => {
+          hl.style.right = `${ta.offsetWidth - ta.clientWidth}px`;
+          hl.style.bottom = `${ta.offsetHeight - ta.clientHeight}px`;
+          hl.scrollTop = ta.scrollTop;
+          hl.scrollLeft = ta.scrollLeft;
+        };
+        ta.oninput = () => {
+          paint(hl, ta.value + "\n");
+          fit();
+          changed(ta.value);
+        };
+        ta.onscroll = fit;
+        // (and again when the field's size changes: a tab shown, full screen, the window)
+        const resized = new ResizeObserver(fit);
+        resized.observe(ta);
+        // (let go with the editor, when the pane lets this file go)
+        destroyEditor = () => resized.disconnect();
+        const show = () => {
+          // (its label says what it does: no aria-pressed beside it, which would say the opposite)
+          toggle.textContent = mode === "edit" ? "View" : "✎ Edit";
+          toggle.title = mode === "edit" ? "Back to reading it" : "Edit it here (saved as you type)";
+          if (mode === "edit") {
+            ta.value = text;
+            paint(hl, text + "\n");
+            box.replaceChildren(wrap);
+            fit();
+          } else {
+            paint(view, text);
+            box.replaceChildren(view);
+          }
+        };
+        toggle.hidden = false;
+        toggle.onclick = () => {
+          // (not while the pane closes: its text is frozen then)
+          if (guard !== "open") return;
+          mode = mode === "edit" ? "view" : "edit";
+          if (key) rememberMode(key, mode);
+          show();
+          if (mode === "edit") ta.focus();
+        };
+        latest = () => (mode === "edit" ? ta.value : text);
+        show();
       }
     },
     () => {
@@ -1085,10 +1293,12 @@ function renderComposer() {
 const marked = (t: Thread) => session.marked(t);
 // (connected on this page, or a reload record found: a chat made since isn't the demo's either)
 let connectedHere = false;
-const mayDemo = (t: Thread) => !marked(t) && !connectedHere;
+// (another Agents tab of this browser has the agent, as it answers "live": this one isn't the demo meanwhile, #1688)
+let otherTabLive = false;
+const mayDemo = (t: Thread) => !marked(t) && !connectedHere && !otherTabLive;
 const inert = (t: Thread) => !live() && !mayDemo(t);
 
-type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | null };
+type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | "here" | null };
 const connText = (b: ConnBar) => b.text ?? (b.kind === "runner" ? "" : CONN[b.kind]);
 // (an agent on one of your computers: the words, word for word as reviewed)
 const NOT_SENT = {
@@ -1113,6 +1323,9 @@ function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }):
 // (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
 let connectingTo: string | null = null;
 let waitingFor = false; // (its runner not connected yet: the header says it waits)
+// (another Agents tab of this browser has the agent: the agent serves one page at a time, so this one can't connect while
+//  that one is; and it prints a new link only once that page goes: #1550)
+const OTHER_TAB = "Claude is connected in another tab of this browser. Use that tab, or close it and Connect here with the new link sagebrush-agent prints.";
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -1123,6 +1336,11 @@ const CONN = {
   unusable: "This page's earlier connection to Claude couldn't be used, so it needs a new code.",
   kept: "Claude was connected to this page earlier.",
   elsewhere: "Claude is connected to another page. Use that page, or close it and Reconnect here.",
+  otherTab: OTHER_TAB,
+  // ("Use Claude here", #1550: the tab that let go says only that it was asked, never that another tab connected: the
+  //  channel proves no such thing; and the tab that asked, when its attempt didn't connect)
+  released: "This tab let go of Claude because another tab of this browser asked for it. Your chats here are kept.",
+  notHere: "Claude couldn't be connected here with your remembered access. Your chats and draft are kept; try again, or Connect with a new link.",
 };
 let connBar: ConnBar | null = null;
 let connShown = false; // (the bar's ×: hidden until the next change)
@@ -1161,7 +1379,7 @@ function renderConn() {
   act.hidden = !b?.action;
   for (const btn of [act, hact]) {
     const mine = reconnecting && busyBtn === btn;
-    setText(btn, mine ? "Reconnecting…" : action === "connect" ? "Connect" : "Reconnect");
+    setText(btn, mine ? (action === "here" ? "Connecting…" : "Reconnecting…") : action === "connect" ? "Connect" : action === "here" ? "Use Claude here" : "Reconnect");
     mine ? btn.setAttribute("aria-busy", "true") : btn.removeAttribute("aria-busy");
     reconnecting || rememberBusy ? btn.setAttribute("aria-disabled", "true") : btn.removeAttribute("aria-disabled");
   }
@@ -1198,6 +1416,7 @@ async function doAct(btn: HTMLElement) {
     connectFrom = btn;
     return agentUi.connect("", "", btn);
   }
+  if (connBar?.action === "here") return useHere(btn);
   reconnecting = true;
   busyBtn = btn;
   renderConn();
@@ -1208,6 +1427,36 @@ async function doAct(btn: HTMLElement) {
     busyBtn = null;
     renderConn();
   }
+}
+/** "Use Claude here" (#1550; SEC move-connection r1 option A): only on the person's click, both conditions asked
+ * again first (another tab's connection is local and remembered; a remembered grant in force here); then the other tab
+ * asked to let go, and this one connected with the remembered access as "Use remembered access" does: its grant
+ * exactly, no new Allow, waiting a bounded while for the other tab's socket to close. Nothing is said connected
+ * until it is; a failure leaves the chats and the draft as they are and says so. */
+async function useHere(btn: HTMLElement) {
+  if (!agentUi) return;
+  reconnecting = true;
+  busyBtn = btn;
+  renderConn();
+  let asked = false, g: Kept["grant"] | null = null;
+  try {
+    // (asked again at the click: either gone meanwhile, nothing is sent and the bar is drawn again from what is true now)
+    if ((await agentUi.remembered()) && (await agentsTabRemembered())) {
+      asked = true;
+      releaseAgentsTab();
+      g = await agentUi.useRemembered().catch(() => null);
+    }
+  } finally {
+    reconnecting = false;
+    busyBtn = null;
+  }
+  if (g) {
+    setText($("#who-status"), `connected with remembered access: ${grantScope(g)}`);
+    setConn(null);
+  } else if (live()) setConn(null);
+  else if (!asked) await checkOtherTab();
+  else setConn({ kind: "notHere", alert: true, action: "connect" });
+  renderHeader();
 }
 $("#conn-act").onclick = () => void doAct($("#conn-act"));
 $("#send-hint-act").onclick = () => void doAct($("#send-hint-act"));
@@ -1263,10 +1512,25 @@ const editor = mountComposer({
   typeset: (el) => typeset(el),
   changed: (v) => { if (draftOf) putDraft(draftOf, v); },
 });
+// (dictation into the draft, #1791: a mic by Send where the browser turns speech into text)
+const dictation = mountDictation({
+  before: $("#send"),
+  conversation: () => draftOf || current().id,
+  // (the words heard, at the end of the draft of the chat they were spoken for: the composer's if it is shown)
+  append: (conv, text) => {
+    const join = (a: string) => (!a ? text : /\s$/.test(a) ? a + text : a + " " + text);
+    if ((draftOf || current().id) === conv) {
+      editor.value = join(editor.value);
+      putDraft(conv, editor.value);
+    } else putDraft(conv, join(draftsPending.get(conv) ?? readDrafts()[conv] ?? ""), true);
+  },
+  toast: (t, ms) => toast(t, ms),
+});
 /** The chat shown's draft in the composer, when another chat's was there. */
 function showDraft() {
   const id = current().id;
   if (draftOf === null || draftOf === id) return;
+  dictation.finish(); // (dictating belongs to the chat it started in: it stops, its words in that chat's draft)
   draftOf = id;
   editor.value = draftsPending.get(id) ?? readDrafts()[id] ?? "";
 }
@@ -1274,6 +1538,20 @@ function showDraft() {
 //  then the person may have typed)
 draftOf = "";
 showDraft();
+// (an image pasted or dropped into the composer: saved in its chat's folder, its path added to that chat's draft)
+mountAttach({
+  composer: $(".composer"),
+  conversation: () => draftOf || current().id,
+  create: (path, bytes) => (workspace ? workspace.createByPerson(path, { content: bytes }) : Promise.reject(new Error("this browser's workspace isn't open"))),
+  append(conv, line) {
+    // (what is there kept as it is, every space of it; the line after a blank line)
+    const join = (v: string) => (v ? v + (v.endsWith("\n\n") ? "" : v.endsWith("\n") ? "\n" : "\n\n") : "") + line;
+    if (draftOf === conv) { editor.value = join(editor.value); putDraft(conv, editor.value, true); }
+    else putDraft(conv, join(draftsPending.get(conv) ?? readDrafts()[conv] ?? ""), true);
+  },
+  agent: () => (live() && pairing?.grant ? { name: agentName(), reads: (p) => inGrant(p, pairing!.grant!.folders) } : null),
+  toast: (t) => toast(t, 6000),
+});
 // (Delegate, for an agent on this computer that offers it: delegate.ts's tasks, drawn by delegate-ui.ts)
 const delegateTasks = new DelegateTasks({ changed: () => delegateUi?.render() });
 const delegateUi = mountDelegate({
@@ -1306,6 +1584,9 @@ const delegateUi = mountDelegate({
   site: new URL("../", import.meta.url),
   // (a proposal's .tex rendered under its diff, where this page has the LaTeX editor, as an artifact's .tex is)
   latex: __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname) ? () => import(/* @vite-ignore */ LATEX_URL) : null,
+  // (a proposal's .md rendered under its diff with this page's own Markdown renderer, the chat's: safe HTML, remote
+  //  pictures click-to-load)
+  markdown: md,
   toast,
   // (Merge: this browser's workspace, and the agent's record of it)
   merge: workspaceIO(() => workspace, (task, params) => delegateTasks.merged(task, params), /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? async (op, path) => { if (typeof (window as any).__mergeSeam === "function") await (window as any).__mergeSeam(op, path); } : undefined),
@@ -1570,6 +1851,7 @@ const chatHereSection = chatHere({
   onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
   onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
   onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
+  remove: (r) => removeComputer(r.remote_id),
 }, () => agentUi);
 
 // A notebook the agent created (the pairing's onCreated): taken at once, as it is created, into the pane of the chat
@@ -1637,6 +1919,8 @@ function mountPairing(ws: Workspace) {
   delegateTasks.keepIn(kept, `sb-delegate-tasks-v1:${ws.identity.workspace}`);
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
+    // (the Connect dialog says so while another tab of this browser has the agent, #1550)
+    otherTab: () => (otherTabLive ? OTHER_TAB : null),
     runVerbs: runVerbsFor(agentRuns(ws)),
     button: $("#connect"),
     notebookEdit: editNotebook,
@@ -1698,7 +1982,11 @@ function mountPairing(ws: Workspace) {
         if (p.state === "closed" && pairing === p && granted && !p.link) {
           // (a connection that was in force ended: the person's Revoke says nothing more; an expiry or a loss, the bar)
           const why = p.closeReason;
-          if (why === "revoked by the person") setConn(null);
+          if (why === RELEASED) {
+            // (let go for another tab: said as asked, the remembered access offered again, nothing tried by itself)
+            setConn({ kind: "released", alert: false, action: "connect" });
+            void agentUi?.remembered().then((g) => { rememberedGrant = g; renderConn(); });
+          } else if (why === "revoked by the person") setConn(null);
           else if (why === "the grant expired") setConn({ kind: "expired", alert: true, action: "connect" });
           else setConn({ kind: "lost", alert: true, action: agentUi?.canReconnect ? "reconnect" : "connect" });
         }
@@ -1716,7 +2004,37 @@ function mountPairing(ws: Workspace) {
 }
 if (workspace) mountPairing(workspace);
 // (a Files tab this page opened asks whether its agent is still connected here, to come back to this tab: #1620)
-answerAgentsLive(() => pairing?.state === "granted");
+answerAgentsLive(() => pairing?.state === "granted", {
+  // ("Use Claude here" in another tab: this page's connection, if local and remembered, may be asked to let go; that
+  //  is all a message on the channel can do, #1550)
+  remembered: () => !!agentUi?.releasable(),
+  release: () => void agentUi?.release(),
+});
+// (and asks the same of the others: while another Agents tab has the agent and this one has none, the bar says so, and
+//  goes once that tab no longer does; asked at load, each time this tab is shown again, and every few seconds while
+//  the bar says so, #1550)
+let otherTabTimer = 0;
+async function checkOtherTab() {
+  const mine = !!pairing && pairing.state !== "closed";
+  const was = otherTabLive;
+  // (not while "Use Claude here" runs: its own end says what happened)
+  if (reconnecting) return;
+  otherTabLive = !mine && (await agentsTabLive());
+  // (the header, the banner and Send follow: not the scripted demo while that tab has Claude, #1688)
+  if (otherTabLive !== was) { renderHeader(); renderComposer(); }
+  // ("Use Claude here" offered only while that tab's connection is local and remembered and a remembered grant is in
+  //  force here: else Connect, as before)
+  const here = otherTabLive && (await agentsTabRemembered()) && !!(await agentUi?.remembered().catch(() => null));
+  if (otherTabLive && (!connBar || connBar.kind === "kept" || connBar.kind === "otherTab" || connBar.kind === "released")) {
+    const action = here ? "here" : "connect";
+    if (connBar?.kind !== "otherTab" || connBar.action !== action) setConn({ kind: "otherTab", alert: false, action });
+  }
+  else if (!otherTabLive && connBar?.kind === "otherTab") setConn(null);
+  clearTimeout(otherTabTimer);
+  if (connBar?.kind === "otherTab") otherTabTimer = window.setTimeout(() => void checkOtherTab(), 3000);
+}
+void checkOtherTab();
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void checkOtherTab(); });
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
@@ -1830,6 +2148,7 @@ setInterval(() => {
   for (const t of state.threads) if (isRunning(t)) void mirror.kick(t.id);
 }, 30_000);
 void mirror.refresh().then(() => mirror.remote()).catch(() => {});
+$("#all-arts-chat").onclick = () => artifactBrowser();
 $("#copychat").onclick = () => { const t = current(); void copyText(async () => threadMarkdown(t, { agent: agentName(), link: await fileLinks(t) }), "Copied the chat"); };
 
 /** The header's agent line from text only (an agent's and a computer's names are text, never markup). */
@@ -1841,7 +2160,7 @@ function whoText(who: HTMLElement, dot: string, name: string, small: string) {
   who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
 }
 
-/** Where the chats are kept, for the banner: "mirrored" only while uploads are actually under way (mirror.ts). */
+/** Where the chats are kept, for the status's popover: "mirrored" only while uploads are actually under way (mirror.ts). */
 function keptWhere() {
   return mirror.keptLine();
 }
@@ -1856,16 +2175,19 @@ function renderHeader() {
     whoText(who, "wait", "", waitingFor ? RUNNER.waiting(connectingTo) : RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     whoText(who, "wait", agentName(), "waiting: allow it in the dialog");
+  } else if (otherTabLive) {
+    whoText(who, "", "Claude", "in another tab");
   } else if (inert(current())) {
     who.innerHTML = `<span class="conn"></span>Claude <small>not connected</small>`;
   } else {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
-  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
+  for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…`;
+  $("#attach-hint").textContent = ATTACH_COPY.help + (live() && pairing?.hello?.features?.includes("workspace.image") ? " " + ATTACH_COPY.sees(agentName()) : "");
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
-  $("#banner").innerHTML = live()
+  $("#who-info").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; ${mirror.uploading() ? "chats are kept in this browser and mirrored to your Sagebrush account" : "chats are kept in this browser"}.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
@@ -1876,6 +2198,27 @@ function renderHeader() {
     : `Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). ${keptWhere()}`;
 }
 
+// (the status's popover, in place of the banner the page had (#1808: a banner in this mode only pushed everything down
+//  on switching from Files): the status opens it, and a click elsewhere, Escape or the status again closes it)
+{
+  const who = $("#who"), info = $("#who-info");
+  // (under the status, as far left as it fits: kept inside the top bar, so a phone's narrow window never scrolls sideways;
+  //  placed again on a resize while it is open)
+  const place = () => {
+    const room = who.parentElement!.clientWidth;
+    info.style.left = `${Math.max(8, Math.min(who.offsetLeft, room - info.offsetWidth - 8))}px`;
+  };
+  const show = (on: boolean) => {
+    info.hidden = !on;
+    who.setAttribute("aria-expanded", String(on));
+    if (on) place();
+  };
+  who.addEventListener("click", () => show(info.hidden));
+  addEventListener("resize", () => { if (!info.hidden) place(); });
+  addEventListener("pointerdown", (e) => { if (!info.hidden && !who.contains(e.target as Node) && !info.contains(e.target as Node)) show(false); }, true);
+  // (first, and taken: Escape that closes it doesn't also stop a running turn or leave full screen)
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && !info.hidden) { e.preventDefault(); show(false); who.focus(); } }, true);
+}
 renderHeader();
 openArtifact = current().artifacts.at(-1)?.id ?? null;
 mountLayout();

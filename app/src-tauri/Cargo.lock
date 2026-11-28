@@ -2683,6 +2683,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 name = "sagebrush-app"
 version = "0.4.0"
 dependencies = [
+ "core-foundation 0.10.1",
  "ed25519-dalek",
  "getrandom 0.3.4",
  "keyring",

@@ -2,7 +2,7 @@
 // token check itself at /__verify, so its rows run in the Workers runtime, as deployed.
 import { clearKeyCache, verifyAccessToken } from "../../share/identity/workos.ts";
 import { seal, sealKeys, unseal } from "../../share/identity/seal.ts";
-import { authTier, disableAccount, drainRevokes, handleShare, outboxCounts, scheduled, type ShareEnv } from "./server.ts";
+import { authTier, disableAccount, drainRevokes, handleShare, outboxCounts, reauthAt, scheduled, type ShareEnv } from "./server.ts";
 import { handleRemote } from "../remote/server.ts";
 
 export default {
@@ -48,6 +48,11 @@ export default {
         freshNonce: again.ct !== s1.ct,
         malformed: [await sealKeys(""), await sealKeys("v1:short"), await sealKeys("nocolon"), await sealKeys(`${b.old},${b.old}`)].map((k) => k === null),
       });
+    }
+    // (tests only: a new session's reauth_ms expression, on D1, with the clock given as ?1 and the state's last moment as ?2)
+    if (u.pathname === "/__reauthAt" && req.method === "POST") {
+      const b = (await req.json()) as { now: number; until: number | null };
+      return Response.json(await env.SHARE_DB!.prepare(`SELECT ${reauthAt("?1", "?2")} AS v`).bind(b.now, b.until).first());
     }
     if (u.pathname === "/__drain" && req.method === "POST") return Response.json(await drainRevokes(env, 100));
     if (u.pathname === "/__outbox" && req.method === "GET") return Response.json(await outboxCounts(env.SHARE_DB!));

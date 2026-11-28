@@ -121,10 +121,23 @@ pub async fn window_open(app: tauri::AppHandle, port: tauri::State<'_, PagePort>
             return Ok(serde_json::json!({ "label": holder, "opened": false }));
         }
     }
+    // (none once a quit has begun, which asked only the windows there were; one being built is reserved first, so a
+    // quit beginning meanwhile waits for it, and it is destroyed as soon as it exists, before its page can take an
+    // edit: leave.rs begin_open, opened, open_failed)
+    if !crate::leave_begin_open(&app) {
+        return Err("the app is quitting".into());
+    }
     let label = format!("doc-{}", next.0.fetch_add(1, Ordering::SeqCst));
-    let data = crate::disk::data_dir(&app)?;
-    let dir = webview_dir(&data, &label).ok_or("no window label")?;
-    crate::page_window(&app, &label, url, port.0, false).data_directory(dir).build().map_err(|e| format!("the window didn't open: {e}"))?;
+    let built = crate::disk::data_dir(&app).and_then(|data| webview_dir(&data, &label).ok_or_else(|| "no window label".to_string())).and_then(|dir| {
+        crate::page_window(&app, &label, url, port.0, false).data_directory(dir).build().map(|_| ()).map_err(|e| format!("the window didn't open: {e}"))
+    });
+    if let Err(e) = built {
+        crate::leave_open_failed(&app);
+        return Err(e);
+    }
+    if crate::leave_opened(&app, &label) {
+        return Err("the app is quitting".into());
+    }
     if let Some(d) = &doc {
         docs.claim(d, &label, |l| app.get_webview_window(l).is_some());
     }

@@ -423,7 +423,7 @@ def conjugates(S, U, budget, refuse):
 def subfields_admit(K, degrees, budget, refuse):
     """Admits enumerating the subfields of K of the given degrees (each
     dividing deg K) with their embeddings, from budget, before any field,
-    map or result is made or any cache touched (daybreak2 LIMIT-PR53-1):
+    map or result is made or any cache touched (the limits review LIMIT-PR53-1):
     first K itself (Conway, of at most EMBED_MAX elements: refuse()
     otherwise, whatever the degrees), then the degrees (their Conway
     polynomials already known, as every Conway field's subfields' are:

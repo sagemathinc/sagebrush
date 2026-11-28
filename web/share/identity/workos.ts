@@ -175,10 +175,12 @@ export async function verifyAccessToken(c: WorkosConfig, token: unknown, opts: {
 }
 
 /** Where to send the browser: AuthKit's hosted sign-in, with PKCE (S256). */
-export function authorizeUrl(c: WorkosConfig, a: { redirectUri: string; state: string; challenge: string; signUp?: boolean }): string {
+export function authorizeUrl(c: WorkosConfig, a: { redirectUri: string; state: string; challenge: string; signUp?: boolean; reauth?: boolean }): string {
   const u = new URL(`${api(c)}/user_management/authorize`);
   const q: Record<string, string> = { client_id: c.clientId, redirect_uri: a.redirectUri, response_type: "code", provider: "authkit", state: a.state, code_challenge: a.challenge, code_challenge_method: "S256" };
   if (a.signUp) q.screen_hint = "sign-up";
+  // (a re-authentication: AuthKit asks the person to sign in again even with a live AuthKit session)
+  if (a.reauth) q.max_age = "0";
   u.search = new URLSearchParams(q).toString();
   return u.toString();
 }

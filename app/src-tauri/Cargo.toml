@@ -13,6 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
 
 [dependencies]
 tauri = { version = "2", features = ["dynamic-acl"] }
@@ -29,10 +30,12 @@ zeroize = "=1.9.2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# (the device key's store, the macOS Keychain only, and the runtime code-signature check of native_tier; pinned exactly)
+# (the agent host's bundle check on a signed Mac build: the shipped Node's code signature, through the safe API; the
+# device key's store, the macOS Keychain only, and the runtime code-signature check of native_tier; pinned exactly)
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
-security-framework = "=3.7.0"
+security-framework = { version = "=3.7.0", default-features = false }
+core-foundation = "0.10.1"
 
 # (the fs plugin: a phone's only, linked only there, since withGlobalTauri puts every linked plugin's
 # window.__TAURI__ API on the page, registered or not; the desktop page reaches files by grants: src/disk.rs. The cfg is

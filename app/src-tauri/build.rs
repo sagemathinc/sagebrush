@@ -13,8 +13,22 @@ fn main() {
     for p in [git(&["rev-parse", "--git-path", "HEAD"]), git(&["rev-parse", "--symbolic-full-name", "HEAD"]).and_then(|r| git(&["rev-parse", "--git-path", &r])), git(&["rev-parse", "--git-path", "packed-refs"])].into_iter().flatten() {
         println!("cargo:rerun-if-changed={p}");
     }
+    // The agent the app hosts (src/agent_host.rs verify_bundle): the sha256 of agent/MANIFEST.json, which
+    // app/engine/bundle.mjs writes beside the engine; none (an empty value) where no agent is bundled
+    let manifest = std::path::Path::new("agent/MANIFEST.json");
+    let agent_sha = std::fs::read(manifest).map(|b| { use sha2::{Digest, Sha256}; Sha256::digest(&b).iter().map(|x| format!("{x:02x}")).collect::<String>() }).unwrap_or_default();
+    println!("cargo:rustc-env=SAGEBRUSH_AGENT_MANIFEST_SHA256={agent_sha}");
+    println!("cargo:rerun-if-changed=agent/MANIFEST.json");
+    // A Mac build signed for release: the Team ID it is signed with (not a secret; ten uppercase letters and digits),
+    // so the agent's Node is checked by its signature (agent_host.rs node_check); unset: an unsigned build
+    let team = std::env::var("SAGEBRUSH_MACOS_TEAM_ID").unwrap_or_default();
+    if !team.is_empty() && !(team.len() == 10 && team.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())) {
+        panic!("SAGEBRUSH_MACOS_TEAM_ID isn't a Team ID (ten uppercase letters and digits)");
+    }
+    println!("cargo:rustc-env=SAGEBRUSH_MACOS_TEAM_ID={team}");
+    println!("cargo:rerun-if-env-changed=SAGEBRUSH_MACOS_TEAM_ID");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&["startup_files", "selftest_file", "selftest_open", "file_open_dialog", "file_save_dialog", "file_read_text", "file_write_text", "folder_list", "folder_read", "folder_write", "selftest_persist", "selftest_report", "app_log", "engine_start", "engine_send", "engine_ack", "engine_stop", "window_open", "window_claim", "disk_list", "disk_stat", "disk_read", "disk_write", "disk_mkdir", "disk_rename", "disk_remove", "disk_where", "settings_write", "settings_read", "grants_read", "grants_write", "app_quit_hold", "app_quit_now", "signer_probe_sign"]),
+        tauri_build::AppManifest::new().commands(&["startup_files", "selftest_file", "selftest_open", "file_open_dialog", "file_save_dialog", "file_read_text", "file_write_text", "folder_list", "folder_read", "folder_write", "selftest_persist", "selftest_report", "app_log", "engine_start", "engine_send", "engine_ack", "engine_stop", "window_open", "window_claim", "disk_list", "disk_stat", "disk_read", "disk_write", "disk_mkdir", "disk_rename", "disk_remove", "disk_where", "disk_reveal", "settings_write", "settings_read", "grants_read", "grants_write", "app_quit_hold", "app_quit_now", "signer_probe_sign"]),
     ))
     .expect("failed to run tauri-build");
 }

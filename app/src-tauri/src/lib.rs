@@ -39,10 +39,19 @@ mod fleet_sig;
 #[allow(dead_code)]
 mod device_key;
 // (the agent the app hosts, desktop only: its owned child and bundle check, for the agents page's launcher, which
-//  comes next; until then nothing calls it but its tests)
+//  comes next; until then only its tests and the self-test's bundle report call it)
 #[cfg(desktop)]
 #[allow(dead_code)]
 mod agent_host;
+// (the tools the app connects, chosen by the person: the checks, before the agents page offers them)
+#[cfg(desktop)]
+#[allow(dead_code)]
+mod tools;
+// (Native (Python), the machine's own CPython as a kernel: choosing the interpreter and running the kernel, before the
+//  kernel menu offers it)
+#[cfg(all(desktop, unix))]
+#[allow(dead_code)]
+mod pykernel;
 mod nav;
 mod version;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -68,10 +77,11 @@ fn startup_files(app: tauri::AppHandle, webview: tauri::Webview, state: tauri::S
 fn startup_files(state: tauri::State<Pending>) -> Vec<String> {
     state.0.lock().unwrap().drain(..).map(|(_, p)| p).collect()
 }
-/// The pending files for window `label`, taken; the others left.
+/// The pending files for window `label` (a notebook page, the only page that asks), taken, with the unassigned ones
+/// (files_target: none waiting for a window that opens files), each once; the others left.
 #[allow(dead_code)]
 fn take_pending(pending: &mut Vec<(String, String)>, label: &str) -> Vec<String> {
-    let (mine, rest): (Vec<_>, Vec<_>) = pending.drain(..).partition(|(to, _)| to == label);
+    let (mine, rest): (Vec<_>, Vec<_>) = pending.drain(..).partition(|(to, _)| to == label || to == UNASSIGNED);
     *pending = rest;
     mine.into_iter().map(|(_, p)| p).collect()
 }
@@ -364,6 +374,26 @@ fn leave_do(app: &tauri::AppHandle, acts: Vec<leave::Act>) {
     }
 }
 
+/// A new window is about to be built (windows.rs window_open): whether it may (not once a quit has begun), reserved.
+#[cfg(desktop)]
+pub(crate) fn leave_begin_open(app: &tauri::AppHandle) -> bool {
+    app.state::<Leaving>().0.lock().unwrap().begin_open()
+}
+/// Window `label`, reserved, was built: destroyed at once if a quit began meanwhile; whether it was.
+#[cfg(desktop)]
+pub(crate) fn leave_opened(app: &tauri::AppHandle, label: &str) -> bool {
+    let acts = app.state::<Leaving>().0.lock().unwrap().opened(label);
+    let destroyed = !acts.is_empty();
+    leave_do(app, acts);
+    destroyed
+}
+/// A reserved window wasn't built after all.
+#[cfg(desktop)]
+pub(crate) fn leave_open_failed(app: &tauri::AppHandle) {
+    let acts = app.state::<Leaving>().0.lock().unwrap().open_failed();
+    leave_do(app, acts);
+}
+
 /// The asking window is writing what it has to disk before it goes.
 #[cfg(desktop)]
 #[tauri::command]
@@ -426,8 +456,10 @@ fn files_waiting(app: &tauri::AppHandle, to: &str) {
 
 /// The window to open the files the system hands over (#1541): of `windows` (label, its page's path, focused), the
 /// focused one whose page is the notebook's ("/", which opens files: web/index.html), else "main" if its page is the
-/// notebook's, else another whose page is, else "main" (gone, or on a board: the files wait for its next notebook
-/// page to ask, startup_files).  Never a board's page, which has nothing that opens them.
+/// notebook's, else another whose page is, else none (UNASSIGNED: no window's page opens files now, main gone or on a
+/// board; the first notebook page to ask takes them, startup_files).  Never a board's page, which has nothing that
+/// opens them.
+pub(crate) const UNASSIGNED: &str = "";
 #[allow(dead_code)]
 fn files_target(windows: Vec<(String, String, bool)>) -> String {
     let notebook = |p: &str| p == "/" || p == "/index.html";
@@ -437,33 +469,57 @@ fn files_target(windows: Vec<(String, String, bool)>) -> String {
         .or_else(|| windows.iter().find(|(l, p, _)| l == "main" && notebook(p)))
         .or_else(|| windows.iter().find(|(_, p, _)| notebook(p)))
         .map(|(l, _, _)| l.clone())
-        .unwrap_or_else(|| "main".into())
+        .unwrap_or_else(|| UNASSIGNED.into())
 }
 
-/// Window `gone` closed: the files still waiting for it, for the window files_target chooses among `left` (none left:
-/// they stay); that window, if any moved.
+/// Window `gone` closed: the files still waiting for it, and any waiting for a window no longer among `left` (an
+/// orphan), go to the window files_target chooses among `left`, or become unassigned if it chooses none; returned: that
+/// window, if any file moved to one (to be told).  Files already unassigned are never moved here: they wait for the
+/// first notebook page that asks (startup_files).  With no window left, everything stays as it is.
 #[allow(dead_code)]
 fn retarget(pending: &mut [(String, String)], gone: &str, left: Vec<(String, String, bool)>) -> Option<String> {
     if left.is_empty() {
         return None;
     }
+    let alive: Vec<String> = left.iter().map(|(l, _, _)| l.clone()).collect();
     let to = files_target(left);
     let mut moved = false;
-    for e in pending.iter_mut().filter(|(t, _)| t == gone) {
+    for e in pending.iter_mut().filter(|(t, _)| t == gone || (t != UNASSIGNED && !alive.contains(t))) {
         e.0 = to.clone();
         moved = true;
     }
-    moved.then_some(to)
+    (moved && to != UNASSIGNED).then_some(to)
 }
 
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now, signer::signer_probe_sign]
+    tauri::generate_handler![startup_files, selftest_file, selftest_open, selftest_persist, selftest_report, app_log, disk::file_open_dialog, disk::file_save_dialog, disk::file_read_text, disk::file_write_text, disk::folder_list, disk::folder_read, disk::folder_write, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, windows::window_open, windows::window_claim, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::disk_reveal, disk::settings_write, disk::settings_read, disk::grants_read, disk::grants_write, app_quit_hold, app_quit_now, signer::signer_probe_sign]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log]
+}
+
+/// The agent bundle's check, on this app's own resources, Node and compiled-in values, as one log line for the
+/// self-test's judge: "[agent] bundle: ok ...", "[agent] bundle: not_bundled", or "[agent] bundle: refused <why>".
+#[cfg(desktop)]
+fn selftest_agent_bundle(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let check = agent_host::node_check();
+    let how = match check {
+        agent_host::NodeCheck::Bytes => "bytes",
+        agent_host::NodeCheck::TeamSignature(_) => "signature",
+    };
+    let r = match (app.path().resource_dir().ok(), agent_host::shipped_node()) {
+        (Some(res), Some(node)) => agent_host::verify_bundle(&res, &node, env!("SAGEBRUSH_AGENT_MANIFEST_SHA256"), check),
+        _ => Err(agent_host::BundleError::Missing),
+    };
+    match r {
+        Ok(v) => eprintln!("[agent] bundle: ok agent={} node={} claude_code={} node_check={how}", v.agent, v.node, v.claude_code.as_deref().unwrap_or("not_bundled")),
+        Err(agent_host::BundleError::NotBundled) => eprintln!("[agent] bundle: not_bundled"),
+        Err(e) => eprintln!("[agent] bundle: refused {e:?} node_check={how}"),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -514,6 +570,11 @@ pub fn run() {
     });
     builder
         .setup(move |app| {
+            // (a self-test reports the agent bundle's check, as the launcher will run it: app/selftest/run-judge.mjs)
+            #[cfg(desktop)]
+            if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+                selftest_agent_bundle(app.handle());
+            }
             // (the page's server, listening before the window exists: the window never loads a page from a port
             // this app doesn't hold)
             // (a free port; in a self-test, SAGEBRUSH_APP_PORT, so two launches can be made to differ: the workspace
@@ -637,7 +698,10 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 let to = files_target(_app.webview_windows().iter().map(|(l, w)| (l.clone(), w.url().map(|u| u.path().to_string()).unwrap_or_default(), w.is_focused().unwrap_or(false))).collect());
                 _app.state::<Pending>().0.lock().unwrap().extend(files.into_iter().map(|p| (to.clone(), p)));
-                files_waiting(_app, &to);
+                // (unassigned: no window to tell; the next notebook page asks as it starts)
+                if to != UNASSIGNED {
+                    files_waiting(_app, &to);
+                }
             }
         });
 }
@@ -651,16 +715,17 @@ mod tests {
         assert_eq!(super::files_target(vec![w("main", "/", false), w("doc-1", "/", true)]), "doc-1");
         // (a board focused: never it; the first window)
         assert_eq!(super::files_target(vec![w("main", "/", false), w("doc-1", "/board/", true)]), "main");
-        assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-2", "/board/", true)]), "main");
+        // (no notebook page at all, main on a board: unassigned, for the first notebook page that asks)
+        assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-2", "/board/", true)]), super::UNASSIGNED);
         // (none focused)
         assert_eq!(super::files_target(vec![w("doc-3", "/index.html", false)]), "doc-3");
         assert_eq!(super::files_target(vec![w("doc-3", "/index.html", true)]), "doc-3");
-        // (main on a board, a board focused: the notebook window, never main (astra2's row))
+        // (main on a board, a board focused: the notebook window, never main (a review's row))
         assert_eq!(super::files_target(vec![w("main", "/board/", false), w("doc-1", "/board/", true), w("doc-2", "/", false)]), "doc-2");
-        // (main gone: another notebook window; only boards: kept for main)
+        // (main gone: another notebook window; only boards, or none: unassigned, never the closed main)
         assert_eq!(super::files_target(vec![w("doc-4", "/board/", true), w("doc-5", "/", false)]), "doc-5");
-        assert_eq!(super::files_target(vec![w("doc-4", "/board/", true)]), "main");
-        assert_eq!(super::files_target(vec![]), "main");
+        assert_eq!(super::files_target(vec![w("doc-4", "/board/", true)]), super::UNASSIGNED);
+        assert_eq!(super::files_target(vec![]), super::UNASSIGNED);
     }
 
     #[test]
@@ -671,7 +736,7 @@ mod tests {
         assert_eq!(super::retarget(&mut p, "doc-1", vec![w("main", "/board/", false), w("doc-2", "/", false)]), Some("doc-2".into()));
         assert_eq!(p, vec![("doc-2".to_string(), "/a.ipynb".to_string()), ("main".to_string(), "/b.ipynb".to_string())]);
         // (a window with no files waiting closed: nothing moved, nobody told)
-        assert_eq!(super::retarget(&mut p, "doc-9", vec![w("main", "/", false)]), None);
+        assert_eq!(super::retarget(&mut p, "doc-9", vec![w("main", "/", false), w("doc-2", "/", false)]), None);
         // (the last window closed: they stay, nobody told)
         assert_eq!(super::retarget(&mut p, "doc-2", vec![]), None);
         assert_eq!(p[0].0, "doc-2");
@@ -687,5 +752,62 @@ mod tests {
         assert_eq!(super::take_pending(&mut p, "main"), Vec::<String>::new());
         assert_eq!(super::take_pending(&mut p, "doc-1"), vec!["/b.ipynb"]);
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn a_file_opened_with_main_closed_and_only_a_board_left_goes_to_the_next_notebook_window_once() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        // (main closed, a board left: the system hands over a file; no window opens files: unassigned, nobody told)
+        let to = super::files_target(vec![w("doc-1", "/board/", true)]);
+        assert_eq!(to, super::UNASSIGNED);
+        let mut p = vec![(to, "/x.ipynb".to_string())];
+        // (the board asking, as no board does, or closing changes nothing of it)
+        assert_eq!(super::retarget(&mut p, "doc-1", vec![w("doc-2", "/board/", false)]), None);
+        assert_eq!(p[0].0, super::UNASSIGNED);
+        // (a new notebook window, doc-3, its page asking as it starts: it takes it, once; another window then nothing)
+        assert_eq!(super::take_pending(&mut p, "doc-3"), vec!["/x.ipynb"]);
+        assert_eq!(super::take_pending(&mut p, "doc-3"), Vec::<String>::new());
+        assert_eq!(super::take_pending(&mut p, "doc-4"), Vec::<String>::new());
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn unassigned_files_are_never_moved_by_a_close() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        // (a close with a notebook window left moves the closed window's own file there, told; the unassigned one stays)
+        let mut p = vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string()), ("doc-1".to_string(), "/d.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut p, "doc-1", vec![w("doc-2", "/", true)]), Some("doc-2".into()));
+        assert_eq!(p, vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string()), ("doc-2".to_string(), "/d.ipynb".to_string())]);
+        // (only unassigned files: nothing moves, nobody told)
+        let mut q = vec![(super::UNASSIGNED.to_string(), "/u.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut q, "doc-3", vec![w("doc-2", "/", true)]), None);
+        assert_eq!(q[0].0, super::UNASSIGNED);
+    }
+
+    #[test]
+    fn files_waiting_for_a_window_that_is_gone_are_re_homed_at_the_next_close() {
+        let w = |l: &str, p: &str, f: bool| (l.to_string(), p.to_string(), f);
+        // (a file waiting for doc-7, which is gone without its close moving it: the next close re-homes it too)
+        let mut p = vec![("doc-7".to_string(), "/o.ipynb".to_string()), ("main".to_string(), "/m.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut p, "doc-8", vec![w("main", "/", false), w("doc-9", "/", true)]), Some("doc-9".into()));
+        assert_eq!(p, vec![("doc-9".to_string(), "/o.ipynb".to_string()), ("main".to_string(), "/m.ipynb".to_string())]);
+        // (re-homed to none, with no notebook page left: unassigned, nobody told)
+        let mut q = vec![("doc-7".to_string(), "/o.ipynb".to_string())];
+        assert_eq!(super::retarget(&mut q, "doc-8", vec![w("doc-1", "/board/", false)]), None);
+        assert_eq!(q[0].0, super::UNASSIGNED);
+    }
+}
+
+#[cfg(test)]
+mod entry_point_tests {
+    // (the mobile build's entry point is the attribute on run(): an item inserted between them would take it, and
+    // the phone apps would have no entry point while the desktop build stays green)
+    #[test]
+    fn the_mobile_entry_point_attribute_is_on_run() {
+        let src = include_str!("lib.rs");
+        let attr = concat!("#[cfg_attr(mobile, tauri::", "mobile_entry_point)]");
+        let at: Vec<usize> = src.lines().enumerate().filter(|(_, l)| l.trim() == attr).map(|(i, _)| i).collect();
+        assert_eq!(at.len(), 1, "the attribute appears once");
+        assert_eq!(src.lines().nth(at[0] + 1).map(str::trim), Some("pub fn run() {"), "the line after it is run()'s");
     }
 }

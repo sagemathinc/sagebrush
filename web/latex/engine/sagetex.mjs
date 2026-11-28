@@ -353,12 +353,15 @@ export function inlineHtml(st, it, esc, math, n) {
   if (ok && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
     const o = plotOptions(it.opts);
     if (o.ignored.length) return chip({ s: "error", msg: whyRejected({ err: "plotopts", name: o.ignored.join(", ") }) }, esc, true, n);
-    return '<img class="sageplot' + (stale ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
+    return plotImg(st, esc, o.style);
   }
   return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n);
 }
+// a plot's image (\sageplot's; a sageblock's last-line plot's): its checked data: URL, a stale one marked
+const plotImg = (st, esc, style) => '<img class="sageplot' + (st.s === "stale" ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '" alt="a plot" src="' + st.src + '"' + (style ? ' style="' + esc(style) + '"' : "") + ">";
 // a code block: sageblock shows its code (as SageTeX typesets it), sagesilent nothing; both show a failed or
-// not-yet-run state (a stale one, which ran, none: it has no value to keep), and the @interacts it made
+// not-yet-run state (a stale one, which ran, none: it has no value to keep), and the @interacts it made. A sageblock
+// whose last line is a plot shows it under the code (William, Nov 10; a Sagebrush difference: SageTeX shows the code)
 export function blockHtml(st, it, esc, n) {
   // (a Magma block marked: the preview colours Sage and Python code only, latex/hl.ts)
   let h = it.shown !== undefined ? '<pre class="verbatim code sageblock' + (isMagma(it) ? " magma" : "") + '">' + esc(it.shown) + "</pre>" : "";
@@ -366,7 +369,8 @@ export function blockHtml(st, it, esc, n) {
   else if (isNonSage(it) && pyBig(st, it)) h += '<div class="sagestate">' + chip(pyBig(st, it), esc, false, n, langOf(it)) + "</div>";
   // (magmablock: what Magma printed, under its code, as text)
   else if (it.mode === "magmablock" && st.latex) h += '<pre class="verbatim code magmaout' + (st.s === "stale" ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '">' + esc(st.latex.replace(/\n$/, "")) + "</pre>";
-  else h += interactsAt(st.interacts, esc, st.s === "stale" && staleTitle(st));
+  // (a sageblock whose last line is a plot: the plot under its code)
+  else h += (it.mode === "block" && typeof st.src === "string" && DATA_SVG.test(st.src) ? plotImg(st, esc) : "") + interactsAt(st.interacts, esc, st.s === "stale" && staleTitle(st));
   return h;
 }
 // ---- @interact (a Sagebrush extension, William Nov 8: "@interact inside sagesilent/sageblock as a documented Sagebrush

@@ -6,6 +6,9 @@
 // agent.ready, takes the grant, answers a chat message with a turn, and answers {"unpair":true} as the runner does
 // (agent.ended "The agent stopped…", then the close). Board's words are checked word for word:
 //   - the Connect dialog's computers: the heading, a row with Chat here; none set up; the listing failed;
+//   - two computers of one name told apart (when each last connected, when it was set up, its id's start), and
+//     Remove…: asked in the row, Keep leaves it, Remove is the site's revoke (POST /api/remote/v1/revoke) and the row
+//     goes, a failure says why and keeps it, the last one gone says none is set up;
 //   - the header while it connects and once allowed; Remember hidden; the Disconnect button's title;
 //   - Disconnect: grant.changed {} then {"unpair":true}, and only the page's own line after it;
 //   - a leg lost, and a refused hello in the runner's words;
@@ -47,7 +50,7 @@ const headersFor = (path) => {
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png" };
 
 // ---- the relay and the runner
-const R = { mode: "ok", peers: [{ kind: "runner", remote_id: "rid-laptop-01", name: "laptop" }], available: true, peersStatus: 200, legs: [], got: [] };
+const R = { mode: "ok", peers: [{ kind: "runner", remote_id: "rid-laptop-01", name: "laptop" }], available: true, peersStatus: 200, legs: [], got: [], revoked: [], revokeStatus: 200 };
 const TOKEN = "TOKEN_" + "t".repeat(40), NONCE = "NONCE_n0nce";
 const rpc = (ws, method, params) => ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
 const server = Bun.serve({
@@ -57,6 +60,16 @@ const server = Bun.serve({
     if (url.pathname === "/api/remote/v1/peers") {
       if (R.peersStatus !== 200) return new Response("no", { status: R.peersStatus });
       return Response.json({ peers: R.peers, available: R.available });
+    }
+    if (url.pathname === "/api/remote/v1/revoke") {
+      return req.text().then((t) => {
+        if (req.method !== "POST" || req.headers.get("origin") !== url.origin) return new Response("no", { status: 403 });
+        if (R.revokeStatus !== 200) return new Response("{}", { status: R.revokeStatus });
+        const id = JSON.parse(t).remote_id;
+        R.revoked.push(id);
+        R.peers = R.peers.filter((p) => p.remote_id !== id);
+        return Response.json({ ok: true });
+      });
     }
     if (url.pathname === "/api/remote/v1/page") {
       if (url.searchParams.get("chan") !== "agent" || url.searchParams.get("remote") !== "rid-laptop-01") return new Response("no", { status: 400 });
@@ -156,9 +169,9 @@ try {
   await ev(`(() => { window.__whoSeen = []; new MutationObserver(() => window.__whoSeen.push(document.querySelector('#who').textContent)).observe(document.querySelector('#who'), { childList: true, subtree: true, characterData: true }); return true; })()`);
   ok(await chatHere(), "Chat here");
   ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`), "…then the grant dialog");
-  // (while it waits for Allow: the header and the banner say the same, waiting for the dialog, never "isn't connected")
-  const askAllow = { who: await text("#who"), banner: await text("#banner") };
-  ok(/waiting: allow it in the dialog/.test(askAllow.who) && /is waiting for you to allow it in the dialog/.test(askAllow.banner) && !/isn't connected/.test(askAllow.banner), "…while it's open, the header and the banner both say it waits for Allow in the dialog", askAllow);
+  // (while it waits for Allow: the header and its popover say the same, waiting for the dialog, never "isn't connected")
+  const askAllow = { who: await text("#who"), info: await text("#who-info") };
+  ok(/waiting: allow it in the dialog/.test(askAllow.who) && /is waiting for you to allow it in the dialog/.test(askAllow.info) && !/isn't connected/.test(askAllow.info), "…while it's open, the header and its popover both say it waits for Allow in the dialog", askAllow);
   ok(await ev(`window.__whoSeen.some((t) => t.includes('Connecting to laptop…'))`), "the header said \"Connecting to laptop…\" meanwhile", await ev(`window.__whoSeen`));
   const leg = R.legs.at(-1);
   ok(leg.data.hello?.fresh === true && leg.data.hello?.purpose === "agent" && !("remember" in leg.data.hello) && !("resume" in leg.data.hello), "the hello asks a fresh agent and remembers nothing", leg.data.hello);
@@ -226,7 +239,9 @@ try {
   // after Disconnect and a reload: nothing of the runner's pairing kept in any store
   await send("Page.reload", {});
   await sleep(300);
-  await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb')`, 30000);
+  // (Connect shown: the workspace open and the pairing's Connect wired, as open() waits for; the composer alone comes
+  //  first, and under load a Chat here's click on Connect before that did nothing)
+  await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && !document.querySelector('#connect').hidden`, 30000);
   const stores = await ev(`(async () => {
     const out = { local: JSON.stringify({ ...localStorage }), session: JSON.stringify({ ...sessionStorage }), idb: "" };
     for (const { name } of await indexedDB.databases()) {
@@ -273,6 +288,53 @@ try {
   ok(await until(`document.querySelector('#who').textContent.includes('on laptop')`), "allowed: the agent on laptop");
   await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect').click()`);
   await until(`document.querySelector('#conn-status').textContent.length > 0`);
+
+  // two computers of one name, and Remove…
+  {
+    const NOW = Date.now();
+    const day = (sec) => new Date(sec * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    R.peers = [
+      { kind: "runner", remote_id: "ridAAA-lite-1", name: "lite", created: 1793000000, agents: ["claude"], agents_at: NOW - 3 * 86400_000 - 60_000 },
+      { kind: "runner", remote_id: "ridBBB-lite-2", name: "lite", created: 1794500000, agents: ["claude"], agents_at: NOW - 125_000 },
+      { kind: "runner", remote_id: "rid-spectre-1", name: "spectre", created: 1794500000 },
+    ];
+    R.revoked = [];
+    const DLG = "[...document.querySelectorAll('.sbag-dlg')].at(-1)";
+    const rows = () => ev(`[...${DLG}.querySelectorAll('.runner:not(.remove-ask)')].map((r) => r.querySelector('.who').innerText.replace(/\\s+/g, ' ').trim())`);
+    const press = (sel, label) => ev(`(() => { const b = [...${DLG}.querySelectorAll(${JSON.stringify(sel)})].find((b) => b.textContent === ${JSON.stringify(label)}); if (!b) return false; b.click(); return true; })()`);
+    const removeRow = (i) => ev(`(() => { const r = [...${DLG}.querySelectorAll('.runner:not(.remove-ask)')][${i}]; const b = [...r.querySelectorAll('button')].find((b) => b.textContent === 'Remove…'); b.click(); return b.title; })()`);
+    await ev(`document.querySelector('#connect').click()`);
+    ok(await until(`${DLG}.querySelectorAll('.runner').length === 3`), "three computers: two named lite, one spectre");
+    const r0 = await rows();
+    ok(r0[0] === `lite connected 3 days ago · added ${day(1793000000)} · id ridAAA` && r0[1] === `lite connected 2 min ago · added ${day(1794500000)} · id ridBBB` && r0[2] === `spectre added ${day(1794500000)}`,
+      "each says when it last connected and when it was set up; the two named lite also show their ids' start", r0);
+    const title = await removeRow(0);
+    ok(title === "Remove lite from your computers", "Remove…'s title", title);
+    ok(await until(`${DLG}.querySelector('.remove-ask')?.textContent.startsWith("Remove lite? It can't connect again until you run sagebrush remote login on it.")`), "Remove…: asked in the row");
+    ok(await press(".remove-ask button", "Keep") && (await rows()).length === 3 && !(await ev(`!!${DLG}.querySelector('.remove-ask')`)) && R.revoked.length === 0, "Keep: nothing removed, the row as it was", R.revoked);
+    await removeRow(0);
+    await until(`!!${DLG}.querySelector('.remove-ask')`);
+    await press(".remove-ask button", "Remove");
+    ok(await until(`${DLG}.querySelectorAll('.runner').length === 2`), "Remove: the row goes");
+    ok(JSON.stringify(R.revoked) === '["ridAAA-lite-1"]' && (await rows())[0].startsWith("lite connected 2 min ago"), "…the site's revoke, for that computer only (the other lite stays)", { revoked: R.revoked, rows: await rows() });
+    // (a failure: its reason, and the row kept)
+    R.revokeStatus = 503;
+    await removeRow(1);
+    await until(`!!${DLG}.querySelector('.remove-ask')`);
+    await press(".remove-ask button", "Remove");
+    ok(await until(`${DLG}.querySelector('.runners [role=status]').textContent === "Couldn't remove spectre: the site couldn't remove it just now: try again"`), "a failure: \"Couldn't remove spectre: …try again\"");
+    ok((await rows()).length === 2 && R.revoked.length === 1 && !(await ev(`!!${DLG}.querySelector('.remove-ask')`)), "…the row kept, with its buttons");
+    // (the last ones removed: none set up)
+    R.revokeStatus = 200;
+    for (let i = 0; i < 2; i++) {
+      await removeRow(0);
+      await until(`!!${DLG}.querySelector('.remove-ask')`);
+      await press(".remove-ask button", "Remove");
+      await until(`${DLG}.querySelectorAll('.runner').length === ${1 - i}`);
+    }
+    ok(await until(`${DLG}.querySelector('.runners [role=status]').textContent === "None of your computers is set up for this. On one, run: sagebrush remote login"`) && R.revoked.length === 3, "the last one removed: none set up", R.revoked);
+    await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  }
 
   // none set up; the listing failed
   R.mode = "ok";

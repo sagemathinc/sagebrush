@@ -4,14 +4,14 @@ The page for people is https://sagebrush.space/agents/connect/: two choices, eac
 
 | Way | Where it works today | What you install | With a sandboxed Claude Code |
 |---|---|---|---|
-| 1. `sagebrush remote` | dev.sagebrush.space (testing). On sagebrush.space, Connect a computer says whether your account can use it | PyPI `sagebrush` 0.10.3 | Not an agent connection: Claude isn't involved |
-| 2. `sagebrush-agent` | The Agents page, /agents/ on sagebrush.space. Claude here; Codex only on a connected computer | `sagebrush-agent` 0.8.14 (a download, not on npm) | Works: it never uses your Claude Code session |
-| 3. `sagebrush-mcp` | Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards | PyPI `sagebrush-mcp` 0.10.3 | Only if your Claude Code can load MCP servers |
+| 1. `sagebrush remote` | dev.sagebrush.space (testing). On sagebrush.space, Connect a computer says whether your account can use it | PyPI `sagebrush` 0.10.5 | Not an agent connection: Claude isn't involved |
+| 2. `sagebrush-agent` | The Agents page, /agents/ on sagebrush.space. Claude here; Codex only on a connected computer | `sagebrush-agent` 0.8.18 (a download, not on npm) | Works: it never uses your Claude Code session |
+| 3. `sagebrush-mcp` | Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards | PyPI `sagebrush-mcp` 0.10.5 | Only if your Claude Code can load MCP servers |
 | 4. A cocalc.ai agent | Not yet | — | — |
 
 ## 1. `sagebrush remote`: your computer runs a notebook's code
 
-Needs PyPI `sagebrush` 0.10.3 and [uv](https://docs.astral.sh/uv/). The loopback pairing works on dev.sagebrush.space, the testing site, only. For the relayed version, [Connect a computer](https://sagebrush.space/remote/connect) says whether your account can use it.
+Needs PyPI `sagebrush` 0.10.5 and [uv](https://docs.astral.sh/uv/). The loopback pairing works on dev.sagebrush.space, the testing site, only. For the relayed version, [Connect a computer](https://sagebrush.space/remote/connect) says whether your account can use it.
 
 On the testing site, a notebook sends the cells you run to a Python on your computer instead of the one in your browser. An agent isn't part of it.
 
@@ -40,7 +40,7 @@ There is also a relayed version, with a terminal on your computer: open [Connect
 
 ## 2. `sagebrush-agent`: Claude on your computer, the chat in your browser
 
-Needs `sagebrush-agent` 0.8.14 (below), Node 20 or later, and Claude Code logged in once with your Claude account. Works with the [Agents page](https://sagebrush.space/agents/) on this site. Codex: not here, only on a [connected computer](https://sagebrush.space/remote/connect).
+Needs `sagebrush-agent` 0.8.18 (below), Node 20 or later, and Claude Code logged in once with your Claude account. Reading Sagebrush's source needs Node 22.13 or later. Works with the [Agents page](https://sagebrush.space/agents/) on this site. Codex: not here, only on a [connected computer](https://sagebrush.space/remote/connect).
 
 A small program on your computer runs Claude with your own Claude login. You chat with it in the Agents page, and it works in the files of your Sagebrush workspace in this browser, in the folders you allow.
 
@@ -49,16 +49,16 @@ A small program on your computer runs Claude with your own Claude login. You cha
 On sagebrush.space:
 
 ```
-npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.14.tgz
+npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz
 ```
 
 On dev.sagebrush.space, the testing site:
 
 ```
-npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.14.tgz --origin https://dev.sagebrush.space
+npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.8.18.tgz --origin https://dev.sagebrush.space
 ```
 
-The sha256 of that file is `73052fd1620bef59120c997327e8876461d719d5b2cad6651db8bd5a603301dd`.
+The sha256 of that file is `4a4b055092df1c3cafb1907473872595dc7d1c324923b0494a19c9afeace3237`.
 
 - It prints a link with a one-time code. Open it in Chrome or Firefox. Safari can't reach a program on your computer.
 - The browser asks once whether this site may reach apps on this computer; its wording depends on the browser's version. Click Allow, then Connect again if it asks.
@@ -69,13 +69,14 @@ If you clicked Block by mistake: click the icon at the left of the address bar, 
 ### What it touches
 
 - **On your computer:** one Node process under your account. It works in an empty temporary folder, loads none of your Claude settings or MCP servers, and listens on 127.0.0.1 only. It accepts only sagebrush.space, the preview site and any `--origin` you add, only with the one-time code (used once, valid 5 minutes), and one page at a time.
-- **What Claude can use:** no shell and none of your computer's files. Its file tools are the Sagebrush workspace's, and the page checks each call against the folders you allowed. Each web search or fetch asks you first in the chat, and so does each move, rename or removal of a file. It can write a notebook. On pages that offer branches it can also make its own branch and ask you to review it; only you accept its changes. It runs code only while "May run code" is on, and then in Sagebrush's sandbox in your browser, never on this computer; otherwise you run a notebook's cells.
+- **What Claude can use:** no shell and none of your computer's files. Its file tools are the Sagebrush workspace's, and the page checks each call against the folders you allowed. Each web search or fetch asks you first in the chat, and so does each move, rename or removal of a file. It can write a notebook. On pages that offer branches it can also make its own branch and ask you to review it; only you accept its changes. In a chat, it runs code only while "May run code" is on, and then in Sagebrush's sandbox in your browser, never on this computer; otherwise you run a notebook's cells.
+- **Delegate tasks (optional):** with **Delegate** on in the Agents page, a task works on its own copy of the documents you choose, kept on this computer in `~/.sagebrush/tasks`, and proposes its changes back to you. Your workspace changes only when you **Merge**. With **May run code** ticked for the task, on Linux and macOS, it runs that copy's notebooks on this computer, confined to the task's folder, with no network.
 - **Network:** the program talks to Anthropic, with your Claude login. Your conversation goes to Anthropic.
 - **On disk:** while it runs, each conversation's transcript is saved under `~/.claude/projects/`, as Claude Code does, including the contents of files Claude read. Ctrl+C stops it and deletes this run's transcripts and its temporary folder; if it can't, it says what's left. If the program is killed or crashes, the transcripts stay until you delete them.
 
 ### With a sandboxed Claude Code
 
-It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work. Option 3's math tools need no outbound network once installed; option 5 might also work.
+It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work. Option 3's math tools need no outbound network once installed.
 
 ### Not yet
 
@@ -84,7 +85,7 @@ It works: it's a separate program and never uses your Claude Code session, sandb
 
 ## 3. `sagebrush-mcp`: Sagebrush's tools in the agent you already run
 
-Needs PyPI `sagebrush-mcp` 0.10.3, [uv](https://docs.astral.sh/uv/), and an agent that loads MCP servers.
+Needs PyPI `sagebrush-mcp` 0.10.5, [uv](https://docs.astral.sh/uv/), and an agent that loads MCP servers.
 
 An MCP server your agent starts: Sage and Python tools, and, when you pair a Sagebrush page with it, your Sagebrush workspace files, including notebooks in Python, Sage, MATLAB or Magma that it writes and runs.
 
