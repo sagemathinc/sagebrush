@@ -7,6 +7,12 @@
 // it lists must be on that origin too.  The page then reads each file from
 // its address there and checks it against its SHA-256, as it does a share's.
 
+import { sharePathOk } from "./folder";
+
+/** the last instant a JavaScript Date can hold (ms): a later `created` is refused as a malformed manifest, never
+ * thrown by toISOString */
+const DATE_MAX_MS = 8.64e15;
+
 /** This site's origin and its course tool's: a link from any other origin is refused. */
 export const LTI_ORIGINS: Record<string, string> = {
   "https://dev.sagebrush.space": "https://lti-dev.sagebrush.space",
@@ -75,10 +81,11 @@ export async function loadLti(hash: string, site: string, fetchFn: typeof fetch,
   const base = `${link.origin}${link.pathname.slice(0, -"manifest".length)}`;
   const files: LtiFile[] = [];
   const urls = new Map<string, string>();
-  if (typeof m.copy !== "string" || !/^[0-9a-f]{32}$/.test(m.copy) || typeof m.title !== "string" || !Number.isSafeInteger(m.created) || typeof m.sha256 !== "string" || !HEX64.test(m.sha256) || !Array.isArray(m.files)) return BAD_LINK;
+  if (typeof m.copy !== "string" || !/^[0-9a-f]{32}$/.test(m.copy) || typeof m.title !== "string" || !Number.isSafeInteger(m.created) || (m.created as number) < 0 || (m.created as number) > DATE_MAX_MS || typeof m.sha256 !== "string" || !HEX64.test(m.sha256) || !Array.isArray(m.files)) return BAD_LINK;
   for (const f of m.files as { path?: unknown; size?: unknown; sha256?: unknown; url?: unknown }[]) {
-    // (each file under this same link, on the tool's origin: nothing the list names may send the page elsewhere)
-    if (typeof f?.path !== "string" || !f.path || urls.has(f.path) || !Number.isSafeInteger(f.size) || (f.size as number) < 0 || typeof f.sha256 !== "string" || !HEX64.test(f.sha256) || typeof f.url !== "string") return BAD_LINK;
+    // (each file under this same link, on the tool's origin: nothing the list names may send the page elsewhere; and its
+    // path one a share takes (relative plain segments, sharePathOk), so the mount and a student's copy can hold it)
+    if (typeof f?.path !== "string" || !sharePathOk(f.path) || urls.has(f.path) || !Number.isSafeInteger(f.size) || (f.size as number) < 0 || typeof f.sha256 !== "string" || !HEX64.test(f.sha256) || typeof f.url !== "string") return BAD_LINK;
     let u: URL;
     try {
       u = new URL(f.url);
@@ -88,6 +95,11 @@ export async function loadLti(hash: string, site: string, fetchFn: typeof fetch,
     if (u.href !== f.url || !f.url.startsWith(base) || !/^\d{1,9}-\d{1,9}\.[0-9a-f]{32}$/.test(f.url.slice(base.length))) return BAD_LINK;
     urls.set(f.path, f.url);
     files.push({ path: f.path, size: f.size as number, sha256: f.sha256 });
+  }
+  // (and no path is another's folder: "a" and "a/b" can't both be in one mount, so that list is refused now, not there)
+  for (const f of files) {
+    const seg = f.path.split("/");
+    for (let i = 1; i < seg.length; i++) if (urls.has(seg.slice(0, i).join("/"))) return BAD_LINK;
   }
   return {
     id: `lti:${m.copy}`,

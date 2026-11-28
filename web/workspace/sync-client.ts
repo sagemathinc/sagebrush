@@ -758,7 +758,7 @@ export class SyncClient {
       };
       ws.onmessage = (ev) => {
         c.heard = this.clock.now();
-        c.chain = c.chain.then(() => this.message(c, ev.data)).catch((e) => {
+        c.chain = c.chain.then(async () => { await this.message(c, ev.data); }).catch((e) => {
           if (e instanceof Fenced) return c.end("fenced");
           console.warn("sync:", e);
           c.end("closed");

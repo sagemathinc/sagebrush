@@ -56,9 +56,10 @@ const Y = "5ea1ed00-0007-4e2e-8e2e-e2e2e2e2e207"; // an account encrypted before
 const Z = "5ea1ed00-0008-4e2e-8e2e-e2e2e2e2e208"; // (unused: an index building over plaintext ops can no longer get a key chain)
 const K = "5ea1ed00-0009-4e2e-8e2e-e2e2e2e2e209"; // releases keyed to the add they end
 const L = "5ea1ed00-000a-4e2e-8e2e-e2e2e2e2e20a"; // an object made before the index's references
-const G = "5ea1ed00-000b-4e2e-8e2e-e2e2e2e2e20b"; // a plaintext op raced against genesis
-const D = "5ea1ed00-000c-4e2e-8e2e-e2e2e2e2e20c"; // an end-to-end account's notebooks and blobs: sealed only
-const NB = "5ea1ed00-000d-4e2e-8e2e-e2e2e2e2e20d"; // a notebook in the clear, then genesis
+const F = "5ea1ed00-000b-4e2e-8e2e-e2e2e2e2e20b"; // a sealed op in flight when its session signs out (S07)
+const G = "5ea1ed00-000c-4e2e-8e2e-e2e2e2e2e20c"; // a plaintext op raced against genesis
+const D = "5ea1ed00-000d-4e2e-8e2e-e2e2e2e2e20d"; // an end-to-end account's notebooks and blobs: sealed only
+const NB = "5ea1ed00-000e-4e2e-8e2e-e2e2e2e2e20e"; // a notebook in the clear, then genesis
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -67,7 +68,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R, P, S, X, Y, Z, K, L, G, D, NB].join(",");
+const listed = [A, N, R, P, S, X, Y, Z, K, L, F, G, D, NB].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_TIERED: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -414,8 +415,15 @@ await section("sealed ops: signed by a current device, under the current head", 
   await seam(A, { sealedCap: kept + 2 });
   const mixedRetry = await ws.ask({ t: "sops", ops: [fill, over] });
   ok(mixedRetry?.ops?.[0]?.seq === filled.ops[0].seq && Number.isInteger(mixedRetry?.ops?.[1]?.seq), "with room for the new one: the old one answered with its seq, the new one accepted, the same dseq");
+  // (one new dseq named twice at the last free place: one row, so accepted, the second answered as its resend; the cap
+  // counts distinct new dseqs, not envelopes)
+  const kept2 = (await ws.ask({ t: "pull_index", after: 0 }))?.ops?.filter((o) => o.env !== undefined).length;
+  await seam(A, { sealedCap: kept2 + 1 });
+  const d1 = await signed(W, d, st, dev, n + 2), d2 = await signed(W, d, st, dev, n + 2);
+  const dup = await ws.ask({ t: "sops", ops: [d1, d2] });
+  ok(dup?.ops?.length === 2 && Number.isInteger(dup.ops[0].seq) && dup.ops[1].seq === dup.ops[0].seq, "one new dseq twice with one place left in the log: accepted once, the second answered as its resend, not limit: " + JSON.stringify(dup));
   await seam(A, { sealedCap: 1_000_000 });
-  n += 2;
+  n += 3;
 
   // (an account with a key chain is encrypted (e2e PR 5d): its agents' index isn't rebuilt, sealed ops or not; and its
   // log takes no plaintext op (an index log is plaintext or sealed, never both): refused for the whole message, nothing
@@ -836,6 +844,58 @@ await section("the sync generation: an op in flight when the synced data is dele
   ok(replay?.code === "forbidden", "generation 1's exact signed op, replayed in generation 2 at the same device and dseq: forbidden: " + JSON.stringify(replay));
   const fresh = await ws2.ask({ t: "sops", ops: [await signed(W, g.d, g.next, dev, w2.next_dseq, { gen: 2 })] });
   ok(Number.isInteger(fresh?.ops?.[0]?.seq), "a fresh generation-2 signature at that dseq: accepted");
+  ws2.ws.close();
+});
+
+await section("S07: a sealed op in flight when its session signs out is not committed", async () => {
+  const s = await enabled(F);
+  const W = account(F);
+  const g = await W.genesis();
+  ok((await post(s, F, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(genesis)");
+  const dev = "sealed-dev-f001";
+  const ws = await socket(s);
+  const w = await hello(ws, dev);
+  const before = await signed(W, g.d, g.next, dev, w.next_dseq);
+  ok(Number.isInteger((await ws.ask({ t: "sops", ops: [before] }))?.ops?.[0]?.seq), "(one op in the log)");
+  // (a signed op held between its checks and its commit; meanwhile its session signs out through /auth/logout)
+  const held = await signed(W, g.d, g.next, dev, w.next_dseq + 1);
+  await seam(F, { sealedHold: 1500 });
+  const pending = ws.ask({ t: "sops", ops: [held] });
+  await new Promise((r) => setTimeout(r, 200));
+  const out = await at(SITE, "/auth/logout", { method: "POST", headers: { cookie: s, origin: SITE } });
+  ok(out.status === 200, "(the op's session signs out while the op is held)");
+  await pending;
+  await new Promise((r) => setTimeout(r, 1600));
+  await seam(F, { sealedHold: 0 });
+  // (another session of the account: the log, and the device's order)
+  const s2 = await signIn(F);
+  const ws2 = await socket(s2);
+  const w2 = await hello(ws2, dev);
+  const log = (await ws2.ask({ t: "pull_index", after: 0 }))?.ops ?? [];
+  ok(log.every((o) => o.env !== held.env) && log.some((o) => o.env === before.env), "an op held across its session's sign-out is not committed: the log has the op before it and not it");
+  ok(w2.next_dseq === held.dseq, `and the device's order didn't move: its next dseq is still the held op's (${w2.next_dseq})`);
+  // (a session that reaches its end during the hold, with no sign-out: refused at the commit, nothing stored)
+  {
+    const s3 = await signIn(F);
+    const until = Math.floor(Date.now() / 1000) + 4;
+    await db.prepare("UPDATE sessions SET expires = ?1 WHERE token_hash = ?2").bind(until, createHash("sha256").update(decodeURIComponent(s3.split("=")[1])).digest("hex")).run();
+    const ws3 = await socket(s3);
+    const w3 = await hello(ws3, dev);
+    const late = await signed(W, g.d, g.next, dev, w3.next_dseq);
+    await seam(F, { sealedHold: 6000 });
+    const pend = ws3.ask({ t: "sops", ops: [late] });
+    while (Date.now() < until * 1000 + 2500) await new Promise((r) => setTimeout(r, 100));
+    await pend;
+    await new Promise((r) => setTimeout(r, Math.max(0, until * 1000 + 3500 - Date.now())));
+    await seam(F, { sealedHold: 0 });
+    const log3 = (await ws2.ask({ t: "pull_index", after: 0 }))?.ops ?? [];
+    ok(log3.every((o) => o.env !== late.env), "a sealed op whose session reaches its end while it's held between its checks and its commit is not committed");
+  }
+  // (control: the same hold with the session kept commits)
+  await seam(F, { sealedHold: 600 });
+  const kept = await ws2.ask({ t: "sops", ops: [await signed(W, g.d, g.next, dev, w2.next_dseq)] });
+  await seam(F, { sealedHold: 0 });
+  ok(Number.isInteger(kept?.ops?.[0]?.seq), "control: the same hold, its session kept, is committed");
   ws2.ws.close();
 });
 
