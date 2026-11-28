@@ -636,7 +636,9 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
       db.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(account_id) DO UPDATE SET email = ?2, name = ?3, last_login = ?4").bind(who.account_id, who.email ?? null, who.name ?? null, t),
       // (reauth_ms: /auth/dev's (DEV only) is now; a CoCalc sign-in's is NULL, since it proves no fresh sign-in)
       db.prepare(`INSERT INTO sessions (token_hash, account_id, created, expires, kind, reauth_ms) VALUES (?1, ?2, ?3, ?4, ?5, CASE WHEN ?5 = 'dev' THEN ${D1_NOW_MS} END)`).bind(hash, who.account_id, t, t + ttl, ident?.kind === "dev" ? "dev" : "legacy"),
-      // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3)
+      // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3.  Not through the onSessionsEnded hooks: it's the
+      // account's own new sign-in, and an evicted session is gone from D1, so it opens nothing new and its sync sockets end
+      // at their next recheck)
       db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
     ]);
   } catch {
@@ -714,7 +716,9 @@ async function startIdentitySession(env: ShareEnv, account: string, ttl: number,
       // (the identity's verified email, as this sign-in's WorkOS answer gave it, or null: in the session's own batch, so
       // a sign-in that stands has always offered it, and one refused wrote nothing; a newer answer already written wins)
       ...(ident.kind === "workos" ? [db.prepare(`UPDATE identities SET email = ?2, email_at = ?3, email_obs = ?4 WHERE identity_id = ?1 AND ${emailNewer(4)}`).bind(ident.identity_id, ident.email, t, ident.ticket)] : []),
-      // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking)
+      // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking.  Not through the
+      // onSessionsEnded hooks: it's the account's own new sign-in, and an evicted session is gone from D1, so it opens
+      // nothing new and its sync sockets end at their next recheck)
       db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
       db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${EVICTED}))`).bind(account, SESSIONS_MAX),
       db.prepare(`DELETE FROM sessions WHERE rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX),
@@ -885,24 +889,65 @@ export async function outboxCounts(db: D1): Promise<{ queued: number; exhausted:
   return (await db.prepare(`SELECT (SELECT COUNT(*) FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0) AS queued, (SELECT COUNT(*) FROM revoke_outbox WHERE exhausted = 1) AS exhausted, (SELECT COUNT(*) FROM revoke_outbox WHERE sid_unknown = 1) AS unknown, ${SLOTS_USED} AS used`).first<{ queued: number; exhausted: number; unknown: number; used: number }>())!;
 }
 
+/** A session ended in bulk (sign-out everywhere, disable): its token hash, and its latest end (seconds), the longest it
+ * could have lasted. */
+export type EndedSession = { session: string; ends: number };
+type EndingHook = (env: ShareEnv, account: string) => Promise<unknown>;
+type EndedHook = (env: ShareEnv, account: string, sessions: EndedSession[], before: unknown) => Promise<void>;
+let endingHook: EndingHook | null = null;
+let endedHook: EndedHook | null = null;
+/**
+ * What else ends an account's sessions, registered once at import by the code that holds them (the sync service's
+ * sockets), each given the request's bindings.  `ending` runs before every bulk end (sign-out everywhere, disable)
+ * deletes anything; a failure refuses a sign-out everywhere with nothing changed (it can be asked again), but never a
+ * disable.  `ended` gets exactly the sessions that bulk end
+ * deleted, after the delete, so none made meanwhile is missed, with what this same call's `ending` returned (its own
+ * record, scoped to the request: nothing is shared between requests).  Neither is set here: without them, ending
+ * sessions is only this module's.
+ */
+export function onSessionsEnded(hooks: { ending?: EndingHook; ended?: EndedHook }): void {
+  endingHook = hooks.ending ?? null;
+  endedHook = hooks.ended ?? null;
+}
+/** The deleted sessions handed on.  They are gone already, so a failure is the hook's to handle (it logs it), never the
+ * request's answer. */
+async function sessionsEnded(env: ShareEnv, account: string, sessions: EndedSession[], before: unknown): Promise<void> {
+  if (!endedHook || sessions.length === 0) return;
+  try {
+    await endedHook(env, account, sessions, before);
+  } catch {
+    // (the hook handles its own failures; one that throws anyway doesn't fail a bulk end that already happened)
+  }
+}
+
 /**
  * Every session of an account ends now, its WorkOS sessions queued for revoking, in one batch with the account's
  * generation bumped (a refresh started before can't write) and, for a sign-out everywhere, the barrier set on D1's
  * clock (a sign-in started before can't make a session).  With `disable`, the account also can't sign in again.
+ * Returns the sessions the batch deleted.
  */
-async function endAllSessions(db: D1, account: string, reason: "everywhere" | "disabled" | "deleted", disable = false): Promise<void> {
+async function endAllSessions(db: D1, account: string, reason: "everywhere" | "disabled" | "deleted", disable = false): Promise<EndedSession[]> {
   const t = now();
-  await db.batch([
+  const rs = await db.batch([
     db.prepare(`UPDATE accounts SET generation = generation + 1, signed_out_all_at = ${D1_NOW_MS}${disable ? ", disabled = ?2" : ""} WHERE account_id = ?1`).bind(account, ...(disable ? [t] : [])),
     db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, ?2, ?3, ?3 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, reason, t),
     db.prepare("DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE account_id = ?1)").bind(account),
-    db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
+    db.prepare("DELETE FROM sessions WHERE account_id = ?1 RETURNING token_hash, MAX(expires, COALESCE(abs_expires, 0)) AS ends").bind(account),
   ]);
+  return ((rs[3] as D1Result<{ token_hash: string; ends: number }>).results ?? []).map((r) => ({ session: r.token_hash, ends: Number(r.ends) }));
 }
 
-/** Disable an account: no sign-in, every session ended at once (the admin action that needs I3's proof calls this). */
+/** Disable an account: no sign-in, every session ended at once (the admin action that needs I3's proof calls this).
+ * The registered `ending` hook first; a disable always happens, even if it fails (D1's disable is the authoritative
+ * stop, and `ended` still gets every deleted session). */
 export async function disableAccount(env: ShareEnv, account: string): Promise<void> {
-  await endAllSessions(env.SHARE_DB!, account, "disabled", true);
+  let before: unknown;
+  try {
+    before = endingHook ? await endingHook(env, account) : undefined;
+  } catch {
+    // (the hook's own failure, never a reason to leave an account enabled)
+  }
+  await sessionsEnded(env, account, await endAllSessions(env.SHARE_DB!, account, "disabled", true), before);
 }
 
 async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response> {
@@ -1599,6 +1644,9 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
     db.prepare("INSERT INTO accounts (account_id, created, deleting) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET deleting = ?2, email = NULL, name = NULL, last_active = NULL").bind(account, t),
     // (with WorkOS sign-in: the account's WorkOS sessions queued for revoking, in the batch that drops them)
     ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'deleted', ?2, ?2 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, t)] : []),
+    // (its sessions end here, not through endAllSessions, so the onSessionsEnded hooks don't see them: safe, since this
+    // batch marks the account deleting, which fails every live() check, and the sync service's own purge removes the
+    // account's sockets and objects)
     db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
     // (the sessions' admin grants with them: admin-visibility-plan r1h §1.8)
     db.prepare("DELETE FROM admin_grants WHERE account_id = ?1").bind(account),
@@ -1937,7 +1985,15 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
     // asking WorkOS, so it works past the hour, past the grace and while WorkOS is down; same-origin was checked above)
     const s = await sessionForSignOut(req, env);
     if (!s) return err(401, "sign in first");
-    await endAllSessions(env.SHARE_DB, s.id, "everywhere");
+    // (the registered hooks: `ending` first, which can refuse the sign-out with nothing changed (then sign out again);
+    // `ended` after, with the sessions this deleted, so one made in between is handed on too)
+    let before: unknown;
+    try {
+      before = endingHook ? await endingHook(env, s.id) : undefined;
+    } catch {
+      return err(503, "signing out didn't finish; try again");
+    }
+    await sessionsEnded(env, s.id, await endAllSessions(env.SHARE_DB, s.id, "everywhere"), before);
     ctx.waitUntil(drainRevokes(env, 25, 6000));
     return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
   }
