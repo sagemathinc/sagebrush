@@ -359,6 +359,11 @@ class Axes:
         self._opts = {}
         self._ci = self._pi = 0
         self._style = _axes_style()
+        # (the Axes this one shares its x or y axis with, itself included,
+        # one list for all of them; and the one it joined, as matplotlib's
+        # _sharex/_sharey)
+        self._shared = {"x": None, "y": None}
+        self._share_lead = {"x": None, "y": None}
 
     def _cycle(self):
         return self._style.get("_cycle", TAB10)
@@ -381,10 +386,71 @@ class Axes:
 
     def _add(self, p):
         self._prims.append(p)
-        # (new data autoscales again: a view set_xticks widened is forgotten)
-        self._opts.pop("_xview", None)
-        self._opts.pop("_yview", None)
+        # (new data autoscales again: a view set_xticks widened is forgotten,
+        # by the Axes sharing it too)
+        for a in ("x", "y"):
+            for ax in self._group(a):
+                ax._opts.pop("_" + a + "view", None)
         return p
+
+    # ------------------------------------------------------------ sharing
+    def _group(self, a):
+        """The Axes sharing this one's a axis ("x" or "y"), this one too: one
+        view of the limits, scale and direction for all of them."""
+        return self._shared[a] or [self]
+
+    def _share(self, a, other):
+        """Axes.sharex/sharey: this Axes joins other's a axis and takes its
+        limits, scale and direction, as matplotlib's."""
+        if not isinstance(other, Axes):
+            raise TypeError("share%s: other must be an Axes, not %s" % (a, type(other).__name__))
+        lead = self._share_lead[a]
+        if lead is not None and lead is not other:
+            raise ValueError("%s-axis is already shared" % a)
+        if other is self or self in other._group(a):
+            return
+        group = other._group(a)
+        for ax in self._group(a):
+            if ax not in group:
+                group.append(ax)
+        for ax in group:
+            ax._shared[a] = group
+        self._share_lead[a] = other
+        other._sync(a)
+
+    def sharex(self, other):
+        """Share the x axis with other: one view of its limits and scale."""
+        self._share("x", other)
+
+    def sharey(self, other):
+        """Share the y axis with other: one view of its limits and scale."""
+        self._share("y", other)
+
+    def _sync(self, a):
+        """This Axes' limits, scale and direction on its a axis, given to the
+        Axes sharing it."""
+        for ax in self._group(a):
+            if ax is not self:
+                for k in (a + "min", a + "max", a + "invert", a + "scale", "_" + a + "view"):
+                    if k in self._opts:
+                        ax._opts[k] = self._opts[k]
+                    else:
+                        ax._opts.pop(k, None)
+
+    def _shared_limits(self, a, o):
+        """The limits of a shared a axis not set: matplotlib's autoscaling of
+        all its Axes' data at once (with a bar chart's zero kept, as its
+        sticky edge), in increasing order."""
+        group = self._group(a)
+        prims = [p for ax in group for p in ax._prims if not p.options.get("hidden")]
+        oo = {k: v for k, v in o.items() if k not in (a + "min", a + "max", a + "invert", "aspect_ratio", "fit_aspect")}
+        bars = "_bars" if a == "y" else "_barsh"
+        if any(ax._opts.get(bars) for ax in group) and oo.get(a + "scale") != "log":
+            bb = Panel(prims).data_bbox()
+            if bb and bb[2 if a == "y" else 0] >= 0:
+                oo[a + "min"] = 0.0
+        r = Panel(prims, **oo).ranges(500, 400)
+        return (r[0], r[1]) if a == "x" else (r[2], r[3])
 
     # ---------------------------------------------------------------- plots
     def plot(self, *args, **kw):
@@ -911,6 +977,11 @@ class Axes:
             self._opts["xtick_rotation"] = float(kw["labelrotation"])
         if kw.get("labelrotation") is not None and axis in ("y", "both"):
             self._opts["_ytick_rotation"] = float(kw["labelrotation"])
+        # (labelbottom/labelleft: whether the tick labels are shown)
+        if kw.get("labelbottom") is not None and axis in ("x", "both"):
+            self._opts["xtick_labels"] = bool(kw["labelbottom"])
+        if kw.get("labelleft") is not None and axis in ("y", "both"):
+            self._opts["ytick_labels"] = bool(kw["labelleft"])
 
     def set_rasterization_zorder(self, z):
         pass  # (contourf is drawn as a picture already)
@@ -1009,11 +1080,19 @@ class Axes:
             lo = view[0] if lo is None else lo
             hi = view[1] if hi is None else hi
             self._opts[a + "invert"] = False
+        elif (lo is None) != (hi is None):
+            # (one limit given: the other is the view's now, the shared one's
+            # for a shared axis, and stays as more data comes, as
+            # matplotlib's, which stops autoscaling the axis)
+            view = self.get_xlim() if a == "x" else self.get_ylim()
+            lo = view[0] if lo is None else lo
+            hi = view[1] if hi is None else hi
         if lo is not None:
             self._opts[a + "min"] = lo
         if hi is not None:
             self._opts[a + "max"] = hi
         self._opts.pop("_" + a + "view", None)
+        self._sync(a)
 
     def _invert(self, a):
         # (as matplotlib's Axis.set_inverted: limits that were set are
@@ -1023,6 +1102,7 @@ class Axes:
             self._opts[a + "min"], self._opts[a + "max"] = hi, lo
         else:
             self._opts[a + "invert"] = not self._opts.get(a + "invert", False)
+        self._sync(a)
 
     def invert_xaxis(self):
         """Invert the x axis: its values decrease from left to right."""
@@ -1055,10 +1135,12 @@ class Axes:
     def set_xscale(self, s, **kw):
         _log_base(s, kw, "x")
         self._opts["xscale"] = s
+        self._sync("x")
 
     def set_yscale(self, s, **kw):
         _log_base(s, kw, "y")
         self._opts["yscale"] = s
+        self._sync("y")
 
     def get_xscale(self):
         return self._opts.get("xscale", "linear")
@@ -1172,8 +1254,25 @@ class Axes:
             entries = [(p, str(s)) for (p, _), s in zip(self._legend_handles(), labels)]
         else:
             entries = [(p, str(s)) for p, s in self._legend_handles() if s is not None and not str(s).startswith("_")]
+        anchor, pad, title = kw.pop("bbox_to_anchor", None), kw.pop("borderaxespad", None), kw.pop("title", None)
         if kw:
             raise NotImplementedError("legend(): %s not supported by sagebrush's matplotlib" % ", ".join(sorted(kw)))
+        if anchor is not None:
+            # (bbox_to_anchor: a point (x, y) or a box (x, y, width, height), in axes fractions)
+            a = [float(v) for v in (anchor.bounds if hasattr(anchor, "bounds") else anchor)]
+            if len(a) not in (2, 4):
+                raise ValueError("Invalid bbox: %r" % (anchor,))
+            self._opts["legend_anchor"] = tuple(a)
+        else:
+            self._opts.pop("legend_anchor", None)
+        if pad is not None:
+            self._opts["legend_pad"] = float(pad) * 10 * PT  # (in font sizes: the legend's 10 points)
+        else:
+            self._opts.pop("legend_pad", None)
+        if title is not None:
+            self._opts["legend_title"] = str(title)
+        else:
+            self._opts.pop("legend_title", None)
         self._opts["legend"] = True
         self._opts["legend_entries"] = entries
         if loc is not None:
@@ -1227,6 +1326,22 @@ class Axes:
 
     def cla(self):
         self._prims, self._opts, self._ci, self._pi = [], {}, 0, 0
+        # (a shared axis keeps its sharing, as matplotlib's: an Axes that
+        # joined another takes that one's view again; the one the others
+        # joined puts the view of them all back to (0, 1), autoscaled again
+        # with the next data any of them is given)
+        for a in ("x", "y"):
+            group = self._group(a)
+            if len(group) < 2:
+                continue
+            lead = self._share_lead[a]
+            if lead is not None:
+                lead._sync(a)
+            else:
+                for ax in group:
+                    for k in (a + "min", a + "max", a + "invert"):
+                        ax._opts.pop(k, None)
+                    ax._opts["_" + a + "view"] = (0.0, 1.0)
         # (pyplot's current image goes with the axes it was in)
         if getattr(getattr(self.figure, "_gci", None), "_ax", None) is self:
             self.figure._gci = None
@@ -1305,6 +1420,9 @@ class Axes:
         if o.get("legend") is None:
             o["legend"] = False  # matplotlib shows a legend only when asked
         prims = [p for p in self._prims if not p.options.get("hidden")]
+        for a in ("x", "y"):
+            if len(self._group(a)) > 1 and o.get(a + "min") is None and o.get(a + "max") is None:
+                o[a + "min"], o[a + "max"] = self._shared_limits(a, o)
         if self._opts.get("_bars") and "ymin" not in o:
             bb = Panel(self._prims).data_bbox()
             if bb and bb[2] >= 0 and o.get("yscale") != "log":
@@ -1407,6 +1525,15 @@ class Figure:
         return _colorbar(self, mappable, cax, ax, **kw)
 
     def add_subplot(self, nrows=1, ncols=1, index=1, **kw):
+        ax = self._add_subplot(nrows, ncols, index)
+        # (sharex=/sharey=: the new Axes joins that one's axis)
+        if kw.get("sharex") is not None:
+            ax.sharex(kw["sharex"])
+        if kw.get("sharey") is not None:
+            ax.sharey(kw["sharey"])
+        return ax
+
+    def _add_subplot(self, nrows, ncols, index):
         if hasattr(nrows, "get_position"):  # a SubplotSpec (gs[i, j])
             ax = Axes(self, nrows.get_position(self))
             ax._opts["exact"] = True
@@ -1459,8 +1586,9 @@ class Figure:
         """This figure as one animation frame: (SVG body, description)."""
         return render_frame(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
 
-    def _svg(self, background=True):
-        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
+    def _svg(self, background=True, grow=True):
+        # (grow: a legend outside the figure widens it, as a notebook's inline figure; savefig's doesn't)
+        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None), grow)
         # (a facecolor the program gave, or set in rcParams, colors the
         # figure as matplotlib's; otherwise it is the page's background)
         if background and self._facecolor_given:
@@ -1538,7 +1666,7 @@ class Figure:
             if metadata is not None:
                 raise NotImplementedError("savefig: metadata for SVG is not implemented in Sagebrush")
             # (savefig's own background: the one asked for, or none)
-            svg = self._svg(background=False)
+            svg = self._svg(background=False, grow=False)
             if given and background != "none":
                 svg = _svg_background(svg, background, self._size[0] * 100, self._size[1] * 100)
             _write(fname, svg, text=True)
@@ -1551,7 +1679,7 @@ class Figure:
         # (the pixel marker ',' is one pixel of this PNG: 100 / dpi SVG units)
         old = _pixel_size(100.0 / dpi) if dpi > 0 and math.isfinite(dpi) else None
         try:
-            svg = self._svg(background=False)
+            svg = self._svg(background=False, grow=False)
         finally:
             if old is not None:
                 _pixel_size(old)
@@ -1676,9 +1804,35 @@ def gca():
     return gcf().gca()
 
 
+def _share_mode(v, name):
+    """subplots' sharex/sharey as one of 'all', 'row', 'col' and 'none' (a
+    value not a string by its truth, as matplotlib's)"""
+    if not isinstance(v, str):
+        v = "all" if v else "none"
+    if v not in ("all", "row", "col", "none"):
+        raise ValueError("%r is not a valid value for %s. Supported values are 'all', 'row', 'col', 'none', False, True" % (v, name))
+    return v
+
+
 def subplots(nrows=1, ncols=1, figsize=None, sharex=False, sharey=False, squeeze=True, dpi=None, facecolor=None, **kw):
+    sharex, sharey = _share_mode(sharex, "sharex"), _share_mode(sharey, "sharey")
     fig = figure(figsize=figsize, dpi=dpi, facecolor=facecolor)
     rows = [[fig.add_subplot(nrows, ncols, r * ncols + c + 1) for c in builtin_range(ncols)] for r in builtin_range(nrows)]
+    # (shared as matplotlib's: each Axes joins the first of its row, column
+    # or grid; and the tick labels a shared axis repeats are left to the
+    # bottom row and the first column, its label_outer)
+    lead = {"all": lambda r, c: rows[0][0], "row": lambda r, c: rows[r][0], "col": lambda r, c: rows[0][c]}
+    for r in builtin_range(nrows):
+        for c in builtin_range(ncols):
+            ax = rows[r][c]
+            if sharex != "none" and lead[sharex](r, c) is not ax:
+                ax.sharex(lead[sharex](r, c))
+            if sharey != "none" and lead[sharey](r, c) is not ax:
+                ax.sharey(lead[sharey](r, c))
+            if sharex in ("all", "col") and r < nrows - 1:
+                ax._opts["xtick_labels"] = False
+            if sharey in ("all", "row") and c > 0:
+                ax._opts["ytick_labels"] = False
     if squeeze and nrows == 1 and ncols == 1:
         return fig, rows[0][0]
     if squeeze and (nrows == 1 or ncols == 1):
@@ -1687,7 +1841,7 @@ def subplots(nrows=1, ncols=1, figsize=None, sharex=False, sharey=False, squeeze
 
 
 def subplot(nrows=1, ncols=1, index=1, **kw):
-    return gcf().add_subplot(nrows, ncols, index)
+    return gcf().add_subplot(nrows, ncols, index, **{k: kw[k] for k in ("sharex", "sharey") if k in kw})
 
 
 def axes(arg=None, **kw):

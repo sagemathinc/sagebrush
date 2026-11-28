@@ -249,7 +249,8 @@ for (const chan of ["constructor", "__proto__", "toString", "hasOwnProperty", "v
   const childFrame = /^[0-9 ()*+-]+$/.test(frameExpr) ? Function(`return (${frameExpr});`)() : NaN;
   ok(/^MiB = 1024 \* 1024$/m.test(childSrc) && childFrame === caps.runner.agent.pageToPeer && childFrame === caps.runner.agent.peerToPage,
     `caps: the runner's AGENT_FRAME (${frameExpr} = ${childFrame}) equals the runner/agent cap both ways (${caps.runner.agent.pageToPeer})`);
-  ok(windows.length === 6 && due.every(([, n]) => n >= 1 && n <= limits.tokens),
+  // (7 receivers: the runner's kernel, terminal, agent and engine (remote r3.3 P1) pages, the agent's, and the two peers)
+  ok(windows.length === 7 && due.every(([, n]) => n >= 1 && n <= limits.tokens),
     `receipts: window / receipt interval <= ${limits.tokens} tokens for every receiver (${JSON.stringify(due)})`);
 }
 

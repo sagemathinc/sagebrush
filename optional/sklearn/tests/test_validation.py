@@ -127,3 +127,19 @@ case("force-writeable-no-copy", lambda: (lambda a: check_array(a, force_writeabl
 case("force-writeable-copy-too", lambda: (lambda a: (lambda r: (r.flags.writeable, r is a))(check_array(a, force_writeable=True, copy=True)))(read_only()))
 case("force-writeable-xy", lambda: (lambda a: (lambda r: (r[0].flags.writeable, r[0] is a))(check_X_y(a, [0, 1], force_writeable=True)))(read_only()))
 case("force-writeable-frame", lambda: (lambda r: (r.flags.writeable, r.tolist()))(check_array(pd.DataFrame({"a": [1.0, 2.0]}), force_writeable=True)))
+# complex data refused before a real dtype's cast could drop its imaginary part (a float or an int dtype, a dtype
+# list, 'numeric', None), complex64 too
+for dt in (np.float64, np.float32, np.int64, np.int32, "numeric", None, [np.float64, np.float32]):
+    case(f"complex-dtype {dt!r}", lambda: check_array(np.array([[1 + 2j, 3.0]]), dtype=dt))
+    case(f"complex64-dtype {dt!r}", lambda: check_array(np.array([[1 + 0j]], np.complex64), dtype=dt))
+# copy=True with pandas input: a writeable copy of the values, the frame untouched
+import pandas as pd
+for obj, kw in ((pd.Series([1.0, 2.0]), dict(ensure_2d=False)), (pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]}), {}), (pd.DataFrame({"a": [1, 2]}), {})):
+    for cp in (True, False):
+        def f(obj=obj, kw=kw, cp=cp):
+            r = check_array(obj, copy=cp, **kw)
+            w = bool(r.flags.writeable)
+            if w:
+                r[0] = 99
+            return (w, r.tolist(), obj.to_numpy().tolist())
+        case(f"pandas-copy {type(obj).__name__} {sorted(kw)} copy={cp}", f)

@@ -334,3 +334,33 @@
 (['0x1.0000000000000p-2', '0x1.0000000000000p-2', '0x1.999999999999ap-4', None], [])
 == acc.weighted-count-tolerance
 True
+== cm.int-weights list 
+('int64', [[9007199254740991, 0], [3, 1]])
+== cm.int-weights ndarray int64
+('int64', [[9007199254740991, 0], [3, 1]])
+== cm.int-weights ndarray int32
+('int64', [[21, 0], [8, 6]])
+== cm.int-weights ndarray bool
+('int64', [[3, 0], [1, 0]])
+== cm.int-weights NoneType 
+('int64', [[3, 0], [1, 1]])
+== fbeta.beta nan
+!! InvalidParameterError: The 'beta' parameter of fbeta_score must be a float in the range [0.0, inf]. Got nan instead.
+== prfs.beta nan
+!! InvalidParameterError: The 'beta' parameter of precision_recall_fscore_support must be a float in the range [0.0, inf]. Got nan instead.
+== fbeta.beta nan
+!! InvalidParameterError: The 'beta' parameter of fbeta_score must be a float in the range [0.0, inf]. Got nan instead.
+== prfs.beta nan
+!! InvalidParameterError: The 'beta' parameter of precision_recall_fscore_support must be a float in the range [0.0, inf]. Got nan instead.
+== fbeta.beta np.float64(nan)
+!! InvalidParameterError: The 'beta' parameter of fbeta_score must be a float in the range [0.0, inf]. Got np.float64(nan) instead.
+== prfs.beta np.float64(nan)
+!! InvalidParameterError: The 'beta' parameter of precision_recall_fscore_support must be a float in the range [0.0, inf]. Got np.float64(nan) instead.
+== fbeta.beta inf
+1.0
+== prfs.beta inf
+[((2,), ['0x1.0000000000000p+0', '0x1.0000000000000p+0']), ((2,), ['0x1.0000000000000p+0', '0x1.0000000000000p+0']), ((2,), ['0x1.0000000000000p+0', '0x1.0000000000000p+0']), ('int64', [1, 1])]
+== fbeta.beta 0.5
+1.0
+== prfs.beta 0.5
+[((2,), ['0x1.0000000000000p+0', '0x1.0000000000000p+0']), ((2,), ['0x1.0000000000000p+0', '0x1.0000000000000p+0']), ((2,), ['0x1.0000000000000p+0', '0x1.0000000000000p+0']), ('int64', [1, 1])]

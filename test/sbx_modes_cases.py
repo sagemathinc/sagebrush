@@ -192,7 +192,9 @@ for label, v in [
     roundtrip("Magma " + label, v, "magma")
 roundtrip("Magma a tuple", M.MTuple((1, "a")), "magma", {"magma": Exception("universe")})
 refused("Magma a real of RealField(30) a double can't hold", M.MReal.of(S.QQ(1) / 3, 30), "magma", "RealField(15)")
-refused("Magma a polynomial in an unnamed variable", M.PolynomialRing(M.Rationals()).gen(), "magma", "name the ring's variables")
+# (a ring of its own, never named: PolynomialRing(Rationals()) and PolynomialRing(Integers()) are the session's one
+# ring each, as Magma's are, and by now named, w above and t by the Sage rows decoded into Magma)
+refused("Magma a polynomial in an unnamed variable", M._MPolyRingZQ(S.QQ, "$.1").gen(), "magma", "name the ring's variables")
 
 # ---- MATLAB's (arrays stored with their axes reversed: [1 2 3; 4 5 6] is stored (3, 2))
 A = L._box(np.ascontiguousarray(np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]).T))

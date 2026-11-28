@@ -35,6 +35,11 @@
       "case": "missing.unknown",
       "printed": "!! AttributeError: module 'sklearn.utils' has no attribute 'no_such_name'",
       "reason": "a name scikit-learn doesn't have either: AttributeError, as scikit-learn; the case shows the two kinds stay apart"
+    },
+    {
+      "case": "cm.int-weights-past-2**53",
+      "printed": "!! NotImplementedError: int64 values beyond 2**53 are not supported yet",
+      "reason": "integer sample weights are summed exactly in an int64 cell, as scikit-learn's; Sagebrush's int64 holds integers up to 2**53 exactly and refuses a cell past it rather than round it"
     }
   ],
   "tolerances": [

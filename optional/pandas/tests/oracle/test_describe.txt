@@ -1,0 +1,301 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== frame
+
+           legs         w
+count  4.000000  3.000000
+mean   5.500000  2.500000
+std    1.914854  1.802776
+min    4.000000  1.000000
+25%    4.000000  1.500000
+50%    5.000000  2.000000
+75%    6.500000  3.250000
+max    8.000000  4.500000
+== frame.exact
+[[4.0, 3.0], [5.5, 2.5], [1.9148542155126762, 1.8027756377319946], [4.0, 1.0], [4.0, 1.5], [5.0, 2.0], [6.5, 3.25], [8.0, 4.5]]
+== frame.index
+Index(['count', 'mean', 'std', 'min', '25%', '50%', '75%', 'max'], dtype='str')
+== frame.all
+
+       name      legs         w    ok
+count     3  4.000000  3.000000     4
+unique    2       NaN       NaN     2
+top     ant       NaN       NaN  True
+freq      2       NaN       NaN     3
+mean    NaN  5.500000  2.500000   NaN
+std     NaN  1.914854  1.802776   NaN
+min     NaN  4.000000  1.000000   NaN
+25%     NaN  4.000000  1.500000   NaN
+50%     NaN  5.000000  2.000000   NaN
+75%     NaN  6.500000  3.250000   NaN
+max     NaN  8.000000  4.500000   NaN
+== frame.all.dtypes
+[('name', 'object'), ('legs', 'float64'), ('w', 'float64'), ('ok', 'object')]
+== frame.object
+
+       name
+count     3
+unique    2
+top     ant
+freq      2
+== frame.str
+
+       name
+count     3
+unique    2
+top     ant
+freq      2
+== frame.number
+
+           legs         w
+count  4.000000  3.000000
+mean   5.500000  2.500000
+std    1.914854  1.802776
+min    4.000000  1.000000
+25%    4.000000  1.500000
+50%    5.000000  2.000000
+75%    6.500000  3.250000
+max    8.000000  4.500000
+== frame.exclude-number
+
+       name    ok
+count     3     4
+unique    2     2
+top     ant  True
+freq      2     3
+== frame.include-bool
+
+          ok
+count      4
+unique     2
+top     True
+freq       3
+== frame.include-float
+
+              w
+count  3.000000
+mean   2.500000
+std    1.802776
+min    1.000000
+25%    1.500000
+50%    2.000000
+75%    3.250000
+max    4.500000
+== frame.bool-only
+
+          ok
+count      4
+unique     2
+top     True
+freq       3
+== frame.str-only
+
+       name
+count     3
+unique    2
+top     ant
+freq      2
+== frame.str-only.dtypes
+[('name', 'object')]
+== frame.ints-only-categorical
+[('o', 'int64')]
+== frame.percentiles
+
+           legs         w
+count  4.000000  3.000000
+mean   5.500000  2.500000
+std    1.914854  1.802776
+min    4.000000  1.000000
+10%    4.000000  1.200000
+50%    5.000000  2.000000
+90%    7.400000  4.000000
+max    8.000000  4.500000
+== frame.percentiles-no-median
+
+           legs         w
+count  4.000000  3.000000
+mean   5.500000  2.500000
+std    1.914854  1.802776
+min    4.000000  1.000000
+10%    4.000000  1.200000
+max    8.000000  4.500000
+== frame.percentiles-fine
+
+           legs         w
+count  4.000000  3.000000
+mean   5.500000  2.500000
+std    1.914854  1.802776
+min    4.000000  1.000000
+0.01%  4.000000  1.000200
+33.3%  4.000000  1.666000
+max    8.000000  4.500000
+== frame.percentiles-mixed
+Index(['count', 'mean', 'std', 'min', '25%', '33.3%', '75%', 'max'], dtype='str')
+== frame.percentiles-ends
+Index(['count', 'mean', 'std', 'min', '0%', '100%', 'max'], dtype='str')
+== frame.percentiles-empty
+Index(['count', 'mean', 'std', 'min', 'max'], dtype='str')
+== frame.percentiles-out
+!! ValueError: percentiles should all be in the interval [0, 1]
+== frame.percentiles-dup
+!! ValueError: percentiles cannot contain duplicates
+== frame.no-columns
+!! ValueError: Cannot describe a DataFrame without columns
+== frame.no-match
+!! ValueError: No columns match the specified include or exclude data types
+== frame.all-and-exclude
+!! ValueError: exclude must be None when include is 'all'
+== frame.uint8
+
+           legs         w
+count  4.000000  3.000000
+mean   5.500000  2.500000
+std    1.914854  1.802776
+min    4.000000  1.000000
+25%    4.000000  1.500000
+50%    5.000000  2.000000
+75%    6.500000  3.250000
+max    8.000000  4.500000
+== series.int
+
+count    4.000000
+mean     5.500000
+std      1.914854
+min      4.000000
+25%      4.000000
+50%      5.000000
+75%      6.500000
+max      8.000000
+Name: legs, dtype: float64
+== series.float
+
+count    3.000000
+mean     2.500000
+std      1.802776
+min      1.000000
+25%      1.500000
+50%      2.000000
+75%      3.250000
+max      4.500000
+Name: w, dtype: float64
+== series.float.exact
+[3.0, 2.5, 1.8027756377319946, 1.0, 1.5, 2.0, 3.25, 4.5]
+== series.str
+
+count       3
+unique      2
+top       ant
+freq        2
+Name: name, dtype: object
+== series.bool
+
+count        4
+unique       2
+top       True
+freq         3
+Name: ok, dtype: object
+== series.str-ties
+
+count     4
+unique    2
+top       b
+freq      2
+dtype: object
+== series.object
+
+count     3
+unique    2
+top       a
+freq      2
+dtype: object
+== series.object-ints
+
+count     3
+unique    2
+top       1
+freq      2
+dtype: int64
+== series.empty
+
+count    0.0
+mean     NaN
+std      NaN
+min      NaN
+25%      NaN
+50%      NaN
+75%      NaN
+max      NaN
+dtype: float64
+== series.empty-object
+
+count       0
+unique      0
+top       NaN
+freq      NaN
+dtype: object
+== series.all-missing
+
+count    0.0
+mean     NaN
+std      NaN
+min      NaN
+25%      NaN
+50%      NaN
+75%      NaN
+max      NaN
+dtype: float64
+== series.all-missing-str
+
+count       0
+unique      0
+top       NaN
+freq      NaN
+dtype: object
+== series.one
+
+count    1.0
+mean     3.0
+std      NaN
+min      3.0
+25%      3.0
+50%      3.0
+75%      3.0
+max      3.0
+dtype: float64
+== series.negative-zero
+[3.0, 0.3333333333333333, 0.5773502691896258, 0.0, 0.0, 0.0, 0.5, 1.0]
+== series.big.exact
+[1000.0, -0.06744981771372298, 3.6538500690696973, -11.17072930275973, -2.484154219631521, -0.11470372875862267, 2.345717226987074, 10.309613921879855]
+== series.big-ints.exact
+[1000.0, -7.587, 586.3415667201702, -994.0, -524.25, 2.5, 513.0, 992.0]
+== series.gaps.exact
+[257.0, 14.99182879377432, 8.6719358872788, 0.1, 7.5, 15.0, 22.5, 29.900000000000002]
+== series.gaps-percentiles.exact
+[257.0, 14.99182879377432, 8.6719358872788, 0.1, 0.35600000000000004, 3.06, 10.0248, 29.644000000000002, 29.900000000000002]
+== series.lerp-upper-side
+'-1.5400000000000003'
+== series.include-warns
+[3.0, 2.5, 1.8027756377319946, 1.0, 1.5, 2.0, 3.25, 4.5]
+== original-kept
+
+  name  legs    w     ok
+0  cat     4  4.5   True
+1  ant     6  NaN  False
+2  NaN     4  1.0   True
+3  ant     8  2.0   True
