@@ -1101,6 +1101,9 @@ class ufunc:
             dt = self._loop(dtype)
             congruent = (self._op in ("add", "multiply") and a.dtype.kind == "f" and dt.kind == "u" and
                          dt.itemsize == 8 and (initial is None or masked))
+            # (a real sum in a complex dtype: sum converts each element as it reads it, NumPy's buffered loop, not a
+            # whole-array cast first)
+            congruent = congruent or (self._op == "add" and a.dtype.kind in "biuf" and dt.kind == "c" and (initial is None or masked))
             if a.dtype != dt and not congruent:
                 # (accumulated in dtype, as NumPy's: the conversion is the reduction's, and its warning says so)
                 old = _np._cast_label("reduce")
@@ -1108,6 +1111,11 @@ class ufunc:
                     a = a.astype(dt)
                 finally:
                     _np._cast_label(old)
+        if where is not True and self._op in ("fmax", "fmin"):
+            # (a masked fmax or fmin: nanmax's or nanmin's, a NaN skipped as fmax skips it, from initial, which a mask
+            # needs, fmax having no identity (nanmax's ValueError, as NumPy's); an unmasked lane of NaN only gives
+            # initial)
+            return (nanmax if self._op == "fmax" else nanmin)(a, axis=axis, keepdims=keepdims, where=where, initial=initial)
         if self._op in quick and (initial is None or masked) and not (dtype is not None and _wraps_in(self._op, dt)):
             # (a sum without an identity starts from its first element: a product's 1 changes nothing; a where= mask
             # goes to the functions that take it, #2088)
@@ -1893,19 +1901,36 @@ min = amin
 def argmax(a, axis=None, out=None, *, keepdims=False):
     a = asarray(a)
     r = _np.argmax(a, axis)
-    # (a 0-d array keeps no axis: NumPy's result is the scalar)
-    if keepdims and axis is not None and a.ndim:
-        r = expand_dims(r, axis)
-    return r
+    # (a 0-d array keeps no axis: NumPy's result is the scalar; the whole array's with keepdims, one of each axis)
+    if keepdims and a.ndim:
+        r = expand_dims(r, axis) if axis is not None else asarray(r).reshape((1,) * a.ndim)
+    return _arg_out(r, out, "argmax")
 
 
 def argmin(a, axis=None, out=None, *, keepdims=False):
     a = asarray(a)
     r = _np.argmin(a, axis)
-    # (a 0-d array keeps no axis: NumPy's result is the scalar)
-    if keepdims and axis is not None and a.ndim:
-        r = expand_dims(r, axis)
-    return r
+    # (a 0-d array keeps no axis: NumPy's result is the scalar; the whole array's with keepdims, one of each axis)
+    if keepdims and a.ndim:
+        r = expand_dims(r, axis) if axis is not None else asarray(r).reshape((1,) * a.ndim)
+    return _arg_out(r, out, "argmin")
+
+
+def _arg_out(r, out, name):
+    # (argmax/argmin's out=: the result written into it, which must have its shape and a dtype that casts to the index
+    # (intp) safely, as NumPy checks it (int8 and bool outs taken, float and uint64 ones refused), and out returned)
+    if out is None:
+        return r
+    if not isinstance(out, ndarray):
+        raise TypeError("output must be an array")
+    r = asarray(r)
+    if out.shape != r.shape:
+        raise ValueError("output array does not match result of np.%s." % name)
+    if not can_cast(out.dtype, int64, "safe"):
+        raise TypeError("Cannot cast %s from dtype('%s') to dtype('int64') according to the rule 'safe'"
+                        % ("scalar" if out.ndim == 0 else "array data", out.dtype.name))
+    out[...] = r
+    return out
 
 
 def ptp(a, axis=None, out=None, keepdims=False):
@@ -2000,8 +2025,7 @@ def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
         raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
                          "specify 'initial'" % name)
     a = asarray(a)
-    if a.dtype.kind == "c":
-        a = _nanfill(a, -inf if is_max else inf)
+    # (a complex array's NaNs are skipped by the runtime's complex fold too, so an all-NaN slice stays NaN)
     if initial is None:
         if a.size == 0 and _count(a, axis) == 0:
             raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
@@ -3130,7 +3154,10 @@ def setdiff1d(a, b, assume_unique=False):
     return unique(array([v for v in asarray(a).ravel().tolist() if v not in bs], dtype=asarray(a).dtype))
 
 
-def diff(a, n=1, axis=-1, prepend=None, append=None):
+_NO_DIFF_EXTRA = object()
+
+
+def diff(a, n=1, axis=-1, prepend=_NO_DIFF_EXTRA, append=_NO_DIFF_EXTRA):
     # (NumPy's order: n = 0 gives back the input itself, unconverted; a negative n and a 0-d input refused; then the
     # axis read as an index, as normalize_axis_index reads it: a list, tuple or np.bool_ refused, a float in its own
     # words, #1944)
@@ -3144,16 +3171,17 @@ def diff(a, n=1, axis=-1, prepend=None, append=None):
     if isinstance(axis, float):
         raise TypeError("integer argument expected, got float")
     axis = _normalize_axis_index(axis, a.ndim)
-    if prepend is not None or append is not None:
+    # (prepend=/append= given, None too, are values, as NumPy's: only an omitted one adds nothing)
+    if prepend is not _NO_DIFF_EXTRA or append is not _NO_DIFF_EXTRA:
         parts = []
         for extra, first in ((prepend, True), (append, False)):
-            if extra is None:
+            if extra is _NO_DIFF_EXTRA:
                 continue
             p = asarray(extra)
             if p.ndim == 0:
                 s = list(a.shape)
                 s[axis] = 1
-                p = broadcast_to(p, s)
+                p = full(s, p[()], dtype=object) if p.dtype.kind == "O" else broadcast_to(p, s)
             parts.append((first, p))
         a = concatenate([p for f, p in parts if f] + [a] + [p for f, p in parts if not f], axis=axis)
     for _ in range(n):
@@ -3161,6 +3189,20 @@ def diff(a, n=1, axis=-1, prepend=None, append=None):
         hi = [slice(None)] * a.ndim
         lo[axis] = slice(None, -1)
         hi[axis] = slice(1, None)
+        if a.dtype.kind == "O":
+            # (object elements subtracted as Python subtracts them, element by element along the axis: their own
+            # results or errors, as NumPy's object loop)
+            m = moveaxis(a, axis, -1)
+            # (the result's shape exactly, never a -1: an empty one, any axis of length 0 or the last one used up, too;
+            # each difference stored as it is, a list one too, never discovered as nested)
+            shape = m.shape[:-1] + (_builtins.max(m.shape[-1] - 1, 0),)
+            d = empty(shape, dtype=object)
+            import itertools
+
+            for ix in itertools.product(*(range(k) for k in shape)):
+                d[ix] = m[ix[:-1] + (ix[-1] + 1,)] - m[ix]
+            a = moveaxis(d, -1, axis)
+            continue
         a = a[tuple(hi)] - a[tuple(lo)] if a.dtype.kind != "b" else not_equal(a[tuple(hi)], a[tuple(lo)])
     return a
 
