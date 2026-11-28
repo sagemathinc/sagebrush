@@ -17,3 +17,9 @@ df = pd.DataFrame({"u": pd.Series([1, 0, 2]).astype("uint8"), "i": pd.Series([5,
 case("frame diff", lambda: df.diff())
 case("frame diff dtypes", lambda: df.diff().dtypes)
 case("frame diff(-1)", lambda: df.diff(-1))
+# int64 differences past 2**53: exact, wrapped as the 64-bit subtraction wraps, then the float64 nearest
+for v in ([-(2 ** 53), 1], [1, -(2 ** 53)], [2 ** 53, -1], [-1, 2 ** 53], [-(2 ** 53), 2 ** 53], [2 ** 52, -(2 ** 52) - 1, 3]):
+    for p in (1, -1):
+        case(f"int64 {v} diff({p}).hex", lambda: [float(x).hex() if x == x else "nan" for x in pd.Series(v).diff(p).tolist()])
+for p in (10 ** 20, -(10 ** 20), 2 ** 63, -(2 ** 63)):
+    case(f"diff({p})", lambda: pd.Series([1, 2]).diff(p))
