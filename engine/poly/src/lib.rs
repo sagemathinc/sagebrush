@@ -46,7 +46,7 @@ pub mod test_faults {
 }
 mod vanhoeij;
 
-pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX, LLL_INTERNAL_PREFIX};
+pub use budget::{take_internal_raised, with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX, LLL_INTERNAL_PREFIX};
 use budget::{big_bytes, div_work, limbs, mul_work, poly_bytes, words_bytes, FResult, Reservation};
 
 pub type ZPoly = Vec<BigInt>;

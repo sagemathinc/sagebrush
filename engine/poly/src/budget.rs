@@ -122,11 +122,26 @@ pub struct FactorLimit {
     pub memory_source: MemorySource,
 }
 
+thread_local! {
+    // set when a failed invariant's refusal is made into its message: the
+    // provenance of an internal error, which text alone (it may be wrapped,
+    // and a caller's text may contain the same words) cannot give
+    static INTERNAL_RAISED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether a failed invariant's message was made on this thread since the
+/// last call (which clears it): a public call clears it on entry and reads
+/// it to type its error.
+pub fn take_internal_raised() -> bool {
+    INTERNAL_RAISED.with(|c| c.replace(false))
+}
+
 impl FactorLimit {
     /// The refusal's message, naming the operation `op` refused.
     pub fn message(&self, op: &Op) -> String {
         use std::fmt::Write;
         if self.kind == Kind::Internal {
+            INTERNAL_RAISED.with(|c| c.set(true));
             return format!("{} ({} in {}); please report it; {}", op.internal, self.what, self.phase.name(), op.outcome);
         }
         let mut m = format!("{}: resource limit exceeded ({} in {}: {} > {}", op.name, self.what, self.phase.name(), self.need, self.remaining);

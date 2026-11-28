@@ -785,6 +785,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: it calls the C-ABI exports with pointers to live test-owned bytes; any reservation goes through sb_reserve's safe ledger calls."
   },
   {
+   "file": "engine/web/tests/json_parse_alloc.rs",
+   "item": "impl GlobalAlloc for Counting",
+   "hash": "9a7688ace56889a86bdf76de35c6ee8542de21b5d7f4b61b74acb189c4ef62cd",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator."
+  },
+  {
    "file": "engine/web/tests/nmod_alloc.rs",
    "item": "impl GlobalAlloc for Counting",
    "hash": "644ec3433664359dcb0e4bbd1e87f577bc5b1b3189c68dea294cfb75d0f7e70a",
