@@ -1751,6 +1751,19 @@ mod tests {
         assert_eq!(key(&r(two(1100), BigInt::one())), f64::INFINITY);
         assert_eq!(key(&r(two(1024) - two(971), BigInt::one())), 1.7976931348623157e308);
         assert_eq!(key(&r(two(1024) - two(970), BigInt::one())), f64::INFINITY);
+        // (about 1.198e308, doubles: (2^1025 + 1)/3, an integer of 1024
+        // bits, and (2^1025 + 2)/3, whose numerator and denominator are
+        // 1024 bits apart, the clamp's edge)
+        for n in [two(1025) + 1u32, two(1025) + 2u32] {
+            let n: BigInt = n;
+            let big3 = r(n.clone(), BigInt::from(3));
+            assert_eq!(key(&big3), Mp::from_q(&n, &BigInt::from(3), 53).to_f64());
+            assert!(key(&big3).is_finite());
+        }
+        // (an imaginary part keyed alike: the same pair in it)
+        let (ia, ib) = (Num::Exact(Q::one(), Q::new(&d53 + 1, d53.clone())), Num::Exact(Q::one(), Q::new(&d53 + 2, &d53 + 1)));
+        assert_eq!(ia.cmp(&ib), Ordering::Greater);
+        assert_eq!(ib.cmp(&ia), Ordering::Less);
         for x in &v {
             for y in &v {
                 let (Num::Exact(p, _), Num::Exact(q, _)) = (x, y) else { unreachable!() };
