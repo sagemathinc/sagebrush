@@ -241,10 +241,15 @@ export function ensure({ root = ROOT, env = process.env, log = console.log, fetc
   }
   log(`engine: building this tree's engine (${key.slice(0, 12)}${dirty ? ", with uncommitted changes" : ""})`);
   const target = targetFor(root, env);
-  mkdirSync(target, { recursive: true });
+  // (marking it used: a target another checkout's pruning removed meanwhile is no error, its build makes it again)
   const used = () => {
-    const now = new Date();
-    utimesSync(target, now, now);
+    try {
+      mkdirSync(target, { recursive: true });
+      const now = new Date();
+      utimesSync(target, now, now);
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
   };
   used();
   build(root, { ...env, CARGO_TARGET_DIR: target });

@@ -89,10 +89,17 @@ try {
   const d = mkdtempSync(join(tmpdir(), "install-engine-wasm-lock-"));
   try {
     const target = join(d, "target");
+    mkdirSync(target); // (as cargo makes it)
     const lock = targetLockPath(target);
     const alias = join(d, "alias");
     fs.symlinkSync(target, alias);
     ok(targetLockPath(alias) === lock && lock === fs.realpathSync(target) + ".lock", "a target reached through a symlink has the real path's lock");
+    // (a target not made yet, or removed by another pruner meanwhile: the same lock, and the target isn't made)
+    const later = join(d, "later");
+    const before = targetLockPath(later);
+    ok(!fs.existsSync(later) && before === join(fs.realpathSync(d), "later") + ".lock", "a missing target's lock is beside its parent's real path, and the target isn't made");
+    mkdirSync(later);
+    ok(targetLockPath(later) === before, "the same lock once the target exists");
     ok(relaunchUnderTargetLock(target, ["false"], { env: { ...process.env, SAGEBRUSH_TARGET_LOCK: lock } }) === null, "the run that holds the lock goes on (null), it doesn't relaunch");
     if (spawnSync("flock", ["--version"]).status === 0) {
       // (two real builds, each relaunching itself under the lock, the second through the alias: one, then the other)

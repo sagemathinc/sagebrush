@@ -64,10 +64,16 @@ export function namesLocalCargoHome(bytes, env = process.env) {
   return home !== CI_CARGO_HOME && Buffer.from(bytes).includes(Buffer.from(home + "/"));
 }
 
-/** The lock file of a cargo target: beside its real path, so every spelling of one target names one lock. */
+/** The lock file of a cargo target: beside its real path, so every spelling of one target names one lock (for a
+ * target not there yet, or removed meanwhile, beside its parent's real path; the target itself isn't made here). */
 export function targetLockPath(target, io = fs) {
-  io.mkdirSync(target, { recursive: true });
-  return io.realpathSync(target) + ".lock";
+  try {
+    return io.realpathSync(target) + ".lock";
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+  io.mkdirSync(dirname(target), { recursive: true });
+  return join(io.realpathSync(dirname(target)), basename(target)) + ".lock";
 }
 
 // A command run holding a kernel lock on `lock`: flock(1) on Linux, lockf(1) on macOS; null elsewhere.  The kernel
@@ -109,7 +115,6 @@ export function relaunchUnderTargetLock(target, argv, { env = process.env, log =
 // "removed", "busy", "failed" (rm failed), or "unsupported" where there is no lock tool.  The lock file itself stays: removing it could
 // let two builds each lock a different file of that name.
 export function removeTargetIfIdle(target, { env = process.env } = {}) {
-  const lock = fs.realpathSync(target) + ".lock";
-  const status = runLocked(lock, ["rm", "-rf", target], false, env);
+  const status = runLocked(targetLockPath(target), ["rm", "-rf", target], false, env);
   return status === null ? "unsupported" : status === LOCK_BUSY ? "busy" : status === 0 ? "removed" : "failed";
 }

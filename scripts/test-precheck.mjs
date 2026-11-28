@@ -150,6 +150,15 @@ try {
   const G = { ...E, RUSTFLAGS: "-Cdebuginfo=1" }, glogs = [];
   const built = ensure({ root: repo, env: G, ...stubs, log: (m) => glogs.push(m), prune: () => { throw new Error("EACCES (injected)"); } });
   ok(built === "built" && check({ root: repo, env: G }).ok && glogs.some((m) => /pruning the cargo targets failed: EACCES/.test(m)), "a pruning failure is logged, after the build is stored and installed");
+  // (another checkout's pruning removes this target right after its build: no error, the build is stored and installed)
+  const H = { ...E, RUSTFLAGS: "-Cdebuginfo=0" };
+  let gone = false;
+  const pruned = ensure({ root: repo, env: H, ...stubs, build: (root, env) => {
+    stubs.build(root, env);
+    rmSync(env.CARGO_TARGET_DIR, { recursive: true, force: true });
+    gone = true;
+  } });
+  ok(gone && pruned === "built" && check({ root: repo, env: H }).ok, "a target removed by another pruner right after the build: the build is stored and installed all the same");
   git("checkout", "-q", "--", "wasm"); // (the tree as committed again, for the branch below)
 
   git("checkout", "-q", "-b", "side", "base");
