@@ -1374,6 +1374,13 @@ export class SyncClient {
       c.writable = false;
       this.say({ state: "paused", ns: c.ns, reason: code === "readonly" ? "read-only" : "deleting" });
     }
+    // (an account whose index log is sealed takes no plaintext op: this client, sending plaintext, stops and says so,
+    // its records kept, rather than trying again)
+    if (code === "conflict" && detail.reason === "sealed_account") {
+      c.halted = "sealed-account";
+      this.showWaiting(c, (await c.ob.status()).count);
+      return;
+    }
     if (this.opts.e2e) {
       // (sealed: the key chain moved (or the server has none yet) for the whole message, so nothing was decided: every
       // record not yet accepted is sealed again under the chain as it is now, with its dseq)
@@ -1577,6 +1584,7 @@ export class SyncClient {
     if (c.halted === "sealed-unverified") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device can't verify another device's encrypted changes yet" });
     if (c.halted === "sealed-halt") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "the server's log doesn't verify: sync stopped at the first change that doesn't" });
     if (c.halted === "sealed-rebuild") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device can't rebuild its sync from encrypted changes yet" });
+    if (c.halted === "sealed-account") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this account's sync is end-to-end encrypted, and this browser can't sync it in the clear" });
     if (c.halted === "sealed-log-full") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this account's encrypted change log is full" });
     if (c.halted === "not-a-device") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device isn't one of this account's encryption devices any more" });
     if (c.halted === "blob-conflict") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server holds other bytes for one of this device's files. Delete my synced data to start again" });
