@@ -1,6 +1,6 @@
 # Agent messages (M7): the wire contract between the page, the fleet Worker and a host
 
-*Status: cleared design; not built in this repository yet. This file is the reviewed text: r6, then its deltas r7 to r11 in order, each standing except where a later one changes it. A delta's text wins over the revisions before it. The sha256 of each reviewed revision is in the table below; the text here differs from those bytes only in heading levels, in naming reviewers by lane (SEC, TESTS) rather than by name, and in two rows corrected in review (r10 X1's first row and r11's first answer_lost row now add a later message in thread A, so that A holds the turn's last verified message and is the answering thread, as r6's reply-key rule and X1 say). The schemas and verifiers are in sagebrush-agent (`schema/fleet/fleet.schema.json`, the bodies `agent-message` and `agent-reply`; `lib/fleet/core/verify.mjs`, `verifyAgentMessage` and `verifyAgentReply`). This repository's copy of the fleet core moves with its mirror pin, not with this file.*
+*Status: cleared design; not built in this repository yet. This file is the reviewed text: r6, then its deltas r7 to r11 and r12 to r12.10 (the scale revision: William's "hundreds of agents", Nov 28 2026) in order, each standing except where a later one changes it. A delta's text wins over the revisions before it. The sha256 of each reviewed revision is in the table below; the text here differs from those bytes only in heading levels, in naming reviewers by lane (SEC, TESTS) rather than by name, and in two rows corrected in review (r10 X1's first row and r11's first answer_lost row now add a later message in thread A, so that A holds the turn's last verified message and is the answering thread, as r6's reply-key rule and X1 say). The schemas and verifiers are in sagebrush-agent (`schema/fleet/fleet.schema.json`, the bodies `agent-message` and `agent-reply`; `lib/fleet/core/verify.mjs`, `verifyAgentMessage` and `verifyAgentReply`). This repository's copy of the fleet core moves with its mirror pin, not with this file.*
 
 | Revision | sha256 | What it settles |
 |---|---|---|
@@ -10,6 +10,17 @@
 | r9 | `3be5c3cc1c96c2165ef7a927852f30356df9134d3a2b29694076f14a8551be7c` | a turn's answer as a sequence of records of at most 64, persisted before the first POST |
 | r10 | `bc9185630b7fe1d0c1a6aa2bc37dff88563ba1ab13cd3cb08ce056786fddd006` | answers split by thread (X1), permanent refusals leave the resend loop, the PUT rows |
 | r11 | `c24c03c33519217dd8054294e631d926dde1c1bfe26abe756ddd99f56695b397` | the closed reasons answer_lost and not_granted, and aud in every body |
+| r12 | `3d86cd79529cd163438904fd47bea90b1bf2d71f3f7a4f7ff6820ca7d65e0eca` | scale: one DO per agent plus a fleet directory, one hint channel per host, budget-derived limits, back-off, queued wakes, the load test |
+| r12.1 | `c7db3274e25285756c8ad6beca2edc465f72110ad5a616a76831d27b9b9513f1` | fleet-scoped thread ids, claims never released, storage leases, durable notifies, `heads` from the agent DOs, certified `through` (no deleted ranges) |
+| r12.2 | `6e3eba76f03889710be1adff4d6538216135c01ecdc450a063dbb83b4874682f` | small, growing, fair-share leases with recall; answer reserves; heads weighted; notify coalescing; the 1 MiB cut; jitter cap; the PROD-bundle row |
+| r12.3 | `1eef54be1ff0f511ddbd76babb5c5aff2f08bc97cc9573e5b5a9275444408eb7` | one snapshot per poll, versioned notify clearing, the reconnect window; the answer_lost reserve; enforced covers and size; the reserve start check |
+| r12.4 | `eaacf9884f35385fed15dfa429a30403c8f1f87e601a7714117536aed7b1e0b7` | answer_lost only against its reserve; a lease covers its send; idle recall and the slack start check; checkable property rows (its E3 replaced by r12.5) |
+| r12.5 | `26f57ae81680683b97e0ffd5eb264546a962cc9541cbf5cce6a25a4fccc0c76c` | held bytes bounded per agent and per host (held-credit leases) and by an age-keyed stale pool |
+| r12.6 | `77aa255d2bc5974fac51c1a5aa643321336dbf3f9e530392f3be9260db0efc69` | the certified-deletion property (G2); its G1 bound superseded |
+| r12.7 | `5304b98f25a6b08e88673a6c58fd25d5ded17f39bc4c8532cf1dd000bc2cea6a` | re-grant moves held bytes (R1, refined by r12.10); its G1 bound superseded |
+| r12.8 | `f4955e8792bfbac9cb9c2d66c7517898b8008738e3ab29d7ad940e8c400df722` | withdrawn |
+| r12.9 | `ae8f73ed8a77473e951259dd373cbab63aa7bf3bbca31fe99ee3512c0001331f` | withdrawn in favour of the folded G1 wording below |
+| r12.10 | `70e79855b5f261a2d0e5212b1edcf5c501ab48848c524ba10bb39adb07e54ffd` | held credit moves on re-grant only atomically, when it fits the new host's cap |
 
 ## Conditions carried into the service and the page (from the reviews of the schemas and of r11)
 
@@ -20,6 +31,21 @@ These hold in addition to the text below, and each comes with its row in the PR 
 - **r11's `not_granted` row (TESTS).** A `refused not_granted` for a message naming ANOTHER agent sits in that agent's thread, so the service refuses it `not_found` (r3 §4) and the host takes r10's permanent-refusal path: the record leaves the resend queue and is logged with its closed code and id. r11's first `not_granted` row expects exactly that for the other-agent case.
 - **The callers' checks (SEC).** The verifiers leave three checks to their callers, each with rows in the PR that calls them: a reply's agent is one the host owns, and its `covers` and `answer` pass R1 (the service); the host's certificate is valid at the record's `chain_seq` (every caller).
 - **The page signs only this type (SEC).** The page signs `sb.agent-message.v1` through the same signing barrier as every other device-signed type: the body built from typed inputs, a grant minted for those exact bytes. The message path never signs any other type. Row: the message path refuses to sign a body whose type isn't `sb.agent-message.v1`.
+- **r12's k-host guarantee (G1), as folded (Codex's ruling on r12.10; SEC: either form, if S's definition matches it).** This text replaces r12.6, r12.7 and r12.9's G1 statements.
+  - **What it bounds:** only unanswered (held) credit, within the budget that remains after durable history (answered records, kept until their threads are deleted) and leased slack. It promises no fleet storage headroom; that is the storage budget's job (r12.1 C3, r12.2 L1, r12.4 E1).
+  - **S** is every host owning any stale credit (held past `stale_after_ms`), whether or not it answers its other agents, and k = |S|. S's held bytes are at most k x `host_held_bytes_max`, with no exception (r12.10: a re-grant moves credit only when it fits).
+  - **The bound:** the hosts outside S can hold new unanswered messages up to (the budget remaining after durable history and slack) - max(`stale_pool_bytes`, S's held bytes), floored at 0. At the defaults, with nothing else stored, that is at least 75% for k <= 2, 50% for k = 5, and 0 from k = 10.
+  - **It is collective (TESTS):** it bounds the hosts outside S together, never one host among several. A slow host whose backlog has aged is in S.
+  - **k counts owners (SEC):** S is the hosts that OWN stale credit, so one misbehaving host can account for several of the k while re-granted credit waits to move (r12.10: a host stopping with re-granted agents whose credit is still owned by three other hosts makes k = 4). "k = 1 leaves 75%" therefore isn't "one bad host leaves 75%" while credit is moving. The Agents page shows the computed k, and the owners it counts, beside the "moving" agents.
+  - **Rows:**
+    - answered history, then stale: budget 100, S holding 90 of answered records plus 1 held byte that goes stale. The others are bounded by the 9 free, and G1 claims nothing beyond the remaining budget;
+    - one healthy host beside 3 slow-but-answering hosts whose backlogs age past the pool: the 3 are in S (k = 3), and the healthy host, alone outside S, can hold up to (the remaining budget) - max(`stale_pool_bytes`, the 3's held bytes): at least 70% at the defaults with nothing else stored;
+    - two healthy hosts outside S: the bound is for the two together, and neither alone is promised a share;
+    - a host stopping while holding re-granted agents whose credit three other hosts still own: k = 4, and the Agents page shows k and its owners;
+    - k = 1, 2 and 5 at the defaults; r12.10's re-grant rows.
+- **Carried to the PR that builds the service (from SEC and Codex on r12.x):**
+  - N2 to N5 (r12.1: the channel's identity from its attachment, client frames bounded, one socket per host, grant changes closing the channel) and N8 (the host's page checks, with r12.3 F1's after <= through <= head);
+  - every row of r12 to r12.10, the transaction, alarm and restart rows run against the real DO code, and the 500-agent / 50-host load gates of r12.1 T3 run for real (Codex: the design models pass; these gates remain).
 
 ---
 
@@ -560,3 +586,656 @@ r6 to r10 stand except where this changes them. r11 writes down two closed recor
 ### `aud` in every body
 
 - Both bodies carry `aud`, the service's audience, as every fleet body does. It's checked by core `open` against the verifier's `ctx.aud`. r6 §2's field lists omit it; they should be read with it.
+
+---
+
+## Agent messages (M7): r12, a delta on r11 (c24c03c3) for scale: hundreds of agents (Nov 28)
+
+r6 to r11 stand except where this changes them. r12 takes William's requirement of Nov 28 2026: "also target real scalability for autonomous agents, eg you clearly can make use of hundreds of agents potentially. no tiny limits right." So the service and the host are designed and tested for hundreds of concurrent agents across many hosts in one fleet:
+- no fleet-wide serialization point on the message path;
+- no fixed small caps; every limit comes from a measured budget, has a documented default and range, and refuses clearly;
+- cost per message stays constant as the number of agents grows;
+- back-pressure and back-off everywhere a client retries;
+- a load test with hundreds of simulated agents is part of done.
+
+It also takes Codex's review of the sequence and gap handling (Y09 F2, §7).
+
+### 1. One Durable Object per agent, and a small fleet directory
+
+This replaces r6 §1's and §5's "one Durable Object per fleet".
+
+- **The agent's DO** (one per (fleet, agent)) holds everything on that agent's message path: its threads, the inbox seq and each thread's seq, the message and reply records, the dedupe keys (fleet, agent, id), the delivered high-water mark and ack cursor per host, the receipts, the turn state and the agent's own limits and counters. Every send, poll, ack, reply and R1 `covers` check touches only this DO. r6 already scopes all of these to one agent (the inbox seq is per (fleet, agent), a thread belongs to one agent, R1 checks the same thread and agent), so nothing on the message path crosses agents.
+- **The fleet directory DO** (one per fleet) holds only what is fleet-wide and rare:
+  - the claimed thread ids, so r3's `thread_conflict` still holds across agents, hosts and fleets: the page's send that creates a thread claims its id here first (one write per new thread, never per message), then writes into the agent's DO. A claim that the agent's DO never confirms (a crash between the two) is confirmed or released by the next send with that thread id, so a claim can't strand an id the person is using;
+  - the per-host channel index (§2);
+  - the fleet's budget counters that must be fleet-wide (§3).
+- **The directory route** (`GET /api/fleet/v1/agents`) stays as r6 has it, read from the chain and grants (D1), not from any DO.
+- **The thread list** (`GET /api/fleet/v1/agents/<agent>/threads`) is the agent's DO.
+- **Grant checks** are unchanged: each DO checks host and agent through the Worker's grant lookup before it accepts a call, and again at answer time (r6 §4).
+- **Rows:**
+  - two agents' sends commit concurrently without waiting on each other (a row measures that agent B's send latency doesn't grow with agent A's load);
+  - a new thread id already claimed by another agent, host or fleet: `thread_conflict`, as before;
+  - a crash between the claim and the agent DO's write: the next send with that thread id confirms the claim and the thread is created once;
+  - no route on the message path (send, poll, ack, reply, turn state) touches the directory DO except thread creation (a row counts DO calls per message).
+
+### 2. One channel per host, not one long poll per agent
+
+This replaces the per-agent long poll as the host's way to learn of new messages. N3's "every granted agent at once" form (reserved in r6) becomes the default.
+
+- **The channel.** A host opens ONE WebSocket to its host channel DO (one per (fleet, host)), using Cloudflare's hibernation API, so an idle channel costs no DO duration. The upgrade request carries the host's `Sagebrush-Sig` and is checked like any host request (aud, window, signature, gen, nonce).
+- **Hints only.** When an agent's DO commits a send, it notifies the host channel DO of that agent's host with `{agent, inbox_seq}`. The channel forwards it to the host as a hint frame. A hint carries no body, no envelope and no thread: only an agent id and a seq number.
+- **The host pulls, as before.** On a hint, the host's supervisor pulls that agent's inbox with the r6 route (`GET /host/inbox?after=`, without `wait`), which is authenticated and grant-checked per request. So a hint grants nothing: a forged, stale or lost hint changes only when the host pulls, never what it receives.
+- **Catch-up.** On every (re)connect, and every `catchup_interval` while connected, the host calls `POST /api/fleet/v1/host/inbox/heads` (N3's `/all` form): one call, answering the head inbox seq of every agent in its latest issued grant. The host pulls each agent whose head is past its cursor. So a hint lost in a disconnect or an eviction is found by the next catch-up, and the cursor, not the hint, decides what is delivered (r6 T7 holds).
+- **Revocation.** The channel DO re-checks the host against the grant when it forwards a hint and at least every `channel_recheck_interval`, and closes the channel with the closed code (`host_revoked`, `not_granted`) when the host or all its agents have left the grant. A hint for an agent that left the grant isn't forwarded.
+- **The per-agent long poll stays** (r6 §4, `wait` up to 25 s) for a host without a channel, a test, or a fallback, with the same rules. A host uses one or the other per agent, never both.
+- **The page** keeps its per-thread long poll: a person has a few threads open, not hundreds.
+- **Cost per message:** one agent-DO transaction, one DO-to-DO notify, one hint frame, one pull. None of these grows with the number of agents in the fleet or on the host.
+- **Rows:**
+  - a send reaches the host by hint and pull; with the channel down, the next catch-up finds it; a hint dropped on purpose (a test hook) is found by the catch-up;
+  - a forged hint frame (a test client injects one) causes a pull that returns only the real records;
+  - a host revoked while connected: its channel closes with `host_revoked`, and its next pull is refused;
+  - `heads` answers every granted agent's head in one call, and no agent outside the latest issued grant;
+  - a channel idle for 10 minutes accrues no DO duration (hibernation; checked on DEV, §6);
+  - one host with 100 agents: one channel and one catch-up call, never 100 polls.
+
+### 3. Limits from budgets, with documented defaults and ranges
+
+This replaces r6 §5's and r7 §3's fixed values. Every limit is a deployment variable, validated at start as r6 §5 already requires (missing, not a positive integer, or out of its documented range refuses the routes' start; no guessed default). The defaults are the starting values; each range's ceiling comes from the measured budget (§6), not from a constant.
+
+| Variable | Default | Range | Per |
+|---|---|---|---|
+| `sends_per_minute` | 60 | 1 to `sends_per_minute_max` | (fleet, agent) |
+| `sends_per_day` (the agent's own setting, r7 §3) | 3,000 | 1 to `sends_per_day_max` | (fleet, agent) |
+| `sends_per_day_max` | 100,000 | 1,000 to 1,000,000 | deployment |
+| `unacked_per_agent` | 2,000 | 1 to 100,000 | (fleet, agent) |
+| `wake_interval_ms` (r6's one wake per 30 s) | 30,000 | 0 to 3,600,000 | (fleet, agent) |
+| `replies_per_day` (r7 §3: the host's replies) | = the agent's `sends_per_day` | as `sends_per_day` | (fleet, agent) |
+| `host_requests_per_minute` | 120 + 60 × the host's granted agents | the formula's two terms each 1 to 10,000 | (fleet, host) |
+| `fleet_storage_bytes` | 10 GiB | 1 GiB to the plan's DO storage limit | fleet |
+| `catchup_interval_ms` | 60,000 | 5,000 to 600,000 | deployment |
+| `channel_recheck_interval_ms` | 300,000 | 60,000 to 3,600,000 | deployment |
+
+- `PUT /api/fleet/v1/agents/<agent>/limits {sends_per_day}` (r7 §3, r9's version rule) accepts 1 to `sends_per_day_max`, so a coordinator taking hundreds of agents' traffic isn't capped at 10,000.
+- The per-host request budget grows with the host's number of granted agents, so a host with hundreds of agents isn't throttled by a per-host constant.
+- The 64-per-page and 1 MiB poll bounds, the 64-per-record `covers` bound (r9), the 100-per-page thread list and the 64 KiB body stay: they're page and record sizes, not throughput limits.
+- **Every refusal is clear.** Past any limit the answer is `limit` with `retry_ms` and the variable's name (`{reason: "limit", limit: "sends_per_day", retry_ms}`), so a person or host sees which budget it hit. A fleet past `fleet_storage_bytes` refuses new sends `limit` (`fleet_storage_bytes`) and never drops a stored record.
+- **Rows:** each variable at its edges and outside its range (a table-driven row, as r6's); each refusal names its variable; `sends_per_day` at `sends_per_day_max` accepted, one more refused `bad_form`; a host with 300 granted agents gets 120 + 60 × 300 requests a minute.
+
+### 4. Back-off and back-pressure on every client retry
+
+r10 retries only `limit` (at `retry_ms`) and transport failures. r12 fixes how:
+- **Full-jitter exponential back-off.** A retry waits a uniform random time in [0, min(cap, base × 2^attempt)], and never less than the `retry_ms` it was given. Defaults: base 1 s, cap 5 min (host configuration, validated at start). This holds for the host's record resends, its pulls, its catch-up calls and its channel reconnects, and for the page's sends.
+- **No head-of-line blocking across agents.** The host keeps one resend queue per agent. A `limit` on one agent's queue delays only that queue.
+- **Bounded concurrency.** At most `host_inflight` requests in flight per host (default 16, range 1 to 256), so a host with hundreds of agents waking at once doesn't open hundreds of connections.
+- **The host-freeze lesson:** no retry loop without back-off, no logging of a full body or response per retry (one line with the closed code and the record id, as r10 has it).
+- **Rows:**
+  - 100 hosts refused `limit` together retry spread over the jitter window, never in one burst (a row measures the retry times' spread);
+  - a `limit` on agent A's queue doesn't delay agent B's records on the same host;
+  - a retry never comes earlier than its `retry_ms`;
+  - the host never has more than `host_inflight` requests open.
+
+### 5. Turns waiting for capacity
+
+The host runs one turn at a time per agent (r6 §7). With hundreds of agents, the host's concurrent turns are bounded by its subscription pools' measured quota (the advisor, the host lane's), not by a constant.
+- **A wake that can't start for capacity is queued**, oldest message first across the host's agents, and the host posts the turn state `queued` (a new value of r6's `POST /host/turn` `state`: `working | idle | queued`). The page shows "Waiting for capacity".
+- **The message isn't acked while queued.** r7's ack-on-delivery applies when the message is handed to a turn or starts one, and a queued wake has done neither. So "seen" still means "the agent has it now".
+- **No message is lost or refused for capacity.** It waits in the inbox, within `unacked_per_agent`.
+- **Rows:**
+  - with a pool quota of 10 concurrent turns and 300 agents woken at once: 10 run, 290 show `queued`, and all 300 run in turn, oldest first;
+  - a queued message isn't acked until its turn takes it.
+
+### 6. The load test (part of done)
+
+The PR that builds the service includes `scripts/fleet-messages-load.mjs`, run against the real DO code:
+
+1. **Miniflare (every CI run of the fleet Worker's suite, short; and a long form by hand):**
+   - 500 simulated agents on 50 simulated hosts (10 each), each host with one channel;
+   - simulated pages sending 1 message per agent per 10 s for 10 minutes, plus a coordinator agent receiving 600 a minute (within raised limits);
+   - each host verifying nothing (a stub host), pulling on hints, acking and replying with a `turn_failed`-sized record;
+   - failure injection: channels dropped and reconnected, hints dropped, `limit` storms, a DO evicted mid-send.
+2. **DEV, once before the first PROD deploy:** the same with 500 agents and 50 hosts, from spot VMs in our own project.
+
+**Recorded, with pass lines set from the first run and kept in the PR:**
+- send-to-hint and send-to-pull latency, p50 and p99;
+- DO CPU ms and storage bytes per message (DEV analytics), and DO calls per message;
+- wakes per message;
+- refusals by variable, and the retry-time spread under `limit` storms;
+- no message lost (every send acked and answered exactly once), and every seq from 1 to `head` a live record or inside a deleted range (§7).
+
+### 7. Sequences, deleted ranges and the retained boundary (Codex's Y09 F2)
+
+r6 calls both seqs gap-free from 1 (§3), erases a deleted thread's bodies at once and its metadata (seqs included) after 30 days (D2), and keeps the inbox gap-free with one `deleted` placeholder per message (D2). Y09 F2: the placeholders' lifetime after the 30 days isn't stated. So an offline host at cursor 0, whose message 1 was deleted and aged out, followed by a live message 2, can't tell deleted history from a missed fetch. r12 settles it with one rule, compact ranges kept for the life of the inbox:
+
+- **Deleted ranges, not placeholders.** Deleting a thread records its inbox seqs as ranges `{from, to}` in the agent's DO: one record per contiguous span, and adjacent spans merged. This replaces r6's per-message placeholders.
+- **The ranges are kept for the life of the inbox, never aged out.** The 30-day tombstone ends the THREAD's metadata (ids, kinds, thread seqs; D2), never the inbox's ranges. A range costs a few bytes whatever its length, and deletions are a person's acts, so the count is bounded by what people do, not by message volume. The inbox therefore stays accounted for, seq by seq, for as long as it exists: every seq from 1 to `head` is a live record or lies inside a deleted range.
+- **A poll answers a range as one item:** `{deleted: {from, to}}`, clipped to the poll's `after`. The host moves its cursor to `to`. A poll's 64-item page counts a range as one item, so a span of any length costs one item. A host must never expand a range into one mark per seq (Y09).
+- **The retained boundary, stated.** Every poll and `heads` answer carries `head` (the last assigned inbox seq) and `floor`, the lowest seq the service can still answer. In r12 `floor` is always 1, because nothing on the inbox ages out. A future retention change would raise it, and then a poll with `after` < `floor` - 1 is answered `cursor_expired {floor, head}`, never silently from `floor`. The host then runs its documented restart: it takes `floor` - 1 as its cursor, records the expiry in its log with both numbers, and continues. So the answer always distinguishes "deleted" (a range), "expired" (`cursor_expired`) and "not yet" (`after` = `head`).
+- **Caught up** is `after >= head`: two integers compared, never a scan.
+- **Seqs are integers** in storage, on the wire (JSON numbers within 2^53, checked as safe integers) and in every comparison and sort. Never strings, and never 32-bit (Y09 F1's lesson).
+- **The thread seq (the page's).** A live thread never loses a seq. A deleted thread answers its read with `thread_deleted {final_seq}`, before and after the 30 days alike, and never returns records with holes.
+- **Rows (Codex's, from Y09):**
+  - a host returning after the tombstone's expiry: at cursor 0, with message 1 deleted 31 days ago and a live message 2, the poll answers `{deleted: {from: 1, to: 1}}` then message 2, `floor` 1;
+  - a completely empty retained load: an inbox whose every message was deleted answers its ranges and `head`, with no records, and the cursor reaches `head`;
+  - a partial fetch: a deleted range of 10,000 seqs answers as ONE item, followed in the same 64-item page by the live records after it; `more` is set only when further items exist;
+  - a new message after an empty load: the next poll from `head` returns exactly that message;
+  - adjacent deletions merge into one range, and two non-adjacent ones stay two;
+  - `cursor_expired`: with `floor` raised by a test hook, a poll below it answers `cursor_expired {floor, head}` and the host's restart takes `floor` - 1 (a host row), never a silent skip;
+  - a cursor of 2^31, 2^32 and 2^53 - 1 is accepted and compared exactly, and 2^53 is refused `bad_form`;
+  - a deleted thread's read answers `thread_deleted {final_seq}` before and after the 30 days.
+
+### For the lanes
+
+- **SEC:** the channel carries hints only and grants nothing (§2); the directory DO's thread claim keeps `thread_conflict` (§1); no new trust in the service.
+- **TESTS:** the rows in §1 to §5, and the load test's recorded lines (§6).
+- **Codex:** §7 (Y09 F2).
+- **The host lane:** the channel client, the catch-up, the per-agent resend queues and back-off (§4), and queued wakes (§5) are yours.
+
+---
+
+## Agent messages (M7): r12.1, a delta on r12 (3d86cd79) for SEC's hold (C1-C3, N1, build notes N2-N8) and TESTS' hold (T1-T5 and the rows)
+
+r12 stands except where this changes it. Two changes go beyond rows: §7's deleted ranges are replaced by a certified `through` (T5), and the agent DO's notify becomes durable (T4).
+
+### C1. Thread ids are scoped to their fleet
+
+- A thread's identity is (fleet, thread). Every route and every store is already scoped to one fleet (r7 §4: one account, no inter-account messaging), so two fleets can't see each other's threads, and a thread id in one fleet is unrelated to the same id in another.
+- So `thread_conflict` is a per-fleet rule, held by that fleet's directory DO: an id already claimed in this fleet for another agent or host is refused. r12 §1's "across agents, hosts and fleets" becomes "across the fleet's agents and hosts".
+- Nothing is global, so there's no global directory to cost.
+- **Row (replacing r6 T2's cross-fleet case):** the same thread id used in two fleets makes two unrelated threads. Neither fleet's routes can read, reply into or delete the other's, and no route of either answers `thread_conflict` because of the other.
+
+### C2. A claim is bound to its agent and never released
+
+r12 §1's "confirmed or released by the next send" is withdrawn: release was where the race lived. Instead:
+- **The claim is one conditional write** in the directory DO: `claim(thread, agent)` stores `thread -> agent` if the id is absent, and answers `ok` if it is absent or already held by the SAME agent, `thread_conflict` otherwise. The directory serializes it, so two claims for one id can't both succeed.
+- **The agent's DO creates the thread only after its claim answered `ok`,** in its own transaction with the first message (r6 §5).
+- **A claim is never released.** A crash between the claim and the agent DO's write leaves the id claimed for that agent and no thread. The next send to that same agent with that id (the page's retry of the same message, by its idempotent id, or any later send) is answered `ok` by the claim and creates the thread once. A send for ANY other agent or host with that id gets `thread_conflict`, before and after.
+- **The cost:** an id that was claimed and never used stays reserved to its agent. Ids are 22-character random values chosen by the page, so a page that gets `thread_conflict` picks a new id, and nothing legitimate needs a released id.
+- **Rows:**
+  - two agents, A and B, sending a new thread with the same id at once: exactly one claim succeeds; the other's send is `thread_conflict` and stores nothing;
+  - a crash injected after A's claim and before A's write: B's later send with that id is `thread_conflict`; A's retry creates the thread exactly once;
+  - the same with the delay on B's side: a late write by the agent whose claim failed can't create the thread (its DO never got `ok`);
+  - the same agent claiming an id it already holds: `ok`, and one thread.
+
+### C3. The fleet's storage budget: leases held by the agents' DOs
+
+- **Leases.** The directory DO holds the fleet's `fleet_storage_bytes` and the bytes leased out. An agent's DO stores records only against bytes it has leased: it asks the directory for a chunk of `lease_chunk_bytes` (default 16 MiB, range 1 MiB to 256 MiB) when its leased bytes would run out, and stores against it until it's used.
+- **No overshoot.** The directory counts leased bytes as used, and never leases past `fleet_storage_bytes`. So the bytes stored fleet-wide never exceed it. The cost of leasing is slack, never overshoot: at most one chunk per agent can be leased and unused, so the unusable part of the budget is at most (the fleet's agents) x `lease_chunk_bytes`.
+- **Returns.** An agent's DO returns whole chunks when its unused leased bytes pass 2 x `lease_chunk_bytes` (after a thread's delete erases its bodies, D2).
+- **Fail closed.** A send that needs a lease the directory doesn't grant (the budget is spent, or the directory doesn't answer) is refused `limit` (`fleet_storage_bytes`) with `retry_ms`. It is never stored unbudgeted.
+- **r12 §1's row** becomes: no route on the message path touches the directory DO except thread creation (one claim per new thread) and a lease (at most one per `lease_chunk_bytes` stored by that agent). A row counts the directory calls per message over 10,000 sends.
+- **What counts:** a record's stored bytes (envelope, sealed body, metadata).
+- **Only the page's sends are refused for storage (TESTS 2).** A send leases its own bytes plus an answer reserve of `answer_reserve_bytes` (default 66 KiB: one sealed reply of the largest body, with its envelope). The host's replies, covered and turn_failed records, acks, receipts and turn states draw on the agent's reserves and are never refused for storage, so a full budget can't wedge an agent's answers. Records a turn posts beyond its reserves are still stored; that overdraw is bounded by r9's records per turn.
+- **A storage refusal has no `retry_ms`:** it's `{reason: "limit", limit: "fleet_storage_bytes", retry_ms: null}`, since waiting doesn't free storage. Deleting threads or raising the budget does.
+- **Rows:**
+  - with `fleet_storage_bytes` = 4 chunks and 8 agents each sending: the stored total never passes the budget; the sends past it are refused `limit (fleet_storage_bytes)`;
+  - the directory made unreachable (a test hook): an agent with leased bytes left keeps accepting sends until they're used, then refuses `limit`, never stores unbudgeted;
+  - deleting a thread returns whole chunks, and another agent's next lease succeeds;
+  - an agent DO evicted with a lease outstanding keeps it (the lease is durable in both DOs), so nothing is double-counted or lost;
+  - with the budget spent: a page send is refused `limit (fleet_storage_bytes)` with `retry_ms: null`, and a host reply, an ack and a turn state for an earlier send are all still accepted.
+
+### N1. The per-host request budget is bounded
+
+- A host's granted agents are bounded by the grant: at most 4,096 agents per host (core grant records, `MAX_AGENTS` in lib/fleet/host/grant.mjs and host-records.mjs). So `host_requests_per_minute` is at most 120 + 60 x 4,096 = 245,880 a minute with the defaults, and the formula's two terms keep their ranges (1 to 10,000 each).
+- A fleet's agents are bounded by its hosts' grants. `fleet_agents_max` (default 10,000, range 1 to 1,000,000) bounds them across the fleet, enforced when a grant names a new agent: the grant intake refuses `limit (fleet_agents_max)`, and the directory DO's lease slack (C3) is bounded by it.
+- **Rows:** a host granted 4,096 agents gets 245,880 a minute; a grant that would pass `fleet_agents_max` is refused with that name.
+
+### Build conditions from SEC's notes (N2-N8)
+
+These hold in the PR that builds the service and the host, each with a row there.
+- **N2:** the channel's host identity and gen come only from the server-side attachment set at the authenticated upgrade, never from anything the client sends, and are read back from that attachment after hibernation.
+- **N3:** frames from the client are ignored, a ping aside, and are bounded in size: one past `channel_frame_max` (default 1 KiB) closes the socket.
+- **N4:** a new authenticated connection for the same (fleet, host) replaces the older one, which closes with `replaced`, so a host has at most one socket in its DO.
+- **N5:** a grant change or a gen bump closes the channel at once, through the directory DO's per-host channel index. `channel_recheck_interval` stays as the backstop. Until then a revoked host learns at most agent ids and seq numbers, since each forward is grant-checked.
+- **N6, N7:** superseded by T5: no deleted ranges are stored, so nothing outlives the thread's metadata, and deletions can't grow a range count. The delete route still takes the page's session only, never a host's signature (N7's rule stands).
+- **N8 (as T5 has it):** the host checks every page: safe integers; each record's seq > `after` and <= `through`, increasing; `through` <= `head`. Otherwise it refuses the page as malformed and keeps its cursor. It never moves its cursor past `head`.
+
+### T1. Back-off: the jitter is added to `retry_ms`, never clamped to it
+
+TESTS: clamping a uniform draw up to `retry_ms` makes refused hosts retry together at exactly `retry_ms`. r12 §4's rule becomes:
+- a retry after `limit` waits `retry_ms` + uniform[0, max(`retry_ms`, min(cap, base x 2^attempt))]; a transport failure waits uniform[0, min(cap, base x 2^attempt)] (full jitter);
+- base 1 s, cap 5 min; the attempt counter resets on a success;
+- answers that aren't `limit` or transport failures (`bad_form`, `not_granted`, r10's permanent list) are never retried;
+- the host's clock and random source are injectable, so the rows run on a fake clock with a seeded random source in CI.
+- **Rows:**
+  - 100 hosts refused `limit` with the same `retry_ms` = 10 s: their retries fall in [10 s, 20 s], no 1 s window holds more than 25% of them, and their spread is at least 8 s (seeded, so the numbers are exact in CI);
+  - every retry is at or after its `retry_ms`;
+  - a success resets the attempt counter (the next failure waits base, not the old exponent);
+  - `bad_form` and `not_granted` are never retried;
+  - a reconnect storm: 50 channels dropped at once reconnect spread by the jitter, no 1 s window holding more than 25%.
+- **Fairness under `host_inflight`:** the host takes records from its agents' queues round-robin, so with agent A holding 1,000 queued records and B one, B's record goes within the next `host_inflight` sends. Row: exactly that.
+
+### T2. The fleet storage budget
+
+Answered by C3 (leases, no overshoot, slack bounded) and its additions above: only page sends are refused, with `retry_ms: null`.
+
+### T3. The load test's absolute gates
+
+r12 §6's "pass lines set from the first run" stays only for the performance lines; the correctness lines are absolute now:
+- **CI (Miniflare), the short form,** in the fleet Worker's suite: 100 agents on 10 hosts, 60 s, 1 send per agent per 2 s, with every injected failure of §6 (channels dropped, hints dropped, notifies failed, a DO evicted mid-send, a `limit` storm). It asserts:
+  - every (fleet, agent, id) sent is delivered to its host and answered exactly once: none lost, none duplicated;
+  - no refusal at this load within the default limits except the storm's, and each refusal names its variable;
+  - the DO-call counts per message of §1 (structural, not timing).
+  Miniflare runs every DO in one process, so CI asserts no latency or CPU line.
+- **The long form** (500 agents, 50 hosts, 10 minutes, the coordinator at 600 a minute) runs by hand and nightly on Miniflare, with the same correctness gates.
+- **DEV, once before the first PROD deploy,** with the long form's load from spot VMs in our own project:
+  - correctness: the same gates;
+  - latency: send-to-pull p50 <= 500 ms and p99 <= 3 s; recorded with DO CPU ms and storage bytes per message, and wakes per message;
+  - the script refuses any base URL but DEV's, in a test account of our own; the test fleet and its DOs' storage are deleted after the run (a DEV-only test-purge route, absent from PROD's build); a row checks the purge leaves nothing.
+
+### T4. `heads` reads the agent DOs, and a notify can't be lost
+
+- **The notify is durable.** An agent DO's send transaction also marks "notify pending" for that host. The DO's alarm sends the notify and retries it with back-off (T1) until the host channel DO accepts it, then clears the mark. So a failed notify delays a hint, never loses it, and the send commits and answers ok whatever the notify does.
+- **`heads` comes from the agent DOs,** not from the channel's hints: the Worker asks each agent DO in the host's latest issued grant for its head, in parallel with bounded concurrency (`heads_concurrency`, default 32).
+- **Partial answers:** an agent DO that doesn't answer within `heads_timeout_ms` (default 2 s) is listed `{agent, head: null, unavailable: true}`, and the host retries that agent with back-off. The rest of the answer stands.
+- **Paging:** at most 256 agents per answer, in agent-id order, with `next` naming the first agent of the next page.
+- **Cost:** a catch-up is one read per granted agent, every `catchup_interval_ms`, whose default becomes 300,000 (5 min): the durable notify makes catch-up the backstop, not the path.
+- **The host the notify goes to** comes from the grant lookup the agent DO already makes for every send (r6 §2: the DO checks host and agent through the Worker's grant lookup), never from the directory.
+- **Rows:**
+  - an agent DO's notify fails (injected): the send answers ok, and the hint arrives after the retry; with the notify failing until the next catch-up, the catch-up finds the message;
+  - `heads` with one agent DO evicted or slow: that agent is listed unavailable, the others answered; the host's retry gets it;
+  - a host with 600 granted agents: `heads` answers in 3 pages (256, 256, 88);
+  - re-grant: an agent moved from host H1 to H2: hints go to H2, H1 gets none, and H1's channel closes if H1 has no agents left.
+
+### T5. No deleted ranges: a page certifies its gaps with `through`
+
+TESTS: a thread deleted while interleaved with a live thread leaves one range per message, so ranges grow with messages after all. r12 §7's ranges are replaced:
+- **The invariant:** inbox seqs are assigned in the send's transaction (r6 §5), and only a thread's delete removes records. So any seq at or below `head` that has no live record has been deleted. The service stores no record of deletions in the inbox; a deleted thread's records are simply gone from the agent's inbox index.
+- **A poll** answers up to 64 live records with seq > `after`, oldest first, and `through`:
+  - when more live records exist: `through` is the seq of the last record returned, and `more: true`;
+  - otherwise: `through` = `head`, and `more: false`.
+  The service certifies that every seq in (`after`, `through`] not returned is deleted. The host sets its cursor to `through`. A page costs one indexed range read whatever was deleted, so interleaved deletions cost nothing.
+- **`floor` and `cursor_expired`** stay as r12 §7 has them (`floor` is 1 in r12.1).
+- **`after` > `head`** is refused `bad_form` (`cursor_ahead`), never treated as caught up.
+- **Cursors** are safe integers: `after` = 0 is the start; negative, fractional, string and 2^53 values are `bad_form`.
+- **Rows** (Codex's Y09 rows restated, then TESTS'):
+  - a host back after the tombstone's expiry, at cursor 0, with message 1 deleted and a live message 2: the poll answers [message 2] with `through` 2;
+  - an inbox whose every message was deleted: no records, `through` = `head`, and the cursor reaches `head`;
+  - 10,000 deleted seqs, then 5 live ones: one page with the 5 records and `through` = `head`;
+  - TESTS' interleaved deletion: a thread of 10,000 messages alternating with a live thread's 10,000, the first deleted: the live thread's records come in 157 pages of 64 (the same as with no deletion), and nothing is stored for the deletion;
+  - a new message after an empty load: the next poll returns exactly it;
+  - `more` and `through` when the page's last record is the last live record: `more: false`, `through` = `head`;
+  - a deletion between a hint and its pull: the pull returns no record for it, and `through` covers its seq;
+  - the `floor` edge with a test hook: `after` = `floor` - 1 accepted, `floor` - 2 is `cursor_expired`;
+  - `after` > `head`: `bad_form`; `after` = 0 accepted; -1, 1.5, "1" and 2^53: `bad_form`;
+  - the host refuses a page whose record seq is <= `after` or > `through`, or whose `through` > `head` (N8).
+
+### The rows TESTS listed, by section
+
+**§1:**
+- C2's claim rows (above) cover A's crashed claim and then B's send (B gets `thread_conflict`), and two pages creating one new id on two agents at once (exactly one wins);
+- "B's latency doesn't grow" is restated as structural: B's send makes no call to A's DO or to any shared DO except C2's claim and C3's lease (counted in CI); the latency form is a DEV line (T3);
+- two fleets with the same agent id get separate DOs (the DO name is (fleet, agent));
+- r6's one-DO-per-fleet layout was never deployed (r6 open item 4: the fleet Worker isn't on DEV), so there's nothing to migrate.
+
+**§2:**
+- a burst of 100 sends to one agent: the host coalesces its pulls (a pull answers up to 64, so at most 2 pulls plus the one in flight) and never passes `host_requests_per_minute`;
+- a stale hint (seq <= the cursor) causes no pull;
+- a hint for an agent that left the grant isn't forwarded;
+- channel or long poll, never both: while a host has an open channel, its long polls (`wait` > 0) are refused `bad_form` (`channel_open`); the long-poll route checks the directory's channel index, which is off the channel path. Row: a host with a channel open sends a long poll and is refused;
+- the hibernation row is restated: an idle channel's DO costs at most one wake per `channel_recheck_interval_ms`.
+
+**§3:**
+- `sends_per_minute_max` joins the table: default 600, range 1 to 10,000;
+- the Default column is the shipped configuration's value; a deployment missing a variable still refuses its start (r6 §5), so the default is never guessed in code;
+- a day is a UTC day (r8), with a row on each side of 00:00 UTC;
+- `wake_interval_ms` = 0: no wake limit, with its own row;
+- the host formula's granted-agent count is the one at the start of the current minute's window;
+- `replies_per_day` follows the agent's `sends_per_day` as it is at each check, so a mid-day change applies to the next reply;
+- `unacked_per_agent` full: a send is refused `limit (unacked_per_agent)`, and one ack frees exactly one.
+
+**§5:**
+- "oldest first" is by the service's `sent_ms`, ties broken by (agent id, inbox seq);
+- the pool quota is the advisor's measured concurrent-turn capacity per subscription profile (the host lane's setting; the row sets it to 10 through the host's configuration);
+- a queued wake whose agent is revoked, or whose message's thread is deleted, while queued: dropped from the queue, never acked, never run;
+- a host restart with 290 queued: the queue is rebuilt from the unacked inbox in the same order.
+
+---
+
+## Agent messages (M7): r12.2, a delta on r12.1 (c7db3274) for TESTS' hold on C3 and SEC's build conditions (B1, N9-N13)
+
+r12 and r12.1 stand except where this changes them.
+
+### L1. Leases start small and grow with use (TESTS 1)
+
+r12.1 C3's fixed 16 MiB chunk lets a few hundred barely-used agents lease the whole budget. Leases now start small and double:
+- An agent DO's first lease is `lease_min_bytes` (default 64 KiB, range 4 KiB to 1 MiB). Each later lease is twice the last one the DO took, up to `lease_chunk_bytes` (default 16 MiB).
+- **Never more than a fair share when the budget runs low:** a lease is at most max(`lease_min_bytes`, unleased / 64), where unleased is `fleet_storage_bytes` minus everything leased. So the last bytes are handed out in small pieces, never to one agent.
+- **Recall:** when unleased falls below 10% of `fleet_storage_bytes`, the directory asks the agent DOs holding more than 2 x `lease_min_bytes` unused to return the excess, keeping `lease_min_bytes` each. An agent DO returns at its next send, or at its alarm within `lease_recall_ms` (default 60,000).
+- **The slack bound becomes** at most (the fleet's agents) x `lease_min_bytes` once a recall has run: 625 MiB at `fleet_agents_max` (10,000) with the defaults. Before a recall it is bounded by the 10% threshold.
+- **Idempotent (SEC N10):** a lease request carries a lease id the agent DO chose, and a return carries the ids it returns. A retried request whose first answer was lost leases once; a retried return frees once.
+- **Rows:**
+  - with the default budget, 1,000 agents each send one message: none is refused, and the leased total is 1,000 x 64 KiB plus what the sends used;
+  - r12.1's row (`fleet_storage_bytes` = 4 chunks, 8 agents each sending) stands;
+  - the budget nearly used: a recall runs, the holders return their excess, and the last bytes go to agents in pieces of at most unleased / 64, so the last send that fits is accepted;
+  - a lease request retried after its answer is lost: one lease; a return retried: freed once.
+
+### L2. Answers never overdraw: the reserve covers every record (TESTS 2, SEC N9)
+
+r12.1's sentence "records a turn posts beyond its reserves are still stored; that overdraw is bounded by r9's records per turn" is withdrawn. Its case can't arise:
+- Every answer record (`reply`, `covered`, `turn_failed`, `refused`) covers one or more messages that were delivered from page sends (R1). Each page send leased `answer_reserve_bytes`, at least the largest record: a sealed reply of the largest body with its envelope.
+- Each message is in exactly one record's `covers` (r9 H1, r10 X1; under r11's `answer_lost`, the earlier `covered` records keep their messages, and the `answer_lost` record covers only the last record's). Per thread, a turn's records are at most its messages there.
+- So a turn's records never need more than the reserves of the messages they cover, and the stored total never passes `fleet_storage_bytes`: **no overshoot and no overdraw.**
+- Acks, receipts and turn states overwrite one row per (agent, host). They grow nothing.
+- **A reserve is released** once its message's record is stored (the unused part returns to the agent DO's leased bytes), or when the message's thread is deleted.
+- **Rows:**
+  - with the budget spent, a turn covering 130 messages across three threads posts its records, all stored, and the stored total stays at or below `fleet_storage_bytes`;
+  - a reserve returns once its message is answered, and once its thread is deleted;
+  - an unanswered message's reserve is held until it's answered or its thread is deleted (never silently freed).
+
+### L3. The storage refusal, in one form (SEC N11)
+
+- The budget spent: `{reason: "limit", limit: "fleet_storage_bytes", retry_ms: null}`.
+- The directory not answering a lease (transient): `{reason: "limit", limit: "fleet_storage_bytes", unavailable: true, retry_ms}`. The page retries it with T1's back-off.
+- r12.1 C3's "with `retry_ms`" is read as this second form.
+
+### L4. `heads` is weighted by the agents it reads (SEC B1)
+
+- A `heads` page counts against `host_requests_per_minute` as one request per agent it reads, not one per page.
+- A host also gets at most `heads_per_minute` pages (default 4, range 1 to 60) beyond one per channel (re)connect, refused `limit (heads_per_minute)`.
+- **Row:** a host calling `heads` in a loop is refused `limit (heads_per_minute)`, and its agent-DO reads stay within both budgets.
+
+### L5. Notifies: coalesced, and accepted for channel-less hosts (TESTS, T4)
+
+- **Coalesced:** an agent DO keeps one "notify pending" mark per host, holding the latest seq. 100 sends before the alarm fires make one notify with the latest seq.
+- **A host without a channel:** the channel DO accepts the notify and drops it when the host has no open socket. The mark clears, so it never alarms forever. A long-poll host learns of the message from its poll, as r6 has it.
+- **Rows:**
+  - 100 sends before the alarm: one pending mark and one notify, carrying the latest seq;
+  - a notify for a long-poll host: accepted, dropped, and the mark clears; the next long poll delivers the message.
+
+### L6. `through` when the 1 MiB bound cuts a page (TESTS, T5)
+
+T5's rule is restated in full. A poll stops at 64 records or 1 MiB, whichever comes first:
+- if it stopped with live records remaining: `through` is the seq of the last record returned, and `more: true`;
+- if no live record remains after the last returned: `through` = `head`, and `more: false`.
+- **Row:** 20 records of 64 KiB after the cursor: the page returns as many as fit in 1 MiB, with `through` = the last returned and `more: true`, never `head`.
+
+### L7. Channel or long poll: the check reads the host's channel DO (TESTS, SEC N13)
+
+- The long-poll route's `channel_open` check reads the host's channel DO, not the directory. So §1's directory-call row is unchanged, and the check is one call per long poll to that host's own DO.
+- **A channel opening while a long poll waits:** the waiting poll still answers, at its next message or at its `wait`'s end. Long polls after the open are refused `bad_form (channel_open)`. A message delivered by both paths in that overlap is processed once: the host dedupes by id (r6 §4).
+- **Row:** a channel opens while a long poll waits: that poll answers normally, the next long poll is refused `channel_open`, and a message delivered both ways runs one turn and is answered once.
+
+### L8. Back-off for long `retry_ms` (TESTS, T1)
+
+T1's wait becomes `retry_ms` + uniform[0, min(cap, max(`retry_ms`, base x 2^attempt))], so the added jitter is never more than `cap` (5 min).
+- For `retry_ms` = 10 s it's still [10 s, 20 s], so T1's rows stand.
+- **Row:** `retry_ms` = 86,400,000 (a day's cap): the retry comes between one day and one day plus 5 minutes.
+
+### L9. The DEV-only purge route is absent from PROD's build (SEC N12, TESTS)
+
+- The test-purge route is compiled only into the DEV build (a build-time flag, absent from PROD's configuration).
+- **Row:** the BUILT PROD bundle is checked for the route's path and handler and must not contain either. This checks the artifact, not the source.
+
+---
+
+## Agent messages (M7): r12.3, a delta on r12.2 (6e3eba76) for Codex's hold on r12.1 (F1-F3) and SEC's L2a-L2c on r12.2
+
+r12 to r12.2 stand except where this changes them. Codex found T5's `through` invariant sound under a snapshot rule (2,000 generated histories), and set three conditions. SEC cleared r12.2, with three additions to L2's argument and two notes.
+
+### F1. One poll, one snapshot
+
+- **The rule:** a poll's `head`, its live-record query, `more`, `through` and the delivered high-water mark it writes (r6 U4) are all read and written in ONE storage transaction of the agent's DO. Nothing that commits a send can interleave with them.
+- **Why:** with them read separately, an empty query, then a send committing, then a newer `head` would answer `through` = the new head and certify the new live record as deleted.
+- **The host checks** (adding to N8): `after` <= `through` <= `head`, and every record's seq lies in (`after`, `through`]. Otherwise the page is malformed: the host refuses it and keeps its cursor.
+- **Rows:**
+  - a send committing while a poll is being answered (a test hook between the query and the answer): either the record is in the page, or `through` stops below its seq; it is never certified deleted;
+  - Codex's generated histories (sends, deletes and polls interleaved) as a property row: no live record ever lies at or below a `through` it wasn't returned with;
+  - a page with `through` < `after`: refused by the host, and the cursor is kept.
+
+### F2. A notify clears only its own mark
+
+- r12.1 T4's pending mark per host holds the latest seq it must announce (r12.2 L5's coalescing).
+- **A notify carries the mark's seq.** When it completes, the agent DO clears the mark only if the mark still holds that same seq. A compare-and-clear in one transaction.
+- So an earlier notify finishing after a newer send was marked leaves the newer mark in place, and the alarm sends it.
+- **Rows:**
+  - notify n in flight, a send marks n+1, then n completes: the mark stays at n+1 and its notify follows;
+  - Codex's 2,000 schedules (sends, notify starts and completions, alarms) as a property row: every committed send's seq is announced by some notify, or covered by a later catch-up;
+  - a coalesced burst (r12.2 L5): one notify, then the mark clears.
+
+### F3. Reconnects spread over a window wide enough for the gate
+
+- r12.1 T1's first transport retry draws from [0, 1 s], so 50 channels dropped together reconnect within one second, against T1's own spread row.
+- **Channel reconnects** use their own base, `reconnect_base_ms` (default 10,000, range 1,000 to 60,000): the first reconnect waits uniform[0, `reconnect_base_ms`], then doubles to `cap` as T1 has it. Other transport retries keep base 1 s.
+- **The row is restated:** 50 channels dropped at once (seeded, fake clock) reconnect over [0, 10 s], no 1-second window holding more than 25% of them, and the spread is at least 8 s.
+- The `heads_per_minute` rule (r12.2 L4) allows one `heads` per reconnect, so the spread reconnects don't refuse each other's catch-ups.
+
+### L2a. `answer_lost` has its own reserve
+
+r11's `answer_lost` record covers messages whose earlier `covered` record was already stored, and whose reserves r12.2 L2 then released. So without a reserve of its own, `answer_lost` would be stored on unbudgeted bytes.
+- **The rule:** when the service stores a `covered` record with `answer` (r10 X1, a split answer naming another thread's reply), it keeps `answer_lost_reserve_bytes` from that record's released reserve. That's the size of a bodyless `turn_failed` record, fixed (default 2 KiB, range 1 KiB to 8 KiB).
+- It's held until the named answering thread's outcome is stored (after which `answer_lost` can't arise), or until either thread is deleted. Then it's released.
+- So `answer_lost` records are stored on reserved bytes, and r12.2 L2's "no overshoot and no overdraw" holds as written.
+- **Row:** with the budget spent, a split turn whose answering thread is deleted before its reply posts: the other thread's `answer_lost` is stored, and the stored total stays at or below `fleet_storage_bytes`.
+
+### L2b. The service enforces what L2's argument assumes
+
+L2 holds for a misbehaving host only because the service refuses records that break it:
+- an answer record whose `covers` is empty, or names a message already covered by a stored record, is refused `bad_covers`. The one exception is `answer_lost`, which covers its thread's last record's messages, as L2a has it;
+- a record larger than `answer_reserve_bytes` is refused `bad_form`.
+- **Rows:** a record covering an already-covered message, refused `bad_covers` (except `answer_lost`); an empty `covers`, refused; a record one byte past `answer_reserve_bytes`, refused.
+
+### L2c. The reserve is checked at start
+
+- A deployment whose `answer_reserve_bytes` is below the largest record (a sealed 64 KiB body, its 16-byte tag, the 12-byte nonce and the envelope at its schema's maximum) refuses the routes' start, as r6 §5's other range checks do. One lower setting would otherwise break L2 silently.
+- **Row:** `answer_reserve_bytes` one byte below the largest record refuses start, naming the variable; exactly at it starts.
+
+### Notes from SEC on r12.2
+
+- **Leases are keyed by (agent DO, lease id).** The directory accepts a return only from the DO that holds the lease. Row: a return naming another DO's lease id is refused and frees nothing.
+- **Where an idle agent's budget goes:** each unanswered page send holds its answer reserve (about 66 KiB) until it's answered or its thread deleted. So an offline or silent agent uses the budget at about 66 KiB per send, within its `sends_per_day`. That is budgeted and fails closed (page sends are refused `limit (fleet_storage_bytes)`). The Agents page shows the reserved bytes per agent, so the person can see where the budget went.
+
+---
+
+## Agent messages (M7): r12.4, a delta on r12.3 (1eef54be) for TESTS' hold on r12.2/r12.3 (lease sizes), SEC's A1 and the offline-agents ruling
+
+r12 to r12.3 stand except where this changes them.
+
+### A1 (SEC on r12.3). `answer_lost` only against its held reserve
+
+r12.3 L2b's exception is tightened:
+- `answer_lost` is accepted only against a held `answer_lost` reserve (r12.3 L2a), and it consumes that reserve. So it is accepted at most once per covered-with-answer record, and only while that record's answering thread has no stored outcome.
+- A second `answer_lost` for the same record is refused `bad_covers`. So is one with no held reserve: the answering thread's outcome is already stored, or the record was never a split answer.
+- **Row:** with the budget spent, one `answer_lost` is stored; a second for the same record is refused `bad_covers`; the stored total stays at or below `fleet_storage_bytes`.
+
+### E1. A lease is at least what the send needs (TESTS)
+
+One page send needs its own record (up to a sealed 64 KiB body and its envelope) plus `answer_reserve_bytes`: about 130 KiB, more than r12.2 L1's first lease of 64 KiB.
+- **A lease's size is** min(unleased, max(need, min(next doubling, max(`lease_min_bytes`, unleased / 64)))), where need is the requesting send's bytes plus its answer reserve, less what the agent DO still holds leased.
+- So one lease always covers the send that asked for it (if the budget can). The doubling and the fair-share cap shape only what's leased beyond that.
+- If unleased is less than need, the send is refused `limit (fleet_storage_bytes)`, `retry_ms: null`.
+- **Rows:**
+  - an agent's first send with the largest body, `lease_min_bytes` at its default: one lease, accepted;
+  - near exhaustion, with unleased = exactly one send's need: that send is accepted, and the next refused `limit (fleet_storage_bytes)`;
+  - with unleased below 8.3 MiB (where unleased / 64 is below one send's need): sends that fit are still accepted, one lease each.
+
+### E2. The slack stays a small share of the budget (TESTS)
+
+- **Idle agents give back everything.** A recall (r12.2 L1) also takes the whole lease of any agent DO with no send for `lease_idle_ms` (default 3,600,000), except bytes already holding records and reserves. An idle agent then holds no free leased bytes, so the slack is (the agents active in the last hour) x `lease_min_bytes`, not every agent's.
+- **A start check ties the three variables:** `fleet_agents_max` x `lease_min_bytes` must be at most 10% of `fleet_storage_bytes`. Otherwise the routes refuse to start, naming the three. With the defaults, 10,000 x 64 KiB = 625 MiB ≤ 1 GiB, which is 10% of 10 GiB. At `fleet_storage_bytes`' floor (1 GiB) the check forces `fleet_agents_max` down to 1,638 or `lease_min_bytes` down.
+- **Rows:**
+  - the start check at its edge: exactly 10% starts, one `lease_min_bytes` more refuses, naming all three;
+  - an agent idle past `lease_idle_ms` during a recall returns all its free leased bytes and keeps its stored records and reserves.
+
+### E3. Offline agents can't take the fleet's messaging down (the ruling)
+
+TESTS: an unanswered send holds its reserve, so about 78 agents whose hosts are offline (each up to `unacked_per_agent` x ~66 KiB, about 132 MiB) could exhaust a 10 GiB budget. Every online agent's sends would then be refused. That fails closed, but at hundreds of agents one person's offline hosts would stop the fleet. So:
+- **An agent is offline** when its host hasn't polled, pulled or held a channel for `offline_after_ms` (default 600,000, 10 minutes).
+- **The offline pool:** the bytes held for undelivered sends to offline agents (their records and reserves) count against `offline_pool_bytes` (default 25% of `fleet_storage_bytes`, range 5% to 100%). A send to an offline agent that would pass it is refused `limit (offline_pool_bytes)`, `retry_ms: null`.
+- **Online agents keep the rest.** At least `fleet_storage_bytes` - `offline_pool_bytes` always stays available to agents whose hosts are online.
+- **When a host comes back,** its agents are online again, and their held bytes leave the offline pool as their messages are delivered.
+- **The Agents page** shows an offline agent as offline, the bytes its unanswered messages hold, and, when the pool is full, "Messages to offline agents are paused until their hosts reconnect."
+- **Rows:**
+  - 100 agents whose hosts are offline receive sends until the pool is full: those sends are refused `limit (offline_pool_bytes)`; an online agent's sends are still accepted, and its stored total stays within the budget;
+  - an offline agent's host reconnects: its messages are delivered, and the pool frees as they are;
+  - an agent goes offline with messages held: they move into the pool's count, and a send that would pass the pool is refused.
+
+### E4. The property rows, in checkable form (TESTS)
+
+- **r12.3 F2:** each generated schedule includes catch-up calls and always ends with a final catch-up. The invariant: after that final catch-up, for every agent, the host's cursor reaches the agent DO's `head`, and every committed seq was either named by a notify the host received or returned by a pull the catch-up caused. A dropped notify counts as covered only if a catch-up in that schedule actually ran after it.
+- **r12.3 F1:** the test hook runs INSIDE the poll's storage transaction. A send arriving during it waits behind the transaction (the DO's input gate) and commits after the answer, so the row checks that the send's record is in the next poll, never certified deleted by this one. A hook outside the transaction couldn't make the row fail, so it isn't one.
+
+---
+
+## Agent messages (M7): r12.5, a delta on r12.4 (eaacf988): E3 replaced (SEC's E3a/E3b, TESTS' E3 condition)
+
+r12 to r12.4 stand except that r12.4 E3 (the offline pool) is replaced by this.
+
+**Why:** E3 keyed the pool on connectivity, but the cost comes from unanswered messages.
+- A host that stays connected and never answers (a bug, or a compromised host) bypassed it (SEC E3a).
+- Bytes stored while an agent was answering moved into the pool when it went offline, possibly far past the pool's limit in one step. So E3's guarantee was false as worded (SEC E3b, TESTS).
+
+A fleet is one account, so the case to bound is one granted host misbehaving and stalling the account's messaging.
+
+### E3'. Held bytes, bounded per agent and per host, with stale bytes pooled by age
+
+**Terms.**
+- A message's **held bytes** are its record plus its answer reserve, from its send until a record covering it is stored (or its thread is deleted).
+- A message is **stale** once it has been held longer than `stale_after_ms` (default 600,000, range 60,000 to 86,400,000), whatever its host's connectivity: offline, connected but silent, or slow. Its held bytes are then **stale bytes**.
+
+**Four bounds, checked for every page send to agent X, in this order:**
+1. **Per agent:** X's held bytes + need <= `agent_held_bytes_max` (default 132 MiB, which is `unacked_per_agent` x `answer_reserve_bytes`, so no stricter than r12's unacked bound by default; range 1 MiB to `fleet_storage_bytes`). Checked in X's DO, with nothing shared. Refused `limit (agent_held_bytes_max)`, `retry_ms: null`.
+2. **Per host:** the held bytes of all agents on X's host + need <= `host_held_bytes_max` (default 10% of `fleet_storage_bytes`, range 1% to 100%).
+   - It's enforced by held-credit leases from the host's channel DO, the same pattern as r12.2 L1 and r12.4 E1: an agent DO leases held credit in chunks (at least the send's need), so a send doesn't call the channel DO unless its agent's credit runs out.
+   - The slack is at most (the host's active agents) x `lease_min_bytes`, and leases are idempotent by lease id.
+   - Refused `limit (host_held_bytes_max)`, `retry_ms: null`.
+3. **The stale pool:** if X has ANY stale message, the fleet's stale bytes + need <= `stale_pool_bytes` (default 25% of `fleet_storage_bytes`, range 5% to 100%).
+   - This needs the directory DO, which keeps the stale total: one call, only on this path. A send to an agent with no stale message skips it.
+   - Refused `limit (stale_pool_bytes)`, `retry_ms: null`.
+4. **The fleet budget:** the lease of r12.4 E1, unchanged.
+
+**The stale total.** Each agent DO reports its staleness transitions (messages becoming stale, stale messages answered or deleted) to the directory DO from its alarm, batched: at most one call per agent per `stale_report_ms` (default 60,000). So the total lags by at most that interval. The lag only delays a refusal; it never lets the stored total pass the budget, because bound 4 holds every byte by lease.
+
+**The guarantee, stated as it holds:**
+- The stored total never passes `fleet_storage_bytes` (bound 4).
+- With one misbehaving host H (offline, connected and silent, or slow), the agents on every other host can always use at least `fleet_storage_bytes` - `stale_pool_bytes` - `host_held_bytes_max`. H's held bytes, fresh or stale, never exceed `host_held_bytes_max` (bound 2), and the stale bytes of everyone else's admitted sends are capped by `stale_pool_bytes` for new admissions (bound 3).
+- At the defaults (10 GiB budget, 25% pool, 10% per host): at least 6.5 GiB stays usable by the other hosts' answering agents.
+- **Aging overflow is bounded, not denied (TESTS, SEC E3b):** bytes admitted fresh can age into the stale total after admission and take it past `stale_pool_bytes`. The excess is at most the fresh held bytes of the hosts that stop answering, which is at most `host_held_bytes_max` per such host. While the stale total is over `stale_pool_bytes`, every send to an agent with a stale message is refused (bound 3), and the over-full pool is shown.
+
+**The Agents page** shows each agent as "answering", "not answering" (stale messages, host connected) or "offline", with its held bytes. Each host shows its held bytes against `host_held_bytes_max`, and the fleet shows the stale total against `stale_pool_bytes`, marked over-full when it is.
+
+**§1's directory-call row** gains two entries: the stale reports (at most one per agent per `stale_report_ms`), and bound 3's check (only for sends to an agent with a stale message). Neither is on the path of a send to an answering agent.
+
+**§3's table** gains `stale_after_ms`, `agent_held_bytes_max`, `host_held_bytes_max`, `stale_pool_bytes` and `stale_report_ms`, with the defaults and ranges above. r12.4 E3's `offline_after_ms` and `offline_pool_bytes` are withdrawn.
+
+**Rows:**
+- **SEC E3a:** a connected-but-silent host's 100 agents receive sends; their held bytes reach `host_held_bytes_max` and those sends are refused `limit (host_held_bytes_max)`; once their messages are stale, sends to them past the stale pool are refused `limit (stale_pool_bytes)`; an answering agent on another host keeps sending, accepted;
+- **SEC E3b / TESTS:** agents holding bytes go silent and age into the stale total past `stale_pool_bytes`: the pool shows over-full, every send to an agent with a stale message is refused, the stored total stays within the budget, and the other hosts' answering agents can still use the stated bound;
+- `agent_held_bytes_max` at its edge (exactly at it accepted, one need over refused, naming it); the same for `host_held_bytes_max`;
+- a host's held-credit lease retried after a lost answer leases once; a return from another agent DO is refused;
+- **TESTS:** an agent answering, then stale, then answering again moves its bytes in and out of the stale total exactly once per transition (reported within `stale_report_ms`);
+- a send to an answering agent makes no directory call for bound 3 (counted).
+
+---
+
+## Agent messages (M7): r12.6, a delta on r12.5 (26f57ae8) for Codex's hold on r12.4 (two P3 items)
+
+r12 to r12.5 stand except where this changes them. Codex's r12.4 item 1 (E3) crossed with r12.5, which replaces E3. This delta states r12.5's guarantee for any number of hosts that stop answering, and corrects r12.4 E4's property.
+
+### G1. r12.5's guarantee, for k hosts that stop answering
+
+r12.5 stated the guarantee for one misbehaving host. In general, with any set S of hosts that stop answering (offline, connected and silent, or slow), at any moment:
+- the stored total never passes `fleet_storage_bytes` (r12.4 E1's leases);
+- the hosts outside S can use at least `fleet_storage_bytes` - max(`stale_pool_bytes`, the held bytes of S's agents), and the held bytes of S's agents are at most |S| x `host_held_bytes_max` (r12.5 bound 2);
+- so with k = |S|, the others keep at least `fleet_storage_bytes` - max(`stale_pool_bytes`, k x `host_held_bytes_max`). At the defaults (10% per host, 25% pool): k = 1 or 2 leaves at least 75%; k = 5 leaves at least 50%; and the bound reaches 0 only when 10 or more hosts stop at once.
+- **Codex's example** (online hosts holding 90 of 100 when they stop): the bound's input is the held bytes per host, which can't pass 10 per host. So 90 held needs at least 9 hosts. When those 9 stop answering, the 90 stays held: it isn't freed, and the others keep at least 100 - 90 = 10, exactly as the formula says. Nothing claims that the 75 stays reserved in that case.
+- **Admission keeps the future transition bounded:** bound 2 is checked at every send, while the host is still answering, so no host can build a backlog larger than `host_held_bytes_max` before it stops. That's the admission rule for the online-to-stale transition.
+- **The Agents page** shows the hosts in S and their held bytes, so the person can see which hosts are holding the budget.
+- **Rows:**
+  - Codex's transition with an existing backlog: 9 hosts each holding exactly `host_held_bytes_max` while answering, then all stopping: their held bytes stay counted; sends to their agents are refused (stale pool, then host cap); the tenth host's agents keep sending within budget - 9 x `host_held_bytes_max`;
+  - a host at `host_held_bytes_max` while answering: its next send is refused `limit (host_held_bytes_max)` before it ever stops, so its backlog can't grow at the transition;
+  - k = 1, 2 and 5 at the defaults: the other hosts' usable bytes are at least 75%, 75% and 50% of the budget.
+
+### G2. r12.4 E4's property counts certified deletions
+
+Codex: E4's invariant ("every committed seq was named by a notify the host received or returned by a pull") excludes seqs certified deleted. Its schedule: send 1, send 2, delete 1 (its thread), before any notify or pull. The coalesced hint names 2, the pull returns 2 with `through` 2, and seq 1 is correctly certified deleted but meets neither branch.
+
+**The property, restated:** after the schedule's final catch-up, for every agent, the host's cursor is the agent DO's `head`. And every committed seq s at or below it is one of:
+- returned by a pull the host made; or
+- inside a pull's certified interval (`after`, `through`] without being returned, and deleted before that pull's snapshot (r12.3 F1).
+
+No seq is in neither, and none is in both a returned record and a certified-deleted gap.
+
+**Rows:**
+- Codex's schedule (send 1, send 2, delete 1, then the coalesced notify and pull): the pull returns 2 with `through` 2, seq 1 is certified deleted, and the property holds;
+- the generated schedules of r12.4 E4, with deletions included, checked against the restated property.
+
+---
+
+## Agent messages (M7): r12.7, a delta on r12.6 (77aa255d): G1's bound corrected (SEC R2), and re-grant moves held bytes (SEC R1)
+
+r12 to r12.6 stand except where this changes them.
+
+### G1, corrected: the two terms add
+
+r12.6 G1 gave the others' usable bytes as `fleet_storage_bytes` - max(`stale_pool_bytes`, k x `host_held_bytes_max`). That is too optimistic. Two things count separately:
+- the held bytes of the k hosts that stopped answering, at most k x `host_held_bytes_max` (r12.5 bound 2);
+- the stale bytes of everyone else's admitted sends, capped for new admissions by `stale_pool_bytes` (bound 3).
+
+**The guarantee:** with k hosts that stop answering, the other hosts' agents can use at least `fleet_storage_bytes` - `stale_pool_bytes` - k x `host_held_bytes_max`, and never less than 0.
+- At the defaults (25% pool, 10% per host): k = 1 leaves at least 65%, k = 2 at least 55%, and k = 5 at least 25%. The bound reaches 0 at k = 8.
+- In Codex's example (9 hosts each holding their full 10%), the bound is 0: nothing is reserved for the others. They can still use whatever the budget has free.
+- **The cost of raising the per-host cap** follows from the formula: each 1% added to `host_held_bytes_max` takes k% from the others' guaranteed share. The Agents page shows the current guaranteed share for k = 1, so an operator sees the cost.
+- r12.5's one-host figure becomes the example for k = 1 (65%: 6.5 GiB of 10 GiB, as r12.5 said).
+- **Rows** (replacing r12.6 G1's k rows): k = 1, 2 and 5 at the defaults leave at least 65%, 55% and 25% usable by the others; 9 hosts each holding their full cap, then stopping: the others' sends are accepted while the budget has free bytes, and nothing beyond that is promised.
+
+### R1. A re-grant moves an agent's held bytes to the new host
+
+When an agent moves from host H1 to H2 (r12.1 T4's re-grant row), its held bytes were leased as held credit from H1's channel DO.
+- Before H2 admits any send to that agent, the agent DO leases held credit from H2's channel DO for the agent's existing held bytes. If that would pass H2's `host_held_bytes_max`, the send is refused `limit (host_held_bytes_max)` and the agent's held bytes count toward H2 all the same: moving doesn't shed them.
+- Once H2's credit is held, the agent DO returns H1's lease (idempotent by lease id, from the holder only: r12.5).
+- So a host can't shed its count by having its agents re-granted elsewhere, and the fleet's held total is counted once throughout: never zero times, and never twice past the return.
+- **Row:** an agent holding bytes is re-granted from H1 to H2. H2's held count includes them before its next admission. H1's count drops by the same amount once the return lands. The fleet total stays the same throughout.
+
+---
+
+## Agent messages (M7): r12.8, a delta on r12.7 (5304b98f): r12.6 G1's bound restored
+
+r12 to r12.7 stand except where this changes them.
+
+- **r12.7's G1 section is withdrawn, and r12.6 G1 stands as written:** the other hosts' agents can use at least `fleet_storage_bytes` - max(`stale_pool_bytes`, the held bytes of S's agents), where S's held bytes are at most |S| x `host_held_bytes_max`.
+- **Why the max form holds (SEC's check of r12.6):**
+  - every host with a stale message is, by definition, in S (it has stopped answering), so the hosts outside S hold no stale bytes;
+  - S's held bytes are bounded by r12.5's bound 2, checked at admission while each host still answered;
+  - so the others' usable space is at least the budget minus S's held bytes, and taking the max with `stale_pool_bytes` only makes the bound more conservative.
+  r12.7's sum is also a true lower bound, but it is weaker and was withdrawn in error.
+- **The numbers at the defaults** are r12.6's: at least 75% for k <= 2, at least 50% for k = 5, and 0 from k = 10. In Codex's 90-of-100 example, nothing is freed and nothing is claimed to be.
+- **Rows:** r12.6 G1's rows stand (k = 1, 2 and 5 leaving at least 75%, 75% and 50%), and r12.7's rows for G1 are withdrawn.
+- **r12.7's R1** (a re-grant moves an agent's held bytes to the new host's count before its next admission) **stands**, with its row. It is what keeps G1 true across a re-grant.
+
+---
+
+## Agent messages (M7): r12.9, a delta on r12.8 (f4955e87): the k-host bound, settled
+
+r12 to r12.8 stand except where this changes them. This settles the G1 bound that r12.6, r12.7 and r12.8 went back and forth on, after SEC's final check.
+
+- **r12.8 is withdrawn in full, and r12.7 G1 stands.**
+- **S** is the set of hosts that have stopped answering entirely: offline, or connected and answering nothing. A host that is slow on some agents but still answers others is outside S, and its stale bytes can fill up to `stale_pool_bytes`. So the two terms add, as r12.7 has it.
+- **The guarantee:** the other hosts' agents can use at least `fleet_storage_bytes` - `stale_pool_bytes` - (S's held bytes), floored at 0.
+  - **S's held bytes** are at most |S| x `host_held_bytes_max`, plus any held bytes that came to a host by re-grant over its cap (r12.7 R1). A re-grant is a person's act, never a host's, so a misbehaving host can't cause that excess.
+  - With no host over its cap, the bound is `fleet_storage_bytes` - `stale_pool_bytes` - k x `host_held_bytes_max`. At the defaults that is 65%, 55% and 25% for k = 1, 2 and 5, and 0 from k = 8. Codex's 9 full hosts leave a guarantee of 0, stated as such.
+- **The Agents page** marks a host whose held bytes are over its cap ("over its cap after a re-grant"), next to the held bytes it already shows against `host_held_bytes_max`.
+- **Rows:** r12.7 G1's rows (65% / 55% / 25%, and the 9 full hosts) and r12.7 R1's re-grant row stand. r12.6 G1's rows (75% / 75% / 50%) stay withdrawn. One new row: a re-grant puts H2 over its cap; H2 is marked over its cap, its next sends are refused `limit (host_held_bytes_max)`, and the others' bound counts H2's actual held bytes.
+
+---
+
+## Agent messages (M7): r12.10, a delta on r12.9 (ae8f73ed): held credit moves only when it fits (Codex, on R1)
+
+r12 to r12.9 stand except where this changes them.
+
+**Codex's gap (on r12.7 R1).** R1 counted a re-granted agent's held bytes at the new host "all the same" and refused only its next send, so one host could come to hold several hosts' worth. Example (budget 100, pool 25, host cap 10): H1 to H4 each legally hold 10. Re-granting the agents of H1, H3 and H4 into H2 leaves H2 holding 40. If only H2 then stops, k = 1 but S's held bytes are 40, leaving 60, below the k = 1 figure, without any send ever admitted past a cap.
+
+**The rule (Codex's option a), replacing r12.7 R1's "count toward H2 all the same" and r12.9's re-granted-in term:**
+- **A host's held count is what it OWNS.** Held credit for an agent's existing held bytes moves from H1 to H2 only as one atomic step, and only when the whole amount fits H2's `host_held_bytes_max` beside what H2 already holds.
+- **Until it fits,** ownership of those bytes, and their place in the k-host count, stay with H1 (or with each old host, for agents re-granted from several). The bytes stay counted exactly once, at their owner.
+- **Meanwhile the agent receives no new sends** (refused `limit (host_held_bytes_max)`, `retry_ms: null`). Its held bytes shrink only as its existing messages are answered or their threads deleted, through H2 as its host now. Once the remainder fits, the transfer happens at the agent's next send or alarm.
+- **So no host's owned held bytes ever pass `host_held_bytes_max`, by sends or by re-grants,** and S's held bytes are at most |S| x `host_held_bytes_max` with no exception.
+  - r12.9's figures hold as stated: 65 / 55 / 25% for k = 1 / 2 / 5, and 0 from k = 8 with S = the hosts that stopped answering entirely.
+  - Equivalently, with S = every host holding a stale message, the max form's 75 / 75 / 50%.
+- **The Agents page** shows such an agent as "moving: waiting for its held messages to fit host H2", naming the old host that still holds them. r12.9's "over its cap" mark is withdrawn, since a host can no longer be over its cap.
+- **Rows:**
+  - **Codex's many-full-hosts-into-one re-grant:** H1 to H4 each holding their cap, then H1's, H3's and H4's agents re-granted into H2. No transfer happens while it wouldn't fit. H2's owned held bytes stay at its cap, those agents' sends are refused, and if only H2 then stops, the others keep at least the k = 1 figure;
+  - a re-granted agent whose held bytes fit H2: one atomic transfer, H2's count up and H1's down by the same amount, and the fleet total unchanged throughout;
+  - a re-granted agent that doesn't fit yet: its messages are answered through H2, its held bytes shrink, and the transfer happens once they fit, never partially;
+  - a transfer retried after a lost answer moves the credit once (idempotent by lease id, as r12.5).
+
+---
