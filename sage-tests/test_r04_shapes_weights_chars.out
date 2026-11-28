@@ -43,6 +43,9 @@ A['a', 1] -> TypeError: index must be an integer
 A['a'] -> TypeError: index must be an integer
 A[1.5] -> TypeError: index must be an integer
 A[(0, 1), (0,)] -> [1] | [3]
+A[range(2)] -> TypeError: index must be an integer
+A[range(1, 2)] -> TypeError: index must be an integer
+A[(0, 1)] -> 2
 ModularForms(11, QQ(5)/2) -> TypeError: no conversion of this rational to integer
 CuspForms(11, QQ(5)/2) -> TypeError: no conversion of this rational to integer
 ModularSymbols(11, QQ(5)/2) -> TypeError: no conversion of this rational to integer

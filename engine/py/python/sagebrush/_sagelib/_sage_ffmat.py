@@ -1779,10 +1779,13 @@ class FFMatrix:
             return FFMatrix(self._base, [[self._rows[r][c] for c in cj] for r in ri], len(cj))
         if isinstance(ij, slice):
             return FFMatrix(self._base, self._rows[ij], self._ncols)
-        if isinstance(ij, (list, range)):
+        if isinstance(ij, list):
+            # (a range selects only in the (rows, columns) form, as in Sage)
             ri = self._selector(ij, len(self._rows), "row")
             _admit_size(self._base, len(ri), self._ncols)
             return FFMatrix(self._base, [list(self._rows[r]) for r in ri], self._ncols)
+        if isinstance(ij, range):
+            raise TypeError("index must be an integer")
         self._selector(ij, len(self._rows), "row")
         return FFVector(self._base, self._rows[ij])
 

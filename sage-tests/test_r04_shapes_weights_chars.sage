@@ -15,7 +15,8 @@ for c in ['A[:0, :].dimensions()', 'A[:0, :].right_kernel().dimension()', 'A[:0,
           'A[1, [0, 2]]', 'A[[0, 1], 2]', 'A[[-1], :]', 'A[[2], :]', 'A[:, [3]]', 'A[[0.5], :]', 'A[1, :]', 'A[:, 1]',
           'A[-1, :]', 'A[5, :]', 'A[:, -4]', 'A[0:5:2, ::-1]', 'A[(1, 0), :]', 'A[[ZZ(1)], :]', 'A[[True], :]', 'A[1, 2]', 'A[1]',
           "A['a', :]", 'A[1.5, :]', 'A[None, :]', "A[:, 'a']", "A[['a'], :]", "A[:, ['a']]", 'A[range(1, 2), :]', 'A[:, range(1)]',
-          'A[range(0), :].dimensions()', 'A[:, [1.5]]', "A[1, 'a']", "A['a', 1]", "A['a']", 'A[1.5]', 'A[(0, 1), (0,)]']:
+          'A[range(0), :].dimensions()', 'A[:, [1.5]]', "A[1, 'a']", "A['a', 1]", "A['a']", 'A[1.5]', 'A[(0, 1), (0,)]',
+          'A[range(2)]', 'A[range(1, 2)]', 'A[(0, 1)]']:
     show(c, lambda: eval(c))
 for c in ['ModularForms(11, QQ(5)/2)', 'CuspForms(11, QQ(5)/2)', 'ModularSymbols(11, QQ(5)/2)', 'ModularForms(11, 2.5)',
           'ModularSymbols(11, 2.5)', 'ModularForms(11, QQ(7)/3)', 'ModularForms(11, QQ(4)/2).dimension()',
