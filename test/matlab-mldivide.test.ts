@@ -198,3 +198,17 @@ test("the TypeScript path warns as MATLAB does where its estimate's extra term o
   assert.equal(r.out, "MATLAB:nearlySingularMatrix ffbfffffffffffff\n");
   assert.equal(r.err, "Warning: Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  3.925231e-17.\n");
 });
+
+test("the TypeScript path's rcond at the largest double is 1, not Infinity", () => {
+  // (lower [realmax 0; 1 realmax]: ||A||_1 = realmax, ||A^-1||_1 = 1 / realmax + 1 / realmax^2, rcond 1 to
+  // rounding; the estimate is a subnormal whose reciprocal overflows, and (1 / est) / anorm was Infinity.
+  // mldivide's fifth value is the estimate)
+  const code = [
+    "import sys, numpy as np, _nplinalg",
+    "M = sys.float_info.max",
+    "r = _nplinalg.mldivide(np.array([[M, 0.0], [1.0, M]]), np.ones((2, 1)))",
+    "print(abs(float(r[4]) - 1.0) <= 2 * 2.0 ** -52)",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [cli, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_WASM: "1" } });
+  assert.equal(out.trim(), "True");
+});

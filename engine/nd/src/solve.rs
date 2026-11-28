@@ -502,6 +502,14 @@ mod tests {
         }
     }
 
+    /// [f64::MAX] \ [1]: rcond is 1 (the estimate 2^-1024 has no finite reciprocal; it once came out Infinity)
+    #[test]
+    fn the_report_rcond_of_the_largest_double_is_1() {
+        let (x, rep, _) = run(Kernel::Scalar, &[f64::MAX], &[1.0], 1, 1);
+        assert_eq!((rep.status, rep.structure, rep.rcond), (Status::Solved, Structure::Diagonal, 1.0), "{rep:?}");
+        assert_eq!(x, [1.0 / f64::MAX]);
+    }
+
     /// An estimate that overflows (A graded by 10^+-150 on both sides): rcond is 0 and the solve is Solved,
     /// not NearlySingular (the Python warning needs 0 < rcond < eps).
     #[test]

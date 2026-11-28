@@ -135,12 +135,17 @@ pub fn lacn2(n: usize, x: &mut [f64], xi: &mut [f64], apply: &mut dyn FnMut(&mut
 }
 
 /// rcond from an estimate of ||A^-1||_1 and ||A||_1: (1 / est) / anorm, or 0 when the estimate is not finite
-/// or zero (as the Python estimate).
+/// or zero (as the Python estimate). When 1 / est overflows (est a subnormal, as for [f64::MAX], whose rcond
+/// is 1), (1 / anorm) / est instead, dtrcon's order: the same value wherever the first form is finite.
 fn rcond_from(est: f64, anorm: f64) -> f64 {
     if !est.is_finite() || est == 0.0 {
-        0.0
+        return 0.0;
+    }
+    let r = (1.0 / est) / anorm;
+    if r.is_infinite() {
+        (1.0 / anorm) / est
     } else {
-        (1.0 / est) / anorm
+        r
     }
 }
 
@@ -438,6 +443,28 @@ mod tests {
         assert_eq!(trcon(&l, 2, 2, false, 2.0, &mut w), 0.25);
         assert_eq!(gecon(&[], 0, 1, 0.0, &mut w), f64::INFINITY);
         assert_eq!(gecon(&[0.0], 1, 1, 0.0, &mut w), 0.0);
+    }
+
+    /// At the largest double the estimate is finite (||A^-1||_1 = 2^-1024, a subnormal) but its reciprocal is not:
+    /// rcond of [f64::MAX] is exactly 1 (LAPACK's dtrcon, (1 / anorm) / est, gives 1; dgecon and dpocon, which
+    /// divide in the other order, give Infinity), so every path gives 1. At 2^-1074 the inverse itself overflows,
+    /// and every path gives 0, as LAPACK's three routines do.
+    #[test]
+    fn rcond_of_the_largest_and_smallest_scalars() {
+        let mut w = [0.0; 8];
+        for (v, want) in [(f64::MAX, 1.0), (-f64::MAX, 1.0), (f64::from_bits(1), 0.0)] {
+            assert_eq!(diagcon(&[v], 1, 1, v.abs()), want, "diagcon {v:e}");
+            assert_eq!(trcon(&[v], 1, 1, true, v.abs(), &mut w), want, "trcon upper {v:e}");
+            assert_eq!(trcon(&[v], 1, 1, false, v.abs(), &mut w), want, "trcon lower {v:e}");
+            assert_eq!(gecon(&[v], 1, 1, v.abs(), &mut w), want, "gecon {v:e}");
+            if v > 0.0 {
+                assert_eq!(pocon(&[v.sqrt()], 1, 1, v, &mut w), want, "pocon {v:e}");
+            }
+        }
+        // (lower [MAX 0; 1 MAX]: ||A||_1 = MAX + 1 = MAX, ||A^-1||_1 = 1 / MAX + 1 / MAX^2, rcond 1 to rounding)
+        let l = [f64::MAX, 1.0, 0.0, f64::MAX];
+        let rc = trcon(&l, 2, 2, false, f64::MAX, &mut w);
+        assert!((rc - 1.0).abs() <= 2.0 * f64::EPSILON, "trcon lower 2 x 2: {rc}");
     }
 
     #[test]
