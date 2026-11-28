@@ -4118,6 +4118,11 @@
   "owner": "Hilbert modular forms (engine)",
   "reason": "the generator search's checked i128 arithmetic actually overflowing: ideals past the types supported, not a size or work cap"
  },
+ "engine/hmf/src/field.rs :: half_euclid_bound :: let starts: Vec<(u64, usize)> = (20..64).map(|b| (1u64 << b, 9)).chain([(u64::MAX - 1_000_000, 4)]).collect(); #0": {
+  "class": "none",
+  "owner": "Hilbert modular forms (engine)",
+  "reason": "a test's sample of split primes up to 2^64; it limits nothing"
+ },
  "engine/hmf/src/field.rs :: primes_above_norms_past_u64 :: for lo in [(1u64 << 63) + 1, 13_000_000_000_000_000_001, 13_500_000_000_000_000_001, u64::MAX - 2_000_000] { #0": {
   "class": "none",
   "owner": "Hilbert modular forms (engine)",

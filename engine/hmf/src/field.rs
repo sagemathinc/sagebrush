@@ -546,9 +546,10 @@ fn shortest(mut u: (i128, i128), mut v: (i128, i128)) -> Option<(i128, i128)> {
 /// p < 2^64: (p, 0), (-r, 1) has Q((p, 0)) = 2 p^2, past i128 from 2^63.
 /// Euclid on (p, r), stopped at the first remainder r_i below sqrt p,
 /// gives the lattice vectors (r_i, -t_i) (r_i = s_i p + t_i r) with
-/// |t_i| <= p / r_(i-1) <= sqrt p; the one before, of coordinates below p
-/// and sqrt p, is size-reduced against it (B fits: below 2^64 2^33); the
-/// result has Q <= 5 p^2 / Q(u) + Q(u) / 4 <= 6 p, as Q(u) >= 2 |N(u)| >= 2 p.
+/// |t_i| <= p / r_(i-1) <= sqrt p, so Q(u) <= 7 p (it can pass 6 p:
+/// 6,484,807 at p = 1000381); the one before, of coordinates below p and
+/// sqrt p, is size-reduced against it (B fits: below 2^64 2^33), to a w with
+/// Q(w) <= 5 p^2 / Q(u) + Q(u) / 4 <= 6 p, as Q(u) >= 2 |N(u)| >= 2 p.
 fn half_euclid(p: u64, r: u64) -> Option<((i128, i128), (i128, i128))> {
     let p128 = p as i128;
     let (mut r0, mut r1) = (p128, r as i128);
@@ -907,5 +908,98 @@ mod tests {
         assert_eq!(i.hnf, Ideal::principal(Elt::int(2)).unwrap().hnf);
         let i = Ideal::from_gens(&[Elt::new(-38, 2).mul(W), Elt::new(-38, 2).scale(3)]).unwrap();
         assert_eq!(i.norm(), 1364);
+    }
+
+    /// Inert primes just past 2^32, whose norms p^2 pass 2^64, are refused,
+    /// the least and the greatest in [2^32, 2^33).
+    #[test]
+    fn inert_just_past_2_32() {
+        for p in [4294967357u64, 8589934583] {
+            assert!(p % 5 == 2 || p % 5 == 3);
+            let e = primes_above(p).unwrap_err();
+            assert!(e.contains("inert") && e.contains("2^64"), "{}", e);
+        }
+    }
+
+    /// half_euclid's basis: Q(u) < 7 p, and the size-reduced w has Q(w) <=
+    /// 6 p, over 400 split primes from 2^20 to 2^64 (both roots each).
+    #[test]
+    fn half_euclid_bound() {
+        let q = |x: (i128, i128)| 2 * x.0 * x.0 + 2 * x.0 * x.1 + 3 * x.1 * x.1;
+        let mut n = 0;
+        let mut seen_u_past_6p = false;
+        // nine split primes from each 2^b, b = 20..64: 396, and four more
+        // from 2^64 - 10^6
+        let starts: Vec<(u64, usize)> = (20..64).map(|b| (1u64 << b, 9)).chain([(u64::MAX - 1_000_000, 4)]).collect();
+        for (start, count) in starts {
+            let (mut p, mut got) = (start | 1, 0);
+            while got < count {
+                if (p % 5 == 1 || p % 5 == 4) && is_prime(p) {
+                    let s = sqrt_mod_p(5, p).unwrap();
+                    let half = (p + 1) / 2;
+                    for t in [s, p - s] {
+                        let r = ((1 + t) as u128 * half as u128 % p as u128) as u64;
+                        let (u, w) = half_euclid(p, r).unwrap();
+                        // (Q fits i128 here: coordinates below 2^33 each)
+                        let (qu, qw) = (q(u) as u128, q(w) as u128);
+                        assert!(qu < 7 * p as u128 && qw <= 6 * p as u128, "p = {} r = {}: Q(u) = {}, Q(w) = {}", p, r, qu, qw);
+                        seen_u_past_6p |= qu > 6 * p as u128;
+                    }
+                    got += 1;
+                    n += 1;
+                }
+                p += 2;
+            }
+        }
+        assert_eq!(n, 400);
+        let (u, _) = {
+            let p = 1000381u64;
+            let s = sqrt_mod_p(5, p).unwrap();
+            let r = |t: u64| ((1 + t) as u128 * ((p + 1) / 2) as u128 % p as u128) as u64;
+            let a = half_euclid(p, r(s)).unwrap();
+            let b = half_euclid(p, r(p - s)).unwrap();
+            if q(a.0) > q(b.0) { a } else { b }
+        };
+        assert_eq!(q(u), 6484807, "Q(u) passes 6 p at p = 1000381");
+        let _ = seen_u_past_6p;
+    }
+
+    /// shortest() against a brute-force minimum of Q over the lattice, on
+    /// random bases of small vectors made skewed by large multiples.
+    #[test]
+    fn shortest_is_a_minimum() {
+        let q = |x: (i128, i128)| 2 * x.0 * x.0 + 2 * x.0 * x.1 + 3 * x.1 * x.1;
+        let mut seed = 0x2371u64;
+        let mut rnd = |m: i64| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) % (2 * m as u64 + 1)) as i64 - m
+        };
+        let mut tested = 0;
+        while tested < 300 {
+            let (e1, e2) = ((rnd(12) as i128, rnd(12) as i128), (rnd(12) as i128, rnd(12) as i128));
+            let det = e1.0 * e2.1 - e1.1 * e2.0;
+            if det == 0 {
+                continue;
+            }
+            // skewed: u = e1 + a e2, v = e2 + b u, a and b up to 10^4
+            let a = rnd(10_000) as i128;
+            let u = (e1.0 + a * e2.0, e1.1 + a * e2.1);
+            let b = rnd(10_000) as i128;
+            let v = (e2.0 + b * u.0, e2.1 + b * u.1);
+            let g = shortest(u, v).unwrap();
+            // the minimum over the lattice points in the box Q <= Q(e1)
+            let bound = q(e1).min(q(e2));
+            let r = (bound as f64).sqrt() as i128 + 1;
+            let mut best = bound;
+            for x in -r..=r {
+                for y in -r..=r {
+                    if (x, y) != (0, 0) && (x * e2.1 - y * e2.0) % det == 0 && (e1.0 * y - e1.1 * x) % det == 0 {
+                        best = best.min(q((x, y)));
+                    }
+                }
+            }
+            assert_eq!(q(g), best, "basis {:?} {:?}: shortest gave {:?}", u, v, g);
+            tested += 1;
+        }
     }
 }
