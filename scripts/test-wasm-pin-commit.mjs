@@ -79,6 +79,16 @@ try {
   refused(() => pinCommit(artifact({ ...run, GITHUB_SHA: edited }), { root: repo, env: { ...run, GITHUB_SHA: edited } }), /records this source with other bytes/, "pins of this source with other bytes: refused, not committed over");
   ok(git("rev-parse", "HEAD") === edited, "...and nothing committed");
 
+  // ...and so are pins of this source whose sha256 differs but whose byte counts are the build's (a rebuild with other
+  // bytes of the same length is never read as current)
+  const sameSize = Object.fromEntries(MODULES.map((n) => [n, { sha256: "e".repeat(64), bytes: mods[n].length }]));
+  writeFileSync(join(repo, "wasm", "pins.json"), formatPins(sameSize, source));
+  git("commit", "-qam", "pins of this source: the build's sizes, other sha256");
+  git("push", "-q", "origin", "HEAD:refs/heads/master");
+  const sized = git("rev-parse", "HEAD");
+  refused(() => pinCommit(artifact({ ...run, GITHUB_SHA: sized }), { root: repo, env: { ...run, GITHUB_SHA: sized } }), /records this source with other bytes/, "pins of this source with the build's sizes but another sha256: refused, not read as current");
+  ok(git("rev-parse", "HEAD") === sized, "...and nothing committed");
+
   // master moved past the run's commit: the push is refused, and nothing reaches master
   writeFileSync(join(repo, "wasm", "pins.json"), formatPins(old, "f".repeat(64)));
   writeFileSync(join(repo, "engine", "lib.rs"), "fn f() { 2; }\n");
