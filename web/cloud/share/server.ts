@@ -636,7 +636,9 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
       db.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(account_id) DO UPDATE SET email = ?2, name = ?3, last_login = ?4").bind(who.account_id, who.email ?? null, who.name ?? null, t),
       // (reauth_ms: /auth/dev's (DEV only) is now; a CoCalc sign-in's is NULL, since it proves no fresh sign-in)
       db.prepare(`INSERT INTO sessions (token_hash, account_id, created, expires, kind, reauth_ms) VALUES (?1, ?2, ?3, ?4, ?5, CASE WHEN ?5 = 'dev' THEN ${D1_NOW_MS} END)`).bind(hash, who.account_id, t, t + ttl, ident?.kind === "dev" ? "dev" : "legacy"),
-      // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3)
+      // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3.  Not through the onSessionsEnded hooks: it's the
+      // account's own new sign-in, and an evicted session is gone from D1, so it opens nothing new and its sync sockets end
+      // at their next recheck)
       db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
     ]);
   } catch {
@@ -714,7 +716,9 @@ async function startIdentitySession(env: ShareEnv, account: string, ttl: number,
       // (the identity's verified email, as this sign-in's WorkOS answer gave it, or null: in the session's own batch, so
       // a sign-in that stands has always offered it, and one refused wrote nothing; a newer answer already written wins)
       ...(ident.kind === "workos" ? [db.prepare(`UPDATE identities SET email = ?2, email_at = ?3, email_obs = ?4 WHERE identity_id = ?1 AND ${emailNewer(4)}`).bind(ident.identity_id, ident.email, t, ident.ticket)] : []),
-      // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking)
+      // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking.  Not through the
+      // onSessionsEnded hooks: it's the account's own new sign-in, and an evicted session is gone from D1, so it opens
+      // nothing new and its sync sockets end at their next recheck)
       db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
       db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${EVICTED}))`).bind(account, SESSIONS_MAX),
       db.prepare(`DELETE FROM sessions WHERE rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX),
