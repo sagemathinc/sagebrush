@@ -181,7 +181,7 @@ s.evaluate(parse("w <- c(a = z)")[0])
 s.evaluate(parse("j <- 50:1")[0])
 s.evaluate(parse("t10 <- 1:10")[0])
 s.evaluate(parse("t100 <- 1:100")[0])
-# (tests4's #2315 L1, L2, L5) lists to print: a 1,003-character non-syntactic tag over a short leaf, and three equal
+# (review: the tags in the peak, their widths, and one leaf's peak) lists to print: a 1,003-character non-syntactic tag over a short leaf, and three equal
 # leaves (built here, so their own reservations aren't the peak measured)
 TAGL = chr(96) + "t " * 501 + "t" + chr(96)
 s.evaluate(parse("lt <- list(%s = 1)" % TAGL)[0])
@@ -288,7 +288,7 @@ print(json.dumps({"peak": peak[0], "printed": len("".join(out))}))
 
 // (review) printing a list reserves its whole peak before its first tag is written: a refusal, wherever the
 // largest leaf is (first, later, nested), leaves no partial output, and the reservation covers that leaf's layout;
-// the sizing walk counts the tags without building one (Codex P2: a 1,003-character tag before any reservation)
+// the sizing walk counts the tags without building one (review: a 1,003-character tag was built before any reservation)
 const LONG_TAG = "`" + "t ".repeat(501) + "t`";
 for (const [where, src, leaf] of [["first leaf", "list(a = numeric(2000), 1)", "numeric(2000)"],
                                   ["later leaf", "list(1, 2, b = numeric(2000))", "numeric(2000)"],
