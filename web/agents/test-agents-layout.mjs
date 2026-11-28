@@ -456,6 +456,34 @@ try {
     await fresh(1400, { stored: '{"side":330,"pane":600}' });
     const mig = { side: (await ev(r("nav.side")))?.[2], files: await ev(`localStorage.getItem(${JSON.stringify(FW)})`) };
     ok("M-width-migrated", mig.side === 330 && mig.files === "330", "a chat list width kept before (330 px) stays, and the files take it", mig);
+    // (and only once: with the files' width gone again, this page's older width never comes back)
+    await ev(`(localStorage.removeItem(${JSON.stringify(FW)}), true)`);
+    await send("Page.navigate", { url: `${origin}/agents/?speed=20` });
+    await until(agentsShown, 30000);
+    await sleep(300);
+    const once = { side: (await ev(r("nav.side")))?.[2], files: await ev(`localStorage.getItem(${JSON.stringify(FW)})`) };
+    ok("M-width-migrated-once", once.side === 272 && once.files === null, "migrated once: with no files' width later, the chat list is the default (272 px), and nothing is written back", once);
+    // (the files' own reset, a double-click on their edge, holds on the Agents page and back (Codex review of #1953):
+    //  Agents dragged to 360, then the reset in Files, then Agents, then Files: 272 in both, never 360 again)
+    await fresh(1400);
+    await drag("sep-side", 360);
+    await ev(`(localStorage.setItem("sagebrush-files-sidebar", "1"), true)`);
+    await send("Page.navigate", { url: `${origin}/` });
+    await until(filesShown, 60000);
+    await sleep(500);
+    const before = (await ev(r("#wssidebar")))?.[2];
+    await ev(`(document.querySelector('#wssidebar [aria-label="Resize the files panel"]').dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true })), true)`);
+    await sleep(300);
+    const reset = { w: (await ev(r("#wssidebar")))?.[2], key: await ev(`localStorage.getItem(${JSON.stringify(FW)})`) };
+    await send("Page.navigate", { url: `${origin}/agents/` });
+    await until(agentsShown, 30000);
+    await sleep(300);
+    const agentsAfter = { side: (await ev(r("nav.side")))?.[2], key: await ev(`localStorage.getItem(${JSON.stringify(FW)})`) };
+    await send("Page.navigate", { url: `${origin}/` });
+    await until(filesShown, 60000);
+    await sleep(500);
+    const filesAfter = (await ev(r("#wssidebar")))?.[2];
+    ok("M-width-reset-holds", before === 360 && reset.w === 272 && reset.key === null && agentsAfter.side === 272 && agentsAfter.key === null && filesAfter === 272, "the files' double-click reset holds: Agents 360, reset in Files to 272, then Agents and Files are both 272, the old 360 never back", { before, reset, agentsAfter, filesAfter });
 
     // (the status's popover: what the banner said; the status opens it, Escape and a click elsewhere close it)
     await fresh(1400);

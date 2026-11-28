@@ -199,6 +199,7 @@ mod tests {
 
     #[test]
     fn shapes_are_checked_before_anything_is_allocated() {
+        let _g = crate::work::tests_serial();
         let mut t = Table::default();
         assert_eq!(t.create(0, 3, 1, false), Err(Error::Shape));
         assert_eq!(t.create(3, 0, 1, false), Err(Error::Shape));
@@ -212,6 +213,7 @@ mod tests {
 
     #[test]
     fn a_dataset_is_sealed_once_and_used_only_sealed() {
+        let _g = crate::work::tests_serial();
         let mut t = Table::default();
         let h = filled(&mut t, &[1.0, 2.0, 3.0, 4.0], &[0.0, 1.0], 2, 2, None);
         assert_eq!(t.get(h).unwrap_err(), Error::State);
@@ -231,6 +233,7 @@ mod tests {
 
     #[test]
     fn nan_only_where_the_mask_allows_and_never_an_infinity() {
+        let _g = crate::work::tests_serial();
         let mut t = Table::default();
         let x = [1.0, f32::NAN, 3.0, 4.0, 5.0, 6.0];
         let h = filled(&mut t, &x, &[0.0, 1.0], 2, 3, None);

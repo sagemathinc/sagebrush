@@ -192,6 +192,44 @@ ${out(`[a, b, c, d, e, f, "CuspForms" in globals()]`)}`);
   assert.deepEqual(r, [1, "Congruence Subgroup Gamma0(11)", true, 6, false, false, true]);
 });
 
+test("del __main__.X: a name deleted through the module, loaded or not yet, stays deleted; an unknown one is an AttributeError", () => {
+  const r = sage(`import __main__
+res = []
+x0 = Graph
+del __main__.Graph
+del __main__.NumberField
+for n in ("Graph", "NumberField"):
+    try:
+        eval(n)
+        res.append("bound")
+    except NameError:
+        res.append("NameError")
+    res.append(hasattr(__main__, n))
+    try:
+        getattr(__main__, n)
+        res.append("bound")
+    except AttributeError:
+        res.append("AttributeError")
+for n in ("Graph", "no_such_name_anywhere"):
+    try:
+        delattr(__main__, n)
+        res.append("deleted")
+    except AttributeError:
+        res.append("AttributeError")
+__main__.Graph = 3
+res.append(Graph)
+__main__.mine = 1
+del __main__.mine
+res.append(hasattr(__main__, "mine"))
+try:
+    del __main__.mine
+except AttributeError:
+    res.append("AttributeError")
+${out(`res + ["NumberField" in dir()]`)}`);
+  // (a name of the user's, not one of sage_all's, deletes as on any module)
+  assert.deepEqual(r, ["NameError", false, "AttributeError", "NameError", false, "AttributeError", "AttributeError", "AttributeError", 3, false, "AttributeError", false]);
+});
+
 test("a global name's miss is part of its line: a NameError's traceback and sys._getframe have no frame of the compiler's $N", () => {
   const r = spawnSync(process.execPath, [CLI, "-c", "import sys\ndef f():\n    try:\n        no_such_name\n    except NameError:\n        print(sys._getframe(0).f_code.co_name, sys._getframe(1).f_code.co_name)\n    return no_such_name\nf()"], { encoding: "utf8", timeout: 120_000 });
   assert.equal(r.stdout, "f <module>\n");
