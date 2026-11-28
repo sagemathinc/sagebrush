@@ -13,7 +13,7 @@
 // - the chain or this browser's E2E state unreadable (offline, a 5xx), or this device's chain refused (forked): no sync here either,
 //   with a reason.
 import type { ClientOptions } from "./sync-client";
-import { here as idbHere, type Here } from "./e2e-here";
+import { e2eAccountOf, here as idbHere, type Here } from "./e2e-here";
 
 export type E2EStart =
   | { kind: "plain" }
@@ -30,6 +30,7 @@ export const CONTENTS_PENDING = "This account is end-to-end encrypted, and this 
 /** Whether the sync client seals file contents (blobs) and notebooks' patches as well as the index: until it does, no
  * page starts a client for an end-to-end account (startSync refuses one too). */
 export const CONTENT_SEALED = false;
+export const WRONG_ACCOUNT = "The server answered with another account's encryption keys, so this browser stopped syncing to keep your files safe.";
 export const DOWNGRADED = "The server says this account isn't end-to-end encrypted, but this browser syncs it encrypted, so it won't sync it in the clear. Reset this device if you turned encryption off.";
 
 const chunkUrl = () => new URL("/sagebrush-e2e.js", location.href).href;
@@ -73,7 +74,16 @@ export async function e2eStart({
   if (r.status === 404) return none();
   if (r.status !== 200) return unreadable;
   const body = (await r.json().catch(() => null)) as { account?: unknown; entries?: unknown } | null;
-  if (!body || !Array.isArray(body.entries)) return unreadable;
+  if (!body || !Array.isArray(body.entries) || typeof body.account !== "string") return unreadable;
+  // (the chain answer's E2E account is the one this page derives for the signed-in account (sec2's C1): another would
+  // put a device where this browser's own check (e2e-here.ts) never looks)
+  let expect: string;
+  try {
+    expect = e2eAccountOf(hash);
+  } catch {
+    return unreadable;
+  }
+  if (body.account !== expect) return { kind: "blocked", reason: WRONG_ACCOUNT, retry: false };
   if (body.entries.length === 0) return none();
   let m: E2EChunk;
   try {
@@ -82,13 +92,14 @@ export async function e2eStart({
     return unreadable;
   }
   try {
-    const keys = await m.DeviceKeys.load();
+    const keys = await m.DeviceKeys.load(undefined, expect);
     if (!keys) return { kind: "blocked", reason: NO_DEVICE, retry: false };
     if (!contentSealed) return { kind: "blocked", reason: CONTENTS_PENDING, retry: false };
     const kit = { sealOps: m.sealOps, sopsItem: m.sopsItem, envHashOf: m.envHashOf, verifyRow: m.verifyRow, PULL_START: m.PULL_START, SealedHalt: m.SealedHalt };
     return { kind: "sealed", e2e: { keys, kit }, recoveryUnconfirmed: keys.recoveryUnconfirmed };
   } catch (e) {
     const code = (e as { code?: string })?.code;
+    if (code === "wrong_account") return { kind: "blocked", reason: WRONG_ACCOUNT, retry: false };
     if (code === "forked" || code === "chain_fork" || code === "chain_reset" || code === "chain_unanchored" || code === "no_device") return { kind: "blocked", reason: code === "no_device" ? NO_DEVICE : FORKED, retry: false };
     return unreadable;
   }

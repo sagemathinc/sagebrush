@@ -201,6 +201,26 @@ try {
       "an object in use when another marks the account forked: its sign, chain view and epoch keys (cached or not) are refused (forked)", r);
   }
 
+  // ---- sec2's C1: given the page's own E2E account id, load and create refuse a chain answer naming another, and
+  // nothing is stored for it; given the right one, load works and a later 404 is still refused
+  {
+    await reset(); await putBack();
+    const r = await P.ev(`(async () => {
+      const hash = await accountHash(${J(A)}), mine = e2eAccountOf(hash), other = "abcdefghijklmnopqrstuvwxya";
+      const load = await code(async () => !!(await K.DeviceKeys.load(undefined, other)));
+      const before = await idb((d) => d.count());
+      const create = await code(async () => (await K.DeviceKeys.create("x", transport("OTHER"), mine)).recoveryCode);
+      const otherAcct = (await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "OTHER" } })).json()).account;
+      const stored = { otherDevice: !!(await deviceOf(otherAcct)), count: await idb((d) => d.count()) };
+      const right = await code(async () => (await K.DeviceKeys.load(undefined, mine)).device.id);
+      const after404 = await e2eStart({ hash, get: async () => ({ status: 404, json: async () => ({}) }), chunk: async () => { throw new Error("not needed"); } });
+      return { mine: mine === ${acct}, load, create, before, stored, right, after404: after404.kind + ":" + (after404.reason === DOWNGRADED) };
+    })()`);
+    ok(r.mine && r.load.code === "wrong_account", "load given the page's E2E id refuses a chain answer naming another (wrong_account)", r);
+    ok(r.create.code === "wrong_account" && !r.stored.otherDevice && r.stored.count === r.before, "create given the page's E2E id refuses a chain answer for another account, and stores no device", r);
+    ok(r.right.ok === made.id && r.after404 === "blocked:true", "given the right id, load works, and a later 404 is still refused (blocked, never plain)", r);
+  }
+
   // ---- tests6's T1 (sec2's H1): after genesis here, the server saying there's no chain (404, empty) is never plain
   // sync; with this browser's device and pin gone (Reset this device), the same answers are plain again
   {
@@ -208,12 +228,12 @@ try {
       const hash = await accountHash(${J(A)});
       const fake = (status, body) => async () => ({ status, json: async () => body });
       const start = async (get) => { const s = await e2eStart({ hash, get, chunk: async () => { throw new Error("the chunk isn't needed"); } }); return s.kind + (s.reason === DOWNGRADED ? ":downgraded" : ""); };
-      const out = { same: e2eAccountOf(hash) === ${acct}, after: [await start(fake(404, {})), await start(fake(200, { entries: [] }))] };
+      const out = { same: e2eAccountOf(hash) === ${acct}, after: [await start(fake(404, {})), await start(fake(200, { account: e2eAccountOf(hash), entries: [] }))] };
       // (a pin only, the device record gone)
       await idb((d) => { d.delete(${acct}); });
-      out.pinOnly = [await start(fake(404, {})), await start(fake(200, { entries: [] }))];
+      out.pinOnly = [await start(fake(404, {})), await start(fake(200, { account: e2eAccountOf(hash), entries: [] }))];
       await K.resetDevice(${acct});
-      out.reset = [await start(fake(404, {})), await start(fake(200, { entries: [] }))];
+      out.reset = [await start(fake(404, {})), await start(fake(200, { account: e2eAccountOf(hash), entries: [] }))];
       return out;
     })()`);
     ok(r.same && J(r.after) === J(["blocked:downgraded", "blocked:downgraded"]), "after genesis in this browser, the server answering 404 or an empty chain: no sync (blocked, never plain)", r);

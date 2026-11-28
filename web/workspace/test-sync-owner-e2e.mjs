@@ -51,7 +51,8 @@ window.fetchFake = async (url, init) => {
   const p = new URL(url).pathname + new URL(url).search;
   window.asked.push(String(url));
   if (p === "/api/share/me") return new Response(JSON.stringify({ account_id: ${J(ACCOUNT)} }), { status: 200 });
-  if (p === "/api/sync/v1/e2e/chain?from=0") return new Response(JSON.stringify(window.chain.body), { status: window.chain.status });
+  // (the chain answer names the account's E2E id, as the server's does, unless the case gives one)
+  if (p === "/api/sync/v1/e2e/chain?from=0") return new Response(JSON.stringify({ account: e2eAccountOf(await accountHash(${J(ACCOUNT)})), ...window.chain.body }), { status: window.chain.status });
   return new Promise(() => {});
 };
 // (a clock whose waits fire only when the case says)
@@ -98,7 +99,7 @@ try {
     await P.until(`window.ready === true`, 10000);
   };
   await load();
-  const S = await P.ev(`({ NO_DEVICE: S.NO_DEVICE, FORKED: S.FORKED, UNREADABLE: S.UNREADABLE, DOWNGRADED: S.DOWNGRADED, CONTENTS_PENDING: S.CONTENTS_PENDING })`);
+  const S = await P.ev(`({ NO_DEVICE: S.NO_DEVICE, FORKED: S.FORKED, UNREADABLE: S.UNREADABLE, DOWNGRADED: S.DOWNGRADED, WRONG_ACCOUNT: S.WRONG_ACCOUNT, CONTENTS_PENDING: S.CONTENTS_PENDING })`);
 
   // ---- the routes off: plain, asked through the owner's fetch and origin; the chunk never fetched
   {
@@ -133,6 +134,13 @@ try {
     const r = await P.ev(`(async () => { await seedDevice(); chain = ${c}; const s = await owned(); return { ...s, other: asked.filter((u) => !u.endsWith("/api/share/me") && !u.endsWith("/api/sync/v1/e2e/chain?from=0")) }; })()`);
     ok(!r.client && r.own.reason === S.DOWNGRADED && r.waiting.length === 0 && r.other.length === 0,
       `this browser's device for the account, and the server answering ${what}: no client (never plain), the reason, no try again, and nothing else asked`, r);
+  }
+
+  // ---- sec2's C1: a chain answer naming another E2E account than the signed-in account's: no client, final
+  {
+    await load();
+    const r = await P.ev(`(async () => { chain = { status: 200, body: { account: "abcdefghijklmnopqrstuvwxya", entries: ["genesis"] } }; return { ...(await owned()), loads: window.chunkLoads ?? 0 }; })()`);
+    ok(!r.client && r.own.reason === S.WRONG_ACCOUNT && r.waiting.length === 0 && r.loads === 0, "a chain answer naming another E2E account: no client, the reason, no try again, the chunk not fetched", r);
   }
 
   // ---- given decisions: refused (final) and unreadable (tried again)

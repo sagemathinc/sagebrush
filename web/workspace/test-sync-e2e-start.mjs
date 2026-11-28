@@ -11,6 +11,9 @@ import { join } from "node:path";
 
 const here = new URL(".", import.meta.url).pathname;
 const S = await import(join(here, "sync-e2e.ts"));
+const { e2eAccountOf } = await import(join(here, "e2e-here.ts"));
+// (the signed-in account's hash, and the E2E account id the server names for it)
+const H = "ab".repeat(32), ACC = e2eAccountOf(H);
 let failures = 0, count = 0;
 const ok = (c, msg, detail) => { count++; console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 400) : "")); if (!c) failures++; };
 
@@ -37,34 +40,54 @@ const chunk = ({ keys = null, code = null, fail = false } = {}) => {
 };
 /** This browser's E2E state (a device or a pin), in memory: the account hashes it holds; `fail` makes reading it throw. */
 const hereOf = (have = [], fail = false) => ({ sealed: async (h) => { if (fail) throw new Error("idb"); return have.includes(h); } });
-const run = (srv, ch, here = hereOf(), contentSealed = true) => S.e2eStart({ hash: "h", get: srv.get, chunk: ch.load, here, contentSealed });
-const entries = { entries: ["genesis"] };
+const run = (srv, ch, here = hereOf(), contentSealed = true) => S.e2eStart({ hash: H, get: srv.get, chunk: ch.load, here, contentSealed });
+const entries = { account: ACC, entries: ["genesis"] };
 
 // ---- plain: the routes off, or no chain; the chunk never fetched
-for (const [what, srv] of [["the E2E routes off (404)", server(404, {})], ["an empty chain", server(200, { entries: [] })]]) {
+for (const [what, srv] of [["the E2E routes off (404)", server(404, {})], ["an empty chain", server(200, { account: ACC, entries: [] })]]) {
   const ch = chunk({ keys: {} });
   const r = await run(srv, ch);
   ok(r.kind === "plain" && ch.loads === 0 && srv.asked[0] === "/api/sync/v1/e2e/chain?from=0", `${what}: plain sync, and the E2E chunk isn't fetched`, { r, loads: ch.loads });
 }
 
 // ---- E2E state for the account in this browser (genesis or a load wrote a device or a pin): the server saying there's no chain is never plain (a downgrade), and the chunk isn't needed
-for (const [what, srv] of [["the E2E routes off (404)", server(404, {})], ["an empty chain", server(200, { entries: [] })]]) {
+for (const [what, srv] of [["the E2E routes off (404)", server(404, {})], ["an empty chain", server(200, { account: ACC, entries: [] })]]) {
   const ch = chunk({ keys: {} });
-  const r = await run(srv, ch, hereOf(["h"]));
+  const r = await run(srv, ch, hereOf([H]));
   ok(r.kind === "blocked" && r.reason === S.DOWNGRADED && r.retry === false && ch.loads === 0, `this browser's device or pin for the account, and ${what}: no sync, with the reason, never plain`, r);
 }
 {
   const other = await run(server(404, {}), chunk(), hereOf(["another account"]));
   ok(other.kind === "plain", "another account's E2E state doesn't block this one: plain on a 404", other);
   const keys = { account: "a", device: { id: "d" }, recoveryUnconfirmed: false };
-  const r = await run(server(200, entries), chunk({ keys }), hereOf(["h"]));
+  const r = await run(server(200, entries), chunk({ keys }), hereOf([H]));
   ok(r.kind === "sealed" && r.e2e.keys === keys, "E2E state here, and a chain with this browser's device: sealed sync, as without the mark", r);
   for (const [what, srv] of [["a 5xx", server(503, {})], ["the chain read throws", server("throw")]]) {
-    const u = await run(srv, chunk(), hereOf(["h"]));
+    const u = await run(srv, chunk(), hereOf([H]));
     ok(u.kind === "blocked" && u.reason === S.UNREADABLE && u.retry === true, `E2E state here, and ${what}: no sync for now, tried again`, u);
   }
-  const none = await run(server(200, entries), chunk({ keys: null }), hereOf(["h"]));
+  const none = await run(server(200, entries), chunk({ keys: null }), hereOf([H]));
   ok(none.kind === "blocked" && none.reason === S.NO_DEVICE, "E2E state here (a pin, the device gone), and a chain: no sync, set it up again", none);
+}
+
+// ---- sec2's C1: the chain answer's E2E account must be the one this page derives for the signed-in account
+{
+  let asked = null;
+  const ch = chunk({ keys: { account: ACC, device: { id: "d" }, recoveryUnconfirmed: false } });
+  const load = ch.load;
+  ch.load = async () => { const m = await load(); return { ...m, DeviceKeys: { load: async (t, expect) => { asked = expect; return m.DeviceKeys.load(); } } }; };
+  const other = e2eAccountOf("cd".repeat(32));
+  for (const [what, body] of [["a chain", { account: other, entries: ["genesis"] }], ["an empty chain", { account: other, entries: [] }]]) {
+    const c2 = chunk({ keys: {} });
+    const r = await run(server(200, body), c2);
+    ok(r.kind === "blocked" && r.reason === S.WRONG_ACCOUNT && r.retry === false && c2.loads === 0, `${what} naming another E2E account: no sync, final, the chunk not fetched`, r);
+  }
+  const none = await run(server(200, { entries: ["genesis"] }), chunk());
+  ok(none.kind === "blocked" && none.reason === S.UNREADABLE, "a chain answer naming no account: unreadable, tried again", none);
+  const r = await run(server(200, entries), ch);
+  ok(r.kind === "sealed" && asked === ACC, "the device is loaded with the page's own E2E account id, for the chunk to refuse an answer naming another", { r: r.kind, asked });
+  const wa = await run(server(200, entries), chunk({ code: "wrong_account" }));
+  ok(wa.kind === "blocked" && wa.reason === S.WRONG_ACCOUNT && wa.retry === false, "the chunk's refusal (wrong_account): no sync, final", wa);
 }
 
 // ---- this browser's E2E state unreadable: no sync for now, tried again (never plain on a 404 it can't check)
@@ -83,9 +106,9 @@ for (const [what, srv] of [["the E2E routes off (404)", server(404, {})], ["an e
   const ch = chunk({ keys: { account: "a", device: { id: "d" }, recoveryUnconfirmed: false } });
   const load = ch.load;
   ch.load = async () => { const m = await load(); return { ...m, DeviceKeys: { load: async () => { loaded++; return m.DeviceKeys.load(); } } }; };
-  const r = await S.e2eStart({ hash: "h", get: server(200, entries).get, chunk: ch.load, here: hereOf(["h"]) });
+  const r = await S.e2eStart({ hash: H, get: server(200, entries).get, chunk: ch.load, here: hereOf([H]) });
   ok(r.kind === "blocked" && r.reason === S.CONTENTS_PENDING && r.retry === false && loaded === 1, "as shipped, a chain and this browser's device: no sync (the reason: encrypted file contents not yet), the device loaded and verified", { r, loaded });
-  const forked = await S.e2eStart({ hash: "h", get: server(200, entries).get, chunk: chunk({ code: "chain_fork" }).load, here: hereOf(["h"]) });
+  const forked = await S.e2eStart({ hash: H, get: server(200, entries).get, chunk: chunk({ code: "chain_fork" }).load, here: hereOf([H]) });
   ok(forked.kind === "blocked" && forked.reason === S.FORKED, "as shipped, a refused chain still says so (forked), not only that contents aren't sealed", forked);
 }
 
@@ -127,7 +150,7 @@ for (const [what, srv, ch] of [
   ["a 5xx", server(503, {}), chunk()],
   ["a 401", server(401, {}), chunk()],
   ["an answer that isn't JSON", server(200, "bad"), chunk()],
-  ["an answer with no entries list", server(200, { entries: "x" }), chunk()],
+  ["an answer with no entries list", server(200, { account: ACC, entries: "x" }), chunk()],
   ["the chunk doesn't load", server(200, entries), chunk({ fail: true })],
   ["the device's load fails another way", server(200, entries), chunk({ code: "server" })],
 ]) {

@@ -117,13 +117,14 @@ async function verifiedGenesis(E: ReturnType<typeof e2eCore>, entry: string, ctx
 }
 
 /** The server's chain for the signed-in account: its E2E account id, audience and entries. */
-async function fetchChain(t: Transport): Promise<{ account: string; aud: string; entries: string[] }> {
+async function fetchChain(t: Transport, expect?: string): Promise<{ account: string; aud: string; entries: string[] }> {
   const r = await t("GET", `${API}/chain?from=0`);
   if (r.status !== 200) throw new DeviceKeysError("server", `the key chain couldn't be read (${r.status})`);
   const { account, aud, entries } = r.json as { account?: unknown; aud?: unknown; entries?: unknown };
   const E = e2eCore();
   if (typeof account !== "string" || typeof aud !== "string" || !E.AUDIENCES.includes(aud) || !Array.isArray(entries) || !entries.every((x) => typeof x === "string"))
     throw new DeviceKeysError("server", "the key chain's answer isn't one");
+  if (expect !== undefined && account !== expect) throw new DeviceKeysError("wrong_account", "the key chain's answer is for another account");
   return { account, aud, entries: entries as string[] };
 }
 
@@ -171,10 +172,12 @@ export class DeviceKeys implements OpKeys {
   }
 
   /** The device for the signed-in account, or null if this browser has none. Refuses a forked account, or a chain
-   * that doesn't extend this device's pin (marking it forked), or one this device isn't current in. */
-  static async load(t: Transport = sameOrigin): Promise<DeviceKeys | null> {
+   * that doesn't extend this device's pin (marking it forked), or one this device isn't current in. `expect`: the E2E
+   * account id the page derived for the signed-in account (e2e-here.ts e2eAccountOf); a chain answer naming another is
+   * refused (wrong_account), so a device is only ever read and stored where the page's own checks look. */
+  static async load(t: Transport = sameOrigin, expect?: string): Promise<DeviceKeys | null> {
     const E = e2eCore();
-    const c = await fetchChain(t);
+    const c = await fetchChain(t, expect);
     const rec = await get<DeviceRecord>("devices", c.account);
     if (!rec) return null;
     const pin = await get<PinRecord>("pins", c.account);
@@ -213,11 +216,12 @@ export class DeviceKeys implements OpKeys {
   /**
    * Turn end-to-end encryption on for the signed-in account from this browser (genesis, §2): a new device, a new
    * recovery key and epoch 0, appended with their wrappers. Returns the device and the recovery code, which is shown
-   * once and never stored (the caller shows it). Refused if the account already has a chain.
+   * once and never stored (the caller shows it). Refused if the account already has a chain, or if the chain answer
+   * names another E2E account than `expect` (as load).
    */
-  static async create(name: string, t: Transport = sameOrigin): Promise<{ keys: DeviceKeys; recoveryCode: string }> {
+  static async create(name: string, t: Transport = sameOrigin, expect?: string): Promise<{ keys: DeviceKeys; recoveryCode: string }> {
     const E = e2eCore();
-    const c = await fetchChain(t);
+    const c = await fetchChain(t, expect);
     if (c.entries.length > 0) throw new DeviceKeysError("exists", "this account's key chain already exists");
     const ctx = { aud: c.aud, account: c.account };
     const k = await newDeviceKeys();
