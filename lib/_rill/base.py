@@ -694,7 +694,7 @@ FORMALS = {
     "factor": Closure("x", "levels", "labels", "exclude", "ordered", "nmax"),
     "ordered": Closure("x", "levels", "labels", "exclude", "nmax"),
     "levels": Primitive("x"),
-    "nlevels": Closure("x"),
+    "nlevels": Closure("x", required=("x",)),
     "is.factor": Closure("x", required=("x",)),
     "is.ordered": Closure("x", required=("x",)),
     "droplevels": Closure("x", DOTS, required=("x",)),

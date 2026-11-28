@@ -94,8 +94,9 @@ def _sorted_unique(x):
 
 # ---------------------------------------------------------------- factor and ordered
 
-def factor(sess, call, args, ordered_default=False):
-    """factor(x = character(), levels, labels = levels, exclude = NA, ordered = is.ordered(x))."""
+def factor(sess, call, args, force_ordered=False):
+    """factor(x = character(), levels, labels = levels, exclude = NA, ordered = is.ordered(x)); ordered() is
+    factor() with ordered TRUE, whatever x is (R 4.5.3: ordered(factor("x")) is ordered)."""
     x = _arg(args, "x")
     if x is MISSING or x is NULL:
         x = RVector("character", [])
@@ -107,7 +108,10 @@ def factor(sess, call, args, ordered_default=False):
     n = len(x.data)
     names = x.attrs.get("names") if x.attrs else None
     o = _arg(args, "ordered")
-    ordered = ("ordered" in _class(x) if was_factor else ordered_default) if o is MISSING else _flag(o, "ordered =")
+    if force_ordered:
+        ordered = True
+    else:
+        ordered = "ordered" in _class(x) if o is MISSING else _flag(o, "ordered =")
     if _arg(args, "nmax") is not MISSING:
         raise NotSupported("factor(nmax =)")
     with mem.reserve(n, "integer", (n, "character"), (n, "character")):
@@ -140,14 +144,16 @@ def factor(sess, call, args, ordered_default=False):
                     raise NotSupported("factor() with duplicated or NA labels")
                 levels = labels
             elif len(labels) == 1:
-                levels = ["%s%d" % (labels[0], i + 1) for i in range(k)]
+                # (one prefix, pasted to each level's position: an NA prefix is "NA", R 4.5.3)
+                prefix = "NA" if labels[0] is None else labels[0]
+                levels = ["%s%d" % (prefix, i + 1) for i in range(k)]
             else:
                 raise RError("invalid 'labels'; length %d should be 1 or %d" % (len(labels), k), call)
         return make(codes, levels, ordered, RVector("character", list(names.data)) if names is not None else None)
 
 
 def ordered(sess, call, args):
-    return factor(sess, call, args, ordered_default=True)
+    return factor(sess, call, args, force_ordered=True)
 
 
 # ---------------------------------------------------------------- levels, nlevels, is.factor, is.ordered
@@ -221,7 +227,10 @@ def cut(sess, call, args):
     single number of breaks divides the range into that many equal intervals, its outer limits moved out by 0.1%
     of the range (?cut)."""
     x = _arg(args, "x")
-    if not (isinstance(x, RVector) and x.type in ("integer", "double", "logical")) or (x.attrs and set(x.attrs) != {"names"}):
+    if isinstance(x, RVector) and x.type == "logical":
+        # (R stops: 'x' must be numeric, its message naming the S3 method cut.default, A1.3)
+        raise NotSupported("cut() of a logical vector")
+    if not (isinstance(x, RVector) and x.type in ("integer", "double")) or (x.attrs and set(x.attrs) != {"names"}):
         raise NotSupported("cut() of this kind of value")
     br = _arg(args, "breaks")
     if not (isinstance(br, RVector) and br.type in ("integer", "double") and br.data):
@@ -236,30 +245,40 @@ def cut(sess, call, args):
             raise NotSupported("cut(dig.lab =) other than a number")
         dig = int(dl.data[0])
     n = len(x.data)
-    xs = [None if e is None or (x.type == "double" and e != e) else float(e) for e in x.data]
     if len(br.data) == 1:
         nb = br.data[0]
         if nb is None or nb != nb or nb < 2 or nb != int(nb):
             raise NotSupported("cut() with this number of breaks")
-        nb = int(nb)
-        fin = [e for e in xs if e is not None and not math.isinf(e)]
-        if not fin:
-            raise NotSupported("cut() of no finite values")
-        lo, hi = min(fin), max(fin)
-        dx = hi - lo
-        if dx == 0:
-            raise NotSupported("cut() of values that are all equal")
-        step = dx / nb
-        breaks = [lo + k * step for k in range(nb + 1)]
-        breaks[0], breaks[-1] = lo - dx / 1000, hi + dx / 1000
+        k = int(nb)
     else:
-        breaks = sorted(float(e) for e in br.data if e is not None)
-        if len(breaks) != len(br.data) or any(math.isinf(b) or b != b for b in breaks):
-            raise NotSupported("cut() with NA or infinite breaks")
-        if len(set(breaks)) != len(breaks):
-            raise RError("'breaks' are not unique", call)
-    k = len(breaks) - 1
-    with mem.reserve(n, "integer", (k, "character")):
+        k = len(br.data) - 1
+    # (the whole peak, before any of it is built: the numbers as doubles, the breaks, the codes and the labels)
+    with mem.reserve(n, "integer", (n, "double"), (k + 1, "double"), (k, "character")):
+        xs = [None if e is None or (x.type == "double" and e != e) else float(e) for e in x.data]
+        if len(br.data) == 1:
+            lo = hi = None
+            for e in xs:
+                if e is None:
+                    continue
+                if math.isinf(e):
+                    # (R stops: the range's end isn't finite, its message naming seq.int, A1.3)
+                    raise NotSupported("cut() into intervals of a range with an infinite end")
+                lo = e if lo is None or e < lo else lo
+                hi = e if hi is None or e > hi else hi
+            if lo is None:
+                raise NotSupported("cut() of no finite values")
+            dx = hi - lo
+            if dx == 0:
+                raise NotSupported("cut() of values that are all equal")
+            step = dx / k
+            breaks = [lo + j * step for j in range(k + 1)]
+            breaks[0], breaks[-1] = lo - dx / 1000, hi + dx / 1000
+        else:
+            breaks = sorted(float(e) for e in br.data if e is not None)
+            if len(breaks) != len(br.data) or any(math.isinf(b) or b != b for b in breaks):
+                raise NotSupported("cut() with NA or infinite breaks")
+            if len(set(breaks)) != len(breaks):
+                raise RError("'breaks' are not unique", call)
         lab = _arg(args, "labels")
         if lab is MISSING or lab is NULL:
             levels = _interval_labels(breaks, dig, right, lowest)
@@ -293,12 +312,14 @@ def _interval(e, breaks, right, lowest):
 
 def _interval_labels(breaks, dig, right, lowest):
     """"(a,b]" labels, each break written with `dig` significant digits, more until neighbours differ (?cut's
-    dig.lab), up to 12."""
+    dig.lab), up to 12.  Where neighbours are still equal at 12, every interval is "Range_k" instead (R 4.5.3)."""
+    k = len(breaks) - 1
     for d in range(dig, max(12, dig) + 1):
         s = [_g(b, d) for b in breaks]
-        if all(s[i] != s[i + 1] for i in range(len(s) - 1)):
+        if all(s[i] != s[i + 1] for i in range(k)):
             break
-    k = len(breaks) - 1
+    else:
+        return ["Range_%d" % (i + 1) for i in range(k)]
     out = []
     for i in range(k):
         lo_b = "(" if right and not (lowest and i == 0) else "["

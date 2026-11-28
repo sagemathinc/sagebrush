@@ -131,6 +131,21 @@
    "reason": "the S3 method's call in R's message, Error in cut.default(...) and its Calls: line (A1.3: S3 dispatch)",
    "sha256": "0b7db99c6cbb1391c6decde6c4cac50623b2edb89e94246ab76cb2d926a8565c"
   },
+  "rill-tests/fac/test_4.R#cut-infinite-range": {
+   "class": "not-implemented",
+   "reason": "R's error comes from seq.int inside the S3 method, with its Calls: line (A1.3: S3 dispatch); Rill refuses",
+   "sha256": "6ac2f73e3860c6fad5eeb187ede97314fdeeaf67250d7b69fd4d82def9d433c4"
+  },
+  "rill-tests/fac/test_4.R#cut-logical": {
+   "class": "not-implemented",
+   "reason": "R's 'x' must be numeric names the S3 method cut.default, with its Calls: line (A1.3: S3 dispatch); Rill refuses",
+   "sha256": "a13eb2f38a6be46e186e0fd6721316c9cf277f81d2686e72f3e330257da10be7"
+  },
+  "rill-tests/fac/test_4.R#fac-nlevels-missing-x": {
+   "class": "not-implemented",
+   "reason": "R's Calls: line (nlevels -> levels), a traceback Rill doesn't print yet (A1.3); the message itself is R's",
+   "sha256": "211ad6b2c7e53534588385f2840fdfb735fe85cb928a9d90ebfd418dcfeaf155"
+  },
   "rill-tests/parse/test_1.R#arg-empty-name": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",

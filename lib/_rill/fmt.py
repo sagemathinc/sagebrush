@@ -215,15 +215,16 @@ def print_value(v, write, opts=DEFAULT):
 def print_factor(labels, levels, ordered, names, write, opts=DEFAULT):
     """print() of a factor (R 4.5.3, rill-tests/fac/): its labels unquoted, NA as <NA>, laid out as a character
     vector (left-justified, or under its names), then "Levels:" and the levels, " < " between them for an ordered
-    one; an empty factor is factor().  A levels line wider than `width` is refused (R shortens it, by rules Rill
-    doesn't model yet); it is checked before anything is written."""
-    line = "Levels: " + (" < " if ordered else " ").join(levels)
+    one; an empty factor is factor() (ordered() for an ordered one).  Labels and levels are escaped as print()
+    escapes a string, without quotes: a newline is \\n.  A levels line wider than `width` is refused (R shortens
+    it, by rules Rill doesn't model yet); it is checked before anything is written."""
+    line = "Levels: " + (" < " if ordered else " ").join(escape_string(l, "") for l in levels)
     if width(line) > opts.width:
         return None
     if not labels:
-        write("factor()\n")
+        write("ordered()\n" if ordered else "factor()\n")
     else:
-        strs = ["<NA>" if s is None else s for s in labels]
+        strs = ["<NA>" if s is None else escape_string(s, "") for s in labels]
         if names is not None:
             _print_named(strs, names, write, opts)
         else:

@@ -1,0 +1,91 @@
+{
+ "cases": [
+  {
+   "id": "fac-ordered-of-factor",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n[1] b a\nLevels: a < b\n[1] b a\nLevels: b < a\n"
+  },
+  {
+   "id": "fac-ordered-stays",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n[1] FALSE\n"
+  },
+  {
+   "id": "fac-ordered-empty",
+   "status": 0,
+   "stderr": "",
+   "stdout": "ordered()\nLevels: \nordered()\nLevels: \n"
+  },
+  {
+   "id": "fac-print-escapes",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] x\\ny\nLevels: x\\ny\n[1] t\\tq\nLevels: t\\tq\n[1] a\\\\b\nLevels: a\\\\b\n[1] q\"r\nLevels: q\"r\n"
+  },
+  {
+   "id": "fac-print-escapes-named",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   x \na\\nb \nLevels: a\\nb\n"
+  },
+  {
+   "id": "fac-labels-na-prefix",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA1 NA2\nLevels: NA1 NA2\n[1] NA1 NA2\nLevels: NA1 NA2\n"
+  },
+  {
+   "id": "fac-is-missing-x",
+   "status": 1,
+   "stderr": "Error in is.ordered() : argument \"x\" is missing, with no default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "fac-is-factor-missing-x",
+   "status": 1,
+   "stderr": "Error in is.factor() : argument \"x\" is missing, with no default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "fac-nlevels-missing-x",
+   "status": 1,
+   "stderr": "Error in nlevels() : argument \"x\" is missing, with no default\nCalls: nlevels -> levels\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "cut-labels-range",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Range_1 Range_1 Range_2 Range_3\nLevels: Range_1 Range_2 Range_3\n[1] \"Range_1\" \"Range_2\"\n"
+  },
+  {
+   "id": "cut-labels-distinct-at-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"(1,1.00000000001]\" \"(1.00000000001,2]\"\n"
+  },
+  {
+   "id": "cut-number-with-na",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] (0.999,1.5] <NA>        (1.5,2]    \nLevels: (0.999,1.5] (1.5,2]\n"
+  },
+  {
+   "id": "cut-infinite-range",
+   "status": 1,
+   "stderr": "Error in seq.int(rx[1L], rx[2L], length.out = nb) : \n  'to' must be a finite number\nCalls: cut -> cut.default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "cut-logical",
+   "status": 1,
+   "stderr": "Error in cut.default(c(FALSE, TRUE), c(-1, 0.5, 2)) : 'x' must be numeric\nCalls: cut -> cut.default\nExecution halted\n",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/fac/test_4.R",
+ "format": "rill-out",
+ "v": 1
+}
