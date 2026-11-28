@@ -5,8 +5,8 @@
     sagebrush -m _pyjs_doctest --open-problems MODULE ...
 
 Every docstring's examples run, in order, in a fresh namespace: lines after
-``sage:`` (continued by ``....:``) in Sage syntax with ``from sage_all
-import *`` done, lines after ``>>>`` (continued by ``...``) as Python.  The
+``sage:`` (continued by ``....:``) in Sage syntax in Sage mode's session
+(sage_all's names, each domain loaded on first use, lib/_sage_lazy.py), lines after ``>>>`` (continued by ``...``) as Python.  The
 expected output follows each example up to a blank line or the next prompt.
 As in Sage:
 
@@ -238,7 +238,8 @@ def _fresh(sage):
         saved = sys.modules.get("__main__")
         sys.modules["__main__"] = ns
         try:
-            out, err = __pyjs_run__("from sage_all import *", ns, True)
+            # (Sage mode's session, as the CLI, the notebook and the kernel start it: its names load on first use)
+            out, err = __pyjs_run__("import _sage_lazy as _sage_lazy_; _sage_lazy_.session(globals()); del _sage_lazy_", ns, True)
         finally:
             sys.modules["__main__"] = saved
         if err:

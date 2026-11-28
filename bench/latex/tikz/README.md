@@ -6,7 +6,7 @@ compares them. It is run by hand or nightly, not in a PR's CI. Its unit tests,
 which are in CI, are `web/latex/test-latex-tikz.mjs`.
 
 ```
-node bench/latex/tikz/run.mjs [--only T01,T02] [--out DIR] [--keep]
+node bench/latex/tikz/run.mjs [--only T01,N01] [--pictures FILE] [--out DIR] [--keep]
 ```
 
 It needs `pdflatex` with TikZ, `pdftoppm` and Chrome (`CHROME`, default
@@ -18,8 +18,8 @@ number) and `table.md`.
 - **TeX:** every picture is a page of one `standalone` document with no border,
   so a page is exactly the picture's bounding box. pdflatex writes each box to
   its log, and `pdftoppm` rasters each page at 300 dpi.
-- **The preview:** `renderTikz` draws each picture alone on a page of a
-  headless Chrome, which takes a screenshot at the same scale, cropped to the
+- **The preview:** `renderTikz` draws each picture (its nodes' text with KaTeX and
+  KaTeX's stylesheet) alone on a page of a headless Chrome, which takes a screenshot at the same scale, cropped to the
   picture's box.
   - The preview writes TeX's pt as CSS pt (1/72 in, not 1/72.27). Its pictures
     are 0.375% larger than TeX's on the page, as the rest of the preview's
@@ -34,4 +34,5 @@ number) and `table.md`.
     without one. A picture's own `iou` is recorded with its reason (`why`).
 
 The pictures were written for this benchmark. They are paths, styles,
-transforms and `\foreach`. Nodes (text in a picture) aren't drawn by the preview yet, so no picture here has one.
+transforms and `\foreach` (T01–T40), and nodes: text, anchors, placement, labels, lines between nodes
+(N01–N12). A node's text is KaTeX's, in KaTeX's Computer Modern-based fonts; its box comes from KaTeX's layout metrics.

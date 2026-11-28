@@ -788,6 +788,14 @@ export function genericGetattr(o: any, name: string, t: PyType, dflt?: any, hook
         throw e;
       }
     }
+    // (a session's module, Sage mode's __main__: a Sage name it hasn't loaded yet, from its _Session, NS_LAZY, as a
+    // global load's miss gets it, so __main__.X and getattr(__main__, X) are Sage's)
+    const lazy = o[NS_LAZY];
+    if (lazy !== undefined) {
+      // (the session itself back: not one of its names, modules.ts lazyName)
+      const v = callObj(getattr(lazy, "_miss"), [name]);
+      if (v !== lazy) return v;
+    }
     if (dflt !== undefined) return dflt;
     const own = Object.prototype.hasOwnProperty.call(o, "__sagebrush_missing__") ? o.__sagebrush_missing__ : undefined;
     raise(T.AttributeError, `module '${o.__name__}' has no attribute '${name}'${missingHint(own, name)}`);
@@ -1076,10 +1084,15 @@ export function genericDelattr(o: any, name: string, t: PyType): void {
       return;
     }
   }
+  // (a session's module, Sage mode's __main__: `del __main__.X` deletes X for good, as `del X` does, index.ts delName;
+  // a Sage name not loaded yet deletes as a bound one does)
+  const lazy = hasInstanceDict(o) ? o[NS_LAZY] : undefined;
+  const unloaded = lazy !== undefined && callObj(getattr(lazy, "_delete"), [name]) === true;
   if (hasInstanceDict(o) && ownAttr(o, name)) {
     delete o[name];
     return;
   }
+  if (unloaded) return;
   raise(T.AttributeError, `'${(t as any).$tpName ?? t.$name}' object has no attribute '${name}'`);
 }
 
@@ -1463,8 +1476,9 @@ export function toPyExc(e: any): any {
   // (JavaScriptCore sizes a result before it computes or allocates it, so
   // nothing is spent first) It says which limit: the JavaScript engine's own,
   // a hard limit and no cap of ours, or memory the computer couldn't give.
-  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow|failed to grow memory|WebAssembly\.\w+\(\): Out of memory/.test(e.message)) {
-    const why = engineLimit(e.message);
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow|failed to grow memory|WebAssembly\.\w+\(\): Out of memory|^WebAssembly kernel workspace: /.test(e.message)) {
+    // (a WebAssembly kernel's workspace, src/runtime/wasm_room.ts: its own words, with the bytes it needed)
+    const why = /^WebAssembly kernel workspace: /.test(e.message) ? e.message : engineLimit(e.message);
     const r = why === undefined ? T.MemoryError() : T.MemoryError(why);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return markRaised(r);
@@ -2072,6 +2086,10 @@ export function globalsDict(g: any): PyDict {
 export const NS_DICT = Symbol("globals dict");
 
 export const NS_GLOBALS = Symbol("globals of a layered namespace");
+// A namespace whose missing names may be loaded on first use: Sage mode's session (lib/_sage_lazy.py _Session), its
+// value the object the runtime asks (_miss(name) on a global load that misses, _delete(name) on `del name`).  Set
+// only on a session's namespace, never on a library module's (builtinName, delName).
+export const NS_LAZY = Symbol("a namespace's lazy names");
 export const NS_LOCALS = Symbol("locals of a layered namespace");
 // The globals behind a module's namespace: a layered one's (exec and eval
 // with separate locals), else the namespace itself
@@ -2088,7 +2106,8 @@ export function moduleLocals(g: any): PyDict {
 export function namespaceOf(d: any): any {
   if (d instanceof PyDict && (d.$m as any) instanceof ObjMap) return ((d.$m as any) as ObjMap).o;
   return new Proxy(Object.create(null), {
-    get: (_t, k) => (typeof k === "string" ? dictGet(d, k) : k === NS_DICT ? d : undefined),
+    // (a plain dict's lazy names, NS_LAZY: kept on the dict itself, as this proxy is made anew for each use)
+    get: (_t, k) => (typeof k === "string" ? dictGet(d, k) : k === NS_DICT ? d : k === NS_LAZY ? d[NS_LAZY] : undefined),
     set: (_t, k, v) => (typeof k === "string" && dictSet(d, k, v), true),
     has: (_t, k) => typeof k === "string" && dictGet(d, k) !== undefined,
     deleteProperty: (_t, k) => (typeof k === "string" && dictDelete(d, k), true),

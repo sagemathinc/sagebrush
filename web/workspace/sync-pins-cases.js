@@ -777,7 +777,17 @@ async function ordering() {
 async function slicedCleanup() {
   // (daybreak2's LIMIT-E5C-1: more than 32,000 tiny pins of collapsed writes, and some of a newer epoch: each slice
   // of the cleanup within its requests and under 50 ms, nothing of the newer epoch taken, all drained by the one
-  // cleanup, no reload or save)
+  // cleanup, no reload or save.  Three samples, each in a fresh workspace, the time bound checked on their median, as
+  // the big move's is (sync-view-cases.js): a slice that blocks the main thread does so in every sample, while one
+  // runner stall (the page's thread descheduled, which the browser reports as a long task) lands in one; every sample's
+  // figures are said, and each sample's drain, epoch and request bound are checked)
+  const samples = [];
+  for (let k = 0; k < 3; k++) samples.push(await slicedCleanupSample());
+  const median = samples.map((x) => x.longest).sort((a, b) => a - b)[1];
+  check(samples.every((x) => x.left === x.ids / 50 && x.newerKept && x.maxTx <= W.PINS.slice.requests) && median < 50, `33,000 pins of collapsed writes: all released by one cleanup, a slice at a time (each at most ${W.PINS.slice.requests} requests, under 50 ms: the median of 3 samples ${median} ms), the newer epoch's kept: ` + J(samples.map(({ ids, newerKept, ...x }) => x)));
+}
+
+async function slicedCleanupSample() {
   const w = await fresh();
   await on(w);
   const ids = 1000, each = 33;
@@ -805,8 +815,8 @@ async function slicedCleanup() {
     obs.disconnect();
   }
   const left = await all(w.ws, "pins");
-  check(left.length === ids / 50 && left.every((p) => p.epoch === 1) && maxTx <= W.PINS.slice.requests && longest < 50, `33,000 pins of collapsed writes: all released by one cleanup, a slice at a time (each at most ${W.PINS.slice.requests} requests, under 50 ms), the newer epoch's kept: ` + J({ left: left.length, slices, maxTx, longest: Math.round(longest) }));
   w.close();
+  return { ids, left: left.length, newerKept: left.every((p) => p.epoch === 1), slices, maxTx, longest: Math.round(longest) };
 }
 
 async function longtaskControl() {

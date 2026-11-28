@@ -2708,6 +2708,16 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/lib.rs :: try_is_squarefree :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the square-free decision within the default factoring limits, as try_factor: a refusal there is FactorLimit, never an answer"
+ },
+ "engine/poly/src/lib.rs :: try_is_squarefree :: pub fn try_is_squarefree(f: &[BigInt]) -> Result<bool, FactorLimit> { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "the square-free decision's signature: its limit is the default factoring budget's"
+ },
  "engine/poly/src/lib.rs :: zassenhaus :: if max_size == usize::MAX && lifted.len() > vanhoeij::ZASSENHAUS_MAX { #0": {
   "class": "none",
   "note": "the no-subset audit counter (plan r3 4.2)",
@@ -3213,6 +3223,11 @@
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "the certificate's search bound for X (Cramer's bound, a mathematical limit past which no integral X exists); not a resource cap"
+ },
+ "engine/poly/src/nf.rs :: a03_f2_shift_search_has_no_limit :: fn a03_f2_shift_search_has_no_limit() { #0": {
+  "class": "none",
+  "owner": "polynomial factorization (@sagebrush-sage2)",
+  "reason": "a test (the shift search has no limit): refuses nothing"
  },
  "engine/poly/src/tests.rs :: a_huge_exponent_is_refused_by_its_reservation :: for k in [u64::MAX, u64::MAX / 2, u64::MAX / 4, 1 << 61] { #0": {
   "class": "none",
@@ -3889,6 +3904,14 @@
   "class": "1+2",
   "owner": "raster/image I/O"
  },
+ "engine/raster/src/svg.rs :: apply :: \"stroke-miterlimit\" => style.miter = number(v)?, #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
+ "engine/raster/src/svg.rs :: apply :: style.cap = match v { #0": {
+  "class": "none",
+  "owner": "raster/image I/O"
+ },
  "engine/raster/src/svg.rs :: draw_path :: let s = Stroke { width: st.stroke_width, line_cap: st.cap, line_join: st.join, miter_limit: st.miter, ..Stroke::default() }; #0": {
   "class": "none",
   "owner": "raster/image I/O"
@@ -3925,6 +3948,126 @@
   "class": "none",
   "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
   "reason": "test inputs past usize's byte counts, and the exactness bound of the retired debt's sum; refuse nothing themselves"
+ },
+ "engine/skltree/src/partition.rs :: partition_samples_final :: let go_to_left = if current_value.is_nan() { missing_go_to_left } else { f64::from(current_value) <= threshold }; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/partition.rs :: partition_samples_final :: pub fn partition_samples_final(&mut self, x: &[f32], f: usize, threshold: f64, feature: usize, missing_go_to_left: bool) { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/rng.rs ::  :: pub const RAND_R_MAX: u32 = 2_147_483_647; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/rng.rs :: a_zero_state_is_the_default_seed_and_draws_stay_below_2_31 :: assert!(our_rand_r(&mut s) <= RAND_R_MAX); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/rng.rs :: a_zero_state_is_the_default_seed_and_draws_stay_below_2_31 :: let mut s = u32::MAX; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_2way :: fn introsort_2way<T: Value>(values: &mut [T], indices: &mut [usize], mut lo: usize, mut n: usize, mut maxd: i64) { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_2way :: if maxd <= 0 { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_2way :: introsort_2way(values, indices, lo, pivot_idx, maxd); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_2way :: maxd -= 1; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_3way :: fn introsort_3way<T: Value>(values: &mut [T], indices: &mut [usize], mut lo: usize, mut n: usize, mut maxd: i64) { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_3way :: if maxd <= 0 { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_3way :: introsort_3way(values, indices, lo, l, maxd); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: introsort_3way :: maxd -= 1; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: if child + 1 < end && values[lo + maxind] < values[lo + child + 1] { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: if child < end && values[lo + maxind] < values[lo + child] { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: if maxind == root { #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: let mut maxind = root; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: maxind = child + 1; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: maxind = child; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: root = maxind; #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: sift_down :: swap(values, indices, lo + root, lo + maxind); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: simultaneous_sort :: introsort_2way(values, indices, 0, n, maxd); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: simultaneous_sort :: introsort_3way(values, indices, 0, n, maxd); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
+ },
+ "engine/skltree/src/sort.rs :: simultaneous_sort :: let maxd = 2 * i64::from(usize::BITS - 1 - n.leading_zeros()); #0": {
+  "class": "none",
+  "owner": "decision-tree kernel (@sagebrush-sklearn-trees)",
+  "reason": "scikit-learn's introsort port (maxd: its recursion depth before the heapsort fallback; maxind: the heap's largest child), the XorShift's range (RAND_R_MAX, u32::MAX in a test) and a split's threshold value: the reference's own arithmetic, ported line by line; none refuses anything"
  },
  "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
   "class": "none",
@@ -5504,6 +5647,11 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: MRec._str :: A maximal order in it prints on one line (_IN_REC), as a tuple's does: #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
  "lib/_magma.py :: PartialFractionDecomposition :: budget = _FunBudget() #0": {
   "class": "2+3",
   "owner": "Magma compatibility/rational functions",
@@ -5588,6 +5736,26 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_magma.py :: _MOrder._parts :: head = \"Maximal Equation Order\" if self._is_equation_order() else \"Maximal Order of Equation Order\" #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
+ "lib/_magma.py :: _MOrder._str :: \"\"\"Laid out as Magma prints a maximal equation order past WIDTH #0": {
+  "class": "none",
+  "owner": "Magma compatibility",
+  "reason": "the word Maximal (a maximal order's description and its printing), not a limit: nothing is refused"
+ },
+ "lib/_magma.py :: _alt :: if n > _COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
  "lib/_magma.py :: _collect :: _COLLECT_MAX of them, before the collection is built (HARD-FCC-1).\"\"\" #0": {
   "class": "1+2",
   "owner": "Magma compatibility/runtime memory",
@@ -5635,6 +5803,16 @@
   "explained": true,
   "owner": "Magma compatibility/runtime memory",
   "row": "inv-26"
+ },
+ "lib/_magma.py :: _cyclic_group :: if n > _COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_magma.py :: _ff_refuse :: bounds: fields of more than EMBED_MAX elements (ff.embed_max), or the work.\"\"\" #0": {
   "class": "none",
@@ -5797,6 +5975,61 @@
   "class": "3",
   "owner": "Magma compatibility",
   "row": "inv-25"
+ },
+ "lib/_magma_classes.py :: _MEllFF._magma_card :: except NotImplementedError: #0": {
+  "class": "coverage",
+  "owner": "Magma compatibility",
+  "reason": "the point count over GF(p) for p >= 2^64 is not available (Sage mode's counting, which needs SEA there): turned into Magma mode's refusal in words; an unsupported case, not a cap"
+ },
+ "lib/_magma_classes.py :: _classes_refusal :: fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_classes.py :: conjugacy_classes :: allow = _m._COLLECT_MAX * _m._COLLECT_COST #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit :: \"one computation\", fixed=_m._COLLECT_MAX == 10 ** 6)) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit :: need, allow, k = _engine_bytes(n, gens, what), _m._COLLECT_MAX * _m._COLLECT_COST, len(gens) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
+ },
+ "lib/_magma_groups.py :: _admit_points :: if count > _m._COLLECT_MAX: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Magma compatibility/runtime memory"
  },
  "lib/_matlab.py :: _oob :: return _err(\"Index exceeds the number of array elements. Index must not exceed %d.\" % n, \"MATLAB:badsubscript\") #0": {
   "class": "none",
@@ -13312,7 +13545,7 @@
   "owner": "pyjs JSON/runtime memory",
   "row": "src-8"
  },
- "src/runtime/modules.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
+ "src/runtime/modules.ts ::  :: import { admitHeap, heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
@@ -13358,6 +13591,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",
@@ -13773,15 +14011,35 @@
   "owner": "sagebrush-python",
   "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
  },
+ "src/runtime/nd.ts :: ndMemoryMax :: return mem ? declaredMax.get(mem) ?? 0 : 0; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
+ },
+ "src/runtime/nd.ts :: reserve :: growTo(m, bytes, declaredMax.get(m)); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: const m = new WebAssembly.Memory({ initial: 17, maximum, shared: true }); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: declaredMax.set(m, maximum * 65536); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
  "src/runtime/nd.ts :: sharedMemory :: for (const maximum of [65536, 16384, 4096]) { #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
  },
- "src/runtime/nd.ts :: sharedMemory :: return new WebAssembly.Memory({ initial: 17, maximum, shared: true }); #0": {
+ "src/runtime/nd.ts :: sharedOk :: const declaredMax = new WeakMap<WebAssembly.Memory, number>(); #0": {
   "class": "none",
-  "owner": "sagebrush-matlab",
-  "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
  },
  "src/runtime/nd.ts :: up :: const MAX_HELPERS = 8; #0": {
   "class": "1",
@@ -13806,6 +14064,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), checked before any storage is admitted, as NumPy checks the dimensions before allocating; NumPy's semantics, not a Sagebrush limit"
  },
+ "src/runtime/numpy.ts :: admitObjects :: export const objBackend = { denseLimit: v8DenseLength(), makeRefs: (n: number): any[] => new Array(n).fill(null) }; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
+ },
  "src/runtime/numpy.ts :: admitWork :: if (bytes <= ARRAY_LIMITS.bytes) return; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -13826,6 +14089,31 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
  },
+ "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "the heap a range's item takes, estimated for its admission (a number up to 2**53 is a 16-byte heap number, a larger one a BigInt); it refuses nothing itself"
+ },
+ "src/runtime/numpy.ts :: binary :: const beyond64 = big < I64MIN || big > I64MAX; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
+ },
+ "src/runtime/numpy.ts :: binary :: const outside = dt.kind !== \"b\" && (dt === D.uint64 ? big < 0n || big > U64MAX : rg ? big < BigInt(rg[0]) || big > BigInt(rg[1]) : beyond64); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text that refuses nothing of a cap: I64MAX/U64MAX, the int64 and uint64 ranges (and a smaller dtype's), past which NumPy 2's weak-scalar rule (NEP 50) makes a Python int an OverflowError or a comparison's constant answer"
+ },
+ "src/runtime/numpy.ts :: cLongRange :: const MINMAX_OPS: Record<string, boolean> = { maximum: true, minimum: true, fmax: true, fmin: true }; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: the names of the maximum and minimum ufuncs (a table of operations), not a cap"
+ },
+ "src/runtime/numpy.ts :: cLongRange :: if (dt.kind === \"u\" && dt.itemsize === 8 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: I64MAX and U64MAX, the int64 and uint64 ranges, by which NumPy discovers a Python int's dtype and past which its C conversion raises OverflowError; NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13841,6 +14129,16 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; it refuses an axis out of bounds for a 0-d array viewed as one element, as NumPy's cumsum"
  },
+ "src/runtime/numpy.ts :: cutArray :: if (shape.length >= OBJ_MAXDIMS) { #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
+ },
+ "src/runtime/numpy.ts :: cutArray :: raise(T.NotImplementedError, \"this operation on object arrays is not supported by sagebrush's numpy yet (an array inside the data whose dimensions don't all fit the result's: NumPy assigns it whole, broadcasting)\"); #0": {
+  "class": "coverage",
+  "owner": "python",
+  "reason": "object arrays: operations not in sagebrush's numpy yet (arithmetic, ufuncs, an inner array cut off by the result's shape) refuse with NotImplementedError rather than compute something else"
+ },
  "src/runtime/numpy.ts :: discover :: if (depth + s.length > MAX_DIMS) nestedTooDeep(); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13850,6 +14148,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: discover :: if (w.big !== undefined && w.dt === null && (w.big > U64MAX || w.big < I64MIN)) { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: U64MAX and I64MIN, the uint64 and int64 ranges, past which NumPy discovers a Python int as an object; NumPy's semantics, not a Sagebrush limit"
  },
  "src/runtime/numpy.ts :: itemIndex :: if (typeof x === \"bigint\" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
   "class": "none",
@@ -13891,6 +14194,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
  },
+ "src/runtime/numpy.ts :: normAxis :: function normAxis(ax: number, nd: number, prefix: string | null = null): number { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
  "src/runtime/numpy.ts :: notIndex :: fn(\"amax\", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first)); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -13900,6 +14208,16 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, false, O.truth(stable)) : objSort(a, normAxis(intNum(axis), a.ndim), false, O.truth(stable)); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof ObjArray) return axis === null ? objSort(objReshape(a, [a.size]), 0, true, O.truth(stable)) : objSort(a, normAxis(intNum(axis), a.ndim), true, O.truth(stable)); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
  },
  "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(intNum(axis), a.ndim), false); #0": {
   "class": "none",
@@ -13921,6 +14239,21 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; the axis read as an index (#1944)"
  },
+ "src/runtime/numpy.ts :: objConcat :: const ax = normAxis(axis, nd); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "normAxis (an axis argument normalized), matched only by the letters m-a-x inside its name; it refuses nothing"
+ },
+ "src/runtime/numpy.ts :: objRefuse :: return raise(T.NotImplementedError, \"this operation on object arrays is not supported by sagebrush's numpy yet (object arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, take, isin, concatenate and printing)\"); #0": {
+  "class": "coverage",
+  "owner": "python",
+  "reason": "object arrays: operations not in sagebrush's numpy yet (arithmetic, ufuncs, an inner array cut off by the result's shape) refuse with NotImplementedError rather than compute something else"
+ },
+ "src/runtime/numpy.ts :: plainOperand :: const i = normAxis(Number(x), a.ndim, \"axis1\"), j = normAxis(Number(y), a.ndim, \"axis2\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
  "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -13936,10 +14269,30 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/numpy.ts :: pyIntDtype :: return w.kind === \"i\" && w.dt === null && w.big !== undefined && w.big > I64MAX && w.big <= U64MAX ? D.uint64 : scalarDtype(w); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: I64MAX, U64MAX and I64MIN, the int64 and uint64 ranges, by which NumPy discovers a Python int's dtype (int64, uint64, or past both an object array); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: pyIntPastWide :: const pyIntPastWide = (w: Weak | null) => w !== null && w.kind === \"i\" && w.dt === null && w.big !== undefined && (w.big > U64MAX || w.big < I64MIN); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: I64MAX, U64MAX and I64MIN, the int64 and uint64 ranges, by which NumPy discovers a Python int's dtype (int64, uint64, or past both an object array); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: refuse :: if (objBackend.denseLimit !== null && n > objBackend.denseLimit) refuse(); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the JS engine's dense-array bound for object-array references (V8 FixedArray::kMaxLength, 2**27 in standard builds; elsewhere the engine's RangeError): a backend storage bound, not Sagebrush policy (LIMITS ruling on #1894); admitHeap first; chunking is #2304"
+ },
  "src/runtime/numpy.ts :: scalarDtype :: const MAX_DIMS = 64; #0": {
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: setDim :: const OBJ_MAXDIMS = 64; #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
  },
  "src/runtime/numpy.ts :: str :: if (shape.length > MAX_DIMS) tooManyDims(shape.length); #0": {
   "class": "none",
@@ -13955,6 +14308,16 @@
   "class": "coverage",
   "owner": "NumPy shim",
   "reason": "string arrays: an operation v1 doesn't have, refused in words (NotImplementedError); not a cap"
+ },
+ "src/runtime/numpy.ts :: toNum :: if (!(n >= -9223372036854775808 && n < (dt.kind === \"u\" && dt.itemsize >= 4 ? 18446744073709551616 : 9223372036854775808))) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: NumPy's own OverflowError for a Python float past a C long, as int() packs it (#2149)"
+ },
+ "src/runtime/numpy.ts :: tooDeep :: return raise(T.ValueError, `setting an array element with a sequence. The requested array would exceed the maximum number of dimension of ${OBJ_MAXDIMS}.`); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "NumPy's own NPY_MAXDIMS = 64 for object and discovered data, its errors and behaviour reproduced (deeper data stays an element or raises NumPy's ValueError): NumPy semantics, not a Sagebrush cap"
  },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",
@@ -13996,6 +14359,11 @@
   "owner": "NumPy shim/runtime memory",
   "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
  },
+ "src/runtime/numpy_linalg.ts ::  :: import { useNd, ndCholesky, ndLu, ndMemoryMax, ndPath, ndRequestWarm, ndScratch, ndWarmState } from \"./nd\"; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "engine/nd's shared memory's declared maximum (4 GiB, 1 GiB or 256 MiB, as much as can be reserved), recorded and reported in np.linalg._kernels(); no limit of ours"
+ },
  "src/runtime/object.ts :: engineLimit :: function engineLimit(message: string): string | undefined { #0": {
   "class": "none",
   "owner": "pyjs runtime",
@@ -14031,15 +14399,15 @@
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
- "src/runtime/object.ts :: toPyExc :: const why = engineLimit(e.message); #0": {
+ "src/runtime/object.ts :: toPyExc :: const why = /^WebAssembly kernel workspace: /.test(e.message) ? e.message : engineLimit(e.message); #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
- "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow|failed to grow memory|WebAssembly\\.\\w+\\(\\): Out of memory/.test(e.message)) { #0": {
+ "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\\.Memory\\.grow|failed to grow memory|WebAssembly\\.\\w+\\(\\): Out of memory|^WebAssembly kernel workspace: /.test(e.message)) { #0": {
   "class": "none",
   "owner": "pyjs runtime",
-  "reason": "translates the JavaScript engine's own allocation failure (also a WebAssembly module's setup out of memory) into a MemoryError naming that engine limit; no limit of ours"
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
  "src/runtime/ops.ts :: bytearrayInplaceRepeat :: if (size > SSIZE_MAX) raise(T.MemoryError); #0": {
   "class": "2",
@@ -14158,6 +14526,36 @@
   },
   "owner": "python (@sagebrush-python)",
   "reason": "2**53 - 1, JavaScript's limit on a typed array's length (ECMAScript ToIndex), checked before allocating: past it a MemoryError, a physical limit of the host (an engine may stop lower, its RangeError then a MemoryError too); not a cap of ours"
+ },
+ "src/runtime/wasm_room.ts ::  :: export const WASM32_MAX_BYTES = 65536 * 65536; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: fixedMax :: const stub = (globalThis as any).__SAGEBRUSH_KERNEL_MAX_BYTES__; #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: const max = fixedMax(declared); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: export function growTo(mem: WebAssembly.Memory, bytes: number, declared = WASM32_MAX_BYTES): void { #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: if (!Number.isSafeInteger(bytes) || bytes > max) { #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
+ },
+ "src/runtime/wasm_room.ts :: growTo :: throw new RangeError(`WebAssembly kernel workspace: needs ${need}, past its memory's maximum of ${max} bytes; ${ADVICE}`); #0": {
+  "class": "none",
+  "owner": "pyjs runtime",
+  "reason": "a WebAssembly kernel memory's own fixed maximum (wasm32's, or engine/nd's declared one) and a refused grow, each a MemoryError naming the workspace, no fallback; no limit of ours (the test stub only lowers it); and the engine's own allocation failures as MemoryErrors"
  },
  "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
   "class": "2",
@@ -14568,7 +14966,7 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
- "web/latex/engine/tikz.mjs :: X :: if (out.length > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of SVG\"); #0": {
+ "web/latex/engine/tikz.mjs :: X :: if (size > TIKZ_LIMITS.SVG_BYTES) fail(\"a picture over \" + TIKZ_LIMITS.SVG_BYTES / 2 ** 20 + \" MiB of rendered output\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -14580,6 +14978,14 @@
   "class": "none",
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
+ },
+ "web/latex/engine/tikz.mjs :: atBorder :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: atom :: if (!Number.isFinite(v)) fail(\"a value too large in \" + JSON.stringify(s)); #0": {
   "class": "1",
@@ -14597,10 +15003,10 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
- "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false }; #0": {
+ "web/latex/engine/tikz.mjs :: base :: op: 1, dop: null, fop: null, arrows: { start: null, end: null }, defaultTip: \"to\", rounded: 0, cap: null, join: null, step: [PT_PER_CM, PT_PER_CM], doDraw: false, doFill: false, #0": {
   "class": "none",
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "matched text that refuses nothing: the line cap's attribute, the path state's cap field, pgfmath's max function"
+  "reason": "matched text that refuses nothing: the path state's cap field"
  },
  "web/latex/engine/tikz.mjs :: checkPt :: if (Math.abs(p[0]) > TIKZ_LIMITS.COORD_MAX || Math.abs(p[1]) > TIKZ_LIMITS.COORD_MAX) fail(\"a point farther than \" + Math.round(TIKZ_LIMITS.COORD_MAX / PT_PER_CM / 100) + \" m\"); #0": {
   "class": "1",
@@ -14703,6 +15109,38 @@
   "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.labelHtml += utf8Len(r.html)) > TIKZ_LIMITS.LABEL_HTML) fail(\"node text past \" + TIKZ_LIMITS.LABEL_HTML / 2 ** 20 + \" MiB of HTML in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if ((this.nodeText += nb) > TIKZ_LIMITS.NODE_TEXT) fail(\"node text past \" + TIKZ_LIMITS.NODE_TEXT / 1024 + \" KiB in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (++this.nodeCount > TIKZ_LIMITS.NODES) fail(\"more than \" + TIKZ_LIMITS.NODES + \" nodes in a picture\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
+ "web/latex/engine/tikz.mjs :: node :: if (nb > TIKZ_LIMITS.LABEL_TEXT) fail(\"a line of a node's text over \" + TIKZ_LIMITS.LABEL_TEXT / 1024 + \" KiB\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
+  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
+ },
  "web/latex/engine/tikz.mjs :: options :: if ((this.optionText += utf8Len(text) + 32) > TIKZ_LIMITS.OPTION_TEXT) fail(\"options and styles past \" + TIKZ_LIMITS.OPTION_TEXT + \" bytes applied in all (styles naming styles many times over?)\"); #0": {
   "class": "1",
   "disposition": {
@@ -14712,14 +15150,6 @@
   "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
  },
  "web/latex/engine/tikz.mjs :: options :: if (depth > TIKZ_LIMITS.STYLE_DEPTH) fail(\"styles naming styles more than \" + TIKZ_LIMITS.STYLE_DEPTH + \" deep (a style that names itself?)\"); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX preview's TikZ (@sagebrush-latex)",
-  "reason": "the LaTeX preview's TikZ pictures (TIKZ_LIMITS): each bound a named problem and a placeholder, never a partial picture or unbounded work; protects the page and its session"
- },
- "web/latex/engine/tikz.mjs :: r :: if (nx + ny > TIKZ_LIMITS.GRID_LINES) fail(\"a grid of more than \" + TIKZ_LIMITS.GRID_LINES + \" lines\"); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -15091,6 +15521,32 @@
   "owner": "the isolated output renderer (@sagebrush-agents-ui)",
   "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
  },
+ "web/space/src/nbroom.ts ::  :: import { cellNames, ELLIPSIS_BUDGET } from \"./pyroom.ts\"; #0": {
+  "class": "none",
+  "owner": "the 3D view's rooms for files of code (@sagebrush-space)",
+  "reason": "names the limits it imports, refusing nothing itself"
+ },
+ "web/space/src/nbroom.ts ::  :: import { checkSpace, utf8Bytes, ROOM_TEXT, LIMITS } from \"./read.ts\"; #0": {
+  "class": "none",
+  "owner": "the 3D view's rooms for files of code (@sagebrush-space)",
+  "reason": "names the limits it imports, refusing nothing itself"
+ },
+ "web/space/src/nbroom.ts :: notebookRoom :: if (all.length > LIMITS.nodes) throw new Error(`it has more than ${LIMITS.nodes} cells`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's rooms for files of code (@sagebrush-space)",
+  "reason": "the 3D view's notebook room: at most as many cells as a space has objects, 1 MiB of code in all and the Sage preparser's budget summed over cells, admitted before any cell is parsed: they protect the page"
+ },
+ "web/space/src/nbroom.ts :: notebookRoom :: if (bytes > ROOM_TEXT || work > ELLIPSIS_BUDGET) throw new Error(\"it's too long to enter here\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's rooms for files of code (@sagebrush-space)",
+  "reason": "the 3D view's notebook room: at most as many cells as a space has objects, 1 MiB of code in all and the Sage preparser's budget summed over cells, admitted before any cell is parsed: they protect the page"
+ },
  "web/space/src/pyroom.ts :: containsDef :: export const ELLIPSIS_BUDGET = 5e7; #0": {
   "class": "1",
   "disposition": {
@@ -15122,6 +15578,62 @@
   },
   "owner": "library chunk fetch",
   "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/sync/e2e-chain.ts :: kept :: const last = this.sql.exec(\"SELECT epoch, hash FROM e2e_keyrings ORDER BY epoch DESC LIMIT 1\").toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: else if (this.kept() + 1 > this.bounds.entries && op !== \"remove\" && op !== \"recover\") throw new SyncError(\"limit\", \"the key chain is at its length bound: only removing a device, recovering or a reset goes on\", { max: this.bounds.entries }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if (!isReset && this.kept() + 1 > this.bounds.entries + this.bounds.reserve) throw new SyncError(\"limit\", \"the key chain is at its length bound\", { max: this.bounds.entries + this.bounds.reserve }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: kept :: if ([...next.devices.values()].filter((d) => d.removed === null).length > E2E.devices) throw new SyncError(\"limit\", \"too many devices\", { max: E2E.devices }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: const all = this.sql.exec(\"SELECT entry FROM e2e_chain WHERE seq >= ? ORDER BY seq LIMIT ?\", from, E2E.page).toArray() as Row[]; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: const r = this.sql.exec(\"SELECT bytes, seq, epoch FROM e2e_wrappers WHERE kind = ? AND rid = ? AND epoch = ? ORDER BY seq DESC LIMIT 1\", kind, id, h.epoch).toArray()[0] as Row | undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
+ },
+ "web/sync/e2e-chain.ts :: stale :: if (live >= E2E.sessions) throw new SyncError(\"limit\", \"too many enrollments at once\", { max: E2E.sessions }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the E2E key chain and enrollment mailbox on the sync server (@sagebrush-auth)",
+  "reason": "E2E key chain and enrollment mailbox host bounds on the account's sync object: entries since the last reset (a reserve for removal and recovery; a reset at any length), current devices, live sessions, a page or lookup. Never membership."
  },
  "web/sync/entries.ts ::  :: bytes: IX_BYTES_MAX, #0": {
   "class": "1",
@@ -15787,6 +16299,275 @@
   "class": "none",
   "owner": "document checkpoints, client (@sagebrush-sync-docs)",
   "reason": "A measurement only: the most a checkpoint decision held at the points between calls, for tests; it refuses nothing."
+ },
+ "web/workspace/space3d.ts ::  :: const NB_WALK = { values: LIMITS.values, depth: LIMITS.depth, string: LIMITS.string }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts ::  :: export const SPACE3D_LIMITS = { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts ::  :: import { LIMITS, checkSpace, jsonSizeWithin, utf8Bytes } from \"../space/src/read.ts\"; #0": {
+  "class": "none",
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "names the limits it imports, refusing nothing itself"
+ },
+ "web/workspace/space3d.ts ::  :: type How = { method: \"readUpTo\"; cap: number } | { method: \"read\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: make :: return e.kind === \"file\" && TEXT.test(e.path) && (e.size ?? 0) <= SPACE3D_LIMITS.lengthBytes; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: make :: }).slice(0, SPACE3D_LIMITS.lengths); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 files of up to 1 MiB) and what the view may then read through it (a file of 4 MiB, per opening 2,000 files and 64 MiB, a path of 4,096), a folder of 50,000 files, a space of 8 MiB shown in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: pyImports :: const names = (m[2] ?? m[3] ?? \"\").replace(/#.*$/gm, \"\").split(\",\").map((s) => s.trim().split(/\\s+/)[0]).filter((s) => s && s !== \"*\" && ok(s)).slice(0, SPACE3D_LIMITS.imports); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: pyImports :: const out: string[][] = [], ok = (n: string) => n.length <= SPACE3D_LIMITS.importName; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: pyImports :: if (m[4]) { for (const name of m[4].split(\",\")) { const mod = name.trim().split(/\\s+/)[0]; if (mod && ok(mod) && out.length < SPACE3D_LIMITS.imports) out.push([mod]); } continue; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: pyImports :: if (out.length >= SPACE3D_LIMITS.imports) break; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: readCapped :: await SPACE3D_TESTING.reading?.(path, 1, { method: \"readUpTo\", cap }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: readCapped :: const readCapped = async (ws: Workspace, path: string, cap: number) => { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: readCapped :: try { return await ws.readUpTo(path, cap); } finally { SPACE3D_TESTING.reading?.(path, -1); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: reply :: const entry = m.path.length <= SPACE3D_LIMITS.path ? allowed.get(m.path) : undefined; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 files of up to 1 MiB) and what the view may then read through it (a file of 4 MiB, per opening 2,000 files and 64 MiB, a path of 4,096), a folder of 50,000 files, a space of 8 MiB shown in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: reply :: if (++reads > SPACE3D_LIMITS.reads) return reply({ error: \"too many files read in this view: close it and open it again\" }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 files of up to 1 MiB) and what the view may then read through it (a file of 4 MiB, per opening 2,000 files and 64 MiB, a path of 4,096), a folder of 50,000 files, a space of 8 MiB shown in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: reply :: if (waiting >= SPACE3D_LIMITS.waiting) return reply({ error: \"too many files asked for at once: try again\" }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: reread :: if ((err as { code?: string }).code !== \"limit\") throw err; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: reread :: return say(`Too large to show (over ${LIMITS.bytes / 2 ** 20} MiB)`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: reread :: try { r = await readCapped(ws, path, LIMITS.bytes); } catch (err) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: send :: if (entries.length > LIMITS.files) { state.textContent = `this folder has more than ${LIMITS.files.toLocaleString(\"en-US\")} files: too many to show`; return; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 files of up to 1 MiB) and what the view may then read through it (a file of 4 MiB, per opening 2,000 files and 64 MiB, a path of 4,096), a folder of 50,000 files, a space of 8 MiB shown in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: serve :: const cap = Math.min(SPACE3D_LIMITS.file, room), over = () => reply({ error: cap < SPACE3D_LIMITS.file ? \"too much read in this view: close it and open it again\" : `it's too large to read here (over ${MiB(cap)})` }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: serve :: const room = SPACE3D_LIMITS.bytes - sent; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: serve :: if (n > cap) return over(); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: serve :: try { jsonSizeWithin(r.content, { ...NB_WALK, bytes: cap }); } catch { return { error: \"this notebook exceeds the 3D view's limits\" }; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: serve :: try { r = await readCapped(ws, entry.path, cap); } catch (err) { if ((err as { code?: string }).code === \"limit\") return over(); throw err; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: ship :: try { checkSpace(s); } catch (err) { state.textContent = `this folder is too large to show: ${(err as Error).message}`; return false; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: worker :: const found = pyImports(t).slice(0, SPACE3D_LIMITS.importsAll - imports); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: worker :: const r = await readCapped(ws, e.path, SPACE3D_LIMITS.lengthBytes); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: worker :: if (/\\.(py|sage)$/i.test(e.path) && imports < SPACE3D_LIMITS.importsAll) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: worker :: if (reserved + SPACE3D_LIMITS.lengthBytes > SPACE3D_LIMITS.lengthsBytes) break; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: worker :: let used = SPACE3D_LIMITS.lengthBytes; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: worker :: reserved += SPACE3D_LIMITS.lengthBytes; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: worker :: reserved -= SPACE3D_LIMITS.lengthBytes - Math.min(used, SPACE3D_LIMITS.lengthBytes); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
+ },
+ "web/workspace/space3d.ts :: worker :: } catch { /* (its contents aren't in this browser, or are too large now: its size will do) */ } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the 3D view's hooks (@sagebrush-space)",
+  "reason": "the 3D view's Open in 3D: what it reads to draw a folder (2,000 entries of 1 MiB, 64 MiB in all, imports kept) and what the view may then read (4 MiB a file; per opening 2,000 files, 64 MiB, 64 waiting), a space of 8 MiB in the Agents chat: they protect the page"
  },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",

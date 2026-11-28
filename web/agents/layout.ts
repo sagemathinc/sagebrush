@@ -2,7 +2,10 @@
 // the two resizable columns (the chat list and the artifact pane; William A1 + A10, the layout plan r3 PR 2).
 // Widths are two CSS variables on body, --sb-side-w and --sb-pane-w, which index.html reads only above 900 px and
 // outside full screen, so the narrow overlay and full screen keep their own layout. Nothing here sets a width.
+// The chat list is the files panel's width (#1808: switching between Files and Agents moves no edge): the same default
+// and bounds, and the same remembered width (workspace/resize.ts FILES_W), which a drag here sets for both.
 import type { Artifact } from "../workspace/agent-chat/events";
+import { FILES_W } from "../workspace/resize";
 
 /** The pane-state classes on body: an artifact shown, and full screen. (A notebook no longer widens its pane: A10.) */
 export function applyPaneClasses(a: Artifact | undefined, fullscreen: boolean) {
@@ -11,7 +14,7 @@ export function applyPaneClasses(a: Artifact | undefined, fullscreen: boolean) {
 }
 
 export const LAYOUT_KEY = "sb-agents-layout-v1";
-const SIDE = { min: 180, max: 480, default: 250 };
+const SIDE = { min: FILES_W.min, max: FILES_W.max, default: FILES_W.def };
 const CHAT_MIN = 420;
 const PANE_MIN = 320;
 const WIDE = 901; // (the narrow overlay is 900 px and below: index.html's @media)
@@ -44,6 +47,40 @@ function readStored(): Stored | null {
   }
 }
 
+/** The files panel's remembered width, read as the files read it (a positive number), or null. */
+function readFilesWidth(): number | null {
+  try {
+    const v = Number(localStorage.getItem(FILES_W.key));
+    return Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+// (the move to one shared width is made once per browser: after it, a missing files width means the files' own reset
+//  (a double-click on their edge removes it), so the chat list takes the default, never this page's older width again)
+const SHARED_KEY = "sagebrush-agents-side-shared";
+function sharedYet(): boolean {
+  try {
+    return localStorage.getItem(SHARED_KEY) === "1";
+  } catch {
+    return true; // (storage unavailable: nothing to move)
+  }
+}
+function markShared() {
+  try {
+    localStorage.setItem(SHARED_KEY, "1");
+  } catch {
+    // (storage unavailable: nothing was moved either)
+  }
+}
+function writeFilesWidth(v: number) {
+  try {
+    localStorage.setItem(FILES_W.key, String(Math.round(v)));
+  } catch {
+    // (storage unavailable or full: this page keeps its width)
+  }
+}
+
 // what the person asked for (null: the default), and what is shown after the clamps
 let want: { side: number | null; pane: number | null } = { side: null, pane: null };
 let shown = { side: SIDE.default, pane: 0, sideMax: SIDE.max, paneMax: 0, collapsed: false, open: false };
@@ -54,8 +91,8 @@ const stats = { applies: 0, writes: 0 };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
-/** The widths for this window: the chat keeps 420 px first, the pane 320, and the sidebar gets what it can (180-480);
- * when 180 + 420 + 320 doesn't fit beside an open pane, the sidebar collapses to the narrow overlay's. */
+/** The widths for this window: the chat keeps 420 px first, the pane 320, and the sidebar gets what it can (200-640);
+ * when 200 + 420 + 320 doesn't fit beside an open pane, the sidebar collapses to the narrow overlay's. */
 function compute() {
   const vw = innerWidth;
   const b = document.body.classList;
@@ -106,14 +143,15 @@ function flush() {
   }
 }
 
-/** Save what is shown: once, at a drag's end or a key's release. */
-function commit() {
+/** Save what is shown: once, at a drag's end or a key's release; the chat list's width for the files too, when it moved. */
+function commit(which: "side" | "pane") {
   stats.writes++;
   try {
     localStorage.setItem(LAYOUT_KEY, JSON.stringify({ side: Math.round(shown.side), pane: Math.round(shown.pane) }));
   } catch {
     // (storage unavailable or full: the layout still works for this page)
   }
+  if (which === "side") writeFilesWidth(shown.side);
 }
 
 let sepSide: HTMLElement | null = null;
@@ -138,7 +176,7 @@ function wire(sep: HTMLElement, which: "side" | "pane") {
       document.body.classList.remove("sb-dragging");
       flush();
       want = { ...want, [which]: which === "side" ? shown.side : shown.pane };
-      commit();
+      commit(which);
     };
     sep.addEventListener("pointermove", move);
     sep.addEventListener("pointerup", end);
@@ -165,7 +203,7 @@ function wire(sep: HTMLElement, which: "side" | "pane") {
   sep.addEventListener("keyup", () => {
     if (!keyed) return;
     keyed = false;
-    commit();
+    commit(which);
   });
 }
 
@@ -174,8 +212,14 @@ export function mountLayout() {
   if (new URLSearchParams(location.search).has("layout-test")) {
     (window as unknown as { __sbLayout: unknown }).__sbLayout = { stats, setFrame: (f: typeof frame) => (frame = f) };
   }
-  const s = readStored();
+  // (the chat list: the files' width; else, the first time only, the one this page kept before they shared it, which
+  //  then becomes theirs; else the default)
+  const s = readStored(), files = readFilesWidth(), first = !sharedYet();
   if (s) want = { side: s.side, pane: s.pane };
+  if (files != null) want.side = files;
+  else if (s && first) writeFilesWidth(s.side);
+  else want.side = null;
+  if (first) markShared();
   sepSide = document.getElementById("sep-side");
   sepPane = document.getElementById("sep-pane");
   if (sepSide) wire(sepSide, "side");

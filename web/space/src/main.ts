@@ -14,8 +14,9 @@ import { drawCode, editor, codeRuns } from "./code.ts";
 import { run, interrupt, sceneObject, SCENE } from "./run.ts";
 import { sizeOf } from "./sizes.ts";
 import { treeRoom, resolveImport } from "./treeroom.ts";
-import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT } from "./read.ts";
+import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
 import { EDIT, keepEdit } from "./keep.ts";
+import { supported as xrSupported } from "../../xr-input.js";
 import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.ts";
 // (the languages whose files are entered: by their names; each parser loaded the first time one of its files is)
 const CODE = { py: "python", sage: "python", js: "js", mjs: "js", cjs: "js", jsx: "js", ts: "js", mts: "js", cts: "js", tsx: "js" };
@@ -40,7 +41,7 @@ const part = <T extends HTMLElement = HTMLElement>(name: string): T => {
 };
 const ui = {
   view: part("view"), panel: part("panel"), title: part("title"), back: part<HTMLButtonElement>("back"), fwd: part<HTMLButtonElement>("fwd"),
-  home: part<HTMLButtonElement>("home"), move: part<HTMLButtonElement>("move"), dims: part<HTMLButtonElement>("dims"), fs: part<HTMLButtonElement>("fs"),
+  home: part<HTMLButtonElement>("home"), move: part<HTMLButtonElement>("move"), dims: part<HTMLButtonElement>("dims"), fs: part<HTMLButtonElement>("fs"), vr: part<HTMLButtonElement>("vr"), ar: part<HTMLButtonElement>("ar"),
   runall: part<HTMLButtonElement>("runall"), theme: part<HTMLButtonElement>("theme"), fold: part<HTMLButtonElement>("fold"), helpbtn: part<HTMLButtonElement>("helpbtn"),
   space: part<HTMLSelectElement>("space"), tour: part<HTMLSelectElement>("tour"), q: part<HTMLInputElement>("q"), results: part<HTMLUListElement>("results"),
   hover: part("hover"), status: part("status"), overlay: part("overlay"), tourpill: part("tourpill"), fade: part("fade"), helpcard: part("helpcard"),
@@ -1075,8 +1076,9 @@ function showOverlay(nd) {
       `<div class="code-edit"></div><p class="hint kept">Your edits and runs here are kept in this browser, on this site.</p><div class="label">Output</div><div class="output">${outputHtml(nd)}</div>` +
       (nd.kind === "plot3d" || nd.scene ? `<p class="hint">A 3D plot is a real object in the space: drag to turn around it. Edit its code and run it to change it.</p>` : "");
   } else {
-    // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes)
-    const pending = nd.src && !nd._full;
+    // (a file whose text is elsewhere (`src`): fetched now, and the drawer drawn again when it comes; not a notebook's
+    //  or a board's, which are read only when entered)
+    const pending = nd.src && !nd._full && nd.doc !== "notebook" && nd.doc !== "board";
     // (only if it is still this object, in this space: ids repeat from room to room)
     const still = () => selected === nd.id && space.nodes.includes(nd) && !ui.overlay.hidden;
     if (pending) fullText(nd).then(() => { if (still()) showOverlay(nd); }, (e) => {
@@ -1244,6 +1246,7 @@ function enterKind(nd) {
   if ((/\.(py|sage)$/.test(p) || (!/\.\w+$/.test(p) && (nd.lang === "python" || nd.lang === "sage"))) && whole) return "python";
   if (codeOf(p) && whole) return codeOf(p);
   if (/\.space\.json$/.test(p) && whole) return "space";
+  if (nd.doc === "notebook" && nd.src) return "notebook";
   return null;
 }
 // (the JS import resolver: set when its module first loads, enterRoom)
@@ -1251,21 +1254,54 @@ let jsResolve = null;
 async function loadResolvers() {
   if (codeOf(String(space?.room?.path ?? "")) === "js" && !jsResolve) jsResolve = (await import("./jsroom.ts")).resolveJs;
 }
-// (a file's whole text: from its `src` (a file of this site), once; the faces drawn again with it)
+// (a file's whole text: from its `src` (a file of this site, or of the person's workspace, which the page that opened
+//  this view reads for it), once; the faces drawn again with it)
 const fetched = new Map();
 async function fullText(nd) {
   if (!nd.src || nd._full) return String(nd.text ?? "");
-  const url = sameSite(nd.src);
-  if (!fetched.has(url.href)) fetched.set(url.href, readText(url));
+  const src = String(nd.src), mine = src.startsWith("workspace:");
+  const key = mine ? src : sameSite(src).href;
+  if (!fetched.has(key)) fetched.set(key, mine ? askPage(decodeURIComponent(src.slice("workspace:".length))) : readText(sameSite(src)));
   let text;
-  try { text = await fetched.get(url.href); } catch (e) { fetched.delete(url.href); throw e; }
+  try { text = await fetched.get(key); } catch (e) { fetched.delete(key); throw e; }
   nd.text = text; nd._full = true;
   const o = objects[space.nodes.indexOf(nd)];
   if (o) { for (const t of o.userData.tex) t?.dispose(); o.userData.tex = []; o.userData.level = -1; }
   return text;
 }
+// (a file of the person's workspace: asked of the page that opened this view (web/workspace/space3d.ts), by its path in
+//  the tree that page sent; the answer is a "space-file", of at most LIMITS.bytes, or the reason it can't be read)
+const asked = new Map<number, { resolve: (t: string) => void; reject: (e: Error) => void }>();
+let askSeq = 0;
+function askPage(path: string): Promise<string> {
+  if (!embedded) return Promise.reject(new Error("only the page that opened this view reads your files"));
+  return new Promise((resolve, reject) => {
+    const id = ++askSeq;
+    asked.set(id, { resolve, reject });
+    window.parent.postMessage({ sagebrush: "space-read", version: 1, id, path }, location.origin);
+    setTimeout(() => { if (asked.delete(id)) reject(new Error("the page didn't answer")); }, 60000);
+  });
+}
+function answered(m) {
+  const a = asked.get(m.id);
+  if (!a) return;
+  asked.delete(m.id);
+  if (typeof m.text !== "string") return a.reject(new Error(String(m.error ?? "couldn't read it").slice(0, 300)));
+  if (utf8Bytes(m.text) > LIMITS.bytes) return a.reject(new Error("it's too large to show here"));
+  a.resolve(m.text);
+}
 async function roomFor(nd, k) {
   if (k === "dir") return checkSpace(treeRoom(space.tree, nd.enter.path));
+  if (k === "notebook") {
+    // (a notebook of the workspace: its cells, as the page sent them)
+    let nb;
+    try { nb = JSON.parse(await fullText(nd)); } catch { throw new Error("it isn't a notebook"); }
+    if (nb?.format !== "sagebrush-notebook-cells" || !Array.isArray(nb.cells)) throw new Error("it isn't a notebook");
+    const { notebookRoom } = await import("./nbroom.ts");
+    const r = notebookRoom(nb, { path: String(nd.path ?? nd.title) });
+    if (space.tree) r.tree = space.tree;
+    return r;
+  }
   if (k === "import") {
     // (through the portal: the imported file's own room, its text read as any file's, from this site)
     const { path, sub } = importTarget(nd), tree = space.tree;
@@ -1340,8 +1376,11 @@ function leaveRoom() {
   const v = k >= 0 ? history[k] : null;
   if (k >= 0) history.length = k;
   future.length = 0;
-  // (given the space itself, load runs to its end at once)
-  load(spaceName, s.space, false, { room: true, P: s.P }).catch(fail);
+  // (the space you come back to is checked again, as any space is, without what drawing it added: its objects' links
+  //  to each other (_in, _out), which load draws anew. Refused (it was changed meanwhile, past the limits), you stay in
+  //  the room you are in)
+  for (const n of Array.isArray(s.space?.nodes) ? s.space.nodes : []) if (n && typeof n === "object") { delete n._in; delete n._out; }
+  load(spaceName, s.space, false, { room: true, P: s.P }).catch((e) => { scopes.push(s); fail(e); });
   xr.roomChanged();
   return v ?? { pos: camera.position.clone(), target: controls.target.clone(), sel: null };
 }
@@ -1805,6 +1844,7 @@ function embed() {
   addEventListener("message", (e) => {
     const m = e.data;
     if (e.source !== window.parent || e.origin !== location.origin || m?.version !== 1) return;
+    if (m.sagebrush === "space-file" && Number.isSafeInteger(m.id)) return answered(m);
     if (m.sagebrush !== "space-load") return;
     const name = String(m.name ?? "space");
     const again = name === current;
@@ -1831,9 +1871,61 @@ async function start() {
 function fail(e) { ui.status.textContent = "couldn't load: " + (e?.message ?? e); }
 start().catch(fail);
 
-// ---------------------------------------------------------------- a headset: none here yet
-// (what the rest of the page asks of one: never presenting)
-const xr = { presenting: false, step(_dt: number) {}, roomChanged() {} };
+// ---------------------------------------------------------------- a headset (xr.ts): Enter VR, Enter AR
+// (offered only where the browser can enter one (web/xr-input.js); its code is loaded then, before any click, so a
+//  click enters at once, as the browser asks of a session; until then, and elsewhere, never presenting)
+let xr: any = { presenting: false, step(_dt: number) {}, roomChanged() {} };
+const xrApi = {
+  renderer, scene, camera, controls, runnable,
+  pickables: () => pickables,
+  select: (nd) => setSelected(nd ? nd.id : null),
+  // (the views the desktop goes to: an object's, and everything's)
+  viewOf: (nd, dist) => viewOf(space.nodes.indexOf(nd), dist),
+  // (a room's view of everything level with its middle: a headset turns you about the vertical only, so from above
+  //  the room would sit low in your view)
+  home: () => { if (!space) return null; const h = homeView(positions); return space.room && positions !== PG ? { ...h, to: h.to.clone().setY(h.toT.y) } : h; },
+  runAll: () => ui.runall.click(),
+  // (tours in a headset: the stop to show, and its narration)
+  tours: () => toursOf(),
+  tourNow: () => (tour ? { title: tour.t.title ?? "Tour", i: tour.i, n: tour.t.steps.length } : null),
+  startTour: (k) => { const t = toursOf()[k]; if (!t) return null; tour = { t, i: -1, space }; return tourStep(1); },
+  tourStep: (d) => tourStep(d),
+  endTour: () => endTour(),
+  run: (nd) => runNode(nd),
+  // (rooms in a headset: what can be entered, entering, and leaving)
+  canEnter: (nd) => !!enterKind(nd),
+  noRoomWhy: (nd) => noRoomWhy(nd),
+  focus: () => focusNode,
+  // (the floor: its mesh, to step along, and its height; at a point, the ground's there: a terrace, or the floor)
+  ground: () => ground,
+  walkable: () => walkable(),
+  floorY: (x, z) => (x === undefined ? floorY : groundAt(x, z)),
+  fullText: (nd) => fullText(nd),
+  linkLabels: (nd) => linkLabels(nd),
+  enter: (nd) => enterRoom(nd),
+  inRoom: () => scopes.length > 0,
+  depth: () => scopes.length,
+  has: (nd) => !!space?.nodes.includes(nd),
+  leave: () => leaveRoom(),
+  glow: (nd, v) => setGlow(nd, v),
+  theme: () => T,
+  changed(on, mode) {
+    ui.vr.textContent = on && mode === "immersive-vr" ? "Exit VR" : "Enter VR";
+    ui.ar.textContent = on && mode === "immersive-ar" ? "Exit AR" : "Enter AR";
+    if (!on) setDeskWalk(deskWalk); else floorMark.visible = false;
+  },
+};
+const xrFail = (e) => (ui.status.textContent = "couldn't start: " + (e?.message ?? e));
+ui.vr.onclick = () => { xr.enter?.("immersive-vr")?.catch(xrFail); };
+ui.ar.onclick = () => { xr.enter?.("immersive-ar")?.catch(xrFail); };
+void (async () => {
+  const [vr, ar] = await Promise.all([xrSupported("immersive-vr"), xrSupported("immersive-ar")]);
+  if (!vr && !ar) return;
+  const { setupXR } = await import("./xr.ts");
+  xr = setupXR(xrApi);
+  ui.vr.hidden = !vr;
+  ui.ar.hidden = !ar;
+})().catch(() => { /* (no headset here: the buttons stay hidden) */ });
 // (walking or flying, as kept)
 setDeskWalk(deskWalk);
 ui.move.onclick = () => setDeskWalk(!deskWalk);
@@ -1842,8 +1934,9 @@ let helpShown = false;
 function showHelp(on) { helpShown = !!on; ui.helpcard.hidden = !helpShown; }
 ui.helpbtn.onclick = () => showHelp(!helpShown);
 ui.helpcard.querySelector<HTMLElement>(".close").onclick = () => showHelp(false);
-let lastTick = performance.now();
+let lastTick = performance.now(), frames = 0;
 function tick(now) {
+  frames++;
   const dt = Math.max(0, Math.min(0.1, (now - lastTick) / 1000));
   lastTick = now;
   if (xr.presenting) xr.step(dt);
@@ -1882,6 +1975,9 @@ window.space3d = {
   get floorLinks() { return floorEdges; },
   get walking() { return deskWalk; },
   get feet() { return feetY(); },
+  // (the headset's, for its tests: presenting, its panel, its rig; and the frames drawn so far)
+  get xr() { return xr; },
+  get frames() { return frames; },
 };
 
 // (the page's API, for an agent driving it and for tests)

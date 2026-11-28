@@ -1,4 +1,4 @@
-// The site's sitemap.xml, robots.txt and docs-index.json: the one owner of them (plan-examples-gallery §3). It builds the pages that
+// The site's sitemap.xml, robots.txt and docs-pages.json: the one owner of them (plan-examples-gallery §3). It builds the pages that
 // have URLs, web/build-articles.ts, web/build-blog.ts, web/build-examples.ts and web/build-docs.ts, from the lists of URLs they return, so no page is in the
 // site without being in the sitemap. Run by web/build.ts when web/site/ is here (or `bun web/build-sitemap.ts`).
 import { writeFileSync } from "node:fs";
@@ -18,11 +18,13 @@ export const NOT_LISTED = /^\/(s|api|auth|c)(\/|@|$)/;
 // fetched; a blocked URL can still be indexed from its links alone)
 export const ROBOTS = `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`;
 
-// The agent's index of the site's doc pages, /docs-index.json: the docs, the articles and the blog, exactly the pages
-// the sitemap lists there. sagebrush-agent's sagebrush_docs reads a page only if it is a member, so what a turn can
-// put in a docs URL is a choice among these and nothing else (#1552; the egress rule S5-S7: no card for a fixed host
-// and a fixed set). Every member is a lowercase slug path; a page whose URL isn't one fails the build here rather than
+// The agent's index of the site's doc pages, /docs-pages.json: the docs, the articles and the blog, exactly the pages
+// the sitemap lists there. (Not /docs-index.json: that address is the Sage function index the page's search loads,
+// copied from web/dist by web/build.ts, and writing the page list there replaced it.) sagebrush-agent's sagebrush_docs
+// reads a page only if it is a member, so what a turn can put in a docs URL is a choice among these and nothing else
+// (#1552; the egress rule S5-S7: no card for a fixed host and a fixed set). Every member is a lowercase slug path; a page whose URL isn't one fails the build here rather than
 // being left out, so the index and the sitemap can't drift apart.
+export const DOCS_PAGES_FILE = "docs-pages.json";
 export const DOCS_INDEX_PREFIX = /^\/(docs|articles|blog)\//;
 export const DOCS_INDEX_PATH = /^\/(docs|articles|blog)\/(?:[a-z0-9][a-z0-9-]{0,79}(?:\/[a-z0-9][a-z0-9-]{0,79}){0,3}\/?)?$/;
 export const DOCS_INDEX_MAX = 1000;
@@ -56,7 +58,7 @@ export async function buildSitemap(o: { out?: string; articles?: () => Url[]; bl
   const urls = [...(o.articles ?? buildArticles)(), ...(o.blog ?? buildBlog)(), ...(await (o.examples ?? buildExamples)(out)), ...(o.docs ?? buildDocs)(out)];
   writeFileSync(join(out, "sitemap.xml"), sitemapXml(urls));
   writeFileSync(join(out, "robots.txt"), ROBOTS);
-  writeFileSync(join(out, "docs-index.json"), docsIndexJson(urls));
+  writeFileSync(join(out, DOCS_PAGES_FILE), docsIndexJson(urls));
   console.log(`sitemap.xml: ${urls.length} URLs`);
   return urls;
 }

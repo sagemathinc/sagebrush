@@ -29,6 +29,7 @@ import { createdRunner } from "../workspace/agent-made";
 import { runVerbsFor } from "../workspace/run-holder";
 import { agentRunsFor } from "../workspace/agent-runs";
 import type { PageRun } from "../workspace/run-verbs";
+import type { SpaceHost } from "../workspace/space3d";
 import { createPermissions } from "../notebook/permissions.js";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
@@ -37,7 +38,7 @@ import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
-import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
+import { AgentLeg, legKey, listComputers, pageLegUrl, removeComputer, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
 import { filesIcon, modeSwitch, answerAgentsLive, agentsTabLive, agentsTabRemembered, releaseAgentsTab, FILES_TAB } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
@@ -49,6 +50,8 @@ import { ownClaudeCommand } from "./own-claude";
 import { workspaceIO } from "./delegate-merge";
 import { toIpynb } from "../notebook/ipynb.js";
 import { mountVersionStamp } from "../version";
+import { ATTACH_COPY, mountAttach } from "./attach";
+import { inGrant } from "../workspace/agent-grant";
 
 // (the build this site serves, under the chat list, for whoever tests it: web/version.ts; first, before anything that
 // waits, so it shows even while the workspace opens; nothing where the site doesn't say)
@@ -58,6 +61,10 @@ void mountVersionStamp(document.getElementById("sbversion"));
 declare const __SB_LATEX__: boolean | undefined;
 declare const __SB_LATEX_HOSTS__: string[];
 const LATEX_URL = new URL("../sagebrush-latex.js", import.meta.url).href;
+// (the 3D view, in builds that have it and on its listed hosts, matched exactly: web/build.ts's SPACE_DEFINE, DEV and
+//  PROD; its code is a chunk of its own, fetched when a .space.json is shown)
+declare const __SB_SPACE__: boolean | undefined;
+declare const __SB_SPACE_HOSTS__: string[];
 
 const STORE = "sagebrush-agents-preview-v1";
 // (the log mirror's cursors, by conversation: local and non-secret, M2)
@@ -248,7 +255,7 @@ const mirror = new Mirror({
   changed: () => {
     renderSidebar();
     renderMirrorSettings();
-    renderHeader(); // (the banner says where the chats are kept)
+    renderHeader(); // (the status's popover says where the chats are kept)
   },
 });
 /** The mirrored conversation shown instead of a thread of this browser's, or null. */
@@ -919,6 +926,19 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     keepFocus();
     return;
   }
+  // (a .space.json, where this build and host offer the 3D view: the viewer in a frame, following the file as the agent
+  //  writes it, and the person's selection written back to it; web/workspace/space3d.ts's mountSpace)
+  if (__SB_SPACE__ && a.path && workspace && __SB_SPACE_HOSTS__.includes(location.hostname) && /\.space\.json$/i.test(a.path)) {
+    const ws = workspace, path = a.path;
+    let m: SpaceHost | null = null, gone = false;
+    h.copy = () => m?.copy() ?? "";
+    h.dispose = async () => { gone = true; await m?.dispose(); };
+    void (import(new URL("../sagebrush-space3d.js", import.meta.url).href) as Promise<typeof import("../workspace/space3d")>).then(
+      (mod) => { if (!gone) m = mod.mountSpace(ws, path, h.el); },
+      (e) => { if (!gone) h.el.replaceChildren(`Couldn't load the 3D view: ${String(e?.message ?? e)}`); });
+    keepFocus();
+    return;
+  }
   // (a .tex, where this host serves the LaTeX editor's page (the build's hosts, as web/latex/boot.ts's latexOn): that
   //  page in a frame, embedded (web/latex page.ts's embed): Run, the PDF, comments and its leave guard, as on the LaTeX
   //  page; mountTexFrame. Elsewhere (the CLI's page) the editor itself, in mountFile)
@@ -1093,7 +1113,10 @@ function mountFile(a: Artifact, box: HTMLElement, saved: HTMLElement): FileHost 
         };
         ta.onscroll = fit;
         // (and again when the field's size changes: a tab shown, full screen, the window)
-        new ResizeObserver(fit).observe(ta);
+        const resized = new ResizeObserver(fit);
+        resized.observe(ta);
+        // (let go with the editor, when the pane lets this file go)
+        destroyEditor = () => resized.disconnect();
         const show = () => {
           // (its label says what it does: no aria-pressed beside it, which would say the opposite)
           toggle.textContent = mode === "edit" ? "View" : "✎ Edit";
@@ -1515,6 +1538,20 @@ function showDraft() {
 //  then the person may have typed)
 draftOf = "";
 showDraft();
+// (an image pasted or dropped into the composer: saved in its chat's folder, its path added to that chat's draft)
+mountAttach({
+  composer: $(".composer"),
+  conversation: () => draftOf || current().id,
+  create: (path, bytes) => (workspace ? workspace.createByPerson(path, { content: bytes }) : Promise.reject(new Error("this browser's workspace isn't open"))),
+  append(conv, line) {
+    // (what is there kept as it is, every space of it; the line after a blank line)
+    const join = (v: string) => (v ? v + (v.endsWith("\n\n") ? "" : v.endsWith("\n") ? "\n" : "\n\n") : "") + line;
+    if (draftOf === conv) { editor.value = join(editor.value); putDraft(conv, editor.value, true); }
+    else putDraft(conv, join(draftsPending.get(conv) ?? readDrafts()[conv] ?? ""), true);
+  },
+  agent: () => (live() && pairing?.grant ? { name: agentName(), reads: (p) => inGrant(p, pairing!.grant!.folders) } : null),
+  toast: (t) => toast(t, 6000),
+});
 // (Delegate, for an agent on this computer that offers it: delegate.ts's tasks, drawn by delegate-ui.ts)
 const delegateTasks = new DelegateTasks({ changed: () => delegateUi?.render() });
 const delegateUi = mountDelegate({
@@ -1814,6 +1851,7 @@ const chatHereSection = chatHere({
   onConnecting(r) { connectingTo = r.name; waitingFor = false; setConn(null); renderHeader(); },
   onWaiting(r) { connectingTo = r.name; waitingFor = true; renderHeader(); },
   onFailed(r, e) { connectingTo = null; waitingFor = false; setConn(runnerBar(r.name, e)); renderHeader(); },
+  remove: (r) => removeComputer(r.remote_id),
 }, () => agentUi);
 
 // A notebook the agent created (the pairing's onCreated): taken at once, as it is created, into the pane of the chat
@@ -2122,7 +2160,7 @@ function whoText(who: HTMLElement, dot: string, name: string, small: string) {
   who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
 }
 
-/** Where the chats are kept, for the banner: "mirrored" only while uploads are actually under way (mirror.ts). */
+/** Where the chats are kept, for the status's popover: "mirrored" only while uploads are actually under way (mirror.ts). */
 function keptWhere() {
   return mirror.keptLine();
 }
@@ -2145,10 +2183,11 @@ function renderHeader() {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
   for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…`;
+  $("#attach-hint").textContent = ATTACH_COPY.help + (live() && pairing?.hello?.features?.includes("workspace.image") ? " " + ATTACH_COPY.sees(agentName()) : "");
   $("#connect").textContent = live() ? "Connected" : "Connect Claude";
   $("#stop").textContent = stopLabel(agentName());
   $("#connect").toggleAttribute("disabled", live());
-  $("#banner").innerHTML = live()
+  $("#who-info").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; ${mirror.uploading() ? "chats are kept in this browser and mirrored to your Sagebrush account" : "chats are kept in this browser"}.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
@@ -2159,6 +2198,27 @@ function renderHeader() {
     : `Preview: the chat is driven by a <b>scripted</b> stand-in for Claude until you connect your own ("Use your own Claude"). ${keptWhere()}`;
 }
 
+// (the status's popover, in place of the banner the page had (#1808: a banner in this mode only pushed everything down
+//  on switching from Files): the status opens it, and a click elsewhere, Escape or the status again closes it)
+{
+  const who = $("#who"), info = $("#who-info");
+  // (under the status, as far left as it fits: kept inside the top bar, so a phone's narrow window never scrolls sideways;
+  //  placed again on a resize while it is open)
+  const place = () => {
+    const room = who.parentElement!.clientWidth;
+    info.style.left = `${Math.max(8, Math.min(who.offsetLeft, room - info.offsetWidth - 8))}px`;
+  };
+  const show = (on: boolean) => {
+    info.hidden = !on;
+    who.setAttribute("aria-expanded", String(on));
+    if (on) place();
+  };
+  who.addEventListener("click", () => show(info.hidden));
+  addEventListener("resize", () => { if (!info.hidden) place(); });
+  addEventListener("pointerdown", (e) => { if (!info.hidden && !who.contains(e.target as Node) && !info.contains(e.target as Node)) show(false); }, true);
+  // (first, and taken: Escape that closes it doesn't also stop a running turn or leave full screen)
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && !info.hidden) { e.preventDefault(); show(false); who.focus(); } }, true);
+}
 renderHeader();
 openArtifact = current().artifacts.at(-1)?.id ?? null;
 mountLayout();

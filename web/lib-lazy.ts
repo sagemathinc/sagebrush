@@ -90,13 +90,23 @@ export function onOfflineMissing(f: (m: OfflineMissing) => void) {
 }
 const ITEM_NAMES: Record<string, string> = { python: "Python library", scientific: "Scientific Python library", sage: "Sage library", matlab: "MATLAB library", magma: "Magma library", modules: "Python module" };
 
+// (a synchronous fetch ends within this, a stalled connection's included: the import that needed it then fails, naming
+// the chunk, and nothing of the group is installed, so the next use tries again; a worker's synchronous request may
+// have a timeout, a page's may not)
+export const SYNC_FETCH_MS = 60_000;
 function fetchSync(url: string): Uint8Array {
   // (in the runner, which has no network, the page fetches it: web/runner)
   if (typeof g.__SAGEBRUSH_FETCH_SYNC__ === "function") return g.__SAGEBRUSH_FETCH_SYNC__(url);
   const x = new XMLHttpRequest();
   x.open("GET", url, false);
   x.responseType = "arraybuffer";
-  x.send();
+  x.timeout = SYNC_FETCH_MS;
+  try {
+    x.send();
+  } catch (e: any) {
+    if (e?.name === "TimeoutError") throw new Error(`no answer within ${SYNC_FETCH_MS / 1000} s`);
+    throw e;
+  }
   if (x.status !== 200) throw Object.assign(new Error(`HTTP ${x.status}`), { status: x.status });
   return new Uint8Array(x.response);
 }

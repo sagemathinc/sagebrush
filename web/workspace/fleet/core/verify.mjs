@@ -22,6 +22,12 @@ const AUTH_MS = 5 * 60_000;
 export const hostFingerprint = (host, signRaw, encRaw) => sha256(concat("sagebrush.fp.v1\nhost\n", host, "\n", signRaw, encRaw));
 /** The full device fingerprint: SHA-256("sagebrush.fp.v1\ndevice\n" + fleet + "\n" + device + "\n" + key). */
 export const deviceFingerprint = (fleet, device, raw) => sha256(concat("sagebrush.fp.v1\ndevice\n", fleet, "\n", device, "\n", raw));
+/**
+ * The full fleet fingerprint: SHA-256("sagebrush.fp.v1\nfleet\n" + fleet + "\n" + SHA-256(the genesis entry's exact
+ * bytes)), the inner hash's 32 raw bytes. It commits to the genesis's signed bytes, so to the fleet's first device and
+ * its recovery key: a new host compares it with the one the person's app shows before it trusts a fleet.
+ */
+export const fleetFingerprint = async (fleet, genesisBytes) => sha256(concat("sagebrush.fp.v1\nfleet\n", fleet, "\n", await sha256(genesisBytes)));
 /** What a person compares: the first 100 bits, 20 base32 characters in groups of 4. */
 export function showFingerprint(full) {
   let bits = 0, acc = 0n, out = "";

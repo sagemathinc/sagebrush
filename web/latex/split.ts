@@ -1,7 +1,7 @@
 // Splitting a large top-level chunk of the renderer's HTML into pieces (plan sbspace r5 §4, in the Worker), so that
 // no single insertion is larger than PIECE_MAX:
 //  - a container (a theorem div.thm, a proof div.proof, a list ol/ul.list, and the other block divs) is split at its
-//    top-level children; each later piece is a COPY of the container (same tag and classes, plus "cont"; no id, no
+//    top-level children, and a child over PIECE_MAX (a theorem's long list) in turn, at most SPLIT_DEPTH deep; each later piece is a COPY of the container (same tag and classes, plus "cont"; no id, no
 //    head), so styles carry over; list items keep their explicit labels (span.lbl: the list CSS has no counters);
 //  - a paragraph div.p is split at the boundaries between its inline runs, each later piece a div.p.cont;
 //  - a table is never split (its columns would misalign): over PIECE_MAX it is a placeholder, with its size;
@@ -16,6 +16,8 @@
 export const PIECE_MAX = 128 * 1024, CHUNK_MAX = 2 * 2 ** 20;
 // (the size aimed for: smaller pieces parse in less time each; PIECE_MAX stays the most any piece may be)
 export const PIECE_TARGET = 32 * 1024;
+// (how many containers deep an element over PIECE_MAX is split in turn: a theorem's list's item's list)
+export const SPLIT_DEPTH = 4;
 const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
 const enc = new TextEncoder();
 export const bytes = (s: string) => enc.encode(s).length;
@@ -89,7 +91,7 @@ function splitText(t: string, max: number): string[] | null {
 
 /** One chunk as pieces, each at most PIECE_MAX bytes (or one placeholder: `tooLarge`, if given, is told why and its
  * size, for latex check). */
-export function splitChunk(h: string, tooLarge?: (why: string, size: number) => void): string[] {
+export function splitChunk(h: string, tooLarge?: (why: string, size: number) => void, depth = 0): string[] {
   const n = bytes(h), w = weight(h);
   // (a placeholder only for what is over a limit: a chunk that fits one piece but can't be split is kept whole, one
   //  piece; and the size said is the one compared with the limit said, the chunk's bytes over CHUNK_MAX, else its
@@ -123,6 +125,13 @@ export function splitChunk(h: string, tooLarge?: (why: string, size: number) => 
     if (!s.startsWith("<")) { const t = splitText(s, PIECE_TARGET - 256); if (!t) return ph("this block is too large to display in the prototype"); parts.push(...t); continue; }
     // (one element over the target: a piece of its own, if it fits the maximum)
     if (b <= PIECE_MAX - 256) { parts.push(s); continue; }
+    // (one element over the maximum, a theorem's long list: split in turn, at most SPLIT_DEPTH containers deep, each
+    //  of its pieces a whole element (a later one a copy of its container, "cont") and a part of this one; one
+    //  placeholder piece means it couldn't be, and the pieces made here are checked against PIECE_MAX below)
+    if (depth < SPLIT_DEPTH) {
+      const sub = splitChunk(s, undefined, depth + 1);
+      if (sub.length > 1) { parts.push(...sub); continue; }
+    }
     return w <= PIECE_MAX ? [h] : ph("this block is too large to display in the prototype");
   }
   const first = o.open, later = contOpen(o.open, o.tag);
@@ -137,4 +146,43 @@ export function splitChunk(h: string, tooLarge?: (why: string, size: number) => 
   flush();
   void para;
   return pieces.every((p) => weight(p) <= PIECE_MAX) ? pieces : ph("this block is too large to display in the prototype");
+}
+
+/** A render's whole size: its chunks' pieces in all, at most `html` bytes and `chunks` chunks (the page's memory). */
+export const RENDER_BOUNDS = { chunks: 20000, html: 16 * 2 ** 20 };
+
+/** A render's chunks as the page's items, within RENDER_BOUNDS: whole chunks in order while they fit, and if any are
+ * left, one more chunk in their place saying where the preview stops (its source line) and why, the chunks before it
+ * fewer if the note needs their room; never part of a chunk. `tooLarge` is told of the shown chunks' placeholders
+ * only; `cut` is where the rest begins. */
+export function boundRender(chunks: string[], chunkPos: number[] | undefined, text: string,
+  tooLarge?: (g: number, why: string, size: number) => void): { items: { g: number; h: string; b: number }[]; groups: number; pos: number[]; cut: { at: number; line: number | null } | null } {
+  const kept: { ps: string[]; bs: number[]; told: [string, number][]; n: number }[] = [];
+  let total = 0, g = 0;
+  for (; g < chunks.length && g < RENDER_BOUNDS.chunks; g++) {
+    const told: [string, number][] = [];
+    const ps = splitChunk(chunks[g], (why, size) => told.push([why, size])), bs = ps.map(bytes), n = bs.reduce((a, b) => a + b, 0);
+    if (total + n > RENDER_BOUNDS.html) break;
+    total += n;
+    kept.push({ ps, bs, told, n });
+  }
+  let note: string | null = null, at = -1, line: number | null = null;
+  if (g < chunks.length) {
+    // (the note in the place of the chunks left: a chunk of its own, within both bounds with the ones before it)
+    const say = (k: number) => {
+      at = typeof chunkPos?.[k] === "number" ? chunkPos[k] : -1;
+      line = null;
+      if (at >= 0) { line = 1; for (let i = text.indexOf("\n"); i !== -1 && i < at; i = text.indexOf("\n", i + 1)) line++; }
+      return '<div class="bounderr">The preview stops here: it shows at most ' + RENDER_BOUNDS.html / 2 ** 20 + " MiB of a document, and the rest" +
+        (line ? ", from line " + line + " of the source on," : "") + " is past that. <code>sagebrush latex render</code> shows all of it.</div>";
+    };
+    note = say(kept.length);
+    while (kept.length && (kept.length + 1 > RENDER_BOUNDS.chunks || total + bytes(note) > RENDER_BOUNDS.html)) { total -= kept.pop()!.n; note = say(kept.length); }
+  }
+  const items: { g: number; h: string; b: number }[] = [];
+  kept.forEach((c, k) => { c.ps.forEach((h, j) => items.push({ g: k, h, b: c.bs[j] })); for (const [why, size] of c.told) tooLarge?.(k, why, size); });
+  if (note === null) return { items, groups: chunks.length, pos: chunkPos || [], cut: null };
+  items.push({ g: kept.length, h: note, b: bytes(note) });
+  const pos = Array.from({ length: kept.length }, (_, k) => (typeof chunkPos?.[k] === "number" ? chunkPos[k] : -1));
+  return { items, groups: kept.length + 1, pos: pos.concat([at]), cut: { at, line } };
 }
