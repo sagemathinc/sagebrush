@@ -13362,6 +13362,16 @@
   "owner": "Sage-mode matrices (shape and exponent checks)",
   "reason": "doctest output: a Python complex keeps Python's refusal with a finite-field matrix; not a cap"
  },
+ "lib/_sage_ffmat.py :: FFMatrix :: sage: cls.__init__ = init; sys._sagebrush_heap_limit = old; A[[0] * 3, :].dimensions() # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show a selection refused before its submatrix is built, and working again"
+ },
+ "lib/_sage_ffmat.py :: FFMatrix :: sage: import sys; old = getattr(sys, \"_sagebrush_heap_limit\", None); sys._sagebrush_heap_limit = 4 * 10**6 # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show a selection refused before its submatrix is built, and working again"
+ },
  "lib/_sage_ffmat.py :: FFMatrix.__rtruediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%s' and '%s'\" % (_sa().parent(o), self.parent())) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
@@ -14906,6 +14916,16 @@
   "class": "none",
   "owner": "modular symbols/runtime memory",
   "reason": "bit-size bounds of the rows about to be computed, reserved against the allowance before the arithmetic (the admission's need, LIMITS L1a), not a limit"
+ },
+ "lib/_sage_modular.py :: DirichletCharacter.__mul__ :: TypeError: unsupported operand parent(s) for *: 'Group of Dirichlet characters modulo 3 with values in Cyclotomic Field of order 2 and degree 1' and 'Group of Dirichlet characters modulo 5 with values in Cyclotomic Field of order 4 and degree 2' #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "Sage's own refusal to multiply characters of different groups; not a size or work limit"
+ },
+ "lib/_sage_modular.py :: DirichletCharacter.__mul__ :: raise TypeError(\"unsupported operand parent(s) for *: '%r' and '%r'\" % (self._G, other._G)) #0": {
+  "class": "none",
+  "owner": "modular forms (Sage mode)",
+  "reason": "Sage's own refusal to multiply characters of different groups; not a size or work limit"
  },
  "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
   "class": "none",

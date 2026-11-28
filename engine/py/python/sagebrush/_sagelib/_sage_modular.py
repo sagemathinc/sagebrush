@@ -119,6 +119,15 @@ def _qfrac(t):
     return Fraction(t)
 
 
+def _weight_arg(k):
+    """A weight as Sage converts it, through ZZ: an integer, or a float, a
+    real, a rational or a string with an integral value; Sage's errors for
+    a non-integral one, NaN or an infinity (never truncated to a different
+    weight)."""
+    from sage_all import ZZ
+    return int(ZZ(k))
+
+
 def _exact_int(x, what):
     """x as an int, refusing a non-integer instead of truncating it."""
     q = _qfrac(x)
@@ -812,6 +821,22 @@ class DirichletCharacter:
         return not self.is_even()
 
     def __mul__(self, other):
+        """The product of two characters of the same group (Sage's TypeError
+        for characters of different groups).
+
+        EXAMPLES::
+
+            sage: DirichletGroup(5).gen() * DirichletGroup(5).gen()
+            Dirichlet character modulo 5 of conductor 5 mapping 2 |--> -1
+            sage: DirichletGroup(3).gen() * DirichletGroup(5).gen()
+            Traceback (most recent call last):
+            ...
+            TypeError: unsupported operand parent(s) for *: 'Group of Dirichlet characters modulo 3 with values in Cyclotomic Field of order 2 and degree 1' and 'Group of Dirichlet characters modulo 5 with values in Cyclotomic Field of order 4 and degree 2'
+        """
+        if not isinstance(other, DirichletCharacter):
+            return NotImplemented
+        if other._G != self._G:
+            raise TypeError("unsupported operand parent(s) for *: '%r' and '%r'" % (self._G, other._G))
         return DirichletCharacter(self._G, [a + b for a, b in zip(self._e, other._e)])
 
     def __pow__(self, n):
@@ -1031,7 +1056,7 @@ class ModularSymbols:
 
     def __init__(self, group=1, weight=2, sign=0, base_ring=None):
         self._N, self._chi = _group_and_char(group)
-        self._k = int(weight)
+        self._k = _weight_arg(weight)
         self._sign = int(sign)
         if self._sign not in (-1, 0, 1):
             raise ValueError("sign must be -1, 0 or 1")
@@ -2399,7 +2424,7 @@ class ModularForms(_QSpace):
 
     def __init__(self, group=1, weight=2, base_ring=None):
         self._N, self._chi = _group_and_char(group)
-        self._k = int(weight)
+        self._k = _weight_arg(weight)
         if self._chi is not None and self._chi.order() == 1:
             self._chi = None
         _check_base_ring(base_ring, self._chi)

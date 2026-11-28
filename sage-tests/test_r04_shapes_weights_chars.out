@@ -1,0 +1,76 @@
+A[:0, :].dimensions() -> (0, 3)
+A[:0, :].right_kernel().dimension() -> 3
+A[:0, 1:3].dimensions() -> (0, 2)
+A[1:1, 0].dimensions() -> (0, 1)
+B[:0, 1:3].right_kernel().dimension() -> 2
+B[1:1, 0].dimensions() -> (0, 1)
+Z4[:0, :].dimensions() -> (0, 2)
+A[[1, 0], :] -> [3 2 1] | [1 2 3]
+A[[1, 0]] -> [3 2 1] | [1 2 3]
+A[[], :].dimensions() -> (0, 3)
+A[[1, 1], :] -> [3 2 1] | [3 2 1]
+A[:, [2, 0]] -> [3 1] | [1 3]
+A[[1], [0, 2]] -> [3 1]
+A[1, [0, 2]] -> [3 1]
+A[[0, 1], 2] -> [3] | [1]
+A[[-1], :] -> [3 2 1]
+A[[2], :] -> IndexError: matrix index out of range
+A[:, [3]] -> IndexError: matrix index out of range
+A[[0.5], :] -> IndexError: row indices must be integers
+A[1, :] -> [3 2 1]
+A[:, 1] -> [2] | [2]
+A[-1, :] -> [3 2 1]
+A[5, :] -> IndexError: matrix index out of range
+A[:, -4] -> IndexError: matrix index out of range
+A[0:5:2, ::-1] -> [3 2 1]
+A[(1, 0), :] -> [3 2 1] | [1 2 3]
+A[[ZZ(1)], :] -> [3 2 1]
+A[[True], :] -> [3 2 1]
+A[1, 2] -> 1
+A[1] -> (3, 2, 1)
+A['a', :] -> TypeError: index must be an integer
+A[1.5, :] -> TypeError: index must be an integer
+A[None, :] -> TypeError: index must be an integer
+A[:, 'a'] -> TypeError: index must be an integer
+A[['a'], :] -> IndexError: row indices must be integers
+A[:, ['a']] -> IndexError: column indices must be integers
+A[range(1, 2), :] -> [3 2 1]
+A[:, range(1)] -> [1] | [3]
+A[range(0), :].dimensions() -> (0, 3)
+A[:, [1.5]] -> IndexError: column indices must be integers
+A[1, 'a'] -> TypeError: index must be an integer
+A['a', 1] -> TypeError: index must be an integer
+A['a'] -> TypeError: index must be an integer
+A[1.5] -> TypeError: index must be an integer
+A[(0, 1), (0,)] -> [1] | [3]
+A[range(2)] -> TypeError: index must be an integer
+A[range(1, 2)] -> TypeError: index must be an integer
+A[(0, 1)] -> 2
+ModularForms(11, QQ(5)/2) -> TypeError: no conversion of this rational to integer
+CuspForms(11, QQ(5)/2) -> TypeError: no conversion of this rational to integer
+ModularSymbols(11, QQ(5)/2) -> TypeError: no conversion of this rational to integer
+ModularForms(11, 2.5) -> TypeError: cannot convert non-integral float to integer
+ModularSymbols(11, 2.5) -> TypeError: cannot convert non-integral float to integer
+ModularForms(11, QQ(7)/3) -> TypeError: no conversion of this rational to integer
+ModularForms(11, QQ(4)/2).dimension() -> 2
+ModularForms(11, 4.0).dimension() -> 4
+ModularSymbols(11, 4.0).dimension() -> 6
+ModularForms(11, int(4)).dimension() -> 4
+ModularSymbols(11, QQ(4)).dimension() -> 6
+CuspForms(11, 2.5) -> TypeError: cannot convert non-integral float to integer
+CuspForms(11, ZZ(4)).dimension() -> 2
+ModularForms(11, RR(2.5)) -> TypeError: Attempt to coerce non-integral RealNumber to Integer
+ModularForms(11, float('nan')) -> ValueError: cannot convert float NaN to integer
+ModularForms(11, float('inf')) -> OverflowError: cannot convert float infinity to integer
+ModularForms(11, RR('nan')) -> TypeError: Attempt to coerce non-integral RealNumber to Integer
+ModularSymbols(11, RR(2.5)) -> TypeError: Attempt to coerce non-integral RealNumber to Integer
+CuspForms(11, RR(4)).dimension() -> 2
+DirichletGroup(3).gen() * DirichletGroup(5).gen() -> TypeError: unsupported operand parent(s) for *: 'Group of Dirichlet characters modulo 3 with values in Cyclotomic Field of order 2 and degree 1' and 'Group of Dirichlet characters modulo 5 with values in Cyclotomic Field of order 4 and degree 2'
+DirichletGroup(5).gen() * DirichletGroup(3).gen() -> TypeError: unsupported operand parent(s) for *: 'Group of Dirichlet characters modulo 5 with values in Cyclotomic Field of order 4 and degree 2' and 'Group of Dirichlet characters modulo 3 with values in Cyclotomic Field of order 2 and degree 1'
+DirichletGroup(4).gen() * DirichletGroup(8).gen(0) -> TypeError: unsupported operand parent(s) for *: 'Group of Dirichlet characters modulo 4 with values in Cyclotomic Field of order 2 and degree 1' and 'Group of Dirichlet characters modulo 8 with values in Cyclotomic Field of order 2 and degree 1'
+DirichletGroup(5).gen() * DirichletGroup(10).gen() -> TypeError: unsupported operand parent(s) for *: 'Group of Dirichlet characters modulo 5 with values in Cyclotomic Field of order 4 and degree 2' and 'Group of Dirichlet characters modulo 10 with values in Cyclotomic Field of order 4 and degree 2'
+DirichletGroup(8).gen(0) * DirichletGroup(12).gen(0) -> TypeError: unsupported operand parent(s) for *: 'Group of Dirichlet characters modulo 8 with values in Cyclotomic Field of order 2 and degree 1' and 'Group of Dirichlet characters modulo 12 with values in Cyclotomic Field of order 2 and degree 1'
+DirichletGroup(5).gen() * DirichletGroup(5).gen() -> Dirichlet character modulo 5 of conductor 5 mapping 2 |--> -1
+DirichletGroup(12).gen(0) * DirichletGroup(12).gen(1) -> Dirichlet character modulo 12 of conductor 12 mapping 7 |--> -1, 5 |--> -1
+chi * 2 -> TypeError
+2 * chi -> TypeError
