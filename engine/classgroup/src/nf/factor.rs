@@ -193,6 +193,28 @@ pub enum FactorError {
     Message(String),
 }
 
+// (the typed error carried up the class group's paths to the engine call:
+// a message converts into it, and it into its message, so a path that
+// keeps String still compiles; only the paths typed end to end keep a
+// refusal typed)
+impl From<String> for FactorError {
+    fn from(m: String) -> Self {
+        FactorError::Message(m)
+    }
+}
+
+impl From<&str> for FactorError {
+    fn from(m: &str) -> Self {
+        FactorError::Message(m.to_string())
+    }
+}
+
+impl From<FactorError> for String {
+    fn from(e: FactorError) -> Self {
+        e.to_string()
+    }
+}
+
 impl std::fmt::Display for FactorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

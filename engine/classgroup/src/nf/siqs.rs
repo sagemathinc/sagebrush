@@ -25,6 +25,7 @@ use crate::arith::{invmod, jacobi, primes_up_to, sqrt_mod};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::{rem_u64, BigInt, BigUint};
+use sagebrush_ledger::EngineError;
 use std::collections::{HashMap, HashSet};
 
 /// SIQS is used for composites of this many bits: below, ECM is as fast;
@@ -47,6 +48,49 @@ const A_PRIME_MAX: f64 = 4000.0;
 /// At most this many values of a per run (a 250-bit n needs about 800):
 /// the set of those used is in memory_bound.  Past it, the sieve gives up.
 const A_MAX: usize = 1 << 14;
+/// The reservation grows in chunks of this many bytes, as relations are
+/// kept: the same input on the same allowance is refused at the same place.
+const CHUNK: u64 = 1 << 20;
+/// The candidates one scan of the sieve hands over at most (a fixed buffer).
+const FOUND_CAP: usize = 4096;
+
+/// The sieve's memory, held with the engine's ledger: every allocation is
+/// charged (an upper bound of its bytes) before it is made, and the
+/// reservation grows in whole chunks when the charges pass it.  Dropping
+/// it, unwinding included, releases everything.
+struct Held {
+    r: sagebrush_ledger::Reservation,
+    used: u64,
+}
+
+impl Held {
+    fn take(&mut self, bytes: u64) -> Result<(), EngineError> {
+        let need = self.used + bytes;
+        if need > self.r.amount() {
+            self.r.grow(WHAT, (need - self.r.amount()).next_multiple_of(CHUNK))?;
+        }
+        self.used = need;
+        Ok(())
+    }
+}
+
+/// The bytes of a hashbrown table for `cap` items of `item` bytes each.
+fn table_bytes(cap: usize, item: usize) -> u64 {
+    let buckets = if cap < 4 { 4 } else if cap < 8 { 8 } else { (cap * 8 / 7).next_power_of_two() };
+    (buckets * (item + 1) + 16 + 64) as u64
+}
+
+/// An upper bound on the heap of a BigInt below 2^(64 limbs).
+fn big_bytes(limbs: usize) -> u64 {
+    16 * limbs as u64 + 64
+}
+
+/// The most columns a relation of an n of `bits` bits has, with s primes
+/// in a: the primes of a, the sign, and at most log2 |g| primes of g, |g|
+/// below m 2^(bits / 2 + 4).
+fn max_cols(bits: u64, s: usize, m: usize) -> usize {
+    s + 1 + (bits / 2) as usize + (m.max(2).ilog2() as usize) + 8
+}
 
 #[derive(Clone, Debug)]
 pub struct Params {
@@ -96,37 +140,55 @@ pub fn params(bits: u64) -> Params {
     row(TABLE[TABLE.len() - 1])
 }
 
-/// An upper bound on the bytes live while n of `bits` bits is sieved and
-/// its matrix solved (for the estimator, nf/cost.rs): the prime table, the
-/// factor base and its roots, the sieve, the relations (PARTIALS_MAX times
-/// as many partial ones) and the matrix.
+/// The bytes reserved before any sieving for an n of `bits` bits (for the
+/// estimator, nf/cost.rs, and the up-front admission): the prime table,
+/// the factor base and its roots, the sieve and its candidate buffer, the
+/// relation slots and the partial relations' table, and one candidate's
+/// and one value of a's working values.  The relations' own heap, the set
+/// of values of a and the matrix are charged as they are made.
 pub fn memory_bound(bits: u64) -> u128 {
     memory_bound_with(bits, &params(bits))
 }
 
 /// memory_bound for the parameters `par`.
 pub fn memory_bound_with(bits: u64, par: &Params) -> u128 {
-    let nfb = par.fb_size.max(40) as u128;
-    let want = nfb + 1 + EXTRA as u128;
-    // the primes of a: kn < 2^(bits + 6), and the largest factor-base
-    // prime is at least the size-th prime, above 4 size
-    let qcap = (2.0 * nfb as f64).min(A_PRIME_MAX);
-    let s = ((bits as f64 + 7.0) / 2.0 * std::f64::consts::LN_2 / qcap.ln()).ceil() as u128 + 3;
-    // the table of primes, if the first bound had to be doubled once
-    let table = 2 * (30 * nfb + 1000);
-    let primes = table + 1 + 16 * super::cost::pi_plus(table as u64) as u128 + 64;
-    let base = nfb * (25 + 9 + 4 * s) + 2 * par.m as u128 + 64;
-    // a relation: t, and its columns (at most s + 1 + log2 |g|, four bytes
-    // each); a combined one has the columns of two
-    let t = 8 * bits.div_ceil(64) as u128 + 64;
-    let cols = 4 * (bits as u128 / 2 + s + 24) + 64;
-    let rels = want * (t + 2 * cols) + PARTIALS_MAX as u128 * want * (t + cols + 160);
-    // the rows' odd columns, then the bits
-    let matrix = want * cols + want * 2 * want.div_ceil(64) * 8;
-    // the values of a used: s indices each, in a hash set of up to twice
-    // as many slots
-    let used = 2 * A_MAX as u128 * (8 * s + 48);
-    primes + base + rels + matrix + used + 4 * nfb + 4096
+    let size = par.fb_size.max(40);
+    let qcap = (2.0 * size as f64).min(A_PRIME_MAX);
+    // (an upper bound on s: kn < 2^(bits + 6))
+    let s = ((bits as f64 + 7.0) / 2.0 * std::f64::consts::LN_2 / qcap.ln()).ceil() as usize + 3;
+    (fb_phase_bytes(size) + fixed_bytes(bits, size, s, par.m.max(1 << 10).next_multiple_of(8))) as u128
+}
+
+/// The factor base's phase: the table of primes up to its first bound (a
+/// byte per integer, and the primes in a vector of u64 that, growing, holds
+/// its old and new blocks at once: three times its count at most) and the
+/// factor base's five vectors.
+fn fb_phase_bytes(size: usize) -> u64 {
+    // (and before it: the multiplier's small table, n and kn)
+    table_phase_bytes(30 * size as u64 + 1000) + 25 * size as u64 + 8192
+}
+
+fn table_phase_bytes(bound: u64) -> u64 {
+    bound + 1 + 24 * super::cost::pi_plus(bound) + 64
+}
+
+/// The structures sieving needs, sized from the factor base (nfb primes),
+/// s primes in a and the half-width m.
+fn fixed_bytes(bits: u64, nfb: usize, s: usize, m: usize) -> u64 {
+    let limbs = (bits as usize + 70).div_ceil(64);
+    let want = nfb + 1 + EXTRA;
+    let roots = 9 * nfb + s * (24 + 4 * nfb);
+    let sieve = 2 * m + 4 * FOUND_CAP;
+    let slots = want * std::mem::size_of::<Rel>() + table_bytes(PARTIALS_MAX * want, std::mem::size_of::<(u64, (BigInt, Vec<u32>))>()) as usize;
+    // one value of a: its primes, gamma, the B_l and a, b, c; one candidate:
+    // x, g, v, t and its columns, grown by pushes and an extension by a
+    // partial's (twice the most a relation has, in a vector that may hold
+    // its old and new blocks at once)
+    let per_a = 64 * s + (s as u64 + 6) as usize * big_bytes(limbs) as usize;
+    let per_candidate = 6 * big_bytes(limbs) as usize + 4 * 6 * max_cols(bits, s, m);
+    // the window, and a dependency's working values
+    let rest = 8 * 40 + 4 * (nfb + 1) + 8 * big_bytes(limbs) as usize;
+    (roots + sieve + slots + per_a + per_candidate + rest + 4096) as u64
 }
 
 #[derive(Clone, Debug, Default)]
@@ -141,6 +203,10 @@ pub struct Stats {
     /// the matrix after removing singletons: rows and columns
     pub matrix: (usize, usize),
     pub dependencies: usize,
+    /// the bytes reserved with the ledger when the run ended (whole chunks)
+    pub reserved: u64,
+    /// the bytes charged against it: the bound the sieve computed
+    pub charged: u64,
 }
 
 /// 2^64 / the golden ratio, mixed into the caller's seed: xorshift's state
@@ -206,9 +272,16 @@ struct Fb {
 }
 
 impl Fb {
-    /// Err is a prime factor of n met on the way.
-    fn new(kn: &BigInt, n: &BigInt, size: usize) -> Result<Fb, u64> {
-        let mut fb = Fb { p: vec![2], t: vec![1], logp: vec![1], pinv: vec![0], plim: vec![0] };
+    /// Ok(Err(p)): p, a prime factor of n met on the way.  The primes'
+    /// table past its first bound is charged to `held` before it is made.
+    fn new(kn: &BigInt, n: &BigInt, size: usize, held: &mut Held) -> Result<Result<Fb, u64>, EngineError> {
+        let cap = size.max(1);
+        let mut fb = Fb { p: Vec::with_capacity(cap), t: Vec::with_capacity(cap), logp: Vec::with_capacity(cap), pinv: Vec::with_capacity(cap), plim: Vec::with_capacity(cap) };
+        fb.p.push(2);
+        fb.t.push(1);
+        fb.logp.push(1);
+        fb.pinv.push(0);
+        fb.plim.push(0);
         let mut bound = 30 * size as u64 + 1000;
         loop {
             for &p in &primes_up_to(bound)[1..] {
@@ -217,7 +290,7 @@ impl Fb {
                 }
                 let r = rem_u64(kn, p);
                 if r == 0 && rem_u64(n, p) == 0 {
-                    return Err(p);
+                    return Ok(Err(p));
                 }
                 if r == 0 || jacobi(r, p) == 1 {
                     let mut inv = p; // Newton: each step doubles the correct bits
@@ -232,9 +305,11 @@ impl Fb {
                 }
             }
             if fb.p.len() >= size {
-                return Ok(fb);
+                return Ok(Ok(fb));
             }
             bound *= 2;
+            // (rare: the first bound held too few primes with kn a square)
+            held.take(table_phase_bytes(bound))?;
         }
     }
 
@@ -333,10 +408,15 @@ fn sieve_pass(sieve: &mut [u8], init: u8, p: &[u32], slog: &[u8], r1: &[u32], r2
     }
 }
 
-/// The indices whose byte reached 128.
+/// The indices whose byte reached 128, from the 8-byte chunk `from` on,
+/// until `found` holds FOUND_CAP of them: the chunk to go on from, or None
+/// at the end.
 #[inline(never)]
-fn scan(sieve: &[u8], found: &mut Vec<u32>) {
-    for (ci, chunk) in sieve.chunks_exact(8).enumerate() {
+fn scan(sieve: &[u8], from: usize, found: &mut Vec<u32>) -> Option<usize> {
+    for (ci, chunk) in sieve.chunks_exact(8).enumerate().skip(from) {
+        if found.len() + 8 > FOUND_CAP {
+            return Some(ci);
+        }
         if u64::from_le_bytes(chunk.try_into().unwrap()) & 0x8080_8080_8080_8080 == 0 {
             continue;
         }
@@ -346,6 +426,7 @@ fn scan(sieve: &[u8], found: &mut Vec<u32>) {
             }
         }
     }
+    None
 }
 
 /// Divides v = |g(x)|, x at sieve index j, by the factor-base primes, and
@@ -404,21 +485,26 @@ pub const WHAT: &str = "the quadratic sieve";
 
 /// siqs with the parameters `par` (and its statistics), its memory_bound
 /// for them reserved the same way.
-pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Result<Option<BigUint>, sagebrush_ledger::EngineError> {
-    // (the bound is far below 2^64 bytes for any n and parameters this
-    // module makes)
-    let _held = sagebrush_ledger::reserve(WHAT, memory_bound_with(n.bits() as u64, par) as u64)?;
-    Ok(sieve(n, par, seed, stats))
+pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Result<Option<BigUint>, EngineError> {
+    #[cfg(test)]
+    tests::ledger_total();
+    // (the factor base's phase up front; the rest charged as it is made)
+    let first = fb_phase_bytes(par.fb_size.max(40));
+    let mut held = Held { r: sagebrush_ledger::reserve(WHAT, first)?, used: first };
+    let r = sieve(n, par, seed, stats, &mut held);
+    stats.reserved = held.r.amount();
+    stats.charged = held.used;
+    r
 }
 
-fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigUint> {
+fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats, held: &mut Held) -> Result<Option<BigUint>, EngineError> {
     let n = BigInt::from(n.clone());
     let k = multiplier(&n);
     stats.multiplier = k;
     let kn = &n * BigInt::from(k);
-    let fb = match Fb::new(&kn, &n, par.fb_size.max(40)) {
+    let fb = match Fb::new(&kn, &n, par.fb_size.max(40), held)? {
         Ok(fb) => fb,
-        Err(p) => return Some(BigUint::from(p)),
+        Err(p) => return Ok(Some(BigUint::from(p))),
     };
     let nfb = fb.p.len();
     let pmax = *fb.p.last().unwrap() as u64;
@@ -446,9 +532,13 @@ fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigU
     let win_hi = (center + 20).min(nfb);
     let window: Vec<usize> = (win_lo..win_hi).filter(|&i| usable(i)).collect();
     if window.len() < s {
-        return None;
+        return Ok(None);
     }
 
+    // every structure sized from the factor base, before any sieving
+    let bits = n.bits() as u64;
+    held.take(fixed_bytes(bits, nfb, s, m))?;
+    let limbs = (bits as usize + 70).div_ceil(64);
     let mut rng = Rng((SEED_MIX ^ seed) | 1);
     let mut used: HashSet<Vec<usize>> = HashSet::new();
     let mut sieve = vec![0u8; len];
@@ -456,10 +546,12 @@ fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigU
     let mut r2 = vec![0u32; nfb];
     let mut slog = vec![0u8; nfb];
     let mut delta = vec![vec![0u32; nfb]; s];
-    let mut found: Vec<u32> = vec![];
-    let mut rels: Vec<Rel> = vec![];
-    let mut partials: HashMap<u64, (BigInt, Vec<u32>)> = HashMap::new();
+    let mut found: Vec<u32> = Vec::with_capacity(FOUND_CAP);
     let want = nfb + 1 + EXTRA;
+    let mut rels: Vec<Rel> = Vec::with_capacity(want);
+    let mut partials: HashMap<u64, (BigInt, Vec<u32>)> = HashMap::with_capacity(PARTIALS_MAX * want);
+    // a kept relation's or partial's own heap: t and its columns
+    let heap = |cols: &Vec<u32>| big_bytes(limbs) + 4 * cols.capacity() as u64;
 
     while rels.len() < want {
         // a new a: s - 1 primes from the window, and the prime that brings
@@ -485,7 +577,15 @@ fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigU
             }
             idx.push(last);
             idx.sort();
-            if used.insert(idx.clone()) {
+            if !used.contains(&idx) {
+                // (the set's entry, and its table if it grows: old and new
+                // tables at once)
+                if used.len() == used.capacity() {
+                    let item = std::mem::size_of::<Vec<usize>>();
+                    held.take(table_bytes(used.capacity(), item) + table_bytes(2 * used.capacity() + 1, item))?;
+                }
+                held.take(8 * s as u64 + 16)?;
+                used.insert(idx.clone());
                 chosen = true;
                 break;
             }
@@ -493,7 +593,7 @@ fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigU
         }
         // (a selection that never completed can leave s - 1 primes in idx)
         if !chosen || used.len() > A_MAX {
-            return None;
+            return Ok(None);
         }
         let q: Vec<u64> = idx.iter().map(|&i| fb.p[i] as u64).collect();
         let a: BigInt = q.iter().map(|&x| BigInt::from(x)).product();
@@ -532,39 +632,49 @@ fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigU
             debug_assert!(((&b * &b - &kn) % &a).is_zero());
 
             sieve_pass(&mut sieve, init, &fb.p[first..], &slog[first..], &r1[first..], &r2[first..]);
-            found.clear();
-            scan(&sieve, &mut found);
-            for &j in &found {
-                stats.candidates += 1;
-                let j = j as u64;
-                let x = BigInt::from(j as i64 - m as i64);
-                let g = (&a * &x + &b * BigInt::from(2)) * &x + &c;
-                let mut cols = a_cols.clone();
-                if g.is_negative() {
-                    cols.push(0);
-                }
-                let mut v = g.abs();
-                trial_divide(&fb, first, &idx, &r1, &r2, &slog, j, &mut v, &mut cols);
-                let t = (&a * &x + &b).mod_floor(&n);
-                cols.shrink_to_fit();
-                if v.is_one() {
-                    stats.full += 1;
-                    rels.push(Rel { t, cols, lp: 0 });
-                } else if let Some(l) = v.to_u64().filter(|&l| l <= lp_max) {
-                    // (prime: every prime factor of g(x) below pmax is
-                    // in the factor base, and l <= pmax^2)
-                    stats.partial += 1;
-                    match partials.get(&l) {
-                        None => {
-                            if partials.len() < PARTIALS_MAX * want {
-                                partials.insert(l, (t, cols));
-                            }
+            let mut next = Some(0);
+            while let Some(from) = next {
+                found.clear();
+                next = scan(&sieve, from, &mut found);
+                for &j in &found {
+                    stats.candidates += 1;
+                    let j = j as u64;
+                    let x = BigInt::from(j as i64 - m as i64);
+                    let g = (&a * &x + &b * BigInt::from(2)) * &x + &c;
+                    let mut cols = a_cols.clone();
+                    if g.is_negative() {
+                        cols.push(0);
+                    }
+                    let mut v = g.abs();
+                    trial_divide(&fb, first, &idx, &r1, &r2, &slog, j, &mut v, &mut cols);
+                    let t = (&a * &x + &b).mod_floor(&n);
+                    cols.shrink_to_fit();
+                    if v.is_one() {
+                        stats.full += 1;
+                        if rels.len() < want {
+                            held.take(heap(&cols))?;
+                            rels.push(Rel { t, cols, lp: 0 });
                         }
-                        Some((t0, cols0)) => {
-                            stats.combined += 1;
-                            cols.extend_from_slice(cols0);
-                            cols.shrink_to_fit();
-                            rels.push(Rel { t: (t * t0).mod_floor(&n), cols, lp: l });
+                    } else if let Some(l) = v.to_u64().filter(|&l| l <= lp_max) {
+                        // (prime: every prime factor of g(x) below pmax is
+                        // in the factor base, and l <= pmax^2)
+                        stats.partial += 1;
+                        match partials.get(&l) {
+                            None => {
+                                if partials.len() < PARTIALS_MAX * want {
+                                    held.take(heap(&cols))?;
+                                    partials.insert(l, (t, cols));
+                                }
+                            }
+                            Some((t0, cols0)) => {
+                                stats.combined += 1;
+                                if rels.len() < want {
+                                    cols.extend_from_slice(cols0);
+                                    cols.shrink_to_fit();
+                                    held.take(heap(&cols))?;
+                                    rels.push(Rel { t: (t * t0).mod_floor(&n), cols, lp: l });
+                                }
+                            }
                         }
                     }
                 }
@@ -575,7 +685,7 @@ fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigU
         }
     }
 
-    let deps = dependencies(&rels, nfb + 1, stats);
+    let deps = dependencies(&rels, nfb + 1, stats, held)?;
     for dep in deps {
         sagebrush_interrupt::check_coarse();
         let (mut x, mut y) = (BigInt::one(), BigInt::one());
@@ -600,24 +710,29 @@ fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigU
         for d in [&x - &y, &x + &y] {
             let g = d.gcd(&n);
             if !g.is_one() && g != n {
-                return g.to_biguint();
+                return Ok(g.to_biguint());
             }
         }
     }
-    None
+    Ok(None)
 }
 
 /// Sets of relations whose exponent vectors sum to zero mod 2: relations
 /// holding the only occurrence of a column are dropped, then dense Gaussian
 /// elimination with a record of the rows combined.
-fn dependencies(rels: &[Rel], ncols: usize, stats: &mut Stats) -> Vec<Vec<usize>> {
+fn dependencies(rels: &[Rel], ncols: usize, stats: &mut Stats, held: &mut Held) -> Result<Vec<Vec<usize>>, EngineError> {
+    // (each structure charged before it is made: the rows' odd columns,
+    // the weights and maps, the matrix, then the dependencies found)
+    let nrel = rels.len();
+    let odd_bytes: u64 = rels.iter().map(|r| 4 * r.cols.len() as u64).sum();
+    held.take(24 * nrel as u64 + odd_bytes + 4 * ncols as u64 + nrel as u64 + 8 * ncols as u64 + 24 * nrel as u64 + 256)?;
     // each relation's columns of odd exponent
     let rows: Vec<Vec<u32>> = rels
         .iter()
         .map(|r| {
             let mut c = r.cols.clone();
             c.sort_unstable();
-            let mut odd = vec![];
+            let mut odd = Vec::with_capacity(c.len());
             for g in c.chunk_by(|x, y| x == y) {
                 if g.len() % 2 == 1 {
                     odd.push(g[0]);
@@ -663,6 +778,7 @@ fn dependencies(rels: &[Rel], ncols: usize, stats: &mut Stats) -> Vec<Vec<usize>
     // row r: nc column bits, then nr record bits
     let wc = nc.div_ceil(64);
     let stride = wc + nr.div_ceil(64);
+    held.take(8 * (nr * stride) as u64)?;
     let mut mat = vec![0u64; nr * stride];
     for (r, &ri) in keep.iter().enumerate() {
         for &c in &rows[ri] {
@@ -685,6 +801,8 @@ fn dependencies(rels: &[Rel], ncols: usize, stats: &mut Stats) -> Vec<Vec<usize>
         rank += 1;
     }
     // the rows below the rank are zero: their records are dependencies
+    let entries: u64 = (rank..nr).map(|r| mat[r * stride + wc..(r + 1) * stride].iter().map(|w| w.count_ones() as u64).sum::<u64>()).sum();
+    held.take(24 * (nr - rank) as u64 + 3 * 8 * entries + 24 * (nr - rank) as u64)?;
     let deps: Vec<Vec<usize>> = (rank..nr)
         .map(|r| {
             let rec = &mat[r * stride + wc..(r + 1) * stride];
@@ -692,12 +810,24 @@ fn dependencies(rels: &[Rel], ncols: usize, stats: &mut Stats) -> Vec<Vec<usize>
         })
         .collect();
     stats.dependencies = deps.len();
-    deps
+    Ok(deps)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// The ledger's total for this crate's test binary, set once: an
+    /// explicit 16 GiB, so the tests' concurrent sieves are admitted as a
+    /// machine with that memory would admit them (no host sets one here;
+    /// the nominal total is a quarter of that).  Tests of a refusal set
+    /// their own, in a test binary of their own.
+    pub(crate) fn ledger_total() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            sagebrush_ledger::set_total(Some(sagebrush_ledger::Total { bytes: 16 << 30, status: sagebrush_ledger::TotalStatus::Observed, joint: false, uncertified: false }));
+        });
+    }
 
     fn check(p: &str, q: &str) {
         let (p, q): (BigUint, BigUint) = (p.parse().unwrap(), q.parse().unwrap());
@@ -734,7 +864,9 @@ mod tests {
         let k = multiplier(&n);
         assert!(k % 2 == 1 && k < 48);
         let kn = &n * BigInt::from(k);
-        let fb = Fb::new(&kn, &n, 200).unwrap();
+        ledger_total();
+        let mut held = Held { r: sagebrush_ledger::reserve(WHAT, 0).unwrap(), used: 0 };
+        let fb = Fb::new(&kn, &n, 200, &mut held).unwrap().unwrap();
         assert_eq!(fb.p.len(), 200);
         for i in 1..fb.p.len() {
             let p = fb.p[i] as u64;
@@ -768,7 +900,9 @@ mod tests {
         // columns 1, 2, 3: rows {1,2}, {2,3}, {1,3}, {1,1} and a singleton {4}
         let rel = |cols: &[u32]| Rel { t: BigInt::one(), cols: cols.to_vec(), lp: 0 };
         let rels = vec![rel(&[1, 2]), rel(&[2, 3]), rel(&[1, 3]), rel(&[1, 1]), rel(&[4, 1])];
-        let deps = dependencies(&rels, 5, &mut Stats::default());
+        ledger_total();
+        let mut held = Held { r: sagebrush_ledger::reserve(WHAT, 0).unwrap(), used: 0 };
+        let deps = dependencies(&rels, 5, &mut Stats::default(), &mut held).unwrap();
         assert_eq!(deps.len(), 2);
         for d in &deps {
             let mut e = [0u32; 5];

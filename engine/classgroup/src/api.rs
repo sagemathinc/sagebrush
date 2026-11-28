@@ -68,7 +68,7 @@ fn monic(f: &[BigInt]) -> Result<(), String> {
     Ok(())
 }
 
-pub fn nf_data(f: &[BigInt]) -> Result<NfData, String> {
+pub fn nf_data(f: &[BigInt]) -> Result<NfData, crate::nf::factor::FactorError> {
     monic(f)?;
     let (o, _, assumed_primes) = crate::nf::order::maximal_order_assuming(f)?;
     let disc = o.disc();
@@ -199,14 +199,14 @@ fn small_generator(o: &Order, x: &[BigInt], p: u64) -> (Vec<BigInt>, BigInt) {
 }
 
 /// The prime ideals above p with their ramification and residue degrees.
-pub fn primes_above(f: &[BigInt], p: u64) -> Result<Vec<PrimeData>, String> {
+pub fn primes_above(f: &[BigInt], p: u64) -> Result<Vec<PrimeData>, crate::nf::factor::FactorError> {
     monic(f)?;
     if !crate::relations::is_prime_u64(p) {
-        return Err(format!("{} is not prime", p));
+        return Err(format!("{} is not prime", p).into());
     }
     // The modular factorization accepts only p < 2^32; refuse before calling it.
     if p >= 1 << 32 {
-        return Err(format!("primes above p >= 2^32 are not supported (p = {})", p));
+        return Err(format!("primes above p >= 2^32 are not supported (p = {})", p).into());
     }
     let (o, _, assumed_primes) = crate::nf::order::maximal_order_assuming(f)?;
     let dk = o.disc();
@@ -306,7 +306,7 @@ fn regulator_decimal(value: &BigInt, precision: u32, digits: usize) -> String {
     if precision == 0 { "1".to_string() } else { fixed_to_decimal(value, precision, digits) }
 }
 
-pub fn bnf(f: &[BigInt]) -> Result<BnfData, String> {
+pub fn bnf(f: &[BigInt]) -> Result<BnfData, crate::nf::factor::FactorError> {
     monic(f)?;
     if f.len() == 2 {
         return Ok(BnfData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2, w_proven: true, certified: true, assumed_primes: vec![] });
@@ -344,7 +344,7 @@ pub struct BnfProofData {
 /// no limit; Limits::CALIBRATED gives the former ones); an error starting
 /// with nf::proof::REFUSED is a refusal
 /// (a bound beyond the limits, said by how much), not a failure.
-pub fn bnf_certify(f: &[BigInt], norm_max: Option<u64>, index_max: Option<u64>) -> Result<BnfProofData, String> {
+pub fn bnf_certify(f: &[BigInt], norm_max: Option<u64>, index_max: Option<u64>) -> Result<BnfProofData, crate::nf::factor::FactorError> {
     monic(f)?;
     if f.len() == 2 {
         return Ok(BnfProofData { degree: 1, r1: 1, r2: 0, disc: BigInt::one(), h: BigInt::one(), cyc: vec![], regulator: "1".into(), w: 2,
@@ -370,7 +370,7 @@ pub struct RelationData {
     pub elems: Vec<(Vec<BigInt>, BigInt)>,
 }
 
-pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String> {
+pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, crate::nf::factor::FactorError> {
     monic(f)?;
     if f.len() < 3 {
         return Err("the degree must be at least 2".into());

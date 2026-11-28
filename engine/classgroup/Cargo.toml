@@ -16,6 +16,8 @@ sagebrush-poly = { path = "../poly" }
 sagebrush-arith = { path = "../arith", default-features = false }
 
 [dev-dependencies]
+# (tests only: a fake usage row, so a refusal mid-run comes at a fixed place)
+sagebrush-ledger = { path = "../ledger", features = ["test-hooks"] }
 # (the LLL benchmark examples drive the unbudgeted L^2 entries)
 sagebrush-poly = { path = "../poly", features = ["bench"] }
 
