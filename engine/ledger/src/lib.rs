@@ -867,7 +867,7 @@ impl Reservation {
     /// reservation's (the test-only audit attributes them; a no-op
     /// otherwise).
     pub fn scope(&self) -> Scope {
-        Scope::enter()
+        Scope::enter_with(self.amount)
     }
 }
 
@@ -884,6 +884,9 @@ impl Drop for Reservation {
 
 thread_local! {
     pub(crate) static COVER: Cell<u32> = const { Cell::new(0) };
+    // (the innermost reservation scope: its amount, and the audit's live bytes when it began; u64::MAX: a scope with
+    // no amount of its own, a span's, a fence's or a resident's.  The test-only audit's per-scope check reads it.)
+    pub(crate) static SCOPE_TOP: Cell<(u64, u64)> = const { Cell::new((u64::MAX, 0)) };
 }
 
 /// A coverage scope: allocations made on this thread while it lives belong
@@ -900,17 +903,41 @@ thread_local! {
 /// fn sync<T: Sync>() {}
 /// sync::<sagebrush_ledger::Scope>();
 /// ```
-pub struct Scope(ThreadBound);
+pub struct Scope(ThreadBound, (u64, u64), (u64, u64));
 
 impl Scope {
     pub fn enter() -> Scope {
+        Scope::enter_with(u64::MAX)
+    }
+
+    /// A reservation's scope: its allocations are this reservation's, of
+    /// `amount` bytes (the audit's per-scope check).
+    fn enter_with(amount: u64) -> Scope {
         COVER.with(|c| c.set(c.get() + 1));
-        Scope(ThreadBound::default())
+        #[cfg(feature = "ledger-audit")]
+        let live = audit::live();
+        #[cfg(not(feature = "ledger-audit"))]
+        let live = 0;
+        let prev = SCOPE_TOP.with(|t| t.replace((amount, live)));
+        Scope(ThreadBound::default(), prev, (amount, live))
     }
 }
 
 impl Drop for Scope {
+    /// The enclosing scope resumes, its own: what this scope's allocations
+    /// still hold is this scope's (its own reservation's, or a span's,
+    /// fence's or resident's), so the enclosing scope's start moves past it,
+    /// and its check counts only its own growth.
     fn drop(&mut self) {
+        SCOPE_TOP.with(|t| {
+            // (a scope nested in this one moved its start on, never back)
+            debug_assert!(t.get().0 == self.2 .0 && t.get().1 >= self.2 .1, "scopes end in the reverse order they began");
+            #[cfg(feature = "ledger-audit")]
+            let held = audit::live().saturating_sub(self.2 .1);
+            #[cfg(not(feature = "ledger-audit"))]
+            let held = 0;
+            t.set((self.1 .0, self.1 .1.saturating_add(held)))
+        });
         COVER.with(|c| c.set(c.get() - 1));
     }
 }

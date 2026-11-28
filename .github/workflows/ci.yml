@@ -1544,6 +1544,11 @@ jobs:
         run: rm -f engine/target/tmp/smith-estimate-rows.txt
       - working-directory: engine
         run: cargo test --workspace --exclude sagebrush-flint --exclude sagebrush-oracle
+      # (the number-field order's memory under the ledger's auditing allocator: every allocation reserved
+      # first, transients included; the test file runs nothing without its feature)
+      - name: the number-field order's memory, audited (feature ledger-audit)
+        working-directory: engine
+        run: cargo test -p sagebrush-classgroup --features ledger-audit --test nf_order_audit
       # The report, pass or fail: its rows per corpus and seed in the job summary, the file
       # itself as an artifact.  Report-only: a missing report (the test isn't on this branch)
       # is a line in the summary, never a failure.

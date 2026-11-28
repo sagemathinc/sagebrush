@@ -18,14 +18,15 @@ pub(super) fn prepare_field(f: &[BigInt], extra: &[u64], config: &BnfConfig, t0:
     // a T2-reduced basis: the f64 work below needs a well-scaled one
     let order = crate::nf::embed::reduce_order(&order)?;
     let n = order.n;
-    let discriminant = order.disc();
-    let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &discriminant).abs());
+    let discriminant = order.disc()?;
+    let disc_f = crate::nf::order::equation_disc(f)?;
+    let index = num_integer::Roots::sqrt(&(&disc_f / &discriminant).abs());
     let embeddings = Embeddings::new(&order)?;
     let (r1, r2) = (embeddings.r1, embeddings.r2);
     // roots of unity: certified (api::roots_of_unity: candidates verified
     // exactly, completeness from residue fields), else a lower bound, and
     // the result records this separately; the analytic lower bound uses w
-    let (w, w_proven) = crate::api::roots_of_unity(&order, &embeddings);
+    let (w, w_proven) = crate::api::roots_of_unity(&order, &embeddings, &disc_f);
     // factor base: the prime ideals of norm < T, with T from Grenie and
     // Molteni's algorithm (nf/grh.rs), at most the uniform 4 log^2 |d_K|
     let log_discriminant = discriminant.to_f64().unwrap().abs().ln();

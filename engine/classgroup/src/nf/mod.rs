@@ -8,6 +8,7 @@ pub mod certify;
 pub mod cost;
 pub mod factor;
 pub mod grh;
+pub mod mem;
 pub mod order;
 pub mod prime;
 pub mod proof;

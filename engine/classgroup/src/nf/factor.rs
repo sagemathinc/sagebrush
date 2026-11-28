@@ -173,10 +173,7 @@ fn split(n: &BigInt) -> Result<Option<BigInt>, FactorError> {
             return Ok(Some(BigInt::from(d)));
         }
         // (a refused reservation is the error: memory never picks the route)
-        let d = super::siqs::siqs(&nu, 1).map_err(|e| match e {
-            sagebrush_ledger::EngineError::Memory(r) => FactorError::Memory(r),
-            e => FactorError::Message(e.to_string()),
-        })?;
+        let d = super::siqs::siqs(&nu, 1).map_err(FactorError::from)?;
         if let Some(d) = d {
             return Ok(Some(BigInt::from(d)));
         }
@@ -197,6 +194,16 @@ pub enum FactorError {
 // a message converts into it, and it into its message, so a path that
 // keeps String still compiles; only the paths typed end to end keep a
 // refusal typed)
+// (the ledger's typed refusal stays typed; another engine error is its message)
+impl From<sagebrush_ledger::EngineError> for FactorError {
+    fn from(e: sagebrush_ledger::EngineError) -> Self {
+        match e {
+            sagebrush_ledger::EngineError::Memory(r) => FactorError::Memory(r),
+            e => FactorError::Message(e.to_string()),
+        }
+    }
+}
+
 impl From<String> for FactorError {
     fn from(m: String) -> Self {
         FactorError::Message(m)

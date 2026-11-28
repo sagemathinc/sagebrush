@@ -185,7 +185,15 @@ fn to_fp(x: &[BigInt], p: u64) -> Vec<u64> {
 pub fn decompose_general(o: &Order, p: u64) -> Result<Vec<PrimeIdeal>, String> {
     let n = o.n;
     let bp = BigInt::from(p);
-    let mut todo = vec![o.radical(&bp)];
+    // (the radical's memory reserved first, as Round 2's: A16)
+    let rs = super::mem::scratch(o.radical_bytes(&bp)).map_err(String::from)?;
+    let rad = {
+        let _s = rs.scope();
+        o.radical(&bp)
+    };
+    let _kept = super::mem::scratch(super::mem::zmat(&rad)).map_err(String::from)?;
+    drop(rs);
+    let mut todo = vec![rad];
     let mut found: Vec<(ZMat, u32)> = vec![];
     let mut rng = 0x2545_F491_4F6C_DD1Du64 ^ p;
     while let Some(j) = todo.pop() {
@@ -466,7 +474,7 @@ mod tests {
         ];
         for &(f, p, want) in cases {
             let (o, _) = maximal_order(&poly(f)).unwrap();
-            let dk = o.disc();
+            let dk = o.disc().unwrap();
             let mut got: Vec<(u32, u32)> = decompose(&o, &dk, p).unwrap().iter().map(|q| (q.e, q.f)).collect();
             got.sort();
             assert_eq!(got, want, "{:?} at {}", f, p);
@@ -481,7 +489,7 @@ mod tests {
         let polys: &[&[i64]] = &[&[8, -2, 1, 1], &[-5, 0, 0, 0, 1], &[1, 1, 2, -1, 1], &[-2, 0, 0, 0, 0, 1], &[3, 1, 0, 2, 0, 1], &[-1, 3, 0, 0, 0, 0, 1]];
         for f in polys {
             let (o, _) = maximal_order(&poly(f)).unwrap();
-            let dk = o.disc();
+            let dk = o.disc().unwrap();
             let n = o.n;
             for p in [2u64, 3, 5, 7] {
                 let mut all = decompose(&o, &dk, p).unwrap();
@@ -503,7 +511,7 @@ mod tests {
     #[test]
     fn valuations_match_norms() {
         let (o, _) = maximal_order(&poly(&[-5, 0, 0, 0, 1])).unwrap();
-        let dk = o.disc();
+        let dk = o.disc().unwrap();
         for p in [2u64, 3, 5, 7, 11, 29] {
             let ps = decompose(&o, &dk, p).unwrap();
             for x in [vec![1, 1, 0, 0], vec![3, 0, 2, 1], vec![10, -4, 1, 7], vec![2, 0, 0, 0]] {
@@ -526,7 +534,7 @@ mod tests {
         let polys: &[&[i64]] = &[&[-5, 0, 0, 0, 1], &[1, 1, 2, -1, 1], &[-2, 0, 0, 0, 0, 1], &[3, 1, 0, 2, 0, 1], &[8, -2, 1, 1], &[-1, 3, 0, 0, 0, 0, 1]];
         for f in polys {
             let (o, _) = maximal_order(&poly(f)).unwrap();
-            let dk = o.disc();
+            let dk = o.disc().unwrap();
             for p in [2u64, 3, 5, 7, 11, 13] {
                 let a = decompose(&o, &dk, p).unwrap();
                 let b = decompose_general(&o, p).unwrap();

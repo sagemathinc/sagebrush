@@ -15,7 +15,13 @@ num-traits = "0.2"
 sagebrush-poly = { path = "../poly" }
 sagebrush-arith = { path = "../arith", default-features = false }
 
+[features]
+# (tests and CI only: the memory ledger's auditing allocator, tests/nf_order_audit.rs)
+ledger-audit = ["sagebrush-ledger/ledger-audit"]
+
 [dev-dependencies]
+# (tests only: Stop traced and armed at a chosen check, tests/nf_order_stop.rs)
+sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
 # (tests only: a fake usage row, so a refusal mid-run comes at a fixed place)
 sagebrush-ledger = { path = "../ledger", features = ["test-hooks"] }
 # (the LLL benchmark examples drive the unbudgeted L^2 entries)

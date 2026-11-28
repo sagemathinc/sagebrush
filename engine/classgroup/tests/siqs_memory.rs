@@ -61,8 +61,25 @@ fn the_sieve_runs_only_when_its_memory_is_admitted() {
     }
     assert!(factor(&BigInt::from(n.clone())).unwrap_err().starts_with(WHAT));
     // the maximal order of x^2 - n factors its discriminant 4n, and the
-    // class group's proof starts there: each gives the refusal typed
+    // class group's proof starts there: each gives the refusal typed (on
+    // this total, below the process's own usage, the equation order's own
+    // reservation, made before the discriminant is factored, or the
+    // sieve's; the fake usage row below fixes which)
     let f = vec![-BigInt::from(n.clone()), BigInt::from(0), BigInt::from(1)];
+    let either = |what: &str| what == WHAT || what == sagebrush_classgroup::nf::mem::WHAT;
+    match maximal_order(&f) {
+        Err(FactorError::Memory(r)) => assert!(either(&r.what), "{}", r.what),
+        other => panic!("maximal_order: {:?}", other.map(|_| ())),
+    }
+    match certify(&f, &Limits::default()) {
+        Err(FactorError::Memory(r)) => assert!(either(&r.what), "{}", r.what),
+        other => panic!("certify: {:?}", other.map(|_| ())),
+    }
+    assert_eq!(outstanding_bytes(), before);
+    // with a share that admits the order (a few KB at degree 2) and not the
+    // sieve's factor base phase: the sieve's refusal, typed through both
+    hooks::set_fake_usage(Some((0, None)));
+    total(admitting(24 << 10));
     match maximal_order(&f) {
         Err(FactorError::Memory(r)) => assert_eq!(r.what, WHAT),
         other => panic!("maximal_order: {:?}", other.map(|_| ())),
@@ -71,6 +88,7 @@ fn the_sieve_runs_only_when_its_memory_is_admitted() {
         Err(FactorError::Memory(r)) => assert_eq!(r.what, WHAT),
         other => panic!("certify: {:?}", other.map(|_| ())),
     }
+    hooks::set_fake_usage(None);
     assert_eq!(outstanding_bytes(), before);
 
     // mid-run: the share admits the up-front bound and one chunk, which a

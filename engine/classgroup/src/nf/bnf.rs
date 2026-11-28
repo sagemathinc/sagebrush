@@ -384,8 +384,8 @@ fn prime_norms(split: &[(u64, Vec<(u32, u32)>)], bound: f64) -> Vec<u64> {
 /// generate the class group of Q[x]/(f).
 pub fn class_group_generator_bound(f: &[BigInt]) -> Result<(f64, f64), String> {
     let (order, _) = maximal_order(f)?;
-    let discriminant = order.disc();
-    let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &discriminant).abs());
+    let discriminant = order.disc()?;
+    let index = num_integer::Roots::sqrt(&(super::order::equation_disc(f)? / &discriminant).abs());
     let r1 = Embeddings::new(&order)?.r1;
     let uniform_bound = super::grh::uniform_bound(&discriminant);
     let split = splitting(&order, &discriminant, &index, uniform_bound as u64);
@@ -395,8 +395,8 @@ pub fn class_group_generator_bound(f: &[BigInt]) -> Result<(f64, f64), String> {
 /// Belabas, Diaz y Diaz and Friedman's one-step bound, for comparison.
 pub fn one_step_generator_bound(f: &[BigInt]) -> Result<f64, String> {
     let (order, _) = maximal_order(f)?;
-    let discriminant = order.disc();
-    let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &discriminant).abs());
+    let discriminant = order.disc()?;
+    let index = num_integer::Roots::sqrt(&(super::order::equation_disc(f)? / &discriminant).abs());
     let r1 = Embeddings::new(&order)?.r1;
     let log_discriminant = discriminant.to_f64().unwrap().abs().ln();
     let uniform_bound = super::grh::uniform_bound(&discriminant);
@@ -412,7 +412,8 @@ pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), crate::nf::factor::FactorE
 /// the factor base and the elements (order coordinates) with those
 /// factorizations. Once the analytic certificate holds (h R against a
 /// proven lower bound), they generate the group of factor-base units.
-#[derive(Clone, Debug)]
+// (no Clone: its order's memory is reserved, Order::try_clone)
+#[derive(Debug)]
 pub struct Relations {
     /// Generating prime ideals: norm below `bound`, plus the requested extra primes.
     pub fb: Vec<PrimeIdeal>,
@@ -420,6 +421,13 @@ pub struct Relations {
     pub rels: Vec<Relation>,
     pub elems: Vec<Vec<BigInt>>,
     pub order: Order,
+}
+
+impl Relations {
+    /// A copy, its order with its own reservation (Order::try_clone).
+    pub fn try_clone(&self) -> Result<Relations, crate::nf::factor::FactorError> {
+        Ok(Relations { fb: self.fb.clone(), bound: self.bound, rels: self.rels.clone(), elems: self.elems.clone(), order: self.order.try_clone()? })
+    }
 }
 
 /// bnfinit, with every prime ideal above the rational primes `extra` also

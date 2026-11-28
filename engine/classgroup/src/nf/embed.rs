@@ -320,10 +320,10 @@ impl Embeddings {
 /// basis of huge numerators over a huge denominator, in which even 1 has
 /// coordinates near 10^10: every f64 computation with order coordinates
 /// (T2 forms, embeddings of elements) then cancels catastrophically.
-pub fn reduce_order(o: &Order) -> Result<Order, String> {
+pub fn reduce_order(o: &Order) -> Result<Order, super::factor::FactorError> {
     let n = o.n;
     if n == 1 {
-        return Ok(o.clone());
+        return o.try_clone();
     }
     let emb = Embeddings::new(o)?;
     let cbits = o.basis.iter().flatten().map(|c| c.bits()).max().unwrap_or(1) as u32;
@@ -365,15 +365,15 @@ pub fn reduce_order(o: &Order) -> Result<Order, String> {
     // unimodular; an internal error is a bug and is returned
     let red = match crate::api::lll(&rows) {
         Ok(red) => red,
-        Err(e) if e.starts_with(sagebrush_poly::LLL_INTERNAL_PREFIX) => return Err(e),
-        Err(_) => return Ok(o.clone()),
+        Err(e) if e.starts_with(sagebrush_poly::LLL_INTERNAL_PREFIX) => return Err(e.into()),
+        Err(_) => return o.try_clone(),
     };
     let u: ZMat = red.iter().map(|r| r[n..].to_vec()).collect();
     if u.len() != n || !crate::linalg::det(&u).abs().is_one() {
-        return Ok(o.clone());
+        return o.try_clone();
     }
     let basis: ZMat = u.iter().map(|ur| (0..n).map(|k| (0..n).map(|i| &ur[i] * &o.basis[i][k]).sum()).collect()).collect();
-    Ok(Order::new(&o.f, basis, o.den.clone()))
+    Order::new(&o.f, basis, o.den.clone())
 }
 
 /// LLL reduction (delta = 0.99) of a basis (order coordinates) for the

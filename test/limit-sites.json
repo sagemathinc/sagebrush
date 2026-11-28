@@ -270,10 +270,10 @@
   "class": "3",
   "owner": "class group/number fields"
  },
- "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: assert_eq!(discriminant, Order::equation_order(&f).disc(), \"{:?}: the equation order is maximal\", f); #0": {
+ "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: assert_eq!(discriminant, Order::equation_order(&f).unwrap().disc().unwrap(), \"{:?}: the equation order is maximal\", f); #0": {
   "class": "none",
-  "owner": "class groups (@sagebrush-sage2)",
-  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
  },
  "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: let (order, _) = maximal_order(&f).unwrap(); #0": {
   "class": "none",
@@ -516,6 +516,21 @@
   "owner": "class group/number fields",
   "reason": "the Montgomery arithmetic's range (16 limbs, 1024 bits): beyond it rho and ECM don't apply (TooLarge); made pub for the estimator (nf/cost.rs), unchanged"
  },
+ "engine/classgroup/src/nf/mem.rs :: max_bits :: pub fn max_bits<'a>(xs: impl IntoIterator<Item = &'a BigInt>) -> u64 { #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/order.rs ::  :: use super::mem::{big, bigs, lg, max_bits, poll, rat, scratch, vec, zmat, Held}; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/order.rs :: equation_disc :: let hb = max_bits(&f[..n]).max(1); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
+ },
  "engine/classgroup/src/nf/order.rs :: maximal_order :: pub fn maximal_order(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>), FactorError> { #0": {
   "class": "none",
   "owner": "class group/number fields",
@@ -525,6 +540,31 @@
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/order.rs :: new :: let bi = max_bits(&basis[i]); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/order.rs :: new :: let hb = max_bits(&f[..n]); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/order.rs :: new :: let pb = product_bits(bi, max_bits(&basis[j]), n, hb); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/order.rs :: new :: tbits = tbits.max(max_bits(&c)); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/order.rs :: sub_order :: let pb = max_bits(rows.iter().flatten()) + max_bits(self.basis.iter().flatten()) + lg(n) + 1; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
  },
  "engine/classgroup/src/nf/proof.rs ::  :: impl Limits { #0": {
   "class": "3",
@@ -729,6 +769,36 @@
   "class": "3",
   "owner": "class group/number fields"
  },
+ "engine/classgroup/tests/nf_order_memory.rs ::  :: use sagebrush_classgroup::nf::order::{equation_disc, maximal_order, Order}; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/nf_order_memory.rs :: orders_run_only_when_their_memory_is_admitted :: refused(maximal_order(&f).map(|o| o.0.n), \"maximal_order\"); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/nf_order_stop.rs ::  :: use sagebrush_classgroup::nf::order::maximal_order; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/nf_order_stop.rs :: stop_at :: assert_eq!(maximal_order(f).unwrap().0.basis, want, \"{site}: the next call\"); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/nf_order_stop.rs :: stop_at :: let r = sagebrush_interrupt::catch(|| maximal_order(f).map(|o| o.0.n)); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/nf_order_stop.rs :: stop_at :: let want = maximal_order(f).unwrap().0.basis; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
+ },
  "engine/classgroup/tests/siqs_memory.rs ::  :: use sagebrush_classgroup::nf::order::maximal_order; #0": {
   "class": "none",
   "owner": "class group/number fields",
@@ -744,15 +814,30 @@
   "owner": "class group/number fields",
   "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
  },
+ "engine/classgroup/tests/siqs_memory.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: match certify(&f, &Limits::default()) { #1": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
+ },
  "engine/classgroup/tests/siqs_memory.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: match maximal_order(&f) { #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
  },
+ "engine/classgroup/tests/siqs_memory.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: match maximal_order(&f) { #1": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
+ },
  "engine/classgroup/tests/siqs_memory.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: other => panic!(\"maximal_order: {:?}\", other.map(|_| ())), #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the typed error the class group paths now carry (signatures, conversions, tests) and the sieve bound's terms: matched text that refuses nothing"
+ },
+ "engine/classgroup/tests/siqs_memory.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: other => panic!(\"maximal_order: {:?}\", other.map(|_| ())), #1": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
  },
  "engine/galois/src/tables.rs ::  :: pub const MAX_DEGREE: usize = 23; #0": {
   "class": "3",
@@ -1014,6 +1099,16 @@
   "class": "none",
   "owner": "estimates and progress (encoding)"
  },
+ "engine/ledger/src/audit.rs :: check_alloc :: if amount != u64::MAX && live.saturating_sub(began) > amount.saturating_add(SLACK.load(Relaxed)) { #0": {
+  "class": "none",
+  "owner": "memory ledger",
+  "reason": "the test-only audit's per-scope check: a scope's reservation amount, u64::MAX for a scope with none (a span's, a fence's, a resident's); matched text that refuses nothing"
+ },
+ "engine/ledger/src/audit.rs :: check_alloc :: let (amount, began) = crate::SCOPE_TOP.try_with(|t| t.get()).unwrap_or((u64::MAX, 0)); #0": {
+  "class": "none",
+  "owner": "memory ledger",
+  "reason": "the test-only audit's per-scope check: a scope's reservation amount, u64::MAX for a scope with none (a span's, a fence's, a resident's); matched text that refuses nothing"
+ },
  "engine/ledger/src/growth.rs :: reserve_growth :: Err(refusal(what, bind, w.unwrap_or(u64::MAX), live, outstanding, retired)) #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
@@ -1021,6 +1116,16 @@
  "engine/ledger/src/lib.rs :: drop :: pub(crate) static FAKE_COMMITTED: AtomicU64 = AtomicU64::new(u64::MAX); #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/ledger/src/lib.rs :: drop :: pub(crate) static SCOPE_TOP: Cell<(u64, u64)> = const { Cell::new((u64::MAX, 0)) }; #0": {
+  "class": "none",
+  "owner": "memory ledger",
+  "reason": "the test-only audit's per-scope check: a scope's reservation amount, u64::MAX for a scope with none (a span's, a fence's, a resident's); matched text that refuses nothing"
+ },
+ "engine/ledger/src/lib.rs :: enter :: Scope::enter_with(u64::MAX) #0": {
+  "class": "none",
+  "owner": "memory ledger",
+  "reason": "the test-only audit's per-scope check: a scope's reservation amount, u64::MAX for a scope with none (a span's, a fence's, a resident's); matched text that refuses nothing"
  },
  "engine/ledger/src/lib.rs :: fake_committed :: c if c == u64::MAX => None, #0": {
   "class": "none",
