@@ -788,19 +788,25 @@ fn json_skip(b: &[u8], i: &mut usize) -> bool {
 }
 
 /// The bound n of a sieve of primes (aplist, aplist_many, moments), with
-/// the sieve's bytes reserved in the ledger before it is built (its
-/// (n - 1) / 2 flags and the primes, at most 1.26 n / log n of them), held
-/// until the op returns; refused when the length passes this target's
-/// usize (on wasm32, n as usize truncated 2^32 + 5 to 5) or the ledger
-/// refuses the bytes.
-fn ap_bound(v: &Value, what: &str) -> Result<(u64, sagebrush_ledger::Reservation), String> {
+/// the bytes reserved in the ledger before anything is built: the sieve's
+/// (n - 1) / 2 flags and the primes, at most 1.26 n / log n of them, and
+/// `per_prime` bytes of result per prime (the result's entries and their
+/// JSON), held until the op returns; refused when the length passes this
+/// target's usize (on wasm32, n as usize truncated 2^32 + 5 to 5) or the
+/// ledger refuses the bytes.
+/// The bytes of one aplist entry and its JSON: (u64, Option<i64>) is 24;
+/// [p, a_p] as a serde_json Value is an array (32) holding two Values (64);
+/// its text is at most 45 characters (48).
+const AP_ENTRY_BYTES: u64 = 24 + 32 + 64 + 48;
+
+fn ap_bound(v: &Value, what: &str, per_prime: u64) -> Result<(u64, sagebrush_ledger::Reservation), String> {
     let n = u(v, "n")?;
     let half = n.saturating_sub(1) / 2;
     if usize::try_from(half).is_err() {
         return Err(format!("{}: primes up to {} pass this engine's address space", what, n));
     }
     let count = (1.26 * n as f64 / (n.max(3) as f64).ln()) as u64 + 16;
-    let bytes = half.saturating_add(count.saturating_mul(8));
+    let bytes = half.saturating_add(count.saturating_mul(8u64.saturating_add(per_prime)));
     let r = sagebrush_ledger::reserve(what, bytes).map_err(|e| format!("{}: the sieve's {} bytes refused: {:?}", what, bytes, e))?;
     Ok((n, r))
 }
@@ -1831,7 +1837,8 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "aplist" => {
             let e = curve(v.get("a"))?;
-            let (n, _sieve) = ap_bound(v, "aplist")?;
+            // (each prime's entry, its JSON value and its text)
+            let (n, _sieve) = ap_bound(v, "aplist", AP_ENTRY_BYTES)?;
             Ok(json!(sagebrush_ap::aplist(&e, n).into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()))
         }
         "ec_height" => {
@@ -1943,13 +1950,14 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "aplist_many" => {
             let es = v.get("curves").and_then(Value::as_array).ok_or("missing curves")?.iter().map(|c| curve(Some(c))).collect::<Result<Vec<_>, _>>()?;
-            let (n, _sieve) = ap_bound(v, "aplist_many")?;
+            let (n, _sieve) = ap_bound(v, "aplist_many", AP_ENTRY_BYTES.saturating_mul(es.len() as u64))?;
             let r = sagebrush_ap::aplist_many(&es, n);
             Ok(json!(r.into_iter().map(|l| l.into_iter().map(|(p, x)| json!([p, x])).collect::<Vec<_>>()).collect::<Vec<_>>()))
         }
         "moments" => {
             let e = curve(v.get("a"))?;
-            let (n, _sieve) = ap_bound(v, "moments")?;
+            // (its result is kmax moments, whatever n)
+            let (n, _sieve) = ap_bound(v, "moments", 0)?;
             let (count, m) = sagebrush_ap::moments(&e, n, size(v, "kmax", Some(4), 64)?);
             Ok(json!([count, m]))
         }
