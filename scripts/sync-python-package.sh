@@ -17,6 +17,17 @@ for f in packages/cremona-small/py/*.py; do pairs="$pairs $f:$DEST/_sagelib/${f#
 # web/workspace/schema.json, written by web/workspace/verbs.ts)
 [ -f web/workspace/schema.json ] && pairs="$pairs web/workspace/schema.json:$DEST/workspace_schema.json"
 bad=0
+# (every Sage-layer module of lib/ has its twin in the package: one missing
+# from SAGE was neither copied nor checked, so its absence went unnoticed;
+# the one exception, the lazy-import shim's test fixture, is pyjs's only)
+NOT_PACKAGED="_sage_lazy_fixture.py"
+for f in lib/_sage_*.py lib/sage_*.py; do
+  b=${f#lib/}
+  case " $SAGE $NOT_PACKAGED " in
+    *" $b "*) ;;
+    *) echo "not in the package: $f (add it to SAGE in scripts/sync-python-package.sh)"; bad=1 ;;
+  esac
+done
 for pair in $pairs; do
   src=${pair%%:*}; dst=${pair#*:}
   if [ "$1" = "--check" ]; then
