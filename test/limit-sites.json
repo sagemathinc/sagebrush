@@ -1385,6 +1385,14 @@
   "owner": "multivariate engine",
   "row": "inv-36"
  },
+ "engine/mpoly/tests/f4_poll_gap.rs :: cyclic :: const MAX_SHARE: f64 = 0.025; #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: assert!(share <= MAX_SHARE, \"cyclic-8: {:.2}% of the run's CPU time between two host polls, past {:.1}%\", 100.0 * share, 100.0 * MAX_SHARE); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
  "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let cpu = hooks::max_poll_gap_cpu_ns(); #0": {
   "class": "none",
   "owner": "sage"
@@ -1394,6 +1402,10 @@
   "owner": "sage"
  },
  "engine/mpoly/tests/f4_poll_gap.rs :: f4_host_poll_gap :: let poll = hooks::max_poll_gap_ns(); #0": {
+  "class": "none",
+  "owner": "sage"
+ },
+ "engine/mpoly/tests/fglm_stop.rs :: stop_in :: let (at, total, cpu) = (hooks::stopped_in(), hooks::total(), hooks::max_poll_gap_cpu_ns() as f64 / 1e6); #0": {
   "class": "none",
   "owner": "sage"
  },
