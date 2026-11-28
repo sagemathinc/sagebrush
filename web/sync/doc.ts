@@ -181,7 +181,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       if (a.admit) {
         if (now > a.admit.expires || this.one("SELECT 1 AS x FROM fenced WHERE admission = ?", a.admit.id)) throw new SyncError("forbidden", "this write's grant changed; it was not committed");
       }
-      this.sessionHeld(a.session, now);
+      this.sessionHeld(a.session, this.sessionNow(now));
       const out = this.decide(a, head, now);
       // (the test seam: this document's answers are lost after the commit, §4.3)
       if (testMode(this.env) && this.env.SYNC_TEST_LOSE === b.doc && out.new > 0) this.lose = true;
@@ -361,7 +361,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     const now = Date.now();
     const out = this.ctx.storage.transactionSync(() => {
       if (this.role(a.account, true) !== "owner" || !a.writer.startsWith("session:") || a.author !== "person") throw new SyncError("forbidden", "only the owner, from a session, clears history");
-      this.sessionHeld(a.session, now);
+      this.sessionHeld(a.session, this.sessionNow(now));
       if (now > a.pin_expires) throw new SyncError("busy", "this forward expired; send again");
       const head = this.head();
       if (a.expect_head.epoch !== head.epoch || a.expect_head.seq !== head.seq) throw new SyncError("conflict", "the document moved on", { head });
@@ -453,6 +453,15 @@ export class SyncDoc extends DurableObject<SyncEnv> {
   }
   /** A forwarded session write's own check, inside its transaction (§2, S07): its session not fenced here (a revoke
    * fences every document the session forwarded to) and not past its end. */
+  // (tests only: the time the session check reads, fixed at an instant, so a write at exactly its session's end can be
+  // asked about; every other clock of the write stays the real one)
+  private sessionAt: number | null = null;
+  async testSessionAt(a: { at: number | null }): Promise<void> {
+    if (testMode(this.env)) this.sessionAt = a.at;
+  }
+  private sessionNow(now: number): number {
+    return testMode(this.env) && this.sessionAt !== null ? this.sessionAt : now;
+  }
   private sessionHeld(s: SessionIn | undefined, now: number): void {
     if (s && (now >= s.expires || this.fencedSession(s.hash))) throw new SyncError("forbidden", "this session was ended; the write was not committed");
   }
