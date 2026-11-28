@@ -1069,6 +1069,14 @@ class ModularSymbols:
             TypeError: n must be an int
             sage: M.T(3) is M.hecke_operator(int(3)), M.T(3).charpoly()
             (True, x^2 - 3*x - 4)
+
+        Even with T_3 made, a non-integer index is refused (Sage returns
+        its cached T_3 here)::
+
+            sage: M.T(3.0)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            TypeError: n must be an int
         """
         if not isinstance(n, int):  # (Sage's HeckeOperator: an int or an Integer)
             raise TypeError("n must be an int")
