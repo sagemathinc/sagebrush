@@ -2,6 +2,7 @@
 # scikit-learn 1.9.1): each case prints its id, then its result or its
 # exception, and one case's exception never ends the file.
 import hashlib
+import re
 
 
 def show(value):
@@ -29,3 +30,14 @@ def digest(a):
     import numpy as np
     a = np.ascontiguousarray(a)
     return (str(a.dtype), a.shape, hashlib.sha256(a.tobytes()).hexdigest()[:16])
+
+
+def sorted_sets(fn):
+    """fn, with each {...} set in its error message listed sorted: a set's order varies between processes."""
+    def run():
+        try:
+            return fn()
+        except Exception as e:
+            msg = re.sub(r"\{([^{}]*)\}", lambda m: "{" + ", ".join(sorted(m.group(1).split(", "))) + "}", str(e))
+            raise type(e)(msg) from None
+    return run

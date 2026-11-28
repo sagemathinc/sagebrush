@@ -68,6 +68,12 @@ Model()
 (False, True, False)
 == estimator-type
 !! AttributeError: 'Model' object has no attribute '_estimator_type'
+== score-classifier
+0.75
+== score-regressor
+-0.02857142857142847
+== score-weighted
+0.5
 == fit-transform
 array([[0., 3.],
        [3., 0.],
