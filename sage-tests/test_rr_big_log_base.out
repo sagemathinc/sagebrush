@@ -64,3 +64,48 @@ inf | True True False False False
 1 | False False False False False
 0 | False False False False True
 nan | False False False True False
+RR(1e400).log(RR(-10)) | 139.785709594310 - 190.720316775480*I | Complex Field with 53 bits of precision
+RR(1e400).log(RR(1)) | +infinity | Real Field with 53 bits of precision
+RR(1e400).log(RR(10)) | 400.000000000000 | Real Field with 53 bits of precision
+RR(1e400).log(RR(1e400)) | 1.00000000000000 | Real Field with 53 bits of precision
+RR(1e400).log(RR(-1e400)) | 0.999988365617642 - 0.00341090120041415*I | Complex Field with 53 bits of precision
+RR(1e400).log(RR(0)) | -0.000000000000000 | Real Field with 53 bits of precision
+RR(1e400).log(RR(inf)) | 0.000000000000000 | Real Field with 53 bits of precision
+RR(1e400).log(RR(nan)) | NaN | Real Field with 53 bits of precision
+RR(1e400).log(RR(2)) | 1328.77123795495 | Real Field with 53 bits of precision
+RR(-1e400).log(RR(-10)) | TypeError
+RR(-1e400).log(RR(1)) | +infinity + +infinity*I | Complex Field with 53 bits of precision
+RR(-1e400).log(RR(10)) | 400.000000000000 + 1.36437635384184*I | Complex Field with 53 bits of precision
+RR(-1e400).log(RR(1e400)) | 1.00000000000000 + 0.00341094088460460*I | Complex Field with 53 bits of precision
+RR(-1e400).log(RR(-1e400)) | TypeError
+RR(-1e400).log(RR(0)) | -0.000000000000000 | Complex Field with 53 bits of precision
+RR(-1e400).log(RR(inf)) | 0.000000000000000 | Complex Field with 53 bits of precision
+RR(-1e400).log(RR(nan)) | NaN + NaN*I | Complex Field with 53 bits of precision
+RR(-1e400).log(RR(2)) | 1328.77123795495 + 4.53236014182719*I | Complex Field with 53 bits of precision
+RR(1e-400).log(RR(-10)) | -139.785709594310 + 190.720316775480*I | Complex Field with 53 bits of precision
+RR(1e-400).log(RR(1)) | -infinity | Real Field with 53 bits of precision
+RR(1e-400).log(RR(10)) | -400.000000000000 | Real Field with 53 bits of precision
+RR(1e-400).log(RR(1e400)) | -1.00000000000000 | Real Field with 53 bits of precision
+RR(1e-400).log(RR(-1e400)) | -0.999988365617642 + 0.00341090120041415*I | Complex Field with 53 bits of precision
+RR(1e-400).log(RR(0)) | 0.000000000000000 | Real Field with 53 bits of precision
+RR(1e-400).log(RR(inf)) | -0.000000000000000 | Real Field with 53 bits of precision
+RR(1e-400).log(RR(nan)) | NaN | Real Field with 53 bits of precision
+RR(1e-400).log(RR(2)) | -1328.77123795495 | Real Field with 53 bits of precision
+RR(-1e-400).log(RR(-10)) | TypeError
+RR(-1e-400).log(RR(1)) | -infinity + +infinity*I | Complex Field with 53 bits of precision
+RR(-1e-400).log(RR(10)) | -400.000000000000 + 1.36437635384184*I | Complex Field with 53 bits of precision
+RR(-1e-400).log(RR(1e400)) | -1.00000000000000 + 0.00341094088460460*I | Complex Field with 53 bits of precision
+RR(-1e-400).log(RR(-1e400)) | TypeError
+RR(-1e-400).log(RR(0)) | 0.000000000000000 | Complex Field with 53 bits of precision
+RR(-1e-400).log(RR(inf)) | -0.000000000000000 | Complex Field with 53 bits of precision
+RR(-1e-400).log(RR(nan)) | NaN + NaN*I | Complex Field with 53 bits of precision
+RR(-1e-400).log(RR(2)) | -1328.77123795495 + 4.53236014182719*I | Complex Field with 53 bits of precision
+RR(nan).log(RR(-10)) | NaN | Real Field with 53 bits of precision
+RR(nan).log(RR(1)) | NaN | Real Field with 53 bits of precision
+RR(nan).log(RR(10)) | NaN | Real Field with 53 bits of precision
+RR(nan).log(RR(1e400)) | NaN | Real Field with 53 bits of precision
+RR(nan).log(RR(-1e400)) | NaN | Real Field with 53 bits of precision
+RR(nan).log(RR(0)) | NaN | Real Field with 53 bits of precision
+RR(nan).log(RR(inf)) | NaN | Real Field with 53 bits of precision
+RR(nan).log(RR(nan)) | NaN | Real Field with 53 bits of precision
+RR(nan).log(RR(2)) | NaN | Real Field with 53 bits of precision

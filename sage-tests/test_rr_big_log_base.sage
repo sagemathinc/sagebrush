@@ -16,3 +16,7 @@ for bs in ['1e400', '1e-400', '-1e400', '-1e-400', 'inf', '-inf', '0', '1', '10'
 for bs in ['1e400', '-1e400', '1e-400', '-1e-400', '2^1024', '-2^1024', 'inf', '-inf', '1', '0', 'nan']:
     x = RR(bs) if not bs.startswith(('2', '-2')) else RR(sage_eval(bs))
     print(bs, "|", x.is_infinity(), x.is_positive_infinity(), x.is_negative_infinity(), x.is_NaN(), x.is_zero())
+# the base of RR's own values past the doubles, and of NaN
+for xs in ['1e400', '-1e400', '1e-400', '-1e-400', 'nan']:
+    for bs in ['-10', '1', '10', '1e400', '-1e400', '0', 'inf', 'nan', '2']:
+        show("RR(%s).log(RR(%s))" % (xs, bs), lambda: RR(xs).log(RR(bs)))

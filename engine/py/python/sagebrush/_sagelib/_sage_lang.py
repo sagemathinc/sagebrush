@@ -507,6 +507,10 @@ class RealNumber(float):
             sage: RR(-2).log(), RR(-8).log(2)
             (0.693147180559945 + 3.14159265358979*I, 3.00000000000000 + 4.53236014182719*I)
         """
+        if float.__float__(self) != float.__float__(self):
+            # (NaN's logarithm to any base is a real NaN, as Sage's; the
+            # quotient below made it complex for a negative base)
+            return RealNumber(_m.nan)
         if float.__float__(self) < 0:
             import _sage_matrix
             return _sage_matrix.ComplexNumber(float.__float__(self), 0.0).log(base)
@@ -1163,9 +1167,27 @@ class _RealBig(RealNumber):
             re = float(_rr_from_mp((-self._mp).log()))
             if base is None:
                 return _sage_matrix.ComplexNumber(re, _m.pi)
-            lb = float(RealNumber(base).log()) if not isinstance(base, _RealBig) else float(base.log())
-            return _sage_matrix.ComplexNumber(re / lb, _m.pi / lb)
-        return _rr_from_mp(self._mp.log() if base is None else self._mp.log(_rr_operand(base) or base))
+            # (as Sage's, CC's log(base): a finite negative base its
+            # TypeError; each part over log(base), the IEEE quotient, so
+            # over log(1) = 0 an infinity: it was ZeroDivisionError)
+            from sage_all import RR
+            rb = RR(base)
+            if rb < 0 and not rb.is_infinity():
+                raise TypeError("unable to coerce to a ComplexNumber: <class 'sage.rings.complex_mpfr.ComplexNumber'>")
+            lb = float(rb.log())
+
+            def over(x):
+                if lb:
+                    return x / lb
+                return _m.nan if x == 0 or x != x else _m.copysign(_m.inf, x) * _m.copysign(1.0, lb)
+            return _sage_matrix.ComplexNumber(over(re), over(_m.pi))
+        if base is not None:
+            # (Sage's log(x) / log(RR(base)) in RR, as RealNumber.log: a
+            # negative base CC's value; _mp.log(base) took a negative one's
+            # MP log and raised AttributeError)
+            from sage_all import RR
+            return self.log() / RR(base).log()
+        return _rr_from_mp(self._mp.log())
 
     log2 = _mpf("log2")
     log10 = _mpf("log10")
