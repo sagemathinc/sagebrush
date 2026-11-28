@@ -2,7 +2,7 @@
 // The desktop app's file permissions across launches (web/workspace/grants-file.ts, #1565): the record kept in
 // grants.json by where each notebook is, and brought back at the next launch under the notebooks' new ids.
 //   bun web/workspace/test-grants-file.mjs
-import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY, GRANTS_SEEN_KEY } from "./grants-file.ts";
+import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -352,7 +352,7 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   // (the listener's first try fails, so the launch goes on, grants.json not yet read; another window has taken the
   // grant back; a change here meanwhile (a denial, of the same notebook) is kept for later, not written: the delay
   // only stops that early write.  What keeps the revocation is the merge: three ways over the grants.json the record
-  // here was last merged with (GRANTS_SEEN_KEY), and, the notebook changed on both sides, scope by scope)
+  // here was last merged with (the record's seenFile), and, the notebook changed on both sides, scope by scope)
   {
     const { perms, s, release, f, w, invoke, sync } = await launch({ listenFails: 1 });
     release();
@@ -375,7 +375,7 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
 }
 
 // a second window of the same launch opening while the first hasn't yet adopted another window's revocation: the
-// record they share still holds the grant, but it was merged with the grants.json that had it (GRANTS_SEEN_KEY), so
+// record they share still holds the grant, but it was merged with the grants.json that had it (the record's seenFile), so
 // the new window's first merge is three ways: the revocation is taken, not undone, and the first window keeps it
 {
   const mem = new Map();
@@ -387,7 +387,7 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   await A.restore();
   ok(perms.grant("id1", "write", "/allowed").ok, "second window: the first allowed /allowed");
   await A.write();
-  ok(localStorage.getItem(GRANTS_SEEN_KEY) === f.kept(), "second window: ...the grants.json it wrote kept beside the record");
+  ok(JSON.parse(localStorage.getItem(GRANTS_KEY)).seenFile === f.kept(), "second window: ...the grants.json it wrote kept beside the record");
   f.set(J({ v: 1, seq: 30, docs: {} }));
   const B = grantsSync(w, f.invoke, localStorage);
   await B.restore();
@@ -399,7 +399,7 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   // then /new is taken back, and a third window opens before the first adopts that)
   f.set(J({ v: 1, seq: 31, docs: { "ws:/n.ipynb": { write: ["/new"], t: 40 } } }));
   await A.adopt();
-  ok(perms.writeTrees("id1").join() === "/new" && localStorage.getItem(GRANTS_SEEN_KEY) === f.kept(), "second window: a merge (adopt) keeps the grants.json it merged with beside the record");
+  ok(perms.writeTrees("id1").join() === "/new" && JSON.parse(localStorage.getItem(GRANTS_KEY)).seenFile === f.kept(), "second window: a merge (adopt) keeps the grants.json it merged with beside the record");
   f.set(J({ v: 1, seq: 32, docs: {} }));
   await grantsSync(w, f.invoke, localStorage).restore();
   ok(perms.writeTrees("id1").length === 0, "second window: ...so a window opening after /new was taken back takes that too: " + J(perms.writeTrees("id1")));
@@ -408,7 +408,7 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
 
 // two windows, one record (the windows' shared localStorage) and one grants.json, past their first merge: B allows /a
 // and writes; A, which hasn't adopted that, takes /a back and writes. A's write finds B's and merges over the base
-// the shared record was last merged with (GRANTS_SEEN_KEY: with /a), not A's own (without it): A's revocation is kept
+// the shared record was last merged with (the record's seenFile: with /a), not A's own (without it): A's revocation is kept
 {
   const mem = new Map();
   globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
@@ -422,6 +422,50 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   ok(perms.revoke("id1", "write", "/a") !== false && perms.writeTrees("id1").length === 0, "shared base: A takes /a back");
   await A.write();
   ok(!J(parseGrants(f.kept()).docs).includes("/a") && perms.writeTrees("id1").length === 0, "shared base: A's write merges over the shared base: the revocation is kept, here and in grants.json: " + J({ file: f.kept(), trees: perms.writeTrees("id1") }));
+  delete globalThis.localStorage;
+}
+
+// the record and its base kept in one write (merges), and a write's end that can't be kept: grants.json written with
+// this page's /a, but the record's base can't be moved on (storage fails just then). Another window then takes /a
+// back; the next merge doesn't know which base is grants.json's last, so it holds to what both allow: /a stays gone
+{
+  const mem = new Map();
+  let failNext = false;
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { if (failNext) { failNext = false; const e = new Error("The quota has been exceeded."); e.name = "QuotaExceededError"; throw e; } mem.set(k, String(v)); }, removeItem: (k) => mem.delete(k) };
+  const { createPermissions } = await import("../notebook/permissions.js");
+  const perms = createPermissions();
+  const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+  let failOnce = true;
+  const invoke = async (c, a) => { const r = await f.invoke(c, a); if (c === "grants_write" && failOnce) failNext = !(failOnce = false); return r; };
+  f.set(J({ v: 1, seq: 1, docs: {} }));
+  const A = grantsSync(w, invoke, localStorage);
+  await A.restore();
+  const before = JSON.parse(localStorage.getItem(GRANTS_KEY) ?? "{}").seenFile;
+  ok(before === f.kept(), "a write's end not kept: the record's base, as restored");
+  ok(perms.grant("id1", "write", "/a").ok && perms.grant("id1", "write", "/keep").ok, "a write's end not kept: /a and /keep allowed here");
+  await A.write();
+  const rec = JSON.parse(localStorage.getItem(GRANTS_KEY));
+  ok(f.kept().includes("/a") && rec.seenFile === before && rec.pendingFile === f.kept(), "a write's end not kept: grants.json has /a, the record still its old base, the write marked as begun");
+  f.set(J({ v: 1, seq: 9, docs: { "ws:/n.ipynb": { write: ["/keep"], t: 9 } } }));
+  await A.adopt();
+  const after = JSON.parse(localStorage.getItem(GRANTS_KEY));
+  ok(J(perms.writeTrees("id1")) === '["/keep"]' && after.pendingFile === undefined && after.seenFile === f.kept(), "a write's end not kept: ...another window takes /a back: the merge holds to what both bases allow, /a gone, /keep kept, the mark cleared: " + J({ trees: perms.writeTrees("id1"), after }));
+  f.set(J({ v: 1, seq: 9, docs: {} }));
+  await A.adopt();
+  // (a merge's one write failing: the record and its base both as they were, never one without the other)
+  const held = localStorage.getItem(GRANTS_KEY);
+  f.set(J({ v: 1, seq: 9, docs: { "file:/x/q.ipynb": { write: ["/q"], t: 2 } } }));
+  failNext = true;
+  const r = await A.adopt();
+  ok(r.failed && localStorage.getItem(GRANTS_KEY) === held, "a merge that can't be kept: the record and its base both unchanged (one write)");
+  f.set(J({ v: 1, seq: 9, docs: {} }));
+  await A.adopt();
+  // (a write refused by the app (another window's there) wasn't made: its mark goes before the merge, so this page's
+  // own change isn't narrowed away)
+  ok(perms.grant("id1", "write", "/b").ok, "a refused write: /b allowed here");
+  f.set(J({ v: 1, seq: 10, docs: { "file:/x/o.ipynb": { write: ["/o"], t: 1 } } }));
+  await A.write();
+  ok(f.kept().includes("/b") && f.kept().includes("/o") && JSON.parse(localStorage.getItem(GRANTS_KEY)).pendingFile === undefined, "a refused write: merged and written again, /b and the other window's /o both in, no mark left: " + f.kept());
   delete globalThis.localStorage;
 }
 

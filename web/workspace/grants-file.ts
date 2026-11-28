@@ -7,7 +7,7 @@
 //   restoreGrants(ws, invoke): at launch, once the workspace is the disk's copy: the kept record back, each
 //     "ws:<path>" named by the notebook at that path now (a path that isn't a notebook now: left out, its permission
 //     gone, so a prompt comes back; never more than was kept); what this page already holds for a document wins,
-//     unless another window of this launch merged the record here before: then three ways, as adopt (GRANTS_SEEN_KEY).
+//     unless another window of this launch merged the record here before: then three ways, as adopt (the record's seenFile).
 //   grantsToKeep(ws): the record as grants.json keeps it (a notebook no longer in the workspace: left out).
 //   keepGrants(ws, invoke, onChange): grants.json written whenever the record changes, one write at a time.
 //   grantsSync(ws, invoke): the app's windows (#1541) each keep the whole record and write all of it, so each page's
@@ -22,11 +22,12 @@
 import { validGrantEntry, GRANT_CAPS } from "../notebook/permissions.js";
 
 export const GRANTS_KEY = "sagebrush-grants";
-/** grants.json as the record beside it (GRANTS_KEY) was last merged with or written to it, by whichever window of the
- * app did so: the base of a page's first merge (restore), so a second window opening merges three ways, as the first
- * does, and a grant another window took back isn't read as this page's own. */
-export const GRANTS_SEEN_KEY = "sagebrush-grants-seen";
-type Rec = { v: 1; seq?: number; migrated?: number; docs: Record<string, unknown> };
+// The record's base, in the record itself (so it is kept with the record in one write; permissions.js keeps fields it
+// doesn't know): `seenFile`, grants.json's text as the record was last merged with or written to it, by whichever
+// window of the app did so, the base of every merge, so a window opening, or past its first merge, merges three ways
+// over the record it reads and a grant another window took back isn't read as this page's own; and `pendingFile`,
+// a write of grants.json begun whose end wasn't kept here, so either text may be grants.json's last.
+type Rec = { v: 1; seq?: number; migrated?: number; docs: Record<string, unknown>; seenFile?: string; pendingFile?: string };
 export interface GrantsWorkspace {
   stat(p: string): Promise<{ kind: string; ref: string | null } | undefined>;
   pathOf(kind: "notebook", ref: string): Promise<string | undefined>;
@@ -77,6 +78,25 @@ export function mergeGrants(base: Record<string, unknown>, file: Record<string, 
   }
   return out;
 }
+/** Two merges of one record, each over a base that may be grants.json's last: by document, only what both allow (a
+ * scope both grant, every denial of either, the later of two), so not knowing which base it was never widens. */
+function narrower(a: Record<string, unknown>, b: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(a)) {
+    if (!(k in b)) continue;
+    const x = a[k] as Entry, y = b[k] as Entry, e: Entry = {};
+    for (const kind of ["write", "read", "net"] as const) if (x[kind] || y[kind]) e[kind] = (x[kind] ?? []).filter((s) => (y[kind] ?? []).includes(s));
+    if (x.denied || y.denied) {
+      const later = new Map<string, [string, string, number]>();
+      for (const d of [...(x.denied ?? []), ...(y.denied ?? [])]) { const key = d[0] + "\u0000" + d[1]; if (!later.has(key) || later.get(key)![2] < d[2]) later.set(key, d); }
+      e.denied = [...later.values()].sort((p, q) => p[2] - q[2]).slice(-GRANT_CAPS.storedDenials);
+    }
+    const t = Math.max(Number(x.t) || 0, Number(y.t) || 0);
+    if (t) e.t = t;
+    out[k] = e;
+  }
+  return out;
+}
 type Entry = { write?: string[]; read?: string[]; net?: string[]; denied?: [string, string, number][]; t?: number };
 /** One document changed both here and in grants.json since `base`: each scope, and each denial, three ways: one that
  * was in `base` stays only if neither took it out; one that wasn't comes in from either (so a grant taken back by
@@ -120,6 +140,8 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
   let tail: Promise<unknown> = Promise.resolve();
   const one = <T>(f: () => Promise<T>): Promise<T> => { const p = tail.then(f, f); tail = p.catch(() => {}); return p; };
   const read = async () => { const t = await invoke("grants_read"); return typeof t === "string" ? t : ""; };
+  // (the record's base fields changed, the rest of it as it is; at once, so no change of the record is lost)
+  const mark = (f: (r: Rec) => Rec) => { const r = parseGrants(storage.getItem(GRANTS_KEY)) ?? { v: 1, seq: 0, docs: {} }; storage.setItem(GRANTS_KEY, J(f(r))); };
   /** grants.json's `text` merged into this page's record; how many documents changed here, and whether this page has
    * changes grants.json hasn't (a write must follow).  A change of the record here while it merges (the person's
    * Allow, which writes localStorage) makes it merge again, so none is lost. */
@@ -135,19 +157,23 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
         if (p) local["ws:" + p] = e;
         else docs[id] = e;
       }
-      // (the base: grants.json as the shared record was last merged with or written to, by any window (GRANTS_SEEN_KEY),
-      // so a window never merges over an older base than the record it reads; none stored: this page's own)
-      const shared = parseGrants(storage.getItem(GRANTS_SEEN_KEY));
-      const merged = mergeGrants(shared ? shared.docs : base, file, local, !!shared || seen !== "");
+      // (the base: grants.json as the shared record was last merged with or written to, by any window (seenFile), so a
+      // window never merges over an older base than the record it reads; none kept: this page's own. A write whose
+      // end wasn't kept (pendingFile): merged over both, and only what both merges allow stays)
+      const shared = parseGrants(cur.seenFile), pending = parseGrants(cur.pendingFile), known = !!shared || !!pending || seen !== "";
+      const over = mergeGrants(shared ? shared.docs : base, file, local, known);
+      const merged = pending ? narrower(over, mergeGrants(pending.docs, file, local, known)) : over;
       for (const [k, e] of Object.entries(merged)) { const id = await idOf(ws, k); if (id) docs[id] = e; }
       if (storage.getItem(GRANTS_KEY) !== raw) { if (tries < 20) continue; throw new Error("grants: the record kept changing here while it was merged"); }
       const ids = new Set([...Object.keys(cur.docs), ...Object.keys(docs)]);
       const changed = [...ids].filter((id) => J(cur.docs[id]) !== J(docs[id])).length;
       // (seq: permissions.js's own counter, kept no lower than grants.json's; never read as an order here)
-      if (changed) storage.setItem(GRANTS_KEY, J({ ...cur, seq: Math.max(Number(cur.seq) || 0, Number(kept?.seq) || 0), docs, ...(kept?.migrated === 1 || cur.migrated === 1 ? { migrated: 1 } : {}) }));
-      // (then what it was merged with, beside it: after the record, so a seen kept without its record never stands as a
-      // base it wasn't merged over)
-      storage.setItem(GRANTS_SEEN_KEY, text);
+      // (the merge and what it was merged over, in one write: neither is ever kept without the other)
+      // (nothing here and nothing to keep, grants.json no record either: no record made)
+      if (changed || cur.pendingFile !== undefined || (cur.seenFile !== text && (raw !== null || kept))) {
+        const { pendingFile: _, ...rest } = cur;
+        storage.setItem(GRANTS_KEY, J({ ...rest, seq: Math.max(Number(cur.seq) || 0, Number(kept?.seq) || 0), docs, ...(kept?.migrated === 1 || cur.migrated === 1 ? { migrated: 1 } : {}), seenFile: text }));
+      }
       // (only once the merge is kept here: a merge that couldn't be stored (localStorage full) leaves grants.json unseen,
       // so the next try merges it again rather than taking it for done)
       seen = text;
@@ -156,7 +182,7 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
     }
   };
   const sync = {
-    /** At launch: grants.json merged in, over what the record here was last merged with (GRANTS_SEEN_KEY; none, the
+    /** At launch: grants.json merged in, over what the record here was last merged with (its seenFile; none, the
      * first window of a launch: what this page already holds wins); how many changed. */
     restore: () => one(async () => { try { return (await take(await read())).changed; } catch (e) { console.warn("grants.json:", e); return 0; } }),
     /** Another window wrote grants.json: merged in; how many documents changed here (and `ahead`: this page has
@@ -175,14 +201,19 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
     write: () => one(async () => {
       for (let tries = 0; tries < 10; tries++) {
         const rec = await grantsToKeep(ws, storage), json = J(rec);
+        // (the write marked in the record before it is made (none made if that can't be kept), its end after: one that
+        // can't be kept leaves the mark, and the next merge holds to what both texts allow)
+        mark((r) => ({ ...r, pendingFile: json }));
         try {
           await invoke("grants_write", { json, expect: seen });
           seen = json;
           base = rec.docs;
-          storage.setItem(GRANTS_SEEN_KEY, json);
+          try { mark(({ pendingFile: _, ...r }) => ({ ...r, seenFile: json })); } catch (e) { console.warn("grants.json:", e); }
           return;
         } catch (e) {
           if (!String((e as any)?.message ?? e).includes(CHANGED)) throw e;
+          // (refused by the app: not written, so its mark goes; any other failure leaves it, the write maybe made)
+          mark(({ pendingFile: _, ...r }) => r);
           await take(await read());
         }
       }
