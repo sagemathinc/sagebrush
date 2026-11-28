@@ -38,7 +38,12 @@ export interface BatchIn extends Writer {
   pin_expires: number;
   /** a grant's write: its admission (§4.5) */
   admit?: { id: string; expires: number };
+  /** a session's write: its session and the session's end, ms (§2): the write commits only if neither the session is
+   * fenced here nor its end has passed (S07) */
+  session?: SessionIn;
 }
+/** The session behind a forwarded write (§2). */
+export interface SessionIn { hash: string; expires: number }
 export interface BatchOut {
   head: Head;
   /** the bytes stored (the new patches' payloads) */
@@ -176,6 +181,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
       if (a.admit) {
         if (now > a.admit.expires || this.one("SELECT 1 AS x FROM fenced WHERE admission = ?", a.admit.id)) throw new SyncError("forbidden", "this write's grant changed; it was not committed");
       }
+      this.sessionHeld(a.session, this.sessionNow(now));
       const out = this.decide(a, head, now);
       // (the test seam: this document's answers are lost after the commit, §4.3)
       if (testMode(this.env) && this.env.SYNC_TEST_LOSE === b.doc && out.new > 0) this.lose = true;
@@ -183,6 +189,12 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     }));
   }
   private lose = false;
+  /** Tests only: the rows whose envelopes and bodies the last pull read from storage, their body bytes, and any text its
+   * sizing read materialized (S07 P2) */
+  private pullRead = { rows: 0, bodyBytes: 0, sizingText: 0 };
+  async testPullRead(): Promise<{ rows: number; bodyBytes: number; sizingText: number } | null> {
+    return testMode(this.env) ? this.pullRead : null;
+  }
 
   // ---- test seams (SYNC_TEST_PIN_MS bound, in web/sync/test-sync.mjs only): gates that hold one
   // batch before it is decided, or after it is decided and before it answers, for interleavings
@@ -301,21 +313,35 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     const head = this.head();
     if (a.epoch !== head.epoch) throw new SyncError("epoch", "this document's history was cleared", { epoch: head.epoch, head });
     const limit = Math.min(Math.max(1, a.limit ?? LIMITS.pullDefault), LIMITS.pullMax);
-    const rows = this.sql.exec("SELECT seq, author, writer, device, envs, body FROM batches WHERE epoch = ? AND seq > ? ORDER BY seq LIMIT ?", head.epoch, a.after, limit + 1).toArray() as Row[];
-    const items: PullOut["items"] = [];
-    let bytes = 0;
-    let more = rows.length > limit;
-    for (const r of rows.slice(0, limit)) {
-      const body = new Uint8Array(r.body as ArrayBuffer);
+    // (which batches fit is decided from their sizes alone, the bodies' and the envelopes', and only those batches'
+    // bodies and envelopes are read: a pull holds about its byte budget, never `limit` batches' worth; the first always
+    // fits, so one large batch still makes progress)
+    const sizes = this.sql.exec("SELECT seq, length(body) AS n, length(envs) AS e FROM batches WHERE epoch = ? AND seq > ? ORDER BY seq LIMIT ?", head.epoch, a.after, limit + 1).toArray() as Row[];
+    let bytes = 0, take = 0, sizingText = 0;
+    let more = sizes.length > limit;
+    // (tests only: any text or bytes the sizing read materialized, which must be none: it reads lengths)
+    if (testMode(this.env)) for (const r of sizes) for (const v of [r.n, r.e]) sizingText += typeof v === "string" ? v.length : v instanceof ArrayBuffer ? v.byteLength : 0;
+    for (const r of sizes.slice(0, limit)) {
       // (base64 is 4/3 of the bytes; the envelopes are counted as stored)
-      const cost = Math.ceil(body.length / 3) * 4 + String(r.envs).length + 200;
-      if (items.length > 0 && bytes + cost > LIMITS.pullBytes) {
+      const cost = Math.ceil(Number(r.n) / 3) * 4 + Number(r.e) + 200;
+      if (take > 0 && bytes + cost > LIMITS.pullBytes) {
         more = true;
         break;
       }
       bytes += cost;
-      items.push({ seq: Number(r.seq), author: String(r.author), writer: String(r.writer), device: String(r.device), patches: JSON.parse(String(r.envs)), body: toB64(body) });
+      take++;
     }
+    const items: PullOut["items"] = [];
+    let read = 0;
+    if (take > 0) {
+      const last = Number(sizes[take - 1].seq);
+      for (const r of this.sql.exec("SELECT seq, author, writer, device, envs, body FROM batches WHERE epoch = ? AND seq > ? AND seq <= ? ORDER BY seq", head.epoch, a.after, last)) {
+        const body = new Uint8Array(r.body as ArrayBuffer);
+        read += body.length;
+        items.push({ seq: Number(r.seq), author: String(r.author), writer: String(r.writer), device: String(r.device), patches: JSON.parse(String(r.envs)), body: toB64(body) });
+      }
+    }
+    if (testMode(this.env)) this.pullRead = { rows: items.length, bodyBytes: read, sizingText };
     return { epoch: head.epoch, head, items, more };
   }
 
@@ -326,13 +352,16 @@ export class SyncDoc extends DurableObject<SyncEnv> {
    * emptied; and `root`, one parentless patch holding the current value,
    * is the new epoch's first batch.  So the document always has a value.
    */
-  async clear(a: Writer & { expect_head: Head; root: Batch; pin_expires: number }): Promise<Result<BatchOut>> {
+  async clear(a: Writer & { expect_head: Head; root: Batch; pin_expires: number; session?: SessionIn }): Promise<Result<BatchOut>> {
+    // (the test seam, as a batch's: held before it is decided)
+    await this.gate(`clear:${a.root.patches[0]?.id ?? ""}`);
     return attemptAsync(() => this.clearNow(a));
   }
-  private async clearNow(a: Writer & { expect_head: Head; root: Batch; pin_expires: number }): Promise<BatchOut> {
+  private async clearNow(a: Writer & { expect_head: Head; root: Batch; pin_expires: number; session?: SessionIn }): Promise<BatchOut> {
     const now = Date.now();
     const out = this.ctx.storage.transactionSync(() => {
       if (this.role(a.account, true) !== "owner" || !a.writer.startsWith("session:") || a.author !== "person") throw new SyncError("forbidden", "only the owner, from a session, clears history");
+      this.sessionHeld(a.session, this.sessionNow(now));
       if (now > a.pin_expires) throw new SyncError("busy", "this forward expired; send again");
       const head = this.head();
       if (a.expect_head.epoch !== head.epoch || a.expect_head.seq !== head.seq) throw new SyncError("conflict", "the document moved on", { head });
@@ -422,6 +451,20 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     const ns = this.env.SYNC_ACCOUNT!;
     return ns.get(ns.idFromName("acct:" + this.get("owner_hash")));
   }
+  // (tests only: the time the session check reads, fixed at an instant, so a write at exactly its session's end can be
+  // asked about; every other clock of the write stays the real one)
+  private sessionAt: number | null = null;
+  async testSessionAt(a: { at: number | null }): Promise<void> {
+    if (testMode(this.env)) this.sessionAt = a.at;
+  }
+  private sessionNow(now: number): number {
+    return testMode(this.env) && this.sessionAt !== null ? this.sessionAt : now;
+  }
+  /** A forwarded session write's own check, inside its transaction (§2, S07): its session not fenced here (a revoke
+   * fences every document the session forwarded to) and not past its end. */
+  private sessionHeld(s: SessionIn | undefined, now: number): void {
+    if (s && (now >= s.expires || this.fencedSession(s.hash))) throw new SyncError("forbidden", "this session was ended; the write was not committed");
+  }
   private fencedSession(session: string): boolean {
     return this.one("SELECT 1 AS x FROM session_fences WHERE session_hash = ? AND expires > ?", session, Date.now()) !== undefined;
   }
@@ -494,7 +537,7 @@ export class SyncDoc extends DurableObject<SyncEnv> {
           // the account object decides it, as for a batch from its own socket: its rate limits, the
           // session not revoked, blobs pinned, then this object's batch(), and the head it records
           // itself (LIMIT-6D6-1, CORR-6D6-2, CORR-6D6-3)
-          r = await this.ownerAccount().socketBatch({ account: att.account, session: att.session, device: att.device, batch: { owner: this.get("owner_hash"), ...Object.fromEntries(["doc", "epoch", "expect_head", "patches", "body"].filter((k) => Object.prototype.hasOwnProperty.call(m, k)).map((k) => [k, m[k]])) } });
+          r = await this.ownerAccount().socketBatch({ account: att.account, session: att.session, expires: att.session_expires, device: att.device, batch: { owner: this.get("owner_hash"), ...Object.fromEntries(["doc", "epoch", "expect_head", "patches", "body"].filter((k) => Object.prototype.hasOwnProperty.call(m, k)).map((k) => [k, m[k]])) } });
         } finally {
           this.inflight.set(ws, (this.inflight.get(ws) ?? 1) - 1);
         }

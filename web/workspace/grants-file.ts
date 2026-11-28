@@ -18,6 +18,8 @@
 //       the app under a lock): one that finds another window's write there merges it (as adopt) and writes again.
 //     No ordering is read from the record itself (its seq is a page's own); the app's check is the order.
 
+import { validGrantEntry } from "../notebook/permissions.js";
+
 export const GRANTS_KEY = "sagebrush-grants";
 type Rec = { v: 1; seq?: number; migrated?: number; docs: Record<string, unknown> };
 export interface GrantsWorkspace {
@@ -32,7 +34,10 @@ export function parseGrants(text: unknown): Rec | null {
   if (typeof text !== "string" || !text) return null;
   try {
     const r = JSON.parse(text);
-    return r && typeof r === "object" && r.v === 1 && r.docs && typeof r.docs === "object" && !Array.isArray(r.docs) ? r : null;
+    if (!(r && typeof r === "object" && r.v === 1 && r.docs && typeof r.docs === "object" && !Array.isArray(r.docs))) return null;
+    // (each document's entry as the page writes one (validGrantEntry), or left out: it grants nothing)
+    for (const [d, e] of Object.entries(r.docs)) if (!validGrantEntry(e)) delete r.docs[d];
+    return r;
   } catch {
     return null;
   }
@@ -163,18 +168,62 @@ export async function reconcileGrants(sync: ReturnType<typeof grantsSync>, perms
   return { changed: r.changed > 0 || flipped, ahead: r.ahead, failed: !!r.failed };
 }
 
+/** The desktop app's grants at launch (#1541, Codex S14 F3), in this order, so no change another window makes is missed:
+ * every grant set aside first; the listener for another window's change ("sb-grants-changed") registered and waited
+ * for; only then grants.json read (restore), and read again and merged (reconcile), so a change made while the first
+ * read ran is in too, and grants come back once that succeeds. A listener that can't be registered leaves every
+ * grant set aside, and is tried again after `retryMs`, then twice as long each time, up to `retryMaxMs`; a read
+ * that fails is tried again every `retryMs`, as reconcileGrants's caller does. `changed()` is called whenever what
+ * the page's code may do changed; `ahead()` when this page has changes of its own to write. */
+export function startGrants(sync: ReturnType<typeof grantsSync>, perms: { suspend(why: string | null): boolean }, listen: (f: () => void) => Promise<unknown>, hooks: { changed(): void; ahead?(): void }, retryMs = 5000, retryMaxMs = 60_000) {
+  let again: ReturnType<typeof setTimeout> | null = null, stopped = false;
+  const reconcile = async () => {
+    if (again) clearTimeout(again);
+    again = null;
+    try {
+      const r = await reconcileGrants(sync, perms);
+      if (r.changed) hooks.changed();
+      if (r.ahead) hooks.ahead?.();
+      if (r.failed && !stopped) again = setTimeout(reconcile, retryMs);
+    } catch (e) { console.warn("grants.json:", e); if (!stopped) again = setTimeout(reconcile, retryMs); }
+  };
+  if (perms.suspend("Sagebrush is reading its file permissions; no notebook may change files until it has")) hooks.changed();
+  // (`ready`: settled once grants are back, or once the first try at the listener has failed (grants still set aside,
+  // tried again meanwhile), so a launch never waits on the retries; `done`: once grants are back)
+  let firstFailed: () => void = () => {};
+  const failedOnce = new Promise<void>((r) => (firstFailed = r));
+  const done = (async () => {
+    for (let wait = retryMs; !stopped; wait = Math.min(wait * 2, retryMaxMs)) {
+      try { await listen(() => void reconcile()); break; } catch (e) {
+        console.warn("grants.json: can't watch for other windows' changes:", e);
+        if (perms.suspend(`Sagebrush can't watch for changes to its file permissions (${String((e as any)?.message ?? e).slice(0, 200)}), so no notebook may change files until it can`)) hooks.changed();
+        firstFailed();
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+    if (stopped) return;
+    try { if (await sync.restore()) hooks.changed(); } catch (e) { console.warn("grants.json:", e); }
+    await reconcile();
+  })();
+  return { ready: Promise.race([done, failedOnce]), done, reconcile, stop() { stopped = true; if (again) clearTimeout(again); } };
+}
+
 /** grants.json written at each change of the record (`onChange`), one write at a time, the record as it is when each
  * write starts (over the grants.json this page last saw: grantsSync's write); a change during a write makes one more. A write that fails keeps the latest change unwritten: tried
  * again after `retryMs`, and at the next flush. `flush()` resolves once the latest change is in grants.json, and
- * rejects, saying why, if it can't be written now (the quit's and the leave's barrier, disk-mirror.ts keepAll). */
-export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: () => void) => void, storage: Store = localStorage, retryMs = 3000, sync = grantsSync(ws, invoke, storage)) {
-  let changes = 0, written = 0, failed: unknown = null, busy: Promise<void> | null = null;
+ * rejects, saying why, if it can't be written now (the quit's and the leave's barrier, disk-mirror.ts keepAll).
+ * `after` (startGrants's `done`): nothing is written until it settles, grants.json read and merged first, so this
+ * page's record from before that read never goes over a grant another window took back (changes are counted
+ * meanwhile, and written then). */
+export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: () => void) => void, storage: Store = localStorage, retryMs = 3000, sync = grantsSync(ws, invoke, storage), after?: Promise<unknown>) {
+  let changes = 0, written = 0, failed: unknown = null, busy: Promise<void> | null = null, open = !after;
+  after?.then(() => { open = true; void run(); });
   let timer: ReturnType<typeof setTimeout> | null = null;
   // (one job at a time, `busy` while it runs: nothing to write is no job at all, and a job yields before it starts, so
   // it can never finish before it is `busy`; it clears `busy` only if it is still the one there)
   const run = (): Promise<void> => {
     if (busy) return busy;
-    if (written >= changes) return Promise.resolve();
+    if (!open || written >= changes) return Promise.resolve();
     const job: Promise<void> = (async () => {
     await Promise.resolve();
     try {
@@ -200,6 +249,7 @@ export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: ()
   onChange(changed);
   const flush = async (): Promise<void> => {
     let last: Promise<void> | null = null;
+    if (!open && written < changes) throw new Error("grants.json isn't read yet, so this page's file permissions aren't written to it");
     for (;;) {
       const job = run();
       // (the same job twice is one already done that was never let go of: said, never a loop that spins)

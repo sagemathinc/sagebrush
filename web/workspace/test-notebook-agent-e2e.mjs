@@ -732,6 +732,53 @@ try {
     ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some(h => h.textContent === "Allow this agent?")`), "Connect still asks for the fresh code's grant, never Use remembered access");
     ok((await drive({ op: "status" })).ok?.granted === false, "the fresh code has no grant before Allow");
   }
+  // Revoke completion is the local commit, not the socket close. The loopback workspace seam delays/fails the actual
+  // delete; no clock race is needed. Fresh code-page grants keep this independent of the preceding remembered choice.
+  {
+    await ev(`([...document.querySelectorAll(".sbag-box button")].find(b => b.textContent === "Cancel")?.click(), true)`);
+    const pyFid = await ev(`${W}.create("/agent-revoke-control.py", { content: new TextEncoder().encode("print(1)\\n") }).then(e=>e.fid)`);
+    const records = `Object.keys(await window.__sbTestWs.agentGrants())`;
+    const noRecords = `(async()=>(${records}).length === 0)()`;
+    const rememberCode = async () => {
+      ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(noRecords), "revoke fixture: prior unusable remembered material is cleaned");
+      const cr = await drive({ op: "code" });
+      ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${cr.code}&port=${cr.port}`) && await until(`[...document.querySelectorAll(".sbag-box input")].some(i => i.value === ${JSON.stringify(cr.code)})`), "revoke fixture: the fresh code is shown");
+      await clickConnect();
+      if (!(await until(`[...document.querySelectorAll(".sbag-box h2")].some(h => h.textContent === "Allow this agent?")`))) throw new Error("revoke fixture: no Allow dialog");
+      await ev(`(() => { const b=document.querySelector(".sbag-box"); [...b.querySelectorAll("label")].find(l=>/Remember this agent/.test(l.textContent)).querySelector("input").checked=true; b.querySelector("select").value="3600000"; [...b.querySelectorAll("button")].find(b=>b.textContent==="Allow").click(); return true; })()`);
+      const ready = await until(`!!document.querySelector(".sbag-bar .chip") && !!document.querySelector('.code-filemenu [data-f="c-agent"]')`);
+      ok(ready && await ev(`(async()=>(${records}).length === 1)()`), "revoke fixture: the code page is ready, one remembered grant is committed", ready ? undefined : await ev(`({url:location.href,note:document.querySelector(".code-note")?.textContent,status:document.querySelector(".code-status")?.textContent})`));
+    };
+    const clickRevoke = () => ev(`([...document.querySelectorAll(".sbag-bar button")].find(b=>b.textContent==="Revoke").click(), true)`);
+    const serverRevoked = async () => { for (let t=Date.now(); Date.now()-t<20000; await sleep(50)) if ((await drive({op:"status"})).ok?.granted === false) return true; return false; };
+    await rememberCode();
+    await ev(`(() => { const w=window.__sbTestWs, put=w.putAgentGrant.bind(w); window.__releaseDelete=null; w.putAgentGrant=async(id,g)=>{if(g===null){window.__deleteHeld=true; await new Promise(r=>window.__releaseDelete=r);} return put(id,g);}; return true; })()`);
+    await clickRevoke();
+    ok(await until(`window.__deleteHeld && document.querySelector(".sbag-bar")?.dataset.cleanup === "revoking"`), "Revoke held before commit: the bar explicitly says Revoking");
+    await ev(`(document.querySelector('.code-filemenu [data-f="c-agent"]').click(), true)`);
+    ok(await ev(`!document.querySelector(".sbag-box") && !!document.querySelector(".sbag-bar button:disabled")`) && await serverRevoked(), "while revoking: a second Connect is blocked, the action disabled, server access already off");
+    await ev(`(window.__releaseDelete(), true)`);
+    ok(await until(`!document.querySelector(".sbag-bar")`) && await ev(noRecords), "Revoke reports completion only after the held local delete commits");
+    ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(noRecords), "navigation after completed Revoke leaves no remembered record");
+
+    await rememberCode();
+    await ev(`(() => { const w=window.__sbTestWs, put=w.putAgentGrant.bind(w); window.__allowDelete=false; w.putAgentGrant=async(id,g)=>{if(g===null&&!window.__allowDelete)throw new Error("controlled local cleanup failure");return put(id,g);};return true;})()`);
+    await clickRevoke();
+    ok(await until(`document.querySelector(".sbag-bar")?.dataset.cleanup === "pending" && document.querySelector(".sbag-bar")?.textContent.includes("Revoked; local cleanup pending.")`) && await serverRevoked(), "a failed local delete says Revoked; local cleanup pending, never active access");
+    await ev(`(window.__allowDelete=true, [...document.querySelectorAll(".sbag-bar button")].find(b=>b.textContent==="Retry local cleanup").click(), true)`);
+    ok(await until(`!document.querySelector(".sbag-bar")`) && await ev(noRecords), "Retry local cleanup commits the delete without restoring access");
+
+    // An abrupt navigation ignores the visible unfinished operation. First load's cleanup is made to fail too;
+    // a later load must retry it, using the real server's unusable-session refusal, not an invented protocol reply.
+    await rememberCode();
+    await ev(`(() => { const w=window.__sbTestWs, put=w.putAgentGrant.bind(w);w.putAgentGrant=async(id,g)=>{if(g===null){window.__deleteHeld=true;await new Promise(()=>{});}return put(id,g);};return true;})()`);
+    await clickRevoke();
+    ok(await until(`window.__deleteHeld && document.querySelector(".sbag-bar")?.dataset.cleanup === "revoking"`) && await serverRevoked(), "abrupt navigation control: server revoked while the local delete is still held");
+    const failLoad = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {let w;Object.defineProperty(window,"__sbTestWs",{configurable:true,get:()=>w,set:v=>{w=v;const put=w.putAgentGrant.bind(w);w.putAgentGrant=async(id,g)=>{if(g===null)throw new Error("controlled load cleanup failure");return put(id,g);};}});})()` });
+    ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`document.querySelector(".sbag-bar")?.dataset.cleanup === "pending"`) && await ev(`(async()=>(${records}).length === 1)()`) && await serverRevoked(), "interrupted deletion: load refuses the stale session; failed cleanup stays pending, with no restored access");
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: failLoad.result.identifier });
+    ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(noRecords) && !(await ev(`!!document.querySelector(".sbag-bar .chip")`)) && await serverRevoked(), "a later load retries and commits stale-session cleanup after abrupt navigation");
+  }
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {

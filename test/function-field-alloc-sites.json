@@ -1,4 +1,8 @@
 {
+ "lib/_magma.py: Denominator :: comprehension :: row": 1,
+ "lib/_magma.py: Denominator :: comprehension :: x": 1,
+ "lib/_magma.py: Denominator :: comprehension :: x.parent()._to_user(x._c)": 1,
+ "lib/_magma.py: Denominator :: comprehension :: x.rows()": 1,
  "lib/_magma.py: Derivative :: call :: max(1, k)": 1,
  "lib/_magma.py: Derivative :: call :: max(_fun_poly_meta(v.numerator())[2], _fun_poly_meta(v.denominator())[2])": 1,
  "lib/_magma.py: Derivative :: call :: range(k)": 2,
