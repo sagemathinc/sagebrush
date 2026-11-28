@@ -33,3 +33,55 @@ f.coefficients(None) -> TypeError 'NoneType' object is not iterable
 f.coefficients({2: 0, 4: 1}) -> [-2, 2]
 f.coefficients(range(5, 2, -1)) -> [1, 2, -1]
 [0, 1] [0]
+cold [2.0] -> TypeError: 'float' object cannot be interpreted as an integer
+cold [3, 2.5] -> TypeError: 'float' object cannot be interpreted as an integer
+cold [QQ(1)/2, 3] -> TypeError: unable to convert rational 1/2 to an integer
+cold [QQ(1)/2] -> TypeError: no conversion of this rational to integer
+cold [2.0, 3] -> TypeError: 'float' object cannot be interpreted as an integer
+cold [-2] -> ValueError: prec (= -1) must be nonnegative
+cold [-1] -> [0]
+cold [-1.0] -> [0]
+cold [-2.0] -> ValueError: prec (= -1) must be nonnegative
+cold [0.0] -> [0]
+cold [1.0] -> TypeError: 'float' object cannot be interpreted as an integer
+cold [-3, 2] -> [0, -2]
+cold [QQ(4)] -> [2]
+cold [QQ(-2)] -> ValueError: prec (= -1) must be nonnegative
+cold [-1, 2.0] -> TypeError: 'float' object cannot be interpreted as an integer
+cold [int(3), ZZ(2)] -> [-1, -2]
+warm [2.0] -> [-2]
+warm [3, 2.5] -> TypeError: cannot convert non-integral float to integer
+warm [QQ(1)/2, 3] -> TypeError: no conversion of this rational to integer
+warm [QQ(1)/2] -> TypeError: no conversion of this rational to integer
+warm [2.0, 3] -> [-2, -1]
+warm [-2] -> ValueError: prec (= -1) must be nonnegative
+warm [-1] -> [0]
+warm [-1.0] -> [0]
+warm [-2.0] -> ValueError: prec (= -1) must be nonnegative
+warm [0.0] -> [0]
+warm [1.0] -> [1]
+warm [-3, 2] -> ValueError: prec (= -2) must be nonnegative
+warm [QQ(4)] -> [2]
+warm [QQ(-2)] -> ValueError: prec (= -1) must be nonnegative
+warm [-1, 2.0] -> [0, -2]
+warm [int(3), ZZ(2)] -> [-1, -2]
+0 [0.0, 3] -> TypeError: 'float' object cannot be interpreted as an integer
+0 [QQ(0), 3] -> [0, -1]
+0 [0.5, 3] -> TypeError: 'float' object cannot be interpreted as an integer
+0 [-0.5, 3] -> [0, -1]
+0 [QQ(1)/2, 3] -> TypeError: unable to convert rational 1/2 to an integer
+0 [QQ(-1)/2, 3] -> [0, -1]
+0 [1.0, 3] -> TypeError: 'float' object cannot be interpreted as an integer
+0 [QQ(3)/2, 3] -> TypeError: unable to convert rational 3/2 to an integer
+0 [0.0] -> [0]
+0 [0.5] -> TypeError: cannot convert non-integral float to integer
+1 [0.0, 3] -> TypeError: 'float' object cannot be interpreted as an integer
+1 [QQ(0), 3] -> [0, 2]
+1 [0.5, 3] -> TypeError: 'float' object cannot be interpreted as an integer
+1 [-0.5, 3] -> [0, 2]
+1 [QQ(1)/2, 3] -> TypeError: unable to convert rational 1/2 to an integer
+1 [QQ(-1)/2, 3] -> [0, 2]
+1 [1.0, 3] -> TypeError: 'float' object cannot be interpreted as an integer
+1 [QQ(3)/2, 3] -> TypeError: unable to convert rational 3/2 to an integer
+1 [0.0] -> [0]
+1 [0.5] -> TypeError: cannot convert non-integral float to integer

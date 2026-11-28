@@ -14,3 +14,25 @@ for c in ['f.coefficients(range(1,4))', 'f.coefficients((n for n in [2, 3, 5]))'
     except Exception as e: print(c, '->', type(e).__name__, e)
 g = CuspForms(37, 2).basis()[1]
 print(g.coefficients([-2, 5]), g.coefficients([-2]))
+# each index validated, on fresh forms (cold) and after a_1..a_4 are known (warm)
+def fresh():
+    return CuspForms(11, 2).gen(0) * 1
+for warm in [None, [1, 2, 3, 4]]:
+    for L in ['[2.0]', '[3, 2.5]', '[QQ(1)/2, 3]', '[QQ(1)/2]', '[2.0, 3]', '[-2]', '[-1]', '[-1.0]', '[-2.0]', '[0.0]', '[1.0]', '[-3, 2]', '[QQ(4)]', '[QQ(-2)]', '[-1, 2.0]', '[int(3), ZZ(2)]']:
+        f = fresh()
+        if warm:
+            f.coefficients(warm)
+        try:
+            r = f.coefficients(eval(L))
+        except Exception as e:
+            r = "%s: %s" % (type(e).__name__, e)
+        print('warm' if warm else 'cold', L, '->', r)
+# an index below a form's valuation, alone and beside a larger one
+for i, M in [(0, CuspForms(11, 2)), (1, CuspForms(37, 2))]:
+    for L in ['[0.0, 3]', '[QQ(0), 3]', '[0.5, 3]', '[-0.5, 3]', '[QQ(1)/2, 3]', '[QQ(-1)/2, 3]', '[1.0, 3]', '[QQ(3)/2, 3]', '[0.0]', '[0.5]']:
+        f = M.basis()[i] * 1
+        try:
+            r = f.coefficients(eval(L))
+        except Exception as e:
+            r = "%s: %s" % (type(e).__name__, e)
+        print(i, L, '->', r)

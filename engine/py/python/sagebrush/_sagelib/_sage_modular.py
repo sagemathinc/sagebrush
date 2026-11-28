@@ -1759,7 +1759,7 @@ class ModularFormElement:
 
         As in Sage, X is read twice (once for the indices not yet known,
         once for the answer), so a generator gives nothing; a negative
-        index gives 0::
+        index gives 0 (but -2 alone asks for precision -1)::
 
             sage: f.coefficients(n for n in [2, 3, 5]), f.coefficients([-1, 3])
             ([], [0, -1])
@@ -1773,13 +1773,20 @@ class ModularFormElement:
         known = self.__dict__.setdefault("_known_coefficients", {})
         Y = [n for n in X if n not in known]
         if Y:
-            need = max(Y) + 1
-            if isinstance(need, float):
-                raise TypeError("'float' object cannot be interpreted as an integer")
-            c = self._coeffs(max(int(ZZ(need)), 1))
+            # (the precision max + 1 as an Integer: Sage's errors for a
+            # non-integral one, and for a negative one)
+            prec = ZZ(max(Y) + 1)
+            if prec < 0:
+                raise ValueError("prec (= %s) must be nonnegative" % prec)
+            c = self._coeffs(max(int(prec), 1))
+            import operator
+            top = max((i for i in range(min(len(c), int(prec))) if c[i]), default=-1)
             for n in Y:
-                i = int(n)
-                known[n] = QQ(c[i]) if 0 <= i < len(c) else QQ(0)
+                # (each index read as the q-expansion to that precision reads
+                # it: 0 below 0 and past its degree, else as an index, with
+                # Python's and Sage's errors for a float or a non-integral
+                # rational)
+                known[n] = QQ(0) if n < 0 or n > top else QQ(c[operator.index(n)])
         return [known[n] for n in X]
 
     def is_cuspidal(self):
