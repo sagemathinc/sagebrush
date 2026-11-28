@@ -5,8 +5,9 @@ tolower, substr, sprintf, format and formatC, as R 4.5.3 behaves
 Memory (design §8.5): each one reserves its whole peak before it builds its
 result: the result's elements, and the characters of its strings at
 CHAR_BYTES each.  Where the strings' length isn't known in advance (sprintf,
-format, formatC, substr), it is measured first, one element at a time, and
-nothing is kept until the reservation holds.  What isn't implemented yet is
+format, formatC, substr), each string is first measured as its pieces (text,
+runs of padding, slices of strings that exist), and nothing is built until the
+reservation holds.  What isn't implemented yet is
 refused in words (NotSupported), never approximated.
 
 Names: nchar, toupper, tolower, substr, format and formatC keep x's names;
@@ -73,15 +74,51 @@ def _chars_bytes(strings):
     return CHAR_BYTES * sum(len(s) for s in strings if s is not None)
 
 
-def _measured(n, make):
-    """[make(0), ..., make(n - 1)] (each a str or None), its whole peak reserved first: the strings are measured one
-    at a time and dropped, then n strings and their characters are reserved, then they are built."""
-    total = 0
+# A string to build is a list of pieces, measured before anything is built (design §8.5): a str (bounded, or one
+# that already exists), (count, ch) for ch repeated count times, or (s, a, b) for s[a:b] of an existing s.
+
+def _piece_len(p):
+    if isinstance(p, str):
+        return len(p)
+    return p[0] if len(p) == 2 else p[2] - p[1]
+
+
+def _piece(p):
+    if isinstance(p, str):
+        return p
+    return p[1] * p[0] if len(p) == 2 else p[0][p[1]:p[2]]
+
+
+def _pieces_len(ps):
+    return sum(_piece_len(p) for p in ps)
+
+
+def _built(n, pieces):
+    """The strings whose pieces are pieces(0), ..., pieces(n - 1) (each a list, or None for NA), their whole peak
+    reserved first: the strings are measured, then n strings and their characters are reserved (and the longest one
+    again, held as its pieces while it is joined), then they are built."""
+    total = longest = 0
     for i in range(n):
-        s = make(i)
-        if s is not None:
-            total += len(s)
-    return mem.reserve(n, "character", extra_bytes=CHAR_BYTES * total), lambda: [make(i) for i in range(n)]
+        ps = pieces(i)
+        if ps is not None:
+            k = _pieces_len(ps)
+            total += k
+            longest = max(longest, k)
+    held = mem.reserve(n, "character", extra_bytes=CHAR_BYTES * (total + longest))
+
+    def build():
+        out = []
+        for i in range(n):
+            ps = pieces(i)
+            out.append(None if ps is None else "".join(_piece(p) for p in ps))
+        return out
+    return held, build
+
+
+def _padded(ps, width, left, fill=" "):
+    """ps in a field width characters wide: padded on the right when left, else on the left."""
+    pad = max(0, width - _pieces_len(ps))
+    return ps + [(pad, fill)] if left else [(pad, fill)] + ps
 
 
 # ---------------------------------------------------------------- paste
@@ -199,10 +236,13 @@ def substr(sess, call, args):
     if n and (not start or not stop):
         raise RError("invalid substring arguments", call)
 
-    def make(i):
+    def pieces(i):
         s, a, b = data[i], start[i % len(start)], stop[i % len(stop)]
-        return None if s is None or a is None or b is None else s[max(a, 1) - 1:max(b, 0)]
-    held, build = _measured(n, make)
+        if s is None or a is None or b is None:
+            return None
+        a, b = max(a, 1) - 1, min(max(b, 0), len(s))
+        return [(s, a, b)] if a < b else []
+    held, build = _built(n, pieces)
     with held:
         return _keep_names("character", build(), x)
 
@@ -212,73 +252,150 @@ def substr(sess, call, args):
 # a conversion: flags, width, precision and its letter (positional %n$ and * widths are refused below)
 _SPEC = re.compile(r"%(?P<flags>[-+ 0#]*)(?P<width>\d*)(?:\.(?P<prec>\d*))?(?P<conv>[a-zA-Z%])")
 
+# (R 4.5.3's words for a value its conversion doesn't take, by the value's type)
+_USE = {"double": "use format %f, %e, %g or %a for numeric objects",
+        "integer": "use format %d, %i, %o, %x or %X for integer objects",
+        "logical": "use format %d or %i for logical objects",
+        "character": "use format %s for character objects"}
 
-def _field(word, flags, width):
+# the precision past which a double's digits are all zeros: %f shows a double exactly in at most 1074 decimals, %e and
+# %g in at most 767 significant digits; the zeros past these are counted, not formatted
+_EXACT = {"f": 1100, "e": 800, "E": 800, "g": 800, "G": 800}
+
+_INT_MAX = 2147483647
+
+
+def _word(word, flags, width):
     """A word (NA, NaN, Inf) in a conversion's field: right-justified, or left with the - flag."""
-    w = int(width) if width else 0
-    return word.ljust(w) if "-" in flags else word.rjust(w)
+    return _padded([word], width, "-" in flags)
 
 
-def _whole(v, e, spec, call):
-    """e (of v) as an int for %d, %i, %x, %X and %o, with R's error for a fraction or a character value."""
-    if v.type == "double":
-        if e != int(e):
-            raise RError("invalid format '%s'; use format %%f, %%e, %%g or %%a for numeric objects" % spec.group(0),
-                         call)
-    elif v.type not in ("integer", "logical"):
-        raise RError("invalid format '%s'; use format %%s for character objects" % spec.group(0), call)
-    return int(e)
+def _int_pieces(k, flags, width, prec, conv):
+    """C's %d, %i, %x, %X or %o of the integer k: R 4.5.3, sprintf("%08.3x", 1L) is "     001", "%+x" "1", "%#5x"
+    of 255L " 0xff", "%#.3o" of 8L "010", "%.0d" of 0L ""."""
+    if conv in "di":
+        a = abs(k)
+        digits = str(a)
+        sign = "-" if k < 0 else "+" if "+" in flags else " " if " " in flags else ""
+    else:
+        # (an integer's bits, as C's unsigned conversions show them: sprintf("%x", -1L) is "ffffffff")
+        a = k & 0xFFFFFFFF
+        digits = ("%" + conv) % a
+        sign = ""
+    if prec == 0 and a == 0:
+        digits = ""
+    zeros = max(0, prec - len(digits)) if prec is not None else 0
+    if "#" in flags:
+        if conv == "o" and zeros == 0 and not digits.startswith("0"):
+            zeros = 1
+        elif conv in "xX" and a:
+            sign = "0" + conv
+    ps = [sign, (zeros, "0"), digits]
+    if "0" in flags and "-" not in flags and prec is None:
+        return [sign, (max(0, width - _pieces_len(ps)) + zeros, "0"), digits]
+    return _padded(ps, width, "-" in flags)
 
 
-def _sprintf1(spec, v, i, call):
-    """One conversion of element i of v (an RVector, recycled)."""
-    flags, width, prec, conv = spec.group("flags"), spec.group("width"), spec.group("prec"), spec.group("conv")
-    e = v.data[i % len(v.data)]
-    head = "%" + flags + width + ("." + prec if prec is not None else "")
-    na = e is None or (isinstance(e, float) and e != e)
-    if conv in "dixXo":
-        if na or (isinstance(e, float) and abs(e) == math.inf):
-            if v.type == "character":
-                _whole(v, e, spec, call)
-            # (NA in the field's width, as a string: R 4.5.3, sprintf("%5d", NA_integer_), sprintf("%x", NA_integer_))
-            return _field("NA", flags, width)
-        k = _whole(v, e, spec, call)
-        if conv in "di":
-            return (head + "d") % k
-        # (an integer's bits, as C's unsigned conversions show them: R 4.5.3, sprintf("%x", -1L) is "ffffffff")
-        k &= 0xFFFFFFFF
-        if conv == "o" and "#" in flags:
-            # (C's alternate octal form is a leading 0, Python's "0o": R 4.5.3, sprintf("%#o", 8L) is "010")
-            digits = ("%" + ("." + prec if prec is not None else "") + "o") % k
-            digits = digits if digits.startswith("0") else "0" + digits
-            w = int(width) if width else 0
-            if "-" in flags:
-                return digits.ljust(w)
-            return digits.rjust(w, "0" if "0" in flags and prec is None else " ")
-        return (head + conv) % k
-    if conv in "feEgG":
-        if v.type not in ("integer", "double", "logical"):
-            raise RError("invalid format '%s'; use format %%s for character objects" % spec.group(0), call)
-        if na:
-            return _field("NA" if e is None else "NaN", flags, width)
-        x = float(e)
-        if abs(x) == math.inf:
-            return _field("Inf" if x > 0 else "-Inf", flags, width)
-        return (head + conv) % x
-    if conv == "s":
-        s = _as_chars(RVector(v.type, [e]), "sprintf()")[0]
-        s = "NA" if s is None else s
-        # (a string's width and precision count its bytes, as C's do: R 4.5.3, sprintf("[%3s]", "é") is "[ é]")
-        b = s.encode("utf-8")
-        if prec is not None and int(prec or 0) < len(b):
-            try:
-                s = b[:int(prec or 0)].decode("utf-8")
-            except UnicodeDecodeError:
+def _float_pieces(x, flags, width, prec, conv):
+    """C's %f, %e, %E, %g or %G of the finite double x."""
+    p = 6 if prec is None else prec
+    q = min(p, _EXACT[conv])
+    core = ("%" + "".join(c for c in "+ #" if c in flags) + "." + str(q) + conv) % x
+    # (the zeros a precision past the exact digits adds, before any exponent; %g without # drops them)
+    tail = p - q if conv in "feE" or "#" in flags else 0
+    at = len(core)
+    if tail and conv != "f":
+        e = core.find("e" if conv in "eg" else "E")
+        at = e if e >= 0 else at
+    head, exp = core[:at], core[at:]
+    ps = [head, (tail, "0"), exp]
+    if "0" in flags and "-" not in flags:
+        s = 1 if head[:1] in ("+", "-", " ") else 0
+        return [head[:s], (max(0, width - _pieces_len(ps)), "0"), head[s:], (tail, "0"), exp]
+    return _padded(ps, width, "-" in flags)
+
+
+def _utf8_len(c):
+    o = ord(c)
+    return 1 if o < 0x80 else 2 if o < 0x800 else 3 if o < 0x10000 else 4
+
+
+def _str_pieces(s, flags, width, prec):
+    """C's %s of s, its width and precision counting bytes: R 4.5.3, sprintf("[%3s]", "é") is "[ é]"."""
+    end, nbytes = len(s), 0
+    for j, c in enumerate(s):
+        k = _utf8_len(c)
+        if prec is not None and nbytes + k > prec:
+            if nbytes < prec:
                 raise NotSupported("sprintf()'s %s precision inside a multibyte character")
-            b = s.encode("utf-8")
-        pad = " " * max(0, (int(width) if width else 0) - len(b))
-        return s + pad if "-" in flags else pad + s
-    raise NotSupported("sprintf()'s %%%s" % conv)
+            end = j
+            break
+        nbytes += k
+    pad = (max(0, width - nbytes), " ")
+    ps = [(s, 0, end)]
+    return ps + [pad] if "-" in flags else [pad] + ps
+
+
+class _Arg:
+    """An argument of sprintf(), as its conversions see it.  R 4.5.3 converts an argument once, for the first
+    element's conversion of it, and every other element's conversion takes it as converted or errs: sprintf("%x", 2)
+    is "2" but sprintf(c("%f", "%d"), c(1, 2)) is an error, and sprintf(c("%s", "%d"), 1:2) too."""
+
+    def __init__(self, v):
+        self.v, self.type = v, v.type
+
+    def convert(self, sess, call, spec, conv):
+        v = self.v
+        if conv in "dixXo" and self.type == "double":
+            # (a double for an integer conversion is taken if every element is NA or a whole number of integer range,
+            # -2^31 being NA with a warning: sprintf("%d", 2147483648) errs, sprintf("%d", -2147483648) is "NA")
+            low = False
+            for e in v.data:
+                if e is None:
+                    continue
+                if e != e or abs(e) == math.inf or e != int(e) or e > _INT_MAX or e < -_INT_MAX - 1:
+                    raise RError("invalid format '%s'; %s" % (spec, _USE["double"]), call)
+                low = low or e == -_INT_MAX - 1
+            if low:
+                sess.warn("NAs introduced by coercion to integer range", call)
+            self.type = "integer"
+        elif conv in "feEgG" and self.type in ("integer", "logical"):
+            self.type = "double"
+        elif conv == "s" and self.type != "character":
+            self.type = "character"
+
+    def pieces(self, i, spec, call):
+        flags, width, prec, conv = spec.group("flags"), spec.group("width"), spec.group("prec"), spec.group("conv")
+        width = int(width) if width else 0
+        prec = None if prec is None else int(prec or 0)
+        e = self.v.data[i % len(self.v.data)]
+        t = self.type
+        if conv in "dixXo":
+            if t != "integer" and not (t == "logical" and conv in "di"):
+                raise RError("invalid format '%s'; %s" % (spec.group(0), _USE[t]), call)
+            if e is None or (self.v.type == "double" and e == -_INT_MAX - 1):
+                # (NA in the field's width, its sign and 0 flags dropped: R 4.5.3, sprintf("%05d", NA) is "   NA")
+                return _word("NA", flags, width)
+            return _int_pieces(int(e), flags, width, prec, conv)
+        if conv in "feEgG":
+            if t != "double":
+                raise RError("invalid format '%s'; %s" % (spec.group(0), _USE[t]), call)
+            if e is None:
+                return _word("NA", flags, width)
+            x = float(e)
+            if x != x:
+                # (R 4.5.3: sprintf("% f", NaN) is " NaN", "%+f" "NaN", "%+f" of Inf "+Inf", "% f" " Inf")
+                return _word((" " if " " in flags and "+" not in flags else "") + "NaN", flags, width)
+            if abs(x) == math.inf:
+                sign = "-" if x < 0 else "+" if "+" in flags else " " if " " in flags else ""
+                return _word(sign + "Inf", flags, width)
+            return _float_pieces(x, flags, width, prec, conv)
+        if conv == "s":
+            if t != "character":
+                raise RError("invalid format '%s'; %s" % (spec.group(0), _USE[t]), call)
+            s = e if self.v.type == "character" else _as_chars(RVector(self.v.type, [e]), "sprintf()")[0]
+            return _str_pieces("NA" if s is None else s, flags, width, prec)
+        raise NotSupported("sprintf()'s %%%s" % conv)
 
 
 def sprintf(sess, call, args):
@@ -314,22 +431,28 @@ def sprintf(sess, call, args):
     used = max((sum(1 for p in ps if not isinstance(p, str) and p.group("conv") != "%") for ps in parsed if ps), default=0)
     if used > len(vals):
         raise RError("too few arguments", call)
+    sargs = [_Arg(v) for v in vals]
+    first = [True]
 
-    def make(i):
+    def pieces(i):
         ps = parsed[i % len(parsed)]
         if ps is None:
             return None
-        k, buf = 0, []
+        k, out = 0, []
         for p in ps:
             if isinstance(p, str):
-                buf.append(p)
+                out.append(p)
             elif p.group("conv") == "%":
-                buf.append("%")
+                out.append("%")
             else:
-                buf.append(_sprintf1(p, vals[k], i, call))
+                if first[0] and i == 0:
+                    sargs[k].convert(sess, call, p.group(0), p.group("conv"))
+                out.extend(sargs[k].pieces(i, p, call))
                 k += 1
-        return "".join(buf)
-    held, build = _measured(n, make)
+        if i == 0:
+            first[0] = False
+        return out
+    held, build = _built(n, pieces)
     with held:
         return RVector("character", build())
 
@@ -368,11 +491,11 @@ def format_(sess, call, args):
     for e in x.data:
         w = max(w, len(raw(e)))
     left = x.type == "character"
-    if trim:
-        make = lambda i: raw(x.data[i])
-    else:
-        make = lambda i: raw(x.data[i]).ljust(w) if left else raw(x.data[i]).rjust(w)
-    held, build = _measured(n, make)
+
+    def pieces(i):
+        r = raw(x.data[i])
+        return [r] if trim else _padded([r], w, left)
+    held, build = _built(n, pieces)
     with held:
         return _keep_names("character", build(), x)
 
@@ -408,23 +531,35 @@ def formatC(sess, call, args):
     # formatC(1/3, format = "f") "0.3333", format = "e" "3.3333e-01")
     if x.type == "double" and digits is None:
         digits = 4
-    spec = "%" + flag + (str(width) if width else "") + ("." + str(digits) if digits is not None and form != "s" else "")
+    if digits is not None and form != "s":
+        # (R 4.5.3 shows at most 324 decimals in format "f" and 50 digits in the others, with a warning:
+        # formatC(1/3, format = "e", digits = 900) is formatC(1/3, format = "e", digits = 50))
+        most = 324 if form == "f" else 50
+        if digits > most:
+            sess.warn("'digits' reduced to %d" % most, call)
+            digits = most
+    if _arg(args, "width") is MISSING and digits is not None and _arg(args, "digits") is not MISSING:
+        # (with digits and no width, the width is digits + 1: R 4.5.3, formatC(c(2, 1/3), digits = 10) is
+        # "          2" "0.3333333333")
+        width = digits + 1
+    if width < 0:
+        flag, width = flag + "-", -width
+    # (format "d" doesn't take digits: R 4.5.3, formatC(22L, width = 3, digits = 3, format = "d") is " 22")
+    prec = digits if form not in ("s", "d") else None
 
-    def make(i):
+    def pieces(i):
         e = x.data[i]
         if e is None or (isinstance(e, float) and e != e):
             # (NA as "NA", right-justified to the width unless flag has "-": R 4.5.3, formatC(c(1L, NA), width = 4))
-            word = "NA" if e is None else "NaN"
-            return word.ljust(width) if "-" in flag else word.rjust(width)
+            return _word("NA" if e is None else "NaN", flag, width)
         if isinstance(e, float) and abs(e) == math.inf:
-            word = "Inf" if e > 0 else "-Inf"
-            return word.ljust(width) if "-" in flag else word.rjust(width)
+            return _word("Inf" if e > 0 else "-Inf", flag, width)
         if form == "d":
-            return (spec + "d") % int(e)
+            return _int_pieces(int(e), flag, width, prec, "d")
         if form == "s":
-            return (spec + "s") % e
-        return (spec + form) % float(e)
-    held, build = _measured(len(x.data), make)
+            return _padded([e], width, "-" in flag)
+        return _float_pieces(float(e), flag, width, prec, form)
+    held, build = _built(len(x.data), pieces)
     with held:
         return _keep_names("character", build(), x)
 

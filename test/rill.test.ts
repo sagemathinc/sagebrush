@@ -789,14 +789,19 @@ mem.SMALL_BYTES = 0
 cases = {
   "nchar(x)": 2 * 32,
   "toupper(x)": 2 * 136 + 4 * 4,
-  'substr("abcdef", 2, 4)': 136 + 4 * 3,
+  # (a string built from its pieces: its characters, and the longest one's again while it is joined)
+  'substr("abcdef", 2, 4)': 136 + 4 * (3 + 3),
   'paste(x, "z")': 2 * 136 + 4 * 8,
   # (the two strings and the one joined from them, held at once)
   'paste(x, collapse = "+")': 136 + 2 * 136 + 4 * (4 + 5),
-  'sprintf("%5d", t3)': 3 * 136 + 4 * 15,
-  'sprintf("%s-%s", x, "q")': 2 * 136 + 4 * 8,
-  "format(y)": 3 * 136 + 4 * 9,
-  'formatC(z, format = "f", digits = 1)': 2 * 136 + 4 * 6,
+  'sprintf("%5d", t3)': 3 * 136 + 4 * (15 + 5),
+  'sprintf("%s-%s", x, "q")': 2 * 136 + 4 * (8 + 4),
+  'sprintf("%1024s", "a")': 136 + 4 * (1024 + 1024),
+  'sprintf("%.1200f", 1)': 136 + 4 * (1202 + 1202),
+  "format(y)": 3 * 136 + 4 * (9 + 3),
+  "format(y, width = 1000)": 3 * 136 + 4 * (3000 + 1000),
+  'formatC(z, format = "f", digits = 1)': 2 * 136 + 4 * (6 + 3),
+  'formatC(z, width = 1000)': 2 * 136 + 4 * (2000 + 1000),
 }
 peak = [0]
 real_enter = mem.Reservation.__enter__
@@ -824,5 +829,39 @@ print(json.dumps(out))
     assert.equal(at, want, `${src}: the whole peak reserved (${at} of ${want})`);
     assert.deepEqual(short, [want, want - 1], `${src}: refused one byte short`);
     assert.equal(open, 0, `${src}: nothing left reserved`);
+  }
+});
+
+test("§8.5: sprintf, format, formatC and substr build nothing before their reservation holds", () => {
+  const got = py(`
+import json
+from _rill import mem, strings
+from _rill.eval import Session
+from _rill.parse import parse
+import _memguard
+s = Session(lambda t: None, lambda t: None)
+for src in ('y <- c(1, 10, 100)', 'w <- "abcdef"'):
+    s.evaluate(parse(src)[0])
+mem.SMALL_BYTES = 0
+built = [0]
+real_piece = strings._piece
+def counted(p):
+    built[0] += 1
+    return real_piece(p)
+strings._piece = counted
+mem._allowance = lambda: (0 - mem.open_bytes(), None)
+out = {}
+for src in ('sprintf("%1048576s", "a")', 'sprintf("%.100000f", 1)', 'sprintf("%-1048576d", 1L)',
+            'format(y, width = 1048576)', 'formatC(y, width = 1048576)', 'substr(w, 2, 5)'):
+    built[0] = 0
+    try:
+        s.evaluate(parse(src)[0])
+        out[src] = "admitted"
+    except _memguard.SagebrushMemoryError as e:
+        out[src] = [built[0], mem.open_bytes()]
+print(json.dumps(out))
+`);
+  for (const [src, r] of Object.entries<any>(got)) {
+    assert.deepEqual(r, [0, 0], `${src}: refused with nothing built and nothing left reserved`);
   }
 });

@@ -17,6 +17,7 @@
   "rill-tests/args/test_1.R",
   "rill-tests/str/test_1.R",
   "rill-tests/str/test_2.R",
-  "rill-tests/str/test_3.R"
+  "rill-tests/str/test_3.R",
+  "rill-tests/str/test_4.R"
  ]
 }
