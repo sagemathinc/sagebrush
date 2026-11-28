@@ -1050,6 +1050,11 @@ class ufunc:
                     a = a.astype(dt)
                 finally:
                     _np._cast_label(old)
+        if where is not True and self._op in ("fmax", "fmin"):
+            # (a masked fmax or fmin: nanmax's or nanmin's, a NaN skipped as fmax skips it, from initial, which a mask
+            # needs, fmax having no identity (nanmax's ValueError, as NumPy's); an unmasked lane of NaN only gives
+            # initial)
+            return (nanmax if self._op == "fmax" else nanmin)(a, axis=axis, keepdims=keepdims, where=where, initial=initial)
         if self._op in quick and (initial is None or masked) and not (dtype is not None and _wraps_in(self._op, dt)):
             # (a sum without an identity starts from its first element: a product's 1 changes nothing; a where= mask
             # goes to the functions that take it, #2088)
@@ -3059,12 +3064,15 @@ def diff(a, n=1, axis=-1, prepend=_NO_DIFF_EXTRA, append=_NO_DIFF_EXTRA):
         if a.dtype.kind == "O":
             # (object elements subtracted as Python subtracts them, element by element along the axis: their own
             # results or errors, as NumPy's object loop)
-            def _pairs(x):
-                return [y - x0 for x0, y in _builtins.zip(x[:-1], x[1:])] if not x or not isinstance(x[0], list) else [_pairs(r) for r in x]
             m = moveaxis(a, axis, -1)
-            # (the result's shape exactly, never a -1: an empty one, any axis of length 0 or the last one used up, too)
+            # (the result's shape exactly, never a -1: an empty one, any axis of length 0 or the last one used up, too;
+            # each difference stored as it is, a list one too, never discovered as nested)
             shape = m.shape[:-1] + (_builtins.max(m.shape[-1] - 1, 0),)
-            d = array(_pairs(m.tolist()), dtype=object).reshape(shape)
+            d = empty(shape, dtype=object)
+            import itertools
+
+            for ix in itertools.product(*(range(k) for k in shape)):
+                d[ix] = m[ix[:-1] + (ix[-1] + 1,)] - m[ix]
             a = moveaxis(d, -1, axis)
             continue
         a = a[tuple(hi)] - a[tuple(lo)] if a.dtype.kind != "b" else not_equal(a[tuple(hi)], a[tuple(lo)])

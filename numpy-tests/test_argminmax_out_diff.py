@@ -32,3 +32,16 @@ show("diff object", lambda: np.diff(np.array([Fraction(1, 2), Fraction(3, 2), 4]
 show("diff object 2d", lambda: np.diff(np.array([[1, 2, 4], [3, 3, 9]], dtype=object), axis=1))
 show("diff object 2d axis0", lambda: np.diff(np.array([[1, 2, 4], [3, 3, 9]], dtype=object), axis=0))
 show("diff float prepend None", lambda: np.diff([1.5, 3.0], prepend=None))
+# an object diff whose differences are sequences: each stored as it is, never discovered as nested
+class Seq:
+    def __init__(self, r): self.r = r
+    def __sub__(self, o): return self.r
+show("diff object list", lambda: np.diff(np.array([Seq([5, 6]), Seq([5, 6])], dtype=object)).tolist())
+show("diff object list shape", lambda: np.diff(np.array([Seq([5, 6]), Seq([5, 6]), Seq(0)], dtype=object)).shape)
+show("diff object tuple", lambda: np.diff(np.array([Seq((1, 2)), Seq((1, 2))], dtype=object)).tolist())
+show("diff object list n=2", lambda: np.diff(np.array([Seq([5, 6])] * 3, dtype=object), n=2))
+show("diff object list 2-D", lambda: np.diff(np.array([[Seq([1]), Seq([2]), Seq([3])]] * 2, dtype=object), axis=1).tolist())
+show("diff object list 2-D axis 0", lambda: np.diff(np.array([[Seq([1]), Seq([2])]] * 2, dtype=object), axis=0).tolist())
+show("diff object single", lambda: np.diff(np.array([Seq([5, 6])], dtype=object)).shape)
+lst = np.empty(2, dtype=object); lst[0] = [1]; lst[1] = [2]
+show("diff object list elements", lambda: np.diff(lst))
