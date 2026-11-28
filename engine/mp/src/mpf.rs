@@ -6,7 +6,10 @@
 //! and rounding included. The exceptions are reviewed fixes of upstream bugs,
 //! each marked where it is made: mpf_div at precision 0 follows mpmath 1.4.1,
 //! except that a power-of-two divisor at precision 0 gives the exact quotient,
-//! which 1.4.1 doesn't.  Statement for statement where the reference branches,
+//! which 1.4.1 doesn't; and mpf_add takes the smaller operand as a sticky bit
+//! only where all of it lies below the larger one's last bit, so that a sum
+//! is the exact one rounded once (filed upstream as mpmath/mpmath#1251).
+//! Statement for statement where the reference branches,
 //! so that the two can be read side by side.
 
 use crate::fail::{raise, too_big};
@@ -256,7 +259,8 @@ pub fn mpf_add(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, sub: bool) -> Mpf {
             // below that bit, offset >= tbc; mpmath 1.3.0 asked only that t's
             // top be prec + 4 under s's, so for an s of more than prec bits a
             // t reaching into them was lost: (1 + 2^-1 + 2^-48) - (3 2^-49 +
-            // 2^-249), just under the tie 1.5, rounded to 2 at 1 bit, not 1)
+            // 2^-249), just under the tie 1.5, rounded to 2 at 1 bit, not 1;
+            // mpmath/mpmath#1251)
             if offset.gt_i64(100) && prec != 0 && !offset.lt_i64(tbc) {
                 // delta = sbc + sexp - tbc - texp
                 let delta = offset.add_i64(sbc - tbc);
