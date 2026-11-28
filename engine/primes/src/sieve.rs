@@ -29,8 +29,16 @@ pub fn isqrt(n: u64) -> u64 {
     r
 }
 
+/// Marks of one prime's pass between two polls of Stop (a pass is up to n / 6 marks, for p = 3).
+const MARKS_PER_POLL: usize = 1 << 20;
+
+/// Small primes that one segment is sieved by between two polls of Stop (below 2^64 the window's square
+/// root has up to about 2 * 10^8 of them, each a division and a pass).
+const PRIMES_PER_POLL: usize = 1 << 16;
+
 /// Every prime p <= n, in increasing order (n below 2^32, so that each prime fits a u32).  The odd numbers
-/// are a bit set (n/16 bytes), and Stop is polled after each prime's pass and while the primes are collected.
+/// are a bit set (n/16 bytes), and Stop is polled every `MARKS_PER_POLL` marks of a prime's pass and while
+/// the primes are collected.
 pub fn small_primes(n: u64) -> Vec<u32> {
     assert!(n < 1 << 32, "small_primes: n must be below 2^32");
     if n < 2 {
@@ -40,18 +48,24 @@ pub fn small_primes(n: u64) -> Vec<u32> {
     let half = (n as usize - 1) / 2 + 1;
     let mut composite = vec![0u64; half.div_ceil(64)];
     let mut i = 1;
-    while (2 * i + 1) * (2 * i + 1) <= n as usize {
-        if composite[i / 64] >> (i % 64) & 1 == 0 {
-            let p = 2 * i + 1;
-            let mut j = p * p / 2;
-            while j < half {
-                composite[j / 64] |= 1 << (j % 64);
-                j += p;
+    {
+        let _marking = sagebrush_interrupt::enter("small primes marking");
+        while (2 * i + 1) * (2 * i + 1) <= n as usize {
+            if composite[i / 64] >> (i % 64) & 1 == 0 {
+                let p = 2 * i + 1;
+                let mut j = p * p / 2;
+                // (a pass is at most n / 2p marks, the longest n / 6 for p = 3: polled in chunks)
+                while j < half {
+                    let stop = half.min(j.saturating_add(p.saturating_mul(MARKS_PER_POLL)));
+                    while j < stop {
+                        composite[j / 64] |= 1 << (j % 64);
+                        j += p;
+                    }
+                    sagebrush_interrupt::check_coarse();
+                }
             }
-            // (a pass is at most n / 2p steps: the longest, for p = 3, is n / 6)
-            sagebrush_interrupt::check_coarse();
+            i += 1;
         }
-        i += 1;
     }
     let mut out = Vec::with_capacity(if n < 100 { 25 } else { (1.3 * n as f64 / (n as f64).ln()) as usize });
     out.push(2);
@@ -88,7 +102,11 @@ fn sieve_segment(base: u64, count: u64, primes: &[u32], bits: &mut Vec<u64>) {
         bits[0] &= !1; // 1 is not prime
     }
     let end = base + 2 * count; // (exclusive)
-    for &p in primes.iter().skip(1) {
+    let _phase = sagebrush_interrupt::enter("sieve segment primes");
+    for (k, &p) in primes.iter().enumerate().skip(1) {
+        if k % PRIMES_PER_POLL == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
         let p = p as u64;
         let pp = p * p;
         if pp >= end {
