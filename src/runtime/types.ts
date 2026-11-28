@@ -3824,7 +3824,19 @@ getset(object, "__dict__", (o) => {
     // array; a byte past ASCII is a non-hexadecimal one at its position)
     if (typeof s !== "string" && isinstance(s, T.str)) s = unbox(s);
     if (typeof s !== "string") {
-      const buf = s instanceof PyBytes ? s.a.subarray(0, s.n) : O.bufferOf(s);
+      // (a contiguous buffer only, as PyObject_GetBuffer's PyBUF_SIMPLE: a strided memoryview CPython's BufferError; a
+      // Python-level exporter (PEP 688) through its __buffer__(0), the view released after with __release_buffer__)
+      let buf: Uint8Array | undefined = s instanceof PyBytes ? s.a.subarray(0, s.n) : O.bufferViewOf(s);
+      if (buf === undefined && O.bufferOf(s) !== undefined) raise(T.BufferError, "memoryview: underlying buffer is not C-contiguous");
+      if (buf === undefined && lookupType(typeOf(s), "__buffer__") !== undefined) {
+        const exporter = s;
+        const view = O.lookupSpecial(exporter, "__buffer__")(exporter, 0);
+        if (typeOf(view) !== T.memoryview) raise(T.TypeError, "__buffer__ returned non-memoryview object");
+        buf = O.bufferViewOf(view);
+        if (buf === undefined) raise(T.BufferError, "memoryview: underlying buffer is not C-contiguous");
+        buf = buf.slice();
+        if (lookupType(typeOf(exporter), "__release_buffer__") !== undefined) O.lookupSpecial(exporter, "__release_buffer__")(exporter, view);
+      }
       if (buf === undefined) raise(T.TypeError, `fromhex() argument must be str or bytes-like, not ${typeName(s)}`);
       let t = "";
       for (let i = 0; i < buf.length; i++) t += String.fromCharCode(buf[i]);

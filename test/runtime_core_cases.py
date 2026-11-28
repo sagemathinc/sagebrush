@@ -136,3 +136,17 @@ for fname, f in (("bytes.fromhex", bytes.fromhex), ("bytearray.fromhex", bytearr
     for label, x in (("memoryview(b'4142')", memoryview(b'4142')), ("bytearray(b'41 42')", bytearray(b'41 42')), ("array('B')", array.array('B', b'4142')),
                      ("memoryview(b'\\xe9')", memoryview(b'\xe9')), ("b'\\xe9'", b'\xe9'), ("5", 5), ("None", None), ("memoryview(b'4')", memoryview(b'4'))):
         show(f"{fname}({label})", lambda: f(x))
+# a contiguous buffer only (a strided memoryview CPython's BufferError), and a
+# Python-level exporter (PEP 688): its __buffer__(0), then __release_buffer__
+log = []
+class Buf:
+    def __buffer__(self, flags): log.append(('buffer', flags)); return memoryview(b"4142")
+    def __release_buffer__(self, view): log.append(('release', type(view).__name__))
+class BadBuf:
+    def __buffer__(self, flags): return b"4142"
+class NoRelease:
+    def __buffer__(self, flags): return memoryview(b"41")
+for fname, f in (("bytes.fromhex", bytes.fromhex), ("bytearray.fromhex", bytearray.fromhex), ("B.fromhex", B.fromhex)):
+    for label, mk in (("Buf()", Buf), ("BadBuf()", BadBuf), ("NoRelease()", NoRelease), ("strided view", lambda: memoryview(b"441122")[::2])):
+        del log[:]
+        show(f"{fname}({label})", lambda: (f(mk()), list(log)))
