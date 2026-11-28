@@ -314,6 +314,9 @@ fn kind_name(e: &SymError) -> &'static str {
         SymError::Value(_) => "ValueError",
         SymError::NotImplemented(_) => "NotImplementedError",
         SymError::Internal(_) => "RuntimeError",
+        SymError::Type(_) => "TypeError",
+        SymError::Overflow(_) => "OverflowError",
+        SymError::Memory(_) => "MemoryError",
     }
 }
 
@@ -450,7 +453,7 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             vec![crate::eval::eval_many(&e, arg(1), &xs).iter().map(|v| format!("{:e}", v)).collect::<Vec<_>>().join(",")]
         }
         // calculus
-        "diff" => one_(crate::diff::diff_n(&d(arg(0)), arg(1), a.get(2).map_or(1, |s| int_arg(s)) as usize)),
+        "diff" => one_(crate::diff::diff_n(&d(arg(0)), arg(1), a.get(2).map_or(1, |s| crate::diff::derivative_count(&int(int_arg(s)))))),
         "expand" => one_(crate::expand::expand(&d(arg(0)))),
         "factor" => one_(crate::simplify::factor(&d(arg(0)))),
         "simplify_rational" => one_(crate::simplify::simplify_rational(&d(arg(0)))),

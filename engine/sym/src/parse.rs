@@ -179,8 +179,8 @@ pub fn call(name: &str, args: Vec<Expr>) -> Expr {
         "exp" if args.len() == 1 => exp(&args[0]),
         "sqrt" if args.len() == 1 => sqrt(&args[0]),
         "diff" | "derivative" if args.len() >= 2 && args[1].as_sym().is_some() => {
-            let n = args.get(2).and_then(|k| k.as_i64()).unwrap_or(1).max(0) as usize;
-            crate::diff::diff_n(&args[0], args[1].as_sym().unwrap(), n)
+            // (every variable and count after f, each count checked as Sage's)
+            crate::diff::diff_spec(&args[0], &args[1..])
         }
         _ => match Fun::from_name(name) {
             Some(f) => fun(f, args),

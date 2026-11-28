@@ -18,9 +18,14 @@ fn var_name(e: &Expr) -> String {
 pub fn apply(name: &str, a: &[Expr]) -> Option<String> {
     Some(match name {
         "diff" | "derivative" => {
-            let x = if a.len() > 1 { var_name(&a[1]) } else { free_symbols(&a[0]).into_iter().next().unwrap_or("x".into()) };
-            let n = a.get(2).and_then(|e| e.as_i64()).unwrap_or(1) as usize;
-            to_string(&crate::diff::diff_n(&a[0], &x, n))
+            if a.len() > 1 {
+                var_name(&a[1]);
+                // (every variable and count after f, each count checked as Sage's)
+                to_string(&crate::diff::diff_spec(&a[0], &a[1..]))
+            } else {
+                let x = free_symbols(&a[0]).into_iter().next().unwrap_or("x".into());
+                to_string(&crate::diff::diff_n(&a[0], &x, 1))
+            }
         }
         "expand" => to_string(&crate::expand::expand(&a[0])),
         "factor" => to_string(&crate::simplify::factor(&a[0])),

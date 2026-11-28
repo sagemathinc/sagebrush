@@ -20,7 +20,7 @@ fn term_power(t: &Expr, x: &str) -> Option<(i64, Expr)> {
         Kind::Sym(s) if &**s == x => Some((1, one())),
         Kind::Pow(b, n) if b.as_sym() == Some(x) => n.as_i64().filter(|k| *k >= 0).map(|k| (k, one())),
         Kind::Mul(v) => {
-            let mut k = 0;
+            let mut k: i64 = 0;
             let mut rest = vec![];
             for f in v {
                 if dep(f) {
@@ -28,7 +28,7 @@ fn term_power(t: &Expr, x: &str) -> Option<(i64, Expr)> {
                     if !r.is_one() {
                         return None;
                     }
-                    k += j;
+                    k = k.checked_add(j)?; // (past i64: not a polynomial this represents)
                 } else {
                     rest.push(f.clone());
                 }
@@ -39,26 +39,40 @@ fn term_power(t: &Expr, x: &str) -> Option<(i64, Expr)> {
     }
 }
 
-/// The coefficients of e (expanded) as a polynomial in x, constant term
-/// first; None if e is not a polynomial in x.
-pub fn coeffs(e: &Expr, x: &str) -> Option<Vec<Expr>> {
+/// The nonzero coefficients of e (expanded) as a polynomial in x, by power;
+/// None if e is not a polynomial in x.  Sparse: x^(2^62) is one entry.
+pub fn sparse_coeffs(e: &Expr, x: &str) -> Option<std::collections::BTreeMap<i64, Expr>> {
     let ex = expand(e);
     let terms = match &ex.kind {
         Kind::Add(v) => v.clone(),
         _ => vec![ex.clone()],
     };
-    let mut out: Vec<Vec<Expr>> = vec![];
+    let mut by: std::collections::BTreeMap<i64, Vec<Expr>> = std::collections::BTreeMap::new();
     for t in terms {
         let (k, r) = term_power(&t, x)?;
-        let k = k as usize;
-        if out.len() <= k {
-            out.resize(k + 1, vec![]);
-        }
-        out[k].push(r);
+        by.entry(k).or_default().push(r);
     }
-    let mut c: Vec<Expr> = out.into_iter().map(add).collect();
-    while c.len() > 1 && c.last().unwrap().is_zero() {
-        c.pop();
+    Some(by.into_iter().map(|(k, v)| (k, add(v))).filter(|(_, c)| !c.is_zero()).collect())
+}
+
+/// The coefficients of e (expanded) as a polynomial in x, constant term
+/// first; None if e is not a polynomial in x.  The dense list has degree + 1
+/// entries: one that cannot be held (x^(2^62)) is Sage's MemoryError, not a
+/// capacity panic.
+pub fn coeffs(e: &Expr, x: &str) -> Option<Vec<Expr>> {
+    let sp = sparse_coeffs(e, x)?;
+    let top = sp.keys().next_back().copied().unwrap_or(0);
+    let len = usize::try_from(top).ok().and_then(|t| t.checked_add(1));
+    let mut c: Vec<Expr> = vec![];
+    if len.is_none_or(|n| c.try_reserve_exact(n).is_err()) {
+        crate::err::memory_error(format!("a polynomial of degree {} in {} has too many coefficients to hold", top, x));
+    }
+    for (k, a) in sp {
+        while (c.len() as i64) < k {
+            sagebrush_interrupt::check();
+            c.push(zero());
+        }
+        c.push(a);
     }
     if c.is_empty() {
         c.push(zero());
@@ -68,14 +82,9 @@ pub fn coeffs(e: &Expr, x: &str) -> Option<Vec<Expr>> {
 
 /// Sage's degree(x): the largest power of x.
 pub fn degree(e: &Expr, x: &str) -> i64 {
-    match coeffs(e, x) {
-        Some(c) => {
-            if c.len() == 1 && c[0].is_zero() {
-                -1
-            } else {
-                c.len() as i64 - 1
-            }
-        }
+    // (sparse: the degree of x^(2^62) needs no dense list)
+    match sparse_coeffs(e, x) {
+        Some(c) => c.keys().next_back().copied().unwrap_or(-1),
         None => value_error(format!("{} is not a polynomial in {}", crate::to_string(e), x)),
     }
 }

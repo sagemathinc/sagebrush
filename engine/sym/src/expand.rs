@@ -16,7 +16,7 @@ pub fn expand(e: &Expr) -> Expr {
                     return power_of_sum(b, n as u64);
                 }
                 if n < 0 {
-                    return pow(&power_of_sum(b, (-n) as u64), &int(-1));
+                    return pow(&power_of_sum(b, n.unsigned_abs()), &int(-1)); // (i64::MIN: no signed negation)
                 }
             }
             e.clone()

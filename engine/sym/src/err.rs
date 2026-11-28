@@ -16,6 +16,12 @@ pub enum SymError {
     /// error, with its message): a bug to report, raised as RuntimeError,
     /// never a resource limit or an unfactored result.
     Internal(String),
+    /// An argument of the wrong type (TypeError).
+    Type(String),
+    /// An integer argument past what the operation takes (OverflowError).
+    Overflow(String),
+    /// A dense result that cannot be represented in memory (MemoryError).
+    Memory(String),
 }
 
 impl fmt::Display for SymError {
@@ -24,7 +30,7 @@ impl fmt::Display for SymError {
             SymError::DivisionByZero => write!(f, "symbolic division by zero"),
             SymError::Value(s) => write!(f, "{}", s),
             SymError::NotImplemented(s) => write!(f, "{}", s),
-            SymError::Internal(s) => write!(f, "{}", s),
+            SymError::Internal(s) | SymError::Type(s) | SymError::Overflow(s) | SymError::Memory(s) => write!(f, "{}", s),
         }
     }
 }
@@ -35,6 +41,18 @@ pub fn throw(e: SymError) -> ! {
 
 pub fn value_error(msg: impl Into<String>) -> ! {
     throw(SymError::Value(msg.into()))
+}
+
+pub fn type_error(msg: impl Into<String>) -> ! {
+    throw(SymError::Type(msg.into()))
+}
+
+pub fn overflow_error(msg: impl Into<String>) -> ! {
+    throw(SymError::Overflow(msg.into()))
+}
+
+pub fn memory_error(msg: impl Into<String>) -> ! {
+    throw(SymError::Memory(msg.into()))
 }
 
 pub fn not_implemented(msg: impl Into<String>) -> ! {
@@ -101,6 +119,9 @@ pub fn install_quiet_hook() {
                         SymError::Value(_) => "ValueError",
                         SymError::NotImplemented(_) => "NotImplementedError",
                         SymError::Internal(_) => "RuntimeError",
+                        SymError::Type(_) => "TypeError",
+                        SymError::Overflow(_) => "OverflowError",
+                        SymError::Memory(_) => "MemoryError",
                     };
                     if let Ok(mut l) = LAST.try_lock() {
                         *l = Some((kind.to_string(), e.to_string()));
