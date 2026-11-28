@@ -96,6 +96,11 @@ export async function loadLti(hash: string, site: string, fetchFn: typeof fetch,
     urls.set(f.path, f.url);
     files.push({ path: f.path, size: f.size as number, sha256: f.sha256 });
   }
+  // (and no path is another's folder: "a" and "a/b" can't both be in one mount, so that list is refused now, not there)
+  for (const f of files) {
+    const seg = f.path.split("/");
+    for (let i = 1; i < seg.length; i++) if (urls.has(seg.slice(0, i).join("/"))) return BAD_LINK;
+  }
   return {
     id: `lti:${m.copy}`,
     // (one revision, never "a newer version": that link is a share's)

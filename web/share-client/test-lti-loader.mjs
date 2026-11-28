@@ -92,6 +92,8 @@ const listBads = [
   ["a path with a backslash", withFile({ ...file("a\\b", 1, 1) })],
   ["a path with a control character", withFile({ ...file("a\u0007b", 1, 1) })],
   ["a path over 512 characters", withFile({ ...file("a".repeat(513), 1, 1) })],
+  ["a file and a folder of one name", { ...MANIFEST, files: [file("a", 1, 1), file("a/b", 2, 1)] }],
+  ["a folder named by a later file", { ...MANIFEST, files: [file("x/y/z", 1, 1), file("x/y", 2, 1)] }],
   // (a date a JavaScript Date can't hold: refused as a malformed list, never thrown while showing it)
   ["a date past the last a Date can hold", { ...MANIFEST, created: Number.MAX_SAFE_INTEGER }],
   ["a date one past 8.64e15", { ...MANIFEST, created: 8.64e15 + 1 }],
@@ -100,8 +102,8 @@ const listBads = [
 for (const [what, m] of listBads) ok((await load(hashOf(LINK), tool(200, m))) === BAD, `the list refused: ${what}`);
 ok((await load(hashOf(LINK), tool(200, "not json"))) === BAD, "the list refused: not JSON");
 {
-  const edge = await load(hashOf(LINK), tool(200, { ...MANIFEST, created: 8.64e15, files: [file("a".repeat(512), 1, 1), file("dir/sub/x.ipynb", 1, 2)] }));
-  ok(typeof edge === "object" && edge.manifest.created === new Date(8.64e15).toISOString() && edge.manifest.files.length === 2, "the edges are accepted: the last instant a Date holds, a 512-character path, nested folders");
+  const edge = await load(hashOf(LINK), tool(200, { ...MANIFEST, created: 8.64e15, files: [file("a".repeat(512), 1, 1), file("dir/sub/x.ipynb", 1, 2), file("ab/c", 1, 3), file("a/b", 1, 4), file("x", 1, 5), file("xy/z", 1, 6)] }));
+  ok(typeof edge === "object" && edge.manifest.created === new Date(8.64e15).toISOString() && edge.manifest.files.length === 6, "the edges are accepted: the last instant a Date holds, a 512-character path, nested folders, and names that only share a prefix (ab/c beside a/b, xy/z beside the file x)");
 }
 
 // the tool's refusals, each in the page's words
