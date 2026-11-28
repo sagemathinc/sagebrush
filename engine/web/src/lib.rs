@@ -61,6 +61,11 @@ pub extern "C" fn sb_reply_len() -> usize {
 /// A top-level call starts: frames and live-progress state a trapped call
 /// left behind (a trap runs no destructors) are forgotten.
 fn new_run() {
+    // (every export starts here, before it replaces REPLY: the reservations
+    // held for the previous reply (AP_HELD, the a_p lists') end with it, and
+    // a call() this export makes holds its own for the host's copy)
+    AP_HELD.with(|h| h.borrow_mut().clear());
+    FOR_HOST.with(|f| f.set(true));
     sagebrush_interrupt::progress::reset_frames();
     sagebrush_arith::smith::progress::reset();
     sagebrush_poly::reset_binomial_units();
@@ -81,14 +86,9 @@ pub unsafe extern "C" fn sb_call(ptr: *const u8, len: usize) -> *const u8 {
     let req = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("");
     let r = &mut *std::ptr::addr_of_mut!(REPLY);
     // the previous reply is freed first (the host copied it after the last
-    // call), so it never coexists with this call's memory; with it go the
-    // reservations held for it (the a_p lists': their reply is that buffer
-    // until the host has copied it)
+    // call), so it never coexists with this call's memory
     drop(std::mem::take(r));
-    AP_HELD.with(|h| h.borrow_mut().clear());
-    FOR_HOST.with(|f| f.set(true));
     *r = call(req).into_bytes();
-    FOR_HOST.with(|f| f.set(false));
     r.as_ptr()
 }
 
@@ -546,9 +546,16 @@ fn progress_selftest(v: &Value) -> Result<Value, String> {
 
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 /// The reply to a request.  Reservations held for the reply (AP_HELD) end
-/// once it is text, or, under sb_call (FOR_HOST), once the host has copied
-/// it: sb_call releases them with the previous reply.
+/// once it is text, or, under an export (FOR_HOST, set by new_run), once the
+/// host has copied it: the next export's new_run releases them with the
+/// previous reply.  A native call() releases every hold of its thread, so a
+/// call() nested in another native one would release its caller's too
+/// (none is: dispatch never calls call()).
 pub fn call(req: &str) -> String {
+    // (the flag is taken, so an unwinding call leaves it cleared; natively the
+    // holds end with this call even if a Stop unwinds through it)
+    let for_host = FOR_HOST.with(|f| f.replace(false));
+    let _release = HeldRelease(!for_host);
     // the capped ops' request sizes are admitted before serde copies
     // anything (the last top-level fn name is read by one scan that owns no
     // text: every other value skipped); unknown names go on as before
@@ -571,10 +578,19 @@ pub fn call(req: &str) -> String {
         Err(e) => error_json(e),
     }
     .to_string();
-    if !FOR_HOST.with(|f| f.get()) {
-        AP_HELD.with(|h| h.borrow_mut().clear());
-    }
     out
+}
+
+/// Releases the reply's held reservations (AP_HELD) when dropped, if set:
+/// at the end of a native call(), returned or unwound.
+struct HeldRelease(bool);
+
+impl Drop for HeldRelease {
+    fn drop(&mut self) {
+        if self.0 {
+            AP_HELD.with(|h| h.borrow_mut().clear());
+        }
+    }
 }
 
 /// The polynomials' factorization as modsym's factor callback (`run` gets
@@ -817,7 +833,8 @@ thread_local! {
     /// The reservations of the a_p lists' sieve and result, held until
     /// call() has serialized the reply (ap_bound pushes; call() clears).
     static AP_HELD: std::cell::RefCell<Vec<sagebrush_ledger::Reservation>> = const { std::cell::RefCell::new(Vec::new()) };
-    /// Set while sb_call runs call(): the reply goes to the host's buffer.
+    /// Set by an export's new_run, taken by the call() it makes: the reply
+    /// goes to the host's buffer.
     static FOR_HOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 

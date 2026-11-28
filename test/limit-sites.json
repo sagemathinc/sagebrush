@@ -9297,6 +9297,11 @@
   "owner": "series ops",
   "reason": "the series ops' fixed caps (series n <= 2^17, sigma and Euler n <= 2^20, input bits <= 2^12, output bits <= 2^14, n beta <= 2^26, work <= 2^34, request bytes), admitted before any allocation; each refusal names the cap and the way around it"
  },
+ "engine/web/tests/ap_reply_admission.rs :: moments_result_and_the_reply_are_admitted :: let req = r#\"{\"fn\":\"moments\",\"a\":[0,0,0,-1,0],\"n\":0,\"kmax\":64}\"#; #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "a test's request with kmax = 64; it limits nothing"
+ },
  "engine/web/tests/bin_alloc.rs ::  :: use sagebrush_web::nmod_ops::{DIV_MAX_LEN, GCD_MAX_LEN, MUL_MAX_LEN}; #0": {
   "class": "none",
   "owner": "engine binary transport (sagebrush-wire)",

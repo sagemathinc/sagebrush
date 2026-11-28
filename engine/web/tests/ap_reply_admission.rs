@@ -1,4 +1,4 @@
-//! The a_p lists' admission covers their results (A09b, cx3): moments'
+//! The a_p lists' admission covers their results (A09b): moments'
 //! kmax numbers and their JSON are reserved with the sieve, so a tiny
 //! allowance refuses moments(kmax = 64) even at n = 0; a large one admits
 //! it; and every reservation is released once the reply is text (call()).
@@ -19,3 +19,4 @@ fn moments_result_and_the_reply_are_admitted() {
     sagebrush_ledger::hooks::set_fake_rows(None);
     assert_eq!(sagebrush_web::sb_outstanding_bytes(), held, "released once the replies are text");
 }
+
