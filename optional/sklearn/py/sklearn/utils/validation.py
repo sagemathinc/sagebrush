@@ -262,8 +262,9 @@ def check_array(array, accept_sparse=False, *, accept_large_sparse=True, dtype="
 
     # (complex data refused before a real dtype's cast could drop its imaginary part: sklearn makes numpy's
     # ComplexWarning an error there and raises this)
-    # (an array's own complex dtype: a list of complex numbers is left to the conversion, whose TypeError NumPy gives)
-    if dtype is not None and dtype.kind != "c" and _sk_has(array, lambda a: a.dtype) and _sk_has(array.dtype, lambda d: d.kind) and array.dtype.kind == "c":
+    # (an array's own complex dtype, into a float or an integer dtype, the casts that warn: a bool or string dtype
+    # takes it, as scikit-learn's; a list of complex numbers is left to the conversion, whose TypeError NumPy gives)
+    if dtype is not None and dtype.kind in "fiu" and _sk_has(array, lambda a: a.dtype) and _sk_has(array.dtype, lambda d: d.kind) and array.dtype.kind == "c":
         raise ValueError("Complex data not supported\n{}\n".format(array))
     if dtype is not None and dtype.kind in "iu":
         # (float to int must not hold NaN or inf, numpy#14412)
