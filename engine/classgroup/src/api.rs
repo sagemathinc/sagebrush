@@ -366,6 +366,11 @@ pub fn bnf_relations(f: &[BigInt], extra: &[u64]) -> Result<RelationData, String
     if f.len() < 3 {
         return Err("the degree must be at least 2".into());
     }
+    // The modular factorization accepts only p < 2^32 (as primes_above); an
+    // extra prime past it panicked there: refuse before calling it.
+    if let Some(p) = extra.iter().find(|&&p| p >= 1 << 32) {
+        return Err(format!("primes above p >= 2^32 are not supported (p = {})", p));
+    }
     let (b, _, r) = crate::nf::bnf::bnfinit_with(f, extra)?;
     let bnf = class_group_data(b);
     let elems = r.elems.iter().map(|x| {
