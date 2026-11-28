@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // mpmath's backend overlay (design/mpmath-core.md, section 4.3; packages/pypi-mpmath/overlay.patch): six of the
-// wheel's files get a 'sagebrush' branch beside their 'sage' one, taking the core's names from _sagebrush_mpcore;
+// wheel's files get a 'sagebrush' branch beside their 'sage' one, taking the core's names from _sagebrush_mpcore
+// (and libmpi.py one that checks its intervals' transcendental endpoints, test/mpmath-iv-containment.test.ts);
 // backend.py chooses once, by SAGEBRUSH_MPMATH_BACKEND ('sagebrush', the default, or 'python', the rollback; anything
 // else is refused), and ctx_mp.py checks every hook. The core is src/runtime/mpcore.ts: a run selected 'sagebrush' must
 // print exactly what a run selected 'python' prints, every hook the live module's the core's.
@@ -20,7 +21,7 @@ const hooks = () => {
   const block = text.slice(text.indexOf("SAGEBRUSH_HOOKS = ("), text.indexOf("\n)\n", text.indexOf("SAGEBRUSH_HOOKS = (")));
   return [...block.matchAll(/\('(\w+)', '(\w+)'\)/g)].map((m) => `${m[1]}.${m[2]}`);
 };
-const FILES = ["ctx_mp.py", "libmp/backend.py", "libmp/libelefun.py", "libmp/libintmath.py", "libmp/libmpc.py", "libmp/libmpf.py"];
+const FILES = ["ctx_mp.py", "libmp/backend.py", "libmp/libelefun.py", "libmp/libintmath.py", "libmp/libmpc.py", "libmp/libmpf.py", "libmp/libmpi.py"];
 
 const run = (backend: string | null, args: string[]) => {
   const env = { ...process.env };
@@ -30,15 +31,24 @@ const run = (backend: string | null, args: string[]) => {
   return { status: r.status, out: r.stdout, err: r.stderr };
 };
 
-test("the overlay only adds the 'sagebrush' branches: no upstream line removed, the six files, every hook in the checked table", () => {
+test("the overlay only adds the 'sagebrush' branches: no upstream line removed, the seven files, every hook in the checked table", () => {
   const patch = readFileSync(join(PKG, "overlay.patch"), "utf8");
   const files = [...patch.matchAll(/^\+\+\+ b\/py\/mpmath\/(.+)$/gm)].map((m) => m[1]).sort();
   assert.deepEqual(files, FILES);
   assert.deepEqual(patch.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("--- a/")), [], "no line of the wheel is removed or changed");
-  // (outside backend.py, each hunk adds one block, and it is a 'sagebrush' branch)
+  // (outside backend.py, each hunk adds one block, and it is a 'sagebrush' branch; libmpi.py has no backend chain
+  // to extend, so its one block, appended after a comment, imports BACKEND and is all inside an
+  // if BACKEND == 'sagebrush': branch, the rollback 'python' keeping upstream's intervals)
+  const libmpi = patch.slice(patch.indexOf("--- a/py/mpmath/libmp/libmpi.py"));
   for (const hunk of patch.split(/^@@ .*@@$/m).slice(1)) {
     const added = hunk.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++"));
     if (added.some((l) => l.includes("SAGEBRUSH_MPMATH_BACKEND"))) continue;
+    if (libmpi.includes(hunk)) {
+      const code = added.filter((l) => l !== "+" && !l.startsWith("+#"));
+      assert.deepEqual(code.slice(0, 2), ["+from .backend import BACKEND", "+if BACKEND == 'sagebrush':"], hunk.slice(0, 200));
+      assert.ok(code.slice(2).every((l) => l.startsWith("+    ")), "libmpi.py: every added line after the branch is inside it");
+      continue;
+    }
     assert.equal(added[0], "+elif BACKEND == 'sagebrush':", hunk.slice(0, 200));
   }
   // (every name taken from the core is one the check covers, under the same name, and the other way round)

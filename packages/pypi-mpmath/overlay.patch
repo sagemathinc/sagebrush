@@ -168,3 +168,76 @@
  
  def list_primes(n):
      n = n + 1
+--- a/py/mpmath/libmp/libmpi.py
++++ b/py/mpmath/libmp/libmpi.py
+@@ -933,3 +933,70 @@
+ 
+ def mpi_factorial(z, prec): return mpi_gamma(z, prec, type=1)
+ def mpci_factorial(z, prec): return mpci_gamma(z, prec, type=1)
++
++# Sagebrush (design/mpmath-core.md: mpmath's iv is a rigorous enclosure, the
++# true value always inside). The directed rounding of a transcendental mpf
++# function is not guaranteed: near a representable number its floor or its
++# ceiling can land on the wrong side (log(1 + 2**-21) at 24 bits, ceiling,
++# gives the floor), and an interval built from it alone can miss the true
++# value. So, in this module only, each such function's floor and ceiling are
++# checked: the function at prec + 64 and prec + 128 bits, raised until the two
++# agree within 2 units in the first one's last place, and the endpoint moved
++# outward one unit in its own last place until that value is at least 4 of
++# those units inside it. An endpoint the check cannot place inside is always
++# moved. A function's exact values (exp(0) = 1, log(1) = 0, atan(0) = 0,
++# atan2(0, x > 0) = 0) and a zero, infinity or nan are kept. Wherever the
++# directed value was already safely on its side, it is returned unchanged, so
++# these are upstream's intervals but where upstream's could miss. (The 'python'
++# backend, the rollback, keeps upstream's.)
++from .backend import BACKEND
++if BACKEND == 'sagebrush':
++    from .libmpf import round_fast
++
++    def _mpi_ulp(v, prec):
++        sign, man, exp, bc = v
++        return from_man_exp(MPZ_ONE, exp + bc - prec)
++
++    def _mpi_outward(f, rounding, prec):
++        v = f(prec, rounding)
++        if rounding not in (round_floor, round_ceiling) or v in (fzero, finf, fninf, fnan):
++            return v
++        wp = prec + 64
++        while 1:
++            h1 = f(wp, round_nearest)
++            h2 = f(wp + 64, round_nearest)
++            if mpf_le(mpf_abs(mpf_sub(h1, h2)), mpf_shift(_mpi_ulp(h1, wp), 1)):
++                break
++            wp *= 2
++        margin = mpf_shift(_mpi_ulp(h1, wp), 2)
++        if rounding == round_floor:
++            bound = mpf_sub(h2, margin)
++            while mpf_gt(v, bound):
++                v = mpf_sub(v, _mpi_ulp(v, prec), prec, round_floor)
++        else:
++            bound = mpf_add(h2, margin)
++            while mpf_lt(v, bound):
++                v = mpf_add(v, _mpi_ulp(v, prec), prec, round_ceiling)
++        return v
++
++    _upstream_exp, _upstream_log, _upstream_atan = mpf_exp, mpf_log, mpf_atan
++    _upstream_atan2, _upstream_pi = mpf_atan2, mpf_pi
++
++    def mpf_exp(x, prec, rnd=round_fast):
++        if x == fzero:
++            return _upstream_exp(x, prec, rnd)
++        return _mpi_outward(lambda p, r: _upstream_exp(x, p, r), rnd, prec)
++
++    def mpf_log(x, prec, rnd=round_fast):
++        if x == fone:
++            return _upstream_log(x, prec, rnd)
++        return _mpi_outward(lambda p, r: _upstream_log(x, p, r), rnd, prec)
++
++    def mpf_atan(x, prec, rnd=round_fast):
++        return _mpi_outward(lambda p, r: _upstream_atan(x, p, r), rnd, prec)
++
++    def mpf_atan2(y, x, prec, rnd=round_fast):
++        return _mpi_outward(lambda p, r: _upstream_atan2(y, x, p, r), rnd, prec)
++
++    def mpf_pi(prec, rnd=round_fast):
++        return _mpi_outward(lambda p, r: _upstream_pi(p, r), rnd, prec)
