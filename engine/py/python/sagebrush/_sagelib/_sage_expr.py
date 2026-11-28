@@ -844,6 +844,10 @@ class Expression:
             Traceback (most recent call last):
             ...
             NotImplementedError: 4.28654315684563e-332 + 0.582240526465012*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+            sage: SR(C(2^-1100, 1)).n(digits=14.9)  # sagebrush only: 53 bits
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: 7.36215182902286e-332 + 1.00000000000000*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
             sage: SR(C(2^-1100, 1)).n(100)
             7.3621518290228626754368661771e-332 + 1.0000000000000000000000000000*I
         """

@@ -12942,6 +12942,11 @@
   "owner": "Sage kernel",
   "reason": "a doctest's expected output for the refusal of n() of a value past the doubles (CC holds doubles), not a cap"
  },
+ "lib/_sage_expr.py :: Expression.n :: NotImplementedError: 7.36215182902286e-332 + 1.00000000000000*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #1": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a doctest's expected output for the refusal of n() of a value past the doubles (CC holds doubles), not a cap"
+ },
  "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
   "class": "none",
   "owner": "Sage kernel",

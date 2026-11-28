@@ -5198,7 +5198,9 @@ def N(x, prec=None, digits=None):
             # (a zero imaginary part leaves a real, as Sage's n())
             v = v._re
         if isinstance(v, ComplexNumberMP):
-            return ComplexField(prec)(v) if prec != 53 else _sa().CC(complex(v))
+            # (CC's numbers are doubles: at 53 bits, which digits= can ask
+            # for (14.9 digits), a part past them is refused, never dropped)
+            return ComplexField(prec)(v) if prec != 53 else _cc_from_mp(_cc_mp()(v))
         return RealField(prec)(v) if prec != 53 else _sa().RR(v)
     if isinstance(x, (RealNumberMP, ComplexNumberMP)):
         return x.n(prec)

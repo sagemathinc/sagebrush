@@ -1,6 +1,6 @@
 # n() of a symbolic number of ComplexField(p), and ComplexField arithmetic
 # with a real of a directed-rounding RealField.  CC's numbers are doubles in
-# sagebrush: n(), n(53) and N() of a value past them are refused (doctests
+# sagebrush: n(), n(53), N() and digits= at 53 bits of a value past them are refused (doctests
 # in lib/_sage_expr.py), so those rows are not here; the other precisions
 # keep such a value.
 def show(label, f):
@@ -20,6 +20,7 @@ for name, z in [("C(1/3, 2)", C(1/3, 2)), ("C(1, 0)", C(1, 0)), ("C(-2, 0)", C(-
     show("digits=5 %s" % name, lambda: s.n(digits=5))
     show("digits=16 %s" % name, lambda: s.n(digits=16))
     show("N digits=15 %s" % name, lambda: N(s, digits=15))
+    show("digits=14.9 (53 bits) %s" % name, lambda: s.n(digits=14.9))
     show("n 2*pi*z %s" % name, lambda: (2*pi*s).n())
 # functions of such a number, within the doubles
 for name, z in [("C(1/3, 2)", SR(C(1/3, 2))), ("C(2^-1000, 1)", SR(C(2^-1000, 1)))]:
@@ -36,6 +37,8 @@ for name, z in [("C(2^-1100, 1)", C(2^-1100, 1)), ("C(1, 2^-1100)", C(1, 2^-1100
     show("digits=5 %s" % name, lambda: s.n(digits=5))
     show("digits=16 %s" % name, lambda: s.n(digits=16))
     show("N digits=15 %s" % name, lambda: N(s, digits=15))
+    show("digits=14.5 (52 bits) %s" % name, lambda: s.n(digits=14.5))
+    show("digits=15.0 (54 bits) %s" % name, lambda: s.n(digits=15.0))
     show("n(100) 2*pi*z %s" % name, lambda: (2*pi*s).n(100))
 # a real of RealField(q, rnd) meets ComplexField(p) in ComplexField(min(p, q)),
 # rounded to nearest there whatever q's rounding
