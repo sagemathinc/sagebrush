@@ -52,7 +52,7 @@
     "py/mpmath/libmp/libintmath.py": "ec449f4f995cff6313627c312dc3153311e609086d54f818f3238951fbee3706",
     "py/mpmath/libmp/libmpc.py": "11eab10aedea12892a84eb8f26e2c977f263c9c7484f2f73d9f6c9fa244f2ae5",
     "py/mpmath/libmp/libmpf.py": "c7547d19307f82929fced1d754647994293422d59b7a67a48008203058a31adf",
-    "py/mpmath/libmp/libmpi.py": "f68b1395419864b261b4f3291dccff0962cf65262d3139091ed578dd0d341406",
+    "py/mpmath/libmp/libmpi.py": "735095a252654870a3648152dc8fbd237bdaaa63702239f37fadada9da22b138",
     "py/mpmath/math2.py": "3b90e0960f354ac5b4c1f1c3509717383f3e70268bbdb548bf2c34b159916e92",
     "py/mpmath/matrices/__init__.py": "113cc60dc8986eaf5fb622b068c6c9d79108f8a3571ebcd16fe6477a186a163b",
     "py/mpmath/matrices/calculus.py": "3cd46afa9da7c604fe7f30b9e0ad9d7a98bc75d85dc7a43ce86f2aa548877946",
@@ -112,7 +112,7 @@
       "license": "BSD-3-Clause",
       "overlay": {
         "patch": "overlay.patch",
-        "sha256": "b4e1f2f0928086685ee717a3a20589286f0de23099853c99b4149168396714ba",
+        "sha256": "484de5049faca1b1438e8ea1d67d5cb8e7d97bdea187b2a16a02bf9f5a9e21a7",
         "files": {
           "py/mpmath/ctx_mp.py": {
             "wheel": "777af8b7bc4736a485b66aac03d06dab5369cb759333ea5c336fe3782c840b16",
@@ -140,7 +140,7 @@
           },
           "py/mpmath/libmp/libmpi.py": {
             "wheel": "bb4239122c24a9afb8f9d5c44e2e64eccb9ac417996ef0803c5b65f7753d605d",
-            "result": "f68b1395419864b261b4f3291dccff0962cf65262d3139091ed578dd0d341406"
+            "result": "735095a252654870a3648152dc8fbd237bdaaa63702239f37fadada9da22b138"
           }
         }
       }

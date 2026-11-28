@@ -1019,7 +1019,8 @@ if BACKEND == 'sagebrush':
     _upstream_gamma, _upstream_rgamma, _upstream_loggamma = mpf_gamma, mpf_rgamma, mpf_loggamma
 
     def _mpi_integral(x):
-        return x not in (finf, fninf, fnan) and x == from_int(to_int(x))
+        # read off the normalized (odd) mantissa's exponent, never expanding the integer itself
+        return x not in (finf, fninf, fnan) and (x == fzero or x[2] >= 0)
 
     def mpf_gamma(x, prec, rnd='d', type=0):
         return _mpi_outward(lambda p, r: _upstream_gamma(x, p, r, type), rnd, prec, _mpi_integral(x))

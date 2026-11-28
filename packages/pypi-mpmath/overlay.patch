@@ -170,7 +170,7 @@
      n = n + 1
 --- a/py/mpmath/libmp/libmpi.py
 +++ b/py/mpmath/libmp/libmpi.py
-@@ -933,3 +933,99 @@
+@@ -933,3 +933,100 @@
  
  def mpi_factorial(z, prec): return mpi_gamma(z, prec, type=1)
  def mpci_factorial(z, prec): return mpci_gamma(z, prec, type=1)
@@ -260,7 +260,8 @@
 +    _upstream_gamma, _upstream_rgamma, _upstream_loggamma = mpf_gamma, mpf_rgamma, mpf_loggamma
 +
 +    def _mpi_integral(x):
-+        return x not in (finf, fninf, fnan) and x == from_int(to_int(x))
++        # read off the normalized (odd) mantissa's exponent, never expanding the integer itself
++        return x not in (finf, fninf, fnan) and (x == fzero or x[2] >= 0)
 +
 +    def mpf_gamma(x, prec, rnd='d', type=0):
 +        return _mpi_outward(lambda p, r: _upstream_gamma(x, p, r, type), rnd, prec, _mpi_integral(x))

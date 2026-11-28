@@ -48,6 +48,8 @@ iv.prec = 24
 print("loggamma(1/4) at 24 bits:", iv.loggamma(iv.mpf(1) / 4)._mpi_)
 iv.prec = 53
 print("exact:", iv.gamma(5)._mpi_, iv.rgamma(3)._mpi_, iv.loggamma(1)._mpi_, iv.loggamma(2)._mpi_, iv.factorial(4)._mpi_, iv.rgamma(-2)._mpi_)
+big = iv.mpf(mp.mpf((0, 1, 10 ** 12, 1)))
+print("loggamma(2^(10^12)), an integer never expanded:", iv.loggamma(big)._mpi_)
 random.seed(2476)
 gfns = {"gamma": (iv.gamma, mp.gamma), "rgamma": (iv.rgamma, mp.rgamma), "loggamma": (iv.loggamma, mp.loggamma), "factorial": (iv.factorial, mp.factorial)}
 gcnt = {n: 0 for n in gfns}; gbad = {n: 0 for n in gfns}
