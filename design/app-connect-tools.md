@@ -14,6 +14,8 @@ The agents page shows, for Claude Code and for Codex, one of:
 
 Nothing happens on its own. The app never searches PATH, never downloads without a click, and never switches to another copy on its own.
 
+The Store builds (the Microsoft Store listing, design/app-agent-host.md §2) make no executable downloads at run time, so they offer only **Choose installed…** and no Download button. The direct-download builds offer both (design/app-agent-host.md §1, Updates).
+
 A copy the person installed may update itself: Claude Code's own installer does by default. After an update it no longer matches what was chosen, so the app shows *the file changed; choose it again*, or *this version isn't supported yet*. That is the rule working. The page says so, and recommends the downloaded copy for a setup that stays put.
 
 ## 2. Choose installed (the person's own copy)
@@ -103,10 +105,12 @@ The host passes one absolute path: `--claude-path <path>` (with `--pair-stdin`),
 The list is a closed constant in the agent; the app mirrors it, with a test that reads the agent's list. A turn whose binary changed ends with `identity_changed`, and the app shows *choose it again*.
 
 **Every helper process is bounded and isolated** in the same way:
-- the person's Claude Code and Codex, for `--version`, `claude -p` and Codex's version check and runs;
+- the person's Claude Code and Codex, for `--version` and Codex's version check (the probes);
 - the bundled agent's control commands: `--claude-versions` and `--fetch-codex`.
 
-Each runs with no shell, an explicit minimal environment (below), a fixed working folder (the app's private `tools/` folder), stdin closed, and stdout and stderr each capped. `--claude-versions` is capped at 64 KiB; the version checks at 4 KiB; `--fetch-codex` reports progress lines of at most 256 bytes and 64 KiB in all. Each has a deadline: 5 s for version checks and `--claude-versions`, 10 min for `--fetch-codex`. It is started in its own process group, killed as a group at the deadline or when the app quits, and reaped.
+Each runs with no shell, an explicit minimal environment (below), a fixed working folder (the app's private `tools/` folder), stdin closed, and stdout and stderr each capped.
+
+The agent's sessions are different. Claude Code runs with `--input-format stream-json`, and `codex app-server` speaks JSON-RPC, each over the agent's own pipe to its stdin and stdout. Those keep that pipe open, owned by the agent. They get the same no shell, minimal environment, own process group and kill when the app quits. Their output goes to the agent's protocol reader, not under the probes' caps. `--claude-versions` is capped at 64 KiB; the version checks at 4 KiB; `--fetch-codex` reports progress lines of at most 256 bytes and 64 KiB in all. Each has a deadline: 5 s for version checks and `--claude-versions`, 10 min for `--fetch-codex`. It is started in its own process group, killed as a group at the deadline or when the app quits, and reaped.
 
 `--fetch-codex` is given its cache root explicitly, as `--codex-cache <the app's private folder>/codex`, a 0700 folder the app made and checked.
 
@@ -116,8 +120,10 @@ Without `--pair-stdin`, the agent run on its own (the command line, a remote run
 
 The minimal environment:
 - no inherited keys;
-- `DISABLE_AUTOUPDATER=1`, so a pinned or chosen binary never updates itself or writes elsewhere;
-- the person's own Claude home, where its login lives (the agent's existing rule: nothing reads, copies or changes it).
+- for Claude Code, `DISABLE_AUTOUPDATER=1`, so a pinned or chosen binary never updates itself or writes elsewhere;
+- for Codex, the same: its update check turned off the way the pinned version reads it (recorded beside the pin);
+- the person's own Claude home, where its login lives (the agent's existing rule: nothing reads, copies or changes it);
+- for Codex, the person's own Codex home, by the same rule.
 
 ## 5. Versions
 
@@ -132,6 +138,7 @@ SEC rules on it then.
 
 ## 7. Tests
 
+- **The app's packaging:** the built app's agent manifest names none of the SDK's platform packages and no `claude` or `claude.exe` file; a control build that keeps one fails.
 - **The app:** each §2 refusal on a real file:
   - a link given, with its target bound;
   - the target swapped after the choice;
@@ -151,6 +158,8 @@ SEC rules on it then.
   - a link given, with the target bound;
   - each ancestor case, and another owner;
   - `DISABLE_AUTOUPDATER=1` in the spawn's environment, and nothing inherited;
+  - for Codex, likewise: its update check off in the spawn's environment or configuration, set the way the pinned version reads it (recorded beside the pin), so a pinned or chosen Codex never updates itself or writes a copy elsewhere;
+  - a first successful turn through each session transport: Claude Code over stream-json on the open stdin, and `codex app-server` over JSON-RPC;
   - `--claude-versions` against the schema, and Codex's two modes never mixing.
 - **SEC's r2 rows** (permanent, both halves where they apply):
   - a URL with a suffix that normalizes, such as `/claude/../claude`, `%2e`, a trailing `/` or `?x`, refused;

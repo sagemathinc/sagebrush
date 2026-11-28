@@ -599,6 +599,10 @@ impl Field {
     /// N(x) = Res_y(T(y), h(x, y)) for h with integer coordinates (num).
     pub fn norm(&self, h: &[Vec<BigInt>]) -> Vec<BigInt> {
         let n = self.n;
+        // (the zero polynomial's norm is 0, the empty coefficient list)
+        if h.is_empty() {
+            return vec![];
+        }
         let dh = h.len() - 1;
         let big_d = n * dh;
         // the bound (sum_i sum_j |c_ij| R^j)^n
@@ -647,16 +651,22 @@ impl Field {
         out
     }
 
-    /// The irreducible factors of a monic square-free h (Trager).
+    /// The irreducible factors of a monic square-free h (Trager).  The
+    /// shifts k = 0, 1, -1, 2, -2, ... are tried with no limit: N(h(x + k a))
+    /// fails to be square-free only when k is one of the finitely many
+    /// (r_i - r_j)/(a_s - a_t) for roots r of h's conjugates and conjugates a
+    /// of the generator, so the search ends; each shift is a Stop point, and
+    /// a shift is passed over only when its norm is proved not square-free.
     fn factor_squarefree(&self, h: &KPoly) -> Result<Vec<KPoly>, String> {
         if h.degree() <= 1 {
             return Ok(vec![h.clone()]);
         }
-        for step in 0..64i64 {
+        for step in 0i64.. {
+            sagebrush_interrupt::check();
             let k = if step % 2 == 1 { (step + 1) / 2 } else { -(step / 2) };
             let hk = self.shift(h, -k);
             let nrm = self.norm(&hk.num);
-            if !certified_squarefree(&nrm) {
+            if !squarefree_over_q(&nrm)? {
                 continue;
             }
             let (_, fs) = try_factor(&nrm).map_err(|e| e.to_string())?;
@@ -670,7 +680,7 @@ impl Field {
             }
             return Ok(out);
         }
-        Err("no shift with a square-free norm".into())
+        unreachable!("the shifts are unbounded")
     }
 
     /// f = u prod g^e with u = lc(f) (coordinates over a denominator) and
@@ -702,9 +712,14 @@ impl Field {
     }
 }
 
-/// Whether N (integer coefficients) is square-free, certified modulo a prime
-/// where it keeps its degree; false when no prime tried certifies it.
-fn certified_squarefree(nrm: &[BigInt]) -> bool {
+/// Whether N (integer coefficients) is square-free over Q.  A prime where N
+/// keeps its degree and is square-free certifies it (the first few primes
+/// are tried, a quick path for the usual case); otherwise the exact test
+/// decides (crate::try_is_squarefree: more primes, then gcd(N, N') over Q).
+/// The number of quick primes changes only the speed, never the answer: a
+/// fixed set of primes can all divide N's discriminant without N having a
+/// repeated factor (x^2 - P^2 with P their product, Codex audit A03).
+fn squarefree_over_q(nrm: &[BigInt]) -> Result<bool, String> {
     for p in primes().take(4) {
         let np: FPoly = nrm.iter().map(|c| modp(c, p)).collect();
         if np.last() == Some(&0) {
@@ -712,10 +727,10 @@ fn certified_squarefree(nrm: &[BigInt]) -> bool {
         }
         let d = ftrim(np.iter().enumerate().skip(1).map(|(i, &c)| c * (i as u64 % p) % p).collect());
         if fgcd(&np, &d, p).len() == 1 {
-            return true;
+            return Ok(true);
         }
     }
-    false
+    crate::try_is_squarefree(nrm).map_err(|e| e.to_string())
 }
 
 /// Res(a, b) over F_p, a monic (b may be 0).
@@ -858,5 +873,61 @@ mod tests {
         let (_, got) = k.factor(&g).unwrap();
         assert_eq!(got.len(), 2);
         assert!(got.contains(&(f, 2)));
+    }
+
+    /// The four primes the quick screen tries (the first of primes()).
+    fn screen_product() -> BigInt {
+        primes().take(4).fold(b(1), |a, p| a * BigInt::from(p))
+    }
+
+    #[test]
+    fn a03_f1_square_free_norm_past_the_quick_primes() {
+        // x^2 - P^2 over Q(sqrt 2), P the product of the quick screen's four
+        // primes: every norm is a square modulo each of them, so the screen
+        // never certifies; the exact test does (Codex audit A03-F1; Sage 10.10:
+        // (x - P)(x + P))
+        let p = screen_product();
+        assert_eq!(p.to_string(), "21267646447030638312596530828283033699");
+        // first the decision itself (before the factoring, whose shift search a
+        // wrong "not square-free" would never end), on integer polynomials: x^2 - P^2 is square-free
+        // though no quick prime says so; (x - P)^2 and x^2 are proved not to be
+        assert!(squarefree_over_q(&[-(&p * &p), b(0), b(1)]).unwrap());
+        assert!(!squarefree_over_q(&[&p * &p, -(&p * b(2)), b(1)]).unwrap());
+        assert!(!squarefree_over_q(&[b(0), b(0), b(1)]).unwrap());
+        assert!(squarefree_over_q(&[b(-2), b(0), b(1)]).unwrap());
+        let k = Field::new(&[b(-2), b(0), b(1)]).unwrap();
+        let f = KPoly::new(2, vec![vec![-(&p * &p), b(0)], vec![b(0), b(0)], vec![b(1), b(0)]], b(1));
+        let (_, got) = k.factor(&f).unwrap();
+        let lin = |c: BigInt| KPoly::new(2, vec![vec![c, b(0)], vec![b(1), b(0)]], b(1));
+        assert_eq!(got.len(), 2);
+        assert!(got.contains(&(lin(-p.clone()), 1)) && got.contains(&(lin(p.clone()), 1)), "{:?}", got);
+    }
+
+    #[test]
+    fn a03_f2_shift_search_has_no_limit() {
+        // prod_{j=-32}^{31} (x - j a), a^2 = 2: the shifts 0, 1, -1, ..., 32
+        // all give norms with a repeated root (0); -32, the 65th, is the
+        // first that works (Codex audit A03-F2; Sage 10.10: 64 linear factors)
+        let k = Field::new(&[b(-2), b(0), b(1)]).unwrap();
+        let mut f = KPoly::new(2, vec![vec![b(1), b(0)]], b(1));
+        let mut want = vec![];
+        for j in -32i64..32 {
+            let g = KPoly::new(2, vec![vec![b(0), b(-j)], vec![b(1), b(0)]], b(1));
+            f = k.mul(&f, &g);
+            want.push(g);
+        }
+        let (unit, got) = k.factor(&f).unwrap();
+        assert_eq!(unit, (vec![b(1), b(0)], b(1)));
+        assert_eq!(got.len(), 64);
+        for g in &want {
+            assert!(got.contains(&(g.clone(), 1)), "{:?}", g);
+        }
+    }
+
+    #[test]
+    fn a03_f3_norm_of_zero() {
+        // the zero polynomial (no coefficients) has norm 0, not a panic
+        let k = Field::new(&[b(-2), b(0), b(1)]).unwrap();
+        assert_eq!(k.norm(&[]), Vec::<BigInt>::new());
     }
 }

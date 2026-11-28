@@ -19,14 +19,18 @@ pub fn page_script() -> String {
     format!("window.__SB_APP_VERSION__ = {};", serde_json::json!({ "version": VERSION, "commit": COMMIT }))
 }
 
+/// The app menu's Approvals… item (the approvals window, signer.rs).
+#[cfg(target_os = "macos")]
+pub const APPROVALS: &str = "sb-approvals";
+
 /// The macOS menu bar: Tauri's default menu (tauri 2's Menu::default), with About naming the commit too.
 #[cfg(target_os = "macos")]
 pub fn menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
-    use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem as P, Submenu, HELP_SUBMENU_ID, WINDOW_SUBMENU_ID};
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem as P, Submenu, HELP_SUBMENU_ID, WINDOW_SUBMENU_ID};
     let name = app.package_info().name.clone();
     let about = AboutMetadata { name: Some(name.clone()), version: Some(VERSION.into()), short_version: Some(short_commit().into()), copyright: app.config().bundle.copyright.clone(), authors: app.config().bundle.publisher.clone().map(|p| vec![p]), ..Default::default() };
     Menu::with_items(app, &[
-        &Submenu::with_items(app, name, true, &[&P::about(app, None, Some(about))?, &P::separator(app)?, &P::services(app, None)?, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?, &P::separator(app)?, &P::quit(app, None)?])?,
+        &Submenu::with_items(app, name, true, &[&P::about(app, None, Some(about))?, &P::separator(app)?, &MenuItem::with_id(app, APPROVALS, "Approvals…", true, None::<&str>)?, &P::separator(app)?, &P::services(app, None)?, &P::separator(app)?, &P::hide(app, None)?, &P::hide_others(app, None)?, &P::separator(app)?, &P::quit(app, None)?])?,
         &Submenu::with_items(app, "File", true, &[&P::close_window(app, None)?])?,
         &Submenu::with_items(app, "Edit", true, &[&P::undo(app, None)?, &P::redo(app, None)?, &P::separator(app)?, &P::cut(app, None)?, &P::copy(app, None)?, &P::paste(app, None)?, &P::select_all(app, None)?])?,
         &Submenu::with_items(app, "View", true, &[&P::fullscreen(app, None)?])?,
