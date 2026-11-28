@@ -146,6 +146,31 @@
    "reason": "R's Calls: line (nlevels -> levels), a traceback Rill doesn't print yet (A1.3); the message itself is R's",
    "sha256": "211ad6b2c7e53534588385f2840fdfb735fe85cb928a9d90ebfd418dcfeaf155"
   },
+  "rill-tests/fac/test_5.R#cut-dig-lab-infinite": {
+   "class": "not-implemented",
+   "reason": "R's error from the S3 method (negative length vectors), naming cut.default (A1.3: S3 dispatch); Rill refuses",
+   "sha256": "d74c7637f4181b865b7b0069b5551171ad3dbb9dafc3ddb39433db61f12fc6a1"
+  },
+  "rill-tests/fac/test_5.R#cut-dig-lab-nan": {
+   "class": "not-implemented",
+   "reason": "R's error from dig.lab's sequence inside the S3 method (A1.3: S3 dispatch); Rill refuses",
+   "sha256": "d74c7637f4181b865b7b0069b5551171ad3dbb9dafc3ddb39433db61f12fc6a1"
+  },
+  "rill-tests/fac/test_5.R#cut-intervals-infinite": {
+   "class": "not-implemented",
+   "reason": "R's error from seq.int inside the S3 method, with a coercion warning (A1.3: S3 dispatch); Rill refuses",
+   "sha256": "0ed7ba121174dcea48b8eab972b1f8901075526c4dcd9d5e96cd1b58bffc04d5"
+  },
+  "rill-tests/fac/test_5.R#cut-intervals-invalid": {
+   "class": "not-implemented",
+   "reason": "R's invalid number of intervals names cut.default (A1.3: S3 dispatch); Rill refuses",
+   "sha256": "0ed7ba121174dcea48b8eab972b1f8901075526c4dcd9d5e96cd1b58bffc04d5"
+  },
+  "rill-tests/fac/test_5.R#cut-intervals-too-many": {
+   "class": "not-implemented",
+   "reason": "R's error from seq.int inside the S3 method, with a coercion warning (A1.3: S3 dispatch); Rill refuses",
+   "sha256": "0ed7ba121174dcea48b8eab972b1f8901075526c4dcd9d5e96cd1b58bffc04d5"
+  },
   "rill-tests/parse/test_1.R#arg-empty-name": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",

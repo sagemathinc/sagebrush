@@ -221,6 +221,12 @@ def as_vector(sess, call, args):
 
 # ---------------------------------------------------------------- cut
 
+# the most significant digits cut's labels are written with (R reduces dig.lab past this, with a warning), and the
+# most intervals a number of breaks may ask for (R's integer range less one: its breaks are one more)
+MAX_DIG = 50
+MAX_INTERVALS = 2 ** 31 - 2
+
+
 def cut(sess, call, args):
     """cut(x, breaks, labels = NULL, include.lowest = FALSE, right = TRUE, dig.lab = 3, ordered_result = FALSE):
     each number's interval among the breaks, as a factor of labels "(a,b]" (or "[a,b)" with right = FALSE).  A
@@ -243,11 +249,20 @@ def cut(sess, call, args):
     if dl is not MISSING:
         if not (isinstance(dl, RVector) and dl.type in ("integer", "double") and len(dl.data) == 1 and dl.data[0] is not None):
             raise NotSupported("cut(dig.lab =) other than a number")
-        dig = int(dl.data[0])
+        d = dl.data[0]
+        # (R: NA, NaN and Inf are errors; a fraction steps from itself, 2.5 to 11.5, to labels Rill doesn't model;
+        # past 50 digits R warns and uses 50)
+        if not math.isfinite(d) or d != int(d):
+            raise NotSupported("cut(dig.lab =) other than a whole number")
+        if d > MAX_DIG:
+            raise NotSupported("cut(dig.lab =) past %d" % MAX_DIG)
+        dig = int(d)
     n = len(x.data)
     if len(br.data) == 1:
         nb = br.data[0]
-        if nb is None or nb != nb or nb < 2 or nb != int(nb):
+        # (R: fewer than 2, NA or -Inf is "invalid number of intervals" from the S3 method; Inf, or more than an
+        # integer holds, an error from seq.int; a fraction is truncated; all refused, A1.3)
+        if nb is None or not math.isfinite(nb) or nb != int(nb) or not 2 <= nb <= MAX_INTERVALS:
             raise NotSupported("cut() with this number of breaks")
         k = int(nb)
     else:
@@ -314,7 +329,9 @@ def _interval_labels(breaks, dig, right, lowest):
     """"(a,b]" labels, each break written with `dig` significant digits, more until neighbours differ (?cut's
     dig.lab), up to 12.  Where neighbours are still equal at 12, every interval is "Range_k" instead (R 4.5.3)."""
     k = len(breaks) - 1
-    for d in range(dig, max(12, dig) + 1):
+    # (a negative dig.lab writes every break as formatC's default, 6 significant digits, so the negative steps are
+    # one try; then 0 up to 12, R 4.5.3)
+    for d in ([6] if dig < 0 else []) + list(range(max(dig, 0), max(12, dig) + 1)):
         s = [_g(b, d) for b in breaks]
         if all(s[i] != s[i + 1] for i in range(k)):
             break
