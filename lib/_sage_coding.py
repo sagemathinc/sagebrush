@@ -711,7 +711,8 @@ class AbstractLinearCode(AbstractCode):
         # (Sage's systematic encoder: no positions, or empty ones, give the
         # echelon form; else distinct integers in range, as many as the rows)
         pos = tuple(systematic_positions) if systematic_positions else None
-        if pos is None:
+        if not pos:
+            # (an empty iterator, too: Sage tests the tuple it makes)
             return G.echelon_form()
         ZZ = _sa().ZZ
 

@@ -54,3 +54,8 @@ C = LinearCode(matrix(GF(2), [[1,0,1,1],[0,1,1,0]]))
 for pos in [(-1, 1), (0.5, 1), ('0', '1'), (0, 0), (0, 4), (0,), (0, 1, 2), (), [], None, [3, 1], (int(2), ZZ(0)), (float(1), 2), (RDF(1), 2), (QQ(1), 2), (Zmod(7)(1), 2), (True, 2)]:
     show("C pos=%r" % (pos,), lambda: C.systematic_generator_matrix(systematic_positions=pos))
 show("C no keyword", lambda: C.systematic_generator_matrix((1, 3)))
+# a negative weight: the digraph's count is the determinant's absolute value
+N = DiGraph([(0, 1, -2)], weighted=True)
+show("N stc, root 1", lambda: (N.spanning_trees_count(), N.spanning_trees_count(1)))
+show("C pos=iter(())", lambda: C.systematic_generator_matrix(systematic_positions=iter(())))
+show("C pos=iter((1, 3))", lambda: C.systematic_generator_matrix(systematic_positions=iter((1, 3))))
