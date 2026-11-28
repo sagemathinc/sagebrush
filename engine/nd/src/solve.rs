@@ -502,6 +502,31 @@ mod tests {
         }
     }
 
+    /// The SPD A = 2^-1018 (I + (P + P')/8) at n = 32 (P the cyclic shift), A \ 1: rcond as at scale 1, about 0.6
+    /// (LAPACK's dpocon: 0x1.3333333333333p-1). Every solved entry is finite (at most about 7.3e306), but the
+    /// alternating vector's absolute sum rounds past the largest double, and the infinite extra estimate made
+    /// rcond 0.
+    #[test]
+    fn the_report_rcond_where_the_alternating_sum_overflows() {
+        let n = 32;
+        let mut c = vec![0.0; n * n];
+        for i in 0..n {
+            c[i + i * n] = 1.0;
+            c[i + ((i + 1) % n) * n] = 0.125;
+            c[(i + 1) % n + i * n] = 0.125;
+        }
+        let (_, base, _) = run(Kernel::Scalar, &c, &vec![1.0; n], n, 1);
+        // (and at 2^-1019, where LAPACK's dpocon gives 0 by its scaling guard, which mldivide's estimate does not
+        // take: #2361)
+        for k in [1018, 1019] {
+            let a: Vec<f64> = c.iter().map(|v| v * 2.0f64.powi(-k)).collect();
+            let (x, rep, _) = run(Kernel::Scalar, &a, &vec![1.0; n], n, 1);
+            assert_eq!((rep.status, rep.structure), (Status::Solved, Structure::Spd), "2^-{k}: {rep:?}");
+            assert!((rep.rcond - base.rcond).abs() <= 4.0 * f64::EPSILON && (rep.rcond - 0.6).abs() < 1e-12, "2^-{k}: {rep:?} vs {base:?}");
+            assert!(x.iter().all(|v| v.is_finite()));
+        }
+    }
+
     /// [f64::MAX] \ [1]: rcond is 1 (the estimate 2^-1024 has no finite reciprocal; it once came out Infinity)
     #[test]
     fn the_report_rcond_of_the_largest_double_is_1() {

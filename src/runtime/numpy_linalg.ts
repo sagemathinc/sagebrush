@@ -292,7 +292,13 @@ function invNormEst(n: number, B: (x: Float64Array, t: boolean) => void, anorm: 
     }
     for (let i = 0; i < n; i++) { const m = 1 + i / (n - 1); x[i] = i % 2 === 0 ? m : -m; }
     B(x, false);
-    const t = 2 * (asum(x) / (3 * n)); // (divided before doubled, as dlacn2 and engine/nd: 2 * sum can overflow)
+    // (divided before doubled, as dlacn2 and engine/nd: 2 * sum can overflow; and when the sum itself rounds past
+    // the largest double with every entry finite, each entry divided by 3n first: the sum is used unchanged
+    // wherever it is finite)
+    const s = asum(x), d = 3 * n;
+    let t = s / d;
+    if (!isFinite(s)) { t = 0; for (let i = 0; i < n; i++) t += Math.abs(x[i]) / d; }
+    t *= 2;
     if (t > est) est = t;
   }
   if (!isFinite(est) || est === 0) return 0;
