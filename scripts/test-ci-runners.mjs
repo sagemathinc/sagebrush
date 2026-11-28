@@ -117,4 +117,10 @@ assert.ok(toolchains.length > 0 && caches.length > 0);
 for (const s of toolchains) assert.equal(s.with?.toolchain, channel, `a dtolnay/rust-toolchain step names ${channel}`);
 for (const s of caches) assert.equal(s.with?.["cache-bin"], false, "a Swatinem/rust-cache step sets cache-bin: false");
 n += toolchains.length + caches.length;
+// (size-gate's merge-queue label read fails closed: a missing gh, or a failed labels call, is an error, never "no label")
+const labelStep = ci.jobs["size-gate"].steps.find((s) => String(s.run ?? "").includes("issues/$n/labels")).run;
+assert.match(labelStep, /command -v gh > \/dev\/null \|\| \{ echo "::error::[^"]*"; exit 1; \}/, "size-gate: no gh is an error");
+assert.match(labelStep, /labels=\$\(gh api "repos\/\$GITHUB_REPOSITORY\/issues\/\$n\/labels" --jq '\[\.\[\]\.name\]'\) \|\| \{ echo "::error::[^"]*"; exit 1; \}/, "size-gate: a failed labels call is an error");
+assert.ok(!/gh api[^\n]*\| *jq -e/.test(labelStep), "size-gate: gh's output isn't piped straight into the test (a failed call would read as no label)");
+n += 3;
 console.log(`ci runners: ${n} checks pass`);
