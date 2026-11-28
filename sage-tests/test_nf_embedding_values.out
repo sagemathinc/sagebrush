@@ -454,3 +454,6 @@ QQ[QQbar(2)^(1/3)]: g < 2, g > 1, CC(g + 1) | (True, True, 2.25992104989487)
 QQ[QQbar(2)^(1/3)]: float(g/3 + 1/3) | 0.7533070166316245
 QQ[QQbar(-3).sqrt()]: g < 2, g > 1, CC(g + 1) | (True, False, 1.00000000000000 + 1.73205080756888*I)
 QQ[QQbar(-3).sqrt()]: float(g/3 + 1/3) | TypeError unable to coerce to a real number
+QQ(1/2) < c, <=, >, >=, c > QQ(1/2) | (False, False, True, True, True)
+QQ(-3) < c, QQ(-3) > c^2 | (False, True)
+QQ(3/2) < a, QQ(3/2) > a, QQ(1/2) < -a | (False, True, False)

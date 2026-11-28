@@ -735,6 +735,35 @@ class Rational(_Fraction):
 
     __slots__ = ()
 
+    # (a number field element on the right: Sage converts this rational into
+    # its field and compares with the rational on the left; Fraction's
+    # NotImplemented would hand the comparison to the element's reflected
+    # method, the operands swapped, which a field ordered only as "left >
+    # right" answers the other way)
+    def _nf_cmp(self, o):
+        if type(o).__name__ != "NumberFieldElement":
+            return None
+        try:
+            return o._K(self)._cmp_embedded(o)
+        except (TypeError, ValueError):
+            return None
+
+    def __lt__(self, o):
+        c = self._nf_cmp(o)
+        return _Fraction.__lt__(self, o) if c is None else c < 0
+
+    def __le__(self, o):
+        c = self._nf_cmp(o)
+        return _Fraction.__le__(self, o) if c is None else c <= 0
+
+    def __gt__(self, o):
+        c = self._nf_cmp(o)
+        return _Fraction.__gt__(self, o) if c is None else c > 0
+
+    def __ge__(self, o):
+        c = self._nf_cmp(o)
+        return _Fraction.__ge__(self, o) if c is None else c >= 0
+
     def __new__(cls, x=0, base=0):
         # (as Sage: the second argument is a base, for a string only:
         # Rational(1, 3) is 1, Rational('12', 3) is 5; a numerator and a

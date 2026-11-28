@@ -1,0 +1,7 @@
+(x-1)^2 - 2/2^200 at 1 + 2^-90: u > 1, (u - 1).sign() | (True, 1)
+x^2 - 2 at ComplexField(100)(1.4): RealField(10)(a), ComplexField(10)(a).real(), as rationals | (181/128, 181/128)
+x^2 - 2 at ComplexField(100)(1.4): RealField(20)(a), ComplexField(20)(a).real(), as rationals | (46341/32768, 46341/32768)
+x^2 - 2 at ComplexField(100)(1.4): RealField(53)(a), ComplexField(53)(a).real(), as rationals | (1592262918131443/1125899906842624, 1592262918131443/1125899906842624)
+x^2 - 2 at QQbar(2).sqrt(): RealField(10)(a), ComplexField(10)(a).real(), as rationals | (181/128, 181/128)
+x^2 - 2 at QQbar(2).sqrt(): RealField(20)(a), ComplexField(20)(a).real(), as rationals | (46341/32768, 46341/32768)
+x^2 - 2 at QQbar(2).sqrt(): RealField(53)(a), ComplexField(53)(a).real(), as rationals | (1592262918131443/1125899906842624, 1592262918131443/1125899906842624)

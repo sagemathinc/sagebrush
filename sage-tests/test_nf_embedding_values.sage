@@ -72,3 +72,9 @@ for n, K in [("QQ[AA(2).sqrt()]", QQ[AA(2).sqrt()]), ("QQ[QQbar(2)^(1/3)]", QQ[Q
     g = K.gen()
     show("%s: g < 2, g > 1, CC(g + 1)" % n, lambda: (g < 2, g > 1, CC(g + 1)))
     show("%s: float(g/3 + 1/3)" % n, lambda: float(g/3 + QQ(1)/3))
+# a rational on the left: converted into the field and compared from the left
+Kc = NumberField(x^3 - 2, 'c', embedding=CC(-0.63, 1.09)); c = Kc.gen()
+show("QQ(1/2) < c, <=, >, >=, c > QQ(1/2)", lambda: (QQ(1)/2 < c, QQ(1)/2 <= c, QQ(1)/2 > c, QQ(1)/2 >= c, c > QQ(1)/2))
+show("QQ(-3) < c, QQ(-3) > c^2", lambda: (QQ(-3) < c, QQ(-3) > c^2))
+Kr = NumberField(x^2 - 2, 'a', embedding=1.4); ar = Kr.gen()
+show("QQ(3/2) < a, QQ(3/2) > a, QQ(1/2) < -a", lambda: (QQ(3)/2 < ar, QQ(3)/2 > ar, QQ(1)/2 < -ar))
