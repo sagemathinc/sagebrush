@@ -54,10 +54,18 @@ impl Group {
 
     pub fn orbit(&self, x: u32) -> Vec<u32> {
         let mut seen = vec![false; self.n];
+        self.orbit_marking(x, &mut seen)
+    }
+
+    /// The orbit of x (sorted), its points marked in `seen` (x's unmarked
+    /// before).  Stop is checked once per point reached: an orbit's work
+    /// grows with the degree, up to 2^20.
+    fn orbit_marking(&self, x: u32, seen: &mut [bool]) -> Vec<u32> {
         seen[x as usize] = true;
         let mut orb = vec![x];
         let mut i = 0;
         while i < orb.len() {
+            sagebrush_interrupt::check();
             for g in &self.gens {
                 let y = g.image(orb[i]);
                 if !seen[y as usize] {
@@ -71,17 +79,16 @@ impl Group {
         orb
     }
 
-    /// All orbits on {0..n-1} (fixed points included), by smallest point.
+    /// All orbits on {0..n-1} (fixed points included), by smallest point:
+    /// one pass over the points, marking each orbit's (not a fresh mark
+    /// array for every orbit, quadratic in the degree for a group with
+    /// many orbits).
     pub fn orbits(&self) -> Vec<Vec<u32>> {
         let mut seen = vec![false; self.n];
         let mut out = vec![];
         for x in 0..self.n as u32 {
             if !seen[x as usize] {
-                let o = self.orbit(x);
-                for &y in &o {
-                    seen[y as usize] = true;
-                }
-                out.push(o);
+                out.push(self.orbit_marking(x, &mut seen));
             }
         }
         out
