@@ -281,11 +281,18 @@ struct Ctx<'a> {
 
 /// (a, b) with e = a x + b, a != 0 free of x.
 fn linear(e: &Expr, x: &str) -> Option<(Expr, Expr)> {
-    let c = crate::poly::coeffs(e, x)?;
-    if c.len() != 2 || c[1].is_zero() || depends(&c[1], x) || depends(&c[0], x) {
+    // (sparse: a high power of x, x^(2^63 - 1), is not linear, and is never
+    // made dense to find that out)
+    let c = crate::poly::sparse_coeffs(e, x)?;
+    if c.keys().any(|k| *k > 1) {
         return None;
     }
-    Some((c[1].clone(), c[0].clone()))
+    let a = c.get(&1)?.clone();
+    let b = c.get(&0).cloned().unwrap_or_else(zero);
+    if a.is_zero() || depends(&a, x) || depends(&b, x) {
+        return None;
+    }
+    Some((a, b))
 }
 
 /// The factors of a product (or the single factor).
@@ -699,8 +706,14 @@ impl<'a> Ctx<'a> {
         let mut dens = vec![];
         exponent_denominators(f, &xs, &mut dens);
         if dens.len() >= 2 {
-            let l = dens.iter().fold(1i64, |acc, d| num_integer::lcm(acc, *d));
-            if l <= 60 {
+            // (checked: an lcm past 60 is no candidate, and past i64 it is
+            // never formed; x^(1/4294967291) and x^(1/4294967279) give
+            // 18446743979220271189)
+            let l = dens.iter().try_fold(1i64, |acc, d| {
+                let m = (acc / num_integer::gcd(acc, *d)).checked_mul(*d)?;
+                (m <= 60).then_some(m)
+            });
+            if let Some(l) = l {
                 cands.push(pow(&xs, &rat(1, l)));
             }
         }

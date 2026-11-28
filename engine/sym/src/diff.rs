@@ -197,10 +197,55 @@ fn real_for_real(t: &Expr, x: &str) -> bool {
 }
 
 /// The n-th derivative.
-pub fn diff_n(e: &Expr, x: &str, n: usize) -> Expr {
+pub fn diff_n(e: &Expr, x: &str, n: u64) -> Expr {
     let mut r = e.clone();
     for _ in 0..n {
+        sagebrush_interrupt::check();
         r = diff(&r, x);
+        if r.is_zero() {
+            break; // (every further derivative is 0 too; checked after a step, so a float 0.0 still becomes 0)
+        }
+    }
+    r
+}
+
+/// A derivative count as Sage takes one: a nonnegative integer below 2^31
+/// (Sage's TypeError for anything else, its OverflowError past a C int and
+/// past a C long, its ValueError for a negative count).  Never truncated
+/// or defaulted.
+pub fn derivative_count(k: &Expr) -> u64 {
+    use num_traits::{Signed, ToPrimitive};
+    let Some(n) = k.as_int() else {
+        crate::err::type_error("argument symb must be a symbol");
+    };
+    if n.is_negative() {
+        crate::err::value_error("derivative counts must be nonnegative");
+    }
+    match n.to_i64() {
+        None => crate::err::overflow_error("Python int too large to convert to C long"),
+        Some(c) if c > i32::MAX as i64 => crate::err::overflow_error("value too large to convert to int"),
+        Some(c) => c as u64,
+    }
+}
+
+/// Sage's diff(f, *spec): variables, each optionally followed by its count
+/// (diff(f, x, 2, y) is the second derivative in x, then the first in y).
+pub fn diff_spec(f: &Expr, spec: &[Expr]) -> Expr {
+    let mut r = f.clone();
+    let mut i = 0;
+    while i < spec.len() {
+        let Some(x) = spec[i].as_sym() else {
+            crate::err::type_error("argument symb must be a symbol");
+        };
+        let n = match spec.get(i + 1) {
+            Some(k) if k.as_sym().is_none() => {
+                i += 1;
+                derivative_count(k)
+            }
+            _ => 1,
+        };
+        r = diff_n(&r, x, n);
+        i += 1;
     }
     r
 }

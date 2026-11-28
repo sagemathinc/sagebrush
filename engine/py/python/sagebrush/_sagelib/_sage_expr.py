@@ -23,7 +23,8 @@ except ImportError:  # pyjs: the engine is linked into the runtime
 
 _SEP = "\x1f"
 _ERRORS = {"ZeroDivisionError": ZeroDivisionError, "ValueError": ValueError,
-           "NotImplementedError": NotImplementedError}
+           "NotImplementedError": NotImplementedError, "TypeError": TypeError,
+           "OverflowError": OverflowError, "MemoryError": MemoryError}
 
 
 
@@ -897,6 +898,11 @@ class Expression:
             if isinstance(a, int) and not isinstance(a, bool):
                 if a < 0:
                     raise ValueError("derivative counts must be nonnegative")
+                # (Sage's: a count past a C long, then past a C int)
+                if a > 2**63 - 1:
+                    raise OverflowError("Python int too large to convert to C long")
+                if a > 2**31 - 1:
+                    raise OverflowError("value too large to convert to int")
                 if last is None:
                     if a == 0:
                         continue

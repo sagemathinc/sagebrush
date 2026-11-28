@@ -4246,6 +4246,16 @@
   "owner": "symbolic calculus (@sagebrush-matlab)",
   "reason": "try_limit is the name of the limit function: this line asks for a one-sided limit and refuses nothing"
  },
+ "engine/sym/src/diff.rs :: derivative_count :: None => crate::err::overflow_error(\"Python int too large to convert to C long\"), #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "Sage's own refusal of a derivative count past a C int or C long (diff(x, x, 2^63) is OverflowError in Sage 10.10), or the error kind table and tests naming it; not a Sagebrush limit"
+ },
+ "engine/sym/src/diff.rs :: derivative_count :: Some(c) if c > i32::MAX as i64 => crate::err::overflow_error(\"value too large to convert to int\"), #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "Sage's own refusal of a derivative count past a C int or C long (diff(x, x, 2^63) is OverflowError in Sage 10.10), or the error kind table and tests naming it; not a Sagebrush limit"
+ },
  "engine/sym/src/num.rs ::  :: pub const MAX_INT_BITS: u64 = 1 << 21; #0": {
   "class": "2+3",
   "owner": "symbolic engine",
@@ -4285,6 +4295,21 @@
   "class": "2+3",
   "owner": "symbolic engine",
   "row": "inv-44"
+ },
+ "engine/sym/tests/audit_a07b.rs :: f1_derivative_counts_as_sage :: (\"diff(x, x, 9223372036854775808)\", SymError::Overflow(\"Python int too large to convert to C long\".into())), #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "Sage's own refusal of a derivative count past a C int or C long (diff(x, x, 2^63) is OverflowError in Sage 10.10), or the error kind table and tests naming it; not a Sagebrush limit"
+ },
+ "engine/sym/tests/audit_a07b.rs :: f1_derivative_counts_as_sage :: (\"diff(x^2, x, 18446744073709551616)\", SymError::Overflow(\"Python int too large to convert to C long\".into())), #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "Sage's own refusal of a derivative count past a C int or C long (diff(x, x, 2^63) is OverflowError in Sage 10.10), or the error kind table and tests naming it; not a Sagebrush limit"
+ },
+ "engine/sym/tests/audit_a07b.rs :: f1_derivative_counts_as_sage :: (\"diff(x^3, x, 9223372036854775807)\", SymError::Overflow(\"value too large to convert to int\".into())), #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "Sage's own refusal of a derivative count past a C int or C long (diff(x, x, 2^63) is OverflowError in Sage 10.10), or the error kind table and tests naming it; not a Sagebrush limit"
  },
  "engine/sym/tests/stage2_interrupt.rs ::  :: use sagebrush_poly::{Budget, Limits}; #0": {
   "class": "none",
@@ -7247,10 +7272,25 @@
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
  },
+ "lib/_sage_expr.py ::  :: \"NotImplementedError\": NotImplementedError, \"TypeError\": TypeError, #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "Sage's own refusal of a derivative count past a C int or C long (diff(x, x, 2^63) is OverflowError in Sage 10.10), or the error kind table and tests naming it; not a Sagebrush limit"
+ },
  "lib/_sage_expr.py ::  :: _SUM_SHIFT_LIMIT = 2000 # work limit of the shifted closed forms #0": {
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
+ },
+ "lib/_sage_expr.py :: Expression.diff :: raise OverflowError(\"Python int too large to convert to C long\") #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "Sage's own refusal of a derivative count past a C int or C long (diff(x, x, 2^63) is OverflowError in Sage 10.10), or the error kind table and tests naming it; not a Sagebrush limit"
+ },
+ "lib/_sage_expr.py :: Expression.diff :: raise OverflowError(\"value too large to convert to int\") #0": {
+  "class": "none",
+  "owner": "symbolic engine",
+  "reason": "Sage's own refusal of a derivative count past a C int or C long (diff(x, x, 2^63) is OverflowError in Sage 10.10), or the error kind table and tests naming it; not a Sagebrush limit"
  },
  "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
   "class": "none",

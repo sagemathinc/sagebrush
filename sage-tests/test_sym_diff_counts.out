@@ -1,0 +1,12 @@
+2^63 OverflowError Python int too large to convert to C long
+2^64 OverflowError Python int too large to convert to C long
+2^63-1 OverflowError value too large to convert to int
+2^31 OverflowError value too large to convert to int
+2^31-1 0
+-1 ValueError derivative counts must be nonnegative
+0 x^2
+x,2,y 6*y^2
+x,y,2 12*x*y
+x,1,y,1 3*x^2
+sin 4 sin(x)
+method 60*x^2
