@@ -281,7 +281,7 @@ export class AgentPairing {
 
   constructor(
     readonly port: number,
-    how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
+    how: { code: string } | { session: string; pairingId: string; agent: { name: string; client: string } } | { link: AgentLink; computer: string },
     private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; egressTurn?: boolean; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
