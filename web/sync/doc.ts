@@ -189,9 +189,10 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     }));
   }
   private lose = false;
-  /** Tests only: the body bytes the last pull read from storage (S07 P2) */
-  private pullRead = 0;
-  async testPullRead(): Promise<number | null> {
+  /** Tests only: the rows whose envelopes and bodies the last pull read from storage, their body bytes, and any text its
+   * sizing read materialized (S07 P2) */
+  private pullRead = { rows: 0, bodyBytes: 0, sizingText: 0 };
+  async testPullRead(): Promise<{ rows: number; bodyBytes: number; sizingText: number } | null> {
     return testMode(this.env) ? this.pullRead : null;
   }
 
@@ -312,33 +313,35 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     const head = this.head();
     if (a.epoch !== head.epoch) throw new SyncError("epoch", "this document's history was cleared", { epoch: head.epoch, head });
     const limit = Math.min(Math.max(1, a.limit ?? LIMITS.pullDefault), LIMITS.pullMax);
-    // (which batches fit is decided from their sizes first, and only those batches' bodies are read: a pull holds about
-    // its byte budget of bodies, never `limit` full ones; the first always fits, so one large batch still makes progress)
-    const meta = this.sql.exec("SELECT seq, length(body) AS n, envs FROM batches WHERE epoch = ? AND seq > ? ORDER BY seq LIMIT ?", head.epoch, a.after, limit + 1).toArray() as Row[];
-    const envs = new Map<number, string>();
-    let bytes = 0;
-    let more = meta.length > limit;
-    for (const r of meta.slice(0, limit)) {
+    // (which batches fit is decided from their sizes alone, the bodies' and the envelopes', and only those batches'
+    // bodies and envelopes are read: a pull holds about its byte budget, never `limit` batches' worth; the first always
+    // fits, so one large batch still makes progress)
+    const sizes = this.sql.exec("SELECT seq, length(body) AS n, length(envs) AS e FROM batches WHERE epoch = ? AND seq > ? ORDER BY seq LIMIT ?", head.epoch, a.after, limit + 1).toArray() as Row[];
+    let bytes = 0, take = 0, sizingText = 0;
+    let more = sizes.length > limit;
+    // (tests only: any text or bytes the sizing read materialized, which must be none: it reads lengths)
+    if (testMode(this.env)) for (const r of sizes) for (const v of [r.n, r.e]) sizingText += typeof v === "string" ? v.length : v instanceof ArrayBuffer ? v.byteLength : 0;
+    for (const r of sizes.slice(0, limit)) {
       // (base64 is 4/3 of the bytes; the envelopes are counted as stored)
-      const cost = Math.ceil(Number(r.n) / 3) * 4 + String(r.envs).length + 200;
-      if (envs.size > 0 && bytes + cost > LIMITS.pullBytes) {
+      const cost = Math.ceil(Number(r.n) / 3) * 4 + Number(r.e) + 200;
+      if (take > 0 && bytes + cost > LIMITS.pullBytes) {
         more = true;
         break;
       }
       bytes += cost;
-      envs.set(Number(r.seq), String(r.envs));
+      take++;
     }
     const items: PullOut["items"] = [];
     let read = 0;
-    if (envs.size > 0) {
-      const last = Math.max(...envs.keys());
-      for (const r of this.sql.exec("SELECT seq, author, writer, device, body FROM batches WHERE epoch = ? AND seq > ? AND seq <= ? ORDER BY seq", head.epoch, a.after, last)) {
+    if (take > 0) {
+      const last = Number(sizes[take - 1].seq);
+      for (const r of this.sql.exec("SELECT seq, author, writer, device, envs, body FROM batches WHERE epoch = ? AND seq > ? AND seq <= ? ORDER BY seq", head.epoch, a.after, last)) {
         const body = new Uint8Array(r.body as ArrayBuffer);
         read += body.length;
-        items.push({ seq: Number(r.seq), author: String(r.author), writer: String(r.writer), device: String(r.device), patches: JSON.parse(envs.get(Number(r.seq))!), body: toB64(body) });
+        items.push({ seq: Number(r.seq), author: String(r.author), writer: String(r.writer), device: String(r.device), patches: JSON.parse(String(r.envs)), body: toB64(body) });
       }
     }
-    if (testMode(this.env)) this.pullRead = read;
+    if (testMode(this.env)) this.pullRead = { rows: items.length, bodyBytes: read, sizingText };
     return { epoch: head.epoch, head, items, more };
   }
 

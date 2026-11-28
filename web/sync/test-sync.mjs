@@ -2535,13 +2535,42 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
     const p = await k.ask({ t: "pull", doc, epoch: 1, after: 0 });
     const read = await docOf(doc).testPullRead();
     ok(p?.items?.length === 4 && p.more === true && p.items.map((it) => it.seq).join() === "1,2,3,4", `a pull of seven 690 KB batches returns the four that fit, in order, with more (${p?.items?.length}, more ${p?.more})`);
-    ok(read === 4 * B, `and it read only those four bodies from storage: ${read} bytes, not the ${7 * B} of all seven`);
+    ok(read?.rows === 4 && read.bodyBytes === 4 * B && read.sizingText === 0, `and it read only those four rows from storage: ${JSON.stringify(read)}, not the ${7 * B} body bytes of all seven`);
     const p2 = await k.ask({ t: "pull", doc, epoch: 1, after: 4 });
     const read2 = await docOf(doc).testPullRead();
-    ok(p2?.items?.map((it) => it.seq).join() === "5,6,7" && p2.more === false && read2 === 3 * B, `the next page: the other three, no more, three bodies read (${read2})`);
+    ok(p2?.items?.map((it) => it.seq).join() === "5,6,7" && p2.more === false && read2?.rows === 3 && read2.bodyBytes === 3 * B, `the next page: the other three, no more, three rows read (${JSON.stringify(read2)})`);
     const one = await k.ask({ t: "pull", doc, epoch: 1, after: 0, limit: 1 });
     const read1 = await docOf(doc).testPullRead();
-    ok(one?.items?.length === 1 && one.more === true && read1 === B, `limit 1: one item, more, one body read (${read1})`);
+    ok(one?.items?.length === 1 && one.more === true && read1?.rows === 1 && read1.bodyBytes === B, `limit 1: one item, more, one row read (${JSON.stringify(read1)})`);
+  }
+
+  // (S07 P2, envelopes: twelve batches whose envelopes are what's large (2,000 tiny patches each, 8 parents apiece,
+  // about half a MB of envelope text a batch), a default pull returns the ones that fit and reads only those rows'
+  // envelopes, not the twelve its limit would have read)
+  {
+    const doc = "fe5c00000007";
+    const C7 = "clientFN07", N = 2000;
+    let cseq = 0;
+    const heavy = () => {
+      const ps = [];
+      for (let j = 0; j < N; j++) {
+        cseq++;
+        const parents = [];
+        for (let q = Math.max(1, cseq - 8); q < cseq; q++) parents.push(pid(q, C7));
+        ps.push([cseq, pid(cseq, C7), parents, "x"]);
+      }
+      return batch(doc, 1, ps, cseq === N ? { kind: "board" } : {});
+    };
+    for (let i = 1; i <= 12; i++) {
+      const r = await k.ask(heavy());
+      if (!r?.batch) ok(false, "(S07 P2: envelope-heavy batch " + i + " stored: " + JSON.stringify(r)?.slice(0, 200) + ")");
+      await new Promise((res) => setTimeout(res, 300));
+    }
+    const p = await k.ask({ t: "pull", doc, epoch: 1, after: 0 });
+    const read = await docOf(doc).testPullRead();
+    const n = p?.items?.length ?? 0;
+    ok(n > 1 && n < 12 && p.more === true, `a pull of twelve envelope-heavy batches returns the ones that fit 4 MiB, with more (${n})`);
+    ok(read?.rows === n && read.sizingText === 0, `and it read only those rows' envelopes and bodies from storage, deciding from lengths alone (${JSON.stringify(read)}), not the twelve rows' envelopes the limit allows`);
   }
 
   // (control: the same hold with no sign-out commits, so the rows above are the sign-out's doing)
