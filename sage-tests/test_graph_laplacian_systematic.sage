@@ -30,3 +30,27 @@ for F, G in [(GF(2), matrix(GF(2), [[1,1,0,1,0,0,1],[0,1,1,0,1,0,1],[1,0,1,0,0,1
         show("%s pos=%s" % (F, pos), lambda: C.systematic_generator_matrix(systematic_positions=pos))
 C = LinearCode(matrix(GF(2), [[1,1,0,0],[0,0,1,1]]))
 show("GF(2) non-information set (0,1)", lambda: C.systematic_generator_matrix(systematic_positions=(0,1)))
+# a digraph's spanning out-trees from root_vertex (default: the first vertex
+# in the graph's own order), the empty graph's none, and the count's type
+L = DiGraph({'b': ['a', 'c'], 'a': ['c'], 'c': ['b']})
+show("L stc", lambda: L.spanning_trees_count())
+for r in ['a', 'b', 'c', 'z']:
+    show("L stc root %s" % r, lambda: L.spanning_trees_count(root_vertex=r))
+for r in [0, 1, 2]:
+    show("DD stc root %s" % r, lambda: DD.spanning_trees_count(r))
+P = DiGraph([(0,1),(1,2),(0,2),(2,3)])
+for r in [None, 0, 3]:
+    show("P stc root %s" % r, lambda: P.spanning_trees_count(root_vertex=r))
+show("W stc root 2", lambda: W.spanning_trees_count(root_vertex=2))
+show("Graph() stc", lambda: Graph().spanning_trees_count()); show("DiGraph() stc", lambda: DiGraph().spanning_trees_count())
+for name, g in [("Graph(1)", Graph(1)), ("DiGraph(1)", DiGraph(1)), ("K4", graphs.CompleteGraph(4)), ("W", W), ("Q", Q), ("DD", DD)]:
+    show(name + " stc and parent", lambda: (lambda v: (v, v.parent()))(g.spanning_trees_count()))
+# signless and normalized Laplacians
+for name, g in [("path", graphs.PathGraph(3)), ("W", W), ("DD", DD), ("isolated", Graph({0: [1], 2: []}))]:
+    for kw in [{"signless": True}, {"normalized": True}, {"normalized": True, "signless": True}, {"signless": True, "indegree": False}]:
+        show("%s lap %s" % (name, sorted(kw.items())), lambda: g.laplacian_matrix(**kw))
+# systematic positions as Sage checks them
+C = LinearCode(matrix(GF(2), [[1,0,1,1],[0,1,1,0]]))
+for pos in [(-1, 1), (0.5, 1), ('0', '1'), (0, 0), (0, 4), (0,), (0, 1, 2), (), [], None, [3, 1], (int(2), ZZ(0)), (float(1), 2), (RDF(1), 2), (QQ(1), 2), (Zmod(7)(1), 2), (True, 2)]:
+    show("C pos=%r" % (pos,), lambda: C.systematic_generator_matrix(systematic_positions=pos))
+show("C no keyword", lambda: C.systematic_generator_matrix((1, 3)))

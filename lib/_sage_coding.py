@@ -708,11 +708,34 @@ class AbstractLinearCode(AbstractCode):
             ValueError: systematic_positions are not an information set
         """
         G = self.generator_matrix()
-        if systematic_positions is None:
+        # (Sage's systematic encoder: no positions, or empty ones, give the
+        # echelon form; else distinct integers in range, as many as the rows)
+        pos = tuple(systematic_positions) if systematic_positions else None
+        if pos is None:
             return G.echelon_form()
-        pos = [int(i) for i in systematic_positions]
+        ZZ = _sa().ZZ
+
+        def integral(e):
+            # (Sage's e in ZZ: ZZ(e) == e, so '0' is not, and Mod(1, 7) is)
+            if isinstance(e, str):
+                return False
+            try:
+                return ZZ(e) == e
+            except (TypeError, ValueError, ArithmeticError):
+                return False
+        if not all(integral(e) and 0 <= ZZ(e) < G.ncols() for e in pos) or len(pos) != len(set(pos)):
+            raise ValueError("systematic positions must be a tuple of distinct integers in the range 0 to n-1 where n is the length of the code")
+        if len(pos) != G.nrows():
+            raise ValueError("systematic_positions must be a tuple of length equal to the dimension of the code")
+        # (an inexact real such as 1.0 passes Sage's test but fails building
+        # its encoder, with this message)
+        if any(isinstance(e, float) or not getattr(getattr(e, "parent", lambda: ZZ)(), "is_exact", lambda: True)() for e in pos):
+            raise ValueError("Constructing the Systematic encoder failed, possibly due to missing or incorrect parameters.\n"
+                             "The constructor requires no arguments.\nIt takes the optional arguments ['systematic_positions'].\n"
+                             "See the documentation of sage.coding.linear_code_no_metric.LinearCodeSystematicEncoder for more details.")
+        pos = [int(ZZ(e)) for e in pos]
         S = _sa().matrix(G.base_ring(), [[G[i, j] for j in pos] for i in range(G.nrows())])
-        if S.nrows() != S.ncols() or S.rank() < S.nrows():
+        if S.rank() < S.nrows():
             raise ValueError("systematic_positions are not an information set")
         return S.inverse() * G
 

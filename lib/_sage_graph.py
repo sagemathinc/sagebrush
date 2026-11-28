@@ -563,7 +563,8 @@ class GenericGraph:
     def laplacian_matrix(self, weighted=None, vertices=None, **kwds):
         """D - A, the degrees on the diagonal: weighted by the edge labels for a
         weighted graph (weighted=None: the graph's own), and for a digraph the
-        in-degrees (indegree=False: the out-degrees), as Sage's.
+        in-degrees (indegree=False: the out-degrees), as Sage's; signless=True
+        gives D + A, and normalized=True scales by D^(-1/2) on both sides.
 
         EXAMPLES::
 
@@ -582,8 +583,11 @@ class GenericGraph:
             [ 0  3], [ 0  0]
             )
         """
-        # (indegree as a keyword, Sage's, so the signature is unchanged)
+        # (indegree, normalized and signless as keywords, Sage's, so the
+        # signature is unchanged)
         indegree = kwds.pop("indegree", True)
+        normalized = kwds.pop("normalized", False)
+        signless = kwds.pop("signless", False)
         if weighted is None:
             weighted = bool(self._weighted)
         A = self.weighted_adjacency_matrix(vertices=vertices) if weighted else self.adjacency_matrix(vertices=vertices)
@@ -592,17 +596,28 @@ class GenericGraph:
             deg = [sum(A[k, i] for k in range(n)) for i in range(n)]
         else:
             deg = [sum(A[i, k] for k in range(n)) for i in range(n)]
-        rows = [[(deg[i] if i == j else 0) - A[i, j] for j in range(n)] for i in range(n)]
+        sgn = 1 if signless else -1
+        rows = [[(deg[i] if i == j else 0) + sgn * A[i, j] for j in range(n)] for i in range(n)]
+        if normalized:
+            # (Sage's D^(-1/2) (D -+ A) D^(-1/2), a degree 0 scaled by 1)
+            sq = [_sa().QQ(1) / _sa().sqrt(d) if d else 1 for d in deg]
+            rows = [[sq[i] * rows[i][j] * sq[j] for j in range(n)] for i in range(n)]
         # (over the weights' ring: a weight 1/2 makes it QQ's)
-        return _sa().matrix(rows)
+        M = _sa().matrix(rows)
+        if normalized and any(deg) and M.base_ring() is _sa().ZZ:
+            # (Sage's D^(-1/2) is over QQ once a degree is nonzero, though
+            # every 1/sqrt(d) is rational)
+            M = M.change_ring(_sa().QQ)
+        return M
 
     kirchhoff_matrix = laplacian_matrix
 
-    def spanning_trees_count(self):
+    def spanning_trees_count(self, root_vertex=None):
         """The number of spanning trees (Kirchhoff's theorem): of a weighted
         graph, weighted by its edges' labels, and of a digraph the spanning
-        trees into its first vertex (the in-degree Laplacian), as Sage's (a
-        digraph had none: it was Graph's only).
+        out-trees rooted at root_vertex (default: the first vertex), each
+        edge directed away from the root, as Sage's (a digraph had none: it
+        was Graph's only). The empty graph has none.
 
         EXAMPLES::
 
@@ -610,14 +625,31 @@ class GenericGraph:
             125
             sage: Graph([(0, 1, 3), (1, 2, 2), (0, 2, 5)], weighted=True).spanning_trees_count()
             31
-            sage: DiGraph([(0, 1, 3), (1, 2, 2), (2, 0, 5), (0, 2, 1)], weighted=True).spanning_trees_count()
-            9
+            sage: D = DiGraph([(0, 1, 3), (1, 2, 2), (2, 0, 5), (0, 2, 1)], weighted=True)
+            sage: [D.spanning_trees_count(r) for r in D]
+            [9, 10, 15]
+            sage: Graph().spanning_trees_count()
+            0
         """
-        L = self.laplacian_matrix()
-        n = L.nrows()
-        if n <= 1:
-            return _sa().Integer(1)
-        return _sa().matrix([[L[i, j] for j in range(1, n)] for i in range(1, n)]).det()
+        # (as Sage's: the vertices in the graph's own order, the first the
+        # root; an undirected graph's root_vertex is unused)
+        if not self.order():
+            return 0
+        vertices = list(self)
+        M = self.kirchhoff_matrix(vertices=vertices)
+        n = M.nrows()
+        if not self.is_directed():
+            if n == 1:
+                return M.base_ring()(1)
+            return M.base_ring()(_sa().matrix(M.base_ring(), [[M[i, j] for j in range(1, n)] for i in range(1, n)]).det())
+        if root_vertex is None:
+            index = 0
+        elif root_vertex not in vertices:
+            raise ValueError("vertex (%s) not in the graph" % (root_vertex,))
+        else:
+            index = vertices.index(root_vertex)
+        rows = [[M[i, j] + (1 if i == j == index else 0) for j in range(n)] for i in range(n)]
+        return M.base_ring()(abs(_sa().matrix(M.base_ring(), rows).det()))
 
     def to_dictionary(self, edge_labels=False, multiple_edges=False):
         """{vertex: neighbours} (or {vertex: {neighbour: label}}).
