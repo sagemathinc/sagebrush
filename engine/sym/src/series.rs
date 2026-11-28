@@ -72,6 +72,9 @@ impl Series {
     }
 
     pub fn mul(&self, o: &Series) -> Series {
+        // (a Stop point: a product is quadratic in the precision, and a
+        // fractional power's base may be expanded far, A07's review)
+        sagebrush_interrupt::check();
         if self.c.is_empty() || o.c.is_empty() {
             return Series { v: self.v + o.v, c: vec![] };
         }
@@ -168,7 +171,10 @@ impl Series {
             acc = acc.add(&term.scale(&binom));
         }
         let mut s = acc.scale(&pow(&a0, &re));
-        s.v += num_traits::ToPrimitive::to_i64(&vr.to_integer()).unwrap();
+        // (a valuation v r past i64, x^(2^63) for one, is refused: unwrapped,
+        // it panicked, Codex's review of A07)
+        let shift = num_traits::ToPrimitive::to_i64(&vr.to_integer()).ok_or_else(|| SymError::NotImplemented("a series whose valuation is past 2^63".into()))?;
+        s.v = s.v.checked_add(shift).ok_or_else(|| SymError::NotImplemented("a series whose valuation is past 2^63".into()))?;
         Ok(s)
     }
 
@@ -264,9 +270,20 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
             let bs = series(b, x, prec + 2)?;
             if let Some(k) = p.as_i64() {
                 if k >= 0 {
+                    // (by squaring: log k products, not k; each a Stop point, as
+                    // is every product)
                     let mut r = Series::constant(&one(), prec + 2);
-                    for _ in 0..k {
-                        r = r.mul(&bs);
+                    let mut sq = bs;
+                    let mut e = k;
+                    while e > 0 {
+                        sagebrush_interrupt::check();
+                        if e & 1 == 1 {
+                            r = r.mul(&sq);
+                        }
+                        e >>= 1;
+                        if e > 0 {
+                            sq = sq.mul(&sq);
+                        }
                     }
                     return Ok(r.truncate(prec));
                 }
@@ -303,10 +320,14 @@ pub fn series(e: &Expr, x: &str, prec: i64) -> R<Series> {
                 let mut bs = bs;
                 let mut have = prec + 2;
                 if bs.c.is_empty() && num_traits::Signed::is_positive(r) {
+                    // (the precision doubled until the base shows a term or
+                    // reaches ceil(prec / r): the work follows the base's
+                    // valuation, not 1/r; (x^20)^(1/400) asked for x^20
+                    // through t^1600 at once)
                     let need = ceil(q(prec) / r)?.max(have);
-                    if need > have {
-                        bs = series(b, x, need)?;
-                        have = need;
+                    while bs.c.is_empty() && have < need {
+                        have = have.saturating_mul(2).min(need);
+                        bs = series(b, x, have)?;
                     }
                 }
                 if !bs.c.is_empty() {

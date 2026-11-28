@@ -54,9 +54,12 @@ impl MPoly {
             };
             for f in factors {
                 let (b, x) = base_exp(&f);
-                let k = x.as_i64().filter(|k| *k > 0)? as u32;
+                // (an exponent below 2^31, and a degree so too, or not a
+                // polynomial here: `as u32` truncated x^(2^32) to x^0 = 1 and
+                // x^(2^40 + 3) to x^3, and sums of two degrees must fit u32)
+                let k = u32::try_from(x.as_i64().filter(|k| *k > 0)?).ok().filter(|k| *k < 1 << 31)?;
                 let i = gens.iter().position(|g| *g == b)?;
-                exps[i] += k;
+                exps[i] = exps[i].checked_add(k).filter(|e| *e < 1 << 31)?;
             }
             let e = p.terms.entry(exps.clone()).or_insert_with(Q::zero);
             *e += c;
@@ -88,7 +91,9 @@ impl MPoly {
         let mut r = MPoly::zero(&self.gens);
         for (a, c) in &self.terms {
             for (b, d) in &o.terms {
-                let e: Vec<u32> = a.iter().zip(b).map(|(x, y)| x + y).collect();
+                // (checked: inputs' degrees are below 2^31, so a product of
+                // two fits; a product of products past u32 is refused, not wrapped)
+                let e: Vec<u32> = a.iter().zip(b).map(|(x, y)| x.checked_add(*y).expect("a polynomial degree past 2^32")).collect();
                 let v = r.terms.entry(e.clone()).or_insert_with(Q::zero);
                 *v += c * d;
                 if v.is_zero() {

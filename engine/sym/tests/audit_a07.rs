@@ -85,3 +85,70 @@ fn taylor_polynomials_as_sage_gives_them() {
         assert!(diff.is_zero(), "taylor({}, x, 0, {}) = {}, Sage {}", f, n, to_string(&ours), s);
     }
 }
+
+#[test]
+fn a07_round2_cost_follows_the_base_not_one_over_r() {
+    // (x^20)^(1/400) through t^3: the base is asked for in doubling precisions and shows x^20 at
+    // 24, not after an expansion through t^1600 at once (that took 22 s), and the answer (a
+    // Puiseux refusal, x^(1/20)) comes at once; (x^200)^(1/200), |x| two-sided, is refused at the
+    // branch after its base is found by doubling, and x^200 is built by squaring, not 200 products
+    sagebrush_sym::err::install_quiet_hook();
+    let t0 = std::time::Instant::now();
+    let e = sagebrush_sym::err::catch(|| t("(x^20)^(1/400)", 3)).unwrap_err();
+    assert!(format!("{:?}", e).contains("Puiseux"), "{:?}", e);
+    assert!(t0.elapsed().as_secs() < 5, "{:?}", t0.elapsed());
+    let e = sagebrush_sym::err::catch(|| t("(x^200)^(1/200)", 3)).unwrap_err();
+    assert!(format!("{:?}", e).contains("branch point"), "{:?}", e);
+    // where the expansion exists it comes out: (x^100 + x^102)^(1/2) = x^50 (1 + x^2)^(1/2), zero
+    // through t^3 and x^50 + 1/2*x^52 through t^52
+    assert_eq!(t("(x^100 + x^102)^(1/2)", 3), "0");
+    assert_eq!(t("(x^100 + x^102)^(1/2)", 52), to_string(&parse("x^50 + 1/2*x^52")));
+    assert!(t0.elapsed().as_secs() < 20, "{:?}", t0.elapsed());
+}
+
+#[test]
+fn a07_round2_a_valuation_past_i64_is_refused() {
+    // x^(2^63) as a series at 0: its valuation v r doesn't fit i64; refused, not a panic
+    // (Sage gives 0; a typed refusal is the accepted alternative)
+    sagebrush_sym::err::install_quiet_hook();
+    let r = sagebrush_sym::err::catch(|| t("x^9223372036854775808", 2));
+    assert!(r.is_err(), "{:?}", r);
+}
+
+#[test]
+fn a07_round2_exponents_past_u32_are_not_truncated() {
+    // numeric review of #2365: polynomial arithmetic took exponents `as u32`, so x^(2^32) simplified
+    // to 1 and x^(2^40 + 3) to x^3; such exponents now stay as written (Sage 10.10 keeps each)
+    sagebrush_sym::err::install_quiet_hook();
+    use sagebrush_sym::simplify::{factor, simplify_rational};
+    let keeps = |f: &dyn Fn(&Expr) -> Expr, s: &str, digits: &str| {
+        let out = to_string(&f(&parse(s)));
+        assert!(out.contains(digits), "{} -> {}", s, out);
+    };
+    keeps(&simplify_full, "x^4294967296", "4294967296");
+    keeps(&simplify_full, "x^4294967297", "4294967297");
+    keeps(&simplify_rational, "x^(-4294967297)", "4294967297");
+    keeps(&simplify_full, "x^1099511627779", "1099511627779");
+    keeps(&simplify_full, "x^4611686018427387904", "4611686018427387904");
+    keeps(&simplify_full, "x^(-9223372036854775807)", "9223372036854775807");
+    keeps(&factor, "x^4294967296 - 1", "4294967296");
+    keeps(&simplify_full, "(x^2147483648 + 1)^2", "2147483648");
+    keeps(&simplify_full, "x^4294967296*y + y", "4294967296");
+    assert!(!simplify_full(&parse("x^4294967296")).is_one());
+    // and below 2^31 nothing changes: (x^5 - 1).factor()
+    assert_eq!(to_string(&factor(&parse("x^5 - 1"))), to_string(&parse("(x - 1)*(x^4 + x^3 + x^2 + x + 1)")));
+}
+
+#[test]
+fn a07_round2_negative_fractional_powers() {
+    sagebrush_sym::err::install_quiet_hook();
+    // a negative power of a base known only to vanish is refused, never taken as zero:
+    // without it limit((x^40)^(-1/2) x^20, x=0, +) was 0; Sage 10.10 gives 1
+    assert_eq!(lim("(x^40)^(-1/2)*x^20", Dir::Plus), "1");
+    // a short base under a negative power: (x^4 + x^5)^(-3/2) = x^-6 (1 + x)^(-3/2) through t^3
+    assert_eq!(t("(x^4 + x^5)^(-3/2)", 3), to_string(&parse("x^(-6) - 3/2*x^(-5) + 15/8*x^(-4) - 35/16*x^(-3) + 315/128*x^(-2) - 693/256*x^(-1) + 3003/1024 - 6435/2048*x + 109395/32768*x^2 - 230945/65536*x^3")));
+    // an integer exponent whose precision request overflows is refused at once
+    let t0 = std::time::Instant::now();
+    assert!(sagebrush_sym::err::catch(|| t("(x^2 + x^3)^(-4611686018427387904)", 2)).is_err());
+    assert!(t0.elapsed().as_secs() < 5);
+}
