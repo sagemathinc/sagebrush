@@ -178,6 +178,26 @@ try {
       "a fork another object met marks the account: a later load and an object already loaded are both refused (forked), the pin unmoved", r);
   }
 
+  // ---- the same, for an object already in use (its epoch keys cached, having signed): once another object marks the
+  // account forked, its sign, its chain view without a refresh and its epoch keys (cached or not) are all refused
+  {
+    await reset(); await putBack();
+    const r = await P.ev(`(async () => {
+      const k1 = await K.DeviceKeys.load();
+      const warm = { e0: !!(await k1.epochKeys(0)), sig: (await k1.device.sign(new Uint8Array([1]))).length, view: !!(await k1.chain()) };
+      const before = await pinOf(${acct});
+      await idb((d, p) => { p.put({ ...before, hash: "A".repeat(42) + "A" }, ${acct}); });
+      const second = await code(async () => K.DeviceKeys.load());
+      const sign = await code(async () => k1.device.sign(new Uint8Array([1])));
+      const view = await code(async () => k1.chain());
+      const e0 = await code(async () => k1.epochKeys(0));
+      const e1 = await code(async () => k1.epochKeys(1));
+      return { warm, second, sign, view, e0, e1 };
+    })()`);
+    ok(r.warm.e0 && r.warm.sig === 64 && r.warm.view && r.second.code === "chain_fork" && [r.sign, r.view, r.e0, r.e1].every((x) => x.code === "forked"),
+      "an object in use when another marks the account forked: its sign, chain view and epoch keys (cached or not) are refused (forked)", r);
+  }
+
   // ---- C1: a fork mark another tab writes while this object's refresh is between its pin read and its advance survives:
   // the refresh is refused (forked) and the mark is still there
   {
@@ -249,11 +269,12 @@ try {
       // (another object loads the longer chain: the stored pin moves to seq 1)
       const k2 = await K.DeviceKeys.load();
       const moved = await pinOf(${acct});
+      const k2head = (await k2.chain()).head;
       // (k1, still at seq 0 in memory, is now served the chain as it was: just genesis)
       old.serve = (entries) => entries.slice(0, 1);
       const refresh = await code(async () => k1.chain(true));
       const after = await pinOf(${acct});
-      return { posted, k2: (await k2.chain()).head === next.head, moved: moved.seq, refresh, after: after.seq };
+      return { posted, k2: k2head === next.head, moved: moved.seq, refresh, after: after.seq };
     })()`);
     ok(r.posted === 201 && r.k2 && r.moved === 1 && r.refresh.code === "chain_fork" && r.after === 1,
       "another object pins seq 1; this object's refresh, served the older chain, is refused (chain_fork) and the stored pin stays at 1", r);

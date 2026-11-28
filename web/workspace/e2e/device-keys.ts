@@ -129,6 +129,7 @@ export class DeviceKeys implements OpKeys {
   #current: { n: number; S: Uint8Array } | null = null;
   #derived = new Map<number, EpochKeys>();
   #seen = new Set<string>();
+  #forked = false;
 
   private constructor(
     readonly account: string,
@@ -138,8 +139,19 @@ export class DeviceKeys implements OpKeys {
     private state: State,
     private readonly t: Transport,
   ) {
-    this.device = { id: rec.id, sign: (b) => signer.sign(b) };
+    this.device = { id: rec.id, sign: async (b) => { await this.live(); return signer.sign(b); } };
     this.recoveryUnconfirmed = rec.recoveryShown === false;
+  }
+
+  /** Refuses once the account is marked forked here, by this object or another (another tab's load or refresh): every
+   * sign, chain view and epoch key goes through it, and the cached epoch secrets are dropped on the first refusal. */
+  private async live(): Promise<void> {
+    if (!this.#forked && (await get<PinRecord>("pins", this.account))?.forked) this.#forked = true;
+    if (!this.#forked) return;
+    this.#current?.S.fill(0);
+    this.#current = null;
+    this.#derived.clear();
+    throw new DeviceKeysError("forked", "this device saw a forked key chain");
   }
 
   /** The device for the signed-in account, or null if this browser has none. Refuses a forked account, or a chain
@@ -255,14 +267,15 @@ export class DeviceKeys implements OpKeys {
       const E = e2eCore();
       // (the stored pin first, then the chain: a fork mark another tab writes meanwhile is caught by advance's own check,
       // inside its transaction, so it is never overwritten)
+      await this.live();
       const pin = await get<PinRecord>("pins", this.account);
-      if (pin?.forked) throw new DeviceKeysError("forked", "this device saw a forked key chain");
       const c = await fetchChain(this.t);
       if (c.account !== this.account) throw new DeviceKeysError("server", "the signed-in account changed");
       const next = await DeviceKeys.verify(E, c.entries, this.ctx, pin ?? E.pinOf(this.state), this.account);
       await advance(this.account, E.pinOf(next), next.hashes, next.base);
       this.state = next;
     }
+    await this.live();
     return viewOf(this.state);
   }
 
@@ -270,11 +283,14 @@ export class DeviceKeys implements OpKeys {
    * can't reach them (it was added after that epoch's keyring chain began, or removed). */
   async epochKeys(n: number): Promise<EpochKeys | null> {
     if (!Number.isSafeInteger(n) || n < 0) return null;
+    await this.live();
     const have = this.#derived.get(n);
     if (have) return have;
     const S = await this.secret(n);
     if (!S) return null;
     const keys = await deriveEpochKeys(S, this.account, n);
+    // (and again after the wrapper's fetch: a mark written meanwhile)
+    await this.live();
     this.#derived.set(n, keys);
     return keys;
   }
