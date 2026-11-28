@@ -543,13 +543,29 @@ pub fn call(req: &str) -> String {
     .to_string()
 }
 
-/// The bytes serde_json's Value tree takes for each node of a request (a
-/// container, a string or a scalar; an object's key is one too), its
-/// strings' text apart, on a 64-bit host (a wasm32 one's Values are
-/// smaller): a 32-byte Value in its parent's vector, whose growth briefly
-/// holds the old and the doubled buffer, or a map entry's share of its
-/// node (tests/json_parse_alloc.rs measures the costliest shapes).
-pub const JSON_NODE_BYTES: u64 = 192;
+/// The bytes serde_json's Value tree (a BTreeMap per object, on a 64-bit
+/// host; a wasm32 one's are smaller) takes, by kind, apart from strings'
+/// text.  An array's element: its 32-byte Value in the array's vector,
+/// whose capacity is at most max(4, 2n) for n elements, so 64 bytes per
+/// element and JSON_ARRAY_BYTES per array that has one (an empty vector
+/// allocates nothing).
+pub const JSON_ARRAY_ELEMENT_BYTES: u64 = 64;
+/// See JSON_ARRAY_ELEMENT_BYTES: the minimum capacity of four Values.
+pub const JSON_ARRAY_BYTES: u64 = 128;
+/// While an array's vector grows, the old buffer (at most 32 bytes per
+/// element so far) is live beside the new one; one vector grows at a time,
+/// so this is charged once, for the longest array.
+pub const JSON_ARRAY_GROWTH_BYTES: u64 = 32;
+/// An object's entry: its key (a 24-byte String) and Value in a B-tree
+/// leaf of 11 (632 bytes), every leaf but the root holding at least 5
+/// entries, and the internal nodes' share (728 bytes, every one but the
+/// root with at least 6 children): at most 632/5 + 728/25 bytes an entry.
+pub const JSON_OBJECT_ENTRY_BYTES: u64 = 160;
+/// An object's fixed part, once it has an entry (an empty map allocates
+/// nothing): the root internal node, which may have only 2 children.  An
+/// object of up to 11 entries is one leaf of 632 bytes, within this and
+/// its first entry's charge.
+pub const JSON_OBJECT_BYTES: u64 = 768;
 
 /// The bytes a parsed request takes for each byte of a string's text
 /// without escapes: serde borrows it from the request and copies it once
@@ -563,24 +579,62 @@ pub const JSON_TEXT_BYTES: u64 = 1;
 pub const JSON_ESCAPED_TEXT_BYTES: u64 = 3;
 
 /// A bound on the bytes the parsed form of the JSON text `req` takes, by
-/// one scan of its bytes that allocates nothing: JSON_NODE_BYTES for each
-/// node and, for each byte of a string's text as written,
-/// JSON_TEXT_BYTES (no escape in the string) or JSON_ESCAPED_TEXT_BYTES.
+/// one scan of its bytes that allocates nothing: the charges above by
+/// kind (the top-level value lives on the stack), and for each byte of a
+/// string's text as written JSON_TEXT_BYTES (no escape in the string) or
+/// JSON_ESCAPED_TEXT_BYTES.  The kind of each node's container is tracked
+/// to serde's nesting limit (128; deeper text is an error before it is
+/// built), and a node deeper than that is charged as the costliest kind.
 /// Malformed text is counted the same way (serde stops at the first
-/// error, having built less).  Stop is checked every 64 KB.
+/// error, having built less).  Stop is checked every 64 KB, inside long
+/// tokens too.
 pub fn json_tree_bound(req: &str) -> u64 {
+    const DEPTH: usize = 128;
+    // (is an object, elements or entries so far, the next string is a key)
+    let mut stack = [(false, 0u64, false); DEPTH];
+    let (mut depth, mut i) = (0usize, 0usize);
+    let (mut bytes, mut text, mut escaped, mut longest) = (0u64, 0u64, 0u64, 0u64);
     let b = req.as_bytes();
-    let (mut nodes, mut text, mut escaped, mut i) = (0u64, 0u64, 0u64, 0usize);
+    // Stop is checked each time the scan passes another 64 KB, inside a
+    // string or scalar token as well
+    let mut next_check = 0usize;
+    macro_rules! poll {
+        () => {
+            if i >= next_check {
+                sagebrush_interrupt::check();
+                next_check = i + 0x10000;
+            }
+        };
+    }
     while i < b.len() {
-        if i & 0xffff == 0 {
-            sagebrush_interrupt::check();
+        poll!();
+        let c = b[i];
+        if matches!(c, b'"' | b'[' | b'{' | b'-' | b'0'..=b'9' | b't' | b'f' | b'n') {
+            // a node starts: its place in its container
+            if depth > DEPTH {
+                bytes = bytes.saturating_add(JSON_OBJECT_ENTRY_BYTES.max(JSON_ARRAY_ELEMENT_BYTES + JSON_ARRAY_GROWTH_BYTES));
+            } else if depth > 0 {
+                let top = &mut stack[depth - 1];
+                // (a container's fixed part with its first element or entry)
+                if !top.0 {
+                    top.1 += 1;
+                    longest = longest.max(top.1);
+                    let first = if top.1 == 1 { JSON_ARRAY_BYTES } else { 0 };
+                    bytes = bytes.saturating_add(JSON_ARRAY_ELEMENT_BYTES + first);
+                } else if top.2 {
+                    top.2 = false;
+                    top.1 += 1;
+                    let first = if top.1 == 1 { JSON_OBJECT_BYTES } else { 0 };
+                    bytes = bytes.saturating_add(JSON_OBJECT_ENTRY_BYTES + first);
+                }
+            }
         }
-        match b[i] {
+        match c {
             b'"' => {
-                nodes += 1;
                 i += 1;
                 let (mut len, mut esc) = (0u64, false);
                 while i < b.len() && b[i] != b'"' {
+                    poll!();
                     let step = if b[i] == b'\\' { 2 } else { 1 };
                     esc |= step == 2;
                     len += step as u64;
@@ -594,20 +648,37 @@ pub fn json_tree_bound(req: &str) -> u64 {
                 i += 1;
             }
             b'[' | b'{' => {
-                nodes += 1;
+                let object = c == b'{';
+                if depth < DEPTH {
+                    stack[depth] = (object, 0, object);
+                } else {
+                    // (untracked: its fixed part now)
+                    bytes = bytes.saturating_add(JSON_OBJECT_BYTES.max(JSON_ARRAY_BYTES));
+                }
+                depth += 1;
+                i += 1;
+            }
+            b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b',' => {
+                if (1..=DEPTH).contains(&depth) && stack[depth - 1].0 {
+                    stack[depth - 1].2 = true;
+                }
                 i += 1;
             }
             b'-' | b'0'..=b'9' | b't' | b'f' | b'n' => {
-                nodes += 1;
                 while i < b.len() && !matches!(b[i], b',' | b']' | b'}' | b':' | b' ' | b'\t' | b'\n' | b'\r' | b'"' | b'[' | b'{') {
+                    poll!();
                     i += 1;
                 }
             }
             _ => i += 1,
         }
     }
-    nodes
-        .saturating_mul(JSON_NODE_BYTES)
+    bytes
+        .saturating_add(longest.saturating_mul(JSON_ARRAY_GROWTH_BYTES))
         .saturating_add(text.saturating_mul(JSON_TEXT_BYTES))
         .saturating_add(escaped.saturating_mul(JSON_ESCAPED_TEXT_BYTES))
 }

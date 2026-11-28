@@ -1,7 +1,8 @@
 //! A JSON request's parsed form (serde_json's Value tree) takes at most
 //! json_tree_bound(text) bytes, whatever its structure: the costliest shapes
 //! (long arrays of one-character scalars, of empty containers and strings,
-//! objects of short keys, deep nests, escaped strings) and an nmod
+//! of small objects; one past a power of two; objects of short keys, deep
+//! nests, escaped strings, a matrix) and an nmod
 //! request's one long string measured by a counting allocator, each
 //! parse's peak above what was live.  call() reserves that bound before parsing: with no room, the
 //! typed memory reply, nothing parsed.  One test (the counters are global).
@@ -61,6 +62,14 @@ fn a_parsed_request_fits_its_bound_and_is_reserved_first() {
         ("true", repeat("[", "true", "]", n)),
         ("nests of 100", repeat("[", &format!("{}{}", "[".repeat(100), "]".repeat(100)), "]", n / 100)),
         ("arrays of two", repeat("[", "[0,0]", "]", n)),
+        // one past a power of two: the vector's last growth from 2^17
+        ("2^17 + 1 numbers", repeat("[", "0", "]", (1 << 17) + 1)),
+        // a B-tree leaf each, for one entry
+        ("one-key objects", repeat("[", "{\"a\":0}", "]", n / 4)),
+        ("six-key objects", repeat("[", "{\"a\":0,\"b\":0,\"c\":0,\"d\":0,\"e\":0,\"f\":0}", "]", n / 8)),
+        // two leaves and an internal root
+        ("twelve-key objects", repeat("[", &format!("{{{}}}", (0..12).map(|k| format!("\"{:x}\":0", k)).collect::<Vec<_>>().join(",")), "]", n / 16)),
+        ("nests of 100 one-key objects", repeat("[", &format!("{}0{}", "{\"a\":".repeat(100), "}".repeat(100)), "]", n / 200)),
     ];
     // an object of distinct short keys
     let mut obj = String::from("{");
@@ -78,7 +87,11 @@ fn a_parsed_request_fits_its_bound_and_is_reserved_first() {
     shapes.push(("a long string ending in an escape", format!("[\"{}\\n\"]", "a".repeat(n * 8))));
     // a long string, an nmod request's matrix: its bound is about its size
     shapes.push(("one long string", format!("{{\"fn\":\"nmod_charpoly\",\"p\":\"7\",\"m\":\"{}\"}}", "0,".repeat(n * 4))));
+    // a 1000 x 1000 matrix of small integers (its bound near its need, below)
+    let row = repeat("[", "7", "]", 1000);
+    shapes.push(("a 1000 x 1000 matrix", repeat("[", &row, "]", 1000)));
     let mut worst = 0.0f64;
+    let mut matrix_share = 0.0f64;
     for (what, text) in &shapes {
         let base = NOW.load(Relaxed);
         PEAK.store(base, Relaxed);
@@ -89,13 +102,18 @@ fn a_parsed_request_fits_its_bound_and_is_reserved_first() {
         let share = peak as f64 / bound as f64;
         eprintln!("{}: {} bytes of text, a peak of {}, the bound {} ({:.0}% of it)", what, text.len(), peak, bound, 100.0 * share);
         worst = worst.max(share);
+        if what.starts_with("a 1000") {
+            matrix_share = share;
+        }
         assert!(peak as u64 <= bound, "{}: a peak of {} past the bound {}", what, peak, bound);
     }
     // (a string without escapes costs its own size: an nmod request near its
     // byte cap, or a long integer list, is not refused for a tree it doesn't
     // have)
-    let long = &shapes.last().unwrap().1;
+    let long = &shapes.iter().find(|s| s.0 == "one long string").unwrap().1;
     assert!(json_tree_bound(long) < 2 * long.len() as u64);
+    // (nor a matrix for a tree a few times its own)
+    assert!(matrix_share >= 0.4, "a matrix's bound {:.1} times its peak", 1.0 / matrix_share);
     eprintln!("the costliest: {:.0}% of its bound", 100.0 * worst);
     // call() with no room for the parse (a 1 MB engine total: 256 KB to
     // share): a 400 KB request is the typed memory refusal, before parsing
