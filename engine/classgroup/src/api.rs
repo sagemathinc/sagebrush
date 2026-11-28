@@ -71,14 +71,16 @@ fn monic(f: &[BigInt]) -> Result<(), String> {
 pub fn nf_data(f: &[BigInt]) -> Result<NfData, crate::nf::factor::FactorError> {
     monic(f)?;
     let (o, _, assumed_primes) = crate::nf::order::maximal_order_assuming(f)?;
-    let disc = o.disc();
-    let index = num_integer::Roots::sqrt(&(Order::equation_order(f).disc() / &disc).abs());
+    let disc = o.disc()?;
+    // (disc(f) from the power sums: no second multiplication table)
+    let disc_f = crate::nf::order::equation_disc(f)?;
+    let index = num_integer::Roots::sqrt(&(&disc_f / &disc).abs());
     let (r1, r2, w, w_proven) = if o.n == 1 {
         (1, 0, 2, true)
     } else {
         let ro = crate::nf::embed::reduce_order(&o)?;
         let emb = Embeddings::new(&ro)?;
-        let (w, proven) = roots_of_unity(&ro, &emb);
+        let (w, proven) = roots_of_unity(&ro, &emb, &disc_f);
         (emb.r1, emb.r2, w, proven)
     };
     // the HNF of the numerators: upper triangular over 1, a, a^2, ...,
@@ -99,7 +101,8 @@ pub fn nf_data(f: &[BigInt]) -> Result<NfData, crate::nf::factor::FactorError> {
 /// Q(zeta_20) no prime below 41 splits completely, and the 2-part needs one
 /// that does).  With a real embedding (the signature is certified), U = 2.
 /// L = U proves w.
-pub(crate) fn roots_of_unity(o: &Order, emb: &Embeddings) -> (u32, bool) {
+/// (`disc_f`: the discriminant of f, crate::nf::order::equation_disc.)
+pub(crate) fn roots_of_unity(o: &Order, emb: &Embeddings, disc_f: &BigInt) -> (u32, bool) {
     let n = o.n;
     let one: ZMat = (0..n).map(|i| (0..n).map(|j| BigInt::from((i == j) as i32)).collect()).collect();
     let red = crate::nf::embed::lll(&one, emb);
@@ -123,13 +126,13 @@ pub(crate) fn roots_of_unity(o: &Order, emb: &Embeddings) -> (u32, bool) {
         is_root_of_unity(&x)
     }).count() as u64;
     // the upper bound from residue fields
-    let disc = Order::equation_order(&o.f).disc();
+    let disc = disc_f;
     let small: Vec<u64> = (2..=(n as u64 + 1)).filter(|&l| crate::relations::is_prime_u64(l)).collect();
     let mut gs: Vec<(u64, BigInt)> = vec![];
     let mut p = 2u64;
     while emb.r1 == 0 && gs.len() < 40 && p < 5000 {
         p += 1;
-        if !crate::relations::is_prime_u64(p) || (&disc % BigInt::from(p)).is_zero() {
+        if !crate::relations::is_prime_u64(p) || (disc % BigInt::from(p)).is_zero() {
             continue;
         }
         let gp = sagebrush_poly::factor_mod(&o.f, p).iter().fold(BigInt::zero(), |acc, (fac, e)| {
@@ -209,7 +212,7 @@ pub fn primes_above(f: &[BigInt], p: u64) -> Result<Vec<PrimeData>, crate::nf::f
         return Err(format!("primes above p >= 2^32 are not supported (p = {})", p).into());
     }
     let (o, _, assumed_primes) = crate::nf::order::maximal_order_assuming(f)?;
-    let dk = o.disc();
+    let dk = o.disc()?;
     let ps = crate::nf::prime::decompose(&o, &dk, p)?;
     Ok(ps.into_iter().map(|q| {
         let (pi, pi_den) = if q.f as usize == o.n { (vec![BigInt::from(p)], BigInt::one()) } else { small_generator(&o, &q.pi, p) };

@@ -155,7 +155,7 @@ pub fn certify(f: &[BigInt], limits: &Limits) -> Result<Proof, crate::nf::factor
     let emb0 = Embeddings::new(&o0)?;
     let (r1, r2) = (emb0.r1, emb0.r2);
     let n = o0.n;
-    let dk = o0.disc();
+    let dk = o0.disc()?;
     let (mbound, kind) = class_norm_bound(r1, r2, &dk).ok_or("the norm bound could not be evaluated")?;
     if mbound > BigInt::from(limits.norm_max) {
         return Err(refuse(&format!("the {} bound for the norms of ideal class representatives", kind.name()), &mbound, limits.norm_max).into());
@@ -233,7 +233,7 @@ pub fn certify(f: &[BigInt], limits: &Limits) -> Result<Proof, crate::nf::factor
     let primes_shown = prove_generation(o, &emb, &dk, rel.bound, mbound, &rel.fb)?;
     lap("generation", &mut timing);
     // characters
-    let chars = Chars::new(o, &rel.elems, &zeta, rel.bound);
+    let chars = Chars::new(o, &rel.elems, &zeta, rel.bound)?;
     // step 2: l <= B
     let mut unit_primes = 0;
     if r > 0 {
@@ -280,7 +280,7 @@ fn upper_f64(b: &Ball) -> f64 {
 /// equals what decompose finds (daybreak's AUDIT-A83-3: comparing counts
 /// and norms alone let a duplicate stand in for a missing prime).
 fn check_factor_base(o: &Order, rel: &Relations) -> Result<(), String> {
-    let dk = o.disc();
+    let dk = o.disc()?;
     let key = |q: &PrimeIdeal| (q.p, q.e, q.f, q.basis.clone());
     let mut want = vec![];
     for p in primes_up_to(rel.bound.saturating_sub(1)) {
@@ -774,15 +774,15 @@ struct Chars {
 }
 
 impl Chars {
-    fn new(o: &Order, elems: &[Vec<BigInt>], zeta: &[BigInt], bound: u64) -> Chars {
-        Chars {
+    fn new(o: &Order, elems: &[Vec<BigInt>], zeta: &[BigInt], bound: u64) -> Result<Chars, crate::nf::factor::FactorError> {
+        Ok(Chars {
             f: o.f.clone(),
-            disc_f: Order::equation_order(&o.f).disc(),
+            disc_f: super::order::equation_disc(&o.f)?,
             den: o.den.clone(),
             start: bound.max(3),
             elems: elems.iter().map(|x| vec_mat(x, &o.basis)).collect(),
             zeta: vec_mat(zeta, &o.basis),
-        }
+        })
     }
 
     /// The primes Q for l: (p, a) with p = 1 mod l, from the smallest p
@@ -1090,7 +1090,7 @@ mod tests {
             // units found can span a sublattice of index 2, rightly refused)
             let units = units_near(o, &emb, &rel.elems, &dense, &sel, r, reg).unwrap();
             let zeta = root_of_unity_generator(o, &emb, w).unwrap();
-            let ch = Chars::new(o, &rel.elems, &zeta, rel.bound);
+            let ch = Chars::new(o, &rel.elems, &zeta, rel.bound).unwrap();
             for l in [2u64, 3, 5, 7] {
                 assert!(unit_saturated(&ch, &units.exps, w, l).is_ok(), "{:?} l = {}", f, l);
             }
@@ -1122,7 +1122,7 @@ mod tests {
             let r = emb.r1 + emb.r2 - 1;
             let (h, _) = class_group_of(&dense, &sel, c).unwrap();
             let zeta = root_of_unity_generator(o, &emb, w).unwrap();
-            let ch = Chars::new(o, &rel.elems, &zeta, rel.bound);
+            let ch = Chars::new(o, &rel.elems, &zeta, rel.bound).unwrap();
             if h.is_multiple_of(&BigInt::from(l)) {
                 assert!(class_saturated(&ch, &dense, c, r, w, l).is_ok(), "{:?}", f);
             }
@@ -1146,7 +1146,7 @@ mod tests {
                 let sel2 = crate::linalg::independent_rows(&d2, c).unwrap();
                 let (h2, _) = class_group_of(&d2, &sel2, c).unwrap();
                 assert_eq!(h2, &h * BigInt::from(l), "{:?} column {}", f, col);
-                let ch2 = Chars::new(o, &el, &zeta, rel.bound);
+                let ch2 = Chars::new(o, &el, &zeta, rel.bound).unwrap();
                 assert!(class_saturated(&ch2, &d2, c, r, w, l).is_err(), "{:?}: the index-{} sublattice (column {}) accepted", f, l, col);
                 checked += 1;
             }
@@ -1163,7 +1163,7 @@ mod tests {
         for (f, ok) in [(&[5i64, 0, 1][..], false), (&[6, -1, 1], false), (&[1, 0, 1], true), (&[41, -1, 1], true)] {
             let (o, _) = super::super::order::maximal_order(&poly(f)).unwrap();
             let emb = Embeddings::new(&o).unwrap();
-            let dk = o.disc();
+            let dk = o.disc().unwrap();
             let (m, _) = class_norm_bound(emb.r1, emb.r2, &dk).unwrap();
             let res = prove_generation(&o, &emb, &dk, 2, m.to_u64().unwrap(), &[]);
             assert_eq!(res.is_ok(), ok, "{:?}: {:?}", f, res);
@@ -1181,7 +1181,7 @@ mod tests {
         let r = emb.r1 + emb.r2 - 1;
         let units = units_near(o, &emb, &rel.elems, &dense, &sel, r, reg).unwrap();
         let zeta = root_of_unity_generator(o, &emb, w).unwrap();
-        let ch = Chars::new(o, &rel.elems, &zeta, rel.bound);
+        let ch = Chars::new(o, &rel.elems, &zeta, rel.bound).unwrap();
         for l in [PRIME_MAX, PRIME_MAX + 11, (1u64 << 63) - 25, 1u64 << 63, (1u64 << 63) + 29, u64::MAX - 58] {
             assert!(class_saturated(&ch, &dense, c, r, w, l).is_err(), "class l = {}", l);
             assert!(unit_saturated(&ch, &units.exps, w, l).is_err(), "unit l = {}", l);
@@ -1204,10 +1204,10 @@ mod tests {
         let i = rel.fb.iter().position(|q| q.p == 5).unwrap();
         let j = rel.fb.iter().rposition(|q| q.p == 5).unwrap();
         assert_ne!(i, j);
-        let mut bad = rel.clone();
+        let mut bad = rel.try_clone().unwrap();
         bad.fb[j] = bad.fb[i].clone();
         assert!(check_factor_base(o, &bad).is_err(), "a duplicate prime accepted");
-        let mut bad = rel.clone();
+        let mut bad = rel.try_clone().unwrap();
         bad.elems.pop();
         assert!(check_relations(o, &bad).is_err(), "relations and elements of different numbers accepted");
     }

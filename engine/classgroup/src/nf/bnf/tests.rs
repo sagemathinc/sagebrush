@@ -111,10 +111,10 @@ fn certificate_bounds() {
     for &(f, h, reg) in cases {
         let f: Vec<BigInt> = f.iter().map(|&c| BigInt::from(c)).collect();
         let (order, _) = maximal_order(&f).unwrap();
-        let discriminant = order.disc();
-        let index = num_integer::Roots::sqrt(&(Order::equation_order(&f).disc() / &discriminant).abs());
+        let discriminant = order.disc().unwrap();
+        let index = num_integer::Roots::sqrt(&(Order::equation_order(&f).unwrap().disc().unwrap() / &discriminant).abs());
         let embeddings = Embeddings::new(&order).unwrap();
-        let (w, _) = crate::api::roots_of_unity(&order, &embeddings);
+        let (w, _) = crate::api::roots_of_unity(&order, &embeddings, &crate::nf::order::equation_disc(&f).unwrap());
         let log_discriminant = discriminant.to_f64().unwrap().abs().ln();
         let x = super::super::certify::choose_x(order.n, log_discriminant).unwrap();
         let split = splitting(&order, &discriminant, &index, x);
@@ -149,7 +149,7 @@ fn log_embedding_error_bounds_hold() {
 fn log_embedding_bound_beyond_1024_bits() {
     let a = (BigInt::one() << 25usize) + 1u32;
     let f = vec![BigInt::from(-1), a.clone(), BigInt::zero(), BigInt::one()];
-    let order = Order::equation_order(&f);
+    let order = Order::equation_order(&f).unwrap();
     let e = Embeddings::new(&order).unwrap();
     let x = vec![BigInt::one(), BigInt::zero(), &a * &a];
     for p in [1023u32, 1024, 1025, 1100] {
@@ -232,8 +232,8 @@ fn generator_bound_paper_example() {
 fn generator_bound_certified_with_a_norm_above_2_63() {
     let f: Vec<BigInt> = [18i64, 1, 0, 0, 0, 0, 0, 1].iter().map(|&c| BigInt::from(c)).collect();
     let (order, _) = maximal_order(&f).unwrap();
-    let discriminant = order.disc();
-    let index = num_integer::Roots::sqrt(&(Order::equation_order(&f).disc() / &discriminant).abs());
+    let discriminant = order.disc().unwrap();
+    let index = num_integer::Roots::sqrt(&(Order::equation_order(&f).unwrap().disc().unwrap() / &discriminant).abs());
     let uniform = super::super::grh::uniform_bound(&discriminant);
     let norms = prime_norms(&splitting(&order, &discriminant, &index, uniform as u64), uniform);
     assert!(norms.iter().any(|&q| q > i64::MAX as u64), "the field must keep a norm above 2^63");
@@ -297,11 +297,11 @@ fn certificate_rejects_index_two_and_twice_h() {
     for &(f, u, h, reg) in cases {
         let f: Vec<BigInt> = f.iter().map(|&c| BigInt::from(c)).collect();
         let (order, _) = maximal_order(&f).unwrap();
-        let discriminant = order.disc();
-        assert_eq!(discriminant, Order::equation_order(&f).disc(), "{:?}: the equation order is maximal", f);
-        let eq = Order::equation_order(&f);
+        let discriminant = order.disc().unwrap();
+        assert_eq!(discriminant, Order::equation_order(&f).unwrap().disc().unwrap(), "{:?}: the equation order is maximal", f);
+        let eq = Order::equation_order(&f).unwrap();
         let e = Embeddings::new(&eq).unwrap();
-        let (w, _) = crate::api::roots_of_unity(&order, &Embeddings::new(&order).unwrap());
+        let (w, _) = crate::api::roots_of_unity(&order, &Embeddings::new(&order).unwrap(), &crate::nf::order::equation_disc(&f).unwrap());
         let log_discriminant = discriminant.to_f64().unwrap().abs().ln();
         let x = super::super::certify::choose_x(order.n, log_discriminant).unwrap();
         let split = splitting(&order, &discriminant, &BigInt::one(), x);

@@ -7,6 +7,6 @@ fn main() {
         let f: Vec<BigInt> = a.split(',').map(|c| c.trim().parse().unwrap()).collect();
         let t = std::time::Instant::now();
         let (o, _) = sagebrush_classgroup::nf::order::maximal_order(&f).unwrap();
-        println!("{} {} {:.2} ms", a, o.disc(), t.elapsed().as_secs_f64() * 1e3);
+        println!("{} {} {:.2} ms", a, o.disc().unwrap(), t.elapsed().as_secs_f64() * 1e3);
     }
 }

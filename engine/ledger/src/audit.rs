@@ -29,6 +29,11 @@ static SLACK: AtomicU64 = AtomicU64::new(0);
 static VIOLATIONS: AtomicU64 = AtomicU64::new(0);
 static LAST_VIOLATION: AtomicU64 = AtomicU64::new(0);
 static BREACHES: AtomicU64 = AtomicU64::new(0);
+// (the window's largest live bytes above its baseline, and largest covered
+// sum (residents and outstanding obligations), each read at an allocation
+// inside an engine entry: a bound's tightness, [`peaks`])
+static PEAK_LIVE: AtomicU64 = AtomicU64::new(0);
+static PEAK_COVER: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
     // (re-entry guard: the checks themselves never allocate, but a panic
@@ -56,7 +61,12 @@ fn check_alloc(size: u64) {
             LAST_VIOLATION.store(size, Relaxed);
         }
         let live = LIVE.load(Relaxed);
-        let bound = BASE.load(Relaxed) + crate::RES_MIRROR.load(Relaxed) + crate::O_MIRROR.load(Relaxed) + SLACK.load(Relaxed);
+        let cover = crate::RES_MIRROR.load(Relaxed) + crate::O_MIRROR.load(Relaxed);
+        let bound = BASE.load(Relaxed) + cover + SLACK.load(Relaxed);
+        if in_engine {
+            PEAK_LIVE.fetch_max(live.saturating_sub(BASE.load(Relaxed)), Relaxed);
+            PEAK_COVER.fetch_max(cover, Relaxed);
+        }
         if in_engine && live > bound {
             BREACHES.fetch_add(1, Relaxed);
         }
@@ -115,6 +125,8 @@ pub fn start(slack: u64) {
     SLACK.store(slack, Relaxed);
     VIOLATIONS.store(0, Relaxed);
     BREACHES.store(0, Relaxed);
+    PEAK_LIVE.store(0, Relaxed);
+    PEAK_COVER.store(0, Relaxed);
 }
 
 pub fn set_slack(slack: u64) {
@@ -130,6 +142,12 @@ pub fn violations() -> (u64, u64) {
 /// Allocations after which the counted live bytes exceeded the covered sum.
 pub fn breaches() -> u64 {
     BREACHES.load(Relaxed)
+}
+
+/// The window's largest live bytes above its baseline and largest covered
+/// sum, each read at an allocation inside an engine entry.
+pub fn peaks() -> (u64, u64) {
+    (PEAK_LIVE.load(Relaxed), PEAK_COVER.load(Relaxed))
 }
 
 /// The counted live bytes.
