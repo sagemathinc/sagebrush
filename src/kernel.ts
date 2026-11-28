@@ -30,6 +30,7 @@ import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mimeBundle, bundleMetadata, sayNote } from "./runtime/index";
 import { requestCtrlC } from "./runtime/interrupt";
+import { listingEpoch } from "./runtime/listing-epoch";
 import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, outputHistory } from "./magic-syntax";
@@ -638,6 +639,8 @@ export function kernelWorker(mode: Mode) {
     current = m.id;
     currentCount = typeof m.count === "number" ? m.count : null;
     currentSilent = m.silent === true;
+    // (a new run: the import search lists its folders again)
+    listingEpoch.n++;
     last = Date.now();
     errorReported = null;
     line = "";

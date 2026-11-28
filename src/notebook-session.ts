@@ -65,6 +65,7 @@ import { unbox } from "./runtime/object";
 import { bundleMetadata } from "./runtime/index";
 import { checkParams, type LiveAnswer, type LiveOp, type LiveParams } from "./live-data";
 import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
+import { listingEpoch } from "./runtime/listing-epoch";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 import { startLimits, type LimitsText } from "./limits";
 import { modeOfFlags } from "./modes";
@@ -531,6 +532,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     }
     if (m.code === undefined && m.interact === undefined) Atomics.and(R.INTR, 0, ~1); // (anything else: as before)
     current = id;
+    // (a new run: the import search lists its folders again, as the page may have changed them meanwhile)
+    listingEpoch.n++;
     target = null;
     used.item = 0;
     used.cut = false;

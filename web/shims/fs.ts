@@ -59,6 +59,7 @@ function mayChange(r: string, what: string) {
 
 import { sha256Hex } from "../../src/runtime/sha256";
 import { gitBlobSha1 } from "../../src/runtime/sha1";
+import { listingEpoch } from "../../src/runtime/listing-epoch";
 
 // ------------------------------------------------------------------ the mediated mode (a Terminal command's worker)
 // PR 3a (b1) design r4 §3: in a worker that runs one Terminal command, every path outside the scratch trees (exactly
@@ -93,7 +94,12 @@ function stdinRead(n: number): Uint8Array {
 }
 // (the page's refusal codes, as the runtime raises them: PermissionError for EACCES, OSError by code otherwise)
 const MED_ERRNO: Record<string, number> = { ENOENT: -2, EIO: -5, E2BIG: -7, EBADF: -9, EBUSY: -16, EEXIST: -17, ENOTDIR: -20, EISDIR: -21, EINVAL: -22, EMFILE: -24, EFBIG: -27, ENOSPC: -28, EROFS: -30, ENAMETOOLONG: -36, ENOTEMPTY: -39, ESTALE: -116, EACCES: -13 };
+// (the requests that may add, remove or move a name in a folder: the page's folders keep their times, so each advances
+// the import search's listing epoch, src/runtime/listing-epoch.ts, and a module this command writes is found by its
+// next import)
+const RENAMING = new Set(["mkdir", "openw", "remove", "rename", "write"]);
 function ask(op: string, args: Record<string, unknown>, opts?: { body?: Uint8Array; max?: number }): any {
+  if (RENAMING.has(op)) listingEpoch.n++;
   try {
     const a = med!.ch.request({ op, args }, opts);
     return "bytes" in a ? a.bytes : a.json;
@@ -184,16 +190,26 @@ const files = new Map<string, Entry>();
 // (an entry named r; one that r named before is unlinked)
 function place(r: string, f: Entry): void {
   const old = files.get(r);
-  if (old !== undefined && old !== f) old.path = null;
+  if (old === undefined) touch(parent(r));
+  else if (old !== f) old.path = null;
   files.set(r, f);
   f.path = r;
 }
 function drop(r: string): void {
   const f = files.get(r);
-  if (f !== undefined) f.path = null;
+  if (f !== undefined) {
+    f.path = null;
+    touch(parent(r));
+  }
   files.delete(r);
 }
 const dirs = new Map<string, number>([["/", Date.now()]]); // path -> mtime
+// (a folder's mtime when a name in it is added or removed, as POSIX's: strictly later, so two changes in one
+// millisecond differ too; the import search keeps a folder's listing while its mtime stays, src/compile.ts)
+function touch(d: string): void {
+  const t = dirs.get(d);
+  if (t !== undefined) dirs.set(d, Math.max(Date.now(), t + 1));
+}
 // (inode numbers, given at a file's or folder's first stat: a file's is its entry's, kept through a rename as a
 // descriptor's inode is; a folder's moves with it; os.path.samefile and pathlib's samefile compare them, as
 // CPython's do, so two files must never share one)
@@ -240,7 +256,11 @@ const bytes = (data: any): Uint8Array =>
   typeof data === "string" ? new TextEncoder().encode(data) : data instanceof Uint8Array ? data.slice() : new Uint8Array(data);
 
 function ensureDirs(p: string) {
-  for (let d = parent(p); !dirs.has(d); d = parent(d)) dirs.set(d, Date.now());
+  let d = parent(p);
+  const made: string[] = [];
+  for (; !dirs.has(d); d = parent(d)) made.push(d);
+  if (made.length) touch(d);
+  for (const m of made) dirs.set(m, Date.now());
 }
 
 /** The interpreter starts in `d` (a notebook's own folder, as Jupyter runs a notebook: the Nov 4 ruling): it and the
@@ -681,6 +701,7 @@ export function mkdirSync(p: string, opts?: any) {
     for (let d = r, todo: string[] = []; ; d = parent(d)) {
       if (dirs.has(d)) {
         if (todo.length) mayChange(r, "mkdir");
+        if (todo.length) touch(d);
         for (const t of todo.reverse()) dirs.set(t, Date.now());
         return;
       }
@@ -691,6 +712,7 @@ export function mkdirSync(p: string, opts?: any) {
   if (dirs.has(r) || files.has(r)) fail("EEXIST", -17, "mkdir", p);
   if (!dirs.has(parent(r))) fail("ENOENT", -2, "mkdir", p);
   mayChange(r, "mkdir");
+  touch(parent(r));
   dirs.set(r, Date.now());
 }
 export function readdirSync(p: string): string[] {
@@ -758,6 +780,7 @@ export function rmdirSync(p: string) {
   mayChange(r, "rmdir");
   if (r !== "/") {
     dirs.delete(r);
+    touch(parent(r));
     dirIno.delete(r);
     dirPerm.delete(r);
     dirAtime.delete(r);
@@ -804,6 +827,8 @@ export function renameSync(a: string, b: string) {
       told(nk, data);
     }
   }
+  touch(parent(ra));
+  touch(parent(rb));
   for (const [k, v] of [...dirs]) {
     if (k === ra || k.startsWith(pre)) {
       dirs.delete(k);
