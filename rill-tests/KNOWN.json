@@ -360,6 +360,11 @@
    "class": "not-implemented",
    "reason": "strsplit's result is a list, and lists are not implemented yet (A3: the lists PR, then strsplit)",
    "sha256": "33f8ecf75c06d455302ed8a03936d52cf46b95ee8349dee605278c3e4e3e5353"
+  },
+  "rill-tests/str/test_3.R#sprintf-s-precision-mid-character": {
+   "class": "not-implemented",
+   "reason": "a %s precision that cuts inside a multibyte character (R cuts its bytes) is refused for now (A3: strings)",
+   "sha256": "d59bccdd54c521664f6d68598d0732e038dde7b7595406dfeb6e3623871c9c3b"
   }
  }
 }

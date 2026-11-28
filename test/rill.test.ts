@@ -771,3 +771,58 @@ test("uchar: Rill's character table is the one generated from R 4.5.3's recorded
   const r = spawnSync("python3", [join(ROOT, "scripts", "rill-uchar.py"), "--check"], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
+
+// (§8.5, the strings' review) each string builtin reserves its whole peak before it builds: n strings (136 bytes)
+// and 4 bytes for each character of their text, measured first where it isn't known in advance (sprintf, format,
+// formatC, substr); admitted at the boundary, refused one byte short, nothing left reserved
+test("§8.5: the string builtins reserve their whole peak first: admitted at the boundary, refused one byte short", () => {
+  const got = py(`
+import json
+from _rill import mem
+from _rill.eval import Session
+from _rill.parse import parse
+import _memguard
+s = Session(lambda t: None, lambda t: None)
+for src in ('x <- c(a = "ab", b = "cd")', "t3 <- 1:3", "y <- c(1, 10, 100)", "z <- c(1.5, 2)"):
+    s.evaluate(parse(src)[0])
+mem.SMALL_BYTES = 0
+cases = {
+  "nchar(x)": 2 * 32,
+  "toupper(x)": 2 * 136 + 4 * 4,
+  'substr("abcdef", 2, 4)': 136 + 4 * 3,
+  'paste(x, "z")': 2 * 136 + 4 * 8,
+  # (the two strings and the one joined from them, held at once)
+  'paste(x, collapse = "+")': 136 + 2 * 136 + 4 * (4 + 5),
+  'sprintf("%5d", t3)': 3 * 136 + 4 * 15,
+  'sprintf("%s-%s", x, "q")': 2 * 136 + 4 * 8,
+  "format(y)": 3 * 136 + 4 * 9,
+  'formatC(z, format = "f", digits = 1)': 2 * 136 + 4 * 6,
+}
+peak = [0]
+real_enter = mem.Reservation.__enter__
+def spy(self):
+    r = real_enter(self)
+    peak[0] = max(peak[0], mem.open_bytes())
+    return r
+mem.Reservation.__enter__ = spy
+out = {}
+for src, want in cases.items():
+    peak[0] = 0
+    mem._allowance = lambda: (want - mem.open_bytes(), None)
+    s.evaluate(parse(src)[0])
+    at = peak[0]
+    mem._allowance = lambda: (want - 1 - mem.open_bytes(), None)
+    try:
+        s.evaluate(parse(src)[0])
+        short = "admitted"
+    except _memguard.SagebrushMemoryError as e:
+        short = [e.need_bytes, e.limit_bytes]
+    out[src] = [want, at, short, mem.open_bytes()]
+print(json.dumps(out))
+`);
+  for (const [src, [want, at, short, open]] of Object.entries<any>(got)) {
+    assert.equal(at, want, `${src}: the whole peak reserved (${at} of ${want})`);
+    assert.deepEqual(short, [want, want - 1], `${src}: refused one byte short`);
+    assert.equal(open, 0, `${src}: nothing left reserved`);
+  }
+});

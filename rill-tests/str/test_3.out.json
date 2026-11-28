@@ -1,0 +1,73 @@
+{
+ "cases": [
+  {
+   "id": "paste-all-empty",
+   "status": 0,
+   "stderr": "",
+   "stdout": "character(0)\ncharacter(0)\ncharacter(0)\ncharacter(0)\ncharacter(0)\ncharacter(0)\n"
+  },
+  {
+   "id": "paste-empty-mixed-collapse",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"\"\n[1] \"\"\n[1] \" a\"\n[1] \"a  b\"\n"
+  },
+  {
+   "id": "paste0-sep-is-data",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"ab\"\n[1] \"abc\"\n"
+  },
+  {
+   "id": "sprintf-recycle-error",
+   "status": 1,
+   "stderr": "Error in sprintf(\"%d:%d\", 1:2, 1:3) : \n  arguments cannot be recycled to the same length\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-recycle-fmt-error",
+   "status": 1,
+   "stderr": "Error in sprintf(c(\"%d\", \"%d!\"), 1:3) : \n  arguments cannot be recycled to the same length\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-recycle-ok",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1 1\" \"2 2\" \"1 3\" \"2 4\"\n[1] \"1\"  \"2!\" \"3\"  \"4!\"\n"
+  },
+  {
+   "id": "sprintf-unsigned",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"ffffffff\"\n[1] \"FFFFFFFF\"\n[1] \"37777777777\"\n[1] \"37777777770\"\n"
+  },
+  {
+   "id": "sprintf-unsigned-flags",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"   ff|FF   |0xff|010\"\n[1] \"ff\"\n[1] \"NA\"\n"
+  },
+  {
+   "id": "sprintf-s-bytes",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"[ é]\"\n[1] \"[é ]\"\n[1] \"[é]\"\n[1] \"[  aé]\"\n"
+  },
+  {
+   "id": "sprintf-s-precision-mid-character",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"[\\xc3]\"\n"
+  },
+  {
+   "id": "case-simple-mapping",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"STRAßE\"\n[1] \"i\"\n[1] \"ᾈ\" \"ᾼ\" \"ὐ\" \"ﬁ\"\n"
+  }
+ ],
+ "file": "rill-tests/str/test_3.R",
+ "format": "rill-out",
+ "v": 1
+}
