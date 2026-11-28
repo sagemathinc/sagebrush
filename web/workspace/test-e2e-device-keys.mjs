@@ -66,6 +66,9 @@ const dir = mkdtempSync(join(tmpdir(), "sb-device-keys-"));
 const entry = join(dir, "entry.ts");
 writeFileSync(entry, [
   `export * as K from ${J(join(here, "e2e", "device-keys.ts"))};`,
+  `export { e2eStart, DOWNGRADED } from ${J(join(here, "sync-e2e.ts"))};`,
+  `export { e2eAccountOf } from ${J(join(here, "e2e-here.ts"))};`,
+  `export { accountHash } from ${J(join(here, "..", "sync-protocol", "protocol.ts"))};`,
   // (the core and HPKE, for a row that makes a real next entry from the page with the recovery code)
   `export { e2eCore } from ${J(join(here, "e2e", "core-ready.ts"))};`,
   `export { hpke } from ${J(join(here, "e2e", "hpke.ts"))};`,
@@ -95,6 +98,8 @@ window.transport = (as, f = {}) => async (method, path, body) => {
   if (isAppend && f.lose) return { status: 502, json: {} };
   return { status: r.status, json };
 };
+// (each test account's E2E id, as the page derives it from the account's hash: what load and create are given)
+window.idOf = async (as) => e2eAccountOf(await accountHash(${J({ A, LOST, REFUSED, DARK, LATE, OTHER })}[as]));
 window.ready = true;</script>`;
 let requests = 0;
 const server = createServer(async (req, res) => {
@@ -123,12 +128,12 @@ try {
   await load();
 
   // ---- no device yet
-  const none = await P.ev(`code(async () => (await K.DeviceKeys.load()) === null)`);
+  const none = await P.ev(`code(async () => (await K.DeviceKeys.load(await idOf("A"))) === null)`);
   ok(none.ok === true, "before turning encryption on, this browser has no device for the account", none);
 
   // ---- genesis from the page
   const made = await P.ev(`(async () => {
-    const { keys, recoveryCode } = await K.DeviceKeys.create("laptop");
+    const { keys, recoveryCode } = await K.DeviceKeys.create("laptop", await idOf("A"));
     window.keys = keys;
     const view = await keys.chain();
     return { id: keys.device.id, account: keys.account, code: recoveryCode, head: view.head, epoch: view.currentEpoch, pos: view.position(view.head), dev: view.device(keys.device.id),
@@ -139,7 +144,7 @@ try {
   ok(typeof made.code === "string" && made.code.replace(/-/g, "").length === 52, `the recovery code is returned once to show: 52 characters in groups (${made.code?.length})`);
   ok(made.epoch === 0 && made.pos === 0 && made.dev?.added === 0 && made.dev?.removed === null && made.signer.length === 32, "the chain view: epoch 0, the head at position 0, the device added there and current, its signing key", made);
   ok(made.e0 === true && made.e1 === null, "the device holds epoch 0's keys and no other", { e0: made.e0, e1: made.e1 });
-  const again = await P.ev(`code(async () => K.DeviceKeys.create("laptop"))`);
+  const again = await P.ev(`code(async () => K.DeviceKeys.create("laptop", await idOf("A")))`);
   ok(again.code === "exists", `turning it on again is refused (exists): ${J(again)}`);
 
   // ---- the keys, as stored: non-extractable, and the recovery code nowhere
@@ -150,7 +155,7 @@ try {
 
   // ---- a reload: the device and its pin from IndexedDB, the epoch's keys from its wrapper again
   await load();
-  const back = await P.ev(`(async () => { const k = await K.DeviceKeys.load(); window.keys = k; const v = await k.chain(true); return { id: k.device.id, head: v.head, e0: !!(await k.epochKeys(0)), sig: (await k.device.sign(new Uint8Array([1, 2, 3]))).length, unconfirmed: k.recoveryUnconfirmed }; })()`);
+  const back = await P.ev(`(async () => { const k = await K.DeviceKeys.load(await idOf("A")); window.keys = k; const v = await k.chain(true); return { id: k.device.id, head: v.head, e0: !!(await k.epochKeys(0)), sig: (await k.device.sign(new Uint8Array([1, 2, 3]))).length, unconfirmed: k.recoveryUnconfirmed }; })()`);
   ok(back.id === made.id && back.head === made.head && back.e0 === true && back.sig === 64, "after a reload the same device loads, verifies the chain under its pin, reopens epoch 0's wrapper and signs", back);
   ok(back.unconfirmed === false, "and, its genesis having returned the recovery code, it loads saying so (the stored mark, read back)", back);
 
@@ -165,11 +170,11 @@ try {
   // as forked, and its pin doesn't move
   {
     const r = await P.ev(`(async () => {
-      const k1 = await K.DeviceKeys.load();
+      const k1 = await K.DeviceKeys.load(await idOf("A"));
       const before = await pinOf(${acct});
       await idb((d, p) => { p.put({ ...before, hash: "A".repeat(42) + "A" }, ${acct}); });
-      const second = await code(async () => K.DeviceKeys.load());
-      const third = await code(async () => K.DeviceKeys.load());
+      const second = await code(async () => K.DeviceKeys.load(await idOf("A")));
+      const third = await code(async () => K.DeviceKeys.load(await idOf("A")));
       const refresh = await code(async () => k1.chain(true));
       const after = await pinOf(${acct});
       return { second, third, refresh, moved: after.hash !== "A".repeat(42) + "A", forked: !!after.forked };
@@ -183,11 +188,11 @@ try {
   {
     await reset(); await putBack();
     const r = await P.ev(`(async () => {
-      const k1 = await K.DeviceKeys.load();
+      const k1 = await K.DeviceKeys.load(await idOf("A"));
       const warm = { e0: !!(await k1.epochKeys(0)), sig: (await k1.device.sign(new Uint8Array([1]))).length, view: !!(await k1.chain()) };
       const before = await pinOf(${acct});
       await idb((d, p) => { p.put({ ...before, hash: "A".repeat(42) + "A" }, ${acct}); });
-      const second = await code(async () => K.DeviceKeys.load());
+      const second = await code(async () => K.DeviceKeys.load(await idOf("A")));
       const sign = await code(async () => k1.device.sign(new Uint8Array([1])));
       const view = await code(async () => k1.chain());
       const e0 = await code(async () => k1.epochKeys(0));
@@ -198,13 +203,71 @@ try {
       "an object in use when another marks the account forked: its sign, chain view and epoch keys (cached or not) are refused (forked)", r);
   }
 
+  // ---- the account binding: given the page's own E2E account id, load and create refuse a chain answer naming another, and
+  // nothing is stored for it; given the right one, load works and a later 404 is still refused
+  {
+    await reset(); await putBack();
+    const r = await P.ev(`(async () => {
+      const hash = await accountHash(${J(A)}), mine = e2eAccountOf(hash), other = "abcdefghijklmnopqrstuvwxya";
+      const load = await code(async () => !!(await K.DeviceKeys.load(other)));
+      const before = await idb((d) => d.count());
+      const create = await code(async () => (await K.DeviceKeys.create("x", mine, transport("OTHER"))).recoveryCode);
+      const otherAcct = (await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "OTHER" } })).json()).account;
+      const stored = { otherDevice: !!(await deviceOf(otherAcct)), count: await idb((d) => d.count()) };
+      const right = await code(async () => (await K.DeviceKeys.load(mine)).device.id);
+      const after404 = await e2eStart({ hash, get: async () => ({ status: 404, json: async () => ({}) }), chunk: async () => { throw new Error("not needed"); } });
+      return { mine: mine === ${acct}, load, create, before, stored, right, after404: after404.kind + ":" + (after404.reason === DOWNGRADED) };
+    })()`);
+    ok(r.mine && r.load.code === "wrong_account", "load given the page's E2E id refuses a chain answer naming another (wrong_account)", r);
+    ok(r.create.code === "wrong_account" && !r.stored.otherDevice && r.stored.count === r.before, "create given the page's E2E id refuses a chain answer for another account, and stores no device", r);
+    ok(r.right.ok === made.id && r.after404 === "blocked:true", "given the right id, load works, and a later 404 is still refused (blocked, never plain)", r);
+  }
+
+  // ---- the downgrade check: after genesis here, the server saying there's no chain (404, empty) is never plain
+  // sync; with this browser's device and pin gone (Reset this device), the same answers are plain again
+  {
+    const r = await P.ev(`(async () => {
+      const hash = await accountHash(${J(A)});
+      const fake = (status, body) => async () => ({ status, json: async () => body });
+      const start = async (get) => { const s = await e2eStart({ hash, get, chunk: async () => { throw new Error("the chunk isn't needed"); } }); return s.kind + (s.reason === DOWNGRADED ? ":downgraded" : ""); };
+      const out = { same: e2eAccountOf(hash) === ${acct}, after: [await start(fake(404, {})), await start(fake(200, { account: e2eAccountOf(hash), entries: [] }))] };
+      // (a pin only, the device record gone)
+      await idb((d) => { d.delete(${acct}); });
+      out.pinOnly = [await start(fake(404, {})), await start(fake(200, { account: e2eAccountOf(hash), entries: [] }))];
+      await K.resetDevice(${acct});
+      out.reset = [await start(fake(404, {})), await start(fake(200, { account: e2eAccountOf(hash), entries: [] }))];
+      return out;
+    })()`);
+    ok(r.same && J(r.after) === J(["blocked:downgraded", "blocked:downgraded"]), "after genesis in this browser, the server answering 404 or an empty chain: no sync (blocked, never plain)", r);
+    ok(J(r.pinOnly) === J(["blocked:downgraded", "blocked:downgraded"]), "with only the pin left (no device record), the same: blocked, never plain", r);
+    ok(J(r.reset) === J(["plain", "plain"]), "after Reset this device (no device, no pin), 404 or an empty chain is plain sync again", r);
+    await putBack();
+  }
+
+  // ---- and for Reset this device (in another tab): an object in use stops too, until the page loads a device again
+  {
+    await reset(); await putBack();
+    const r = await P.ev(`(async () => {
+      const k1 = await K.DeviceKeys.load(await idOf("A"));
+      const warm = { e0: !!(await k1.epochKeys(0)), sig: (await k1.device.sign(new Uint8Array([1]))).length };
+      await K.resetDevice(${acct});
+      const out = { warm, sign: await code(async () => k1.device.sign(new Uint8Array([1]))), view: await code(async () => k1.chain()), refresh: await code(async () => k1.chain(true)), e0: await code(async () => k1.epochKeys(0)) };
+      await idb((d) => { d.put(window.kept, ${acct}); });
+      out.after = await code(async () => k1.device.sign(new Uint8Array([1])));
+      return out;
+    })()`);
+    ok(r.warm.e0 && r.warm.sig === 64 && [r.sign, r.view, r.refresh, r.e0].every((x) => x.code === "no_device") && r.after.code === "no_device",
+      "an object in use when Reset this device runs (another tab): its sign, chain view, refresh and epoch keys are refused (no_device), and stay so for that object", r);
+    await reset(); await putBack();
+  }
+
   // ---- C1: a fork mark another tab writes while this object's refresh is between its pin read and its advance survives:
   // the refresh is refused (forked) and the mark is still there
   {
     await reset(); await putBack();
     const r = await P.ev(`(async () => {
       const f = { armed: false };
-      const k1 = await K.DeviceKeys.load(transport("A", { before: async () => { if (f.armed) { f.armed = false; await idb((d, p) => { const g = p.get(${acct}); g.onsuccess = () => p.put({ ...g.result, forked: { at: 1, code: "chain_fork" } }, ${acct}); }); } } }));
+      const k1 = await K.DeviceKeys.load(await idOf("A"), transport("A", { before: async () => { if (f.armed) { f.armed = false; await idb((d, p) => { const g = p.get(${acct}); g.onsuccess = () => p.put({ ...g.result, forked: { at: 1, code: "chain_fork" } }, ${acct}); }); } } }));
       f.armed = true;
       const refresh = await code(async () => k1.chain(true));
       const after = await pinOf(${acct});
@@ -217,9 +280,9 @@ try {
   // ---- T1: Reset this device forgets the pin and the fork mark too: the device enrolled again loads, pinned afresh
   {
     await reset();
-    const gone = await P.ev(`(async () => ({ pin: (await pinOf(${acct})) ?? null, load: await code(async () => (await K.DeviceKeys.load()) === null) }))()`);
+    const gone = await P.ev(`(async () => ({ pin: (await pinOf(${acct})) ?? null, load: await code(async () => (await K.DeviceKeys.load(await idOf("A"))) === null) }))()`);
     await putBack();
-    const again = await P.ev(`(async () => { const r = await code(async () => { const k = await K.DeviceKeys.load(); return (await k.chain()).head; }); return { r, pin: await pinOf(${acct}) }; })()`);
+    const again = await P.ev(`(async () => { const r = await code(async () => { const k = await K.DeviceKeys.load(await idOf("A")); return (await k.chain()).head; }); return { r, pin: await pinOf(${acct}) }; })()`);
     ok(gone.pin === null && gone.load.ok === true && again.r.ok === made.head && again.pin?.hash === made.head && !again.pin.forked,
       "after Reset this device no pin or fork mark is left, and the device enrolled again loads with a fresh pin at the head", { gone, again });
   }
@@ -227,15 +290,15 @@ try {
   // ---- T2: a chain reset since the pin (another generation) is refused and marks the account forked
   {
     await P.ev(`idb((d, p) => { const g = p.get(${acct}); g.onsuccess = () => p.put({ ...g.result, generation: "z".repeat(26) }, ${acct}); })`);
-    const r = await P.ev(`(async () => [await code(async () => K.DeviceKeys.load()), await code(async () => K.DeviceKeys.load())])()`);
+    const r = await P.ev(`(async () => [await code(async () => K.DeviceKeys.load(await idOf("A"))), await code(async () => K.DeviceKeys.load(await idOf("A")))])()`);
     ok(r[0].code === "chain_reset" && r[1].code === "forked", "a chain of another generation than the pin's (a reset since) is refused, and the account is then forked here", r);
     await reset(); await putBack();
   }
 
   // ---- N1, N2: a pinned device meeting an emptied chain, or one that starts at a reset, marks it too
   for (const [what, serve, code0] of [["an emptied chain", "() => []", "no_chain"], ["a chain that starts at a reset", "() => [JSON.stringify({ body: { op: 'reset' } })]", "chain_unanchored"]]) {
-    await P.ev(`code(async () => K.DeviceKeys.load())`);
-    const r = await P.ev(`(async () => [await code(async () => K.DeviceKeys.load(transport("A", { serve: ${serve} }))), await code(async () => K.DeviceKeys.load())])()`);
+    await P.ev(`code(async () => K.DeviceKeys.load(await idOf("A")))`);
+    const r = await P.ev(`(async () => [await code(async () => K.DeviceKeys.load(await idOf("A"), transport("A", { serve: ${serve} }))), await code(async () => K.DeviceKeys.load(await idOf("A")))])()`);
     ok(r[0].code === code0 && r[1].code === "forked", `a pinned device meeting ${what} is refused (${code0}) and the account is then forked here`, r);
     await reset(); await putBack();
   }
@@ -246,7 +309,7 @@ try {
     const r = await P.ev(`(async () => {
       const E = e2eCore();
       const old = { serve: null };
-      const k1 = await K.DeviceKeys.load(transport("A", { serve: (entries) => (old.serve ? old.serve(entries) : entries) }));
+      const k1 = await K.DeviceKeys.load(await idOf("A"), transport("A", { serve: (entries) => (old.serve ? old.serve(entries) : entries) }));
       // (a real next entry from the page: the recovery key replaced, signed by this device, the new key countersigning
       // and proving its X25519 half; its package, the epoch's secret wrapped to the new key, read with the recovery code)
       const chain = await (await fetch("/api/sync/v1/e2e/chain?from=0")).json();
@@ -267,7 +330,7 @@ try {
       const w = await E.wrapEpoch({ hpke, state: next, ctx, sender: { id: k1.device.id, sign: signer }, recipient: { kind: "recovery", id: ctx.account }, n: 0, S });
       const posted = (await fetch("/api/sync/v1/e2e/chain", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ entry: new TextDecoder().decode(bytes), keyring: null, wrappers: [new TextDecoder().decode(w)] }) })).status;
       // (another object loads the longer chain: the stored pin moves to seq 1)
-      const k2 = await K.DeviceKeys.load();
+      const k2 = await K.DeviceKeys.load(await idOf("A"));
       const moved = await pinOf(${acct});
       const k2head = (await k2.chain()).head;
       // (k1, still at seq 0 in memory, is now served the chain as it was: just genesis)
@@ -283,13 +346,13 @@ try {
   // ---- H1: genesis whose append fails or whose answer is lost
   {
     // (its answer lost after it applied: the chain says so, and genesis finishes, its recovery code returned)
-    const lost = await P.ev(`code(async () => { const { keys, recoveryCode } = await K.DeviceKeys.create("tablet", transport("LOST", { lose: true })); return { code: recoveryCode.length, unconfirmed: keys.recoveryUnconfirmed, again: !!(await K.DeviceKeys.load(transport("LOST"))), e0: !!(await keys.epochKeys(0)) }; })`);
+    const lost = await P.ev(`code(async () => { const { keys, recoveryCode } = await K.DeviceKeys.create("tablet", await idOf("LOST"), transport("LOST", { lose: true })); return { code: recoveryCode.length, unconfirmed: keys.recoveryUnconfirmed, again: !!(await K.DeviceKeys.load(await idOf("LOST"), transport("LOST"))), e0: !!(await keys.epochKeys(0)) }; })`);
     ok(lost.ok?.code === 64 && lost.ok.unconfirmed === false && lost.ok.again && lost.ok.e0, "genesis whose append's answer is lost after it applied finishes: the recovery code is returned, the device loads", lost);
     // (refused before it applied, definitely (a 4xx): no device is left behind, and trying again works)
     const refused = await P.ev(`(async () => {
-      const first = await code(async () => K.DeviceKeys.create("phone", transport("REFUSED", { refuse: 409 })));
-      const left = await K.DeviceKeys.load(transport("REFUSED"));
-      const retry = await code(async () => (await K.DeviceKeys.create("phone", transport("REFUSED"))).recoveryCode.length);
+      const first = await code(async () => K.DeviceKeys.create("phone", await idOf("REFUSED"), transport("REFUSED", { refuse: 409 })));
+      const left = await K.DeviceKeys.load(await idOf("REFUSED"), transport("REFUSED"));
+      const retry = await code(async () => (await K.DeviceKeys.create("phone", await idOf("REFUSED"), transport("REFUSED"))).recoveryCode.length);
       return { first, left: left === null, retry };
     })()`);
     ok(refused.first.code === "server" && refused.left && refused.retry.ok === 64, "genesis whose append is refused (409) before it applies leaves no device behind, and trying again succeeds", refused);
@@ -309,7 +372,7 @@ try {
       const body = E.nextBody(null, ctx, "genesis", { device: { id, name: "another", kind: "browser", sign: b64(raw), kem: b64(dk.kem.publicRaw) }, recovery: { sign: b64(rk.sign.raw), kem: b64(rk.kem.publicRaw) }, epoch: { n: 0, suite: 1, commit: await E.epochCommit(E.newEpochSecret(), acct, 0), keyring: null } });
       const genesis = new TextDecoder().decode(await E.sealEntry(E.deviceSigner(id, signer), body, signer, { recovery: rk.sign }));
       const valid = !!(await E.applyChainEntry(null, new TextEncoder().encode(genesis), ctx));
-      const tryWith = async (otherAfter) => { try { return { ok: (await K.DeviceKeys.create("laptop", transport("OTHER", { refuse: 503, otherAfter }))).recoveryCode }; } catch (e) { return { code: e.code, message: e.message }; } };
+      const tryWith = async (otherAfter) => { try { return { ok: (await K.DeviceKeys.create("laptop", await idOf("OTHER"), transport("OTHER", { refuse: 503, otherAfter }))).recoveryCode }; } catch (e) { return { code: e.code, message: e.message }; } };
       const first = await tryWith(genesis);
       const left = !!(await deviceOf(acct));
       const out = { valid, first, left, bad: [] };
@@ -330,7 +393,7 @@ try {
     // (a 5xx with no entry, twice: the append may still land, so the device stays, unconfirmed, and isn't forgotten)
     const late = await P.ev(`(async () => {
       const acct = (await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "LATE" } })).json()).account;
-      const first = await code(async () => K.DeviceKeys.create("tv", transport("LATE", { refuse: 503 })));
+      const first = await code(async () => K.DeviceKeys.create("tv", await idOf("LATE"), transport("LATE", { refuse: 503 })));
       const kept = await deviceOf(acct);
       return { first, kept: !!kept, shown: kept?.recoveryShown ?? null };
     })()`);
@@ -338,8 +401,8 @@ try {
     // (its answer lost and the chain then unreadable: the device stays, marked as not having shown its recovery code)
     const dark = await P.ev(`(async () => {
       let posted = false;
-      const first = await code(async () => K.DeviceKeys.create("desk", transport("DARK", { lose: true, dark: () => { const was = posted; posted = true; return was; } })));
-      const k = await K.DeviceKeys.load(transport("DARK"));
+      const first = await code(async () => K.DeviceKeys.create("desk", await idOf("DARK"), transport("DARK", { lose: true, dark: () => { const was = posted; posted = true; return was; } })));
+      const k = await K.DeviceKeys.load(await idOf("DARK"), transport("DARK"));
       return { first, unconfirmed: k?.recoveryUnconfirmed ?? null };
     })()`);
     ok(dark.first.code === "server" && dark.unconfirmed === true, "genesis whose answer is lost and whose chain can't then be read keeps the device, which loads saying its recovery code may never have been shown", dark);
@@ -347,7 +410,7 @@ try {
 
   // ---- N3: only the current epoch's raw secret is kept, in a private field
   {
-    const r = await P.ev(`(async () => { const k = await K.DeviceKeys.load(transport("LOST")); await k.epochKeys(0); return Object.keys(k).sort(); })()`);
+    const r = await P.ev(`(async () => { const k = await K.DeviceKeys.load(await idOf("LOST"), transport("LOST")); await k.epochKeys(0); return Object.keys(k).sort(); })()`);
     ok(!r.some((x) => /secret|current|derived|seen/i.test(x)), `no epoch secret or key cache is an ordinary property of the object (${J(r)})`);
   }
   ok(requests > 0, `(the page's requests went to the server: ${requests})`);

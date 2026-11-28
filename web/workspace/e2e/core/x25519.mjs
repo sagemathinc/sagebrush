@@ -34,7 +34,7 @@ export function checkKemPublic(raw) {
 
 /** A new key pair made on this device, with a non-extractable private key. */
 export async function newKem() {
-  const kp = await subtle().generateKey(X, false, ["deriveBits"]);
+  const kp = /** @type {CryptoKeyPair} */ (await subtle().generateKey(X, false, ["deriveBits"]));
   const publicRaw = new Uint8Array(await subtle().exportKey("raw", kp.publicKey));
   return Object.freeze({ publicRaw: checkKemPublic(publicRaw), privateKey: kp.privateKey });
 }

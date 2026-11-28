@@ -122,13 +122,14 @@ async function verifiedGenesis(E: ReturnType<typeof e2eCore>, entry: string, ctx
 }
 
 /** The server's chain for the signed-in account: its E2E account id, audience and entries. */
-async function fetchChain(t: Transport): Promise<{ account: string; aud: string; entries: string[] }> {
+async function fetchChain(t: Transport, expect: string | null): Promise<{ account: string; aud: string; entries: string[] }> {
   const r = await t("GET", `${API}/chain?from=0`);
   if (r.status !== 200) throw new DeviceKeysError("server", `the key chain couldn't be read (${r.status})`);
   const { account, aud, entries } = r.json as { account?: unknown; aud?: unknown; entries?: unknown };
   const E = e2eCore();
   if (typeof account !== "string" || typeof aud !== "string" || !E.AUDIENCES.includes(aud) || !Array.isArray(entries) || !entries.every((x) => typeof x === "string"))
     throw new DeviceKeysError("server", "the key chain's answer isn't one");
+  if (expect !== null && account !== expect) throw new DeviceKeysError("wrong_account", "the key chain's answer is for another account");
   return { account, aud, entries: entries as string[] };
 }
 
@@ -144,7 +145,7 @@ export class DeviceKeys implements OpKeys {
   #current: { n: number; S: Uint8Array } | null = null;
   #derived = new Map<number, EpochKeys>();
   #seen = new Set<string>();
-  #forked = false;
+  #ended: "forked" | "no_device" | null = null;
 
   private constructor(
     readonly account: string,
@@ -158,22 +159,30 @@ export class DeviceKeys implements OpKeys {
     this.recoveryUnconfirmed = rec.recoveryShown === false;
   }
 
-  /** Refuses once the account is marked forked here, by this object or another (another tab's load or refresh): every
-   * sign, chain view and epoch key goes through it, and the cached epoch secrets are dropped on the first refusal. */
+  /** Refuses once the account is marked forked here, or this device is no longer this browser's for the account (Reset
+   * this device, in this tab or another), by this object or another: every sign, chain view and epoch key goes through
+   * it, and the cached epoch secrets are dropped on the first refusal. */
   private async live(): Promise<void> {
-    if (!this.#forked && (await get<PinRecord>("pins", this.account))?.forked) this.#forked = true;
-    if (!this.#forked) return;
+    if (!this.#ended) {
+      const tx = (await open()).transaction(["pins", "devices"], "readonly");
+      const [pin, rec] = await Promise.all([req(tx.objectStore("pins").get(this.account)), req(tx.objectStore("devices").get(this.account))]) as [PinRecord | undefined, DeviceRecord | undefined];
+      if (pin?.forked) this.#ended = "forked";
+      else if (rec?.id !== this.rec.id) this.#ended = "no_device";
+    }
+    if (!this.#ended) return;
     this.#current?.S.fill(0);
     this.#current = null;
     this.#derived.clear();
-    throw new DeviceKeysError("forked", "this device saw a forked key chain");
+    throw this.#ended === "forked" ? new DeviceKeysError("forked", "this device saw a forked key chain") : new DeviceKeysError("no_device", "this device was reset in this browser");
   }
 
   /** The device for the signed-in account, or null if this browser has none. Refuses a forked account, or a chain
-   * that doesn't extend this device's pin (marking it forked), or one this device isn't current in. */
-  static async load(t: Transport = sameOrigin): Promise<DeviceKeys | null> {
+   * that doesn't extend this device's pin (marking it forked), or one this device isn't current in. `expect` (required: the
+   * account binding): the E2E account id the page derived for the signed-in account (e2e-here.ts e2eAccountOf); a chain answer
+   * naming another is refused (wrong_account), so a device is only ever read and stored where the page's own checks look. */
+  static async load(expect: string, t: Transport = sameOrigin): Promise<DeviceKeys | null> {
     const E = e2eCore();
-    const c = await fetchChain(t);
+    const c = await fetchChain(t, expect);
     const rec = await get<DeviceRecord>("devices", c.account);
     if (!rec) return null;
     const pin = await get<PinRecord>("pins", c.account);
@@ -212,11 +221,12 @@ export class DeviceKeys implements OpKeys {
   /**
    * Turn end-to-end encryption on for the signed-in account from this browser (genesis, §2): a new device, a new
    * recovery key and epoch 0, appended with their wrappers. Returns the device and the recovery code, which is shown
-   * once and never stored (the caller shows it). Refused if the account already has a chain.
+   * once and never stored (the caller shows it). Refused if the account already has a chain, or if the chain answer
+   * names another E2E account than `expect` (as load).
    */
-  static async create(name: string, t: Transport = sameOrigin): Promise<{ keys: DeviceKeys; recoveryCode: string }> {
+  static async create(name: string, expect: string, t: Transport = sameOrigin): Promise<{ keys: DeviceKeys; recoveryCode: string }> {
     const E = e2eCore();
-    const c = await fetchChain(t);
+    const c = await fetchChain(t, expect);
     if (c.entries.length > 0) throw new DeviceKeysError("exists", "this account's key chain already exists");
     const ctx = { aud: c.aud, account: c.account };
     const k = await newDeviceKeys();
@@ -257,7 +267,7 @@ export class DeviceKeys implements OpKeys {
       for (let i = 0; i < 2 && applied === "unknown"; i++) {
         if (i > 0) await new Promise((r) => setTimeout(r, GENESIS_RECHECK_MS));
         try {
-          const now = await fetchChain(t);
+          const now = await fetchChain(t, null);
           if (now.account !== c.account) break;
           if (now.entries[0] === text) applied = "yes";
           else if (now.entries.length > 0) { if (await verifiedGenesis(E, now.entries[0], ctx)) applied = "no"; }
@@ -286,7 +296,7 @@ export class DeviceKeys implements OpKeys {
       // inside its transaction, so it is never overwritten)
       await this.live();
       const pin = await get<PinRecord>("pins", this.account);
-      const c = await fetchChain(this.t);
+      const c = await fetchChain(this.t, null);
       if (c.account !== this.account) throw new DeviceKeysError("server", "the signed-in account changed");
       const next = await DeviceKeys.verify(E, c.entries, this.ctx, pin ?? E.pinOf(this.state), this.account);
       await advance(this.account, E.pinOf(next), next.hashes, next.base);
@@ -386,7 +396,8 @@ async function shown(account: string, id: string): Promise<void> {
   await done(tx);
 }
 
-/** "Reset this device": its keys and pin for the account deleted, the fork mark with them (it then enrolls again). */
+/** "Reset this device": its keys and pin for the account deleted, the fork mark with them (it then enrolls again; and
+ * with neither left, this browser no longer refuses plain sync for the account: e2e-here.ts). */
 export async function resetDevice(account: string): Promise<void> {
   const tx = (await open()).transaction(["devices", "pins"], "readwrite");
   tx.objectStore("devices").delete(account);

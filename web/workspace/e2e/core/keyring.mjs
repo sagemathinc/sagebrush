@@ -62,7 +62,8 @@ async function ringKey(S, account, n, usage) {
 export async function sealKeyring({ S, account, meta, secret }) {
   checkRingMeta(meta);
   if (!(secret instanceof Uint8Array) || secret.length !== 32) fail("bad_form", "an epoch secret is 32 bytes");
-  const nonce = random(12);
+  // (random() is typed for any buffer; its bytes are a plain ArrayBuffer, which the encrypt call types require)
+  const nonce = /** @type {Uint8Array<ArrayBuffer>} */ (random(12));
   const ct = new Uint8Array(await subtle().encrypt({ name: "AES-GCM", iv: nonce, additionalData: ringAad(account, meta) }, await ringKey(S, account, meta.epoch, "encrypt"), secret));
   const bytes = new Uint8Array(12 + ct.length);
   bytes.set(nonce);
@@ -98,6 +99,8 @@ export async function openKeyring({ S, account, row, expect }) {
  * Returns S[to] (the caller zeroes it). Every step checks the row's hash before decrypting, and takes the next
  * expected hash only from the keyring it just authenticated.
  */
+/** @param {{ S: Uint8Array, n: number, expect: unknown, to: number, account: string, row: (k: number) => Promise<any>, commit?: (k: number) => string | undefined, keep?: (k: number, secret: Uint8Array) => Promise<void>, budget?: number, signal?: AbortSignal }} a
+ * (any: a keyring row as its store keeps it; openKeyring checks its form) */
 export async function walkBack({ S, n, expect, to, account, row, commit = () => undefined, keep = async () => {}, budget = 4096, signal }) {
   if (!Number.isSafeInteger(n) || !Number.isSafeInteger(to) || to < 0 || to > n) fail("bad_form", "a bad walk");
   if (n - to > budget) fail("limit", "the walk is past its budget");

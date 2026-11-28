@@ -33,6 +33,10 @@ import { confirmedIndex } from "./sync-confirmed";
 import { accountHash } from "../sync-protocol/protocol";
 import { detectOldSync, OLD_SYNC_REASON, UNREADABLE_REASON, type OldSync } from "./sync-old";
 import { BLOCKED_LINE, resetSyncHere, type SyncBlocked } from "./sync-reset";
+import { e2eStart, CONTENT_SEALED, UNREADABLE as E2E_UNREADABLE, type E2EStart } from "./sync-e2e";
+
+/** The owner's options: the client's, and how it decides whether sync runs end to end (sync-e2e.ts; tests give theirs). */
+export type OwnerOptions = ClientOptions & { e2eStart?: () => Promise<E2EStart> };
 
 export const STATUS_PUB = {
   /** status messages at most this often (one slot) */
@@ -56,6 +60,8 @@ export const OWNER = {
 /** The production client: always with the confirmed index (step 4's onIndex), so a namespace's first sync adopts
  * the local tree and other devices' changes are applied (CORR-STEP5-4). */
 export function startSync(w: Workspace, opts: ClientOptions = {}): SyncClient {
+  // (never an end-to-end client while it would send file contents and notebooks' patches as they are: sync-e2e.ts)
+  if (opts.e2e && !CONTENT_SEALED) throw new Error("sync: end-to-end sync of file contents isn't built yet");
   return new SyncClient(w, { onIndex: confirmedIndex(w), ...opts });
 }
 
@@ -72,7 +78,7 @@ type Life = { ns: string; epoch: number };
 
 export class SyncOwner {
   /** The owner of `w` (one per Workspace). */
-  static of(w: Workspace, opts: ClientOptions = {}): SyncOwner {
+  static of(w: Workspace, opts: OwnerOptions = {}): SyncOwner {
     let o = owners.get(w);
     if (!o) owners.set(w, (o = new SyncOwner(w, opts)));
     return o;
@@ -126,7 +132,7 @@ export class SyncOwner {
   /** (tests) what the holder side did */
   readonly stats = { published: 0, asks: 0, suppressed: 0, reconciles: 0, retries: 0, unsentReads: 0, unsentVisited: 0, unsentMostRead: 0 };
 
-  private constructor(readonly w: Workspace, private opts: ClientOptions) {}
+  private constructor(readonly w: Workspace, private opts: OwnerOptions) {}
 
   /** `f()` whenever what the foot shows may have changed; returns how to stop. */
   onChange(f: () => void): () => void {
@@ -429,8 +435,20 @@ export class SyncOwner {
       return;
     }
     const l = d;
+    // (end to end or not, decided before the client starts: an account whose index is sealed never gets a plain client,
+    // and one this browser can't sync (no device here, a refused chain, the keys unreadable) shows why, with no client)
+    const { e2eStart: decide, ...clientOpts } = this.opts;
+    const start = await this.decideStart(l, decide);
+    if (this.suspended || this.life !== l) return;
+    if (start.kind === "blocked") {
+      this.own = { ...(await this.offView()), reason: start.reason };
+      this.changed();
+      if (start.retry) this.later();
+      return;
+    }
     const c = startSync(this.w, {
-      ...this.opts,
+      ...clientOpts,
+      ...(start.kind === "sealed" ? { e2e: start.e2e } : {}),
       lifecycle: { ns: l.ns, epoch: l.epoch, fence: () => this.holds(l) },
       onLease: (lease) => this.becameHolder(l, lease.gen),
       onRelease: () => this.demote(),
@@ -457,6 +475,19 @@ export class SyncOwner {
       }
     });
     this.ask();
+  }
+  /** How the client starts for `l` (sync-e2e.ts; its account's hash keys this browser's mark), through the owner's
+   * fetch and origin; a decision that hangs (the mark's read, the chain's, the chunk's, the device's load) is given up
+   * after OWNER.askMs as unreadable, so tried again later. */
+  private async decideStart(l: Life, decide?: () => Promise<E2EStart>): Promise<E2EStart> {
+    const f = this.opts.fetch ?? globalThis.fetch.bind(globalThis), origin = this.opts.origin ?? location.origin;
+    let cancel = () => {};
+    const late = new Promise<E2EStart>((res) => { cancel = (this.opts.clock ?? realClock).after(OWNER.askMs, () => res({ kind: "blocked", reason: E2E_UNREADABLE, retry: true })); });
+    try {
+      return await Promise.race([(decide ?? (() => e2eStart({ hash: l.ns.split(":")[0], get: (p) => f(origin + p, { credentials: "same-origin" }) })))(), late]);
+    } finally {
+      cancel();
+    }
   }
   /** Whether the session's account is the namespace's (its hash, the namespace's first part): "unknown" when it
    * couldn't be asked (the fetch threw, a 5xx, a 429); a 401, a 403 or another account is a final "no". */
