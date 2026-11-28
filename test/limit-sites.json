@@ -13949,11 +13949,6 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
- "src/runtime/numpy.ts :: better :: if (cnan(vr, vi) || !(isMax ? cgt(ar, ai, vr, vi) : cgt(vr, vi, ar, ai))) { #0": {
-  "class": "none",
-  "owner": "NumPy shim",
-  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
- },
  "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
   "class": "none",
   "owner": "python",
@@ -13978,6 +13973,36 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: I64MAX and U64MAX, the int64 and uint64 ranges, by which NumPy discovers a Python int's dtype and past which its C conversion raises OverflowError; NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: const bBetter = isMax ? br > ar || (br === ar && bi > ai) : br < ar || (br === ar && bi < ai); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: fmax: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.max(x, y)), c: cmaxmin(true, true) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: fmin: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.min(x, y)), c: cmaxmin(false, true) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: function cmaxmin(isMax: boolean, skip: boolean): CBin { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: maximum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.max(x, y)), c: cmaxmin(true, false) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: minimum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.min(x, y)), c: cmaxmin(false, false) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",

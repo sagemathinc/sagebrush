@@ -1040,6 +1040,9 @@ class ufunc:
             dt = self._loop(dtype)
             congruent = (self._op in ("add", "multiply") and a.dtype.kind == "f" and dt.kind == "u" and
                          dt.itemsize == 8 and (initial is None or masked))
+            # (a real sum in a complex dtype: sum converts each element as it reads it, NumPy's buffered loop, not a
+            # whole-array cast first)
+            congruent = congruent or (self._op == "add" and a.dtype.kind in "biuf" and dt.kind == "c" and (initial is None or masked))
             if a.dtype != dt and not congruent:
                 # (accumulated in dtype, as NumPy's: the conversion is the reduction's, and its warning says so)
                 old = _np._cast_label("reduce")
@@ -1813,14 +1816,18 @@ def argmin(a, axis=None, out=None, *, keepdims=False):
 
 
 def _arg_out(r, out, name):
-    # (argmax/argmin's out=: the result written into it, which must have its shape, and out returned, as NumPy's)
+    # (argmax/argmin's out=: the result written into it, which must have its shape and a dtype that casts to the index
+    # (intp) safely, as NumPy checks it (int8 and bool outs taken, float and uint64 ones refused), and out returned)
     if out is None:
         return r
     if not isinstance(out, ndarray):
-        raise TypeError("return arrays must be of ArrayType")
+        raise TypeError("output must be an array")
     r = asarray(r)
     if out.shape != r.shape:
         raise ValueError("output array does not match result of np.%s." % name)
+    if not can_cast(out.dtype, int64, "safe"):
+        raise TypeError("Cannot cast %s from dtype('%s') to dtype('int64') according to the rule 'safe'"
+                        % ("scalar" if out.ndim == 0 else "array data", out.dtype.name))
     out[...] = r
     return out
 
@@ -1917,8 +1924,7 @@ def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
         raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
                          "specify 'initial'" % name)
     a = asarray(a)
-    if a.dtype.kind == "c":
-        a = _nanfill(a, -inf if is_max else inf)
+    # (a complex array's NaNs are skipped by the runtime's complex fold too, so an all-NaN slice stays NaN)
     if initial is None:
         if a.size == 0 and _count(a, axis) == 0:
             raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
@@ -3056,7 +3062,10 @@ def diff(a, n=1, axis=-1, prepend=_NO_DIFF_EXTRA, append=_NO_DIFF_EXTRA):
             def _pairs(x):
                 return [y - x0 for x0, y in _builtins.zip(x[:-1], x[1:])] if not x or not isinstance(x[0], list) else [_pairs(r) for r in x]
             m = moveaxis(a, axis, -1)
-            a = moveaxis(array(_pairs(m.tolist()), dtype=object).reshape(m.shape[:-1] + (m.shape[-1] - 1,)), -1, axis)
+            # (the result's shape exactly, never a -1: an empty one, any axis of length 0 or the last one used up, too)
+            shape = m.shape[:-1] + (_builtins.max(m.shape[-1] - 1, 0),)
+            d = array(_pairs(m.tolist()), dtype=object).reshape(shape)
+            a = moveaxis(d, -1, axis)
             continue
         a = a[tuple(hi)] - a[tuple(lo)] if a.dtype.kind != "b" else not_equal(a[tuple(hi)], a[tuple(lo)])
     return a
