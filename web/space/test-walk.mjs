@@ -98,6 +98,13 @@ await wheel(1, { deltaY: 100 });
 const after = await ev(`space3d.camera.position.toArray()`);
 const along = (after[0] - before[0]) * ahead[0] + (after[2] - before[2]) * ahead[1];
 ok(along < 0, "a turn the other way walks back", { along: +along.toFixed(2) });
+const before2 = await ev(`space3d.camera.position.toArray()`);
+await wheel(1, { deltaY: -100 });
+const after2 = await ev(`space3d.camera.position.toArray()`);
+const along2 = (after2[0] - before2[0]) * ahead[0] + (after2[2] - before2[2]) * ahead[1];
+ok(along2 > 0, "a turn forward (deltaY < 0) walks forward", { along: +along2.toFixed(2) });
+// (the page's icon: the site's own, inline)
+ok(await ev(`(() => { const l = document.querySelector('link[rel="icon"]'); return !!l && l.href.startsWith("data:image/svg+xml,") && decodeURIComponent(l.href).includes("<svg"); })()`), "the page has the site's icon");
 await key("?"); await key("?", false);
 ok(await ev(`!document.querySelector('[data-c="helpcard"]').hidden`), "? shows the help");
 await key("Escape"); await key("Escape", false);
