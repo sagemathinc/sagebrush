@@ -4,6 +4,36 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/arith/src/zmat.rs :: a_multiply_adds_weight_saturates_at_the_targets_usize :: assert_eq!(mul_weight(1 << 22, 1 << 22, u64::MAX), (1 << 32) + 1); #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: a_multiply_adds_weight_saturates_at_the_targets_usize :: assert_eq!(mul_weight(u64::MAX, u64::MAX, u64::MAX), u64::MAX); #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: a_multiply_adds_weight_saturates_at_the_targets_usize :: let cap32 = u32::MAX as u64; #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: mul :: let w = mul_weight(self.max_bits(), o.max_bits(), usize::MAX as u64) as usize; #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight :: (a / 64).saturating_mul(b / 64).saturating_add(1).min(cap) #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
+ "engine/arith/src/zmat.rs :: mul_weight :: fn mul_weight(a: u64, b: u64, cap: u64) -> u64 { #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight (usize::MAX / max_bits) and its unit test: how often Stop is polled, saturated at the target's usize; not a limit"
+ },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -13,6 +43,16 @@
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
   "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
+ },
+ "engine/arith/src/zmat.rs :: solve :: let a_bits = a.max_bits(); #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the residual's poll weight from a's entries' sizes (max_bits, usize::MAX cap): how often Stop is polled, not a limit"
+ },
+ "engine/arith/src/zmat.rs :: solve :: let aw = if a64.is_some() { 1 } else { mul_weight(a_bits, 64, usize::MAX as u64) as usize }; #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the residual's poll weight from a's entries' sizes (max_bits, usize::MAX cap): how often Stop is polled, not a limit"
  },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
@@ -7546,6 +7586,61 @@
  "lib/_sage_ffmat.py :: _AlgCharge.row :: self.base, self.limit // mib, _HEAP_SHARE, _heap_limit() // mib), None, self.limit) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge :: one row of the budget and nothing is kept.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge :: operation's working copy), against the budget for one matrix.  The #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge.__init__ :: self.limit = _heap_limit() // _HEAP_SHARE #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge.row :: if self.total > self.limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge.row :: self.total, self.limit, \"one matrix\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "linear algebra/runtime memory",
+  "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _admit_size :: anything is built, if not; its allowance is the budget, 1/_HEAP_SHARE #0": {
   "class": "2",

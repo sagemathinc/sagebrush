@@ -18,7 +18,7 @@
 //!   norms, bounding the sums of principal minors by Hadamard).
 
 use crate::nmod::{Modulus, Primes};
-use crate::nmod_mat::{Lu, Mat};
+use crate::nmod_mat::{Lu, Mat, Poll};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -114,11 +114,16 @@ impl ZMat {
         assert_eq!(self.cols, o.rows, "matrix dimensions do not match");
         let (r, k, c) = (self.rows, self.cols, o.cols);
         let small = self.max_bits() + o.max_bits() + (64 - (k as u64).leading_zeros() as u64) < 126;
+        // Stop is polled every few milliseconds of multiply-adds, inside a
+        // row too (a row of a 1024 x 1024 product is a million of them)
+        let _phase = sagebrush_interrupt::enter("arith.mul");
+        let mut poll = Poll::new();
         if small {
             if let (Some(a), Some(b)) = (self.as_i64(), o.as_i64()) {
                 let mut d = Vec::with_capacity(r * c);
                 for i in 0..r {
                     for j in 0..c {
+                        poll.add(k);
                         let mut s = 0i128;
                         for l in 0..k {
                             s += a[i * k + l] as i128 * b[l * c + j] as i128;
@@ -129,11 +134,22 @@ impl ZMat {
                 return ZMat { rows: r, cols: c, d };
             }
         }
+        // (a multiply-add of big integers costs about the product of their
+        // sizes in words: counted so, a product of few large entries polls;
+        // past 2^10 words a multiply-add, each is counted as it is done)
+        let w = mul_weight(self.max_bits(), o.max_bits(), usize::MAX as u64) as usize;
+        let each = w >= 1 << 10;
         let mut d = Vec::with_capacity(r * c);
         for i in 0..r {
             for j in 0..c {
+                if !each {
+                    poll.add(k.saturating_mul(w));
+                }
                 let mut s = BigInt::zero();
                 for l in 0..k {
+                    if each {
+                        poll.add(w);
+                    }
                     if !self.d[i * k + l].is_zero() {
                         s += &self.d[i * k + l] * &o.d[l * c + j];
                     }
@@ -343,6 +359,11 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
     let mut pk = BigInt::one();
     let mut check = 4usize.min(max_iters);
     let mut iter = 0;
+    // a lifting step is n^2 k multiply-adds (the k solves through the LU
+    // and the residual): Stop is polled within it, not only between steps
+    let _phase = sagebrush_interrupt::enter("arith.solve_lift");
+    let mut poll = Poll::new();
+    let a_bits = a.max_bits();
     loop {
         if r128.is_none() && a64.is_some() {
             let lim = BigInt::from(1i128 << 120);
@@ -358,24 +379,30 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                 .collect(),
             None => r.iter().map(|v| mod_u64(v, &m)).collect(),
         };
-        // digit = a^-1 (r mod p), column by column through the LU
-        let digit = if k == 1 {
-            Mat { rows: n, cols: 1, m, d: ainv.solve_vec(&rd) }
-        } else {
-            let mut d = vec![0u64; n * k];
-            for j in 0..k {
-                let col: Vec<u64> = (0..n).map(|i| rd[i * k + j]).collect();
-                for (i, v) in ainv.solve_vec(&col).into_iter().enumerate() {
-                    d[i * k + j] = v;
+        // digit = a^-1 (r mod p), column by column through the LU, the
+        // solves counted on the step's poll (a phase of their own)
+        let digit = {
+            let _digits = sagebrush_interrupt::enter("arith.solve_digits");
+            if k == 1 {
+                Mat { rows: n, cols: 1, m, d: ainv.solve_vec_polled(&rd, &mut poll) }
+            } else {
+                let mut d = vec![0u64; n * k];
+                for j in 0..k {
+                    let col: Vec<u64> = (0..n).map(|i| rd[i * k + j]).collect();
+                    for (i, v) in ainv.solve_vec_polled(&col, &mut poll).into_iter().enumerate() {
+                        d[i * k + j] = v;
+                    }
                 }
+                Mat { rows: n, cols: k, m, d }
             }
-            Mat { rows: n, cols: k, m, d }
         };
         // r = (r - a digit) / p
+        let residual = sagebrush_interrupt::enter("arith.solve_residual");
         match (&mut r128, &a64) {
             (Some(rv), Some(a64)) => {
                 for i in 0..n {
                     for j in 0..k {
+                        poll.add(n);
                         let mut s = 0i128;
                         for l in 0..n {
                             s += a64[i * n + l] as i128 * digit.d[l * k + j] as i128;
@@ -386,8 +413,12 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                 }
             }
             _ => {
+                // (a big-integer multiply-add costs about a's entries' size
+                // in words when they leave i64)
+                let aw = if a64.is_some() { 1 } else { mul_weight(a_bits, 64, usize::MAX as u64) as usize };
                 for i in 0..n {
                     for j in 0..k {
+                        poll.add(n.saturating_mul(aw));
                         let s: BigInt = match &a64 {
                             Some(a64) => {
                                 let mut s = 0i128;
@@ -405,9 +436,16 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                 }
             }
         }
-        for (xi, &di) in x.iter_mut().zip(&digit.d) {
-            if di != 0 {
-                *xi += &pk * BigInt::from(di);
+        drop(residual);
+        // (each a multiply-add of p^iter's size, in words)
+        {
+            let _x = sagebrush_interrupt::enter("arith.solve_x");
+            let pkw = 1 + (pk.bits() / 64) as usize;
+            for (xi, &di) in x.iter_mut().zip(&digit.d) {
+                poll.add(pkw);
+                if di != 0 {
+                    *xi += &pk * BigInt::from(di);
+                }
             }
         }
         pk *= &bp;
@@ -431,6 +469,14 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
             check = (2 * check).min(max_iters);
         }
     }
+}
+
+/// The work of one multiply-add of entries of `a` and `b` bits, in word
+/// products (1 + their sizes in words multiplied), at most `cap` (usize's
+/// largest: on a 32-bit target the product of two 2^22-bit entries' sizes
+/// is 2^32, which would wrap).
+fn mul_weight(a: u64, b: u64, cap: u64) -> u64 {
+    (a / 64).saturating_mul(b / 64).saturating_add(1).min(cap)
 }
 
 /// Fraction-free Gaussian elimination (Bareiss): exact determinant with
@@ -1199,6 +1245,19 @@ pub fn charpoly(a: &ZMat) -> Vec<BigInt> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_multiply_adds_weight_saturates_at_the_targets_usize() {
+        // (a 32-bit target: 2^22-bit entries are 2^16 words each, whose
+        // product 2^32 wraps to 0 in a u32; saturated, the weight is the cap)
+        let cap32 = u32::MAX as u64;
+        assert_eq!(mul_weight(1 << 22, 1 << 22, cap32), cap32);
+        assert_eq!(mul_weight(3 << 21, 3 << 21, cap32), cap32);
+        assert_eq!(mul_weight(1 << 22, 1 << 22, u64::MAX), (1 << 32) + 1);
+        assert_eq!(mul_weight(63, 1 << 20, cap32), 1);
+        assert_eq!(mul_weight(128, 640, cap32), 21);
+        assert_eq!(mul_weight(u64::MAX, u64::MAX, u64::MAX), u64::MAX);
+    }
 
     fn rng(seed: &mut u64) -> u64 {
         *seed ^= *seed << 13;

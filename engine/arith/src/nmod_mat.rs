@@ -18,6 +18,13 @@ pub struct Lu {
 impl Lu {
     /// x with A x = b.
     pub fn solve_vec(&self, b: &[u64]) -> Vec<u64> {
+        self.solve_vec_polled(b, &mut Poll::new())
+    }
+
+    /// As [`Lu::solve_vec`], counting its n^2 multiply-adds on the caller's
+    /// `poll`: a caller that solves for many right-hand sides polls across
+    /// them (one solve of size n < 256 is under one poll's work).
+    pub(crate) fn solve_vec_polled(&self, b: &[u64], poll: &mut Poll) -> Vec<u64> {
         let n = self.a.rows;
         let m = self.a.m;
         let batch = batch_len(&m);
@@ -35,12 +42,14 @@ impl Lu {
         };
         let mut y = vec![0u64; n];
         for i in 0..n {
+            poll.add(i + 1);
             let s = dot(&d[i * n..i * n + i], &y[..i]);
             let pv = d[i * n + i];
             y[i] = m.mul(m.sub(b[self.perm[i]], s), m.inv(pv).expect("singular"));
         }
         let mut x = vec![0u64; n];
         for i in (0..n).rev() {
+            poll.add(n - i);
             let s = dot(&d[i * n + i + 1..(i + 1) * n], &x[i + 1..]);
             x[i] = m.sub(y[i], s);
         }
@@ -62,14 +71,14 @@ pub struct Mat {
 /// in wasm, where the 128-bit products are emulated: the natural
 /// checkpoints of the dense algorithms here (a row, a column, a block) can
 /// each cost tens of millions of them for large matrices.
-struct Poll(u64);
+pub(crate) struct Poll(u64);
 
 impl Poll {
-    fn new() -> Poll {
+    pub(crate) fn new() -> Poll {
         Poll(0)
     }
     #[inline]
-    fn add(&mut self, work: usize) {
+    pub(crate) fn add(&mut self, work: usize) {
         self.0 += work as u64;
         if self.0 >= 1 << 16 {
             self.0 = 0;

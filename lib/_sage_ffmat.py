@@ -196,6 +196,62 @@ class _AlgCharge:
         return r
 
 
+def _nf_base(base):
+    # (a number field is _sage_nf's: if it isn't loaded, base is none)
+    import sys
+    nf = sys.modules.get("_sage_nf")
+    return nf is not None and isinstance(base, nf.NumberField_absolute)
+
+
+def _int_heap(v):
+    # (a Python int's bytes: a header and 30-bit digits in CPython, about the
+    # same in pyjs's BigInts)
+    return 32 + v.bit_length() // 7
+
+
+class _NFCharge:
+    """The running charge of a matrix's entries over a number field: each
+    entry's share by degree (_entry_cost), and the numerators and
+    denominators of its coordinates, twice (the entry and an elementwise
+    operation's working copy), against the budget for one matrix.  The
+    charge by degree alone admitted a 32 x 32 matrix over QQ(sqrt 2) of
+    32769-bit coordinates at 747,520 bytes, whose numerators alone retain
+    4.5 MB.  Rows are charged as they are made, so a refusal comes within
+    one row of the budget and nothing is kept."""
+
+    def __init__(self, base):
+        self.base, self.total = base, 0
+        self.unit = _entry_cost(base)
+        self.limit = _heap_limit() // _HEAP_SHARE
+
+    def row(self, r):
+        for x in r:
+            t = self.unit
+            for c in x._c:
+                t += 2 * (_int_heap(c.numerator) + _int_heap(c.denominator))
+            self.total += t
+        if self.total > self.limit:
+            # (the memory guard's refusal, as _admit_size's: the charge so far
+            # is the need it names, a lower bound of the whole matrix's)
+            import _capacity, _memguard
+            e = _memguard.memory_guard("A matrix over %r of these entries (each entry's coordinates count, by their size)" % (self.base,),
+                                       self.total, self.limit, "one matrix")
+            e.capacity = _capacity.capacity()
+            raise e
+        return r
+
+
+def _entry_charge(base):
+    """The running charge of a matrix's entries over base, row by row, where
+    the entries' sizes vary beyond what base alone says (AA and QQbar: their
+    fields; a number field: its coordinates' heights); None otherwise."""
+    if _alg_base(base):
+        return _AlgCharge(base)
+    if _nf_base(base):
+        return _NFCharge(base)
+    return None
+
+
 def _admit_vector(base, n, factor=1):
     """n, after checking that a vector of n entries over base (times factor
     for its working space) fits this process's budget for one matrix:
@@ -1407,9 +1463,9 @@ class FFMatrix:
             raise ValueError("the rows of a matrix must all have %d entries" % ncols)
         _admit_size(base, len(rows), ncols)
         self._base = base
-        if _alg_base(base):
+        charge = _entry_charge(base)
+        if charge is not None:
             # (charged by what the entries hold, row by row as converted)
-            charge = _AlgCharge(base)
             self._rows = [charge.row([base(x) for x in r]) for r in rows]
         else:
             self._rows = [[base(x) for x in r] for r in rows]
@@ -2687,10 +2743,11 @@ def matrix(base, *args, **kwds):
     if callable(entries) and not hasattr(entries, "__iter__") and not hasattr(entries, "__len__") and not hasattr(entries, "__getitem__"):
         # matrix(F, m, n, f): the entries f(i, j), as Sage, after the shape
         # is checked; each value converted as it is returned, and over QQbar
-        # and AA each row charged as it is made (was a TypeError: "Illegal
-        # initializer for algebraic number")
+        # and AA (and a number field, by its coordinates) each row charged as
+        # it is made (was a TypeError: "Illegal initializer for algebraic
+        # number")
         _admit_size(base, m, n)
-        charge = _AlgCharge(base) if _alg_base(base) else None
+        charge = _entry_charge(base)
         rows = []
         for i in range(m):
             r = [base(entries(i, j)) for j in range(n)]
