@@ -187,3 +187,14 @@ test("the TypeScript path's estimate does not overflow on a finite sum near the 
   const out = execFileSync(process.execPath, [cli, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_WASM: "1" } });
   assert.equal(out.trim(), "0x1.8e38e38e38e39p-1");
 });
+
+test("the TypeScript path warns as MATLAB does where its estimate's extra term once overflowed", () => {
+  // (A = 2^-968.5 [1 1; 1 1+2^-52], A \ [1; 2]: MATLAB R2026b, observed 2026-11-28, warns nearly singular with
+  // RCOND = 3.925231e-17 in the message, although its rcond(A) is 0 there (LAPACK's scaling guard: the warning's
+  // estimate is not rcond's), and x(1) is ffbfffffffffffff. With the extra term doubled before the division
+  // by 3n, the estimate overflowed to 0 and the solve was silent)
+  const r = run("lastwarn(''); x = 2^-968.5 * [1 1; 1 1+2^-52] \\ [1; 2]; [~, id] = lastwarn(); fprintf('%s %s\\n', id, num2hex(x(1)));", true);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, "MATLAB:nearlySingularMatrix ffbfffffffffffff\n");
+  assert.equal(r.err, "Warning: Matrix is close to singular or badly scaled. Results may be inaccurate. RCOND =  3.925231e-17.\n");
+});
