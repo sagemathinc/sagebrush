@@ -174,7 +174,8 @@ export const FREE_LIMITS: Limits = { tier: "free", storage_bytes: 256 * 1024 * 1
  * - While WorkOS can't be asked, it keeps working until GRACE_S after its last validation (never after a failed
  *   attempt), then answers "unavailable" (its row and the user's work are kept: signing in again can't help then).
  *   A failed attempt isn't retried for REFRESH_RETRY_S.  A local sign-out, sign-out everywhere or disable ends it at
- *   once, grace or not.
+ *   once, grace or not.  A refresh WorkOS answered whose access token can't be verified yet counts as a failed
+ *   attempt, but keeps WorkOS's replacement refresh token (the old one is spent), unverified until the next refresh.
  */
 const WORKOS_VALID_S = 3600;
 const GRACE_S = 24 * 3600;
@@ -585,10 +586,13 @@ async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow
   const r = await refreshSession(c, plain);
   if (!r.ok) return r.kind === "refused" ? endFenced(db, fence, "refused") : markUnavailable(db, fence, row);
   const v = await verifyAccessToken(c, r.accessToken);
-  if (!v.ok) return v.kind === "unavailable" ? markUnavailable(db, fence, row) : endFenced(db, fence, "refresh-invalid");
+  if (!v.ok && v.kind !== "unavailable") return endFenced(db, fence, "refresh-invalid");
   // (a refresh never moves a session to another identity, or onto another WorkOS session)
-  if (v.subject !== row.subject || v.sid !== row.provider_sid) return endFenced(db, fence, "refresh-mismatch");
+  if (v.ok && (v.subject !== row.subject || v.sid !== row.provider_sid)) return endFenced(db, fence, "refresh-mismatch");
   const sealed = await seal(keys, ctxSeal, r.refreshToken);
+  // (WorkOS rotated the token but its answer can't be checked yet: the old token is spent, so the replacement is kept,
+  // as an outage, and checked at the next refresh before anything moves)
+  if (!v.ok) return keepUnverified(db, fence, sealed);
   // (the identity's verified email, as this refresh's answer gives it for this very subject: anything else, a missing,
   // unverified or malformed address or another user's, clears it.  Updated on a successful fenced refresh, in the same
   // batch and only if the session update took, and only if no newer answer (a later ticket) was written already; an
@@ -604,6 +608,16 @@ async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow
 /** WorkOS couldn't be asked: the session may be used until its grace ends; validated never moves. */
 async function markUnavailable(db: D1, fence: () => readonly unknown[], _row: SessionRow): Promise<RefreshOutcome> {
   const res = await db.prepare(`UPDATE sessions SET refresh_failed = ?6, expires = MIN(COALESCE(validated, 0) + ${GRACE_S}, abs_expires) WHERE ${REFRESH_FENCE}`).bind(...fence()).run();
+  return Number(res.meta?.changes ?? 0) === 1 ? "unavailable" : "raced";
+}
+
+/**
+ * A refresh WorkOS answered whose access token can't be verified yet (its keys unreachable): as markUnavailable, plus
+ * the replacement refresh token, since WorkOS refuses the spent one after its short reuse window.  validated, the
+ * email and the identity don't move: the next refresh verifies the token this one leads to before any of them do.
+ */
+async function keepUnverified(db: D1, fence: () => readonly unknown[], sealed: Awaited<ReturnType<typeof seal>>): Promise<RefreshOutcome> {
+  const res = await db.prepare(`UPDATE sessions SET refresh_ct = ?8, key_version = ?9, refresh_failed = ?6, expires = MIN(COALESCE(validated, 0) + ${GRACE_S}, abs_expires) WHERE ${REFRESH_FENCE}`).bind(...fence(), sealed.ct, sealed.version).run();
   return Number(res.meta?.changes ?? 0) === 1 ? "unavailable" : "raced";
 }
 
