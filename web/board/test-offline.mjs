@@ -67,9 +67,6 @@ ws.onmessage = (ev) => {
 const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
-// (unconfined here, ?runner=0: a board's code waits for the person's "Run this board's code", web/board/capability.ts;
-// pressed here as they would)
-const runPaused = async () => { await until(`!document.querySelector("[data-sbb=runpaused]").hidden`, 15000); await ev(`(document.querySelector("[data-sbb=runpaused]:not([hidden])")?.click(), 1)`); };
 // (a file and its export again are compared without the day of export its generator line names: a run that crosses
 // midnight UTC exports them on two days, and nothing else may differ)
 const undated = (html) => html.replace(/(<meta name="generator" content="[^"]*, exported )\d{4}-\d{2}-\d{2}"/, '$1(day)"');
@@ -99,7 +96,7 @@ try {
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable"]) await send(m);
   await send("Network.setCacheDisabled", { cacheDisabled: true });
   await online(true);
-  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.board.json")}` });
+  await send("Page.navigate", { url: `${site}board/?runner=0&gate=0&doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await ev("localStorage.clear(), 1");
   // Download as HTML, for a board with code: the two choices first
@@ -169,7 +166,7 @@ try {
 
   // a Sage board with Python: the Sage library in the file too; Sage runs
   // offline, and 3D, its viewer from the file
-  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/polynomials.board.json")}` });
+  await send("Page.navigate", { url: `${site}board/?runner=0&gate=0&doc=${encodeURIComponent("examples/polynomials.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const sageHtml = await ev("window.sagebrush.board.exportHtml({ python: true })");
   check(libSage.every((f) => parts(sageHtml).includes(f)), "a Sage board's file with Python carries Sage's compiled modules: " + parts(sageHtml).join());
@@ -199,7 +196,7 @@ try {
   overrides.clear();
 
   // the latest: another engine, if its api is the file's; else its own
-  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.board.json")}` });
+  await send("Page.navigate", { url: `${site}board/?runner=0&gate=0&doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   // (in View, the choice is this download's only: the board is left as it is, View writes nothing, web/doc-mode.ts)
   await ev("document.querySelector('[data-sbb=html]').click(), 1");
@@ -246,14 +243,13 @@ try {
   // Outputs carried (design/outputs.md, section 3): a board's slow items'
   // outputs go in the file; opened, it shows them at once, marked as the
   // file's, and runs the rest; exported again, it carries them again
-  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.board.json")}` });
+  await send("Page.navigate", { url: `${site}board/?runner=0&gate=0&doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await ev("localStorage.clear(), 1");
   const slowStamp = "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.3:\n    pass\nstamp = os.urandom(8).hex()\nprint('s ran:', stamp)";
   const slow = { title: "Carried", seed: "c".repeat(64), nodes: [{ id: "s", code: slowStamp }, { id: "d", code: "print('d sees', stamp)" }, { id: "f", code: "print('fast')" }] };
   const outs = async () => Object.fromEntries((await ev("window.sagebrush.board.outputs()")).map((o) => [o.id, o]));
   await ev(`window.sagebrush.board.load(${JSON.stringify(slow)}).then(() => 1)`);
-  await runPaused();
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === ''))", 60000), "a board with a slow item ran");
   const before = await outs();
   await ev("document.querySelector('[data-sbb=html]').click(), 1");

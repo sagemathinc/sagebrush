@@ -53,7 +53,7 @@ const load = async (d) => { await ev("history.replaceState(null, '', location.pa
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Page.navigate", { url: `${base}board/?runner=0` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&gate=0` });
   if (!(await until(`${B}?.snapshot().items.length > 0`, 60000))) throw new Error("the board did not open");
   const LEGIBLE = 0.6;
 

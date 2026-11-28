@@ -56,7 +56,7 @@ async function open(dead, ms) {
     };
     window.Worker.prototype = W.prototype;
   })()` }));
-  await send("Page.navigate", { url: `${base}board/?runner=0&fresh=${Math.random()}` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&gate=0&fresh=${Math.random()}` });
   if (!(await until(`${B}?.snapshot().items.length > 0`, 60000))) throw new Error("the board did not open");
   await ev(`${B}.load(${JSON.stringify(BOARD)}).then(() => 1)`);
 }

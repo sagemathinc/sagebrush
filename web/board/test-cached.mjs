@@ -86,7 +86,7 @@ const entry = (key) => ev(`window.cache.get(${JSON.stringify(key)}).then((c) => 
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Page.navigate", { url: `${base}board/?runner=0` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&gate=0` });
   if (!(await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000))) throw new Error("the page's board was not shown");
   await ev(SETUP);
   await ev(`window.R = fake(${JSON.stringify(doc("One"))}, ${D}), 1`);

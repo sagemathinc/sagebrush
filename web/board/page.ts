@@ -475,7 +475,9 @@ const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
 // (whether this page holds the person's storage, which unconfined code could reach: Sagebrush's own board page, not a
 // downloaded file (its own origin) nor a sandboxed frame (no storage at all: reading it throws))
-const holdsStorage = !file && location.origin !== "null" && (() => { try { return !!globalThis.localStorage; } catch { return false; } })();
+// (?gate=0, on a loopback host only, as ?runner=0: tests of the engine in a plain worker, the gate not theirs to test)
+const gateOff = q.get("gate") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const holdsStorage = !file && !gateOff && location.origin !== "null" && (() => { try { return !!globalThis.localStorage; } catch { return false; } })();
 const runnerPill = createRunnerPill({ enabled: !file && !(window as any).__TAURI__ && q.get("runner-info") === "1" });
 // (the frame other sites show a board in, /frame/board/ (export.ts
 // frameHtml, design/frame.md): an exported page whose document its parent

@@ -40,7 +40,7 @@ const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 // (the page afresh, its ⋯ menu opened, then Help: what the dialog's foot says, and the agent's answer)
 const look = async () => {
   await send("Page.navigate", { url: "about:blank" });
-  await send("Page.navigate", { url: `${base}board/?runner=0` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&gate=0` });
   if (!(await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000))) throw new Error("the board did not open");
   await ev("document.querySelector('[data-sbb=menubtn]').click(), 1");
   check(await ev("!document.querySelector('[data-sbb=menu] [data-sbb=ver]')"), "the ⋯ menu itself no longer says the version");
