@@ -193,6 +193,10 @@ pub fn inv_series(f: &[u64], k: usize, m: &Modulus) -> Poly {
 fn inv_series_t(f: &[u64], k: usize, m: &Modulus, t: Tabs) -> Poly {
     let _phase = sagebrush_interrupt::enter("newton-inverse");
     let mut g = vec![m.inv(f[0]).expect("constant term not a unit")];
+    if k == 0 {
+        // (modulo x^0 the inverse has no coefficients)
+        return vec![];
+    }
     let mut len = 1;
     while len < k {
         sagebrush_interrupt::check_coarse();
@@ -585,6 +589,17 @@ impl PolyModulus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The inverse modulo x^k has k coefficients at most: none for k = 0
+    /// (Sage: (1/(1 + x)).truncate(0) is 0; it was [1]), and 1 - x + x^2 to
+    /// x^3 as a control.
+    #[test]
+    fn inv_series_to_precision_zero() {
+        let m = Modulus::new(7);
+        assert_eq!(inv_series(&[1, 1], 0, &m), Vec::<u64>::new());
+        assert_eq!(inv_series(&[1, 1], 1, &m), vec![1]);
+        assert_eq!(inv_series(&[1, 1], 3, &m), vec![1, 6, 1]);
+    }
 
     fn rng(seed: &mut u64) -> u64 {
         *seed ^= *seed << 13;
