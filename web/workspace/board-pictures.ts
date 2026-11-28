@@ -6,8 +6,8 @@ import { IMAGE_BYTES_MAX, imageFolder, saveImage } from "./image-store";
 
 /** What of the workspace a board's pictures need (Workspace has them). */
 export interface PictureWorkspace {
-  list(folder: string): Promise<{ path: string; kind?: string; size?: number; fid?: string }[]>;
-  readUpTo(p: string, max: number): Promise<{ content: Uint8Array; entry?: { fid?: string; size?: number } }>;
+  list(folder: string): Promise<{ path: string; kind?: string; size?: number; fid?: string; rev?: number }[]>;
+  readUpTo(p: string, max: number): Promise<{ content: Uint8Array; entry?: { fid?: string; size?: number; rev?: number } }>;
   createByPerson(p: string, opts: { content: Uint8Array }): Promise<unknown>;
 }
 
@@ -29,8 +29,20 @@ export function boardPictureFiles(w: PictureWorkspace, id: string | null | undef
  * browser's store, its write committed), else it is reported. */
 export type PictureKeep = (name: string, bytes: Uint8Array | null) => Promise<boolean>;
 
-/** A picture file a copy copies: its path, its name, and what it was when measured (its file id and size). */
-export type PictureFile = { path: string; name: string; size: number; fid?: string };
+/** A picture file a copy copies: its path, its name, and what it was when measured (its file id, revision and size). */
+export type PictureFile = { path: string; name: string; size: number; fid?: string; rev?: number };
+
+/** The content name of a picture's bytes, as web/board/images.ts names them (and checks a file against when it shows
+ * it): "i" and the first 128 bits of their SHA-256, or, outside a secure context, FNV-1a twice. */
+export async function contentName(bytes: Uint8Array): Promise<string> {
+  if (globalThis.crypto?.subtle) {
+    const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
+    return "i" + [...h.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  let a = 0x811c9dc5, b = 0x01000193 ^ bytes.length;
+  for (const x of bytes) { a = Math.imul(a ^ x, 0x01000193); b = Math.imul(b ^ x, 0x5bd1e995); }
+  return "i" + (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+}
 
 /** The names of a board's pictures that its files hold: those in its `images` without a source of their own (an
  * https: address, or embedded data a stored board carries until it is opened), which the board keeps itself. */
@@ -48,13 +60,13 @@ export async function pictureFilesOf(w: PictureWorkspace, from: string, names: I
   if (!a || !want.size) return out;
   const seen = new Set<string>();
   // (no folder: no picture of the board is a file)
-  for (const e of await w.list(a.folder).catch(() => [] as { path: string; kind?: string; size?: number; fid?: string }[])) {
+  for (const e of await w.list(a.folder).catch(() => [] as { path: string; kind?: string; size?: number; fid?: string; rev?: number }[])) {
     // (one over the image cap can't be read as a picture: not one a copy copies)
     if ((e.kind !== undefined && e.kind !== "file") || (e.size ?? 0) > IMAGE_BYTES_MAX) continue;
     const base = e.path.slice(e.path.lastIndexOf("/") + 1), name = base.slice(0, base.lastIndexOf("."));
     if (!want.has(name) || seen.has(name) || e.path !== `${a.folder}/${base}`) continue;
     seen.add(name);
-    out.push({ path: e.path, name, size: e.size ?? 0, ...(e.fid !== undefined ? { fid: e.fid } : {}) });
+    out.push({ path: e.path, name, size: e.size ?? 0, ...(e.fid !== undefined ? { fid: e.fid } : {}), ...(e.rev !== undefined ? { rev: e.rev } : {}) });
   }
   return out;
 }
@@ -79,9 +91,12 @@ export async function copyBoardPictures(w: PictureWorkspace, from: string, to: s
     let u: Uint8Array | null = null;
     if (f) {
       const r = await w.readUpTo(f.path, IMAGE_BYTES_MAX).catch(() => null);
-      // (held to what was measured: the same file, the same size)
-      if (o.expect && (!r || r.content.length !== f.size || (f.fid !== undefined && r.entry?.fid !== f.fid))) throw o.stale ? o.stale(f.path) : new Error(`${f.path} changed since it was measured`);
-      u = r ? r.content : null;
+      // (only bytes that are the picture: their content name the name, as the copy checks them when it shows them)
+      const theirs = r ? (await contentName(r.content)) === name : false;
+      // (held to what was measured: the same file, at the same revision and size, still the picture)
+      if (o.expect && (!r || !theirs || r.content.length !== f.size || (f.fid !== undefined && r.entry?.fid !== f.fid) || (f.rev !== undefined && r.entry?.rev !== f.rev)))
+        throw o.stale ? o.stale(f.path) : new Error(`${f.path} changed since it was measured`);
+      u = r && theirs ? r.content : null;
     }
     const r = u && b ? await saveImage(create, b.folder, u, { name, read: b.read }).catch(() => null) : null;
     const stop = o.stopped?.();

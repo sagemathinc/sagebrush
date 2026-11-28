@@ -4,7 +4,7 @@
 // when they were read (null when there are none: never a file, unreadable), and reported when neither copied nor kept,
 // so the caller can tell the person: every name asked for is one of the three.
 //   bun web/workspace/test-board-pictures-copy.mjs
-import { copyBoardPictures, filePictureNames, pictureFilesOf } from "./board-pictures.ts";
+import { contentName, copyBoardPictures, filePictureNames, pictureFilesOf } from "./board-pictures.ts";
 
 let failures = 0;
 const J = JSON.stringify;
@@ -12,9 +12,11 @@ const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const png = (fill) => { const u = new Uint8Array(64).fill(fill); u.set(PNG); return u; };
 const A = "/Attachments/board-a", B = "/Attachments/board-b";
+// (the pictures' content names, as a board names them: a file is copied only if its bytes are its name's)
+const ONE = await contentName(png(1)), TWO = await contentName(png(2));
 /** a stand-in workspace: the source board's two picture files; `failRead`, paths whose read fails */
 function ws(failRead = new Set()) {
-  const files = new Map([[`${A}/ione.png`, png(1)], [`${A}/itwo.png`, png(2)]]);
+  const files = new Map([[`${A}/${ONE}.png`, png(1)], [`${A}/${TWO}.png`, png(2)]]);
   return {
     files,
     list: async (folder) => [...files.keys()].filter((p) => p.startsWith(folder + "/")).map((path) => ({ path, kind: "file", size: files.get(path).length })),
@@ -27,41 +29,41 @@ const creator = (w, refuse = () => false) => async (p, u) => {
   if (w.files.has(p)) throw Object.assign(new Error("there"), { code: "exists" });
   w.files.set(p, new Uint8Array(u));
 };
-const names = ["ione", "itwo", "ibrowser"];
+const names = [ONE, TWO, "ibrowser"];
 
 {
   const w = ws();
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w));
-  ok(J(lost) === J(["ibrowser"]) && w.files.has(`${B}/ione.png`) && w.files.has(`${B}/itwo.png`), "every picture file copied to the copy's folder; a name with no file and nothing to keep it: reported", lost);
+  ok(J(lost) === J(["ibrowser"]) && w.files.has(`${B}/${ONE}.png`) && w.files.has(`${B}/${TWO}.png`), "every picture file copied to the copy's folder; a name with no file and nothing to keep it: reported", lost);
   const w2 = ws(), asked = [];
   const lost2 = await copyBoardPictures(w2, "a", "b", names, creator(w2), async (n, u) => (asked.push([n, u]), u === null));
   ok(J(lost2) === "[]" && asked.length === 1 && asked[0][0] === "ibrowser" && asked[0][1] === null, "a name with no file is offered to keep with no bytes; kept (a browser that has it), not reported", asked);
-  ok(J((await pictureFilesOf(ws(), "a", names)).map((f) => [f.name, f.size])) === J([["ione", 64], ["itwo", 64]]), "the picture files a copy copies, with their sizes, for the caller to charge first");
+  ok(J((await pictureFilesOf(ws(), "a", names)).map((f) => [f.name, f.size])) === J([[ONE, 64], [TWO, 64]]), "the picture files a copy copies, with their sizes, for the caller to charge first");
 }
 {
   const w = ws();
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w, (p) => p.startsWith(B)));
-  ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]) && ![...w.files.keys()].some((p) => p.startsWith(B)), "the copy's creates refused, nothing to keep them: all reported", lost);
+  ok(J(lost.sort()) === J(["ibrowser", ONE, TWO].sort()) && ![...w.files.keys()].some((p) => p.startsWith(B)), "the copy's creates refused, nothing to keep them: all reported", lost);
 }
 {
   const w = ws(), kept = new Map();
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w, (p) => p.startsWith(B)), async (n, u) => (kept.set(n, u), u !== null));
-  ok(J(lost) === J(["ibrowser"]) && kept.get("ione")?.[8] === 1 && kept.get("itwo")?.[8] === 2, "refused, then kept (this browser): those not reported, each kept with its own bytes", [...kept.keys()]);
+  ok(J(lost) === J(["ibrowser"]) && kept.get(ONE)?.[8] === 1 && kept.get(TWO)?.[8] === 2, "refused, then kept (this browser): those not reported, each kept with its own bytes", [...kept.keys()]);
 }
 {
   const w = ws();
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w, (p) => p.startsWith(B)), async () => false);
-  ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]), "refused and not kept: reported", lost);
+  ok(J(lost.sort()) === J(["ibrowser", ONE, TWO].sort()), "refused and not kept: reported", lost);
 }
 {
-  const w = ws(new Set([`${A}/itwo.png`])), kept = [];
+  const w = ws(new Set([`${A}/${TWO}.png`])), kept = [];
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w), async (n, u) => (kept.push(n), u !== null));
-  ok(J(lost.sort()) === J(["ibrowser", "itwo"]) && J(kept.sort()) === J(["ibrowser", "itwo"]) && w.files.has(`${B}/ione.png`), "a source that can't be read: offered with no bytes, not kept, reported; the others copied", { lost, kept });
+  ok(J(lost.sort()) === J(["ibrowser", TWO].sort()) && J(kept.sort()) === J(["ibrowser", TWO].sort()) && w.files.has(`${B}/${ONE}.png`), "a source that can't be read: offered with no bytes, not kept, reported; the others copied", { lost, kept });
 }
 {
   const w = ws();
   const lost = await copyBoardPictures(w, "a", "b", names, async () => { throw new TypeError("a save that threw"); });
-  ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]), "a create that throws anything: reported, never taken as copied", lost);
+  ok(J(lost.sort()) === J(["ibrowser", ONE, TWO].sort()), "a create that throws anything: reported, never taken as copied", lost);
 }
 
 {
@@ -69,7 +71,7 @@ const names = ["ione", "itwo", "ibrowser"];
   const w = ws();
   w.list = async () => { throw new Error("listing failed"); };
   const lost = await copyBoardPictures(w, "a", "b", names, creator(w));
-  ok(J(lost.sort()) === J(["ibrowser", "ione", "itwo"]) && ![...w.files.keys()].some((p) => p.startsWith(B)), "a source folder that can't be listed: every name reported, nothing copied", lost);
+  ok(J(lost.sort()) === J(["ibrowser", ONE, TWO].sort()) && ![...w.files.keys()].some((p) => p.startsWith(B)), "a source folder that can't be listed: every name reported, nothing copied", lost);
 }
 
 {
@@ -80,21 +82,36 @@ const names = ["ione", "itwo", "ibrowser"];
 {
   // held to what was measured (the shell's): only those files, each as it was; one changed since, stale, thrown
   const w = ws();
-  const files = await pictureFilesOf(w, "a", ["ione", "itwo"]);
-  w.files.set(`${A}/itwo.png`, png(9).slice(0, 40));
+  const files = await pictureFilesOf(w, "a", [ONE, TWO]);
+  w.files.set(`${A}/${TWO}.png`, png(9).slice(0, 40));
   let thrown = null;
-  try { await copyBoardPictures(w, "a", "b", ["ione", "itwo"], creator(w), undefined, { expect: files, stale: (p) => new Error("stale " + p) }); } catch (e) { thrown = e; }
-  ok(thrown?.message === `stale ${A}/itwo.png`, "a picture changed since it was measured: the caller's stale error thrown", String(thrown));
+  try { await copyBoardPictures(w, "a", "b", [ONE, TWO], creator(w), undefined, { expect: files, stale: (p) => new Error("stale " + p) }); } catch (e) { thrown = e; }
+  ok(thrown?.message === `stale ${A}/${TWO}.png`, "a picture changed since it was measured: the caller's stale error thrown", String(thrown));
   const w2 = ws();
-  const lost = await copyBoardPictures(w2, "a", "b", ["ione", "itwo"], creator(w2), undefined, { expect: (await pictureFilesOf(w2, "a", ["ione"])) });
-  ok(J(lost) === J(["itwo"]) && !w2.files.has(`${B}/itwo.png`) && w2.files.has(`${B}/ione.png`), "a file not measured isn't copied (it wasn't charged): reported", lost);
+  const lost = await copyBoardPictures(w2, "a", "b", [ONE, TWO], creator(w2), undefined, { expect: (await pictureFilesOf(w2, "a", [ONE])) });
+  ok(J(lost) === J([TWO]) && !w2.files.has(`${B}/${TWO}.png`) && w2.files.has(`${B}/${ONE}.png`), "a file not measured isn't copied (it wasn't charged): reported", lost);
 }
 {
   // the caller's own refusal at a picture's create (a limit, a revoked grant): thrown as it is, not a lost picture
   const w = ws(), no = new Error("limit hit");
   let stop = null, thrown = null;
-  try { await copyBoardPictures(w, "a", "b", ["ione", "itwo"], async () => { stop = no; throw no; }, undefined, { stopped: () => stop }); } catch (e) { thrown = e; }
+  try { await copyBoardPictures(w, "a", "b", [ONE, TWO], async () => { stop = no; throw no; }, undefined, { stopped: () => stop }); } catch (e) { thrown = e; }
   ok(thrown === no && ![...w.files.keys()].some((p) => p.startsWith(B)), "the caller's refusal at the first picture: thrown as it is, nothing more copied", String(thrown));
+}
+
+{
+  // a same-size rewrite after the measurement (the same file id and size): not the picture any more; held to the
+  // measurement, stale; without one, not copied (it would show as missing) and reported
+  const w = ws();
+  const files = await pictureFilesOf(w, "a", [ONE]);
+  w.files.set(`${A}/${ONE}.png`, png(5));
+  let thrown = null;
+  try { await copyBoardPictures(w, "a", "b", [ONE], creator(w), undefined, { expect: files, stale: (p) => new Error("stale " + p) }); } catch (e) { thrown = e; }
+  ok(thrown?.message === `stale ${A}/${ONE}.png` && !w.files.has(`${B}/${ONE}.png`), "a same-size rewrite after the measurement: stale, nothing copied", String(thrown));
+  const w2 = ws();
+  w2.files.set(`${A}/${ONE}.png`, png(5));
+  const lost = await copyBoardPictures(w2, "a", "b", [ONE], creator(w2));
+  ok(J(lost) === J([ONE]) && !w2.files.has(`${B}/${ONE}.png`), "a file whose bytes aren't its name's: not copied, reported", lost);
 }
 
 console.log(failures ? `${failures} FAILED` : "test-board-pictures-copy: all passed");

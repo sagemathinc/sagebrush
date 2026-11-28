@@ -2039,7 +2039,7 @@ export class Workspace {
     // conflict and nothing copied (each is held to it again as it is copied))
     for (const f of opts.pictures?.expect ?? []) {
       const st = await this.stat(f.path);
-      if (!st || st.kind !== "file" || (st.size ?? 0) !== f.size || (f.fid !== undefined && st.fid !== f.fid)) throw new WorkspaceError("conflict", `${f.path} was changed since it was measured`);
+      if (!st || st.kind !== "file" || (st.size ?? 0) !== f.size || (f.fid !== undefined && st.fid !== f.fid) || (f.rev !== undefined && st.rev !== f.rev)) throw new WorkspaceError("conflict", `${f.path} was changed since it was measured`);
     }
     const made = await this.locked(async () => {
       await this.admitAt(admit, "duplicate", "source", path(p));
