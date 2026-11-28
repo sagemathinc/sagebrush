@@ -189,6 +189,15 @@ try {
   check(r.stdout === "1\n" && r.error === null, `a notebook: a module the page put between two runs is found by the second (${JSON.stringify(r)})`);
   r = await ev(`nb.run(${JSON.stringify(tryImport("wmod") + "open('wmod.py', 'w').write('Y = 2\\n')\nimport wmod\nprint(wmod.Y)\n")})`, RUN_MS);
   check(r.stdout === "absent\n2\n" && r.error === null, `a notebook: a module a run writes is found by its next import, in the same run (${JSON.stringify(r)})`);
+  // (cx4: a relative sys.path entry, '' among them, is looked in from the worker's working directory, before and after
+  // an os.chdir; the listing cache keyed by that same folder)
+  await ev(`nb.put("/nb/helpers/relmod.py", "R = 5\\n")`);
+  r = await ev(`nb.run(${JSON.stringify("import sys\nsys.path.insert(0, 'helpers')\nimport relmod\nprint(relmod.R)\n")})`, RUN_MS);
+  check(r.stdout === "5\n" && r.error === null, `a notebook: a relative sys.path entry is searched from the working directory (${JSON.stringify(r)})`);
+  await ev(`nb.put("/nb/sub/cwdmod.py", "C = 6\\n")`);
+  await ev(`nb.put("/nb/sub/inner/innermod.py", "I = 7\\n")`);
+  r = await ev(`nb.run(${JSON.stringify("import os, sys\nos.chdir('/nb/sub')\nsys.path.insert(0, '')\nsys.path.insert(0, 'inner')\nimport cwdmod, innermod\nprint(cwdmod.C, innermod.I)\n")})`, RUN_MS);
+  check(r.stdout === "6 7\n" && r.error === null, `a notebook: after os.chdir, '' and a relative entry are searched from the new working directory (${JSON.stringify(r)})`);
   await ev("nb.stop()");
 
   // ---- a Terminal command's worker

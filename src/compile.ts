@@ -420,7 +420,7 @@ const listings = new Map<string, { mtime: number; gen: number; epoch: number; na
 function absentFrom(d: string, leaf: string): boolean {
   if (mountedBases.some((b) => d === b || d.startsWith(b + "/"))) return false;
   if (embedded !== undefined && (d === LIB_VIRTUAL || d.startsWith(LIB_VIRTUAL + "/"))) return false;
-  const at = resolvePath(cwdPath(d || "."));
+  const at = resolvePath(process.cwd(), cwdPath(d || "."));
   let mtime: number;
   try {
     const st = statSync(at);
