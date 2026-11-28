@@ -24,19 +24,24 @@ export function sameSite(href, { space = false } = {}) {
   if (space && !u.pathname.endsWith(".space.json")) throw new Error("a space is a .space.json file");
   return u;
 }
-// The one place outside this site a file's text is read from: Sagebrush's own public repository on GitHub, at one commit
-// named by its full hash (the example "Sagebrush's repository", web/space/examples/repo.ts, whose tree.base this is).
-// Exactly https://raw.githubusercontent.com/sagemathinc/sagebrush/<40 hex>/<path>: no user, query or fragment, no
-// encoded slash or backslash, no "." or ".." segment; read as a file of this site is (no redirect followed, no
-// credentials sent, the same caps). /space/'s policy allows connecting to that host and no other (web/csp-policy.mts).
+// The one place outside this site a file's text is read from: Sagebrush's own public repository on GitHub, at the one
+// commit this viewer was built from (BUILD_COMMIT, compiled in by web/build.ts; the example "Sagebrush's repository",
+// web/space/examples/repo.ts, is that tree at that commit). Not any commit: GitHub serves a fork's commits under the
+// parent's path too, so only the build's own is read. Exactly
+// https://raw.githubusercontent.com/sagemathinc/sagebrush/<that hash>/<path>: no user, query or fragment, no encoded
+// slash or backslash, no "." or ".." segment; read as a file of this site is (no redirect followed, no credentials
+// sent, the same caps). /space/'s policy allows connecting to that repository's path and nowhere else on that host
+// (web/csp-policy.mts). Without a build commit (a test of this module alone), nothing there is read unless one is given.
+declare const __SB_SPACE_COMMIT__: string | undefined;
+export const BUILD_COMMIT: string | null = typeof __SB_SPACE_COMMIT__ === "string" && /^[0-9a-f]{40}$/.test(__SB_SPACE_COMMIT__) ? __SB_SPACE_COMMIT__ : null;
 export const RAW_HOST = "raw.githubusercontent.com";
-const PINNED_PATH = /^\/sagemathinc\/sagebrush\/[0-9a-f]{40}\/[^?#]+$/;
-export function pinnedRaw(href) {
+export function pinnedRaw(href, commit: string | null = BUILD_COMMIT) {
   const u = new URL(href, location.href);
   const segs = u.pathname.split("/").slice(1);
-  if (u.protocol !== "https:" || u.host !== RAW_HOST || u.username || u.password || u.search || u.hash || !PINNED_PATH.test(u.pathname) ||
+  if (!commit || !/^[0-9a-f]{40}$/.test(commit) || u.protocol !== "https:" || u.host !== RAW_HOST || u.username || u.password || u.search || u.hash ||
+      !u.pathname.startsWith(`/sagemathinc/sagebrush/${commit}/`) || u.pathname.length === `/sagemathinc/sagebrush/${commit}/`.length ||
       /%2f|%5c|\\/i.test(u.pathname) || segs.some((x) => x === "" || /^(?:\.|%2e){1,2}$/i.test(x)))
-    throw new Error("only files of this site, or of Sagebrush's repository at one commit, are read");
+    throw new Error("only files of this site, or of Sagebrush's repository at the commit this was built from, are read");
   return u;
 }
 /** a file's text may be read from here: this site's (sameSite), or the pinned repository's (pinnedRaw) */

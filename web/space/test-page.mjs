@@ -127,7 +127,8 @@ ws.addEventListener("message", (e) => {
   void send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, body, responseHeaders: [{ name: "Content-Type", value: "text/plain; charset=utf-8" }, { name: "Access-Control-Allow-Origin", value: "*" }] });
 });
 await send("Fetch.enable", { patterns: [{ urlPattern: "https://*" }] });
-const H = "0123456789abcdef0123456789abcdef01234567", RAW = `https://raw.githubusercontent.com/sagemathinc/sagebrush/${H}/`;
+// (the build's commit, compiled into the viewer: the one its repository example names)
+const H = JSON.parse(readFileSync(join(here, "..", "dist", "space", "repository.space.json"), "utf8")).tree.commit, RAW = `https://raw.githubusercontent.com/sagemathinc/sagebrush/${H}/`;
 const repoSpace = (base) => JSON.stringify({ format: "sagebrush-space", version: 1, title: "r", nodes: [], tree: { name: "r", base, files: [["lib/a b.py", 6]], imports: [] } });
 await open("?space=intro.space.json");
 await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000);
@@ -146,6 +147,20 @@ await until(`space3d.space?.nodes?.some((n) => n.id === "p:lib/a b.py")`, 10000)
 await ev(`space3d.enter("p:lib/a b.py").catch(() => false)`);
 await sleep(1500);
 ok(paused.length === 0 && !(await ev(`space3d.space.nodes.some((n) => n.kind === "class")`)), "a tree whose files are on another host: nothing is requested, and nothing is entered", { paused, status: await status() });
+paused.length = 0;
+await ev(`space3d.load(${repoSpace(`https://raw.githubusercontent.com/sagemathinc/sagebrush/${"f".repeat(40)}/`)}, "r3.space.json"), true`);
+await until(`space3d.space?.nodes?.some((n) => n.id === "d:lib")`, 10000);
+await ev(`space3d.enter("d:lib"), true`);
+await until(`space3d.space?.nodes?.some((n) => n.id === "p:lib/a b.py")`, 10000);
+await ev(`space3d.enter("p:lib/a b.py").catch(() => false)`);
+await sleep(1500);
+ok(paused.length === 0 && !(await ev(`space3d.space.nodes.some((n) => n.kind === "class")`)), "a tree at another commit of the repository (a fork's, say): nothing is requested, nothing entered", { paused, status: await status() });
+// (and the page's policy: of that host, only the repository's own path can be reached at all)
+paused.length = 0;
+const blocked = await ev(`fetch("https://raw.githubusercontent.com/someone/other/${"0".repeat(40)}/x.py").then(() => "fetched", (e) => "refused")`);
+ok(blocked === "refused" && paused.length === 0, "another repository on that host is refused by the page's policy, before any request", { blocked, paused });
+const allowed = await ev(`fetch(${JSON.stringify(RAW + "x.py")}).then((r) => r.status, () => "refused")`);
+ok(allowed === 200 && paused.length === 1, "while the repository's own path is let through", { allowed, paused });
 await send("Fetch.disable");
 
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));

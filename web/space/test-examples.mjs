@@ -75,7 +75,10 @@ if (repo) {
   ok(t.commit === head && t.base === `https://raw.githubusercontent.com/sagemathinc/sagebrush/${head}/`, "its files are read from GitHub at this build's commit", { commit: t.commit, base: t.base });
   globalThis.location = new URL("https://sagebrush.space/space/");
   const { pinnedRaw } = await import("./src/read.ts");
-  ok(t.files.every(([p]) => { try { pinnedRaw(t.base + p.split("/").map(encodeURIComponent).join("/")); return true; } catch { return false; } }), `each of its ${t.files.length} files is one the viewer may read`);
+  ok(t.files.every(([p]) => { try { pinnedRaw(t.base + p.split("/").map(encodeURIComponent).join("/"), t.commit); return true; } catch { return false; } }), `each of its ${t.files.length} files is one the viewer may read`);
+  // (the viewer reads that commit only: its hash is compiled into the page's code)
+  const js = readdirSync(join(out, "chunks")).map((f) => join(out, "chunks", f)).concat(join(out, "space.js"));
+  ok(js.some((f) => readFileSync(f, "utf8").includes(JSON.stringify(head))), "the viewer's code has this build's commit compiled in");
   ok(t.files.length > 1000 && t.files.some(([p]) => p === "web/space/src/read.ts") && t.imports.length > 1000, "it is the whole tree, with its imports", { files: t.files.length, imports: t.imports.length });
   ok(repo.nodes.length === 0 && !JSON.stringify(t).includes("def "), "and carries no file's text");
 }

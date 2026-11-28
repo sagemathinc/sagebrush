@@ -825,7 +825,10 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
 {
   const out = join(here, "dist", "space");
   rmSync(out, { recursive: true, force: true });
-  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "space", "src", "main.ts")], outdir: out, naming: { entry: "space.js", chunk: "chunks/[name]-[hash].js" }, splitting: true, target: "browser", format: "esm", minify: true });
+  // (the commit this is built from: the one commit of the repository the viewer reads files of, web/space/src/read.ts)
+  const SPACE_COMMIT = execFileSync("git", ["-C", join(here, ".."), "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  if (!/^[0-9a-f]{40}$/.test(SPACE_COMMIT)) throw new Error(`web/build.ts: HEAD isn't a commit hash: ${SPACE_COMMIT}`);
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "space", "src", "main.ts")], outdir: out, naming: { entry: "space.js", chunk: "chunks/[name]-[hash].js" }, splitting: true, target: "browser", format: "esm", minify: true, define: { __SB_SPACE_COMMIT__: JSON.stringify(SPACE_COMMIT) } });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
