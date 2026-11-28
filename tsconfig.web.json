@@ -33,6 +33,14 @@
     "web/notebook/gradescope/dialog.ts",
     "web/zip/read.ts",
     "web/tar/read.ts",
-    "web/space/src/main.ts"
+    "web/space/src/main.ts",
+    "web/workspace/sync-client.ts",
+    "web/workspace/sync-owner.ts",
+    "web/workspace/sync-panel.ts",
+    "web/workspace/sync-seal.ts",
+    "web/workspace/sync-refs.ts",
+    "web/workspace/sync-ready.ts",
+    "web/workspace/sync-rows.ts",
+    "web/workspace/e2e/page-keys-interface.ts"
   ]
 }

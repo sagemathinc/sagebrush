@@ -19,7 +19,8 @@
 //! own cost is a few thousand floating-point operations.
 
 use super::ecm::{fixed_b2, DOUBLING_B1, DOUBLING_B2_MAX, DOUBLING_CURVES, DOUBLING_TABLE_MAX, MAXL, SCHEDULE, STAGE2_D};
-use super::factor::{RHO_ITERS, SPLIT_BITS_MAX, TRIAL_BOUND};
+use super::factor::{ecm_levels_before_siqs, RHO_ITERS, SPLIT_BITS_MAX, TRIAL_BOUND};
+use super::siqs;
 use std::sync::OnceLock;
 
 // ---- the closed forms (plan-factor-budget r5 §2.1; units, None beyond u128)
@@ -408,9 +409,9 @@ pub fn factor_estimate(bits: u64) -> FactorEstimate {
         // isn't given by n's size, so their work and chances are unknown;
         // their memory doesn't depend on it (MAXL-limb buffers, the tables)
         let lv = levels(MODEL_LAST_B1);
-        let memory = lv.iter().map(|l| table_peak(l.table) + buffers).max().unwrap_or(0).max(RHO_MEMORY);
+        let memory = lv.iter().map(|l| table_peak(l.table) + buffers).max().unwrap_or(0).max(RHO_MEMORY).max(siqs::memory_bound(siqs::MAX_BITS));
         stages.push(Stage {
-            name: format!("Pollard-Brent rho and ECM on a cofactor of at most {} bits", SPLIT_BITS_MAX),
+            name: format!("Pollard-Brent rho, ECM and the quadratic sieve on a cofactor of at most {} bits", SPLIT_BITS_MAX),
             phase: "ecm",
             limbs: limbs(SPLIT_BITS_MAX),
             units: None,
@@ -428,9 +429,12 @@ pub fn factor_estimate(bits: u64) -> FactorEstimate {
             SPLIT_BITS_MAX
         ));
         notes.push(format!(
-            "trial division can leave a cofactor of at most {} bits, and a perfect power's root is smaller than n: rho and ECM \
-             then work at that size, which n's size alone does not give, so their work and chances are unknown here",
-            SPLIT_BITS_MAX
+            "trial division can leave a cofactor of at most {} bits, and a perfect power's root is smaller than n: rho, ECM \
+             and the quadratic sieve (a cofactor of {} to {} bits) then work at that size, which n's size alone does not \
+             give, so their work and chances are unknown here",
+            SPLIT_BITS_MAX,
+            siqs::MIN_BITS,
+            siqs::MAX_BITS
         ));
     } else if !total_known {
         stages.push(Stage {
@@ -448,6 +452,44 @@ pub fn factor_estimate(bits: u64) -> FactorEstimate {
             let t = RHO_ITERS as f64;
             rho_chances.push((d, 1.0 - (-(t * t) / (2.0 * p)).exp()));
         }
+        // factor::split sieves a cofactor of siqs::MIN_BITS to MAX_BITS bits
+        // after ECM's first levels; the later levels then run only if the
+        // sieve finds no factor
+        let sieved = bits >= siqs::MIN_BITS;
+        let before = ecm_levels_before_siqs(bits.min(siqs::MAX_BITS));
+        let ecm_condition = if sieved {
+            "if rho found no factor, no earlier level did, and the quadratic sieve has not split the cofactor"
+        } else {
+            "if rho found no factor, and no earlier level did"
+        };
+        if sieved {
+            stages.push(Stage {
+                name: format!("quadratic sieve (SIQS) on a cofactor of {} to {} bits", siqs::MIN_BITS, siqs::MAX_BITS),
+                phase: "siqs",
+                limbs: k,
+                units: None,
+                label: Label::Unknown,
+                memory: Some(siqs::memory_bound(bits.min(siqs::MAX_BITS))),
+                memory_label: Label::Bound,
+                condition: Some(format!(
+                    "if rho found no factor and the cofactor has {} to {} bits{}",
+                    siqs::MIN_BITS,
+                    siqs::MAX_BITS,
+                    match before {
+                        0 => String::new(),
+                        1 => ", and ECM's first level found none".into(),
+                        n => format!(", and ECM's first {} levels found none", n),
+                    }
+                )),
+            });
+            notes.push(format!(
+                "a composite cofactor of {} to {} bits is split by the quadratic sieve, after ECM's first levels (none below 180 \
+                 bits, one below 230, then two); the sieve's work is not modelled: unknown here. ECM's later levels run on \
+                 such a cofactor only if the sieve finds no factor",
+                siqs::MIN_BITS,
+                siqs::MAX_BITS
+            ));
+        }
         let lv = levels(MODEL_LAST_B1);
         let costs: Vec<Option<u128>> = lv.iter().map(|l| curve_cost(k, l.b1, l.b2)).collect();
         for (l, &c) in lv.iter().zip(&costs) {
@@ -460,7 +502,7 @@ pub fn factor_estimate(bits: u64) -> FactorEstimate {
                 label: Label::Known,
                 memory: Some(table_peak(l.table) + buffers),
                 memory_label: Label::Bound,
-                condition: Some("if rho found no factor, and no earlier level did".into()),
+                condition: Some(ecm_condition.into()),
             });
         }
         // (k <= 16 limbs here: every count fits; an overflow would drop the
@@ -472,7 +514,9 @@ pub fn factor_estimate(bits: u64) -> FactorEstimate {
         // targets: factors of at most d digits, beyond trial division, up to
         // the size of the smaller factor of n
         let max_digits = ((bits as f64 / 2.0) * 2f64.log10()).ceil() as u32;
-        if let (Some(costs), Some(units_total)) = (costs, units_total) {
+        // (an n of at most siqs::MAX_BITS bits has no ECM milestones: the
+        // sieve splits its cofactor before ECM's later levels)
+        if let (Some(costs), Some(units_total), false) = (costs, units_total, sieved && bits <= siqs::MAX_BITS) {
             for d in [15u32, 20, 25, 30, 35, 40, 45, 50] {
                 if d > max_digits.max(15) {
                     break;
@@ -603,12 +647,35 @@ mod tests {
         let small = factor_estimate(30);
         assert!(small.total_known && small.ecm.is_empty());
         // the stage list follows the pipeline's order
-        let e = factor_estimate(200);
+        let e = factor_estimate(80);
         let phases: Vec<&str> = e.stages.iter().map(|s| s.phase).collect();
         assert_eq!(&phases[..4], &["trial", "prp", "roots", "rho"]);
         assert!(phases[4..].iter().all(|&p| p == "ecm"));
+        assert!(!e.ecm.is_empty());
         // the fixed levels are ecm.rs's schedule
         assert_eq!(e.levels.iter().filter(|l| l.fixed).map(|l| (l.b1, l.curves as usize)).collect::<Vec<_>>(), SCHEDULE.to_vec());
+    }
+
+    // A cofactor of siqs::MIN_BITS to MAX_BITS bits goes to the quadratic
+    // sieve: its stage has unknown work and a memory bound, and an n in
+    // that range has no ECM milestones.
+    #[test]
+    fn the_sieve_is_a_stage_of_unknown_work() {
+        for bits in [siqs::MIN_BITS, 160, siqs::MAX_BITS, 300, 1024] {
+            let e = factor_estimate(bits);
+            let phases: Vec<&str> = e.stages.iter().map(|s| s.phase).collect();
+            assert_eq!(&phases[..5], &["trial", "prp", "roots", "rho", "siqs"], "{}", bits);
+            assert!(phases[5..].iter().all(|&p| p == "ecm"));
+            let s = &e.stages[4];
+            assert!(s.units.is_none() && s.label == Label::Unknown, "{}", bits);
+            assert_eq!(s.memory, Some(siqs::memory_bound(bits.min(siqs::MAX_BITS))));
+            assert_eq!(e.ecm.is_empty(), bits <= siqs::MAX_BITS, "{}", bits);
+            assert!(e.stages[5].condition.as_ref().unwrap().contains("quadratic sieve"));
+            assert_eq!(s.condition.as_ref().unwrap().contains("ECM's first"), bits >= 180, "{}", bits);
+            assert!(e.notes.iter().any(|n| n.contains("not modelled")));
+        }
+        assert!(factor_estimate(siqs::MIN_BITS - 1).stages.iter().all(|s| s.phase != "siqs"));
+        assert!(siqs::memory_bound(160) < siqs::memory_bound(250) && siqs::memory_bound(250) < 1 << 30);
     }
 
     // Above 1024 bits (Astra's review of PR 2a, EST-PIPELINE): split tests
@@ -631,7 +698,7 @@ mod tests {
             assert!(!e.notes.iter().any(|n| n.contains("is not split")));
             // the memory bound covers rho and every level the 1024-bit
             // estimate models
-            let m = factor_estimate(1024).stages.iter().filter(|s| s.phase == "rho" || s.phase == "ecm").map(|s| s.memory.unwrap()).max().unwrap();
+            let m = factor_estimate(1024).stages.iter().filter(|s| ["rho", "siqs", "ecm"].contains(&s.phase)).map(|s| s.memory.unwrap()).max().unwrap();
             assert_eq!(last.memory.unwrap(), m);
         }
     }

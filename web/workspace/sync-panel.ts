@@ -21,7 +21,7 @@ import { accountHash } from "../sync-protocol/protocol";
 import { openHistoryDb } from "../notebook/stores.js";
 import { readDebt, unackedDocs } from "../journal/rows.js";
 import { CLIENT, type Refusal } from "./sync-client";
-import { listedSummary } from "./sync-view";
+import { listedSummary, type Listed } from "./sync-view";
 import { OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
 import { RESET_BUTTON, RESET_CONFIRM, RESET_DONE } from "./sync-reset";
 import { learnMore } from "../docs-link";
@@ -176,7 +176,7 @@ export type SectionHost = { say(text: string): void; fail(e: unknown): void; usa
 /** The Sync section, drawn into `into`; dispose() (the panel's close) ends its poll and its subscription. */
 /** What the details read gives: the listed paths and the refusals of namespace `ns` (a seam for tests). */
 /** (and the refusals' seen mark: the n of the newest one shown when their list was last opened, 0 if never) */
-type DetailsRead = (ns: string) => Promise<[{ count: number; paths: [string, string][] } | undefined, Refusal[] | undefined, number?]>;
+type DetailsRead = (ns: string) => Promise<[Listed | undefined, Refusal[] | undefined, number?]>;
 /** The notebooks with edits the server hasn't acknowledged (their ids), or `over` when there are too many to count
  * (a seam for tests). */
 export type ReadUnacked = () => Promise<{ ids: string[]; over: boolean }>;
@@ -220,8 +220,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   const unsub = owner.onChange(() => { if (last && !poll.closed) draw(); });
 
   function answered(a: Answer) {
-    if (!a.ok && a.why === "stale") return poll.request();
-    if (!a.ok) {
+    if (a.ok === false && a.why === "stale") return poll.request();
+    if (a.ok === false) {
       last = null;
       const signedOut = a.why === "http" && a.code === 401;
       // (signed out: sign-in itself, back to this page, never through the share dialog)
@@ -558,7 +558,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
       } else if ((a.status.generation ?? 0) > generation) note = "Sync was turned on again since; confirm again to delete the current data";
       else note = "Couldn't confirm the deletion: Delete again to send it once more";
     }
-    if (!own && (!a.ok ? a.why === "stale" : !a.life || !sameLife(a.life, mark))) return stale();
+    if (!own && (a.ok === false ? a.why === "stale" : !a.life || !sameLife(a.life, mark))) return stale();
     if (poll.closed) return;
     answered(own && a.ok ? { ...a, life: undefined } : a);
   }
