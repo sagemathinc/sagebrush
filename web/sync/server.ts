@@ -86,6 +86,10 @@ async function adminGate(req: Request, env: Env): Promise<Response | null> {
   }
   return null;
 }
+/** The most a delete request's body may be ({"confirm": "delete", "generation": n} is about 40 bytes) */
+const DELETE_BODY = 1024;
+/** The most a blobs/check body may be: LIMITS.checkItems entries of two hashes and a size */
+const CHECK_BODY = 128 << 10;
 /** A body read to at most `max` bytes, as text, or null if it is longer (whatever its headers say). */
 async function readBounded(req: Request, max: number): Promise<string | null> {
   if (!req.body) return "";
@@ -252,7 +256,15 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (p === "/api/sync/v1/delete" && m === "POST") {
     // (the generation the device was given, by enable or the socket's welcome: a late request for an
     // older one leaves a newer alone, CORR-3ED-1)
-    const b = (await req.json().catch(() => null)) as { confirm?: unknown; generation?: unknown } | null;
+    // (its small body read to at most DELETE_BODY bytes of the stream itself, before anything is parsed, S13)
+    const text = await readBounded(req, DELETE_BODY);
+    if (text === null) return err(413, "limit");
+    let b: { confirm?: unknown; generation?: unknown } | null;
+    try {
+      b = JSON.parse(text);
+    } catch {
+      b = null;
+    }
     if (b?.confirm !== "delete" || !Number.isSafeInteger(b.generation) || (b.generation as number) < 1) return err(400, "invalid", { message: 'send {"confirm": "delete", "generation": <the account\'s generation>}' });
     const rid = crypto.randomUUID();
     const r = await stub.purge({ request_id: rid, kind: "self", generation: b.generation as number });
@@ -285,8 +297,9 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   const bind = { ...(bindAccount !== null ? { account: bindAccount } : {}), ...(bindGen !== null ? { generation: Number(bindGen) } : {}) };
   if (p === "/api/sync/v1/blobs/check" && m === "POST") {
     if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
-    const text = await req.text();
-    if (text.length > 128 << 10) return err(413, "limit");
+    // (read to at most CHECK_BODY bytes of the stream itself, before anything is held or parsed, S13)
+    const text = await readBounded(req, CHECK_BODY);
+    if (text === null) return err(413, "limit");
     let blobs: { address: string; ct_sha256: string; size: number }[];
     try {
       const b = fields(JSON.parse(text), ["blobs"], "check");

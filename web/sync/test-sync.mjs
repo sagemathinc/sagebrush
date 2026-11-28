@@ -73,6 +73,7 @@ const ST3 = "5a5a5a5a-0003-4a5a-8a5a-5a5a5a5a5a03"; // GET /status beside an ena
 const ST4 = "5a5a5a5a-0004-4a5a-8a5a-5a5a5a5a5a04"; // GET /status while CoCalc is down
 const ST5 = "5a5a5a5a-0005-4a5a-8a5a-5a5a5a5a5a05"; // cold statuses and an enable at once: one CoCalc fetch
 const ST6 = "5a5a5a5a-0006-4a5a-8a5a-5a5a5a5a5a06"; // statuses polled through an outage: a fetch per retry gate
+const IX = "b0d0e000-0001-4e2e-8e2e-e2e2e2e2e2f2"; // bounded reads: a long non-ASCII index, and bodies past their limits (S13)
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -125,6 +126,7 @@ for (const st of [ST1, ST2, ST3, ST4, ST5, ST6]) fake.limits.set(st, sync(1 << 2
 fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(P1, sync(1 << 20, 1 << 20));
 fake.limits.set(P2, sync(1 << 20, 1 << 20));
+fake.limits.set(IX, sync(1 << 26, 1 << 30));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 for (const t of [TL1, TL2, TL3]) fake.limits.set(t, sync(1 << 20, 1 << 20)); // (the test list's accounts: enable asks for the plan first)
 async function cocalc(req) {
@@ -145,7 +147,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4},${ST5},${ST6},${P1},${P2}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4},${ST5},${ST6},${P1},${P2},${IX}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -2411,6 +2413,64 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   // and a status from another site is refused like every sync request
   const xr = await fetchAt(SITE, "/api/sync/v1/status", { headers: { cookie: s1, origin: "https://evil.test" } });
   ok(xr.status === 403, "a status asked from another site is refused (403)");
+}
+
+// ---- S13: reads bounded before they allocate. An index page counts UTF-8 bytes and reads from storage only the page and
+// the row past it; the delete and blobs/check bodies are read to their limits of the stream itself
+{
+  const sx = await signIn(IX);
+  ok((await post(sx, "/api/sync/v1/enable", {})).status === 200, "(S13: sync on)");
+  const acctX = acctNs.get(acctNs.idFromName("acct:" + hashOf(IX)));
+  const w = await socket(sx);
+  await hello(w, "bounded-dev-0001");
+  // (paths of four 250-character names of a 3-byte character: about 1,000 characters, 3,000 UTF-8 bytes each)
+  const nm = (c, i) => c.repeat(245) + String(i).padStart(5, "0");
+  const base = ["/" + nm("あ", 0), "/" + nm("あ", 0) + "/" + nm("い", 0), "/" + nm("あ", 0) + "/" + nm("い", 0) + "/" + nm("う", 0)];
+  let dseq = 1;
+  const mk = (path) => ({ dseq: dseq++, t: 9000 + dseq, by: "person", op: "mkdir", path, kind: "folder" });
+  const all = [...base.map(mk)];
+  for (let i = 1; i <= 997; i++) all.push(mk(base[2] + "/" + nm("え", i)));
+  for (let at = 0; at < all.length; at += 500) {
+    const a = await w.ask({ t: "ops", ops: all.slice(at, at + 500) });
+    if (!a?.ops?.every((o) => Number.isInteger(o.seq))) ok(false, "(S13: ops stored: " + JSON.stringify(a)?.slice(0, 200) + ")");
+  }
+  const page = await w.ask({ t: "pull_index", after: 0 });
+  const utf8 = (page?.ops ?? []).reduce((n, o) => n + Buffer.byteLength(JSON.stringify(o)), 0);
+  const read = await acctX.testIndexRead();
+  ok(page?.more === true && utf8 <= 1 << 20 && page.ops.length < 1000, `an index page of non-ASCII paths stays within 1 MiB in UTF-8 bytes: ${page?.ops?.length} ops, ${utf8} bytes, more`);
+  // (the cursor's own count: the page, the row past it that ended the page, and the one SQLite steps to ahead of that)
+  ok(read?.rows <= page.ops.length + 2 && read.bytes === utf8, `and it read from storage only the page and the rows just past it: ${JSON.stringify(read)} for ${page?.ops?.length} ops, not the ${1001} a page could take`);
+  // (the pages cover the log exactly, in order)
+  let after = 0, seen = 0, pages = 0;
+  for (;;) {
+    const p = await w.ask({ t: "pull_index", after });
+    seen += p.ops.length;
+    pages++;
+    if (!p.more) break;
+    after = p.ops[p.ops.length - 1].seq;
+  }
+  ok(seen === 1000 && pages >= 3, `paged through, every op once: ${seen} in ${pages} pages`);
+
+  // (bodies past their limits: a stream that sends more than the limit and then never ends is answered 413 at once)
+  const stalled = (n) => new ReadableStream({ start(c) { c.enqueue(new Uint8Array(n).fill(32)); } });
+  const quick = async (path, n) => {
+    const t0 = Date.now();
+    const r = await Promise.race([
+      fetchAt(SITE, path, { method: "POST", headers: { cookie: sx, origin: SITE, "content-type": "application/json" }, body: stalled(n), duplex: "half" }),
+      new Promise((res) => setTimeout(() => res(null), 4000)),
+    ]);
+    return { status: r?.status ?? "no answer", ms: Date.now() - t0 };
+  }
+  const d = await quick("/api/sync/v1/delete", 2048);
+  ok(d.status === 413 && d.ms < 3000, `a delete body past 1 KiB, never ending, is refused 413 once the limit is passed (${JSON.stringify(d)})`);
+  const c = await quick("/api/sync/v1/blobs/check", (128 << 10) + 4096);
+  ok(c.status === 413 && c.ms < 3000, `a blobs/check body past 128 KiB, never ending, is refused 413 once the limit is passed (${JSON.stringify(c)})`);
+  // (a valid delete with a body past the limit is refused, and nothing is deleted)
+  const gen = (await db.prepare("SELECT generation FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(IX)).first())?.generation;
+  const big = await fetchAt(SITE, "/api/sync/v1/delete", { method: "POST", headers: { cookie: sx, origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ confirm: "delete", generation: gen, pad: " ".repeat(2000) }) });
+  const st = await db.prepare("SELECT state FROM sync_accounts WHERE account_hash = ?1").bind(hashOf(IX)).first();
+  ok(big.status === 413 && st?.state !== "deleting" && st?.state !== "purged", `a delete with a 2 KB body is refused 413 before it's read as a delete, and the account's sync stays (${big.status}, ${st?.state})`);
+  w.ws.close();
 }
 
 // ---- astra's narrowed CORR-PR58-1, last: it waits for a whole purge, so it runs after the cases whose clocks a
