@@ -1,0 +1,25 @@
+f.coefficient(7) -> -2
+[f.coefficient(n) for n in range(1, 11)] -> [1, -2, -1, 2, 1, 2, -2, 0, -2, -2]
+f.character() -> Dirichlet character modulo 11 of conductor 1 mapping 2 |--> 1
+f.has_cm() -> False
+g.has_cm() -> True
+g.cm_discriminant() -> -3
+f.atkin_lehner_eigenvalue() -> -1
+h.atkin_lehner_eigenvalue() -> 1
+f.padded_list(6) -> [0, 1, -2, -1, 2, 1]
+f.qexp(6) -> q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)
+h2.atkin_lehner_eigenvalue() -> -1
+f.coefficients(5) -> [1, -2, -1, 2, 1]
+f.coefficient(1) -> 1
+f.coefficient(0) -> IndexError: n must be a positive integer
+h.has_cm() -> False
+f.cm_discriminant() -> ValueError: Not a CM form
+f.level() -> 11
+f.weight() -> 2
+Newforms(121, names="e")[0].has_cm() -> False
+f.atkin_lehner_eigenvalue(11) -> -1
+f.atkin_lehner_eigenvalue(2) -> ValueError: d should divide N
+Newforms(15, names="x")[0].atkin_lehner_eigenvalue(3) -> 1
+Newforms(15, names="x")[0].atkin_lehner_eigenvalue(5) -> -1
+f.padded_list(0) -> []
+f.qexp() -> q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)

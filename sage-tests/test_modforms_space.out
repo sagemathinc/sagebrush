@@ -1,0 +1,83 @@
+S.hecke_bound() -> 3
+list(S.q_echelon_basis(8)) -> [q - 2*q^2 - q^3 + 2*q^4 + q^5 + 2*q^6 - 2*q^7 + O(q^8)]
+list(S.q_integral_basis(8)) -> [q - 2*q^2 - q^3 + 2*q^4 + q^5 + 2*q^6 - 2*q^7 + O(q^8)]
+list(M.echelon_basis()) -> [1 + 12*q^2 + 12*q^3 + 12*q^4 + 12*q^5 + O(q^6), q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)]
+M.cuspidal_submodule().dimension() -> 1
+list(M.eisenstein_series()) -> [5/12 + q + 3*q^2 + 4*q^3 + 7*q^4 + 6*q^5 + O(q^6)]
+list(M12.q_echelon_basis(6)) -> [1 + 196560*q^2 + 16773120*q^3 + 398034000*q^4 + 4629381120*q^5 + O(q^6), q - 24*q^2 + 252*q^3 - 1472*q^4 + 4830*q^5 + O(q^6)]
+M.hecke_bound() -> 9
+M12.hecke_bound() -> 8
+list(S37.q_echelon_basis(6)) -> [q + q^3 - 2*q^4 + O(q^6), q^2 + 2*q^3 - 2*q^4 + q^5 + O(q^6)]
+list(S37.q_integral_basis(6)) -> [q + q^3 - 2*q^4 + O(q^6), q^2 + 2*q^3 - 2*q^4 + q^5 + O(q^6)]
+M24.hecke_bound() -> 37
+list(M.q_echelon_basis(6)) -> [1 + 12*q^2 + 12*q^3 + 12*q^4 + 12*q^5 + O(q^6), q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)]
+list(M.q_integral_basis(6)) -> [1 + 12*q^2 + 12*q^3 + 12*q^4 + 12*q^5 + O(q^6), q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)]
+list(M12.echelon_basis()) -> [1 + 196560*q^2 + 16773120*q^3 + 398034000*q^4 + 4629381120*q^5 + O(q^6), q - 24*q^2 + 252*q^3 - 1472*q^4 + 4830*q^5 + O(q^6)]
+list(S37.echelon_basis()) -> [q + q^3 - 2*q^4 + O(q^6), q^2 + 2*q^3 - 2*q^4 + q^5 + O(q^6)]
+M.eisenstein_submodule().dimension() -> 1
+list(M12.eisenstein_series()) -> [691/65520 + q + 2049*q^2 + 177148*q^3 + 4196353*q^4 + 48828126*q^5 + O(q^6)]
+list(ModularForms(4, 2).eisenstein_series()) -> [1/24 + q + q^2 + 4*q^3 + q^4 + 6*q^5 + O(q^6), 1/8 + q + 3*q^2 + 4*q^3 + 3*q^4 + 6*q^5 + O(q^6)]
+list(ModularForms(1, 4).eisenstein_series()) -> [1/240 + q + 9*q^2 + 28*q^3 + 73*q^4 + 126*q^5 + O(q^6)]
+list(ModularForms(6, 2).eisenstein_series()) -> [1/24 + q + q^2 + 4*q^3 + q^4 + 6*q^5 + O(q^6), 1/12 + q + 3*q^2 + q^3 + 7*q^4 + 6*q^5 + O(q^6), 5/24 + q + 3*q^2 + 4*q^3 + 7*q^4 + 6*q^5 + O(q^6)]
+M24.cuspidal_submodule().dimension() -> 8
+M24.eisenstein_submodule().dimension() -> 8
+list(S.q_echelon_basis()) -> [q - 2*q^2 - q^3 + 2*q^4 + q^5 + O(q^6)]
+M.sturm_bound() -> 3
+S37.cuspidal_submodule().dimension() -> 2
+ModularForms(4, 2).hecke_bound() -> 10
+ModularForms(1, 2).hecke_bound() -> 1
+CuspForms(11, 2).eisenstein_submodule().dimension() -> 0
+list(ModularForms(9, 2).eisenstein_series()) -> [q - 3*q^2 + 7*q^4 - 6*q^5 + O(q^6), 1/12 + q + 3*q^2 + q^3 + 7*q^4 + 6*q^5 + O(q^6), 1/3 + q + 3*q^2 + 4*q^3 + 7*q^4 + 6*q^5 + O(q^6)]
+list(ModularForms(36, 4).eisenstein_series()) -> [q^4 + O(q^6), q^2 - 9*q^4 + O(q^6), q - 9*q^2 + 73*q^4 - 126*q^5 + O(q^6), 1/240 + q + 9*q^2 + 28*q^3 + 73*q^4 + 126*q^5 + O(q^6), 1/240 + q^2 + 9*q^4 + O(q^6), 1/240 + q^3 + O(q^6), 1/240 + q^4 + O(q^6), 1/240 + O(q^6), 1/240 + O(q^6), 1/240 + O(q^6), 1/240 + O(q^6), 1/240 + O(q^6)]
+list(ModularForms(64, 2).eisenstein_series()) -> [q + 4*q^3 - 6*q^5 + O(q^6), q - 4*q^3 - 6*q^5 + O(q^6), q^4 + O(q^6), q^2 + O(q^6), q - 4*q^3 + 6*q^5 + O(q^6), 1/24 + q + q^2 + 4*q^3 + q^4 + 6*q^5 + O(q^6), 1/8 + q + 3*q^2 + 4*q^3 + 3*q^4 + 6*q^5 + O(q^6), 7/24 + q + 3*q^2 + 4*q^3 + 7*q^4 + 6*q^5 + O(q^6), 5/8 + q + 3*q^2 + 4*q^3 + 7*q^4 + 6*q^5 + O(q^6), 31/24 + q + 3*q^2 + 4*q^3 + 7*q^4 + 6*q^5 + O(q^6), 21/8 + q + 3*q^2 + 4*q^3 + 7*q^4 + 6*q^5 + O(q^6)]
+list(ModularForms(10, 4).eisenstein_series()) -> [1/240 + q + 9*q^2 + 28*q^3 + 73*q^4 + 126*q^5 + O(q^6), 1/240 + q^2 + 9*q^4 + O(q^6), 1/240 + q^5 + O(q^6), 1/240 + O(q^6)]
+list(ModularForms(11, 3).eisenstein_series()) -> []
+list(CuspForms(23, 2).q_integral_basis(8)) -> [q - q^3 - q^4 - 2*q^6 + 2*q^7 + O(q^8), q^2 - 2*q^3 - q^4 + 2*q^5 + q^6 + 2*q^7 + O(q^8)]
+list(ModularForms(23, 2).q_integral_basis(8)) -> [1 + 12*q^3 + 12*q^4 + 12*q^6 + O(q^8), q - q^3 - q^4 - 2*q^6 + 2*q^7 + O(q^8), q^2 - 2*q^3 - q^4 + 2*q^5 + q^6 + 2*q^7 + O(q^8)]
+list(ModularForms(12, 4).q_integral_basis(6)) -> [1 + O(q^6), q + O(q^6), q^2 + O(q^6), q^3 + O(q^6), q^4 + O(q^6), q^5 + O(q^6), O(q^6), O(q^6), O(q^6)]
+list(ModularForms(5, 6).q_echelon_basis(4)) -> [1 + O(q^4), q - 20*q^3 + O(q^4), q^2 + 8*q^3 + O(q^4)]
+list(CuspForms(1, 24).q_integral_basis(6)) -> [q + 195660*q^3 + 12080128*q^4 + 44656110*q^5 + O(q^6), q^2 - 48*q^3 + 1080*q^4 - 15040*q^5 + O(q^6)]
+list(ModularForms(35, 2).q_integral_basis(8)) -> [1 + 6*q^7 + O(q^8), q - 2*q^6 + O(q^8), q^2 + 2*q^6 + q^7 + O(q^8), q^3 + q^5 + 2*q^6 - q^7 + O(q^8), q^4 + q^5 - q^7 + O(q^8), 2*q^5 - 3*q^7 + O(q^8)]
+list(ModularForms(35, 2).q_echelon_basis(8)) -> [1 + 6*q^7 + O(q^8), q - 2*q^6 + O(q^8), q^2 + 2*q^6 + q^7 + O(q^8), q^3 + 2*q^6 + 1/2*q^7 + O(q^8), q^4 + 1/2*q^7 + O(q^8), q^5 - 3/2*q^7 + O(q^8)]
+list(CuspForms(35, 2).q_integral_basis(8)) -> [q - 2*q^6 + O(q^8), q^2 - 3*q^4 - q^5 + 2*q^6 + q^7 + O(q^8), q^3 - 2*q^4 - q^5 + 2*q^6 + q^7 + O(q^8)]
+ModularForms(1, 2).cuspidal_submodule().hecke_bound() -> 2
+ModularForms(6, 2).cuspidal_submodule().hecke_bound() -> 3
+ModularForms(18, 2).cuspidal_submodule().hecke_bound() -> 7
+CuspForms(11, 2).eisenstein_submodule().hecke_bound() -> 3
+CuspForms(1, 12).eisenstein_submodule().hecke_bound() -> 2
+list(CuspForms(11, 2).eisenstein_submodule().q_echelon_basis(10)) -> []
+list(CuspForms(1, 12).eisenstein_submodule().q_echelon_basis(6)) -> []
+list(CuspForms(37, 2).eisenstein_submodule().q_integral_basis(6)) -> []
+ModularForms(11, 2).eisenstein_submodule().cuspidal_submodule().dimension() -> 0
+CuspForms(DirichletGroup(7).0^3, 3).newforms("a")[0].character() -> Dirichlet character modulo 7 of conductor 7 mapping 3 |--> -1
+CuspForms(DirichletGroup(7).0^3, 3).newforms("a")[0].atkin_lehner_eigenvalue(7) -> ValueError: Unable to compute square root. Try specifying an embedding into a larger ring
+CuspForms(DirichletGroup(12).1, 3).newforms("a")[0].character() -> Dirichlet character modulo 12 of conductor 3 mapping 7 |--> 1, 5 |--> -1
+CuspForms(DirichletGroup(12).1, 3).newforms("a")[0].atkin_lehner_eigenvalue(3) -> ValueError: Unable to compute square root. Try specifying an embedding into a larger ring
+0 [[], [], [], [], [], []]
+1 [[1], [0], [0], [0], [0], [0]]
+5 [[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0], [0, 0, 0, 0, 1], [0, 0, 0, 0, 0]]
+6 [[1, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0], [0, 0, 0, 1, 0, 1], [0, 0, 0, 0, 1, 1], [0, 0, 0, 0, 0, 2]]
+7 [[1, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, -2], [0, 0, 1, 0, 0, 0, 2], [0, 0, 0, 1, 0, 1, 2], [0, 0, 0, 0, 1, 1, 0], [0, 0, 0, 0, 0, 2, 0]]
+9 [[1, 0, 0, 0, 0, 0, 0, 6, 0], [0, 1, 0, 0, 0, 0, -2, 0, -2], [0, 0, 1, 0, 0, 0, 2, 1, 3], [0, 0, 0, 1, 0, 1, 2, -1, 2], [0, 0, 0, 0, 1, 1, 0, -1, 0], [0, 0, 0, 0, 0, 2, 0, -3, 0]]
+6 [[1, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0], [0, 0, 1, 0, 0, 0], [0, 0, 0, 1, 0, 1], [0, 0, 0, 0, 1, 1], [0, 0, 0, 0, 0, 2]]
+5 [[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0], [0, 0, 0, 0, 1], [0, 0, 0, 0, 0]]
+7 [[1, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, -2], [0, 0, 1, 0, 0, 0, 2], [0, 0, 0, 1, 0, 1, 2], [0, 0, 0, 0, 1, 1, 0], [0, 0, 0, 0, 0, 2, 0]]
+6 [[0, 1, 0, 0, 0, -1], [0, 0, 1, 0, 0, -2], [0, 0, 0, 1, 0, 1], [0, 0, 0, 0, 1, 2]]
+20 [[0, 1, 0, 0, 1, 1, -2, 0], [0, 0, 1, 0, 0, -2, 0, -1], [0, 0, 0, 1, 1, 3, -2, 0], [0, 0, 0, 0, 2, 4, -3, 1]]
+6 [[0, 1, 0, 0, 1, 1], [0, 0, 1, 0, 0, -2], [0, 0, 0, 1, 1, 3], [0, 0, 0, 0, 2, 4]]
+4 [[0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [0, 0, 0, 0]]
+Power Series Ring in q over Integer Ring Integer Ring Power Series Ring in q over Integer Ring
+q_integral_basis 2.50000000000000 TypeError Attempt to coerce non-integral RealNumber to Integer
+q_integral_basis -1 ValueError prec (=-1) must be at least 0
+q_integral_basis 5/2 TypeError no conversion of this rational to integer
+q_integral_basis '3' [q - 2*q^2 + O(q^3)]
+q_integral_basis 4 [q - 2*q^2 - q^3 + O(q^4)]
+q_echelon_basis 2.50000000000000 TypeError Attempt to coerce non-integral RealNumber to Integer
+q_echelon_basis -1 ValueError prec (=-1) must be at least 0
+q_echelon_basis 5/2 TypeError no conversion of this rational to integer
+q_echelon_basis '3' [q - 2*q^2 + O(q^3)]
+q_echelon_basis 4 [q - 2*q^2 - q^3 + O(q^4)]
+30 [[0, 1, 0, 1, 0, 0], [0, 0, 1, 1, 0, 0], [0, 0, 0, 2, 0, 0], [0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 1]]
+4 [[0, 1, 0, 1], [0, 0, 1, 1], [0, 0, 0, 2], [0, 0, 0, 0], [0, 0, 0, 0]]
+3 [[0, 1, 0], [0, 0, 1], [0, 0, 0], [0, 0, 0], [0, 0, 0]]
+[[0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [0, 0, 0, 0], [0, 0, 0, 0]]
