@@ -8845,7 +8845,7 @@
   "owner": "python (@sagebrush-python)",
   "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
  },
- "lib/_scipy_stats_py.py :: describe :: return DescribeResult(np.int64(n), (mins, maxs), means, vars_, sk, ku) #0": {
+ "lib/_scipy_stats_py.py :: describe :: return DescribeResult(n, (mins, maxs), means, vars_, sk, ku) #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
@@ -8865,7 +8865,7 @@
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
- "lib/_scipy_stats_py.py :: levene :: raise NotImplementedError(\"scipy.stats.levene: axis and keepdims are not supported in Sagebrush\") #0": {
+ "lib/_scipy_stats_py.py :: levene :: raise NotImplementedError(\"scipy.stats.levene: keepdims is not supported in Sagebrush\") #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
@@ -8914,6 +8914,11 @@
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: 2-d samples (a matrix of the variables' correlations) are not supported in Sagebrush (give two 1-d samples)\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (spearmanr's matrix of the variables' correlations for 2-d samples): raised before any work, never a guessed result; not a cap"
  },
  "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)\") #0": {
   "class": "coverage",
