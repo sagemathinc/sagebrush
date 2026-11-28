@@ -39,6 +39,12 @@ fn cyclic(n: usize, p: u64) -> Vec<QPoly> {
         .collect()
 }
 
+/// The longest stretch between two host polls, as a share of cyclic-8's
+/// whole run (CPU time), where the system reports it: 1.10% measured (two
+/// runs on an idle n2-standard-16, Nov 28), 4.68% with every check_coarse in
+/// f4.rs removed; the bound sits between, about twice from each.
+const MAX_SHARE: f64 = 0.025;
+
 #[test]
 fn f4_host_poll_gap() {
     // WebAssembly runs F4 on one thread
@@ -48,7 +54,9 @@ fn f4_host_poll_gap() {
         hooks::reset();
         hooks::trace();
         let t = std::time::Instant::now();
+        let cpu0 = hooks::thread_cpu_ns();
         let g = groebner_p(&fs, Order::DegRevLex, 32003).unwrap();
+        let cpu_run = hooks::thread_cpu_ns().zip(cpu0).map(|(b, a)| b.saturating_sub(a));
         let secs = t.elapsed().as_secs_f64();
         let poll = hooks::max_poll_gap_ns();
         let cpu = hooks::max_poll_gap_cpu_ns();
@@ -63,5 +71,14 @@ fn f4_host_poll_gap() {
         // wall time stands in
         let (t, what) = if hooks::thread_cpu_ns().is_some() { (cpu, "CPU time") } else { (poll, "wall time") };
         assert!(t <= 250_000_000, "cyclic-{}: {:.2} ms of {} between two host polls, past the 250 ms Stop bound", n, t as f64 / 1e6, what);
+        // and, on cyclic-8, the longest stretch as a share of the whole run's
+        // CPU time: the polls' density, whatever the machine's speed (a fast
+        // machine runs even an unpolled row loop under 250 ms: 239 ms on an
+        // idle VM with every check_coarse removed)
+        if let (8, Some(run)) = (n, cpu_run) {
+            let share = cpu as f64 / run as f64;
+            eprintln!("cyclic-8: the longest stretch between host polls is {:.2}% of the run's {:.2} s of CPU time", 100.0 * share, run as f64 / 1e9);
+            assert!(share <= MAX_SHARE, "cyclic-8: {:.2}% of the run's CPU time between two host polls, past {:.1}%", 100.0 * share, 100.0 * MAX_SHARE);
+        }
     }
 }

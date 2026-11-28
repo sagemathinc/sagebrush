@@ -216,9 +216,14 @@ pub fn fglm_p(pk: Packing, o1: Order, g: &[P], o2: Order, md: &Modulus) -> Resul
         if leads.iter().any(|l| l.iter().zip(&m).all(|(a, b)| a <= b)) {
             continue;
         }
+        sagebrush_interrupt::phase("fglm.walk");
         sagebrush_interrupt::check();
+        // (the product's and the elimination's own checks are phases of their
+        // own, for the tests' phase-targeted Stop)
+        sagebrush_interrupt::phase("fglm.walk.apply");
         let v = apply(var, &svec[parent]);
         // reduce by the echelon rows, keeping the combination
+        sagebrush_interrupt::phase("fglm.walk.reduce");
         let mut w: Vec<u64> = v.iter().map(|&x| x as u64).collect();
         let mut comb: Vec<u64> = vec![0; smon.len()];
         for k in 0..ech.len() {

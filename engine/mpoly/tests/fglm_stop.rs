@@ -65,7 +65,17 @@ fn fglm_stops_in_its_setup_and_walk_and_recovers() {
         let (stopped, at, _, _) = stop_in(phase, k, setup_checks + 16, &big);
         assert!(stopped && at == phase, "{}: stopped {} in {:?}", phase, stopped, at);
     }
-    // 3. the next call works, with the basis it had before
+    // 3. the walk's product (a million coordinates: a check every 4096) and
+    // its elimination (a check every 1024 echelon rows and at each row it
+    // reduces by) check in their own phases: a Stop armed in each, at its
+    // 100th and first check, stops there, within the walk's first steps
+    // (without the product's or the elimination's checks, the backstop a
+    // thousand checks past the setup stops the walk elsewhere)
+    for (phase, k) in [("fglm.walk.apply", 100), ("fglm.walk.reduce", 1)] {
+        let (stopped, at, _, _) = stop_in(phase, k, setup_checks + 1000, &big);
+        assert!(stopped && at == phase, "{}: stopped {} in {:?}", phase, stopped, at);
+    }
+    // 4. the next call works, with the basis it had before
     assert_eq!(lex(&small).unwrap().unwrap(), small_basis);
     assert_eq!(small_basis.len(), 2);
 }
