@@ -1425,6 +1425,10 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         "primes" => primes_op(v),
         "progress_tables" => serde_json::from_str(&sagebrush_interrupt::progress::tables_json()).map_err(|e| e.to_string()),
         "progress_selftest" => progress_selftest(v),
+        // (tests only: an op whose factoring raises a failed proved invariant,
+        // so call()'s reply to one is tested end to end)
+        #[cfg(test)]
+        "selftest_internal" => Err(sagebrush_poly::Budget::unlimited().internal("a test's invariant").to_string()),
         "perm_group" => perm_group(v),
         "perm_group_named" => perm_group_named(v),
         "characters" => {
@@ -2049,6 +2053,14 @@ mod tests {
         // a real resource refusal through call(): no flag
         let r: serde_json::Value = serde_json::from_str(&call(r#"{"fn":"factor","f":["1","1","0","0","1"],"work":1}"#)).unwrap();
         assert!(r["error"].as_str().unwrap().contains("resource limit exceeded") && r.get("internal").is_none(), "{}", r);
+        // an op that raises one, through call(): the reply is flagged
+        // internal (its provenance read by call()'s error path), and the
+        // next call's ordinary error is not
+        let r: serde_json::Value = serde_json::from_str(&call(r#"{"fn":"selftest_internal"}"#)).unwrap();
+        assert_eq!(r["internal"], true, "{}", r);
+        assert!(r["error"].as_str().unwrap().contains(sagebrush_poly::INTERNAL_PREFIX), "{}", r);
+        let r: serde_json::Value = serde_json::from_str(&call(r#"{"fn":"factor","f":[]}"#)).unwrap();
+        assert!(r.get("error").is_some() && r.get("internal").is_none(), "{}", r);
     }
 
     #[test]

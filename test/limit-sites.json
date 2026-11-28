@@ -4386,6 +4386,11 @@
   "owner": "HMF/web",
   "row": "inv-40"
  },
+ "engine/web/src/lib.rs :: dispatch :: \"selftest_internal\" => Err(sagebrush_poly::Budget::unlimited().internal(\"a test's invariant\").to_string()), #0": {
+  "class": "none",
+  "owner": "web engine dispatch (engine/web)",
+  "reason": "a test-only op (cfg(test)) raising an internal factoring error for call()'s reply row; an unlimited budget refuses nothing"
+ },
  "engine/web/src/lib.rs :: dispatch :: Some(w) => sagebrush_poly::try_factor_with(&f, &sagebrush_poly::Budget::new(sagebrush_poly::Limits { work: w, ..sagebrush_poly::Limits::DEFAULT })), #0": {
   "class": "3",
   "owner": "polynomial factorization"
