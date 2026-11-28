@@ -8,7 +8,8 @@
 // returns its result with the index of the first missing value met, or -1.  A missing value is an element
 // that is None or NaN, or a NaN made on the way (Inf - Inf, 0 * Inf), at the element that made it; from there
 // the results are NaN.  R keeps the first missing value met, so the caller, which knows which of its elements
-// were NA, decides between NA and NaN from that index.  No NaN payload travels through here.  Several
+// were NA, decides between NA and NaN from that index.  No NaN payload travels through here.  Each pass
+// over a buffer polls for Stop every 1024 elements (a KeyboardInterrupt).  Several
 // arguments (R's sum(a, b)) are the caller's to combine, in double: each is one buffer.
 
 import * as Obj from "./object";
@@ -176,6 +177,7 @@ function buffer(xs: any): any[] {
 function fold(xs: any[], start: LD, op: (a: LD, b: LD) => LD, each: ((v: number) => void) | null): { v: LD; at: number } {
   let acc = start, at = -1;
   for (let i = 0; i < xs.length; i++) {
+    if ((i & 1023) === 1023) O.pollInterrupt();
     acc = op(acc, fromDouble(element(xs[i])));
     if (at < 0 && acc.kind === 2) at = i;
     if (each !== null) each(toDouble(acc));
@@ -209,7 +211,10 @@ export function mean(xs: any[]): [number, number] {
   if (s.kind !== 0) return [toDouble(s), first.at];
   const ms = negate(s);
   let t = ZERO;
-  for (let i = 0; i < n; i++) t = add(t, add(fromDouble(element(xs[i])), ms));
+  for (let i = 0; i < n; i++) {
+    if ((i & 1023) === 1023) O.pollInterrupt();
+    t = add(t, add(fromDouble(element(xs[i])), ms));
+  }
   return [toDouble(add(s, divInt(t, n))), -1];
 }
 

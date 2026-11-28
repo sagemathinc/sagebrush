@@ -131,6 +131,23 @@ test("ld80's operations give the exact extended value, not only the double it ro
   assert.deepEqual(exact(LD.mul(ld((1n << 64n) - 1n), ld((1n << 64n) - 1n))), [(1n << 64n) - 2n, 64]);
 });
 
+test("Stop in either pass: a KeyboardInterrupt within 1024 elements of the request, which it consumes", () => {
+  const { requestCtrlC, INTR, INTR_CTRL_C } = require("../src/runtime/interrupt.js");
+  const Obj = require("../src/runtime/object.js");
+  // 8192 elements, each read counted; Ctrl-C is requested at the `at`-th read of the whole call
+  const stopped = (f: (xs: any[]) => unknown, at: number) => {
+    let reads = 0;
+    const xs: any[] = [];
+    for (let i = 0; i < 8192; i++) Object.defineProperty(xs, i, { get: () => (++reads === at && requestCtrlC(), 1.5), enumerable: true });
+    assert.throws(() => f(xs), (e: any) => Obj.typeName(e) === "KeyboardInterrupt");
+    assert.ok(reads >= at && reads < at + 1024, `stopped after ${reads} reads, Ctrl-C at ${at}`);
+    assert.equal(INTR[0] & INTR_CTRL_C, 0, "the Ctrl-C is consumed");
+  };
+  for (const f of [LD.sum, LD.prod, LD.mean, (xs: any[]) => LD.cumulative(xs, "sum"), (xs: any[]) => LD.cumulative(xs, "prod")]) stopped(f, 2049);
+  // the mean's second pass, over the residuals
+  stopped(LD.mean, 8192 + 2049);
+});
+
 test("ld80 from Python: the private module _ld80", () => {
   const src = [
     "import _ld80",
