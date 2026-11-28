@@ -29,6 +29,7 @@ export const SOURCE_PATHS = [
   "scripts/build-nd.mjs",
   "scripts/build-raster.mjs",
   "scripts/build-mp.mjs",
+  "scripts/build-skltree.mjs",
   "scripts/install-engine-wasm.mjs",
 ];
 const KEEP = 20;

@@ -22,6 +22,7 @@ import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size.ts";
 import { safeSvg, RASTER_URL, XLINK_NS } from "../safe-svg.js";
 export { safeSvg };
 import { cellId } from "./ipynb.js";
+import { withCellIds } from "./nbformat.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
@@ -32,6 +33,7 @@ const STOP_MESSAGE = "\nStopped: it did not stop when interrupted, so the interp
 // (web/notebook/highlight.js, which the board's editor uses too)
 import { esc, highlight, highlightMarkdown } from "./highlight.js";
 import { highlightMatlab } from "./highlight-matlab.js";
+import { highlightMagma } from "./highlight-magma.js";
 import { armStop, disarmStop, stopIgnored } from "./stop-guard.js";
 export { esc, highlight, highlightMarkdown };
 
@@ -223,7 +225,7 @@ export function createNotebook(root, opts = {}) {
   const cells = () => [...cellsEl.children].map((el) => el.cell).filter(Boolean);
   const index = (cell) => cells().indexOf(cell);
   function paint(cell) {
-    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
+    cell.hl.innerHTML = cell.type === "code" ? (isMatlab() ? highlightMatlab(cell.ta.value) : isMagma() ? highlightMagma(cell.ta.value) : highlight(cell.ta.value, isSage())) : cell.type === "markdown" ? highlightMarkdown(cell.ta.value, isSage()) : esc(cell.ta.value) + "\n";
     // (a Markdown cell's blocks: its text changed elsewhere, merged, undone, an agent's)
     if (cell.blocks && cell.ta.value !== cell.blocksText) { cell.blocksText = cell.ta.value; cell.blocks.value = cell.ta.value; }
   }
@@ -1882,6 +1884,7 @@ export function createNotebook(root, opts = {}) {
   }
   // Highlight fenced Python/Sage code in Markdown as in code cells.
   const mdHighlight = (code, lang) => (/^(matlab|m)$/i.test(lang ?? "") || (!lang && isMatlab()) ? highlightMatlab(code).replace(/\n$/, "")
+    : /^(magma|mag)$/i.test(lang ?? "") || (!lang && isMagma()) ? highlightMagma(code).replace(/\n$/, "")
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
@@ -2367,12 +2370,21 @@ export function createNotebook(root, opts = {}) {
     closeCompleter(); closeMenu(false); activate(null);
     cellsEl.textContent = "";
     execCount = 0; // (without a kernel; an interpreter keeps its own count)
-    for (const c of list?.length ? list : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
+    // (a stored cell without an id shown with one, the same on every device and load (nbformat.js cellIdFor), never one
+    // made at random: the history matches cells by id; and saved once by the writer, below, so the ids are stored)
+    const stored = list ?? [], given = withCellIds(rest.id, stored), idsGiven = given !== stored;
+    for (const c of given.length ? given : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
     const snap = snapshot();
     lastJson = JSON.stringify(snap);
-    // (the base: the document as loaded, not as shown: an empty one is shown with a blank cell it doesn't have)
+    // (the base: the document as loaded, not as shown: an empty one is shown with a blank cell it doesn't have; and
+    // its cells as stored, without the ids given here, so the save that stores them is a change of the base)
     shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
-    Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
+    Promise.resolve().then(() => {
+      loading = false;
+      showParked();
+      // (the ids given here stored by the notebook's writer, once; a page that isn't its writer only shows them)
+      if (idsGiven && store && !store.readOnly) { lastJson = null; schedule(); }
+    }); // after the observer's records for this
     reactiveLoad();
     typed = false; // (another document shown: nothing typed in it yet; one left with saves to make is the page's to ask)
     guard(); // (its own failed save, or none)

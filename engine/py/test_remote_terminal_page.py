@@ -140,6 +140,7 @@ async def test_hello_lists_terminal():
         leg.send(pair_hello(sg), gen=1)
         g, r = await recv(leg)
         assert r["result"]["channels"] == ["kernel", "terminal"], r
+        assert "A page is paired.\n" in t.said, t.said  # (a notebook's kernel page, said on the terminal)
     finally:
         await t.end()
         sg.close()
@@ -163,6 +164,7 @@ async def test_echo_end_to_end():
         acks = [m["upto"] for m in p.sent if m.get("t") == "ack"]
         assert acks and acks[-1] == len(p.data), (acks[-3:], len(p.data))
         assert not [e for e in p.events if e["t"] == "error"], p.events
+        assert "A terminal page is paired.\n" in t.said, t.said  # (said on the runner's terminal, as a notebook's is)
         await p.end()
     finally:
         await t.end()

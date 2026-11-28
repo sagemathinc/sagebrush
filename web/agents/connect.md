@@ -4,14 +4,14 @@ The page for people is https://sagebrush.space/agents/connect/: two choices, eac
 
 | Way | Where it works today | What you install | With a sandboxed Claude Code |
 |---|---|---|---|
-| 1. `sagebrush remote` | dev.sagebrush.space (testing). On sagebrush.space, Connect a computer says whether your account can use it | PyPI `sagebrush` 0.10.3 | Not an agent connection: Claude isn't involved |
+| 1. `sagebrush remote` | dev.sagebrush.space (testing). On sagebrush.space, Connect a computer says whether your account can use it | PyPI `sagebrush` 0.10.5 | Not an agent connection: Claude isn't involved |
 | 2. `sagebrush-agent` | The Agents page, /agents/ on sagebrush.space. Claude here; Codex only on a connected computer | `sagebrush-agent` 0.8.18 (a download, not on npm) | Works: it never uses your Claude Code session |
-| 3. `sagebrush-mcp` | Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards | PyPI `sagebrush-mcp` 0.10.3 | Only if your Claude Code can load MCP servers |
+| 3. `sagebrush-mcp` | Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards | PyPI `sagebrush-mcp` 0.10.5 | Only if your Claude Code can load MCP servers |
 | 4. A cocalc.ai agent | Not yet | — | — |
 
 ## 1. `sagebrush remote`: your computer runs a notebook's code
 
-Needs PyPI `sagebrush` 0.10.3 and [uv](https://docs.astral.sh/uv/). The loopback pairing works on dev.sagebrush.space, the testing site, only. For the relayed version, [Connect a computer](https://sagebrush.space/remote/connect) says whether your account can use it.
+Needs PyPI `sagebrush` 0.10.5 and [uv](https://docs.astral.sh/uv/). The loopback pairing works on dev.sagebrush.space, the testing site, only. For the relayed version, [Connect a computer](https://sagebrush.space/remote/connect) says whether your account can use it.
 
 On the testing site, a notebook sends the cells you run to a Python on your computer instead of the one in your browser. An agent isn't part of it.
 
@@ -85,7 +85,7 @@ It works: it's a separate program and never uses your Claude Code session, sandb
 
 ## 3. `sagebrush-mcp`: Sagebrush's tools in the agent you already run
 
-Needs PyPI `sagebrush-mcp` 0.10.3, [uv](https://docs.astral.sh/uv/), and an agent that loads MCP servers.
+Needs PyPI `sagebrush-mcp` 0.10.5, [uv](https://docs.astral.sh/uv/), and an agent that loads MCP servers.
 
 An MCP server your agent starts: Sage and Python tools, and, when you pair a Sagebrush page with it, your Sagebrush workspace files, including notebooks in Python, Sage, MATLAB or Magma that it writes and runs.
 

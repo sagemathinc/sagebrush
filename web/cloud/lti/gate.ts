@@ -518,6 +518,8 @@ export class LtiContentGate extends DurableObject<{ LTI_CONTENT?: D1 }> {
         // (its own 30 s, or what is left of a shared budget: a resolution's tombstone and read share one, CORR-LTI18-4)
         new Promise<never>((_, no) => (timer = setTimeout(() => {
           if (ts) fired = performance.now();
+          // Tests: an expired deadline consumes its gate budget, just as an awaited virtual sleep does.
+          if (this.virtual !== null) this.virtual += limitGate;
           no(new Error("gate deadline"));
         }, limit))),
       ]);
@@ -543,7 +545,7 @@ export class LtiContentGate extends DurableObject<{ LTI_CONTENT?: D1 }> {
     // missing answer from either is unresolved: the record stays and the next call or the alarm tries again, so a
     // resolution never holds the queue, or a checkpoint's hold, past it)
     // (its end on the gate clock, in gate ms: on a real or scaled clock the same deadline as before; on the virtual
-    // clock exact, since only sleeps move it, never the real time the D1 calls take, sage's option (a))
+    // clock exact: awaited sleeps and expired deadlines move it, never the real time a successful D1 call takes)
     const until = this.now() + this.deadlineMs;
     if (this.resolveGapRealMs > 0 && testMode()) await new Promise((r) => setTimeout(r, this.resolveGapRealMs));
     this.tombstones++;
@@ -567,6 +569,7 @@ export class LtiContentGate extends DurableObject<{ LTI_CONTENT?: D1 }> {
       const read = parked ? new Promise<never>(() => {}) : db.prepare("SELECT kind FROM gate_calls WHERE seq = ?").bind(seq).first<{ kind: string }>();
       row = await Promise.race([read, new Promise<never>((_, no) => (timer = setTimeout(() => {
         if (bs) fired = performance.now();
+        if (this.virtual !== null) this.virtual += budgetGate;
         no(new Error("resolution budget"));
       }, budget)))]);
     } catch {

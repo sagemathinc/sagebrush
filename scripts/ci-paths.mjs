@@ -226,10 +226,10 @@ const modePaths = [
 ];
 const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/, /^scripts\/build-raster\.mjs$/, /^scripts\/build-mp\.mjs$/,
+  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/, /^scripts\/build-raster\.mjs$/, /^scripts\/build-mp\.mjs$/, /^scripts\/build-skltree\.mjs$/,
 ];
 // What the modules' bytes, their pins and their handling depend on (design/wasm-artifacts.md section 4): a change
-// here builds the four modules once (the wasm-modules job), and every job that reads wasm/ installs that run's
+// here builds the five modules once (the wasm-modules job), and every job that reads wasm/ installs that run's
 // artifact instead of fetching the published modules, whose pins this change may not have published yet.
 const wasmBuildPaths = [
   ...enginePaths,
@@ -406,13 +406,17 @@ const webGroups = [
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
   ["space", webRuntime || inArea("space") || suiteGroups.has("space")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
-// (the web-browser jobs: the selected groups packed into at most three, the CI capacity ruling, Nov 22 2026, the org's 60
+// (the web-browser jobs: the selected groups packed into at most four, the CI capacity ruling, Nov 22 2026, the org's 60
 // concurrent jobs; 13 before, most of each its setup.  A job runs its groups in this order, every one even after one
 // failed.  latex is alone: its build has the editor on loopback hosts.  terminal is last in its job: it rebuilds
-// web/dist with the bash set.  Every group is in exactly one job: test/ci-paths.test.ts)
+// web/dist with the bash set.  notebook and remote-preview are apart since Nov 24 2026: notebook, remote-preview, space
+// and terminal in one job took 21.5 min (10.1 + 7.6 + 0.5 + 3.3), the longest job of a merge_group run; split, notebook
+// with space and remote-preview with terminal are about 11 each.  Every group is in exactly one job:
+// test/ci-paths.test.ts)
 export const WEB_BUCKETS = [
   ["board", ["board-a", "board-b", "board-c", "board-unit", "preload"]],
-  ["notebook", ["notebook", "remote-preview", "space", "terminal"]],
+  ["notebook", ["notebook", "space"]],
+  ["remote-terminal", ["remote-preview", "terminal"]],
   ["latex", ["latex"]],
 ];
 const webMatrix = WEB_BUCKETS
@@ -513,5 +517,11 @@ if (prLight) {
 // light or not; elsewhere it follows the full tier, as before)
 outputs.latex_budget = event === "pull_request" && matches(latexBudgetPaths);
 outputs.pr_light = prLight;
+// The desktop app's build in app.yml (its page, then Linux, macOS and Windows: about 27 job-minutes) under PR CI light:
+// a light pull request builds it only when it changes the app itself (app/, the pins it bundles, app.yml); its merge
+// group always builds it, on all three, and gates the merge.  Every other run builds it as before.  (CI job cuts, cut
+// 4b, William Nov 24 2026: 344 of 383 job-minutes an hour of pull requests' app builds touched no app/ file)
+const appBuildPaths = [/^app\//, /^wasm\/pins\.json$/, /^\.github\/workflows\/app\.yml$/];
+outputs.app_build = !prLight || matches(appBuildPaths);
 for (const [key, value] of Object.entries(outputs)) console.log(`${key}=${value}`);
 console.error(`ci paths (${event}, ${files.length} files): ${JSON.stringify(outputs)}`);

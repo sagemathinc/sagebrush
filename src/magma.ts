@@ -55,6 +55,13 @@ export const KEYWORDS = new Set(
     "intrinsic time eval declare clear").split(" "),
 );
 
+// print x : Level, the levels Magma 2.18-5 knows (another name is its "Bad print level")
+const PRINT_LEVELS = new Set(["Default", "Minimal", "Maximal", "Magma", "Hex", "Latex", "Debug"]);
+// Magma 2.18-5's reserved words that this lexer reads as names (each checked: print 1 : default; is bad syntax there,
+// not a bad print level)
+const RESERVED_NAMES = new Set(("adj assert2 assert3 catch default exists forall fprintf freeze iload import load notadj " +
+  "random read readi requirege requirerange restore save try vprintf vtime").split(" "));
+
 // longest first
 const OPS = [":->", "@@", "+:=", "-:=", "*:=", "/:=", "^:=", ":=", "..", "->", "{@", "@}", "{*", "*}", "$$", "<", ">", "(", ")", "[", "]", "{", "}",
   ",", ";", ":", "|", "#", "&", "~", "+", "-", "*", "/", "^", ".", "!", "`", "@", "=", "\\"];
@@ -234,9 +241,10 @@ export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.sta
  * (lib/_magma.py's _CALL_POS_NAMES, which a test keeps equal): their calls
  * are emitted as _m._call((line, col), f, args), so that a repeated or
  * nested call is told apart. */
-export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPolynomial Embed Generator Identity Integral IsSubfield " +
-  "MinimalPolynomial Norm Normalise Normalize PrimeField Root RootsInSplittingField Solution SquarefreeFactorization " +
-  "Submatrix Subsets Sym Trace Vector").split(" "));
+export const CALL_POS = new Set(("Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed " +
+  "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm " +
+  "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization " +
+  "Stabilizer Submatrix Subsets Sym Trace Vector").split(" "));
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
@@ -406,10 +414,16 @@ class Parser {
       if (a.v === "." && (b.v === "-" || b.v === "<") && k > from && T[k - 1].t === "id") return found(b.v === "-" ? `${T[k - 1].v}.-1 (a generator's inverse by its index)` : `${T[k - 1].v}.<...> (an element by its indices)`);
       if (a.v === "=" && a.t === "op") return found("= (an equation, as in a relation)");
       if (a.v === "^" && b.v === "^" && next(a, b)) return found("a^^n (a multiplicity in a multiset)");
-      if (a.v === ":" && b.t === "id" && ["Hex", "Magma", "Maximal", "Minimal", "Default"].includes(b.v)) return found(`x: ${b.v} (a printing level)`);
+      // (x: Magma as a statement of its own, which Magma prints; anywhere else, x := 1 : Magma, : : Magma, it's bad syntax;
+      // a name that isn't a level there is Magma's "Bad print level" at it, a reserved word its bad syntax)
+      if (a.v === ":" && b.t === "id" && c.v === ";" && this.levelStatement(from, k)) {
+        if (PRINT_LEVELS.has(b.v)) return found(`x: ${b.v} (a printing level)`);
+        const said = { name: "", tok: b, verbatim: RESERVED_NAMES.has(b.v) ? "bad syntax" : `Bad print level "${b.v}"` };
+        return said;
+      }
       if (a.v === "where" && a.t === "kw") return found("where x is ... (a definition after an expression)");
       if (a.v === "eval" && a.t === "kw") return found("eval");
-      if (a.t === "id" && (a.v === "try" || a.v === "catch")) return found("try ... catch");
+      if (a.t === "id" && (a.v === "try" || a.v === "catch") && k === from) return found("try ... catch");
       if (a.v === ".." && b.v === "." && next(a, b)) return found("... (a function with a variable number of arguments)");
       if (a.v === "case" && b.v === "<") return found("case< ... >");
       if (a.v === "." && b.t === "id" && k > from && (T[k - 1].t === "id" || T[k - 1].v === ")" || T[k - 1].v === "]")) return found(`${T[k - 1].v}.${b.v} (a generator by a variable's index)`);
@@ -417,6 +431,21 @@ class Parser {
       if (a.v === "\\") return found("\\ (a line continued)");
     }
     return null;
+  }
+
+  /** Whether the tokens [from, k) are an expression statement's value, as in Magma's x : Magma; (not a print, an
+   * assignment or anything inside brackets). */
+  levelStatement(from: number, k: number): boolean {
+    const T = this.toks;
+    // (a statement that a keyword begins takes no level: return 1 : Magma; is bad syntax, as in Magma)
+    if (T[from].t === "kw" && ["print", "printf", "vprint", "return", "assert", "error", "delete", "require"].includes(T[from].v)) return false;
+    let depth = 0;
+    for (let q = from; q < k; q++) {
+      if ("([{<".includes(T[q].v) || T[q].v === "{@" || T[q].v === "{*") depth++;
+      else if (")]}>".includes(T[q].v) || T[q].v === "@}" || T[q].v === "*}") depth--;
+      else if (depth === 0 && (T[q].v === ":=" || T[q].v === ":")) return false;
+    }
+    return depth === 0;
   }
 
   // The loops being parsed, innermost last (a function's body starts its
@@ -542,7 +571,10 @@ class Parser {
         // (the line the statement is dropped through, in a session: the error's)
         const errLine = e instanceof MagmaSyntaxError ? e.line : 0;
         if (u && e instanceof MagmaSyntaxError) {
-          e.message = `${u.name} is not supported yet`;
+          // (Magma's own words where it has them: x : Bogus; is its "Bad print level")
+          const said = (u as { verbatim?: string }).verbatim;
+          e.message = said ?? `${u.name} is not supported yet`;
+          if (said) e.verbatim = true;
           e.line = u.tok.line;
           e.col = u.tok.col;
         }
@@ -655,6 +687,9 @@ class Parser {
   // - a nested rule's or function's own reads don't count in the
   //   enclosing order, but its snapshot of a name imports it ("s").
   private capturing = 0;
+  // the scope depth (capturing) of each quantifier with witnesses parsed so far: its code binds names with :=
+  // (quantifier) in that scope, which a lambda would make its own (the "!" operand's lazy evaluation checks it)
+  private witnessDepths: number[] = [];
   private ruleDepth = 0; // map rules being parsed (capturing counts functions too)
   private uses: { name: string; bound: boolean; kind: "r" | "a" | "s" | "w" | "p" | "l" | "d"; tok?: Tok; done?: boolean; res?: string; post?: string }[] = [];
   private assigned: string[] = [];
@@ -1179,8 +1214,13 @@ class Parser {
   printList(kind: "print" | "vprint") {
     const vals = [this.expr()];
     while (this.eat(",")) vals.push(this.expr());
-    // print x: Magma level; print x: Maximal etc. are ignored
-    if (this.eat(":")) this.ident();
+    // print x: Magma level; print x: Maximal etc. are ignored; a name that isn't a level is Magma's error at it
+    if (this.eat(":")) {
+      const t = this.peek();
+      if (t.t === "id" && RESERVED_NAMES.has(t.v)) this.fail(`'${t.v}' is reserved, not a print level`, t);
+      const level = this.ident();
+      if (!PRINT_LEVELS.has(level)) throw new MagmaSyntaxError(`Bad print level "${level}"`, t.line, t.col, true);
+    }
     this.expect(";");
     // (each value's all, as for a, b; at a statement)
     this.emit(`_m._print_line(_m._flat([${vals.map((v) => this.all(v)).join(", ")}]))`);
@@ -1624,7 +1664,14 @@ class Parser {
         e = `_m._getattr(${e}, ${f.code}, (${f.line}, ${f.col}))`;
       } else if (this.at("!")) {
         const t = this.next();
-        e = `_m._coerce(${e}, ${this.unary()}, (${t.line}, ${t.col}))`;
+        const w0 = this.witnessDepths.length, depth = this.capturing;
+        const x = this.unary();
+        // (x is evaluated in S's context, so that G!(1, 2) and a function G!f() calls make cycles: in a lambda; an
+        // operand that binds names in its own scope, a quantifier's witnesses (exists(w){ ... }, recorded as parsed
+        // with their depth, witnessDepths; not one inside a function or rule it makes, which binds there), in place
+        // between _ctx_enter and _coerce_after, as a lambda would make the names its own)
+        const binds = this.witnessDepths.slice(w0).some((d) => d === depth);
+        e = binds ? `_m._coerce_after(_m._ctx_enter(${e}), ${x}, (${t.line}, ${t.col}))` : `_m._coerce_ctx(${e}, lambda: ${x}, (${t.line}, ${t.col}))`;
       } else if (this.at("@")) {
         this.next();
         e = `_m._apply(${this.unary()}, ${e})`;
@@ -1658,14 +1705,16 @@ class Parser {
       if (!fn) this.fail("$$ outside a function");
       return fn.name;
     }
-    if (this.eat("(")) {
+    if (this.at("(")) {
+      const lp = this.next();
       const e = this.expr();
       if (this.eat(",")) {
-        // (a, b): Magma has no tuples in parentheses, but allow it as a tuple
+        // (a, b): a cycle, made only in a permutation group's context (G!(1, 2), _m._coerce_ctx), as Magma's;
+        // elsewhere Magma's error, said at the "("
         const rest = [e, this.expr()];
         while (this.eat(",")) rest.push(this.expr());
         this.expect(")");
-        return `_m.MTuple([${rest.join(", ")}])`;
+        return `_m._cycle([${rest.join(", ")}], (${lp.line}, ${lp.col}))`;
       }
       this.expect(")");
       // ((f(2)); is all of f(2)'s values, as f(2); is)
@@ -1797,6 +1846,36 @@ class Parser {
         } while (this.eat(","));
         this.expect(">");
         return `_m._ext(${base}, [${args.join(", ")}], (${lt.line}, ${lt.col}))`;
+      }
+      this.i = start;
+    }
+    if (t.v === "PermutationGroup" || t.v === "sub") {
+      // PermutationGroup< n | g, ... > and sub< G | g, ... > (lib/_magma.py
+      // _group_ctor; other forms of them are not implemented yet)
+      const start = this.i;
+      const first = this.expr();
+      if (this.eat("|")) {
+        const gens: string[] = [];
+        const w0 = this.witnessDepths.length, depth = this.capturing;
+        if (!this.at(">")) {
+          do {
+            gens.push(this.expr());
+          } while (this.eat(","));
+        }
+        this.expect(">");
+        // (it returns the group and a map: in an expression, the group, as a
+        // call's first value)
+        // (the generators evaluated in a permutation group's context, so that a cycle written there is made: in a
+        // lambda; generators that bind names in this scope, a quantifier's witnesses, in place between _ctx_push and
+        // _group_ctor_after, as the "!" operand's are, since a lambda would make the names its own)
+        const binds = this.witnessDepths.slice(w0).some((d) => d === depth);
+        const kind = JSON.stringify(t.v), at = `(${lt.line}, ${lt.col})`;
+        const call = binds
+          ? `_m._group_ctor_after(${kind}, _m._ctx_push(${first}), [${gens.join(", ")}], ${at})`
+          : `_m._group_ctor(${kind}, ${first}, lambda: [${gens.join(", ")}], ${at})`;
+        const e = `_m._first(${call})`;
+        this.calls.set(e, call);
+        return e;
       }
       this.i = start;
     }
@@ -1965,6 +2044,7 @@ class Parser {
     if (!wit.length) return `${kw === "exists" ? "any" : "all"}(${test} ${loops})`;
     // the first witness (in a 1-tuple, so that any value is one), assigned
     // with := in the expression, only when there is one
+    this.witnessDepths.push(this.capturing);
     const t = this.fresh();
     const found = `(${t} := _m._witness(((${head},) ${loops} if ${kw === "exists" ? test : `not ${test}`})))`;
     const names = wit.map((w) => pyName(w.v));

@@ -30,9 +30,9 @@ def prepare(answer_json):
     main = _sys.modules["__main__"].__dict__
     ns = _types.ModuleType("__check__")
     d = ns.__dict__
-    for k, v in main.items():
-        if k not in ("__name__", "__spec__", "__loader__", "__file__"):
-            d[k] = v
+    # (in Sage mode the copy is a session too: a Sage name the board's code didn't use loads at the check's use)
+    from _sage_lazy import session_copy, lazy_has
+    session_copy(main, d, skip=("__name__", "__spec__", "__loader__", "__file__"))
     # (the verdict slot the check's own: never one the board's code left, CORR-A19-3)
     d.pop("__sb_value__", None)
     # (the check helpers, close(), same_set(), ...: each where the board has no
@@ -40,7 +40,7 @@ def prepare(answer_json):
     try:
         import board_checks as _bc
         for k in getattr(_bc, "__all__", ()):
-            if k not in d:
+            if k not in d and not lazy_has(d, k):
                 d[k] = getattr(_bc, k)
     except Exception:
         pass
