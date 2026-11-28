@@ -93,3 +93,25 @@ for T, v in ((np.complex64, 1 / 3 + 1j), (np.complex128, 2 + 1j), (np.float64, 2
     before = (type(v).__name__, repr(v))
     r = T(v)
     print("argument kept", T.__name__, before, (type(v).__name__, repr(v)), r is v)
+# two parts, as NumPy admits them: NumPy integer, floating and bool scalars too; an np.complex64 (its real part
+# bringing both parts, its imaginary part only its real one); not np.complex128 or np.str_ (np.bytes_ Sagebrush lacks)
+for T in (np.complex64, np.complex128):
+    for p in (np.complex64(1), np.complex64(1 + 1j), np.complex128(1), np.complex128(1 + 2j), np.str_("1"), np.float32(2),
+              np.float64(2), np.int8(3), np.uint64(4), np.bool_(True)):
+        for args in ((p, 0), (0, p), (p, 2.5)):
+            try:
+                print(f"{T.__name__}{args!r} |", repr(T(*args)))
+            except Exception as e:
+                print(f"{T.__name__}{args!r} |", type(e).__name__, e)
+    for a, b in ((np.complex64(1 + 1j), np.complex64(3 + 4j)), (2, np.complex64(3 + 4j)), (np.complex64(1 - 1j), np.float32(1))):
+        print(f"{T.__name__}({a!r}, {b!r}) |", repr(T(a, b)))
+# a plain sequence read until IndexError, its __len__ neither truncating nor extending it
+class SeqN:
+    def __init__(self, n, items): self.n, self.items = n, items
+    def __len__(self): return self.n
+    def __getitem__(self, i):
+        if i >= len(self.items): raise IndexError
+        return self.items[i]
+for T in (np.float64, np.float32, np.complex128, np.complex64):
+    for n, it in ((1, [1.5, 2.5, 3.5]), (5, [1.5, 2.5]), (0, [1.5]), (2, [1.5, 2.5]), (3, [])):
+        show(f"{T.__name__}(SeqN(len={n}, {it}))", lambda: T(SeqN(n, it)))
