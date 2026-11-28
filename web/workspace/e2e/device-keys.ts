@@ -1,0 +1,297 @@
+// This browser's E2E device for the signed-in account (design/e2e-encryption.md §2, §3.4; plan notes m1-page-keys-plan
+// M1a): its keys and chain pin in IndexedDB, the account's key chain verified from the server's entries, and the epoch
+// keys its wrappers carry. It gives the sync client its OpKeys (sync-seal.ts). Adding devices, removal and provisioned
+// machines come next (M1b, M1c), on this module.
+//
+// - The keys: an Ed25519 signing pair and an X25519 pair, made by WebCrypto with `extractable: false` and kept as
+//   CryptoKeys in this origin's IndexedDB (PROD and DEV are separate origins). Their private halves never leave
+//   WebCrypto: nothing here can read them.
+// - The pin: the chain position this device last verified, {seq, hash, generation}. Each load replays the server's
+//   chain under it (replayFrom with the pin), so a chain that rolls back or forks from it is refused, and the account
+//   is then marked forked here, for good: a forked device signs nothing and opens nothing until "Reset this device".
+//   The pin only moves forward, in one transaction (a compare-and-set, so two tabs can't interleave).
+// - Epoch secrets: opened from the device's wrapper and, for older epochs, from the chained keyrings; held in this
+//   object's memory only, never stored. The derived keys are non-extractable.
+// - A chain that starts at a reset (compacted) needs an anchor; that comes with recovery (M1b), and is refused here.
+import { e2eCore } from "./core-ready.ts";
+import { hpke } from "./hpke.ts";
+import { deriveEpochKeys, type EpochKeys } from "./keys.ts";
+import { b64, newId, unb64 } from "../fleet/core/bytes.mjs";
+import { asKey } from "../fleet/core/ed25519.mjs";
+import type { ChainView, OpKeys } from "../sync-seal.ts";
+
+const DB = "sagebrush-e2e-v1";
+const API = "/api/sync/v1/e2e";
+
+/** How the module reaches the sync server: same-origin requests with the session cookie (tests can give another). */
+export type Transport = (method: "GET" | "POST", path: string, body?: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
+export const sameOrigin: Transport = async (method, path, body) => {
+  const r = await fetch(path, { method, credentials: "same-origin", headers: body === undefined ? {} : { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: r.status, json: ((await r.json().catch(() => ({}))) ?? {}) as Record<string, unknown> };
+};
+
+/** A refusal of this module's, by code (the E2E core's codes, and its own: forked, no_device, no_chain, server). */
+export class DeviceKeysError extends Error {
+  constructor(readonly code: string, message: string) { super(message); }
+}
+
+type Signer = Awaited<ReturnType<typeof asKey>>;
+type Kem = { publicRaw: Uint8Array; privateKey: CryptoKey };
+type Pin = { seq: number; hash: string; generation: string };
+type DeviceRecord = { id: string; sign: CryptoKeyPair; signRaw: Uint8Array; kem: CryptoKeyPair; kemRaw: Uint8Array; created: number };
+type PinRecord = Pin & { forked?: { at: number; code: string } };
+/** The verified chain state as chain.mjs makes it (the fields read here). */
+type State = {
+  readonly head: string; readonly generation: string; readonly seq: number; readonly base: number; readonly hashes: readonly string[];
+  readonly epoch: { n: number; commit: string; keyring: { hash: string } | null }; readonly epochs: readonly { n: number; commit: string; seq: number }[];
+  readonly devices: ReadonlyMap<string, { id: string; sign: Uint8Array; signKey: string; added: number; removed: number | null }>;
+};
+
+const req = <T>(r: IDBRequest<T>) => new Promise<T>((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+const done = (tx: IDBTransaction) => new Promise<void>((ok, no) => { tx.oncomplete = () => ok(); tx.onerror = () => no(tx.error); tx.onabort = () => no(tx.error ?? new Error("aborted")); });
+let db: Promise<IDBDatabase> | undefined;
+function open(): Promise<IDBDatabase> {
+  return (db ??= new Promise((ok, no) => {
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => { for (const s of ["devices", "pins"]) r.result.createObjectStore(s); };
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => no(r.error);
+  }));
+}
+async function get<T>(store: string, key: string): Promise<T | undefined> {
+  const tx = (await open()).transaction(store, "readonly");
+  return (await req(tx.objectStore(store).get(key))) as T | undefined;
+}
+
+/** A new device's keys, non-extractable (refused in a browser that can't make them so). */
+async function newDeviceKeys(): Promise<Omit<DeviceRecord, "id" | "created">> {
+  let sign: CryptoKeyPair, kem: CryptoKeyPair;
+  try {
+    sign = (await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"])) as CryptoKeyPair;
+    kem = (await crypto.subtle.generateKey({ name: "X25519" }, false, ["deriveBits"])) as CryptoKeyPair;
+  } catch {
+    throw new DeviceKeysError("no_crypto", "this browser can't hold end-to-end keys");
+  }
+  if (sign.privateKey.extractable !== false || kem.privateKey.extractable !== false) throw new DeviceKeysError("no_crypto", "this browser can't hold end-to-end keys");
+  const kemRaw = e2eCore().checkKemPublic(new Uint8Array(await crypto.subtle.exportKey("raw", kem.publicKey))) as Uint8Array;
+  return { sign, signRaw: new Uint8Array(await crypto.subtle.exportKey("raw", sign.publicKey)), kem, kemRaw };
+}
+
+/** Move the pin forward to `next`, which the caller verified as extending the stored pin, in one transaction. */
+async function advance(account: string, next: Pin, hashes: readonly string[], base: number): Promise<void> {
+  const tx = (await open()).transaction("pins", "readwrite");
+  const s = tx.objectStore("pins");
+  const cur = (await req(s.get(account))) as PinRecord | undefined;
+  // (another tab may have pinned meanwhile: only forward, and only along this chain)
+  const onChain = (p: Pin) => p.generation === next.generation && p.seq >= base && hashes[p.seq - base] === p.hash;
+  if (cur?.forked) { tx.abort(); throw new DeviceKeysError("forked", "this device saw a forked key chain"); }
+  if (cur && !onChain(cur) && cur.seq <= next.seq) {
+    s.put({ ...cur, forked: { at: Date.now(), code: "chain_fork" } } satisfies PinRecord, account);
+    await done(tx);
+    throw new DeviceKeysError("forked", "this device saw a forked key chain");
+  }
+  if (!cur || cur.seq < next.seq) s.put({ seq: next.seq, hash: next.hash, generation: next.generation } satisfies PinRecord, account);
+  await done(tx);
+}
+async function markForked(account: string, code: string): Promise<void> {
+  const tx = (await open()).transaction("pins", "readwrite");
+  const s = tx.objectStore("pins");
+  const cur = (await req(s.get(account))) as PinRecord | undefined;
+  if (cur && !cur.forked) s.put({ ...cur, forked: { at: Date.now(), code } } satisfies PinRecord, account);
+  await done(tx);
+}
+
+/** The server's chain for the signed-in account: its E2E account id, audience and entries. */
+async function fetchChain(t: Transport): Promise<{ account: string; aud: string; entries: string[] }> {
+  const r = await t("GET", `${API}/chain?from=0`);
+  if (r.status !== 200) throw new DeviceKeysError("server", `the key chain couldn't be read (${r.status})`);
+  const { account, aud, entries } = r.json as { account?: unknown; aud?: unknown; entries?: unknown };
+  const E = e2eCore();
+  if (typeof account !== "string" || typeof aud !== "string" || !E.AUDIENCES.includes(aud) || !Array.isArray(entries) || !entries.every((x) => typeof x === "string"))
+    throw new DeviceKeysError("server", "the key chain's answer isn't one");
+  return { account, aud, entries: entries as string[] };
+}
+
+/**
+ * This browser's E2E device for the signed-in account, its chain verified under its pin: the sync client's OpKeys.
+ * `load` returns null when this browser has no device for the account (it hasn't opted in here, or was reset).
+ */
+export class DeviceKeys implements OpKeys {
+  readonly device: { readonly id: string; sign(bytes: Uint8Array): Promise<Uint8Array> };
+  private secrets = new Map<number, Uint8Array>();
+  private derived = new Map<number, EpochKeys>();
+  private seen = new Set<string>();
+
+  private constructor(
+    readonly account: string,
+    private readonly ctx: { aud: string; account: string },
+    private readonly rec: DeviceRecord,
+    private readonly signer: Signer,
+    private state: State,
+    private readonly t: Transport,
+  ) {
+    this.device = { id: rec.id, sign: (b) => signer.sign(b) };
+  }
+
+  /** The device for the signed-in account, or null if this browser has none. Refuses a forked account, or a chain
+   * that doesn't extend this device's pin (marking it forked), or one this device isn't current in. */
+  static async load(t: Transport = sameOrigin): Promise<DeviceKeys | null> {
+    const E = e2eCore();
+    const c = await fetchChain(t);
+    const rec = await get<DeviceRecord>("devices", c.account);
+    if (!rec) return null;
+    const pin = await get<PinRecord>("pins", c.account);
+    if (pin?.forked) throw new DeviceKeysError("forked", "this device saw a forked key chain");
+    if (c.entries.length === 0) throw new DeviceKeysError("no_chain", "the account's key chain is gone");
+    const ctx = { aud: c.aud, account: c.account };
+    if (c.entries.length > 0 && !e2eFirstIsGenesis(c.entries[0])) throw new DeviceKeysError("chain_unanchored", "a compacted key chain needs its anchor (recovery)");
+    const state = await DeviceKeys.verify(E, c.entries, ctx, pin ?? null, c.account);
+    const signer = await asKey(rec.signRaw, async (m: Uint8Array) => new Uint8Array(await crypto.subtle.sign("Ed25519", rec.sign.privateKey, m as BufferSource)));
+    const me = E.currentDevice(state, rec.id);
+    if (!me || me.signKey !== signer.key) throw new DeviceKeysError("no_device", "this device isn't one of the account's current devices");
+    await advance(c.account, E.pinOf(state), state.hashes, state.base);
+    return new DeviceKeys(c.account, ctx, rec, signer, state, t);
+  }
+
+  /** Replay entries under the pin; a fork, rollback or reset refuses and marks the account forked here. */
+  private static async verify(E: ReturnType<typeof e2eCore>, entries: string[], ctx: { aud: string; account: string }, pin: Pin | null, account: string): Promise<State> {
+    const bytes = entries.map((e) => new TextEncoder().encode(e));
+    try {
+      return (await E.replayFrom(bytes, ctx, { pin: pin ? { seq: pin.seq, hash: pin.hash, generation: pin.generation } : null })) as State;
+    } catch (e) {
+      const code = (e as { code?: string })?.code ?? "bad_form";
+      if (code === "chain_fork" || code === "chain_reset") await markForked(account, code);
+      throw new DeviceKeysError(code, "the account's key chain doesn't verify on this device");
+    }
+  }
+
+  /**
+   * Turn end-to-end encryption on for the signed-in account from this browser (genesis, §2): a new device, a new
+   * recovery key and epoch 0, appended with their wrappers. Returns the device and the recovery code, which is shown
+   * once and never stored (the caller shows it). Refused if the account already has a chain.
+   */
+  static async create(name: string, t: Transport = sameOrigin): Promise<{ keys: DeviceKeys; recoveryCode: string }> {
+    const E = e2eCore();
+    const c = await fetchChain(t);
+    if (c.entries.length > 0) throw new DeviceKeysError("exists", "this account's key chain already exists");
+    const ctx = { aud: c.aud, account: c.account };
+    const k = await newDeviceKeys();
+    const rec: DeviceRecord = { id: newId(), created: Date.now(), ...k };
+    const signer = await asKey(rec.signRaw, async (m: Uint8Array) => new Uint8Array(await crypto.subtle.sign("Ed25519", rec.sign.privateKey, m as BufferSource)));
+    const seed = E.newRecoverySeed();
+    const rk = await E.recoveryKeys(seed, c.account);
+    const S = E.newEpochSecret();
+    const epoch = { n: 0, suite: 1, commit: await E.epochCommit(S, c.account, 0), keyring: null };
+    const device = { id: rec.id, name, kind: "browser", sign: b64(rec.signRaw), kem: b64(rec.kemRaw) };
+    const body = E.nextBody(null, ctx, "genesis", { device, recovery: { sign: b64(rk.sign.raw), kem: b64(rk.kem.publicRaw) }, epoch });
+    const entry = await E.sealEntry(E.deviceSigner(rec.id, signer), body, signer, { recovery: rk.sign });
+    const { state } = await E.applyChainEntry(null, entry, ctx);
+    const sender = { id: rec.id, sign: signer };
+    const wrappers = [];
+    for (const recipient of [{ kind: "device", id: rec.id }, { kind: "recovery", id: c.account }]) wrappers.push(new TextDecoder().decode(await E.wrapEpoch({ hpke, state, ctx, sender, recipient, n: 0, S })));
+    // (the device is stored before the append: if the append's answer is lost, a reload finds the device and the chain)
+    const tx = (await open()).transaction("devices", "readwrite");
+    const s = tx.objectStore("devices");
+    if ((await req(s.getKey(c.account))) !== undefined) { tx.abort(); throw new DeviceKeysError("exists", "this browser already has a device for the account"); }
+    s.add(rec, c.account);
+    await done(tx);
+    const r = await t("POST", `${API}/chain`, { entry: new TextDecoder().decode(entry), keyring: null, wrappers });
+    if (r.status !== 201) throw new DeviceKeysError("server", `the key chain couldn't be started (${r.status})`);
+    await advance(c.account, E.pinOf(state), state.hashes, state.base);
+    const keys = new DeviceKeys(c.account, ctx, rec, signer, state as State, t);
+    keys.secrets.set(0, S);
+    return { keys, recoveryCode: E.showCode(E.codeOfSeed(seed)) };
+  }
+
+  /** The verified chain as a ChainView; `refresh` reads the server's newer entries first, verified under this device's
+   * pin (and the pin moves forward). */
+  async chain(refresh?: boolean): Promise<ChainView> {
+    if (refresh) {
+      const E = e2eCore();
+      const c = await fetchChain(this.t);
+      if (c.account !== this.account) throw new DeviceKeysError("server", "the signed-in account changed");
+      const pin = await get<PinRecord>("pins", this.account);
+      if (pin?.forked) throw new DeviceKeysError("forked", "this device saw a forked key chain");
+      const next = await DeviceKeys.verify(E, c.entries, this.ctx, pin ?? E.pinOf(this.state), this.account);
+      await advance(this.account, E.pinOf(next), next.hashes, next.base);
+      this.state = next;
+    }
+    return viewOf(this.state);
+  }
+
+  /** Epoch n's keys: from the device's wrapper (the current epoch) or the keyrings back from it; null if this device
+   * can't reach them (it was added after that epoch's keyring chain began, or removed). */
+  async epochKeys(n: number): Promise<EpochKeys | null> {
+    if (!Number.isSafeInteger(n) || n < 0) return null;
+    const have = this.derived.get(n);
+    if (have) return have;
+    const S = await this.secret(n);
+    if (!S) return null;
+    const keys = await deriveEpochKeys(S, this.account, n);
+    this.derived.set(n, keys);
+    return keys;
+  }
+
+  private async secret(n: number): Promise<Uint8Array | null> {
+    const E = e2eCore();
+    const cur = this.state.epoch.n;
+    if (n > cur) return null;
+    if (!this.secrets.has(cur)) {
+      const r = await this.t("GET", `${API}/wrapper?kind=device&id=${encodeURIComponent(this.rec.id)}`);
+      if (r.status !== 200 || typeof r.json.wrapper !== "string") return null;
+      const me = { kind: "device", id: this.rec.id, recipient: { publicRaw: this.rec.kemRaw, privateKey: this.rec.kem.privateKey } as Kem };
+      const got = await E.openWrapper({ hpke, state: this.state, ctx: this.ctx, bytes: new TextEncoder().encode(r.json.wrapper), me, seen: (id: string) => this.seen.has(id) });
+      this.seen.add(got.id);
+      if (got.n !== cur) return null;
+      this.secrets.set(cur, got.S);
+    }
+    if (n === cur) return this.secrets.get(cur)!;
+    // (an older epoch: back along the chained keyrings from the current one, each checked against the chain)
+    const commits = new Map(this.state.epochs.map((e: { n: number; commit: string }) => [e.n, e.commit]));
+    try {
+      // (walkBack's JSDoc types its callbacks loosely)
+      const walkBack = E.walkBack as unknown as (a: Record<string, unknown>) => Promise<Uint8Array>;
+      const S = await walkBack({
+        S: this.secrets.get(cur)!, n: cur, expect: this.state.epoch.keyring?.hash, to: n, account: this.account,
+        row: async (k: number) => {
+          const r = await this.t("GET", `${API}/keyring/${k}`);
+          if (r.status !== 200) throw new DeviceKeysError("server", "a keyring couldn't be read");
+          return { ...(r.json as object), bytes: unb64(String(r.json.keyring)) };
+        },
+        commit: (k: number) => commits.get(k),
+      });
+      this.secrets.set(n, S);
+      return S;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/** Whether a chain's first entry is genesis (a compacted chain starts at a reset, which needs an anchor). */
+function e2eFirstIsGenesis(entry: string): boolean {
+  try { return (JSON.parse(entry) as { body?: { op?: unknown } })?.body?.op === "genesis"; } catch { return false; }
+}
+
+/** A ChainView of a verified state (absolute positions, as the sync client reads them). */
+function viewOf(state: State): ChainView {
+  const E = e2eCore();
+  const position = (h: string) => { const i = state.hashes.indexOf(h); return i < 0 ? null : state.base + i; };
+  return Object.freeze({
+    head: state.head, generation: state.generation, currentEpoch: state.epoch.n, position,
+    signerAt: (h: string, id: string) => {
+      const p = position(h), d = state.devices.get(id);
+      return p !== null && d && d.added <= p && (d.removed === null || d.removed > p) ? new Uint8Array(d.sign) : null;
+    },
+    epochAt: (h: string) => { const p = position(h); return p === null ? null : (E.epochAt(state, p)?.n ?? null); },
+    device: (id: string) => { const d = state.devices.get(id); return d ? { added: d.added, removed: d.removed } : null; },
+  });
+}
+
+/** "Reset this device": its keys and pin for the account deleted, the fork mark with them (it then enrolls again). */
+export async function resetDevice(account: string): Promise<void> {
+  const tx = (await open()).transaction(["devices", "pins"], "readwrite");
+  tx.objectStore("devices").delete(account);
+  tx.objectStore("pins").delete(account);
+  await done(tx);
+}
