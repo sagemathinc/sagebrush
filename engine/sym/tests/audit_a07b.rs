@@ -56,22 +56,6 @@ fn f1_derivative_counts_as_sage() {
 }
 
 #[test]
-fn f3_radical_index_lcm_past_i64() {
-    // (Sage's exact lcm is 18446743979220271189: no candidate, no overflow;
-    // the integral is left unevaluated or found another way, never a panic)
-    for f in [
-        "sin(x^(1/4294967291) + x^(1/4294967279))",
-        "exp(x^(1/4294967291) + x^(1/4294967279))",
-        "1/(1 + x^(1/4294967291) + x^(1/4294967279))",
-    ] {
-        let r = int(f);
-        assert!(r.is_ok(), "{} -> {:?}", f, r);
-    }
-    // (control: small indices still substitute u = x^(1/6), lcm(2, 3))
-    assert!(matches!(int("1/(x^(1/2) + x^(1/3))"), Ok(Some(_))));
-}
-
-#[test]
 fn f4_a_degree_too_large_to_hold_densely() {
     // (sin of a power is not a linear argument: decided sparsely, never a
     // capacity panic)

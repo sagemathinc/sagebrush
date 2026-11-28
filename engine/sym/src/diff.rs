@@ -201,10 +201,10 @@ pub fn diff_n(e: &Expr, x: &str, n: u64) -> Expr {
     let mut r = e.clone();
     for _ in 0..n {
         sagebrush_interrupt::check();
-        if r.is_zero() {
-            break; // (every further derivative is 0 too)
-        }
         r = diff(&r, x);
+        if r.is_zero() {
+            break; // (every further derivative is 0 too; checked after a step, so a float 0.0 still becomes 0)
+        }
     }
     r
 }
