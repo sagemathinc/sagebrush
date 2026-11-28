@@ -982,6 +982,66 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
     ok(r.status === 503 && /be checked right now/.test(text) && !/Sign in to connect/.test(text), `Y4 a remote page past the grace with WorkOS down: 503, can't be checked, no sign-in prompt (${r.status})`);
   }
 
+  // a refresh WorkOS answered, rotating the token, whose access token can't be verified (WorkOS's keys unreachable):
+  // the replacement is kept, nothing else moves, and past the retry interval the session recovers with it.  The kept
+  // token is still checked (another subject's answer ends the session), and only under the refresh fence
+  {
+    const keysDown = async (down) => {
+      fake.jwksDown = down;
+      await verify("a.b.c", { fresh: true });
+    };
+    const emailAt = async (row) => (await db.prepare("SELECT email_at FROM identities WHERE identity_id = ?1").bind(row.identity_id).first()).email_at;
+    const outboxed = async (sid) => (await db.prepare("SELECT reason FROM revoke_outbox WHERE sid = ?1").bind(sid).all()).results.map((q) => q.reason);
+    // (a session past its hour whose refresh is answered while the keys are down)
+    const rotatedUnverified = async (subject, sid) => {
+      const s = await signIn(subject, sid);
+      await pastHour(sid);
+      const before = await sess(sid);
+      const e0 = await emailAt(before);
+      await keysDown(true);
+      const r = await me(s.session);
+      const mid = await sess(sid);
+      const e1 = await emailAt(before);
+      await keysDown(false);
+      return { s, before, mid, r, emailKept: e1 === e0 };
+    };
+    const pastRetry = (sid) => db.prepare("UPDATE sessions SET refresh_failed = ?2 WHERE provider_sid = ?1").bind(sid, nowS() - 61).run();
+
+    const k = await rotatedUnverified("user_01KEYSDOWN", "session_01KD");
+    const live = [...fake.rts.values()].filter((x) => x.sid === "session_01KD").length;
+    ok(k.r.status === 200 && k.mid.refresh_ct !== k.before.refresh_ct && live === 1, `Y5 keys unreachable after WorkOS rotated the token: served in grace, the replacement kept (${k.r.status}, ${live} live)`);
+    ok(k.mid.validated === k.before.validated && k.mid.refresh_failed !== null && k.mid.expires === Math.min(k.before.validated + 24 * 3600, k.mid.abs_expires) && k.emailKept, `Y5 and as an outage: validated and the email don't move, expiry is the grace end (${JSON.stringify({ v: k.mid.validated, e: k.mid.expires })})`);
+    await pastRetry("session_01KD");
+    const back = await me(k.s.session);
+    const kr = await sess("session_01KD");
+    ok(back.status === 200 && kr && kr.validated > k.before.validated && kr.refresh_failed === null && kr.refresh_ct !== k.mid.refresh_ct && (await outboxed("session_01KD")).length === 0, `Y5 past the retry interval with the keys back: the kept token refreshes, validated moves, nothing ends (${back.status})`);
+
+    // the kept token's next answer is checked as any: another subject's ends the session
+    const m = await rotatedUnverified("user_01KEYSMIS", "session_01KM");
+    await pastRetry("session_01KM");
+    fake.refreshAs = { subject: "user_01SOMEONE", sid: "session_01KM" };
+    const mis = await me(m.s.session);
+    fake.refreshAs = null;
+    const mq = await outboxed("session_01KM");
+    ok(m.r.status === 200 && mis.status === 401 && !(await sess("session_01KM")) && (mq.includes("refresh-mismatch") || fake.revoked.includes("session_01KM")), `Y6 the kept token's next refresh answered for another subject: the session ends, its revoke queued (${m.r.status}, ${mis.status})`);
+
+    // another isolate's refresh wins while this one is in flight: the fence holds, the winner's token isn't overwritten
+    const f = await signIn("user_01KEYSFEN", "session_01KF");
+    await pastHour("session_01KF");
+    let open;
+    fake.refreshGate = new Promise((r) => (open = r));
+    await keysDown(true);
+    const inFlight = me(f.session);
+    await new Promise((r) => setTimeout(r, 250));
+    await db.prepare("UPDATE sessions SET refresh_ct = 'rotated-elsewhere', validated = ?2, expires = ?3 WHERE provider_sid = ?1").bind("session_01KF", nowS(), nowS() + 3600).run();
+    open();
+    fake.refreshGate = null;
+    const fst = (await inFlight).status;
+    await keysDown(false);
+    const f1 = await sess("session_01KF");
+    ok(fst === 200 && f1?.refresh_ct === "rotated-elsewhere" && f1.refresh_failed === null, `Y7 another refresh won while an unverifiable one was in flight: the fence holds, the winner's token stands (${fst}, ${JSON.stringify({ row: !!f1, ct: f1?.refresh_ct === "rotated-elsewhere", failed: f1?.refresh_failed })})`);
+  }
+
   // a refresh-token key of 16 bytes (AES-128) is refused: no sealing possible, so sign-in is unavailable before WorkOS
   {
     const short = worker({ ...bindings, REFRESH_KEYS: `v1:${randomBytes(16).toString("base64")}` });

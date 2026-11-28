@@ -856,6 +856,10 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   const { modularSpace } = await import("./space/examples/modular.ts");
   writeFileSync(join(out, "modular-forms.space.json"), JSON.stringify(modularSpace(join(here, ".."))) + "\n");
   examples.push("modular-forms.space.json");
+  // (and the 3D view's own code, with tours: previews of its files and parts, so nothing is fetched)
+  const { selfSpace } = await import("./space/examples/self.ts");
+  writeFileSync(join(out, "self.space.json"), JSON.stringify(selfSpace(here)) + "\n");
+  examples.push("self.space.json");
   // (and the repository at this commit: paths, lengths and links only; a file's text is read from GitHub when opened)
   const { repositorySpace } = await import("./space/examples/repo.ts");
   writeFileSync(join(out, "repository.space.json"), JSON.stringify(repositorySpace(join(here, ".."))) + "\n");

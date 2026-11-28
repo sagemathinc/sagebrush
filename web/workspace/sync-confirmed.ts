@@ -504,8 +504,8 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
 export const sealedPullKey = (ns: string) => `sync:${ns}:sealedPull`;
 
 export const confirmedIndex = (w: Workspace) => async (page: { ns: string; ops: SyncOp[]; sealed?: ReadonlyMap<number, unknown>; docKeys?: ReadonlyMap<number, DocKeyVerdict> }) => {
-  const { runReplay, startReplay, startForget } = await import("./sync-replay");
-  const { rewriting } = await import("./sync-rewrite");
+  const { runReplay, startReplay, startForget } = await import("./sync-replay.ts");
+  const { rewriting } = await import("./sync-rewrite.ts");
   for (let tries = 0; ; tries++) {
     try {
       await runReplay(w, page.ns);
