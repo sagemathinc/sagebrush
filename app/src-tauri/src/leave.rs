@@ -146,6 +146,16 @@ mod tests {
     }
 
     #[test]
+    fn an_unasked_hold_left_standing_doesnt_hide_a_later_stall() {
+        // (a hold from a window nobody asked counts for nothing: left standing, it would hide that window's "isn't
+        // responding" in a later quit, and the app would wait on it with no dialog)
+        let mut l = Leave::default();
+        l.hold("main");
+        l.quit(w(&["main"]));
+        assert_eq!(l.answer_timeout("main"), vec![Act::Stalled(s("main"))]);
+    }
+
+    #[test]
     fn closing_one_window_waits_for_it_alone() {
         let mut l = Leave::default();
         assert_eq!(l.close("doc-1", w(&["main", "doc-1"])), vec![Act::AskClose(s("doc-1")), Act::Watch(s("doc-1"))]);
