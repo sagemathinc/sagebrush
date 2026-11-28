@@ -1,0 +1,35 @@
+true
+true true
+[ false, true, true, true, true, true ]
+[ false, true, true, false, false ]
+[ 0, 1, 2, -3, 1/2, -3/5 ]
+[ 0, 1, 2, -3 ]
+RngIntElt FldRatElt FldRatElt
+-7 true 25
+-3 true 25
+-1 true 25
+2 true 25
+3 true 25
+5 true 25
+7 true 25
+13 true 25
+true -a
+true -a - 1
+true 0
+true 1
+true 2
+true -a
+true -a + 1
+true -a + 2
+true 3
+true -3/2
+false false false
+false false
+false false
+false false
+true 3
+true -b + 1
+true -b
+true -3/2
+true -2*b - 3
+true 1/2*(-c - 1)

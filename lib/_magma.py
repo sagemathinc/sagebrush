@@ -7786,19 +7786,54 @@ def Fibonacci(n):
 
 
 def IsSquare(n):
+    # (false and no root: s, r := IsSquare(n) leaves r unassigned, as Magma's)
     if _is_ff(n):
-        return _multi([True, _ff_sqrt(n)]) if n.is_square() else False
+        return _multi([True, _ff_sqrt(n)]) if n.is_square() else _no_root()
     if isinstance(n, int) and n >= 0:
         r = _math.isqrt(n)
         if r * r == n:
             return _multi([True, r])
-        return False
+        return _no_root()
     if isinstance(n, _Fraction) and n >= 0:
         a, b = _math.isqrt(n.numerator), _math.isqrt(n.denominator)
         if a * a == n.numerator and b * b == n.denominator:
             return _multi([True, _sa._q(_Fraction(a, b))])
-        return False
-    return False
+        return _no_root()
+    if isinstance(n, _snf.NumberFieldElement):
+        return _nf_is_square(n)
+    return _no_root()
+
+
+def _no_root():
+    return _multi([False, _NOVAL])
+
+
+def _nf_is_square(y):
+    """IsSquare of a number field element: true and a root r (r^2 = y), a
+    root of x^2 - y over its field, else false.  Which of r and -r is
+    Sagebrush's: the one whose last nonzero coordinate past the constant
+    one is negative (-a for a^2, -a - 1 for (a + 1)^2 in Q(sqrt 2), as
+    Magma's), a rational root positive if an integer, else negative (2 for
+    4, -3/2 for 9/4, as Magma's).  Magma's own choice depends on the field
+    and the element (2 w + 2 or -2 w - 2 for (2 + 2 w)^2, 2/3 or -2/3 for
+    4/9), a rule not documented."""
+    K = y.parent()
+    if y == 0:
+        return _multi([True, K(0)])
+    # (a ring over this field object: PolynomialRing's cache answers an equal
+    # field's ring, QuadraticField(2) made twice)
+    import _sage_nfpoly
+    rs = [r for r, _ in _sage_nfpoly.PolynomialRing_nf_(K, "x")([-y, 0, 1]).roots()]
+    if not rs:
+        return _no_root()
+    r = rs[0]
+    c = [_Fraction(v) for v in r.list()]
+    tail = [v for v in c[1:] if v != 0]
+    if tail:
+        chosen = tail[-1] < 0
+    else:
+        chosen = c[0] > 0 if c[0].denominator == 1 else c[0] < 0
+    return _multi([True, r if chosen else -r])
 
 
 def Isqrt(n):
@@ -8503,6 +8538,8 @@ def IsUnit(x):
         return _math.gcd(x.v, x.R.m) == 1
     if _is_ff(x):
         return bool(x)  # (every nonzero element of a field)
+    if isinstance(x, _Fraction):
+        return x != 0  # (a rational field element, Q!2 too: its field's rule)
     return x in (1, -1)
 
 
@@ -10558,6 +10595,8 @@ def Norm(x, sub=None):
         return _ff_absolute("Norm", x)
     if isinstance(x, _snf.NumberFieldElement):
         return _m_num(x.norm())
+    if isinstance(x, (int, _Fraction)) and not isinstance(x, bool):
+        return x  # (the norm of an integer or rational is itself, as Magma's)
     return x * x
 
 
