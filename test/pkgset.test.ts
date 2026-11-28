@@ -238,6 +238,7 @@ test("no grading context admits pandas yet: graderAdmission refuses it, itself o
   assert.equal(P.graderAdmission(P.admitIndex(s2.S, s2.index, BUILD, reserved), ["@sagebrush/pandas@9.9.9"], BUILD, base).ok, false);
   assert.equal(P.gradingExcluded("@sagebrush/pandas@0.1.0") !== null, true);
   assert.equal(P.gradingExcluded("@sagebrush/pandasx@0.1.0"), null);
+  assert.equal(P.gradingExcluded("@sagebrush/sklearn@0.1.0") !== null, true);
   assert.equal(P.gradingExcluded("@sagebrush/hello@0.1.0"), null);
 });
 

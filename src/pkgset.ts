@@ -658,6 +658,7 @@ export const GRADER_BUDGET = Object.freeze({ cpuMs: 4000, mb: 72, prodFactor: 1.
 // allowance is armed, at import (src/compile.ts mountOptional).
 const GRADING_EXCLUDED: ReadonlyMap<string, string> = new Map([
   ["@sagebrush/pandas", "not admitted for grading yet: its memory and timing gates are still to be measured"],
+  ["@sagebrush/sklearn", "not admitted for grading yet: its memory and timing gates are still to be measured"],
 ]);
 /** Why package `id` (name@version) may not run in a grading context, or null if it may. */
 export function gradingExcluded(id: string): string | null {

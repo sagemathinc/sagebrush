@@ -1,0 +1,278 @@
+== list-int
+('int64', (2, 2), [[1, 2], [3, 4]])
+== list-float
+('float64', (2, 2), [[1.5, 2.0], [3.0, 4.0]])
+== list-bool
+('bool', (1, 2), [[True, False]])
+== dtype-float64
+('float64', (1, 2), [[1.0, 2.0]])
+== dtype-list
+('float64', (1, 2), [[1.0, 2.0]])
+== float32-kept
+('float32', (1, 2), [[1.0, 1.0]])
+== one-d
+!! ValueError: Expected 2D array, got 1D array instead:
+array=[1 2 3].
+Reshape your data either using array.reshape(-1, 1) if your data has a single feature or array.reshape(1, -1) if it contains a single sample.
+== one-d-allowed
+('int64', (3,), [1, 2, 3])
+== scalar
+!! ValueError: Expected 2D array, got scalar array instead:
+array=5.
+Reshape your data either using array.reshape(-1, 1) if your data has a single feature or array.reshape(1, -1) if it contains a single sample.
+== scalar-1d-off
+!! TypeError: Input should have at least 1 dimension i.e. satisfy `len(x.shape) > 0`, got scalar `array(5)` instead.
+== three-d
+!! ValueError: Found array with dim 3, while dim <= 2 is required.
+== three-d-allowed
+(2, 2, 2)
+== empty
+!! ValueError: Found array with 0 feature(s) (shape=(1, 0)) while a minimum of 1 is required.
+== no-samples
+!! ValueError: Found array with 0 sample(s) (shape=(0, 3)) while a minimum of 1 is required.
+== min-samples
+!! ValueError: Found array with 1 sample(s) (shape=(1, 1)) while a minimum of 2 is required.
+== min-features
+!! ValueError: Found array with 1 feature(s) (shape=(1, 1)) while a minimum of 2 is required.
+== nan
+!! ValueError: Input contains NaN.
+== inf
+!! ValueError: Input contains infinity or a value too large for dtype('float64').
+== nan-allowed
+('float64', (1, 2), [[nan, 1.0]])
+== inf-with-allow-nan
+!! ValueError: Input contains infinity or a value too large for dtype('float64').
+== nan-not-checked
+('float64', (1, 1), [[nan]])
+== nan-input-name
+!! ValueError: Input X contains NaN.
+== strings
+!! ValueError: dtype='numeric' is not compatible with arrays of bytes/strings.Convert your data to numeric values explicitly instead.
+== strings-dtype-none
+('str32', (1, 2), [['a', 'b']])
+== complex
+!! ValueError: Complex data not supported
+[[1.+2.j]]
+
+== copy
+False
+== no-copy
+True
+== order-f
+True
+== estimator-name
+!! ValueError: Expected 2D array, got 1D array instead:
+array=[1 2].
+Reshape your data either using array.reshape(-1, 1) if your data has a single feature or array.reshape(1, -1) if it contains a single sample.
+== frame
+('float64', (2, 2), [[1.0, 3.5], [2.0, 4.0]])
+== frame-ints
+('int64', (2, 2), [[1, 3], [2, 4]])
+== frame-bool
+('bool', (2, 1), [[True], [False]])
+== frame-bool-mixed
+('int64', (2, 2), [[1, 1], [0, 2]])
+== frame-bool-float
+('float64', (2, 3), [[1.0, 1.0, 0.5], [0.0, 2.0, 1.0]])
+== frame-dtype-float64
+('float64', (2, 1), [[1.0], [2.0]])
+== frame-nan
+!! ValueError: Input X contains NaN.
+== frame-one-column-series
+!! ValueError: Expected a 2-dimensional container but got <class 'pandas.Series'> instead. Pass a DataFrame containing a single row (i.e. single sample) or a single column (i.e. single feature) instead.
+== series-1d
+('float64', (2,), [1.0, 2.0])
+== xy
+[('int64', (2, 2), [[1, 2], [3, 4]]), ('int64', (2,), [0, 1])]
+== xy-length
+!! ValueError: Found input variables with inconsistent numbers of samples: [2, 3]
+== xy-none
+!! ValueError: estimator requires y to be passed, but the target y is None
+== xy-y-2d
+(array([[1, 2],
+       [3, 4]]), array([0, 1]))
+== xy-y-2d-multi
+('int64', (2, 2), [[0, 1], [1, 0]])
+== xy-y-nan
+!! ValueError: Input y contains NaN.
+== xy-y-numeric
+('int64', (2,), [1, 2])
+== xy-y-strings
+('str32', (2,), ['a', 'b'])
+== column-or-1d
+('int64', (2,), [1, 2])
+== column-or-1d-2
+!! ValueError: y should be a 1d array, got an array of shape (2, 2) instead.
+== consistent
+None
+== inconsistent
+!! ValueError: Found input variables with inconsistent numbers of samples: [2, 3, 1]
+== indexable
+['list', 'ndarray', 'NoneType']
+== rs-int
+[874, 664, 249, 643]
+== rs-instance
+True
+== rs-bad
+!! ValueError: 'seed' cannot be used to seed a numpy.random.RandomState instance
+== rs-none-type
+'RandomState'
+== scalar-ok
+3
+== scalar-type
+!! TypeError: n must be an instance of int, not float.
+== scalar-low
+!! ValueError: n == 0, must be >= 1.
+== scalar-high-left
+!! ValueError: alpha == 1.0, must be < 1.0.
+== scalar-bounds
+1.0
+== non-negative
+!! ValueError: Negative values in data passed to MyModel.fit.
+== non-negative-ok
+None
+== as-float
+('float64', (1, 2), [[1.0, 2.0]])
+== as-float-32
+('float32', (1, 2), [[1.0, 1.0]])
+== has-fit-parameter
+(True, False)
+== n-features-in
+3
+== no-feature-names
+False
+== feature-names
+['a', 'b']
+== feature-names-int-columns
+False
+== feature-names-mixed
+!! TypeError: Feature names are only supported if all input features have string names, but your input has ['int', 'str'] as feature name / column name types. If you want feature names to be stored and validated, you must convert them all to strings, by using X.columns = X.columns.astype(str) for example. Otherwise you can remove feature / column names from your input data, or convert them all to a non-string data type.
+== feature-names-refit-array
+False
+== predict-names-after-array
+array([1., 2.])
+== predict-array-after-names
+array([1.])
+== predict-wrong-n
+!! ValueError: X has 3 features, but Fits2 is expecting 2 features as input.
+== predict-ok
+array([5])
+== predict-renamed
+!! ValueError: The feature names should match those that were passed during fit.
+Feature names must be in the same order as they were in fit.
+
+== predict-extra-name
+!! ValueError: The feature names should match those that were passed during fit.
+Feature names unseen at fit time:
+- c
+
+== force-writeable
+(True, False, False, [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
+== force-writeable-off
+(False, True)
+== force-writeable-no-copy
+True
+== force-writeable-copy-too
+(True, False)
+== force-writeable-xy
+(True, False)
+== force-writeable-frame
+(True, [[1.0], [2.0]])
+== complex-dtype <class 'numpy.float64'>
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype <class 'numpy.float64'>
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype <class 'numpy.float32'>
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype <class 'numpy.float32'>
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype <class 'numpy.int64'>
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype <class 'numpy.int64'>
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype <class 'numpy.int32'>
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype <class 'numpy.int32'>
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype 'numeric'
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype 'numeric'
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype None
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype None
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== complex-dtype [<class 'numpy.float64'>, <class 'numpy.float32'>]
+!! ValueError: Complex data not supported
+[[1.+2.j 3.+0.j]]
+
+== complex64-dtype [<class 'numpy.float64'>, <class 'numpy.float32'>]
+!! ValueError: Complex data not supported
+[[1.+0.j]]
+
+== pandas-copy Series ['ensure_2d'] copy=True
+(True, [99.0, 2.0], [1.0, 2.0])
+== pandas-copy Series ['ensure_2d'] copy=False
+(False, [1.0, 2.0], [1.0, 2.0])
+== pandas-copy DataFrame [] copy=True
+(True, [[99.0, 99.0], [2.0, 4.0]], [[1.0, 3.0], [2.0, 4.0]])
+== pandas-copy DataFrame [] copy=False
+(False, [[1.0, 3.0], [2.0, 4.0]], [[1.0, 3.0], [2.0, 4.0]])
+== pandas-copy DataFrame [] copy=True
+(True, [[99], [2]], [[1], [2]])
+== pandas-copy DataFrame [] copy=False
+(False, [[1], [2]], [[1], [2]])
+== complex-into <class 'bool'>
+('b', [[True, False]])
+== complex-into <class 'numpy.bool'>
+('b', [[True, False]])
+== complex-into 'U40'
+('U', [['(1+2j)', '0j']])
+== complex-into <class 'str'>
+('U', [['(1+2j)', '0j']])
+== complex-into <class 'numpy.float32'>
+!! ValueError: Complex data not supported
+[[1.+2.j 0.+0.j]]
+
+== complex-into <class 'numpy.int8'>
+!! ValueError: Complex data not supported
+[[1.+2.j 0.+0.j]]
+
+== copy-order-F frame
+(True, False, True, [[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]])
+== copy-order-F int frame float64
+(True, False, True, [[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]])
+== copy-order-F int frame int64
+(True, False, True, [[1, 4], [2, 5], [3, 6]])
+== copy-order-F ndarray C
+(True, False, True, [[0.0, 1.0], [2.0, 3.0], [4.0, 5.0]])
+== complex-into uint8
+!! ValueError: Complex data not supported
+[[1.+2.j 0.+0.j]]
+
+== complex-into object
+('O', [[(1+2j), 0j]])

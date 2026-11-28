@@ -1,0 +1,6 @@
+# The tests whose .out is Sagebrush's own output, not the oracle's:
+# gen-oracle.sh skips them, and test_known.py checks that each test_*.py is either here
+# or has an oracle output in oracle/, never both.
+test_known.py
+test_unsupported.py
+test_version.py

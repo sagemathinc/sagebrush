@@ -1,0 +1,40 @@
+{
+  "tests": [],
+  "divergences": [
+    {
+      "case": "text.frame",
+      "printed": "!! NotImplementedError: sklearn.utils.check_array of a DataFrame with text is not in Sagebrush's sklearn 0.x subset",
+      "reason": "scikit-learn makes text data an object array; Sagebrush's numpy has no object dtype, so check_array refuses text columns rather than change their type"
+    },
+    {
+      "case": "text.frame-mixed",
+      "printed": "!! NotImplementedError: sklearn.utils.check_array of a DataFrame with text is not in Sagebrush's sklearn 0.x subset",
+      "reason": "as text.frame: one text column among numbers makes the whole frame object data in scikit-learn"
+    },
+    {
+      "case": "text.series",
+      "printed": "!! NotImplementedError: sklearn.utils.check_array of a Series with text is not in Sagebrush's sklearn 0.x subset",
+      "reason": "as text.frame, for a Series"
+    },
+    {
+      "case": "feature-names.dtype",
+      "printed": "dtype('<U2')",
+      "reason": "feature_names_in_ holds the same names, as a str array: scikit-learn's is an object array, which Sagebrush's numpy doesn't have"
+    },
+    {
+      "case": "missing.svm",
+      "printed": "!! NotImplementedError: sklearn.svm.SVC is not in Sagebrush's sklearn 0.x subset",
+      "reason": "a scikit-learn class outside the subset: it raises NotImplementedError naming itself, not AttributeError"
+    },
+    {
+      "case": "missing.utils",
+      "printed": "!! NotImplementedError: sklearn.utils.compute_class_weight is not in Sagebrush's sklearn 0.x subset",
+      "reason": "as missing.svm, for a function"
+    },
+    {
+      "case": "missing.unknown",
+      "printed": "!! AttributeError: module 'sklearn.utils' has no attribute 'no_such_name'",
+      "reason": "a name scikit-learn doesn't have either: AttributeError, as scikit-learn; the case shows the two kinds stay apart"
+    }
+  ]
+}
