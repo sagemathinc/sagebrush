@@ -90,26 +90,44 @@ impl C64 {
             // (a zero divisor, infinities and NaNs as the plain formula gives them)
             return self * o.recip_smith();
         }
+        // (the divisor scaled by a power of two to a larger part in [1, 2):
+        // exact; then Smith's quotient part by part, each part's two terms
+        // brought near 1 by their own power of two before they are added and
+        // divided, and that power and the divisor's taken back after: each
+        // part rounds once at its own scale, and neither a huge nor a tiny
+        // part of the dividend flushes or inflates the other)
         let eb = ilog2(mb);
-        let b = C64::new(scale2(o.re, -eb), scale2(o.im, -eb));
-        // (scaled up, the dividend could pass the doubles though the quotient
-        // doesn't, 1 / 1e-308 among them: it goes up to 2^1020 at most, and
-        // the rest of the factor is applied to the quotient, exactly; it is
-        // never scaled down for its own size, which would flush its smaller part)
-        let ma = self.re.abs().max(self.im.abs());
-        let mut k = -eb;
-        if k > 0 && ma > 0.0 && ilog2(ma) + k > 1020 {
-            k = (1020 - ilog2(ma)).max(0);
-        }
-        let a = C64::new(scale2(self.re, k), scale2(self.im, k));
-        let q = a * b.recip_smith();
-        let rest = -eb - k;
-        if rest == 0 {
-            q
+        let (br, bi) = (scale2(o.re, -eb), scale2(o.im, -eb));
+        let (a, c) = (self.re, self.im);
+        if br.abs() >= bi.abs() {
+            let r = bi / br;
+            let den = br + bi * r;
+            C64::new(part(a, c, r, den, -eb), part(c, -a, r, den, -eb))
         } else {
-            C64::new(scale2(q.re, rest), scale2(q.im, rest))
+            let r = br / bi;
+            let den = br * r + bi;
+            C64::new(part(c, a, r, den, -eb), part(-a, c, r, den, -eb))
         }
     }
+
+}
+
+/// (x + y r) / den 2^s, with x and y r first brought near 1 by one power of
+/// two, so that the sum and the quotient round once, at their own scale (r and
+/// den are moderate: |r| <= 1, den in [1, 4)).
+fn part(x: f64, y: f64, r: f64, den: f64, s: i32) -> f64 {
+    let ex = if x != 0.0 { Some(ilog2(x.abs())) } else { None };
+    let ey = if y != 0.0 && r != 0.0 { Some(ilog2(y.abs()) + ilog2(r.abs())) } else { None };
+    let k = match (ex, ey) {
+        (Some(a), Some(b)) => -a.max(b),
+        (Some(a), None) | (None, Some(a)) => -a,
+        (None, None) => 0,
+    };
+    // (a zero term is left out: a huge y scaled for a tiny x would be inf, and inf * 0 NaN)
+    let tx = if ex.is_some() { scale2(x, k) } else { x };
+    let ty = if ey.is_some() { scale2(y, k) * r } else { 0.0 };
+    let v = (tx + ty) / den;
+    scale2(v, s - k)
 }
 
 /// Parts within 2^-500..2^500 (or 0): Smith's formulas neither overflow nor

@@ -71,6 +71,15 @@ fn a05_f2_reciprocal_and_division_keep_representable_results() {
     // a lopsided divisor of moderate quotient: (1e308 + 1e-308 i) / (2 + 0 i) keeps its 5e-309
     let q = C64::new(1e308, 1e-308) / C64::new(2.0, 0.0);
     assert_eq!((q.re, q.im), (5e307, 5e-309));
+    // a dividend with one part subnormal and the other huge, over non-powers of two: each part as
+    // its own real division gives it (z.re / d, correctly rounded), not rounded small, then
+    // scaled up (cx1: (2^-1074, 2^1020) / 0.1 gave 16 ulps, not 10)
+    for d in [0.1, 0.3, 3.0, 7.5, 1e-5, 1e5] {
+        for (x, y) in [(f64::from_bits(1), 2f64.powi(1020)), (f64::from_bits(7), 1e300), (1e300, f64::from_bits(3)), (2f64.powi(-1030), 1e308)] {
+            let q = C64::new(x, y) / C64::real(d);
+            assert!(q.re == x / d && q.im == y / d, "({:e}, {:e}) / {} = {:?}, want ({:e}, {:e})", x, y, d, q, x / d, y / d);
+        }
+    }
     // controls: moderate inputs keep the bits Smith's formulas gave
     let c = C64::new(3.0, 4.0).recip();
     assert_eq!((c.re, c.im), (0.12, -0.16));
