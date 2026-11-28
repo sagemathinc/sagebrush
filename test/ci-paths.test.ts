@@ -19,7 +19,7 @@ function classify(files: string[], labels = "", env: Record<string, string> = {}
   writeFileSync(list, files.join("\n") + "\n");
   const r = spawnSync(process.execPath, [script], {
     encoding: "utf8",
-    env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: labels, ...env },
+    env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: labels, CI_PATHS_PINS: "current", ...env },
   });
   assert.equal(r.status, 0, r.stderr);
   return Object.fromEntries(r.stdout.trim().split("\n").map((l) => l.split("=") as [string, string]));
@@ -81,6 +81,9 @@ test("prose no code reads is docs-only: the other top-level pages, docs/'s pages
     assert.deepEqual(suites(classify([f])), docs, f);
   assert.deepEqual(suites(classify(["SECURITY-MODEL.md", "notes/friction/x/REPORT.md", "design/a.md"])), docs);
   assert.equal(classify(["notes/friction/x.md"]).wasm_build, "false");
+  // (unless the pins are pending: they record another source than the merge's, so the published modules aren't its
+  // engine, and the run builds them: design/wasm-artifacts.md section 13)
+  assert.equal(classify(["notes/friction/x.md"], "", { CI_PATHS_PINS: "pending" }).wasm_build, "true");
   // (and what code reads is not: NOTICE.md (the notices' and imports' scripts, the packages), docs/schemas/
   // (lib/sagebrush/records.py, test/records.test.ts), a file under docs/ that isn't a page, a new top-level page)
   for (const f of ["NOTICE.md", "docs/schemas/record.json", "docs/schemas/a.md", "docs/x.json", "NEW.md"])
@@ -305,7 +308,7 @@ test("the WebKit job: its inputs on pull requests, never master pushes, always n
   const run = (event: string, ref: string, files: string) => {
     const list = join(dir, "files.txt");
     writeFileSync(list, files);
-    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref } });
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref, CI_PATHS_PINS: "current" } });
     assert.equal(r.status, 0, r.stderr);
     return /^webkit=(\w+)$/m.exec(r.stdout)?.[1];
   };
@@ -648,11 +651,11 @@ test("examples: a change selects its examples; the engines select notebooks, boa
 test("examples: ci-paths finds the corpus beside it in a checkout whose path has a space", () => {
   const top = mkdtempSync(join(tmpdir(), "ci paths "));
   mkdirSync(join(top, "scripts"));
-  for (const f of ["ci-paths.mjs", "examples-lib.mjs", "size-measure.mjs", "build-inputs.mjs", "web-tests.mjs", "pin-policy.mjs"]) cpSync(join(__dirname, "..", "..", "scripts", f), join(top, "scripts", f));
+  for (const f of ["ci-paths.mjs", "examples-lib.mjs", "size-measure.mjs", "build-inputs.mjs", "web-tests.mjs", "pin-policy.mjs", "wasm-modules.mjs"]) cpSync(join(__dirname, "..", "..", "scripts", f), join(top, "scripts", f));
   cpSync(join(__dirname, "..", "..", "test", "fixtures", "examples"), join(top, "examples"), { recursive: true });
   const list = join(top, "files.txt");
   writeFileSync(list, "examples/latex/article/main.tex\n");
-  const env: NodeJS.ProcessEnv = { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "" };
+  const env: NodeJS.ProcessEnv = { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", CI_PR_LABELS: "", CI_PATHS_PINS: "current" };
   delete env.CI_EXAMPLES_ROOT;
   const r = spawnSync(process.execPath, [join(top, "scripts", "ci-paths.mjs")], { encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
@@ -755,7 +758,7 @@ test("web_share: the share dialog's shard runs on a pull request that changes sh
   for (const [event, ref] of [["push", "refs/heads/master"], ["schedule", "refs/heads/master"], ["workflow_dispatch", "refs/heads/x"]]) {
     const list = join(mkdtempSync(join(tmpdir(), "ci-paths-")), "files");
     writeFileSync(list, "README.md\n");
-    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref } });
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref, CI_PATHS_PINS: "current" } });
     assert.match(r.stdout, /^web_share=true$/m, event);
   }
 });
@@ -911,7 +914,7 @@ test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test
     assert.equal(o.queue_tested, "true");
     // (the matrices' contents, read only by jobs now off, and the counts aren't selections; app_build is app.yml's,
     // which a queue-tested push doesn't change)
-    const kept = new Set(["wasm_build", "queue_tested", "mpmath_backends", "web_sync_shards", "files", "app_build"]);
+    const kept = new Set(["wasm_build", "queue_tested", "mpmath_backends", "web_sync_shards", "files", "app_build", "pin_commit"]);
     for (const [k, v] of Object.entries(o)) if (!kept.has(k)) assert.ok(v === "false" || v === "[]" || v === "", `${files.join()}: ${k}=${v}`);
     assert.equal(o.wasm_build, "true");
     // (without it, or not "true", the same push runs the full tier)
@@ -923,6 +926,21 @@ test("a master push the merge queue already tested (CI_QUEUE_TESTED): every test
   // (only a master push: a track push, the queue's own run, a pull request ignore it)
   assert.equal(classify(["src/x.ts"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math", CI_QUEUE_TESTED: "true" }).full, "true");
   assert.equal(classify(["src/x.ts"], "", { CI_QUEUE_TESTED: "true" }).queue_tested, "false");
+});
+
+test("master's pin commit (a push to master changing only wasm/pins.json): no test runs again; the modules' build stays", () => {
+  const push = { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" };
+  const o = classify(["wasm/pins.json"], "", push);
+  assert.equal(o.pin_commit, "true");
+  const kept = new Set(["wasm_build", "pin_commit", "mpmath_backends", "web_sync_shards", "files", "app_build", "queue_tested"]);
+  for (const [k, v] of Object.entries(o)) if (!kept.has(k)) assert.ok(v === "false" || v === "[]" || v === "", `${k}=${v}`);
+  assert.deepEqual([o.wasm_build, o.queue_tested], ["true", "false"]);
+  // (anything besides the pins, a track push, a pull request: the usual selection)
+  for (const [files, env] of [[["wasm/pins.json", "src/x.ts"], push], [["wasm/pins.json"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/track/math" }], [["wasm/pins.json"], {}]] as const) {
+    const f = classify([...files], "", { ...env });
+    assert.equal(f.pin_commit, "false", `${files.join()} ${JSON.stringify(env)}`);
+    assert.equal(f.engine_smoke, "true", `${files.join()} ${JSON.stringify(env)}`);
+  }
 });
 
 test("latex_budget: a pull request changing the LaTeX group's inputs keeps web-artifacts, light or not; nothing else does", () => {

@@ -7,7 +7,7 @@
 //   schedule and a dispatch stay on GitHub's runners; wasm-modules stays there on master's push (wasm-publish
 //   publishes its modules);
 // - no named job holds a secret, an environment, an OIDC token or a write permission; the jobs not named (wasm-publish,
-//   macOS, Windows) don't move; no other workflow names the variable;
+//   wasm-pins, macOS, Windows) don't move; no other workflow names the variable;
 // - with SB_CI_RUNNER unset, every job runs where it ran before (vars.CI_RUNNER, else GitHub's).
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -31,7 +31,10 @@ n += 5;
 
 const T = "vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))";
 const TW = "vars.SB_CI_RUNNER != '' && github.event_name == 'merge_group'";
-const RULE = { default: `\${{ ${T} && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}`, "wasm-modules": `\${{ ${TW} && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}` };
+// (wasm-modules: GitHub's runner on this repository's master push before either variable is read, design/wasm-artifacts.md
+// section 13: that push's modules are the ones published and pinned)
+const MW = "github.repository == 'sagemathinc/sagebrush' && github.event_name == 'push' && github.ref == 'refs/heads/master' && 'ubuntu-24.04'";
+const RULE = { default: `\${{ ${T} && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}`, "wasm-modules": `\${{ ${MW} || ${TW} && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}` };
 
 // ---- an evaluator of exactly these expressions (GitHub's && and || yield an operand, as JavaScript's do)
 function runner(expr, ctx) {
@@ -40,11 +43,11 @@ function runner(expr, ctx) {
   let e = m[1];
   const strings = [];
   e = e.replace(/'((?:[^']|'')*)'/g, (_, s) => `__S${strings.push(s.replace(/''/g, "'")) - 1}__`);
-  e = e.replace(/vars\.([A-Z_]+)/g, (_, k) => `v[${JSON.stringify(k)}]`).replace(/github\.(event_name|ref)\b/g, (_, k) => `c.${k}`).replace(/\bstartsWith\(/g, "sw(");
-  if (/\b(?!v\b|c\b|sw\b)[A-Za-z_]\w*\s*[.(]/.test(e.replace(/\bc\.(event_name|ref)\b/g, ""))) throw new Error(`an expression this evaluator doesn't model: ${expr}`);
+  e = e.replace(/vars\.([A-Z_]+)/g, (_, k) => `v[${JSON.stringify(k)}]`).replace(/github\.(event_name|ref|repository)\b/g, (_, k) => `c.${k}`).replace(/\bstartsWith\(/g, "sw(");
+  if (/\b(?!v\b|c\b|sw\b)[A-Za-z_]\w*\s*[.(]/.test(e.replace(/\bc\.(event_name|ref|repository)\b/g, ""))) throw new Error(`an expression this evaluator doesn't model: ${expr}`);
   e = e.replace(/__S(\d+)__/g, (_, i) => JSON.stringify(strings[Number(i)]));
   const sw = (a, b) => String(a ?? "").toLowerCase().startsWith(String(b).toLowerCase());
-  return Function("c", "v", "sw", `return (${e});`)(ctx, { SB_CI_RUNNER: "", CI_RUNNER: "", ...ctx.vars }, sw);
+  return Function("c", "v", "sw", `return (${e});`)({ repository: "sagemathinc/sagebrush", ...ctx }, { SB_CI_RUNNER: "", CI_RUNNER: "", ...ctx.vars }, sw);
 }
 const EVENTS = {
   "merge_group": [{ event_name: "merge_group", ref: "refs/heads/gh-readonly-queue/master/pr-1-abc" }, "trusted"],
@@ -87,10 +90,12 @@ for (const file of readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).sort()) {
     const notFor = spec.not_for[name] ?? [];
     for (const [label, [ev, kind]] of Object.entries(EVENTS)) {
       const moves = kind === "trusted" || (kind === "master" && !notFor.includes("push refs/heads/master"));
+      // (a job not for master's push stays on GitHub's runner there, whatever CI_RUNNER says)
+      const hosted = kind === "master" && notFor.includes("push refs/heads/master");
       assert.equal(runner(on, { ...ev, vars: { SB_CI_RUNNER: "sagebrush-ci" } }), moves ? "sagebrush-ci" : "ubuntu-24.04", `${name}, ${label}, switch on`);
       assert.equal(runner(on, { ...ev }), "ubuntu-24.04", `${name}, ${label}, switch off`);
-      assert.equal(runner(on, { ...ev, vars: { CI_RUNNER: "other" } }), "other", `${name}, ${label}, CI_RUNNER alone`);
-      assert.equal(runner(on, { ...ev, vars: { SB_CI_RUNNER: "sagebrush-ci", CI_RUNNER: "other" } }), moves ? "sagebrush-ci" : "other", `${name}, ${label}, both`);
+      assert.equal(runner(on, { ...ev, vars: { CI_RUNNER: "other" } }), hosted ? "ubuntu-24.04" : "other", `${name}, ${label}, CI_RUNNER alone`);
+      assert.equal(runner(on, { ...ev, vars: { SB_CI_RUNNER: "sagebrush-ci", CI_RUNNER: "other" } }), moves ? "sagebrush-ci" : hosted ? "ubuntu-24.04" : "other", `${name}, ${label}, both`);
       n++;
     }
   }
@@ -100,8 +105,21 @@ for (const file of readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).sort()) {
 // (the publisher and the platforms stay where they are)
 const ci = parse(join(dir, "ci.yml"));
 assert.equal(ci.jobs["wasm-publish"]["runs-on"], "ubuntu-24.04");
+assert.equal(ci.jobs["wasm-pins"]["runs-on"], "ubuntu-24.04");
 assert.equal(ci.jobs["engine-nd-neon"]["runs-on"], "macos-15");
 assert.equal(ci.jobs["windows-smoke"]["runs-on"], "windows-latest");
-assert.ok(!spec.jobs.includes("wasm-publish") && spec.jobs.length === Object.keys(ci.jobs).length - 3);
-n += 4;
+assert.ok(!spec.jobs.includes("wasm-publish") && !spec.jobs.includes("wasm-pins") && spec.jobs.length === Object.keys(ci.jobs).length - 4);
+n += 5;
+// (the pinned bytes are what master's push builds, publishes and commits, so that push never moves those three jobs to
+// the pool, whatever the variables: design/wasm-artifacts.md section 13; the SEC review of #2473, P2)
+const masterPush = { event_name: "push", ref: "refs/heads/master" };
+for (const name of ["wasm-modules", "wasm-publish", "wasm-pins"]) {
+  for (const vars of [{ SB_CI_RUNNER: "sagebrush-ci" }, { CI_RUNNER: "self-hosted" }, { SB_CI_RUNNER: "sagebrush-ci", CI_RUNNER: "self-hosted" }]) {
+    assert.equal(runner(String(ci.jobs[name]["runs-on"]), { ...masterPush, vars }), "ubuntu-24.04", `${name}: a push to master runs on GitHub's runner, never the pool (${JSON.stringify(vars)})`);
+    n++;
+  }
+}
+// (a fork's master push, which publishes nothing, still follows CI_RUNNER, as every job of a fork does)
+assert.equal(runner(String(ci.jobs["wasm-modules"]["runs-on"]), { ...masterPush, repository: "someone/sagebrush", vars: { CI_RUNNER: "fork-runner" } }), "fork-runner");
+n++;
 console.log(`ci runners: ${n} checks pass`);

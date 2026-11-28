@@ -4,8 +4,8 @@
 // The source of the modules is everything scripts/build-engine.mjs reads: engine/ (its toolchain file too) and the
 // build scripts (SOURCE_PATHS).  Its key is the sha256 of their git object ids at HEAD, plus the bytes of any uncommitted
 // change to them (a mutant under review is a source too) and $RUSTFLAGS.  Then:
-//   - the source and the pins are those of the merge base with master (whose pins are always its own source's build,
-//     check-fresh-wasm.mjs), and $RUSTFLAGS is unset: the pinned modules are fetched (wasm-fetch.mjs);
+//   - wasm/pins.json records this committed source (its pins are this source's build, check-fresh-wasm.mjs), the tree
+//     has no uncommitted change to it, and $RUSTFLAGS is unset: the pinned modules are fetched (wasm-fetch.mjs);
 //   - otherwise, a cache entry for the key is copied in, after its bytes are checked against the entry's manifest;
 //   - otherwise, the engine is built (build-engine.mjs, into this checkout's own cargo target, targetFor) and stored
 //     under the key.
@@ -23,18 +23,10 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkModules, MODULES, ROOT, modulePath, sha256, writeJsonAtomic, writeSidecar } from "./wasm-modules.mjs";
+import { checkModules, MODULES, ROOT, SOURCE_PATHS, modulePath, pinsState, sha256, sourceIds, writeJsonAtomic, writeSidecar } from "./wasm-modules.mjs";
 import { removeTargetIfIdle } from "./install-engine-wasm.mjs";
 
-export const SOURCE_PATHS = [
-  "engine", // (with its rust-toolchain.toml)
-  "scripts/build-engine.mjs",
-  "scripts/build-nd.mjs",
-  "scripts/build-raster.mjs",
-  "scripts/build-mp.mjs",
-  "scripts/build-skltree.mjs",
-  "scripts/install-engine-wasm.mjs",
-];
+export { SOURCE_PATHS, sourceIds };
 const KEEP = 20;
 export const cacheDir = (env = process.env) => env.SAGEBRUSH_ENGINE_CACHE || join(homedir(), ".cache", "sagebrush", "engine");
 
@@ -108,18 +100,6 @@ const markerPath = (root) => join(root, "wasm", "engine-source.local.json");
 const gitIn = (root) => (args, opts = {}) =>
   execFileSync("git", ["-C", root, ...args], { encoding: opts.encoding ?? "utf8", maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "pipe"] });
 
-// The object id of each source path at `rev` ("-" when absent), in SOURCE_PATHS order.
-export function sourceIds(root, rev) {
-  const git = gitIn(root);
-  return SOURCE_PATHS.map((p) => {
-    try {
-      return git(["rev-parse", "--verify", "--quiet", `${rev}:${p}`]).trim();
-    } catch {
-      return "-";
-    }
-  });
-}
-
 // The key of the working tree's source, and whether it has uncommitted changes.
 export function sourceKey(root = ROOT, env = process.env) {
   const git = gitIn(root);
@@ -134,22 +114,17 @@ export function sourceKey(root = ROOT, env = process.env) {
   return { key: h.digest("hex"), dirty: diff.length > 0 || untracked.length > 0 };
 }
 
-// Is the working tree's source the one its committed pins were built from?  Master's pins are always its own source's
-// build (check-fresh-wasm.mjs is strict there), so they are when the source and the pins are those of the branch's
-// merge base with master, and $RUSTFLAGS is unset as when CI builds them.  (A track's engine moves ahead of its pins:
-// it is built.)
+// Is the working tree's source the one its committed pins were built from?  When wasm/pins.json records HEAD's
+// committed source (wasm-modules.mjs's pinsState), the tree has no uncommitted change to it, and $RUSTFLAGS is unset as
+// when CI builds them.  (A pin is committed on master only, after the merge: a branch's changed engine, or master's
+// before its pin commit, is built.)
 export function isPinnedSource(root = ROOT, env = process.env, dirty = sourceKey(root, env).dirty) {
   if (dirty || env.RUSTFLAGS) return false;
-  const master = env.SAGEBRUSH_PINS_REF || "origin/master";
-  const git = gitIn(root);
-  let base;
   try {
-    base = git(["merge-base", master, "HEAD"]).trim();
+    return pinsState(root) === "current";
   } catch {
     return false;
   }
-  const ids = (rev) => [...sourceIds(root, rev), git(["rev-parse", `${rev}:wasm/pins.json`]).trim()].join(" ");
-  return ids(base) === ids("HEAD");
 }
 
 function readJson(path) {

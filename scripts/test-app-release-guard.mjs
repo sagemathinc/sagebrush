@@ -143,6 +143,20 @@ if (cond) {
     }
     ok(got === signs, `${what}: ${signs ? "signs" : "never signs"} (the condition says ${got})`);
   }
+  // (the page a signed app ships takes only published modules of pins that record its own source: its wasm-modules
+  // step's release input is true on every case that signs, design/wasm-artifacts.md section 13)
+  const pageJob = /^  page:\n([\s\S]*?)(?=^  [A-Za-z0-9_-]+:\n|(?![\s\S]))/m.exec(text)?.[1] ?? "";
+  const rel = /uses: \.\/\.github\/actions\/wasm-modules\n\s+with:\n(?:\s+[a-z-]+: .*\n)*?\s+release: \$\{\{\s*([\s\S]*?)\s*\}\}\n/.exec(pageJob)?.[1];
+  ok(rel !== undefined, "page's wasm-modules step has a release input");
+  if (rel !== undefined) {
+    for (const [what, event_name, ref, inputs, repository, signs] of cases) {
+      if (!signs) continue;
+      let got;
+      try { got = evaluate(rel, ctxOf(event_name, ref, inputs, repository)); } catch (e) { ok(false, `page's release input, ${what}: ${e.message}`); continue; }
+      ok(got === true, `${what}: the page's modules are a release's (published, current pins only); the input says ${got}`);
+    }
+    ok(evaluate(rel, ctxOf("pull_request", "refs/pull/1/merge", {}, REPO)) === false && evaluate(rel, ctxOf("push", "refs/heads/master", {}, REPO)) === false, "a pull request and a master push: not a release (a pending pin builds)");
+  }
   // (never after a page that failed, was skipped or was cancelled, nor in a cancelled run)
   const TAG = ["push", "refs/tags/app-v0.4.0", {}, REPO];
   for (const [what, page, cancelled] of [["the page failed", "failure", false], ["the page was skipped", "skipped", false], ["the page was cancelled", "cancelled", false], ["the run was cancelled", "success", true]]) {

@@ -1,6 +1,8 @@
 # The WebAssembly modules as hash-pinned artifacts
 
-Status: design, for review. No code changes yet.
+Status: implemented (sections 1 to 11), and since Nov 28 2026 section 13: **a pull request never carries a pin**;
+master's CI commits it after the merge. Where an earlier section says a pull request commits its pin, or a stale pin
+fails a run, section 13 replaces it.
 
 **Since the decision-tree kernel (Nov 2026) there are five modules:** `sagebrush-skltree.wasm`, built by
 `scripts/build-skltree.mjs` (engine/skltree), joined the four below under the same rule. Where this design says
@@ -496,3 +498,85 @@ git filter-repo --path cdn/sagebrush-engine.mjs --path-glob 'wasm/*.wasm' --inve
 - **SHAs cited elsewhere** (PR bodies, reviews, `.growth` markers' reasons, memory notes, the dashu fork's
   references, the jsdelivr diagnostic's `f8b80537`) stay valid in the backup bundle. A note in `DEVELOPMENT.md`
   gives the rewrite date and where the commit map is.
+
+## 13. Pins on master only (Nov 28 2026)
+
+Until now an engine pull request had to commit its pin: a first CI run printed it, a second commit carried it, and
+every master merge since made it stale again. Every engine pull request in flight then needed a merge and a new pin,
+and two of them conflicted in `wasm/pins.json`. From here a pull request never carries a pin, and nothing it does
+depends on one.
+
+**The pins record their source.** `wasm/pins.json` gains `"source"`: the sha256 of the git object ids of the paths
+the modules are built from (`SOURCE_PATHS` in `scripts/wasm-modules.mjs`: `engine/`, its toolchain file included,
+the five builders with the installer they import, and what cargo reads above `engine/`: the root `.cargo/` (its
+`config.toml` or legacy `config`; cargo merges every parent's) and a root `Cargo.toml` and `Cargo.lock`, absent today
+and counted as absent. `scripts/engine-cache.mjs` keys its builds by the same paths).
+`wasm/pins.json` isn't one of them, so committing it keeps the source. Any checkout can tell, with no network and no
+build, which state its pins are in (`pinsState`, `node scripts/wasm-pins.mjs --state`):
+- **current:** they record this commit's own source, so they are its build;
+- **pending:** they record another source, or none (an engine change, on a branch or on master before its pin
+  commit).
+
+**The policy** (`wasm-artifact.mjs`, `check-fresh-wasm.mjs`, `wasm-publish.mjs`), on every event:
+
+| the run's build against the pins | current pins | pending pins |
+|---|---|---|
+| equal | pinned | pinned |
+| different | an error: the build isn't reproducible, or the pins were edited by hand | fresh, labelled; every reader uses this run's build and nothing records it as pinned |
+| different, on a tag (a release) | an error | an error: tag the commit after its pin commit |
+
+So a pull request and a merge queue group that change the engine run on their own build with no stale-pin failure,
+and their merge conflicts never involve the pins. Tracks follow the same rule (their pins are pending while their
+engine moves).
+
+**Where the modules come from:**
+- `ci.yml`: the `changes` job builds them (`wasm_build`) for every push, queue group and dispatch, as before, and also
+  for a pull request whose pins are pending, even one that changes no engine file. The published modules of pending
+  pins aren't its engine.
+- The other workflows (`.github/actions/wasm-modules`): with current pins they fetch, as before; with pending pins
+  they build the commit's own modules, labelled fresh. `release.yml`, the TestFlight build, and `app.yml`'s page on
+  a run that may sign (an `app-v` tag, a dispatch with `sign`) pass `release: true` and only fetch: a commit whose pin
+  is pending is refused (`wasm-fetch.mjs --release`). `check-fresh-wasm.mjs` also refuses a pending pin's build on
+  a tag.
+- `size-base`: a base whose pins are pending is built from its own source and measured as built, as a track's base
+  already was. It is never measured with another commit's modules.
+- `engine-cache.mjs` (precheck): the pins are this tree's engine exactly when they are current and the tree has no
+  uncommitted change to its source.
+
+**A pull request doesn't change `wasm/pins.json`** (`wasm-pins.mjs --pr-check`, in the `changes` job). The one
+exception is pins that are current for the merge commit, which CI then checks against its own build: a pins-only pull
+request, the manual path while no pins App is configured.
+
+**Master's pin commit** (the `wasm-pins` job, `scripts/wasm-pin-commit.mjs`). After a push to master whose pins aren't
+this commit's build:
+1. `wasm-modules` builds the modules, and `wasm-publish` publishes them: keys are content-addressed, so publishing a
+   build that is never pinned names nothing. A build that differs from current pins is still refused.
+2. `wasm-pins` checks four things, and refuses otherwise:
+   - this is a push to master, and the checkout is that commit;
+   - the artifact is this run's;
+   - the pins don't already record this source with this build (then there is nothing to do);
+   - they don't record this source with other bytes (then a person must look).
+3. It writes `wasm/pins.json` for the build, with the source, and commits exactly that file.
+4. It pushes the commit as a fast-forward of the run's commit, never forced. When master has moved on, the push is
+   refused and nothing changes: the newer commit's own run pins it. Its concurrency group keeps one job at a time, and
+   the newest pending run always runs.
+5. The push starts the pin commit's own CI run. `ci-paths.mjs` sees a push to master changing only `wasm/pins.json`
+   (`pin_commit`), so no test runs again, as for a push the merge queue already tested. Its modules are still built,
+   and since its pins now record its source, the run fails unless the build equals them.
+
+**The pins App.** Master's ruleset requires a pull request and the merge queue, with no bypass, so the job pushes as a
+GitHub App: one with Contents read and write on this repository only, and the ruleset's one bypass actor. Its client id
+is the repository variable `SB_PINS_APP_CLIENT_ID`. Its private key is the secret `SB_PINS_APP_KEY` of the environment
+`wasm-pins`, whose deployment branches are master only, as with `wasm-publish`. Pull request and queue runs never reach
+the job or the key. A maintainer creates the App and the environment.
+
+**Without the App** (the variable unset) the job doesn't run, and everything else works: master's pins stay pending
+after an engine change, every run builds the modules it reads, and a release is refused until a pins-only pull request
+records the source.
+
+**What this keeps from section 9:**
+- the pin in git is the reference: every pin on master records the source it is the build of, which any checkout can
+  check, and the pin commit's own run rebuilds and checks it;
+- unpinned bytes never reach a release;
+- only master's push publishes, and only the App, from master's push, writes a pin.
+

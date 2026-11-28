@@ -105,6 +105,8 @@ function evaluate(cond, ctx) {
     .replace(/needs\.([a-z][a-z0-9-]*)\.result/g, (_, j) => `r(${JSON.stringify(j)})`)
     .replace(/github\.(event_name|ref|repository)/g, (_, k) => `g(${JSON.stringify(k)})`)
     .replace(/vars\.CI_RUNNER/g, '""')
+    // (the pins App unset, as until it is configured: master's pin commit doesn't run, design/wasm-artifacts.md section 13)
+    .replace(/vars\.SB_PINS_APP_CLIENT_ID/g, '""')
     .replace(/\balways\(\)/g, "true").replace(/\bcancelled\(\)/g, "false")
     .replace(/\bfromJSON\(/g, "JSON.parse(").replace(/\bcontains\(/g, "has(");
   e = e.replace(/__S(\d+)__/g, (_, i) => JSON.stringify(strings[Number(i)]));

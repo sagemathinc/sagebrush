@@ -3,15 +3,16 @@
 // Only when every fetch failure is an HTTP 404 is the base commit built from its own source; all its resulting
 // modules must then match that base's pins exactly.  The base's module set is its own pins.json's (baseModules): a
 // module added since the base has no pin there, and isn't fetched, built or checked for it.  Network errors, corrupt objects and build/pin mismatches fail.
-// On a track (scripts/pin-policy.mjs: a pull request into track/*, a push or dispatch on it) the base's pin can lag
-// its engine (the pin moves only with the track's pull into master), so its published modules may not be its
-// engine at all: the base is always built from its own source, and the result is labelled pinned or fresh.
+// When the base's pins are pending (wasm-modules.mjs's pinsState: they record another source than the base's, as on
+// master between an engine change's merge and its pin commit, design/wasm-artifacts.md section 13), and on a track
+// (scripts/pin-policy.mjs: a pull request into track/*, a push or dispatch on it), the published modules its pins name
+// may not be its engine at all: the base is built from its own source, and the result is labelled pinned or fresh.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchModules } from "./wasm-fetch.mjs";
 import { existsSync } from "node:fs";
-import { baseModules, checkModules, MODULES, ROOT, modulePath, writeSidecar } from "./wasm-modules.mjs";
+import { baseModules, checkModules, MODULES, ROOT, modulePath, pinsState, writeSidecar } from "./wasm-modules.mjs";
 import { onTrack, runRefs } from "./pin-policy.mjs";
 
 const notFound = (modules) => new RegExp(`^(${modules.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}): \\S+: 404(?:\\s|$)`);
@@ -47,11 +48,13 @@ export async function fetchOrBuild({
   modulesOf = baseModules,
   log = (line) => console.log(line),
   env = process.env,
+  state = (root, modules) => pinsState(root, { modules }),
 } = {}) {
   // (the base checkout's own set: its pins.json, fail closed)
   const modules = modulesOf(root);
-  if (onTrack(runRefs(env))) {
-    log("a track's base: building it from its own source (its pin may lag its engine)");
+  const track = onTrack(runRefs(env));
+  if (track || state(root, modules) === "pending") {
+    log(track ? "a track's base: building it from its own source (its pin may lag its engine)" : "the base's pin is pending (its pins record another source): building it from its own source");
     build(root);
     // (each module this build wrote gets its sidecar; then a module built here or a pinned one passes, and a
     // missing or unidentified one fails)
@@ -62,7 +65,7 @@ export async function fetchOrBuild({
       log("base WebAssembly source build matches every pin");
       return "built";
     }
-    log("::warning::the track base's fresh build differs from its pins (expected on a track): measured as built");
+    log(`::warning::the ${track ? "track " : ""}base's fresh build differs from its pins (expected ${track ? "on a track" : "while its pin is pending"}): measured as built`);
     return "built-fresh";
   }
   try {

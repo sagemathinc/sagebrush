@@ -5,6 +5,10 @@
 //   node scripts/wasm-fetch.mjs              fetch what's missing or outdated
 //   node scripts/wasm-fetch.mjs --offline    no network at all: a module not in the cache fails at once
 //   node scripts/wasm-fetch.mjs --force      also replace unidentified bytes and local builds
+//   node scripts/wasm-fetch.mjs --release    first require pins that record this commit's own source (a release
+//                                            ships only such a commit: design/wasm-artifacts.md section 13)
+// Pins that record another source (pending: an engine change on master before its pin commit, or on a branch) are
+// fetched with a warning: they are another source's build.
 // SAGEBRUSH_WASM_BASE overrides the base URL (a mirror, or file:///dir/ of <sha256>.wasm files);
 // SAGEBRUSH_WASM_CACHE (default $XDG_CACHE_HOME/sagebrush/wasm, else ~/.cache/sagebrush/wasm) is the cache.
 //
@@ -18,7 +22,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { MODULES, ROOT, loadPins, matches, moduleState, modulePath, recordInstalled } from "./wasm-modules.mjs";
+import { MODULES, ROOT, loadPins, matches, moduleState, modulePath, pinsState, recordInstalled } from "./wasm-modules.mjs";
 
 export const DEFAULT_BASE = "https://get.sagebrush.space/wasm/sha256/";
 export const LIMITS = { headersMs: 10_000, downloadMs: 60_000, attempts: 3, backoffMs: [1_000, 4_000], deadlineMs: 240_000, parallel: 2, staleMs: 3_600_000 };
@@ -211,15 +215,25 @@ export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_W
   }
 }
 
+// A release's check: the pins record this commit's own source, or it throws.  (`state`: pinsState(root), or a test's)
+export function requireCurrent({ root = ROOT, state = pinsState(root) } = {}) {
+  if (state !== "current") {
+    throw new Error("wasm-fetch --release: this commit's pin is pending (wasm/pins.json records another source's build, or none): a release ships only a commit whose pins are its own source's build. Tag the commit after master's pin commit (scripts/wasm-pin-commit.mjs).");
+  }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  const unknown = args.filter((a) => !["--offline", "--force"].includes(a));
+  const unknown = args.filter((a) => !["--offline", "--force", "--release"].includes(a));
   if (unknown.length) {
-    console.error(`wasm-fetch: unknown argument ${unknown[0]} (usage: node scripts/wasm-fetch.mjs [--offline] [--force])`);
+    console.error(`wasm-fetch: unknown argument ${unknown[0]} (usage: node scripts/wasm-fetch.mjs [--offline] [--force] [--release])`);
     process.exit(2);
   }
   try {
+    const state = pinsState();
+    if (args.includes("--release")) requireCurrent({ state });
     await fetchModules({ offline: args.includes("--offline"), force: args.includes("--force") });
+    if (state !== "current") console.log("::warning::wasm/pins.json records another source's build (this source's pin is pending: master's CI commits it after the merge): these modules are not this tree's engine. Build it for this source with node scripts/build-engine.mjs (or node scripts/engine-cache.mjs).");
   } catch (e) {
     console.error(e.message);
     process.exit(1);

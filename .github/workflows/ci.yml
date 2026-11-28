@@ -96,6 +96,11 @@ jobs:
         with:
           node-version: 24
       - run: git diff --check
+      # (a pull request never carries an engine pin: master's CI commits it after the merge, design/wasm-artifacts.md
+      # section 13; the merge commit's first parent is the base)
+      - name: a pull request carries no engine pin (scripts/wasm-pins.mjs --pr-check)
+        if: github.event_name == 'pull_request'
+        run: node scripts/wasm-pins.mjs --pr-check
       - name: public text adds no reviewer handles or local paths
         run: node scripts/test-public-text.mjs && node scripts/public-text.mjs
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -1677,8 +1682,9 @@ jobs:
   wasm-modules:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.wasm_build == 'true'
-    # (not on master's push: then its modules are what wasm-publish publishes, built on GitHub's runners)
-    runs-on: ${{ vars.SB_CI_RUNNER != '' && github.event_name == 'merge_group' && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (never on master's push in this repository: then its modules are what wasm-publish publishes and wasm-pins pins,
+    # built on GitHub's runners whatever the runner variables; design/wasm-artifacts.md section 13)
+    runs-on: ${{ github.repository == 'sagemathinc/sagebrush' && github.event_name == 'push' && github.ref == 'refs/heads/master' && 'ubuntu-24.04' || vars.SB_CI_RUNNER != '' && github.event_name == 'merge_group' && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1698,9 +1704,10 @@ jobs:
         run: |
           node scripts/build-engine.mjs
           node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
-          # (a mismatch with wasm/pins.json: labelled on a pull request, whose engine test jobs run it; every other
-          # reader of a pull request fails at install, and any other event fails here)
-          node scripts/wasm-artifact.mjs policy --allow-fresh
+          # (a mismatch with wasm/pins.json: labelled fresh while the pins are pending (they record another source: a
+          # change to the engine, before master's pin commit), and every reader uses this build; an error when they record
+          # this very source, and on a tag: design/wasm-artifacts.md section 13)
+          node scripts/wasm-artifact.mjs policy
           node scripts/wasm-artifact.mjs pack "$RUNNER_TEMP/wasm-modules"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -1709,7 +1716,8 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  # Publishes this run's modules to the release bucket (design/wasm-artifacts.md section 5): only for a push to master
+  # Publishes this run's modules to the release bucket (design/wasm-artifacts.md sections 5 and 13: the pinned build,
+  # or master's build of a source whose pin is pending, which wasm-pins then commits): only for a push to master
   # and a dispatch on master, in the wasm-publish environment (deployment branches: master; the bucket credentials).
   # Track refs never reach this job or its bucket-wide credential.  Never cancelled.  Each absent key is written with
   # a conditional write and read back; a present key must match.  Then a cold client checks every pin is served.
@@ -1743,6 +1751,55 @@ jobs:
       - name: every pin of this commit is served (a cold client)
         run: node scripts/wasm-pins.mjs --verify-published
 
+  # Master's pin commit (design/wasm-artifacts.md section 13): a pull request never carries a pin, so after a push to
+  # master whose pins are pending (they record another source), this job commits wasm/pins.json for this run's build,
+  # which wasm-publish has just published and read back.  Only for a push to master in this repository, in the wasm-pins
+  # environment (deployment branches: master), which holds the pins App's key; the App is the one actor master's ruleset
+  # lets push outside the merge queue.  Without the App (vars.SB_PINS_APP_CLIENT_ID unset) the job doesn't run: master's
+  # pins then stay pending, every run builds the modules it reads, and a release refuses the commit.  The commit changes
+  # exactly wasm/pins.json and is a fast-forward of this run's commit, never forced: when master has moved on, nothing is
+  # pushed, and the newer commit's own run pins it.  Its push starts its own CI run, which builds the modules again and
+  # fails unless they equal the pins it now records (scripts/ci-paths.mjs: pin_commit, no test runs again).
+  wasm-pins:
+    needs: [wasm-modules, wasm-publish]
+    if: github.repository == 'sagemathinc/sagebrush' && github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.wasm-publish.result == 'success' && vars.SB_PINS_APP_CLIENT_ID != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: wasm-pins
+    concurrency:
+      group: wasm-pins
+      cancel-in-progress: false
+    # (the workflow's read-only token: the only write is the App's, below)
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.SB_PINS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.SB_PINS_APP_KEY }}
+          # (the token: this repository's contents and nothing else, whatever more the App could grant)
+          repositories: sagebrush
+          permission-contents: write
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          token: ${{ steps.app.outputs.token }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: wasm-modules-${{ github.sha }}
+          path: ${{ runner.temp }}/wasm-modules
+      - name: commit and push this build's pins (a fast-forward of this commit, exactly wasm/pins.json)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          id=$(gh api "/users/${SLUG}[bot]" --jq .id)
+          git config user.name "${SLUG}[bot]"
+          git config user.email "${id}+${SLUG}[bot]@users.noreply.github.com"
+          node scripts/wasm-pin-commit.mjs "$RUNNER_TEMP/wasm-modules"
+
   engine-wasm:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true') }}
@@ -1772,7 +1829,6 @@ jobs:
         uses: ./.github/actions/wasm-modules
         with:
           artifact: "true"
-          allow-fresh: "true"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1797,7 +1853,7 @@ jobs:
           (cd engine && cargo build --release -p sagebrush-growth-probe --target wasm32-unknown-unknown)
           node engine/growth-probe/sweep.mjs engine/target/wasm32-unknown-unknown/release/sagebrush_growth_probe.wasm
           node engine/web/tests/wasm_designated.mjs
-          # (a stale pin: an ERROR on master pushes, dispatches, the schedule and a track's pull into master; a warning on other PRs and on track/*)
+          # (a build that differs from pins recording this very source: an ERROR on every event; from pending pins: reported)
           node scripts/check-fresh-wasm.mjs
           node scripts/third-party-notices.mjs --check
           pnpm run build
@@ -1830,7 +1886,6 @@ jobs:
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
-          allow-fresh: "true"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1876,7 +1931,6 @@ jobs:
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
-          allow-fresh: "true"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1915,7 +1969,6 @@ jobs:
       - uses: ./.github/actions/wasm-modules
         with:
           artifact: ${{ needs.wasm-modules.result == 'success' }}
-          allow-fresh: "true"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"

@@ -84,9 +84,12 @@ Notes:
   (`--remap-path-prefix=...=/home/runner/.cargo`, as the README shows). Without that, a plain
   `node scripts/build-engine.mjs` differs by a few bytes: the same engine, but not its pin.
   `node scripts/wasm-fetch.mjs --force` puts the pinned ones back, and `node scripts/wasm-pins.mjs --check` says
-  which you have. A change to the engine commits its new pins (`node scripts/wasm-pins.mjs --from-local` after the
-  mapped build, or the lines its pull request's CI prints). CI's `engine-wasm` job checks that a fresh build matches
-  the pins (an error on master, a warning on a pull request).
+  which you have. A pull request never changes `wasm/pins.json`, not even one that changes the engine: its CI builds
+  the modules and every job uses that build, and master's CI commits the new pins after the merge
+  (design/wasm-artifacts.md section 13). The pins record the source they are the build of (`"source"`); `node
+  scripts/wasm-pins.mjs --state` says whether they are this commit's (`current`) or still another source's
+  (`pending`). CI's `engine-wasm` job checks that a fresh build matches pins that record its own source (an error on
+  every event); pending pins only report the difference.
   `test-all.sh` runs that job as CI does, without the mapping, so locally it only warns.
 - **The atlas data** (`web/dist/atlas/data`, about 50 MB of JSON) isn't built by default: `bun web/build.ts` says
   it's missing. It's rebuilt from the engine as [web/atlas/README.md](web/atlas/README.md) describes, and needs the
