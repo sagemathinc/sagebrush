@@ -8,6 +8,7 @@
 import { pythonRoom, ELLIPSIS_BUDGET } from "./src/pyroom.ts";
 import { jsRoom } from "./src/jsroom.ts";
 import { laid } from "./src/roomlayout.ts";
+import { notebookRoom, parsed } from "./src/nbroom.ts";
 import { LIMITS, ROOM_TEXT, utf8Bytes } from "./src/read.ts";
 import { preparse } from "../../src/sagepre.ts";
 
@@ -74,6 +75,38 @@ for (const [lang, L] of Object.entries(langs)) {
   ok(r?.edges?.length === 141 * 140 && laid.rooms === before + 1, `${lang}: 141 functions calling each other (19,740 links) are laid out`, typeof r === "string" ? r : r?.edges?.length);
   before = laid.rooms;
   ok(refused(() => L.room(calling(150)), /more than 20000 links/) === true && laid.rooms === before, `${lang}: 150 of them (22,350 links) are refused before any layout begins`, laid.rooms - before);
+}
+
+// ---- a notebook's room: its cells and code admitted before any cell is parsed (parsed.cells, the sentinel)
+{
+  const nb = (cells, mode = "python") => ({ format: "sagebrush-notebook-cells", mode, cells });
+  const room = (x) => { try { return notebookRoom(x, { path: "n.ipynb" }); } catch (e) { return String(e?.message); } };
+  // (code exactly ROOM_TEXT in all, over two cells, € in it; then one byte more)
+  const half = ROOM_TEXT / 2, cell = (n, k) => ({ id: "c" + k, code: "x = 1\n#" + "€".repeat(1000) + "a".repeat(n - 7 - 3000) });
+  const at = [cell(half, 1), cell(half, 2)];
+  ok(at.reduce((n, c) => n + utf8Bytes(c.code), 0) === ROOM_TEXT, "the cells' code is exactly 1 MiB in UTF-8");
+  let before = parsed.cells;
+  const r1 = room(nb(at));
+  ok(r1?.nodes?.length === 2 && parsed.cells === before + 2, "a notebook of exactly 1 MiB of code is entered", r1);
+  before = parsed.cells;
+  ok(/too long to enter/.test(room(nb([cell(half, 1), cell(half + 1, 2)]))) && parsed.cells === before, "one byte more: refused before any cell is parsed");
+  // (as many cells as a space may have objects; one more is refused before any is parsed)
+  const many = (n) => Array.from({ length: n }, (_, k) => ({ id: "c" + k, code: "x = " + k }));
+  before = parsed.cells;
+  const r2 = room(nb(many(LIMITS.nodes)));
+  ok(r2?.nodes?.length === LIMITS.nodes && parsed.cells === before + LIMITS.nodes, `${LIMITS.nodes} cells are entered`, typeof r2 === "string" ? r2 : r2?.nodes?.length);
+  before = parsed.cells;
+  ok(/more than 4000 cells/.test(room(nb(many(LIMITS.nodes + 1)))) && parsed.cells === before, "one cell more: refused before any is parsed");
+  // (the count stops at the first cell past the limit: the next isn't even looked at)
+  let touched = false;
+  const later = { id: "later", get code() { touched = true; return "y = 2"; } };
+  ok(/too long to enter/.test(room(nb([{ id: "big", code: "#".repeat(ROOM_TEXT + 1) }, later]))) && !touched, "the count stops at the first cell past 1 MiB: the cell after it isn't read");
+  // (Sage: the preparser's work on ranges, summed over the cells)
+  const ranges = (k) => ({ id: "s" + k, code: "v = [1..2]\n".repeat(600) + "#" + "a".repeat(50000 - 6600 - 2) + "\n" }); // (600 ranges in 50,000 bytes: 3e7)
+  ok(utf8Bytes(ranges(0).code) === 50000, "a Sage cell of 600 ranges in 50,000 bytes (3e7)");
+  ok(room(nb([ranges(0)], "sage"))?.nodes?.length === 1, "one such cell is entered");
+  before = parsed.cells;
+  ok(/too long to enter/.test(room(nb([ranges(0), ranges(1)], "sage"))) && parsed.cells === before, "two (6e7 in all, over 5e7): refused before any is parsed");
 }
 
 console.log(failures ? `${failures} FAILED` : "all passed");

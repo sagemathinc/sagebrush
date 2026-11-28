@@ -1,7 +1,7 @@
 // The file browser (design/workspace-files.md §4): the workspace's tree, in
 // both pages: a sidebar (on a phone, a full-screen sheet).  Folders open and
 // close; an icon for each kind; Recent at the top; a search; each row's ⋯
-// (Open, Open in a new tab, Rename, Duplicate, Download, Copy path, Move to
+// (Open, Open in a new tab (a new window in the app), Rename, Duplicate, Download, Copy path, Move to
 // Trash); New (notebook, board, folder) and Upload; files dropped on a
 // folder are uploaded there; Trash, with Restore and, for the person alone,
 // Delete forever and Empty Trash.  Opening is the page's (host.open).
@@ -24,6 +24,11 @@ declare const __SB_NO_SYNC__: boolean | undefined;
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hooks fold away)
 declare const __SB_LATEX__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
+// (the 3D view's hooks, Open in 3D: offered only in a build with them and on its listed hosts, matched exactly (web/build.ts
+// SPACE_DEFINE: DEV only for now); their code is a chunk of its own, sagebrush-space3d.js (./space3d.ts), fetched when chosen)
+declare const __SB_SPACE__: boolean | undefined;
+declare const __SB_SPACE_HOSTS__: string[];
+// (each use tests the define first, so a build without them drops the use whole; openIn3D is at the end of this file)
 
 /** Empty Trash's question.  In the desktop app, whose Trash is a folder on the computer (.Trash in Sagebrush's
  * folder), it says that everything in it goes, a file changed by another program while it was there too. */
@@ -37,8 +42,10 @@ export type BrowserHost = {
   /** The document open in the page, if any: known by its id, wherever it is
    * moved to meanwhile (here, or in another tab). */
   current?: () => { kind: "notebook" | "board"; ref: string } | undefined;
-  /** Open an entry: in this page, or in a new tab. */
+  /** Open an entry: in this page, or in a new tab (in the desktop app, a new window: `windows`). */
   open(e: Entry, how: "here" | "tab"): void;
+  /** The desktop app (#1541): "tab" opens a window of the app's own, so the menu says "Open in a new window". */
+  windows?: boolean;
   /** A file the page opens in an editor of its own rather than the file preview (the board page: a .tex file in the
    * LaTeX editor, on the notebook page's /?tex=); true if it took the file. (The notebook page's own hook, __sbTex,
    * is web/latex/boot.ts's.) */
@@ -297,6 +304,8 @@ export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): vo
   /** "Export all current files (.zip)": the Storage panel, its export started (File ▸ Download ▸ Everything) */ exportAll(): void };
 
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
+  // (the desktop app, #1541: "tab" opens a window of the app's own; the page says so, or the app's markers do)
+  const inApp = host.windows ?? ((globalThis as any).__SB_DESKTOP_APP__ === true && !!(globalThis as any).__TAURI__);
   style();
   const w = host.ws;
   let entries: Entry[] = [], trashView = false, query = "", toast: { text: string; undo?: () => unknown; sticky?: boolean; error?: boolean; label?: string } | null = null;
@@ -742,7 +751,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     }
     const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
     const items: ([string, () => void, string?] | "-")[] = [];
-    if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], ["Open in a new tab", () => host.open(e, "tab")], "-");
+    if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], [inApp ? "Open in a new window" : "Open in a new tab", () => host.open(e, "tab")], "-");
     // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays; a .md
     //  by its first 4 KiB, read in at most 300 ms, else by its name: a Jupytext MyST one is a notebook)
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
@@ -753,6 +762,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
     if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
+    if (typeof __SB_SPACE__ !== "undefined" && __SB_SPACE__ && e.kind === "folder" && __SB_SPACE_HOSTS__.includes(location.hostname)) items.push(["Open in 3D", () => void openIn3D(w, e.path).catch(fail)]);
     items.push(["Copy path name", () => navigator.clipboard?.writeText(e.path).then(() => say(`Copied path '${e.path}'`), () => say(e.path))]);
     if (host.reveal) items.push(["Show in folder", () => reveal(e.path)]);
     // (only a person deletes old versions, §2.5)
@@ -1063,7 +1073,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }));
   upBtn.onclick = () => pick("/");
   // (Download everything: the Storage panel's export, offered here too, where a person looks for it)
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(host.reveal ? [["Show in folder", () => reveal("/")] as [string, () => unknown]] : []), ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
+  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(typeof __SB_SPACE__ !== "undefined" && __SB_SPACE__ && __SB_SPACE_HOSTS__.includes(location.hostname) ? [["Open all files in 3D", () => void openIn3D(w, "/").catch(fail)] as [string, () => unknown], ["3D view examples", () => void window.open("/space/", "_blank", "noopener")] as [string, () => unknown]] : []), ...(host.reveal ? [["Show in folder", () => reveal("/")] as [string, () => unknown]] : []), ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {
@@ -1116,4 +1126,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     // (the Storage panel, with its sync section: the page's account menu, workspace/account.ts)
     storage: () => void storage(),
   };
+}
+
+// (Open in 3D: its chunk, sagebrush-space3d.js (./space3d.ts), fetched when it is chosen)
+async function openIn3D(w: Workspace, folder: string): Promise<void> {
+  const m: typeof import("./space3d") = await import(new URL("/sagebrush-space3d.js", location.href).href);
+  return m.openIn3D(w, folder);
 }

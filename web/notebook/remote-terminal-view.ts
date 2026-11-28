@@ -267,7 +267,7 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if (event.type !== "keydown") return true;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && term?.hasSelection()) return false;
-      if ((event.ctrlKey || event.metaKey) && event.key === "v") return false;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") return false;
       return true;
     });
     // Ported from CoCalc packages/frontend/frame-editors/terminal-editor/connected-terminal.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)

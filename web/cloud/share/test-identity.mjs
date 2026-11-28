@@ -59,7 +59,8 @@ function sign(claims, { kid = "k1", key = k1.privateKey, alg = "RS256" } = {}) {
   const s = alg === "RS256" ? createSign("RSA-SHA256").update(`${h}.${p}`).sign(key).toString("base64url") : "";
   return `${h}.${p}.${s}`;
 }
-const claimsFor = (subject, sid, extra = {}) => ({ iss: ISSUER, sub: subject, sid, client_id: CLIENT, iat: nowS(), exp: nowS() + 300, ...extra });
+// (auth_time: AuthKit's time of the last active sign-in, on every access token it issues)
+const claimsFor = (subject, sid, extra = {}) => ({ iss: ISSUER, sub: subject, sid, client_id: CLIENT, iat: nowS(), exp: nowS() + 300, auth_time: nowS(), ...extra });
 
 async function outbound(req) {
   const u = new URL(req.url);
@@ -1213,6 +1214,150 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
     await db.prepare("INSERT INTO identity_email_clock (id, n) VALUES (1, 1000000)").run();
     ok(sb.cb.status === 503 && asked === 0 && rr.status === 200 && row.refresh_failed !== null && JSON.stringify(after) === JSON.stringify(before), `F4 without a ticket: sign-in 503 before WorkOS is asked (${sb.cb.status}, ${asked} asks), a refresh an outage (${rr.status}, refresh_failed set), the address unchanged (${JSON.stringify(after)})`);
   }
+}
+
+// ---- 9. re-authentication (sessions.reauth_ms; re-auth d2 §1, §3; T4, T5, C1-C3)
+{
+  const tok = (c) => c.slice(c.indexOf("=") + 1);
+  const rowOf = (c) => db.prepare("SELECT reauth_ms, validated, created FROM sessions WHERE token_hash = ?1").bind(createHash("sha256").update(tok(c)).digest("hex")).first();
+  const stateOf = (b) => JSON.parse(Buffer.from(tok(b.oauth).split(".")[0], "base64url").toString());
+  /** a sign-in state signed as workosLogin signs one (the test holds SESSION_KEY), as the OAuth cookie */
+  const signed = (st) => {
+    const payload = b64url(JSON.stringify(st));
+    return `__Host-sb_oauth=${payload}.${createHmac("sha256", "session-key").update("workos-oauth\n" + payload).digest("hex")}`;
+  };
+  /** a sign-in's start, /auth/login?return=/x plus `q` */
+  const login = async (q) => {
+    const r = await fetchSite(mf, `/auth/login?return=%2Fx${q}`);
+    const loc = r.headers.get("location");
+    return { r, to: loc ? new URL(loc) : null, oauth: cookieOf(r, "__Host-sb_oauth") };
+  };
+  /** the callback for `b`, with its own cookie (or `oauth`), the code's options, an extra cookie and query */
+  const callback = (b, subject, sid, { oauth = b.oauth, cookie, query = "", ...opts } = {}) => {
+    const code = b64url(Buffer.from(Math.random().toString()));
+    fake.codes.set(code, { subject, sid, challenge: b.to.searchParams.get("code_challenge"), ...opts });
+    return fetchSite(mf, `/auth/callback?code=${code}&state=${b.to.searchParams.get("state")}${query}`, { headers: { cookie: cookie ? `${oauth}; ${cookie}` : oauth } });
+  };
+  const within = (v, t0, t1) => Number.isSafeInteger(v) && v >= t0 - 1000 && v <= t1 + 1000;
+
+  // T5: the authorize URL with reauth=1 is the default's plus max_age=0, once; the signed state carries reauth: true
+  const params = (b) => [...b.to.searchParams].filter(([k]) => k !== "state" && k !== "code_challenge").map(([k, v]) => `${k}=${v}`).sort();
+  const dflt = await login(""), re = await login("&reauth=1");
+  const extra = params(re).filter((p) => !params(dflt).includes(p));
+  ok(re.r.status === 302 && JSON.stringify(extra) === JSON.stringify(["max_age=0"]) && params(dflt).every((p) => params(re).includes(p)), `RA1 reauth=1 adds exactly max_age=0 to the authorize URL (${extra})`);
+  ok(re.to.searchParams.getAll("max_age").length === 1 && re.to.searchParams.getAll("provider").join() === "authkit" && dflt.to.searchParams.getAll("provider").join() === "authkit", "RA1 max_age once; provider=authkit once, in both");
+  ok(re.to.searchParams.get("state")?.length === dflt.to.searchParams.get("state")?.length && re.to.searchParams.get("code_challenge_method") === "S256" && re.to.searchParams.get("redirect_uri") === `${SITE}/auth/callback`, "RA1 state, PKCE and redirect_uri as the default's");
+  ok(stateOf(re).reauth === true && !("reauth" in stateOf(dflt)), "RA1 the signed state carries reauth: true only for reauth=1");
+  for (const q of ["&reauth=0", "&reauth=", "&reauth=true", "&reauth=11", ""]) {
+    const b = await login(q);
+    ok(!b.to.searchParams.has("max_age") && !("reauth" in stateOf(b)), `RA2 ${q || "no reauth"}: the default login`);
+  }
+  for (const ret of ["//evil.test/x", "https://evil.test/x"]) {
+    const r = await fetchSite(mf, `/auth/login?return=${encodeURIComponent(ret)}&reauth=1`);
+    const st = JSON.parse(Buffer.from(tok(cookieOf(r, "__Host-sb_oauth")).split(".")[0], "base64url").toString());
+    ok(r.status === 302 && st.reauth === true && st.ret === "/", `RA3 reauth=1 keeps the return check: ${ret} becomes / (${st.ret})`);
+  }
+
+  // T4: only a callback whose SIGNED state carries reauth sets reauth_ms; it is D1's clock when the session is made
+  const t0 = Date.now();
+  const ra = await callback(await login("&reauth=1"), "user_01REAUTH", "session_01RA1");
+  const t1 = Date.now();
+  const sa = cookieOf(ra, "__Host-sb_session");
+  const rowA = await rowOf(sa);
+  ok(ra.status === 302 && within(rowA?.reauth_ms, t0, t1), `RA4 a re-authentication's session: reauth_ms now (${rowA?.reauth_ms}, ${t0}..${t1})`);
+  const plain = cookieOf(await callback(await login(""), "user_01REAUTH", "session_01RA2"), "__Host-sb_session");
+  ok((await rowOf(plain))?.reauth_ms === null, "RA4 an ordinary sign-in's session: NULL");
+  const viaUrl = cookieOf(await callback(await login(""), "user_01REAUTH", "session_01RA3", { query: "&reauth=1&max_age=0" }), "__Host-sb_session");
+  ok(viaUrl && (await rowOf(viaUrl))?.reauth_ms === null, "RA4 reauth=1 on the callback URL with a state without it: NULL");
+  // (a refresh moves validated and never reauth_ms)
+  await db.prepare("UPDATE sessions SET validated = ?2, expires = ?3, refresh_failed = NULL WHERE provider_sid = ?1").bind("session_01RA1", nowS() - 3700, nowS() - 1).run();
+  const calls = fake.refreshCalls;
+  ok((await me(sa)).status === 200 && fake.refreshCalls === calls + 1, "RA5 the re-authenticated session is refreshed past its hour");
+  const rowA2 = await rowOf(sa);
+  ok(rowA2.validated > rowA.validated - 3700 + 1 && rowA2.reauth_ms === rowA.reauth_ms, `RA5 the refresh moved validated, not reauth_ms (${rowA2.reauth_ms})`);
+  // (the session a re-authentication replaces is ended, its WorkOS session queued; an ordinary sign-in replaces nothing)
+  const outbox = (sid) => db.prepare("SELECT COUNT(*) n FROM revoke_outbox WHERE sid = ?1 AND reason = 'replaced'").bind(sid).first().then((r) => r.n);
+  const prior = cookieOf(await callback(await login(""), "user_01REAUTH", "session_01RA4"), "__Host-sb_session");
+  const kept = await callback(await login(""), "user_01REAUTH", "session_01RA5", { cookie: prior });
+  ok(kept.status === 302 && (await me(prior)).status === 200 && (await outbox("session_01RA4")) === 0, "RA6 an ordinary sign-in leaves the browser's earlier session as it was");
+  const rb = await callback(await login("&reauth=1"), "user_01REAUTH", "session_01RA6", { cookie: prior });
+  const sb = cookieOf(rb, "__Host-sb_session");
+  const parts = { status: rb.status, me: (await me(prior)).status, row: !!(await rowOf(prior)), outbox: await outbox("session_01RA4"), revoked: fake.revoked.includes("session_01RA4") };
+  ok(parts.status === 302 && parts.me === 401 && !parts.row && (parts.outbox === 1 || parts.revoked), `RA6 a re-authentication ends the session it replaces (401 after), its WorkOS session queued or already revoked (${JSON.stringify(parts)})`);
+  ok((await me(sb)).status === 200 && (await rowOf(sb))?.reauth_ms !== null, "RA6 and its own session stands, re-authenticated");
+  const same = cookieOf(await callback(await login(""), "user_01REAUTH", "session_01RA7"), "__Host-sb_session");
+  const rs = await callback(await login("&reauth=1"), "user_01REAUTH", "session_01RA7", { cookie: same });
+  await fetchSite(mf, "/__drain", { method: "POST" });
+  ok(rs.status === 302 && !(await rowOf(same)) && (await outbox("session_01RA7")) === 0 && !fake.revoked.includes("session_01RA7") && (await me(cookieOf(rs, "__Host-sb_session"))).status === 200, "RA6 a replaced session sharing the new session's WorkOS sid: ended, that sid never queued nor revoked, the new session stands");
+
+  // C1: the state's life, its signature, its single use
+  const base = await login("");
+  const st0 = stateOf(base);
+  const life = async (startedAgo, label, want) => {
+    const b = await login("");
+    const st = { ...stateOf(b), reauth: true, started: Date.now() - startedAgo };
+    const r = await callback(b, "user_01REAUTH", `session_01C1${label}`, { oauth: signed(st) });
+    const v = (await rowOf(cookieOf(r, "__Host-sb_session") ?? "x=x"))?.reauth_ms;
+    ok(r.status === 302 && (want ? v !== null : v === null), `C1 a re-authentication state that started ${startedAgo} ms ago: ${want ? "set" : "NULL"} (${v})`);
+  };
+  await life(600_000 + 500, "a", false);
+  await life(600_000 - 30_000, "b", true);
+  const until = 1_800_000_000_000;
+  const at = async (now, u) => (await (await fetchSite(mf, "/__reauthAt", { method: "POST", body: JSON.stringify({ now, until: u }) })).json()).v;
+  const edge = [await at(until, until), await at(until + 1, until), await at(until - 1, until), await at(until, null)];
+  ok(JSON.stringify(edge) === JSON.stringify([until, null, until - 1, null]), `C1 the window at the millisecond: its last moment set, one past NULL, none without a state's (${edge})`);
+  const forged = { ...st0, reauth: true };
+  const bad = signed(forged).replace(/.$/, (c) => (c === "a" ? "b" : "a"));
+  const nBefore = (await db.prepare("SELECT COUNT(*) n FROM sessions").first()).n;
+  const rbad = await callback(base, "user_01REAUTH", "session_01C1c", { oauth: bad });
+  ok(rbad.status === 400 && !cookieOf(rbad, "__Host-sb_session") && (await db.prepare("SELECT COUNT(*) n FROM sessions").first()).n === nBefore, `C1 a state claiming reauth under a bad signature: refused, no session (${rbad.status})`);
+  const used = await login("&reauth=1");
+  await callback(used, "user_01REAUTH", "session_01C1d");
+  const again = await callback(used, "user_01REAUTH", "session_01C1e");
+  ok(again.status === 400 && !cookieOf(again, "__Host-sb_session"), `C1 a re-authentication state used again: refused, nothing set again (${again.status})`);
+
+  // C2: the sign-in's time is the access token's auth_time, against the state's started; iat (this exchange's own) proves none
+  const timed = async (claims, label) => {
+    const b = await login("&reauth=1");
+    const S = Math.floor(stateOf(b).started / 1000);
+    const c = claimsFor("user_01REAUTH", `session_01C2${label}`, claims(S));
+    for (const k of Object.keys(c)) if (c[k] === undefined) delete c[k];
+    const r = await callback(b, "user_01REAUTH", `session_01C2${label}`, { token: sign(c) });
+    return { status: r.status, v: (await rowOf(cookieOf(r, "__Host-sb_session") ?? "x=x"))?.reauth_ms };
+  };
+  const c2 = {
+    iatNow: await timed(() => ({ auth_time: undefined }), "a"),
+    iatSame: await timed((S) => ({ auth_time: undefined, iat: S }), "b"),
+    authBefore: await timed((S) => ({ auth_time: S - 1 }), "c"),
+    authSame: await timed((S) => ({ auth_time: S, iat: S - 1 }), "d"),
+    authFraction: await timed((S) => ({ auth_time: S + 0.5 }), "e"),
+    authText: await timed((S) => ({ auth_time: String(S) }), "f"),
+  };
+  ok(c2.iatNow.status === 302 && c2.iatNow.v === null, `C2 a token without auth_time, its iat now: NULL (${JSON.stringify(c2.iatNow)})`);
+  ok(c2.iatSame.status === 302 && c2.iatSame.v === null, `C2 a token without auth_time, its iat in the attempt's second: NULL (${JSON.stringify(c2.iatSame)})`);
+  ok(c2.authBefore.status === 302 && c2.authBefore.v === null, `C2 auth_time before the attempt started, iat now: NULL (${JSON.stringify(c2.authBefore)})`);
+  ok(c2.authSame.status === 302 && c2.authSame.v !== null, `C2 auth_time in that second, iat before it: set, auth_time is the one read (${JSON.stringify(c2.authSame)})`);
+  ok(c2.authFraction.status === 302 && c2.authFraction.v === null && c2.authText.status === 302 && c2.authText.v === null, `C2 an auth_time that isn't whole seconds, or isn't a number: NULL (${JSON.stringify([c2.authFraction, c2.authText])})`);
+
+  // C3: the migration: rows from before it read NULL; the CHECK; the column
+  const m2 = worker(bindings);
+  const d2 = await m2.getD1Database("SHARE_DB");
+  for (const { name, path: m } of migrations()) {
+    if (name === "0018_session_reauth.sql") await d2.prepare("INSERT INTO accounts (account_id, created, last_login) VALUES ('a', 1, 1)").run().then(() => d2.prepare("INSERT INTO sessions (token_hash, account_id, created, expires) VALUES ('h', 'a', 1, 2)").run());
+    for (const q of readFileSync(m, "utf8").replace(/--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await d2.prepare(q).run();
+  }
+  ok((await d2.prepare("SELECT reauth_ms FROM sessions WHERE token_hash = 'h'").first()).reauth_ms === null, "C3 a session from before the migration reads NULL");
+  const col = (await d2.prepare("PRAGMA table_info(sessions)").all()).results.find((c) => c.name === "reauth_ms");
+  ok(col && col.type === "INTEGER" && col.notnull === 0 && col.dflt_value === null, `C3 the column: INTEGER, nullable, no default (${JSON.stringify(col)})`);
+  const put = (v) => d2.prepare("UPDATE sessions SET reauth_ms = ?1 WHERE token_hash = 'h'").bind(v).run().then(() => "ok", () => "refused");
+  const ck = [await put(0), await put(9007199254740991), await put(-1), await put(9007199254740992), await put(null)];
+  ok(JSON.stringify(ck) === JSON.stringify(["ok", "ok", "refused", "refused", "ok"]), `C3 the CHECK: 0 to 2^53 - 1, or NULL (${ck})`);
+  await m2.dispose();
+
+  // /auth/dev (DEV only) sets it to now; D3 above refuses /auth/dev where DEV's gates aren't bound
+  const d0 = Date.now();
+  const dv = await fetchSite(mf, "/auth/dev", { method: "POST", headers: { "content-type": "application/json", origin: SITE }, body: JSON.stringify({ token: "dev-token", account_id: "55555555-5555-4555-8555-555555555555" }) });
+  ok(dv.status === 200 && within((await rowOf(cookieOf(dv, "__Host-sb_session")))?.reauth_ms, d0, Date.now()), "RA7 /auth/dev's session is re-authenticated now");
 }
 
 await mf.dispose();

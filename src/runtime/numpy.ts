@@ -814,19 +814,24 @@ function discover(x: any, depth: number, shape: number[] & { leaf?: number }, ki
     kinds.dt = kinds.dt ? promote(kinds.dt, D.float64) : D.float64;
     return;
   }
-  // (a Python int that neither int64 nor uint64 holds: an object array, as NumPy's discovery)
-  if (w.big !== undefined && w.dt === null && (w.big > 18446744073709551615n || w.big < -9223372036854775808n)) {
+  // (a Python int that neither int64 nor uint64 holds: an object array, as NumPy's discovery; in any mix, before
+  // promotion, so it never becomes a float64)
+  if (w.big !== undefined && w.dt === null && (w.big > U64MAX || w.big < I64MIN)) {
     (kinds as { big?: bigint }).big ??= w.big;
     throw OBJS;
   }
-  const dt = scalarDtype(w);
-  kinds.dt = kinds.dt ? promoteScalar(kinds.dt, dt, w) : dt;
+  // (a Python int is int64, as NumPy discovers it, or uint64 from 2**63 up to 2**64 - 1, past int64; then the
+  // dtypes promote as any others: with an int64, a uint64 makes float64)
+  const dt = pyIntDtype(w);
+  kinds.dt = kinds.dt ? promote(kinds.dt, dt) : dt;
 }
-// Python scalars inside a list promote as values (an int and a float give float64).
-function promoteScalar(a: DType, b: DType, w: Weak): DType {
-  if (w.dt === null && a.kind !== "b" && b === D.int64 && a.isInt) return a.itemsize >= 8 ? a : D.int64;
-  return promote(a, b);
+// A scalar's discovered dtype: a Python int is int64, or uint64 from 2**63 up to 2**64 - 1, past int64 (a caller has
+// sent one past both to an object array already); anything else its own.
+function pyIntDtype(w: Weak): DType {
+  return w.kind === "i" && w.dt === null && w.big !== undefined && w.big > I64MAX && w.big <= U64MAX ? D.uint64 : scalarDtype(w);
 }
+// Whether a Python int is past both int64 and uint64: an object array's, as NumPy discovers it.
+const pyIntPastWide = (w: Weak | null) => w !== null && w.kind === "i" && w.dt === null && w.big !== undefined && (w.big > U64MAX || w.big < I64MIN);
 function setDim(shape: number[] & { leaf?: number }, d: number, n: number) {
   if (shape.length === d) shape.push(n);
   else if (shape.length < d) inhomogeneous(d, shape);
@@ -883,8 +888,12 @@ function checkWeak(dt: DType, w: Weak) {
   if (isWide(dt) && w.inexact) wideRefuse(dt);
 }
 function checkWeakRange(dt: DType, w: Weak) {
-  if (w.big !== undefined && (dt.kind === "u" && dt.itemsize === 8 ? w.big < I64MIN || w.big > U64MAX : w.big < I64MIN || w.big > I64MAX)) raise(T.OverflowError, "Python int too large to convert to C long");
+  if (w.big !== undefined) cLongRange(dt, w.big);
   checkPyInt(dt, w.v);
+}
+// (a Python int no C long holds: NumPy's OverflowError, whatever the integer dtype; uint64 takes its own range)
+function cLongRange(dt: DType, big: bigint) {
+  if (dt.kind === "u" && dt.itemsize === 8 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, "Python int too large to convert to C long");
 }
 const MINMAX_OPS: Record<string, boolean> = { maximum: true, minimum: true, fmax: true, fmin: true };
 function bigMinMax(op: string, ct: DType, arr: NDArray, big: bigint): NDArray {
@@ -932,6 +941,7 @@ function admitWide(v: any, dt: DType): number {
     return v + 0;
   }
   if (typeof v === "bigint") {
+    cLongRange(dt, v);
     const lo = dt.kind === "u" ? 0n : -(2n ** 63n), hi = dt.kind === "u" ? 2n ** 64n - 1n : 2n ** 63n - 1n;
     if (v < lo || v > hi) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
     const n = Number(v);
@@ -989,7 +999,13 @@ function toNum(v: any, dt?: DType): number {
   }
   if (typeof v === "boolean") return +v;
   if (typeof v === "bigint") {
-    if (dt && dt.isInt && dt.itemsize === 8 && (v > 18446744073709551615n || v < -9223372036854775808n)) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
+    if (dt && dt.isInt) {
+      cLongRange(dt, v);
+      // (the dtype's range, the int in the message as it is, not as a double; every non-wide integer dtype has one, and
+      // int64/uint64 went to admitWide above)
+      const rg = RANGE[dt.name];
+      if (rg && (v < BigInt(rg[0]) || v > BigInt(rg[1]))) raise(T.OverflowError, `Python integer ${v} out of bounds for ${dt.name}`);
+    }
     // (into int64 or uint64 only if a double holds it exactly)
     if (dt && isWide(dt) && BigInt(Number(v)) !== v) wideRefuse(dt);
     return Number(v);
@@ -1478,6 +1494,94 @@ function reshape(a: NDArray, shape: number[]): NDArray {
   if (prod(shape) !== n) raise(T.ValueError, `cannot reshape array of size ${n} into shape ${shapeStr(shape)}`);
   const c = a.isC() ? a : copy(a);
   return viewOf(new NDArray(c.dt, c.data, shape, cStrides(shape), c.offset, c === a ? (a.base ?? a) : null), c);
+}
+// np.reshape and ndarray.reshape as NumPy's PyArray_Newshape (numpy/_core/src/multiarray/shape.c, BSD-3-Clause):
+// the same shape is a view; one unknown (negative) dimension is solved; then a view where the strides allow it
+// in the order asked for ('C' or 'F'; _attempt_nocopy_reshape), else a copy in that order. copy: 0 when needed,
+// 1 always, 2 never (NumPy's error). (The runtime's own reshape, above, keeps giving C-contiguous results.)
+function npShapeStr(vals: number[]): string {
+  // (NumPy's convert_shape_to_string: leading unknown dimensions dropped, later ones named newaxis)
+  let i = 0;
+  while (i < vals.length && vals[i] < 0) i++;
+  if (i === vals.length) return "()";
+  let s = `(${vals[i++]}`;
+  for (; i < vals.length; i++) s += vals[i] < 0 ? ",newaxis" : `,${vals[i]}`;
+  return s + (vals.length === 1 ? ",)" : ")");
+}
+function nocopyStrides(a: NDArray, dims: number[], f: boolean): number[] | null {
+  const od: number[] = [], os: number[] = [];
+  for (let i = 0; i < a.ndim; i++)
+    if (a.shape[i] !== 1) {
+      od.push(a.shape[i]);
+      os.push(a.strides[i]);
+    }
+  const ns = new Array(dims.length).fill(0);
+  let oi = 0, oj = 1, ni = 0, nj = 1;
+  while (ni < dims.length && oi < od.length) {
+    let np = dims[ni], op = od[oi];
+    while (np !== op) {
+      if (np < op) np *= dims[nj++];
+      else op *= od[oj++];
+    }
+    for (let ok = oi; ok < oj - 1; ok++) {
+      if (f ? os[ok + 1] !== od[ok] * os[ok] : os[ok] !== od[ok + 1] * os[ok + 1]) return null;
+    }
+    if (f) {
+      ns[ni] = os[oi];
+      for (let nk = ni + 1; nk < nj; nk++) ns[nk] = ns[nk - 1] * dims[nk - 1];
+    } else {
+      ns[nj - 1] = os[oj - 1];
+      for (let nk = nj - 1; nk > ni; nk--) ns[nk - 1] = ns[nk] * dims[nk];
+    }
+    ni = nj++;
+    oi = oj++;
+  }
+  // (the strides of the trailing length-1 axes: anything reasonable, as NumPy's)
+  let last = ni >= 1 ? ns[ni - 1] : 1;
+  if (f && ni >= 1) last *= dims[ni - 1];
+  for (let nk = ni; nk < dims.length; nk++) ns[nk] = last;
+  return ns;
+}
+function reshapeNp(a: NDArray, shape: number[], order: string, copyMode: number, copyC: (x: NDArray) => NDArray = (x) => copy(x)): NDArray {
+  const f = order === "F";
+  if (copyMode !== 1 && shape.length === a.ndim && shape.every((d, i) => d === a.shape[i]))
+    return viewOf(new NDArray(a.dt, a.data, a.shape.slice(), a.strides.slice(), a.offset, a.base ?? a), a);
+  const n = a.size, dims = shape.slice();
+  let unknown = -1, known = 1;
+  for (let i = 0; i < dims.length; i++) {
+    if (dims[i] < 0) {
+      if (unknown >= 0) raise(T.ValueError, "can only specify one unknown dimension");
+      unknown = i;
+    } else known *= dims[i];
+  }
+  const mismatch = () => raise(T.ValueError, `cannot reshape array of size ${n} into shape ${npShapeStr(shape)}`);
+  if (unknown >= 0) {
+    if (known === 0 || n % known !== 0) mismatch();
+    dims[unknown] = n / known;
+  } else if (known !== n) mismatch();
+  let src = a, strides: number[] | null = null;
+  const copyIn = () => {
+    if (copyMode === 2) raise(T.ValueError, "Unable to avoid creating a copy while reshaping.");
+    // (a copy in the order asked for: Fortran order as the C copy of the transpose, transposed back)
+    return f ? transpose(copyC(transpose(a, null)), null) : copyC(a);
+  };
+  if (copyMode === 1) src = copyIn();
+  else if (n > 0 && !(f ? fContig(a) : cContig(a))) {
+    strides = nocopyStrides(a, dims, f);
+    if (strides === null) src = copyIn();
+  }
+  if (strides === null) {
+    // (NumPy's _array_fill_strides: a dimension of size 0 isn't multiplied in, so np.empty(0).reshape((0, 2), order="F")
+    // has strides (8, 8), not (8, 0))
+    strides = new Array(dims.length);
+    let s = 1;
+    for (let i = 0; i < dims.length; i++) {
+      const d = f ? i : dims.length - 1 - i;
+      strides[d] = s;
+      if (dims[d] !== 0) s *= dims[d];
+    }
+  }
+  return viewOf(new NDArray(src.dt, src.data, dims, strides, src.offset, src === a ? (a.base ?? a) : (src.base ?? null)), src);
 }
 function transpose(a: NDArray, axes: number[] | null): NDArray {
   const ax = axes ?? a.shape.map((_, i) => a.ndim - 1 - i);
@@ -4048,9 +4152,12 @@ function strFromPy(x: any, dtype: any, objOK = false): StrArray | NDArray {
       if (objOK && dtype === null) throw OBJS;
       strRefuse();
     }
+    // (a Python int past int64 and uint64 among strings: an object array, as NumPy's; one past int64 only counts as
+    // uint64's 20 characters)
+    if (objOK && dtype === null && pyIntPastWide(w)) throw OBJS;
     const s = F.str(v);
     vals.push(s);
-    len = Math.max(len, w.dt ? defaultLen(w.dt) : given ? cpLen(s) : ({ b: 5, i: 21, f: 32, c: 64 } as Record<string, number>)[w.kind]);
+    len = Math.max(len, w.dt ? defaultLen(w.dt) : given ? cpLen(s) : w.kind === "i" ? defaultLen(pyIntDtype(w)) : ({ b: 5, f: 32, c: 64 } as Record<string, number>)[w.kind]);
   };
   walk(x, 0);
   const n = sized ? sd.n : Math.max(1, len);
@@ -5201,7 +5308,8 @@ newBuiltinModule("_numpy", (m) => {
   });
   fn("full", (shape: any, value: any, dtype: any = null) => {
     // (an object dtype, or a value no number or string is, such as None: every element that value)
-    if (objSpec(dtype) || (dtype === null && !anyArray(value) && !isSeq(value) && pyScalar(value) === null && !strLike(value))) return objFull(shapeArg(shape), value);
+    // (or a Python int past both int64 and uint64, an object array's, as NumPy discovers it)
+    if (objSpec(dtype) || (dtype === null && !anyArray(value) && !isSeq(value) && (pyScalar(value) === null || pyIntPastWide(pyScalar(value))) && !strLike(value))) return objFull(shapeArg(shape), value);
     // (a sequence whose discovered dtype is object, such as [None, 1]: that object array, broadcast)
     if (dtype === null && isSeq(value) && !strLike(value)) {
       const r: any = fromPy(value, null, undefined, true);
@@ -5223,7 +5331,8 @@ newBuiltinModule("_numpy", (m) => {
       return a;
     }
     const v = operand(value);
-    const dt = dtype !== null ? toDtype(dtype) : v.weak ? scalarDtype(v.weak) : v.arr.dt;
+    // (a Python int discovered as an array's element is: uint64 past int64, #2031)
+    const dt = dtype !== null ? toDtype(dtype) : v.weak ? pyIntDtype(v.weak) : v.arr.dt;
     const a = empty(shapeArg(shape), dt);
     assign(a, isWide(dt) && !(value instanceof NDArray) && !isPyFloat(value) ? fromPy(value, dt) : v.arr);
     return a;
@@ -5432,7 +5541,12 @@ newBuiltinModule("_numpy", (m) => {
   });
   fn("cumsum", (a: any, axis: any = null, dtype: any = null) => cumulative(asarray(a), opt(axis), false, opt(dtype)));
   fn("cumprod", (a: any, axis: any = null, dtype: any = null) => cumulative(asarray(a), opt(axis), true, opt(dtype)));
-  fn("reshape", (a: any, shape: any) => (a instanceof StrArray ? strReshape(a, shapeArg(shape)) : a instanceof ObjArray ? objReshape(a, shapeArg(shape)) : reshape(asarray(a), shapeArg(shape))));
+  fn("reshape", (a: any, shape: any, order: any = "C", copyMode: any = 0) => {
+    const o = String(order), c = Number(copyMode);
+    if (a instanceof StrArray) return strView(reshapeNp(N(a), shapeArg(shape), o, c, (x) => N(strCopy(strView(x)))));
+    if (a instanceof ObjArray) return objView(reshapeNp(NO(a), shapeArg(shape), o, c, (x) => NO(objCopy(objView(x)))));
+    return reshapeNp(asarray(a), shapeArg(shape), o, c);
+  });
   fn("transpose", (a: any, axes: any = null) => tr(a instanceof StrArray || a instanceof ObjArray ? a : asarray(a), axes === null ? null : shapeArg(axes)));
   fn("ravel", (a: any) => (a instanceof StrArray ? strReshape(a, [a.size]) : a instanceof ObjArray ? objReshape(a, [a.size]) : ravel(asarray(a))));
   fn("copy", (a: any) => (a instanceof StrArray ? strCopy(a) : a instanceof ObjArray ? objCopy(a) : copy(asarray(a))));
