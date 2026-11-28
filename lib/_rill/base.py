@@ -163,23 +163,39 @@ def _dbl_op(op, a, b):
         except ValueError:
             return math.inf if a == 0 else math.nan
     if op == "%%":
-        if b == 0:
-            return math.nan
-        if math.isinf(a):
-            return math.nan
-        if math.isinf(b):
-            return a if (a >= 0) == (b > 0) else b
-        r = math.fmod(a, b)
-        if r != 0 and (r < 0) != (b < 0):
-            r += b  # the result takes the divisor's sign, as R's %% does
-        return r
+        return _dbl_mod(a, b)
     if op == "%/%":
-        if b == 0:
-            if a == 0 or a != a:
+        # (R 4.5.3: NaN in, NaN out; a zero divisor or an infinite dividend gives a signed Inf, NaN when both are
+        # zero or both infinite; an infinite divisor gives 0, or -1 for opposite signs; else the floor of the exact
+        # quotient by R's own remainder, so 1 %/% 0.1 is 9, as 1 %% 0.1 is 0.1 short of 1; and Inf when a/b overflows)
+        if a != a or b != b:
+            return math.nan
+        if b == 0 or math.isinf(a):
+            if a == 0 or math.isinf(b):
                 return math.nan
             return math.copysign(math.inf, a) * math.copysign(1.0, b)
-        return math.floor(a / b)
+        if math.isinf(b):
+            return 0.0 if a == 0 or (a > 0) == (b > 0) else -1.0
+        if math.isinf(a / b):
+            return a / b
+        return float(math.floor((a - _dbl_mod(a, b)) / b))
     raise NotSupported("operator %s" % op)
+
+
+def _dbl_mod(a, b):
+    """R's %% of two doubles (R 4.5.3): NaN for a NaN, an infinite dividend or a zero divisor; by an infinite divisor,
+    the dividend when its sign is the divisor's (a zero keeping its own sign), else the divisor; NaN when a/b
+    overflows; otherwise the remainder with the divisor's sign, a zero one being +0."""
+    if a != a or b != b or b == 0 or math.isinf(a):
+        return math.nan
+    if math.isinf(b):
+        return a if a == 0 or (a > 0) == (b > 0) else b
+    if math.isinf(a / b):
+        return math.nan
+    r = math.fmod(a, b)
+    if r != 0 and (r < 0) != (b < 0):
+        r += b  # the result takes the divisor's sign, as R's %% does
+    return r if r != 0 else 0.0
 
 
 def arith(sess, call, args):
@@ -219,12 +235,21 @@ def arith(sess, call, args):
         else:
             xd = [as_double_scalar(e, x.type) for e in x.data]
             yd = [as_double_scalar(e, y.type) for e in y.data]
+            # (a missing value against another, R 4.5.3 on x86-64: for + - * / %/% the left one decides, so NaN + NA
+            # is NaN and NA + NaN is NA, but an NA that was integer stays NA (a logical one doesn't); ^ the right one, NaN^NA
+            # being NA and NA^NaN NaN; %% gives NA, but NaN for NA %% 0)
+            y_real_na = y.type in ("double", "logical")
             for i in range(n):
                 a, b = xd[i % nx], yd[i % ny]
                 if op == "^" and (a == 1 or b == 0):
                     out[i] = 1.0
                 elif a is None or b is None:
-                    out[i] = None
+                    if op == "%%":
+                        out[i] = math.nan if a is None and b == 0 else None
+                    elif op == "^":
+                        out[i] = math.nan if b is not None and b != b else None
+                    else:
+                        out[i] = math.nan if a is not None and a != a and y_real_na else None
                 else:
                     out[i] = _dbl_op(op, a, b)
         return RVector(rtype, out, _result_attrs(n, x, y))

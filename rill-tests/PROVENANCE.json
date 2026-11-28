@@ -25,6 +25,11 @@
    "out_sha256": "a31e78d56e98f6699b75f106877aedd4877ba9ae18f1609a2bcac9c50cb804d0",
    "r_sha256": "ad025b1ee03dd686a8d773350f1bd5976b23dc2b9ec7f2f476f518eb11aa6fc8"
   },
+  "rill-tests/arith/test_2.R": {
+   "cases": 10,
+   "out_sha256": "64994581c7d49148d87a9a61da12e373e047b8c5bfdec9b9f5f1fbb407345fa0",
+   "r_sha256": "0e8e387795c61aa834cd59f2316b98ee44598437677eb610a4dd6ff29018f00f"
+  },
   "rill-tests/core/test_1.R": {
    "cases": 103,
    "out_sha256": "b00e849f0c63a0082936f6b86aa1e1b89f6d31686a414f6d797370860f8c7477",
