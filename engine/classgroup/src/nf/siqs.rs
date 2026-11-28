@@ -12,7 +12,7 @@
 //! The polynomials of one a are its 2^(s - 1) values of b, visited in Gray
 //! code order so that each prime's sieve roots change by one addition (S. P.
 //! Contini, "Factoring integers with the self-initializing quadratic sieve",
-//! MA thesis, University of Georgia, 1997).  The multiplier is Knuth and
+//! 1997).  The multiplier is Knuth and
 //! Schroeppel's (R. D. Silverman, "The multiple polynomial quadratic sieve",
 //! Math. Comp. 48, 1987).  The layout follows the class group sieve
 //! (relations.rs) and C. Swenson's rust-qsieve (MIT); the parameter table
@@ -380,10 +380,16 @@ fn clear_column(rows: &mut [u64], pivot: &[u64], stride: usize, w: usize, bit: u
 }
 
 /// A nontrivial factor of n (odd, composite, not a perfect power), or None
-/// if no dependency splits n or no polynomial is left.  `seed` selects the
-/// polynomials: the same seed gives the same run.
+/// if no dependency splits n, no polynomial is left, or the engine's memory
+/// budget (the host's share) does not admit the sieve's memory_bound: the
+/// caller's ECM goes on without it.  `seed` selects the polynomials: the
+/// same seed gives the same run.
 pub fn siqs(n: &BigUint, seed: u64) -> Option<BigUint> {
-    siqs_with(n, &params(n.bits() as u64), seed, &mut Stats::default())
+    let bits = n.bits() as u64;
+    // (reserved before anything is built, held while the sieve runs)
+    let budget = sagebrush_poly::Budget::default();
+    let _held = budget.reserve(u64::try_from(memory_bound(bits)).ok()).ok()?;
+    siqs_with(n, &params(bits), seed, &mut Stats::default())
 }
 
 pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigUint> {
@@ -713,6 +719,22 @@ mod tests {
             assert_eq!(fb.t[i] as u64 * fb.t[i] as u64 % p, rem_u64(&kn, p));
             assert!(fb.divides(i, 7 * p) && !fb.divides(i, 7 * p + 1));
         }
+    }
+
+    // The sieve's memory is admitted by the engine's budget: refused, siqs
+    // gives None (and factor() goes on by ECM); admitted, it runs.
+    #[test]
+    fn the_sieve_runs_only_when_its_memory_is_admitted() {
+        let (p, q): (BigUint, BigUint) = ("1125899906842597".parse().unwrap(), "1125899906842589".parse().unwrap());
+        let n = &p * &q;
+        let small = sagebrush_poly::Limits { memory: memory_bound(n.bits() as u64) as u64 - 1, ..sagebrush_poly::Limits::DEFAULT };
+        assert_eq!(sagebrush_poly::with_default_limits(small, || siqs(&n, 1)), None);
+        let enough = sagebrush_poly::Limits { memory: memory_bound(n.bits() as u64) as u64, ..sagebrush_poly::Limits::DEFAULT };
+        let g = sagebrush_poly::with_default_limits(enough, || siqs(&n, 1)).unwrap();
+        assert!(g == p || g == q);
+        let mut want = vec![(BigInt::from(q.clone()), 1), (BigInt::from(p.clone()), 1)];
+        want.sort();
+        assert_eq!(sagebrush_poly::with_default_limits(small, || super::super::factor::factor(&BigInt::from(n.clone()))).unwrap(), want, "ECM without the sieve");
     }
 
     #[test]

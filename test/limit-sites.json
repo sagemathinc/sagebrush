@@ -583,6 +583,26 @@
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
+ "engine/classgroup/src/nf/siqs.rs :: siqs :: let _held = budget.reserve(u64::try_from(memory_bound(bits)).ok()).ok()?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve reserves its memory_bound through the engine Budget (the host share) before anything is built; refused, the sieve is skipped and ECM goes on, nothing refused to the user"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: siqs :: let budget = sagebrush_poly::Budget::default(); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "class group/number fields",
+  "reason": "the quadratic sieve reserves its memory_bound through the engine Budget (the host share) before anything is built; refused, the sieve is skipped and ECM goes on, nothing refused to the user"
+ },
  "engine/classgroup/src/nf/siqs.rs :: siqs_with :: if partials.len() < PARTIALS_MAX * want { #0": {
   "class": "none",
   "owner": "class group/number fields",
@@ -617,6 +637,31 @@
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: assert_eq!(sagebrush_poly::with_default_limits(small, || siqs(&n, 1)), None); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: assert_eq!(sagebrush_poly::with_default_limits(small, || super::super::factor::factor(&BigInt::from(n.clone()))).unwrap(), want, \"ECM without the sieve\"); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: let enough = sagebrush_poly::Limits { memory: memory_bound(n.bits() as u64) as u64, ..sagebrush_poly::Limits::DEFAULT }; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: let g = sagebrush_poly::with_default_limits(enough, || siqs(&n, 1)).unwrap(); #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
+ },
+ "engine/classgroup/src/nf/siqs.rs :: the_sieve_runs_only_when_its_memory_is_admitted :: let small = sagebrush_poly::Limits { memory: memory_bound(n.bits() as u64) as u64 - 1, ..sagebrush_poly::Limits::DEFAULT }; #0": {
+  "class": "none",
+  "owner": "class group/number fields",
+  "reason": "a test of the sieve's memory admission (smaller and exact memory limits): matched text that refuses nothing"
  },
  "engine/classgroup/src/realq.rs :: class_group_real_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
