@@ -50,3 +50,60 @@ show("unmasked negative raises", lambda: np.power(np.array([2]), np.array([-1]))
 show("list mask", lambda: (lambda out: (np.power(np.array([2, 3]), np.array([-1, 2]), out=out, where=[False, True]), out.tolist())[1])(np.array([7, 7])))
 show("float lanes", lambda: (lambda out: (np.power(np.array([0.0, 4.0]), np.array([-1.0, 0.5]), out=out, where=[False, True]), out.tolist())[1])(np.array([7.0, 7.0])))
 show("scalar exponent masked", lambda: (lambda out: (np.power(np.array([2, 3]), -1, out=out, where=[False, False]), out.tolist())[1])(np.array([7, 7])))
+# (the rows below: the exception's class only, NumPy's messages not matched)
+def show(tag, f):
+    try:
+        r = f()
+        print(tag, "|", (r.dtype.name, r.shape, r.tolist()) if isinstance(r, np.ndarray) else repr(r))
+    except Exception as e:
+        print(tag, "| !!", type(e).__name__)
+def _try(f):
+    try:
+        f()
+    except Exception:
+        pass
+# accumulate's loop resolved from the dtypes, no value computed: power's first element copied, never raised to itself;
+# out= in the loop of out's dtype and the input's (none, bitwise_or's into a float out, NumPy's TypeError, out
+# untouched); a comparison's refused but for bools; bools in int8 where NumPy's loops take them
+show("power.accumulate [-1] int8", lambda: np.power.accumulate(np.array([-1], np.int8)))
+show("power.accumulate [-1, 2] int8", lambda: np.power.accumulate(np.array([-1, 2], np.int8)))
+show("power.accumulate 3**20", lambda: np.power.accumulate(np.array([3 ** 20], np.int64)))
+show("power.accumulate empty", lambda: np.power.accumulate(np.array([], np.int8)))
+show("fmax.accumulate one int", lambda: np.fmax.accumulate(np.array([7])))
+show("fmax.accumulate empty int", lambda: np.fmax.accumulate(np.array([], int)))
+for u, x, odt in (("bitwise_or", np.array([1, 2], np.int8), np.float64), ("left_shift", np.array([1, 2], np.int8), np.float64),
+                  ("floor_divide", np.array([1, 2], np.int8), np.complex128), ("logical_or", np.array([1, 0]), bool),
+                  ("logical_or", np.array([1, 0]), np.complex128), ("true_divide", np.array([2, 3]), np.int64),
+                  ("true_divide", np.array([2, 3]), bool), ("hypot", np.array([3, 4]), np.int8), ("add", np.array([1, 2], np.int8), np.float64),
+                  ("equal", np.array([1, 2]), bool), ("equal", np.array([True, False]), bool), ("maximum", np.array([2], np.uint8), np.complex128)):
+    show(f"{u}.accumulate out {np.dtype(odt).name}", lambda: (lambda o: (getattr(np, u).accumulate(x, out=o), o)[1])(np.full(2 if x.size == 2 else 1, 7, odt)))
+    show(f"{u}.accumulate out {np.dtype(odt).name} untouched", lambda: (lambda o: (_try(lambda: getattr(np, u).accumulate(x, out=o)), o)[1])(np.full(2 if x.size == 2 else 1, 7, odt)))
+for u in ("equal", "less", "greater", "not_equal"):
+    show(f"{u}.accumulate ints", lambda: getattr(np, u).accumulate([1, 1, 2]))
+    show(f"{u}.accumulate bools", lambda: getattr(np, u).accumulate(np.array([True, False, True])))
+    show(f"{u}.accumulate empty bools", lambda: getattr(np, u).accumulate(np.array([], bool)))
+for u in ("left_shift", "floor_divide", "remainder", "maximum", "logical_xor"):
+    show(f"{u}.accumulate bools", lambda: getattr(np, u).accumulate(np.array([True, False, True])))
+# masked power: a weak scalar admitted first (its range); list and tuple operands; where=None computing no lane
+show("power masked weak -129", lambda: np.power(np.array([2, 3], np.int8), -129, out=np.array([7, 7], np.int8), where=False))
+show("power masked weak 300 uint8", lambda: np.power(np.array([2, 3], np.uint8), 300, out=np.array([7, 7], np.uint8), where=False))
+show("power masked weak -1 uint8", lambda: np.power(np.array([2, 3], np.uint8), -1, out=np.array([7, 7], np.uint8), where=False))
+show("power masked -1 kept lane", lambda: np.power(np.array([2, 3]), -1, where=np.array([False, True]), out=np.zeros(2, int)))
+show("power masked lists", lambda: (lambda o: (np.power([2, 3], [-1, 2], out=o, where=[False, True]), o)[1])(np.array([7, 7])))
+show("power masked tuples", lambda: (lambda o: (np.power((2, 3), (-1, -2), out=o, where=False), o)[1])(np.array([7, 7])))
+show("power masked list kept negative", lambda: np.power([2, 3], [-1, 2], out=np.array([7, 7]), where=[True, True]))
+for u in ("add", "power", "multiply"):
+    show(f"{u} where=None", lambda: (lambda o: (getattr(np, u)(np.array([2, 3]), np.array([-1, 2]), out=o, where=None), o)[1])(np.array([7, 7])))
+    show(f"{u} where=None shape", lambda: getattr(np, u)(np.array([2, 3]), 2, where=None).shape)
+# bools as lists and tuples, and dtype=bool, as NumPy's loops take them
+B = np.array([True, False])
+for u in ("square", "conjugate", "positive", "sign", "reciprocal", "negative", "absolute"):
+    show(f"{u} bool list", lambda: getattr(np, u)([True, False]))
+    show(f"{u} bool tuple", lambda: getattr(np, u)((True, False)))
+    show(f"{u} dtype=bool", lambda: getattr(np, u)(B, dtype=bool))
+for u in ("floor_divide", "remainder", "left_shift", "power", "add", "bitwise_and"):
+    show(f"{u} bool lists", lambda: getattr(np, u)([True, False], [True, True]))
+    show(f"{u} bools", lambda: getattr(np, u)(B, B))
+    show(f"{u} bool scalars", lambda: getattr(np, u)(True, np.True_))
+    show(f"{u} bool and int", lambda: getattr(np, u)(B, np.array([1, 2])))
+    show(f"{u} dtype=bool", lambda: getattr(np, u)(B, B, dtype=bool))

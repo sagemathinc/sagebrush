@@ -890,13 +890,19 @@ class ufunc:
         if casting not in _CASTINGS:
             raise ValueError("casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got %r)" % (casting,))
         scalars = not _builtins.any(isinstance(x, ndarray) for x in args)
+        if where is None:
+            where = False  # (NumPy's: None computes no lane, out left as it is)
         if dtype is None:
             args = self._bool_loop(args)
-        if where is not True and self._op == "power" and where is not None:
+        if where is not True and self._op == "power":
             # (a lane where= leaves out is never computed, as NumPy's: an integer power's negative exponent there no
-            # refusal; an array operand's left-out lanes given the exponent and base 1, which raise nothing)
+            # refusal; an array operand's (a list's or tuple's too) left-out lanes given the exponent and base 1, which
+            # raise nothing; the operands admitted first, a weak scalar out of its dtype's range NumPy's OverflowError)
             m = asarray(where)
             if m.dtype.kind == "b":
+                args = tuple(asarray(x) if isinstance(x, (list, tuple)) else x for x in args)
+                if dtype is None:
+                    self._result_dtype(args)
                 # (a scalar operand is in every lane: given as 1 only when no lane is computed)
                 none = not m.any()
                 args = tuple(_np.where3(m, x, array(1, dtype=x.dtype)) if isinstance(x, ndarray)
@@ -946,11 +952,13 @@ class ufunc:
         return asarray(self._apply([dummy(x) for x in args])).dtype
 
     def _bool_loop(self, args):
-        """bool operands as NumPy's loops take them: square, conjugate (the ufunc) and the shifts have no bool loop and
-        compute in int8; positive and sign have none at all, NumPy's UFuncTypeError"""
+        """bool operands (a list or tuple of bools too) as NumPy's loops take them: square, conjugate (the ufunc), the
+        shifts, floor_divide and remainder have no bool loop and compute in int8; positive and sign have none at all,
+        NumPy's UFuncTypeError"""
         op = self._op
-        if op not in ("square", "conjugate", "positive", "sign", "left_shift", "right_shift"):
+        if op not in ("square", "conjugate", "positive", "sign", "left_shift", "right_shift", "floor_divide", "remainder"):
             return args
+        args = tuple(asarray(x) if isinstance(x, (list, tuple)) else x for x in args)
         isbool = [isinstance(x, (_builtins.bool, bool_)) or (isinstance(x, ndarray) and x.dtype.kind == "b") for x in args]
         if not _builtins.all(isbool):
             return args
@@ -966,8 +974,11 @@ class ufunc:
         op = self._op
         if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
                 else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
-                else dt.kind == "c" and op in ("floor_divide", "remainder")):
+                else dt.kind == "c" and op in ("floor_divide", "remainder")
+                or dt.kind == "b" and op in ("square", "reciprocal", "power", "floor_divide", "remainder")):
             raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
+        if dt.kind == "b" and op in ("positive", "sign"):
+            raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types <class 'numpy.dtypes.BoolDType'> -> None" % self.__name__)
         return dt
 
     def _cast_in(self, x, i, dt, casting):
@@ -1121,14 +1132,15 @@ class ufunc:
             # float array into an int out accumulates in float, each result cast into out; an invalid conversion
             # warns "... in cast", then "... in accumulate")
             out = _one_out(out)
-            dt_in = dtype if dtype is not None else result_type(asarray(a).dtype, out.dtype)
-            # (a ufunc with no loop in that dtype (logical_or into a bool out from ints): its own loop, the results
-            # converted into out)
-            if dtype is None:
-                try:
-                    self._loop(dt_in)
-                except TypeError:
-                    dt_in = None
+            if self._op in _BOOL_OUT and self._op not in ("logical_or", "logical_and", "logical_xor") and asarray(a).dtype.kind != "b":
+                # (a comparison's bool output is not its operands' dtype: NumPy's refusal, out untouched)
+                raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types" % self.__name__)
+            # (the loop NumPy resolves from out's dtype and the input's, no value computed: logical_or's bool one into a
+            # bool out from ints, true_divide's float one into an int out; none, bitwise_or's into a float out, its
+            # TypeError, out untouched)
+            # (a logical ufunc's loop is bool whatever out's dtype: its own, the results converted into out)
+            dt_in = (dtype if dtype is not None else None if self._op in ("logical_or", "logical_and", "logical_xor")
+                     else self._acc_loop(out.dtype, asarray(a).dtype))
             r = asarray(self.accumulate(a, axis, dt_in))
             if r.shape != out.shape:
                 raise ValueError("provided out is the wrong size for the accumulation.")
@@ -1144,10 +1156,15 @@ class ufunc:
             return cumsum(a, axis=axis, dtype=dtype)
         if self._op == "multiply" and not (dtype is not None and _wraps_in(self._op, dt)):
             return cumprod(a, axis=axis, dtype=dtype)
-        # (the loop resolved first, as NumPy's: the ufunc's result dtype for the operand's (logical_or's bool for an
-        # int array), a loop it doesn't have refused even for one element or none; the first element cast to it)
-        one = moveaxis(a, axis, 0)[:1] if a.shape[axis] else zeros((1,), a.dtype)
-        rdt = asarray(self(one, one)).dtype
+        # (the loop resolved first, as NumPy's, from the dtypes, no value computed: the ufunc's result dtype for the
+        # operand's (logical_or's bool for an int array), a loop it doesn't have refused even for one element or none;
+        # a comparison's, whose bool output is not its operands' dtype, refused but for bools; the first element cast
+        # to it)
+        if self._op in _BOOL_OUT and self._op not in ("logical_or", "logical_and", "logical_xor") and a.dtype.kind != "b":
+            # (NumPy's class: equal's a UFuncTypeError, the others' a TypeError)
+            raise (_UFuncTypeError if self._op == "equal" else TypeError)("the resolved dtypes are not compatible with %s.accumulate. Resolved (dtype(%r), dtype(%r), dtype('bool'))"
+                            % (self.__name__, a.dtype.name, a.dtype.name))
+        rdt = self._acc_loop(a.dtype, a.dtype)
         if a.shape[axis] == 0:
             return zeros(a.shape, rdt)  # (empty, of the loop's dtype and the operand's shape)
         a = moveaxis(a, axis, 0)
@@ -1157,6 +1174,16 @@ class ufunc:
             acc = a[i].astype(rdt) if acc is None else self(acc, a[i])
             res.append(acc)
         return moveaxis(array(res, dtype=rdt), 0, axis)
+
+    def _acc_loop(self, dt1, dt2):
+        """accumulate's loop dtype for operands of dt1 and dt2, as NumPy resolves it, no value computed: the ufunc's on
+        empty operands (bools as _bool_loop takes them), its TypeError where it has none; a complex maximum, minimum,
+        fmax or fmin's the promoted dtype, an empty or one-element accumulation needing no operation"""
+        if self._op in ("maximum", "minimum", "fmax", "fmin"):
+            dt = result_type(dt1, dt2)
+            if dt.kind == "c":
+                return dt
+        return self._result_dtype(self._bool_loop((empty((0,), dt1), empty((0,), dt2))))
 
     def outer(self, A, B, **kw):
         A, B = asarray(A), asarray(B)
@@ -1227,10 +1254,11 @@ def float_power(x, y):
 
 
 def conjugate(x):
-    # (the ufunc has no bool loop: a bool operand computes in int8, as NumPy's; the method keeps bool)
-    if isinstance(x, (_builtins.bool, bool_)) or (isinstance(x, ndarray) and x.dtype.kind == "b"):
-        x = asarray(x).astype(int8)
+    # (the ufunc has no bool loop: a bool operand (a list of bools too) computes in int8, as NumPy's; the method
+    # keeps bool)
     x = asarray(x)
+    if x.dtype.kind == "b":
+        x = x.astype(int8)
     return x.conj() if x.ndim else x.conj()[()]
 
 
