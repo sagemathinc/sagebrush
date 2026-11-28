@@ -29,3 +29,20 @@ test("numpy-tests/run.py: a program failing on both sides is a failure; the same
   assert.equal(agreeing.status, 0, agreeing.stdout + agreeing.stderr);
   assert.match(agreeing.stdout, /1\/1 identical/);
 });
+
+// (each side's status checked on its own: the same output, failing under one side only, is a failure either way;
+// sys.implementation.name is "pyjs" under Sagebrush, "cpython" under CPython)
+test("numpy-tests/run.py: a program failing on one side only, with the same output, is a failure", () => {
+  const sb = harness({ "test_sb_only_fails.py": "import sys; print('same on both sides'); sys.exit(0 if sys.implementation.name == 'cpython' else 3)\n" });
+  assert.equal(sb.status, 1, sb.stdout + sb.stderr);
+  assert.match(sb.stdout, /exit status: numpy 0, sagebrush 3 \(both must be 0\)/);
+  const np = harness({ "test_np_only_fails.py": "import sys; print('same on both sides'); sys.exit(3 if sys.implementation.name == 'cpython' else 0)\n" });
+  assert.equal(np.status, 1, np.stdout + np.stderr);
+  assert.match(np.stdout, /exit status: numpy 3, sagebrush 0 \(both must be 0\)/);
+});
+
+test("numpy-tests/run.py: --dir with no directory is a usage error", () => {
+  const r = spawnSync("python3", [RUN, "--dir"], { encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /--dir needs a directory/);
+});

@@ -15,6 +15,8 @@ CLI = os.path.join(os.path.dirname(HERE), "dist", "src", "cli.js")
 argv = sys.argv[1:]
 if "--dir" in argv:
     i = argv.index("--dir")
+    if i + 1 == len(argv):
+        sys.exit("usage: run.py [--dir D] [-v] [NAME ...]: --dir needs a directory")
     HERE = os.path.abspath(argv[i + 1])
     del argv[i:i + 2]
 args = [a for a in argv if not a.startswith("-")]
