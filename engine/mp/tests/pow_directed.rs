@@ -58,3 +58,32 @@ fn every_other_power_is_the_references() {
     assert_eq!(n, 1492);
     assert!(bad.is_empty(), "{} of {}:\n{}", bad.len(), n, bad.join("\n"));
 }
+
+/// Near-integer exponents, t = +-(n +- 2^-j) for n = 1, 2 and j = 64, 192,
+/// of s = 2, 3, 10, at 1, 53 and 113 bits, every directed rounding, against
+/// MPFR's correctly rounded value (tests/data/pow-near-integer.txt): each on
+/// its side (a bound at a fixed precision left 2^-(1 - 2^-64) rounded up at
+/// 1 bit as 1/2, below the true value, until the precision was raised).
+#[test]
+fn near_integer_exponents_on_their_side() {
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/pow-near-integer.txt")).unwrap();
+    let (mut n, mut bad) = (0, vec![]);
+    for line in text.lines() {
+        let (code, rnd, s, t, prec, mpfr) = case(line);
+        let got = checked(|| mpf_pow(&s, &t, prec, rnd)).unwrap();
+        let w: Vec<&str> = mpfr.split(' ').collect();
+        let d = mpf_add(&got, &parse(&w), 0, Rnd::Down, true);
+        let up = code == "c" || code == "u";
+        if !(d.man.is_zero() || (d.sign == 0) == up) {
+            bad.push(format!("{} => {}", line, show(&Ok(got))));
+        }
+        n += 1;
+    }
+    assert_eq!(n, 576);
+    assert!(bad.is_empty(), "{} of {} on the wrong side:\n{}", bad.len(), n, bad.join("\n"));
+    // (the two cases from the review, exactly MPFR's: 2^-(1 - 2^-64) rounded
+    // up at 1 bit is 1, and 2^-(1 - 2^-192) at 53 bits is 1/2 + 2^-53)
+    let up = |t: &[&str], p| show(&checked(|| mpf_pow(&parse(&["0", "1", "1", "1"]), &parse(t), p, Rnd::Ceiling)));
+    assert_eq!(up(&["1", "ffffffffffffffff", "-64", "64"], 1), "0 1 0 1");
+    assert_eq!(up(&["1", &"f".repeat(48), "-192", "192"], 53), "0 10000000000001 -53 53");
+}
