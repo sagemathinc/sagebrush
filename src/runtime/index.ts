@@ -151,13 +151,15 @@ function funcStr(f: any): string {
 // as CPython's DICT_MERGE: a name given twice, also by a mapping that is not
 // a dict, is a TypeError, keys must be strings, and a KeyError from the
 // mapping's __getitem__ reads as a name given twice (format_kwargs_error).
-export function kwMerge(names: string[], values: any[], mapping: any, f?: any): void {
+// (defer: a key that isn't a string is kept, for kwStrings to refuse at the call, as CPython's merge of a call's
+// keywords leaves that check to the call: every later keyword and mapping runs first)
+export function kwMerge(names: string[], values: any[], mapping: any, f?: any, defer = false): void {
   const who = () => (f === undefined ? "" : funcStr(f) + " ");
   const twice = (key: string) => raise(T.TypeError, `${who()}got multiple values for keyword argument '${key}'`);
   if (mapping instanceof Obj.PyDict) {
     for (const [k, v] of mapping.$m) {
       const key = Obj.dictKeyOf(mapping, k);
-      if (typeof key !== "string") raise(T.TypeError, "keywords must be strings");
+      if (typeof key !== "string" && !defer) raise(T.TypeError, "keywords must be strings");
       if (names.includes(key)) twice(key);
       names.push(key);
       values.push(v);
@@ -182,11 +184,30 @@ export function kwMerge(names: string[], values: any[], mapping: any, f?: any): 
       if (typeof a !== "string") raise(T.TypeError, "keywords must be strings");
       twice(a);
     }
-    if (typeof k !== "string") raise(T.TypeError, "keywords must be strings");
+    if (typeof k !== "string" && !defer) raise(T.TypeError, "keywords must be strings");
     if (names.includes(k)) twice(k);
     names.push(k);
     values.push(v);
   });
+}
+
+// An explicit keyword after a ** mapping, at its place in the call: a name the call has already given is refused,
+// as CPython's merge of the keywords in order refuses it
+export function kwPut(names: string[], values: any[], key: string, value: any, f?: any): void {
+  if (names.includes(key)) raise(T.TypeError, `${f === undefined ? "" : funcStr(f) + " "}got multiple values for keyword argument '${key}'`);
+  names.push(key);
+  values.push(value);
+}
+
+// A run of explicit keywords after a ** mapping, merged once its values have all run, as CPython builds the run's
+// mapping and then merges it: a name the call has already given is refused there
+export function kwBatch(names: string[], values: any[], keys: string[], vals: any[], f?: any): void {
+  for (let i = 0; i < keys.length; i++) kwPut(names, values, keys[i], vals[i], f);
+}
+
+// The call's keywords, every one a string, checked at the call (kwMerge's deferred keys)
+export function kwStrings(names: any[]): void {
+  for (const n of names) if (typeof n !== "string") raise(T.TypeError, "keywords must be strings");
 }
 
 export function callEx(f: any, pos: any[], names: string[], values: any[], maps: any[]): any {
@@ -204,7 +225,8 @@ export function dictOf(...kv: any[]): Obj.PyDict {
 // natively; anything else gets an adaptor that forwards send() and throw()
 // and turns StopIteration(value) into the result of the `yield from`.
 export function yieldFrom(x: any): any {
-  if (Array.isArray(x) && (x as any).$cls === undefined) return x;
+  // (a list or a tuple too: its iterator through the adaptor, so that send(), throw() and close() reach it as
+  // CPython's, not a JS array's native delegation)
   const it = O.iter(x);
   if (it instanceof O.GenIter) return O.delegateTo(it.g);
   const target = it instanceof O.ProtoIter ? it.o : it;
@@ -1534,6 +1556,8 @@ export const R: any = {
   siteGet: Obj.siteGet,
   siteSet: Obj.siteSet,
   siteCall: Obj.siteCall,
+  siteMethod: Obj.siteMethod,
+  callLooked: Obj.callLooked,
   callObj: Obj.callObj,
   callKw: Obj.callKw,
   tooManyArgs: Obj.tooManyArgs,
@@ -1593,6 +1617,9 @@ export const R: any = {
   dflt,
   kwdflt,
   kwMerge,
+  kwPut,
+  kwBatch,
+  kwStrings,
   classDef,
   builtins: B.builtins,
   gname: B.gname,

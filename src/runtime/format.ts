@@ -740,13 +740,19 @@ export function fcat(...parts: string[]): string {
   return SP.joinChecked(parts, "");
 }
 
-export function fmt(v: any, conv: string | null, spec: string): string {
-  if (conv === "r") v = repr(v);
-  else if (conv === "s") v = str(v);
-  else if (conv === "a") v = repr(v).replace(/[^\x00-\x7f]/gu, (c) => {
+// A replacement field's conversion, !r, !s or !a (the compiled code applies it itself, before the field's format
+// specification runs, when that specification has fields of its own: CPython converts first)
+export function fconv(v: any, conv: string): string {
+  if (conv === "r") return repr(v);
+  if (conv === "s") return str(v);
+  return repr(v).replace(/[^\x00-\x7f]/gu, (c) => {
     const n = c.codePointAt(0)!;
     return n <= 0xff ? "\\x" + n.toString(16).padStart(2, "0") : n <= 0xffff ? "\\u" + n.toString(16).padStart(4, "0") : "\\U" + n.toString(16).padStart(8, "0");
   });
+}
+
+export function fmt(v: any, conv: string | null, spec: string): string {
+  if (conv !== null) v = fconv(v, conv);
   else if (spec === "" && typeof v === "string") return v;
   return format(v, spec);
 }

@@ -23,13 +23,16 @@ def used():
     return sys._sagebrush_heap_used()
 
 
+SLACK = 4096
+
+
 def per_object(make, bound):
     """(growth, noise): the live heap's growth per object made, the median
     of three trials, each over enough copies for about 8 MiB by the
     formula's bound (at most 2^21), held in a list made beforehand (so the
     holder's own growth isn't counted), less the same loop's growth making
     nothing; and that control's largest size per copy, the measurement's
-    own noise."""
+    own noise, with SLACK bytes a trial."""
     copies = max(32, min(1 << 21, (8 << 20) // bound))
     make(0)
 
@@ -48,7 +51,9 @@ def per_object(make, bound):
         c = trial(lambda i: None)
         got.append(trial(make) - c)
         noise = max(noise, abs(c))
-    return sorted(got)[1] / copies, noise / copies
+    # (plus SLACK bytes a trial: a one-off allocation in the measured window, a few hundred bytes, which a measured
+    # size exactly the formula's can show as 0.01 byte an object; a formula wrong by a field is 8 bytes an object)
+    return sorted(got)[1] / copies, (noise + SLACK) / copies
 
 
 def layouts(top):
