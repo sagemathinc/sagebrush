@@ -18,7 +18,7 @@
 //!   norms, bounding the sums of principal minors by Hadamard).
 
 use crate::nmod::{Modulus, Primes};
-use crate::nmod_mat::{Lu, Mat};
+use crate::nmod_mat::{Lu, Mat, Poll};
 use num_integer::Integer;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 use sagebrush_bigint::BigInt;
@@ -114,11 +114,16 @@ impl ZMat {
         assert_eq!(self.cols, o.rows, "matrix dimensions do not match");
         let (r, k, c) = (self.rows, self.cols, o.cols);
         let small = self.max_bits() + o.max_bits() + (64 - (k as u64).leading_zeros() as u64) < 126;
+        // Stop is polled every few milliseconds of multiply-adds, inside a
+        // row too (a row of a 1024 x 1024 product is a million of them)
+        let _phase = sagebrush_interrupt::enter("arith.mul");
+        let mut poll = Poll::new();
         if small {
             if let (Some(a), Some(b)) = (self.as_i64(), o.as_i64()) {
                 let mut d = Vec::with_capacity(r * c);
                 for i in 0..r {
                     for j in 0..c {
+                        poll.add(k);
                         let mut s = 0i128;
                         for l in 0..k {
                             s += a[i * k + l] as i128 * b[l * c + j] as i128;
@@ -132,6 +137,7 @@ impl ZMat {
         let mut d = Vec::with_capacity(r * c);
         for i in 0..r {
             for j in 0..c {
+                poll.add(k);
                 let mut s = BigInt::zero();
                 for l in 0..k {
                     if !self.d[i * k + l].is_zero() {
@@ -343,6 +349,10 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
     let mut pk = BigInt::one();
     let mut check = 4usize.min(max_iters);
     let mut iter = 0;
+    // a lifting step is n^2 k multiply-adds (the k solves through the LU
+    // and the residual): Stop is polled within it, not only between steps
+    let _phase = sagebrush_interrupt::enter("arith.solve_lift");
+    let mut poll = Poll::new();
     loop {
         if r128.is_none() && a64.is_some() {
             let lim = BigInt::from(1i128 << 120);
@@ -376,6 +386,7 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
             (Some(rv), Some(a64)) => {
                 for i in 0..n {
                     for j in 0..k {
+                        poll.add(n);
                         let mut s = 0i128;
                         for l in 0..n {
                             s += a64[i * n + l] as i128 * digit.d[l * k + j] as i128;
@@ -388,6 +399,7 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
             _ => {
                 for i in 0..n {
                     for j in 0..k {
+                        poll.add(n);
                         let s: BigInt = match &a64 {
                             Some(a64) => {
                                 let mut s = 0i128;
@@ -406,6 +418,7 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
             }
         }
         for (xi, &di) in x.iter_mut().zip(&digit.d) {
+            poll.add(1);
             if di != 0 {
                 *xi += &pk * BigInt::from(di);
             }

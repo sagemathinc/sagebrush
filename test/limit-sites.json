@@ -7270,6 +7270,61 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "lib/_sage_ffmat.py :: _NFCharge :: one row of the budget and nothing is kept.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "explained": true,
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge :: operation's working copy), against the budget for one matrix.  The #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "explained": true,
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge.__init__ :: self.limit = _heap_limit() // _HEAP_SHARE #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "explained": true,
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge.row :: if self.total > self.limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "explained": true,
+  "row": "inv-6"
+ },
+ "lib/_sage_ffmat.py :: _NFCharge.row :: self.total, self.limit, \"one matrix\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "linear algebra/runtime memory",
+  "explained": true,
+  "row": "inv-6"
+ },
  "lib/_sage_ffmat.py :: _admit_size :: anything is built, if not; its allowance is the budget, 1/_HEAP_SHARE #0": {
   "class": "2",
   "explained": true,

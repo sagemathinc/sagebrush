@@ -44,3 +44,35 @@ test("a matrix over AA whose entries each have their own field is refused, not c
   assert.match(lines[0], /^refused (NotImplementedError a |SagebrushMemoryError Not enough memory for th)/);
   assert.equal(lines[1], "[4 6]");
 });
+
+// A matrix over a number field is charged by its coordinates' sizes as well
+// as the field's degree: the degree alone (470 + 130 d bytes an entry)
+// admitted 32 x 32 entries 2^32768 + 32 i + j + a over QQ(sqrt 2) at 747,520
+// bytes, whose numerators alone retain 4.5 MB.
+
+test("a matrix over a number field of 32769-bit coordinates is refused, not built, in 96 MiB", () => {
+  // (the budget for one matrix is a quarter of the heap, 24 MiB; 64 x 64
+  // entries of 32769-bit coordinates are charged about 9.5 KB each, and
+  // refused within a row of the budget; the degree alone charged 3 MB)
+  const src = "x = polygen(QQ, 'x')\nK.<a> = NumberField(x^2 - 2)\n" +
+    "for c in ('matrix(K, 64, 64, lambda i, j: 2**32768 + 64*i + j + a)', 'matrix(K, 64, 64, [2**32768 + k + a for k in range(4096)])'):\n" +
+    " try:\n  M = eval(c)\n  print('built')\n" +
+    " except (NotImplementedError, MemoryError) as e:\n  print('refused', type(e).__name__, ' '.join(str(e).split())[:40])\n" +
+    "print(matrix(K, [[1, a]]) + matrix(K, [[a, 1]]))\n";
+  const r = run(["--max-old-space-size=96"], src, 300000);
+  assert.ifError(r.error);
+  assert.equal(r.status, 0, r.stderr.slice(-400));
+  const lines = r.stdout.trim().split("\n");
+  for (const l of lines.slice(0, 2)) assert.match(l, /^refused SagebrushMemoryError /);
+  assert.equal(lines[2], "[a + 1 a + 1]");
+});
+
+test("a matrix over a number field of small coordinates is admitted as before", () => {
+  // (the same shape, 17-bit coordinates: about 1.5 KB an entry charged)
+  const src = "x = polygen(QQ, 'x')\nK.<a> = NumberField(x^2 - 2)\n" +
+    "M = matrix(K, 64, 64, lambda i, j: 2^16 + 64*i + j + a)\nprint(M.dimensions(), M.rank())\n";
+  const r = run(["--max-old-space-size=96"], src);
+  assert.ifError(r.error);
+  assert.equal(r.status, 0, r.stderr.slice(-400));
+  assert.equal(r.stdout, "(64, 64) 2\n");
+});
