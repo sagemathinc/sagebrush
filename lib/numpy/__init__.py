@@ -198,7 +198,8 @@ class float64(float, floating):
 
     def __new__(cls, v=0.0):
         if isinstance(v, (list, tuple, ndarray)):
-            return asarray(v, float64)  # as NumPy: a sequence gives an array
+            a = asarray(v, float64)  # as NumPy: a sequence gives an array, a 0-d array its scalar
+            return a[()] if a.ndim == 0 else a
         return float.__new__(cls, v)
 
     def __repr__(self):
@@ -222,7 +223,8 @@ class float32(float, floating):
 
     def __new__(cls, v=0.0):
         if isinstance(v, (list, tuple, ndarray)):
-            return asarray(v, float32)
+            a = asarray(v, float32)
+            return a[()] if a.ndim == 0 else a
         return float.__new__(cls, _f32(v))
 
     def __repr__(self):
@@ -323,6 +325,12 @@ class complex128(complex, complexfloating):
     __slots__ = ()
     __hash__ = complex.__hash__
 
+    def __new__(cls, *args):
+        if len(args) == 1 and isinstance(args[0], (list, tuple, ndarray)):
+            a = asarray(args[0], complex128)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
+            return a[()] if a.ndim == 0 else a
+        return complex.__new__(cls, *args)
+
     def __repr__(self):
         r = complex.__repr__(self)
         return "np.complex128(%s)" % (r[1:-1] if r.startswith("(") else r)
@@ -335,6 +343,12 @@ class complex128(complex, complexfloating):
 class complex64(complex, complexfloating):
     __slots__ = ()
     __hash__ = complex.__hash__
+
+    def __new__(cls, *args):
+        if len(args) == 1 and isinstance(args[0], (list, tuple, ndarray)):
+            a = asarray(args[0], complex64)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
+            return a[()] if a.ndim == 0 else a
+        return complex.__new__(cls, *args)
 
     def __repr__(self):
         r = complex.__repr__(self)
@@ -785,6 +799,7 @@ class _UFuncTypeError(TypeError):
 
 
 _UFuncTypeError.__name__ = _UFuncTypeError.__qualname__ = "UFuncTypeError"
+_np.set_ufunc_type_error(_UFuncTypeError)
 
 
 def _out_cast(name, dt, out, casting):

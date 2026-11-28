@@ -1199,6 +1199,12 @@ export function tolist(a: NDArray): any {
 // NumPy's AxisError (numpy.exceptions, a ValueError and an IndexError), which the numpy
 // package hands over as it loads (set_axis_error); before that, an IndexError
 let axisError: any = null;
+// (and its UFuncTypeError, a TypeError, an in-place operator's refused cast: set_ufunc_type_error; before, a TypeError)
+let ufuncTypeError: any = null;
+function castRefused(msg: string): never {
+  if (ufuncTypeError) throw Obj.markRaised(Obj.callObj(ufuncTypeError, [msg]));
+  return raise(T.TypeError, msg);
+}
 function normAxis(ax: number, nd: number, prefix: string | null = null): number {
   const a = ax < 0 ? ax + nd : ax;
   if (a < 0 || a >= nd || !Number.isInteger(a)) {
@@ -5162,6 +5168,12 @@ newBuiltinModule("_numpy", (m) => {
     ["lshift", "left_shift"], ["rshift", "right_shift"],
   ];
   const isOperand = (o: any) => o instanceof NDArray || pyScalar(o) !== null || Array.isArray(o) || hasArrayProtocol(o);
+  // (NumPy's same_kind rule for an in-place operator's result into its target: no kind later than the target's in
+  // bool, unsigned, signed, float, complex; float64 into float32 and int64 into int8 allowed, as NumPy's, a signed
+  // int into an unsigned one or a float into an int refused)
+  const KIND_RANK: Record<string, number> = { b: 0, u: 1, i: 2, f: 3, c: 4 };
+  const INT8_BOOL = new Set(["floor_divide", "remainder", "left_shift", "right_shift"]);
+  const kindAllows = (src: DType, dst: DType) => (KIND_RANK[src.kind] ?? 9) <= (KIND_RANK[dst.kind] ?? -1);
   const boolOp = (op: string) => (op === "bitwise_and" ? "logical_and" : op === "bitwise_or" ? "logical_or" : op === "bitwise_xor" ? "logical_xor" : op);
   for (const [py, op] of BINOPS) {
     const pick = (a: any, b: any) => {
@@ -5180,10 +5192,13 @@ newBuiltinModule("_numpy", (m) => {
       if (!isOperand(o)) return NotImplemented;
       // (the target is the output: NumPy's words, before any computing)
       outWritable(a);
+      // (bools floor-divided, taken modulo or shifted compute in int8, as NumPy's loops: not storable in a bool target)
+      if (a.dt.kind === "b" && INT8_BOOL.has(op) && operand(o).arr.dt.kind === "b")
+        castRefused(`Cannot cast ufunc '${op}' output from dtype('int8') to dtype('bool') with casting rule 'same_kind'`);
       const f = py === "pow" ? fastScalarPower(a, o) : null;
       if (f !== null) {
         const r = unary(f, a);
-        if (r.dt !== a.dt && !(promote(r.dt, a.dt) === a.dt)) raise(T.UFuncTypeError ?? T.TypeError, `Cannot cast ufunc '${f}' output from dtype('${r.dt.name}') to dtype('${a.dt.name}') with casting rule 'same_kind'`);
+        if (r.dt !== a.dt && !(promote(r.dt, a.dt) === a.dt) && !kindAllows(r.dt, a.dt)) castRefused(`Cannot cast ufunc '${f}' output from dtype('${r.dt.name}') to dtype('${a.dt.name}') with casting rule 'same_kind'`);
         assign(a, r);
         return a;
       }
@@ -5192,7 +5207,7 @@ newBuiltinModule("_numpy", (m) => {
       if ((o === a || !(o instanceof NDArray && o.data.buffer === a.data.buffer)) && binary(pick(a, o), a, o, a, true) !== undefined) return a;
       const r = binary(pick(a, o), a, o);
       const rt = r.dt;
-      if (rt !== a.dt && !(promote(rt, a.dt) === a.dt)) raise(T.UFuncTypeError ?? T.TypeError, `Cannot cast ufunc '${op}' output from dtype('${rt.name}') to dtype('${a.dt.name}') with casting rule 'same_kind'`);
+      if (rt !== a.dt && !(promote(rt, a.dt) === a.dt) && !kindAllows(rt, a.dt)) castRefused(`Cannot cast ufunc '${op}' output from dtype('${rt.name}') to dtype('${a.dt.name}') with casting rule 'same_kind'`);
       assign(a, r);
       return a;
     });
@@ -5779,6 +5794,7 @@ newBuiltinModule("_numpy", (m) => {
   });
   // (lib/numpy's set_printoptions validates and passes every option)
   fn("set_axis_error", (cls: any) => ((axisError = cls), null));
+  fn("set_ufunc_type_error", (cls: any) => ((ufuncTypeError = cls), null));
   fn("set_printoptions", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => {
     printopts.precision = Number(precision);
     printopts.threshold = Number(threshold);
