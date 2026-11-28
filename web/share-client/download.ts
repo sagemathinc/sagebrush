@@ -54,7 +54,12 @@ export function createDownloadDialog(h: DownloadDialogHost) {
     //  way out before it starts lets it go, and closing meanwhile stops it)
     const ac = new AbortController();
     setBusy(ac);
-    await h.prepareNotebook?.();
+    // (a read that fails lets the reservation go, as every other way out before the start does)
+    try { await h.prepareNotebook?.(); } catch (e: any) {
+      setBusy(null);
+      out.textContent = `Couldn't read the notebook's images: ${e?.message ?? e}. Nothing was downloaded.`;
+      return;
+    }
     if (ac.signal.aborted || !picker.mine()) {
       if (!ac.signal.aborted) out.textContent = "The notebook changed since this was opened: open it again.";
       setBusy(null);

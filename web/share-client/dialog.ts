@@ -235,7 +235,12 @@ export function createShareDialog(h: ShareDialogHost) {
     // (its images read again first, then the notebook as it is now, bounded like any file, CORR-172-ASTRA-3; the publish
     //  is reserved before that read, so a second click meanwhile does nothing, and every way out before it starts lets it go)
     setBusy(true);
-    await h.prepareNotebook?.();
+    // (a read that fails lets the reservation go, as every other way out before the start does)
+    try { await h.prepareNotebook?.(); } catch (e: any) {
+      setBusy(false);
+      out.textContent = `Couldn't read the notebook's images: ${e?.message ?? e}. Nothing was published.`;
+      return;
+    }
     if (!d.open || !picker.mine()) {
       if (d.open) out.textContent = "The notebook changed since Share was opened: open Share again.";
       setBusy(false);

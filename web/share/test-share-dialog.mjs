@@ -441,6 +441,12 @@ try {
     await sleep(300);
     const after = await ev("({ prep: window.sagebrush.shareTest.prep, reads: window.sagebrush.shareTest.reads, busy: document.querySelector('#shareupload').getAttribute('aria-busy'), disabled: document.querySelector('#shareupload').disabled, link: !!document.querySelector('#shareresult a') })");
     ok(held.prep === 1 && held.busy === "true" && held.disabled && after.prep === 1 && after.link && after.busy === "false" && !after.disabled && after.reads.length === new Set(after.reads).size, "Publish clicked twice while the notebook's images are read: reserved at the first, one publish (each file read once), then idle again", { held, after });
+    // (and a read of the images that fails: the reservation let go, Publish idle and enabled again)
+    await ev("(() => { const nb = window.sagebrush.notebook; nb.imagesReady = () => Promise.reject(new Error('unreadable')); return true; })()");
+    await ev("document.querySelector('#shareupload').click()");
+    await sleep(500);
+    const failed = await ev("({ busy: document.querySelector('#shareupload').getAttribute('aria-busy'), disabled: document.querySelector('#shareupload').disabled, said: document.querySelector('#shareresult').textContent })");
+    ok(failed.busy === "false" && !failed.disabled && /^Couldn't read the notebook's images: unreadable\. Nothing was published\.$/.test(failed.said), "...and when reading the images fails, Publish is let go (idle and enabled again) and the dialog says so", failed);
     await ev("(() => { const nb = window.sagebrush.notebook, t = window.sagebrush.shareTest; nb.imagesReady = t.ready; t.onRead = null; return true; })()");
     await closeDialog();
   }
