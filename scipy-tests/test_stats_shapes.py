@@ -98,6 +98,9 @@ A3 = np.arange(24.0).reshape(2, 3, 4) ** 1.3
 A3[0, :, 1] = n
 for axis in (0, 1, -1):
     out("describe masked 3-d axis %d" % axis, lambda: tuple(st.describe(A3, axis=axis, nan_policy="omit")))
+# (two values left: bias=False corrects neither skewness (n > 2) nor kurtosis (n > 3); ddof=2 leaves the variance masked)
+for ddof in (1, 2):
+    out("describe masked two values bias False ddof %d" % ddof, lambda: tuple(st.describe([1.0, n, 3.0], nan_policy="omit", bias=False, ddof=ddof)))
 for label, a in [("1-d all nan", [n, n]), ("1-d one value", [n, 2.0]), ("1-d constant", [n, 2.0, 2.0]),
                  ("2-d all nan", np.full((2, 2), n))]:
     out("describe masked %s" % label, lambda: tuple(st.describe(a, nan_policy="omit")))
