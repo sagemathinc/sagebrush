@@ -535,11 +535,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       lastEmpty = empty;
       shownDigest = digest;
       lastIds = cells.map((x) => x.id);
-      if (stoppedHere) return holdCode("stopped", order.length > 0);
-      if (!confinedNow() && !mayRun(digest)) return holdCode("unconfined", order.length > 0);
+      const any = order.length > 0 || !empty;
+      if (stoppedHere) return holdCode("stopped", any);
+      if (!confinedNow() && !mayRun(digest)) return holdCode("unconfined", any);
       if (paused) { paused = false; $("runpaused").hidden = true; }
     } else if (paused) { $("runpaused").hidden = !order.length; return; }
-    if (order.length || code) engine()?.sync(cells, mode, d.seed, digest).catch((e) => console.warn("board: code items:", e));
+    // (a board of questions only, their checks its only code: given too, so its digest is the engines')
+    if (order.length || code || (gate && runnableOf(d)?.length)) engine()?.sync(cells, mode, d.seed, digest).catch((e) => console.warn("board: code items:", e));
   }
   async function show(d: BoardDoc, view = false, ifStill?: BoardDoc, by: "person" | "elsewhere" | "load" = "load"): Promise<boolean> {
     const g = loadGen, over = () => destroyed || g !== loadGen;
@@ -1046,7 +1048,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     c.onChange = () => { board.codeStates(); relayout(); drawer?.changed(); stoppedNow(["interrupted"]); };
     c.onRan = (ids) => { keepPreviews(c, ids).catch((e) => console.warn("board: previews:", e)); };
     // (a language's sync held at the gate: its interpreter turned out unconfined, the code not approved)
-    c.onHeld = () => { if (!destroyed && doc) holdCode("unconfined", codeOrder(doc).length > 0); };
+    c.onHeld = () => { if (!destroyed && doc) holdCode("unconfined", codeOrder(doc).length > 0 || !!runnableOf(doc)?.length); };
     c.cache = host.outputs ?? null;
     c.cacheId = outputsId;
     c.usePictures(docPixels);
@@ -1983,7 +1985,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       paused = false;
       $("runpaused").hidden = true;
       host.codeResumed?.();
-      if (order.length) engine()?.sync(cells, mode, d.seed, digest).catch((e) => console.warn("board: code items:", e));
+      if (order.length || code || runnableOf(d)?.length) engine()?.sync(cells, mode, d.seed, digest).catch((e) => console.warn("board: code items:", e));
       return;
     }
     paused = false;
@@ -1997,7 +1999,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("forgetrun").onclick = () => {
     if (!forget(shownDigest)) return say("The approval couldn't be forgotten in this browser.");
     host.codeGate?.approved?.();
-    if (doc && !confinedNow()) holdCode("unconfined", codeOrder(doc).length > 0);
+    if (doc && !confinedNow()) holdCode("unconfined", codeOrder(doc).length > 0 || !!runnableOf(doc)?.length);
     say("This board's code waits for Run again.");
   };
   // (what is being written kept first, and kept by the host: else this board stays, nothing uploaded

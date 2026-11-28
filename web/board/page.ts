@@ -74,7 +74,7 @@ import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showS
 // notice (a deletion's progress, its end) replaces or hides: board's N2 on 7e4ddd5b)
 onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
 import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
-import { mayRun } from "./capability";
+import { mayRun, testSwitch, gateHere } from "./capability";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { langOf } from "../code/langs";
@@ -475,9 +475,11 @@ const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
 // (whether this page holds the person's storage, which unconfined code could reach: Sagebrush's own board page, not a
 // downloaded file (its own origin) nor a sandboxed frame (no storage at all: reading it throws))
-// (?gate=0, on a loopback host only, as ?runner=0: tests of the engine in a plain worker, the gate not theirs to test)
-const gateOff = q.get("gate") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-const holdsStorage = !file && !gateOff && location.origin !== "null" && (() => { try { return !!globalThis.localStorage; } catch { return false; } })();
+// (?gate=0, for tests of the engine in a plain worker, the gate not theirs to test: only on an http: page of a loopback
+// host, never the desktop app's, capability.ts testSwitch; the gate on every page of this origin, its storage readable
+// or not, gateHere)
+const gateOff = testSwitch(q, "gate", location, !!(window as any).__TAURI__);
+const holdsStorage = gateHere({ file, origin: location.origin, gateOff });
 const runnerPill = createRunnerPill({ enabled: !file && !(window as any).__TAURI__ && q.get("runner-info") === "1" });
 // (the frame other sites show a board in, /frame/board/ (export.ts
 // frameHtml, design/frame.md): an exported page whose document its parent

@@ -90,6 +90,10 @@ export function gateWorker(w: any, confined: () => boolean, allowed: () => boole
     onmessage: null,
     onerror: null,
     postMessage(m: any, transfer?: Transferable[]) {
+      // (code is never posted without an id, worker-kernel.js: one that were is refused all the same, and dropped,
+      // there being no run to answer)
+      const code = !!m && typeof m === "object" && (m.code !== undefined || m.interact !== undefined || m.evaluate !== undefined);
+      if (code && m.id === undefined && !confined() && !allowed()) { refused.push(null); return; }
       if (m && typeof m === "object" && m.id !== undefined && !confined() && !allowed()) {
         refused.push(m.id);
         const say = (data: unknown) => queueMicrotask(() => g.onmessage?.({ data }));
@@ -113,6 +117,21 @@ export function gateWorker(w: any, confined: () => boolean, allowed: () => boole
   w.onmessage = (e: any) => g.onmessage?.(e);
   w.onerror = (e: any) => g.onerror?.(e);
   return g;
+}
+
+// ---- where the gate applies, and the tests' own switches
+
+/** A test's switch in the address (?runner=0, ?gate=0): honoured only on a plain http: page of a loopback host, never
+ * in the desktop app, whose pages are tauri://localhost (http://tauri.localhost on Windows), so a link there can't
+ * turn anything off. */
+export function testSwitch(q: URLSearchParams, name: string, loc: { protocol: string; hostname: string }, desktop: boolean): boolean {
+  return q.get(name) === "0" && !desktop && loc.protocol === "http:" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(loc.hostname);
+}
+/** Whether the gate applies on this page: every page of Sagebrush's own origin, its storage readable or not (not
+ * readable, nothing is approved: fail closed). None only where there is no storage by construction: a downloaded
+ * file's page (`file`) and a sandboxed frame (an opaque origin, "null"); and a test's ?gate=0. */
+export function gateHere(o: { file: boolean; origin: string; gateOff: boolean }): boolean {
+  return !o.file && !o.gateOff && o.origin !== "null";
 }
 
 // ---- a board whose last run was stopped opens paused (N1)

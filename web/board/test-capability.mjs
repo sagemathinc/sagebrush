@@ -18,6 +18,7 @@ globalThis.localStorage = {
   removeItem: (k) => mem.delete(k),
 };
 const cap = await import("./capability.ts");
+const { testSwitch, gateHere } = cap;
 const { codeDigest, runnableOf, KINDS, approve, approved, mayRun, allowOnce, forget, forgetAll, validApprovals, mergeApprovals, APPROVALS_MAX, gateWorker, NOT_APPROVED, markStopped, wasStopped, clearStopped, SEED } = cap;
 const { BOARD_SEED } = await import("./code.ts");
 const { cleanDoc } = await import("./doc.ts");
@@ -137,6 +138,40 @@ ok(SEED === BOARD_SEED, "the digest's default seed is code.ts's BOARD_SEED");
   ok(!sent.some((m) => m.id === 6), "approval forgotten (or the runner given up for a plain worker): the next code is refused at once");
   fake.onmessage({ data: { id: 4, done: true } });
   ok(heard.some((d) => d.id === 4 && d.done) && g.raw === fake, "what the worker says reaches the kernel; the worker itself is there for the pill");
+}
+
+// ---- where the gate applies, and the tests' switches (SEC's H1, C1)
+{
+  const Q = (s) => new URLSearchParams(s);
+  const at = (u) => { const x = new URL(u); return { protocol: x.protocol, hostname: x.hostname }; };
+  ok(testSwitch(Q("gate=0"), "gate", at("http://127.0.0.1:8765/board/"), false) && testSwitch(Q("gate=0"), "gate", at("http://localhost:8765/"), false), "?gate=0 on a loopback http: page (a test's server): honoured");
+  const not = [
+    ["the desktop app's page (tauri://localhost)", at("tauri://localhost/board/"), true],
+    ["the desktop app on Windows (http://tauri.localhost)", at("http://tauri.localhost/board/"), true],
+    ["a loopback page with the desktop app's globals", at("http://localhost/board/"), true],
+    ["sagebrush.space", at("https://sagebrush.space/board/"), false],
+    ["https on loopback", at("https://localhost/board/"), false],
+  ];
+  for (const [what, loc, desktop] of not) ok(!testSwitch(Q("gate=0&runner=0"), "gate", loc, desktop), `?gate=0 not honoured: ${what}`);
+  ok(!testSwitch(Q("gate=1"), "gate", at("http://127.0.0.1/"), false) && !testSwitch(Q(""), "gate", at("http://127.0.0.1/"), false), "only ?gate=0 itself");
+  ok(gateHere({ file: false, origin: "https://sagebrush.space", gateOff: false }), "the gate on Sagebrush's own page");
+  // (C1: own origin, storage unreadable (blocked site data, a policy): the gate stays, approving nothing)
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("SecurityError: access denied"); } });
+  const on = gateHere({ file: false, origin: "https://sagebrush.space", gateOff: false }), none = mayRun("a".repeat(64));
+  Object.defineProperty(globalThis, "localStorage", real);
+  ok(on && !none, "own origin, its storage unreadable (blocked site data): the gate stays on, and nothing is approved (fail closed)");
+  ok(!gateHere({ file: true, origin: "file://", gateOff: false }) && !gateHere({ file: false, origin: "null", gateOff: false }) && !gateHere({ file: false, origin: "http://127.0.0.1:8765", gateOff: true }), "no gate only where there is no storage by construction (a downloaded file, a sandboxed frame), or a test's ?gate=0");
+}
+// ---- code never crosses without an id: one that would is refused all the same (SEC's N1)
+{
+  const sent = [];
+  const g = gateWorker({ postMessage: (m) => sent.push(m), terminate() {} }, () => false, () => false);
+  g.postMessage({ code: "import os" });
+  g.postMessage({ interact: { x: 1 } });
+  g.postMessage({ evaluate: { code: "1" } });
+  g.postMessage({ init: { limits: {} } });
+  ok(sent.length === 1 && sent[0].init && g.refused.length === 3, "unconfined, not approved: a code-bearing message without an id is refused too (dropped); its start goes through", sent);
 }
 
 // ---- N1: a board whose run was stopped opens paused

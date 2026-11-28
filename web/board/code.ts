@@ -112,6 +112,9 @@ export class BoardCode {
   private token: string | null = null;
   private worker: any = null;
   private mod: any = null;
+  /** The board's code, by its digest, as decided before any item of this language is given (BoardCodes: a Check's own
+   * interpreter, made after the board was approved, has it from the start). */
+  allow(digest: string | null) { if (this.token === null) this.token = digest; }
   /** told when a sync was held at the gate: the worker turned out unconfined and the code isn't approved */
   onHeld?: () => void;
   /** Whether its worker is the runner's sandboxed frame (and not its fallback, nor a plain worker): before it is made,

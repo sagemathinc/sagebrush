@@ -162,6 +162,19 @@ try {
   await runIt();
   check(await A.until(`${outOf("late")}.then((o) => /LATE RAN/.test(o))`, 60000), "…and runs when the person presses it");
 
+  // (a board of questions only, their checks its only code: held unconfined, Run offered; Check runs nothing until the
+  // person runs it; then it does)
+  const revQ = await write({ title: "Asks", nodes: [{ id: "k", kind: "ask", input: "number", text: "Two?", answer: 2, check: "answer == 2" }], edges: [] });
+  const askNode = `window.sagebrush.board.snapshot().doc.nodes.find((n) => n.id === "k")`;
+  check(typeof revQ === "number" && await A.until(`${askNode}?.check === "answer == 2" && !!document.querySelector('.board-ask[data-ask="k"] .board-ask-check')`, 15000) && await A.until(`!${runBtn}.hidden`, 10000), "a board of questions only, written elsewhere: held, Run offered");
+  await A.ev(`(document.querySelector('.board-ask[data-ask="k"] .board-ask-check').click(), 1)`);
+  await sleep(3000);
+  check((await A.ev(`${askNode}.result ?? null`)) === null && !(await A.ev(`${runBtn}.hidden`)), "…Check runs nothing before the person's Run", await A.ev(`${askNode}.result ?? null`));
+  await runIt();
+  check(await A.until(`${runBtn}.hidden`, 10000), "…Run approves it");
+  await A.ev(`(document.querySelector('.board-ask[data-ask="k"] .board-ask-check').click(), 1)`);
+  check(await A.until(`${askNode}.result === "right"`, 60000), "…then Check runs its check: right", await A.ev(`${askNode}.result ?? null`));
+
   // in the runner (the sandbox: nothing of the person's in reach), a change written elsewhere runs at once, unasked
   const created3 = await A.send("Target.createTarget", { url: "about:blank" });
   const R = await tab((await (async () => { for (let i = 0; i < 100; i++) { const l = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); const p = l.find((x) => x.id === created3.targetId); if (p) return p; await sleep(100); } throw new Error("tab R not found"); })()).webSocketDebuggerUrl);

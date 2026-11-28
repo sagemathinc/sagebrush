@@ -69,6 +69,7 @@ export class BoardCodes {
     e.onChange = () => this.onChange?.();
     e.onRan = (ids) => this.onRan?.(ids);
     e.onHeld = () => this.onHeld?.();
+    e.allow(this.digest);
     e.cache = this.cache;
     e.cacheId = this.cacheId;
     if (this.pictures !== null) e.usePictures(this.pictures);
@@ -112,7 +113,10 @@ export class BoardCodes {
     return es.length ? es.every((e) => e.confined()) : planned;
   }
   /** `digest` (capability.ts): what these items are, as approved or not; each language's engine checks it as it gives them. */
+  // (the board's code as last given, by its digest: an engine made later, a Check's, starts with it)
+  private digest: string | null = null;
   async sync(items: Item[], mode: BoardMode = "python", seed?: string, digest: string | null = null): Promise<string[]> {
+    this.digest = digest;
     const parts = new Map<BoardMode, Item[]>();
     // (an item whose language changed, in the same document: its stored
     // preview is the other language's output, so it is not shown as this
