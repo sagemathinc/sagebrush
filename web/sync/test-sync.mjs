@@ -604,6 +604,37 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   ok(await until(async () => (await raceBucket.head(lose.ok.key)) === null), "the race: the loser's object is deleted from R2 (queued for deletion, then drained)");
   const again2 = await acctA.finalize({ account: A, id: lose.ok.id, size: 1 });
   ok(again2.error !== undefined, "the race: the loser's finalize again is still refused, never \"finalized\": " + JSON.stringify(again2));
+  // (e2e PR 3b-1: a versioned keyed address, "a1:" and 64 hex, is an address wherever one is taken: the PUT and its
+  // answer, a check, the read. Anything else after "a1:", another version, or a prefix that isn't exactly "a1:" is
+  // none; and ct_sha256 is never an address)
+  const vh = sha(Buffer.from("e2e: a keyed address")), v1 = "a1:" + vh, vb = Buffer.from("v"), vNone = "a1:" + sha(Buffer.from("e2e: not held"));
+  r = await put(sa, vb, v1);
+  ok(r.status === 201 && (await r.json()).address === v1, "bytes at a versioned keyed address (a1: and 64 hex): held, the answer naming it");
+  r = await put(sa, vb, v1);
+  ok(r.status === 200 && (await r.json()).have === true, "…the same bytes there again: have");
+  r = await put(sa, Buffer.from("w"), v1);
+  ok(r.status === 409 && (await r.json()).held?.address === v1, "…other bytes there: a conflict naming it, as for any address");
+  r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ address: v1, ct_sha256: sha(vb), size: 1 }, { address: vNone, ct_sha256: sha(vb), size: 1 }] });
+  rj = await r.json();
+  ok(r.status === 200 && JSON.stringify(rj.missing) === JSON.stringify([vNone]) && !rj.conflicts, "check: a held a1: address is present, one not held is missing: " + JSON.stringify(rj));
+  // (the read as another account, B, holding its own copy: A's read budget is measured below)
+  const sbv = await signIn(B);
+  ok((await put(sbv, vb, v1)).status === 201, "(B holds the same bytes at the same a1: address: its own)");
+  r = await fetchAt(SITE, `/api/sync/v1/blob/${v1}`, { headers: { cookie: sbv, "sec-fetch-site": "same-origin" } });
+  const vloc = r.headers.get("location") ?? "";
+  const vgot = r.status === 303 ? Buffer.from(await (await dispatch(mf, vloc)).arrayBuffer()) : null;
+  ok(r.status === 303 && vgot?.equals(vb), "a read at the a1: address: a 303 to a signed URL, and its bytes");
+  r = await fetchAt(SITE, `/api/sync/v1/blob/${vh}`, { headers: { cookie: sbv, "sec-fetch-site": "same-origin" } });
+  ok(r.status === 404, "…the same 64 hex without its version is another address: nothing there");
+  for (const bad of ["a2:" + vh, "a1:" + vh.slice(1), "A1:" + vh, "a1:" + vh.toUpperCase(), "a1:a1:" + vh, ":" + vh, "a1" + vh, "a1:" + vh + "0"]) {
+    const pr = await put(sa, vb, bad);
+    const cr = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ address: bad, ct_sha256: sha(vb), size: 1 }] });
+    ok(pr.status >= 400 && pr.status < 500 && cr.status === 400, `not an address (${bad.slice(0, 8)}…, ${bad.length} characters): the PUT and a check refuse it (${pr.status}, ${cr.status})`);
+  }
+  r = await put(sa, vb, vNone, v1);
+  ok(r.status === 400, "an a1: address as x-sb-ct-sha256 is refused: the bytes' SHA-256 is 64 hex, never an address");
+  r = await post(sa, "/api/sync/v1/blobs/check", { blobs: [{ address: vNone, ct_sha256: v1, size: 1 }] });
+  ok(r.status === 400, "…and as a check's ct_sha256");
   r = await put(sa, Buffer.alloc(20_000, 3));
   ok(r.status === 507 && (await r.json()).error === "storage_full", "over storage_bytes: storage_full");
   // a read: debited at issue, a 303 to a signed URL on the user-content domain
@@ -2664,6 +2695,27 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
     const h = await hello(w2, "fence-ops-00001");
     ok(!log.some((o) => o.path === "/s07-recheck") && h.welcome?.next_dseq === 1, `ops whose session is revoked during their socket's D1 recheck are not committed, and the device's order didn't move (next dseq ${h.welcome?.next_dseq})`);
     w2.ws.close();
+  }
+
+  // (the session's end, to the millisecond, with the document's session clock fixed (its test seam): a write at exactly
+  // its session's end is refused, one a millisecond before it is committed. Every other clock of the write is the real
+  // one, so the forward itself is live and only the session check decides)
+  {
+    const doc = "fe5c0000000b";
+    const { s, until } = await shortSession(120);
+    const w = await socket(s);
+    await hello(w, "fence-edge-0001");
+    await w.ask(batch(doc, 1, [[1, pid(1, "clientFN0b"), [], "seed"]], { kind: "board" }));
+    const end = until * 1000;
+    await docOf(doc).testSessionAt({ at: end });
+    const atEnd = await w.ask(batch(doc, 1, [[2, pid(2, "clientFN0b"), [pid(1, "clientFN0b")], "at the end"]]));
+    await docOf(doc).testSessionAt({ at: end - 1 });
+    const before = await w.ask(batch(doc, 1, [[2, pid(3, "clientFN0b"), [pid(1, "clientFN0b")], "just before"]]));
+    await docOf(doc).testSessionAt({ at: null });
+    const got = await ids(doc);
+    ok(atEnd?.t === "error" && atEnd.code === "forbidden" && !got?.includes(pid(2, "clientFN0b")), "a write at exactly its session's end is refused (forbidden), not committed: " + JSON.stringify(atEnd));
+    ok(before?.batch?.new === 1 && got?.includes(pid(3, "clientFN0b")), "…and one a millisecond before its end is committed: " + JSON.stringify(before));
+    w.ws.close();
   }
 
   // (control: the same hold with no sign-out commits, so the rows above are the sign-out's doing)

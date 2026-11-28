@@ -101,6 +101,12 @@
    "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. sagebrush-arith (deps: bigint, interrupt, par) does not depend on sagebrush-ledger directly, and no crate re-exports a ledger type (par only uses them privately), so it cannot name those types, and it reinterprets an i64 slice as u64 / calls an AVX2-compiled copy of a safe kernel, on its own numeric slices. (Premises machine-checked by scripts/unsafe-inventory.mjs: premises.no_ledger_dep against the manifests, no ledger re-export anywhere, and the pinned proc-macro/build-script closure.)"
   },
   {
+   "file": "engine/classgroup/tests/siqs_peak.rs",
+   "item": "impl GlobalAlloc for Count",
+   "hash": "d2f7e04caad69fb7f4a950d1f4b4e1463311df2a97ed1575d90f3829abfdb34b",
+   "audit": "Can it produce or alter an Obligations, Operation, Reservation, Growth or Context (directly, generically or through a pointer)? No. Test glue: a System-forwarding counting allocator (the quadratic sieve's peak against its bound); it writes only its own LIVE and PEAK counters, counting a reallocation at old + new while it runs."
+  },
+  {
    "file": "engine/flint/src/lib.rs",
    "item": "fn fmpz_big",
    "hash": "b43c2696269aeaccbec6f410ef31de0cdcbcdc5e2a483744ac2d56617356c11b",

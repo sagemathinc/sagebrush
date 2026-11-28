@@ -85,8 +85,8 @@ test("a Python loop at the prompt: Ctrl-C raises KeyboardInterrupt, and the sess
 test("a call into the engine (Sage's factor): Ctrl-C stops it, KeyboardInterrupt, and the prompt takes the next input", { skip: !hasScript && "no script(1)", timeout: 120000 }, async () => {
   const r = await prompt(["--sage"], [
     { until: /sage: $/, ms: 60000 },
-    // (a product of two primes of 35 digits: minutes for the engine's factor_integer)
-    { send: "n = next_prime(10^34) * next_prime(3 * 10^34)\r" },
+    // (a product of two primes of 40 digits, above the quadratic sieve's range: hours for the engine's factor_integer)
+    { send: "n = next_prime(10^39) * next_prime(3 * 10^39)\r" },
     { until: /sage: $/ },
     { send: "r = factor(n)\r" },
     { wait: 2000 },
