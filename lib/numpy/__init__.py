@@ -191,6 +191,14 @@ def _arith(cls):
     return cls
 
 
+def _as_array_arg(v):
+    """A scalar type's array-like argument as asarray takes it: a plain sequence object (__len__ and __getitem__, not
+    a list or tuple) read item by item, as NumPy's sequence protocol reads it"""
+    if isinstance(v, (list, tuple, ndarray, range)) or hasattr(v, "__array__"):
+        return v
+    return [v[i] for i in range(len(v))]
+
+
 def _array_like(v):
     """A scalar type's argument NumPy converts as an array: a sequence (a range, a list, ... not a str, bytes or a
     mapping), an ndarray or an object with __array__"""
@@ -207,7 +215,7 @@ class float64(float, floating):
 
     def __new__(cls, v=0.0):
         if _array_like(v):
-            a = asarray(v, float64)  # as NumPy: a sequence gives an array, a 0-d array its scalar
+            a = asarray(_as_array_arg(v), float64)  # as NumPy: a sequence gives an array, a 0-d array its scalar
             return a[()] if a.ndim == 0 else a
         return float.__new__(cls, v)
 
@@ -232,7 +240,7 @@ class float32(float, floating):
 
     def __new__(cls, v=0.0):
         if _array_like(v):
-            a = asarray(v, float32)
+            a = asarray(_as_array_arg(v), float32)
             return a[()] if a.ndim == 0 else a
         return float.__new__(cls, _f32(v))
 
@@ -336,9 +344,15 @@ class complex128(complex, complexfloating):
 
     def __new__(cls, *args):
         if len(args) == 1 and _array_like(args[0]):
-            a = asarray(args[0], complex128)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
+            a = asarray(_as_array_arg(args[0]), complex128)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
             return a[()] if a.ndim == 0 else a
-        return complex.__new__(cls, *args)
+        if len(args) == 2 and not _builtins.all(isinstance(x, (_builtins.int, _builtins.float, generic)) and not isinstance(x, _builtins.complex)
+                                      or isinstance(x, generic) for x in args):
+            # (NumPy's: a real and an imaginary part, each a real number; a Python complex, a str or None refused)
+            raise TypeError("Could not convert arguments into a complex scalar. '%r' given." % (args,))
+        # (a new value from its two float parts: complex.__new__(cls, z) of a Python complex z would retype z itself)
+        z = complex(*args)
+        return complex.__new__(cls, z.real, z.imag)
 
     def __repr__(self):
         r = complex.__repr__(self)
@@ -348,6 +362,20 @@ class complex128(complex, complexfloating):
         return complex.__repr__(self)
 
 
+def _c64_str(z):
+    """A complex64's str, as NumPy's: Python's complex layout ("1j", "(-0-0j)", "(1+2j)"), each part in float32's
+    shortest digits (0.33333334, 1.2345679e+08)"""
+    import math
+    def part(x):
+        t = _np.format_f32(float(x))
+        return t[:-2] if t.endswith(".0") else t
+    re, im = float(z.real), float(z.imag)
+    i = part(im)
+    if re == 0 and math.copysign(1.0, re) > 0:
+        return i + "j"
+    return "(%s%s%sj)" % (part(re), "" if i.startswith("-") else "+", i)
+
+
 @_arith
 class complex64(complex, complexfloating):
     __slots__ = ()
@@ -355,16 +383,22 @@ class complex64(complex, complexfloating):
 
     def __new__(cls, *args):
         if len(args) == 1 and _array_like(args[0]):
-            a = asarray(args[0], complex64)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
+            a = asarray(_as_array_arg(args[0]), complex64)  # (as NumPy: a sequence gives an array, a 0-d array its scalar)
             return a[()] if a.ndim == 0 else a
-        return complex.__new__(cls, *args)
+        if len(args) == 2 and not _builtins.all(isinstance(x, (_builtins.int, _builtins.float, generic)) and not isinstance(x, _builtins.complex)
+                                      or isinstance(x, generic) for x in args):
+            # (NumPy's: a real and an imaginary part, each a real number; a Python complex, a str or None refused)
+            raise TypeError("Could not convert arguments into a complex scalar. '%r' given." % (args,))
+        # (a new value from its two float parts: complex.__new__(cls, z) of a Python complex z would retype z itself)
+        z = complex(*args)
+        return complex.__new__(cls, _f32(z.real), _f32(z.imag))
 
     def __repr__(self):
-        r = complex.__repr__(self)
+        r = _c64_str(self)
         return "np.complex64(%s)" % (r[1:-1] if r.startswith("(") else r)
 
     def __str__(self):
-        return complex.__repr__(self)
+        return _c64_str(self)
 
 
 True_ = bool_(True)

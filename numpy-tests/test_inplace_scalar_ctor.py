@@ -57,3 +57,39 @@ for T in (np.float64, np.float32, np.complex128, np.complex64):
     show(f"{T.__name__}(range(3))", lambda: T(range(3)))
     show(f"{T.__name__}(__array__)", lambda: T(AL()))
     show(f"{T.__name__}(range(0))", lambda: T(range(0)))
+# the refusal's message, NumPy's ufunc names (divide, not true_divide)
+for adt in (np.int8, np.int64, np.uint8, np.float32, np.bool_):
+    for op in ("/=", "//=", "**=", "-=", "%=", "+=", "*="):
+        for s in (2.5, np.float64(2.5), 1j):
+            a = np.ones(2, adt)
+            try:
+                exec(f"a {op} s", {}, {"a": a, "s": s})
+                print("in place", adt.__name__, op, repr(s), "| ok")
+            except Exception as e:
+                print("in place", adt.__name__, op, repr(s), "|", type(e).__name__, e)
+# two arguments: each a real number (NumPy scalars too), else NumPy's TypeError and message
+for T in (np.complex64, np.complex128):
+    for args in ((1 + 1j, 2), (1, 2 + 0j), (1, 2), (1.5, -2.5), ("1", 2), (1, "2"), (np.float32(1), 2), (np.complex64(1), 0), (None, 1), (1, None), (True, 1)):
+        try:
+            print(f"{T.__name__}{args!r} |", repr(T(*args)))
+        except Exception as e:
+            print(f"{T.__name__}{args!r} |", type(e).__name__, e)
+# a plain sequence object (__len__ and __getitem__) converted as NumPy's sequence protocol reads it
+class Seq:
+    def __len__(self): return 2
+    def __getitem__(self, i):
+        if i >= 2: raise IndexError
+        return [1.5, 2.5][i]
+for T in (np.float64, np.float32, np.complex128, np.complex64):
+    show(f"{T.__name__}(Seq())", lambda: T(Seq()))
+# complex64's repr and str in float32's digits
+for v in (1 / 3 + 1j, 1j, -0.0 + 1j, 0j, 1 / 3, complex(float("nan"), 1), complex(float("inf"), -float("inf")), 1e20 + 1e-20j, -1 - 1j,
+          123456789 + 0.1j, complex(-0.0, -0.0), 0.1 + 0.2j, complex(0.0, -0.0), complex(1, float("nan"))):
+    for T in (np.complex64, np.complex128):
+        print(f"{T.__name__}({v!r}) |", repr(T(v)), str(T(v)), repr(T(np.array(v))), repr(np.array([v], T)[0]))
+# a scalar type never changes its argument: the value it was given keeps its own type (np.complex64(v) once retyped v)
+for T, v in ((np.complex64, 1 / 3 + 1j), (np.complex128, 2 + 1j), (np.float64, 2.5), (np.float32, 2.5), (np.int64, 7), (np.int8, 7), (np.uint8, 7),
+             (np.bool_, True), (np.complex128, 2.5), (np.float64, np.float32(1.5)), (np.complex64, np.complex128(1 + 2j)), (np.float64, np.float64(3.0))):
+    before = (type(v).__name__, repr(v))
+    r = T(v)
+    print("argument kept", T.__name__, before, (type(v).__name__, repr(v)), r is v)
