@@ -25,11 +25,22 @@ export const GRANTS_KEY = "sagebrush-grants";
 // The record's base, in the record itself (so it is kept with the record in one write; permissions.js keeps fields it
 // doesn't know): `seenFile`, grants.json's text as the record was last merged with or written to it, by whichever
 // window of the app did so, the base of every merge, so a window opening, or past its first merge, merges three ways
-// over the record it reads and a grant another window took back isn't read as this page's own; and `pendingFile`,
-// a write of grants.json begun whose end wasn't kept here, so either text may be grants.json's last. (One copy of
-// grants.json's text: the record in localStorage is about twice the size of the permissions it holds, both within
-// GRANT_CAPS's bounds.)
-type Rec = { v: 1; seq?: number; migrated?: number; docs: Record<string, unknown>; seenFile?: string; pendingFile?: string };
+// over the record it reads and a grant another window took back isn't read as this page's own; and `pending`, each
+// window's write of grants.json begun whose end isn't kept yet (its text and when, by the window's own name): until it
+// lands, or is older than MARK_MS, either text may be grants.json's last, and a merge holds to what both allow. A window
+// removes only its own mark, and moves the base on only if no merge moved it since it marked; every write carries a
+// nonce (`w`), so grants.json the same text means the same write. (One copy of grants.json's text, and one a write in
+// flight: the record in localStorage is about twice the size of the permissions it holds, both within GRANT_CAPS's
+// bounds.)
+type Mark = { text: string; at: number };
+type Rec = { v: 1; seq?: number; migrated?: number; w?: string; docs: Record<string, unknown>; seenFile?: string; pending?: Record<string, Mark> };
+/** How long another window's write may be in flight: past it, its mark is no longer waited for (a write is one local
+ * call to the app). */
+export const MARK_MS = 120_000;
+/** At most this many marks are kept (one a window writing): past it, the oldest go. */
+export const MARKS_MAX = 32;
+const WRITER = /^[0-9a-f]{16}$/;
+const hex = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
 export interface GrantsWorkspace {
   stat(p: string): Promise<{ kind: string; ref: string | null } | undefined>;
   pathOf(kind: "notebook", ref: string): Promise<string | undefined>;
@@ -45,6 +56,14 @@ export function parseGrants(text: unknown): Rec | null {
     if (!(r && typeof r === "object" && r.v === 1 && r.docs && typeof r.docs === "object" && !Array.isArray(r.docs))) return null;
     // (each document's entry as the page writes one (validGrantEntry), or left out: it grants nothing)
     for (const [d, e] of Object.entries(r.docs)) if (!validGrantEntry(e)) delete r.docs[d];
+    // (the record's own fields: a base that isn't a text, or a mark that isn't one, is left out)
+    if (r.seenFile !== undefined && typeof r.seenFile !== "string") delete r.seenFile;
+    delete r.pendingFile;
+    if (r.pending !== undefined) {
+      const ok = r.pending && typeof r.pending === "object" && !Array.isArray(r.pending) ? Object.entries(r.pending).filter(([w, m]: [string, any]) => WRITER.test(w) && m && typeof m.text === "string" && Number.isSafeInteger(m.at)) : [];
+      if (ok.length) r.pending = Object.fromEntries(ok.sort((a: any, b: any) => b[1].at - a[1].at).slice(0, MARKS_MAX).map(([w, m]: [string, any]) => [w, { text: m.text, at: m.at }]));
+      else delete r.pending;
+    }
     return r;
   } catch {
     return null;
@@ -135,7 +154,9 @@ function mergeEntry(base: unknown, file: unknown, local: unknown): Entry | undef
 const CHANGED = "grants.json was changed by another window";
 
 /** One page's grants.json: its reads, merges and writes one at a time (see the top of this file). */
-export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store = localStorage) {
+export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store = localStorage, opts: { now?: () => number } = {}) {
+  // (this page's own name for its marks, and the clock their age is told by: a test's own)
+  const me = hex(8), now = opts.now ?? (() => Date.now());
   // (grants.json as this page last read or wrote it: its text, which a write must find there, and its documents, the
   // merge's base)
   let seen = "", base: Record<string, unknown> = {};
@@ -160,15 +181,24 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
         else docs[id] = e;
       }
       // (the base: grants.json as the shared record was last merged with or written to, by any window (seenFile), so a
-      // window never merges over an older base than the record it reads; none kept: this page's own. A write whose
-      // end wasn't kept (pendingFile), grants.json neither text: merged over both, and only what both merges allow stays)
+      // window never merges over an older base than the record it reads; none kept: this page's own)
       // (grants.json as the marked write left it: it landed; as before it: it didn't; neither, another window's write
       // since: not known, so both)
-      const landed = cur.pendingFile !== undefined && text === cur.pendingFile, missed = cur.pendingFile !== undefined && text === cur.seenFile;
-      const shared = parseGrants(landed ? cur.pendingFile : cur.seenFile), pending = landed || missed ? null : parseGrants(cur.pendingFile);
-      const known = !!shared || !!pending || seen !== "";
-      const over = mergeGrants(shared ? shared.docs : base, file, local, known);
-      const merged = pending ? narrower(over, mergeGrants(pending.docs, file, local, known)) : over;
+      // (each window's write marked: one whose text grants.json is landed, and is the base; this page's own, not in flight
+      // here, is settled now, merged over too unless grants.json is still the base, which every write's own nonce makes
+      // mean nothing was written since; another window's, maybe still in flight, merged over and kept, until it lands or
+      // is older than MARK_MS)
+      const marks = Object.entries(cur.pending ?? {}), landed = marks.find(([, m]) => m.text === text);
+      const keepMarks: Record<string, Mark> = {}, over: string[] = [];
+      for (const [w, m] of marks) {
+        if (m === landed?.[1]) continue;
+        if (w === me) { if (text !== cur.seenFile) over.push(m.text); continue; }
+        over.push(m.text);
+        if (now() - m.at <= MARK_MS) keepMarks[w] = m;
+      }
+      const shared = parseGrants(landed ? landed[1].text : cur.seenFile), known = !!shared || over.length > 0 || seen !== "";
+      let merged = mergeGrants(shared ? shared.docs : base, file, local, known);
+      for (const t of over) { const p = parseGrants(t); if (p) merged = narrower(merged, mergeGrants(p.docs, file, local, known)); }
       for (const [k, e] of Object.entries(merged)) { const id = await idOf(ws, k); if (id) docs[id] = e; }
       if (storage.getItem(GRANTS_KEY) !== raw) { if (tries < 20) continue; throw new Error("grants: the record kept changing here while it was merged"); }
       const ids = new Set([...Object.keys(cur.docs), ...Object.keys(docs)]);
@@ -176,9 +206,10 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
       // (seq: permissions.js's own counter, kept no lower than grants.json's; never read as an order here)
       // (the merge and what it was merged over, in one write: neither is ever kept without the other)
       // (nothing here and nothing to keep, grants.json no record either: no record made)
-      if (changed || cur.pendingFile !== undefined || (cur.seenFile !== text && (raw !== null || kept))) {
-        const { pendingFile: _, ...rest } = cur;
-        storage.setItem(GRANTS_KEY, J({ ...rest, seq: Math.max(Number(cur.seq) || 0, Number(kept?.seq) || 0), docs, ...(kept?.migrated === 1 || cur.migrated === 1 ? { migrated: 1 } : {}), seenFile: text }));
+      const sameMarks = J(keepMarks) === J(cur.pending ?? {});
+      if (changed || !sameMarks || (cur.seenFile !== text && (raw !== null || kept))) {
+        const { pending: _, ...rest } = cur;
+        storage.setItem(GRANTS_KEY, J({ ...rest, seq: Math.max(Number(cur.seq) || 0, Number(kept?.seq) || 0), docs, ...(kept?.migrated === 1 || cur.migrated === 1 ? { migrated: 1 } : {}), seenFile: text, ...(Object.keys(keepMarks).length ? { pending: keepMarks } : {}) }));
       }
       // (only once the merge is kept here: a merge that couldn't be stored (localStorage full) leaves grants.json unseen,
       // so the next try merges it again rather than taking it for done)
@@ -199,7 +230,7 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
       try {
         const text = await read();
         // (the same text as last seen is nothing new, unless a write's end wasn't kept: then merged, so the mark is settled)
-        if (text === seen && parseGrants(storage.getItem(GRANTS_KEY))?.pendingFile === undefined) return { changed: 0, ahead: false };
+        if (text === seen && parseGrants(storage.getItem(GRANTS_KEY))?.pending === undefined) return { changed: 0, ahead: false };
         return await take(text);
       } catch (e) { console.warn("grants.json:", e); return { changed: 0, ahead: false, failed: e }; }
     }),
@@ -209,22 +240,26 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
       for (let tries = 0; tries < 10; tries++) {
         // (an earlier write's end not kept (its mark still there): merged first, over both texts, as the next merge
         // would, so a new mark never takes the place of one not yet reconciled)
-        if (parseGrants(storage.getItem(GRANTS_KEY))?.pendingFile !== undefined) await take(await read());
-        const rec = await grantsToKeep(ws, storage), json = J(rec);
+        if (parseGrants(storage.getItem(GRANTS_KEY))?.pending !== undefined) await take(await read());
+        // (each write's text its own: a nonce, so grants.json the same text means the same write)
+        const rec = await grantsToKeep(ws, storage), json = J({ ...rec, w: hex(8) });
         // (the write marked in the record before it is made (none made if that can't be kept), its end after: one that
         // can't be kept leaves the mark, and the next merge holds to what both texts allow)
-        mark((r) => ({ ...r, pendingFile: json }));
+        let was: string | undefined;
+        mark((r) => { was = r.seenFile; return { ...r, pending: { ...r.pending, [me]: { text: json, at: now() } } }; });
         try {
           await invoke("grants_write", { json, expect: seen });
           seen = json;
           base = rec.docs;
-          try { mark(({ pendingFile: _, ...r }) => ({ ...r, seenFile: json })); } catch (e) { console.warn("grants.json:", e); }
+          // (its own mark goes, and only its own; the base moves on only if no merge moved it since the mark, else that
+          // merge's base stands)
+          try { mark((r) => { const { [me]: _, ...rest } = r.pending ?? {}; const { pending: __, ...out } = r; return { ...out, ...(r.seenFile === was ? { seenFile: json } : {}), ...(Object.keys(rest).length ? { pending: rest } : {}) }; }); } catch (e) { console.warn("grants.json:", e); }
           return;
         } catch (e) {
           if (!String((e as any)?.message ?? e).includes(CHANGED)) throw e;
           // (refused by the app: not written, so its own mark goes, and only its own; any other failure leaves it, the
           // write maybe made)
-          mark(({ pendingFile, ...r }) => (pendingFile === json ? r : { ...r, pendingFile }));
+          mark((r) => { const { [me]: _, ...rest } = r.pending ?? {}; const { pending: __, ...out } = r; return { ...out, ...(Object.keys(rest).length ? { pending: rest } : {}) }; });
           await take(await read());
         }
       }

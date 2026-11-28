@@ -2,7 +2,7 @@
 // The desktop app's file permissions across launches (web/workspace/grants-file.ts, #1565): the record kept in
 // grants.json by where each notebook is, and brought back at the next launch under the notebooks' new ids.
 //   bun web/workspace/test-grants-file.mjs
-import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY } from "./grants-file.ts";
+import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY, MARK_MS } from "./grants-file.ts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -21,9 +21,11 @@ const files = () => {
   return { invoke: async (c, a) => { calls.push(c); if (c === "grants_read") return now(); if (c === "grants_write") { if (a.expect !== now()) throw new Error("grants.json was changed by another window"); kept = a.json; return null; } throw new Error(c); }, kept: () => kept, set: (t) => (kept = t), calls };
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// (the text of a record's one write mark, if it has exactly one)
+const marked = (r) => { const v = Object.values(r?.pending ?? {}); return v.length === 1 ? v[0].text : undefined; };
 // (a change of the record as permissions.js makes one: the fields it doesn't know (the base grants-file.ts keeps in it)
 // kept)
-const withBase = (st, rec) => { const cur = JSON.parse(st.getItem(GRANTS_KEY) ?? "{}"); return J({ ...rec, ...("seenFile" in cur ? { seenFile: cur.seenFile } : {}), ...("pendingFile" in cur ? { pendingFile: cur.pendingFile } : {}) }); };
+const withBase = (st, rec) => { const cur = JSON.parse(st.getItem(GRANTS_KEY) ?? "{}"); return J({ ...rec, ...("seenFile" in cur ? { seenFile: cur.seenFile } : {}), ...("pending" in cur ? { pending: cur.pending } : {}) }); };
 
 // launch 1: two workspace notebooks and a notebook file allowed; one more id that's no notebook now
 const w1 = workspace({ "/a/one.ipynb": { kind: "notebook", ref: "r1" }, "/b/two.ipynb": { kind: "notebook", ref: "r2" }, "/data.csv": { kind: "file", ref: null } });
@@ -448,11 +450,11 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   ok(perms.grant("id1", "write", "/a").ok && perms.grant("id1", "write", "/keep").ok, "a write's end not kept: /a and /keep allowed here");
   await A.write();
   const rec = JSON.parse(localStorage.getItem(GRANTS_KEY));
-  ok(f.kept().includes("/a") && rec.seenFile === before && rec.pendingFile === f.kept(), "a write's end not kept: grants.json has /a, the record still its old base, the write marked as begun");
+  ok(f.kept().includes("/a") && rec.seenFile === before && marked(rec) === f.kept(), "a write's end not kept: grants.json has /a, the record still its old base, the write marked as begun");
   f.set(J({ v: 1, seq: 9, docs: { "ws:/n.ipynb": { write: ["/keep"], t: 9 } } }));
   await A.adopt();
   const after = JSON.parse(localStorage.getItem(GRANTS_KEY));
-  ok(J(perms.writeTrees("id1")) === '["/keep"]' && after.pendingFile === undefined && after.seenFile === f.kept(), "a write's end not kept: ...another window takes /a back: the merge holds to what both bases allow, /a gone, /keep kept, the mark cleared: " + J({ trees: perms.writeTrees("id1"), after }));
+  ok(J(perms.writeTrees("id1")) === '["/keep"]' && after.pending === undefined && after.seenFile === f.kept(), "a write's end not kept: ...another window takes /a back: the merge holds to what both bases allow, /a gone, /keep kept, the mark cleared: " + J({ trees: perms.writeTrees("id1"), after }));
   f.set(J({ v: 1, seq: 9, docs: {} }));
   await A.adopt();
   // (a merge's one write failing: the record and its base both as they were, never one without the other)
@@ -468,7 +470,7 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   ok(perms.grant("id1", "write", "/b").ok, "a refused write: /b allowed here");
   f.set(J({ v: 1, seq: 10, docs: { "file:/x/o.ipynb": { write: ["/o"], t: 1 } } }));
   await A.write();
-  ok(f.kept().includes("/b") && f.kept().includes("/o") && JSON.parse(localStorage.getItem(GRANTS_KEY)).pendingFile === undefined, "a refused write: merged and written again, /b and the other window's /o both in, no mark left: " + f.kept());
+  ok(f.kept().includes("/b") && f.kept().includes("/o") && JSON.parse(localStorage.getItem(GRANTS_KEY)).pending === undefined, "a refused write: merged and written again, /b and the other window's /o both in, no mark left: " + f.kept());
   delete globalThis.localStorage;
 }
 
@@ -490,7 +492,7 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     perms.grant("id1", "write", "/a");
     await A.write();
     const rec = JSON.parse(localStorage.getItem(GRANTS_KEY));
-    const ready = f.kept().includes("/a") && rec.pendingFile === f.kept() && !rec.seenFile.includes("/a");
+    const ready = f.kept().includes("/a") && marked(rec) === f.kept() && !rec.seenFile.includes("/a");
     return { perms, f, w, A, invoke, ready, setOnRead: (h) => (onRead = h), done: () => delete globalThis.localStorage };
   };
   const revoked = J({ v: 1, seq: 20, docs: { "file:/x/o.ipynb": { write: ["/o"], t: 1 } } });
@@ -511,7 +513,7 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     setOnRead(() => f.set(revoked));
     await A.write();
     const rec = JSON.parse(localStorage.getItem(GRANTS_KEY));
-    ok(ready && !f.kept().includes('"/a"') && f.kept().includes("/b") && f.kept().includes("/o") && rec.pendingFile === undefined, "a write's end not kept, then a write refused by a conflict: only its own mark goes; /a stays taken back, /b and /o written, no mark left: " + f.kept());
+    ok(ready && !f.kept().includes('"/a"') && f.kept().includes("/b") && f.kept().includes("/o") && rec.pending === undefined, "a write's end not kept, then a write refused by a conflict: only its own mark goes; /a stays taken back, /b and /o written, no mark left: " + f.kept());
     done();
   }
   {
@@ -519,7 +521,9 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     const { perms, f, w, invoke, ready, done } = await failedSettle();
     f.set(revoked);
     await grantsSync(w, invoke, localStorage).restore();
-    ok(ready && perms.writeTrees("id1").length === 0 && JSON.parse(localStorage.getItem(GRANTS_KEY)).pendingFile === undefined, "a write's end not kept, then a fresh window over the record: /a stays taken back, the mark settled");
+    ok(ready && perms.writeTrees("id1").length === 0 && marked(JSON.parse(localStorage.getItem(GRANTS_KEY))) !== undefined, "a write's end not kept, then a fresh window over the record: /a stays taken back; the other window's mark kept (its write maybe still in flight)");
+    await grantsSync(w, invoke, localStorage, { now: () => Date.now() + MARK_MS + 1 }).restore();
+    ok(perms.writeTrees("id1").length === 0 && JSON.parse(localStorage.getItem(GRANTS_KEY)).pending === undefined, "...a window merging once the mark is older than MARK_MS: /a still taken back, the mark gone");
     done();
   }
   {
@@ -527,9 +531,93 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     const { perms, A, f, ready, done } = await failedSettle();
     await A.adopt();
     const rec = JSON.parse(localStorage.getItem(GRANTS_KEY));
-    ok(ready && rec.pendingFile === undefined && rec.seenFile === f.kept() && J(perms.writeTrees("id1")) === '["/a"]', "a write's end not kept, the same text adopted: the mark is settled (the write landed), /a kept");
+    ok(ready && rec.pending === undefined && rec.seenFile === f.kept() && J(perms.writeTrees("id1")) === '["/a"]', "a write's end not kept, the same text adopted: the mark is settled (the write landed), /a kept");
     done();
   }
+}
+
+// two windows' writes overlapping: A's write lands but its answer is late; /b is allowed meanwhile; B merges A's
+// landed write and writes /a and /b, but B's end can't be kept (storage full just then); A's late end then comes. A
+// removes only its own mark and leaves the base B's merge set, so B's mark stands. Another window then takes /b back
+// (a real writer, or grants.json put back to A's very text): a window opening after holds /b taken back
+for (const back of ["writer", "A's text"]) {
+  const mem = new Map();
+  let failNext = false;
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { if (failNext) { failNext = false; throw new Error("The quota has been exceeded."); } mem.set(k, String(v)); }, removeItem: (k) => mem.delete(k) };
+  const { createPermissions } = await import("../notebook/permissions.js");
+  const perms = createPermissions();
+  const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+  f.set(J({ v: 1, seq: 1, docs: {} }));
+  let releaseA, landedA;
+  const heldA = new Promise((r) => (releaseA = r)), aLanded = new Promise((r) => (landedA = r));
+  const invokeA = async (c, a) => { const r = await f.invoke(c, a); if (c === "grants_write") { landedA(); await heldA; } return r; };
+  const invokeB = async (c, a) => { const r = await f.invoke(c, a); if (c === "grants_write") failNext = true; return r; };
+  const A = grantsSync(w, invokeA, localStorage), B = grantsSync(w, invokeB, localStorage);
+  await A.restore();
+  perms.grant("id1", "write", "/a");
+  const aWrite = A.write();
+  await aLanded;
+  const textA = f.kept();
+  perms.grant("id1", "write", "/b");
+  await B.write();
+  const mid = JSON.parse(localStorage.getItem(GRANTS_KEY));
+  ok(f.kept().includes("/b") && marked(mid) === f.kept() && mid.seenFile === textA, `overlap (${back}): B's write landed with /a and /b, its end not kept: its mark stands, the base A's write`);
+  releaseA();
+  await aWrite;
+  const after = JSON.parse(localStorage.getItem(GRANTS_KEY));
+  ok(marked(after) !== undefined && marked(after) !== textA && after.seenFile === textA, `overlap (${back}): A's late end removes only its own mark: B's mark stands, the base as B's merge left it`, { seen: after.seenFile === textA, marks: Object.keys(after.pending ?? {}).length });
+  if (back === "writer") {
+    // (another window, its own record, takes /b back and writes)
+    const other = new Map();
+    const so = { getItem: (k) => (other.has(k) ? other.get(k) : null), setItem: (k, v) => other.set(k, String(v)) };
+    const C = grantsSync(w, f.invoke, so);
+    await C.restore();
+    so.setItem(GRANTS_KEY, J({ ...JSON.parse(so.getItem(GRANTS_KEY)), docs: { id1: { write: ["/a"], t: 50 } } }));
+    await C.write();
+  } else f.set(textA);
+  ok(!f.kept().includes('"/b"'), `overlap (${back}): grants.json no longer has /b`);
+  await grantsSync(w, f.invoke, localStorage).restore();
+  ok(J(perms.writeTrees("id1")) === '["/a"]', `overlap (${back}): a window opening after holds /b taken back (B's mark is merged over): ` + J(perms.writeTrees("id1")));
+  delete globalThis.localStorage;
+}
+
+// a late end after the base moved on: A's write lands, its answer late; another window (C) writes /y; B adopts it (the
+// base is C's text now). A's late end must leave that base: put back to A's text, the person's revocation of /y here
+// would read as unchanged, and C's next write would bring /y back
+{
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const { createPermissions } = await import("../notebook/permissions.js");
+  const perms = createPermissions();
+  const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+  f.set(J({ v: 1, seq: 1, docs: {} }));
+  let releaseA, landedA;
+  const heldA = new Promise((r) => (releaseA = r)), aLanded = new Promise((r) => (landedA = r));
+  const A = grantsSync(w, async (c, a) => { const r = await f.invoke(c, a); if (c === "grants_write") { landedA(); await heldA; } return r; }, localStorage), B = grantsSync(w, f.invoke, localStorage);
+  await A.restore();
+  perms.grant("id1", "write", "/a");
+  const aWrite = A.write();
+  await aLanded;
+  const other = new Map(), so = { getItem: (k) => (other.has(k) ? other.get(k) : null), setItem: (k, v) => other.set(k, String(v)) };
+  const C = grantsSync(w, f.invoke, so);
+  await C.restore();
+  so.setItem(GRANTS_KEY, J({ ...JSON.parse(so.getItem(GRANTS_KEY)), docs: { id1: { write: ["/a", "/y"], t: 60 } } }));
+  await C.write();
+  await B.adopt();
+  ok(J(perms.writeTrees("id1")) === '["/a","/y"]' && JSON.parse(localStorage.getItem(GRANTS_KEY)).seenFile === f.kept(), "late end: B adopted C's /y, the base C's text");
+  releaseA();
+  await aWrite;
+  ok(JSON.parse(localStorage.getItem(GRANTS_KEY)).seenFile === f.kept(), "late end: A's late end leaves the base C's text (it moved since A marked)");
+  perms.revoke("id1", "write", "/y");
+  so.setItem(GRANTS_KEY, J({ ...JSON.parse(so.getItem(GRANTS_KEY)), docs: { ...JSON.parse(so.getItem(GRANTS_KEY)).docs, "file:/x/z.ipynb": { write: ["/z"], t: 61 } } }));
+  await C.write();
+  await B.adopt();
+  ok(J(perms.writeTrees("id1")) === '["/a"]', "late end: the person's revocation of /y here stands when C writes again: " + J(perms.writeTrees("id1")));
+  // (every write its own text: the same record written twice is two texts)
+  const once = f.kept();
+  await C.write();
+  ok(f.kept() !== once && J(parseGrants(f.kept()).docs) === J(parseGrants(once).docs), "every write carries its own nonce: the same record written again is another text");
+  delete globalThis.localStorage;
 }
 
 // a notebook changed on both sides since the base, scope by scope: a grant taken back by either is gone, one made by
