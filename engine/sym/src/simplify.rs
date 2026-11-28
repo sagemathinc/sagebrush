@@ -47,7 +47,9 @@ pub fn together(e: &Expr) -> (Expr, Expr) {
                 if k > 0 {
                     (pow(&bn, x), pow(&bd, x))
                 } else {
-                    let m = int(-k);
+                    // (-k exactly, as a number: int(-k) wrapped for k = -2^63 and
+                    // made x^(-2^63) into x^(2^63), Codex audit A07-F3)
+                    let m = neg(x);
                     (pow(&bd, &m), pow(&bn, &m))
                 }
             }
