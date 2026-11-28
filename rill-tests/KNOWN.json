@@ -286,11 +286,6 @@
    "reason": "lists: list() and $ on a list (A1.6)",
    "sha256": "c0bf449434b6bcaaff24b3d8005f4a43734bd463b05371cf623b901a74ee1077"
   },
-  "rill-tests/parse/test_3.R#tok-string-bell-etc": {
-   "class": "not-implemented",
-   "reason": "the builtin nchar (A1.2b)",
-   "sha256": "5e909dbf6c8ff0a7fc2c1293baee84f1361adb7726f584de3d6dcee6ddec952c"
-  },
   "rill-tests/parse/test_3.R#tok-unmatched-close-bb": {
    "class": "not-implemented",
    "reason": "lists and matrices (A1.6)",
@@ -355,6 +350,46 @@
    "class": "not-implemented",
    "reason": "strings holding invalid UTF-8 and several warnings in one statement (A1.4)",
    "sha256": "8803a1e56a0393a458760f8b34aced6532561ba3a73928c7259c3b04b92ba593"
+  },
+  "rill-tests/str/test_1.R#str-10": {
+   "class": "not-implemented",
+   "reason": "strsplit's result is a list, and lists are not implemented yet (A3: the lists PR, then strsplit)",
+   "sha256": "d2f37d72073985733d388a78476edec21c5451b9d5f89edbe2a7a175d729c123"
+  },
+  "rill-tests/str/test_1.R#str-9": {
+   "class": "not-implemented",
+   "reason": "strsplit's result is a list, and lists are not implemented yet (A3: the lists PR, then strsplit)",
+   "sha256": "33f8ecf75c06d455302ed8a03936d52cf46b95ee8349dee605278c3e4e3e5353"
+  },
+  "rill-tests/str/test_3.R#sprintf-s-precision-mid-character": {
+   "class": "not-implemented",
+   "reason": "a %s precision that cuts inside a multibyte character (R cuts its bytes) is refused for now (A3: strings)",
+   "sha256": "d59bccdd54c521664f6d68598d0732e038dde7b7595406dfeb6e3623871c9c3b"
+  },
+  "rill-tests/str/test_5.R#format-nsmall-inf-error": {
+   "class": "not-implemented",
+   "reason": "R's error line names prettyNum(.Internal(format(...))) with a Calls: line (and an In addition: warning for Inf); Rill names format() (A3: strings)",
+   "sha256": "1ca4342e51bbafa94d7439a2feaa579a166996b09b5833210e05b753b7bfb3ee"
+  },
+  "rill-tests/str/test_5.R#format-nsmall-minus-inf-error": {
+   "class": "not-implemented",
+   "reason": "R's error line names prettyNum(.Internal(format(...))) with a Calls: line (and an In addition: warning for Inf); Rill names format() (A3: strings)",
+   "sha256": "a22357bcdc638d0c4a9ca1de5fde51ef5053a7eac7af0e3a2b88e2c17091b8ff"
+  },
+  "rill-tests/str/test_5.R#format-nsmall-na-error": {
+   "class": "not-implemented",
+   "reason": "R's error line names prettyNum(.Internal(format(...))) with a Calls: line (and an In addition: warning for Inf); Rill names format() (A3: strings)",
+   "sha256": "38298ac6885c87220f2545ab2839b619747c05c835eee193eb15e4b9724e261e"
+  },
+  "rill-tests/str/test_5.R#format-nsmall-nan-error": {
+   "class": "not-implemented",
+   "reason": "R's error line names prettyNum(.Internal(format(...))) with a Calls: line (and an In addition: warning for Inf); Rill names format() (A3: strings)",
+   "sha256": "103a51aaf6354f3f4df8532dc82702253c4ec442a6c9149046d38a4283b0925d"
+  },
+  "rill-tests/str/test_5.R#format-nsmall-too-large-error": {
+   "class": "not-implemented",
+   "reason": "R's error line names prettyNum(.Internal(format(...))) with a Calls: line (and an In addition: warning for Inf); Rill names format() (A3: strings)",
+   "sha256": "169d5a04b3aacd0f9666ef1f8286e06c7747295a4748dd648835619929d5e645"
   }
  }
 }

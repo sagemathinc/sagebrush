@@ -1,0 +1,157 @@
+{
+ "cases": [
+  {
+   "id": "sprintf-x-2p31-error",
+   "status": 1,
+   "stderr": "Error in sprintf(\"%x\", 2^31) : \n  invalid format '%x'; use format %f, %e, %g or %a for numeric objects\nExecution halted\n",
+   "stdout": "[1] \"7fffffff\"\n"
+  },
+  {
+   "id": "sprintf-x-minus-2p31-na",
+   "status": 0,
+   "stderr": "Warning message:\nIn sprintf(\"%x\", -2^31) : NAs introduced by coercion to integer range\n",
+   "stdout": "[1] \"NA\"\n"
+  },
+  {
+   "id": "sprintf-x-below-range-error",
+   "status": 1,
+   "stderr": "Error in sprintf(\"%x\", -2^31 - 1) : \n  invalid format '%x'; use format %f, %e, %g or %a for numeric objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-o-unsigned-max-error",
+   "status": 1,
+   "stderr": "Error in sprintf(\"%o\", 4294967295) : \n  invalid format '%o'; use format %f, %e, %g or %a for numeric objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-X-logical-error",
+   "status": 1,
+   "stderr": "Error in sprintf(\"%X\", NA) : \n  invalid format '%X'; use format %d or %i for logical objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-d-out-of-range-error",
+   "status": 1,
+   "stderr": "Error in sprintf(\"%5d\", 1e+10) : \n  invalid format '%5d'; use format %f, %e, %g or %a for numeric objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-d-fraction-whole-vector-error",
+   "status": 1,
+   "stderr": "Error in sprintf(c(\"%d\", \"%s\"), 2.5) : \n  invalid format '%d'; use format %f, %e, %g or %a for numeric objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-d-minus-2p31-warns-once",
+   "status": 0,
+   "stderr": "Warning message:\nIn sprintf(\"%d\", c(-2147483648, 1, -2147483648)) :\n  NAs introduced by coercion to integer range\n",
+   "stdout": "[1] \"NA\" \"1\"  \"NA\"\n[1] \"NA\" \"3\" \n"
+  },
+  {
+   "id": "sprintf-d-inf-error",
+   "status": 1,
+   "stderr": "Error in sprintf(\"%d\", Inf) : \n  invalid format '%d'; use format %f, %e, %g or %a for numeric objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-first-element-converts",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1\" \"2\"\n[1] \"1 3\" \"2 3\"\n[1] \"1.000000\"     \"2.000000e+00\"\n[1] \"1.000000\"\n[1] \"TRUE\" \"NA\"  \n[1] \"   NA\"\n[1] \"NA\"\n"
+  },
+  {
+   "id": "sprintf-later-element-double-error",
+   "status": 1,
+   "stderr": "Error in sprintf(c(\"%f\", \"%d\"), c(1, 2)) : \n  invalid format '%d'; use format %f, %e, %g or %a for numeric objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-later-element-integer-error",
+   "status": 1,
+   "stderr": "Error in sprintf(c(\"%d\", \"%f\"), c(1, 2)) : \n  invalid format '%f'; use format %d, %i, %o, %x or %X for integer objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-later-element-character-error",
+   "status": 1,
+   "stderr": "Error in sprintf(c(\"%s\", \"%5x\"), c(1, 2.5)) : \n  invalid format '%5x'; use format %s for character objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-later-element-logical-error",
+   "status": 1,
+   "stderr": "Error in sprintf(c(\"%d\", \"%s\"), c(TRUE, NA)) : \n  invalid format '%s'; use format %d or %i for logical objects\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "sprintf-int-sign-flags",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1|1|1|+1| 1|   +1\"\n[1] \"+007| 0007|+7   |-0007\"\n"
+  },
+  {
+   "id": "sprintf-int-precision",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"     001|     001|001     |||     |\"\n"
+  },
+  {
+   "id": "sprintf-int-alternate",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"0|0XFF|0|010| 0xff|0x0ff\"\n"
+  },
+  {
+   "id": "sprintf-na-words",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"[   NA|NA|NA   |   NA|+Inf|   NA]\"\n[1] \"[ -Inf|+Inf|   NaN|-Inf   ]\"\n[1] \"[ Inf|-Inf|NaN| Inf|+Inf|NA| NaN]\"\n"
+  },
+  {
+   "id": "sprintf-string-flags",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"   NA|NA   ||\"\n[1] \"        ab\"\n[1] \"ab\"\n"
+  },
+  {
+   "id": "sprintf-float-flags",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"3.|3.e+00|1.00000|1e-05|0xff|0\"\n[1] \"-000003.50|3.50      |+01.23e+04| 00.000123\"\n"
+  },
+  {
+   "id": "sprintf-wide-precision",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1202\n[1] \"726562500000000000000\"\n[1] \"0000000000000\"\n[1] \"000000000000e-10\"\n[1] \"0000000000000e-01\"\n[1] 1031\n"
+  },
+  {
+   "id": "formatC-digits-reduced",
+   "status": 0,
+   "stderr": "Warning message:\nIn formatC(third, format = \"f\", digits = 1500) : 'digits' reduced to 324\nWarning message:\nIn formatC(third, format = \"e\", digits = 900) : 'digits' reduced to 50\nWarning message:\nIn formatC(c(third, 2), digits = 60) : 'digits' reduced to 50\n",
+   "stdout": "[1] 326\n[1] 56\n[1] 52 51\n"
+  },
+  {
+   "id": "formatC-digits-width",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"          2\"  \"        0.5\"  \"0.3333333333\" \"        100\" \n[1] \"     2\"\n[1] \"   1\" \"  22\"\n"
+  },
+  {
+   "id": "formatC-widths",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"ab  \"\n[1] \"000000003.14\"\n[1] \"000001\" \"-00005\"\n[1] \"255\"\n[1] \"1    \" \"NA   \"\n[1] \"  1\" \" 22\"\n"
+  },
+  {
+   "id": "substr-bounds",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"abcdef\"\n[1] \"\"\n   a    b \n\"el\"   NA \n"
+  }
+ ],
+ "file": "rill-tests/str/test_4.R",
+ "format": "rill-out",
+ "v": 1
+}

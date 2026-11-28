@@ -17,6 +17,8 @@ from .access import (as_character, as_complex, as_double, as_integer, as_logical
                      is_integer, is_logical, is_na, is_nan, is_null, is_numeric, is_vector, length_, logical_,
                      names_, options, refuse_raw)
 from .args import DOTS, Closure, Primitive
+from .strings import (LETTERS, MONTH_NAME, format_, formatC, letters, nchar, paste, paste0, sprintf, substr, tolower,
+                      toupper)
 from .eval import NotSupported, RError
 from .values import NULL, RVector
 
@@ -676,6 +678,20 @@ FORMALS = {
     "complex": Closure("length.out", "real", "imaginary", "modulus", "argument"),
     "is.vector": Closure("x", "mode", required=("x",)),
     "options": Closure(DOTS),
+    # A3 strings (strings.py), as R 4.5.3 declares them (format's are format.default's, which R dispatches to)
+    "paste": Closure(DOTS, "sep", "collapse", "recycle0"),
+    "paste0": Closure(DOTS, "collapse", "recycle0"),
+    "nchar": Closure("x", "type", "allowNA", "keepNA", required=("x",)),
+    "toupper": Closure("x", required=("x",)),
+    "tolower": Closure("x", required=("x",)),
+    "substr": Closure("x", "start", "stop", required=("x", "start", "stop")),
+    "sprintf": Closure("fmt", DOTS, required=("fmt",)),
+    "format": Closure("x", "trim", "digits", "nsmall", "justify", "width", "na.encode", "scientific", "big.mark",
+                      "big.interval", "small.mark", "small.interval", "decimal.mark", "zero.print", "drop0trailing",
+                      DOTS, required=("x",)),
+    "formatC": Closure("x", "width", "digits", "format", "flag", "mode", "big.mark", "big.interval", "small.mark",
+                       "small.interval", "decimal.mark", "preserve.width", "zero.print", "replace.zero",
+                       "drop0trailing", required=("x",)),
 }
 for _f in ("as.logical", "as.integer", "as.numeric", "as.double", "as.character", "as.complex"):
     FORMALS[_f] = Primitive("x", dots=True, least=0)
@@ -727,5 +743,18 @@ BUILTINS["is.vector"] = is_vector
 BUILTINS["options"] = options
 BUILTINS["raw"] = refuse_raw
 BUILTINS["as.raw"] = refuse_raw
+# A3 strings (strings.py)
+BUILTINS["paste"] = paste
+BUILTINS["paste0"] = paste0
+BUILTINS["nchar"] = nchar
+BUILTINS["toupper"] = toupper
+BUILTINS["tolower"] = tolower
+BUILTINS["substr"] = substr
+BUILTINS["sprintf"] = sprintf
+BUILTINS["format"] = format_
+BUILTINS["formatC"] = formatC
 # base's constants (values, not functions)
 VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False])}
+VALUES["letters"] = letters
+VALUES["LETTERS"] = LETTERS
+VALUES["month.name"] = MONTH_NAME
