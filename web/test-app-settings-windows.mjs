@@ -117,7 +117,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
   ok(why === "disk full" && h.file["sagebrush-theme"] === "solar" && h.file["sagebrush-files-sort"] === "size", "a write that fails: its key is written with the next: " + J({ why, file: h.file }));
 }
 
-// astra2's races (#1716 H1, H2), each observed on disk and in the window's localStorage
+// The review's races (H1, H2), each observed on disk and in the window's localStorage
 {
   // (H1: a write held, then failing, after a newer value of the same key was queued behind it: the old value isn't
   // put back, so the next unrelated write never takes settings.json back to it)
@@ -160,7 +160,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
   ok(h.file["sagebrush-theme"] === "solar" && b.localStorage.getItem("sagebrush-theme") === "solar" && a.localStorage.getItem("sagebrush-theme") === "solar", "H2: a read made before this window's own later change, returned late, isn't taken: disk " + J(h.file) + ", doc-1 " + b.localStorage.getItem("sagebrush-theme") + ", main " + a.localStorage.getItem("sagebrush-theme"));
 }
 
-// (astra2's R1: another window's change that can't be stored here (localStorage full, or a removal failing) isn't
+// (the review's R1: another window's change that can't be stored here (localStorage full, or a removal failing) isn't
 // taken for seen: the next read, of the same version, takes it)
 {
   const h = host();

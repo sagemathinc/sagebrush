@@ -201,7 +201,7 @@ fn command(app: &tauri::AppHandle) -> Option<Command> {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn shipped(app: &tauri::AppHandle) -> Option<Command> {
     use tauri::Manager;
-    let node = std::env::current_exe().ok()?.parent()?.join("sagebrush-node");
+    let node = crate::agent_host::shipped_node()?;
     let engine = app.path().resource_dir().ok()?.join("engine");
     if !node.is_file() || !engine.join("main.mjs").is_file() {
         return None;

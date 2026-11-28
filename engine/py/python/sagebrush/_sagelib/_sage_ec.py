@@ -104,7 +104,7 @@ def _cubic_roots_mod(c2, c1, c0, p):
                 rem = q[:-1]
                 roots[x] = roots.get(x, 0) + 1
         return roots
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     out = {}
     for g, e in call("factor_mod", f=[str(c0), str(c1), str(c2), "1"], p=int(p)):
         if len(g) == 2:  # monic linear: g0 + T
@@ -289,7 +289,7 @@ def _add(P, Q, A):
 
 def _int_roots_cubic(A, C):
     """Integer roots of x^3 + A x + C (exactly, by factoring over Z)."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     if C == 0:
         roots = {0}
         # x^2 + A
@@ -562,7 +562,7 @@ def certified_low_rank(ld):
     (engine/ap/src/lcert.rs: every exp, E_1 and sum enclosed, tails
     bounded; the systematic review's R2-EC-F2), else None.  The f64
     version below is kept for comparison only."""
-    from sagebrush import ap as _apm
+    from _sagebrush_lib import ap as _apm
     r = _apm.low_rank(ld.an, ld.N)
     return None if r is None else r["rank"]
 
@@ -1072,7 +1072,7 @@ def canonical_height_ball(a, P, bad_primes, prec=128):
     ball arithmetic (engine/ap/src/height.rs: the periods, the elliptic
     logarithm and the theta product with enclosures, the systematic review's
     R2-EC-F3); the finite local terms are exact here."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     if P is None:
         return _F(0), _F(0)
     r = _roots_fixed(a)
@@ -1105,7 +1105,7 @@ def _dyadic(m, e):
 def log_ball(x, prec=128):
     """(lo, hi): exact Fractions enclosing log(x) for a positive rational x
     (the engine's ball logarithm)."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     x = _F(x)
     h = call("ball_log", x=[str(x.numerator), str(x.denominator)], prec=int(prec))
     return _dyadic(int(h["lo"][0]), int(h["lo"][1])), _dyadic(int(h["hi"][0]), int(h["hi"][1]))
@@ -1119,7 +1119,7 @@ def _root_seeds(a):
 def real_period_ball(a, prec=128):
     """(lo, hi): exact Fractions enclosing Omega_E of the model a (the
     engine's AGM on balls; as real_period)."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     h = call("ec_real_period", a=[str(int(c)) for c in a], roots=_root_seeds(a), prec=int(prec))
     return _dyadic(int(h["lo"][0]), int(h["lo"][1])), _dyadic(int(h["hi"][0]), int(h["hi"][1]))
 
@@ -1128,7 +1128,7 @@ def l_value_ball(ld):
     """(w, lo, hi): the root number and exact Fractions enclosing L(E,1)
     (w = 1) or L'(E,1) (w = -1), from the engine's balls
     (engine/ap/src/lcert.rs); None if the balls do not decide w."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     r = call("ec_l_value", an=[int(x) for x in ld.an], n=int(ld.N))
     if r is None:
         return None
@@ -1483,7 +1483,7 @@ def _two_torsion_model(a):
     b2, b4, b6, b8 = _b(a)
     # 2-torsion: roots of 4x^3 + b2 x^2 + 2 b4 x + b6; scale x = X/4 for integer roots
     # X^3 + b2 X^2 + 8 b4 X + 16 b6 = 0 with X = 4x
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     fac = call("factor", f=[str(16 * b6), str(8 * b4), str(b2), "1"])["factors"]
     roots = [_F(-int(g[0]), 4) for g, e in fac if len(g) == 2 and int(g[1]) == 1]
     if not roots:
@@ -1697,7 +1697,7 @@ def two_descent(a, quartic_bound=60, point_bound=6.0, max_candidates=1e10, algor
     2-Selmer group from S-units of the cubic field Q[x]/(f)
     (_sage_ec_cubic.py), with points from a search on E only.  By default
     the quartics, and the cubic field beyond max_candidates."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     if algorithm == "cubic":
         return two_descent_cubic(a)
     c4, c6 = _c(a)
@@ -1877,7 +1877,7 @@ def point_search_engine(a, H, limit=100000, R=None):
     """The points with x = r/s^2, log max(|r|, s^2) <= H (the Rust engine's
     search; x lifted to the points above it).  Exactly: max(|r|, s^2) <= R
     with R = int(exp(H)) (a double), or the R given."""
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     b2, b4, b6, _ = _b(a)
     if R is None:
         R = int(_m.exp(H))
@@ -1941,7 +1941,7 @@ def divide_point(a, R, p):
     curve a (integral coefficients)."""
     if R is None:
         return None
-    from sagebrush._engine import call
+    from _sagebrush_lib._engine import call
     psi = _division_polys(a, p + 1)
     b2, b4, b6, _ = _b(a)
     F = [b6, 2 * b4, b2, 4]

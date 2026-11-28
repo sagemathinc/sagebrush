@@ -8,7 +8,7 @@ names = {"module_shas", "pin_shas", "fetch_pinned", "unpinned", "restore_modules
 tree = ast.parse(src)
 body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
 mods_node = [n for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "MODULES"]
-MODULES = ["sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-mp.wasm", "sagebrush-nd.wasm"]
+MODULES = ["sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-mp.wasm", "sagebrush-nd.wasm", "sagebrush-skltree.wasm"]
 sha = lambda b: hashlib.sha256(b).hexdigest()
 results = []
 
@@ -54,7 +54,7 @@ def r2(p, pins, g):
     start = g["module_shas"](); build_all(p); built = g["module_shas"]()
     failed = g["restore_modules"]({"built": built}, start)
     now = g["module_shas"]()
-    return (not failed) and all(now[m] == pins[m]["sha256"] for m in MODULES), f"failure {failed}, all four pinned again"
+    return (not failed) and all(now[m] == pins[m]["sha256"] for m in MODULES), f"failure {failed}, all five pinned again"
 
 def r3(p, pins, g):
     start = g["module_shas"]()
@@ -133,7 +133,7 @@ def r8(p, pins, g):
     kept = (p / "wasm" / MODULES[2]).read_bytes() == edit
     untouched = all(now[m] == built[m] for m in MODULES if m != MODULES[2])
     leftover = sorted(x.name for x in (p / "wasm").glob("*.part"))
-    return failed and kept and untouched and not leftover and len(staged) == 4, \
+    return failed and kept and untouched and not leftover and len(staged) == len(MODULES), \
         f"failure reported {failed}, the edit kept {kept}, nothing replaced {untouched}, staged {len(staged)}, parts left {leftover}"
 
 def r9(p, pins, g):
@@ -181,7 +181,7 @@ def r10(p, pins, g):
     now = g["module_shas"]()
     untouched = all(now[m] == built[m] for m in MODULES)
     leftover = sorted(x.name for x in (p / "wasm").glob("*.part"))
-    return failed and untouched and not leftover and len(staged) == 4, \
+    return failed and untouched and not leftover and len(staged) == len(MODULES), \
         f"failure reported {failed}, nothing replaced {untouched}, staged {len(staged)}, parts left {leftover}"
 
 for n, f in [("a module edited after the staging", r8), ("a rename that fails partway", r9), ("a pin changed after the staging", r10), ("a module edited during the fetch", r7), ("a local build of another module before the run", r5), ("a missing module before the run", r6), ("a module changed by someone else after the build", r1), ("an ordinary run", r2),

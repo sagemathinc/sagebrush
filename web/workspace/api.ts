@@ -34,7 +34,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { dropRows } from "../notebook/journal-rows.js";
 import { SYNC_NB } from "../notebook/sync-rows.js";
 import { isBoard } from "../board/doc";
-import { fromNbformat, cellId, kernelMode } from "../notebook/nbformat.js";
+import { fromNbformat, kernelMode, withCellIds } from "../notebook/nbformat.js";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
 import { syncState as ledgerState, waitSync as ledgerWait, type SyncAnswer, type SyncLevel, type WaitResult } from "./sync-ledger";
@@ -118,6 +118,14 @@ export type OpAfter = { id: string; parent: string | null; name: string; kind: K
 export type Op = {
   seq?: number; t: number; device: string; by: string; op: string; path: string; to?: string; kind: Kind;
   ref?: string; fid?: string; sha256?: string; size?: number; base?: string; parent?: string; after?: OpAfter | null; origin?: "server";
+  /** (dropVersions, never sent) the newest old versions of each file it kept, and whether it named only some: the
+   * account's history it releases follows them (e2e PR 5d) */
+  keep?: number; partial?: true;
+  /** (dropVersions) what the person saw when asking (e2e PR 5d): the verified index's cursor then, and the files in its
+   * scope by identity (none: every file) */
+  view?: number; fids?: string[];
+  /** (dropVersions) the sync namespace `view` was read in (its account and server generation): another's releases nothing */
+  viewNs?: string;
 };
 /** An entry's identity (design/sync-client.md §3): a data file's or folder's fid, a document's ref; undefined
  * where it has none yet (a folder or file from before ids were kept, until the migrator gives it one). */
@@ -407,11 +415,26 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
 const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed"), REVIEW_REFUSED = Symbol("the grant changed"), RUN_NOTE_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
+/** (tests) dropVersions: run just before its request is logged, the deletion done (e2e PR 5d: a namespace switch then
+ * must not rebind the request) */
+export const DROP_HOOK: { beforeLog?: () => Promise<void> | void } = {};
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
  * transaction is kept): `inRoot`, the root and record written, before the commit; `inPublish`, ready and its pages. */
 export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "root-late" | "copy" | "copy-late" | "folder-late" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
 const sameSource = (e: Entry, s: BranchSource) =>
   e.kind === s.kind && e.created === s.created && e.fid === s.fid && (e.kind === "file" || e.kind === "folder" || e.ref === s.ref) && (e.kind !== "file" || (e.sha256 === s.sha256 && e.size === s.size));
+/** Whether `p` is a branch's root's place, `/Branches/<name>`. */
+const atBranchRoot = (p: string) => within(p, BRANCHES) && p !== BRANCHES && !p.slice(BRANCHES.length + 1).includes("/");
+/** Every record of the branch whose root folder is `fid`, deleted in `tx` (which has "meta"): its record, review
+ * state, runs and hash pages, as reconcileBranches deletes them.  Done in the transaction that puts the root in Trash,
+ * so nothing of the branch outlives its removal: a folder restored from Trash afterwards is a plain folder. */
+function dropBranch(tx: IDBTransaction, fid: string): void {
+  const st = tx.objectStore("meta");
+  st.delete(BRANCH_KEY + fid);
+  st.delete(BRANCH_REVIEW_KEY + fid);
+  st.delete(BRANCH_RUNS_KEY + fid);
+  st.delete(IDBKeyRange.bound(`${BRANCH_HASH_KEY}${fid}:`, `${BRANCH_HASH_KEY}${fid}:\uffff`));
+}
 async function branchRecordsIn(tx: IDBTransaction): Promise<Map<string, BranchRecord>> {
   const st = tx.objectStore("meta"), range = IDBKeyRange.bound(BRANCH_KEY, BRANCH_KEY + "\uffff");
   const [keys, values] = await Promise.all([req(st.getAllKeys(range)), req(st.getAll(range))]);
@@ -523,9 +546,6 @@ export const PATH_OF_FILE_MAX = 64;
 
 /** A notebook's document as written (web/notebook/nbformat.js: Jupyter's nbformat made Sagebrush's), what it can't
  * convert (a heading level not 1 to 6) refused as invalid. */
-/** A new notebook's cells, each with its id: one it was given, or a new one, as the page gives an id-less cell when it opens
- * it, so the notebook stored is the one shown (an agent's notebook that runs by itself is compared by its cells' ids). */
-const withCellIds = (cells: any[]) => cells.map((c) => (c && typeof c === "object" && !c.id ? { ...c, id: cellId() } : c));
 /** A notebook's writer lock under sync's journal (notebook/journal.js's lockPrefix + its ref), held by the one tab of
  * this browser that writes it. */
 export const NB_WRITER_LOCK = "sagebrush-nb-writer:";
@@ -1620,7 +1640,10 @@ export class Workspace {
     const doc = nbDoc(content) as any;
     if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
     const { id: _i, rev: _r, updated: _u, baseRev: _b, ...rest } = doc;
-    const want = { ...rest, cells: withCellIds(rest.cells) };
+    // (each cell with its id: one it was given, or the one the page gives it on every device and load (nbformat.js
+    //  cellIdFor), so the notebook stored is the one shown: an agent's notebook that runs by itself is compared by its
+    //  cells' ids)
+    const want = { ...rest, cells: withCellIds(ref, rest.cells) };
     // (an ok: the record holds this whole document (notebook-form docValue: every field but the store's envelope, each
     // cell whole), its language too if it names one)
     const withMode = want.mode !== undefined, key = docValue(want, withMode);
@@ -1746,6 +1769,8 @@ export class Workspace {
         const doc = nbDoc(content) as any;
         if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
         const { id: _i, rev: _r, updated: _u, ...rest } = doc;
+        // (a cell without an id given one, the same on every device (nbformat.js cellIdFor): never stored without)
+        rest.cells = withCellIds(e.ref!, rest.cells);
         // (one that names no mode, as nbformat's doesn't, keeps the notebook's: the save replaces the whole record
         // (daybreak3, #928))
         const mode = rest.mode ?? (await this.mainTx("notebooks", "readonly", (st) => st.get(e.ref!)))?.mode ?? e.mode;
@@ -2199,6 +2224,13 @@ export class Workspace {
     const q = path(p), keep = Math.max(0, Math.floor(opts.keep ?? 0)), x = opts.expect;
     if (this.actor !== "person") throw new WorkspaceError("invalid", "only a person can drop old versions");
     return this.locked(async () => {
+      // (the sync namespace and its verified index as the person asked, read before any deletion page: the request is
+      // that namespace's for good. sync:current can change while the pages run (switchToIf doesn't take this lock), and
+      // a request read at the end would be stamped with the next namespace and release its history (e2e PR 5d))
+      const asked = await inTx(this.ws, "meta", "readonly", async (tx) => {
+        const meta = tx.objectStore("meta"), cur = (await req(meta.get("sync:current"))) as { ns?: string } | undefined;
+        return cur?.ns ? { viewNs: cur.ns, view: ((await req(meta.get(`sync:${cur.ns}:cursor`))) as number | undefined) ?? 0 } : { view: 0 };
+      });
       if (x) {
         const e = q === "/" ? undefined : await this.mustStat(q);
         if (x.fid !== undefined && e?.fid !== x.fid) throw new WorkspaceError("conflict", `${q} is another file now`);
@@ -2304,8 +2336,14 @@ export class Workspace {
         }
       }
       this.noteDeleting(1);
+      await DROP_HOOK.beforeLog?.();
       const ops: Op[] = [];
-      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => { await this.log(tx, ops, { op: "dropVersions", path: q, kind }); });
+      // (what the person saw, kept with the request (e2e PR 5d): the account's history it releases is bounded by the
+      // verified index as it was asked (`asked`, never read again here) and these files by identity, never by what has
+      // come since)
+      await inTx(this.ws, withSync("ops"), "readwrite", async (tx) => {
+        await this.log(tx, ops, { op: "dropVersions", path: q, kind, ...asked, ...(fids ? { fids } : {}), ...(keep > 0 ? { keep } : {}), ...(only ? { partial: true as const } : {}) });
+      });
       this.tell({ ops });
       return freed;
     });
@@ -3765,7 +3803,7 @@ export class Workspace {
       // notebook's first writer load takes it into the journal (recovery's catch-up, 2c-1d-iii §3); a plain store's
       // save is refused there, and so was every notebook made here: the Files' New, create, duplicate, an upload)
       const journaled = (await this.mainTx("notebooks", "readonly", (st) => st.get(FENCE)))?.phase === "journal";
-      const out = await new IdbStore(this.main, ref, null, { journal: journaled }).save({ ...doc, cells: withCellIds(doc.cells ?? []), mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true, ...(journaled ? { journal: { keep: true, hash: "", unjournaled: true } } : {}) });
+      const out = await new IdbStore(this.main, ref, null, { journal: journaled }).save({ ...doc, cells: withCellIds(ref, doc.cells ?? []), mode, name: splitExt(nameOf(q))[0], id: ref }, { lockHeld: true, ...(journaled ? { journal: { keep: true, hash: "", unjournaled: true } } : {}) });
       if (typeof out === "string") throw new WorkspaceError("storage", out);
       undo = () => this.deleteNotebook(ref);
     } else if (kind === "board") {
@@ -4087,7 +4125,9 @@ export class Workspace {
     if (stuck) throw new WorkspaceError("limit", tooLarge(stuck));
     await passGate(gate, "publishing:small");
     const ops: Op[] = [];
-    const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+    // (a branch's root put in Trash: the branch's records go in the same transaction)
+    const branch = op === "remove" && atBranchRoot(a);
+    const moved = await inTx(this.ws, withSync("entries", "ops", ...(branch ? ["meta"] : [])), "readwrite", async (tx) => {
       await fenceCheck(tx, [a, b]);
       const st = tx.objectStore("entries");
       if ((await req(st.getKey(b))) !== undefined || (await req(st.count(subtree(b)))) > 0) throw new WorkspaceError("exists", `${b} is there already`);
@@ -4112,6 +4152,7 @@ export class Workspace {
         out.push(n);
       }
       await this.log(tx, ops, { op, path: a, to: b, kind: old[0].kind }, out[0]);
+      if (branch && old[0].kind === "folder" && old[0].fid) dropBranch(tx, old[0].fid);
       return out;
     });
     this.tell({ ops });
@@ -4192,7 +4233,9 @@ export class Workspace {
       await passGate(gate, "publishing:large");
       // (the publication: the top moved, its op logged, the record published, one transaction (r4 §1))
       const ops: Op[] = [];
-      const moved = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
+      // (a branch's root put in Trash: the branch's records go in the same transaction)
+      const branch = op === "remove" && atBranchRoot(a);
+      const moved = await inTx(this.ws, withSync("entries", "ops", ...(branch ? ["meta"] : [])), "readwrite", async (tx) => {
         FENCE_READ.add(tx);
         const st = tx.objectStore("entries"), rec = (await req(st.get(RW))) as ERecord | undefined;
         if (!rec || rec.rid !== rid || rec.published) throw new WorkspaceError("conflict", `the move of ${a} was taken over`);
@@ -4209,6 +4252,7 @@ export class Workspace {
         st.put({ ...rec, published: true, rev: rec.rev + 1 } satisfies ERecord);
         dropView(tx);
         await this.log(tx, ops, { op, path: a, to: b, kind: top.kind }, n);
+        if (branch && top.kind === "folder" && top.fid) dropBranch(tx, top.fid);
         return n;
       });
       this.tell({ ops });

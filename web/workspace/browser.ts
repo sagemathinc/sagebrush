@@ -67,6 +67,12 @@ export type BrowserHost = {
    * other page, its own saves made first; none (the Open… dialog, the desktop app): no Agents…, and no Files | Agents
    * switch. */
   agents?(): void;
+  /** Show in folder (the desktop app, whose workspace is real files on the computer: #1539): the system's file
+   * manager at this workspace path ("/" the workspace's own folder); none: not offered. */
+  reveal?(path: string): Promise<unknown>;
+  /** Where the workspace's files are on the computer (the desktop app's folder), for the Storage panel to say;
+   * none or undefined: not said. */
+  where?(): string | undefined;
   /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
   exportUrl?: (file: string) => string;
@@ -433,7 +439,17 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (P0 #1: the documents whose content is in this browser, read at each refresh, so another device's that hasn't
   // arrived reads "on another device", and stops as soon as it is here)
   let here: { notebook: Set<string>; board: Set<string> } = { notebook: new Set(), board: new Set() };
-  async function refresh() {
+  // (one refresh at a time: one asked for while another runs is made once more after it, so an older list, answered
+  // late, never draws over a newer one, and each caller's promise ends after a list read since its call. `refreshing`
+  // is cleared in the same step as the last `again` is read, never a microtask later: one asked for in between
+  // would get a promise no read follows)
+  let refreshing: Promise<void> | null = null, again = false;
+  function refresh(): Promise<void> {
+    if (refreshing) { again = true; return refreshing; }
+    refreshing = (async () => { try { do { again = false; await refreshOnce(); } while (again); } finally { refreshing = null; } })();
+    return refreshing;
+  }
+  async function refreshOnce() {
     try { entries = await w.list(trashView ? TRASH : "/", { recursive: true }); } catch (e) { fail(e); }
     if (entries.some((e) => e.remote && (e.kind === "notebook" || e.kind === "board"))) here = await w.contentIds().catch(() => here);
     byParent = new Map();
@@ -711,7 +727,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     meterEl.textContent = est ? `${fmtBytes(est.usage)} of ${fmtBytes(est.quota)}` : "Storage";
   }
   const preview = (e: Entry) => openPreview(w, e, { say, fail }).then(() => meter());
-  const storage = (startExport = false) => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen, startExport }).then(() => meter());
+  // (Show in folder: refused (not on disk yet, or the file manager didn't start) said, never thrown)
+  const reveal = (p: string) => void Promise.resolve(host.reveal?.(p)).catch(fail);
+  const storage = (startExport = false) => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen, startExport, where: host.where?.(), reveal: host.reveal ? () => reveal("/") : undefined }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
 
   async function rowMenu(at: HTMLElement, e: Entry) {
@@ -740,6 +758,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind === "file") items.push(["Download", () => download(e)]);
     if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
     items.push(["Copy path name", () => navigator.clipboard?.writeText(e.path).then(() => say(`Copied path '${e.path}'`), () => say(e.path))]);
+    if (host.reveal) items.push(["Show in folder", () => reveal(e.path)]);
     // (only a person deletes old versions, §2.5)
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
     items.push("-", ["Move to Trash", () => toTrash(e), "danger"]);
@@ -1048,7 +1067,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }));
   upBtn.onclick = () => pick("/");
   // (Download everything: the Storage panel's export, offered here too, where a person looks for it)
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
+  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(host.reveal ? [["Show in folder", () => reveal("/")] as [string, () => unknown]] : []), ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {
