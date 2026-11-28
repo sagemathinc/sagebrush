@@ -1283,8 +1283,10 @@ class _SeriesLoc(object):
 
 def diff_column(col, periods):
     """Column.diff: float64 (float32 for a float32 column, computed in it),
-    NaN where the value `periods` away is missing or past either end (pandas
-    3.1: the integers and float64 alike)."""
+    NaN where the value `periods` away is missing or past either end, as pandas
+    3.1: an int8 or int16 column's differences exact, in float32; an int32,
+    int64 or unsigned one's subtracted in its own dtype, wrapping (a uint8
+    0 after 1 is 255), then float64."""
     if isinstance(periods, bool) or not isinstance(periods, (int, np.integer)):
         raise ValueError("periods must be an integer")
     periods = int(periods)
@@ -1292,14 +1294,17 @@ def diff_column(col, periods):
         raise _unsupported("diff of a datetime64[us] column (a Timedelta column)")
     if col.dtype not in INTS and col.dtype not in FLOATS:
         raise _unsupported("diff of a %s column" % (col.dtype,))
-    d = "float32" if col.dtype == "float32" else "float64"
-    v = col._pd_values.astype(d)
+    small = col.dtype in ("int8", "int16")
+    d = "float32" if col.dtype == "float32" or small else "float64"
+    # (the subtraction's dtype: a float's own result dtype, int64 for a small int, else the int's own, wrapping)
+    v = col._pd_values.astype(d if col.dtype in FLOATS else "int64" if small else col.dtype)
     n = len(v)
     out = np.full(n, np.nan, dtype=d)
-    if periods >= 0 and periods < n:
-        out[periods:] = v[periods:] - v[:n - periods]
-    elif periods < 0 and -periods < n:
-        out[:n + periods] = v[:n + periods] - v[-periods:]
+    with np.errstate(over="ignore"):
+        if periods >= 0 and periods < n:
+            out[periods:] = (v[periods:] - v[:n - periods]).astype(d)
+        elif periods < 0 and -periods < n:
+            out[:n + periods] = (v[:n + periods] - v[-periods:]).astype(d)
     return Column(d, out)
 
 
