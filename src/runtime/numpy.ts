@@ -4296,8 +4296,9 @@ newBuiltinModule("_numpy", (m) => {
         const A = { arr: { dt: wa.dt ?? scalarDtype(wa) } as NDArray, weak: wa.dt ? null : wa };
         const B = { arr: { dt: wb.dt ?? scalarDtype(wb) } as NDArray, weak: wb.dt ? null : wb };
         let ct = resultType(A, B);
-        // (floats only: integers take binary()'s checked kernel)
-        if (ct.kind === "f") {
+        // (floats only: integers take binary()'s checked kernel; the bitwise ufuncs and the shifts have no float
+        // loop, so binary() refuses them with NumPy's TypeError: np.int8(3) << 1.5 was a float here)
+        if (ct.kind === "f" && !(op.startsWith("bitwise") || op.endsWith("_shift"))) {
           const rt = spec.out === "bool" ? D.bool : ct;
           const f = spec.f;
           const v = castNum(rt, f(wa.v, wb.v));

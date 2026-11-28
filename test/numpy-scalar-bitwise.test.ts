@@ -209,6 +209,16 @@ int8 -7 >> -1 (int) | int8 np.int8(-1)
 int8 array >> -1 | ndarray array([ 0, -1, -1,  0], dtype=int8)
 int8 array << -1 | ndarray array([0, 0, 0, 0], dtype=int8)
 int16 array >> 16 | ndarray array([ 0, -1], dtype=int16)
+int8 << 1.5 | !! TypeError
+1.5 >> int8 | !! TypeError
+int8 & 1.0 | !! TypeError
+int8 & uint64 | !! TypeError
+uint64 | int16 | !! TypeError
+int8 ^ 1j | !! TypeError
+uint8 | float32 | !! TypeError
+bool_ ^ 1.0 | !! TypeError
+float64 << int8 | !! TypeError
+~float64 | !! TypeError
 `;
 
 test("NumPy integer scalars' bitwise operators, ~ and **, and the wrapping integer kernels, are NumPy's", () => {
