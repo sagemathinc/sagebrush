@@ -1,20 +1,17 @@
 // The pins against a fresh build of engine/ (the engine-wasm job, after scripts/build-engine.mjs wrote the five
-// modules into wasm/): a module whose bytes don't match its pin in wasm/pins.json, or whose mode isn't 0644,
-// means the pin is stale.  On a master push, a dispatch (a train's gate, before it lands) or the schedule that is an
-// error: master must never carry a pin that isn't its own source's build.  So is a pull request from a track
-// (track/*) into master: the pin moves only there, with that pull.  Elsewhere it is a warning: a pull request into
-// master prints the pins.json lines to commit (the wasm-modules job); and on a track (a push to track/*, a
-// dispatch on it, a pull request into it) the pin stays where master left it while the track's engine moves, so
-// CI builds the engine from source and a mismatch is expected.
-//   node scripts/check-fresh-wasm.mjs        (in the engine-wasm job; scripts/pin-policy.mjs's isStrict decides)
+// modules into wasm/): a module whose bytes don't match its pin in wasm/pins.json, or whose mode isn't 0644.
+// When the pins record this tree's own source (wasm-modules.mjs's pinsState: "current"), that is an error on every
+// event: the pins must be this source's build, so the build isn't reproducible, or the pins were edited by hand.
+// When they record another source ("pending": a pull request or queue group that changes the engine, or master before
+// its pin commit, design/wasm-artifacts.md section 13), the mismatch is expected and only reported: a pull request
+// never carries a pin, and master's CI commits it after the merge (scripts/wasm-pin-commit.mjs).
+//   node scripts/check-fresh-wasm.mjs        (in the engine-wasm job)
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { MODULES, parsePins, sha256 } from "./wasm-modules.mjs";
-import { isStrict, runRefs } from "./pin-policy.mjs";
+import { MODULES, parsePins, pinsState, sha256 } from "./wasm-modules.mjs";
 
-export function checkFreshWasm({ cwd = process.cwd(), env = process.env, ...given } = {}) {
-  // (an explicit event stands alone, so a test's verdict never depends on the refs of the run it is in)
-  const { event, ref = "", baseRef = "", headRef = "" } = "event" in given ? given : runRefs(env);
+// (`state` stands in for pinsState(cwd): a test's fixture without git)
+export function checkFreshWasm({ cwd = process.cwd(), state } = {}) {
   let pins;
   try {
     pins = parsePins(readFileSync(join(cwd, "wasm", "pins.json"), "utf8"));
@@ -36,9 +33,10 @@ export function checkFreshWasm({ cwd = process.cwd(), env = process.env, ...give
     else if (mode !== 0o644) stale.push(`${name}: mode ${mode.toString(8)}, not 644`);
   }
   if (!stale.length) return { status: 0, message: "wasm/: every pin equals a fresh build" };
-  const what = "wasm/pins.json differs from a fresh build of engine/ (commit the pins.json lines this run's wasm-modules job printed, or node scripts/wasm-pins.mjs --from-local after the same build)";
-  const strict = isStrict({ event, ref, baseRef, headRef });
-  return strict ? { status: 1, message: `::error::${what}\n${stale.join("\n")}` } : { status: 0, message: `::warning::${what}\n${stale.join("\n")}` };
+  if ((state ?? pinsState(cwd)) === "current") {
+    return { status: 1, message: `::error::wasm/pins.json records this tree's own source, but differs from a fresh build of it: the build isn't reproducible here, or the pins were edited by hand\n${stale.join("\n")}` };
+  }
+  return { status: 0, message: `::notice::this source's pin is pending (wasm/pins.json records another source's build): master's CI commits it after the merge, never a pull request\n${stale.join("\n")}` };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

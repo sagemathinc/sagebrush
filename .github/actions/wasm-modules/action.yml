@@ -1,14 +1,16 @@
 name: wasm modules
 description: >-
-  Puts the five WebAssembly modules in wasm/ before anything reads them (design/wasm-artifacts.md sections 4 and 6).
-  When this run built them (its wasm-modules job), installs that artifact after checking it and the pin policy;
-  otherwise fetches the published modules that wasm/pins.json names (a no-op while they are committed and match).
+  Puts the five WebAssembly modules in wasm/ before anything reads them (design/wasm-artifacts.md sections 4, 6 and 13).
+  When this run built them (its wasm-modules job), installs that artifact after checking it and the pin policy.
+  Otherwise, when wasm/pins.json records this commit's own source, fetches the published modules it names; when the
+  pins are pending (they record another source: an engine change before master's pin commit), builds them here,
+  labelled fresh.  A release (release: true) only ever fetches, and refuses a commit whose pin is pending.
 inputs:
   artifact:
     description: "'true' when this run's wasm-modules job built the modules"
     required: true
-  allow-fresh:
-    description: "'true' only for a pull request's engine test jobs: run a build that doesn't match the pins, labelled"
+  release:
+    description: "'true' for a release: the published modules of pins that record this commit's own source, or a failure"
     required: false
     default: "false"
 runs:
@@ -21,9 +23,24 @@ runs:
         path: ${{ runner.temp }}/wasm-modules
     - if: inputs.artifact == 'true'
       shell: bash
-      env:
-        ALLOW_FRESH: ${{ inputs.allow-fresh }}
-      run: node scripts/wasm-artifact.mjs install "$RUNNER_TEMP/wasm-modules" $([ "$ALLOW_FRESH" = true ] && echo --allow-fresh)
+      run: node scripts/wasm-artifact.mjs install "$RUNNER_TEMP/wasm-modules"
     - if: inputs.artifact != 'true'
+      id: pins
       shell: bash
-      run: node scripts/wasm-fetch.mjs
+      run: echo "state=$(node scripts/wasm-pins.mjs --state)" >> "$GITHUB_OUTPUT"
+    - if: inputs.artifact != 'true' && (steps.pins.outputs.state == 'current' || inputs.release == 'true')
+      shell: bash
+      env:
+        RELEASE: ${{ inputs.release }}
+      run: node scripts/wasm-fetch.mjs $([ "$RELEASE" = true ] && echo --release)
+    # (pending pins, not a release: this commit's own engine, built with its pinned toolchain, engine/rust-toolchain.toml)
+    - if: inputs.artifact != 'true' && steps.pins.outputs.state != 'current' && inputs.release != 'true'
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+      with:
+        targets: wasm32-unknown-unknown
+    - if: inputs.artifact != 'true' && steps.pins.outputs.state != 'current' && inputs.release != 'true'
+      shell: bash
+      run: |
+        echo "::notice::this commit's pin is pending (wasm/pins.json records another source's build): building its modules here, labelled fresh"
+        node scripts/build-engine.mjs
+        node scripts/check-fresh-wasm.mjs

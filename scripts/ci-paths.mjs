@@ -9,6 +9,7 @@ import { headers } from "./web-tests.mjs";
 import { BUILD_INPUT_PATHS } from "./build-inputs.mjs";
 import { listExamples, select as selectExamples, shardCount } from "./examples-lib.mjs";
 import { onTrack, runRefs } from "./pin-policy.mjs";
+import { ROOT, sourceOf } from "./wasm-modules.mjs";
 
 const event = process.env.GITHUB_EVENT_NAME ?? "local";
 const ref = process.env.GITHUB_REF ?? "";
@@ -64,6 +65,17 @@ function changedFiles() {
 }
 
 // (tests replay a file list through the classifier: one path a line)
+// The pins' state at `rev` in this checkout ("pending" when anything can't be read: then the run builds)
+function pinsStateOf(rev) {
+  try {
+    const at = execFileSync("git", ["-C", ROOT, "show", `${rev}:wasm/pins.json`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const recorded = JSON.parse(at).source ?? null;
+    const source = sourceOf(ROOT, rev);
+    return recorded !== null && source !== null && recorded === source ? "current" : "pending";
+  } catch {
+    return "pending";
+  }
+}
 const files = process.env.CI_PATHS_FILES
   ? readFileSync(process.env.CI_PATHS_FILES, "utf8").split("\n").filter(Boolean)
   : changedFiles();
@@ -320,7 +332,11 @@ const engineSmoke = full || workflowOrBuild || engineChange || fallback;
 // (scripts/pin-policy.mjs), so the published modules its pins name may not be its engine)
 // (the CPython package's own Python, enginePythonOnlyPaths, is in no module: engine/py is its own crate, not one of
 // the four builds (engine/web, engine/nd, engine/raster, engine/mp); the CI capacity ruling, Nov 22 2026, item 2)
-const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) ||
+// (and a pull request whose pins are pending, design/wasm-artifacts.md section 13: wasm/pins.json records another
+// source than its merge's, as after an engine change merges and before master's pin commit, so the published modules
+// aren't its engine.  CI_PATHS_PINS (current or pending) stands in for the checkout's state: the classifier's tests.)
+const pinsPending = process.env.CI_PATHS_PINS ? process.env.CI_PATHS_PINS === "pending" : pinsStateOf(head) === "pending";
+const wasmBuild = event !== "pull_request" || fallback || onTrack(runRefs(process.env)) || pinsPending ||
   files.some((file) => wasmBuildPaths.some((p) => p.test(file)) && !enginePythonOnlyPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 const webkit = event === "merge_group" || event === "workflow_dispatch" || event === "schedule" ||
@@ -491,12 +507,17 @@ const outputs = {
 // sets), the size gate's docs-only record and the ci summary.  Every other selection is off, whatever it was (the CI
 // capacity ruling's second cut, Nov 22 2026; test/ci-paths.test.ts checks each output).
 const queueTested = event === "push" && ref === "refs/heads/master" && process.env.CI_QUEUE_TESTED === "true";
-if (queueTested) {
+// And master's pin commit (scripts/wasm-pin-commit.mjs, design/wasm-artifacts.md section 13): a push to master whose
+// only change is wasm/pins.json changes no source, so nothing is tested again either.  Its modules are still built,
+// and since its pins now record its own source, the wasm-modules job fails unless the build equals them.
+const pinCommitPush = event === "push" && ref === "refs/heads/master" && files.length === 1 && files[0] === "wasm/pins.json";
+if (queueTested || pinCommitPush) {
   for (const key of ["full", "node", "web", "modes", "engine_smoke", "engine_full", "engine_cpython", "webkit", "web_runner", "web_export",
     "web_lookalike", "web_share", "census", "unsafe_sweep", "slow_tests", "size_inputs"]) outputs[key] = false;
   Object.assign(outputs, { web_groups: "[]", web_matrix: "[]", examples_ids: "[]", examples_matrix: "[]", slow_scope: "" });
 }
 outputs.queue_tested = queueTested;
+outputs.pin_commit = pinCommitPush;
 // PR CI light (the checked-in switch .github/pr-ci-light, exactly "true", set by William while the merge queue is starved
 // of runners; ci.yml's changes job passes its first line as CI_PR_LIGHT, a file so that a fork's pull request reads it
 // too): a pull request runs only checks and the size gate (with its

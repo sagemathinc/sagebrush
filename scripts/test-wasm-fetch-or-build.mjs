@@ -9,8 +9,9 @@ import { baseModules, MODULES, parsePins } from "./wasm-modules.mjs";
 // (wasm-fetch.mjs's failure, as it writes it for a fetch of `total` modules: this checkout's count by default)
 const failureOf = (total, ...lines) => new Error(`wasm-fetch: ${lines.length} of ${total} modules failed:\n${lines.join("\n")}`);
 const failure = (...lines) => failureOf(MODULES.length, ...lines);
-// (the cases below run on this checkout's module set unless they say otherwise)
-const fob = (opts) => fetchOrBuild({ modulesOf: () => MODULES, ...opts });
+// (the cases below run on this checkout's module set, with current pins (they record the base's own source), unless
+// they say otherwise)
+const fob = (opts) => fetchOrBuild({ modulesOf: () => MODULES, state: () => "current", ...opts });
 const missing = (name) => `${name}: https://get.example/${name}.wasm: 404 https://get.example/${name}.wasm: this pin isn't published yet`;
 let passed = 0;
 const test = async (name, fn) => {
@@ -38,6 +39,27 @@ await test("one or several unpublished pins build once and verify every pin", as
       log: () => {},
     }), "built");
     assert.deepEqual([builds, checks], [1, 1]);
+  }
+});
+
+await test("pending base pins (another source's build): built from the base's own source, never fetched; labelled", async () => {
+  for (const [lines, want] of [[MODULES.map((n) => `${n}: pinned`), "built"], [[`${MODULES[0]}: using a local build (sha256 e, 9 bytes), not the pinned one (a)`, ...MODULES.slice(1).map((n) => `${n}: pinned`)], "built-fresh"]]) {
+    let builds = 0, states = [];
+    const log = [];
+    assert.equal(await fob({
+      root: "/base",
+      env: {},
+      state: (root, modules) => (states.push([root, modules]), "pending"),
+      fetch: async () => assert.fail("fetched another source's modules"),
+      build: (root) => { assert.equal(root, "/base"); builds++; },
+      mark: () => {},
+      check: ({ root, mode }) => { assert.deepEqual([root, mode], ["/base", "local"]); return lines; },
+      log: (l) => log.push(l),
+    }), want);
+    assert.equal(builds, 1);
+    assert.deepEqual(states, [["/base", MODULES]]);
+    assert.ok(log.some((l) => /pin is pending/.test(l)), log.join("\n"));
+    if (want === "built-fresh") assert.ok(log.some((l) => /while its pin is pending/.test(l)), log.join("\n"));
   }
 });
 
@@ -148,12 +170,12 @@ await test("the header must be exactly the fetched set's: other totals, counts, 
 await test("a base that pins four modules is fetched, checked and built as four (its own set), not as this checkout's five", async () => {
   const four = MODULES.filter((n) => n !== "sagebrush-skltree.wasm");
   let fetched = null, checked = null, builds = 0;
-  assert.equal(await fetchOrBuild({ root: "/base", env: {}, log: () => {}, modulesOf: () => four,
+  assert.equal(await fetchOrBuild({ root: "/base", env: {}, log: () => {}, state: () => "current", modulesOf: () => four,
     fetch: async ({ modules }) => { fetched = modules; throw failureOf(4, missing("sagebrush-nd.wasm")); },
     build: () => builds++, check: ({ modules }) => ((checked = modules), ["all pinned"]) }), "built");
   assert.deepEqual([fetched, checked, builds], [four, four, 1]);
   // (the base's 404 of a module its own pins don't name is no reason to build)
-  await assert.rejects(fetchOrBuild({ root: "/base", env: {}, log: () => {}, modulesOf: () => four, fetch: async () => { throw failureOf(4, missing("sagebrush-skltree.wasm")); }, build: () => assert.fail("built") }));
+  await assert.rejects(fetchOrBuild({ root: "/base", env: {}, log: () => {}, state: () => "current", modulesOf: () => four, fetch: async () => { throw failureOf(4, missing("sagebrush-skltree.wasm")); }, build: () => assert.fail("built") }));
 });
 
 await test("size-base's call on a real four-module base root: its own four are fetched (the default modulesOf, reading --root's pins.json)", async () => {
@@ -163,11 +185,11 @@ await test("size-base's call on a real four-module base root: its own four are f
     const four = MODULES.filter((n) => n !== "sagebrush-skltree.wasm");
     writeFileSync(join(dir, "wasm", "pins.json"), JSON.stringify({ v: 1, modules: Object.fromEntries(four.map((n) => [n, { sha256: "0".repeat(64), bytes: 1 }])) }));
     let fetched = null;
-    assert.equal(await fetchOrBuild({ root: dir, env: {}, log: () => {}, fetch: async ({ root, modules }) => { assert.equal(root, dir); fetched = modules; } }), "fetched");
+    assert.equal(await fetchOrBuild({ root: dir, env: {}, log: () => {}, state: () => "current", fetch: async ({ root, modules }) => { assert.equal(root, dir); fetched = modules; } }), "fetched");
     assert.deepEqual(fetched, four);
     // (and the five-module head's own root: all five)
     writeFileSync(join(dir, "wasm", "pins.json"), JSON.stringify({ v: 1, modules: Object.fromEntries(MODULES.map((n) => [n, { sha256: "0".repeat(64), bytes: 1 }])) }));
-    assert.equal(await fetchOrBuild({ root: dir, env: {}, log: () => {}, fetch: async ({ modules }) => { fetched = modules; } }), "fetched");
+    assert.equal(await fetchOrBuild({ root: dir, env: {}, log: () => {}, state: () => "current", fetch: async ({ modules }) => { fetched = modules; } }), "fetched");
     assert.deepEqual(fetched, MODULES);
   } finally {
     rmSync(dir, { recursive: true, force: true });

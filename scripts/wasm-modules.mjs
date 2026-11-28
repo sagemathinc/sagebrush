@@ -32,8 +32,44 @@ export const modulePath = (name, root = ROOT) => join(root, "wasm", name);
 const stampPath = (root) => join(root, "wasm", ".installed.json");
 const sidecarPath = (name, root) => join(root, "wasm", `${name}.local.json`);
 
-// pins.json: {"v": 1, "modules": {<name>: {"sha256": <64 hex>, "bytes": <n>}}}, exactly the five names (or exactly
-// `modules`: another checkout's set, read by baseModules)
+// The source of the modules: everything scripts/build-engine.mjs reads, engine/ (its toolchain file too) and the
+// build scripts.  scripts/engine-cache.mjs keys its builds by the same paths.
+export const SOURCE_PATHS = [
+  "engine", // (with its rust-toolchain.toml)
+  "scripts/build-engine.mjs",
+  "scripts/build-nd.mjs",
+  "scripts/build-raster.mjs",
+  "scripts/build-mp.mjs",
+  "scripts/build-skltree.mjs",
+  "scripts/install-engine-wasm.mjs",
+];
+const gitOut = (root, args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "pipe"] });
+// The object id of each source path at `rev` ("-" when absent), in SOURCE_PATHS order.
+export function sourceIds(root, rev) {
+  return SOURCE_PATHS.map((p) => {
+    try {
+      return gitOut(root, ["rev-parse", "--verify", "--quiet", `${rev}:${p}`]).trim();
+    } catch {
+      return "-";
+    }
+  });
+}
+// The committed source at `rev`, as pins.json records it: the sha256 of its paths' object ids.  null when `root` is
+// no git checkout or `rev` no commit there (the source is then unknown, and no pin is its build).
+export function sourceOf(root = ROOT, rev = "HEAD") {
+  try {
+    gitOut(root, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
+  } catch {
+    return null;
+  }
+  const h = createHash("sha256").update("wasm-source v1\n");
+  sourceIds(root, rev).forEach((id, i) => h.update(`${SOURCE_PATHS[i]} ${id}\n`));
+  return h.digest("hex");
+}
+
+// pins.json: {"v": 1, "source": <64 hex>, "modules": {<name>: {"sha256": <64 hex>, "bytes": <n>}}}, exactly the five
+// names (or exactly `modules`: another checkout's set, read by baseModules).  "source" (sourceOf) names the source
+// the modules are the build of; without it, or when it isn't this tree's, the pins are pending (pinsState).
 // (a module named twice in pins.json's text: JSON.parse would keep the last silently)
 function duplicated(text) {
   const seen = new Set(), twice = new Set();
@@ -50,6 +86,9 @@ export function parsePins(text, modules = MODULES) {
     throw new Error(`wasm/pins.json is not valid JSON: ${e.message}`);
   }
   if (doc?.v !== 1 || typeof doc.modules !== "object" || doc.modules === null) throw new Error('wasm/pins.json: expected {"v": 1, "modules": {...}}');
+  const extra = Object.keys(doc).filter((k) => !["v", "source", "modules"].includes(k));
+  if (extra.length) throw new Error(`wasm/pins.json: unknown keys ${extra.join(", ")}`);
+  if ("source" in doc && (typeof doc.source !== "string" || !/^[0-9a-f]{64}$/.test(doc.source))) throw new Error("wasm/pins.json: source needs 64 lowercase hex digits");
   const names = Object.keys(doc.modules).sort();
   if (JSON.stringify(names) !== JSON.stringify([...modules].sort())) throw new Error(`wasm/pins.json must pin exactly ${modules.join(", ")}; it has ${names.join(", ") || "none"}`);
   for (const name of modules) {
@@ -61,6 +100,19 @@ export function parsePins(text, modules = MODULES) {
   return doc.modules;
 }
 export const loadPins = (root = ROOT, modules = MODULES) => parsePins(readFileSync(pinsPath(root), "utf8"), modules);
+// The source pins.json records (after parsePins accepted the file), or null
+export function loadPinsSource(root = ROOT, modules = MODULES) {
+  const text = readFileSync(pinsPath(root), "utf8");
+  parsePins(text, modules);
+  return JSON.parse(text).source ?? null;
+}
+// Whether this tree's pins are its own source's build: "current" when pins.json records this tree's committed source
+// (sourceOf), else "pending" (they are another source's build: master's CI commits this source's pin after the merge,
+// scripts/wasm-pin-commit.mjs).  `source` stands in for sourceOf(root) (a self-test's fixture without git).
+export function pinsState(root = ROOT, { source = sourceOf(root), modules = MODULES } = {}) {
+  const recorded = loadPinsSource(root, modules);
+  return recorded !== null && source !== null && recorded === source ? "current" : "pending";
+}
 // Another checkout's module set, from its own pins.json (the rule for size-base, which runs this checkout's
 // helper with --root at the base) (size-base runs this checkout's scripts on the base commit's
 // checkout, which may pin fewer modules: one added since has no pin there): its names in MODULES' order.  Fail
@@ -82,9 +134,9 @@ export function baseModules(root) {
   if (!names.includes(MODULES[0])) throw new Error(`${pinsPath(root)} doesn't pin ${MODULES[0]}`);
   return MODULES.filter((n) => names.includes(n));
 }
-export function formatPins(modules) {
+export function formatPins(modules, source = null) {
   const lines = MODULES.map((n, i) => `    ${JSON.stringify(n)}: { "sha256": ${JSON.stringify(modules[n].sha256)}, "bytes": ${modules[n].bytes} }${i < MODULES.length - 1 ? "," : ""}`);
-  return `{\n  "v": 1,\n  "modules": {\n${lines.join("\n")}\n  }\n}\n`;
+  return `{\n  "v": 1,\n${source ? `  "source": ${JSON.stringify(source)},\n` : ""}  "modules": {\n${lines.join("\n")}\n  }\n}\n`;
 }
 export const matches = (bytes, pin) => bytes.length === pin.bytes && sha256(bytes) === pin.sha256;
 

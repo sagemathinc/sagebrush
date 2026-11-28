@@ -7,7 +7,7 @@
 //   schedule and a dispatch stay on GitHub's runners; wasm-modules stays there on master's push (wasm-publish
 //   publishes its modules);
 // - no named job holds a secret, an environment, an OIDC token or a write permission; the jobs not named (wasm-publish,
-//   macOS, Windows) don't move; no other workflow names the variable;
+//   wasm-pins, macOS, Windows) don't move; no other workflow names the variable;
 // - with SB_CI_RUNNER unset, every job runs where it ran before (vars.CI_RUNNER, else GitHub's).
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -100,8 +100,9 @@ for (const file of readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).sort()) {
 // (the publisher and the platforms stay where they are)
 const ci = parse(join(dir, "ci.yml"));
 assert.equal(ci.jobs["wasm-publish"]["runs-on"], "ubuntu-24.04");
+assert.equal(ci.jobs["wasm-pins"]["runs-on"], "ubuntu-24.04");
 assert.equal(ci.jobs["engine-nd-neon"]["runs-on"], "macos-15");
 assert.equal(ci.jobs["windows-smoke"]["runs-on"], "windows-latest");
-assert.ok(!spec.jobs.includes("wasm-publish") && spec.jobs.length === Object.keys(ci.jobs).length - 3);
-n += 4;
+assert.ok(!spec.jobs.includes("wasm-publish") && !spec.jobs.includes("wasm-pins") && spec.jobs.length === Object.keys(ci.jobs).length - 4);
+n += 5;
 console.log(`ci runners: ${n} checks pass`);

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { STEPS, workflowLines } from "./precheck.mjs";
 import { SOURCE_PATHS, check, ensure, isPinnedSource, keepTargets, pruneTargets, sourceKey, targetFor } from "./engine-cache.mjs";
-import { MODULES } from "./wasm-modules.mjs";
+import { MODULES, formatPins, sourceOf } from "./wasm-modules.mjs";
 
 let failures = 0;
 const ok = (c, what) => (c ? console.log("ok  ", what) : (failures++, console.log("FAIL", what)));
@@ -36,8 +36,12 @@ try {
   mkdirSync(join(repo, "wasm"));
   writeFileSync(join(repo, "engine", "web", "src", "lib.rs"), "pub fn f() {}\n");
   for (const p of BUILD_SCRIPTS) writeFileSync(join(repo, p), "// build\n");
-  writeFileSync(join(repo, "wasm", "pins.json"), "{}\n");
   writeFileSync(join(repo, "README"), "a\n");
+  git("add", "-A");
+  git("commit", "-qm", "the source");
+  // (pins that record this source: wasm/pins.json is no source path, so committing it keeps the source)
+  const fakePins = Object.fromEntries(MODULES.map((n) => [n, { sha256: "c".repeat(64), bytes: 1 }]));
+  writeFileSync(join(repo, "wasm", "pins.json"), formatPins(fakePins, sourceOf(repo)));
   git("add", "-A");
   git("commit", "-qm", "pins with their source");
   git("branch", "base");
@@ -167,9 +171,19 @@ try {
   git("checkout", "-q", "--", "wasm"); // (the tree as committed again, for the branch below)
 
   git("checkout", "-q", "-b", "side", "base");
-  writeFileSync(join(repo, "wasm", "pins.json"), '{"other": 1}\n');
+  writeFileSync(join(repo, "wasm", "pins.json"), formatPins(fakePins, "f".repeat(64)));
   git("commit", "-qam", "a branch moves the pins");
-  ok(!pinned(), "a branch whose pins differ from its base's is not the pinned source");
+  ok(!pinned(), "pins that record another source are not the pinned source");
+  writeFileSync(join(repo, "wasm", "pins.json"), formatPins(fakePins));
+  git("commit", "-qam", "pins without their source");
+  ok(!pinned(), "pins that record no source are not the pinned source");
+  // an engine change, then master's pin commit recording its source (design/wasm-artifacts.md section 13)
+  writeFileSync(join(repo, "engine", "web", "src", "lib.rs"), "pub fn f() { let _ = 3; }\n");
+  git("commit", "-qam", "an engine change");
+  ok(!pinned(), "an engine change leaves its pins pending");
+  writeFileSync(join(repo, "wasm", "pins.json"), formatPins(fakePins, sourceOf(repo)));
+  git("commit", "-qam", "its pin commit");
+  ok(pinned(), "the pin commit that records the new source makes it the pinned source again");
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }

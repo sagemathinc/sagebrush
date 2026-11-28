@@ -423,9 +423,11 @@ pnpm test                             # the Node tests (about 24 min one after a
 The engine's Rust toolchain is pinned (`engine/rust-toolchain.toml`, 1.99.1;
 rustup installs it on the first `cargo` command under `engine/`), so that
 a fresh build gives exactly the bytes `wasm/pins.json` pins: CI rebuilds
-the modules and fails on master pushes, dispatches and the schedule if they
-differ. Bumping the toolchain is a deliberate pull request that commits the
-new pins with their size marker. The modules embed the crate registry's
+the modules and fails if they differ from pins that record their own
+source. A pull request never commits pins: master's CI commits them after
+the merge (design/wasm-artifacts.md section 13), and a release ships only a
+commit whose pins record its own source. Bumping the toolchain is a
+deliberate pull request with its size marker. The modules embed the crate registry's
 paths, so a local build reproduces the pinned bytes only with CI's path:
 
 ```sh
@@ -674,8 +676,9 @@ workflows landed needs a new run (a push, or a re-run) before it can enter the q
 
 Build concurrency limits how many queue builds run at once; the group limits set how many passing entries land
 together. Every queue run tests its cumulative head with the full tier, so labels such as `full-ci` cannot be
-lost; the slower nightly tier stays nightly. A queue run is strict about the engine's modules: a stale
-`wasm/pins.json` fails it, as on a master push. Size comparisons use the payload's `base_sha` and `head_sha`, not
+lost; the slower nightly tier stays nightly. A queue run builds the engine's modules and uses that build: the
+pins are committed on master after the merge (design/wasm-artifacts.md section 13), and a build that differs from
+pins recording its own source fails it. Size comparisons use the payload's `base_sha` and `head_sha`, not
 a moving master or `HEAD^1`, so a group is measured as one change.
 
 The guarded merge script must retain review, expected-head and required-check

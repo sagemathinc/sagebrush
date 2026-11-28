@@ -3,7 +3,13 @@
 //   node scripts/wasm-pins.mjs --verify-committed   pins.json matches the modules committed at HEAD (while they are committed)
 //   node scripts/wasm-pins.mjs --from-committed     write pins.json from the modules committed at HEAD
 //   node scripts/wasm-pins.mjs --from-local         write pins.json from the files in wasm/ (a build with the pinned
-//                                                   toolchain and the path mapping is byte-identical to CI's)
+//                                                   toolchain and the path mapping is byte-identical to CI's), with
+//                                                   HEAD's source when the tree has no uncommitted change to it
+//   node scripts/wasm-pins.mjs --state              "current" when pins.json records this commit's own source, else
+//                                                   "pending" (design/wasm-artifacts.md section 13)
+//   node scripts/wasm-pins.mjs --pr-check           on a pull request (its merge commit checked out): wasm/pins.json is
+//                                                   unchanged, or changed to pins of the merge's own source (a pins-only
+//                                                   pull request; CI then checks them against its build)
 //   node scripts/wasm-pins.mjs --mark-local [name]  record a module built here (wasm/<name>.local.json), for SAGEBRUSH_WASM_LOCAL=1
 //   node scripts/wasm-pins.mjs --verify-published [--base URL]   every pin is in the bucket with matching length and sha256
 //   node scripts/wasm-pins.mjs --self-test          the planted controls: each must fail with its own message
@@ -13,8 +19,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MODULES, ROOT, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, readStamp, runMode, sha256, writeSidecar } from "./wasm-modules.mjs";
-import { DEFAULT_BASE, LIMITS, fetchModules } from "./wasm-fetch.mjs";
+import { MODULES, ROOT, SOURCE_PATHS, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, pinsState, readStamp, runMode, sha256, sourceOf, writeSidecar } from "./wasm-modules.mjs";
+import { DEFAULT_BASE, LIMITS, fetchModules, requireCurrent } from "./wasm-fetch.mjs";
 import { MANIFEST, install, pack, policy, readArtifact } from "./wasm-artifact.mjs";
 import { BUCKET, awsPut, keyOf, publish } from "./wasm-publish.mjs";
 
@@ -31,6 +37,16 @@ export async function verifyPublished({ root = ROOT, base = DEFAULT_BASE, limits
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+// A pull request never carries a pin (design/wasm-artifacts.md section 13): master's CI commits it after the merge.
+// The one exception is a pull request whose pins record its merge's own source, which CI then checks against its own
+// build (a pins-only pull request, while no automatic pin commit is configured).  Returns the problems.
+export function prPinsProblems({ root = ROOT, base = "HEAD^1", head = "HEAD", state = () => pinsState(root) } = {}) {
+  const changed = execFileSync("git", ["-C", root, "diff", "--name-only", base, head, "--", "wasm/pins.json"], { encoding: "utf8" }).trim();
+  if (!changed) return [];
+  if (state() === "current") return [];
+  return ["wasm/pins.json: a pull request doesn't change the pins (master's CI commits this source's pin after the merge). Drop the change: git checkout origin/master -- wasm/pins.json"];
 }
 
 function pinsFrom(read) {
@@ -102,6 +118,12 @@ async function selfTest() {
     // pins.json itself
     await expect("pins.json with an extra module", async () => parsePins(JSON.stringify({ v: 1, modules: { ...pinsOf(mods), "x.wasm": { sha256: "0".repeat(64), bytes: 1 } } })), /exactly/);
     await expect("pins.json with a short sha256", async () => parsePins(JSON.stringify({ v: 1, modules: { ...pinsOf(mods), [MODULES[0]]: { sha256: "abc", bytes: 1 } } })), /64 lowercase hex/);
+    await expect("pins.json with a malformed source", async () => parsePins(JSON.stringify({ v: 1, source: "abc", modules: pinsOf(mods) })), /source needs 64 lowercase hex/);
+    await expect("pins.json with an unknown key", async () => parsePins(JSON.stringify({ v: 1, built: "x", modules: pinsOf(mods) })), /unknown keys built/);
+    await pass("pins.json with a source parses, and formatPins writes it back", async () => {
+      const text = formatPins(pinsOf(mods), "a".repeat(64));
+      return JSON.stringify(parsePins(text)) === JSON.stringify(pinsOf(mods)) && JSON.parse(text).source === "a".repeat(64) && !("source" in JSON.parse(formatPins(pinsOf(mods))));
+    });
     // the fetch: a clean download, then the controls
     const r1 = root("r1");
     await pass("a cold fetch downloads all five and they check as pinned", async () => {
@@ -311,11 +333,10 @@ async function selfTest() {
       const { d } = artifact("ok"), rt = root("ra-target");
       return install(d, { root: rt, env: run }).mode === "pinned" && checkModules({ root: rt, mode: "pinned" }).length === MODULES.length;
     });
-    await pass("on a track, an artifact that doesn't match the pins installs, fresh, and records nothing as pinned", async () => {
-      const track = { ...run, GITHUB_REF_NAME: "track/math" };
-      const { d } = artifact("track", track), rt = root("ra-track-target");
-      writeFileSync(pinsPath(rt), formatPins({ ...pinsOf(mods), [MODULES[0]]: { sha256: "e".repeat(64), bytes: 9 } }));
-      const r = install(d, { root: rt, env: track });
+    await pass("with pending pins (another source's), an artifact that doesn't match them installs, fresh, and records nothing as pinned", async () => {
+      const { d } = artifact("pending"), rt = root("ra-pending-target");
+      writeFileSync(pinsPath(rt), formatPins({ ...pinsOf(mods), [MODULES[0]]: { sha256: "e".repeat(64), bytes: 9 } }, "b".repeat(64)));
+      const r = install(d, { root: rt, env: run, source: "a".repeat(64) });
       return r.mode === "fresh" && Object.keys(readStamp(rt)).length === 0 && moduleState(MODULES[0], loadPins(rt)[MODULES[0]], rt).state !== "pinned";
     });
     for (const n of MODULES) {
@@ -339,32 +360,57 @@ async function selfTest() {
     }, new RegExp(`${MODULES[2].replace(".", "\\.")}: .*the manifest says`));
     await expect("an artifact from another run is refused", async () => readArtifact(artifact("other-run", { ...run, GITHUB_RUN_ID: "6" }).d, { env: run }), /from run 6 .* not this run/);
     await expect("an artifact from another commit is refused", async () => readArtifact(artifact("other-sha", { ...run, GITHUB_SHA: "d".repeat(40) }).d, { env: run }), /not this run/);
-    // the pin policy: a build that doesn't match the pins
+    // the pin policy (design/wasm-artifacts.md section 13): a build that doesn't match the pins
     const freshMods = { ...pinsOf(mods), [MODULES[0]]: { sha256: "e".repeat(64), bytes: 9 } };
-    for (const ev of ["push", "workflow_dispatch", "schedule"]) {
-      await expect(`a stale pin is an error on ${ev}, even for an engine test job`, async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: ev } }), /the pin is stale: commit these wasm\/pins\.json lines/);
-    }
-    // a merge queue group is what lands on its target: strict into master, even for an engine test job; fresh into a track
-    await expect("a stale pin is an error in a queue group into master, even for an engine test job", async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/master/pr-7-cccccccccccccccccccccccccccccccccccccccc" } }), /the pin is stale: commit these wasm\/pins\.json lines/);
-    await pass("a stale pin in a queue group into a track: fresh, labelled", async () => {
-      const r = policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/track/math/pr-7-cccccccccccccccccccccccccccccccccccccccc" } });
-      if (r.mode !== "fresh") throw new Error(`mode ${r.mode}`);
-    });
-    await expect("a stale pin is an error for every other reader on a pull request", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request" } }), /the pin is stale/);
-    await pass("...and a labelled fresh run for a pull request's engine test job", async () => {
-      const r = policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "pull_request" } });
-      return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`));
-    });
-    // on a track every reader runs the fresh build, labelled, and records nothing as pinned
-    for (const env of [{ GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "track/math" }, { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/track/math" }, { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "track/math", GITHUB_HEAD_REF: "r6" }, { GITHUB_EVENT_NAME: "pull_request_target", GITHUB_BASE_REF: "track/math" }]) {
-      await pass(`a stale pin on a track (${env.GITHUB_EVENT_NAME}): fresh for every reader, labelled`, async () => {
-        const r = policy(freshMods, { root: r1, env });
-        return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`)) && r.lines.some((l) => /a track's run/.test(l));
+    const src = "a".repeat(64);
+    const rPending = root("r-policy-pending"), rCurrent = root("r-policy-current");
+    writeFileSync(pinsPath(rPending), formatPins(pinsOf(mods), "b".repeat(64)));
+    writeFileSync(pinsPath(rCurrent), formatPins(pinsOf(mods), src));
+    const events = [
+      { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }, { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/master" },
+      { GITHUB_EVENT_NAME: "schedule" }, { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "x" },
+      { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" },
+      { GITHUB_EVENT_NAME: "merge_group", GITHUB_REF_NAME: "gh-readonly-queue/master/pr-7-cccccccccccccccccccccccccccccccccccccccc" },
+      { GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "track/math" },
+    ];
+    for (const env of events) {
+      const what = `${env.GITHUB_EVENT_NAME} ${env.GITHUB_REF ?? env.GITHUB_REF_NAME ?? env.GITHUB_HEAD_REF ?? ""}`.trim();
+      await pass(`pending pins (another source's build), ${what}: every reader runs the fresh build, labelled`, async () => {
+        const r = policy(freshMods, { root: rPending, env, source: src });
+        return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`)) && r.lines.some((l) => /pin is pending/.test(l));
       });
+      await expect(`pins of this very source that differ from the build, ${what}: an error`, async () => policy(freshMods, { root: rCurrent, env, source: src }), /records this very source .* isn't reproducible/);
     }
-    await expect("a stale pin on a track's pull into master is an error for every other reader", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request", GITHUB_BASE_REF: "master", GITHUB_HEAD_REF: "track/math" } }), /the pin is stale/);
-    await expect("a stale pin on a track/math-like branch that isn't a track is an error", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "push", GITHUB_REF_NAME: "trackmath" } }), /the pin is stale/);
-    await expect("the schedule is never a track's run", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "schedule", GITHUB_REF_NAME: "track/math" } }), /the pin is stale/);
+    await pass("pins without a source are pending", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }, source: src }).mode === "fresh");
+    await pass("a tree whose source is unknown (no git) has pending pins", async () => policy(freshMods, { root: rCurrent, env: { GITHUB_EVENT_NAME: "pull_request" }, source: null }).mode === "fresh");
+    for (const env of [{ GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/tags/v1.2.3", GITHUB_REF_TYPE: "tag" }, { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/tags/app-v1" }]) {
+      await expect(`a release (${env.GITHUB_REF}) with pending pins: refused`, async () => policy(freshMods, { root: rPending, env, source: src }), /a release builds only from a commit whose pins are its own/);
+    }
+    await expect("a release's fetch (wasm-fetch.mjs --release) with pending pins: refused", async () => requireCurrent({ root: rPending, state: "pending" }), /a release ships only a commit whose pins are its own/);
+    await expect("...the real state of a fixture without git: pending, refused", async () => requireCurrent({ root: rCurrent }), /pin is pending/);
+    await pass("...and with current pins it passes", async () => (requireCurrent({ root: rCurrent, state: "current" }), true));
+    await pass("a release whose build equals its pins: pinned", async () => policy(pinsOf(mods), { root: rCurrent, env: { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/tags/v1.2.3", GITHUB_REF_TYPE: "tag" }, source: src }).mode === "pinned");
+    // a pull request doesn't change the pins, unless to its merge's own source's pins (prPinsProblems)
+    {
+      const pr = join(dir, "pr-repo");
+      mkdirSync(join(pr, "wasm"), { recursive: true });
+      const gp = (...a) => execFileSync("git", ["-C", pr, ...a], { stdio: "ignore" });
+      gp("init", "-q");
+      gp("config", "user.email", "self-test@example.invalid");
+      gp("config", "user.name", "self-test");
+      writeFileSync(pinsPath(pr), formatPins(pinsOf(mods)));
+      writeFileSync(join(pr, "notes.txt"), "a\n");
+      gp("add", "-A");
+      gp("commit", "-qm", "base");
+      writeFileSync(join(pr, "notes.txt"), "b\n");
+      gp("commit", "-qam", "a change without pins");
+      await pass("a pull request that leaves wasm/pins.json alone passes", async () => prPinsProblems({ root: pr, state: () => "pending" }).length === 0);
+      writeFileSync(pinsPath(pr), formatPins(freshMods));
+      gp("commit", "-qam", "a pin change");
+      await pass("a pull request that changes wasm/pins.json to pending pins fails, naming the fix", async () => prPinsProblems({ root: pr, state: () => "pending" }).some((l) => /doesn't change the pins.*git checkout origin\/master -- wasm\/pins\.json/.test(l)));
+      await pass("...and passes when they are its merge's own source's pins (a pins-only pull request)", async () => prPinsProblems({ root: pr, state: () => "current" }).length === 0);
+      await pass("...with the real state: pins without a source are pending", async () => prPinsProblems({ root: pr }).length === 1);
+    }
     // publishing, against this server as the bucket
     {
       const { ra, d } = artifact("publish");
@@ -388,11 +434,22 @@ async function selfTest() {
       const rs = root("ra-stale-pins");
       writeFileSync(pinsPath(rs), formatPins(freshMods));
       const before = requests, putsBefore = puts.length;
-      await expect("a build that doesn't match the pins is never published", () => publish(d, { root: rs, base, put, limits: fast, env: run, log: () => {} }), /the pin is stale/);
+      await expect("outside master, a build that doesn't match the pins is never published", () => publish(d, { root: rs, base, put, limits: fast, env: run, log: () => {} }), /refusing to publish a fresh build outside master/);
       results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads`);
-      await expect("on a track, a build that doesn't match the pins is never published either", () => publish(d, { root: rs, base, put, limits: fast, env: { ...run, GITHUB_REF_NAME: "track/math" }, log: () => {} }), /refusing to publish a fresh build/);
+      await expect("on a track, a build that doesn't match the pins is never published either", () => publish(d, { root: rs, base, put, limits: fast, env: { ...run, GITHUB_REF_NAME: "track/math", GITHUB_REF: "refs/heads/track/math" }, log: () => {} }), /refusing to publish a fresh build outside master/);
       results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload, on a track too" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads on a track`);
+      const master = { ...run, GITHUB_REF: "refs/heads/master" };
+      writeFileSync(pinsPath(rs), formatPins(freshMods, "b".repeat(64)));
+      await expect("on master, pins of this very source that differ from the build: never published", () => publish(d, { root: rs, base, put, limits: fast, env: master, log: () => {}, source: "b".repeat(64) }), /records this very source/);
+      results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads`);
       for (const [k, v] of stash) served.set(k, v);
+      const fresh = MODULES[2], freshKey = `${sha256(mods[fresh])}.wasm`;
+      served.delete(freshKey);
+      await pass("on master, the build of a source whose pin is pending is published by its own bytes, each key read back", async () => {
+        const n = puts.length;
+        const res = await publish(d, { root: rs, base, put, limits: fast, env: master, log: () => {}, source: "a".repeat(64) });
+        return puts.length === n + 1 && puts.at(-1).endsWith(freshKey) && res.find((r) => r.name === fresh)?.state === "uploaded and read back" && res.filter((r) => r.state === "already published").length === MODULES.length - 1;
+      });
     }
     // the upload itself (awsPut), with a stand-in for the aws CLI
     {
@@ -459,9 +516,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const bad = committedMismatches({ rev: arg("--rev") ?? "HEAD" });
       if (bad.length) throw new Error(`wasm/pins.json doesn't match the committed modules (run node scripts/wasm-pins.mjs --from-committed):\n${bad.join("\n")}`);
       console.log("wasm/pins.json matches the committed modules");
+    } else if (cmd === "--state") {
+      console.log(pinsState());
+    } else if (cmd === "--pr-check") {
+      const problems = prPinsProblems();
+      if (problems.length) throw new Error(problems.join("\n"));
+      console.log("wasm/pins.json: unchanged by this pull request, or this source's own pins");
     } else if (cmd === "--from-committed" || cmd === "--from-local") {
       const read = cmd === "--from-local" ? (n) => readFileSync(modulePath(n)) : (n) => execFileSync("git", ["-C", ROOT, "show", `HEAD:wasm/${n}`], { maxBuffer: 1 << 27 });
-      writeFileSync(pinsPath(), formatPins(pinsFrom(read)));
+      // (HEAD's source only when the build can be its: no uncommitted change to the source paths)
+      const dirty = execFileSync("git", ["-C", ROOT, "status", "--porcelain", "--", ...SOURCE_PATHS], { encoding: "utf8" }).trim();
+      if (dirty) console.error("the source has uncommitted changes: pins.json is written without a source (pending)");
+      writeFileSync(pinsPath(), formatPins(pinsFrom(read), dirty ? null : sourceOf()));
       console.log(readFileSync(pinsPath(), "utf8").trimEnd());
     } else if (cmd === "--mark-local") {
       for (const n of rest.length ? rest : MODULES) {
@@ -478,7 +544,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(failed ? `wasm-pins self-test: ${failed} of ${r.length} FAILED` : `wasm-pins self-test: all ${r.length} controls pass`);
       if (failed) process.exit(1);
     } else {
-      console.error("usage: node scripts/wasm-pins.mjs --check | --verify-committed | --from-committed | --from-local | --mark-local [name...] | --verify-published [--base URL] | --self-test");
+      console.error("usage: node scripts/wasm-pins.mjs --check | --state | --pr-check | --verify-committed | --from-committed | --from-local | --mark-local [name...] | --verify-published [--base URL] | --self-test");
       process.exit(2);
     }
   } catch (e) {

@@ -4,8 +4,11 @@
 //
 //   node scripts/wasm-publish.mjs <artifact dir>
 //
-// The artifact must be this run's and match wasm/pins.json exactly.  For each module, a bounded GET of its key:
-//   - present: its length and sha256 must match the pin; a key that doesn't fails the job and is never overwritten;
+// The artifact must be this run's, and either match wasm/pins.json exactly or, on master, be the build of a source
+// whose pin is pending (design/wasm-artifacts.md section 13): master's push publishes it so that its pin commit
+// (scripts/wasm-pin-commit.mjs) never names unpublished bytes.  Keys are content-addressed, so publishing a build
+// that is never pinned names nothing.  For each module, a bounded GET of its key:
+//   - present: its length and sha256 must match; a key that doesn't fails the job and is never overwritten;
 //   - absent (404): upload it with a conditional write (only if the key doesn't exist), then read it back from the
 //     public domain (past any cached 404) and check it.
 // It succeeds only when every key has been read back and matches.
@@ -14,7 +17,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MODULES, ROOT, loadPins } from "./wasm-modules.mjs";
+import { MODULES, ROOT, sourceOf } from "./wasm-modules.mjs";
 import { DEFAULT_BASE, LIMITS, download } from "./wasm-fetch.mjs";
 import { policy, readArtifact } from "./wasm-artifact.mjs";
 
@@ -41,16 +44,19 @@ export function awsPut(key, bytes, env = process.env, spawn = spawnSync) {
   }
 }
 
-export async function publish(dir, { root = ROOT, base = DEFAULT_BASE, put = awsPut, limits = LIMITS, env = process.env, log = (s) => console.log(s) } = {}) {
+// A push to master, or a dispatch on it (the wasm-publish job's events), in this repository's own refs
+export const isMasterRun = (env = process.env) => ["push", "workflow_dispatch"].includes(env.GITHUB_EVENT_NAME) && env.GITHUB_REF === "refs/heads/master";
+
+export async function publish(dir, { root = ROOT, base = DEFAULT_BASE, put = awsPut, limits = LIMITS, env = process.env, log = (s) => console.log(s), source = sourceOf(root) } = {}) {
   const { manifest, bytes } = readArtifact(dir, { env });
-  // all five must equal the pins: no fresh build is ever published (a track's run gets "fresh" from the policy)
-  const verdict = policy(manifest.modules, { root, env });
-  if (verdict.mode !== "pinned") throw new Error(`refusing to publish a fresh build:\n${verdict.lines.join("\n")}`);
-  const pins = loadPins(root);
+  // all five equal the pins, or they are master's build of a source whose pin is pending (a track's run, a pull
+  // request's or a queue group's never publishes; a mismatch with pins of this very source throws in the policy)
+  const verdict = policy(manifest.modules, { root, env, source });
+  if (verdict.mode !== "pinned" && !isMasterRun(env)) throw new Error(`refusing to publish a fresh build outside master:\n${verdict.lines.join("\n")}`);
   const never = new AbortController().signal;
   const results = [];
   for (const name of MODULES) {
-    const pin = pins[name], url = base + `${pin.sha256}.wasm`;
+    const pin = manifest.modules[name], url = base + `${pin.sha256}.wasm`;
     let state;
     try {
       await download(url, pin, limits, never, log);

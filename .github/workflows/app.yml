@@ -82,7 +82,7 @@ jobs:
         run: |
           node scripts/build-engine.mjs
           node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
-          node scripts/wasm-artifact.mjs policy --allow-fresh
+          node scripts/wasm-artifact.mjs policy
           node scripts/wasm-artifact.mjs pack "$RUNNER_TEMP/wasm-modules"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
