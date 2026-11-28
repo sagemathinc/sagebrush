@@ -4272,18 +4272,41 @@ def _join(a, b, pos=None):
     return _set_result(MSet(list(a) + list(b), k), "join", a, b, pos, "No valid universe containing all elements")
 
 
+def _multiplicity(x, s):
+    """x's multiplicity in the multiset s (equal elements of one universe)."""
+    e = s.keys.get(_key(x))
+    if e is None:
+        e = next((s.keys[_key(y)] for y in s.items if _cmpeq(x, y)), None)
+    return 0 if e is None else e[1]
+
+
+def _multi_counts(a, b, count):
+    """The multiset of a's elements, each count(its multiplicity in a, in b)
+    times (meet: the least; diff: the excess over b's)."""
+    out = []
+    for x in a.items:
+        out.extend([x] * count(a.keys[_key(x)][1], _multiplicity(x, b)))
+    return MSet(out, "multi")
+
+
 def _meet(a, b, pos=None):
     _set_pair("meet", a, b, pos, "No valid universe containing all elements")
     a, b = _ff_sets(a, b, "meet", pos, "No valid universe containing all elements")
-    return _set_result(MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "meet", a, b, pos,
-                       "No valid universe containing all elements", mode="meet")
+    if a.kind == b.kind == "multi":
+        r = _multi_counts(a, b, min)
+    else:
+        r = MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
+    return _set_result(r, "meet", a, b, pos, "No valid universe containing all elements", mode="meet")
 
 
 def _diff(a, b, pos=None):
     _set_pair("diff", a, b, pos, "No valid universe containing all elements")
     a, b = _ff_sets(a, b, "diff", pos, "No valid universe containing all elements")
-    return _set_result(MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "diff", a, b, pos,
-                       "No valid universe containing all elements", mode="first")
+    if a.kind == b.kind == "multi":
+        r = _multi_counts(a, b, lambda m, n: max(m - n, 0))
+    else:
+        r = MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
+    return _set_result(r, "diff", a, b, pos, "No valid universe containing all elements", mode="first")
 
 
 def _sdiff(a, b, pos=None):
@@ -5812,7 +5835,11 @@ def _ext_type(x):
     if isinstance(x, _MModMat):
         return "%s[%s]" % (_type_name(x), _ring_cat(x.base_ring()))
     if isinstance(x, _smat.Matrix):
-        return "%s[%s]" % ("AlgMatElt" if x.is_square() else "ModMatRngElt", _ring_cat(x.base_ring()))
+        # (a matrix that isn't square: over a field ModMatFldElt, as Magma's,
+        # else ModMatRngElt)
+        R = x.base_ring()
+        kind = "AlgMatElt" if x.is_square() else "ModMatFldElt" if getattr(R, "is_field", lambda: False)() else "ModMatRngElt"
+        return "%s[%s]" % (kind, _ring_cat(R))
     if isinstance(x, _Cat):
         return "Cat[%s]" % x
     if isinstance(x, _MCycField):
@@ -7786,19 +7813,54 @@ def Fibonacci(n):
 
 
 def IsSquare(n):
+    # (false and no root: s, r := IsSquare(n) leaves r unassigned, as Magma's)
     if _is_ff(n):
-        return _multi([True, _ff_sqrt(n)]) if n.is_square() else False
+        return _multi([True, _ff_sqrt(n)]) if n.is_square() else _no_root()
     if isinstance(n, int) and n >= 0:
         r = _math.isqrt(n)
         if r * r == n:
             return _multi([True, r])
-        return False
+        return _no_root()
     if isinstance(n, _Fraction) and n >= 0:
         a, b = _math.isqrt(n.numerator), _math.isqrt(n.denominator)
         if a * a == n.numerator and b * b == n.denominator:
             return _multi([True, _sa._q(_Fraction(a, b))])
-        return False
-    return False
+        return _no_root()
+    if isinstance(n, _snf.NumberFieldElement):
+        return _nf_is_square(n)
+    return _no_root()
+
+
+def _no_root():
+    return _multi([False, _NOVAL])
+
+
+def _nf_is_square(y):
+    """IsSquare of a number field element: true and a root r (r^2 = y), a
+    root of x^2 - y over its field, else false.  Which of r and -r is a
+    documented choice: the one whose last nonzero coordinate past the
+    constant one is negative (-a for a^2, -a - 1 for (a + 1)^2 in
+    Q(sqrt 2)), a rational root positive if an integer, else negative (2
+    for 4, -3/2 for 9/4).  Magma's sign agrees about half the time
+    (measured on 7560 rows, Nov 28); its own rule depends on the field and
+    the element (2 w + 2 or -2 w - 2 for (2 + 2 w)^2, 2/3 or -2/3 for 4/9)."""
+    K = y.parent()
+    if y == 0:
+        return _multi([True, K(0)])
+    # (a ring over this field object: PolynomialRing's cache answers an equal
+    # field's ring, QuadraticField(2) made twice)
+    import _sage_nfpoly
+    rs = [r for r, _ in _sage_nfpoly.PolynomialRing_nf_(K, "x")([-y, 0, 1]).roots()]
+    if not rs:
+        return _no_root()
+    r = rs[0]
+    c = [_Fraction(v) for v in r.list()]
+    tail = [v for v in c[1:] if v != 0]
+    if tail:
+        chosen = tail[-1] < 0
+    else:
+        chosen = c[0] > 0 if c[0].denominator == 1 else c[0] < 0
+    return _multi([True, r if chosen else -r])
 
 
 def Isqrt(n):
@@ -7858,8 +7920,8 @@ def Sqrt(x):
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
     "Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
-    "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
-    "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
+    "Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
+    "Normalise Normalize Numerator Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
     "Stabilizer Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
@@ -8503,6 +8565,10 @@ def IsUnit(x):
         return _math.gcd(x.v, x.R.m) == 1
     if _is_ff(x):
         return bool(x)  # (every nonzero element of a field)
+    if isinstance(x, _Fraction):
+        return x != 0  # (a rational field element, Q!2 too: its field's rule)
+    if isinstance(x, _snf.NumberFieldElement):
+        return x != 0  # (in a number field every nonzero element is a unit)
     return x in (1, -1)
 
 
@@ -8589,6 +8655,10 @@ def Numerator(x):
         D, B = _fun_presentation_meta(x.F, x.v)
         _fun_preflight_result(x.F, D, B, budget, "numerator presentation")
         return x.F._parts(x.v)[0]
+    if isinstance(x, _MNFElt):
+        return x * Denominator(x)
+    if isinstance(x, (_smat.Matrix, _MVector)):
+        raise _bad_types("Numerator", (x,), _located("Numerator"))  # (Magma has none for matrices and vectors)
     return x.numerator if isinstance(x, _Fraction) else x
 
 
@@ -8598,7 +8668,22 @@ def Denominator(x):
         D, B = _fun_presentation_meta(x.F, x.v)
         _fun_preflight_result(x.F, D, B, budget, "denominator presentation")
         return x.F._parts(x.v)[1]
+    if isinstance(x, _MNFElt):
+        # (the least common denominator of its coordinates on 1, a, a^2, ..,
+        # as Magma's: 2 for (1 + a)/2 in Q(sqrt 5) too, integral or not)
+        return _coords_denominator(_Fraction(c) for c in x.parent()._to_user(x._c))
+    if isinstance(x, _smat.Matrix):
+        return _coords_denominator(_Fraction(c) for row in x.rows() for c in row)
+    if isinstance(x, _MVector):
+        return _coords_denominator(_Fraction(c) for c in x)
     return x.denominator if isinstance(x, _Fraction) else 1
+
+
+def _coords_denominator(cs):
+    d = 1
+    for c in cs:
+        d = d * c.denominator // _math.gcd(d, c.denominator)
+    return d
 
 
 def _fun_factor_key(item):
@@ -9335,8 +9420,23 @@ def Remove(s, i):
 
 
 def Insert(s, i, x):
+    if not isinstance(i, int) or isinstance(i, bool):
+        raise _bad_types("Insert", (s, i, x), _located("Insert"))
+    if i < 1:
+        raise MagmaError("Argument 2 must be positive", "'Insert'", True, _located("Insert"))
+    if i >= 1 << 30:
+        # (Magma's own bound on the position, said before anything is made)
+        raise MagmaError("Argument 2 (%d) is too large" % i, "'Insert'", True, _located("Insert"))
     x = _lift("Insert", s, x, "Cannot coerce element into the universe")
     s = _own(s) if isinstance(s, MSeq) else _as_seq(s)
+    # (past the end: undefined elements up to position i, as Magma's (a
+    # Python insert would put x at the end), admitted by the collection
+    # bound before they are made, in one extend)
+    pad = i - 1 - len(s)
+    if pad > 0:
+        if len(s) + pad + 1 > _COLLECT_MAX:
+            raise _collect_refusal()
+        s.extend([_UNDEF] * pad)
     s.insert(i - 1, x)
     _settle(s)
     return s
@@ -9488,6 +9588,9 @@ def Eltseq(x):
             raise MagmaError("Bad argument types\nArgument types given: %s[%s]" % (_type(x), et), "'Eltseq'", True)
     if isinstance(x, _MVectorSpace):
         raise _bad_types("Eltseq", (x,))
+    if isinstance(x, _smat.Matrix):
+        # (its entries, row by row, in its ring, as Magma's; not its rows)
+        return MSeq([c for row in x.rows() for c in row], BaseRing(x))
     return MSeq(x)
 
 
@@ -10558,6 +10661,8 @@ def Norm(x, sub=None):
         return _ff_absolute("Norm", x)
     if isinstance(x, _snf.NumberFieldElement):
         return _m_num(x.norm())
+    if isinstance(x, (int, _Fraction)) and not isinstance(x, bool):
+        return x  # (the norm of an integer or rational is itself, as Magma's)
     return x * x
 
 
