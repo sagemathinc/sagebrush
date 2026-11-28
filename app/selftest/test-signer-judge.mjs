@@ -17,7 +17,7 @@ const GOOD_STATE = "[signer] state: ready=complete probe=yes tauri=yes ran=yes p
 const SECOND = "[page] signer second window: refused: Command not allowed";
 const LOADED = [SECOND, "[signer] startup data folder: removed", "[signer] page started null/signer/index.html", "[signer] page finished null/signer/index.html", "[signer] state check sent", GOOD_STATE];
 const FRAME = ["frame: requested", "frame: loaded", "frame: refused: not allowed", "frame: signer refused: not allowed"];
-const v = (err, { out = refusedLine, seen = FRAME, control, code = 0, signal = null, problems = [], left = null, bare = false } = {}) => signerVerdict({ err: (bare ? err : [...err, ...LOADED]).join("\n"), out, seen, control, code, signal, problems, left });
+const v = (err, { out = refusedLine, seen = FRAME, control, code = 0, signal = null, problems = [], left = null, bare = false, platform } = {}) => signerVerdict({ err: (bare ? err : [...err, ...LOADED]).join("\n"), out, seen, control, code, signal, problems, left, platform });
 
 ok(signerLog([d(1, "signer"), s(1, 1, "signer"), "[signer] refused 2: not the signer window's page", d(2, "main")].join("\n")).dispatches.length === 2, "the log's lines are read: dispatches and signatures");
 
@@ -54,7 +54,14 @@ ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unkn
   const both = [...framed(2), ...framed(3, "tauri://localhost")];
   ok(v([d(1, "signer"), s(1, 1, "signer"), ...both], { control: "frame+cap", seen: SF }).ok, "frame+cap: both frames' calls reach the command, remote, and are refused (the forged Origin's too), the signer page's one signature: passes");
   ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: SF }).ok, "frame+cap: no call from a frame reaching the command (the widening didn't take) fails");
-  ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2)], { control: "frame+cap", seen: SF }).ok, "frame+cap: no call with the forged Origin reaching the command (the postMessage path didn't run) fails");
+  // (as CI saw it on Windows: /sframe's call reached the command, remote, refused; /sforge's forged call never arrived)
+  const SFW = [...SF.filter((x) => !x.startsWith("sforge: signer")), "sforge: refused: (no answer)", "sforge: signer refused: (no answer)"];
+  ok(v([d(1, "signer"), s(1, 1, "signer"), ...framed(2)], { control: "frame+cap", seen: SFW }).ok, "frame+cap, Windows: /sframe refused at the command, /sforge's forged call never answered: passes");
+  // (as on macOS and Linux: a frame of another origin has no IPC bridge, so nothing of either frame reaches the command)
+  const NOB = ["sframe: loaded", "sframe: signer refused: undefined is not an object (evaluating 'window.__TAURI__.core')", "sforge: loaded", "sforge: signer refused: undefined is not an object (evaluating 'window.__TAURI__.core')"];
+  ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB, platform: "darwin" }).ok && v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB, platform: "linux" }).ok, "frame+cap, macOS and Linux: both frames loaded, no bridge, nothing reached the command: passes");
+  ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB }).ok, "frame+cap, Windows: no frame's call reaching the command fails (there the frame has the bridge)");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer")], { control: "frame+cap", seen: NOB, platform: "darwin" }).ok, "frame+cap: a second dispatch the check took as local fails, on any platform");
   ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2), d(3, "signer", "tauri://localhost", "remote", "tauri://localhost"), s(3, 2, "signer")], { control: "frame+cap", seen: SF }).ok, "frame+cap: the forged frame's call signing fails");
   ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2), d(3, "signer", "tauri://localhost", "local", "tauri://localhost"), s(3, 2, "signer")], { control: "frame+cap", seen: SF }).ok, "frame+cap: a frame's call resolved as local and signing (two signatures) fails");
   ok(!v([d(1, "signer"), s(1, 1, "signer"), ...both], { control: "frame+cap" }).ok, "frame+cap: the frames never loaded fails");

@@ -194,15 +194,17 @@ function otherServer() {
   const page = (name) => `<!doctype html><script>
     const say = (v) => ${name === "sforge" ? `void (window.__sbImgs ||= []).push(Object.assign(new Image(), { src: "/report?p=${name}&v=" + encodeURIComponent(v) }))` : `fetch("/report?p=${name}&v=" + encodeURIComponent(v)).catch(() => {})`};
     say("loaded");
+    // (each call bounded: a call that never answers says "(no answer)", and the next is tried)
+    const answer = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("(no answer)")), 5000))]);
     (async () => {
-      try { const w = await window.__TAURI__.core.invoke("disk_where"); say("REACHED disk_where " + String(w).length); }
+      try { const w = await answer(window.__TAURI__.core.invoke("disk_where")); say("REACHED disk_where " + String(w).length); }
       catch (e) { say("refused: " + String(e && e.message || e).slice(0, 80)); }
-      try { const x = await window.__TAURI__.fs.exists("/"); say("REACHED fs.exists " + x); }
+      try { const x = await answer(window.__TAURI__.fs.exists("/")); say("REACHED fs.exists " + x); }
       catch (e) { say("fs refused: " + String(e && e.message || e).slice(0, 80)); }
       // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded; /sforge's
       // page may not fetch (its CSP), so Tauri's script sends on the postMessage path, where a header is the caller's
       // to set: it claims the signer page's Origin)
-      try { const x = await window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }${name === "sforge" ? `, { headers: { Origin: "tauri://localhost" } }` : ""}); say("REACHED signer " + String(x).slice(0, 40)); }
+      try { const x = await answer(window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }${name === "sforge" ? `, { headers: { Origin: "tauri://localhost" } }` : ""})); say("REACHED signer " + String(x).slice(0, 40)); }
       catch (e) { say("signer refused: " + String(e && e.message || e).slice(0, 80)); }
     })();
   <\/script>`;
@@ -319,7 +321,7 @@ async function signerLaunch(control) {
   // (the approvals window's web view data folder once the app has quit: signer.rs DATA_FOLDER)
   const left = listTree(join(data, "signer-webview"));
   console.log(`  the approvals window's data folder after the app quit: ${left === null ? "absent" : left.length ? `${left.length} entries: ${left.slice(0, 80).join(", ")}` : "empty"}`);
-  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control, code: res.code, signal: res.signal, problems: res.problems, left });
+  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control, code: res.code, signal: res.signal, problems: res.problems, left, platform: process.platform });
   console.log(`launch${control ? ` (control: ${control})` : ""}: ${persistLine(res)} (exit ${res.code}); reached the command ${v.counts.dispatches} (${v.counts.dispatchesOthers} not the approvals window's), signed ${v.counts.signed} (${v.counts.signedOthers} not the approvals window's)`);
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   return v;
@@ -330,8 +332,12 @@ function executable() {
   const at = mkdtempSync(join(tmpdir(), "sagebrush-appimage-"));
   const { APPIMAGE_EXTRACT_AND_RUN: _, ...env } = process.env;
   const x = spawnSync(exe, ["--appimage-extract"], { cwd: at, stdio: "ignore", env, timeout: 120000 });
-  if (x.status !== 0) console.log(`(extracting the AppImage: exit ${x.status}${x.error ? `, ${x.error.message}` : ""})`);
-  return join(at, "squashfs-root", "usr", "bin", "sagebrush-app");
+  const bin = join(at, "squashfs-root", "usr", "bin");
+  const names = existsSync(bin) ? readdirSync(bin) : [];
+  console.log(`(the AppImage extracted: exit ${x.status}${x.error ? `, ${x.error.message}` : ""}; usr/bin: ${names.join(", ") || "none"})`);
+  // (the app's own executable: the one there, or the one named for the app)
+  const name = names.length === 1 ? names[0] : names.find((n) => /^sagebrush/i.test(n));
+  return join(bin, name ?? "(none)");
 }
 // (a release build: the executable holds none of the controls' names, and started with the signer's widest control
 // set, nothing reaches a signing command; release-judge.mjs)

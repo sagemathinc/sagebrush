@@ -11,12 +11,16 @@
 //   - "csp-off" (the signer's page without its CSP, framing the other server's page): that page loaded in the frame,
 //     and said what its signing call got (refused), and still nothing of it reached the command: dispatches 1,
 //     signatures 1, the signer window's own;
-//   - "frame+cap" (that, and the command in the signer window's capability for the other server's origin too): the
-//     frame's call reaches the command (a dispatch in the signer window whose caller Tauri resolved as remote), and the
-//     command's check of the calling document refuses it; and so does a second frame's, made on the postMessage path
-//     (its page may not fetch, so Tauri's script falls back to it) with a forged Origin header, "tauri://localhost"
-//     (a header is the caller's to set there: the check reads Tauri's own word, never it): signatures 1, the signer
-//     page's own (N1: the window's top-level page, which the frames share, isn't the guard);
+//   - "frame+cap" (that, and the command in the signer window's capability for the other server's origin too): two
+//     frames of the other server in the signer page, /sframe and /sforge (whose page may not fetch, so Tauri's script
+//     falls back to its postMessage path, with a forged Origin header, "tauri://localhost": there a header is the
+//     caller's to set, and the check reads Tauri's own word on the caller, never it).  Signatures 1, the signer page's
+//     own, and no other dispatch the check took as local; both frames loaded and said what their signing calls got,
+//     neither REACHED (a forged call that never answered says "(no answer)").  On Windows, where WebView2 gives a frame
+//     the IPC bridge, /sframe's call must reach the command (a dispatch in the signer window whose caller Tauri resolved
+//     as remote) and be refused by the command's check of the calling document (N1: the window's top-level page, which
+//     the frame shares, isn't the guard).  On macOS and Linux a frame of another origin has no IPC bridge at all (its
+//     calls fail in the page, before any request), so no frame's call reaches the command there;
 //   - "guard-off" (the signer window's navigation guard left out, the window sent to the other server): that page
 //     loaded in the signer window and said what its signing call got (refused), and nothing of it reached the command:
 //     dispatches 1, signatures 1.
@@ -65,7 +69,7 @@ export function storedLeft(left) {
   return (left ?? []).filter((e) => STORED.test(e));
 }
 
-export function signerVerdict({ err, out, seen, control, code, signal, problems, left = null }) {
+export function signerVerdict({ err, out, seen, control, code, signal, problems, left = null, platform = "win32" }) {
   const { dispatches, signed } = signerLog(err);
   const why = [];
   const elsewhere = stateChecksElsewhere(err);
@@ -119,14 +123,18 @@ export function signerVerdict({ err, out, seen, control, code, signal, problems,
       break;
     case "frame+cap": {
       const framed = dispatches.filter((d) => d.label === "signer" && d.caller === "remote");
-      if (fromOthers(dispatches).length) why.push(`dispatches from other windows (${fromOthers(dispatches).length}): only the signer window's page and its frame may reach the command`);
-      if (!framed.length) why.push("no call from the frame in the signer page reached the command: the widened capability didn't take, or the frame didn't call");
-      if (signed.length !== 1) why.push(`signatures ${signed.length}, not 1: the frame's call signed`);
-      if (!seen.includes("sframe: loaded")) why.push("the other server's page didn't load in the signer page's frame: the control didn't run");
-      if (!seen.some((x) => /^sframe: signer refused/.test(x))) why.push("the other server's page in the signer page's frame didn't report its signing call refused");
-      if (!framed.some((d) => d.header === "tauri://localhost")) why.push("no call with a forged Origin header (the postMessage path) reached the command: the forged frame's control didn't run");
-      if (!seen.includes("sforge: loaded")) why.push("the forged frame's page didn't load in the signer page");
-      if (!seen.some((x) => /^sforge: signer refused/.test(x))) why.push("the forged frame's page didn't report its signing call refused");
+      const local = dispatches.filter((d) => d.caller === "local");
+      if (fromOthers(dispatches).length) why.push(`dispatches from other windows (${fromOthers(dispatches).length}): only the signer window's page and its frames may reach the command`);
+      if (local.length !== 1) why.push(`${local.length} dispatches the check took as local, not only the signer page's own`);
+      if (signed.length !== 1) why.push(`signatures ${signed.length}, not 1: a frame's call signed`);
+      for (const f of ["sframe", "sforge"]) {
+        if (!seen.includes(`${f}: loaded`)) why.push(`the other server's /${f} didn't load in the signer page's frame: the control didn't run`);
+        if (!seen.some((x) => x.startsWith(`${f}: signer refused`))) why.push(`/${f} in the signer page didn't say what its signing call got`);
+      }
+      if (platform === "win32") {
+        if (!framed.length) why.push("on Windows, no call from a frame in the signer page reached the command: the widened capability didn't take, or the frame didn't call");
+        if (!seen.some((x) => /^sframe: signer refused: only the approvals window's page signs/.test(x))) why.push("on Windows, /sframe's call wasn't refused by the command's check of the calling document");
+      }
       break;
     }
     case "cap":
