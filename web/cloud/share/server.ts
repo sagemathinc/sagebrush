@@ -857,8 +857,8 @@ const CLAIM_S = 30;
  * freeing its slot.  Not delivered: tried again later, with backoff (a minute, doubling), and after REVOKE_ATTEMPTS
  * kept as exhausted.
  */
-export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): Promise<{ delivered: number; failed: number }> {
-  const out = { delivered: 0, failed: 0 };
+export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): Promise<{ delivered: number; failed: number; held: number }> {
+  const out = { delivered: 0, failed: 0, held: 0 };
   const c = workosMode(env) ? workosConfig(env) : null;
   if (!c) return out;
   const db = env.SHARE_DB!;
@@ -868,7 +868,18 @@ export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): P
     if (Date.now() - start > budgetMs) break;
     const claim = b64url(random(12));
     const t = now();
-    const got = await db.prepare("UPDATE revoke_outbox SET claim = ?2, claim_until = ?3 WHERE id = ?1 AND sid = ?4 AND attempts = ?5 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?6)").bind(r.id, claim, t + CLAIM_S, r.sid, r.attempts, t).run();
+    // (a WorkOS session another local session of the same account still holds isn't revoked: several local sessions can share one sid (one
+    // AuthKit sign-in, used twice), and ending one of them, by sign-out, cap eviction or expiry, mustn't end the
+    // others' provider session.  Its row goes instead, in the same batch as the claim that then can't happen: the
+    // obligation is the holder's now, whose own end queues the sid again.  So the last local session to end revokes it)
+    const [held, got] = await db.batch([
+      db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND sid = ?2 AND attempts = ?3 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?4) AND EXISTS (SELECT 1 FROM sessions s WHERE s.provider_sid = ?2 AND s.account_id = revoke_outbox.account_id)").bind(r.id, r.sid, r.attempts, t),
+      db.prepare("UPDATE revoke_outbox SET claim = ?2, claim_until = ?3 WHERE id = ?1 AND sid = ?4 AND attempts = ?5 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?6)").bind(r.id, claim, t + CLAIM_S, r.sid, r.attempts, t),
+    ]);
+    if (Number(held.meta?.changes ?? 0) === 1) {
+      out.held++;
+      continue;
+    }
     if (Number(got.meta?.changes ?? 0) !== 1) continue;
     if ((await revokeSession(c, r.sid)) === "revoked") {
       await db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND claim = ?2").bind(r.id, claim).run();

@@ -1360,6 +1360,40 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   ok(dv.status === 200 && within((await rowOf(cookieOf(dv, "__Host-sb_session")))?.reauth_ms, d0, Date.now()), "RA7 /auth/dev's session is re-authenticated now");
 }
 
+// ---- one WorkOS session held by several local sessions: ending one of them (sign-out, cap eviction) doesn't revoke the
+// WorkOS session the others still hold; the last one to end does
+{
+  const post = (path, session) => fetchSite(mf, path, { method: "POST", headers: { "content-type": "application/json", origin: SITE, ...(session ? { cookie: session } : {}) }, body: "{}" });
+  const drain = async () => (await post("/__drain")).json();
+  const queuedFor = async (sid) => (await db.prepare("SELECT COUNT(*) AS n FROM revoke_outbox WHERE sid = ?1").bind(sid).first()).n;
+  const rowsFor = async (sid) => (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE provider_sid = ?1").bind(sid).first()).n;
+  await drain();
+
+  const a = await signIn("user_01SHAREA", "session_01SHAREDA");
+  const b = await signIn("user_01SHAREA", "session_01SHAREDA");
+  fake.revoked = [];
+  const lo = await post("/auth/logout", a.session);
+  const d1 = await drain();
+  ok(lo.status === 200 && (await me(b.session)).status === 200 && (await rowsFor("session_01SHAREDA")) === 1 && !fake.revoked.includes("session_01SHAREDA") && (await queuedFor("session_01SHAREDA")) === 0, `V1 signing out one of two local sessions sharing a WorkOS session doesn't revoke it: the other is still served, nothing stays queued (${JSON.stringify(d1)}, ${fake.revoked})`);
+  await post("/auth/logout", b.session);
+  await drain();
+  ok(fake.revoked.includes("session_01SHAREDA") && (await rowsFor("session_01SHAREDA")) === 0, `V1 the last one's sign-out revokes it (${fake.revoked})`);
+
+  // the 21st sign-in with one WorkOS session evicts the oldest local row; the 20 left still hold it, so it isn't revoked
+  fake.revoked = [];
+  let last;
+  for (let i = 0; i < 21; i++) last = await signIn("user_01SHAREC", "session_01SHAREDC");
+  const d2 = await drain();
+  ok((await rowsFor("session_01SHAREDC")) === 20 && (await me(last.session)).status === 200 && !fake.revoked.includes("session_01SHAREDC") && (await queuedFor("session_01SHAREDC")) === 0, `V2 a cap eviction of one of 21 local sessions sharing a WorkOS session doesn't revoke it (${JSON.stringify(d2)}, ${fake.revoked})`);
+
+  // a sid no local session holds is still revoked as before
+  const c = await signIn("user_01SHARED", "session_01SHAREDD");
+  fake.revoked = [];
+  await post("/auth/logout", c.session);
+  await drain();
+  ok(fake.revoked.includes("session_01SHAREDD"), `V3 a sign-out of the only local session holding a WorkOS session revokes it (${fake.revoked})`);
+}
+
 await mf.dispose();
 console.log(`${count - failures}/${count} identity checks passed`);
 process.exit(failures ? 1 : 0);
