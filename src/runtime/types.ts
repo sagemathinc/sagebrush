@@ -3835,7 +3835,14 @@ getset(object, "__dict__", (o) => {
         buf = O.bufferViewOf(view);
         if (buf === undefined) raise(T.BufferError, "memoryview: underlying buffer is not C-contiguous");
         buf = buf.slice();
-        if (lookupType(typeOf(exporter), "__release_buffer__") !== undefined) O.lookupSpecial(exporter, "__release_buffer__")(exporter, view);
+        // (an exception from __release_buffer__ is CPython's unraisable one: reported there, the result kept)
+        if (lookupType(typeOf(exporter), "__release_buffer__") !== undefined) {
+          try {
+            O.lookupSpecial(exporter, "__release_buffer__")(exporter, view);
+          } catch (_e) {
+            // (Sagebrush has no unraisable hook: the result stands, as CPython's)
+          }
+        }
       }
       if (buf === undefined) raise(T.TypeError, `fromhex() argument must be str or bytes-like, not ${typeName(s)}`);
       let t = "";

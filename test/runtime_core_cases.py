@@ -150,3 +150,15 @@ for fname, f in (("bytes.fromhex", bytes.fromhex), ("bytearray.fromhex", bytearr
     for label, mk in (("Buf()", Buf), ("BadBuf()", BadBuf), ("NoRelease()", NoRelease), ("strided view", lambda: memoryview(b"441122")[::2])):
         del log[:]
         show(f"{fname}({label})", lambda: (f(mk()), list(log)))
+# an exporter whose view is strided: CPython's BufferError, __release_buffer__ not called; one whose release raises:
+# the result kept (CPython reports the release's exception as unraisable)
+class StridedBuf:
+    def __buffer__(self, flags): log.append('buffer'); return memoryview(b"441122")[::2]
+    def __release_buffer__(self, view): log.append('release')
+class BadRelease:
+    def __buffer__(self, flags): return memoryview(b"41")
+    def __release_buffer__(self, view): raise KeyError('release')
+del log[:]
+show("bytes.fromhex(StridedBuf())", lambda: (bytes.fromhex(StridedBuf()), list(log)))
+print("log after strided |", log)
+show("bytes.fromhex(BadRelease())", lambda: bytes.fromhex(BadRelease()))
