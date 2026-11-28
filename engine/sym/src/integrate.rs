@@ -76,9 +76,21 @@ pub fn integrate(f: &Expr, x: &str) -> Option<Expr> {
     Some(r)
 }
 
+/// Restores the trace state integrate_steps found, on every exit: also
+/// when a Stop (or a panic) unwinds through it, so that tracing never stays
+/// on and later ordinary integrations don't keep their step trees.
+struct TraceGuard(Option<Vec<Vec<Step>>>);
+
+impl Drop for TraceGuard {
+    fn drop(&mut self) {
+        let prev = self.0.take();
+        TRACE.with(|t| *t.borrow_mut() = prev);
+    }
+}
+
 /// The antiderivative with the steps that found it.
 pub fn integrate_steps(f: &Expr, x: &str) -> Option<(Expr, Step)> {
-    TRACE.with(|t| *t.borrow_mut() = Some(vec![vec![]]));
+    let _restore = TraceGuard(TRACE.with(|t| t.borrow_mut().replace(vec![vec![]])));
     let r = integrate(f, x);
     let steps = TRACE.with(|t| t.borrow_mut().take()).and_then(|mut s| s.pop()).unwrap_or_default();
     let r = r?;
