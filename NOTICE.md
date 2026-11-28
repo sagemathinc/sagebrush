@@ -730,7 +730,7 @@ gives permission. Nothing else in PSAGE is covered.
 ### mpmath 1.3.0 (BSD-3-Clause), from PyPI
 
 `packages/pypi-mpmath/py/` is the Python source of mpmath 1.3.0's wheel, unchanged but for
-Sagebrush's overlay (packages/pypi-mpmath/overlay.patch, 6 files):
+Sagebrush's overlay (packages/pypi-mpmath/overlay.patch, 7 files):
 https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl
 (SHA-256 a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c). Its license:
 

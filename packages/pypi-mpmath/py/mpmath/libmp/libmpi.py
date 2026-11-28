@@ -933,3 +933,100 @@ def mpci_rgamma(z, prec): return mpci_gamma(z, prec, type=2)
 
 def mpi_factorial(z, prec): return mpi_gamma(z, prec, type=1)
 def mpci_factorial(z, prec): return mpci_gamma(z, prec, type=1)
+
+# Sagebrush (design/mpmath-core.md: mpmath's iv is a rigorous enclosure, the
+# true value always inside). The directed rounding of a transcendental mpf
+# function is not guaranteed: near a representable number its floor or its
+# ceiling can land on the wrong side (log(1 + 2**-21) at 24 bits, ceiling,
+# gives the floor), and an interval built from it alone can miss the true
+# value. So, in this module only, each such function's floor and ceiling are
+# checked (exp, log, atan, atan2, pi, gamma, rgamma, loggamma): the function
+# at prec + 64 and prec + 128 bits, raised until the two agree within 2 units
+# in the first one's last place, and the endpoint moved outward one unit in
+# its own last place until that value is at least 4 of those units inside it.
+# An endpoint the check cannot place inside is always moved. A function's
+# exact values (exp(0) = 1, log(1) = 0, atan(0) = 0, atan2(0, x > 0) = 0) and
+# a zero, infinity or nan are kept. Wherever the directed value was already
+# safely on its side, it is returned unchanged, so these are upstream's
+# intervals but where upstream's could miss. (The 'python' backend, the
+# rollback, keeps upstream's.)
+from .backend import BACKEND
+if BACKEND == 'sagebrush':
+    from .libmpf import round_fast
+
+    def _mpi_ulp(v, prec):
+        sign, man, exp, bc = v
+        return from_man_exp(MPZ_ONE, exp + bc - prec)
+
+    # (one unit in the last place of the prec-bit number next to v, below it when down: toward
+    # zero from a power of two, the binade below's, half v's own)
+    def _mpi_step(v, prec, down):
+        sign, man, exp, bc = v
+        if man == 1 and bool(sign) != down:
+            return from_man_exp(MPZ_ONE, exp + bc - 1 - prec)
+        return from_man_exp(MPZ_ONE, exp + bc - prec)
+
+    def _mpi_outward(f, rounding, prec, exact_ok=False):
+        v = f(prec, rounding)
+        if rounding not in (round_floor, round_ceiling) or v in (fzero, finf, fninf, fnan):
+            return v
+        wp = prec + 64
+        while 1:
+            h1 = f(wp, round_nearest)
+            h2 = f(wp + 64, round_nearest)
+            # (an exact result, where one is possible: the same at every precision)
+            if exact_ok and v == h1 == h2:
+                return v
+            if mpf_le(mpf_abs(mpf_sub(h1, h2)), mpf_shift(_mpi_ulp(h1, wp), 1)):
+                break
+            wp *= 2
+        margin = mpf_shift(_mpi_ulp(h1, wp), 2)
+        if rounding == round_floor:
+            bound = mpf_sub(h2, margin)
+            while mpf_gt(v, bound):
+                v = mpf_sub(v, _mpi_step(v, prec, True), prec, round_floor)
+        else:
+            bound = mpf_add(h2, margin)
+            while mpf_lt(v, bound):
+                v = mpf_add(v, _mpi_step(v, prec, False), prec, round_ceiling)
+        return v
+
+    _upstream_exp, _upstream_log, _upstream_atan = mpf_exp, mpf_log, mpf_atan
+    _upstream_atan2, _upstream_pi = mpf_atan2, mpf_pi
+
+    def mpf_exp(x, prec, rnd=round_fast):
+        if x == fzero:
+            return _upstream_exp(x, prec, rnd)
+        return _mpi_outward(lambda p, r: _upstream_exp(x, p, r), rnd, prec)
+
+    def mpf_log(x, prec, rnd=round_fast):
+        if x == fone:
+            return _upstream_log(x, prec, rnd)
+        return _mpi_outward(lambda p, r: _upstream_log(x, p, r), rnd, prec)
+
+    def mpf_atan(x, prec, rnd=round_fast):
+        return _mpi_outward(lambda p, r: _upstream_atan(x, p, r), rnd, prec)
+
+    def mpf_atan2(y, x, prec, rnd=round_fast):
+        return _mpi_outward(lambda p, r: _upstream_atan2(y, x, p, r), rnd, prec)
+
+    def mpf_pi(prec, rnd=round_fast):
+        return _mpi_outward(lambda p, r: _upstream_pi(p, r), rnd, prec)
+
+    # (the gamma family: gamma and 1/gamma at a positive integer can be exact, a factorial or its
+    # reciprocal, kept when the check finds the same value at every precision; loggamma's floor
+    # and ceiling, which could come back reversed, are each moved outward)
+    _upstream_gamma, _upstream_rgamma, _upstream_loggamma = mpf_gamma, mpf_rgamma, mpf_loggamma
+
+    def _mpi_integral(x):
+        # read off the normalized (odd) mantissa's exponent, never expanding the integer itself
+        return x not in (finf, fninf, fnan) and (x == fzero or x[2] >= 0)
+
+    def mpf_gamma(x, prec, rnd='d', type=0):
+        return _mpi_outward(lambda p, r: _upstream_gamma(x, p, r, type), rnd, prec, _mpi_integral(x))
+
+    def mpf_rgamma(x, prec, rnd='d'):
+        return _mpi_outward(lambda p, r: _upstream_rgamma(x, p, r), rnd, prec, _mpi_integral(x))
+
+    def mpf_loggamma(x, prec, rnd='d'):
+        return _mpi_outward(lambda p, r: _upstream_loggamma(x, p, r), rnd, prec, _mpi_integral(x))
