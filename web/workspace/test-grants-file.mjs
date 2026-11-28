@@ -2,7 +2,7 @@
 // The desktop app's file permissions across launches (web/workspace/grants-file.ts, #1565): the record kept in
 // grants.json by where each notebook is, and brought back at the next launch under the notebooks' new ids.
 //   bun web/workspace/test-grants-file.mjs
-import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY, MARK_MS } from "./grants-file.ts";
+import { restoreGrants, grantsToKeep, keepGrants, grantsSync, mergeGrants, reconcileGrants, startGrants, parseGrants, GRANTS_KEY, MARK_MS, MARKS_MAX } from "./grants-file.ts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; console.log((c ? "ok   " : "FAIL ") + what); if (!c) fails++; };
@@ -617,6 +617,31 @@ for (const back of ["writer", "A's text"]) {
   const once = f.kept();
   await C.write();
   ok(f.kept() !== once && J(parseGrants(f.kept()).docs) === J(parseGrants(once).docs), "every write carries its own nonce: the same record written again is another text");
+  delete globalThis.localStorage;
+}
+
+// MARKS_MAX other windows' writes in flight: a read keeps every mark (none cut for room), and this window's write isn't
+// made (nothing written, every mark kept, said); once those marks are past MARK_MS, it is
+{
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const { createPermissions } = await import("../notebook/permissions.js");
+  const perms = createPermissions();
+  const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+  f.set(J({ v: 1, seq: 1, docs: {} }));
+  const A = grantsSync(w, f.invoke, localStorage);
+  await A.restore();
+  perms.grant("id1", "write", "/a");
+  const t0 = Date.now(), many = Object.fromEntries(Array.from({ length: MARKS_MAX + 3 }, (_, i) => [i.toString(16).padStart(16, "0"), { text: J({ v: 1, docs: { "ws:/n.ipynb": { write: [`/w${i}`], t: 1 } } }), at: t0 }]));
+  ok(Object.keys(parseGrants(J({ v: 1, docs: {}, pending: many })).pending).length === MARKS_MAX + 3, "marks: a read keeps every valid mark, past MARKS_MAX too (none dropped unmerged)");
+  const full = Object.fromEntries(Object.entries(many).slice(0, MARKS_MAX));
+  localStorage.setItem(GRANTS_KEY, J({ ...JSON.parse(localStorage.getItem(GRANTS_KEY)), pending: full }));
+  const before = f.kept();
+  const why = await A.write().then(() => "written", (e) => String(e.message));
+  ok(/other windows are writing it at once/.test(why) && f.kept() === before && J(JSON.parse(localStorage.getItem(GRANTS_KEY)).pending) === J(full), `marks: ${MARKS_MAX} other windows' writes in flight: this write isn't made, nothing written, every mark kept: ` + why);
+  const later = grantsSync(w, f.invoke, localStorage, { now: () => t0 + MARK_MS + 1 });
+  await later.write();
+  ok(f.kept().includes("/a") && marked(JSON.parse(localStorage.getItem(GRANTS_KEY))) === undefined, "marks: once they are past MARK_MS, the write is made (and the old marks, merged over, gone)");
   delete globalThis.localStorage;
 }
 

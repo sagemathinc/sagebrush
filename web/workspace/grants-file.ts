@@ -37,7 +37,8 @@ type Rec = { v: 1; seq?: number; migrated?: number; w?: string; docs: Record<str
 /** How long another window's write may be in flight: past it, its mark is no longer waited for (a write is one local
  * call to the app). */
 export const MARK_MS = 120_000;
-/** At most this many marks are kept (one a window writing): past it, the oldest go. */
+/** At most this many windows' writes in flight (a mark each): a write that finds this many live marks of others isn't
+ * made (tried again later), so marks are never dropped for room, only once landed, settled or past MARK_MS. */
 export const MARKS_MAX = 32;
 const WRITER = /^[0-9a-f]{16}$/;
 const hex = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -61,7 +62,8 @@ export function parseGrants(text: unknown): Rec | null {
     delete r.pendingFile;
     if (r.pending !== undefined) {
       const ok = r.pending && typeof r.pending === "object" && !Array.isArray(r.pending) ? Object.entries(r.pending).filter(([w, m]: [string, any]) => WRITER.test(w) && m && typeof m.text === "string" && Number.isSafeInteger(m.at)) : [];
-      if (ok.length) r.pending = Object.fromEntries(ok.sort((a: any, b: any) => b[1].at - a[1].at).slice(0, MARKS_MAX).map(([w, m]: [string, any]) => [w, { text: m.text, at: m.at }]));
+      // (every one kept, never cut to a number: a mark dropped unmerged would lose its write's evidence)
+      if (ok.length) r.pending = Object.fromEntries(ok.map(([w, m]: [string, any]) => [w, { text: m.text, at: m.at }]));
       else delete r.pending;
     }
     return r;
@@ -246,7 +248,14 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
         // (the write marked in the record before it is made (none made if that can't be kept), its end after: one that
         // can't be kept leaves the mark, and the next merge holds to what both texts allow)
         let was: string | undefined;
-        mark((r) => { was = r.seenFile; return { ...r, pending: { ...r.pending, [me]: { text: json, at: now() } } }; });
+        mark((r) => {
+          // (too many other windows writing at once: this write isn't made, and is tried again later; its mark would
+          // be past MARKS_MAX)
+          const live = Object.entries(r.pending ?? {}).filter(([w, m]) => w !== me && now() - m.at <= MARK_MS).length;
+          if (live >= MARKS_MAX) throw new Error(`grants.json: ${live} other windows are writing it at once; tried again shortly`);
+          was = r.seenFile;
+          return { ...r, pending: { ...r.pending, [me]: { text: json, at: now() } } };
+        });
         try {
           await invoke("grants_write", { json, expect: seen });
           seen = json;
