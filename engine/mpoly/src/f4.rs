@@ -1354,6 +1354,32 @@ mod tests {
     }
 
     #[test]
+    fn signature_path_checks_before_packing() {
+        // the signature path's own homogenization (called directly: CI never
+        // sets SB_SIGF4): (a b c d e)^52 + 1 in 8 bits a variable over GF(7),
+        // h's 260 doesn't fit, so the path overflows (its caller widens),
+        // never a basis of the spilled words; in 10 bits it is its own basis
+        let f = q(5, "52,52,52,52,52:1;0,0,0,0,0:1");
+        let md = Modulus::new(7);
+        for bits in [8u32, 10] {
+            let pk = Packing { n: 5, bits };
+            let words = vec![crate::gcd::reduce(&f.num.reduce_mod(7).repack(bits), 7)];
+            match sig_path(pk, Order::DegRevLex, &md, &words) {
+                Err(Overflow) => assert_eq!(bits, 8),
+                Ok(Some(g)) => {
+                    assert_eq!(bits, 10);
+                    let mut want = words[0].clone();
+                    want.sort();
+                    let mut got = g[0].clone();
+                    got.sort();
+                    assert_eq!((g.len(), got), (1, want));
+                }
+                Ok(None) => panic!("the signature path declined {} bits", bits),
+            }
+        }
+    }
+
+    #[test]
     fn signature_path_matches() {
         // cyclic-4 and katsura-3 (homogeneous and not) mod 32003: the
         // signature-based F4 against F4
