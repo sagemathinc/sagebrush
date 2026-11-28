@@ -107,7 +107,8 @@ export async function extractNotebookImages(ws: Workspace, e: Entry): Promise<nu
   try {
     const r = await ws.read(e.path);
     const x = await extractAttachments(r.content as any, (u) => saveImage((p, b) => ws.create(p, { content: b }), folder, u));
-    if (!x.extracted) return 0;
+    // (references the file brought are removed even when nothing was extracted: a document from outside names no file here)
+    if (!x.extracted && !x.dropped) return 0;
     await ws.write(e.path, x.doc, { base: r.rev, expect: { kind: e.kind, fid: e.fid, created: e.created, ref: e.ref } });
     return x.extracted;
   } catch {

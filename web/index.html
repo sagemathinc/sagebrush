@@ -1774,6 +1774,8 @@ function notebookImages() {
       return r?.content instanceof Uint8Array ? r.content : null;
     },
     say: (text) => { statusEl.textContent = text; },
+    // (the folder of the notebook being shown, read by the notebook at each load: only its own images are followed)
+    folder: () => (current.kind === "browser" && current.id && ws ? imageFolder("nb", current.id) : null),
   };
 }
 // The open notebook as it leaves this browser (Download, the download dialog, Share): its file images embedded as
@@ -1784,7 +1786,7 @@ function notebookForExport() {
   if (r.missing.length) statusEl.textContent = IMAGES_LEFT_OUT(r.missing.length);
   return r.doc;
 }
-const IMAGES_LEFT_OUT = (n) => `${n} image${n === 1 ? "" : "s"} couldn't be included: ${n === 1 ? "its file is" : "their files are"} missing or no longer an image.`;
+const IMAGES_LEFT_OUT = (n) => `${n} image${n === 1 ? "" : "s"} couldn't be included. ${n === 1 ? "Its file may be" : "Their files may be"} unavailable, invalid, or over the image size limit.`;
 // A workspace file's bytes, for embedding another notebook's images (a folder share)
 const readImageFile = async (path) => {
   const r = ws ? await ws.read(path).catch(() => null) : null;
@@ -3437,7 +3439,7 @@ async function openFolderShare(e, talk = null) {
       const d = await w.contents(now);
       if (!d || typeof d !== "object") throw new Error(`${f.path.replace(/^\/+/, "")} can't be read`);
       // (a share is an export: its file images embedded, as Download's are; any missing are left out)
-      return (await embedAttachments(d, readImageFile)).doc;
+      return (await embedAttachments(d, imageFolder("nb", now.ref), readImageFile)).doc;
     },
     notebookText: (doc) => toIpynb(doc),
     saveOpen: talk ? talk.saveOpen : async () => { saveNow(); await nb.saved(); },
@@ -4358,7 +4360,11 @@ fileMenu.addEventListener("click", async (e) => {
       saveNow();
       const name = prompt("Save a copy of this notebook as", docName() + " (copy)");
       if (!name?.trim()) break;
-      const d = nb.snapshot();
+      // (a copy is another notebook, with its own folder: its source's images go into it embedded, read from the
+      //  source's own folder, never as references to that folder, which the copy may not follow)
+      const was = current.id;
+      const d = (await embedAttachments(nb.snapshot(), current.kind === "browser" && was ? imageFolder("nb", was) : null, readImageFile)).doc;
+      if (current.id !== was) break;
       // (a copy has its source's provenance; unknown stays unknown)
       const src = ws && current.id ? await ws.pathOf("notebook", current.id).then((p) => (p ? ws.stat(p) : undefined)).catch(() => undefined) : undefined;
       await openDocument({ ...d, share_id: undefined, share_attempt: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
@@ -4370,7 +4376,8 @@ fileMenu.addEventListener("click", async (e) => {
       // (the notebook as it is now, its name with it, then its images read from the workspace for exactly that
       //  snapshot (not the page's held ones), then written; if another notebook was opened meanwhile, said, nothing written)
       const was = current.id, doc = { ...nb.snapshot(), name: docName() }, name = fileBase() + ".ipynb";
-      void embedAttachments(doc, readImageFile).then((r) => {
+      const folder = current.kind === "browser" && was ? imageFolder("nb", was) : null;
+      void embedAttachments(doc, folder, readImageFile).then((r) => {
         if (current.id !== was) { statusEl.textContent = "Another notebook was opened before the download was ready: download again."; return; }
         if (r.missing.length) statusEl.textContent = IMAGES_LEFT_OUT(r.missing.length);
         download(name, notebookFileText(r.doc));

@@ -25,8 +25,12 @@ let server;
 const sitePort = await startServe(() => (server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }))).port;
 const site = `http://127.0.0.1:${sitePort}`;
 const B = await browser();
-const PNG_JS = `(() => { const u = new Uint8Array(64).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]); return u; })()`;
-const PNG = (() => { const u = new Uint8Array(64).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]); return u; })();
+// (a real 3x2 PNG, so a drawn image can be decoded: its pixels, not only its header)
+const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAEElEQVR4nGM4IScHQQxwFgBBAAYZPEVBlgAAAABJRU5ErkJggg==";
+const PNG_JS = `Uint8Array.from(atob("${PNG_B64}"), (c) => c.charCodeAt(0))`;
+const PNG = new Uint8Array(Buffer.from(PNG_B64, "base64"));
+/** whether every <img> matched by `sel` decodes, and their natural widths */
+const decoded = (P, sel) => P.ev(`Promise.all([...document.querySelectorAll(${JSON.stringify(sel)})].map((i) => i.decode().then(() => i.naturalWidth, () => 0)))`);
 const b64 = (u) => Buffer.from(u).toString("base64");
 const NB = "window.sagebrush.notebook", T = "window.sagebrush.imagesTest", W = "window.sagebrush.workspace";
 try {
@@ -62,7 +66,8 @@ try {
   await P.ev(`(${NB}.run(${cellJs}), true)`).catch(() => {});
   await P.until(`!!${cellJs}.md.querySelector('img[src^="blob:"]')`, 10000).catch(() => {});
   const img = await P.ev(`(() => { const i = ${cellJs}.md.querySelector("img"); return i ? { src: i.getAttribute("src").slice(0, 5), alt: i.alt } : ${cellJs}.md.innerHTML.slice(0, 200); })()`);
-  ok(img?.src === "blob:" && img.alt === "image", "N2: the cell shows it, from a blob: URL", img);
+  const w2 = await P.ev(`(() => { const i = ${cellJs}.md.querySelector("img"); return i ? i.decode().then(() => [i.naturalWidth, i.naturalHeight], () => null) : null; })()`);
+  ok(img?.src === "blob:" && img.alt === "image" && J(w2) === J([3, 2]), "N2: the cell shows it, from a blob: URL, and it decodes as the 3x2 image pasted", { img, w2 });
 
   // ---- N3: Download embeds it
   await sleep(500);
@@ -85,8 +90,8 @@ try {
   ok(!took4c && (await P.ev(`${NB}.cells()[${codeAt}].ta.value`)) === "x = 1" && !(await P.ev(`${NB}.cells()[${codeAt}].attachments`)), "N4: a code cell takes no image");
 
   // ---- N5: import an .ipynb with attachments, then export it again
-  // (a real 2x1 GIF: screen, one frame, its pixels, the trailer)
-  const gif = Buffer.concat([Buffer.from("GIF89a"), Buffer.from([2, 0, 1, 0, 0, 0, 0, 0x2c, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 2, 0x44, 0x01, 0, 0x3b])]);
+  // (a real 1x1 GIF)
+  const gif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
   const svg = { "image/svg+xml": Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>").toString("base64") };
   const src = { cells: [
     { cell_type: "markdown", id: "m1", metadata: {}, source: ["![p](attachment:p.png) ![g](attachment:g.gif) ![s](attachment:s.svg)"], attachments: { "p.png": { "image/png": b64(PNG) }, "g.gif": { "image/gif": gif.toString("base64") }, "s.svg": svg } },
@@ -104,7 +109,8 @@ try {
   const back = JSON.parse(await P.ev(`${T}.exportIpynb()`));
   ok(J(back.cells[0].attachments) === J(src.cells[0].attachments) && [].concat(back.cells[0].source).join("") === src.cells[0].source[0], "N5: exported again: the same attachments, byte for byte, and the same source (round trip)", back.cells[0].attachments);
   await P.until(`[...document.querySelectorAll("#cells .mdout img")].filter((i) => i.getAttribute("src").startsWith("blob:")).length === 2`, 10000).catch(() => {});
-  ok((await P.ev(`[...document.querySelectorAll("#cells .mdout img")].filter((i) => i.getAttribute("src").startsWith("blob:")).length`)) === 2, "N5: the imported notebook shows its two raster images from files");
+  const w5 = await decoded(P, '#cells .mdout img[src^="blob:"]');
+  ok(J(w5) === J([3, 1]), "N5: the imported notebook shows its two raster images from files, and both decode (3 and 1 pixels wide)", w5);
 
   // ---- N7: an image over the page's pixel budget (9000 px wide): saved and exported, but not drawn
   const big = `(() => { const u = new Uint8Array(64).fill(7); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x23, 0x28, 0, 0, 0, 10]); return u; })()`;
@@ -177,7 +183,9 @@ try {
   //  export waits for that one too, and embeds it
   {
     const doc = await P.ev(`${NB}.snapshot()`);
-    const extraPath = p8; // (a file that exists: N7's, rewritten by N9)
+    // (a file that exists, in the folder of the notebook shown now: only its own folder is ever followed (H1))
+    const extraPath = `/Attachments/nb-${await P.ev(`${T}.ref()`)}/n11extra.png`;
+    await P.ev(`${W}.create(${J(extraPath)}, { content: ${PNG_JS} }).then(() => true, () => true)`);
     const reloaded = { ...doc, cells: [...doc.cells, { id: "n11", type: "markdown", code: "![n](attachment:n11.png)", attachments: { "n11.png": { "sagebrush/file": extraPath } } }] };
     await P.ev(`${NB}.load(${J(doc)})`);
     await sleep(300);
@@ -200,6 +208,26 @@ try {
   const reads = await P.ev(`window.__reads`);
   const shown6 = await P.ev(`(() => { const cs = ${NB}.cells(); const c = cs[cs.length - 1]; return { img: !!c.md.querySelector("img"), text: c.md.textContent }; })()`);
   ok(!reads.some((p) => p.startsWith("/private")) && !shown6.img && /x/.test(shown6.text), "N6: an ill-formed reference: shown as missing (its alt text), never read", { reads, shown6 });
+  // ---- N12 (H1): a reference into ANOTHER notebook's folder, or a chat's, is never read, shown or embedded: a saved
+  //  notebook (as an agent or an edit could make it), its Download, and an import that brings such references
+  const OTHER = "/Attachments/nb-someoneelse/secret.png", CHAT = "/Attachments/chat-x1/secret.png";
+  for (const p of [OTHER, CHAT]) await P.ev(`${W}.create(${J(p)}, { content: ${PNG_JS} }).then(() => true, () => true)`);
+  await P.ev(`(() => { window.__reads = []; return true; })()`);
+  await P.ev(`(() => { const c = ${NB}.addCell("![o](attachment:o.png) ![c](attachment:c.png)", null, false, "markdown"); c.attachments = { "o.png": { "sagebrush/file": ${J(OTHER)} }, "c.png": { "sagebrush/file": ${J(CHAT)} } }; ${NB}.run(c); return true; })()`);
+  await sleep(800);
+  const shown12 = await P.ev(`(() => { const cs = ${NB}.cells(); const c = cs[cs.length - 1]; return { img: c.md.querySelectorAll("img").length, text: c.md.textContent }; })()`);
+  const ex12 = JSON.parse(await P.ev(`${T}.exportIpynb()`));
+  const cell12 = ex12.cells.find((c) => [].concat(c.source).join("").includes("attachment:o.png"));
+  const reads12 = await P.ev(`window.__reads`);
+  ok(shown12.img === 0 && !reads12.includes(OTHER) && !reads12.includes(CHAT), "N12: a notebook's reference into another notebook's folder, or a chat's: not shown, never read", { shown12, reads12 });
+  ok(cell12 && !cell12.attachments?.["o.png"] && !cell12.attachments?.["c.png"] && !JSON.stringify(ex12).includes(b64(PNG).slice(0, 40) + "secret"), "N12: …and Download embeds neither (left out, as a missing one is)", cell12?.attachments);
+  // (an import that brings references: removed, never followed, not even into its own new folder)
+  const src12 = { cells: [{ cell_type: "markdown", id: "m12", metadata: {}, source: ["![o](attachment:o.png)"], attachments: { "o.png": { "sagebrush/file": OTHER } } }], metadata: {}, nbformat: 4, nbformat_minor: 5 };
+  await P.ev(`(() => { window.__reads = []; return true; })()`);
+  const r12 = await P.ev(`(async () => { const r = await ${T}.importIpynb("brings-refs.ipynb", ${J(J(src12))}); return r.made.map((e) => ({ path: e.path, ref: e.ref })); })()`);
+  const doc12 = r12[0] && (await P.ev(`(async () => (await ${W}.read(${J(r12[0].path)})).content)()`));
+  const reads12b = await P.ev(`window.__reads.filter((p) => p.startsWith("/Attachments/"))`);
+  ok(r12[0] && !JSON.stringify(doc12?.cells?.[0]?.attachments ?? null).includes("sagebrush/file") && reads12b.length === 0, "N12: an imported .ipynb's own sagebrush/file references are removed on import, and nothing under /Attachments is read", { att: doc12?.cells?.[0]?.attachments, reads12b });
   ok(P.errors.length === 0, "no page errors", P.errors);
 } catch (e) {
   ok(false, "the run threw: " + String(e?.stack ?? e).slice(0, 600));

@@ -105,10 +105,12 @@ export async function saveImage(create: (path: string, bytes: Uint8Array) => Pro
 // ---- attachments that refer to files
 
 const SEGMENT = /^[A-Za-z0-9_.-]{1,255}$/;
-/** The workspace path an attachment refers to, if it is exactly {"sagebrush/file": "/Attachments/<folder>/<name>.<ext>"}
- * with plain segments (no "..", no empty or dot segments) and a raster extension; null for anything else (fail closed:
- * an unknown or ill-formed entry is shown as a missing image and never followed). */
-export function filePathOf(att: unknown): string | null {
+/** The workspace path an attachment refers to, if it is exactly {"sagebrush/file": "<folder>/<name>.<ext>"} with a plain
+ * name and a raster extension, in exactly `folder`: the folder of the document that holds it (imageFolder of its owner,
+ * passed by the caller, never read from the document). Null for anything else, a reference into another notebook's or
+ * chat's folder included (fail closed: such an entry is shown as a missing image and never read, embedded or sent), and
+ * for every entry when there's no owner folder. */
+export function filePathOf(att: unknown, folder: string | null): string | null {
   if (!att || typeof att !== "object" || Array.isArray(att)) return null;
   const keys = Object.keys(att);
   if (keys.length !== 1 || keys[0] !== FILE_KEY) return null;
@@ -118,6 +120,8 @@ export function filePathOf(att: unknown): string | null {
   if (segs.length !== 4 || segs[0] !== "" || `/${segs[1]}` !== ATTACH_ROOT) return null;
   if (!segs.slice(2).every((s) => SEGMENT.test(s) && s !== "." && s !== ".." && !s.startsWith("."))) return null;
   if (!/\.(png|jpg|gif|webp)$/.test(segs[3])) return null;
+  // (the owner's own folder only: exactly equal, so no folder (null) or any other string follows nothing)
+  if (`/${segs[1]}/${segs[2]}` !== folder) return null;
   return p;
 }
 /** Whether an attachment entry is one of ours (its key), valid or not: such entries are never treated as Jupyter's. */
@@ -161,19 +165,19 @@ type Cell = { type?: string; cell_type?: string; attachments?: Record<string, un
 const isMarkdown = (c: Cell) => (c?.type ?? c?.cell_type) === "markdown";
 
 const needsEmbed = (doc: { cells?: Cell[] }) => Array.isArray(doc?.cells) && doc.cells.some((c) => isMarkdown(c) && !!c.attachments && Object.values(c.attachments).some(isFileEntry));
-/** The workspace paths a notebook's attachments refer to (well-formed ones only). */
-export function referencedPaths(doc: { cells?: Cell[] }): string[] {
+/** The workspace paths a notebook's attachments refer to: well-formed ones in its own `folder` only. */
+export function referencedPaths(doc: { cells?: Cell[] }, folder: string | null): string[] {
   const out = new Set<string>();
   for (const c of Array.isArray(doc?.cells) ? doc.cells : []) {
     if (!isMarkdown(c) || !c.attachments) continue;
-    for (const a of Object.values(c.attachments)) { const p = filePathOf(a); if (p) out.add(p); }
+    for (const a of Object.values(c.attachments)) { const p = filePathOf(a, folder); if (p) out.add(p); }
   }
   return [...out];
 }
 
 /** embedAttachments with the files' bytes already at hand (`get`, synchronous): for a page that holds the bytes of the
  * images it shows (the open notebook's Download and share, whose hooks are synchronous). */
-export function embedAttachmentsWith<D extends { cells?: Cell[] }>(doc: D, get: (path: string) => Uint8Array | null): { doc: D; missing: string[] } {
+export function embedAttachmentsWith<D extends { cells?: Cell[] }>(doc: D, folder: string | null, get: (path: string) => Uint8Array | null): { doc: D; missing: string[] } {
   const missing: string[] = [];
   if (!needsEmbed(doc)) return { doc, missing };
   const cells: Cell[] = [];
@@ -183,7 +187,8 @@ export function embedAttachmentsWith<D extends { cells?: Cell[] }>(doc: D, get: 
     const att: Record<string, unknown> = Object.create(null);
     for (const [name, a] of Object.entries(c.attachments)) {
       if (!isFileEntry(a)) { att[name] = a; continue; }
-      const p = filePathOf(a);
+      // (only the owner's folder is ever read: a reference elsewhere is left out, as a missing one is)
+      const p = filePathOf(a, folder);
       const u = p ? get(p) : null;
       const type = u && u.length <= IMAGE_BYTES_MAX ? imageType(u) : null;
       if (!u || !type) { missing.push(name); continue; }
@@ -195,32 +200,36 @@ export function embedAttachmentsWith<D extends { cells?: Cell[] }>(doc: D, get: 
 }
 
 /** A notebook document with every file-referring attachment embedded as Jupyter's {mime: base64}, for an export that
- * leaves this browser (Download, Export all, a share, a push): `read` gives a workspace file's bytes (or null). An entry
- * whose file is missing, unreadable, over the cap or not a raster image is left out, and its name listed in `missing`;
- * an ill-formed entry of our key is left out too, and never read. Nothing else changes; the document given isn't
- * modified. */
-export async function embedAttachments<D extends { cells?: Cell[] }>(doc: D, read: (path: string) => Promise<Uint8Array | null>): Promise<{ doc: D; missing: string[] }> {
+ * leaves this browser (Download, Export all, a share, a push): `folder` is the folder of the notebook it is (imageFolder
+ * of its ref, from the caller's own record of it), and `read` gives a workspace file's bytes (or null). Only files in
+ * that folder are read. An entry whose file is missing, unreadable, over the cap or not a raster image is left out, and
+ * its name listed in `missing`; an ill-formed entry of our key, or one naming another folder, is left out too, and
+ * never read. Nothing else changes; the document given isn't modified. */
+export async function embedAttachments<D extends { cells?: Cell[] }>(doc: D, folder: string | null, read: (path: string) => Promise<Uint8Array | null>): Promise<{ doc: D; missing: string[] }> {
   if (!needsEmbed(doc)) return { doc, missing: [] };
   const got = new Map<string, Uint8Array | null>();
-  for (const p of referencedPaths(doc)) got.set(p, await read(p).catch(() => null));
-  return embedAttachmentsWith(doc, (p) => got.get(p) ?? null);
+  for (const p of referencedPaths(doc, folder)) got.set(p, await read(p).catch(() => null));
+  return embedAttachmentsWith(doc, folder, (p) => got.get(p) ?? null);
 }
 
 /** A notebook document whose Markdown cells' inline raster images (Jupyter's {mime: base64}) are saved as workspace
  * files by `save` and referred to instead, for an import into the workspace. An attachment is extracted only if it has
  * one entry, an image/png, jpeg, gif or webp mime, strict base64 within the cap, and bytes that are that raster type;
- * anything else (SVG, several mimes, over the cap, a refused save) stays inline as it was, so nothing is lost. */
-export async function extractAttachments<D extends { cells?: Cell[] }>(doc: D, save: (bytes: Uint8Array) => Promise<{ path: string } | { refused: Refusal }>): Promise<{ doc: D; extracted: number }> {
-  let extracted = 0;
-  if (!Array.isArray(doc?.cells)) return { doc, extracted };
+ * anything else (SVG, several mimes, over the cap, a refused save) stays inline as it was, so nothing is lost.
+ * An entry of OUR key in the imported document (a reference to a workspace file) is removed and counted in `dropped`:
+ * a document from outside never brings a reference, so it can't name any file here, its own new folder included. */
+export async function extractAttachments<D extends { cells?: Cell[] }>(doc: D, save: (bytes: Uint8Array) => Promise<{ path: string } | { refused: Refusal }>): Promise<{ doc: D; extracted: number; dropped: number }> {
+  let extracted = 0, dropped = 0;
+  if (!Array.isArray(doc?.cells)) return { doc, extracted, dropped };
   const cells: Cell[] = [];
   for (const c of doc.cells) {
     if (!isMarkdown(c) || !c.attachments || typeof c.attachments !== "object") { cells.push(c); continue; }
     const att: Record<string, unknown> = Object.create(null);
     let changed = false;
     for (const [name, a] of Object.entries(c.attachments)) {
+      if (isFileEntry(a)) { dropped++; changed = true; continue; }
       att[name] = a;
-      if (!a || typeof a !== "object" || Array.isArray(a) || isFileEntry(a)) continue;
+      if (!a || typeof a !== "object" || Array.isArray(a)) continue;
       const entries = Object.entries(a as Record<string, unknown>);
       if (entries.length !== 1) continue;
       const [mime, b64] = entries[0];
@@ -233,7 +242,7 @@ export async function extractAttachments<D extends { cells?: Cell[] }>(doc: D, s
       changed = true;
       extracted++;
     }
-    cells.push(changed ? { ...c, attachments: att } : c);
+    cells.push(changed ? { ...c, attachments: Object.keys(att).length ? att : null } : c);
   }
-  return { doc: extracted ? { ...doc, cells } : doc, extracted };
+  return { doc: extracted || dropped ? { ...doc, cells } : doc, extracted, dropped };
 }

@@ -179,7 +179,9 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
  * @param {(name: string) => string | undefined} [opts.assetUrl] the URL of one of them, if not under assetBase (a blob: in a downloaded file)
  * @param {boolean} [opts.readOnly]
  * @param {() => Promise<object | null>} [opts.mystBook] a MyST notebook's book (the workspace page's: web/workspace/book-cap.ts)
- * @param {{ save(bytes: Uint8Array): Promise<{ path: string } | { refused: string }>, read(path: string): Promise<Uint8Array | null>, say(text: string): void }} [opts.images]
+ * @param {{ save(bytes: Uint8Array): Promise<{ path: string } | { refused: string }>, read(path: string): Promise<Uint8Array | null>, say(text: string): void, folder(): string | null }} [opts.images]
+ *   (folder: the folder of the document being shown, imageFolder of its owner, read at each load: only references into
+ *   it are shown, embedded or kept)
  *   images in Markdown cells kept as workspace files (#1872, web/workspace/image-store.ts): the host saves a pasted or
  *   dropped image and reads one to show it; none: pasting files does nothing, and such attachments show as missing.
  *   save() takes the document shown when it is called, which addImages calls only while the cell pasted into is
@@ -201,6 +203,9 @@ export function createNotebook(root, opts = {}) {
   const images = opts.images ?? null;
   const imageUrls = images ? new ImageUrls(images.read, () => redrawImages()) : null;
   const fileImage = imageUrls ? (p) => imageUrls.url(p) : undefined;
+  // (the folder of the document shown, from the host at each load (its owner's, never the document's own say): the only
+  //  one whose files its references may name)
+  let fileFolder = null;
   const hasFileImages = (cell) => cell.type === "markdown" && !!cell.attachments && Object.values(cell.attachments).some(isFileEntry);
   function redrawImages() {
     for (const cell of cells()) {
@@ -1970,7 +1975,7 @@ export function createNotebook(root, opts = {}) {
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
-    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, fileImage, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
+    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, fileImage, fileFolder, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
     cell.el.classList.add("rendered");
     if (cell.md.querySelector(".math")) typesetMath(cell.md);
     schedule();
@@ -1991,7 +1996,7 @@ export function createNotebook(root, opts = {}) {
   function openBlocks(cell) {
     if (cell.blocks || opts.readOnly) return cell.blocks;
     const b = new BlockEditor(cell.ta.value, {
-      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, fileImage, pixels, remote: remotePictures(), myst: mystFor(cell, true) }),
+      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, fileImage, fileFolder, pixels, remote: remotePictures(), myst: mystFor(cell, true) }),
       typeset: (el) => typesetMath(el),
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
@@ -2252,7 +2257,7 @@ export function createNotebook(root, opts = {}) {
     timer = null;
     if (loading) return;
     // (images no cell refers to any more: let go)
-    if (imageUrls) imageUrls.retain(referencedPaths({ cells: cells().map((c) => ({ type: c.type, attachments: c.attachments })) }));
+    if (imageUrls) imageUrls.retain(referencedPaths({ cells: cells().map((c) => ({ type: c.type, attachments: c.attachments })) }, fileFolder));
     // (a journal's store that follows another tab's (focus takeover): nothing saved from here, nothing refused to say;
     // this page is read-only, so nothing typed waits, and it reloads the document when it writes)
     if (store?.journaled && store.readOnly === "other") return;
@@ -2443,7 +2448,8 @@ export function createNotebook(root, opts = {}) {
   // Show a document, replacing what is there.
   function load(doc) {
     // (another document, or this one again: the images held for the last one let go, read again as shown)
-    imageUrls?.clear();
+    fileFolder = images?.folder?.() ?? null;
+    imageUrls?.clear(fileFolder);
     loading = true;
     shown = { synced: null, remoteSeen: 0 }; // (another document: its own)
     leftChanged();
@@ -2870,14 +2876,14 @@ export function createNotebook(root, opts = {}) {
       for (let first = true; ; first = false) {
         // (the notebook destroyed meanwhile: nothing more is read)
         if (imageUrls.disposed) return;
-        const paths = referencedPaths(snapshot());
+        const paths = referencedPaths(snapshot(), fileFolder);
         if (!first && paths.every((p) => imageUrls.settled(p))) return;
         await imageUrls.ready(paths);
       }
     },
     /** `doc` with its file images embedded as Jupyter's {mime: base64}, from the bytes loaded (imagesReady first), and
      * the names of any that couldn't be (image-store.ts embedAttachmentsWith): for an export that leaves this browser. */
-    embedImages: (doc) => embedAttachmentsWith(doc, (p) => imageUrls?.bytes(p) ?? null),
+    embedImages: (doc) => embedAttachmentsWith(doc, fileFolder, (p) => imageUrls?.bytes(p) ?? null),
     get kernel() { return kernel; },
     get mode() { return mode; },
     get meta() { return meta; },

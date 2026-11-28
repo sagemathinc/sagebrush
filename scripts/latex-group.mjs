@@ -253,7 +253,11 @@ export const LATEX_LAZY_CAPS = {
   // (68,867 / 23,606: Nov 25 2026, image reads: a raster image's read as an image for an agent that takes one, by its
   //  bytes (isRaster, imageOut, agent-pair.ts), measured on the shipped build of the head merged with master 5fb549fa
   //  with bun 1.4.4 and node 24.21.0: 68,803 / 23,542, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 68867, gzip: 23606 },
+  // (69,649 / 23,960: Nov 27 2026, notebook images (#1872): the image helpers the pairing's agent-pair.ts reads
+  //  (isRaster, IMAGE_BYTES_MAX) moved into web/workspace/image-store.ts, which this chunk now carries, with its
+  //  owner-folder reference check (SEC H1); measured on the shipped build of the head on master 5963e768 with bun 1.4.4
+  //  and node 24.21.0: 69,585 / 23,896, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 69649, gzip: 23960 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

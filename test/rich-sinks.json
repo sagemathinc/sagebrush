@@ -402,7 +402,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/notebook/notebook.js :: renderMd :: cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, fileImage, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class=\"hc\">Empty Markdown cell: double-click to edit.</p>'; #0": {
+  "web/notebook/notebook.js :: renderMd :: cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, fileImage, fileFolder, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class=\"hc\">Empty Markdown cell: double-click to edit.</p>'; #0": {
    "kind": "rich",
    "owner": "phase-2",
    "readers": [
