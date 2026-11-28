@@ -763,6 +763,23 @@ await section("S07: a sealed op in flight when its session signs out is not comm
   const log = (await ws2.ask({ t: "pull_index", after: 0 }))?.ops ?? [];
   ok(log.every((o) => o.env !== held.env) && log.some((o) => o.env === before.env), "an op held across its session's sign-out is not committed: the log has the op before it and not it");
   ok(w2.next_dseq === held.dseq, `and the device's order didn't move: its next dseq is still the held op's (${w2.next_dseq})`);
+  // (a session that reaches its end during the hold, with no sign-out: refused at the commit, nothing stored)
+  {
+    const s3 = await signIn(F);
+    const until = Math.floor(Date.now() / 1000) + 4;
+    await db.prepare("UPDATE sessions SET expires = ?1 WHERE token_hash = ?2").bind(until, createHash("sha256").update(decodeURIComponent(s3.split("=")[1])).digest("hex")).run();
+    const ws3 = await socket(s3);
+    const w3 = await hello(ws3, dev);
+    const late = await signed(W, g.d, g.next, dev, w3.next_dseq);
+    await seam(F, { sealedHold: 6000 });
+    const pend = ws3.ask({ t: "sops", ops: [late] });
+    while (Date.now() < until * 1000 + 2500) await new Promise((r) => setTimeout(r, 100));
+    await pend;
+    await new Promise((r) => setTimeout(r, Math.max(0, until * 1000 + 3500 - Date.now())));
+    await seam(F, { sealedHold: 0 });
+    const log3 = (await ws2.ask({ t: "pull_index", after: 0 }))?.ops ?? [];
+    ok(log3.every((o) => o.env !== late.env), "a sealed op whose session reaches its end while it's held between its checks and its commit is not committed");
+  }
   // (control: the same hold with the session kept commits)
   await seam(F, { sealedHold: 600 });
   const kept = await ws2.ask({ t: "sops", ops: [await signed(W, g.d, g.next, dev, w2.next_dseq)] });

@@ -16,7 +16,7 @@ import {
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut, type SessionIn } from "./doc.ts";
-import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { agentOn, allowed, e2eOn, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
 import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
 import { e2eCore } from "../workspace/e2e/core-ready.ts";
@@ -430,7 +430,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (now >= att.expires) return end("session expired");
     if (!allowed(this.env, att.account)) return end("sync isn't enabled for this account");
     if (this.one("SELECT 1 AS x FROM revoked_sessions WHERE session_hash = ?", att.session)) return end("session ended");
-    if (now - att.checked >= RECHECK_MS) {
+    // (tests only: "session-recheck" set makes the recheck due now, and holds it before its D1 read)
+    if (now - att.checked >= RECHECK_MS || gateOn(this.env, "session-recheck")) {
+      await gate(this.env, "session-recheck");
       const db = this.env.SHARE_DB;
       const row = db
         ? await db.prepare("SELECT s.expires FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.account_id = ?2 AND s.expires > ?3 AND a.deleting IS NULL").bind(att.session, att.account, Math.floor(now / 1000)).first<{ expires: number }>()

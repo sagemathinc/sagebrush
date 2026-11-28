@@ -2428,7 +2428,14 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   const k = await socket(keep);
   await hello(k, "fence-keep-0001");
   const signOut = async (session) => (await fetchAt(SITE, "/auth/logout", { method: "POST", headers: { cookie: session, origin: SITE } })).status;
-  const ids = async (doc) => ((await k.ask({ t: "pull", doc, epoch: 1, after: 0 }))?.items ?? []).flatMap((it) => it.patches.map((e) => e.id));
+  // (a pull that gets no answer within the socket helper's 3 s, as on a loaded host, is asked again)
+  const ids = async (doc) => {
+    for (let i = 0; i < 5; i++) {
+      const r = await k.ask({ t: "pull", doc, epoch: 1, after: 0 });
+      if (r?.t === "batches") return r.items.flatMap((it) => it.patches.map((e) => e.id));
+    }
+    return null;
+  };
   const blobF = Buffer.from("a blob of S07's held batch");
   await put(keep, blobF);
   const refsF = async () => (await acctF.inspect({ sha256: sha(blobF) }))?.refs;
@@ -2450,7 +2457,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
     await p;
     const got = await ids(doc);
     const pins = (await acctF.inspect({ sha256: sha(blobF) }))?.pins ?? [];
-    ok(!got.includes(held) && got.length === 1, `an account socket's batch held across its session's sign-out is not committed: the document has only the seed (${JSON.stringify(got)})`);
+    ok(got !== null && !got.includes(held) && got.length === 1, `an account socket's batch held across its session's sign-out is not committed: the document has only the seed (${JSON.stringify(got)})`);
     ok(await until(async () => (await refsF()) === refs0 && !((await acctF.inspect({ sha256: sha(blobF) }))?.pins ?? []).some((x) => String(x.ref).endsWith(held)), 5000), `and its blob's pin is gone, the blob's references as before (${JSON.stringify(pins)})`);
   }
 
@@ -2474,7 +2481,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
     await gateF(false);
     await p;
     const got = await ids(doc);
-    ok(!got.includes(held) && got.length === 1, `an account socket's batch whose session signed out before the forward is refused at the account object (${JSON.stringify(got)})`);
+    ok(got !== null && !got.includes(held) && got.length === 1, `an account socket's batch whose session signed out before the forward is refused at the account object (${JSON.stringify(got)})`);
   }
 
   // (a document socket's batch)
@@ -2495,7 +2502,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
     await docOf(doc).open({ name: `before:${held}` });
     await p;
     const got = await ids(doc);
-    ok(!got.includes(held) && got.length === 1, `a document socket's batch held across its session's sign-out is not committed (${JSON.stringify(got)})`);
+    ok(got !== null && !got.includes(held) && got.length === 1, `a document socket's batch held across its session's sign-out is not committed (${JSON.stringify(got)})`);
   }
 
   // (a clear)
@@ -2573,6 +2580,75 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
     ok(read?.rows === n && read.sizingText === 0, `and it read only those rows' envelopes and bodies from storage, deciding from lengths alone (${JSON.stringify(read)}), not the twelve rows' envelopes the limit allows`);
   }
 
+  // (a session that reaches its end during the hold, with no sign-out: its end is set a few seconds ahead in D1 before
+  // the socket opens, so the socket carries it; the write is held at its document past that end, then released)
+  const shortSession = async (secs) => {
+    const s = await signIn(FN);
+    const until = Math.floor(Date.now() / 1000) + secs;
+    await db.prepare("UPDATE sessions SET expires = ?1 WHERE token_hash = ?2").bind(until, createHash("sha256").update(decodeURIComponent(s.split("=")[1])).digest("hex")).run();
+    return { s, until };
+  };
+  // (the write is sent just before the session's end and held just past it: under the test pins' 1 s, so the forward
+  // itself is still live and only the session's end can refuse it)
+  const at = async (ms) => { while (Date.now() < ms) await new Promise((r) => setTimeout(r, 20)); };
+  {
+    const doc = "fe5c00000008";
+    const { s, until } = await shortSession(6);
+    const w = await socket(s);
+    await hello(w, "fence-time-0001");
+    await w.ask(batch(doc, 1, [[1, pid(1, "clientFN08"), [], "seed"]], { kind: "board" }));
+    const held = pid(2, "clientFN08");
+    await docOf(doc).hold({ name: `before:${held}` });
+    await at(until * 1000 - 500);
+    const p = w.ask(batch(doc, 1, [[2, held, [pid(1, "clientFN08")], "late"]]));
+    await at(until * 1000 + 150);
+    await docOf(doc).open({ name: `before:${held}` });
+    await p;
+    const got = await ids(doc);
+    ok(got !== null && !got.includes(held) && got.length === 1, `an account socket's batch whose session reaches its end while it waits at its document is not committed (${JSON.stringify(got)})`);
+  }
+  {
+    const doc = "fe5c00000009";
+    const { s, until } = await shortSession(7);
+    const w = await socket(s);
+    await hello(w, "fence-time-0002");
+    await w.ask(batch(doc, 1, [[1, pid(1, "clientFN09"), [], "seed"]], { kind: "board" }));
+    const t = await w.ask({ t: "ticket", doc });
+    const d = await socket(s, SITE, `/api/sync/v1/doc/${hashOf(FN)}/${doc}?ticket=${t.ticket}`);
+    ok(d.status === 101, "(S07: a document socket open, its session ending in seconds)");
+    const held = pid(2, "clientFN09");
+    await docOf(doc).hold({ name: `before:${held}` });
+    await at(until * 1000 - 500);
+    const p = d.ask(batch(doc, 1, [[2, held, [pid(1, "clientFN09")], "late"]]));
+    await at(until * 1000 + 150);
+    await docOf(doc).open({ name: `before:${held}` });
+    await p;
+    const got = await ids(doc);
+    ok(got !== null && !got.includes(held) && got.length === 1, `a document socket's batch whose session reaches its end while it waits is not committed: the forward carries the socket's real session end (${JSON.stringify(got)})`);
+  }
+
+  // (plaintext ops whose session is revoked while the socket's periodic D1 recheck is awaited: held at a test gate that
+  // makes the recheck due; the session is revoked in the account object (its D1 row kept, so the recheck itself
+  // passes); only the check inside the ops' own transaction can refuse them)
+  {
+    const s = await signIn(FN);
+    const w = await socket(s);
+    await hello(w, "fence-ops-00001");
+    const sess = createHash("sha256").update(decodeURIComponent(s.split("=")[1])).digest("hex");
+    const gs = (name, on) => fetchAt(SITE, `/__test/gate?name=${name}&on=${on ? 1 : 0}`, { method: "POST" });
+    await gs("session-recheck", true);
+    w.send({ t: "ops", req: 1, ops: [{ dseq: 1, t: 1, by: "person", op: "mkdir", path: "/s07-recheck", kind: "folder" }] });
+    await new Promise((r) => setTimeout(r, 300));
+    await acctF.revoke({ session: sess, expires: Date.now() + 3600_000 });
+    await gs("session-recheck", false);
+    await new Promise((r) => setTimeout(r, 500));
+    const log = (await k.ask({ t: "pull_index", after: 0 }))?.ops ?? [];
+    const w2 = await socket(await signIn(FN));
+    const h = await hello(w2, "fence-ops-00001");
+    ok(!log.some((o) => o.path === "/s07-recheck") && h.welcome?.next_dseq === 1, `ops whose session is revoked during their socket's D1 recheck are not committed, and the device's order didn't move (next dseq ${h.welcome?.next_dseq})`);
+    w2.ws.close();
+  }
+
   // (control: the same hold with no sign-out commits, so the rows above are the sign-out's doing)
   {
     const doc = "fe5c00000004";
@@ -2583,7 +2659,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
     await new Promise((r) => setTimeout(r, 200));
     await docOf(doc).open({ name: `before:${held}` });
     const r = await p;
-    ok(r?.batch?.new === 1 && (await ids(doc)).includes(held), "control: the same held batch, its session kept, is committed");
+    ok(r?.batch?.new === 1 && (await ids(doc))?.includes(held), "control: the same held batch, its session kept, is committed");
   }
   k.ws.close();
 }
