@@ -2425,8 +2425,40 @@ def size(a, axis=None):
     return a.size if axis is None else a.shape[axis]
 
 
+def _reshape_order(order):
+    # (NumPy's order argument for reshaping: 'C', 'F' or 'A', in either case, as str or bytes; None is 'C')
+    if order is None:
+        return "C"
+    if isinstance(order, bytes):
+        order = order.decode("latin-1")
+    if not isinstance(order, str):
+        raise TypeError("order must be str, not %s" % type(order).__name__)
+    o = order.upper()
+    if o == "K":
+        raise ValueError("order 'K' is not permitted for reshaping")
+    if o not in ("C", "F", "A"):
+        raise ValueError("order must be one of 'C', 'F', 'A', or 'K' (got %r)" % order)
+    return o
+
+
+def _reshape(a, shape, order="C", copy=None):
+    o = _reshape_order(order)
+    if o == "A":
+        o = "F" if a.flags.f_contiguous and not a.flags.c_contiguous else "C"
+    # (copy: None a copy only where the strides need one, True always, False never; a string refused, as NumPy's
+    # PyArray_CopyConverter does, never taken by its truth)
+    if isinstance(copy, str):
+        raise ValueError("strings are not allowed for 'copy' keyword. Use True/False/None instead.")
+    # (an array as the shape is a sequence of sizes, as a list is)
+    return _np.reshape(a, shape if isinstance(shape, ndarray) else _shape(shape), o, 0 if copy is None else 1 if copy else 2)
+
+
 def reshape(a, shape=None, order="C", *, newshape=None, copy=None):
-    return _np.reshape(asarray(a), _shape(shape if shape is not None else newshape))
+    return _reshape(asarray(a), shape if shape is not None else newshape, order, copy)
+
+
+def _m_reshape(self, *shape, order="C", copy=None):
+    return _reshape(self, shape[0] if len(shape) == 1 else shape, order, copy)
 
 
 def ravel(a, order="C"):

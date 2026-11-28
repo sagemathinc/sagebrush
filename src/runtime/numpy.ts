@@ -1495,6 +1495,94 @@ function reshape(a: NDArray, shape: number[]): NDArray {
   const c = a.isC() ? a : copy(a);
   return viewOf(new NDArray(c.dt, c.data, shape, cStrides(shape), c.offset, c === a ? (a.base ?? a) : null), c);
 }
+// np.reshape and ndarray.reshape as NumPy's PyArray_Newshape (numpy/_core/src/multiarray/shape.c, BSD-3-Clause):
+// the same shape is a view; one unknown (negative) dimension is solved; then a view where the strides allow it
+// in the order asked for ('C' or 'F'; _attempt_nocopy_reshape), else a copy in that order. copy: 0 when needed,
+// 1 always, 2 never (NumPy's error). (The runtime's own reshape, above, keeps giving C-contiguous results.)
+function npShapeStr(vals: number[]): string {
+  // (NumPy's convert_shape_to_string: leading unknown dimensions dropped, later ones named newaxis)
+  let i = 0;
+  while (i < vals.length && vals[i] < 0) i++;
+  if (i === vals.length) return "()";
+  let s = `(${vals[i++]}`;
+  for (; i < vals.length; i++) s += vals[i] < 0 ? ",newaxis" : `,${vals[i]}`;
+  return s + (vals.length === 1 ? ",)" : ")");
+}
+function nocopyStrides(a: NDArray, dims: number[], f: boolean): number[] | null {
+  const od: number[] = [], os: number[] = [];
+  for (let i = 0; i < a.ndim; i++)
+    if (a.shape[i] !== 1) {
+      od.push(a.shape[i]);
+      os.push(a.strides[i]);
+    }
+  const ns = new Array(dims.length).fill(0);
+  let oi = 0, oj = 1, ni = 0, nj = 1;
+  while (ni < dims.length && oi < od.length) {
+    let np = dims[ni], op = od[oi];
+    while (np !== op) {
+      if (np < op) np *= dims[nj++];
+      else op *= od[oj++];
+    }
+    for (let ok = oi; ok < oj - 1; ok++) {
+      if (f ? os[ok + 1] !== od[ok] * os[ok] : os[ok] !== od[ok + 1] * os[ok + 1]) return null;
+    }
+    if (f) {
+      ns[ni] = os[oi];
+      for (let nk = ni + 1; nk < nj; nk++) ns[nk] = ns[nk - 1] * dims[nk - 1];
+    } else {
+      ns[nj - 1] = os[oj - 1];
+      for (let nk = nj - 1; nk > ni; nk--) ns[nk - 1] = ns[nk] * dims[nk];
+    }
+    ni = nj++;
+    oi = oj++;
+  }
+  // (the strides of the trailing length-1 axes: anything reasonable, as NumPy's)
+  let last = ni >= 1 ? ns[ni - 1] : 1;
+  if (f && ni >= 1) last *= dims[ni - 1];
+  for (let nk = ni; nk < dims.length; nk++) ns[nk] = last;
+  return ns;
+}
+function reshapeNp(a: NDArray, shape: number[], order: string, copyMode: number, copyC: (x: NDArray) => NDArray = (x) => copy(x)): NDArray {
+  const f = order === "F";
+  if (copyMode !== 1 && shape.length === a.ndim && shape.every((d, i) => d === a.shape[i]))
+    return viewOf(new NDArray(a.dt, a.data, a.shape.slice(), a.strides.slice(), a.offset, a.base ?? a), a);
+  const n = a.size, dims = shape.slice();
+  let unknown = -1, known = 1;
+  for (let i = 0; i < dims.length; i++) {
+    if (dims[i] < 0) {
+      if (unknown >= 0) raise(T.ValueError, "can only specify one unknown dimension");
+      unknown = i;
+    } else known *= dims[i];
+  }
+  const mismatch = () => raise(T.ValueError, `cannot reshape array of size ${n} into shape ${npShapeStr(shape)}`);
+  if (unknown >= 0) {
+    if (known === 0 || n % known !== 0) mismatch();
+    dims[unknown] = n / known;
+  } else if (known !== n) mismatch();
+  let src = a, strides: number[] | null = null;
+  const copyIn = () => {
+    if (copyMode === 2) raise(T.ValueError, "Unable to avoid creating a copy while reshaping.");
+    // (a copy in the order asked for: Fortran order as the C copy of the transpose, transposed back)
+    return f ? transpose(copyC(transpose(a, null)), null) : copyC(a);
+  };
+  if (copyMode === 1) src = copyIn();
+  else if (n > 0 && !(f ? fContig(a) : cContig(a))) {
+    strides = nocopyStrides(a, dims, f);
+    if (strides === null) src = copyIn();
+  }
+  if (strides === null) {
+    // (NumPy's _array_fill_strides: a dimension of size 0 isn't multiplied in, so np.empty(0).reshape((0, 2), order="F")
+    // has strides (8, 8), not (8, 0))
+    strides = new Array(dims.length);
+    let s = 1;
+    for (let i = 0; i < dims.length; i++) {
+      const d = f ? i : dims.length - 1 - i;
+      strides[d] = s;
+      if (dims[d] !== 0) s *= dims[d];
+    }
+  }
+  return viewOf(new NDArray(src.dt, src.data, dims, strides, src.offset, src === a ? (a.base ?? a) : (src.base ?? null)), src);
+}
 function transpose(a: NDArray, axes: number[] | null): NDArray {
   const ax = axes ?? a.shape.map((_, i) => a.ndim - 1 - i);
   if (ax.length !== a.ndim) raise(T.ValueError, "axes don't match array");
@@ -5557,7 +5645,12 @@ newBuiltinModule("_numpy", (m) => {
   });
   fn("cumsum", (a: any, axis: any = null, dtype: any = null) => cumulative(asarray(a), opt(axis), false, opt(dtype)));
   fn("cumprod", (a: any, axis: any = null, dtype: any = null) => cumulative(asarray(a), opt(axis), true, opt(dtype)));
-  fn("reshape", (a: any, shape: any) => (a instanceof StrArray ? strReshape(a, shapeArg(shape)) : a instanceof ObjArray ? objReshape(a, shapeArg(shape)) : reshape(asarray(a), shapeArg(shape))));
+  fn("reshape", (a: any, shape: any, order: any = "C", copyMode: any = 0) => {
+    const o = String(order), c = Number(copyMode);
+    if (a instanceof StrArray) return strView(reshapeNp(N(a), shapeArg(shape), o, c, (x) => N(strCopy(strView(x)))));
+    if (a instanceof ObjArray) return objView(reshapeNp(NO(a), shapeArg(shape), o, c, (x) => NO(objCopy(objView(x)))));
+    return reshapeNp(asarray(a), shapeArg(shape), o, c);
+  });
   fn("transpose", (a: any, axes: any = null) => tr(a instanceof StrArray || a instanceof ObjArray ? a : asarray(a), axes === null ? null : shapeArg(axes)));
   fn("ravel", (a: any) => (a instanceof StrArray ? strReshape(a, [a.size]) : a instanceof ObjArray ? objReshape(a, [a.size]) : ravel(asarray(a))));
   fn("copy", (a: any) => (a instanceof StrArray ? strCopy(a) : a instanceof ObjArray ? objCopy(a) : copy(asarray(a))));
