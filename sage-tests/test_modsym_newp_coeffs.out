@@ -1,0 +1,35 @@
+33 3 [4, 8]
+  3 2 2 [2, 2] 3 2 2 False
+  11 6 2 [2, 6] 3 6 2 False
+30 3 [6, 10, 10]
+  2 2 2 [2, 2, 2] 3 2 2 False
+  3 6 2 [2, 6, 6] 3 6 2 False
+  5 6 2 [2, 6, 6] 3 6 2 False
+45 3 [4, 10]
+  3 2 2 [2, 2] 3 2 2 False
+  5 6 2 [2, 6] 3 6 2 False
+f.coefficients(range(1,4)) -> [1, -2, -1]
+f.coefficients((n for n in [2, 3, 5])) -> []
+f.coefficients([1, 7]) -> [1, -2]
+f.coefficients(4) -> [1, -2, -1, 2]
+f.coefficients(range(0,3)) -> [0, 1, -2]
+f.coefficients(iter([4])) -> []
+f.coefficients(set([2])) -> [-2]
+f.coefficients(2.5) -> TypeError 'float' object is not iterable
+f.coefficients(-1) -> []
+f.coefficients(0) -> []
+f.coefficients(range(1,1)) -> []
+f.coefficients("3") -> TypeError can only concatenate str (not "int") to str
+f.coefficients([-1]) -> [0]
+f.coefficients([-1, 3]) -> [0, -1]
+f.coefficients([2.0]) -> [-2]
+f.coefficients([ZZ(3), int(2)]) -> [-1, -2]
+f.coefficients(True) -> [1]
+f.coefficients(ZZ(3)) -> [1, -2, -1]
+f.coefficients((3, 1)) -> [-1, 1]
+f.coefficients([]) -> []
+f.coefficients([QQ(1)/2]) -> TypeError no conversion of this rational to integer
+f.coefficients(None) -> TypeError 'NoneType' object is not iterable
+f.coefficients({2: 0, 4: 1}) -> [-2, 2]
+f.coefficients(range(5, 2, -1)) -> [1, 2, -1]
+[0, 1] [0]

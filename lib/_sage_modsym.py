@@ -1115,10 +1115,16 @@ class _ModularSymbolsSubspace:
 
             sage: ModularSymbols(33).cuspidal_submodule().new_submodule().dimension()
             2
+            sage: S = ModularSymbols(33).cuspidal_submodule(); S.new_submodule(11).dimension(), S.new_submodule(11).new_submodule().dimension()
+            (6, 2)
+            sage: S.new_submodule(11).new_submodule(3).dimension(), S.new_submodule(3).new_submodule(11).dimension()
+            (2, 2)
         """
+        # (only the new subspace for all the primes is new for every prime;
+        # a p-new one is not)
         if self._kind == "new" and p is None:
             return self
-        return self._meet(self._A.new_submodule(p)._B, "new")
+        return self._meet(self._A.new_submodule(p)._B, "new" if p is None else ("new", int(p)))
 
     cuspidal_subspace = cuspidal_submodule
     eisenstein_subspace = eisenstein_submodule
@@ -1489,7 +1495,7 @@ class ModularSymbolsMethods:
                     for r, row in zip(cols, ms._degeneracy_rows(sp, low, t)):
                         r.extend(row)
             ncols = len(cols[0]) if cols else 0
-            return _ModularSymbolsSubspace(self, ms._left_kernel(cols, ncols), "new")
+            return _ModularSymbolsSubspace(self, ms._left_kernel(cols, ncols), "new" if p is None else ("new", int(p)))
 
     def old_submodule(self, p=None):
         """Not available yet (Sage's: the images of the degeneracy maps from

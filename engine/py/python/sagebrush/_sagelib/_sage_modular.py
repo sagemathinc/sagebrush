@@ -1747,17 +1747,40 @@ class ModularFormElement:
         return QQ(self._coeffs(n + 1)[n])
 
     def coefficients(self, X):
-        """The coefficients a_1, ..., a_X (X an integer), or a_n for n in X (a list).
+        """The coefficients a_1, ..., a_X (X an integer), or a_n for n in X
+        (any iterable of indices).
 
         EXAMPLES::
 
             sage: CuspForms(37, 2).basis()[1].coefficients(6)
             [0, 1, 2, -2, 1, -3]
+            sage: f = CuspForms(11, 2).gen(0); f.coefficients(range(1, 4)), f.coefficients((3, 1)), f.coefficients(set([2]))
+            ([1, -2, -1], [-1, 1], [-2])
+
+        As in Sage, X is read twice (once for the indices not yet known,
+        once for the answer), so a generator gives nothing; a negative
+        index gives 0::
+
+            sage: f.coefficients(n for n in [2, 3, 5]), f.coefficients([-1, 3])
+            ([], [0, -1])
         """
-        from sage_all import QQ
-        ns = list(range(1, int(X) + 1)) if not isinstance(X, (list, tuple)) else [int(n) for n in X]
-        c = self._coeffs((max(ns) if ns else 0) + 1)
-        return [QQ(c[n]) for n in ns]
+        from sage_all import QQ, ZZ
+        if isinstance(X, int):
+            # (a count: ints, Integers and bools, as Sage)
+            X = range(1, int(X) + 1)
+        # (the coefficients known so far, by index, as Sage keeps them: the
+        # precision is computed only for the indices not yet known)
+        known = self.__dict__.setdefault("_known_coefficients", {})
+        Y = [n for n in X if n not in known]
+        if Y:
+            need = max(Y) + 1
+            if isinstance(need, float):
+                raise TypeError("'float' object cannot be interpreted as an integer")
+            c = self._coeffs(max(int(ZZ(need)), 1))
+            for n in Y:
+                i = int(n)
+                known[n] = QQ(c[i]) if 0 <= i < len(c) else QQ(0)
+        return [known[n] for n in X]
 
     def is_cuspidal(self):
         """Whether the form is a cusp form.
