@@ -14,7 +14,7 @@ import { drawCode, editor, codeRuns } from "./code.ts";
 import { run, interrupt, sceneObject, SCENE } from "./run.ts";
 import { sizeOf } from "./sizes.ts";
 import { treeRoom, resolveImport } from "./treeroom.ts";
-import { checkSpace, readText, sameSite, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
+import { checkSpace, readText, readable, sameSite, utf8Bytes, ROOM_TEXT, LIMITS } from "./read.ts";
 import { EDIT, keepEdit } from "./keep.ts";
 import { groundPlan, placedOnGround, moundFor, supportAt as blockAt, EYE, SIGN, STEP } from "./ground.ts";
 // (the languages whose files are entered: by their names; each parser loaded the first time one of its files is)
@@ -1259,8 +1259,8 @@ const fetched = new Map();
 async function fullText(nd) {
   if (!nd.src || nd._full) return String(nd.text ?? "");
   const src = String(nd.src), mine = src.startsWith("workspace:");
-  const key = mine ? src : sameSite(src).href;
-  if (!fetched.has(key)) fetched.set(key, mine ? askPage(decodeURIComponent(src.slice("workspace:".length))) : readText(sameSite(src)));
+  const key = mine ? src : readable(src).href;
+  if (!fetched.has(key)) fetched.set(key, mine ? askPage(decodeURIComponent(src.slice("workspace:".length))) : readText(readable(src)));
   let text;
   try { text = await fetched.get(key); } catch (e) { fetched.delete(key); throw e; }
   nd.text = text; nd._full = true;

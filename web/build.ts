@@ -854,6 +854,10 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   const { modularSpace } = await import("./space/examples/modular.ts");
   writeFileSync(join(out, "modular-forms.space.json"), JSON.stringify(modularSpace(join(here, ".."))) + "\n");
   examples.push("modular-forms.space.json");
+  // (and the repository at this commit: paths, lengths and links only; a file's text is read from GitHub when opened)
+  const { repositorySpace } = await import("./space/examples/repo.ts");
+  writeFileSync(join(out, "repository.space.json"), JSON.stringify(repositorySpace(join(here, ".."))) + "\n");
+  examples.push("repository.space.json");
   examples.sort();
   writeFileSync(join(out, "spaces.json"), JSON.stringify(examples) + "\n");
   // (everything written here for the page passes the repository's push text check: generated spaces carry paths,
