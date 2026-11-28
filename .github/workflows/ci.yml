@@ -1775,6 +1775,9 @@ jobs:
         with:
           client-id: ${{ vars.SB_PINS_APP_CLIENT_ID }}
           private-key: ${{ secrets.SB_PINS_APP_KEY }}
+          # (the token: this repository's contents and nothing else, whatever more the App could grant)
+          repositories: sagebrush
+          permission-contents: write
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}

@@ -105,4 +105,13 @@ assert.equal(ci.jobs["engine-nd-neon"]["runs-on"], "macos-15");
 assert.equal(ci.jobs["windows-smoke"]["runs-on"], "windows-latest");
 assert.ok(!spec.jobs.includes("wasm-publish") && !spec.jobs.includes("wasm-pins") && spec.jobs.length === Object.keys(ci.jobs).length - 4);
 n += 5;
+// (the pinned bytes are what master's push builds, publishes and commits, so that push never moves those three jobs to
+// the pool, whatever the variables: design/wasm-artifacts.md section 13; the SEC review of #2473, P2)
+const masterPush = { event_name: "push", ref: "refs/heads/master" };
+for (const name of ["wasm-modules", "wasm-publish", "wasm-pins"]) {
+  for (const vars of [{ SB_CI_RUNNER: "sagebrush-ci" }, { SB_CI_RUNNER: "sagebrush-ci", CI_RUNNER: "" }]) {
+    assert.equal(runner(String(ci.jobs[name]["runs-on"]), { ...masterPush, vars }), "ubuntu-24.04", `${name}: a push to master runs on GitHub's runner, never the pool`);
+    n++;
+  }
+}
 console.log(`ci runners: ${n} checks pass`);
