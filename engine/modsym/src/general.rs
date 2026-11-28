@@ -224,10 +224,13 @@ pub fn heilbronn_merel(p: i64) -> Vec<[i64; 4]> {
         let q = p / a;
         if q * a == p {
             let d = q;
+            // (ad = p: up to p matrices each way, a check each)
             for b in 0..a {
+                sagebrush_interrupt::check();
                 out.push([a, b, 0, d]);
             }
             for c in 1..d {
+                sagebrush_interrupt::check();
                 out.push([a, 0, c, d]);
             }
         }

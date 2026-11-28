@@ -348,7 +348,11 @@ pub(crate) fn crt(residues: &[(u64, Vec<Vec<u64>>)], d: usize, phi: usize) -> Ve
         let prod = (0..a).fold(1u64, |acc, b| mul(acc, ls[b] % ls[a], ls[a]));
         powmod(prod, ls[a] - 2, ls[a])
     }).collect();
-    let modulus = ls.iter().fold(BigUint::one(), |acc, &l| acc * l);
+    // (a growing product: a check per factor)
+    let modulus = ls.iter().fold(BigUint::one(), |acc, &l| {
+        sagebrush_interrupt::check();
+        acc * l
+    });
     let half = &modulus >> 1;
     let idx: Vec<(usize, usize)> = (0..=d).flat_map(|j| (0..phi).map(move |i| (j, i))).collect();
     let flat = par::map_slice(&idx, |&(j, i)| {
@@ -367,6 +371,8 @@ pub(crate) fn crt(residues: &[(u64, Vec<Vec<u64>>)], d: usize, phi: usize) -> Ve
         }
         let mut x = BigUint::zero();
         for a in (0..r).rev() {
+            // (Horner over a growing integer: a check per digit)
+            sagebrush_interrupt::check();
             x = x * ls[a] + digits[a];
         }
         if x > half { BigInt::from(x) - BigInt::from(modulus.clone()) } else { BigInt::from(x) }

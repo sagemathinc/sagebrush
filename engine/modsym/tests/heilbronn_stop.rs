@@ -30,6 +30,10 @@ fn heilbronn_kernels_stop() {
     // (one per a, per d and per c: 217,562 at p = 211; without the c loop's,
     // 43,564)
     assert!(checks(|| drop(heilbronn_merel(p))) > 4 * (p * p) as u64);
+    // the ad = p branch alone (a = p: p matrices (p, b, 0, 1); a = 1: p - 1
+    // matrices (1, 0, c, p)) checks once a matrix: Merel at p checks at
+    // least 2 p - 1 more than its loops over a, d and c (217,562 at 211)
+    assert!(checks(|| drop(heilbronn_merel(p))) >= 217_562 + 2 * p as u64 - 1);
     // a large Hecke prime on a small space: a check per Heilbronn matrix's
     // image at least, so the checks outnumber the matrices
     let eps = Character::trivial(11);
@@ -63,6 +67,8 @@ fn heilbronn_kernels_stop() {
     let residues: Vec<(u64, Vec<Vec<u64>>)> = ls.iter().map(|&l| (l, vec![vec![7], vec![l - 5]])).collect();
     let mut out = vec![];
     let n = checks(|| out = pins::crt(&residues, 1, 1));
-    assert!(n >= 300 + 2 * 300, "{} checks", n);
+    // the inverses, the modulus's product, and per entry its digits and
+    // its Horner pass: 300 + 300 + 2 (300 + 300)
+    assert!(n >= 300 + 300 + 2 * (300 + 300), "{} checks", n);
     assert_eq!(out.iter().map(|c| c[0].to_string()).collect::<Vec<_>>(), ["7", "-5"]);
 }
