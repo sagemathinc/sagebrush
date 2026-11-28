@@ -5352,7 +5352,7 @@ const docSyncReady = (async () => {
   const allowed = (wait) => docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning(wait) });
   if (!(await allowed(20_000))) await untilAllowed({ onChange: (f) => owner.onChange(f), running: () => owner.clientRunning(0), allowed: () => allowed(0) });
   // (the account's end-to-end keys, when it has them: every patch then sealed on the wire (web/workspace/doc-keys.ts))
-  const keys = await pageDocKeys();
+  const keys = pageDocKeys(owner);
   return (await enableDocSync({
     loadHistory,
     // (a document's changes stored from another device: its Files entry's last-modified time, here too)

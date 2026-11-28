@@ -282,7 +282,7 @@ async function docSyncHere(w: Workspace) {
   const allowed = await docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });
   if (!allowed) return;
   // (the account's end-to-end keys, when it has them: every patch then sealed on the wire (workspace/doc-keys.ts))
-  const keys = await pageDocKeys();
+  const keys = pageDocKeys(owner);
   await followDocSync({
     // (a document's changes stored from another device: its Files entry's last-modified time, here too)
     makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}), keys }),

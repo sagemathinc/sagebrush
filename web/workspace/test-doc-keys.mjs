@@ -1,11 +1,11 @@
 // ci: web-runner order=357 runner=bun chrome
-// A page's notebook keys under end-to-end encryption (web/workspace/doc-keys.ts, e2e/doc-cek.ts), in headless Chromium
-// with its real WebCrypto, against fixture epochs and a fixture declaration store: a document's first patch mints and
-// declares one generation (once, however many sealings ask at the same time), which another device of the account
-// opens from the declaration alone; the index asked once per chain head; a new epoch, or a retired generation, mints
-// anew while older patches still open; a declaration race settles on the index's answer, and one refused as stale is
-// minted again once; a wrapped key moved to another place, edited or cut short is refused; and a failure caches
-// nothing.
+// A page's notebook keys under end-to-end encryption (web/workspace/doc-keys.ts), in headless Chromium with its real
+// WebCrypto, against fixture epochs and a fixture declaration store: a document's first patch mints and declares one
+// generation (once, however many sealings ask at the same time), which another device of the account opens from the
+// declaration alone; the index asked once per chain head; a new epoch, or a retired generation, mints anew while older
+// patches still open; a declaration race settles on the index's answer, one refused as stale is minted again once, and
+// one confirmed after a new epoch began isn't sealed under; a failure caches nothing; and a page's keys come from its
+// sync owner. (The wrapping itself, e2e/doc-cek.ts, is test-e2e-doc-cek.mjs's.)
 //   CHROME=google-chrome bun web/workspace/test-doc-keys.mjs
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -171,28 +171,6 @@ try {
     ok(/another generation/.test(r.liar), "K-6: an index answer for another generation than the one asked for is refused", r);
   }
 
-  // ---- K-7: a wrapped key opens only for its own place, and only whole
-  {
-    const r = await P.ev(`(async () => {
-      const a = account(${J(FILLS)}), k1 = await a.api.epochKeys(1), k2 = await a.api.epochKeys(2);
-      const P0 = { account: ACCT, document: ${J(DOC)}, cekId: "g-1", keyEpoch: 1 };
-      const { wrapped } = await C.mintDocCek(k1, P0), out = {};
-      out.home = await code(() => C.unwrapDocCek(k1, P0, wrapped));
-      out.otherDoc = await code(() => C.unwrapDocCek(k1, { ...P0, document: ${J(DOC2)} }, wrapped));
-      out.otherId = await code(() => C.unwrapDocCek(k1, { ...P0, cekId: "g-2" }, wrapped));
-      const edited = wrapped.slice(); edited[20] ^= 1;
-      out.edited = await code(() => C.unwrapDocCek(k1, P0, edited));
-      out.short = await code(() => C.unwrapDocCek(k1, P0, wrapped.slice(0, 59)));
-      out.otherEpochKeys = await code(() => C.unwrapDocCek(k2, P0, wrapped));
-      const other = account(${J(FILLS)}, "e2e-acct-2"), ko = await other.api.epochKeys(1);
-      out.otherAccountKeys = await code(() => C.unwrapDocCek(ko, P0, wrapped));
-      out.forged = await code(() => C.mintDocCek({ ...k1 }, P0));
-      return out;
-    })()`);
-    const refused = ["otherDoc", "otherId", "edited", "short", "otherEpochKeys", "otherAccountKeys", "forged"].filter((k) => r[k] !== "bad_form");
-    ok(r.home === "ok" && refused.length === 0, "K-7: a wrapped key opens for its own document, id and epoch; moved to another document or id, edited, cut short, or given another epoch's, another account's or a copied bundle of keys, it is refused (bad_form)", r);
-  }
-
   // ---- K-8: a failure caches nothing
   {
     const r = await P.ev(`(async () => {
@@ -239,10 +217,25 @@ try {
     ok(r.sealed === 2 && J(r.decls) === J([[1, "h1"], [2, "h-removal"]]), "K-11: a declaration that answers for its own epoch after the chain moved on isn't sealed under: the new epoch's generation is declared and used", r);
   }
 
-  // ---- K-9: no page has keys yet
+  // ---- K-9: a page's keys come from its sync owner: none without the sealing module, the declarations its client's
   {
-    const r = await P.ev(`(async () => (await K.pageDocKeys()) === undefined)()`);
-    ok(r === true, "K-9: pageDocKeys answers undefined while no account has end-to-end keys: DocSync carries patches as before");
+    const r = await P.ev(`(async () => {
+      const st = store(), a = account(${J(FILLS)}), b = account(${J(FILLS)}), out = {};
+      out.none = K.pageDocKeys({ e2eKeys: () => null, client: { docDeclarations: () => st.api } }) === undefined;
+      const owner = { e2eKeys: () => a.api, client: null };
+      const p = K.pageDocKeys(owner);
+      out.account = p?.account;
+      out.noClient = await code(() => p.current(${J(DOC)}));
+      owner.client = { docDeclarations: () => st.api };
+      const s = await S.sealSlice(p, W(${J(DOC)}, 1), new Uint8Array([4]));
+      const q = K.pageDocKeys({ e2eKeys: () => b.api, client: { docDeclarations: () => st.api } });
+      out.opened = Array.from(await S.openSlice(q, W(${J(DOC)}, 1), s));
+      out.declares = st.calls.declare;
+      return out;
+    })()`);
+    ok(r.none === true, "K-9: an owner without the sealing module gives no keys: DocSync carries patches as before", r);
+    ok(r.account === "e2e-acct-1" && r.noClient === "ended", "K-9: with it, the keys are the account's; with no client running on the page, a sealing is refused (ended)", r);
+    ok(J(r.opened) === J([4]) && r.declares === 1, "K-9: once a client runs, its declarations are the ones asked: a patch sealed through one page's keys opens through another's", r);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

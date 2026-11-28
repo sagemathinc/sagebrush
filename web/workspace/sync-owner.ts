@@ -270,6 +270,11 @@ export class SyncOwner {
     void this.reconcile();
   }
 
+  /** The account's keys when its sync is end to end: the sealing module's key provider this owner's clients are made
+   * with, or null (a page's document keys, doc-keys.ts pageDocKeys). */
+  e2eKeys(): NonNullable<ClientOptions["e2e"]>["keys"] | null {
+    return this.opts.e2e?.keys ?? null;
+  }
   /** (sync 2c-3, DEV's switch: web/workspace/doc-sync-switch.ts) notebooks' contents on this page's connection:
    * every client made from now on carries `docs`, and one running now is made again with it (its new connection's
    * welcome then connects it). */

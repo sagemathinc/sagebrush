@@ -14,6 +14,7 @@ import type { DocKeys, KeyGeneration } from "./doc-seal.ts";
 import type { EpochKeys } from "./e2e/keys.ts";
 import { mintDocCek, unwrapDocCek, type CekPlace } from "./e2e/doc-cek.ts";
 import { hex } from "./e2e/bytes.ts";
+import { DocKeyError, type DocDeclarations, type KeyDeclaration } from "./sync-dockeys.ts";
 
 /** The account's epochs, as the sync client's key provider gives them: the E2E account, the verified chain's head and
  * current epoch, and an epoch's keys. */
@@ -22,20 +23,6 @@ export interface AccountEpochs {
   chain(refresh?: boolean): Promise<{ readonly head: string; readonly currentEpoch: number }>;
   epochKeys(n: number): Promise<EpochKeys | null>;
 }
-/** A document key generation as the sealed index declares it, with the chain head that authorized its declaration (the
- * head its op was sealed under: the index keeps no head of its own, and refuses a key epoch that isn't that head's). */
-export type KeyDeclaration = Readonly<{ document: string; cekId: string; keyEpoch: number; wrappedCek: Uint8Array; head: string }>;
-/** The sealed index's key declarations. */
-export interface DocDeclarations {
-  /** the generation `doc`'s new patches are sealed under at `head`: the latest declared that isn't retired at it, or null */
-  current(doc: string, head: string): Promise<KeyDeclaration | null>;
-  /** exactly the generation (doc, cekId, keyEpoch), or null */
-  exact(doc: string, cekId: string, keyEpoch: number): Promise<KeyDeclaration | null>;
-  /** declare a new generation; resolves, once the index decides, with the generation current for `doc` after it.
-   * Rejects with code "stale" if the chain moved past `head` before it went up (it is then minted again, once) */
-  declare(d: KeyDeclaration): Promise<KeyDeclaration>;
-}
-
 const NUL = "\u0000";
 
 export function docKeys(src: { epochs: AccountEpochs; declarations: DocDeclarations }): DocKeys {
@@ -103,9 +90,31 @@ export function docKeys(src: { epochs: AccountEpochs; declarations: DocDeclarati
   };
 }
 
+/** Where a page finds its account's keys: its sync owner, whose client options carry the sealing module (with the
+ * account's epochs) when the account syncs end to end, and whose running client answers the key declarations. */
+export interface KeySource {
+  e2eKeys(): AccountEpochs | null;
+  readonly client: { docDeclarations(): DocDeclarations } | null;
+}
+
 /** A page's DocKeys, or undefined while its account has no end-to-end keys: then DocSync carries patches as before.
- * (The account's epochs come from the keys-and-devices page side, the declarations from the sealed index's key
- * declaration; until both exist no page has keys, and this answers undefined.) */
-export async function pageDocKeys(): Promise<DocKeys | undefined> {
-  return undefined;
+ * The declarations are asked of the owner's client at each call: DocSync runs only on the tab whose client runs, and a
+ * client made again (a new connection, a lease taken over) answers from the same confirmed ledger. With no client
+ * running, a call is refused ("ended"), which stops the notebook (e2e) until the page is reloaded. */
+export function pageDocKeys(src: KeySource): DocKeys | undefined {
+  const epochs = src.e2eKeys();
+  if (!epochs) return undefined;
+  const decl = (): DocDeclarations => {
+    const c = src.client;
+    if (!c) throw new DocKeyError("ended", "no sync client on this page");
+    return c.docDeclarations();
+  };
+  return docKeys({
+    epochs,
+    declarations: {
+      current: async (doc, head) => decl().current(doc, head),
+      exact: async (doc, cekId, keyEpoch) => decl().exact(doc, cekId, keyEpoch),
+      declare: async (d: KeyDeclaration) => decl().declare(d),
+    },
+  });
 }
