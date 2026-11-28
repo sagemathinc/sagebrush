@@ -65,7 +65,7 @@ fn main() {
         let sym_order = groups[m - 1].order();
         let is_sym = |g: &Group| g.order() == sym_order;
         let is_alt = |g: &Group| n > 2 && g.order() * sagebrush_bigint::BigInt::from(2u32) == sym_order;
-        let gens: Vec<Vec<Perm>> = groups.iter().map(few_generators).collect();
+        let gens: Vec<Vec<Perm>> = groups.iter().map(few_generators).collect::<Result<_, _>>().unwrap();
         // cycle type counts
         let counts: Vec<Vec<(Vec<usize>, u128)>> = groups
             .iter()
@@ -96,7 +96,7 @@ fn main() {
         }
         std::fs::write(format!("tables/cycletypes-{}.txt", n), ct).unwrap();
         // does group i embed in group j (as a conjugate)?
-        let embeds = |i: usize, amb: &Ambient| amb.conjugates(&gens[i], &mut |_| true);
+        let embeds = |i: usize, amb: &Ambient| amb.conjugates(&gens[i], &mut |_| true).unwrap();
         let mut out = format!(
             "# Maximal transitive subgroups of the transitive groups of degree {} (tables/transitive-{}.txt),\n\
              # up to conjugacy in the group (for Alt(n) each class may be listed twice).  Per line:\n\
@@ -133,7 +133,7 @@ fn main() {
             } else {
                 let a = amb(&mut ambients, &groups, k);
                 let small: Vec<Vec<(Vec<usize>, usize)>> = counts.iter().map(|c| c.iter().map(|(t, k)| (t.clone(), (*k).min(usize::MAX as u128) as usize)).collect()).collect();
-                maxes = maximal_transitive(a, &groups, &gens, &small);
+                maxes = maximal_transitive(a, &groups, &gens, &small).unwrap();
             }
             // check: each is a subgroup of the right order
             for (j, y) in &maxes {

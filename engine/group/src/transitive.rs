@@ -96,8 +96,7 @@ pub fn conjugate_profiled(h1: &Group, h2: &Group, prof: &Profile) -> Result<bool
         return Ok(false);
     }
     let mut g1 = h1.clone();
-    // (only shortens the generating list: refused, the long one is kept)
-    let _ = g1.reduce_gens();
+    g1.reduce_gens()?;
     let gs: Vec<Perm> = g1.gens.iter().filter(|g| !g.is_identity()).cloned().collect();
     if gs.is_empty() {
         return Ok(h2.is_trivial());

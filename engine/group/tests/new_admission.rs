@@ -45,7 +45,7 @@ fn group_new_admits_its_chain() {
     assert_eq!(named::symmetric(8).unwrap().order().to_string(), "40320");
     // the named groups admit theirs: of degree 12000, 1.15 GB certain, refused
     assert!(named::symmetric(12_000).is_err() && named::cyclic(12_000).is_err());
-    // a stabilizer whose chain can't fit is an Err, not a panic (tests4's
+    // a stabilizer whose chain can't fit is an Err, not a panic (the review's
     // case): <(0 1), (2 3 ... 11999)> is admitted (its first level is
     // (0 1)'s orbit); the stabilizer of 2 needs the 11998-cycle's orbit at
     // its first level, 1.15 GB, past the whole allowance whatever is live
@@ -54,6 +54,9 @@ fn group_new_admits_its_chain() {
     for e in [big.stabilizer(2).unwrap_err(), big.pointwise_stabilizer(&[2]).unwrap_err(), big.blocks_containing(2).unwrap_err()] {
         assert!(e.contains("a permutation group's stabilizer chain"), "{}", e);
     }
+    // and its few generators (random elements' subgroups, each admitted):
+    // the refusal is the Err, not a panic (the review's second case)
+    assert!(sagebrush_group::embed::few_generators(&big).is_err());
     // the stabilizer of 0 keeps the group's own chain (base 0): no new one
     assert_eq!(big.stabilizer(0).unwrap().order().to_string(), "11998");
     assert_eq!(big.transitivity().unwrap(), 0);

@@ -1,7 +1,7 @@
 //! The chain admission's own work (the interrupt crate's test hooks): its
 //! orbit walk checks Stop once per point (mutant A8), and with no room for
 //! the chain's known levels the refusal comes before any walk (the walk's
-//! mark array, the degree's size, is reserved with them: cx3's case).  One
+//! mark array, the degree's size, is reserved with them: the review's case).  One
 //! test: the hooks, the request flag and the ledger's total are global.
 
 use sagebrush_group::group::chain_certain_bytes;

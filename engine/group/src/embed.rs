@@ -48,24 +48,23 @@ pub fn tuple_conjugator(n: usize, gs: &[Perm], hs: &[Perm], y0: u32) -> Option<P
 }
 
 /// A few elements generating h (two if possible, found at random).
-pub fn few_generators(h: &Group) -> Vec<Perm> {
+pub fn few_generators(h: &Group) -> Result<Vec<Perm>, String> {
     let mut rng = crate::perm::Rng::new(0x5eed);
     let order = h.order();
     if h.is_trivial() {
-        return vec![];
+        return Ok(vec![]);
     }
     for r in 1..=4usize {
         for _ in 0..200 {
             let gs: Vec<Perm> = (0..r).map(|_| h.random(&mut rng)).collect();
-            if Group::new(h.n, gs.clone()).unwrap().order() == order {
-                return gs;
+            if Group::new(h.n, gs.clone())?.order() == order {
+                return Ok(gs);
             }
         }
     }
     let mut g = h.clone();
-    // (only shortens the generating list: refused, the long one is kept)
-    let _ = g.reduce_gens();
-    g.gens.clone()
+    g.reduce_gens()?;
+    Ok(g.gens.clone())
 }
 
 /// A group G with its elements tabulated, its conjugacy classes and its
@@ -124,7 +123,7 @@ impl Ambient {
         (0..self.t.order as u32).filter(|&e| self.t.conj(x, e) == x).collect()
     }
 
-    fn generators_of(&self, els: &[u32]) -> Vec<u32> {
+    fn generators_of(&self, els: &[u32]) -> Result<Vec<u32>, String> {
         let mut gens: Vec<u32> = vec![];
         let mut sub = Group::trivial(self.g.n);
         let target = num_traits::cast::FromPrimitive::from_usize(els.len()).unwrap();
@@ -134,25 +133,26 @@ impl Ambient {
             let p = self.t.perm(e);
             if !sub.contains(&p) {
                 gens.push(e);
-                sub = Group::new(self.g.n, gens.iter().map(|&i| self.t.perm(i)).collect()).unwrap();
+                sub = Group::new(self.g.n, gens.iter().map(|&i| self.t.perm(i)).collect())?;
             }
         }
-        gens
+        Ok(gens)
     }
 
     /// Calls visit(y) for conjugates H^y <= G of h = <hs> (transitive), at
     /// least one in each G-class of them; stops when visit returns true.
-    pub fn conjugates(&self, hs: &[Perm], visit: &mut dyn FnMut(&Perm) -> bool) -> bool {
+    /// An Err where a centralizer's generators can't be found within memory.
+    pub fn conjugates(&self, hs: &[Perm], visit: &mut dyn FnMut(&Perm) -> bool) -> Result<bool, String> {
         let n = self.g.n;
         let r = hs.len();
         if r == 0 {
-            return visit(&Perm::identity(n));
+            return Ok(visit(&Perm::identity(n)));
         }
         let mut types = vec![];
         for h in hs {
             match self.type_index(h) {
                 Some(i) => types.push(i),
-                None => return false,
+                None => return Ok(false),
             }
         }
         // the cycle types of the products h_i h_j (i < j)
@@ -161,7 +161,7 @@ impl Ambient {
             for j in i + 1..r {
                 match self.type_index(&hs[i].mul(&hs[j])) {
                     Some(k) => prod[i][j] = Some(k as u32),
-                    None => return false,
+                    None => return Ok(false),
                 }
             }
         }
@@ -203,12 +203,12 @@ impl Ambient {
             }
             if r == 1 {
                 if finish(&[x1], visit) {
-                    return true;
+                    return Ok(true);
                 }
                 continue;
             }
             let c = self.centralizer(x1);
-            let cg = self.generators_of(&c);
+            let cg = self.generators_of(&c)?;
             let mut seen = vec![false; t.order];
             for &x2 in &self.by_type[types[1]] {
                 if seen[x2 as usize] || !ok_with(&[x1], x2) {
@@ -230,11 +230,11 @@ impl Ambient {
                 }
                 let mut xs = vec![x1, x2];
                 if rest(self, &mut xs, &types, &ok_with, &finish, visit) {
-                    return true;
+                    return Ok(true);
                 }
             }
         }
-        false
+        Ok(false)
     }
 }
 
@@ -277,7 +277,7 @@ impl Cosets {
 /// up to conjugacy in G: pairs (i, y) with candidates[i]^y <= G, largest
 /// first.  `gens[i]` are a few generators of candidates[i], `counts[i]` the
 /// numbers of elements of each cycle type in it.
-pub fn maximal_transitive(a: &Ambient, candidates: &[Group], gens: &[Vec<Perm>], counts: &[Vec<(Vec<usize>, usize)>]) -> Vec<(usize, Perm)> {
+pub fn maximal_transitive(a: &Ambient, candidates: &[Group], gens: &[Vec<Perm>], counts: &[Vec<(Vec<usize>, usize)>]) -> Result<Vec<(usize, Perm)>, String> {
     let order = a.t.order;
     let mine = a.type_counts();
     let fits = |c: &Vec<(Vec<usize>, usize)>| c.iter().all(|(t, k)| mine.iter().any(|(u, l)| u == t && l >= k));
@@ -298,8 +298,8 @@ pub fn maximal_transitive(a: &Ambient, candidates: &[Group], gens: &[Vec<Perm>],
                 found.push((i, y.clone(), Cosets::new(a, &ks)));
             }
             false
-        });
+        })?;
         kept.extend(found);
     }
-    kept.into_iter().map(|(i, y, _)| (i, y)).collect()
+    Ok(kept.into_iter().map(|(i, y, _)| (i, y)).collect())
 }
