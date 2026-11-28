@@ -126,7 +126,8 @@ pub fn lacn2(n: usize, x: &mut [f64], xi: &mut [f64], apply: &mut dyn FnMut(&mut
             *v = if i % 2 == 0 { m } else { -m };
         }
         apply(x, false);
-        let t = 2.0 * asum(x) / (3.0 * n as f64);
+        // divided before doubled, as dlacn2: 2 * sum overflows on a finite sum near the largest double
+        let t = 2.0 * (asum(x) / (3.0 * n as f64));
         if t > est {
             est = t;
         }
@@ -446,5 +447,63 @@ mod tests {
         assert_eq!(argmax_abs(&[1.0, f64::NAN, 5.0]), 1);
         assert_eq!(argmax_abs(&[f64::NAN, 5.0]), 0);
         assert_eq!((sgn(0.0), sgn(-0.0), sgn(-1e-300), sgn(f64::NAN)), (1.0, 1.0, -1.0, -1.0));
+    }
+
+    /// A power-of-two scaling leaves rcond unchanged, bit for bit, through the scales where ||A^-1||_1 is
+    /// finite: C = I + P/8 (P the cyclic shift, n = 8; exact rcond 7/9, LAPACK's dgecon 0.7777777777777778 at
+    /// every scale here) by LU, and the SPD I + (P + P')/8 (n = 16) by Cholesky (even powers to 2^-1018, where
+    /// dpocon gives 0.6; it gives 0 at 2^-1020). For C at 2^-1020 the alternating vector's solved sum is about
+    /// 1.54e308, finite: 2 * sum before the division by 3n overflowed, and the infinite extra estimate made
+    /// rcond 0.
+    #[test]
+    fn rcond_is_scale_invariant_up_to_the_largest_scales() {
+        let mut kernels = vec![Kernel::Scalar];
+        #[cfg(target_arch = "x86_64")]
+        kernels.extend(crate::micro::Avx2Fma::detect().map(Kernel::Avx2Fma));
+        #[cfg(target_arch = "aarch64")]
+        kernels.push(Kernel::Neon);
+        let shift = |n: usize, sym: bool| {
+            let mut c = vec![0.0; n * n];
+            for i in 0..n {
+                c[i + i * n] = 1.0;
+                c[i + ((i + 1) % n) * n] = 0.125;
+                if sym {
+                    c[(i + 1) % n + i * n] = 0.125;
+                }
+            }
+            c
+        };
+        let lu_rc = |kern: Kernel, a: &[f64], n: usize| {
+            let mut f = a.to_vec();
+            let mut ipiv = vec![0; n];
+            let mut work = vec![0.0; crate::lu::getrf_work_len(n, n).unwrap()];
+            assert_eq!(crate::lu::getrf(kern, &mut f, n, n, n, &mut ipiv, &mut work).unwrap(), None);
+            let mut w = vec![0.0; cond_work_len(n).unwrap()];
+            gecon(&f, n, n, norm1(a, n), &mut w)
+        };
+        let chol_rc = |kern: Kernel, a: &[f64], n: usize| {
+            let mut r = a.to_vec();
+            let mut work = vec![0.0; crate::chol::potrf_work_len(n).unwrap()];
+            assert_eq!(crate::chol::potrf(kern, &mut r, n, n, &mut work).unwrap(), None);
+            let mut w = vec![0.0; cond_work_len(n).unwrap()];
+            pocon(&r, n, n, norm1(a, n), &mut w)
+        };
+        let (c, s) = (shift(8, false), shift(16, true));
+        for kern in kernels {
+            let (rc, rs) = (lu_rc(kern, &c, 8), chol_rc(kern, &s, 16));
+            assert_eq!(rc.to_bits(), (7.0f64 / 9.0).to_bits());
+            for k in -1000..=1020 {
+                let t = 2.0f64.powi(-k);
+                let a: Vec<f64> = c.iter().map(|v| v * t).collect();
+                assert_eq!(lu_rc(kern, &a, 8).to_bits(), rc.to_bits(), "LU 2^{}", -k);
+                if k % 2 != 0 || k > 1018 {
+                    // R scales by the square root of the scale, a power of two only for even k; at 2^-1020
+                    // dpocon's own estimate overflows (LAPACK gives 0 there too)
+                    continue;
+                }
+                let a: Vec<f64> = s.iter().map(|v| v * t).collect();
+                assert_eq!(chol_rc(kern, &a, 16).to_bits(), rs.to_bits(), "Cholesky 2^{}", -k);
+            }
+        }
     }
 }
