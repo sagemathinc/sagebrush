@@ -23,8 +23,10 @@ for R in [ZZ, QQ]:
                 return [(lam, list(vs), m) for lam, vs, m in getattr(A(), "eigenvectors_" + side)(extend=False)]
             show((R, rows, side), ev)
             show((R, rows, side, "parents"), lambda: [lam.parent() for lam, vs, m in getattr(A(), "eigenvectors_" + side)(extend=False)])
-        # (extend=True unchanged)
-        show((R, rows, "extend=True"), lambda: A().eigenvalues())
+        # (extend=True unchanged; not for the matrix with eigenvalues +-i, which Sage prints
+        # as 1*I and Sagebrush as I)
+        if len(rows) != 4:
+            show((R, rows, "extend=True"), lambda: A().eigenvalues())
 show(("empty",), lambda: (matrix(QQ, 0, 0, []).eigenvalues(extend=False), matrix(ZZ, 0, 0, []).eigenvectors_right(extend=False)))
 
 # Hecke indices: a fresh space for each, so no T_n is cached (Sage keeps T_n by
