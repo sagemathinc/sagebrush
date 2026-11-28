@@ -33,7 +33,8 @@ def _resolve(module, name):
 
 class LazyImport:
     """A name whose module is imported on first use (see this module's
-    documentation and lazy_import); a stub's __doc__ is its target's.
+    documentation and lazy_import); a stub's __doc__, __module__ and
+    __qualname__ are its target's.
 
     EXAMPLES::
 
@@ -73,9 +74,11 @@ class LazyImport:
         return getattr(self._get(), attr)
 
     def __getattribute__(self, attr):
-        # (the class's __doc__ is its own text; a stub's is its target's)
-        if attr == "__doc__":
-            return object.__getattribute__(self, "_get")().__doc__
+        # (the class's __doc__ and __module__ are its own; a stub's, and its
+        # __qualname__, are its target's: P = MixedIntegerLinearProgram saved
+        # before its first use has P.__module__ '_sage_milp', not '_sage_lazy')
+        if attr in ("__doc__", "__module__", "__qualname__"):
+            return getattr(object.__getattribute__(self, "_get")(), attr)
         return object.__getattribute__(self, attr)
 
     def __call__(self, *args, **kw):

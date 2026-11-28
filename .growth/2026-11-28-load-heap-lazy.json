@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "A move, not new code: Sage mode's HilbertModularForms, sandpiles and MixedIntegerLinearProgram (lib/_sage_hmf.py, _sage_sandpile.py, _sage_milp.py) and RDF/CDF past the doubles (lib/_sage_rdf_big.py) are loaded on first use, so they leave Sage mode's start bundle for the lazy sage-more group, for Magma mode's load heap (2.4 MB less; track/math was over its ceiling). CI's size gate at 12a8e8c8: engine/lib/sage-more.src +219169, engine/lib/sage.src -218155, engine/lib/sage.pre -853221. Allowed: that +219169, the head's later changes to modules of that group (+12 in lib/_sage_rdf_big.py, at most +300 in lib/_sage_lazy.py) and 119 B of margin.",
+  "bytes": {
+    "engine/lib/sage-more.src": 219600
+  }
+}

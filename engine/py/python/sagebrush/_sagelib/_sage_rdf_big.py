@@ -1,7 +1,7 @@
 """RDF and CDF past the doubles, loaded on first use (lib/_sage_rdf.py):
 f e^a correctly rounded where e^a alone overflows, and CDF's sinh, cosh and
 tanh, each part on its own as IEEE's.  Kept out of the modules Sage mode
-loads, for the load-heap budget (heap-budget.json)."""
+loads at its start, so that Magma mode's load heap stays small."""
 
 import math
 

@@ -43,6 +43,27 @@ print(CDF(1000, 1).sinh(), [m for m in mods if m in sys.modules])
   }
 });
 
+test("a lazy name saved under another name reports its target's module, before and after its first use", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sage-lazy-modules-"));
+  try {
+    const f = join(dir, "alias.sage");
+    writeFileSync(
+      f,
+      `P = MixedIntegerLinearProgram
+print(type(P).__name__, P.__module__, P.__qualname__)
+p = MixedIntegerLinearProgram()
+print(type(P).__name__, P.__module__, P.__qualname__, P is MixedIntegerLinearProgram)
+`,
+    );
+    assert.equal(
+      cli(f),
+      "LazyImport _sage_milp MixedIntegerLinearProgram\n" + "LazyImport _sage_milp MixedIntegerLinearProgram False\n",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Magma mode's load (the load-heap budget's probe) imports none of them", () => {
   assert.equal(cli("-c", `import sys, _magma; print([m for m in ${MODS} if m in sys.modules])`), "[]\n");
 });
