@@ -578,7 +578,12 @@ def formatC(sess, call, args):
                 raise RError("width cannot be zero", call)
             width = d
     width = width or 0
+    # (strings, NA, NaN and Inf are left-justified only by a flag of exactly "-" or a negative width: R 4.5.3,
+    # formatC(c(1, NA), flag = "-0", width = 5) is "1    " "   NA", flag = "-" "1    " "NA   ")
+    words_left = flag == "-" or width < 0
     if width < 0:
+        if "0" in flag:
+            raise NotSupported("formatC() with a negative width and flag \"0\"")
         flag, width = flag + "-", -width
     # (format "d" doesn't take digits: R 4.5.3, formatC(22L, width = 3, digits = 3, format = "d") is " 22")
     prec = digits if form not in ("s", "d") else None
@@ -602,7 +607,7 @@ def formatC(sess, call, args):
         e = x.data[i]
         word = ("NA" if e is None else e) if form == "s" else nonfinite(e)
         if word is not None:
-            return _word(word, flag, max(width, words))
+            return _padded([word], max(width, words), words_left)
         if form == "d":
             return _int_pieces(int(e), flag, width, prec, "d")
         return _float_pieces(float(e), flag, width, prec, form)

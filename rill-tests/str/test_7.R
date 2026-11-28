@@ -19,3 +19,10 @@ formatC(c(-Inf, NA, NaN), width = 2, flag = "-"); formatC(c(1, 22.5, NA)); forma
 #-- formatC-strings-common-width
 formatC(c("abc", "d")); formatC(c("abc", "d"), flag = "-"); formatC(c("abc", NA)); formatC(c("abc", NA), width = 5); formatC(NA_character_, flag = "-", width = 4)
 formatC(c("abc", "d", NA)); formatC(c("a", NA)); formatC(c("abcd", NA, "b")); formatC(c("abc", NA), flag = "-"); formatC(c("abc", "d", NA), width = 2)
+#-- formatC-words-justify-flags
+formatC(c(1, Inf, NA), flag = "-0", width = 2); formatC(c(1, Inf, NA), flag = "0-", width = 5); formatC(c(1, Inf, NA), flag = "-", width = 5)
+formatC(c(1L, NA), flag = "-0", width = 4); formatC(c("ab", NA), flag = "-0", width = 4); formatC(c(NaN, -Inf), flag = "-0", width = 6)
+formatC(c(1, NA), flag = "- 0", width = 5); formatC(c(1, NA), flag = "-+", width = 5); formatC(c(1, NA), flag = "- ", width = 5)
+formatC(c(1, NA), flag = "-#", width = 5); formatC(c("ab", NA), flag = "-+", width = 5); formatC(c("ab", NA), flag = "--", width = 5)
+formatC(c(1L, NA), flag = "#-", width = 5); formatC(c("ab", NA), flag = "+", width = -5); formatC(c(1, NA), flag = "-", width = -5)
+sprintf("[%-05f|%0-6f|%-05d|%-05s]", Inf, NaN, NA_integer_, NA)
