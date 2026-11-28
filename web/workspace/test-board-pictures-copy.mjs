@@ -17,10 +17,12 @@ const ONE = await contentName(png(1)), TWO = await contentName(png(2));
 /** a stand-in workspace: the source board's two picture files; `failRead`, paths whose read fails */
 function ws(failRead = new Set()) {
   const files = new Map([[`${A}/${ONE}.png`, png(1)], [`${A}/${TWO}.png`, png(2)]]);
+  const revs = new Map();
+  const rev = (p) => revs.get(p) ?? 1;
   return {
-    files,
-    list: async (folder) => [...files.keys()].filter((p) => p.startsWith(folder + "/")).map((path) => ({ path, kind: "file", size: files.get(path).length })),
-    readUpTo: async (p) => { if (failRead.has(p) || !files.has(p)) throw new Error("not readable"); return { content: files.get(p) }; },
+    files, revs,
+    list: async (folder) => [...files.keys()].filter((p) => p.startsWith(folder + "/")).map((path) => ({ path, kind: "file", size: files.get(path).length, rev: rev(path) })),
+    readUpTo: async (p) => { if (failRead.has(p) || !files.has(p)) throw new Error("not readable"); return { content: files.get(p), entry: { rev: rev(p) } }; },
     createByPerson: async () => { throw new Error("not used"); },
   };
 }
@@ -112,6 +114,28 @@ const names = [ONE, TWO, "ibrowser"];
   w2.files.set(`${A}/${ONE}.png`, png(5));
   const lost = await copyBoardPictures(w2, "a", "b", [ONE], creator(w2));
   ok(J(lost) === J([ONE]) && !w2.files.has(`${B}/${ONE}.png`), "a file whose bytes aren't its name's: not copied, reported", lost);
+}
+
+{
+  // only the revision changed since the measurement (the same bytes, size and name): stale too, the revision alone
+  const w = ws();
+  const files = await pictureFilesOf(w, "a", [ONE]);
+  w.revs.set(`${A}/${ONE}.png`, 2);
+  let thrown = null;
+  try { await copyBoardPictures(w, "a", "b", [ONE], creator(w), undefined, { expect: files, stale: (p) => new Error("stale " + p) }); } catch (e) { thrown = e; }
+  ok(files[0]?.rev === 1 && thrown?.message === `stale ${A}/${ONE}.png`, "only the revision changed since the measurement: stale", String(thrown));
+}
+{
+  // outside a secure context (no SHA-256): no bytes are taken as a picture's, so nothing is copied; each reported
+  const subtle = Object.getOwnPropertyDescriptor(globalThis.crypto, "subtle");
+  Object.defineProperty(globalThis.crypto, "subtle", { value: undefined, configurable: true });
+  try {
+    const w = ws();
+    const lost = await copyBoardPictures(w, "a", "b", [ONE], creator(w));
+    ok(J(lost) === J([ONE]) && !w.files.has(`${B}/${ONE}.png`), "no SHA-256 here: not copied, reported", lost);
+  } finally {
+    if (subtle) Object.defineProperty(globalThis.crypto, "subtle", subtle); else delete globalThis.crypto.subtle;
+  }
 }
 
 console.log(failures ? `${failures} FAILED` : "test-board-pictures-copy: all passed");

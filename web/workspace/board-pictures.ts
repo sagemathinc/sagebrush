@@ -33,15 +33,12 @@ export type PictureKeep = (name: string, bytes: Uint8Array | null) => Promise<bo
 export type PictureFile = { path: string; name: string; size: number; fid?: string; rev?: number };
 
 /** The content name of a picture's bytes, as web/board/images.ts names them (and checks a file against when it shows
- * it): "i" and the first 128 bits of their SHA-256, or, outside a secure context, FNV-1a twice. */
-export async function contentName(bytes: Uint8Array): Promise<string> {
-  if (globalThis.crypto?.subtle) {
-    const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
-    return "i" + [...h.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-  let a = 0x811c9dc5, b = 0x01000193 ^ bytes.length;
-  for (const x of bytes) { a = Math.imul(a ^ x, 0x01000193); b = Math.imul(b ^ x, 0x5bd1e995); }
-  return "i" + (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+ * it): "i" and the first 128 bits of their SHA-256; null outside a secure context (no SHA-256 there: images.ts's
+ * FNV-1a fallback isn't collision-resistant, so a copy never takes bytes on its word). */
+export async function contentName(bytes: Uint8Array): Promise<string | null> {
+  if (!globalThis.crypto?.subtle) return null;
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
+  return "i" + [...h.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** The names of a board's pictures that its files hold: those in its `images` without a source of their own (an
