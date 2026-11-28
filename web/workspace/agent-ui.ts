@@ -207,7 +207,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
   }
   // (an agent's runs of code (chat plan PR 4a): the page's run-holder.ts, only where the page offers them)
   const runVerbs = o.runVerbs;
-  const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string }) =>
+  const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent: { name: string; client: string } } | { link: AgentLink; computer: string }) =>
     new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.egressTurn ? { egressTurn: true } : {}), ...(o.onCreated ? { onCreated: onlyCurrent(() => pairing, o.onCreated) } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
   // (`branches`: git_branch and its reconcile, on the pages that offer it (they import git-branch.ts), never in a
@@ -612,7 +612,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { otherTab?: () => st
         let p: AgentPairing | null = null;
         try {
           if (k.grant.expires !== null && !(Date.now() < k.grant.expires)) break; // (expired while it waited)
-          p = make(k.port, { session: k.session, pairingId: id });
+          // (the session must be answered by the agent its grant was given to, name and client, as restoreWith's: another
+          //  agent's answer is closed before anything is granted, credited or kept anew; the remembered grant stays)
+          p = make(k.port, { session: k.session, pairingId: id, agent: { name: k.grant.agent, client: k.grant.client } });
           watch(p);
           await p.paired();
           // (superseded meanwhile by a pairing the person chose, or fenced by a release: this attempt goes, touching

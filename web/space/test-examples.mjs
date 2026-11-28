@@ -2,8 +2,9 @@
 // The 3D view's examples as the build writes them (web/build.ts, after a site build: bun web/build.ts): every file it
 // writes for /space/ passes the repository's push text check (web/space/examples/text-check.ts), which catches each of
 // its words and allows "cup product"; the generated "Modular forms in Sagebrush" is a space the viewer accepts, with
-// its crates, Python layers, notes, samples (each output exactly what running it with this checkout gives) and plot,
-// and the page's list offers it. (Fetched only when picked:
+// its crates, Python layers, notes, samples (each output exactly what running it with this checkout gives) and plot;
+// and "Sagebrush's repository", paths and links only, its files read from GitHub at the build's commit; the page's
+// list offers both. (Fetched only when picked:
 // web/space/test-page.mjs.)
 //   bun web/space/test-examples.mjs
 import { execFileSync } from "node:child_process";
@@ -64,6 +65,22 @@ if (space) {
   const plot = kinds("plot3d")[0], grid = execFileSync("node", [cli, "--sage", "-c", "print([[Gamma0(N).dimension_cusp_forms(k) for N in range(1, 41)] for k in range(2, 26, 2)])"], { encoding: "utf8", timeout: 300_000 }).trim();
   ok(/dimension_cusp_forms\(k\)\)/.test(plot.text) && !/\/ *3/.test(plot.text), "the plot's program draws the dimensions as they are (unscaled, as the surface is)", plot.text);
   ok(JSON.stringify(plot.surface.z) === grid.replace(/ /g, "") && JSON.stringify(plot.surface.x) === JSON.stringify([...Array(40)].map((_, i) => i + 1)) && JSON.stringify(plot.surface.y) === JSON.stringify([...Array(12)].map((_, i) => 2 * i + 2)), "the plot's dimensions are the ones computed now", { stored: JSON.stringify(plot.surface.z).slice(0, 80), run: grid.slice(0, 80) });
+}
+// ---- Sagebrush's repository: paths, lengths and links only; its files read from GitHub at the build's commit
+ok(list.includes("repository.space.json"), "the page's list offers the repository");
+let repo = null;
+try { repo = checkSpace(JSON.parse(readFileSync(join(out, "repository.space.json"), "utf8"))); ok(true, "the viewer accepts it (checkSpace)"); } catch (e) { ok(false, "the viewer accepts it", String(e)); }
+if (repo) {
+  const t = repo.tree, head = execFileSync("git", ["-C", join(here, "..", ".."), "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  ok(t.commit === head && t.base === `https://raw.githubusercontent.com/sagemathinc/sagebrush/${head}/`, "its files are read from GitHub at this build's commit", { commit: t.commit, base: t.base });
+  globalThis.location = new URL("https://sagebrush.space/space/");
+  const { pinnedRaw } = await import("./src/read.ts");
+  ok(t.files.every(([p]) => { try { pinnedRaw(t.base + p.split("/").map(encodeURIComponent).join("/"), t.commit); return true; } catch { return false; } }), `each of its ${t.files.length} files is one the viewer may read`);
+  // (the viewer reads that commit only: its hash is compiled into the page's code)
+  const js = readdirSync(join(out, "chunks")).map((f) => join(out, "chunks", f)).concat(join(out, "space.js"));
+  ok(js.some((f) => readFileSync(f, "utf8").includes(JSON.stringify(head))), "the viewer's code has this build's commit compiled in");
+  ok(t.files.length > 1000 && t.files.some(([p]) => p === "web/space/src/read.ts") && t.imports.length > 1000, "it is the whole tree, with its imports", { files: t.files.length, imports: t.imports.length });
+  ok(repo.nodes.length === 0 && !JSON.stringify(t).includes("def "), "and carries no file's text");
 }
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);
