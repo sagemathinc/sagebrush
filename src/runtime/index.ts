@@ -24,6 +24,7 @@ import * as Prog from "./progress";
 import "./raster";
 import "./mpcore";
 import "./skltree";
+import "./ld80";
 import * as Cx from "./complex";
 import * as FO from "./file-once";
 import { cIntArg } from "./argconv";
