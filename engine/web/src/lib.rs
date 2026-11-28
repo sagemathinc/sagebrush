@@ -1392,10 +1392,12 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                 }
                 divs.extend(more);
             }
-            let new: i64 = divs.into_iter().filter(|m| m % f == 0).map(|m| {
+            // (in i128: a dimension can pass i64 at large levels and weights)
+            let new: i128 = divs.into_iter().filter(|m| m % f == 0).map(|m| {
                 sagebrush_interrupt::check();
-                beta(n / m) * dim_cusp_forms(&eps.restrict(m), k) as i64
+                beta(n / m) as i128 * dim_cusp_forms(&eps.restrict(m), k) as i128
             }).sum();
+            let new = i64::try_from(new).map_err(|_| format!("the new subspace's dimension {} passes i64", new))?;
             Ok(json!({ "order": eps.order, "conductor": f, "cusp": dim_cusp_forms(&eps, k),
                        "eisenstein": dim_eisenstein(&eps, k), "modsym": dim_modsym(&eps, k), "new": new }))
         }

@@ -77,6 +77,7 @@ fn twice_sum_omega(eps: &Character, vals: &[(u64, i128)]) -> i128 {
 /// dim S_k(Gamma0(N), eps) for k >= 2 (Cohen-Oesterle).
 pub fn dim_cusp_forms(eps: &Character, k: usize) -> u64 {
     assert!(k >= 2);
+    debug_assert!(k < 1 << 31, "a weight below 2^31 (check_weight)");
     if !parity_ok(eps, k) {
         return 0;
     }

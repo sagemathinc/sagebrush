@@ -4347,6 +4347,21 @@
   "owner": "modular symbols (engine)",
   "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
  },
+ "engine/modsym/src/general.rs :: is_trivial :: e == u32::MAX || e as u64 % self.order == 0 #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
+ "engine/modsym/src/general.rs :: minimal :: if e == u32::MAX { e } else { (e as u64 / s) as u32 } #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
+ "engine/modsym/src/general.rs :: minimal :: let g = self.exps.iter().filter(|&&e| e != u32::MAX).fold(self.order, |g, &e| { #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
  "engine/modsym/src/general.rs :: trivial :: if gcd(m, n) == 1 || n == 1 { 0 } else { u32::MAX } #0": {
   "class": "none",
   "owner": "modular symbols (engine)",

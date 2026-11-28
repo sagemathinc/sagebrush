@@ -94,9 +94,15 @@ impl Character {
     /// The same character with `order` its exact order m (exponents
     /// relative to zeta_m = zeta_order^(order/m)).
     pub fn minimal(&self) -> Character {
-        let g = self.exps.iter().filter(|&&e| e != u32::MAX).fold(self.order, |g, &e| gcd(g, e as u64));
+        let g = self.exps.iter().filter(|&&e| e != u32::MAX).fold(self.order, |g, &e| {
+            sagebrush_interrupt::check();
+            gcd(g, e as u64)
+        });
         let s = g.max(1);
-        let exps = self.exps.iter().map(|&e| if e == u32::MAX { e } else { (e as u64 / s) as u32 }).collect();
+        let exps = self.exps.iter().map(|&e| {
+            sagebrush_interrupt::check();
+            if e == u32::MAX { e } else { (e as u64 / s) as u32 }
+        }).collect();
         Character { n: self.n, order: self.order / s, exps }
     }
 
@@ -117,7 +123,10 @@ impl Character {
     }
 
     pub fn is_trivial(&self) -> bool {
-        self.exps.iter().all(|&e| e == u32::MAX || e as u64 % self.order == 0)
+        self.exps.iter().all(|&e| {
+            sagebrush_interrupt::check();
+            e == u32::MAX || e as u64 % self.order == 0
+        })
     }
 }
 
