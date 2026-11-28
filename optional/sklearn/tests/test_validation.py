@@ -146,3 +146,13 @@ for obj, kw in ((pd.Series([1.0, 2.0]), dict(ensure_2d=False)), (pd.DataFrame({"
 # a complex array into a bool or string dtype: taken, as scikit-learn's (only the float and integer casts warn)
 for dt in (bool, np.bool_, "U40", str, np.float32, np.int8):
     case(f"complex-into {dt!r}", lambda: (lambda r: (r.dtype.kind, r.tolist()))(check_array(np.array([[1 + 2j, 0j]]), dtype=dt)))
+# copy=True with order="F": the copy keeps the order asked for (a DataFrame, an int frame cast, a NumPy array); and
+# a complex array into an unsigned dtype refused, into object kept
+X = pd.DataFrame(np.arange(6.0).reshape(3, 2), columns=list("ab"))
+for name, f in (("frame", lambda: check_array(X, copy=True, order="F")),
+                ("int frame float64", lambda: check_array(pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}), copy=True, order="F", dtype=np.float64)),
+                ("int frame int64", lambda: check_array(pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}), copy=True, order="F", dtype=np.int64)),
+                ("ndarray C", lambda: check_array(np.arange(6.0).reshape(3, 2), copy=True, order="F"))):
+    case(f"copy-order-F {name}", lambda f=f: (lambda r: (bool(r.flags["F_CONTIGUOUS"]), bool(r.flags["C_CONTIGUOUS"]), bool(r.flags.writeable), r.tolist()))(f()))
+case("complex-into uint8", lambda: check_array(np.array([[1 + 2j, 0j]]), dtype=np.uint8))
+case("complex-into object", lambda: (lambda r: (r.dtype.kind, r.tolist()))(check_array(np.array([[1 + 2j, 0j]]), dtype=object)))
