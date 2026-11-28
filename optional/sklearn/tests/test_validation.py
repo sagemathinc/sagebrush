@@ -143,3 +143,6 @@ for obj, kw in ((pd.Series([1.0, 2.0]), dict(ensure_2d=False)), (pd.DataFrame({"
                 r[0] = 99
             return (w, r.tolist(), obj.to_numpy().tolist())
         case(f"pandas-copy {type(obj).__name__} {sorted(kw)} copy={cp}", f)
+# a complex array into a bool or string dtype: taken, as scikit-learn's (only the float and integer casts warn)
+for dt in (bool, np.bool_, "U40", str, np.float32, np.int8):
+    case(f"complex-into {dt!r}", lambda: (lambda r: (r.dtype.kind, r.tolist()))(check_array(np.array([[1 + 2j, 0j]]), dtype=dt)))
