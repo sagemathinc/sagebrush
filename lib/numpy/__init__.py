@@ -890,6 +890,18 @@ class ufunc:
         if casting not in _CASTINGS:
             raise ValueError("casting must be one of 'no', 'equiv', 'safe', 'same_kind', 'unsafe' (got %r)" % (casting,))
         scalars = not _builtins.any(isinstance(x, ndarray) for x in args)
+        if dtype is None:
+            args = self._bool_loop(args)
+        if where is not True and self._op == "power" and where is not None:
+            # (a lane where= leaves out is never computed, as NumPy's: an integer power's negative exponent there no
+            # refusal; an array operand's left-out lanes given the exponent and base 1, which raise nothing)
+            m = asarray(where)
+            if m.dtype.kind == "b":
+                # (a scalar operand is in every lane: given as 1 only when no lane is computed)
+                none = not m.any()
+                args = tuple(_np.where3(m, x, array(1, dtype=x.dtype)) if isinstance(x, ndarray)
+                             else type(x)(1) if none and isinstance(x, (_builtins.int, _builtins.float)) and not isinstance(x, _builtins.bool)
+                             else x for x in args)
         if dtype is not None:
             # (the loop is resolved from dtype before computing, as NumPy's:
             # the inputs cast to it under the casting rule, then the operation
@@ -932,6 +944,19 @@ class ufunc:
                 return x
             return empty((0,), asarray(x).dtype)
         return asarray(self._apply([dummy(x) for x in args])).dtype
+
+    def _bool_loop(self, args):
+        """bool operands as NumPy's loops take them: square, conjugate (the ufunc) and the shifts have no bool loop and
+        compute in int8; positive and sign have none at all, NumPy's UFuncTypeError"""
+        op = self._op
+        if op not in ("square", "conjugate", "positive", "sign", "left_shift", "right_shift"):
+            return args
+        isbool = [isinstance(x, (_builtins.bool, bool_)) or (isinstance(x, ndarray) and x.dtype.kind == "b") for x in args]
+        if not _builtins.all(isbool):
+            return args
+        if op in ("positive", "sign"):
+            raise _UFuncTypeError("ufunc '%s' did not contain a loop with signature matching types <class 'numpy.dtypes.BoolDType'> -> None" % self.__name__)
+        return tuple(asarray(x).astype(int8) if isinstance(x, ndarray) else int8(x) for x in args)
 
     def _loop(self, dtype):
         """dtype's loop, or NumPy's TypeError where the ufunc has none (a
@@ -1096,7 +1121,15 @@ class ufunc:
             # float array into an int out accumulates in float, each result cast into out; an invalid conversion
             # warns "... in cast", then "... in accumulate")
             out = _one_out(out)
-            r = asarray(self.accumulate(a, axis, dtype if dtype is not None else result_type(asarray(a).dtype, out.dtype)))
+            dt_in = dtype if dtype is not None else result_type(asarray(a).dtype, out.dtype)
+            # (a ufunc with no loop in that dtype (logical_or into a bool out from ints): its own loop, the results
+            # converted into out)
+            if dtype is None:
+                try:
+                    self._loop(dt_in)
+                except TypeError:
+                    dt_in = None
+            r = asarray(self.accumulate(a, axis, dt_in))
             if r.shape != out.shape:
                 raise ValueError("provided out is the wrong size for the accumulation.")
             _store(out, r, "cast")
@@ -1111,15 +1144,19 @@ class ufunc:
             return cumsum(a, axis=axis, dtype=dtype)
         if self._op == "multiply" and not (dtype is not None and _wraps_in(self._op, dt)):
             return cumprod(a, axis=axis, dtype=dtype)
+        # (the loop resolved first, as NumPy's: the ufunc's result dtype for the operand's (logical_or's bool for an
+        # int array), a loop it doesn't have refused even for one element or none; the first element cast to it)
+        one = moveaxis(a, axis, 0)[:1] if a.shape[axis] else zeros((1,), a.dtype)
+        rdt = asarray(self(one, one)).dtype
         if a.shape[axis] == 0:
-            return a.copy()  # (empty, of its dtype and shape)
+            return zeros(a.shape, rdt)  # (empty, of the loop's dtype and the operand's shape)
         a = moveaxis(a, axis, 0)
         res = []
         acc = None
         for i in range(a.shape[0]):
-            acc = a[i] if acc is None else self(acc, a[i])
+            acc = a[i].astype(rdt) if acc is None else self(acc, a[i])
             res.append(acc)
-        return moveaxis(array(res), 0, axis)
+        return moveaxis(array(res, dtype=rdt), 0, axis)
 
     def outer(self, A, B, **kw):
         A, B = asarray(A), asarray(B)
@@ -1190,6 +1227,9 @@ def float_power(x, y):
 
 
 def conjugate(x):
+    # (the ufunc has no bool loop: a bool operand computes in int8, as NumPy's; the method keeps bool)
+    if isinstance(x, (_builtins.bool, bool_)) or (isinstance(x, ndarray) and x.dtype.kind == "b"):
+        x = asarray(x).astype(int8)
     x = asarray(x)
     return x.conj() if x.ndim else x.conj()[()]
 
