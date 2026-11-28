@@ -9,7 +9,8 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PUSH_TEXT, textProblems } from "./examples/text-check.ts";
+import { createHash } from "node:crypto";
+import { PUSH_PATTERN, PUSH_TEXT, textProblems } from "./examples/text-check.ts";
 import { checkSpace } from "./src/read.ts";
 
 const here = new URL(".", import.meta.url).pathname, out = join(here, "..", "dist", "space");
@@ -21,6 +22,10 @@ const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (de
 const samples = PUSH_TEXT.source.split("|").map((alt) => alt.replace(/\\b/g, "").replace("[0-9]", "1").replace(/\\\//g, "/"));
 const missed = samples.filter((w) => textProblems(`see ${w} here`).length !== 1);
 ok(samples.length >= 10 && missed.length === 0, `the check catches each of its ${samples.length} words`, missed);
+// (and the pattern is exactly the push check's, byte for byte: its SHA-256, so no alternative can be dropped or changed
+//  without this row failing; when the push check changes, this pin and the encoded copy change with it)
+const PUSH_SHA256 = "81baf79c9c0f73e9d4e1bcab25b0c9fcb92ded9d562cb8463e4595a5da38adaa";
+ok(createHash("sha256").update(PUSH_PATTERN).digest("hex") === PUSH_SHA256, "the pattern is the push check's (its SHA-256)", createHash("sha256").update(PUSH_PATTERN).digest("hex"));
 ok(textProblems("the cup product of two classes").length === 0, "and allows \"cup product\"");
 ok(textProblems("Modular symbols over Gamma0(N): Hecke operators").length === 0, "plain text passes");
 
@@ -57,6 +62,7 @@ if (space) {
   }
   // (and the plot's data is the dimensions themselves: dim S_k(Gamma0(N)) for N = 1..40, k = 2..24 even, computed now)
   const plot = kinds("plot3d")[0], grid = execFileSync("node", [cli, "--sage", "-c", "print([[Gamma0(N).dimension_cusp_forms(k) for N in range(1, 41)] for k in range(2, 26, 2)])"], { encoding: "utf8", timeout: 300_000 }).trim();
+  ok(/dimension_cusp_forms\(k\)\)/.test(plot.text) && !/\/ *3/.test(plot.text), "the plot's program draws the dimensions as they are (unscaled, as the surface is)", plot.text);
   ok(JSON.stringify(plot.surface.z) === grid.replace(/ /g, "") && JSON.stringify(plot.surface.x) === JSON.stringify([...Array(40)].map((_, i) => i + 1)) && JSON.stringify(plot.surface.y) === JSON.stringify([...Array(12)].map((_, i) => 2 * i + 2)), "the plot's dimensions are the ones computed now", { stored: JSON.stringify(plot.surface.z).slice(0, 80), run: grid.slice(0, 80) });
 }
 console.log(failures ? `${failures} FAILED` : "all passed");
