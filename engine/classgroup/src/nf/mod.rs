@@ -1,6 +1,7 @@
 //! General number fields: maximal orders, prime ideals, class groups and
 //! units (in progress).
 pub mod ecm;
+pub mod siqs;
 pub mod embed;
 pub mod bnf;
 pub mod certify;

@@ -60,7 +60,7 @@ mod tests {
         let poly = |c: &[i64]| c.iter().map(|&x| BigInt::from(x)).collect::<Vec<_>>();
         // zero rounds: every search refuses at once, as the old limits did
         // when exhausted
-        let e = with_round_limit(0, || crate::api::bnf(&poly(&[-5, 0, 0, 1])).map(|_| ())).unwrap_err();
+        let e = with_round_limit(0, || crate::api::bnf(&poly(&[-5, 0, 0, 1])).map(|_| ())).unwrap_err().to_string();
         assert!(e.contains("no convergence"), "{}", e);
         // (|D| above the small-discriminant shortcuts, so both quadratic
         // routes use their relation search: -1000003 is fundamental, 1000003

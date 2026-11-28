@@ -4,7 +4,7 @@
 //! The maximal order by Round 2 (Pohst-Zassenhaus; Cohen, A Course in
 //! Computational Algebraic Number Theory, 6.1).
 
-use super::factor::factor;
+use super::factor::{factor_typed, FactorError};
 use super::zlin::*;
 use crate::linalg::det;
 use sagebrush_bigint::BigInt;
@@ -233,7 +233,7 @@ impl Order {
 /// returns the factorization of the field discriminant.  An error if the
 /// discriminant cannot be factored completely (Round 2 needs every prime
 /// whose square divides it).
-pub fn maximal_order(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>), String> {
+pub fn maximal_order(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>), FactorError> {
     maximal_order_assuming(f).map(|(o, fac, _)| (o, fac))
 }
 
@@ -242,11 +242,12 @@ pub fn maximal_order(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>), String
 /// are prime (the systematic review's NFD-F4).  That includes factors to
 /// the first power: a composite one could hide a square, at whose prime
 /// the order was never enlarged (R2-NFD-F1).
-pub fn maximal_order_assuming(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>, Vec<BigInt>), String> {
+/// A memory refusal while factoring the discriminants is kept typed.
+pub fn maximal_order_assuming(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>, Vec<BigInt>), FactorError> {
     let mut o = Order::equation_order(f);
     let d = o.disc();
     let mut assumed = vec![];
-    for (p, e) in factor(&d)? {
+    for (p, e) in factor_typed(&d)? {
         if p.bits() > 64 {
             assumed.push(p.clone());
         }
@@ -259,7 +260,7 @@ pub fn maximal_order_assuming(f: &[BigInt]) -> Result<(Order, Vec<(BigInt, u32)>
         }
     }
     let dk = o.disc();
-    let fac = factor(&dk)?;
+    let fac = factor_typed(&dk)?;
     Ok((o, fac, assumed))
 }
 
