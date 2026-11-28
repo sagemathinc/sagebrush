@@ -97,3 +97,43 @@ for dt in (np.int8, np.uint8, np.int16, np.uint16):
         show(f"initial bitwise_and {dt.__name__} {v!r}", lambda: repr(np.bitwise_and.reduce(x, initial=v)))
 for u in ("add", "multiply", "bitwise_and", "bitwise_or", "bitwise_xor", "logical_and", "logical_or", "logical_xor", "maximum", "minimum", "subtract", "hypot"):
     show(f"identity {u}", lambda: getattr(np, u).identity)
+# a complex initial into a real reduction: a Python complex refused by int() or float() as NumPy converts it (into
+# bool its truth); a NumPy complex scalar cast, its imaginary part dropped
+import warnings
+for dt in (np.int8, np.uint8, np.int64, np.uint64, np.float32, np.bool_):
+    x = np.array([100, 27], dt) if dt is not np.bool_ else np.array([True, False])
+    for v in (1j, 1 + 0j, np.complex128(1j), np.complex64(1 + 0j)):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            show(f"complex initial sum {dt.__name__} {v!r}", lambda: repr(np.sum(x, initial=v)))
+            show(f"complex initial add {dt.__name__} {v!r}", lambda: repr(np.add.reduce(x, initial=v)))
+            show(f"complex initial max {dt.__name__} {v!r}", lambda: repr(np.maximum.reduce(x, initial=v)))
+# the general fold's loop as NumPy resolves it: an int true_divide, hypot or logaddexp in float64, its one element
+# combined with initial; logaddexp's identity -inf; an add or multiply in the default int; the loop refused (a bool
+# subtract) before several axes are; not here: an int8 or bool float function's float16, which Sagebrush refuses
+show("true_divide one int initial", lambda: repr(np.true_divide.reduce(np.array([3], dtype="int32"), initial=1.5)))
+show("hypot one int initial", lambda: repr(np.hypot.reduce(np.array([3], dtype="int32"), initial=1.5)))
+show("logaddexp identity", lambda: np.logaddexp.identity)
+show("logaddexp empty", lambda: repr(np.logaddexp.reduce(np.zeros(0))))
+show("logaddexp all masked", lambda: repr(np.logaddexp.reduce(np.ones(3), where=False)))
+show("logaddexp tuple axis", lambda: repr(np.logaddexp.reduce(np.ones((2, 2)), axis=(0, 1))))
+for u in ("true_divide", "hypot", "logaddexp", "arctan2", "subtract", "power", "fmax", "add", "multiply", "copysign", "floor_divide"):
+    f = getattr(np, u)
+    for dt in (np.int32, np.uint16, np.bool_, np.float32):
+        if dt in (np.bool_, np.uint16) and u in ("true_divide", "hypot", "logaddexp", "arctan2", "copysign"):
+            continue
+        for data in ([], [3], [3, 2], [[1, 1], [1, 1]]):
+            x = np.array(data, dt)
+            for ini in (None, 1.5, 2):
+                kw = {} if ini is None else {"initial": ini}
+                with np.errstate(all="ignore"):
+                    show(f"fold {u} {dt.__name__} {data} ini={ini}", lambda: repr(f.reduce(x, **kw)))
+                    show(f"fold {u} {dt.__name__} {data} ini={ini} masked", lambda: repr(f.reduce(x, where=False, **kw)))
+                    if x.ndim == 2:
+                        show(f"fold {u} {dt.__name__} {data} ini={ini} axes", lambda: repr(f.reduce(x, axis=(0, 1), **kw)))
+show("subtract bool several axes", lambda: np.subtract.reduce(np.ones((2, 2), bool), axis=None))
+show("subtract dtype=bool several axes", lambda: np.subtract.reduce(np.ones((2, 2), int), axis=None, dtype=bool))
+show("floor_divide dtype=bool several axes", lambda: np.floor_divide.reduce(np.ones((2, 2), int), axis=None, dtype=bool))
+show("floor_divide bool several axes", lambda: np.floor_divide.reduce(np.ones((2, 2), bool), axis=None))
+show("subtract bool call", lambda: np.subtract(np.array([True]), np.array([False])))
+show("subtract dtype=bool call", lambda: np.subtract([1, 2], [1, 1], dtype=bool))

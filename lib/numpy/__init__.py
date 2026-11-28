@@ -872,6 +872,14 @@ def _initial_in(initial, rdt):
     """A reduction's initial= in its accumulator's dtype rdt, as NumPy converts it: into an integer dtype a Python int,
     bool or float (truncated) is a Python int, out of range NumPy's OverflowError, and so is a NumPy scalar into a
     signed dtype; a NumPy scalar into an unsigned dtype is cast; into any other dtype a cast"""
+    # (a Python complex into a real dtype: NumPy converts it by int() or float(), whose TypeError it raises; into bool
+    # its truth; a NumPy complex scalar is cast, below, its imaginary part dropped with the ComplexWarning)
+    if isinstance(initial, _builtins.complex) and not isinstance(initial, generic) and rdt.kind != "c":
+        if rdt.kind == "b":
+            return bool_(initial)
+        if rdt.kind in "iu":
+            raise TypeError("int() argument must be a string, a bytes-like object or a real number, not 'complex'")
+        raise TypeError("float() argument must be a string or a real number, not 'complex'")
     if rdt.kind in "iu" and not isinstance(initial, ndarray) and not (isinstance(initial, generic) and rdt.kind == "u"):
         if isinstance(initial, (_builtins.int, _builtins.float, generic)) and not isinstance(initial, (complexfloating, _builtins.complex)):
             return array(_builtins.int(initial), dtype=rdt)[()]
@@ -968,7 +976,9 @@ class ufunc:
         op = self._op
         if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
                 else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
-                else (dt.kind in "bc" and op in ("floor_divide", "remainder", "fmod")) or (dt.kind == "b" and op == "power")):
+                else (dt.kind in "bc" and op in ("floor_divide", "remainder", "fmod")) or (dt.kind == "b" and op in ("power", "subtract"))):
+            if op == "subtract":
+                raise TypeError("numpy boolean subtract, the `-` operator, is not supported, use the bitwise_xor, the `^` operator, or the logical_xor function instead.")
             raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
         return dt
 
@@ -1063,12 +1073,18 @@ class ufunc:
         if initial is _NoValue:
             initial = None
         a = asarray(a)
-        # (NumPy's order: the mask's conversion, then several axes refused for a ufunc that isn't reorderable, before
-        # the loop is resolved and the mask broadcast)
+        # (NumPy's order: the mask's conversion, the loop resolved (none, as a bool subtract's or dtype=bool's for
+        # floor_divide, its TypeError), then several axes refused for a ufunc that isn't reorderable, before the mask
+        # is broadcast)
         if where is not True:
             _ufunc_where(where)
         if isinstance(axis, tuple) and len(axis) > 1 or (axis is None and a.ndim > 1):
             if self._op not in self._REORDERABLE:
+                if dtype is not None:
+                    self._loop(dtype)
+                else:
+                    with errstate(all="ignore"):
+                        self(ones(1, a.dtype), ones(1, a.dtype))
                 raise ValueError("reduction operation '%s' is not reorderable, so at most one axis may be specified" % self.__name__)
         quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
                  "logical_or": any}
@@ -1111,10 +1127,10 @@ class ufunc:
 
     # (the ufuncs whose reduction has an identity: a masked or empty reduction's start without initial)
     _IDENTITY = {"add": 0, "multiply": 1, "logical_or": False, "logical_and": True, "logical_xor": False,
-                 "bitwise_or": 0, "bitwise_xor": 0, "bitwise_and": -1, "hypot": 0}
+                 "bitwise_or": 0, "bitwise_xor": 0, "bitwise_and": -1, "hypot": 0, "logaddexp": -inf}
     # (the ufuncs whose reduction may take several axes at once, NumPy's reorderable ones)
     _REORDERABLE = frozenset(("add", "multiply", "logical_or", "logical_and", "logical_xor", "bitwise_or", "bitwise_xor",
-                              "bitwise_and", "maximum", "minimum", "fmax", "fmin", "hypot", "gcd", "lcm"))
+                              "bitwise_and", "maximum", "minimum", "fmax", "fmin", "hypot", "logaddexp", "gcd", "lcm"))
 
     def _fold(self, a, axis, dtype, keepdims, initial, mask):
         """reduce's general case, as NumPy's: the reduced axes (several only for a reorderable ufunc; a 0-d array's
@@ -1140,6 +1156,16 @@ class ufunc:
         t = a.transpose(order).reshape((rn,) + rshape)
         mt = None if m is None else m.transpose(order).reshape((rn,) + rshape)
         own = initial is not None
+        # (the accumulator's dtype, the loop's, as NumPy resolves it first (a bool subtract's TypeError before the
+        # identity's ValueError): the ufunc's on two of the input's elements (already in dtype, if given), true_divide's
+        # float64 on ints, an add or multiply of bools or small ints in the default int, uint64 if unsigned, as np.sum's;
+        # each element, the first too, taken into it)
+        with errstate(all="ignore"):
+            one = ones(1, a.dtype)
+            rdt = asarray(self(one, one)).dtype
+        if dtype is None and self._op in ("add", "multiply") and rdt.kind in "biu" and rdt.itemsize < 8:
+            rdt = _dtype_of("uint64" if rdt.kind == "u" else "int64")
+        t = t.astype(rdt) if t.dtype != rdt else t
         if initial is None and (m is not None or rn == 0):
             initial = self._IDENTITY.get(self._op)
             if initial is None:
@@ -1147,15 +1173,10 @@ class ufunc:
                     raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to specify 'initial'" % self.__name__)
                 raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
         if initial is not None:
-            # (the accumulator's dtype: the reduction's own without initial (a small int sum or product in the default
-            # int), initial cast to it, as NumPy resolves the loop first)
-            probe = self.reduce(t[:1] if rn else zeros((1,) + rshape, a.dtype), axis=0, dtype=dtype)
-            rdt = asarray(probe).dtype
             # (initial given: converted as NumPy converts it, _initial_in; the ufunc's own identity, bitwise_and's -1,
             # stored as NumPy stores it, all bits set in an unsigned dtype too)
             init = _initial_in(initial, rdt) if own else asarray(initial).astype(rdt)[()]
             acc = full(rshape, init, dtype=rdt)
-            t = t.astype(rdt) if t.dtype != rdt else t
             start = 0
         else:
             acc = t[0].copy() if isinstance(t[0], ndarray) else t[0]
