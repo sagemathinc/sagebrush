@@ -1,0 +1,37 @@
+{
+ "cases": [
+  {
+   "id": "sprintf-space-flag-na-nan",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"[ NA| NA| NA| NA|NA|   NA| NA  |NA|NA]\"\n[1] \"[ NaN|   NaN| NaN]\"\n[1] \"[+Inf|  -Inf|+Inf]\"\n"
+  },
+  {
+   "id": "format-trim-width",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"a  \"\n[1] \"  1\"\n[1] \"a \" \"bb\"\n[1] \"1\"  \"10\"\n[1] \"   1\" \"  10\"\n[1] \"TRUE\" \"NA\"  \n[1] \"1\"  \"10\"\n"
+  },
+  {
+   "id": "formatC-nonfinite-fields",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"Inf\"\n[1] \"   Inf\"\n[1] \"Inf   \"\n[1] \"Inf\"\n[1] \"Inf\"\n[1] \"   Inf\"\n[1] \"Inf\"\n[1] \" Inf\"\n[1] \"Inf   \"\n[1] \"    Inf\"\n[1] \"-Inf\"\n[1] \"   NaN\"\n[1] \"  NA\"\n[1] \"NA\"\n"
+  },
+  {
+   "id": "formatC-nonfinite-common-width",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1\"   \"Inf\" \" NA\"\n[1] \"   1\" \" Inf\" \"  NA\"\n[1] \"-1\"  \"NaN\"\n[1] \"1\"  \"NA\"\n[1] \"NaN\" \" NA\"\n[1] \"-Inf\" \"  NA\"\n[1] \"1\"    \"-Inf\" \"  NA\" \" NaN\"\n[1] \"Inf\" \"2.5\" \" NA\"\n[1] \"-Inf\" \"NA  \"\n[1] \"1\"  \"NA\"\n[1] \"Inf\" \" NA\"\n[1] \"1.235e+05\" \" NA\"       \"Inf\"      \n[1] \"  Inf\" \"   NA\"\n[1] \"-Inf\" \" Inf\" \" NaN\"\n[1] \"-Inf\" \"NA  \" \"NaN \"\n[1] \"1\"    \"22.5\" \"NA\"  \n[1] \"1\"   \"333\" \"NA\" \n[1] \"1.0000\" \"NA\"    \n"
+  },
+  {
+   "id": "formatC-strings-common-width",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"abc\" \"  d\"\n[1] \"abc\" \"d  \"\n[1] \"abc\" \" NA\"\n[1] \"  abc\" \"   NA\"\n[1] \"NA  \"\n[1] \"abc\" \"  d\" \" NA\"\n[1] \" a\" \"NA\"\n[1] \"abcd\" \"  NA\" \"   b\"\n[1] \"abc\" \"NA \"\n[1] \"abc\" \"  d\" \" NA\"\n"
+  }
+ ],
+ "file": "rill-tests/str/test_7.R",
+ "format": "rill-out",
+ "v": 1
+}

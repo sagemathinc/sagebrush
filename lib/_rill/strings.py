@@ -381,12 +381,11 @@ class _Arg:
         if conv in "feEgG":
             if t != "double":
                 raise RError("invalid format '%s'; %s" % (spec.group(0), _USE[t]), call)
-            if e is None:
-                return _word("NA", flags, width)
+            if e is None or e != e:
+                # (R 4.5.3: sprintf("% f", NaN) is " NaN", "%+f" "NaN", "%+ f" " NaN", "% G" of NA " NA", "%+f" of
+                # Inf "+Inf", "% f" " Inf")
+                return _word((" " if " " in flags else "") + ("NA" if e is None else "NaN"), flags, width)
             x = float(e)
-            if x != x:
-                # (R 4.5.3: sprintf("% f", NaN) is " NaN", "%+f" "NaN", "%+f" of Inf "+Inf", "% f" " Inf")
-                return _word((" " if " " in flags and "+" not in flags else "") + "NaN", flags, width)
             if abs(x) == math.inf:
                 sign = "-" if x < 0 else "+" if "+" in flags else " " if " " in flags else ""
                 return _word(sign + "Inf", flags, width)
@@ -509,10 +508,14 @@ def format_(sess, call, args):
     for e in x.data:
         w = max(w, len(raw(e)))
     left = x.type == "character"
+    # (trim only stops numbers and logicals being padded to their common width: an explicit width still pads them,
+    # and strings still pad to theirs; R 4.5.3, format(1, width = 3, trim = TRUE) is "  1", format(c("a", "bb"),
+    # trim = TRUE) "a " "bb")
+    if trim and not left:
+        w = width
 
     def pieces(i):
-        r = raw(x.data[i])
-        return [r] if trim else _padded([r], w, left)
+        return _padded([raw(x.data[i])], w, left)
     held, build = _built(n, pieces)
     with held:
         return _keep_names("character", build(), x)
@@ -580,17 +583,28 @@ def formatC(sess, call, args):
     # (format "d" doesn't take digits: R 4.5.3, formatC(22L, width = 3, digits = 3, format = "d") is " 22")
     prec = digits if form not in ("s", "d") else None
 
+    def nonfinite(e):
+        if e is None or (isinstance(e, float) and e != e):
+            return "NA" if e is None else "NaN"
+        if isinstance(e, float) and abs(e) == math.inf:
+            return "Inf" if e > 0 else "-Inf"
+        return None
+    # (NA, NaN and Inf take no sign or 0 flag, and are padded to the width or to the widest of them, whichever is
+    # more: R 4.5.3, formatC(c(1, -Inf, NA)) is "1" "-Inf" "  NA", formatC(c(1L, NA), width = 4) "   1" "  NA")
+    # (strings, NA as "NA", are padded to the widest of them: formatC(c("abc", "d", NA)) is "abc" "  d" " NA")
+    words = 0
+    for e in x.data:
+        word = ("NA" if e is None else e) if form == "s" else nonfinite(e)
+        if word is not None:
+            words = max(words, len(word))
+
     def pieces(i):
         e = x.data[i]
-        if e is None or (isinstance(e, float) and e != e):
-            # (NA as "NA", right-justified to the width unless flag has "-": R 4.5.3, formatC(c(1L, NA), width = 4))
-            return _word("NA" if e is None else "NaN", flag, width)
-        if isinstance(e, float) and abs(e) == math.inf:
-            return _word("Inf" if e > 0 else "-Inf", flag, width)
+        word = ("NA" if e is None else e) if form == "s" else nonfinite(e)
+        if word is not None:
+            return _word(word, flag, max(width, words))
         if form == "d":
             return _int_pieces(int(e), flag, width, prec, "d")
-        if form == "s":
-            return _padded([e], width, "-" in flag)
         return _float_pieces(float(e), flag, width, prec, form)
     held, build = _built(len(x.data), pieces)
     with held:
