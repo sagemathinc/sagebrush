@@ -116,3 +116,244 @@ User basis matrix:
 ]
 len(D.eigenvectors_right()[0][1]) -> 3
 type(B.eigenvectors_right()[0][2]) -> <class 'int'>
+X3.eigenvalues(extend=False) -> [2]
+X3.eigenvalues(False) -> [2]
+X3.eigenvalues(extend=0) -> [2]
+X3.eigenvalues(extend=None) -> [2]
+X3.eigenvectors_right(extend=False) -> [(2, [
+(1, 0, 0)
+], 1)]
+X3.eigenvectors_left(extend=False) -> [(2, [
+(1, 0, 0)
+], 1)]
+X3.eigenvectors_right(None, False) -> TypeError: eigenvectors_right() takes at most 1 positional argument (2 given)
+X3.eigenvectors_left(None, False) -> TypeError: eigenvectors_left() takes at most 1 positional argument (2 given)
+X3.eigenvectors_right(False) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 3
+X3.eigenvectors_left(other=B2) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 3
+X3.eigenvectors_right(bogus=1) -> TypeError: eigenvectors_right() got an unexpected keyword argument 'bogus'
+X7.eigenvalues(extend=False) -> [3, 3]
+X7.eigenvalues(False) -> [3, 3]
+X7.eigenvalues(extend=0) -> [3, 3]
+X7.eigenvalues(extend=None) -> [3, 3]
+X7.eigenvectors_right(extend=False) -> [(3, [
+(0, 0, 1, 0),
+(0, 0, 0, 1)
+], 2)]
+X7.eigenvectors_left(extend=False) -> [(3, [
+(0, 0, 1, 0),
+(0, 0, 0, 1)
+], 2)]
+X7.eigenvectors_right(None, False) -> TypeError: eigenvectors_right() takes at most 1 positional argument (2 given)
+X7.eigenvectors_left(None, False) -> TypeError: eigenvectors_left() takes at most 1 positional argument (2 given)
+X7.eigenvectors_right(False) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 7
+X7.eigenvectors_left(other=B2) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 7
+X7.eigenvectors_right(bogus=1) -> TypeError: eigenvectors_right() got an unexpected keyword argument 'bogus'
+I7.eigenvalues(extend=False) -> []
+I7.eigenvalues(False) -> []
+I7.eigenvalues(extend=0) -> []
+I7.eigenvalues(extend=None) -> []
+I7.eigenvectors_right(extend=False) -> []
+I7.eigenvectors_left(extend=False) -> []
+I7.eigenvectors_right(None, False) -> TypeError: eigenvectors_right() takes at most 1 positional argument (2 given)
+I7.eigenvectors_left(None, False) -> TypeError: eigenvectors_left() takes at most 1 positional argument (2 given)
+I7.eigenvectors_right(False) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 7
+I7.eigenvectors_left(other=B2) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 7
+I7.eigenvectors_right(bogus=1) -> TypeError: eigenvectors_right() got an unexpected keyword argument 'bogus'
+B.eigenvalues(extend=False) -> [3, 2, 2]
+B.eigenvalues(False) -> [3, 2, 2]
+B.eigenvalues(extend=0) -> [3, 2, 2]
+B.eigenvalues(extend=None) -> [3, 2, 2]
+B.eigenvectors_right(extend=False) -> [(3, [
+(0, 0, 1)
+], 1), (2, [
+(1, 0, 0)
+], 2)]
+B.eigenvectors_left(extend=False) -> [(3, [
+(0, 0, 1)
+], 1), (2, [
+(0, 1, 0)
+], 2)]
+B.eigenvectors_right(None, False) -> TypeError: eigenvectors_right() takes at most 1 positional argument (2 given)
+B.eigenvectors_left(None, False) -> TypeError: eigenvectors_left() takes at most 1 positional argument (2 given)
+B.eigenvectors_right(False) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 101
+B.eigenvectors_left(other=B2) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 101
+B.eigenvectors_right(bogus=1) -> TypeError: eigenvectors_right() got an unexpected keyword argument 'bogus'
+Z.eigenvalues(extend=False) -> [91, 10]
+Z.eigenvalues(False) -> [91, 10]
+Z.eigenvalues(extend=0) -> [91, 10]
+Z.eigenvalues(extend=None) -> [91, 10]
+Z.eigenvectors_right(extend=False) -> [(91, [
+(1, 91)
+], 1), (10, [
+(1, 10)
+], 1)]
+Z.eigenvectors_left(extend=False) -> [(91, [
+(1, 10)
+], 1), (10, [
+(1, 91)
+], 1)]
+Z.eigenvectors_right(None, False) -> TypeError: eigenvectors_right() takes at most 1 positional argument (2 given)
+Z.eigenvectors_left(None, False) -> TypeError: eigenvectors_left() takes at most 1 positional argument (2 given)
+Z.eigenvectors_right(False) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 101
+Z.eigenvectors_left(other=B2) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 101
+Z.eigenvectors_right(bogus=1) -> TypeError: eigenvectors_right() got an unexpected keyword argument 'bogus'
+T2.eigenvalues(extend=False) -> [0]
+T2.eigenvalues(False) -> [0]
+T2.eigenvalues(extend=0) -> [0]
+T2.eigenvalues(extend=None) -> [0]
+T2.eigenvectors_right(extend=False) -> [(0, [
+(1, 1, 1)
+], 1)]
+T2.eigenvectors_left(extend=False) -> [(0, [
+(1, 1, 1)
+], 1)]
+T2.eigenvectors_right(None, False) -> TypeError: eigenvectors_right() takes at most 1 positional argument (2 given)
+T2.eigenvectors_left(None, False) -> TypeError: eigenvectors_left() takes at most 1 positional argument (2 given)
+T2.eigenvectors_right(False) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 2
+T2.eigenvectors_left(other=B2) -> NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Finite Field of size 2
+T2.eigenvectors_right(bogus=1) -> TypeError: eigenvectors_right() got an unexpected keyword argument 'bogus'
+B2.eigenspaces_right(algebraic_multiplicity=True) -> [
+(2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[1 0], 2)
+]
+B2.eigenspaces_left(algebraic_multiplicity=True) -> [
+(2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 1], 2)
+]
+B2.eigenspaces_right("all", "a", True) -> [
+(2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[1 0], 2)
+]
+B2.eigenspaces_left(format="all", algebraic_multiplicity=True) -> [
+(2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 1], 2)
+]
+B2.eigenspaces_right(algebraic_multiplicity=1) -> [
+(2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[1 0], 2)
+]
+B2.eigenspaces_left(algebraic_multiplicity=False) -> [
+(2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 1])
+]
+B2.eigenspaces_right(algebraic_multiplicity="x") -> ValueError: algebraic_multiplicity keyword must be True or False
+B.eigenspaces_right(algebraic_multiplicity=True) -> [
+(3, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 0 1], 1),
+(2, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[1 0 0], 2)
+]
+B.eigenspaces_left(algebraic_multiplicity=True) -> [
+(3, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 0 1], 1),
+(2, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 1 0], 2)
+]
+B.eigenspaces_right("all", "a", True) -> [
+(3, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 0 1], 1),
+(2, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[1 0 0], 2)
+]
+B.eigenspaces_left(format="all", algebraic_multiplicity=True) -> [
+(3, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 0 1], 1),
+(2, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 1 0], 2)
+]
+B.eigenspaces_right(algebraic_multiplicity=1) -> [
+(3, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 0 1], 1),
+(2, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[1 0 0], 2)
+]
+B.eigenspaces_left(algebraic_multiplicity=False) -> [
+(3, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 0 1]),
+(2, Vector space of degree 3 and dimension 1 over Finite Field of size 101
+User basis matrix:
+[0 1 0])
+]
+B.eigenspaces_right(algebraic_multiplicity="x") -> ValueError: algebraic_multiplicity keyword must be True or False
+D.eigenspaces_right(algebraic_multiplicity=True) -> [
+(5, Vector space of degree 4 and dimension 3 over Finite Field of size 101
+User basis matrix:
+[1 0 0 0]
+[0 1 0 0]
+[0 0 1 0], 4)
+]
+D.eigenspaces_left(algebraic_multiplicity=True) -> [
+(5, Vector space of degree 4 and dimension 3 over Finite Field of size 101
+User basis matrix:
+[1 0 0 0]
+[0 1 0 0]
+[0 0 0 1], 4)
+]
+D.eigenspaces_right("all", "a", True) -> [
+(5, Vector space of degree 4 and dimension 3 over Finite Field of size 101
+User basis matrix:
+[1 0 0 0]
+[0 1 0 0]
+[0 0 1 0], 4)
+]
+D.eigenspaces_left(format="all", algebraic_multiplicity=True) -> [
+(5, Vector space of degree 4 and dimension 3 over Finite Field of size 101
+User basis matrix:
+[1 0 0 0]
+[0 1 0 0]
+[0 0 0 1], 4)
+]
+D.eigenspaces_right(algebraic_multiplicity=1) -> [
+(5, Vector space of degree 4 and dimension 3 over Finite Field of size 101
+User basis matrix:
+[1 0 0 0]
+[0 1 0 0]
+[0 0 1 0], 4)
+]
+D.eigenspaces_left(algebraic_multiplicity=False) -> [
+(5, Vector space of degree 4 and dimension 3 over Finite Field of size 101
+User basis matrix:
+[1 0 0 0]
+[0 1 0 0]
+[0 0 0 1])
+]
+D.eigenspaces_right(algebraic_multiplicity="x") -> ValueError: algebraic_multiplicity keyword must be True or False
+X3.eigenspaces_right(algebraic_multiplicity=True) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+X3.eigenspaces_left(algebraic_multiplicity=True) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+X3.eigenspaces_right("all", "a", True) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+X3.eigenspaces_left(format="all", algebraic_multiplicity=True) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+X3.eigenspaces_right(algebraic_multiplicity=1) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+X3.eigenspaces_left(algebraic_multiplicity=False) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+X3.eigenspaces_right(algebraic_multiplicity="x") -> ValueError: algebraic_multiplicity keyword must be True or False
+I7.eigenspaces_right(algebraic_multiplicity=True) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+I7.eigenspaces_left(algebraic_multiplicity=True) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+I7.eigenspaces_right("all", "a", True) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+I7.eigenspaces_left(format="all", algebraic_multiplicity=True) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+I7.eigenspaces_right(algebraic_multiplicity=1) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+I7.eigenspaces_left(algebraic_multiplicity=False) -> NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+I7.eigenspaces_right(algebraic_multiplicity="x") -> ValueError: algebraic_multiplicity keyword must be True or False
+type(B2.eigenspaces_right(algebraic_multiplicity=True)[0][2]) -> <class 'int'>
+B2.eigenvectors_right(None, other=B2) -> TypeError: eigenvectors_right() got multiple values for keyword argument 'other'
+B2.eigenvectors_left(None, other=B2) -> TypeError: eigenvectors_left() got multiple values for keyword argument 'other'
+B2.eigenvectors_right(None, other=None) -> TypeError: eigenvectors_right() got multiple values for keyword argument 'other'
+B2.eigenvectors_left(None, other=None) -> TypeError: eigenvectors_left() got multiple values for keyword argument 'other'
+B2.eigenvectors_left(None, extend=False) -> [(2, [
+(0, 1)
+], 2)]

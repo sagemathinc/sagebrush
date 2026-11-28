@@ -13232,6 +13232,36 @@
   "owner": "finite fields + configuration",
   "reason": "domain refusal: resultant, discriminant and is_square over Z/n with n composite (not a field) are not implemented; not a size or work limit"
  },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: before it is made, and no degree or shape cap applies:: #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: import sys; old = getattr(sys, \"_sagebrush_heap_limit\", None) # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = 2^60 # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = 4 * 2 * 10^6 # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = old; P.padded_list = padded; P.__mod__ = mod # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.minpoly_mod :: sage: sys._sagebrush_heap_limit = old; g.minpoly_mod(x^2 + 1) # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.nth_root :: NotImplementedError: nth_root of degree 2 of a polynomial over a field with several such roots is not supported yet #0": {
   "class": "none",
   "owner": "finite fields + configuration",
@@ -13250,6 +13280,81 @@
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
   "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.subresultants :: sage: import sys; old = getattr(sys, \"_sagebrush_heap_limit\", None) # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.subresultants :: sage: sys._sagebrush_heap_limit = 4 * 2 * 10^6 # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: Polynomial_ff.subresultants :: sage: sys._sagebrush_heap_limit = old; P.padded_list = padded # sagebrush only #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "doctests that lower the heap figure to show the polynomial builders' workspace admitted and refused before any row is built, and working again"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: decides alone; there is no cap on the degree or shape.\"\"\" #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: e = _memguard.memory_guard(what, need, limit // _HEAP_SHARE, \"one operation's workspace\") #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: from _sage_ffmat import _entry_cost, _heap_limit, _HEAP_SHARE #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: if need > limit // _HEAP_SHARE: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: limit = _heap_limit() #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
+ },
+ "lib/_sage_ff.py :: _admit_workspace :: live at once, fit this process's budget for one operation (that of one #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "owner": "finite fields/runtime memory",
+  "reason": "a computation's live workspace admitted against the heap's share for one operation, by the memory guard; no fixed cap"
  },
  "lib/_sage_ff.py :: _ff_bounded :: return lambda: NotImplementedError(\"%s of elements of %r and %r is not supported yet (subfields are computed here only in fields of at most %s elements%s)\" % (what, A, B, _ffsub().embed_max_text(), _ffsub().work_clause())) #0": {
   "class": "3",
@@ -13671,7 +13776,17 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
  },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods._eigenvectors :: raise NotImplementedError(\"generalized eigenvector decomposition is implemented for RDF and CDF, but not for %r\" % self._base) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal, Sage's own: generalized eigenvectors (other=) over a finite field; not a size or work limit"
+ },
  "lib/_sage_ffmat_more.py :: FFMatrixMethods._split_eigenvalues :: raise NotImplementedError(what) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenspaces_left :: NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field, #0": {
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
@@ -13681,7 +13796,7 @@
   "owner": "finite fields + configuration",
   "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
  },
- "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenvalues :: modelled here: NotImplementedError. #0": {
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenvalues :: modelled here: NotImplementedError; with extend=False, those in the #0": {
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
@@ -20420,11 +20535,6 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
- },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -20467,6 +20577,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",

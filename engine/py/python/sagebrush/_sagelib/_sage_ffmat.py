@@ -3736,7 +3736,7 @@ _MORE_MATRIX = frozenset([
     "left_kernel_matrix", "adjugate", "permanent", "pfaffian",
     "minimal_polynomial", "eigenvalues", "eigenvectors_right", "eigenvectors_left", "right_eigenvectors", "left_eigenvectors",
     "eigenspaces_right", "eigenspaces_left", "LU", "fcp", "jordan_form", "rational_form",
-    "_row_index", "_col_index", "_with", "_checked_indices", "_numeric_route", "_split_eigenvalues", "_eigenvectors",
+    "_row_index", "_col_index", "_with", "_checked_indices", "_numeric_route", "_split_eigenvalues", "_eigenvalues", "_eigenvectors",
     "_eigenspaces", "_jordan_chains", "_invariant_factors", "_square_for",
 ])
 _MORE_VECTOR = frozenset([

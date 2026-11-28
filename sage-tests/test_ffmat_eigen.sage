@@ -54,3 +54,25 @@ show('E.eigenspaces_right()', lambda: E.eigenspaces_right())
 show('matrix(F, [[2]]).eigenspaces_left()', lambda: matrix(F, [[2]]).eigenspaces_left())
 show('len(D.eigenvectors_right()[0][1])', lambda: len(D.eigenvectors_right()[0][1]))
 show('type(B.eigenvectors_right()[0][2])', lambda: type(B.eigenvectors_right()[0][2]))
+# extend=False: only the eigenvalues in the field (mixed linear and irreducible factors)
+X3 = matrix(GF(3), [[2, 0, 0], [0, 0, -1], [0, 1, 0]])
+X7 = matrix(GF(7), [[0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 3, 0], [0, 0, 0, 3]])
+I7 = matrix(GF(7), [[0, 1], [-1, 0]])
+B2 = matrix(F, [[2, 1], [0, 2]])
+for nm in ['X3', 'X7', 'I7', 'B', 'Z', 'T2']:
+    for c in ['eigenvalues(extend=False)', 'eigenvalues(False)', 'eigenvalues(extend=0)', 'eigenvalues(extend=None)',
+              'eigenvectors_right(extend=False)', 'eigenvectors_left(extend=False)',
+              'eigenvectors_right(None, False)', 'eigenvectors_left(None, False)', 'eigenvectors_right(False)',
+              'eigenvectors_left(other=B2)', 'eigenvectors_right(bogus=1)']:
+        show(nm + '.' + c, lambda: eval(nm + '.' + c))
+# algebraic_multiplicity=True: (eigenvalue, space, multiplicity)
+for nm in ['B2', 'B', 'D', 'X3', 'I7']:
+    for c in ['eigenspaces_right(algebraic_multiplicity=True)', 'eigenspaces_left(algebraic_multiplicity=True)',
+              'eigenspaces_right("all", "a", True)', 'eigenspaces_left(format="all", algebraic_multiplicity=True)',
+              'eigenspaces_right(algebraic_multiplicity=1)', 'eigenspaces_left(algebraic_multiplicity=False)',
+              'eigenspaces_right(algebraic_multiplicity="x")']:
+        show(nm + '.' + c, lambda: eval(nm + '.' + c))
+show('type(B2.eigenspaces_right(algebraic_multiplicity=True)[0][2])', lambda: type(B2.eigenspaces_right(algebraic_multiplicity=True)[0][2]))
+# a duplicate binding of other
+for c in ['B2.eigenvectors_right(None, other=B2)', 'B2.eigenvectors_left(None, other=B2)', 'B2.eigenvectors_right(None, other=None)', 'B2.eigenvectors_left(None, other=None)', 'B2.eigenvectors_left(None, extend=False)']:
+    show(c, lambda: eval(c))
