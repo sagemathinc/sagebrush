@@ -7,6 +7,7 @@
 // (web/page/handover.ts), and an agent's edit asks for it; remote pictures wait for a click whatever the document says.
 import { writerHandover } from "../page/handover";
 import type { Workspace } from "../workspace/api";
+import { imageFolder, saveImage } from "../workspace/image-store";
 import { canonical, cellForm, preflight, type NotebookEdit } from "../workspace/notebook-edit";
 import { docValue, ENVELOPE } from "../workspace/notebook-form";
 import type { Kept, PageRun } from "../workspace/run-verbs";
@@ -665,7 +666,24 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
     if (!alive) return;
     if (journal && !hdb) return fail("This browser saves notebooks through sync, which needs storage that isn't available here.");
     const k = (kernel = lazyKernel(mod, () => frozen));
-    const comp = (nb = mod.createNotebook(nbRoot, { kernel: k, assetBase: SITE.href, reactive: false, remotePictures: "click" }));
+    // (images in its Markdown cells kept as workspace files, #1872: shown from the workspace, and a pasted or dropped
+    //  one saved in this notebook's own folder, /Attachments/nb-<its ref>, as on the notebook page)
+    const images = {
+      // (the folder of the document mounted here, by its ref as checked at mount: never looked up by path, so a rename
+      //  and another notebook at the same path can't take this one's images)
+      save: async (bytes: Uint8Array) => {
+        const folder = imageFolder("nb", ref);
+        return folder ? saveImage((p, b) => ws.createByPerson(p, { content: b }), folder, bytes) : { refused: "other" as const };
+      },
+      read: async (p: string) => {
+        const r = await ws.read(p).catch(() => null);
+        return r?.content instanceof Uint8Array ? r.content : null;
+      },
+      say: (text: string) => ui.saved(text),
+      // (the mounted document's own folder, by its ref: the only one its references may name)
+      folder: () => imageFolder("nb", ref),
+    };
+    const comp = (nb = mod.createNotebook(nbRoot, { kernel: k, assetBase: SITE.href, reactive: false, remotePictures: "click", images }));
 
     // The store, bound to this document while the pane shows it. The database it writes through refuses every write
     // transaction once the pane lets go (gone, dispose), so a save already on its way (past this wrapper, waiting for

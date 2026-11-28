@@ -2051,8 +2051,17 @@ export class Workspace {
       await this.admitAt(admit, "duplicate", "destination", dest);
       if (e.kind === "notebook") {
         const { id: _i, rev: _r, updated: _u, ...doc } = c;
+        // (a copy is another notebook, with its own folder: its source's images go into it embedded, read from the
+        //  source's own folder only, never as references to that folder, which the copy doesn't follow; as Save a copy.
+        //  Loaded here, not imported: the image store stays out of every bundle that holds the workspace (the terminal's))
+        const { embedAttachments, imageFolder } = await import("./image-store.ts");
+        const { doc: copy } = await embedAttachments(doc, e.ref ? imageFolder("nb", e.ref) : null, async (q) => {
+          const f = await this.stat(q);
+          const b = f?.kind === "file" ? await this.contents(f) : undefined;
+          return b instanceof Uint8Array ? b : null;
+        });
         // (the notebook's own mode, as it is now; the entry's is the one it was made with)
-        return this.make(dest, "notebook", doc, (doc as { mode?: string }).mode ?? e.mode, undefined, e.made);
+        return this.make(dest, "notebook", copy, (copy as { mode?: string }).mode ?? e.mode, undefined, e.made);
       }
       // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
       if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);

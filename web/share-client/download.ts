@@ -15,6 +15,8 @@ export interface DownloadDialogHost extends Omit<PickerHost, "notebook"> {
   dlg: HTMLDialogElement;
   /** the notebook: its file name, and its Download bytes */
   notebook: () => { path: string; data: Uint8Array };
+  /** made ready just before the notebook is taken: its images read again (#1872); none: nothing to do */
+  prepareNotebook?: () => Promise<void>;
   /** its workspace path now, without the leading /, or null (not in the workspace): looked up at the click */
   notebookPath: () => Promise<string | null>;
   /** one file's bytes; throws if it is no longer the file listed (fid) */
@@ -48,10 +50,23 @@ export function createDownloadDialog(h: DownloadDialogHost) {
       out.textContent = "The notebook changed since this was opened: open it again.";
       return;
     }
-    const nb = h.notebook(), nbId = picker.notebook;
-    const { snap } = picker.take();
+    // (the download is reserved before the images are read, so a second click while they are read does nothing; every
+    //  way out before it starts lets it go, and closing meanwhile stops it)
     const ac = new AbortController();
     setBusy(ac);
+    // (a read that fails lets the reservation go, as every other way out before the start does)
+    try { await h.prepareNotebook?.(); } catch (e: any) {
+      setBusy(null);
+      out.textContent = `Couldn't read the notebook's images: ${e?.message ?? e}. Nothing was downloaded.`;
+      return;
+    }
+    if (ac.signal.aborted || !picker.mine()) {
+      if (!ac.signal.aborted) out.textContent = "The notebook changed since this was opened: open it again.";
+      setBusy(null);
+      return;
+    }
+    const nb = h.notebook(), nbId = picker.notebook;
+    const { snap } = picker.take();
     out.textContent = "";
     try {
       const where = await h.notebookPath();

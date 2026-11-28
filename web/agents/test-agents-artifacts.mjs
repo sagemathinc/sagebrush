@@ -705,6 +705,73 @@ try {
     await converse();
   }
 
+  // ======================================================================== an image pasted into the pane's notebook (#1872)
+  // (saved in the mounted notebook's own folder, /Attachments/nb-<its ref>, by its identity: renamed after it was
+  //  opened, its images still go to its folder, never looked up by path)
+  if (want("nbimages")) {
+    const path = "/notes/images.ipynb";
+    await call("workspace.create", { path, content: docFor(path, [{ type: "markdown", code: "Figure:" }, { code: "1 + 1" }]), mode: "python" });
+    await openNotebook(path);
+    const ref = await refOf(path);
+    const paste = () => ev(`(() => {
+      const u = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAEElEQVR4nGM4IScHQQxwFgBBAAYZPEVBlgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer(); dt.items.add(new File([u], "p.png", { type: "image/png" }));
+      const e = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+      ${cellJs(0)}.dispatchEvent(e);
+      return e.defaultPrevented;
+    })()`);
+    const listOf = (r) => call("workspace.list", { folder: `/Attachments/nb-${r}` }).then((x) => x.entries.map((e) => e.path), () => []);
+    const took = await paste();
+    await until(`(${cellJs(0)}.cell?.ta?.value ?? '').includes('attachment:')`, 10000).catch(() => {});
+    const text = await ev(`${cellJs(0)}.cell?.ta?.value ?? ''`);
+    const listed = await listOf(ref);
+    await until(`!!${cellJs(0)}.querySelector('.mdout img[src^="blob:"]')`, 10000).catch(() => {});
+    // (drawn, and decoded: the real 3x2 PNG pasted, not only an element)
+    const drawn = await ev(`(() => { const i = ${cellJs(0)}.querySelector('.mdout img[src^="blob:"]'); return i ? i.decode().then(() => i.naturalWidth === 3 && i.naturalHeight === 2, () => false) : false; })()`);
+    ok(took && /!\[image\]\(attachment:[0-9a-f]{24}\.png\)/.test(text) && listed.length === 1 && listed[0].startsWith(`/Attachments/nb-${ref}/`) && drawn, "a pasted image in the pane's notebook: saved in that notebook's own folder (by its ref), referred to and drawn", { took, text, listed, drawn });
+    // (H1: a notebook the AGENT writes, naming the first notebook's image file: not shown in the pane; and its own
+    //  pasted image, in the same cell, is (the control: images do show there), so exactly one image is drawn)
+    {
+      const spyPath = "/notes/agent-names-other.ipynb";
+      const foreign = listed[0];
+      await call("workspace.create", { path: spyPath, content: { json: { mode: "python", cells: [{ id: "h1a", type: "markdown", code: "![s](attachment:s.png)", attachments: { "s.png": { "sagebrush/file": foreign } } }] } }, mode: "python" });
+      await openNotebook(spyPath);
+      await sleep(1000);
+      const before = await ev(`${cellJs(0)}.querySelectorAll('.mdout img').length`);
+      await paste();
+      await until(`(${cellJs(0)}.cell?.ta?.value ?? '').split('attachment:').length > 2`, 10000).catch(() => {});
+      await until(`!!${cellJs(0)}.querySelector('.mdout img[src^="blob:"]')`, 10000).catch(() => {});
+      await sleep(800);
+      const got = await ev(`(() => { const c = ${cellJs(0)}; return { alts: [...c.querySelectorAll('.mdout img')].map((i) => i.alt), att: c.cell?.attachments ?? {} }; })()`);
+      // (the pasted image's own file, by the reference the pane wrote: in this notebook's folder, which isn't the foreign one)
+      const ownPath = Object.entries(got.att).find(([k]) => k !== "s.png")?.[1]?.["sagebrush/file"] ?? "";
+      const ownFolder = ownPath.split("/").slice(0, 3).join("/"), foreignFolder = foreign.split("/").slice(0, 3).join("/");
+      const ownListed = ownFolder ? await call("workspace.list", { folder: ownFolder }).then((x) => x.entries.map((e) => e.path), () => []) : [];
+      ok(before === 0 && JSON.stringify(got.alts) === JSON.stringify(["image"]) && ownFolder && ownFolder !== foreignFolder && ownListed.includes(ownPath), "H1: an agent-written notebook naming another notebook's image file: that one isn't shown; the notebook's own pasted image, in the same cell and its own folder, is (exactly one drawn)", { before, got, ownPath, foreign });
+      await openNotebook(path);
+      await until(`!!${cellJs(0)}.querySelector('.mdout img[src^="blob:"]')`, 10000).catch(() => {});
+    }
+    const blobSrc = await ev(`${cellJs(0)}.querySelector('.mdout img')?.getAttribute('src') ?? ''`);
+    // (renamed away, and another notebook made at its old path: the pane keeps the one it mounted, frozen; a paste
+    //  then saves nothing, in neither notebook's folder)
+    await call("workspace.rename", { from: path, to: "/notes/images-renamed.ipynb" });
+    await call("workspace.create", { path, content: docFor(path, [{ type: "markdown", code: "Other" }], undefined, "b"), mode: "python" });
+    const ref2 = await refOf(path, "b");
+    await until(`/moved or removed/.test(document.querySelector('#artifacts .pane-bar')?.textContent ?? '')`, 10000).catch(() => {});
+    await paste();
+    await sleep(1000);
+    const mine = await listOf(ref), theirs = await listOf(ref2);
+    ok(mine.length === 1 && theirs.length === 0, "renamed away and replaced at its path: a paste in the pane saves nothing, in neither notebook's folder", { mine, theirs });
+    // (the pane closed: the images it held are let go, their blob: URLs revoked)
+    await ev(`(document.querySelector('#artifacts #close').click(), true)`);
+    await sleep(1500);
+    // (a frozen notebook that couldn't keep its content as a copy offers Close without keeping: taken)
+    await ev(`(() => { const b = [...document.querySelectorAll('#artifacts button')].find((x) => x.textContent === 'Close without keeping'); b?.click(); return !!b; })()`);
+    await until(`!document.querySelector('#artifacts .nb-artifact')`, 10000).catch(() => {});
+    const fetched = await ev(`fetch(${JSON.stringify("")} + ${JSON.stringify(blobSrc)}).then(() => "fetched", () => "revoked")`);
+    ok(/^blob:/.test(blobSrc) && fetched === "revoked", "the pane closed: the image's blob: URL is revoked", { blobSrc: blobSrc.slice(0, 5), fetched });
+  }
+
   // ======================================================================== an agent's new notebook runs once by itself
   // (the notebook page's rule, workspace/agent-made.ts: created by this pairing in the chat's running turn, the grant
   //  with May run code and Everything, as here; opened in the pane and run there, its outputs shown and saved)

@@ -18,6 +18,9 @@ export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   dlg: HTMLDialogElement;
   /** the notebook: its file name in the share, and its bytes */
   notebook: () => { path: string; data: Uint8Array };
+  /** made ready just before the notebook is taken for a share: its images read again (#1872), so what is shared is
+   * what the workspace has now; none: nothing to do */
+  prepareNotebook?: () => Promise<void>;
   /** one file's bytes at upload; throws if it is no longer the file listed (fid) */
   readFile: (f: { path: string; fid?: string }) => Promise<Uint8Array>;
   upload: (o: { files: LazyFile[]; title: string; license: string; author: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean; frozen?: string; version?: string }>;
@@ -229,18 +232,31 @@ export function createShareDialog(h: ShareDialogHost) {
       out.textContent = "The notebook changed since Share was opened: open Share again.";
       return;
     }
-    // (the notebook as it is now, bounded like any file, CORR-172-ASTRA-3)
+    // (its images read again first, then the notebook as it is now, bounded like any file, CORR-172-ASTRA-3; the publish
+    //  is reserved before that read, so a second click meanwhile does nothing, and every way out before it starts lets it go)
+    setBusy(true);
+    // (a read that fails lets the reservation go, as every other way out before the start does)
+    try { await h.prepareNotebook?.(); } catch (e: any) {
+      setBusy(false);
+      out.textContent = `Couldn't read the notebook's images: ${e?.message ?? e}. Nothing was published.`;
+      return;
+    }
+    if (!d.open || !picker.mine()) {
+      if (d.open) out.textContent = "The notebook changed since Share was opened: open Share again.";
+      setBusy(false);
+      return;
+    }
     const nb = h.notebook();
     const max = h.bounds().maxFileBytes;
     if (max !== undefined && nb.data.length > max) {
       out.textContent = `This notebook (${h.fmtSize(nb.data.length)}) is larger than your plan's largest file.`;
+      setBusy(false);
       return;
     }
     const { snap, stillRunning } = picker.take();
     const title = ($(d, "#sharetitlein") as HTMLInputElement).value;
     const license = ($(d, "#sharelicense") as HTMLSelectElement).value;
     const author = authorIn.value;
-    setBusy(true);
     out.textContent = "";
     if (stillRunning) status.textContent = state.textContent = "Finding the files stopped: publishing what you checked.";
     try {

@@ -1,0 +1,294 @@
+// ci: web-runner order=199 runner=bun
+// The shared image store (image-store.ts): which bytes are images, where they're saved, content-addressed names, the
+// attachment form that refers to a file (and fails closed), data: URLs, and a notebook's embed on export and extract
+// on import, round trip included.
+//   bun web/workspace/test-image-store.mjs
+import { ImageUrls } from "./image-urls.ts";
+import { IMAGE_BYTES_MAX, FILE_KEY, referencedPaths, embedAttachmentsWith, imageType, imageFolder, saveImage, filePathOf, isFileEntry, fromBase64, toBase64, toDataUrl, fromDataUrl, embedAttachments, extractAttachments, refusalOf } from "./image-store.ts";
+
+let failures = 0;
+const J = JSON.stringify;
+const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
+const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const bytes = (head, n = 64, fill = 7) => { const u = new Uint8Array(n).fill(fill); u.set(head); return u; };
+/** a stand-in workspace: exclusive create, read */
+function store() {
+  const files = new Map();
+  const create = async (p, u) => { if (files.has(p)) throw Object.assign(new Error("there already: secret text"), { code: "exists" }); files.set(p, new Uint8Array(u)); };
+  const read = async (p) => files.get(p) ?? null;
+  return { files, create, read };
+}
+
+// ---- types and folders
+ok(imageType(bytes(PNG))?.ext === "png" && imageType(bytes([0xff, 0xd8, 0xff]))?.mime === "image/jpeg" && imageType(bytes(ascii("GIF89a")))?.ext === "gif" && imageType(bytes([...ascii("RIFF"), 1, 2, 3, 4, ...ascii("WEBP")]))?.ext === "webp" && imageType(bytes(ascii("<svg"))) === null, "types by bytes: PNG, JPEG, GIF, WebP; SVG isn't one");
+ok(imageFolder("chat", "abc") === "/Attachments/abc" && imageFolder("nb", "u-1") === "/Attachments/nb-u-1" && imageFolder("board", "ab12") === "/Attachments/board-ab12" && imageFolder("nb", "../x") === null && imageFolder("board", "a b") === null && imageFolder("nb", "") === null, "folders: a chat's, a notebook's (nb-), a board's (board-); only plain ids");
+
+// ---- saving
+{
+  const S = store();
+  const r = await saveImage(S.create, "/Attachments/nb-x", bytes(PNG));
+  ok(/^\/Attachments\/nb-x\/[0-9a-f]{24}\.png$/.test(r.path) && S.files.size === 1, "saved under a random name with the bytes' extension", r);
+  ok((await saveImage(S.create, "/Attachments/nb-x", bytes(ascii("<svg")))).refused === "notImage" && (await saveImage(S.create, "/Attachments/nb-x", bytes(PNG, IMAGE_BYTES_MAX + 1))).refused === "tooBig" && S.files.size === 1, "refused: not an image, over the cap; nothing written");
+  ok((await saveImage(S.create, "/Attachments/nb-x", bytes(PNG, IMAGE_BYTES_MAX))).path !== undefined, "exactly the cap is saved");
+  ok((await saveImage(S.create, "/Attachments/b", bytes(PNG, 2_000_001), { max: 2_000_000 })).refused === "tooBig" && (await saveImage(S.create, "/Attachments/b", bytes(PNG, IMAGE_BYTES_MAX + 1), { max: 9e9 })).refused === "tooBig", "a caller's cap applies; never above the outer cap");
+  // content-addressed (the board's)
+  const T = store();
+  const a = await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name: "iabc", read: T.read });
+  const again = await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name: "iabc", read: T.read });
+  const other = await saveImage(T.create, "/Attachments/board-1", bytes(PNG, 64, 9), { name: "iabc", read: T.read });
+  ok(a.path === "/Attachments/board-1/iabc.png" && again.path === a.path && other.refused === "exists" && T.files.size === 1, "a content-addressed name: the same bytes again is the same file (success); other bytes there are refused", { a, again, other });
+  ok((await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name: "../x", read: T.read })).refused === "other" && (await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name: "ok" })).refused === "other", "a name must be plain, and comes with read");
+  let threw = false, rr;
+  try { rr = await saveImage(async () => { throw Object.assign(new Error("x"), { code: "exists" }); }, "/Attachments/nb-x", bytes(PNG)); } catch { threw = true; }
+  ok(!threw && rr?.refused === "exists", "a random name already taken: refused as exists (only a content-addressed name compares bytes)");
+  ok(refusalOf({ code: "limit" }) === "limit" && refusalOf({ code: "toString" }) === "other" && refusalOf(new Error("x")) === "other", "refusals by code only");
+}
+
+// ---- the file-referring attachment, failing closed
+ok(filePathOf({ [FILE_KEY]: "/Attachments/nb-x/ab12.png" }, "/Attachments/nb-x") === "/Attachments/nb-x/ab12.png", "a well-formed reference in its owner's folder");
+const bad = [{ [FILE_KEY]: "/Attachments/nb-x/../../secret.png" }, { [FILE_KEY]: "/private/a.png" }, { [FILE_KEY]: "/private/notes/a.png" }, { [FILE_KEY]: "/attachments/nb-x/a.png" }, { [FILE_KEY]: "/Attachments/a.png" }, { [FILE_KEY]: "/Attachments/nb-x/a/b.png" }, { [FILE_KEY]: "/Attachments/nb-x/a.svg" }, { [FILE_KEY]: "/Attachments/nb-x/.a.png" }, { [FILE_KEY]: 7 }, { [FILE_KEY]: "/Attachments/nb-x/a.png", extra: 1 }, { "image/png": "AAAA" }, null, [], "x"];
+ok(bad.every((b) => filePathOf(b, "/Attachments/nb-x") === null), "ill-formed references are refused: traversal, outside /Attachments, wrong depth, not raster, hidden, not a string, extra keys", bad.filter((b) => filePathOf(b, "/Attachments/nb-x") !== null));
+ok(isFileEntry({ [FILE_KEY]: 1 }) && !isFileEntry({ "image/png": "x" }), "an entry of our key is ours even when ill-formed");
+
+// ---- base64 and data: URLs
+ok(fromBase64("QQ==")?.[0] === 65 && fromBase64("QQ") === null && fromBase64("Q Q==") === null && fromBase64("QQ==\n") === null && fromBase64("-_8=") === null, "strict base64");
+ok(fromBase64("A".repeat(8), 5) === null && fromBase64("A".repeat(8), 6) !== null, "refused by its decoded length before decoding");
+{
+  const u = bytes(PNG);
+  const url = toDataUrl(u);
+  ok(url.startsWith("data:image/png;base64,") && fromDataUrl(url).length === 64, "data: URL round trip");
+  ok(fromDataUrl("data:image/svg+xml;base64,PHN2Zz4=") === null && fromDataUrl(url.replace("image/png", "image/gif")) === null && toDataUrl(bytes(ascii("<svg"))) === null && fromDataUrl(url, 10) === null, "data: URLs: not SVG, the type must match the bytes, the cap applies");
+}
+
+// ---- a notebook: extract on import, embed on export, round trip
+{
+  const png = bytes(PNG), gif = bytes(ascii("GIF89a"), 40);
+  const svg = { "image/svg+xml": "PHN2Zz4=" };
+  const doc = { mode: "python", cells: [
+    { id: "a", type: "markdown", code: "![a](attachment:a.png) ![g](attachment:g.gif) ![s](attachment:s.svg)", attachments: { "a.png": { "image/png": toBase64(png) }, "g.gif": { "image/gif": toBase64(gif) }, "s.svg": svg, "two.png": { "image/png": toBase64(png), "text/plain": "x" }, "lie.png": { "image/png": toBase64(gif) } } },
+    { id: "b", code: "1+1", attachments: { "c.png": { "image/png": toBase64(png) } } },
+  ] };
+  const S = store(), R1 = "/Attachments/nb-r1";
+  const x = await extractAttachments(doc, (u) => saveImage(S.create, R1, u));
+  const att = x.doc.cells[0].attachments;
+  ok(x.extracted === 2 && filePathOf(att["a.png"], R1) && filePathOf(att["g.gif"], R1) && att["s.svg"] === svg && att["two.png"]["text/plain"] === "x" && att["lie.png"]["image/png"] && S.files.size === 2, "import: raster images become files; SVG, several mimes and a mime that lies stay inline", att);
+  ok(x.doc.cells[0].code === doc.cells[0].code && x.doc.cells[1] === doc.cells[1] && doc.cells[0].attachments["a.png"]["image/png"], "the source never changes, code cells are untouched, the given document isn't modified");
+  const e = await embedAttachments(x.doc, R1, S.read);
+  ok(e.missing.length === 0 && JSON.stringify(e.doc.cells[0].attachments) === JSON.stringify(doc.cells[0].attachments) && e.doc.cells[0].code === doc.cells[0].code, "export: the same attachments, byte for byte, and the same source (round trip)", e.doc.cells[0].attachments);
+  // a missing file, and a file that isn't an image any more
+  S.files.delete(filePathOf(att["a.png"], R1));
+  S.files.set(filePathOf(att["g.gif"], R1), new TextEncoder().encode("not an image"));
+  const m = await embedAttachments(x.doc, R1, S.read);
+  ok(m.missing.join() === "a.png,g.gif" && !("a.png" in m.doc.cells[0].attachments) && m.doc.cells[0].attachments["s.svg"] === svg, "export: a missing or changed file is left out and listed; the rest is kept", m.missing);
+  const evil = { cells: [{ type: "markdown", code: "x", attachments: { "e.png": { [FILE_KEY]: "/private/notes.png" } } }] };
+  let asked = 0;
+  const ev = await embedAttachments(evil, R1, async () => { asked++; return bytes(PNG); });
+  ok(asked === 0 && ev.missing.join() === "e.png", "export: an ill-formed reference is never read, only listed as missing");
+  const plain = { cells: [{ type: "markdown", code: "x" }] };
+  ok((await embedAttachments(plain, R1, S.read)).doc === plain && (await extractAttachments(plain, () => { throw new Error("no"); })).doc === plain, "a notebook with nothing to do is returned as it is");
+}
+
+// ---- ImageUrls: shown when its size can be read; its checked bytes kept for export either way
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  const noSize = bytes(PNG); // (a PNG signature with no IHDR: its size can't be read)
+  const files = new Map([["/Attachments/nb-x/a.png", real], ["/Attachments/nb-x/b.png", noSize], ["/Attachments/nb-x/c.png", new TextEncoder().encode("text")]]);
+  const reads = [];
+  let changes = 0;
+  const U = new ImageUrls(async (p) => { reads.push(p); return files.get(p) ?? null; }, () => changes++);
+  U.clear("/Attachments/nb-x");
+  await U.ready(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/c.png", "/Attachments/nb-x/none.png", "/private/x.png"]);
+  const a = U.url("/Attachments/nb-x/a.png");
+  ok(a && a.url.startsWith("blob:") && a.w === 3 && a.h === 2 && U.bytes("/Attachments/nb-x/a.png")?.length === 64, "a readable image: a blob: URL with its size, and its bytes");
+  ok(U.url("/Attachments/nb-x/b.png") === null && U.bytes("/Attachments/nb-x/b.png")?.length === 64, "an image whose size can't be read: not drawn, but its bytes kept for export");
+  ok(U.bytes("/Attachments/nb-x/c.png") === null && U.bytes("/Attachments/nb-x/none.png") === null, "not an image, or missing: nothing");
+  ok(!reads.includes("/private/x.png") && reads.length === 4, "a path outside /Attachments is never read", reads);
+  U.put("/Attachments/nb-x/d.png", real);
+  ok(U.bytes("/Attachments/nb-x/d.png")?.length === 64 && !reads.includes("/Attachments/nb-x/d.png"), "an image saved just now is held without reading it back");
+  const doc = { cells: [{ type: "markdown", code: "x", attachments: { "a.png": { [FILE_KEY]: "/Attachments/nb-x/a.png" }, "b.png": { [FILE_KEY]: "/Attachments/nb-x/b.png" }, "c.png": { [FILE_KEY]: "/Attachments/nb-x/c.png" } } }] };
+  ok(J(referencedPaths(doc, "/Attachments/nb-x")) === J(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/c.png"]), "the paths a notebook refers to");
+  const e = embedAttachmentsWith(doc, "/Attachments/nb-x", (p) => U.bytes(p));
+  ok(e.missing.join() === "c.png" && Object.keys(e.doc.cells[0].attachments).join() === "a.png,b.png", "export from held bytes: both images embedded (the one not drawn too); the non-image left out and listed", e.missing);
+  // (ready() reads again: a changed file's new bytes, a deleted one gone, a restored one back)
+  const other = new Uint8Array(real); other[40] = 9;
+  files.set("/Attachments/nb-x/a.png", other);
+  files.delete("/Attachments/nb-x/b.png");
+  files.set("/Attachments/nb-x/none.png", real);
+  const before = changes;
+  await U.ready(["/Attachments/nb-x/a.png", "/Attachments/nb-x/b.png", "/Attachments/nb-x/none.png"]);
+  ok(U.bytes("/Attachments/nb-x/a.png")?.[40] === 9 && U.bytes("/Attachments/nb-x/b.png") === null && U.bytes("/Attachments/nb-x/none.png")?.length === 64 && changes > before, "ready() reads again: a changed file's new bytes, a deleted one gone, a restored one found; the page told to draw again");
+  U.retain(["/Attachments/nb-x/a.png"]);
+  ok(U.bytes("/Attachments/nb-x/a.png") !== null && U.bytes("/Attachments/nb-x/none.png") === null && U.bytes("/Attachments/nb-x/d.png") === null, "retain() lets go of the images no cell refers to, keeps the rest");
+  U.clear("/Attachments/nb-x");
+  ok(U.bytes("/Attachments/nb-x/a.png") === null, "clear() lets every image go");
+  U.dispose();
+}
+// ---- a read still on its way when another document loads (clear()) is dropped when it arrives
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const U = new ImageUrls(async () => { await gate; return real; }, () => {});
+  U.clear("/Attachments/nb-a");
+  const loading = U.load("/Attachments/nb-a/x.png");
+  const readying = U.ready(["/Attachments/nb-a/y.png"]);
+  U.clear("/Attachments/nb-a");
+  release();
+  await loading; await readying;
+  ok(U.bytes("/Attachments/nb-a/x.png") === null && U.bytes("/Attachments/nb-a/y.png") === null && U.url("/Attachments/nb-a/x.png") === null, "reads that arrive after clear() (another document shown) aren't kept");
+  U.dispose();
+}
+// ---- a read still on its way when its image is let go (retain(): its cell deleted) is dropped when it arrives,
+//  for load() and for ready()'s second read alike
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  let hold = false, release = () => {}, readsOf = 0;
+  const read = async (p) => { if (p.endsWith("c.png")) readsOf++; if (hold) await new Promise((r) => (release = r)); return real; };
+  const U = new ImageUrls(read, () => {});
+  U.clear("/Attachments/nb-r");
+  hold = true;
+  const l = U.load("/Attachments/nb-r/a.png");
+  U.retain([]);
+  release(); await l;
+  ok(U.bytes("/Attachments/nb-r/a.png") === null, "load(): a read that arrives after its image was let go (retain) isn't kept");
+  hold = false;
+  await U.load("/Attachments/nb-r/b.png");
+  hold = true;
+  const r = U.ready(["/Attachments/nb-r/b.png"]);
+  await new Promise((res) => setTimeout(res, 0));
+  U.retain([]);
+  release(); await r;
+  ok(U.bytes("/Attachments/nb-r/b.png") === null, "ready(): its read again, arriving after the image was let go, isn't kept");
+  // (held already; let go between ready()'s first wait (the settled load) and its read again)
+  hold = false;
+  await U.load("/Attachments/nb-r/c.png");
+  const r2 = U.ready(["/Attachments/nb-r/c.png"]);
+  U.retain([]);
+  await r2;
+  ok(U.bytes("/Attachments/nb-r/c.png") === null && readsOf === 1, "ready(): an image let go right after ready() was called isn't brought back, nor read again", readsOf);
+  U.dispose();
+}
+// ---- ready() across clear() and the same paths loaded again (A, then B, then A again): it returns only once each path
+//  is settled in the current generation, not when the stale reads end
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  const releases = [];
+  const U = new ImageUrls(() => new Promise((r) => releases.push(() => r(real))), () => {});
+  U.clear("/Attachments/nb-ab");
+  const p = "/Attachments/nb-ab/x.png";
+  const r = U.ready([p]);
+  U.clear("/Attachments/nb-ab");
+  void U.load(p);
+  let done = false;
+  void r.then(() => (done = true));
+  releases[0]();
+  await new Promise((res) => setTimeout(res, 10));
+  const early = done;
+  releases[1]();
+  await r;
+  ok(!early && U.bytes(p) !== null, "ready(): after a clear() and a reload of the same path, it waits for the new read, and the image is held", { early });
+  U.dispose();
+}
+// ---- the same, switched back and forth five times while ready() waits: it returns only once the last read is in
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  const releases = [];
+  const U = new ImageUrls(() => new Promise((r) => releases.push(() => r(real))), () => {});
+  U.clear("/Attachments/nb-ab");
+  const p = "/Attachments/nb-ab/y.png";
+  const r = U.ready([p]);
+  let done = false;
+  void r.then(() => (done = true));
+  for (let k = 0; k < 5; k++) {
+    U.clear("/Attachments/nb-ab");
+    void U.load(p);
+    releases[k]();
+    await new Promise((res) => setTimeout(res, 5));
+  }
+  const early = done;
+  releases[5]();
+  await r;
+  ok(!early && U.bytes(p) !== null, "ready(): switched back and forth five times, it waits for the last read, and the image is held", { early, reads: releases.length });
+  U.dispose();
+}
+// ---- dispose() is final: a read on its way is dropped, and nothing is read or held afterwards
+{
+  const real = new Uint8Array(64).fill(7); real.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 3, 0, 0, 0, 2]);
+  const releases = [];
+  let reads = 0;
+  const U = new ImageUrls(() => { reads++; return new Promise((r) => releases.push(() => r(real))); }, () => {});
+  U.clear("/Attachments/nb-d");
+  const p = "/Attachments/nb-d/z.png";
+  const r = U.ready([p]);
+  U.dispose();
+  releases[0]();
+  await r;
+  void U.ready([p]); void U.load(p); U.put("/Attachments/nb-d/w.png", real);
+  await new Promise((res) => setTimeout(res, 5));
+  ok(U.disposed && reads === 1 && U.bytes(p) === null && U.url(p) === null && U.bytes("/Attachments/nb-d/w.png") === null, "dispose() is final: the read on its way dropped, nothing read or held afterwards", { reads });
+}
+// ---- an attachment named "__proto__" survives import and export
+{
+  const S = store();
+  const doc = JSON.parse('{"cells":[{"type":"markdown","code":"![p](attachment:__proto__)","attachments":{"__proto__":{"image/png":"' + toBase64(bytes(PNG)) + '"}}}]}');
+  const x = await extractAttachments(doc, (u) => saveImage(S.create, "/Attachments/nb-p", u));
+  const xa = x.doc.cells[0].attachments;
+  ok(x.extracted === 1 && Object.hasOwn(xa, "__proto__") && filePathOf(xa["__proto__"], "/Attachments/nb-p"), "import: an attachment named __proto__ is extracted like any other");
+  const e = await embedAttachments(x.doc, "/Attachments/nb-p", S.read);
+  ok(JSON.stringify(e.doc.cells[0].attachments) === JSON.stringify(doc.cells[0].attachments), "export: and embedded back, the same", e.doc.cells[0].attachments);
+}
+// ---- H1: a reference is followed only in its owner's own folder (a confused deputy otherwise: another notebook's or a
+//  chat's images read, shown and embedded by whoever renders or exports this one)
+{
+  const OWN = "/Attachments/nb-mine", OTHER = "/Attachments/nb-other/secret.png", CHAT = "/Attachments/chat1/secret.png", MINE = OWN + "/a.png";
+  const ref = (p) => ({ [FILE_KEY]: p });
+  ok(filePathOf(ref(MINE), OWN) === MINE, "H1: a reference into the owner's folder is followed");
+  ok(filePathOf(ref(OTHER), OWN) === null && filePathOf(ref(CHAT), OWN) === null, "H1: one into another notebook's folder, or a chat's, is refused");
+  ok([null, undefined, "", "/Attachments", "/Attachments/", "/Attachments/nb-mine/", "/private", "/Attachments/../x", "/Attachments/a/b"].every((f) => filePathOf(ref(MINE), f) === null), "H1: no owner folder, or a malformed one, follows nothing");
+  ok(filePathOf(ref("/Attachments/nb-mine-x/a.png"), OWN) === null && filePathOf(ref("/Attachments/nb-min/a.png"), OWN) === null, "H1: a folder that merely starts or ends like the owner's is another folder");
+  const doc = { cells: [{ type: "markdown", code: "x", attachments: { "own.png": ref(MINE), "o.png": ref(OTHER), "c.png": ref(CHAT) } }] };
+  ok(J(referencedPaths(doc, OWN)) === J([MINE]) && J(referencedPaths(doc, null)) === "[]", "H1: referencedPaths lists only the owner's folder, and nothing without one");
+  const asked = [];
+  const e = await embedAttachments(doc, OWN, async (p) => { asked.push(p); return bytes(PNG); });
+  ok(J(asked) === J([MINE]) && J(Object.keys(e.doc.cells[0].attachments)) === J(["own.png"]) && e.missing.join() === "o.png,c.png", "H1: an export (Download, Export all, a share, a push) reads only the owner's file; the others are left out and listed, never read", { asked, missing: e.missing });
+  const got = [];
+  const w = embedAttachmentsWith(doc, OWN, (p) => (got.push(p), bytes(PNG)));
+  ok(J(got) === J([MINE]) && w.missing.join() === "o.png,c.png", "H1: the same from held bytes (the open notebook's Download and share)", got);
+  const none = [];
+  const n = await embedAttachments(doc, null, async (p) => (none.push(p), bytes(PNG)));
+  ok(none.length === 0 && n.missing.length === 3, "H1: with no owner folder, nothing is read at all");
+  // (the page's held images: only the shown document's folder, and nothing before a folder is given)
+  const reads = [];
+  const U = new ImageUrls(async (p) => { reads.push(p); return bytes(PNG); }, () => {});
+  await U.ready([MINE]);
+  ok(reads.length === 0 && U.settled(MINE), "H1: ImageUrls reads nothing before the page gives the document's folder");
+  U.clear(OWN);
+  await U.ready([MINE, OTHER, CHAT]);
+  U.url(OTHER); U.url(CHAT); U.put(OTHER, bytes(PNG));
+  await new Promise((res) => setTimeout(res, 5));
+  ok(J(reads) === J([MINE]) && U.bytes(OTHER) === null && U.bytes(CHAT) === null && U.settled(OTHER), "H1: ImageUrls follows only the shown document's folder: another notebook's or a chat's is never read, shown or held", reads);
+  U.clear("/Attachments/nb-other");
+  ok(U.bytes(MINE) === null, "H1: another document shown: the last one's images let go");
+  U.dispose();
+  // (an import: references the file brings are removed, and none is ever followed or saved)
+  const S = store();
+  const imported = { cells: [{ type: "markdown", code: "![x](attachment:o.png) ![y](attachment:own.png) ![z](attachment:i.png)", attachments: { "o.png": ref(OTHER), "own.png": ref("/Attachments/nb-new/guess.png"), "bad.png": { [FILE_KEY]: 7 }, "i.png": { "image/png": toBase64(bytes(PNG)) } } }] };
+  const saves = [];
+  const x = await extractAttachments(imported, (u) => { saves.push(u); return saveImage(S.create, "/Attachments/nb-new", u); });
+  const xa = x.doc.cells[0].attachments;
+  ok(x.dropped === 3 && x.extracted === 1 && saves.length === 1 && J(Object.keys(xa)) === J(["i.png"]) && filePathOf(xa["i.png"], "/Attachments/nb-new"), "H1: an import drops every reference the file brought (another folder's, a guess at its own, an ill-formed one) and extracts only its inline image", { dropped: x.dropped, keys: Object.keys(xa) });
+  const only = { cells: [{ type: "markdown", code: "x", attachments: { "o.png": ref(OTHER) } }] };
+  const y = await extractAttachments(only, () => { throw new Error("never saved"); });
+  ok(y.dropped === 1 && y.extracted === 0 && y.doc !== only && y.doc.cells[0].attachments === null, "H1: an import with only a reference: removed (the document is rewritten), nothing saved", y.doc.cells[0]);
+}
+// ---- the board's content-addressed names: "i" + 64 hex
+{
+  const T = store();
+  const name = "i" + "ab".repeat(32);
+  const r = await saveImage(T.create, "/Attachments/board-1", bytes(PNG), { name, read: T.read });
+  ok(r.path === `/Attachments/board-1/${name}.png` && filePathOf({ [FILE_KEY]: r.path }, "/Attachments/board-1") === r.path, "a 65-character content name (i + SHA-256 hex) is saved, and its path is a valid reference");
+}
+
+console.log(failures ? `${failures} FAILED` : "test-image-store: all passed");
+process.exit(failures ? 1 : 0);

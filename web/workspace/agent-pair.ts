@@ -18,6 +18,7 @@ import { editProblem, type NotebookEdit } from "./notebook-edit";
 import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
 import { entryUrl } from "./entry-url";
+import { IMAGE_BYTES_MAX, isRaster } from "./image-store";
 import { MADE_CHANNEL, type TexMade, type TexMayRun, type TexMayRunYes } from "./agent-made-tex";
 
 /** What the hello's result says (the agent's own claims, shown as such). Over a runner (`link`), the agent's
@@ -180,17 +181,9 @@ function contentOut(kind: string, c: unknown, what: string) {
   if (u.length > MAX) throw tooBig(u.length, what);
   try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(u) }; } catch { return { base64: b64(u) }; }
 }
-/** An image as an agent with "workspace.image" may see it: at most this many bytes, so its base64 is at most
- * 5,000,000 characters (the agent's own cap, which it checks again). */
-export const IMAGE_BYTES_MAX = 3_750_000;
-/** Whether `u` starts as a PNG, JPEG, GIF or WebP file does: by its bytes alone, never its name. */
-export function isRaster(u: Uint8Array): boolean {
-  const at = (i: number, s: number[]) => s.every((b, j) => u[i + j] === b);
-  return at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) // PNG
-    || at(0, [0xff, 0xd8, 0xff]) // JPEG
-    || at(0, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) || at(0, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) // GIF87a, GIF89a
-    || (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])); // RIFF....WEBP
-}
+// (an image as an agent with "workspace.image" may see it: the rules shared by every place images are kept, at most
+//  IMAGE_BYTES_MAX bytes, so its base64 is at most 5,000,000 characters, the agent's own cap, which it checks again)
+export { IMAGE_BYTES_MAX, isRaster };
 /** A file's contents as bytes, if they are a raster image's; else null (text, a document, other bytes). */
 const imageBytes = (c: unknown): Uint8Array | null => { const u = c instanceof Uint8Array ? c : c instanceof ArrayBuffer ? new Uint8Array(c) : null; return u && isRaster(u) ? u : null; };
 const isImageBytes = (c: unknown) => imageBytes(c) !== null;

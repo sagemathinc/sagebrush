@@ -15,6 +15,8 @@
 // is embedded or fetched until a person clicks it.
 
 import { PixelBudget, dataUrl, imageSize, pictureKey } from "./image-size";
+import { filePathOf, isFileEntry } from "./workspace/image-store";
+import type { Shown } from "./workspace/image-urls";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -69,6 +71,12 @@ export interface SafeOptions {
   remote?: boolean | "click";
   /** the document's pictures' pixels (image-size.ts): the data: pictures shown here are counted in it; none, each on its own */
   pixels?: PixelBudget;
+  /** an attachment that refers to a workspace image file ({"sagebrush/file": path}, image-store.ts): its blob: URL and
+   * size once loaded, or null (not loaded yet, missing, or not an image). Without it, such attachments aren't shown. */
+  fileImage?: (path: string) => Shown | null;
+  /** the folder of the document these attachments belong to (image-store.ts imageFolder of its owner): only references
+   * into it are followed. Without it, no file attachment is shown. */
+  fileFolder?: string | null;
 }
 
 // whether a link or an image address is harmless (control characters and spaces, which browsers ignore inside a scheme, are taken out first)
@@ -112,6 +120,13 @@ export function safeImage(src: string, o: SafeOptions = {}): string | null {
   if (a) {
     const att = o.attachments?.[a[1]];
     if (!att) return null;
+    // (one of ours, referring to a workspace file: only a well-formed path in this document's own folder, only as the
+    //  page loaded and checked it, and counted in the pixel budget like any picture; anything else of our key, another
+    //  notebook's or chat's folder included: missing)
+    if (isFileEntry(att)) {
+      const p = filePathOf(att, o.fileFolder ?? null), got = p && o.fileImage ? o.fileImage(p) : null;
+      return got && /^blob:/.test(got.url) && (o.pixels ?? new PixelBudget(Infinity)).take(got, "file\n" + p) === null ? got.url : null;
+    }
     const [mime, b64] = Object.entries(att)[0] ?? [];
     const url = `data:${mime};base64,${b64}`;
     return DATA_IMG.test(url) && shownSize(url, o) ? url : null;

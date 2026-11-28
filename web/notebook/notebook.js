@@ -19,6 +19,8 @@ import { render as renderMarkdown } from "../markdown.ts";
 import { BlockEditor } from "../board/blocks.ts";
 import { loadRemotePicture, safeHtml } from "../safe-html.ts";
 import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size.ts";
+import { FILE_KEY, IMAGE_BYTES_MAX, IMAGE_COPY, IMAGES_AT_ONCE, embedAttachmentsWith, isFileEntry, referencedPaths } from "../workspace/image-store.ts";
+import { ImageUrls } from "../workspace/image-urls.ts";
 import { safeSvg, RASTER_URL, XLINK_NS } from "../safe-svg.js";
 export { safeSvg };
 import { cellId } from "./ipynb.js";
@@ -177,6 +179,13 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
  * @param {(name: string) => string | undefined} [opts.assetUrl] the URL of one of them, if not under assetBase (a blob: in a downloaded file)
  * @param {boolean} [opts.readOnly]
  * @param {() => Promise<object | null>} [opts.mystBook] a MyST notebook's book (the workspace page's: web/workspace/book-cap.ts)
+ * @param {{ save(bytes: Uint8Array): Promise<{ path: string } | { refused: string }>, read(path: string): Promise<Uint8Array | null>, say(text: string): void, folder(): string | null }} [opts.images]
+ *   (folder: the folder of the document being shown, imageFolder of its owner, read at each load: only references into
+ *   it are shown, embedded or kept)
+ *   images in Markdown cells kept as workspace files (#1872, web/workspace/image-store.ts): the host saves a pasted or
+ *   dropped image and reads one to show it; none: pasting files does nothing, and such attachments show as missing.
+ *   save() takes the document shown when it is called, which addImages calls only while the cell pasted into is
+ *   still shown (another document loaded takes its cells out)
  * @returns {import("./types").Notebook}
  */
 export function createNotebook(root, opts = {}) {
@@ -189,6 +198,23 @@ export function createNotebook(root, opts = {}) {
   let meta = {}; // the document's other fields (name, ...), kept as they are
   // (the pixels of the pictures this document shows: image-size.ts)
   let pixels = new PixelBudget();
+  // (images in Markdown cells kept as workspace files: shown through blob: URLs the page makes once loaded and checked,
+  //  each cell drawn again when one arrives; only the host's workspace is read, only under /Attachments)
+  const images = opts.images ?? null;
+  const imageUrls = images ? new ImageUrls(images.read, () => redrawImages()) : null;
+  const fileImage = imageUrls ? (p) => imageUrls.url(p) : undefined;
+  // (the folder of the document shown, from the host at each load (its owner's, never the document's own say): the only
+  //  one whose files its references may name)
+  let fileFolder = null;
+  const hasFileImages = (cell) => cell.type === "markdown" && !!cell.attachments && Object.values(cell.attachments).some(isFileEntry);
+  function redrawImages() {
+    for (const cell of cells()) {
+      if (!hasFileImages(cell)) continue;
+      if (cell.el.classList.contains("rendered")) void renderMd(cell);
+      // (a cell being written: its blocks drawn again only while the person isn't in them, so nothing moves under the caret)
+      else if (cell.blocks && !cell.blocks.el.contains(document.activeElement)) cell.blocks.value = cell.ta.value;
+    }
+  }
   // Remote pictures in Markdown: shown at once in a document written in this
   // browser (its host's store says so: `here`, which a document from
   // elsewhere never brings, index.html's openDocument), else each when
@@ -1530,6 +1556,10 @@ export function createNotebook(root, opts = {}) {
     cell.ta.readOnly = !!opts.readOnly;
     // (typing and execCommand edits: a new text version first)
     cell.ta.addEventListener("input", () => { cell.version = Object.freeze({ text: cell.ta.value }); autosize(cell.ta); paint(cell); refilter(cell); markEdited(cell); });
+    // (an image pasted or dropped into a Markdown cell: before the editor's own paste, which takes text only)
+    el.addEventListener("paste", (e) => takeImages(cell, e), true);
+    el.addEventListener("drop", (e) => takeImages(cell, e), true);
+    el.addEventListener("dragover", (e) => { if (images && !opts.readOnly && cell.type === "markdown" && e.dataTransfer?.types.includes("Files")) e.preventDefault(); }, true);
     cell.ta.addEventListener("blur", () => { if (comp?.cell === cell) closeCompleter(); });
     cell.ta.addEventListener("click", () => { if (comp?.cell === cell) closeCompleter(); });
     cell.ta.addEventListener("keydown", (e) => editKey(cell, e));
@@ -1865,6 +1895,63 @@ export function createNotebook(root, opts = {}) {
   cellsEl.addEventListener("dragend", endDrag);
 
   // ---------------------------------------------------------- Markdown cells
+  // An image pasted or dropped into a Markdown cell (#1872): saved by the host as a workspace file (image-store.ts's
+  // rules: PNG, JPEG, GIF or WebP by their bytes, within the cap, an exclusive create), then referred to by an
+  // attachment entry {"sagebrush/file": path} and `![image](attachment:<name>)` at the caret: Jupyter's own form,
+  // so the source never changes on export (which embeds the bytes) or import. A paste that also has text (a
+  // document's selection) keeps its text: the editor pastes it, as before.
+  function takeImages(cell, e) {
+    if (!images || opts.readOnly || cell.type !== "markdown") return;
+    const dt = e.type === "paste" ? e.clipboardData : e.dataTransfer;
+    const files = dt ? [...dt.files] : [];
+    if (!files.length) return;
+    if (!(e.type === "paste" && dt.getData("text/plain"))) { e.preventDefault(); e.stopPropagation(); }
+    void addImages(cell, files);
+  }
+  async function addImages(cell, files) {
+    if (files.length > IMAGES_AT_ONCE) return images.say(IMAGE_COPY.tooMany);
+    const lines = [];
+    // (the cell pasted into still shown, still Markdown: another document loaded takes it out of the page)
+    const still = () => cell.el.isConnected && cell.type === "markdown";
+    for (const f of files) {
+      // (the size first, from the file itself: nothing over the cap is read)
+      if (f.size > IMAGE_BYTES_MAX) { images.say(IMAGE_COPY.refused("tooBig", f.size)); continue; }
+      let u;
+      try { u = new Uint8Array(await f.arrayBuffer()); } catch { images.say(IMAGE_COPY.refused("read")); continue; }
+      // (another document shown meanwhile, or this cell gone: nothing more saved, nothing put anywhere; checked just
+      //  before save, with no wait between, so save() sees the document the paste was made in)
+      if (!still()) return;
+      const r = await images.save(u);
+      if (!still()) return;
+      if (!r || !("path" in r)) { images.say(r?.refused === "noPlace" ? IMAGE_COPY.noPlace : IMAGE_COPY.refused(r?.refused ?? "other", u.length)); continue; }
+      const name = r.path.slice(r.path.lastIndexOf("/") + 1);
+      imageUrls.put(r.path, u);
+      cell.attachments = { ...(cell.attachments ?? {}), [name]: { [FILE_KEY]: r.path } };
+      lines.push(`![image](attachment:${name})`);
+    }
+    // (the cell may have gone, or stopped being Markdown, while the images were saved: the files stay, nothing is
+    //  written into another cell)
+    if (!lines.length || !still()) return;
+    insertMd(cell, lines.join("\n\n"));
+  }
+  // Markdown put into a cell as the person would type it: at the caret of the block or editor being written in, else
+  // after the cell's text (kept as it is, every space of it), then drawn; an input event, so it is saved and recorded.
+  function insertMd(cell, text) {
+    const field = cell.blocks?.field ?? (cell.el.classList.contains("rendered") ? null : cell.ta);
+    if (field && field.isConnected) {
+      // (an image is a paragraph of its own: a blank line before and after it, unless the caret is already there)
+      const a = field.selectionStart, b = field.selectionEnd, v = field.value;
+      const before = a === 0 || v.slice(0, a).endsWith("\n\n") ? "" : v.slice(0, a).endsWith("\n") ? "\n" : "\n\n";
+      const after = b === v.length || v.slice(b).startsWith("\n\n") ? "" : v.slice(b).startsWith("\n") ? "\n" : "\n\n";
+      field.setRangeText(before + text + after, a, b, "end");
+      field.dispatchEvent(new Event("input"));
+      return;
+    }
+    const v = cell.ta.value;
+    setText(cell, (v ? v + (v.endsWith("\n\n") ? "" : v.endsWith("\n") ? "\n" : "\n\n") : "") + text);
+    cell.ta.dispatchEvent(new Event("input"));
+    if (cell.el.classList.contains("rendered")) void renderMd(cell);
+  }
   function setType(cell, type) {
     // raw cells (nbformat's): text kept as it is, never run
     cell.type = type === "markdown" || type === "raw" ? type : "code";
@@ -1888,7 +1975,7 @@ export function createNotebook(root, opts = {}) {
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
   async function renderMd(cell) {
     closeBlocks(cell);
-    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
+    cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, fileImage, fileFolder, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
     cell.el.classList.add("rendered");
     if (cell.md.querySelector(".math")) typesetMath(cell.md);
     schedule();
@@ -1909,7 +1996,7 @@ export function createNotebook(root, opts = {}) {
   function openBlocks(cell) {
     if (cell.blocks || opts.readOnly) return cell.blocks;
     const b = new BlockEditor(cell.ta.value, {
-      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures(), myst: mystFor(cell, true) }),
+      render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, fileImage, fileFolder, pixels, remote: remotePictures(), myst: mystFor(cell, true) }),
       typeset: (el) => typesetMath(el),
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
@@ -2169,6 +2256,8 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
+    // (images no cell refers to any more: let go)
+    if (imageUrls) imageUrls.retain(referencedPaths({ cells: cells().map((c) => ({ type: c.type, attachments: c.attachments })) }, fileFolder));
     // (a journal's store that follows another tab's (focus takeover): nothing saved from here, nothing refused to say;
     // this page is read-only, so nothing typed waits, and it reloads the document when it writes)
     if (store?.journaled && store.readOnly === "other") return;
@@ -2358,6 +2447,9 @@ export function createNotebook(root, opts = {}) {
   }
   // Show a document, replacing what is there.
   function load(doc) {
+    // (another document, or this one again: the images held for the last one let go, read again as shown)
+    fileFolder = images?.folder?.() ?? null;
+    imageUrls?.clear(fileFolder);
     loading = true;
     shown = { synced: null, remoteSeen: 0 }; // (another document: its own)
     leftChanged();
@@ -2775,6 +2867,23 @@ export function createNotebook(root, opts = {}) {
 
   const api = {
     root,
+    /** Every image file this document's Markdown cells refer to, loaded (or found missing): before an export. */
+    imagesReady: async () => {
+      if (!imageUrls) return;
+      // (the paths of the document as it is now, again after each wait: one reloaded meanwhile, or a new image in it,
+      //  is waited for too, until a wait ends with every image it refers to settled)
+      //  (always one pass at least: it reads each held image again, so what is exported is what the workspace has now)
+      for (let first = true; ; first = false) {
+        // (the notebook destroyed meanwhile: nothing more is read)
+        if (imageUrls.disposed) return;
+        const paths = referencedPaths(snapshot(), fileFolder);
+        if (!first && paths.every((p) => imageUrls.settled(p))) return;
+        await imageUrls.ready(paths);
+      }
+    },
+    /** `doc` with its file images embedded as Jupyter's {mime: base64}, from the bytes loaded (imagesReady first), and
+     * the names of any that couldn't be (image-store.ts embedAttachmentsWith): for an export that leaves this browser. */
+    embedImages: (doc) => embedAttachmentsWith(doc, fileFolder, (p) => imageUrls?.bytes(p) ?? null),
     get kernel() { return kernel; },
     get mode() { return mode; },
     get meta() { return meta; },
@@ -2907,6 +3016,8 @@ export function createNotebook(root, opts = {}) {
     outputText, pictures, interacts, setInteract, saveOutputs, loadOutputs,
     destroy() {
       api.detach();
+      // (the images held for showing and exporting let go: their blob: URLs revoked, their bytes dropped)
+      imageUrls?.dispose();
       observer.disconnect();
       sizeObserver?.disconnect();
       removeEventListener("resize", resizeAll);

@@ -427,6 +427,28 @@ try {
     ok(await ev("!document.querySelector('#shareupload').disabled && !document.querySelector('#shareall').disabled && document.querySelector('#sharelist .sharerow input').disabled"), "after a failed upload, the same");
     await ev("window.sagebrush.shareTest.onRead = null");
     await closeDialog();
+    // (#1962, cx2: Publish reserved before the notebook's images are read again: two clicks while that read is held
+    //  make one publish, the second doing nothing; released, the dialog is idle again)
+    await openDialog();
+    await ev(`(() => { const nb = window.sagebrush.notebook, t = window.sagebrush.shareTest; t.ready = nb.imagesReady; t.prep = 0; t.reads = [];
+      t.held = new Promise((r) => (t.release = r)); nb.imagesReady = () => (t.prep++, t.held.then(() => t.ready.call(nb)));
+      t.onRead = (p) => { t.reads.push(p); }; return true; })()`);
+    await ev("document.querySelector('#shareresult').textContent = ''; document.querySelector('#shareupload').click(); document.querySelector('#shareupload').click()");
+    await sleep(300);
+    const held = await ev("({ prep: window.sagebrush.shareTest.prep, busy: document.querySelector('#shareupload').getAttribute('aria-busy'), disabled: document.querySelector('#shareupload').disabled })");
+    await ev("window.sagebrush.shareTest.release()");
+    await until("!!document.querySelector('#shareresult a') || /failed/.test(document.querySelector('#shareresult').textContent)", 60000);
+    await sleep(300);
+    const after = await ev("({ prep: window.sagebrush.shareTest.prep, reads: window.sagebrush.shareTest.reads, busy: document.querySelector('#shareupload').getAttribute('aria-busy'), disabled: document.querySelector('#shareupload').disabled, link: !!document.querySelector('#shareresult a') })");
+    ok(held.prep === 1 && held.busy === "true" && held.disabled && after.prep === 1 && after.link && after.busy === "false" && !after.disabled && after.reads.length === new Set(after.reads).size, "Publish clicked twice while the notebook's images are read: reserved at the first, one publish (each file read once), then idle again", { held, after });
+    // (and a read of the images that fails: the reservation let go, Publish idle and enabled again)
+    await ev("(() => { const nb = window.sagebrush.notebook; nb.imagesReady = () => Promise.reject(new Error('unreadable')); return true; })()");
+    await ev("document.querySelector('#shareupload').click()");
+    await sleep(500);
+    const failed = await ev("({ busy: document.querySelector('#shareupload').getAttribute('aria-busy'), disabled: document.querySelector('#shareupload').disabled, said: document.querySelector('#shareresult').textContent })");
+    ok(failed.busy === "false" && !failed.disabled && /^Couldn't read the notebook's images: unreadable\. Nothing was published\.$/.test(failed.said), "...and when reading the images fails, Publish is let go (idle and enabled again) and the dialog says so", failed);
+    await ev("(() => { const nb = window.sagebrush.notebook, t = window.sagebrush.shareTest; nb.imagesReady = t.ready; t.onRead = null; return true; })()");
+    await closeDialog();
   }
 
   // ---- a close's event that arrives after the next open (the browser queues it): stale, the new
@@ -556,6 +578,20 @@ try {
     await q.ev("document.querySelector('#sharedlg [data-dl=withfiles]').click()");
     await q.until("document.querySelector('#dldepsdlg').open", 5000).catch(() => {});
     ok(await q.ev("document.querySelector('#dldepsdlg').open && !document.querySelector('#sharedlg').open"), "With its files (.zip): the list of files opens in place of the Share dialog");
+    // (#1962, cx2: the .zip reserved before the notebook's images are read again: two clicks while that read is held
+    //  make one .zip, the second doing nothing; released, the dialog is idle again)
+    await q.until("!document.querySelector('#dldepsgo').disabled", 12000).catch(() => {});
+    await q.ev(`(() => { const nb = window.sagebrush.notebook; window.__ready = nb.imagesReady; window.__prep = 0; window.__dl = [];
+      window.__held = new Promise((r) => (window.__release = r)); nb.imagesReady = () => (window.__prep++, window.__held.then(() => window.__ready.call(nb))); return true; })()`);
+    await q.ev("document.querySelector('#dldepsgo').click(); document.querySelector('#dldepsgo').click()");
+    await sleep(300);
+    const zheld = await q.ev("({ prep: window.__prep, text: document.querySelector('#dldepsgo').textContent, dl: window.__dl.length })");
+    await q.ev("window.__release()");
+    await q.until("window.__dl.length > 0 || /stopped|Nothing/.test(document.querySelector('#dldepsresult').textContent)", 30000).catch(() => {});
+    await sleep(500);
+    const zafter = await q.ev("({ prep: window.__prep, dl: window.__dl, text: document.querySelector('#dldepsgo').textContent, result: document.querySelector('#dldepsresult').textContent })");
+    ok(zheld.prep === 1 && /Preparing/.test(zheld.text) && zheld.dl === 0 && zafter.prep === 1 && zafter.dl.length === 1 && /\.zip$/.test(zafter.dl[0]) && zafter.text === "Download .zip", "Download .zip clicked twice while the notebook's images are read: reserved at the first, one .zip, then idle again", { zheld, zafter });
+    await q.ev("window.sagebrush.notebook.imagesReady = window.__ready");
     await q.ev("document.querySelector('#dldepsdlg').close(); HTMLAnchorElement.prototype.click = window.__aclick");
     await raw("Target.closeTarget", { targetId: q.targetId });
     await raw("Target.disposeBrowserContext", { browserContextId });
