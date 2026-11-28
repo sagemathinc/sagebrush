@@ -96,6 +96,11 @@
    "reason": "NaN against NA in vector + and *: R takes the right missing value by operand lengths; Rill keeps the scalar rule (the left)",
    "sha256": "70d96e09b77aa3a67d977321920ff0a16a3923eedc7a7bf991efd39ecc8cc670"
   },
+  "rill-tests/arith/test_2.R#mod-loss-of-accuracy-per-element": {
+   "class": "not-implemented",
+   "reason": "several warnings in one statement (A1.4)",
+   "sha256": "1b29f13866794d9989161b95e0b52c8eb8ba2b4fadc15878469dd36431b3a779"
+  },
   "rill-tests/core/test_1.R#colon-chr-bad": {
    "class": "not-implemented",
    "reason": "warnings reported after an error, 'In addition:' (A1.4)",

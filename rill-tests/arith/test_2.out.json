@@ -107,6 +107,12 @@
    "status": 0,
    "stderr": "",
    "stdout": " [1] FALSE FALSE  TRUE  TRUE FALSE FALSE  TRUE  TRUE FALSE FALSE\n[1] TRUE TRUE\n"
+  },
+  {
+   "id": "mod-loss-of-accuracy-per-element",
+   "status": 0,
+   "stderr": "Warning messages:\n1: probable complete loss of accuracy in modulus \n2: probable complete loss of accuracy in modulus \n",
+   "stdout": ""
   }
  ],
  "file": "rill-tests/arith/test_2.R",

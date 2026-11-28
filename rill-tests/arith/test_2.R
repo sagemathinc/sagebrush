@@ -73,3 +73,5 @@ c((36.911 %/% -2.293720254535676e-15) == -1.6092197785240376e+16, (-1.3733456825
 x <- c(NaN, NaN); y <- c(NA_real_, NA_real_)
 is.nan(c(x + y, y + x, NaN + y, x * y, NaN * y))
 is.nan(c(NaN, NaN) + c(NA_integer_, NA_integer_))
+#-- mod-loss-of-accuracy-per-element
+x <- c(1e300, 2.5, 1e-300) %% c(7, 1e-300, -7)

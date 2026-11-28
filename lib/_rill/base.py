@@ -333,7 +333,7 @@ def arith(sess, call, args):
             # NaN - / %/% NA_integer_ stay NaN; ^ the right one, NaN^NA being NA and NA^NaN NaN; %% gives NA, but NaN
             # for NA %% 0)
             y_real_na = y.type in ("double", "logical")
-            lost = False
+            lost = 0
             for i in range(n):
                 a, b = xd[i % nx], yd[i % ny]
                 if op == "^" and (a == 1 or b == 0):
@@ -347,10 +347,11 @@ def arith(sess, call, args):
                         out[i] = math.nan if a is not None and a != a and (y_real_na or op not in "+*") else None
                 else:
                     out[i] = _dbl_op(op, a, b)
-                    if op == "%%" and not lost and b != 0 and abs(a / b) > _TWO63 and not math.isinf(a / b):
-                        lost = True
-            if lost:
-                # (R 4.5.3 warns, with no call, when |a/b| passes 2^63: 1 %% 1e-300 is 0 with this warning)
+                    if op == "%%" and b != 0 and abs(a / b) > _TWO63 and not math.isinf(a / b):
+                        lost += 1
+            for _ in range(lost):
+                # (R 4.5.3 warns, with no call, once for each element whose |a/b| passes 2^63: 1 %% 1e-300 is 0 with
+                # this warning)
                 sess.warn("probable complete loss of accuracy in modulus")
         return RVector(rtype, out, _result_attrs(n, x, y))
 
