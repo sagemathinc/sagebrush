@@ -74,6 +74,18 @@ await key("g"); await key("g", false);
 ok((await ev(`space3d.walking`)) === false && (await ev(`space3d.controls.enabled`)), "G flies instead (the orbit controls back)");
 await key("g"); await key("g", false);
 ok((await ev(`space3d.walking`)) === true, "and G walks again");
+// (the wheel: a mouse's notch is a step of 3; a trackpad's pinch, many small Ctrl+wheel turns, walks only as far as they turn)
+const wheel = (n, init) => ev(`(async () => {
+  const c = document.querySelector("canvas"), a = space3d.camera.position.clone();
+  for (let k = 0; k < ${n}; k++) { c.dispatchEvent(new WheelEvent("wheel", { ...${JSON.stringify(init)}, bubbles: true, cancelable: true })); await new Promise((r) => requestAnimationFrame(r)); }
+  const b = space3d.camera.position; return +Math.hypot(b.x - a.x, b.z - a.z).toFixed(2);
+})()`);
+const notch = await wheel(1, { deltaY: -100 });
+ok(notch > 2.5 && notch < 3.5, "a mouse wheel's notch walks a step of 3", { notch });
+const pinch = await wheel(60, { deltaY: -2, ctrlKey: true });
+ok(pinch > 1 && pinch < 6, "a second of trackpad pinch (60 small Ctrl+wheel turns) walks a few units, not 180", { pinch });
+const lines = await wheel(1, { deltaY: -3, deltaMode: 1 });
+ok(lines > 1 && lines < 2, "a wheel that counts in lines (3 lines) walks as 48 pixels would", { lines });
 await key("?"); await key("?", false);
 ok(await ev(`!document.querySelector('[data-c="helpcard"]').hidden`), "? shows the help");
 await key("Escape"); await key("Escape", false);
