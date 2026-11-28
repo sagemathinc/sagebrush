@@ -253,9 +253,13 @@ fn aplist_many<'py>(py: Python<'py>, curves: Vec<Vec<i64>>, n: u64, threads: usi
 /// (number of good primes p <= n, [mean (a_p^2/p)^k for k = 1..kmax]): Sato-Tate moments.
 #[pyfunction]
 #[pyo3(signature = (a, n, kmax=4, threads=0))]
-fn moments(py: Python<'_>, a: Vec<i64>, n: u64, kmax: usize, threads: usize) -> PyResult<(u64, Vec<f64>)> {
+fn moments<'py>(py: Python<'py>, a: Vec<i64>, n: u64, kmax: usize, threads: usize) -> PyResult<Bound<'py, PyAny>> {
     let e = curve(a)?;
-    run(py, threads, || ap_reserve("moments", n, 0, sagebrush_ap::moments_fixed_bytes(n, kmax)).map(|_held| sagebrush_ap::moments(&e, n, kmax)))?.map_err(err)
+    let fixed = sagebrush_ap::moments_fixed_bytes(n, kmax);
+    let (m, held) = run(py, threads, || ap_reserve("moments", n, 0, fixed).map(|r| (sagebrush_ap::moments(&e, n, kmax), r)))?.map_err(err)?;
+    let out = m.into_pyobject(py)?.into_any();
+    drop(held);
+    Ok(out)
 }
 
 // ---- sagebrush.mf: weight k >= 2 with a Dirichlet character ----

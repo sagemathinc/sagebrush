@@ -54,17 +54,17 @@
   "owner": "elliptic curves (engine)",
   "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it; these lines refuse nothing"
  },
- "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let gap_ms = hooks::max_gap_ns() as f64 / 1e6; #0": {
+ "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns()); #0": {
   "class": "none",
   "owner": "elliptic curves (engine)",
-  "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it; these lines refuse nothing"
+  "reason": "the Stop test of the point search reads the hooks' longest gaps (max_gap_ns, max_poll_gap_ns); it refuses nothing"
  },
  "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let r = catch(|| search(rmax, 1, 1000)); #0": {
   "class": "none",
   "owner": "elliptic curves (engine)",
   "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it; these lines refuse nothing"
  },
- "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let rmax = 2_000_000u64; #0": {
+ "engine/ap/tests/search_stop.rs :: search_stops_inside_the_scan_and_at_the_limit :: let rmax = 10_000_000u64; #0": {
   "class": "none",
   "owner": "elliptic curves (engine)",
   "reason": "rmax is the point search's numerator bound (the caller's height bound) in a Stop test of it; these lines refuse nothing"
@@ -8149,7 +8149,17 @@
   "owner": "engine binary transport (sagebrush-wire)",
   "reason": "the binary pieces transport (both hosts), before any allocation: at most 2^16 pieces, summed size within the frame cap; the echelon sends about 2^12 pieces at most and keeps its memory-admitted Python path past the cap, so no computation is limited"
  },
- "engine/py/src/lib.rs :: moments :: run(py, threads, || ap_reserve(\"moments\", n, 0, sagebrush_ap::moments_fixed_bytes(n, kmax)).map(|_held| sagebrush_ap::moments(&e, n, kmax)))?.map_err(err) #0": {
+ "engine/py/src/lib.rs :: moments :: fn moments<'py>(py: Python<'py>, a: Vec<i64>, n: u64, kmax: usize, threads: usize) -> PyResult<Bound<'py, PyAny>> { #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "kmax is the number of Sato-Tate moments asked for; these lines size moments' reservation from it, a byte count for the ledger, and cap nothing"
+ },
+ "engine/py/src/lib.rs :: moments :: let (m, held) = run(py, threads, || ap_reserve(\"moments\", n, 0, fixed).map(|r| (sagebrush_ap::moments(&e, n, kmax), r)))?.map_err(err)?; #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "kmax is the number of Sato-Tate moments asked for; these lines size moments' reservation from it, a byte count for the ledger, and cap nothing"
+ },
+ "engine/py/src/lib.rs :: moments :: let fixed = sagebrush_ap::moments_fixed_bytes(n, kmax); #0": {
   "class": "none",
   "owner": "elliptic curves (engine)",
   "reason": "kmax is the number of Sato-Tate moments asked for; these lines size moments' reservation from it, a byte count for the ledger, and cap nothing"
