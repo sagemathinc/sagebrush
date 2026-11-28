@@ -526,15 +526,30 @@ fn shortest(mut u: (i128, i128), mut v: (i128, i128)) -> (i128, i128) {
     }
 }
 
-/// The primes of O_F above the rational prime p, sorted.
-pub fn primes_above(p: u64) -> Vec<Prime> {
-    assert!(is_prime(p), "{} is not prime", p);
+/// The primes of O_F above the rational prime p, sorted; an error if p is
+/// not prime, is inert of norm p^2 >= 2^64 (p >= 2^32), past the u64 norms
+/// of [`Prime`] and [`Hnf`], or is split and at least 2^62, past the i128
+/// arithmetic of the generator's search (its Gram values reach 6 p^2).
+pub fn primes_above(p: u64) -> Result<Vec<Prime>, String> {
+    if !is_prime(p) {
+        return Err(format!("{} is not prime", p));
+    }
     if p == 5 {
         // (sqrt 5) = (2w - 1)
-        return vec![Prime::from_gen(5, Kind::Ramified, Elt::new(-1, 2))];
+        return Ok(vec![Prime::from_gen(5, Kind::Ramified, Elt::new(-1, 2))]);
     }
     if p % 5 == 2 || p % 5 == 3 {
-        return vec![Prime::from_gen(p, Kind::Inert, Elt::int(p as i64))];
+        // (p is inert: its prime (p) has norm p^2, which must fit a u64, and
+        // p itself an i64 generator; a split prime's norm is p)
+        if p >= 1 << 32 {
+            return Err(format!("the prime above {} is inert of norm {}^2, at least 2^64: past the norms supported", p, p));
+        }
+        return Ok(vec![Prime::from_gen(p, Kind::Inert, Elt::int(p as i64))]);
+    }
+    if p >= 1 << 62 {
+        // (shortest's reduction forms 2 B(u, v) + Q(u) <= 6 p^2 + 6 p + 3 in
+        // i128 from the basis (p, 0), (-r, 1): below 2^127 for p < 2^62)
+        return Err(format!("the primes above {} are split of norm {}, at least 2^62: past the norms supported", p, p));
     }
     // p = +-1 mod 5 splits: x^2 - x - 1 has the roots r = (1 +- sqrt 5)/2
     // mod p, and (p) = (p, w - r)(p, w - r'). The lattice (p, w - r) has
@@ -551,7 +566,7 @@ pub fn primes_above(p: u64) -> Vec<Prime> {
         v.push(Prime::from_gen(p, Kind::Split, g));
     }
     v.sort();
-    v
+    Ok(v)
 }
 
 /// A nonzero ideal of O_F with its factorization and a totally positive
@@ -577,7 +592,7 @@ impl Ideal {
         let mut factors = vec![];
         let mut rest = g;
         for (p, _) in factor_u64(n as u64)? {
-            for pr in primes_above(p) {
+            for pr in primes_above(p)? {
                 let mut e = 0;
                 while let Some(q) = rest.div_exact(pr.gen) {
                     rest = q;
@@ -681,7 +696,10 @@ pub fn rational_primes(n: u64) -> Vec<u64> {
 
 /// The prime ideals of norm at most bound, sorted by norm.
 pub fn primes_of_bounded_norm(bound: u64) -> Vec<Prime> {
-    let mut v: Vec<Prime> = rational_primes(bound).into_iter().flat_map(primes_above).filter(|p| p.norm <= bound).collect();
+    // (the only refusal of primes_above(p) for a prime p is an inert one of
+    // norm p^2 >= 2^64, past any bound)
+    let mut v: Vec<Prime> =
+        rational_primes(bound).into_iter().filter_map(|p| primes_above(p).ok()).flatten().filter(|p| p.norm <= bound).collect();
     v.sort();
     v
 }
@@ -714,6 +732,33 @@ pub fn ideals_of_bounded_norm(bound: u64) -> Vec<Ideal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Inert primes whose norm p^2 passes 2^64 are refused, not wrapped: Sage
+    /// 10.10 gives 2^63 - 25 and 2^64 - 59 one inert prime each, of norm p^2
+    /// (85070591730234615404675050015203263089 and
+    /// 340282366920938461286658806734041124249), where this gave norms 625 and
+    /// 3481. Split primes from 2^62 on are refused too (the generator's
+    /// search passes i128 there; in a debug build 2^63 - 259 overflowed).
+    /// The largest inert prime below 2^32 and the largest split prime below
+    /// 2^62 are still answered, with Sage's norms.
+    #[test]
+    fn primes_above_norms_past_u64() {
+        for p in [(1u64 << 63) - 25, u64::MAX - 58] {
+            let e = primes_above(p).unwrap_err();
+            assert!(e.contains("inert") && e.contains("2^64"), "{}", e);
+        }
+        let v = primes_above(4294967197).unwrap();
+        assert_eq!((v.len(), v[0].norm, v[0].kind), (1, 18446743223306036809, Kind::Inert));
+        let v = primes_above(4611686018427387761).unwrap();
+        assert_eq!(v.len(), 2);
+        for q in &v {
+            assert_eq!((q.norm, q.kind), (4611686018427387761, Kind::Split));
+        }
+        for p in [9223372036854775549, 18446744073709551521] {
+            assert!(primes_above(p).unwrap_err().contains("2^62"));
+        }
+        assert!(primes_above(91).unwrap_err().contains("not prime"));
+    }
 
     /// For tests/wasm-stop.mjs (the Stop button in wasm): seconds of
     /// Pollard-Brent factorizations of products of two primes near 2^31,

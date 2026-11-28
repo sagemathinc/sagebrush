@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn local_p1_bijection() {
         for p in rational_primes(20) {
-            for pr in primes_above(p) {
+            for pr in primes_above(p).unwrap() {
                 for e in 1..=3u32 {
                     if (pr.norm as u128).pow(e) > 5000 {
                         continue;

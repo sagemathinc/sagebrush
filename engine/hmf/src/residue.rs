@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn arithmetic_agrees_with_o_f() {
         for p in rational_primes(30) {
-            for pr in primes_above(p) {
+            for pr in primes_above(p).unwrap() {
                 for e in 1..=4u32 {
                     if (pr.norm as u128).pow(e) > 20000 {
                         continue;
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn square_roots() {
         for p in [3u64, 7, 11, 13, 41, 101, 1009] {
-            for pr in primes_above(p) {
+            for pr in primes_above(p).unwrap() {
                 let k = LocalRing::new(pr, 1).unwrap();
                 if k.q <= 64 {
                     continue;
