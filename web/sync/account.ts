@@ -534,6 +534,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const wait = this.opsRate.take(list.length);
     if (wait) throw new SyncError("rate", "too many ops", { retry_after: wait });
     return this.ctx.storage.transactionSync(() => {
+      // (an account's index log is either plaintext or sealed, never both: once it has a key chain (which a sync-data
+      // purge keeps), no plaintext op is taken, decided in this transaction, as genesis decides the converse in the chain's)
+      if (this.encrypted()) throw new SyncError("conflict", "this account's sync is end-to-end encrypted: changes in the clear aren't taken", { reason: "sealed_account" });
       let next = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
       const out: ({ dseq: number; seq: number } | { dseq: number; code: string })[] = [];
       const refusedCount = () => Number(this.one("SELECT COUNT(*) AS n FROM refused WHERE device = ?", device)!.n);
@@ -2601,6 +2604,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         if (wait) throw new SyncError("rate", "too many key-chain changes; wait", { retry_after: wait });
       }
       return store.append(a, {
+        // (an account's index log is either plaintext or sealed, never both: no chain begins over changes already in the
+        // clear, decided in the append's own transaction, so a plaintext op can't land between this check and the chain)
+        genesis: () => {
+          if (this.one("SELECT 1 AS x FROM ops LIMIT 1")) throw new SyncError("conflict", "this account's sync already holds changes in the clear: delete your synced data first", { reason: "plaintext_log" });
+        },
         work: () => {
           const wait = this.e2eResetWork.take(1, this.e2eNow());
           if (wait) throw new SyncError("rate", "too many reset attempts; wait", { retry_after: wait });

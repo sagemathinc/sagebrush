@@ -200,7 +200,7 @@ export class E2EStore {
    * length; it is charged to `chargeReset` only once it has verified, and its transaction replaces every chain row and
    * wrapper with the reset and its package, keeps every keyring row, and records the checkpoint anchor.
    */
-  async append(a: { entry: unknown; keyring?: unknown; wrappers?: unknown }, charge: { work?: () => void; verified?: () => void } = {}): Promise<{ seq: number; head: string }> {
+  async append(a: { entry: unknown; keyring?: unknown; wrappers?: unknown }, charge: { work?: () => void; verified?: () => void; genesis?: () => void } = {}): Promise<{ seq: number; head: string }> {
     if (typeof a.entry !== "string" || a.entry.length === 0 || utf8(a.entry).length > E2E.entryBytes) throw new SyncError("invalid", "an entry is canonical JSON text, at most 64 KiB");
     const wrappers = a.wrappers ?? [];
     if (!Array.isArray(wrappers) || wrappers.length > E2E.wrappers || wrappers.some((w) => typeof w !== "string" || utf8(w).length > E2E.wrapperBytes)) throw new SyncError("invalid", "wrappers are at most 64 texts of 8 KiB");
@@ -255,6 +255,9 @@ export class E2EStore {
       for (const s of E2E_SCHEMA) this.sql.exec(s);
       // (the head checked against is still the stored one: another append in between makes this one stale)
       if (this.storedSeq() !== at) this.stale();
+      // (a genesis: the caller's own condition, decided here, in the same step as the append, so nothing the caller
+      // checks can change between its check and the chain beginning)
+      if (op === "genesis") charge.genesis?.();
       // (a reset compacts: the chain's rows and every wrapper go, and the reset and its package take their place)
       if (op === "reset") {
         this.sql.exec("DELETE FROM e2e_chain");

@@ -53,9 +53,10 @@ const P = "5ea1ed00-0004-4e2e-8e2e-e2e2e2e2e204"; // the sync generation: deleti
 const S = "5ea1ed00-0005-4e2e-8e2e-e2e2e2e2e205"; // what a device that pulls needs: the signed fields, acks, a refusal's end
 const X = "5ea1ed00-0006-4e2e-8e2e-e2e2e2e2e206"; // the agents' index of an account that becomes encrypted
 const Y = "5ea1ed00-0007-4e2e-8e2e-e2e2e2e2e207"; // an account encrypted before its first grant
-const Z = "5ea1ed00-0008-4e2e-8e2e-e2e2e2e2e208"; // an account encrypted while its index builds
+const Z = "5ea1ed00-0008-4e2e-8e2e-e2e2e2e2e208"; // (unused: an index building over plaintext ops can no longer get a key chain)
 const K = "5ea1ed00-0009-4e2e-8e2e-e2e2e2e2e209"; // releases keyed to the add they end
 const L = "5ea1ed00-000a-4e2e-8e2e-e2e2e2e2e20a"; // an object made before the index's references
+const G = "5ea1ed00-000b-4e2e-8e2e-e2e2e2e2e20b"; // a plaintext op raced against genesis
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -64,7 +65,7 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R, P, S, X, Y, Z, K, L].join(",");
+const listed = [A, N, R, P, S, X, Y, Z, K, L, G].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
@@ -397,9 +398,15 @@ await section("sealed ops: signed by a current device, under the current head", 
   await seam(A, { sealedCap: 1_000_000 });
   n += 2;
 
-  // (an account with a key chain is encrypted (e2e PR 5d): its agents' index isn't rebuilt, sealed ops or not)
+  // (an account with a key chain is encrypted (e2e PR 5d): its agents' index isn't rebuilt, sealed ops or not; and its
+  // log takes no plaintext op (an index log is plaintext or sealed, never both): refused for the whole message, nothing
+  // applied, this device's next dseq unchanged)
+  const rows0 = await logRows();
   const plain = await ws.ask({ t: "ops", ops: [{ dseq: n, t: Date.now(), by: "person", op: "mkdir", path: "/after-sealed", kind: "folder", fid: "00000000000005b1" }] });
-  ok(Number.isInteger(plain?.ops?.[0]?.seq), "(a plaintext op after the sealed ones)");
+  ok(plain?.t === "error" && plain.code === "conflict" && plain.detail?.reason === "sealed_account" && (await logRows()) === rows0, "a plaintext op after the sealed ones: refused (conflict, sealed_account), nothing applied: " + J(plain));
+  const still = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n)] });
+  ok(Number.isInteger(still?.ops?.[0]?.seq), "…and the same dseq goes on as a sealed op: accepted");
+  n += 1;
   const rb = await at(SITE, "/api/sync/v1/index/rebuild", { method: "POST", headers: { cookie: s, origin: SITE, "content-type": "application/json" }, body: "{}" });
   const rbb = await rb.json().catch(() => ({}));
   ok(rb.status === 409 && rbb.reason === "encrypted", "the agents' index of an account with a key chain isn't rebuilt: 409, encrypted: " + J({ status: rb.status, body: rbb }));
@@ -510,9 +517,9 @@ await section("releases keyed to the add they end: exact, once, and only an inde
     refs: [await one(b1), await one(b2), await one(b3), await one(otherAdd.blob)],
     index_refs: (await acct.inspect({}))?.index_refs,
   });
-  // (a plaintext op first, so K's seqs and S's differ: its seq is no add here)
-  const pl = await ws.ask({ t: "ops", ops: [{ dseq: n, t: Date.now(), by: "person", op: "create", path: "/k.txt", kind: "file", fid: "0000000000000e01", sha256: sha(b3), size: b3.length }] });
-  ok(Number.isInteger(pl?.ops?.[0]?.seq) && (await one(b3)) === 1, "(a plaintext op naming b3: its shared count is 1, and no index add)");
+  // (a sealed op with no references first, so K's seqs and S's differ: its seq is no add here)
+  const pl = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n)] });
+  ok(Number.isInteger(pl?.ops?.[0]?.seq) && (await one(b3)) === 0, "(a sealed op naming no blob: b3's shared count is 0, and no index add)");
   n += 1;
   const addOp = async (sock, by, sdev, dseq, adds) => (await sock.ask({ t: "sops", ops: [await signed(W, by, st, sdev, dseq, { adds })] }))?.ops?.[0]?.seq;
   const s1 = await addOp(ws, d, dev, n, [sha(b1)]), s2 = await addOp(ws, d, dev, n + 1, [sha(b1)]), s3 = await addOp(ws, d, dev, n + 2, [sha(b2)]), s4 = await addOp(ws, d, dev, n + 3, [sha(b2)]);
@@ -536,12 +543,12 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   ok(!(otherAdd.seq === s1 || otherAdd.seq === s2), "(S's add seq names no add of its blob here)");
   await refused([{ address: sha(otherAdd.blob), add: otherAdd.seq }], "another account's add (its blob held here too, its seq S's)");
   await refused([{ address: sha(b1), add: s4 + 1000 }], "a future add seq");
-  await refused([{ address: sha(b3), add: pl.ops[0].seq }], "a seq that is an op, but no index add (a plaintext op naming the blob)");
+  await refused([{ address: sha(b3), add: pl.ops[0].seq }], "a seq that is an op, but no index add of the blob (a sealed op naming none)");
   await refused([{ address: sha(b1), add: s1 }, { address: sha(b2), add: s1 }], "one good release and one wrong one: the op whole");
   // (b3: held only by other kinds of reference, as a document's pin or a manifest holds one, never by an index add)
   await seam(K, { shareRefs: { sha256: sha(b3), n: 2 } });
-  ok((await one(b3)) === 3, "(b3's shared count raised as two pins or manifests would: 3, still no index add)");
-  await refused([{ address: sha(b3), add: s1 }], "a blob held only by a pin, a manifest or a plaintext op: no index add of it to end");
+  ok((await one(b3)) === 2, "(b3's shared count raised as two pins or manifests would: 2, still no index add)");
+  await refused([{ address: sha(b3), add: s1 }], "a blob held only by a pin or a manifest: no index add of it to end");
   // (the same add twice in one op: a form error, so the op is refused before any check of the log)
   await refused([{ address: sha(b1), add: s1 }, { address: sha(b1), add: s1 }], "the same (address, add) twice in one op");
   // (a malformed release: an old bare address, a missing or zero add, an extra field)
@@ -579,7 +586,7 @@ await section("releases keyed to the add they end: exact, once, and only an inde
   ok(J(codes.slice().sort()) === J(["invalid", "seq"]) && (await one(b2)) === 2 && ((await acct.inspect({}))?.index_refs ?? []).filter((r) => r.address === sha(b2) && r.add_seq === s3 && r.released_seq !== null).length === 1, "two devices release one add at once: one accepted, one refused invalid, the add ended once: " + J({ codes, refs: await one(b2) }));
   const x3 = await (async () => (await wp.ask({ t: "sops", ops: [await signed(W, phone, st, pdev, m++, { releases: [{ address: sha(b2), add: s4 }] })] }))?.ops?.[0])();
   ok(Number.isInteger(x3?.seq) && (await one(b2)) === 2, "the other device releases b2's other add, which this device added: accepted, its shared count kept");
-  ok((await one(b3)) === 3, "b3's shared count is still the pins' and the plaintext op's, untouched by every refusal");
+  ok((await one(b3)) === 2, "b3's shared count is still the pins', untouched by every refusal");
   ws.ws.close();
   wp.ws.close();
 });
@@ -588,7 +595,7 @@ await section("an object made before the index's references: its restart makes t
   const s = await enabled(L);
   const ws0 = await socket(s);
   const n0 = (await hello(ws0, "sealed-dev-l001")).next_dseq;
-  ok(Number.isInteger((await ws0.ask({ t: "ops", ops: [{ dseq: n0, t: Date.now(), by: "person", op: "mkdir", path: "/l", kind: "folder", fid: "0000000000000f01" }] }))?.ops?.[0]?.seq), "(a plaintext op: the object exists)");
+  ok(Number.isInteger(n0), "(its device said hello: the object exists)");
   ws0.ws.close();
   const acct = await objectOf(L);
   ok((await acct.testOldIndexRefs()) === true, "(the table dropped, as an object made before it has none)");
@@ -608,9 +615,10 @@ await section("an object made before the index's references: its restart makes t
   ws.ws.close();
 });
 
-await section("an encrypted account's agents' index: off, every route that reads it refused, before and after the first sealed op", async () => {
+await section("an index log is plaintext or sealed, never both; an encrypted account's agents' index: off, every route that reads it refused", async () => {
   const agentCall = (token, verb, params) => at(SITE, "/api/agent/v1/" + verb, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify(params) });
   const grant = async (s, id) => (await (await post(s, id, "/api/sync/v1/grants", { agent: "an agent", scopes: [{ path: "/", access: "read" }] })).json()).token;
+  // (X: plaintext first, its agents' index built; then no key chain can begin over it: genesis refused, and nothing changes)
   const s = await enabled(X);
   const ws = await socket(s);
   const n = (await hello(ws, "sealed-dev-x001")).next_dseq;
@@ -624,66 +632,71 @@ await section("an encrypted account's agents' index: off, every route that reads
     st = await agentCall(token, "stat", { path: "/before" });
     if (st.status !== 200) await new Promise((r) => setTimeout(r, 50));
   }
-  ok(st?.status === 200, "(before its key chain: the agents' index is built and answers)");
+  ok(st?.status === 200, "(before any key chain: the agents' index is built and answers)");
   const W = account(X);
   const g = await W.genesis();
-  ok((await post(s, X, "/api/sync/v1/e2e/chain", g.body)).status === 201, "(its key chain made: the account is encrypted from here)");
-  const refused = async (what) => {
-    const r = await agentCall(token, what.verb, what.params);
-    const b = await r.json().catch(() => ({}));
-    return r.status === 409 && b.error === "conflict" && b.reason === "encrypted";
-  };
-  const verbs = [{ verb: "stat", params: { path: "/before" } }, { verb: "list", params: { folder: "/" } }, { verb: "list", params: { folder: "/", recursive: true } }];
-  const before = await Promise.all(verbs.map(refused));
-  ok(before.every(Boolean), "before its first sealed op: stat, list and a recursive list are refused (409 conflict, encrypted), the index it had never read: " + J(before));
-  const rb = await at(SITE, "/api/sync/v1/index/rebuild", { method: "POST", headers: { ...hdr(s, X, SITE), "content-type": "application/json" }, body: "{}" });
-  const rbb = await rb.json().catch(() => ({}));
-  ok(rb.status === 409 && rbb.reason === "encrypted", "rebuilding the index is refused too: " + J({ status: rb.status, body: rbb }));
-  const ix0 = await ax.testIndex({});
-  const pl = await ws.ask({ t: "ops", ops: [{ dseq: n + 1, t: Date.now(), by: "person", op: "mkdir", path: "/after-chain", kind: "folder", fid: "0000000000000d02" }] });
-  ok(Number.isInteger(pl?.ops?.[0]?.seq), "(a plaintext op after its key chain)");
-  const ix1 = await ax.testIndex({});
-  ok(ix1.cursor === ix0.cursor && ix1.entries === ix0.entries && ix1.max > ix0.max, "the ready index takes no op past the key chain (nothing applied live): " + J({ before: [ix0.cursor, ix0.entries], after: [ix1.cursor, ix1.entries], max: ix1.max }));
-  const op = await signed(W, g.d, g.next, "sealed-dev-x001", n + 2);
-  ok(Number.isInteger((await ws.ask({ t: "sops", ops: [op] }))?.ops?.[0]?.seq), "(a sealed op accepted)");
-  const after = await Promise.all(verbs.map(refused));
-  ok(after.every(Boolean), "after it: still refused, every one: " + J(after));
-  const acct = await objectOf(X);
-  const ix = await acct.testIndex({});
-  ok(ix && ix.state !== "building", "the index isn't building any more for it (nothing derives from a log it can't read): " + J(ix?.state));
+  const gr = await post(s, X, "/api/sync/v1/e2e/chain", g.body);
+  const grb = await gr.json().catch(() => ({}));
+  ok(gr.status === 409 && grb.error === "conflict" && grb.reason === "plaintext_log" && (await seam(X, {})).e2e_chain <= 0,
+    "genesis over a log that holds a plaintext op: refused (409 conflict, plaintext_log), no chain stored: " + J({ status: gr.status, body: grb }));
+  ok((await agentCall(token, "stat", { path: "/before" })).status === 200, "…and the plaintext account goes on as before: its agents' index still answers");
   ws.ws.close();
-  // (an account with a key chain before its first grant: the grant starts no index; a plaintext account is unchanged)
+  // (Y: a key chain first: its first grant starts no index, every route that reads one is refused, its log takes no
+  // plaintext op, and sealed ops go on)
   const sy = await enabled(Y);
   const Wy = account(Y);
   const gy = await Wy.genesis();
-  ok((await post(sy, Y, "/api/sync/v1/e2e/chain", gy.body)).status === 201, "(Y: a key chain first)");
+  ok((await post(sy, Y, "/api/sync/v1/e2e/chain", gy.body)).status === 201, "(Y: a key chain first, over an empty log)");
   const ty = await grant(sy, Y);
   const iy = await (await objectOf(Y)).testIndex({});
   ok((await agentCall(ty, "stat", { path: "/" })).status === 409 && (iy?.state ?? null) === null,
     "Y: its first grant starts no index, and its agents' stat is refused: " + J(iy?.state ?? null));
-  // (an index still building when the key chain is made: no step builds it further, and the alarm stops waking for it)
-  const sz = await enabled(Z);
-  const wz = await socket(sz);
-  const nz = (await hello(wz, "sealed-dev-z001")).next_dseq;
-  ok(Number.isInteger((await wz.ask({ t: "ops", ops: [{ dseq: nz, t: Date.now(), by: "person", op: "mkdir", path: "/z", kind: "folder", fid: "0000000000000d03" }] }))?.ops?.[0]?.seq), "(Z: a plaintext op)");
-  wz.ws.close();
-  const az = await objectOf(Z);
-  await az.testIndex({ manual: true });
-  const tz = await grant(sz, Z);
-  ok(tz && (await az.testIndex({})).state === "building", "(Z: its first grant starts the index, held at its first step)");
-  const gz = await account(Z).genesis();
-  ok((await post(sz, Z, "/api/sync/v1/e2e/chain", gz.body)).status === 201, "(Z: its key chain made while the index builds)");
-  let iz = null;
-  for (let k = 0; k < 3; k++) iz = await az.testIndex({ step: true });
-  ok(iz.state === "building" && iz.cursor === 0 && iz.entries === 0, "Z: no step builds the index further once the account is encrypted: " + J({ state: iz.state, cursor: iz.cursor, entries: iz.entries }));
-  await new Promise((r) => setTimeout(r, 1500));
-  const za = (await az.testIndex({})).alarm;
-  ok(za === null || za > Date.now() + 60_000, "Z: the alarm no longer wakes at once for an index it won't build: " + J(za === null ? null : za - Date.now()));
+  const refused = async (what) => {
+    const r = await agentCall(ty, what.verb, what.params);
+    const b = await r.json().catch(() => ({}));
+    return r.status === 409 && b.error === "conflict" && b.reason === "encrypted";
+  };
+  const verbs = [{ verb: "stat", params: { path: "/" } }, { verb: "list", params: { folder: "/" } }, { verb: "list", params: { folder: "/", recursive: true } }];
+  ok((await Promise.all(verbs.map(refused))).every(Boolean), "Y: stat, list and a recursive list are refused (409 conflict, encrypted)");
+  const rb = await at(SITE, "/api/sync/v1/index/rebuild", { method: "POST", headers: { ...hdr(sy, Y, SITE), "content-type": "application/json" }, body: "{}" });
+  const rbb = await rb.json().catch(() => ({}));
+  ok(rb.status === 409 && rbb.reason === "encrypted", "Y: rebuilding the index is refused too: " + J({ status: rb.status, body: rbb }));
+  const wy = await socket(sy);
+  const ny = (await hello(wy, "sealed-dev-y001")).next_dseq;
+  const pl = await wy.ask({ t: "ops", ops: [{ dseq: ny, t: Date.now(), by: "person", op: "mkdir", path: "/after-chain", kind: "folder", fid: "0000000000000d02" }] });
+  ok(pl?.t === "error" && pl.code === "conflict" && pl.detail?.reason === "sealed_account", "Y: a plaintext op after its key chain: refused (conflict, sealed_account): " + J(pl));
+  const op = await signed(Wy, gy.d, gy.next, "sealed-dev-y001", ny);
+  ok(Number.isInteger((await wy.ask({ t: "sops", ops: [op] }))?.ops?.[0]?.seq), "Y: …a sealed op at that dseq: accepted");
+  ok((await Promise.all(verbs.map(refused))).every(Boolean), "Y: after it, every route still refused");
+  const iy2 = await (await objectOf(Y)).testIndex({});
+  ok((iy2?.state ?? null) === null, "Y: and no index was started from a log it can't read: " + J(iy2?.state ?? null));
+  wy.ws.close();
+  // (an index still building when a key chain is made can no longer happen: an index builds only over plaintext ops,
+  // and genesis is refused over any, as X's row shows; Z is kept in the account list, unused)
   const sn = await enabled(N);
   const tn = await grant(sn, N);
   const pn = await agentCall(tn, "stat", { path: "/" });
   const bn = await pn.json().catch(() => ({}));
   ok(bn.reason !== "encrypted" && [200, 503].includes(pn.status), "a plaintext account's agents' stat is answered as before: " + pn.status);
+});
+
+await section("a plaintext op raced against genesis: exactly one of the two lands, decided in the account object's own steps", async () => {
+  const s = await enabled(G);
+  const ws = await socket(s);
+  const n = (await hello(ws, "sealed-dev-g001")).next_dseq;
+  const W = account(G);
+  const g = await W.genesis();
+  // (genesis held between its checks, which pass over the empty log, and its transaction; the plaintext op lands then)
+  await seam(G, { hold: 600 });
+  const pending = post(s, G, "/api/sync/v1/e2e/chain", g.body);
+  await new Promise((r) => setTimeout(r, 150));
+  const op = await ws.ask({ t: "ops", ops: [{ dseq: n, t: Date.now(), by: "person", op: "mkdir", path: "/raced", kind: "folder", fid: "0000000000000a01" }] });
+  const gr = await pending;
+  await seam(G, { hold: 0 });
+  const grb = await gr.json().catch(() => ({}));
+  ok(Number.isInteger(op?.ops?.[0]?.seq) && gr.status === 409 && grb.reason === "plaintext_log" && (await seam(G, {})).e2e_chain <= 0,
+    "the plaintext op lands while genesis is held past its checks; genesis, decided in its own transaction, is then refused (plaintext_log), no chain stored: " + J({ op: op?.ops?.[0], genesis: gr.status, reason: grb.reason }));
+  ws.ws.close();
 });
 
 await section("the sync generation: an op in flight when the synced data is deleted, and a replay after", async () => {
