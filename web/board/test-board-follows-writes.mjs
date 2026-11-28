@@ -145,6 +145,20 @@ try {
   await A.ev("window.sagebrush.board.editing(true), 1");
   await A.ev(`window.sagebrush.board.personEditForTests((d) => { d.nodes.find((n) => n.id === "more").code = "print(x + 200)"; }).then(() => 1)`);
   check(await A.until(`${outOf("more")}.then((o) => /206/.test(o))`, 60000) && await A.ev(`${runBtn}.hidden`), "the person's own edit of approved code runs at once", await A.ev(outOf("more")).catch(() => null));
+  // (Codex F1 on #2477: a write from elsewhere and then the person's edit, close together, the edit's digest finished
+  // first: it carries only its exact predecessor's decision, the write's, never the approval of the board before)
+  await A.ev(`(() => { const orig = crypto.subtle.digest.bind(crypto.subtle); window.__codeWaits = []; crypto.subtle.digest = async (alg, data) => { if (window.__holdCode && new TextDecoder().decode(data).startsWith('["sagebrush-board-code"')) await new Promise((r) => window.__codeWaits.push(r)); return orig(alg, data); }; window.__holdCode = true; return 1; })()`);
+  const revRace = await write({ title: "Followed", nodes: [KEEP, { id: "intro", title: "About", text: "Its square: $x^2$." }, { id: "sq", title: "A square", code: "x = 6\nprint(x * 8)" }, { id: "more", title: "More", code: "print(x + 200)" }, { id: "race", title: "Race", code: "print('RACE RAN')" }], edges: [] });
+  check(typeof revRace === "number" && await A.until(`${items} === 5 && window.__codeWaits.length >= 1`, 15000), "a write from elsewhere shown, its digest still being computed");
+  await A.ev(`(window.sagebrush.board.personEditForTests((d) => { d.nodes.find((n) => n.id === "more").code = "print(x + 250)"; }), 1)`);
+  check(await A.until("window.__codeWaits.length >= 2", 15000), "…then the person's edit, its digest still being computed too");
+  await A.ev("(window.__holdCode = false, window.__codeWaits.pop()(), 1)");
+  await sleep(1500);
+  await A.ev("(window.__codeWaits.splice(0).forEach((r) => r()), 1)");
+  await sleep(3000);
+  check(!/RACE RAN/.test(await A.ev(outOf("race"))) && !(await A.ev(`${runBtn}.hidden`)), "…the edit's digest finished first: it carries nothing from the board before the write, the write's code held", { race: await A.ev(outOf("race")) });
+  await runIt();
+  check(await A.until(`${outOf("race")}.then((o) => /RACE RAN/.test(o))`, 60000), "…until the person runs it");
   // (D4: another writer's code held, then the person edits another item: that edit approves nothing of the held code)
   const rev4 = await write({ title: "Followed", nodes: [KEEP, { id: "intro", title: "About", text: "Its square: $x^2$." }, { id: "sq", title: "A square", code: "x = 6\nprint(x * 8)" }, { id: "more", title: "More", code: "print(x + 200)" }, { id: "theirs", title: "Theirs", code: "print('THEIRS RAN')" }], edges: [] });
   check(typeof rev4 === "number" && await A.until(`${items} === 5`, 15000) && await A.until(`!${runBtn}.hidden`, 10000), "another writer's new code: held, Run offered");
@@ -186,6 +200,20 @@ try {
   const rev6 = await write({ title: "Followed", nodes: [KEEP, { id: "sandboxed", title: "Sandboxed", code: "print('IN THE RUNNER', 6 * 7)" }], edges: [] });
   check(typeof rev6 === "number" && await R.until(`window.sagebrush.board.snapshot().items.length === 2`, 15000), "a change written elsewhere, shown in the runner's page");
   check(await R.until(`window.sagebrush.board.outputs().then((os) => /IN THE RUNNER 42/.test(String(os.find((o) => o.id === "sandboxed")?.output ?? "")))`, 90000) && await R.ev(`document.querySelector("[data-sbb=runpaused]").hidden`), "…its code runs at once, whoever wrote it: no Run asked for");
+  // (Codex F2 on #2477: a board the page has from its source, not the workspace (an example): left running as its page
+  // goes, it opens paused next time, in the runner too, until the person runs it)
+  const example = `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}`;
+  await R.send("Page.navigate", { url: example });
+  check(await R.until("!!window.sagebrush?.board?.snapshot?.()?.doc", 60000), "an example board, opened in the runner");
+  await R.ev(`(window.sagebrush.board.load({ title: "Spins", nodes: [{ id: "spin", code: "while True:\n    pass" }] }), 1)`);
+  check(await R.until(`window.sagebrush.board.outputs ? (window.sagebrush.board.snapshot().doc.title === "Spins") : false`, 15000), "…its code running, left so");
+  await sleep(3000);
+  await R.send("Page.navigate", { url: "about:blank" });
+  await sleep(500);
+  await R.send("Page.navigate", { url: example });
+  check(await R.until(`!!window.sagebrush?.board?.snapshot?.()?.doc && !document.querySelector("[data-sbb=runpaused]").hidden`, 60000) && /stopped/.test(await R.ev(`document.querySelector("[data-sbb=runpaused]").title`)), "…opened again: paused, as its last run was left running", await R.ev(`document.querySelector("[data-sbb=runpaused]").title`).catch(() => null));
+  await R.ev(`(document.querySelector("[data-sbb=runpaused]").click(), 1)`);
+  check(await R.until(`document.querySelector("[data-sbb=runpaused]").hidden`, 10000) && (await R.ev(`JSON.parse(localStorage.getItem("sagebrush-board-stopped") ?? "[]").some((x) => x.startsWith("source:examples/live.board.json"))`)) === false, "…Run runs it, and it opens unpaused again");
   await R.send("Page.navigate", { url: "about:blank" });
   await A.send("Page.navigate", { url: unconfined });
   await A.until("!!window.sagebrush?.board?.snapshot?.()?.doc", 60000);

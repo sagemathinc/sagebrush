@@ -504,7 +504,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // Whether the board's code may run where it runs (capability.ts; Codex S14 F1, William's ruling of Nov 28): in the
   // runner always; unconfined only if this code, its digest, is approved. Decided on the very cells given to the
   // engine; an edit of the person's carries the approval of the code it edited, never over code it didn't approve (D4).
-  let gateGen = 0, lastDigest: string | null = null, lastEmpty = true, lastIds: string[] = [];
+  let gateGen = 0, lastIds: string[] = [];
+  // (each document shown decided after the one shown before it, in that order: an edit of the person's carries the
+  // approval of its exact predecessor's decision, that document's, even one overtaken before it was drawn, never an
+  // earlier one's (Codex F1 on #2477))
+  type Decision = { digest: string | null; empty: boolean };
+  let decided: Promise<Decision> = Promise.resolve({ digest: null, empty: true });
   // (the gate's decision for the document shown, its code given (or held) once it settles: what waits for the code's
   // first run waits for it first)
   let gating: Promise<void> = Promise.resolve();
@@ -526,13 +531,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const cells = withPreviews(d, order, byPage), mode = d.mode ?? "python", gate = host.codeGate;
     let digest: string | null = null;
     if (gate) {
-      const g = ++gateGen;
-      digest = await codeDigest(cells, d, mode, d.seed ?? SEED);
+      const g = ++gateGen, before = decided, empty = !order.length && !runnableOf(d)?.length;
+      let settle!: (x: Decision) => void;
+      decided = new Promise<Decision>((r) => (settle = r));
+      try {
+        digest = await codeDigest(cells, d, mode, d.seed ?? SEED);
+        const prev = await before;
+        if (by === "person" && !confinedNow() && (prev.empty || mayRun(prev.digest))) { if (approve(digest)) gate.approved?.(); }
+      } finally { settle({ digest, empty }); }
       if (g !== gateGen || destroyed) return;
-      const empty = !order.length && !runnableOf(d)?.length;
-      if (by === "person" && !confinedNow() && (lastEmpty || mayRun(lastDigest))) { if (approve(digest)) gate.approved?.(); }
-      lastDigest = digest;
-      lastEmpty = empty;
       shownDigest = digest;
       lastIds = cells.map((x) => x.id);
       const any = order.length > 0 || !empty;
@@ -1980,8 +1987,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       else { allowOnce(digest); say("Your approval of this code couldn't be kept in this browser: it runs now, in this page only."); }
       stoppedHere = false;
       if (gate.ref) clearStopped(gate.ref);
-      lastDigest = shownDigest = digest;
-      lastEmpty = !order.length && !runnableOf(d)?.length;
+      shownDigest = digest;
       paused = false;
       $("runpaused").hidden = true;
       host.codeResumed?.();

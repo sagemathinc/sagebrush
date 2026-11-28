@@ -1290,7 +1290,9 @@ const host: BoardHost = {
   // none: there unconfined code reaches nothing of theirs)
   ...(holdsStorage ? { codeGate: {
     confined: runnerHere,
-    ref: local ? source.slice(6) : undefined,
+    // (the board, for "its last run was stopped": its workspace id, else where the page has it from, an example's path
+    // or a link's: every board this page shows has one, Codex F2 on #2477)
+    ref: local ? source.slice(6) : "source:" + storeName.slice(0, 512),
     // (the desktop app forgets this page's storage at quit: an approval kept in grants.json too, beside the grants)
     approved: () => { if (desktopApp && ws) void desktopModule().then((d) => d.saveGrants(ws!, (c: string, a?: any) => (window as any).__TAURI__.core.invoke(c, a))).catch((e) => console.warn("grants.json:", e)); },
   } } : {}),
