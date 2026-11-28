@@ -219,20 +219,35 @@ fn ap(a: Vec<i64>, p: u64) -> PyResult<Option<i64>> {
     Ok(curve(a)?.ap(p))
 }
 
+/// The bytes of aplist, aplist_many or moments (sagebrush_ap::sieve_bytes),
+/// reserved before the sieve and held by the caller until the result has
+/// become Python objects: refused past the address space or by the ledger.
+fn ap_reserve(what: &'static str, n: u64, per_prime: u64, fixed: u64) -> Result<sagebrush_ledger::Reservation, String> {
+    let bytes = sagebrush_ap::sieve_bytes(n, per_prime, fixed).ok_or_else(|| format!("{}: primes up to {} pass this engine's address space", what, n))?;
+    sagebrush_ledger::reserve(what, bytes).map_err(|e| format!("{}: the sieve's {} bytes refused: {:?}", what, bytes, e))
+}
+
 /// [(p, a_p)] for all primes p <= n (a_p None at bad primes), in parallel.
 #[pyfunction]
 #[pyo3(signature = (a, n, threads=0))]
-fn aplist(py: Python<'_>, a: Vec<i64>, n: u64, threads: usize) -> PyResult<Vec<(u64, Option<i64>)>> {
+fn aplist<'py>(py: Python<'py>, a: Vec<i64>, n: u64, threads: usize) -> PyResult<Bound<'py, PyAny>> {
     let e = curve(a)?;
-    run(py, threads, || sagebrush_ap::aplist(&e, n))
+    let (v, held) = run(py, threads, || ap_reserve("aplist", n, sagebrush_ap::APLIST_BYTES_PER_PRIME, 0).map(|r| (sagebrush_ap::aplist(&e, n), r)))?.map_err(err)?;
+    let out = v.into_pyobject(py)?.into_any();
+    drop(held);
+    Ok(out)
 }
 
 /// aplist for many curves, in parallel over curves.
 #[pyfunction]
 #[pyo3(signature = (curves, n, threads=0))]
-fn aplist_many(py: Python<'_>, curves: Vec<Vec<i64>>, n: u64, threads: usize) -> PyResult<Vec<Vec<(u64, Option<i64>)>>> {
+fn aplist_many<'py>(py: Python<'py>, curves: Vec<Vec<i64>>, n: u64, threads: usize) -> PyResult<Bound<'py, PyAny>> {
     let es = curves.into_iter().map(curve).collect::<PyResult<Vec<_>>>()?;
-    run(py, threads, || sagebrush_ap::aplist_many(&es, n))
+    let per_prime = sagebrush_ap::APLIST_MANY_BYTES_PER_PRIME.saturating_mul(es.len() as u64);
+    let (v, held) = run(py, threads, || ap_reserve("aplist_many", n, per_prime, 0).map(|r| (sagebrush_ap::aplist_many(&es, n), r)))?.map_err(err)?;
+    let out = v.into_pyobject(py)?.into_any();
+    drop(held);
+    Ok(out)
 }
 
 /// (number of good primes p <= n, [mean (a_p^2/p)^k for k = 1..kmax]): Sato-Tate moments.
@@ -240,7 +255,7 @@ fn aplist_many(py: Python<'_>, curves: Vec<Vec<i64>>, n: u64, threads: usize) ->
 #[pyo3(signature = (a, n, kmax=4, threads=0))]
 fn moments(py: Python<'_>, a: Vec<i64>, n: u64, kmax: usize, threads: usize) -> PyResult<(u64, Vec<f64>)> {
     let e = curve(a)?;
-    run(py, threads, || sagebrush_ap::moments(&e, n, kmax))
+    run(py, threads, || ap_reserve("moments", n, 0, sagebrush_ap::moments_fixed_bytes(n, kmax)).map(|_held| sagebrush_ap::moments(&e, n, kmax)))?.map_err(err)
 }
 
 // ---- sagebrush.mf: weight k >= 2 with a Dirichlet character ----

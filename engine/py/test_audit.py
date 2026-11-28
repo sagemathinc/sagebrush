@@ -853,3 +853,15 @@ for _bad in [dict(dpi=float("inf")), dict(dpi=float("nan")), dict(dpi=0), dict(d
 _G.save(os.path.join(_d, "ok.png"), dpi=50)
 assert open(os.path.join(_d, "ok.png"), "rb").read(8) == b"\x89PNG\r\n\x1a\n"
 print("png limits: ok")
+
+
+# A17-F2: aplist, aplist_many and moments reserve the sieve and their
+# results before the sieve exists, and refuse what the ledger can't hold
+# (a sieve to 2^62 used to allocate 2^61 bytes of flags first)
+_e = [0, 0, 1, -1, 0]
+for _f, _args in [(ap.aplist, (_e, 2**62)), (ap.aplist_many, ([_e, _e], 2**62)), (ap.moments, (_e, 2**62)), (ap.moments, (_e, 100, 10**15))]:
+    assert "refused" in raises(ValueError, _f, *_args), (_f.__name__, _args)
+assert ap.aplist(_e, 13) == [(2, -2), (3, -3), (5, -2), (7, -1), (11, -5), (13, -2)]
+assert ap.aplist_many([_e, _e], 13) == [ap.aplist(_e, 13)] * 2
+assert ap.moments(_e, 1000, 2)[0] == 167
+print("a_p sieve admission: ok")

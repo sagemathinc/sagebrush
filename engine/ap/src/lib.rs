@@ -172,6 +172,38 @@ pub fn prime_count_bound(n: u64) -> usize {
     usize::try_from(b.min(n)).unwrap_or(usize::MAX).max(1)
 }
 
+/// The bytes a sieve up to n and its caller's per-prime data take: the
+/// (n-1)/2 flags, prime_count_bound(n) primes of 8 bytes and `per_prime`
+/// more bytes each, and `fixed` once.  The flags are freed before the
+/// traces start, so this sum also covers what aplist, aplist_many and
+/// moments keep after the sieve.  None when the flags pass this target's
+/// address space (primes_up_to's limit).  What callers reserve before
+/// aplist, aplist_many or moments: the web dispatchers and the Python
+/// binding.
+pub fn sieve_bytes(n: u64, per_prime: u64, fixed: u64) -> Option<u64> {
+    let half = n.saturating_sub(1) / 2;
+    usize::try_from(half).ok()?;
+    let count = prime_count_bound(n) as u64;
+    Some(half.saturating_add(count.saturating_mul(8u64.saturating_add(per_prime))).saturating_add(fixed))
+}
+
+/// aplist's own bytes per prime: its chunks' results and the flattened
+/// list, which grows by doubling, (u64, Option<i64>) of 24 bytes each: at
+/// most three of them per prime at once.
+pub const APLIST_BYTES_PER_PRIME: u64 = 3 * 24;
+
+/// aplist_many's own bytes per prime and curve: each curve's list, of
+/// exactly one (u64, Option<i64>) per prime.
+pub const APLIST_MANY_BYTES_PER_PRIME: u64 = 24;
+
+/// moments' own bytes beyond the sieve's: kmax sums for each chunk of 4096
+/// primes (with the chunk's count and Vec), and the kmax means.
+pub fn moments_fixed_bytes(n: u64, kmax: usize) -> u64 {
+    let chunks = prime_count_bound(n) as u64 / 4096 + 1;
+    let k = (kmax as u64).saturating_mul(8);
+    chunks.saturating_mul(k.saturating_add(48)).saturating_add(k).saturating_add(64)
+}
+
 /// Sieve writes (or indices scanned) between two interrupt checks: tens of
 /// microseconds of work, so a Stop is seen promptly, and in WebAssembly one
 /// host poll per block (check_coarse) costs nothing measurable.
@@ -317,6 +349,27 @@ pub fn moments(e: &EllipticCurve, n: u64, kmax: usize) -> (u64, Vec<f64>) {
 #[cfg(test)]
 mod audit_tests {
     use super::*;
+
+    // A17-F2: the bytes callers reserve before the sieve: its flags, its
+    // primes and their per-prime data, saturating; None only when the flags
+    // pass the address space.
+    #[test]
+    fn sieve_bytes_counts_the_sieve_and_the_results() {
+        let c = prime_count_bound(13) as u64;
+        assert_eq!(sieve_bytes(13, 0, 0), Some(6 + 8 * c));
+        assert_eq!(sieve_bytes(13, APLIST_BYTES_PER_PRIME, 5), Some(6 + (8 + 72) * c + 5));
+        assert_eq!(sieve_bytes(0, 0, 7), Some(prime_count_bound(0) as u64 * 8 + 7));
+        let big = sieve_bytes(10_000_000, APLIST_BYTES_PER_PRIME, 0).unwrap();
+        assert!(big >= 4_999_999 + 664_579 * 80, "{}", big);
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(sieve_bytes(u64::MAX, u64::MAX, 0), Some(u64::MAX));
+        #[cfg(target_pointer_width = "32")]
+        assert_eq!(sieve_bytes((1 << 33) + 11, 0, 0), None);
+        // moments: one chunk of kmax sums per 4096 primes, and the means
+        assert_eq!(moments_fixed_bytes(13, 4), (32 + 48) + 32 + 64);
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(moments_fixed_bytes(13, usize::MAX), u64::MAX);
+    }
 
     // Astra's audit, F2: on y^2 + 2000000 xy = x^3 + x, -54 c6 overflowed
     // before reduction mod p, so a_p at p >= 1000 (the BSGS path) was that of
