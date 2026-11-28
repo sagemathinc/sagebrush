@@ -1030,12 +1030,12 @@
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
- "engine/mp/src/linalg.rs :: mpf_sum :: if delta - x.bc > max_extra { #0": {
+ "engine/mp/src/linalg.rs :: mpf_sum :: if delta.add_i64(-x.bc).gt_i64(max_extra) { #0": {
   "class": "none",
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
  },
- "engine/mp/src/linalg.rs :: mpf_sum :: if delta > max_extra && (man.is_zero() || delta - man.bits() as i64 > max_extra) { #0": {
+ "engine/mp/src/linalg.rs :: mpf_sum :: if delta.gt_i64(max_extra) && (man.is_zero() || delta.add_i64(-(man.bits() as i64)).gt_i64(max_extra)) { #0": {
   "class": "none",
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"

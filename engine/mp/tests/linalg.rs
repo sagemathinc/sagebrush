@@ -108,3 +108,24 @@ fn timing_50_at_1000_bits() {
         eprintln!("50 x 50 at 1000 bits: inverse {:?}, det {:?}", ti, t.elapsed());
     }
 }
+
+// Exponents past i64 in a sum, and a comparison across a wide exponent gap,
+// each against mpmath 1.4.1's raw tuple: the least-squares solution of
+// [2^E, 0]^T x = [1, 0]^T at E = 2^62 is 2^-E (A^T A's one product, 2^2E,
+// has an exponent past i64: the sum took it as 0 and gave 2^E), and the
+// Cholesky factor of [2^(2^30)] is [2^(2^29)] (comparing the pivot with the
+// tolerance asked for the exact difference, 2^24 limbs: a MemoryError); with
+// the small exponents 62 and 30 as controls.
+#[test]
+fn exponents_past_i64_and_wide_gaps() {
+    let lsq = |e: &str| {
+        let a = mpfs(&["0", "1", e, "1", "0", "0", "0", "0"]);
+        let b = mpfs(&["0", "1", "0", "1", "0", "0", "0", "0"]);
+        checked(|| show_all(&lu_solve(&a, &b, 2, 1, 53, Rnd::Nearest).unwrap())).ok()
+    };
+    assert_eq!(lsq("4611686018427387904").as_deref(), Some("0 1 -4611686018427387904 1"));
+    assert_eq!(lsq("62").as_deref(), Some("0 1 -62 1"));
+    let chol = |e: &str| checked(|| show_all(&cholesky(&mpfs(&["0", "1", e, "1"]), 1, 53, Rnd::Nearest).unwrap())).ok();
+    assert_eq!(chol("1073741824").as_deref(), Some("0 1 536870912 1"));
+    assert_eq!(chol("30").as_deref(), Some("0 1 15 1"));
+}
