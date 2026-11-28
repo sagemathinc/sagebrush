@@ -513,7 +513,13 @@ class RealNumber(float):
         if base is None and float.__float__(self) == 0:
             # (log(+-0) is -infinity, as MPFR's)
             return RealNumber(-_INF)
-        return RealNumber(_m.log(self) if base is None else _m.log(self, base))
+        if base is None:
+            return RealNumber(_m.log(self))
+        # (Sage's: log(self) / log(RR(base)) in RR, so a base of 1 gives
+        # +infinity, 0 gives -0, a negative base CC's logarithm, and a base
+        # past the doubles, RR('1e400'), its own logarithm)
+        from sage_all import RR
+        return self.log() / RR(base).log()
 
     def floor(self):
         """The floor, an integer.
@@ -1201,6 +1207,17 @@ class _RealBig(RealNumber):
 
     def is_zero(self):
         return False
+
+    # (the value's own infinities, Sage's mpfr_inf_p: the float this holds
+    # is an infinity for a finite value past the doubles)
+    def is_infinity(self):
+        return self._mp._special in ("+inf", "-inf")
+
+    def is_positive_infinity(self):
+        return self._mp._special == "+inf"
+
+    def is_negative_infinity(self):
+        return self._mp._special == "-inf"
 
     def str(self, base=10, digits=0, *args, no_sci=None, e=None, truncate=False, skip_zeroes=False):
         # (the MP real's str checks the arguments, as Sage's)

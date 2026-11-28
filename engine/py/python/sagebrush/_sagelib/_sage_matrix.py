@@ -4950,8 +4950,15 @@ class ComplexNumber(complex):
         if base is None:
             return ComplexNumber(rho, theta)
         # (both parts over log(base), the correctly rounded logarithm in RR, each
-        # quotient as MPFR's: over log(1) = +0, +-infinity, or NaN for 0 / 0)
-        lb = float(_sage_real.RealField_(53, "RNDN")(float(_sa().RR(base))).log())
+        # quotient as MPFR's: over log(1) = +0, +-infinity, or NaN for 0 / 0;
+        # the base kept in RR's field, no float step, so a finite base past
+        # the doubles, RR('1e400'), is not an infinity)
+        rb = _sa().RR(base)
+        if rb < 0 and not rb.is_infinity():
+            # (a finite negative base: Sage's CC can't divide by its complex
+            # logarithm)
+            raise TypeError("unable to coerce to a ComplexNumber: <class 'sage.rings.complex_mpfr.ComplexNumber'>")
+        lb = float(_sage_real.RealField_(53, "RNDN")(rb).log())
 
         def over(x):
             if lb:
