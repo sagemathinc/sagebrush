@@ -36,7 +36,7 @@
 //   each (8 KiB).
 // The heap these allow is an accounted model, not a browser ceiling: a JS string takes at most 2 bytes per UTF-8 byte.
 
-import { listComputers, listRunners, pageLegUrl, type Runner } from "./remote-runners";
+import { listComputers, listRunners, pageLegUrl, removeComputer, type Runner } from "./remote-runners";
 
 export const LEG = {
   helloMs: 10_000,
@@ -498,7 +498,7 @@ export class AgentLeg {
     if (msg?.method !== "agent.ready" || msg.id !== undefined) return undefined;
     const r = msg.params;
     if (!r || !r.agent || typeof r.agent.name !== "string" || typeof r.child !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(r.child)) return false;
-    const features = Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => f === "notebook.edit" || f === "permission.digest" || f === "run.context" || f === "chat.resume" || f === "edit.turn" || f === "chat.steer" || f === "egress.turn" || f === "chat.resume.tag") : [];
+    const features = Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => f === "notebook.edit" || f === "permission.digest" || f === "run.context" || f === "chat.resume" || f === "edit.turn" || f === "chat.steer" || f === "egress.turn" || f === "chat.resume.tag" || f === "workspace.image") : [];
     return { agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, features, child: r.child, ...(typeof r.log?.instance === "string" && /^[0-9a-f]{8,64}$/.test(r.log.instance) ? { log: { instance: r.log.instance } } : {}) }; // (as agent-pair.ts's logOf)
   }
 
@@ -552,4 +552,4 @@ export class AgentLeg {
   }
 }
 
-export { listComputers, listRunners, pageLegUrl, type Runner };
+export { listComputers, listRunners, pageLegUrl, removeComputer, type Runner };

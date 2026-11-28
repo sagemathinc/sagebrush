@@ -1,0 +1,154 @@
+== series.rename-name
+
+a    0.1
+b    0.9
+c    0.4
+Name: malignant, dtype: float64
+== series.rename-name-int
+
+a    0.1
+b    0.9
+c    0.4
+Name: 3, dtype: float64
+== series.rename-none
+
+a    0.1
+b    0.9
+c    0.4
+dtype: float64
+== series.rename-dict
+
+A    0.1
+b    0.9
+c    0.4
+Name: p, dtype: float64
+== series.rename-func
+
+A    0.1
+B    0.9
+C    0.4
+Name: p, dtype: float64
+== series.rename-original-kept
+'p'
+== frame.rename-columns-dict
+
+    a  B
+10  1  x
+20  2  y
+30  3  z
+== frame.rename-columns-func
+
+    a  b
+10  1  x
+20  2  y
+30  3  z
+== frame.rename-index-dict
+
+     A  B
+100  1  x
+20   2  y
+30   3  z
+== frame.rename-mapper-axis
+
+    alpha  B
+10      1  x
+20      2  y
+30      3  z
+== frame.rename-mapper-axis1
+
+    A beta
+10  1    x
+20  2    y
+30  3    z
+== frame.rename-mapper-index
+
+     A  B
+10   1  x
+200  2  y
+30   3  z
+== frame.rename-errors-raise
+!! KeyError: "['Q'] not found in axis"
+== frame.rename-both
+
+    a  B
+10  1  x
+20  2  y
+3   3  z
+== frame.rename-mapper-and-columns
+!! TypeError: Cannot specify both 'mapper' and any of 'index' or 'columns'
+== frame.rename-original-kept
+
+    A  B
+10  1  x
+20  2  y
+30  3  z
+== series.reset
+
+  index    p
+0     a  0.1
+1     b  0.9
+2     c  0.4
+== series.reset-drop
+
+0    0.1
+1    0.9
+2    0.4
+Name: p, dtype: float64
+== series.reset-name
+
+  index  prob
+0     a   0.1
+1     b   0.9
+2     c   0.4
+== series.reset-unnamed
+
+  index  0
+0     u  5
+1     v  6
+== series.reset-named-index
+
+  key  val
+0   u    5
+1   v    6
+== frame.reset
+
+   index  A  B
+0     10  1  x
+1     20  2  y
+2     30  3  z
+== frame.reset-dtypes
+[('index', 'int64'), ('A', 'int64'), ('B', 'str')]
+== frame.reset-drop
+
+   A  B
+0  1  x
+1  2  y
+2  3  z
+== frame.reset-named-index
+
+   B  A
+0  x  1
+1  y  2
+2  z  3
+== frame.reset-index-taken
+
+   level_0  index
+0        5      1
+1        6      2
+== frame.reset-range
+
+   index  a
+0      0  1
+1      1  2
+== frame.reset-after-sort
+
+   A  B
+0  3  z
+1  2  y
+2  1  x
+== frame.reset-original-kept
+
+    A  B
+10  1  x
+20  2  y
+30  3  z

@@ -253,8 +253,10 @@ class input_box(Control):
         if v.strip() == "":
             return None
         import sys
+        # (a copy of the session's names: in Sage mode a session too, so a Sage name not used yet loads, _sage_lazy)
+        from _sage_lazy import session_copy
         main = sys.modules.get("__main__")
-        return eval(v, dict(main.__dict__) if main is not None and hasattr(main, "__dict__") else {})
+        return eval(v, session_copy(main.__dict__) if main is not None and hasattr(main, "__dict__") else {})
 
 
 class color_selector(Control):

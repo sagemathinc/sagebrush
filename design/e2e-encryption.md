@@ -213,7 +213,7 @@ RFC 9180's base mode doesn't authenticate the sender and doesn't prevent replay.
 | Quota | holding and document sizes | ciphertext bytes, as now (quota already uses sizes only) |
 | Agent scope, `list`/`stat` | the server's derived index | a device acting for the agent (§6) |
 | Grants and the access log | each grant's scope paths, and every agent call's paths, in plaintext (account.ts `grants.scopes`, `access_log.paths`) | scopes sealed to the devices, which enforce them; the server keeps only the grant id, token hash, tag, rates and expiry. The access log is written by the answering device, encrypted (or with paths HMACed under `K_index[e]`) |
-| Version retention, Trash | every file blob an op names is held until the account is purged; version retention is client-side (IndexedDB), and the server enforces no version cap | explicit client ops; the server counts the refs each envelope adds and releases. Physical GC stays deferred (§3.3), as it effectively is today |
+| Version retention, Trash | every file blob an op names is held until the account is purged; version retention is client-side (IndexedDB), and the server enforces no version cap | explicit client ops; the server counts the refs each envelope adds and releases. Each release names the add it ends, `{address, add: seq}`, and the server keeps the index's live adds apart from the blob's shared count (document pins and chunk manifests count there too), so a release must end a live index add, once. Physical GC stays deferred (§3.3), as it effectively is today |
 
 **What changes in the server:**
 - `checkOp` becomes form-only. The server still checks the signature, `dseq` order, envelope size, and that every added ref is a held blob.
@@ -359,7 +359,38 @@ Assignment files launched from a school's LMS (LTI) aren't end-to-end encrypted.
   - the grant token, its tag and its rates stay on the server;
   - **every verb relays to an online device** of the person's (an open tab, the desktop app or an Autonomous VM), which decrypts, checks scope (`inScope`, and the Trash visibility rule for grants, `trashVisible`) and answers, as runs are designed to (agent-endpoint.md §6; not built yet);
   - the document verbs aren't built yet (only `list` and `stat` answer today, from the derived index), so nothing is lost by making them relay-only from the start;
-  - with no device online, the endpoint queues the request opaquely and answers "waiting for one of your devices". It never decrypts.
+  - **the request and the answer travel end to end** between the agent and the answering device, never in plaintext through the server:
+    - **E2E agent grants are made by pairing only** (SEC). The grant dialog's copied token has no way to certify an agent's key, so under E2E it isn't offered;
+    - **at pairing, the agent makes its own X25519 static key and a 128-bit pairing secret `k`**. The agent shows `k` as a QR code or 26 base32 characters, and `k` never goes through the server. The server's short lookup code, if kept, only finds the request; it authenticates nothing;
+    - pairing starts before the agent knows any account, so the pairing authenticator doesn't name one. With labels pinned here:
+      - `session = Trunc128(HMAC-SHA256(k, "sagebrush.agent.pair.session.v1"))`;
+      - `K = HKDF-SHA256(ikm = k, salt = "sagebrush.agent.pair.v1", info = "sagebrush.agent.pair.mac.v1\n" || session, 32)`;
+      - the agent posts its request with `tag = HMAC-SHA256(K, "sagebrush.agent.pair.tag.v1\n" || canon({ protocol: "sagebrush.agent.v1", session, agent name, static key }))`;
+    - the person types or scans `k` into their device. The device derives `session` and `K`, finds the request by `session`, and checks the tag over the full static key before it signs anything. A relay that substitutes the key would need `k`. The account is bound afterwards, by the signed grant;
+    - **the signed grant** is one canonical object, signed by the approving device's chain key at a named chain head. It binds the protocol and version, the account, the grant id and its generation, the agent's name and static key, the scopes, `run_code`, the outward authority and the expiry. The answering device enforces every one of them from the signed grant, never from the server's copy;
+    - **each request runs Noise_IK_25519_AESGCM_SHA256** (§6.2's suite and test vectors) between the agent and an online device, through the relay. The device checks that the agent's static key is the one a current, unexpired, unrevoked grant names. The agent checks that the device's static key is current in the account's chain;
+    - **the Noise prologue binds** "sagebrush.agent.v1", the account, the grant id, the agent's and the device's static keys, the chain head each side verified, and a fresh session id;
+    - **a request is bound to one device:** IK fixes the answering device's static key in the first message, so a request relayed to the person's other device fails at that device's handshake, before anything is read;
+    - **each request is accepted once** (SEC). It carries a request id, chosen by the agent inside the encrypted channel, and an expiry of at most 5 minutes:
+      - the answering device records the id before acting, persistently and through the expiry, so it survives a restart;
+      - a repeat returns the recorded answer without running the request again, or is refused once the record is gone. So a relay that replays a whole old handshake gets no second execution;
+      - an id whose request was interrupted (a crash after recording it, before an answer) stays pending: a repeat is answered "indeterminate" and refused, never run again;
+      - the answer is bound to the request id;
+    - **revocation is in the key chain** (SEC). Revoking a grant, or raising its generation, is a chain entry signed by a current device. An answering device refuses a grant whose revocation is in the chain it has verified, so the server can't undo a revocation;
+    - **the limit, stated plainly:** a server can withhold a revocation entry from a device that hasn't seen it yet. That device keeps answering the revoked agent until it sees the entry, or until the grant's signed expiry, whichever comes first. Checkpoints detect the withholding later (§4.1). Short expiries bound it;
+    - **what the agent trusts:** the grant comes with the chain head its device signed at, and with a MAC under the pairing key, so the agent pins nothing the server could have made (SEC):
+      - the approving device returns `grant_mac = HMAC-SHA256(K, "sagebrush.agent.pair.grant.v1\n" || SHA-256(signed grant) || chain head)`, with `K` the pairing key above, which only the agent and a device that was given `k` hold;
+      - the agent pins the grant and the head only if `grant_mac` verifies under its own `K`; otherwise it refuses the pairing and pins nothing. A server answering the pairing with its own grant and chain (devices it holds) can't make that MAC without `k`;
+      - once pinned, the agent refuses a later chain that rolls back or forks from that head;
+    - **what the relay still sees:** which grant talks to which device, when, and how much. Not the paths, the content or the answers;
+    - **tests (rows):**
+      - a pairing answered with a grant and chain the server made, with no valid `grant_mac`: refused, nothing pinned;
+      - a `grant_mac` over another grant, another head, or under another `k`: refused;
+      - the honest pairing: verifies and pins;
+      - a request's handshake relayed to the person's other device: fails at the handshake;
+      - mutants that skip the `grant_mac` check, or MAC the grant without the head, must each fail a row;
+  - with no device online, the endpoint answers "waiting for one of your devices", and the agent sends the request again when one is. It never decrypts, and it holds no request content.
+
 ### 6.1 Autonomous VM custody (SEC)
 
 An Autonomous VM is a full account device, so whoever controls the VM controls its keys: the cloud provider, a root compromise, a disk snapshot, or a clone of its image. They can take its device keys and every epoch secret it holds.

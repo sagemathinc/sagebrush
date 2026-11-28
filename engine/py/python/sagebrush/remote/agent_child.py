@@ -87,6 +87,9 @@ def log_dir():
     return os.path.join(base, "sagebrush")
 
 
+LAST_LINE = 300
+
+
 class AgentLog:
     """The child's stderr, kept on this computer only: 0600 in a 0700 folder, rotated at LOG_MAX, token-like strings
     redacted chunk by chunk (a token split across two chunks is the one gap, and each chunk is 64 KiB)."""
@@ -98,9 +101,13 @@ class AgentLog:
         os.chmod(self.folder, 0o700)
         # (name: a kind other than the runner's first, from relay.AGENT_NAME's letters only: its own file)
         self.path = os.path.join(self.folder, "agent.log" if name is None else "agent-%s.log" % name)
+        self.last = None  # (the last non-empty line written, redacted, at most LAST_LINE characters: for the terminal)
 
     def write(self, chunk):
         chunk = _REDACT.sub(b"[redacted]", chunk)
+        lines = [x.strip() for x in chunk.decode("utf-8", "replace").splitlines() if x.strip() and not x.startswith("[runner]")]
+        if lines:
+            self.last = lines[-1][:LAST_LINE]
         try:
             size = os.path.getsize(self.path)
         except OSError:
@@ -148,6 +155,7 @@ class AgentChild:
         self.starting = False     # (between start() and the process existing: a stop then is honoured once it does)
         self.pending_interrupt = False  # (a Stop during that window, delivered once the process exists)
         self.exit_text = None
+        self.stopped_by_runner = False  # (stop(): the runner ended it, so its exit isn't news for the terminal)
         self.stats = {"toPage": 0, "toChild": 0, "dropped": 0, "answeredDetached": 0, "refusedFull": 0, "droppedAtDetach": 0}
 
     async def start(self):
@@ -421,6 +429,7 @@ class AgentChild:
         if self.ended:
             return
         self.ended = True
+        self.stopped_by_runner = True
         self.exit_text = "The agent stopped"
         self._log(("[runner] stopping the agent: %s\n" % why).encode("utf-8"))
         self._end_page(tell)

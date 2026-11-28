@@ -9,13 +9,16 @@
 //      reaches the proposal before anything is opened again;
 //   5. reopens the page, pairs again with the agent's fresh code, and turns Delegate on again (a new pairing starts
 //      with it off);
-//   6. sees the task's proposal: Proposal ready, the notebook changed, its diff with the added cell.
-// Merge (step 7) comes with the page's Merge.
+//   6. sees the task's proposal: Proposal ready, the notebook changed, its diff with the added cell;
+//   7. merges it: the chip says Merged, the agent's own record says merged, and the person's notebook, open beside the
+//      chat, has the cell the agent added.
 // DELEGATE_E2E_CONTROL=paused, a negative control: the agent is paused while no page is paired, so step 4 must FAIL
 // (the case then exits 1, saying so).
 //   (the agent's record: SAGEBRUSH_TASKS_HOME/.sagebrush/tasks/<task>/task.json, its status and proposals)
 //   SAGEBRUSH_AGENTS=1 bun web/build.ts && SAGEBRUSH_AGENT_TGZ=... SAGEBRUSH_AGENT_TGZ_SHA256=... \
 //     CHROME=chromium bun web/agent-flows/test-delegate-e2e.mjs        (SHOT_DIR=dir: a screenshot at each step)
+//   DELEGATE_E2E_SITE=https://dev.sagebrush.space: the same steps against a deployed site's Agents page instead of a
+//   local build (the agent still runs here, with the fake model)
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startSite, startChrome, sleep } from "./harness.mjs";
@@ -32,10 +35,22 @@ const record = (agent, task) => { const f = join(agent.tasksHome, ".sagebrush", 
 let failures = 0;
 const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 
-const site = await startSite();
+const SITE = process.env.DELEGATE_E2E_SITE;
+if (SITE && !/^https:\/\/[a-z0-9.-]+$/.test(SITE)) throw new Error("DELEGATE_E2E_SITE: an https origin, nothing after it");
+const site = SITE ? { origin: SITE, close() {} } : await startSite();
 let page = null, agent = null;
 try {
   page = await startChrome();
+  // (a deployed https site reaching the agent on this computer needs the person's OK for local network access, as
+  //  Chrome asks a person; headless, it is granted here, for that origin only)
+  //  (Chrome's names for it change across versions: each one this Chrome knows is granted, the others refused)
+  if (SITE) {
+    const granted = [];
+    for (const name of ["localNetworkAccess", "localNetwork", "loopbackNetwork"]) {
+      try { await page.send("Browser.grantPermissions", { origin: SITE, permissions: [name] }); granted.push(name); } catch {}
+    }
+    console.log("local network access granted to " + SITE + ": " + (granted.join(", ") || "none (this Chrome knows none of them)"));
+  }
   agent = await startTarballAgent({ origin: site.origin });
   const shot = async (name) => { if (process.env.SHOT_DIR) await page.shot(join(process.env.SHOT_DIR, `delegate-e2e-${name}.png`)); };
   const must = async (js, what, ms = 30000) => { if (!(await page.until(js, ms))) throw new Error(`${what}: not seen in ${ms / 1000} s (${await page.ev("location.href").catch(() => "?")})`); };
@@ -132,6 +147,25 @@ try {
   await must(`document.querySelector("dialog.proposal[open]").textContent.includes(${JSON.stringify(NOTE)})`, "the added cell in the diff", 30000);
   ok(true, "the diff shows the cell the agent added: " + JSON.stringify(NOTE));
   await shot("6-proposal");
+
+  // ---- 7. Merge: the person's notebook gets the agent's cell, recorded by the page and by the agent
+  const mergeJs = `document.querySelector('dialog.proposal[open] button[data-act="merge"]')`;
+  await must(`${mergeJs}?.getAttribute("aria-disabled") === null`, "Merge, on");
+  // (its control: before Merge, the person's notebook beside the chat doesn't have the cell)
+  const before = await page.ev(`({ tab: document.querySelector(".pane-head .tab.on")?.dataset.tab ?? null, has: document.querySelector(".pane-body")?.textContent.includes(${JSON.stringify(NOTE)}) ?? null })`);
+  ok(before.tab === NOTEBOOK && before.has === false, "7. before Merge: the person's notebook beside the chat, without the agent's cell", before);
+  await page.ev(`(${mergeJs}.click(), true)`);
+  await must(`${chipJs}.textContent === "Merged"`, "the task's chip, Merged", 30000);
+  ok(true, "7. Merge: the task's chip says Merged");
+  let merged = null;
+  for (const t = Date.now(); Date.now() - t < 20_000; await sleep(250)) if ((merged = record(agent, task))?.status === "merged") break;
+  ok(merged?.status === "merged", "7. the agent's own record says merged", { status: merged?.status });
+  await shot("7-merged");
+  await page.ev(`(document.querySelector("dialog.proposal[open]")?.close(), true)`);
+  await page.ev(`(document.querySelector('.pane-head .tab[data-tab=${JSON.stringify(NOTEBOOK)}]')?.click(), true)`);
+  await must(`document.querySelector(".pane-head .tab.on")?.dataset.tab === ${JSON.stringify(NOTEBOOK)} && document.querySelector(".pane-body").textContent.includes(${JSON.stringify(NOTE)})`, "the merged cell in the person's notebook beside the chat", 30000);
+  ok(true, "7. the person's notebook beside the chat has the cell the agent added");
+  await shot("7-notebook");
   ok(page.errors.length === 0, "no page errors", page.errors);
 } catch (e) {
   ok(false, "the case ran to its end: " + (e?.stack ?? e));

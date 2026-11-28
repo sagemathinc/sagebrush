@@ -15,14 +15,18 @@ const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (!c
 
 // ---- the module's own text: it verifies, it doesn't sign
 const src = readFileSync(join(here, "fleet-verify.ts"), "utf8");
-const signing = src.replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "").match(/\b(?:seal\w*|sign\w*|keyFromSeed|recoveryKey|newRecoveryCode|setupSender|hpkeSeal|makeDeviceKey|asKey)\b/g);
-ok(!signing, "S-2: fleet-verify.ts names no signing or key-making function of the core or fleet-device (comments aside)", signing);
+const signing = src.replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "").match(/\b(?:seal\w*|sign(?!Raw\b)\w*|keyFromSeed|recoveryKey|newRecoveryCode|setupSender|hpkeSeal|makeDeviceKey|asKey)\b/g);
+// (signRaw is a verified host certificate's PUBLIC signing key, which hostFingerprintShown reads; it signs nothing)
+ok(!signing, "S-2: fleet-verify.ts names no signing or key-making function of the core or fleet-device (comments aside; signRaw, a certificate's public key, allowed)", signing);
 
 const dir = mkdtempSync(join(tmpdir(), "sb-fleet-verify-"));
 const entry = join(dir, "entry.ts");
 writeFileSync(entry, [
   `export * as fv from ${JSON.stringify(join(here, "fleet-verify.ts"))};`,
   `export { advancePin, advancePinOnChain, pin, resetDevice } from ${JSON.stringify(join(here, "fleet-device.ts"))};`,
+  // (the test's own signer, never the page's: it seals a second, valid genesis of the same fleet with the fixtures'
+  //  mock device seed, so the fingerprint's genesis check is tested against an entry that replays on its own)
+  `export { fleetCore as testCore } from ${JSON.stringify(join(here, "fleet", "install.ts"))};`,
 ].join("\n"));
 const built = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
 rmSync(dir, { recursive: true, force: true });
@@ -93,10 +97,10 @@ try {
     ok(changed !== F.objects.host_cert && tampered !== null, "V-7: a certificate with a changed byte is refused", tampered);
     const g = await P.ev(`(async () => { const bad = []; for (const c of F.objects.grants) { const cur = c.current && { gen: c.current.gen, bytes: new TextEncoder().encode(c.current.bytes), body: JSON.parse(c.current.bytes).body };
       let got; try { await m.fv.verifyGrant(${CTX}, CH, CERT, c.bytes, cur ?? null, F.now_ms); got = "ok"; } catch (e) { got = e?.code ?? String(e); } if (got !== c.expect) bad.push({ name: c.name, got, expect: c.expect }); } return { n: F.objects.grants.length, bad }; })()`);
-    ok(g.n === 11 && g.bad.length === 0, `V-8: all ${g.n} of the agent's grant cases get the fixtures' answer through verifyGrant`, g);
+    ok(g.n === 16 && g.bad.length === 0, `V-8: all ${g.n} of the agent's grant cases get the fixtures' answer through verifyGrant`, g);
     const a = await P.ev(`(async () => { const bad = []; for (const c of F.objects.grant_acks) {
       let got; try { await m.fv.verifyGrantAck(${CTX}, CERT, c.bytes, c.current_gen); got = "ok"; } catch (e) { got = e?.code ?? String(e); } if (got !== c.expect) bad.push({ name: c.name, got, expect: c.expect }); } return { n: F.objects.grant_acks.length, bad, refused: F.objects.grant_acks.filter((c) => c.expect !== "ok").length }; })()`);
-    ok(a.n === 7 && a.refused === 5 && a.bad.length === 0, `V-16: all ${a.n} of the agent's grant-ack cases (${a.refused} refused) get the fixtures' answer through verifyGrantAck`, a);
+    ok(a.n === 8 && a.refused === 5 && a.bad.length === 0, `V-16: all ${a.n} of the agent's grant-ack cases (${a.refused} refused) get the fixtures' answer through verifyGrantAck`, a);
   }
   // ---- when this browser can't store the pin or the fork mark: storage_failed, never a fork it didn't record
   // (IDBObjectStore.put made to throw QuotaExceededError, or to drop the write silently; restored afterwards)
@@ -176,7 +180,41 @@ try {
   {
     const P = await page();
     const names = await P.ev(`Object.keys(m.fv).sort().join()`);
-    ok(names === "PinMoved,StorageFailed,syncChain,verifyGrant,verifyGrantAck,verifyHostCert", "S-1: the module exports verification only: syncChain, verifyHostCert, verifyGrant, verifyGrantAck (and its errors StorageFailed, PinMoved)", names);
+    ok(names === "PinMoved,StorageFailed,fleetFingerprintShown,hostFingerprintShown,readChainPage,syncChain,verifyGrant,verifyGrantAck,verifyHostCert,verifyHostRevocation", "S-1: the module exports verification and reading only: syncChain, readChainPage, fleetFingerprintShown, verifyHostCert, verifyGrant, verifyGrantAck, verifyHostRevocation, hostFingerprintShown (and its errors StorageFailed, PinMoved)", names);
+    // (the fingerprint a person compares: recomputed from the verified certificate's keys, and equal to the first 100
+    //  bits of the full fingerprint the certificate carries, which the core has already checked against those keys)
+    const fp = await P.ev(`(async () => { const c = await m.fv.syncChain(${CTX}, F.objects.chain); const cert = await m.fv.verifyHostCert(${CTX}, c, F.objects.host_cert); const full = JSON.parse(F.objects.host_cert).body.fingerprint; const b = Uint8Array.from(atob(full.replace(/-/g, "+").replace(/_/g, "/")), (x) => x.charCodeAt(0)); let acc = 0n; for (const x of b.subarray(0, 13)) acc = (acc << 8n) | BigInt(x); acc >>= 4n; let want = ""; for (let i = 19; i >= 0; i--) want += "abcdefghijklmnopqrstuvwxyz234567"[Number((acc >> BigInt(5 * i)) & 31n)]; return { got: await m.fv.hostFingerprintShown(cert), want: want.match(/.{4}/g).join("-") }; })()`);
+    ok(/^[a-z2-7]{4}(-[a-z2-7]{4}){4}$/.test(fp.got) && fp.got === fp.want, "V-17: hostFingerprintShown: the first 100 bits of the certificate's full fingerprint, 20 base32 characters in groups of 4", fp);
+    // (a revocation: no fixture of one yet; anything else in its place is refused)
+    const rv = await code(P, `(async () => { const c = await m.fv.syncChain(${CTX}, F.objects.chain); await m.fv.verifyHostRevocation(${CTX}, c, F.ids.host, F.objects.host_cert); })()`);
+    ok(rv !== null, "V-18: verifyHostRevocation refuses an object that isn't a revocation (a host certificate in its place)", rv);
+    // (the fleet's fingerprint: the agent's shared vectors, each under its own fleet id, from a chain synced here)
+    const ffp = await P.ev(`(async () => { const out = []; for (const c of F.fleet_fingerprints) {
+      await m.resetDevice(c.fleet).catch(() => {});
+      const ctx = { aud: F.aud, fleet: c.fleet };
+      let got; try { const ch = c.fleet === F.ids.fleet ? await m.fv.syncChain(ctx, F.objects.chain) : null; got = ch ? await m.fv.fleetFingerprintShown(ctx, ch, c.genesis) : "no chain"; } catch (e) { got = e?.code ?? String(e); }
+      out.push({ name: c.name, got, shown: c.shown, own: c.fleet === F.ids.fleet && c.genesis === F.objects.chain[0] });
+    } return out; })()`);
+    const own = ffp.filter((r) => r.own);
+    ok(ffp.length === 3 && own.length === 1 && own[0].got === own[0].shown, "V-19: fleetFingerprintShown on the agent's own fleet and genesis gives the shared vector's shown fingerprint", ffp);
+    const notGenesis = await code(P, `(async () => { const c = await m.fv.syncChain(${CTX}, F.objects.chain); await m.fv.fleetFingerprintShown(${CTX}, c, F.objects.chain[1]); })()`);
+    const changed = await code(P, `(async () => { const c = await m.fv.syncChain(${CTX}, F.objects.chain); await m.fv.fleetFingerprintShown(${CTX}, c, F.fleet_fingerprints.find((x) => /one byte more/.test(x.name)).genesis); })()`);
+    ok(notGenesis !== null && changed !== null, "V-20: a genesis that isn't this chain's own seq-0 entry (another entry; one byte more) is refused, never fingerprinted", { notGenesis, changed });
+    // (a twin: the honest genesis's body one millisecond later, sealed by the same device. It is a valid genesis of
+    //  this fleet on its own, but not the entry this chain starts with: refused. The chain's own genesis still passes)
+    const twin = await P.ev(`(async () => {
+      const core = m.testCore(); const g = JSON.parse(F.objects.chain[0]); const body = { ...g.body, at_ms: g.body.at_ms + 1 };
+      const key = await core.keyFromSeed(Uint8Array.from(F.keys["device-browser"].seed.match(/../g), (h) => parseInt(h, 16)));
+      const text = new TextDecoder().decode(await core.seal(g.type, g.signer, body, key));
+      const ctx = ${CTX};
+      const alone = await core.replayChain([new TextEncoder().encode(text)], ctx).then(() => "ok", (e) => e?.code ?? String(e));
+      const c = await m.fv.syncChain(ctx, F.objects.chain);
+      const got = await m.fv.fleetFingerprintShown(ctx, c, text).then(() => null, (e) => e?.code ?? String(e));
+      const own = await m.fv.fleetFingerprintShown(ctx, c, F.objects.chain[0]);
+      return { alone, got, own, differs: text !== F.objects.chain[0] };
+    })()`);
+    const want = F.fleet_fingerprints.find((c) => c.fleet === F.ids.fleet && c.genesis === F.objects.chain[0])?.shown;
+    ok(twin.alone === "ok" && twin.differs && twin.got === "bad_form" && twin.own === want, "V-21: a second VALID genesis of the same fleet (replays on its own) that isn't this chain's: refused (bad_form); the chain's own genesis gives the shared vector", twin);
   }
 } catch (e) {
   ok(false, "the test ran to its end: " + (e?.stack ?? e));

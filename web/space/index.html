@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Sagebrush</title>
+<title>3D view · Sagebrush</title>
 <style>
   /* light by default (a white space); dark when the system is dark, or when chosen (Theme) */
   /* (the viewer's own root: its theme, its colours, the whole window) */
@@ -130,6 +130,8 @@
     <button data-c="move" title="Walking or flying (G)">Walking (G)</button>
     <button data-c="dims" title="Float the space in the air, as laid out in 3D">Float</button>
     <button data-c="fs" title="Full screen">Full screen</button>
+    <button data-c="vr" hidden title="Into the space, in a headset (Meta Quest and others)">Enter VR</button>
+    <button data-c="ar" hidden title="The space in your room, through the headset's passthrough">Enter AR</button>
     <button data-c="runall" title="Run every object's code, one after another">Run all</button>
     <button data-c="theme" title="Light, dark, or as your system is (Auto)">Theme: Auto</button>
   </div>
@@ -158,13 +160,18 @@
     <tr><td>W A S D, E Q</td><td>fly; up and down</td></tr>
     <tr><th colspan="2">Everywhere</th></tr>
     <tr><td>Click an object</td><td>read it (Esc closes)</td></tr>
-    <tr><td>Enter</td><td>into a folder</td></tr>
+    <tr><td>Enter</td><td>into a folder, a file of code, or a class</td></tr>
     <tr><td>B, F</td><td>back, forward (Back also leaves a room)</td></tr>
     <tr><td>H</td><td>see everything</td></tr>
     <tr><td>/</td><td>search</td></tr>
     <tr><td>N, P</td><td>a tour's next and previous stop</td></tr>
     <tr><td>G</td><td>walking or flying</td></tr>
     <tr><td>?</td><td>this help</td></tr>
+    <tr><th colspan="2">In a headset (Enter VR)</th></tr>
+    <tr><td>Left stick</td><td>walk; right stick: turn in steps</td></tr>
+    <tr><td>Trigger</td><td>on an object: read it; on the floor: step there</td></tr>
+    <tr><td>A or X, B or Y</td><td>close the panel; back</td></tr>
+    <tr><td>Left wrist</td><td>the menu: Back, Forward, See all, Run all, Tour, Fly, Exit</td></tr>
   </table>
 </div>
 </div>

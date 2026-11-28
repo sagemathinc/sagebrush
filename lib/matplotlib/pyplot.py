@@ -1254,8 +1254,25 @@ class Axes:
             entries = [(p, str(s)) for (p, _), s in zip(self._legend_handles(), labels)]
         else:
             entries = [(p, str(s)) for p, s in self._legend_handles() if s is not None and not str(s).startswith("_")]
+        anchor, pad, title = kw.pop("bbox_to_anchor", None), kw.pop("borderaxespad", None), kw.pop("title", None)
         if kw:
             raise NotImplementedError("legend(): %s not supported by sagebrush's matplotlib" % ", ".join(sorted(kw)))
+        if anchor is not None:
+            # (bbox_to_anchor: a point (x, y) or a box (x, y, width, height), in axes fractions)
+            a = [float(v) for v in (anchor.bounds if hasattr(anchor, "bounds") else anchor)]
+            if len(a) not in (2, 4):
+                raise ValueError("Invalid bbox: %r" % (anchor,))
+            self._opts["legend_anchor"] = tuple(a)
+        else:
+            self._opts.pop("legend_anchor", None)
+        if pad is not None:
+            self._opts["legend_pad"] = float(pad) * 10 * PT  # (in font sizes: the legend's 10 points)
+        else:
+            self._opts.pop("legend_pad", None)
+        if title is not None:
+            self._opts["legend_title"] = str(title)
+        else:
+            self._opts.pop("legend_title", None)
         self._opts["legend"] = True
         self._opts["legend_entries"] = entries
         if loc is not None:
@@ -1569,8 +1586,9 @@ class Figure:
         """This figure as one animation frame: (SVG body, description)."""
         return render_frame(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
 
-    def _svg(self, background=True):
-        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None))
+    def _svg(self, background=True, grow=True):
+        # (grow: a legend outside the figure widens it, as a notebook's inline figure; savefig's doesn't)
+        svg = render_svg(self._panels(), self._size[0] * 100, self._size[1] * 100, self._suptitle, getattr(self, "_markup", None), grow)
         # (a facecolor the program gave, or set in rcParams, colors the
         # figure as matplotlib's; otherwise it is the page's background)
         if background and self._facecolor_given:
@@ -1648,7 +1666,7 @@ class Figure:
             if metadata is not None:
                 raise NotImplementedError("savefig: metadata for SVG is not implemented in Sagebrush")
             # (savefig's own background: the one asked for, or none)
-            svg = self._svg(background=False)
+            svg = self._svg(background=False, grow=False)
             if given and background != "none":
                 svg = _svg_background(svg, background, self._size[0] * 100, self._size[1] * 100)
             _write(fname, svg, text=True)
@@ -1661,7 +1679,7 @@ class Figure:
         # (the pixel marker ',' is one pixel of this PNG: 100 / dpi SVG units)
         old = _pixel_size(100.0 / dpi) if dpi > 0 and math.isfinite(dpi) else None
         try:
-            svg = self._svg(background=False)
+            svg = self._svg(background=False, grow=False)
         finally:
             if old is not None:
                 _pixel_size(old)

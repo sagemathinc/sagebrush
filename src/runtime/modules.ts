@@ -1,6 +1,6 @@
 // Module registry, import machinery, and builtin modules written in JS.
 
-import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig, raiseExc } from "./object";
+import { globalsDict, realGlobals, namespaceOf, instanceDict, NS_DICT, NS_LAZY, hooks, setattr, putAttr, currentExc, lookupType, isType, checkArity, bindArgs, sig, raiseExc } from "./object";
 import { glibcLog, glibcExp, glibcExp2, glibcLog1p, glibcPow } from "./libm";
 import { T, DONE, markRaised, FloatBox, PyDict, PyBytes, NotImplemented, typeOf, raise, PrimBox, unbox, builtin, tuple, getattr, isinstance, dictSet, dictGet, dictDelete, typeName, callKw, callObj, positionalArray } from "./object";
 import * as O from "./ops";
@@ -12,7 +12,7 @@ import * as FD from "./fdlibm";
 import * as CR from "./crmath";
 import * as PG from "./pygamma";
 import { floatRepr, intDigits } from "./format";
-import { heapLimit } from "./heap";
+import { admitHeap, heapLimit } from "./heap";
 
 export const sysModules = new PyDict();
 const factories: Record<string, (m: any) => void> = Object.create(null);
@@ -310,10 +310,27 @@ export function builtinsObject(b: any): any {
   const d = b[NS_DICT];
   return d !== undefined ? d : instanceDict(b);
 }
-export function builtinName(b: any, k: string): any {
+// (G: the globals the load missed in; a lazy namespace's, NS_LAZY, may still supply the name: Sage mode's session
+// loads a domain on the first use of one of its names, lib/_sage_lazy.py)
+export function builtinName(b: any, k: string, G?: any): any {
   const v = b === builtins ? (Object.prototype.hasOwnProperty.call(b, k) ? b[k] : undefined) : b[k];
-  if (v === undefined) raise(T.NameError, `name '${k}' is not defined`);
+  if (v === undefined) {
+    const lazy = G === undefined ? undefined : G[NS_LAZY];
+    if (lazy !== undefined) {
+      const w = lazyName(lazy, k);
+      if (w !== undefined) return w;
+    }
+    raise(T.NameError, `name '${k}' is not defined`);
+  }
   return v;
+}
+// A lazy namespace's name k, loaded and bound there, or undefined when it has none (a KeyError from _miss); any other
+// error, a domain that fails to import, is the load's own
+// (the session itself back: not one of its names; any exception, a KeyError included, is the domain's own and
+// propagates)
+export function lazyName(lazy: any, k: string): any {
+  const v = callObj(getattr(lazy, "_miss"), [k]);
+  return v === lazy ? undefined : v;
 }
 // (the importing code's builtins' __import__, those it started with:
 // CPython's IMPORT_NAME, the frame's builtins)
@@ -365,6 +382,11 @@ export function importFrom(m: any, name: string): any {
   }
   const v = m[name];
   if (v !== undefined && Object.prototype.hasOwnProperty.call(m, name)) return v;
+  // (a session's module, Sage mode's __main__: a Sage name not loaded yet, `from __main__ import X`)
+  if (m[NS_LAZY] !== undefined) {
+    const lv = lazyName(m[NS_LAZY], name);
+    if (lv !== undefined) return lv;
+  }
   // an attribute from the module's __getattr__ (PEP 562, or a module
   // subclass) comes before a submodule, as in CPython
   if (typeOf(m) !== T.module || m.__getattr__ !== undefined) {
@@ -1743,6 +1765,8 @@ newBuiltinModule("types", (m) => {
 
 // ------------------------------------------------------------------ _random: MT19937 exactly as CPython
 
+// (the ASCII codes of the 16 hex digits, for getrandbits's buffer)
+const HEX_DIGITS = Uint8Array.from([48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]);
 export class MT {
   mt = new Uint32Array(624);
   mti = 625;
@@ -1816,8 +1840,9 @@ export class MT {
     // seed(None): 256 bits of os.urandom, as CPython (it was the clock)
     if (x === null || x === undefined) v = [...(require("crypto").randomBytes(32) as Uint8Array)].reduce((a, b) => (a << 8n) | BigInt(b), 0n);
     else if (O.isPyInt(x)) v = BigInt(typeof x === "boolean" ? +x : x);
-    else if (typeof x === "string") v = BigInt.asUintN(64, BigInt(O.hashAny(x)));
-    else v = BigInt.asUintN(64, BigInt(O.hashAny(x)));
+    // (anything else, a float say: its hash cast to unsigned, as CPython's random_seed; the exact hash, never a
+    // double's rounding of it: hash(1.5) is 2^60 + 1)
+    else v = BigInt.asUintN(64, BigInt(O.hashExact(x)));
     if (v < 0n) v = -v;
     const key: number[] = [];
     do {
@@ -1826,18 +1851,26 @@ export class MT {
     } while (v > 0n);
     this.initByArray(key);
   }
-  getrandbits(k: number): number | bigint {
+  getrandbits(k: number, shown: string = String(k)): number | bigint {
     if (k < 0) raise(T.ValueError, "number of bits must be non-negative");
     if (k === 0) return 0;
     if (k <= 32) return this.genrand() >>> (32 - k);
-    let r = 0n, shift = 0n;
-    for (let left = k; left > 0; left -= 32) {
+    // (CPython's words, least significant first, the last one's top bits; made one int at once from their hex, not
+    // OR-ed in one at a time, which copied the growing int at each word: k = 2^20 took 0.4 s. The hex digits go into
+    // one byte buffer, decoded once: no string per word)
+    const n = Math.ceil(k / 32);
+    // (the buffer, k/4 bytes; its one-byte string, k/4; the int, k/8: 5/8 of a byte per bit at the peak, measured at
+    // 0.9 with the buffer counted twice by node's accounting, so 1 byte per bit, admitted before any word is drawn)
+    admitHeap(k, `getrandbits(${shown})`);
+    const buf = new Uint8Array(2 + 8 * n);
+    buf[0] = 48;
+    buf[1] = 120;
+    for (let i = 0, left = k; i < n; i++, left -= 32) {
       let w = this.genrand();
       if (left < 32) w >>>= 32 - left;
-      r |= BigInt(w) << shift;
-      shift += 32n;
+      for (let j = 2 + 8 * (n - 1 - i) + 7, e = j - 8; j > e; j--, w >>>= 4) buf[j] = HEX_DIGITS[w & 15];
     }
-    return O.normBig(r);
+    return O.normBig(BigInt(new TextDecoder("latin1").decode(buf)));
   }
 }
 
@@ -1849,7 +1882,14 @@ newBuiltinModule("_random", (m) => {
   });
   Ty.method(RandomType, "seed", (r: MT, x: any = null) => (r.seed(x), null));
   Ty.method(RandomType, "random", (r: MT) => O.mkfloat(r.random()));
-  Ty.method(RandomType, "getrandbits", (r: MT, k: any) => r.getrandbits(Number(k)));
+  // (k an index, as CPython's uint64_t argument: a float or a str a TypeError, a negative one or one past 64 bits a
+  // ValueError or OverflowError in its words; a large one a MemoryError, getrandbits's admission)
+  Ty.method(RandomType, "getrandbits", (r: MT, k: any) => {
+    const i = O.index(k);
+    if (i < 0) raise(T.ValueError, "Cannot convert negative int");
+    if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, "Python int too large for C uint64_t");
+    return r.getrandbits(Number(i), String(i));
+  });
   Ty.method(RandomType, "getstate", (r: MT) => tuple([3, tuple([...r.mt, r.mti]), null]));
   Ty.method(RandomType, "setstate", (r: MT, st: any) => {
     const inner = O.toArray(st[1]);

@@ -182,6 +182,28 @@ async function upload(c, files, title = "T") {
   const d = await fetchSite("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "wrong", account_id: A }) });
   ok(d.status === 403, "dev sign-in needs the dev token");
 }
+// ---- re-authentication (sessions.reauth_ms) on the CoCalc sign-in: never set by it, and reauth=1 changes nothing
+{
+  const reauthOf = async (c) => (await db.prepare("SELECT reauth_ms FROM sessions WHERE token_hash = ?1").bind(sha(c.slice(c.indexOf("=") + 1))).first())?.reauth_ms;
+  const { session } = await signIn(A);
+  ok(session && (await reauthOf(session)) === null, "re-auth: a CoCalc sign-in's session has reauth_ms NULL");
+  // (its authorize URL with reauth=1 is the default's, apart from the per-attempt state and challenge; no max_age)
+  const shape = async (q) => {
+    const r = await fetchSite(`/auth/login?return=%2Fx${q}`);
+    const u = new URL(r.headers.get("location"));
+    for (const k of ["state", "code_challenge"]) u.searchParams.set(k, "-");
+    return `${r.status} ${u}`;
+  };
+  const plain = await shape("");
+  ok(plain === (await shape("&reauth=1")) && !plain.includes("max_age"), "re-auth: with CoCalc, /auth/login?reauth=1 answers as without it", plain);
+  const r = await fetchSite(`/auth/login?return=${encodeURIComponent("//evil.example/")}&reauth=1`);
+  const to = new URL(r.headers.get("location"));
+  const oauth = r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_oauth="));
+  const code = b64url(Buffer.from(Math.random().toString()));
+  fake.codes.set(code, { account_id: A, email: "a@example.com", verified: true, redirect_uri: to.searchParams.get("redirect_uri"), challenge: to.searchParams.get("code_challenge") });
+  const cb = await fetchSite(`/auth/callback?code=${code}&state=${to.searchParams.get("state")}&reauth=1`, { headers: { cookie: oauth } });
+  ok(cb.status === 302 && cb.headers.get("location") === "/" && (await reauthOf(sessionOf(cb))) === null, "re-auth: with CoCalc, reauth=1 keeps the return check and sets no reauth_ms");
+}
 // ---- DEV's /auth/dev: a short session when asked (ttl, whole seconds 300 to 32400), else 30 days (plan-fuzz-F3b A1)
 {
   const D = "33333333-3333-4333-8333-333333333333";
@@ -193,8 +215,11 @@ async function upload(c, files, title = "T") {
   const maxAge = (r) => Number((r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_session=")) ?? "").match(/Max-Age=(\d+)/)?.[1] ?? NaN);
   const sessionsOfD = async () => (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(D).first()).n;
   // (none asked: 30 days, as before)
+  const t0 = Date.now();
   const r0 = await dev({});
   const j0 = await r0.json(), row0 = await rowOf(r0);
+  const rm = (await db.prepare("SELECT reauth_ms FROM sessions WHERE token_hash = ?1").bind(sha(sessionOf(r0).slice(sessionOf(r0).indexOf("=") + 1))).first())?.reauth_ms;
+  ok(Number.isSafeInteger(rm) && rm >= t0 - 1000 && rm <= Date.now() + 1000, "re-auth: /auth/dev's session (DEV only) is re-authenticated now", { t0, rm });
   ok(r0.status === 200 && row0 && row0.expires - row0.created === 30 * 86400 && j0.expires === row0.expires && maxAge(r0) === 30 * 86400, `dev sign-in without ttl: a 30-day session, as before (${row0?.expires - row0?.created} s, Max-Age ${maxAge(r0)}, answered expires ${j0.expires === row0?.expires})`);
   // (the bounds, and one between: the session ends exactly ttl after it starts, the cookie says so, the answer too)
   for (const ttl of [300, 2700, 32400]) {

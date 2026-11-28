@@ -34,8 +34,15 @@ pass, and CI runs them.
     inputs in float16, which Sagebrush refuses (see float16 below).
 - **Arithmetic:** NumPy 2 promotion, with Python scalars "weak" (NEP 50),
   and OverflowError for out-of-range Python ints. Float sums use NumPy's
-  pairwise summation, so they agree to the last bit. `mean`, `var` and `std`
-  follow NumPy's formulas.
+  pairwise summation (its complex one for complex arrays), in the order
+  NumPy's iterator visits the array, so they agree to the last bit for a
+  transposed, F-ordered, strided or reversed array too
+  (`numpy-tests/test_reduce_order.py`). `mean`, `var` and `std` follow
+  NumPy's formulas. One gap remains: an operation's result (`a + 1`,
+  `astype`) is laid out in C order, where NumPy keeps an F-ordered or
+  transposed input's layout, so a reduction of such a result (a sum, a
+  mean, or `var` and `std` of it) can differ from NumPy's in the last bits;
+  `var` and `std` of the input itself agree.
 - **Random:** NumPy's exact streams.
   - `np.random.seed` and `RandomState`: MT19937 with NumPy's legacy seeding,
     53-bit doubles, polar-method normals, masked-rejection integers, and
@@ -61,6 +68,25 @@ pass, and CI runs them.
     differently).
   - fft (pocketfft).
   - float32 transcendentals.
+- **A float cast to an integer type** (NaN, infinity or a value out of range; `astype`, assignment, `out=`): NumPy
+  leaves these to the C cast, whose x86-64 result Sagebrush gives as a fixed rule, NumPy's per-element (scalar) loop.
+  int8, int16, int32, uint8 and uint16 convert through a 32-bit integer (out of its range, or NaN, gives its least
+  value, whose low bits the narrow types keep: 0); uint32 converts through a 64-bit integer and keeps the low 32
+  bits (NaN, infinity and $|x| \ge 2^{63}$ give 0, -3e9 gives 1294967296). NumPy warns "invalid value encountered in
+  cast" when that conversion is invalid, and so does Sagebrush, once per cast. NumPy's vectorized loop gives some
+  uint32 elements of a contiguous array other values (in blocks of 4: NaN gives 2147483648 there); Sagebrush gives
+  every element the per-element result. A Python float (or a NumPy float scalar) assigned or listed is converted by
+  `int()`, NaN, infinity and out-of-range values refused, as in NumPy. int64 converts through a 64-bit integer (out
+  of range, NaN or infinity gives $-2^{63}$), and uint64 by x86-64's unsigned conversion ($2^{63}$ for NaN,
+  $-\infty$ and values below $-2^{63}$; 0 for $\infty$ and values from $2^{64}$): values these stores hold exactly.
+  Results past $2^{53}$ that a double can't hold are still refused. A complex value cast to a real type other than
+  bool drops its imaginary part with NumPy's `ComplexWarning` (`astype`, assignment, `out=`, and `sum`, `prod`,
+  `mean`, `cumsum` and `cumprod` with a real `dtype=`). The warning names the operation as NumPy's does ("in cast";
+  "in add" and so on when a ufunc writes into an integer `out=`; "in reduce" for a reduction into one), and
+  `np.errstate`/`np.seterr` set whether it warns, is ignored or raises `FloatingPointError` (their 'call', 'print'
+  and 'log' modes are not supported for 'invalid' yet). Sagebrush gives one warning per call: NumPy casts the first
+  element of `min`/`max` (and of an accumulation, "in accumulate") into `out=` on its own, so it may give a second
+  warning, or say "in cast" when only that element is invalid.
 
 ## What is there
 
@@ -71,6 +97,21 @@ pass, and CI runs them.
   them.
 - **Broadcasting ufuncs** with `out`, `where`, `reduce`, `accumulate` and
   `outer`.
+  - `out=` takes the loop's result only under `casting=` (default
+    `same_kind`), checked before anything is computed: a float result into an
+    integer `out=` is NumPy's `UFuncTypeError`, and `out` keeps its values.
+    `casting='unsafe'` casts. `clip` refuses the same way (as `maximum` or
+    `minimum` with one bound), and `ptp`'s `out=` is NumPy's: the maximum
+    reduced into `out`, then `subtract` into it.
+  - A reduction without an identity (`max`, `min`, `maximum.reduce`,
+    `nanmax`, ...) into an `out=` of another dtype takes NumPy's two steps:
+    each position's first element is cast into `out` ("invalid value
+    encountered in cast"), then the rest are reduced from `out`'s value read
+    back, and the result is cast ("... in reduce"). An accumulation into
+    `out=` (`cumsum`, `add.accumulate`, ...) is computed in the dtype both
+    convert to, with each result cast into `out`. NumPy's buffered iterator
+    also writes `out` back every 8192 elements of some reductions; that is not
+    done, so a reduction past that length into a narrower `out` can differ.
 - **Reductions** with `axis` (int or tuple) and `keepdims`: `nan*`
   variants, `median`, `percentile`/`quantile` (NumPy's `_lerp`), `average`,
   `cov`, `corrcoef`.

@@ -19,6 +19,8 @@ export const LABELS = Object.freeze({
   // ---- a document's payloads (§4): where a patch or a presence message belongs, its header's first field (doc-payload.ts)
   docPatch: "sagebrush.e2e.doc.patch.v1",
   docPresence: "sagebrush.e2e.doc.presence.v1",
+  // ---- a document key generation's CEK, wrapped under K_wrap[e] for its declaration: the wrapping's AAD (doc-cek.ts)
+  docCekWrap: "sagebrush.e2e.doc.cek-wrap.v1",
   // ---- the key chain's (keys and devices, §11.1 and §11.2): here so that one table covers every label
   keyring: "sagebrush.keyring.v1",
   kemPop: "sagebrush.kem-pop.v1",
@@ -32,6 +34,9 @@ export const LABELS = Object.freeze({
   preEntry: "sagebrush.e2e.pre-entry.v1",
   publicKeyProbe: "sagebrush.e2e.public-key-probe.v1",
   keySalt: "sagebrush.e2e.v1",
+  // ---- a sealed index op's signed bytes (§4.1; e2e PR 5b): spelled in sealed-op.mjs (the server's and the client's),
+  // registered here so that the one collision check covers it
+  sealedOp: "sagebrush.e2e.sealed-op.v1",
   // ---- named by the design for later work (§6.2): listed so that nothing else takes them
   logSegment: "sagebrush.logseg.v1",
   remote: "sagebrush.remote.v1",
