@@ -194,9 +194,10 @@ function otherServer() {
   const page = (name) => `<!doctype html><script>
     const say = (v) => ${name === "sforge" ? `void (window.__sbImgs ||= []).push(Object.assign(new Image(), { src: "/report?p=${name}&v=" + encodeURIComponent(v) }))` : `fetch("/report?p=${name}&v=" + encodeURIComponent(v)).catch(() => {})`};
     say("loaded");
-    // (the three calls at once, each bounded: one that never answers says "(no answer)" within 5 s, and holds up none
-    // of the others, so each is said before the launch ends)
-    const answer = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("(no answer)")), 5000))]);
+    // (the three calls at once, each bounded: one that never answers says "(no answer)", and holds up none of the
+    // others, so each is said before the launch ends; /sforge's within 1.5 s, since its frame loads last, a few seconds
+    // before the main page's probe ends the launch, and its calls go nowhere)
+    const answer = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("(no answer)")), ${name === "sforge" ? 1500 : 5000}))]);
     const call = (f, ok, no) => answer(Promise.resolve().then(f)).then((x) => say(ok(x)), (e) => say(no + String(e && e.message || e).slice(0, 80)));
     call(() => window.__TAURI__.core.invoke("disk_where"), (w) => "REACHED disk_where " + String(w).length, "refused: ");
     call(() => window.__TAURI__.fs.exists("/"), (x) => "REACHED fs.exists " + x, "fs refused: ");
