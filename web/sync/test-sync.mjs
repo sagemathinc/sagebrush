@@ -591,10 +591,17 @@ const big = Buffer.alloc(6000, 7), small = Buffer.from("small file"), other = Bu
   ok(lose.ok?.id !== undefined, "the race: the first upload reserves");
   r = await put(sa, early, addr2);
   ok(r.status === 201, "the race: the second upload, finished first, is held");
+  // (the loser's bytes, as its streamed upload would have left them at its reserved key: what its refusal must delete)
+  const raceBucket = await mf.getR2Bucket("SHARE_BUCKET", "sync");
+  await raceBucket.put(lose.ok.key, late);
+  ok((await raceBucket.head(lose.ok.key)) !== null, "(the race: the loser's bytes are in R2 at its reserved key)");
   const fin = await acctA.finalize({ account: A, id: lose.ok.id, size: 1 });
   ok(fin.error?.code === "conflict" && JSON.stringify(fin.error.detail?.held) === JSON.stringify({ address: addr2, ct_sha256: sha(early), size: 1 }), "the race: the first upload, finalized second, is a conflict naming the winner, never \"finalized\": " + JSON.stringify(fin));
   i = await acctA.inspect({ sha256: addr2 });
-  ok(i?.used === 12_002 && i.reservations === 0 && i.outbox >= 1, "the race: the loser's bytes came back, its reservation is gone and its object is queued for deletion (" + JSON.stringify({ used: i?.used, reservations: i?.reservations, outbox: i?.outbox }) + ")");
+  ok(i?.used === 12_002 && i.reservations === 0, "the race: the loser's bytes came back and its reservation is gone (" + JSON.stringify({ used: i?.used, reservations: i?.reservations }) + ")");
+  // (its object queued for deletion, and deleted: waited for as that event, the object gone from R2, since the
+  // account's alarm may drain the queue before any look at it)
+  ok(await until(async () => (await raceBucket.head(lose.ok.key)) === null), "the race: the loser's object is deleted from R2 (queued for deletion, then drained)");
   const again2 = await acctA.finalize({ account: A, id: lose.ok.id, size: 1 });
   ok(again2.error !== undefined, "the race: the loser's finalize again is still refused, never \"finalized\": " + JSON.stringify(again2));
   r = await put(sa, Buffer.alloc(20_000, 3));
