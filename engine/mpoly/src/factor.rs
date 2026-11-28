@@ -514,14 +514,14 @@ fn lift_univariate(g: &[BigInt], us: Vec<U>, p: &BigInt, m: &BigInt) -> Option<V
 
 /// The factorization of f over Z: (unit content, [(irreducible, e)]) with
 /// primitive factors of positive leading coefficient (lex).
-pub fn factor_z(f: &ZPoly) -> Result<(BigInt, Vec<(ZPoly, u32)>), String> {
+pub fn factor_z(f: &ZPoly) -> Result<(BigInt, Vec<(ZPoly, u64)>), String> {
     factor_z_with(f, &sagebrush_poly::Budget::default())
 }
 
 /// As [`factor_z`], every univariate factorization (of images, contents and
 /// leading coefficients, recursively) drawing from one budget: a refusal is
 /// an error.
-pub fn factor_z_with(f: &ZPoly, b: &sagebrush_poly::Budget) -> Result<(BigInt, Vec<(ZPoly, u32)>), String> {
+pub fn factor_z_with(f: &ZPoly, b: &sagebrush_poly::Budget) -> Result<(BigInt, Vec<(ZPoly, u64)>), String> {
     let n = f.n;
     if f.is_zero() {
         return Err("factor(0)".into());
@@ -531,12 +531,12 @@ pub fn factor_z_with(f: &ZPoly, b: &sagebrush_poly::Budget) -> Result<(BigInt, V
         c = -c;
     }
     let g = f.divexact_scalar(&c);
-    let mut out: Vec<(ZPoly, u32)> = vec![];
+    let mut out: Vec<(ZPoly, u64)> = vec![];
     // monomial content
     let degs_min: Vec<u64> = (0..n).map(|j| g.exps.iter().map(|&w| g.exp(w, j)).min().unwrap_or(0)).collect();
     for (j, &k) in degs_min.iter().enumerate() {
         if k > 0 {
-            out.push((var(n, j), k as u32));
+            out.push((var(n, j), k));
         }
     }
     let g = build(n, terms(&g).into_iter().map(|(mut e, c)| {
@@ -547,7 +547,7 @@ pub fn factor_z_with(f: &ZPoly, b: &sagebrush_poly::Budget) -> Result<(BigInt, V
     }).collect());
     factor_rec(&g, &mut out, b)?;
     // equal factors merged
-    let mut merged: Vec<(ZPoly, u32)> = vec![];
+    let mut merged: Vec<(ZPoly, u64)> = vec![];
     for (h, e) in out {
         match merged.iter_mut().find(|(k, _)| k.equals(&h)) {
             Some(x) => x.1 += e,
@@ -568,7 +568,7 @@ fn normalize(h: ZPoly) -> ZPoly {
 }
 
 /// Factors of a primitive g (no monomial content) appended to out.
-fn factor_rec(g: &ZPoly, out: &mut Vec<(ZPoly, u32)>, b: &sagebrush_poly::Budget) -> Result<(), String> {
+fn factor_rec(g: &ZPoly, out: &mut Vec<(ZPoly, u64)>, b: &sagebrush_poly::Budget) -> Result<(), String> {
     if is_constant(g) {
         return Ok(());
     }
@@ -593,7 +593,7 @@ fn factor_rec(g: &ZPoly, out: &mut Vec<(ZPoly, u32)>, b: &sagebrush_poly::Budget
 }
 
 /// Yun's square-free decomposition of pp (primitive in v) with respect to v.
-fn squarefree(f: &ZPoly, v: usize) -> Result<Vec<(ZPoly, u32)>, String> {
+fn squarefree(f: &ZPoly, v: usize) -> Result<Vec<(ZPoly, u64)>, String> {
     if surely_squarefree(f, v) {
         return Ok(vec![(f.clone(), 1)]);
     }
@@ -605,7 +605,7 @@ fn squarefree(f: &ZPoly, v: usize) -> Result<Vec<(ZPoly, u32)>, String> {
     let mut out = vec![];
     let mut c = c;
     let mut d = sub(&db, &derivative(&c, v));
-    let mut i = 1u32;
+    let mut i = 1u64;
     while uses(&c, v) {
         let (a, c1, d1) = gcd_cofactors(&c, &d)?;
         if uses(&a, v) {
@@ -695,7 +695,7 @@ fn factor_sqfree_in(s: &ZPoly, v: usize, b: &sagebrush_poly::Budget) -> Result<V
     // Wang: lc = omega * prod F_j^e_j, the F_j distributed over the factors
     let (omega, lfacs) = if is_constant(&lc) { (lc.coeffs.big(0), vec![]) } else { factor_z_with(&lc, b)? };
     let lf: Vec<ZPoly> = lfacs.iter().map(|(h, _)| h.clone()).collect();
-    let le: Vec<u32> = lfacs.iter().map(|(_, e)| *e).collect();
+    let le: Vec<u64> = lfacs.iter().map(|(_, e)| *e).collect();
     let mut rng = 0x9E3779B97F4A7C15u64;
     let mut next = |range: i64| -> i64 {
         rng ^= rng << 13;
@@ -801,7 +801,7 @@ fn distinct_parts(c: &BigInt, ft: &[BigInt]) -> Option<Vec<BigInt>> {
 
 /// D_i, the product of the F_j dividing the leading coefficient of the
 /// i-th factor, from the image's leading coefficients (Wang).
-fn distribute(n: usize, lf: &[ZPoly], le: &[u32], ft: &[BigInt], ds: &[BigInt], facs: &[Vec<BigInt>]) -> Option<Vec<ZPoly>> {
+fn distribute(n: usize, lf: &[ZPoly], le: &[u64], ft: &[BigInt], ds: &[BigInt], facs: &[Vec<BigInt>]) -> Option<Vec<ZPoly>> {
     let r = facs.len();
     // the remaining leading coefficients, as fractions num / den
     let mut rem: Vec<(BigInt, BigInt)> = facs.iter().map(|h| (h.last().unwrap().clone(), BigInt::one())).collect();
@@ -1047,8 +1047,25 @@ mod tests {
             prod = mul(&prod, &h.pow(*e as u64).unwrap());
         }
         assert!(prod.equals(f), "product mismatch");
-        let total: u32 = fs.iter().map(|x| x.1).sum();
+        let total: u64 = fs.iter().map(|x| x.1).sum();
         assert_eq!(total as usize, want, "{} factors", fs.len());
+    }
+
+    #[test]
+    fn wide_multiplicities() {
+        // a monomial content's multiplicity past u32 kept whole: x^e, e =
+        // 2^32 - 1, 2^32, 2^32 + 1, 2^40 + 3, alone, times 3, and times
+        // (x + 1); the product equal to the input
+        for e in [(1u64 << 32) - 1, 1 << 32, (1 << 32) + 1, (1 << 40) + 3] {
+            let (c, fs) = factor_z(&poly(1, &[(&[e], 1)])).unwrap();
+            assert_eq!((c, fs.len(), fs[0].1), (BigInt::one(), 1, e));
+            let (c, fs) = factor_z(&poly(1, &[(&[e], 3)])).unwrap();
+            assert_eq!((c, fs.len(), fs[0].1), (BigInt::from(3), 1, e));
+            let (_, fs) = factor_z(&poly(1, &[(&[e + 1], 1), (&[e], 1)])).unwrap();
+            let mut ms: Vec<u64> = fs.iter().map(|x| x.1).collect();
+            ms.sort();
+            assert_eq!(ms, vec![1, e]);
+        }
     }
 
     #[test]

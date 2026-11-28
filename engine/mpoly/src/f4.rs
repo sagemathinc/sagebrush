@@ -496,18 +496,23 @@ pub fn f4_p_opt(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>], pro
             let ph = Packing { n: n + 1, bits: pk.bits };
             // lex on the variables (reversed for invlex), then h
             let perm: Vec<usize> = if o == Order::Lex { (0..n).collect() } else { (0..n).rev().collect() };
+            // (h's exponent, up to the total degree, can pass the variables'
+            // packing: each word is checked before it is packed, a wider
+            // packing tried if any doesn't fit)
             let mut hs = vec![];
             for f in fs {
                 let d = f.iter().map(|&(w, _)| pk.degree(w)).max().unwrap_or(0);
-                hs.push(f.iter().map(|&(w, c)| {
+                let mut h = Vec::with_capacity(f.len());
+                for &(w, c) in f {
                     let e = pk.unpack(w);
                     let mut e2: Vec<u64> = perm.iter().map(|&i| e[i]).collect();
                     e2.push(d - pk.degree(w));
-                    (ph.pack(&e2), c)
-                }).collect::<Vec<_>>());
-            }
-            if hs.iter().flatten().any(|x| x.0 & ph.guard() != 0) {
-                return Err(Overflow);
+                    if !ph.fits(&e2) {
+                        return Err(Overflow);
+                    }
+                    h.push((ph.pack(&e2), c));
+                }
+                hs.push(h);
             }
             let gh = f4_direct(ph, Order::DegLex, md, &hs, prob)?;
             if std::env::var("SB_F4_DEBUG").is_ok() {
@@ -565,16 +570,20 @@ fn sig_path(pk: Packing, o: Order, md: &Modulus, fs: &[Vec<(u64, u64)>]) -> Resu
             return Ok(None);
         }
         let ph = Packing { n: n + 1, bits: pk.bits };
-        let hs: Vec<P> = fs.iter().filter(|f| !f.is_empty()).map(|f| {
+        // (each word checked before it is packed, as in f4_p_opt)
+        let mut hs: Vec<P> = vec![];
+        for f in fs.iter().filter(|f| !f.is_empty()) {
             let d = f.iter().map(|&(w, _)| pk.degree(w)).max().unwrap();
-            f.iter().map(|&(w, c)| {
+            let mut h = Vec::with_capacity(f.len());
+            for &(w, c) in f {
                 let mut e = pk.unpack(w);
                 e.push(d - pk.degree(w));
-                (ph.pack(&e), c)
-            }).collect()
-        }).collect();
-        if hs.iter().flatten().any(|x| x.0 & ph.guard() != 0) {
-            return Err(Overflow);
+                if !ph.fits(&e) {
+                    return Err(Overflow);
+                }
+                h.push((ph.pack(&e), c));
+            }
+            hs.push(h);
         }
         let gh = crate::sigf4::sig_basis(ph, o, md, &hs)?;
         gh.iter().map(|f| {
@@ -672,8 +681,20 @@ pub fn groebner_p(fs: &[QPoly], o: Order, p: u64) -> Result<Vec<QPoly>, String> 
     groebner_p_opt(fs, o, p, false)
 }
 
+/// The reduced basis of constants (no variables): [1] if one is nonzero,
+/// else [].
+fn constants_basis(fs: &[QPoly], p: u64) -> Result<Vec<QPoly>, String> {
+    if fs.iter().all(|f| f.num.is_zero()) {
+        return Ok(vec![]);
+    }
+    Ok(vec![QPoly { num: ZPoly::from_terms(0, vec![(vec![], BigInt::one())])?, den: BigInt::one(), p }])
+}
+
 fn groebner_p_opt(fs: &[QPoly], o: Order, p: u64, prob: bool) -> Result<Vec<QPoly>, String> {
     let n = fs.first().map(|f| f.num.n).unwrap_or(1);
+    if n == 0 {
+        return constants_basis(fs, p);
+    }
     let md = Modulus::new(p);
     let (mut bits, maxb) = bits_range(fs, o);
     loop {
@@ -733,6 +754,9 @@ pub fn groebner_q_opt(fs: &[QPoly], o: Order, proof: bool) -> Result<Vec<QPoly>,
     let fs: Vec<QPoly> = fs.iter().filter(|f| !f.num.is_zero()).cloned().collect();
     if fs.is_empty() {
         return Ok(vec![]);
+    }
+    if fs[0].num.n == 0 {
+        return constants_basis(&fs, 0);
     }
     if matches!(o, Order::DegRevLex | Order::DegLex) && std::env::var("SB_F4Q").as_deref() != Ok("0") {
         if let Some(g) = crate::f4q::groebner_q_f4(&fs, o, proof)? {
@@ -1202,6 +1226,114 @@ mod tests {
 
     fn q(n: usize, s: &str) -> QPoly {
         QPoly::from_text(n, s).unwrap()
+    }
+
+    /// The reduced basis over GF(p) of a principal ideal <f>, f with every
+    /// coefficient 1 (monic in any order), is f, in every order.
+    fn principal(n: usize, text: &str, p: u64) {
+        let f = q(n, text);
+        let f = QPoly { num: f.num.reduce_mod(p), den: BigInt::one(), p };
+        let sorted = |t: String| {
+            let mut v: Vec<String> = t.split(';').map(|x| x.to_string()).collect();
+            v.sort();
+            v
+        };
+        for o in [Order::Lex, Order::InvLex, Order::DegLex, Order::DegRevLex] {
+            let g = groebner_p(&[f.clone()], o, p).unwrap();
+            assert_eq!(g.len(), 1, "{:?}: {} elements", o, g.len());
+            assert_eq!(sorted(g[0].to_text()), sorted(f.to_text()), "{:?}", o);
+        }
+    }
+
+    /// The reduced basis by the public call, as text, or the refusal.
+    fn call_basis(f: &QPoly, o: &str) -> Result<Vec<String>, String> {
+        let out = crate::call("groebner", &[o.as_bytes(), &f.to_bytes()])?;
+        Ok(out.iter().map(|b| QPoly::from_bytes(b).unwrap().to_text()).collect())
+    }
+
+    #[test]
+    fn packing_grid() {
+        // (x_1 ... x_n)^d + 1, n = 2..9, d about each field's boundary, every
+        // order, over GF(2), GF(101), GF(2000003) and GF(2147483659) (past
+        // 2^31): its basis is itself, or a refusal when its homogenized
+        // words can't be packed (h's exponent, n d, takes the field)
+        let (mut matched, mut refused) = (0, 0);
+        for p in [2u64, 101, 2000003, 2147483659] {
+            for n in 2..10usize {
+                for d in [1u64, 15, 16, 31, 32, 51, 52, 60, 63, 64, 127] {
+                    let text = format!("{}:1;{}:1", vec![d.to_string(); n].join(","), vec!["0"; n].join(","));
+                    let f = QPoly { num: q(n, &text).num, den: BigInt::one(), p };
+                    for o in ["lex", "invlex", "deglex", "degrevlex"] {
+                        // (refused exactly when no packing the engine tries fits:
+                        // its words hold 64 / (n + 1) bits a field for lex
+                        // orders, 64 / n for degree orders; a start of two bits
+                        // past d's, and in lex orders h's n d below the guard)
+                        let lex = o == "lex" || o == "invlex";
+                        let max = 64 / (n as u32 + lex as u32);
+                        let refuse = crate::bits_for(d) + 2 > max || lex && crate::bits_for(n as u64 * d) + 1 > max;
+                        match call_basis(&f, o) {
+                            Ok(g) => {
+                                assert!(!refuse, "GF({}) n {} d {} {}: not refused", p, n, d, o);
+                                assert_eq!(g, vec![text.clone()], "GF({}) n {} d {} {}", p, n, d, o);
+                                matched += 1;
+                            }
+                            Err(e) => {
+                                assert!(refuse, "GF({}) n {} d {} {}: refused: {}", p, n, d, o, e);
+                                refused += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(matched + refused, 1408);
+        eprintln!("packing grid: {} matched, {} refused", matched, refused);
+    }
+
+    #[test]
+    fn no_variables() {
+        // the constants: 1's basis is [1], 0's is [], in every order, over
+        // GF(7) and Q (no division by the number of variables)
+        for p in [7u64, 0] {
+            let one = QPoly { num: q(0, ":1").num, den: BigInt::one(), p };
+            let zero = QPoly { num: ZPoly::zero(0), den: BigInt::one(), p };
+            for o in ["lex", "invlex", "deglex", "degrevlex"] {
+                assert_eq!(call_basis(&one, o).unwrap(), vec![one.to_text()], "{} over {}", o, p);
+                assert_eq!(call_basis(&zero, o).unwrap(), Vec::<String>::new(), "{} over {}", o, p);
+            }
+        }
+    }
+
+    #[test]
+    fn lex_homogenizing_exponent_checked_before_packing() {
+        // (a b c d e)^52 + 1 over GF(7): each variable's exponent packs in 8
+        // bits, h's 260 doesn't (it spilled into the next field, past the
+        // guard); its basis is itself in every order
+        principal(5, "52,52,52,52,52:1;0,0,0,0,0:1", 7);
+        // random principal ideals whose h exponent (the total degree) passes
+        // the starting packing's guard and fits the widened one: 8 bits
+        // widened to 10, 12 and 9 for 5, 4 and 6 variables; 15 to 16 for 3
+        let mut x = 0x9E3779B97F4A7C15u64;
+        let mut next = |m: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % m
+        };
+        for &(n, lo, hi) in &[(5usize, 26u64, 63u64), (4, 32, 63), (6, 22, 42), (3, 5500, 8191)] {
+            for _ in 0..6 {
+                let mut terms: Vec<String> = vec![];
+                while terms.len() < 3 {
+                    let e: Vec<String> = (0..n).map(|_| (lo + next(hi - lo + 1)).to_string()).collect();
+                    let t = format!("{}:1", e.join(","));
+                    if !terms.contains(&t) {
+                        terms.push(t);
+                    }
+                }
+                terms.push(format!("{}:1", vec!["0"; n].join(",")));
+                principal(n, &terms.join(";"), 32003);
+            }
+        }
     }
 
     #[test]

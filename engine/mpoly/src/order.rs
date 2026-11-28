@@ -71,6 +71,12 @@ impl Packing {
         (0..self.n).fold(0u64, |g, i| g | (top << self.shift(i)))
     }
 
+    /// Whether exponents e pack below the guard bit of every field: checked
+    /// before packing, since a larger exponent spills into the next field.
+    pub fn fits(&self, e: &[u64]) -> bool {
+        e.len() == self.n && e.iter().all(|&x| x >> (self.bits - 1) == 0)
+    }
+
     pub fn pack(&self, e: &[u64]) -> u64 {
         e.iter().enumerate().fold(0u64, |w, (i, &x)| w | (x << self.shift(i)))
     }

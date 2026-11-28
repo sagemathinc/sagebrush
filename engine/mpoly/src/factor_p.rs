@@ -137,7 +137,7 @@ impl Ctx<'_> {
 
 /// The factorization of f over GF(p): the unit (the leading coefficient)
 /// and the monic (lex) irreducible factors with multiplicities.
-pub fn factor_p(f: &ZPoly, p: u64) -> Result<(u64, Vec<(ZPoly, u32)>), String> {
+pub fn factor_p(f: &ZPoly, p: u64) -> Result<(u64, Vec<(ZPoly, u64)>), String> {
     if p >= 1 << 32 {
         return Err("factorization over GF(p) for p >= 2^32 is not in the engine".into());
     }
@@ -156,21 +156,21 @@ pub fn factor_p(f: &ZPoly, p: u64) -> Result<(u64, Vec<(ZPoly, u32)>), String> {
     let fp = crate::gcd::reduce(&f.repack(bits), p);
     let unit = fp[0].1;
     let mut fp = cx.monic(&fp);
-    let mut out: Vec<(SP, u32)> = vec![];
+    let mut out: Vec<(SP, u64)> = vec![];
     // monomial content
     let mins: Vec<u64> = (0..n).map(|j| fp.iter().map(|&(w, _)| pk.exp(w, j)).min().unwrap_or(0)).collect();
     for (j, &k) in mins.iter().enumerate() {
         if k > 0 {
             let mut e = vec![0; n];
             e[j] = 1;
-            out.push((vec![(pk.pack(&e), 1)], k as u32));
+            out.push((vec![(pk.pack(&e), 1)], k));
         }
     }
     let m = pk.pack(&mins);
     fp = fp.into_iter().map(|(w, c)| (w - m, c)).collect();
     rec(&cx, fp, 1, &mut out)?;
     // equal factors merged
-    let mut merged: Vec<(SP, u32)> = vec![];
+    let mut merged: Vec<(SP, u64)> = vec![];
     for (h, e) in out {
         match merged.iter_mut().find(|x| x.0 == h) {
             Some(x) => x.1 += e,
@@ -180,7 +180,7 @@ pub fn factor_p(f: &ZPoly, p: u64) -> Result<(u64, Vec<(ZPoly, u32)>), String> {
     Ok((unit, merged.into_iter().map(|(h, e)| (ZPoly { n, bits, exps: h.iter().map(|x| x.0).collect(), coeffs: Coeffs::Small(h.iter().map(|x| x.1 as i64).collect()) }, e)).collect()))
 }
 
-fn rec(cx: &Ctx, f: SP, mult: u32, out: &mut Vec<(SP, u32)>) -> Result<(), String> {
+fn rec(cx: &Ctx, f: SP, mult: u64, out: &mut Vec<(SP, u64)>) -> Result<(), String> {
     sagebrush_interrupt::check();
     if cx.is_const(&f) {
         return Ok(());
@@ -193,7 +193,8 @@ fn rec(cx: &Ctx, f: SP, mult: u32, out: &mut Vec<(SP, u32)>) -> Result<(), Strin
             let e: Vec<u64> = cx.pk.unpack(w).into_iter().map(|x| x / p).collect();
             (cx.pk.pack(&e), c)
         }).collect();
-        return rec(cx, g, mult * p as u32, out);
+        // (a multiplicity divides the degree of the input, a u64)
+        return rec(cx, g, mult * p, out);
     };
     let dbg = std::env::var("SB_FP_DEBUG").is_ok();
     let t0 = dbg.then(std::time::Instant::now);
@@ -244,7 +245,7 @@ fn rec(cx: &Ctx, f: SP, mult: u32, out: &mut Vec<(SP, u32)>) -> Result<(), Strin
         if cx.is_const(&h) {
             return Err("factor: a constant factor".into());
         }
-        let mut e = 0u32;
+        let mut e = 0u64;
         while let Some(q) = cx.divexact(&f, &h) {
             f = q;
             e += 1;
@@ -588,7 +589,7 @@ mod tests {
         ZPoly::from_terms(n, t.iter().map(|(e, c)| (e.to_vec(), BigInt::from(*c))).collect()).unwrap()
     }
 
-    fn check(f: &ZPoly, p: u64, want: u32) {
+    fn check(f: &ZPoly, p: u64, want: u64) {
         let (u, fs) = factor_p(f, p).unwrap();
         let md = Modulus::new(p);
         let mut prod = poly(f.n, &[(&vec![0; f.n], u as i64)]);
@@ -597,8 +598,21 @@ mod tests {
         }
         let _ = md;
         assert!(prod.equals(&f.reduce_mod(p)), "product mismatch over GF({})", p);
-        let total: u32 = fs.iter().map(|x| x.1).sum();
+        let total: u64 = fs.iter().map(|x| x.1).sum();
         assert_eq!(total, want, "factors over GF({}): {:?}", p, fs.iter().map(|x| (x.0.len(), x.1)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn wide_multiplicities() {
+        // x^e (x + 1) over GF(7) for e past u32 is refused (its exponents
+        // don't pack), not factored with a wrapped multiplicity; a p-th power
+        // keeps its whole multiplicity: x^(2^29) + 1 = (x + 1)^(2^29) over GF(2)
+        for e in [(1u64 << 32) - 1, 1 << 32, (1 << 32) + 1] {
+            assert!(factor_p(&poly(1, &[(&[e + 1], 1), (&[e], 1)]), 7).is_err());
+        }
+        let (u, fs) = factor_p(&poly(1, &[(&[1 << 29], 1), (&[0], 1)]), 2).unwrap();
+        assert_eq!((u, fs.len(), fs[0].1), (1, 1, 1 << 29));
+        assert!(fs[0].0.equals(&poly(1, &[(&[1], 1), (&[0], 1)])));
     }
 
     #[test]
