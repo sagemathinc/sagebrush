@@ -111,6 +111,26 @@ test("ld80: the cases R's help and #2321 name", () => {
   assert.ok(Object.is(LD.prod([-0, 2])[0], -0));
 });
 
+test("ld80's operations give the exact extended value, not only the double it rounds to", () => {
+  // (each the nearest 64-bit significand to the exact quotient, ties to even, from Python's Fraction; a quotient
+  // whose bits below the 66th look like a tie without the sticky bit is caught here, where the final double
+  // can't tell: 1/15's significand ends ...528 without it)
+  const ld = (num: bigint, exp = 0): LD.LD => ({ kind: 0, num, exp, neg: num < 0n });
+  const exact = (x: LD.LD) => [x.num, x.exp];
+  assert.deepEqual(exact(LD.divInt(ld(1n), 15)), [9838263505978427529n, -67]);
+  assert.deepEqual(exact(LD.divInt(ld(1n), 3)), [12297829382473034411n, -65]);
+  assert.deepEqual(exact(LD.divInt(ld(1n), 7)), [10540996613548315209n, -66]);
+  assert.deepEqual(exact(LD.divInt(ld(3n), 10)), [11068046444225730970n, -65]);
+  assert.deepEqual(exact(LD.divInt(ld((1n << 64n) - 1n), 3)), [12297829382473034410n, -1]);
+  assert.deepEqual(exact(LD.divInt(ld(1n), 2 ** 40 + 1)), [18446744073692774400n, -104]);
+  assert.deepEqual(exact(LD.divInt(ld(-5n), 6)), [-15372286728091293013n, -64]);
+  // add and mul: 1 + 2^-64 is a tie, to the even 1; 1 + 3 * 2^-64 rounds up; (2^64 - 1)^2 = 2^128 - 2^65 + 1 rounds to (2^64 - 2) * 2^64
+  const one = LD.fromDouble(1);
+  assert.deepEqual(exact(LD.add(one, LD.fromDouble(2 ** -64))), [1n << 63n, -63]);
+  assert.deepEqual(exact(LD.add(one, LD.fromDouble(3 * 2 ** -64))), [(1n << 63n) + 2n, -63]);
+  assert.deepEqual(exact(LD.mul(ld((1n << 64n) - 1n), ld((1n << 64n) - 1n))), [(1n << 64n) - 2n, 64]);
+});
+
 test("ld80 from Python: the private module _ld80", () => {
   const src = [
     "import _ld80",
