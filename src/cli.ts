@@ -29,7 +29,7 @@ import { runNotebookServer, notebookWorker } from "./notebook";
 import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
 import { selectLimits } from "./limits-file";
 import { setDataRoot } from "./runtime/modules";
-import { rillRefusal, rillSource } from "./rill";
+import { isRFile, rillRefusal, rillSource } from "./rill";
 import { sprigRefusal, sprigSource } from "./sprig";
 import type { ReplMode } from "./modes";
 import { PromptSession, type StepResult } from "./repl-step";
@@ -49,6 +49,8 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
            that assign with :=
   --matlab MATLAB: the program is MATLAB, translated to Python (src/matlab.ts)
            and run on lib/_matlab.py; implied for other .m files
+  --r      R: the program is R, run on lib/_rill (a subset of R so far:
+           what is not implemented yet says so); implied for .R files
   -q       no banner on the interactive prompt
   --limits FILE
            this run's engine limits (also SAGEBRUSH_LIMITS=FILE): a JSON
@@ -340,7 +342,7 @@ R.host = {
 let sage = false;
 let magma = false;
 let matlab = false;
-// --rill: R (src/rill.ts), hidden until design/rill.md's A1.7
+// --r (or --rill): R (src/rill.ts, lib/_rill); implied for .R files
 let rill = false;
 // --sprig: Sprig (src/sprig.ts), hidden until the S1 plan's S1.4
 let sprig = false;
@@ -354,6 +356,14 @@ const mFileIsMagma = (f: string) => {
 };
 const isMagma = (f: string | null) => magma || (!matlab && f !== null && (/\.(mag|magma)$/.test(f) || (/\.m$/.test(f) && mFileIsMagma(f))));
 const isMatlab = (f: string | null) => matlab || (!magma && f !== null && /\.m$/.test(f) && !mFileIsMagma(f));
+const isRill = (f: string | null) => rill || (!magma && !matlab && isRFile(f));
+
+/** The interactive prompt's first lines: the version, the language, and how to leave. */
+function promptBanner(mode: ReplMode): string {
+  if (mode === "python") return `${VERSION}\nType help(obj) for help, exit() or Ctrl-D to leave.\n`;
+  if (mode === "r") return `${VERSION} (R, a subset: what is not implemented yet says so)\nType q() or Ctrl-D to leave.\n`;
+  return `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${mode === "magma" ? "quit;" : "exit"} or Ctrl-D to leave.\n`;
+}
 
 /** MATLAB source as Python, or null after reporting a syntax error. */
 function matlabSource(src: string, file: string, asFile = false): string | null {
@@ -458,8 +468,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
     process.removeAllListeners("SIGHUP");
     process.kill(process.pid, "SIGHUP");
   });
-  const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
-  if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
+  if (!quiet) process.stdout.write(promptBanner(mode));
   // (the session's step, shared with the Terminal's prompt: src/repl-step.ts; the language's library and
   // get_ipython() loaded before the first prompt rather than at the first input)
   const session = new PromptSession(main, mode, sage, {
@@ -808,8 +817,7 @@ function promptFront(argv: string[], limits: LimitsText): Promise<number> {
 /** The worker's side of the prompt: the session, one message at a time from promptFront (is an input complete,
  * run it, complete a line, close), each answered in order. Resolves to the prompt's exit status. */
 function promptBack(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<number> {
-  const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
-  if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
+  if (!quiet) process.stdout.write(promptBanner(mode));
   const session = new PromptSession(main, mode, sage, {
     // (a KeyboardInterrupt at the prompt is reported and the prompt goes on, as CPython's: its status isn't the
     // session's, and it doesn't end the process when the prompt does)
@@ -984,7 +992,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     else if (a === "--sage") sage = true;
     else if (a === "--magma") magma = true;
     else if (a === "--matlab") matlab = true;
-    else if (a === "--rill") rill = true;
+    else if (a === "--r" || a === "--rill") rill = true;
     else if (a === "--sprig") sprig = true;
     else if (a === "--pkgset") {
       // (an optional package set for this run: src/pkgcache.ts)
@@ -1052,9 +1060,9 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     }
     argv.shift();
   }
-  // (--rill runs only -c until design/rill.md's A1.7: refused before any file is opened)
-  if (rill) {
-    const why = rillRefusal({ cmd, file, mod, inspect, emit });
+  // (R's -m and --emit: refused before any file is opened)
+  if (isRill(file)) {
+    const why = rillRefusal({ mod, emit });
     if (why !== null) {
       process.stderr.write(`sagebrush: ${why}\n`);
       process.exitCode = 2;
@@ -1146,7 +1154,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     // (the startup raised: reported, and the program doesn't run)
   } else if (cmd !== null && sprig) {
     code = guarded(() => R.loader.exec(sprigSource(cmd!), main, "exec", "<string>", opts()));
-  } else if (cmd !== null && rill) {
+  } else if (cmd !== null && isRill(null)) {
     code = guarded(() => R.loader.exec(rillSource(cmd!), main, "exec", "<string>", opts()));
   } else if (cmd !== null && isMatlab(null)) {
     const py = matlabSource(cmd, "<string>");
@@ -1160,6 +1168,13 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   } else if (mod !== null) {
     code = guarded(() => {
       main = execModuleAsMain(mod!);
+    });
+  } else if (file !== null && file !== "-" && isRill(file)) {
+    // (an R program, run as Rscript runs it: up to its first error, which gives exit status 1)
+    const src = readFileSync(file, "utf8");
+    code = guarded(() => {
+      main = mainModule(file!);
+      R.loader.exec(rillSource(src), main, "exec", file!, opts());
     });
   } else if (file !== null && file !== "-" && isMatlab(file)) {
     const py = matlabSource(readFileSync(file, "utf8"), file, true);
@@ -1177,6 +1192,10 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       // (made: the module as soon as it exists, so that -i after a program that raised has what it defined)
       main = execModule(source, file!, "__main__", false, sage || file!.endsWith(".sage"), (m) => (main = m));
     });
+  } else if (!interactive && isRill(null)) {
+    // R on stdin (or `--r -`): a program, as `Rscript -` runs one
+    const src = readStdin();
+    code = src === null ? 1 : guarded(() => R.loader.exec(rillSource(src), main, "exec", "<stdin>", opts()));
   } else if (!interactive && isMatlab(null)) {
     // MATLAB on stdin (or `--matlab -`): a program, run as a file of it is, up to its first
     // error, which gives exit status 1, as `matlab -batch` does
@@ -1202,7 +1221,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     if (main === null) code = guarded(() => void (main = mainModule("<stdin>")));
     if (main !== null) {
       // (the prompt speaks the program's language: --magma or --matlab, or that of the file -i ran)
-      const mode: ReplMode = isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python";
+      const mode: ReplMode = isRill(file) ? "r" : isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python";
       code = await (promptHost ? promptBack(main, quiet || inspect, mode) : repl(main, quiet || inspect, mode));
     }
   }
