@@ -16,9 +16,14 @@
 import { e2eCore } from "./core-ready.ts";
 import { hpke } from "./hpke.ts";
 import { deriveEpochKeys, type EpochKeys } from "./keys.ts";
-import { b64, newId, unb64 } from "../fleet/core/bytes.mjs";
-import { asKey } from "../fleet/core/ed25519.mjs";
+import { fleetCore } from "../fleet/install.ts";
 import type { ChainView, OpKeys } from "../sync-seal.ts";
+
+// (the fleet core's bytes and Ed25519 helpers, through the page's one way into it: fleet/install.ts)
+const b64 = (b: Uint8Array): string => fleetCore().b64(b);
+const unb64 = (s: string): Uint8Array => fleetCore().unb64(s);
+const newId = (): string => fleetCore().newId();
+const asKey = (...a: Parameters<ReturnType<typeof fleetCore>["asKey"]>): ReturnType<ReturnType<typeof fleetCore>["asKey"]> => fleetCore().asKey(...a);
 
 const DB = "sagebrush-e2e-v1";
 /** After a lost genesis answer with no entry yet, how long before the chain is read once more */
