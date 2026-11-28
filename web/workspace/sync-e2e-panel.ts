@@ -45,27 +45,43 @@ const btn = (text: string, onclick: () => void, cls = "") => { const b = h("butt
 export const TURN_ON_CONFIRM = "Turn on end-to-end encrypted sync for your account?\n\nYour files will be encrypted in this browser before they are synced: the server can't read them. This browser gets its own keys, and you get a recovery code, shown once. If you lose both this browser's keys and the recovery code, your encrypted files can't be recovered by anyone.";
 export const RESET_CONFIRM = "Reset this device?\n\nThis browser's encryption keys for your account will be deleted. To sync here again you'll need another of your devices or your recovery code. If you have neither, your encrypted files can't be recovered: not by you, and not by Sagebrush.";
 export const USED_LINE = "To encrypt this account's sync end to end, first delete your synced data (above), then turn on encrypted sync.";
-export const UNCONFIRMED_LINE = "This browser's recovery code may never have been saved. Until you can make a new one, keep this browser: if you lose it, your encrypted files can't be recovered.";
+export const UNCONFIRMED_LINE = "This browser's recovery code may never have been saved. Keep this browser until you know you have a saved recovery code. If you lose both, your encrypted files can't be recovered.";
 export const ON_LINE = "End-to-end encryption is on for your account, in this browser.";
 const LABEL_MAX = 64;
 
-/** Words for a turn-on that failed, by DeviceKeys' code. */
+/** Words for a turn-on that failed, by DeviceKeys' code: the person's words, never an internal message. */
 function failWords(e: unknown): string {
-  const code = (e as { code?: string })?.code, message = (e as Error)?.message ?? String(e);
+  const code = (e as { code?: string })?.code, message = (e as Error)?.message ?? "";
   if (code === "exists") return "End-to-end encryption is already on for this account.";
   if (code === "plaintext_log") return USED_LINE;
   if (code === "wrong_account") return WRONG_ACCOUNT;
   if (code === "no_crypto") return "This browser can't keep end-to-end keys safely, so encryption can't be turned on here.";
-  return `End-to-end encryption couldn't be turned on: ${message}.`;
+  // (the server's answer lost: whether it was turned on isn't known until the page reads the account again)
+  if (code === "server" && /reload/.test(message)) return "It isn't known whether end-to-end encryption was turned on. Reload the page to see.";
+  if (code === "server") return "End-to-end encryption couldn't be turned on. Try again.";
+  return "End-to-end encryption couldn't be turned on here. Reload the page and try again.";
 }
 
 /**
  * The recovery code's dialog: the code, Copy and Download, and a Close that stays disabled until the person ticks
- * that they saved it. Resolves once closed, the code's text gone from the DOM and its reference dropped.
+ * that they saved it. Resolves once closed, the code's text gone from the DOM and its reference dropped: true when
+ * closed by Close after the tick, false when the dialog closed any other way (a browser lets a repeated Escape close
+ * a modal dialog however its cancel is handled), which leaves the device unconfirmed.
  */
-export function showRecoveryCode(host: HTMLElement, recoveryCode: string): Promise<void> {
+export function showRecoveryCode(host: HTMLElement, recoveryCode: string): Promise<boolean> {
   let code: string | null = recoveryCode;
   return new Promise((done) => {
+    let saved = false, ended = false;
+    // (every way the dialog ends: the code's text cleared, the reference dropped, the dialog gone, told once)
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      pre.textContent = "";
+      code = null;
+      if (box.open) box.close();
+      box.remove();
+      done(saved);
+    };
     const pre = h("pre", { className: "e2e-code", textContent: code });
     const copied = h("span", { className: "note" });
     const copy = btn("Copy", () => {
@@ -78,16 +94,14 @@ export function showRecoveryCode(host: HTMLElement, recoveryCode: string): Promi
       // (no account id in the name; the URL revoked right after the click)
       const a = h("a", { href: url, download: "sagebrush-recovery-code.txt" });
       a.click();
-      URL.revokeObjectURL(url);
+      // (on the next task: revoked at once, some browsers cancel the download it just began)
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     });
     const tick = h("input", { type: "checkbox" }) as HTMLInputElement;
     const close = btn("Close", () => {
       if (!tick.checked) return;
-      pre.textContent = "";
-      code = null;
-      box.close();
-      box.remove();
-      done();
+      saved = true;
+      end();
     });
     close.disabled = true;
     tick.onchange = () => { close.disabled = !tick.checked; };
@@ -98,6 +112,8 @@ export function showRecoveryCode(host: HTMLElement, recoveryCode: string): Promi
       pre, h("p", {}, copy, " ", download, copied),
       h("label", {}, tick, " I've saved my recovery code somewhere safe"), h("p", {}, close));
     box.oncancel = (e) => e.preventDefault();
+    // (closed by the browser itself, not by Close: the same ending, the code gone, not saved)
+    box.onclose = () => end();
     host.append(box);
     box.showModal();
   });
@@ -112,7 +128,7 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
   async function turnOn() {
     if (working) return;
     if (!deps.confirm(TURN_ON_CONFIRM)) return;
-    const typed = deps.prompt("A name for this browser, so you can tell your devices apart:", "This browser");
+    const typed = deps.prompt("A name for this browser, so you can tell your devices apart. Sagebrush's server can see this name, so don't use anything private:", "This browser");
     if (typed === null) return;
     const label = (typed.trim() || "This browser").slice(0, LABEL_MAX);
     working = true;
@@ -121,9 +137,9 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
       if (!hash) throw new Error("the signed-in account isn't known yet");
       const m = await deps.chunk();
       const made = await m.DeviceKeys.create(label, e2eAccountOf(hash));
-      await showRecoveryCode(deps.modalHost ?? document.body, made.recoveryCode);
-      // (the device confirmed only now: the person said they saved the code)
-      await made.confirm();
+      // (the device confirmed only if the person said they saved the code; a dialog closed any other way leaves it
+      // unconfirmed, and the section says so once sync is on)
+      if (await showRecoveryCode(deps.modalHost ?? document.body, made.recoveryCode)) await made.confirm();
       await deps.enable();
       deps.reconcile();
       working = false;
@@ -148,7 +164,8 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
     } catch (e) {
       working = false;
       await refresh();
-      fail(`This device couldn't be reset: ${(e as Error)?.message ?? e}.`);
+      void e;
+      fail("This device couldn't be reset. Reload the page and try again.");
     }
   }
 

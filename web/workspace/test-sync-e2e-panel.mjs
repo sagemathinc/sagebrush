@@ -28,7 +28,7 @@ let failures = 0, count = 0;
 const ok = (c, msg, detail) => { count++; console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 const J = JSON.stringify;
 const SITE = "https://sagebrush.test";
-const IDS = { ONA: "e2e0a000-0001-4e2e-8e2e-e2e2e2e2e201", UNC: "e2e0a000-0002-4e2e-8e2e-e2e2e2e2e202", FRK: "e2e0a000-0003-4e2e-8e2e-e2e2e2e2e203" };
+const IDS = { ONA: "e2e0a000-0001-4e2e-8e2e-e2e2e2e2e201", UNC: "e2e0a000-0002-4e2e-8e2e-e2e2e2e2e202", FRK: "e2e0a000-0003-4e2e-8e2e-e2e2e2e2e203", ESC: "e2e0a000-0004-4e2e-8e2e-e2e2e2e2e204" };
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const rl = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
@@ -162,6 +162,27 @@ try {
     ok(r.copied && r.clicks.length === 1 && r.clicks[0].download === "sagebrush-recovery-code.txt" && r.urls.length === 1 && J(r.revoked) === J(r.urls), "Copy gives the code to the clipboard; Download is a Blob URL revoked right after its click, named with no account id", { clicks: r.clicks, urls: r.urls.length, revoked: r.revoked.length });
     ok(r.enabledAfterTick && !r.after.dialog && !r.after.inDom && !r.after.inStorage && !r.after.inLogs, "after the tick and Close: the code is nowhere in the DOM, localStorage, IndexedDB or the console", r.after);
     ok(r.after.stored === true && r.after.enabled === 1 && r.after.reconciled >= 1 && r.text.includes(C.ON) && !r.img, "the device confirmed only after the tick; then sync turned on once, the owner asked to decide again, and the section says it's on (the typed name never drawn as HTML)", { after: r.after, text: r.text });
+  }
+
+  // ---- the dialog closed by the browser (Escape, twice: the second isn't one a page can refuse): the code gone just as
+  // after Close, the device left unconfirmed, and the section says so
+  {
+    await P.ev(`(async () => { await as("ESC"); T.sync = { on: false, used: false }; T.label = null; await section().refresh(); click("Turn on encrypted sync…");
+      for (let i = 0; i < 200 && !document.querySelector(".e2e-code-dialog"); i++) await new Promise((r) => setTimeout(r, 25));
+      window.escCode = document.querySelector(".e2e-code-dialog pre").textContent.replace(/[^0-9a-z]/gi, "").slice(0, 16); return true; })()`);
+    const key = async () => { for (const type of ["keyDown", "keyUp"]) await P.send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 }); };
+    await key();
+    await new Promise((r) => setTimeout(r, 200));
+    const afterOne = await P.ev(`!!document.querySelector(".e2e-code-dialog")`);
+    await key();
+    await new Promise((r) => setTimeout(r, 200));
+    await key();
+    const r = await P.ev(`(async () => {
+      for (let i = 0; i < 200 && document.querySelector(".e2e-code-dialog"); i++) await new Promise((r) => setTimeout(r, 25));
+      for (let i = 0; i < 200 && !text().includes(Panel.UNCONFIRMED_LINE); i++) await new Promise((r) => setTimeout(r, 25));
+      return { dialog: !!document.querySelector(".e2e-code-dialog"), inDom: document.documentElement.outerHTML.includes(escCode), stored: (await deviceOf("ESC"))?.recoveryShown, text: text() };
+    })()`);
+    ok(r.dialog === false && !r.inDom && r.stored === false && r.text.includes(C.UNCONFIRMED), "the dialog closed by the browser (Escape, repeated): the code nowhere in the DOM, the device still unconfirmed, and the section says so: " + J({ afterOne, ...r, text: r.text.slice(0, 200) }));
   }
 
   // ---- a device whose code may never have been saved: said
