@@ -1,5 +1,5 @@
-// The signer window (Autonomous agents, app pairing r4's native tier; the contract is N1 r2,
-// macapp-notes/n1-native-signing-ipc.md): the one place the desktop app will sign for the person.  This first part has
+// The signer window (Autonomous agents, app pairing r4's native tier; the contract is N1 r2, the
+// native signing design note): the one place the desktop app will sign for the person.  This first part has
 // no keys: it is the window, the guards around it, and a stand-in command the self-test signs with, so that what can and
 // can't reach the signing commands is shown before any key exists.
 //   - The window is made by Rust alone, from native UI the app owns (the macOS menu's "Approvals…"; the tray and the

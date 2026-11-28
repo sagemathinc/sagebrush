@@ -84,7 +84,7 @@ ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unkn
   }
 }
 
-// (astra2: a run whose log shows everything it must, but whose app didn't end cleanly, never passes)
+// (a review row: a run whose log shows everything it must, but whose app didn't end cleanly, never passes)
 const good = [d(1, "signer"), s(1, 1, "signer")];
 ok(!v(good, { code: 1 }).ok, "an otherwise passing run whose app exited 1 fails");
 ok(!v(good, { code: null, signal: "SIGKILL" }).ok, "an otherwise passing run whose app was killed (a signal) fails");
