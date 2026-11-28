@@ -453,7 +453,7 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             vec![crate::eval::eval_many(&e, arg(1), &xs).iter().map(|v| format!("{:e}", v)).collect::<Vec<_>>().join(",")]
         }
         // calculus
-        "diff" => one_(crate::diff::diff_n(&d(arg(0)), arg(1), a.get(2).map_or(1, |s| crate::diff::derivative_count(&int(int_arg(s)))))),
+        "diff" => one_(crate::diff::diff_n(&d(arg(0)), arg(1), a.get(2).map_or(1, |s| crate::diff::derivative_count(&crate::parse::parse(s))))),
         "expand" => one_(crate::expand::expand(&d(arg(0)))),
         "factor" => one_(crate::simplify::factor(&d(arg(0)))),
         "simplify_rational" => one_(crate::simplify::simplify_rational(&d(arg(0)))),
