@@ -201,11 +201,19 @@ export type ClientOptions = {
    * page gives yet, and the sealing module itself (sync-seal.ts, the `kit`), passed in rather than imported, so a page
    * without end-to-end encryption carries none of its code. Another device's sealed ops halt the pull until they can
    * be verified (5c-2) */
-  e2e?: { keys: SealMod.OpKeys; kit: Pick<typeof SealMod, "sealOps" | "sopsItem" | "envHashOf" | "verifyRow" | "PULL_START" | "SealedHalt"> };
+  e2e?: { keys: SealMod.OpKeys; kit: Pick<typeof SealMod, "sealOps" | "sopsItem" | "envHashOf" | "verifyRow" | "PULL_START" | "SealedHalt" | "sealFile" | "openFile" | "sealedSize"> };
 };
 
 const key = (ns: string, what: string) => `sync:${ns}:${what}`;
 const mismatchKey = (ns: string, dseq: number) => key(ns, "mismatch:" + String(dseq).padStart(16, "0"));
+/** (e2e PR 3b-2) A file's blob address and the epoch it is under, by the file's SHA-256: written only from a verified
+ * op (verifyRow derives it), read by a download, which an end-to-end client makes from nothing else. */
+const addrKey = (ns: string, sha: string) => key(ns, "addr:" + sha);
+/** (e2e PR 3b-2) the copies a sealed upload or download holds at once, by its size: the bytes, the sealing's or the
+ * opening's own buffers, and the frame */
+const SEALED_COPIES = COPIES + 4;
+const A1 = /^a1:[0-9a-f]{64}$/;
+const shaBytes = (h: string) => Uint8Array.from({ length: 32 }, (_, i) => parseInt(h.slice(2 * i, 2 * i + 2), 16));
 /** this workspace's stored bytes were once found longer or shorter than their metadata (LIMIT-PR58-2) */
 const UNTRUSTED = "sync:bytes-untrusted";
 /** a narrow upload read in progress (cleared in the transaction that reads; left by a page killed in it) */
@@ -1052,7 +1060,9 @@ export class SyncClient {
             await this.halt(c, "diverged", `the server's sealed op ${o.seq} for dseq ${o.dseq} isn't the envelope this device sealed`);
             return;
           }
-          ops[ops.indexOf(o)] = { ...r.op, seq: o.seq, device: o.device, dseq: o.dseq } as unknown as IndexOp;
+          // (e2e PR 3b-2: a file op's blob address, from this device's own seal, the envelope the server holds being it)
+          const own = r.op.kind === "file" && r.op.sha256 !== undefined && s.adds.length === 1 && A1.test(s.adds[0]) && Number.isSafeInteger(s.epoch) ? { address: s.adds[0], addressEpoch: s.epoch } : {};
+          ops[ops.indexOf(o)] = { ...r.op, seq: o.seq, device: o.device, dseq: o.dseq, ...own } as unknown as IndexOp;
           ok.push(o.dseq);
           seqs.set(o.dseq, o.seq);
           echoed.set(o.dseq, h);
@@ -1080,6 +1090,16 @@ export class SyncClient {
     for (let i = 0; i < ops.length; i++) {
       const op = opened.get(ops[i].seq);
       if (op && ops[i].device !== this.w.device) ops[i] = { ...op, seq: ops[i].seq, device: ops[i].device, dseq: ops[i].dseq } as unknown as IndexOp;
+    }
+    // (e2e PR 3b-2: each file op's blob address under its epoch, as verifyRow derived it or this device sealed it, kept by
+    // the file's SHA-256 before anything of the page is applied: a download finds its blob there, and only there)
+    if (this.opts.e2e) {
+      const found: [string, { address: string; epoch: number }][] = [];
+      for (const op of ops) {
+        const a = op as unknown as { kind?: string; sha256?: string; address?: string; addressEpoch?: number };
+        if (a.kind === "file" && typeof a.sha256 === "string" && typeof a.address === "string" && A1.test(a.address) && Number.isSafeInteger(a.addressEpoch)) found.push([a.sha256, { address: a.address, epoch: a.addressEpoch! }]);
+      }
+      if (found.length) await inTx(this.w.ws, META, "readwrite", async (tx) => { for (const [sha, at] of found) tx.objectStore(META).put(at, addrKey(c.ns, sha)); });
     }
     if (this.opts.onIndex && ops.length) {
       try {
@@ -1490,7 +1510,18 @@ export class SyncClient {
         return;
       }
       this.showWaiting(c, (await c.ob.status()).count);
-      const n = await this.blobsFor(c, recs);
+      // (sealed sends: each record's sealed form, kept before it first goes, then the same bytes on every resend; sealed
+      // first (e2e PR 3b-2), so each file's blob goes up at the address its sealed op names, under the epoch it names)
+      let sealedItems: unknown[] | null = null;
+      if (this.opts.e2e) {
+        sealedItems = await this.sealFor(c, recs);
+        if (this.conn !== c || c.resync) return;
+        if (!sealedItems) {
+          this.again = true;
+          return;
+        }
+      }
+      const n = this.opts.e2e ? await this.sealedBlobsFor(c, recs) : await this.blobsFor(c, recs);
       if (this.conn !== c || c.resync) return;
       if (n === 0) {
         // (waiting on bytes: a pause or a timer an upload just set is said)
@@ -1498,16 +1529,7 @@ export class SyncClient {
         return;
       }
       const batch = recs.slice(0, n);
-      // (sealed sends: each record's sealed form, kept before it first goes, then the same bytes on every resend)
-      let sealedItems: unknown[] | null = null;
-      if (this.opts.e2e) {
-        sealedItems = await this.sealFor(c, batch);
-        if (this.conn !== c || c.resync) return;
-        if (!sealedItems) {
-          this.again = true;
-          return;
-        }
-      }
+      if (sealedItems) sealedItems = sealedItems.slice(0, n);
       const wait = this.bucket.take(batch.length, this.clock.now());
       if (wait === Infinity) throw new Error("sync: a message larger than the pace allows");
       if (wait > 0) {
@@ -1646,11 +1668,46 @@ export class SyncClient {
     return n;
   }
 
+  /**
+   * (e2e PR 3b-2) blobsFor for an end-to-end client: each data file's blob goes up sealed, at the address its kept
+   * sealed op names, under that op's epoch (rules 1-2 of the plan); a file's plaintext SHA-256 is never asked about
+   * or sent. No check first: the frame's own SHA-256 is known only once the file is read and sealed, and the PUT
+   * answers "have" for bytes already held. Returns how many of `recs`, from the first, may be sent.
+   */
+  private async sealedBlobsFor(c: Conn, recs: OutboxRecord[]): Promise<number> {
+    const kept = await c.ob.sealed(recs.map((r) => r.dseq));
+    const at = (r: OutboxRecord): { address: string; epoch: number } | null => {
+      const s = kept.get(r.dseq);
+      return s && s.adds.length === 1 && A1.test(s.adds[0]) && Number.isSafeInteger(s.epoch) ? { address: s.adds[0], epoch: s.epoch! } : null;
+    };
+    const isFile = (r: OutboxRecord) => r.op.op !== "release" && r.op.kind === "file" && r.op.sha256 !== undefined;
+    const known = (a: string) => c.have.has(a) || c.final.has(a) || c.gone.has(a);
+    let n = 0;
+    for (const r of recs) {
+      if (!isFile(r)) { n++; continue; }
+      const where = at(r);
+      // (a file op sealed without its address and epoch: never sent from here as anything else)
+      if (!where) throw new Error("sync: a sealed file op without its blob's address");
+      if (!known(where.address)) {
+        const out = await this.upload(c, r, where);
+        if (out === "wait") break;
+        (out === "have" ? c.have : out === "gone" ? c.gone : c.final).add(where.address);
+      }
+      if (this.conn !== c) break;
+      n++;
+    }
+    return n;
+  }
+
   /** One data file's bytes uploaded: "have" (the server holds them), "gone" (this device no longer has them),
-   * "final" (the server will never take them: too large, or not these bytes), or "wait" (not now). */
-  private async upload(c: Conn, r: OutboxRecord): Promise<"have" | "gone" | "final" | "wait"> {
+   * "final" (the server will never take them: too large, or not these bytes), or "wait" (not now). `sealed`: an
+   * end-to-end client's, the blob sealed under that epoch and sent at that address (e2e PR 3b-2). */
+  private async upload(c: Conn, r: OutboxRecord, sealed?: { address: string; epoch: number }): Promise<"have" | "gone" | "final" | "wait"> {
     const size = r.op.size ?? 0;
     if (size > CLIENT.maxPut) return "final";
+    // (a sealed file's frame is a little larger than the file: one over the largest PUT stays here, said by the server's
+    // answer to its op, never sent in pieces (plan rule 7))
+    if (sealed && this.opts.e2e!.kit.sealedSize(size) > CLIENT.maxPut) return "final";
     if (!c.writable) return "wait";
     // (a storage_full pause with an end: over once it has passed, durably; else woken at its end, CORR-PR58-2)
     if (this.paused?.until !== undefined && this.paused.until <= this.clock.now()) {
@@ -1678,7 +1735,7 @@ export class SyncClient {
     // workspace's whole life at most one value is ever held beyond what its reader reserved (LIMIT-PR58-2))
     let wide = await this.untrusted();
     for (;;) {
-      const need = wide ? Math.max(size, LEGACY_MAX) * COPIES : size * COPIES;
+      const need = (wide ? Math.max(size, LEGACY_MAX) : size) * (sealed ? SEALED_COPIES : COPIES);
       const token = await reserve(need);
       try {
         if (this.conn !== c) return "wait";
@@ -1708,12 +1765,27 @@ export class SyncClient {
         if (bytes.length !== size || bytes.length > CLIENT.maxPut) return "gone";
         // (the connection still the one these bytes are for: never sent under another lease, CORR-PR58-1)
         if (this.conn !== c) return "wait";
+        // (sealed: the frame under the op's own epoch, which must give the address the op names; then it, never the file.
+        // An address goes into the path as it is, never percent-encoded: the server's routes match the raw path, so
+        // "a1%3A…" would be no address there (a 404))
+        let path = `/api/sync/v1/blob/${r.op.sha256}`, body: Uint8Array = bytes, ct = r.op.sha256!;
+        if (sealed) {
+          const keys = await this.opts.e2e!.keys.epochKeys(sealed.epoch);
+          if (!keys) throw new Error("sync: this device doesn't hold the keys of the epoch a file was sealed under");
+          const f = await this.opts.e2e!.kit.sealFile(keys, shaBytes(r.op.sha256!), bytes);
+          bytes.fill(0);
+          if (f.address !== sealed.address) throw new Error("sync: a sealed file's address isn't the one its op names");
+          path = `/api/sync/v1/blob/${f.address}`;
+          body = f.body;
+          ct = f.ctSha256;
+        }
+        if (this.conn !== c) return "wait";
         this.stats.puts++;
         this.stats.putsAtOnce++;
         this.stats.maxPutsAtOnce = Math.max(this.stats.maxPutsAtOnce, this.stats.putsAtOnce);
         let res;
         try {
-          res = await this.http("PUT", `/api/sync/v1/blob/${r.op.sha256}`, bytes, { ...this.binding(c), "x-sb-ct-sha256": r.op.sha256! });
+          res = await this.http("PUT", path, body, { ...this.binding(c), "x-sb-ct-sha256": ct });
         } finally {
           this.stats.putsAtOnce--;
         }
@@ -1851,10 +1923,28 @@ export class SyncClient {
       await finalize(this.w, c.ns, it, "too large to sync");
       return "done";
     }
-    const token = await reserve(it.size * COPIES);
+    // (e2e PR 3b-2: an end-to-end client downloads a file only from the address a verified op gave it, under that op's
+    // epoch, and only as a sealed frame of exactly the file's sealed size; with no such address it is set apart, never
+    // fetched by its plaintext SHA-256)
+    let sealed: { address: string; epoch: number } | null = null;
+    if (this.opts.e2e) {
+      const at = await this.metaGet<{ address?: unknown; epoch?: unknown }>(addrKey(c.ns, it.sha256));
+      if (!at || typeof at.address !== "string" || !A1.test(at.address) || !Number.isSafeInteger(at.epoch)) {
+        await finalize(this.w, c.ns, it, "no encrypted copy of this file is known here");
+        return "done";
+      }
+      sealed = { address: at.address, epoch: at.epoch as number };
+    }
+    const wire = sealed ? this.opts.e2e!.kit.sealedSize(it.size) : it.size;
+    if (wire > CLIENT.maxPut) {
+      await finalize(this.w, c.ns, it, "too large to sync");
+      return "done";
+    }
+    const need = sealed ? wire * SEALED_COPIES : it.size * COPIES;
+    const token = await reserve(need);
     try {
       if (this.conn !== c) return "wait";
-      if (token.n < it.size * COPIES) throw new Error("sync: a reservation that doesn't cover a download");
+      if (token.n < need) throw new Error("sync: a reservation that doesn't cover a download");
       this.stats.fetches++;
       this.stats.fetchesAtOnce++;
       this.stats.maxFetchesAtOnce = Math.max(this.stats.maxFetchesAtOnce, this.stats.fetchesAtOnce);
@@ -1868,7 +1958,10 @@ export class SyncClient {
           // (no binding headers: the server's GET reads none (it answers by the session alone), and the 303 takes a
           // request's headers across to the files origin, whose CORS allows none of them: every download failed there,
           // William's "on another device", Nov 1 2026)
-          res = await this.fetch(this.origin + `/api/sync/v1/blob/${it.sha256}`, { credentials: "same-origin", redirect: "follow" });
+          // (the address as it is in the path, never percent-encoded: the routes match the raw path)
+          const path = `/api/sync/v1/blob/${sealed ? sealed.address : it.sha256}`;
+          this.guard("GET", path);
+          res = await this.fetch(this.origin + path, { credentials: "same-origin", redirect: "follow" });
           if (res.redirected && res.url) {
             const exp = Number(new URL(res.url).searchParams.get("exp"));
             if (Number.isSafeInteger(exp)) await keepUrl(this.w, c.ns, it, res.url, exp);
@@ -1901,12 +1994,22 @@ export class SyncClient {
       }
       // (D9: the length declared canonically and equal to the size, before the body is read)
       const cl = res.headers.get("content-length");
-      if (cl === null || !CANONICAL_LENGTH.test(cl) || Number(cl) !== it.size) {
+      if (cl === null || !CANONICAL_LENGTH.test(cl) || Number(cl) !== wire) {
         try { await res.body?.cancel(); } catch {}
         return this.fetchFail(c, it, undefined, "the download wasn't the file's size");
       }
-      const bytes = await this.readCapped(res, it.size);
-      if (!bytes) return this.fetchFail(c, it, undefined, "the download was cut short or too long");
+      const got = await this.readCapped(res, wire);
+      if (!got) return this.fetchFail(c, it, undefined, "the download was cut short or too long");
+      let bytes = got;
+      if (sealed) {
+        const keys = await this.opts.e2e!.keys.epochKeys(sealed.epoch);
+        if (!keys) return this.fetchFail(c, it, undefined, "this device doesn't hold the keys this file was encrypted under");
+        try {
+          bytes = await this.opts.e2e!.kit.openFile(keys, shaBytes(it.sha256), sealed.address, got, { maxPlaintext: cap, maxCompressed: cap, maxRatio: 1 });
+        } catch {
+          return this.fetchFail(c, it, undefined, "the encrypted download didn't open as the file");
+        }
+      }
       const sha = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource)));
       if (sha !== it.sha256) return this.fetchFail(c, it, undefined, "the bytes downloaded weren't the file's");
       const out = await install(this.w, c.ns, it, bytes);
@@ -2409,7 +2512,36 @@ export class SyncClient {
     return { "x-sync-account": c.account, "x-sync-generation": String(c.generation) };
   }
 
+  /**
+   * (e2e PR 3b-2, plan rule 6, D5) The one check every request to the sync API passes before it is made, from http()
+   * and a download's GET: with `e2e`, a blob is named only by an a1: address (a path, a check's items, a PUT's ct being
+   * its frame's), a PUT's body is a sealed frame, and the chunked files' routes aren't used. Anything else throws here,
+   * before the request: a plaintext SHA-256 never leaves as a blob's name, and a plain file never as a body.
+   */
+  private guard(method: string, path: string, body?: unknown) {
+    if (!this.opts.e2e) return;
+    const bad = (why: string): never => { throw new Error(`sync: an end-to-end client never sends ${why}`); };
+    // (checked as fetch will send it: the path resolved against the origin, with no query or fragment, and exactly its
+    // own normalized form, so a "..", a "." or an encoded segment can't carry a request past these checks to a route)
+    if (path.includes("?") || path.includes("#")) bad("a request with a query or fragment");
+    let resolved: string;
+    try {
+      resolved = new URL(path, this.origin || "http://origin.invalid").pathname;
+    } catch {
+      return bad("a request to a path that isn't one");
+    }
+    if (resolved !== path) bad("a path that isn't its own normalized form");
+    if (path.startsWith("/api/sync/v1/manifest")) bad("a chunked file's manifest");
+    const m = path.match(/^\/api\/sync\/v1\/blob\/([^/?]*)$/);
+    if (m && !A1.test(m[1])) bad("a blob named by anything but its keyed address");
+    if (m && method === "PUT" && !(body instanceof Uint8Array && body.length >= 4 && body[0] === 0x53 && body[1] === 0x42 && body[2] === 0x42 && body[3] === 0x31)) bad("a file's bytes as they are");
+    if (path === "/api/sync/v1/blobs/check") {
+      const items = (body as { blobs?: unknown })?.blobs;
+      if (!Array.isArray(items) || !items.every((b) => A1.test((b as { address?: unknown })?.address as string))) bad("a check naming anything but keyed addresses");
+    }
+  }
   private async http(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ ok: boolean; status: number; body: unknown; code?: string; retryAfter?: number }> {
+    this.guard(method, path, body);
     let res: Response;
     try {
       const init: RequestInit = { method, credentials: "same-origin", headers: { ...headers } };

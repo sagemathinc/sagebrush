@@ -122,7 +122,15 @@ const haltOf = async (P, rows, k, change) => {
   const a = await C.device(), b = await C.device();
   const rows = await logOf(C, { a, b }, [{ dev: "a" }, { dev: "b", file: true }, { dev: "a", file: true }, { dev: "b", then: (C) => C.move() }, { dev: "a" }]);
   const r = await read(C.provider(a), rows);
-  ok(r.verdict === "ok" && r.opened.length === 5 && r.opened.every((op, i) => C14(op) === C14(rows[i]._op)), "V1: an honest log of two devices verifies, and every op opens to what was sealed", r);
+  // (a file op opens with its blob's address under its epoch beside it, derived by verifyRow (e2e PR 3b-2): the op
+  // itself, without those two fields, is what was sealed)
+  const bare = (op) => { const { address, addressEpoch, ...rest } = op; return rest; };
+  ok(r.verdict === "ok" && r.opened.length === 5 && r.opened.every((op, i) => C14(bare(op)) === C14(rows[i]._op)), "V1: an honest log of two devices verifies, and every op opens to what was sealed", r);
+  const { addressOf } = await import(join(here, "e2e", "blob-wire.ts"));
+  const files = [];
+  for (const [i, op] of r.opened.entries()) if (op.kind === "file" && op.sha256) files.push({ op, row: rows[i], want: await addressOf(C.keys[1], Buffer.from(op.sha256, "hex")) });
+  ok(files.length === 2 && files.every(({ op, row, want }) => op.address === want && op.addressEpoch === 1 && row.adds.length === 1 && row.adds[0] === want),
+    "V1: each file op opens with its blob's address under its epoch (1), the one its row's visible add names: " + J(files.map(({ op }) => [op.address?.slice(0, 10), op.addressEpoch])));
   ok(r.state.seq === 5 && r.state.floor === C.top() && r.state.devices["sync-dev-a"].dseq === 3 && r.state.devices["sync-dev-b"].dseq === 2,
     "V1: the state after it: the last seq, the floor at the newest head, each device's last dseq", r.state);
   const again = await read(C.provider(b), rows, [2, 2, 1]);
@@ -263,8 +271,8 @@ const haltOf = async (P, rows, k, change) => {
   const P = C.provider(a);
   // (sealed under epoch 2's keys while the chain says epoch 1 at that head; signed honestly)
   const op = opOf(1, 0, true);
-  const env2 = await sealIndexOp(C.keys[2], { device: "sync-dev-a", dseq: 1 }, op, { prev: null, adds: [op.sha256], releases: [] });
-  const ctx = { account: C.account, syncGeneration: SYNC_GEN, chainGeneration: C.generation, head: rows[0].head, device: "sync-dev-a", dseq: 1, adds: [op.sha256], releases: [], signer: a.id };
+  const env2 = await sealIndexOp(C.keys[2], { device: "sync-dev-a", dseq: 1 }, op, { prev: null, adds: rows[0].adds, releases: [] });
+  const ctx = { account: C.account, syncGeneration: SYNC_GEN, chainGeneration: C.generation, head: rows[0].head, device: "sync-dev-a", dseq: 1, adds: rows[0].adds, releases: [], signer: a.id };
   const sig2 = await signIndexOp(a, ctx, env2);
   const re = await read(P, [{ ...rows[0], env: Buffer.from(env2).toString("base64"), sig: sig2 }]);
   ok(re.verdict === "halt" && /another epoch/.test(re.why), "V6: an op sealed under another epoch than its head's: halted", re.why);
@@ -273,6 +281,19 @@ const haltOf = async (P, rows, k, change) => {
   const sigN = await signIndexOp(a, { ...ctx, adds: [] }, envN);
   const rn = await read(P, [{ ...rows[0], env: Buffer.from(envN).toString("base64"), sig: sigN, adds: [] }]);
   ok(rn.verdict === "halt" && /references that aren't its op's/.test(rn.why), "V6: a file op whose visible adds aren't its own (refsOf): halted", rn.why);
+  // (e2e PR 3b-2: a file op whose add is its plaintext SHA-256, sealed and signed honestly as before keyed addresses:
+  // its add isn't its blob's address under its epoch, and it halts; and one whose sealed op names an address itself)
+  const envP = await sealIndexOp(C.keys[1], { device: "sync-dev-a", dseq: 1 }, op, { prev: null, adds: [op.sha256], releases: [] });
+  const sigP = await signIndexOp(a, { ...ctx, adds: [op.sha256] }, envP);
+  const rp = await read(P, [{ ...rows[0], env: Buffer.from(envP).toString("base64"), sig: sigP, adds: [op.sha256] }]);
+  ok(rp.verdict === "halt" && /references that aren't its op's/.test(rp.why), "V6: a file op whose visible add is its plaintext SHA-256 (not its keyed address): halted", rp.why);
+  const named = { ...op, address: rows[0].adds[0], addressEpoch: 1 };
+  const envA = await sealIndexOp(C.keys[1], { device: "sync-dev-a", dseq: 1 }, named, { prev: null, adds: rows[0].adds, releases: [] });
+  const sigA = await signIndexOp(a, ctx, envA);
+  const ra = await read(P, [{ ...rows[0], env: Buffer.from(envA).toString("base64"), sig: sigA }]);
+  ok(ra.verdict === "halt" && /names its own address/.test(ra.why), "V6: a sealed op that carries an address field of its own: halted (an address is derived, never taken from an envelope)", ra.why);
+  const other = await read(P, [{ ...rows[0] }]);
+  ok(other.verdict === "ok", "V6: (the control: the honest row verifies)", other.why);
 }
 
 // ---- V8: a chain reset (recovery): a new generation, positions going on from the old; the new chain's ops verify, and

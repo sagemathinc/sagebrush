@@ -14,6 +14,9 @@
 // never has a successor in the log; the undecided ones are sealed again after the accepted one.
 import { OP_REFS_MAX, opEpoch, opHash, openIndexOp, sealIndexOp, signIndexOp, verifyIndexOp, type OpRelease } from "./e2e/index-op.ts";
 import type { EpochKeys } from "./e2e/keys.ts";
+import { addressOf } from "./e2e/blob-wire.ts";
+/** (e2e PR 3b-2) files' bytes sealed and opened at their keyed address (e2e/blob-wire.ts), for the sync client's kit */
+export { sealFile, openFile, sealedSize } from "./e2e/blob-wire.ts";
 import type { WireOp } from "./sync-outbox";
 import { RELEASE_OP as RELEASE, refsOf } from "./sync-refs";
 import { DOC_KEY_OP, bytesOf, isDocKeyForm, type DocKeyVerdict } from "./sync-dockeys";
@@ -62,7 +65,25 @@ export type Sealed = {
   releases: OpRelease[];
   signer: string;
   sig: string;
+  /** (e2e PR 3b-2) the epoch it was sealed under: a file op's address (its adds) is that epoch's, and its blob is
+   * sealed under it, never under a newer one */
+  epoch?: number;
 };
+
+/** (e2e PR 3b-2) The local fields a verified or sealed file op carries: its blob's address under the epoch its op was
+ * sealed in. Set only here (verifyRow, sealOps' callers by their kept Sealed), never taken from an envelope or the wire. */
+export const ADDRESS_FIELD = "address", ADDRESS_EPOCH_FIELD = "addressEpoch";
+const HEX64 = /^[0-9a-f]{64}$/;
+const shaBytes = (hex: string) => Uint8Array.from({ length: 32 }, (_, i) => parseInt(hex.slice(2 * i, 2 * i + 2), 16));
+/** A file op's references as sealed: its blob's address under `epoch` (not its plaintext SHA-256); others as refsOf. */
+export async function sealedRefsOf(epoch: EpochKeys, op: WireOp): Promise<{ adds: string[]; releases: OpRelease[] }> {
+  const { releases } = refsOf(op);
+  if (op.op !== RELEASE && op.kind === "file" && op.sha256 !== undefined) {
+    if (!HEX64.test(op.sha256)) throw new Error("sync: a file op's sha256 isn't one");
+    return { adds: [await addressOf(epoch, shaBytes(op.sha256))], releases };
+  }
+  return { adds: refsOf(op).adds, releases };
+}
 
 /** (the references an op declares, and the release op's name: sync-refs.ts, which the page has without this module) */
 export { refsOf, RELEASE };
@@ -96,7 +117,9 @@ export async function sealOps(keys: OpKeys, syncGeneration: number, syncDevice: 
   const out: Sealed[] = [];
   let before = prev;
   for (const op of ops) {
-    const { adds, releases } = refsOf(op);
+    // (an op of this device's never carries the local address fields: they're derived, never sealed)
+    if (Object.hasOwn(op, ADDRESS_FIELD) || Object.hasOwn(op, ADDRESS_EPOCH_FIELD)) throw new Error("sync: an op to seal carries a derived address");
+    const { adds, releases } = await sealedRefsOf(epoch, op);
     const env = await sealIndexOp(epoch, { device: syncDevice, dseq: op.dseq }, op, { prev: before === null ? null : fromB64url(before), adds, releases });
     const ctx = {
       account: keys.account, syncGeneration, chainGeneration: chain.generation, head: chain.head, device: syncDevice, dseq: op.dseq,
@@ -104,7 +127,7 @@ export async function sealOps(keys: OpKeys, syncGeneration: number, syncDevice: 
     };
     const sig = await signIndexOp({ sign: (b) => keys.device.sign(b) }, ctx, env);
     const envHash = b64url(await opHash(env));
-    out.push({ dseq: op.dseq, env: b64(env), envHash, head: chain.head, chainGen: chain.generation, adds, releases, signer: keys.device.id, sig });
+    out.push({ dseq: op.dseq, env: b64(env), envHash, head: chain.head, chainGen: chain.generation, adds, releases, signer: keys.device.id, sig, epoch: chain.currentEpoch });
     before = envHash;
   }
   return out;
@@ -249,16 +272,19 @@ export async function verifyRow(keys: OpKeys, syncGeneration: number, row: Recor
     return halt("it doesn't open at its place, after its device's previous envelope, with its references");
   }
   if (!op || typeof op !== "object" || Array.isArray(op) || op.dseq !== dseq) halt("an op that isn't its own");
+  // (the derived address fields are this device's to set, never an envelope's: one that carries them halts)
+  if (Object.hasOwn(op, ADDRESS_FIELD) || Object.hasOwn(op, ADDRESS_EPOCH_FIELD)) halt("an op that names its own address");
   // (the opened op is untrusted too: its references read and compared under the halt, so nothing it holds escapes as
-  // another error)
+  // another error; a file op's add is its blob's address under this envelope's epoch, derived here, never adopted)
   let refsMatch = false;
   try {
-    const own = refsOf(op);
+    const own = await sealedRefsOf(epoch!, op);
     refsMatch = sameList(own.adds, adds) && sameReleases(own.releases, releases);
   } catch {
     halt("an op whose references can't be read");
   }
   if (!refsMatch) halt("visible references that aren't its op's");
+  if (op.op !== RELEASE && op.kind === "file" && op.sha256 !== undefined) Object.assign(op, { [ADDRESS_FIELD]: adds[0], [ADDRESS_EPOCH_FIELD]: n });
   // (a release op is exactly its form: no content, nothing else it could change; e2e PR 5d)
   if (op.op === RELEASE && !isReleaseForm(op as unknown as Record<string, unknown>)) halt("a release op that isn't only a release");
   // (a document key declaration: exactly its form (an `eligible` it claims is one more field, and halts), under no
