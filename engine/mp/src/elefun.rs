@@ -6,8 +6,8 @@
 //! history), and mpf_exp, mpf_log, mpf_cos/mpf_sin, mpf_pow, exp_fixed,
 //! cos_sin_fixed, log_int_fixed.  Float parameter choices go through glibm
 //! (CPython's pow and log).  One reviewed exception to the reference's
-//! results: mpf_pow rounded up or down replaces a result provably on the
-//! wrong side of the true value (pow_directed_side).
+//! results: mpf_pow rounded up or down replaces a result that a certified
+//! bound shows to be on the wrong side of the true value (pow_directed_side).
 
 use crate::fail::{failed, raise, too_big};
 use crate::consts::{e_fixed, ln2_fixed, pi_fixed};
@@ -741,20 +741,35 @@ pub fn mpf_pow(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
 
 /// s^t bounded at wp bits (s > 0): below the true value (upper = false) or
 /// above it, log, the product and exp each rounded on the bound's side
-/// (exp is increasing, so the argument is rounded the same way).
+/// (exp is increasing, so the argument is rounded the same way), and each
+/// widened by one more unit of its last place, outward: mpf_log's and
+/// mpf_exp's directed results carry a limited number of guard bits.
 fn pow_bound(s: &Mpf, t: &Mpf, wp: u64, upper: bool) -> Mpf {
     let lrnd = if (t.sign == 0) == upper { Rnd::Ceiling } else { Rnd::Floor };
-    let c = mpf_log(s, wp, lrnd);
+    let c = widen(&mpf_log(s, wp, lrnd), wp, lrnd == Rnd::Ceiling);
     let a = mpf_mul(t, &c, 0, Rnd::Down);
-    mpf_exp(&a, wp, if upper { Rnd::Ceiling } else { Rnd::Floor })
+    widen(&mpf_exp(&a, wp, if upper { Rnd::Ceiling } else { Rnd::Floor }), wp, upper)
 }
 
-/// The reference's directed result r of s^t, unless it is provably on the
-/// wrong side of the true value: then the bound on the right side, rounded
-/// as asked.  (Its log is rounded in the result's direction, which a
-/// negative t turns around: 17498112^(-31/4) rounded up was below the true
-/// value.  A result on its side, the exact ones and the correctly rounded
-/// ones among them, is the reference's, unchanged; nearest is not checked.)
+/// x moved by one unit in the wp-th bit of its top, up (or down), exactly.
+fn widen(x: &Mpf, wp: u64, up: bool) -> Mpf {
+    if x.man.is_zero() {
+        return x.clone();
+    }
+    let u = Mpf { sign: 0, man: Nat::from_u64(1), exp: x.exp.add_i64(x.bc - wp as i64), bc: 1 };
+    mpf_add(x, &u, 0, Rnd::Down, !up)
+}
+
+/// The reference's directed result r of s^t, unless it is shown to be on
+/// the wrong side of the true value by a certified bound at 2 prec + 64 bits:
+/// then the bound on the right side, rounded as asked.  (Its log is rounded
+/// in the result's direction, which a negative t turns around:
+/// 17498112^(-31/4) rounded up was below the true value.)  A wrong-side r
+/// closer to the true value than that bound's width is not detected: the
+/// side is guaranteed only beyond it, not in every case (a Ziv loop with an
+/// exactness test would close that).  Results on their side, the exact and
+/// the correctly rounded among them, stay the reference's; nearest is not
+/// checked.
 fn pow_directed_side(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd, r: Mpf) -> Mpf {
     // (s > 0, so the result is positive: up is ceiling, down is floor)
     let up = match rnd {
