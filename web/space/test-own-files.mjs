@@ -20,7 +20,7 @@ const ok = (c, msg, detail) => { console.log((c ? "ok   " : "FAIL ") + msg + (de
 const port = 8600 + Math.floor(Math.random() * 90);
 const server = spawn("python3", [join(here, "..", "serve.py"), String(port)], { stdio: "ignore" });
 // (the hosts the gate is tried on, all this server: DEV's, PROD's, and two names that only look like DEV's)
-const HOSTS = ["dev.sagebrush.space", "sagebrush.space", "xdev.sagebrush.space", "dev.sagebrush.space.example.test", "xsagebrush.space", "sagebrush.space.example.test"];
+const HOSTS = ["dev.sagebrush.space", "sagebrush.space", "xdev.sagebrush.space", "dev.sagebrush.space.example.test", "xsagebrush.space", "sagebrush.space.example.test", "www.sagebrush.space"];
 const profile = mkdtempSync(join(tmpdir(), "space-own-"));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist",
   `--host-resolver-rules=${HOSTS.map((h) => `MAP ${h} 127.0.0.1`).join(", ")}`, `--unsafely-treat-insecure-origin-as-secure=${HOSTS.map((h) => `http://${h}:${port}`).join(",")}`,
@@ -304,14 +304,28 @@ ok(await until(`!document.querySelector('iframe[src*="/space/"]')`, 3000), "Clos
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 
 // ---- where it is offered: the listed hosts, matched exactly
-for (const [host, want] of [["dev.sagebrush.space", true], ["127.0.0.1", false], ["localhost", false], ["sagebrush.space", true], ["xdev.sagebrush.space", false], ["dev.sagebrush.space.example.test", false], ["xsagebrush.space", false], ["sagebrush.space.example.test", false]]) {
+for (const [host, want] of [["dev.sagebrush.space", true], ["127.0.0.1", false], ["localhost", false], ["sagebrush.space", true], ["xdev.sagebrush.space", false], ["dev.sagebrush.space.example.test", false], ["xsagebrush.space", false], ["sagebrush.space.example.test", false], ["www.sagebrush.space", false], ["SageBrush.Space", true]]) {
+  // (a URL in mixed case reaches the page as its lowercase hostname, which is what is compared)
   await send("Page.navigate", { url: `http://${host}:${port}/` });
   await sleep(500);
-  const ready = await until(`location.hostname === ${JSON.stringify(host)} && !!window.sagebrush?.workspace`, 30000);
+  const ready = await until(`location.hostname === ${JSON.stringify(host.toLowerCase())} && !!window.sagebrush?.workspace`, 30000);
   await showFiles();
   const items = ready ? await menuOf(ALL_MORE) : null;
   ok(Array.isArray(items) && items.includes("Open all files in 3D") === want && items.includes("3D view examples") === want, `on ${host}: ${want ? "offered" : "not offered"}`, items);
   if (!want) ok(!(await ev(`performance.getEntriesByType("resource").some((r) => r.name.includes("sagebrush-space3d"))`)), `on ${host}: its chunk isn't fetched`);
+  // (3D view examples opens /space/ in a new tab, with no opener)
+  if (want) {
+    const args = await ev(`(async () => {
+      const calls = []; const real = window.open; window.open = (...a) => { calls.push(a); return null; };
+      try {
+        ${ALL_MORE}.click();
+        await new Promise((r) => setTimeout(r, 300));
+        [...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent.trim() === "3D view examples")?.click();
+        return calls;
+      } finally { window.open = real; }
+    })()`);
+    ok(JSON.stringify(args) === JSON.stringify([["/space/", "_blank", "noopener"]]), `on ${host}: 3D view examples opens /space/ in a new tab, no opener`, args);
+  }
 }
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);
