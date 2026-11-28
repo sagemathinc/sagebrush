@@ -66,12 +66,13 @@ async function idOf(ws: GrantsWorkspace, k: string): Promise<string | null> {
 }
 const J = (x: unknown) => JSON.stringify(x);
 /** By document (grants.json's keys): what `local` changed since `base` (an entry made, changed or taken out) kept;
- * every other document as `file` has it; a document both changed since `base` had it, scope by scope (mergeEntry). */
-export function mergeGrants(base: Record<string, unknown>, file: Record<string, unknown>, local: Record<string, unknown>): Record<string, unknown> {
+ * every other document as `file` has it; a document both changed, scope by scope (mergeEntry), when `known` (`base`
+ * is a grants.json this record was merged with; not known, the first window of a launch: `local`'s entry wins). */
+export function mergeGrants(base: Record<string, unknown>, file: Record<string, unknown>, local: Record<string, unknown>, known = true): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const k of new Set([...Object.keys(base), ...Object.keys(file), ...Object.keys(local)])) {
     const mine = J(local[k]) !== J(base[k]), theirs = J(file[k]) !== J(base[k]);
-    const e = mine && theirs && base[k] !== undefined && J(local[k]) !== J(file[k]) ? mergeEntry(base[k], file[k], local[k]) : mine ? local[k] : file[k];
+    const e = mine && theirs && known && J(local[k]) !== J(file[k]) ? mergeEntry(base[k], file[k], local[k]) : mine ? local[k] : file[k];
     if (e !== undefined) out[k] = e;
   }
   return out;
@@ -79,7 +80,8 @@ export function mergeGrants(base: Record<string, unknown>, file: Record<string, 
 type Entry = { write?: string[]; read?: string[]; net?: string[]; denied?: [string, string, number][]; t?: number };
 /** One document changed both here and in grants.json since `base`: each scope, and each denial, three ways: one that
  * was in `base` stays only if neither took it out; one that wasn't comes in from either (so a grant taken back by
- * either is gone, a grant or a denial made by either is in). Within GRANT_CAPS, so the entry stays whole. */
+ * either is gone, a grant or a denial made by either is in), unless one side newly denied every file change ("/").
+ * Within GRANT_CAPS, so the entry stays whole. */
 function mergeEntry(base: unknown, file: unknown, local: unknown): Entry | undefined {
   const b = (base ?? {}) as Entry, f = (file ?? {}) as Entry, l = (local ?? {}) as Entry;
   const three = <T>(bs: T[], fs: T[], ls: T[], key: (x: T) => string) => {
@@ -92,6 +94,10 @@ function mergeEntry(base: unknown, file: unknown, local: unknown): Entry | undef
     if (!(kind in f) && !(kind in l)) continue;
     e[kind] = three(b[kind] ?? [], f[kind] ?? [], l[kind] ?? [], String).slice(0, GRANT_CAPS.perKind);
   }
+  // ("Don't allow file changes" made on one side (a denial of "/" that `base` hadn't): only the write grants that side
+  // holds stay, so a folder the other side allowed meanwhile goes too; no order is read from either side's counters)
+  const deniedAll = (x: Entry) => (x.denied ?? []).some((d) => d[0] === "write" && d[1] === "/");
+  for (const side of [f, l]) if (deniedAll(side) && !deniedAll(b) && e.write) e.write = e.write.filter((s) => (side.write ?? []).includes(s));
   if (f.denied || l.denied) {
     // (a denial both have: the later of the two)
     const later = new Map<string, [string, string, number]>();
@@ -129,7 +135,10 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
         if (p) local["ws:" + p] = e;
         else docs[id] = e;
       }
-      const merged = mergeGrants(base, file, local);
+      // (the base: grants.json as the shared record was last merged with or written to, by any window (GRANTS_SEEN_KEY),
+      // so a window never merges over an older base than the record it reads; none stored: this page's own)
+      const shared = parseGrants(storage.getItem(GRANTS_SEEN_KEY));
+      const merged = mergeGrants(shared ? shared.docs : base, file, local, !!shared || seen !== "");
       for (const [k, e] of Object.entries(merged)) { const id = await idOf(ws, k); if (id) docs[id] = e; }
       if (storage.getItem(GRANTS_KEY) !== raw) { if (tries < 20) continue; throw new Error("grants: the record kept changing here while it was merged"); }
       const ids = new Set([...Object.keys(cur.docs), ...Object.keys(docs)]);
@@ -147,16 +156,9 @@ export function grantsSync(ws: GrantsWorkspace, invoke: Invoke, storage: Store =
     }
   };
   const sync = {
-    /** At launch: grants.json merged in, over what the record here was last merged with (GRANTS_SEEN_KEY); how many
-     * changed. */
-    restore: () => one(async () => {
-      try {
-        // (the base: grants.json as the record here was last merged with it, by any window; none, the first window of
-        // a launch: what this page already holds wins)
-        base = parseGrants(storage.getItem(GRANTS_SEEN_KEY))?.docs ?? {};
-        return (await take(await read())).changed;
-      } catch (e) { console.warn("grants.json:", e); return 0; }
-    }),
+    /** At launch: grants.json merged in, over what the record here was last merged with (GRANTS_SEEN_KEY; none, the
+     * first window of a launch: what this page already holds wins); how many changed. */
+    restore: () => one(async () => { try { return (await take(await read())).changed; } catch (e) { console.warn("grants.json:", e); return 0; } }),
     /** Another window wrote grants.json: merged in; how many documents changed here (and `ahead`: this page has
      * changes of its own to write).  A grants.json that isn't a record reads as none, as at launch (nothing stays
      * allowed but what this page changed since).  One that can't be read, or merged, is `failed`: this page can't

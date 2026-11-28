@@ -406,6 +406,25 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   delete globalThis.localStorage;
 }
 
+// two windows, one record (the windows' shared localStorage) and one grants.json, past their first merge: B allows /a
+// and writes; A, which hasn't adopted that, takes /a back and writes. A's write finds B's and merges over the base
+// the shared record was last merged with (GRANTS_SEEN_KEY: with /a), not A's own (without it): A's revocation is kept
+{
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const { createPermissions } = await import("../notebook/permissions.js");
+  const perms = createPermissions();
+  const f = files(), w = workspace({ "/n.ipynb": { kind: "notebook", ref: "id1" } });
+  const A = grantsSync(w, f.invoke, localStorage), B = grantsSync(w, f.invoke, localStorage);
+  await A.restore(); await B.restore();
+  ok(perms.grant("id1", "write", "/a").ok, "shared base: B allows /a");
+  await B.write();
+  ok(perms.revoke("id1", "write", "/a") !== false && perms.writeTrees("id1").length === 0, "shared base: A takes /a back");
+  await A.write();
+  ok(!J(parseGrants(f.kept()).docs).includes("/a") && perms.writeTrees("id1").length === 0, "shared base: A's write merges over the shared base: the revocation is kept, here and in grants.json: " + J({ file: f.kept(), trees: perms.writeTrees("id1") }));
+  delete globalThis.localStorage;
+}
+
 // a notebook changed on both sides since the base, scope by scope: a grant taken back by either is gone, one made by
 // either is in, a denial from either kept (the later of two), never more than either side's caps
 {
@@ -417,6 +436,13 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
   const many = (p, n) => Array.from({ length: n }, (_, i) => `${p}${i}`);
   const big = mergeGrants({ "ws:/n": { write: [], t: 1 } }, { "ws:/n": { write: many("/f", 20), t: 2 } }, { "ws:/n": { write: many("/l", 20), t: 3 } })["ws:/n"];
   ok(big.write.length === 32 && parseGrants(J({ v: 1, docs: { x: big } }))?.docs.x, "both changed, more than a kind may hold: kept within its cap, so the entry stays whole");
+  // ("Don't allow file changes" on one side: the other side's new folder goes too, either way round)
+  const stop = { "ws:/n": { write: [], denied: [["write", "/", 9]], t: 9 } }, more = { "ws:/n": { write: ["/a", "/new"], t: 3 } }, was = { "ws:/n": { write: ["/a"], t: 1 } };
+  ok(J(mergeGrants(was, more, stop)["ws:/n"].write) === "[]" && J(mergeGrants(was, stop, more)["ws:/n"].write) === "[]", "both changed, one side denying every file change: no write grant stays, the other side's new folder included");
+  // (a notebook both sides made, the base known but without it: scope by scope too; the first window of a launch, no
+  // base known: this page's entry, as before)
+  const mineNew = { "ws:/m": { write: ["/l"], t: 2 } }, theirsNew = { "ws:/m": { write: ["/f"], t: 3 } };
+  ok(J(mergeGrants({}, theirsNew, mineNew)["ws:/m"].write) === J(["/f", "/l"]) && J(mergeGrants({}, theirsNew, mineNew, false)["ws:/m"]) === J(mineNew["ws:/m"]), "both made one notebook: scope by scope with a base known; with none (a launch's first window), this page's entry");
 }
 
 console.log(fails ? `${fails} of ${checks} failed` : `test-grants-file: all ${checks} passed`);
