@@ -54,6 +54,9 @@ if (!checkOnly) {
   if (ex.status !== 0) throw new Error(`app/build-examples.ts failed (${ex.error?.message ?? "exit " + ex.status}): the gallery isn't in app/dist`);
   // the app's native code's notices (scripts/third-party-notices.mjs), beside the page's
   cpSync(join(here, "THIRD-PARTY-NOTICES-native.txt"), join(out, "THIRD-PARTY-NOTICES-native.txt"));
+  // the approvals window's page (app/signer/, app/src-tauri/src/signer.rs): shown on the app protocol only, never
+  // served at the page's origin (lib.rs serve_page refuses /signer/)
+  cpSync(join(here, "signer"), join(out, "signer"), { recursive: true });
 }
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "signer",
+  "description": "The approvals window only (src/signer.rs): its bundled page on the app protocol, never a page of the page's origin (http://127.0.0.1:<port>) or any other. The signing commands are here and nowhere else; each also checks its caller itself. Keys come in a later change: for now, the self-test's stand-in command.",
+  "windows": [
+    "signer"
+  ],
+  "permissions": [
+    "allow-signer-probe-sign"
+  ],
+  "local": true
+}

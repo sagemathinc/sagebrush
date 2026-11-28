@@ -46,13 +46,14 @@
 //
 //   node app/selftest/run.mjs <the app's executable>
 import { spawn } from "node:child_process";
-import { mkdtempSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as httpCreateServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture, judge, python } from "./run-judge.mjs";
+import { signerVerdict } from "./signer-judge.mjs";
 
 const RUN_MS = 360000;
 
@@ -185,6 +186,9 @@ function otherServer() {
       catch (e) { say("refused: " + String(e && e.message || e).slice(0, 80)); }
       try { const x = await window.__TAURI__.fs.exists("/"); say("REACHED fs.exists " + x); }
       catch (e) { say("fs refused: " + String(e && e.message || e).slice(0, 80)); }
+      // (the approvals window's signing command, N1: never another origin's page's, wherever it is loaded)
+      try { const x = await window.__TAURI__.core.invoke("signer_probe_sign", { msg: "${name}" }); say("REACHED signer " + String(x).slice(0, 40)); }
+      catch (e) { say("signer refused: " + String(e && e.message || e).slice(0, 80)); }
     })();
   <\/script>`;
   const server = httpCreateServer((req, res) => {
@@ -262,6 +266,52 @@ if (passed) {
     console.log(why ? "the control failed, for its reason, as it must" : `FAIL the control didn't fail for its reason (the markers seen): ${c.line}`);
     if (c.left.length) console.log("FAIL the last launch's web view data folders weren't removed at this launch");
     passed &&= why && !c.left.length;
+  }
+}
+// The approvals window (N1, app/src-tauri/src/signer.rs; the verdict is signer-judge.mjs, whose expectations it
+// states): a launch with SAGEBRUSH_APP_PERSIST=signer:<another local server's origin>.  The app opens the approvals
+// window as its menu does; its page signs once with the stand-in command (no key yet).  The main page, a second window,
+// a notebook output's frame and the other server's frame each try the command, and the main page tries to open the
+// window from a page.  Then the controls, each leaving one guard out (SAGEBRUSH_APP_SIGNER_CONTROL): "cap" the command
+// in the page's capability too (other windows' calls reach it; its own check refuses them), "cap+check" that and no
+// check (another window's call signs: the probe sees the path it checks), "csp-off" the signer's page without its CSP,
+// framing the other server's page, and "guard-off" the signer window's navigation guard left out, the window sent to
+// that page (each loads there, and reaches nothing).  Calls that reached the command and signatures are counted from
+// the app's own log.
+// (what's in a folder, as relative paths, folders ending in "/"; null if it isn't there)
+function listTree(dir, rel = "") {
+  if (!existsSync(dir)) return null;
+  const out = [];
+  for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(`${r}/`, ...listTree(dir, r));
+    else out.push(r);
+  }
+  return out;
+}
+async function signerLaunch(control) {
+  const o = await otherServer();
+  const data = mkdtempSync(join(tmpdir(), "sagebrush-app-data-"));
+  // (a previous launch's leftover, as a crash leaves it: the launch's cleanup must remove it, signer.rs)
+  mkdirSync(join(data, "signer-webview"), { mode: 0o700 });
+  writeFileSync(join(data, "signer-webview", "crash-leftover"), "x");
+  const res = await launch({ SAGEBRUSH_APP_PERSIST: `signer:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: data, ...(control ? { SAGEBRUSH_APP_SIGNER_CONTROL: control } : {}) }, 120000);
+  await new Promise((r) => setTimeout(r, 1000));
+  o.close();
+  // (the approvals window's web view data folder once the app has quit: signer.rs DATA_FOLDER)
+  const left = listTree(join(data, "signer-webview"));
+  console.log(`  the approvals window's data folder after the app quit: ${left === null ? "absent" : left.length ? `${left.length} entries: ${left.slice(0, 80).join(", ")}` : "empty"}`);
+  const v = signerVerdict({ err: res.err, out: res.out, seen: o.seen, control, code: res.code, signal: res.signal, problems: res.problems, left });
+  console.log(`launch${control ? ` (control: ${control})` : ""}: ${persistLine(res)} (exit ${res.code}); reached the command ${v.counts.dispatches} (${v.counts.dispatchesOthers} not the approvals window's), signed ${v.counts.signed} (${v.counts.signedOthers} not the approvals window's)`);
+  console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
+  return v;
+}
+if (passed) {
+  for (const control of [null, "cap", "cap+check", "csp-off", "guard-off"]) {
+    console.log(`\nthe approvals window${control ? `, the control "${control}"` : ": only its own page signs"}`);
+    const v = await signerLaunch(control);
+    console.log(v.ok ? "as it must" : `FAIL ${v.why.join("; ")}`);
+    passed &&= v.ok; // (every row runs, after a failure too: a control's outcome says why the positive failed)
   }
 }
 process.exit(passed ? 0 : 1);
