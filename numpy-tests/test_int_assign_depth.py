@@ -18,3 +18,15 @@ for d in (np.int8, np.uint8, np.int64):
                 print(d.__name__, name, "written", a.tolist())
             except Exception as e:
                 print(d.__name__, name, type(e).__name__, a.tolist())
+# an out-of-range sibling before or after an over-deep branch: the dimension refusal, the destination unchanged.
+# (Not here: a list holding itself twice, [c, c], which Sagebrush refuses at once but NumPy 2.5.1 walks for its 2**64
+# paths, never finishing.)
+for d in (np.int8, np.uint8):
+    for name, v in (("deep then 300", [nest(5, 70), 300]), ("300 then deep", [300, nest(5, 70)]), ("300 then self", [300, r])):
+        for key in (Ellipsis, slice(None), [0, 1]):
+            a = np.zeros(2, d) + 7
+            try:
+                a[key] = v
+                print(d.__name__, name, "written", a.tolist())
+            except Exception as e:
+                print(d.__name__, name, type(e).__name__, a.tolist())

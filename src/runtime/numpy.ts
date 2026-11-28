@@ -1466,17 +1466,33 @@ function getitem(a: NDArray, key: any): any {
 // cast as the arrays are, wrapping. A list's values are checked one by one, a NumPy scalar among them as by basic
 // indexing (not in np.full).
 const isSmallInt = (dt: DType) => dt.isInt && !isWide(dt);
-function admitSmallInt(dt: DType, x: any, floats: boolean, npScalars: boolean, lists: boolean, depth = 0) {
-  if (lists && isSeq(x) && !(x instanceof NDArray)) {
-    // (a list or tuple subclass with __array__ converts by its protocol, once, later, as NumPy's: its stored items are
-    // never what is written, so never checked here)
-    if (protocolSeq(x)) return;
-    // (nesting past MAX_DIMS, a container holding itself among them: left to discover, whose ValueError refuses it
-    // before anything is written; never a recursion without bound here)
-    if (depth >= MAX_DIMS) return;
-    for (const it of seqItems(x)) admitSmallInt(dt, it, floats, true, true, depth + 1);
-    return;
-  }
+function admitSmallInt(dt: DType, x: any, floats: boolean, npScalars: boolean, lists: boolean) {
+  if (!(lists && isSeq(x) && !(x instanceof NDArray))) return admitSmallScalar(dt, x, floats, npScalars);
+  // (a nested value: every leaf checked, the first refusal kept and raised once the walk is done, so a dimension
+  // refusal met anywhere wins, as NumPy discovers the shape before converting a value)
+  let first: unknown = null;
+  const walk = (y: any, depth: number) => {
+    if (isSeq(y) && !(y instanceof NDArray)) {
+      // (a list or tuple subclass with __array__ converts by its protocol, once, later, as NumPy's: its stored items
+      // are never what is written, so never checked here)
+      if (protocolSeq(y)) return;
+      // (nesting past MAX_DIMS, a container holding itself among them: discover's ValueError, at once, ending the
+      // whole walk; never a recursion or a revisit without bound)
+      if (depth >= MAX_DIMS) nestedTooDeep();
+      for (const it of seqItems(y)) walk(it, depth + 1);
+      return;
+    }
+    if (first !== null) return;
+    try {
+      admitSmallScalar(dt, y, floats, depth === 0 ? npScalars : true);
+    } catch (e) {
+      first = e;
+    }
+  };
+  walk(x, 0);
+  if (first !== null) throw first;
+}
+function admitSmallScalar(dt: DType, x: any, floats: boolean, npScalars: boolean) {
   const w = pyScalar(x);
   if (w === null || w.kind === "b" || w.kind === "c" || (w.dt !== null && (!npScalars || dt.kind === "u"))) return;
   if (w.kind === "f" && !floats) return;
