@@ -35,6 +35,9 @@ ws.onmessage = (ev) => {
 const send = (method, params = {}, ms = 60000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result.value; };
 const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
+// (unconfined here, ?runner=0: a board's code waits for the person's "Run this board's code", web/board/capability.ts;
+// pressed here as they would)
+const runPaused = async () => { await until(`!document.querySelector("[data-sbb=runpaused]").hidden`, 15000); await ev(`(document.querySelector("[data-sbb=runpaused]:not([hidden])")?.click(), 1)`); };
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
@@ -64,6 +67,7 @@ try {
   await until(`${B}?.snapshot().items.length > 0`, 60000);
   await ev("localStorage.clear(), 1");
   await ev(`${B}.load(${JSON.stringify(DOC)}).then(() => 1)`);
+  await runPaused();
   await until(`${B}.outputs().then((os) => os.some((o) => o.id === "c" && /42/.test(o.output)))`, 60000);
   // as it was: Edit on, a camera of its own
   await ev("document.querySelector('[data-sbb=edit]').click(), window.board.setCamera({ x: 100, y: 50, z: 0.8 }), window.board.render(), 1");

@@ -505,6 +505,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // runner always; unconfined only if this code, its digest, is approved. Decided on the very cells given to the
   // engine; an edit of the person's carries the approval of the code it edited, never over code it didn't approve (D4).
   let gateGen = 0, lastDigest: string | null = null, lastEmpty = true, lastIds: string[] = [];
+  // (the gate's decision for the document shown, its code given (or held) once it settles: what waits for the code's
+  // first run waits for it first)
+  let gating: Promise<void> = Promise.resolve();
   // (N1: stopped by the person, or left running as the page goes: opened paused next time)
   const stoppedNow = (states: string[]) => { const ref = host.codeGate?.ref; if (ref && code && lastIds.some((id) => states.includes(code!.state(id)))) markStopped(ref); };
   const onPageHide = () => stoppedNow(["running", "queued"]);
@@ -625,7 +628,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     for (const it of items) if (it.code !== undefined) it.order = nth.get(cellOf.get(it.id) ?? it.id);
     if (!view) for (const c of order) if (c.id !== c.item) byPage.add(c.item);
     // (the code given to run, unless it waits for the person's "Run this board's code": capability.ts)
-    if (!view) void gateSync(d, order, by);
+    if (!view) gating = gateSync(d, order, by);
     for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) b.setAttribute("aria-pressed", String(b.dataset.mode === (d.mode ?? "python")));
     // (the toolbar's Code: the board's language; its tool's title reads it
     // when the toolbar's menu is drawn, UI-231-1, and what is drawn already,
@@ -1169,8 +1172,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // (William): told the camera to move at all, a flight not yet begun
   // included (Find, a double-click; CORR-300-1)
   async function refitAfterRun() {
-    const c = code, loaded = loads, moves = board.moves;
-    if (!c) return;
+    const loaded = loads, moves = board.moves;
+    await gating;
+    const c = code;
+    if (!c || loads !== loaded) return;
     await c.idle();
     // (code that can't run here has no first run: nothing to fit again)
     if (!(await c.ready)) return;
@@ -2712,12 +2717,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       ...(/^(127\.0\.0\.1|localhost)$/.test(globalThis.location?.hostname ?? "") ? { personEditForTests: (f: (d: BoardDoc) => void) => editor.commit(f) } : {}),
       /** Run code items (all when none are given), then what depends on them; resolves to outputs(). */
       run: async (ids?: string[]) => {
+        await gating;
         const c = engine();
         if (c) { await c.idle(); await (ids ? c.run(ids) : c.runAll()); }
         return outputs();
       },
       /** Code items in reading order: their state ("" when up to date, or queued, running, stale, error, cancelled) and output as text, after what was asked for has run. */
-      outputs: async () => { await code?.idle(); return outputs(); },
+      outputs: async () => { await gating; await code?.idle(); return outputs(); },
       /** Turn Edit mode on or off. */
       editing: (on: boolean) => editor.setOn(on),
       /** TimeTravel: the versions kept in this browser, oldest first ({index, ms}). */
