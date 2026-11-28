@@ -23,7 +23,7 @@ const CLI = join(__dirname, "..", "src", "cli.js");
 
 export type Outcome = { stdout: string; stderr: string; status: number };
 export type Known = { class: string; reason: string; sha256: string };
-export const REASON_CLASSES = ["not-implemented", "layout-undocumented", "rng-stream", "lapack-rounding", "help-system"];
+export const REASON_CLASSES = ["not-implemented", "layout-undocumented", "rng-stream", "lapack-rounding", "help-system", "extended-precision", "loop-order"];
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 export const outcomeHash = (o: Outcome) => sha(JSON.stringify({ stdout: o.stdout, stderr: o.stderr, status: o.status }));

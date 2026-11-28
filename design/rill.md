@@ -22,6 +22,7 @@ The feasibility spike (`/scratch/sagebrush-reviews/r-spike/REPORT.md`, branch `s
 
 - **Only documentation is read.** R, its base packages, and every CRAN package Rill reimplements or uses as an oracle are GPL: knitr, rmarkdown, ggplot2, dplyr, tibble, pillar and rlang. For these we read only documentation: the R manuals, help pages (as text, `rhelp.sh`), the CRAN reference manuals, vignettes, and published books and papers. We never read their source code: no C, no Fortran, and no R-level source.
 - **The oracle is a black box.** It is R 4.5.3 in VM4 `~/sbm-r` (`/scratch/sagebrush-reviews/r-spike/APPENDIX-A-oracle.md`). We call functions and record outputs. We never print a function object, and never call `body`, `deparse`, `getAnywhere`, `edit`, `fix`, `page` or `View` on one. Inspecting data is fine: `.Random.seed`, `sprintf("%.17g", x)`, `write.csv(dataset)`, `ggplot_build(p)$data`.
+- **The oracle is x86-64 Linux R.** Some of R's arithmetic uses the x87 80-bit extended precision there (`%%` and `%/%` of doubles, for example: `1 %% 0.1` is 0.1 short of 1 and `1 %/% 0.1` is 9). An R on Apple silicon has no 80-bit type and can answer differently, so expected outputs are recorded on x86-64 only, and Rill models the x86-64 results.
 - **Our words, our code.** Help text is never copied into our docs, our docsearch index or our messages. Error and warning texts that R prints, and output layouts, are reproduced as observed behaviour; this is interoperability, as MATLAB mode reproduces MATLAB's.
 - **No code is written by Codex sessions.**
 - **Each oracle-derived algorithm records its provenance in its PR**, as the RNG section of the spike report does: what was observed, and what was fitted. For example: the RNG seeding and generators, `pretty()`, `format.pval`, and the column-header rules.
@@ -256,7 +257,7 @@ For each case, the comparison covers three things, byte for byte:
 
 ### 7.3 Known differences, enforced both ways (T3)
 
-`rill-tests/KNOWN.json` is machine-readable. Each entry holds a case id, a reason class (`layout-undocumented`, `rng-stream`, `lapack-rounding`, `not-implemented`, …), one line of reason, and the sha256 of **our** current output for that case.
+`rill-tests/KNOWN.json` is machine-readable. Each entry holds a case id, a reason class (`layout-undocumented`, `rng-stream`, `lapack-rounding`, `not-implemented`, `extended-precision`, `loop-order`, …), one line of reason, and the sha256 of **our** current output for that case.
 
 A listed case still runs, and the test checks two things:
 

@@ -86,6 +86,16 @@
    "reason": "lists: options()'s value printed (A1.6)",
    "sha256": "e996e7bc861af8a4c5b1ec3140fc965f8d8093f19fde737a6826e2bebf0dd3c2"
   },
+  "rill-tests/arith/test_2.R#known-extended-extremes": {
+   "class": "extended-precision",
+   "reason": "%% and %/% of operands far apart in size: R 4.5.3 on x86-64 differs from Rill's 80-bit model in the last bits (14 of 3007 grid pairs)",
+   "sha256": "f2713657c394165d94a7f894a7914583ac51fd6d76b1cb82d8b828c3cdb55102"
+  },
+  "rill-tests/arith/test_2.R#known-na-nan-vector-order": {
+   "class": "loop-order",
+   "reason": "NaN against NA in vector + and *: R takes the right missing value by operand lengths; Rill keeps the scalar rule (the left)",
+   "sha256": "70d96e09b77aa3a67d977321920ff0a16a3923eedc7a7bf991efd39ecc8cc670"
+  },
   "rill-tests/core/test_1.R#colon-chr-bad": {
    "class": "not-implemented",
    "reason": "warnings reported after an error, 'In addition:' (A1.4)",
