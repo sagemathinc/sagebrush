@@ -118,6 +118,11 @@ ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "main"), s(2, 2, "main")], { cont
   ok(!cspHalf.ok && /signer page's frame didn't report its signing call/.test(why(cspHalf)), "csp-off: the framed destination loaded but never reported its signing call fails, by name");
   const stopHalf = v(good, { control: "guard-off", seen: [...FRAME, "stop: loaded"] });
   ok(!stopHalf.ok && /signer window didn't report its signing call/.test(why(stopHalf)), "guard-off: the destination loaded but never reported its signing call fails, by name");
+  // (another destination's result can't stand in: guard-off with only the frame's, or csp-off with only the window's)
+  const stopFromFrame = v(good, { control: "guard-off", seen: [...FRAME, "stop: loaded", "sframe: loaded", "sframe: signer refused: not allowed"] });
+  ok(!stopFromFrame.ok && /signer window didn't report its signing call/.test(why(stopFromFrame)), "guard-off: only the csp-off frame's result present, not the window's own, fails by name");
+  const frameFromStop = v(good, { control: "csp-off", seen: [...FRAME, "sframe: loaded", "stop: loaded", "stop: signer refused: not allowed"] });
+  ok(!frameFromStop.ok && /signer page's frame didn't report its signing call/.test(why(frameFromStop)), "csp-off: only the guard-off window's result present, not the frame's own, fails by name");
   ok(v(good, { control: "csp-off", seen: [...FRAME, "sframe: loaded", "sframe: signer refused: not allowed"] }).ok && v(good, { control: "guard-off", seen: [...FRAME, "stop: loaded", "stop: signer refused: not allowed"] }).ok, "...and each control with its destination's call refused: passes");
 }
 

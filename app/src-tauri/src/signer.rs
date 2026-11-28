@@ -26,7 +26,11 @@ const PAGE_NO_CSP: &str = "signer/probe-nocsp.html";
 /// "cap": the signing command in the page's capability too; "cap+check": that and no caller check; "csp-off": the
 /// signer's page without its CSP; "guard-off": the signer window's navigation guard left out.
 pub fn control() -> Option<String> {
-    std::env::var("SAGEBRUSH_APP_SIGNER_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
+    control_from(std::env::var("SAGEBRUSH_APP_SIGNER_CONTROL").ok(), std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
+}
+/// The control asked for (`asked`), honoured only in a self-test (`selftest`): never in a normal run.
+fn control_from(asked: Option<String>, selftest: bool) -> Option<String> {
+    asked.filter(|_| selftest)
 }
 
 /// Whether `url` is the app protocol's page `path` ("/signer/index.html"): tauri://localhost/… (macOS, Linux) or
@@ -145,6 +149,11 @@ fn owner(_: &std::fs::Metadata) -> u32 {
 /// the same owner, and is removed; the new one is made owner-only (0700 on Unix) and must then have the same owner
 /// as `data` (the folder this process just made is its own, so `data` is this user's).  (Windows: no symlink, a
 /// folder; its per-user ACLs aren't checked here.)
+/// Whether a previous signer folder may be removed: a private folder (`private`: no symlink, no group or other write)
+/// whose owner (`owner`) is the app data folder's (`data_owner`); else it is refused and kept.
+fn may_remove_old(private: bool, owner: u32, data_owner: u32) -> bool {
+    private && owner == data_owner
+}
 pub fn prepare_data_folder(data: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let d = std::fs::symlink_metadata(data).map_err(|e| format!("the app's data folder: {e}"))?;
     if !private_folder(&d) {
@@ -152,7 +161,7 @@ pub fn prepare_data_folder(data: &std::path::Path) -> Result<std::path::PathBuf,
     }
     let f = data_folder(data);
     match std::fs::symlink_metadata(&f) {
-        Ok(m) if private_folder(&m) && owner(&m) == owner(&d) => std::fs::remove_dir_all(&f).map_err(|e| format!("the approvals window's old data folder: {e}"))?,
+        Ok(m) if may_remove_old(private_folder(&m), owner(&m), owner(&d)) => std::fs::remove_dir_all(&f).map_err(|e| format!("the approvals window's old data folder: {e}"))?,
         Ok(_) => return Err("the approvals window's data folder isn't a folder only its owner may write".into()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("the approvals window's data folder: {e}")),
@@ -533,6 +542,26 @@ mod tests {
     use super::*;
     fn u(s: &str) -> Url {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn a_control_is_honoured_only_in_a_self_test() {
+        for c in ["cap", "cap+check", "csp-off", "guard-off"] {
+            assert_eq!(control_from(Some(c.to_string()), true), Some(c.to_string()), "{c} in a self-test");
+            assert_eq!(control_from(Some(c.to_string()), false), None, "{c} outside a self-test: never");
+        }
+        assert_eq!(control_from(None, true), None);
+        assert_eq!(control_from(None, false), None);
+    }
+
+    #[test]
+    fn an_old_signer_folder_is_removed_only_if_private_and_the_data_folder_owners() {
+        assert!(may_remove_old(true, 501, 501));
+        // (another owner's, even private: refused and kept)
+        assert!(!may_remove_old(true, 0, 501));
+        assert!(!may_remove_old(true, 502, 501));
+        // (not private: refused, whoever owns it)
+        assert!(!may_remove_old(false, 501, 501));
     }
 
     #[test]
