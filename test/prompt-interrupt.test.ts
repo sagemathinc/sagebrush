@@ -15,7 +15,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // (the terminal's control sequences, and its echo of a pressed Ctrl-C, out of the text)
 const plain = (s: string) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "").replace(/^(\^C)+/gm, "");
 
-type Step = { send?: string } | { press: true } | { signal: NodeJS.Signals; group?: boolean } | { wait: number } | { until: RegExp; ms?: number };
+// (again: the next press of the same gesture, a double tap: it keeps the first press's mark and time, so the
+// acknowledgment of the first press, which may come before it, still counts)
+type Step = { send?: string } | { press: true; again?: boolean } | { signal: NodeJS.Signals; group?: boolean } | { wait: number } | { until: RegExp; ms?: number };
 
 /** A measured allowance for a promptness bound: `base` ms on an idle machine, plus four of the session's own round
  * trips of a trivial input (rtt), so that a loaded runner, slower at everything, isn't held to an idle one's clock. */
@@ -57,8 +59,10 @@ async function prompt(args: string[], steps: Step[], env: Record<string, string>
         p.stdin!.write(s.send);
       }
       if ("press" in s) {
-        mark = out.length;
-        pressedAt = Date.now();
+        if (!s.again) {
+          mark = out.length;
+          pressedAt = Date.now();
+        }
         p.stdin!.write("\x03");
       }
       if ("signal" in s) {
@@ -148,13 +152,16 @@ test("a double tap (two Ctrl-C 50 ms apart) is one press: one KeyboardInterrupt,
     { wait: 1500 },
     { press: true },
     { wait: 50 },
-    { press: true },
-    { until: /KeyboardInterrupt\n>>> $/ },
+    { press: true, again: true },
+    // (the second tap may come after the prompt is back: then it is a Ctrl-C at an empty prompt, which redraws it)
+    { until: /KeyboardInterrupt\n>>> (?:\n>>> )?$/ },
     // (and the second press doesn't wait for the next input: it is gone)
     { send: "import time; time.sleep(1.5); print('k counted', k > 0)\r" },
     { until: /k counted True\n>>> $/ },
     { send: "exit()\r" },
   ]);
+  // (the interrupt seen, whether before or after the second tap: not a wait that timed out)
+  assert.ok(r.seen[String(/KeyboardInterrupt\n>>> (?:\n>>> )?$/)] >= 0, JSON.stringify(r.seen) + r.out);
   assert.equal(r.out.match(/KeyboardInterrupt/g)?.length, 1, r.out);
   assert.match(r.out, /k counted True/, r.out);
   assert.equal(r.ended?.code, 0, r.out);
