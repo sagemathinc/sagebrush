@@ -23,3 +23,9 @@ for v in ([-(2 ** 53), 1], [1, -(2 ** 53)], [2 ** 53, -1], [-1, 2 ** 53], [-(2 *
         case(f"int64 {v} diff({p}).hex", lambda: [float(x).hex() if x == x else "nan" for x in pd.Series(v).diff(p).tolist()])
 for p in (10 ** 20, -(10 ** 20), 2 ** 63, -(2 ** 63)):
     case(f"diff({p})", lambda: pd.Series([1, 2]).diff(p))
+# periods past a C ssize_t: an unsigned column's differences all missing (an empty one too), a signed int's or a
+# float's pandas' OverflowError
+for dt in ("uint8", "uint16", "uint32", "int8", "int32", "int64", "float32", "float64"):
+    for n in (2, 0):
+        for p in (10 ** 20, -(10 ** 20), 2 ** 63, -(2 ** 63) - 1, 2 ** 63 - 1, -(2 ** 63), 10 ** 40):
+            case(f"{dt} len {n} diff({p})", lambda: pd.Series([1, 2][:n]).astype(dt).diff(p).tolist())

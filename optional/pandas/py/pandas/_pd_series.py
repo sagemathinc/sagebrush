@@ -1290,12 +1290,14 @@ def diff_column(col, periods):
     if isinstance(periods, bool) or not isinstance(periods, (int, np.integer)):
         raise ValueError("periods must be an integer")
     periods = int(periods)
-    if not -(1 << 63) <= periods < 1 << 63:
-        raise OverflowError("Python int too large to convert to C ssize_t")
     if col.dtype is DT:
         raise _unsupported("diff of a datetime64[us] column (a Timedelta column)")
     if col.dtype not in INTS and col.dtype not in FLOATS:
         raise _unsupported("diff of a %s column" % (col.dtype,))
+    # (periods past a C ssize_t: pandas' OverflowError for a signed int or a float column; an unsigned one's
+    # differences are all missing, as pandas')
+    if not -(1 << 63) <= periods < 1 << 63 and not col.dtype.startswith("uint"):
+        raise OverflowError("Python int too large to convert to C ssize_t")
     small = col.dtype in ("int8", "int16")
     d = "float32" if col.dtype == "float32" or small else "float64"
     if col.dtype == "int64":

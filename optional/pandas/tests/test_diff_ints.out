@@ -843,3 +843,227 @@ dtype: object
 0   NaN
 1   NaN
 dtype: float64
+== uint8 len 2 diff(100000000000000000000)
+[nan, nan]
+== uint8 len 2 diff(-100000000000000000000)
+[nan, nan]
+== uint8 len 2 diff(9223372036854775808)
+[nan, nan]
+== uint8 len 2 diff(-9223372036854775809)
+[nan, nan]
+== uint8 len 2 diff(9223372036854775807)
+[nan, nan]
+== uint8 len 2 diff(-9223372036854775808)
+[nan, nan]
+== uint8 len 2 diff(10000000000000000000000000000000000000000)
+[nan, nan]
+== uint8 len 0 diff(100000000000000000000)
+[]
+== uint8 len 0 diff(-100000000000000000000)
+[]
+== uint8 len 0 diff(9223372036854775808)
+[]
+== uint8 len 0 diff(-9223372036854775809)
+[]
+== uint8 len 0 diff(9223372036854775807)
+[]
+== uint8 len 0 diff(-9223372036854775808)
+[]
+== uint8 len 0 diff(10000000000000000000000000000000000000000)
+[]
+== uint16 len 2 diff(100000000000000000000)
+[nan, nan]
+== uint16 len 2 diff(-100000000000000000000)
+[nan, nan]
+== uint16 len 2 diff(9223372036854775808)
+[nan, nan]
+== uint16 len 2 diff(-9223372036854775809)
+[nan, nan]
+== uint16 len 2 diff(9223372036854775807)
+[nan, nan]
+== uint16 len 2 diff(-9223372036854775808)
+[nan, nan]
+== uint16 len 2 diff(10000000000000000000000000000000000000000)
+[nan, nan]
+== uint16 len 0 diff(100000000000000000000)
+[]
+== uint16 len 0 diff(-100000000000000000000)
+[]
+== uint16 len 0 diff(9223372036854775808)
+[]
+== uint16 len 0 diff(-9223372036854775809)
+[]
+== uint16 len 0 diff(9223372036854775807)
+[]
+== uint16 len 0 diff(-9223372036854775808)
+[]
+== uint16 len 0 diff(10000000000000000000000000000000000000000)
+[]
+== uint32 len 2 diff(100000000000000000000)
+[nan, nan]
+== uint32 len 2 diff(-100000000000000000000)
+[nan, nan]
+== uint32 len 2 diff(9223372036854775808)
+[nan, nan]
+== uint32 len 2 diff(-9223372036854775809)
+[nan, nan]
+== uint32 len 2 diff(9223372036854775807)
+[nan, nan]
+== uint32 len 2 diff(-9223372036854775808)
+[nan, nan]
+== uint32 len 2 diff(10000000000000000000000000000000000000000)
+[nan, nan]
+== uint32 len 0 diff(100000000000000000000)
+[]
+== uint32 len 0 diff(-100000000000000000000)
+[]
+== uint32 len 0 diff(9223372036854775808)
+[]
+== uint32 len 0 diff(-9223372036854775809)
+[]
+== uint32 len 0 diff(9223372036854775807)
+[]
+== uint32 len 0 diff(-9223372036854775808)
+[]
+== uint32 len 0 diff(10000000000000000000000000000000000000000)
+[]
+== int8 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 2 diff(9223372036854775807)
+[nan, nan]
+== int8 len 2 diff(-9223372036854775808)
+[nan, nan]
+== int8 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(9223372036854775807)
+[]
+== int8 len 0 diff(-9223372036854775808)
+[]
+== int8 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(9223372036854775807)
+[nan, nan]
+== int32 len 2 diff(-9223372036854775808)
+[nan, nan]
+== int32 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(9223372036854775807)
+[]
+== int32 len 0 diff(-9223372036854775808)
+[]
+== int32 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(9223372036854775807)
+[nan, nan]
+== int64 len 2 diff(-9223372036854775808)
+[nan, nan]
+== int64 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(9223372036854775807)
+[]
+== int64 len 0 diff(-9223372036854775808)
+[]
+== int64 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(9223372036854775807)
+[nan, nan]
+== float32 len 2 diff(-9223372036854775808)
+[nan, nan]
+== float32 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(9223372036854775807)
+[]
+== float32 len 0 diff(-9223372036854775808)
+[]
+== float32 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(9223372036854775807)
+[nan, nan]
+== float64 len 2 diff(-9223372036854775808)
+[nan, nan]
+== float64 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(9223372036854775807)
+[]
+== float64 len 0 diff(-9223372036854775808)
+[]
+== float64 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
