@@ -101,6 +101,12 @@ try {
     mkdirSync(later);
     ok(targetLockPath(later) === before, "the same lock once the target exists");
     ok(relaunchUnderTargetLock(target, ["false"], { env: { ...process.env, SAGEBRUSH_TARGET_LOCK: lock } }) === null, "the run that holds the lock goes on (null), it doesn't relaunch");
+    // (no flock or lockf on this machine: the build goes on unlocked, saying so, and pruning is "unsupported", never
+    // a success that skipped the work)
+    const bare = { ...process.env, PATH: join(d, "no-such-bin") };
+    const said = [];
+    ok(relaunchUnderTargetLock(target, ["false"], { env: bare, log: (m) => said.push(m) }) === null && said.length === 1 && /no flock or lockf/.test(said[0]), "no lock tool: the build goes on (null), saying so");
+    ok(removeTargetIfIdle(target, { env: bare }) === "unsupported" && fs.existsSync(target), "no lock tool: pruning is unsupported, the target stays");
     if (spawnSync("flock", ["--version"]).status === 0) {
       // (two real builds, each relaunching itself under the lock, the second through the alias: one, then the other)
       const order = join(d, "order.txt"), script = join(d, "child.mjs");
@@ -116,11 +122,23 @@ appendFileSync(${JSON.stringify(order)}, "end\\n");
       const waited = readFileSync(join(d, "e2"), "utf8");
       ok(r.status === 0 && readFileSync(order, "utf8") === "start\nend\nstart\nend\n", "two builds on one target (one through a symlink): one, then the other");
       ok((waited.match(/waiting for another build/g) ?? []).length === 1, "the second says once that it waits");
+      // (a build that itself exits 75 is not taken for a held lock: it runs once and its status is passed on)
+      const runs = join(d, "runs.txt"), s75 = join(d, "exit75.mjs");
+      writeFileSync(s75, `import { relaunchUnderTargetLock } from ${JSON.stringify(new URL("./install-engine-wasm.mjs", import.meta.url).href)};
+import { appendFileSync } from "node:fs";
+const locked = relaunchUnderTargetLock(process.argv[2], [process.execPath, process.argv[1], process.argv[2]], { log: () => {} });
+if (locked !== null) process.exit(locked);
+appendFileSync(${JSON.stringify(runs)}, "run\\n");
+process.exit(75);
+`);
+      const r75 = spawnSync(process.execPath, [s75, target]);
+      ok(r75.status === 75 && readFileSync(runs, "utf8") === "run\n", "a build exiting 75 runs once, and its 75 is passed on");
       // (a holder killed outright: the kernel releases its lock)
       const holder = spawn("flock", [lock, "sleep", "30"], { detached: true, stdio: "ignore" });
       const until = Date.now() + 5000;
       while (spawnSync("flock", ["-n", "-E", "75", lock, "true"]).status !== 75 && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
       ok(removeTargetIfIdle(target) === "busy" && fs.existsSync(target), "a target whose lock a build holds is not pruned");
+      ok(removeTargetIfIdle(alias) === "busy" && fs.existsSync(target), "nor through a symlink to it (the real path's lock)");
       process.kill(-holder.pid, "SIGKILL");
       holder.unref();
       let freed = false;

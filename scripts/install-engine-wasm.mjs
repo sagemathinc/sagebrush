@@ -101,14 +101,14 @@ const runLocked = (lock, argv, wait, env) => {
 export function relaunchUnderTargetLock(target, argv, { env = process.env, log = console.error } = {}) {
   const lock = targetLockPath(target);
   if (env.SAGEBRUSH_TARGET_LOCK === lock) return null;
-  const first = runLocked(lock, argv, false, env);
-  if (first === null) {
+  // (a probe that can't exit LOCK_BUSY itself tells a held lock from the build's own exit status)
+  const probe = runLocked(lock, ["true"], false, env);
+  if (probe === null) {
     log(`engine: no flock or lockf here: building without the target's lock (${target})`);
     return null;
   }
-  if (first !== LOCK_BUSY) return first;
-  log(`engine: waiting for another build in ${target} to finish`);
-  return runLocked(lock, argv, true, env);
+  if (probe === LOCK_BUSY) log(`engine: waiting for another build in ${target} to finish`);
+  return runLocked(lock, argv, true, env) ?? 1;
 }
 
 // Remove a cargo target if no build holds its lock (the lock is taken without waiting, and held while it is removed):

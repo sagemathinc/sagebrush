@@ -147,6 +147,11 @@ try {
   ok(logs.filter((m) => /removed the cargo target checkout-0+[24] \(1 MiB, last used /.test(m)).length === 2 && logs.some((m) => /removed the cargo target checkout-0+3 \(0 MiB/.test(m)), "each removed target is logged with its size and last use; one gone meanwhile is 0 MiB, no error");
   ok(logs.some((m) => /kept the cargo target checkout-0+5: a build holds it/.test(m)), "a target a build holds is kept, and said so");
   ok(/4 checkout targets in .*, 4 MiB$/.test(logs.at(-1)), `the total kept is logged (${logs.at(-1)})`);
+  // (no lock tool: pruning stops at the first target, saying so once, and removes nothing)
+  const ulogs = [];
+  let calls2 = 0;
+  pruneTargets(join(tp, names[6]), { SAGEBRUSH_ENGINE_TARGETS: "1" }, (m) => ulogs.push(m), () => (calls2++, "unsupported"));
+  ok(calls2 === 1 && ulogs.filter((m) => /not pruned/.test(m)).length === 1 && readdirSync(tp).filter((n) => n.startsWith("checkout-")).length === 4, "no lock tool: pruning stops at once, said once, nothing removed");
   const G = { ...E, RUSTFLAGS: "-Cdebuginfo=1" }, glogs = [];
   const built = ensure({ root: repo, env: G, ...stubs, log: (m) => glogs.push(m), prune: () => { throw new Error("EACCES (injected)"); } });
   ok(built === "built" && check({ root: repo, env: G }).ok && glogs.some((m) => /pruning the cargo targets failed: EACCES/.test(m)), "a pruning failure is logged, after the build is stored and installed");
