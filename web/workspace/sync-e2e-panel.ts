@@ -119,9 +119,17 @@ export function showRecoveryCode(host: HTMLElement, recoveryCode: string): Promi
   });
 }
 
-/** The section, drawn into `into`; refresh() draws it again from what the server and the owner say now. */
-export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): Promise<void>; busy(): boolean } {
-  let working = false, gen = 0;
+// (a turn-on whose section went (the panel closed, or the signed-in account changed) before its recovery code could
+// be shown: kept in this page's memory only, for that account, and shown when its section next opens there; until
+// then the device stays unconfirmed. Never retried or cancelled: its genesis was admitted)
+let pendingCode: { hash: string; code: string; confirm: () => Promise<void> } | null = null;
+
+/** The section, drawn into `into`. refresh() draws it again from what the server and the owner say now; update(key)
+ * does when `key` (what it depends on: the verified account, sync's state, the owner's reason) changed; clear() empties
+ * it (sync unavailable, or its status unknown); dispose() ends it (the panel's close): nothing more is drawn or shown
+ * from it. */
+export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): Promise<void>; update(key: string): void; clear(): void; dispose(): void; busy(): boolean } {
+  let working = false, gen = 0, disposed = false, lastKey: string | null = null;
   const line = (text: string, cls = "note") => h("p", { className: cls, textContent: text });
   const fail = (text: string) => { into.append(line(text, "note error")); };
 
@@ -137,18 +145,30 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
       if (!hash) throw new Error("the signed-in account isn't known yet");
       const m = await deps.chunk();
       const made = await m.DeviceKeys.create(label, e2eAccountOf(hash));
-      // (the device confirmed only if the person said they saved the code; a dialog closed any other way leaves it
-      // unconfirmed, and the section says so once sync is on)
-      if (await showRecoveryCode(deps.modalHost ?? document.body, made.recoveryCode)) await made.confirm();
-      await deps.enable();
-      deps.reconcile();
-      working = false;
-      await refresh();
+      // (the section gone, or another account signed in, while genesis ran: its code kept for this account's next open)
+      if (disposed || (await deps.hash()) !== hash) {
+        pendingCode = { hash, code: made.recoveryCode, confirm: made.confirm };
+        working = false;
+        return;
+      }
+      await finish(made.recoveryCode, made.confirm);
     } catch (e) {
       working = false;
       await refresh();
       fail(failWords(e));
     }
+  }
+
+  /** The recovery code shown, the device confirmed only if the person said they saved it (a dialog closed any other way
+   * leaves it unconfirmed, and the section says so), then sync turned on, unless the section went meanwhile. */
+  async function finish(code: string, confirm: () => Promise<void>) {
+    working = true;
+    if (await showRecoveryCode(deps.modalHost ?? document.body, code)) await confirm();
+    if (disposed) { working = false; return; }
+    await deps.enable();
+    deps.reconcile();
+    working = false;
+    await refresh();
   }
 
   async function reset() {
@@ -170,6 +190,7 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
   }
 
   async function refresh(): Promise<void> {
+    if (disposed) return;
     const mine = ++gen;
     let chain: { status: number; entries?: unknown };
     try {
@@ -182,19 +203,30 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
     if (chain.status === 404) { into.replaceChildren(); return; }
     const out: Node[] = [h("h4", { textContent: "End-to-end encryption" })];
     const reason = deps.reason();
+    const resetBtn = () => btn("Reset this device…", () => void reset(), "danger");
     if (chain.status !== 200 || !Array.isArray(chain.entries)) out.push(line("Can't check end-to-end encryption right now."));
-    else if (reason === FORKED || reason === WRONG_ACCOUNT) out.push(line(reason), btn("Reset this device…", () => void reset(), "danger"));
+    else if (reason === FORKED || reason === WRONG_ACCOUNT) out.push(line(reason), resetBtn());
     else if (reason === NO_DEVICE) out.push(line(reason));
     else if (chain.entries.length > 0) {
-      out.push(line(ON_LINE));
-      // (whether this browser's code may never have been saved: from its device, loaded and verified as sync does)
+      // ("on in this browser" only from this browser's own device, loaded and verified as sync does; none, or one this
+      // browser refuses, says what it is instead)
+      let k: { recoveryUnconfirmed: boolean } | null = null, code: string | null = null;
       try {
         const hash = await deps.hash();
-        const k = hash ? await (await deps.chunk()).DeviceKeys.load(e2eAccountOf(hash)) : null;
-        if (mine !== gen) return;
-        if (k?.recoveryUnconfirmed) out.push(line(UNCONFIRMED_LINE, "note warn"));
-      } catch { /* (the owner's own reason says what is wrong; nothing more here) */ }
-      if (reason) out.push(line(reason));
+        if (!hash) code = "unknown";
+        else k = await (await deps.chunk()).DeviceKeys.load(e2eAccountOf(hash));
+      } catch (e) {
+        code = (e as { code?: string })?.code ?? "unknown";
+      }
+      if (mine !== gen) return;
+      if (k) {
+        out.push(line(ON_LINE));
+        if (k.recoveryUnconfirmed) out.push(line(UNCONFIRMED_LINE, "note warn"));
+        if (reason) out.push(line(reason));
+      } else if (code === null || code === "no_device") out.push(line(NO_DEVICE));
+      else if (code === "wrong_account") out.push(line(WRONG_ACCOUNT), resetBtn());
+      else if (code === "forked" || code === "chain_fork" || code === "chain_reset" || code === "chain_unanchored") out.push(line(FORKED), resetBtn());
+      else out.push(line("Can't check end-to-end encryption right now."));
     } else {
       const s = deps.sync();
       if (s.on || s.used) out.push(line(USED_LINE));
@@ -202,7 +234,32 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
     }
     if (mine !== gen) return;
     into.replaceChildren(...out);
+    // (a code this page kept for this account, from a turn-on whose section went before it could be shown: shown now)
+    if (pendingCode && !working) {
+      const hash = await deps.hash();
+      if (mine !== gen || !pendingCode || pendingCode.hash !== hash) return;
+      const p = pendingCode;
+      pendingCode = null;
+      void finish(p.code, p.confirm);
+    }
   }
 
-  return { refresh, busy: () => working };
+  return {
+    refresh,
+    update: (key) => {
+      if (disposed || working || key === lastKey) return;
+      lastKey = key;
+      void refresh();
+    },
+    clear: () => {
+      lastKey = null;
+      gen++;
+      into.replaceChildren();
+    },
+    dispose: () => {
+      disposed = true;
+      gen++;
+    },
+    busy: () => working,
+  };
 }

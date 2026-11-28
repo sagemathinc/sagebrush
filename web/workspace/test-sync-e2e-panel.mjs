@@ -28,7 +28,7 @@ let failures = 0, count = 0;
 const ok = (c, msg, detail) => { count++; console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 const J = JSON.stringify;
 const SITE = "https://sagebrush.test";
-const IDS = { ONA: "e2e0a000-0001-4e2e-8e2e-e2e2e2e2e201", UNC: "e2e0a000-0002-4e2e-8e2e-e2e2e2e2e202", FRK: "e2e0a000-0003-4e2e-8e2e-e2e2e2e2e203", ESC: "e2e0a000-0004-4e2e-8e2e-e2e2e2e2e204" };
+const IDS = { ONA: "e2e0a000-0001-4e2e-8e2e-e2e2e2e2e201", UNC: "e2e0a000-0002-4e2e-8e2e-e2e2e2e2e202", FRK: "e2e0a000-0003-4e2e-8e2e-e2e2e2e2e203", ESC: "e2e0a000-0004-4e2e-8e2e-e2e2e2e2e204", NEW1: "e2e0a000-0005-4e2e-8e2e-e2e2e2e2e205", SLOW: "e2e0a000-0006-4e2e-8e2e-e2e2e2e2e206" };
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const rl = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
@@ -222,6 +222,65 @@ try {
       return { text: text(), enabled: T.enabled - n0, dialog: !!document.querySelector(".e2e-code-dialog") };
     })()`);
     ok(r.text.includes(C.USED) && r.enabled === 0 && !r.dialog, "genesis refused over changes in the clear: the section says to delete the synced data first; no code shown, nothing turned on", r);
+  }
+
+  // ---- (E2462-1) the section follows the verified account: a key with another account reads that account's chain
+  // again (here: a fresh account's switch, then one with a chain and this browser's device), the same key reads nothing,
+  // and clear() empties it
+  {
+    const r = await P.ev(`(async () => {
+      let reads = 0;
+      const box = document.getElementById("box"); box.replaceChildren();
+      T.reason = undefined; T.sync = { on: false, used: false };
+      const d = deps({ chain: async () => { reads++; return deps().chain(); } });
+      const second = Panel.e2eSection(box, d);
+      await as("NEW1"); second.update(JSON.stringify(["NEW1"])); await new Promise((r) => setTimeout(r, 400));
+      const first = { buttons: buttons(), reads };
+      second.update(JSON.stringify(["NEW1"])); await new Promise((r) => setTimeout(r, 300));
+      const same = reads;
+      await as("ONA"); second.update(JSON.stringify(["ONA"])); await new Promise((r) => setTimeout(r, 600));
+      const switched = { text: text(), buttons: buttons(), reads };
+      second.clear();
+      return { first, same, switched, cleared: box.childNodes.length };
+    })()`);
+    ok(J(r.first.buttons) === J(["Turn on encrypted sync…"]) && r.same === r.first.reads && r.switched.reads === r.first.reads + 1 && r.switched.text.includes(C.ON) && r.switched.buttons.length === 0 && r.cleared === 0,
+      "the section follows the account: another account's key reads its chain again (here: on, its device), the same key reads nothing, clear() empties it", r);
+  }
+
+  // ---- (E2462-2) "on in this browser" only with this browser's device: a chain and none here (reset) says so
+  {
+    const r = await P.ev(`(async () => { await as("FRK"); T.reason = undefined; await section().refresh(); return { text: text(), buttons: buttons() }; })()`);
+    ok(!r.text.includes(C.ON) && r.text.includes(C.NO_DEVICE), "a chain and no device in this browser (reset, the owner with no reason): not \"on in this browser\", but that this browser isn't set up", r);
+  }
+
+  // ---- (E2462-3) the section closed while genesis runs: no dialog then; the device unconfirmed; the code kept in
+  // this page for the account and shown when its section next opens, then confirmed once ticked, and sync turned on
+  {
+    const r = await P.ev(`(async () => {
+      await as("SLOW"); T.reason = undefined; T.sync = { on: false, used: false }; T.label = null;
+      let open; const gate = new Promise((r) => { open = r; });
+      const slowK = { ...K, DeviceKeys: { ...K.DeviceKeys, load: (...a) => K.DeviceKeys.load(...a), create: async (...a) => { await gate; return K.DeviceKeys.create(...a); } }, resetDevice: K.resetDevice };
+      const first = section({ chunk: async () => slowK });
+      await first.refresh();
+      const n0 = T.enabled;
+      click("Turn on encrypted sync…");
+      await new Promise((r) => setTimeout(r, 100));
+      first.dispose();
+      open();
+      for (let i = 0; i < 200 && !(await deviceOf("SLOW")); i++) await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => setTimeout(r, 300));
+      const closed = { dialog: !!document.querySelector(".e2e-code-dialog"), stored: (await deviceOf("SLOW"))?.recoveryShown, enabled: T.enabled - n0 };
+      await section().refresh();
+      for (let i = 0; i < 200 && !document.querySelector(".e2e-code-dialog"); i++) await new Promise((r) => setTimeout(r, 25));
+      const dlg = document.querySelector(".e2e-code-dialog");
+      const shown = !!dlg && (dlg.querySelector("pre")?.textContent ?? "").length > 0;
+      dlg?.querySelector("input[type=checkbox]").click();
+      if (dlg) click("Close");
+      for (let i = 0; i < 200 && T.enabled - n0 === 0; i++) await new Promise((r) => setTimeout(r, 25));
+      return { closed, shown, stored: (await deviceOf("SLOW"))?.recoveryShown, enabled: T.enabled - n0 };
+    })()`);
+    ok(r.closed.dialog === false && r.closed.stored === false && r.closed.enabled === 0, "the section closed while genesis ran: no dialog, the device unconfirmed, sync not turned on", r.closed);
+    ok(r.shown && r.stored === true && r.enabled === 1, "the section opened again for that account: the kept code shown, the device confirmed once ticked, then sync turned on", r);
   }
 
   // ---- the E2E routes off: no section at all

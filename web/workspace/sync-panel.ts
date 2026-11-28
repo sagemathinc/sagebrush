@@ -221,7 +221,6 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     return a.ok ? { ...a, life: before } : a;
   };
   const poll = new PanelPoll(boundStatus, (a) => answered(a), opts.random, opts.after);
-  let lastE2EKey = "";
   const e2e = e2eSection(e2eBox, {
     chain: async () => {
       const r = await f("/api/sync/v1/e2e/chain?from=0", { credentials: "same-origin" });
@@ -244,6 +243,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!a.ok && a.why === "stale") return poll.request();
     if (!a.ok) {
       last = null;
+      // (sync's status unknown or signed out: nothing of encryption's section is kept from an earlier answer)
+      e2e.clear();
       const signedOut = a.why === "http" && a.code === 401;
       // (signed out: sign-in itself, back to this page, never through the share dialog)
       sec.replaceChildren(h("h4", { textContent: "Sync" }), signedOut
@@ -282,13 +283,10 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!last) return;
     const st = last.status;
     renderGen++;
-    // (encryption's section read again only when what it depends on changes (sync's state, the owner's reason, this
-    // browser's use), not on every progress redraw, and never while a turn-on or reset is under way there)
-    const e2eKey = JSON.stringify([st.available, st.state, owner.own.reason ?? null, usedHere]);
-    if (st.available && e2eKey !== lastE2EKey && !e2e.busy()) {
-      lastE2EKey = e2eKey;
-      void e2e.refresh();
-    }
+    // (encryption's section read again only when what it depends on changes (the verified account, sync's state, the
+    // owner's reason, this browser's use), not on every progress redraw; emptied while sync is unavailable)
+    if (!st.available) e2e.clear();
+    else e2e.update(JSON.stringify([last.verified ? last.account : null, st.state, owner.own.reason ?? null, usedHere]));
     sec.replaceChildren();
     // (off the allowlist: nothing at all, unless this browser synced before: then what changed, and as whom)
     if (!st.available && st.reason === "not_allowlisted") {
@@ -599,7 +597,7 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   }
 
   poll.request();
-  return { dispose: () => { poll.close(); renderGen++; unsub(); }, poll, refresh: () => poll.request() };
+  return { dispose: () => { poll.close(); renderGen++; unsub(); e2e.dispose(); }, poll, refresh: () => poll.request() };
 }
 
 /** The Files sidebar's sync line ("" hides it): the foot's words while sync is on (with the notebooks', `nb`: readNotebooks); once sync was used here and is
