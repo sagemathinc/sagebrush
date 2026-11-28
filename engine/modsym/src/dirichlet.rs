@@ -208,7 +208,9 @@ impl Character {
         // Breadth-first closure of {1} under multiplication by the generators.
         let mut queue = vec![1 % n.max(1)];
         while let Some(x) = queue.pop() {
+            sagebrush_interrupt::check();
             for (&g, &v) in gens.iter().zip(vals) {
+                sagebrush_interrupt::check();
                 let y = mul_mod(x, g, n);
                 let e = ((exps[x as usize] as u64 + v) % order) as u32;
                 if exps[y as usize] == u32::MAX {
@@ -226,6 +228,7 @@ impl Character {
     pub fn restrict(&self, m: u64) -> Character {
         assert!(self.n % m == 0 && m % self.conductor() == 0);
         let exps = (0..m).map(|x| {
+            sagebrush_interrupt::check();
             if m > 1 && gcd(x, m) != 1 {
                 return u32::MAX;
             }

@@ -4342,6 +4342,36 @@
   "owner": "modular symbols",
   "reason": "a check-only example (the twisted traces' prime supply against L): its max is the largest sigma0 below 2^30 and its loops a level range; it refuses nothing"
  },
+ "engine/modsym/src/dims.rs :: exact_at_large_weights :: let mut exps = vec![u32::MAX; n as usize]; #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
+ "engine/modsym/src/general.rs :: from_exponents :: if e == u32::MAX { e } else { (e as u64 % order) as u32 } #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
+ "engine/modsym/src/general.rs :: is_trivial :: e == u32::MAX || e as u64 % self.order == 0 #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
+ "engine/modsym/src/general.rs :: minimal :: if e == u32::MAX { e } else { (e as u64 / s) as u32 } #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
+ "engine/modsym/src/general.rs :: minimal :: let g = self.exps.iter().filter(|&&e| e != u32::MAX).fold(self.order, |g, &e| { #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
+ "engine/modsym/src/general.rs :: trivial :: if gcd(m, n) == 1 || n == 1 { 0 } else { u32::MAX } #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
+ },
  "engine/modsym/src/hecke_q.rs :: cusp_dim :: let Some(d) = gamma0_cusp_dim(m, k) else { return u64::MAX }; #0": {
   "class": "none",
   "owner": "cusp_hecke_matrix",
@@ -4451,6 +4481,11 @@
   "class": "none",
   "owner": "modular symbols",
   "reason": "test code: the longest time between Stop checks while newforms computes trace forms; refuses nothing itself"
+ },
+ "engine/modsym/tests/table_scans_poll.rs :: table_scans_poll :: let exps: Vec<u32> = (0..n).map(|x| chi.exponent(x as i64).unwrap_or(u32::MAX)).collect(); #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "u32::MAX marks a non-unit in a character's exponent table, a sentinel; it limits nothing"
  },
  "engine/mp/src/abi.rs ::  :: const MAX_FACTORIAL_CACHE: i64 = 1000; #0": {
   "class": "none",
@@ -20420,11 +20455,6 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
- },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -20467,6 +20497,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",

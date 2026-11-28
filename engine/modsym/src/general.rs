@@ -42,7 +42,10 @@ pub struct Character {
 
 impl Character {
     pub fn trivial(n: u64) -> Self {
-        let exps = (0..n).map(|m| if gcd(m, n) == 1 || n == 1 { 0 } else { u32::MAX }).collect();
+        let exps = (0..n).map(|m| {
+            sagebrush_interrupt::check();
+            if gcd(m, n) == 1 || n == 1 { 0 } else { u32::MAX }
+        }).collect();
         Character { n, order: 1, exps }
     }
 
@@ -53,6 +56,7 @@ impl Character {
             return Err("need one exponent per residue mod N".into());
         }
         for a in 0..n {
+            sagebrush_interrupt::check();
             let unit = gcd(a, n) == 1 || n == 1;
             if unit != (exps[a as usize] != u32::MAX) {
                 return Err(format!("eps({}) must be defined exactly on units", a));
@@ -60,6 +64,7 @@ impl Character {
         }
         for a in 0..n {
             for b in 0..n {
+                sagebrush_interrupt::check();
                 let (ea, eb) = (exps[a as usize], exps[b as usize]);
                 if ea != u32::MAX && eb != u32::MAX {
                     let ab = exps[((a * b) % n) as usize] as u64;
@@ -72,7 +77,10 @@ impl Character {
         // exponents reduced mod the order: [_, 2, 2, ...] with order 2 is the
         // trivial character, which minimal() and is_trivial() must see (the
         // second review's R2-MOD-F4: it got cusp dimension 0 at level 11)
-        let exps = exps.into_iter().map(|e| if e == u32::MAX { e } else { (e as u64 % order) as u32 }).collect();
+        let exps = exps.into_iter().map(|e| {
+            sagebrush_interrupt::check();
+            if e == u32::MAX { e } else { (e as u64 % order) as u32 }
+        }).collect();
         Ok(Character { n, order, exps })
     }
 
@@ -89,9 +97,15 @@ impl Character {
     /// The same character with `order` its exact order m (exponents
     /// relative to zeta_m = zeta_order^(order/m)).
     pub fn minimal(&self) -> Character {
-        let g = self.exps.iter().filter(|&&e| e != u32::MAX).fold(self.order, |g, &e| gcd(g, e as u64));
+        let g = self.exps.iter().filter(|&&e| e != u32::MAX).fold(self.order, |g, &e| {
+            sagebrush_interrupt::check();
+            gcd(g, e as u64)
+        });
         let s = g.max(1);
-        let exps = self.exps.iter().map(|&e| if e == u32::MAX { e } else { (e as u64 / s) as u32 }).collect();
+        let exps = self.exps.iter().map(|&e| {
+            sagebrush_interrupt::check();
+            if e == u32::MAX { e } else { (e as u64 / s) as u32 }
+        }).collect();
         Character { n: self.n, order: self.order / s, exps }
     }
 
@@ -99,8 +113,12 @@ impl Character {
     /// x = 1 mod M.
     pub fn conductor(&self) -> u64 {
         let n = self.n;
-        (1..=n).filter(|m| n % m == 0).find(|&m| {
+        (1..=n).filter(|m| {
+            sagebrush_interrupt::check();
+            n % m == 0
+        }).find(|&m| {
             (0..n / m).all(|t| {
+                sagebrush_interrupt::check();
                 let x = (1 + t * m) % n;
                 self.exponent(x as i64).map_or(true, |e| e as u64 % self.order == 0)
             })
@@ -108,7 +126,10 @@ impl Character {
     }
 
     pub fn is_trivial(&self) -> bool {
-        self.exps.iter().all(|&e| e == u32::MAX || e as u64 % self.order == 0)
+        self.exps.iter().all(|&e| {
+            sagebrush_interrupt::check();
+            e == u32::MAX || e as u64 % self.order == 0
+        })
     }
 }
 
