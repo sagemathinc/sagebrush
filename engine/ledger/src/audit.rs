@@ -94,16 +94,16 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for Audit<A> {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // (a reallocation that moves, growing, shrinking or neither, holds
+        // the old block and the new one at once inside the wrapped call;
+        // from outside no one can tell a move from a change in place, so
+        // every one is checked at old + new: new counted before the call,
+        // then old released on success, new on failure)
+        let (old, new) = (layout.size() as u64, new_size as u64);
+        LIVE.fetch_add(new, Relaxed);
+        check_alloc(new);
         let q = self.0.realloc(ptr, layout, new_size);
-        if !q.is_null() {
-            let (old, new) = (layout.size() as u64, new_size as u64);
-            if new >= old {
-                LIVE.fetch_add(new - old, Relaxed);
-                check_alloc(new - old);
-            } else {
-                LIVE.fetch_sub(old - new, Relaxed);
-            }
-        }
+        LIVE.fetch_sub(if q.is_null() { new } else { old }, Relaxed);
         q
     }
 }

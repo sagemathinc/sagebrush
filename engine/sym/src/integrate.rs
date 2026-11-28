@@ -76,9 +76,21 @@ pub fn integrate(f: &Expr, x: &str) -> Option<Expr> {
     Some(r)
 }
 
+/// Restores the trace state integrate_steps found, on every exit: also
+/// when a Stop (or a panic) unwinds through it, so that tracing never stays
+/// on and later ordinary integrations don't keep their step trees.
+struct TraceGuard(Option<Vec<Vec<Step>>>);
+
+impl Drop for TraceGuard {
+    fn drop(&mut self) {
+        let prev = self.0.take();
+        TRACE.with(|t| *t.borrow_mut() = prev);
+    }
+}
+
 /// The antiderivative with the steps that found it.
 pub fn integrate_steps(f: &Expr, x: &str) -> Option<(Expr, Step)> {
-    TRACE.with(|t| *t.borrow_mut() = Some(vec![vec![]]));
+    let _restore = TraceGuard(TRACE.with(|t| t.borrow_mut().replace(vec![vec![]])));
     let r = integrate(f, x);
     let steps = TRACE.with(|t| t.borrow_mut().take()).and_then(|mut s| s.pop()).unwrap_or_default();
     let r = r?;
@@ -1881,6 +1893,21 @@ pub fn definite(f: &Expr, x: &str, a: &Expr, b: &Expr) -> Option<Expr> {
 mod tests {
     use super::*;
     use crate::parse::parse;
+
+    // integrate_steps inside a traced integration restores the outer trace
+    // it found, not none (the guard's previous state)
+    #[test]
+    fn a_nested_traced_integration_restores_the_outer_trace() {
+        let x = parse("x");
+        let marker = Step { rule: "outer".into(), integrand: x.clone(), var: "x".into(), result: x.clone(), sub: vec![] };
+        TRACE.with(|t| *t.borrow_mut() = Some(vec![vec![marker]]));
+        assert!(integrate_steps(&parse("x^2"), "x").is_some());
+        let outer = TRACE.with(|t| t.borrow_mut().take());
+        let outer = outer.expect("the outer trace is back");
+        assert_eq!(outer.len(), 1);
+        assert_eq!(outer[0].len(), 1);
+        assert_eq!(outer[0][0].rule, "outer");
+    }
 
     fn check(f: &str, expect: Option<&str>) {
         let e = parse(f);
