@@ -73,7 +73,8 @@ import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showS
 // that it stopped in this tab, at the journal's activation: at the top with Reload, kept until then, which no busy
 // notice (a deletion's progress, its end) replaces or hides: board's N2 on 7e4ddd5b)
 onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
-import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
+import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
+import { mayRun, testSwitch, gateHere } from "./capability";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { langOf } from "../code/langs";
@@ -395,6 +396,10 @@ const source = unsaved ? "unsaved:" + unsaved : embedded() ? "embedded:" + locat
 const storeName = Object.keys(RENAMED).find((o) => RENAMED[o] === source) ?? source;
 const saveKey = "sagebrush-board:" + storeName;
 const local = /^local:[0-9a-f]{12}$/.test(source);
+// (whether a board's code runs in the runner here: an opaque-origin sandboxed frame, design/runner.md; ?runner=0 only
+// on a loopback host, for tests: elsewhere a link could add it to someone else's code; in every browser but WebKit's,
+// as on the notebook page: notebook/runner-browser.js; not yet in the desktop app)
+const runnerHere = !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && RUNNER_BROWSER && !(window as any).__TAURI__;
 // (a document's history in this browser: by its source and its name beside it)
 const historyKey = (id: string | null) => "board:" + storeName + (id ? ":" + id : "");
 // The board journal (DEV-only; journal.ts): a board of the workspace is saved through the
@@ -468,6 +473,13 @@ async function journalHistory(docId: string | null): Promise<BoardTimeTravel | n
 }
 const bench = q.has("items") || q.has("strokes");
 const file = !!embedded();
+// (whether this page holds the person's storage, which unconfined code could reach: Sagebrush's own board page, not a
+// downloaded file (its own origin) nor a sandboxed frame (no storage at all: reading it throws))
+// (?gate=0, for tests of the engine in a plain worker, the gate not theirs to test: only on an http: page of a loopback
+// host, never the desktop app's, capability.ts testSwitch; the gate on every page of this origin, its storage readable
+// or not, gateHere)
+const gateOff = testSwitch(q, "gate", location, !!(window as any).__TAURI__);
+const holdsStorage = gateHere({ file, origin: location.origin, gateOff });
 const runnerPill = createRunnerPill({ enabled: !file && !(window as any).__TAURI__ && q.get("runner-info") === "1" });
 // (the frame other sites show a board in, /frame/board/ (export.ts
 // frameHtml, design/frame.md): an exported page whose document its parent
@@ -1272,8 +1284,18 @@ const host: BoardHost = {
   fullFileMenu: true,
   // (File ▸ New window: the app's page in a window of its own, #1541)
   ...(desktopApp ? { newWindow: () => void (window as any).__TAURI__.core.invoke("window_open", { at: "/" }).catch((err: any) => alert(`A new window didn't open: ${err?.message ?? err}`)) } : {}),
-  // (a board brought in from a file, opened here: its code waits for the person, until they run it)
-  codePaused: local && isPaused(source.slice(6)),
+  // (the gate on code by capability, capability.ts: in the runner its code runs, whoever wrote it; unconfined, only if
+  // approved by the person. The interim pause of a board brought in from a file is gone with it. Only on a page that
+  // holds the person's storage: not a downloaded file, whose page is its own origin, nor a sandboxed frame, which has
+  // none: there unconfined code reaches nothing of theirs)
+  ...(holdsStorage ? { codeGate: {
+    confined: runnerHere,
+    // (the board, for "its last run was stopped": its workspace id, else where the page has it from, an example's path
+    // or a link's: every board this page shows has one, Codex F2 on #2477)
+    ref: local ? source.slice(6) : "source:" + storeName.slice(0, 512),
+    // (the desktop app forgets this page's storage at quit: an approval kept in grants.json too, beside the grants)
+    approved: () => { if (desktopApp && ws) void desktopModule().then((d) => d.saveGrants(ws!, (c: string, a?: any) => (window as any).__TAURI__.core.invoke(c, a))).catch((e) => console.warn("grants.json:", e)); },
+  } } : {}),
   codeResumed: () => { if (local) unpause(source.slice(6)); },
   store: {
     async load() {
@@ -1491,7 +1513,7 @@ const host: BoardHost = {
   // the latest (engine.ts)
   // (?runner=0 only on a loopback host, for tests: elsewhere a link could add
   // it to someone else's code; in every browser but WebKit's, as on the notebook page: notebook/runner-browser.js)
-  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && RUNNER_BROWSER && !(window as any).__TAURI__), { observeRunner: (kernel, mod) => runnerPill.watch(kernel, (w: any) => w instanceof mod.RunnerWorker && !w.inner) })
+  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), runnerHere), { gate: holdsStorage ? { mayRun } : undefined, observeRunner: (kernel, mod) => runnerPill.watch(kernel, (w: any) => { const x = w?.raw ?? w; return x instanceof mod.RunnerWorker && !x.inner; }) })
     // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
     // (one for each language the board's items are in: Sage's with its library, item 16)
     : ref ? (d, mode) => new BoardCode(engineRecovery.track(mode, (unavailable) => fileEngine(() => (publicEngine ? publicLatestEngine() : chooseEngine(ref, fromParent ? "pinned" : d.engine)).then((e) => ((chosen = e.id), e)), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent, unavailable }))) : undefined,

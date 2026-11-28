@@ -194,16 +194,14 @@ try {
   check(await until(`${W}.stat("/h.board.json").then((e) => e?.kind === "board")`), "a .board.json dropped on the board: a document of its own");
   check((await ev(`${W}.stat("/h.board.json").then((e) => e?.made)`)) === "elsewhere", "…from elsewhere (provenance), never the person's own");
   check(await until(`window.sagebrush?.board?.snapshot()?.doc?.title === "H"`, 30000), "…opened, not poured into the open board");
-  // a single board brought in: opened with its code paused until the person runs it (@sagebrush's interim, astra's CORR-4B3-1)
+  // a single board brought in: opened; in the runner (a sandbox: nothing of the person's in reach) its code runs, as
+  // any board's does there (web/board/capability.ts, William's ruling of Nov 28; the interim pause of a board brought
+  // in from a file is gone with it). Unconfined it waits for Run: web/board/test-board-follows-writes.mjs
   await go(base);
   await until(`!!${W} && !!sagebrush.notebook.store?.id`, 60000);
   await upload(NB, [file("runs.board.json", runBoard("Runs"))]);
   check(await until(`location.pathname.startsWith("/board") && window.sagebrush?.board?.snapshot()?.doc?.title === "Runs"`, 60000), "one board uploaded from the notebook page: opened");
-  check(await until(`document.querySelector("[data-sbb=runpaused]")?.hidden === false`), "…with \"Run this board's code\" shown");
-  await sleep(3000);
-  check(!(await ev(`document.body.innerText.includes("RAN_MARKER")`)), "…its code not run by itself");
-  await ev(`(() => { document.querySelector("[data-sbb=runpaused]").click(); return 1; })()`);
-  check(await until(`document.body.innerText.includes("RAN_MARKER")`, 90000) && (await ev(`document.querySelector("[data-sbb=runpaused]").hidden`)), "…run when the person presses it");
+  check(await until(`document.body.innerText.includes("RAN_MARKER")`, 90000) && (await ev(`crossOriginIsolated === true && document.querySelector("[data-sbb=runpaused]").hidden`)), "…in the runner, its code runs by itself, no Run asked for");
   // an in-place edit under way when a file is dropped: kept before the page goes (astra's CORR-4B3-2)
   const edited = await ev(`${W}.create("/Edited.board.json", { content: { title: "Edited board", nodes: [{ id: "a", title: "Before", text: "body", x: 0, y: 0 }] } }).then((e) => e.ref)`);
   await go(base + "board/?doc=local:" + edited);

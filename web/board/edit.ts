@@ -111,7 +111,7 @@ export class Editor {
   inDrawer: () => boolean = () => false;
 
   // (edits are to the page shown: pg(d) is it, within the whole document d)
-  constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc) => Promise<void>,
+  constructor(private board: Board, private doc: () => BoardDoc | null, private change: (d: BoardDoc, by?: "person" | "elsewhere") => Promise<void>,
     private pg: (d: BoardDoc) => BoardPage = (d) => d as BoardPage) {
     board.onItemDown = (it, e) => this.down(it, e);
     board.onDoubleClick = (it, x, y) => this.dblclick(it, x, y);
@@ -209,8 +209,10 @@ export class Editor {
    * (null), whatever asks for it (a person's edit, slow code's output previews), unless `outside` says whose it is:
    * "page", the page's own (a document loaded or made, its file renamed, an agent's edit through the page's API under
    * its own grants); "inplace", what was typed in Edit, kept as Edit ends; "answer", a reader's answer to a question
-   * and its checked attempt (answering is not editing the board's design). */
-  async commit(f: (d: BoardDoc) => void, merge = false, record = true, outside?: "page" | "inplace" | "answer"): Promise<boolean | null> {
+   * and its checked attempt (answering is not editing the board's design). `by`: whose change it is, for the approval of
+   * the board's code (capability.ts): the person's, or "elsewhere" (an agent's edit, a file opened as the board), whose
+   * result is never approved by being made. */
+  async commit(f: (d: BoardDoc) => void, merge = false, record = true, outside?: "page" | "inplace" | "answer", by: "person" | "elsewhere" = "person"): Promise<boolean | null> {
     if (this.leaving) return null;
     if (!this.on && !outside) return null;
     const cur = this.doc();
@@ -229,7 +231,7 @@ export class Editor {
     else if (this.undos.at(-1) === after) { this.undos.pop(); stepped = false; }
     if (this.undos.length > 200) this.undos.shift();
     this.redos = [];
-    await this.change(d);
+    await this.change(d, by);
     this.selectEdge(this.edgeSel);
     this.gone();
     return stepped;

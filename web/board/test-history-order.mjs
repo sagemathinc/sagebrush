@@ -72,7 +72,7 @@ const recorded = (name) => H(`H.hist[${JSON.stringify(name)}] ? { docs: H.hist[$
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Page.navigate", { url: `${base}board/?runner=0` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&gate=0` });
   if (!(await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000))) throw new Error("the page's board was not shown");
 
   // the page's own board and history: versions waiting (frames held) when the

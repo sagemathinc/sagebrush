@@ -44,7 +44,7 @@ const settled = (ids) => until(`${B}.outputs().then((os) => ${JSON.stringify(ids
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   // (a board of one language first: one interpreter)
-  await send("Page.navigate", { url: `${base}board/?runner=0&fresh=${Math.random()}` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&gate=0&fresh=${Math.random()}` });
   if (!(await until(`${B}?.snapshot().items.length > 0`, 60000))) throw new Error("the board did not open");
   await ev(`${B}.load(${JSON.stringify({ title: "One", nodes: [{ id: "p", code: "1 + 1" }] })}).then(() => 1)`);
   check(await settled(["p"]), "(the one-language board ran)");
@@ -53,7 +53,7 @@ try {
   check(await until("[...document.querySelectorAll('.board-code-src')].length > 0 && [...document.querySelectorAll('.board-code-src')].every((e) => !!e.querySelector('span'))", 30000), "the code highlighted once its interpreter is ready: " + JSON.stringify(await ev("[...document.querySelectorAll('.board-code-src')].map((e) => e.innerHTML.slice(0, 80))")));
 
   // three languages: Python (the board's), Sage and MATLAB items
-  await send("Page.navigate", { url: `${base}board/?runner=0&fresh=${Math.random()}` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&gate=0&fresh=${Math.random()}` });
   await until(`${B}?.snapshot().items.length > 0`, 60000);
   const DOC = { title: "Languages", nodes: [
     { id: "a", title: "myval in Python", code: "myval = 6" },

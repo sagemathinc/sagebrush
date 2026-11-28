@@ -46,7 +46,7 @@ const DOC = { title: "Group titles", nodes: [{ id: "all", kind: "group", title: 
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Page.navigate", { url: `${base}board/?runner=0` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&gate=0` });
   if (!(await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000))) throw new Error("the board did not open");
   await ev(`window.sagebrush.board.load(${JSON.stringify(DOC)}).then(() => 1)`);
   await until("!!window.board.item('u5')");
