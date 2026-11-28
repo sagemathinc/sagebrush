@@ -95,7 +95,7 @@ export async function e2eStart({
     const keys = await m.DeviceKeys.load(expect);
     if (!keys) return { kind: "blocked", reason: NO_DEVICE, retry: false };
     if (!contentSealed) return { kind: "blocked", reason: CONTENTS_PENDING, retry: false };
-    const kit = { sealOps: m.sealOps, sopsItem: m.sopsItem, envHashOf: m.envHashOf, verifyRow: m.verifyRow, PULL_START: m.PULL_START, SealedHalt: m.SealedHalt };
+    const kit = { sealOps: m.sealOps, sopsItem: m.sopsItem, envHashOf: m.envHashOf, verifyRow: m.verifyRow, PULL_START: m.PULL_START, SealedHalt: m.SealedHalt, sealFile: m.sealFile, openFile: m.openFile, sealedSize: m.sealedSize };
     return { kind: "sealed", e2e: { keys, kit }, recoveryUnconfirmed: keys.recoveryUnconfirmed };
   } catch (e) {
     const code = (e as { code?: string })?.code;
