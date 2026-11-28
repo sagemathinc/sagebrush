@@ -134,3 +134,23 @@ True
 (360, 65)
 == iris.filename
 ('iris.csv', 'sklearn.datasets.data')
+== digits-n_class-check 0
+!! InvalidParameterError: The 'n_class' parameter of load_digits must be an int in the range [1, 10]. Got 0 instead.
+== digits-n_class-check -1
+!! InvalidParameterError: The 'n_class' parameter of load_digits must be an int in the range [1, 10]. Got -1 instead.
+== digits-n_class-check 1
+((178, 64), [0])
+== digits-n_class-check 2
+((360, 64), [0, 1])
+== digits-n_class-check 10
+((1797, 64), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+== digits-n_class-check 11
+!! InvalidParameterError: The 'n_class' parameter of load_digits must be an int in the range [1, 10]. Got 11 instead.
+== digits-n_class-check 2.5
+!! InvalidParameterError: The 'n_class' parameter of load_digits must be an int in the range [1, 10]. Got 2.5 instead.
+== digits-n_class-check True
+((178, 64), [0])
+== digits-n_class-check np.int64(3)
+((537, 64), [0, 1, 2])
+== digits-n_class-check '3'
+!! InvalidParameterError: The 'n_class' parameter of load_digits must be an int in the range [1, 10]. Got '3' instead.
