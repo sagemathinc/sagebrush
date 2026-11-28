@@ -8305,6 +8305,11 @@
   "class": "3",
   "owner": "number fields"
  },
+ "lib/_sage_nf.py :: NumberField_absolute.number_of_roots_of_unity :: raise NotImplementedError(\"the number of roots of unity of %s: the count found is not proven complete\" % self) #0": {
+  "class": "coverage",
+  "owner": "Sage number fields",
+  "reason": "the number of roots of unity when the count found is not proven complete: refused rather than returned (a lower bound only); an unproven result, not a cap"
+ },
  "lib/_sage_nf.py :: Order.__repr__ :: name = \"Maximal Order\" #0": {
   "class": "none",
   "owner": "Sage compatibility",

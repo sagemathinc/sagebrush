@@ -170,8 +170,10 @@ impl Embeddings {
         // alone gave a singular T2 form for x^3 - 1386489987 x - ...)
         let mut emb = Embeddings { r1, r2, roots, conj: vec![], iso, order };
         let cbits = o.basis.iter().flatten().map(|c| c.bits()).max().unwrap_or(1) as u32;
-        let rbits = emb.roots.iter().map(|r| r.0.abs().max(r.1.abs()).max(1.0).log2().ceil() as u32).max().unwrap_or(1);
-        let prec = 96 + cbits + (o.n as u32) * rbits;
+        let rbits = emb.root_bits();
+        // (checked: a precision past u32 is no embedding we can compute)
+        let prec = (o.n as u32).checked_mul(rbits).and_then(|x| x.checked_add(cbits)).and_then(|x| x.checked_add(96))
+            .ok_or_else(|| "the embeddings' precision is past 2^32 bits".to_string())?;
         let hp = emb.roots_hp(&o.f, prec)?;
         let p = prec as usize;
         let to_f = |x: &BigInt| -> f64 { crate::real::to_f64(x, prec) };
@@ -188,6 +190,16 @@ impl Embeddings {
             }).collect()
         }).collect();
         Ok(emb)
+    }
+
+    /// The bits of the largest root, at least 1: |root| < 2^root_bits, from
+    /// the certified enclosures (fixed point at iso.prec bits).  (From the
+    /// roots as doubles, a root past them, as for (x + 2^1024 + 3)^2 - 2,
+    /// was infinite and its bits u32::MAX: the precision overflowed, and the
+    /// roots of unity came out as 0.)
+    pub fn root_bits(&self) -> u32 {
+        let prec = self.iso.prec as u64;
+        self.iso.roots.iter().map(|r| r.re.bits().max(r.im.bits()).saturating_sub(prec).max(1) as u32).max().unwrap_or(1)
     }
 
     /// sigma_j(x) for x in order coordinates (f64).
@@ -327,14 +339,16 @@ pub fn reduce_order(o: &Order) -> Result<Order, String> {
     }
     let emb = Embeddings::new(o)?;
     let cbits = o.basis.iter().flatten().map(|c| c.bits()).max().unwrap_or(1) as u32;
-    let rbits = emb.roots.iter().map(|r| r.0.abs().max(r.1.abs()).max(1.0).log2().ceil() as u32).max().unwrap_or(1);
+    let rbits = emb.root_bits();
     // The embeddings of the basis are up to about 2^(cbits + n rbits); the
     // short vectors are combinations cancelling all but O(1) of that, so
     // the lattice keeps 80 bits below 1 beyond that size (with 80 bits only,
     // a power basis of a generator near 5 10^7 needed two passes, and the
     // roots of unity were then counted in a badly scaled basis).
-    let size = cbits + (n as u32) * rbits;
-    let prec = 160 + 2 * size;
+    let size = (n as u32).checked_mul(rbits).and_then(|x| x.checked_add(cbits))
+        .ok_or_else(|| "the reduction's precision is past 2^32 bits".to_string())?;
+    let prec = size.checked_mul(2).and_then(|x| x.checked_add(160))
+        .ok_or_else(|| "the reduction's precision is past 2^32 bits".to_string())?;
     let p = prec as usize;
     let hp = emb.roots_hp(&o.f, prec)?;
     // sigma_j(w_i) den 2^p; complex embeddings as sqrt(2) (re, im)
