@@ -14,3 +14,5 @@ dtype('<U2')
 !! AttributeError: module 'sklearn.utils' has no attribute 'no_such_name'
 == cm.int-weights-past-2**53
 !! NotImplementedError: int64 values beyond 2**53 are not supported yet
+== cm.int-weights-running-sum-past-2**53
+!! NotImplementedError: int64 values beyond 2**53 are not supported yet

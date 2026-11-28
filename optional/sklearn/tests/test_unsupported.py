@@ -26,3 +26,4 @@ case("missing.unknown", lambda: __import__("sklearn.utils", fromlist=["no_such_n
 # past it, never a float64 round trip's wrong count
 from sklearn.metrics import confusion_matrix
 case("cm.int-weights-past-2**53", lambda: confusion_matrix([0, 0], [0, 0], sample_weight=np.array([2**53 - 1, 2], np.int64)))
+case("cm.int-weights-running-sum-past-2**53", lambda: confusion_matrix([0, 0, 0], [0, 0, 0], sample_weight=np.array([2**53 - 1, 2, -2], np.int64)))
