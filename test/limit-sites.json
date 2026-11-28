@@ -3927,6 +3927,26 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/tests/cld_stop.rs ::  :: use sagebrush_poly::{try_factor_with, Budget}; #0": {
+  "class": "none",
+  "owner": "engine",
+  "reason": "Stop test rows (A14): a default factoring budget and an unbounded poll chunk as the control for the exact poll count; tests only, no refusal"
+ },
+ "engine/poly/tests/cld_stop.rs :: stop_at :: assert_eq!(try_factor_with(f, &Budget::default()).unwrap().1, vec![(f.to_vec(), 1)]); #0": {
+  "class": "none",
+  "owner": "engine",
+  "reason": "Stop test rows (A14): a default factoring budget and an unbounded poll chunk as the control for the exact poll count; tests only, no refusal"
+ },
+ "engine/poly/tests/cld_stop.rs :: stop_at :: assert_eq!(try_factor_with(f, &Budget::default()).unwrap().1, vec![(f.to_vec(), 1)]); #1": {
+  "class": "none",
+  "owner": "engine",
+  "reason": "Stop test rows (A14): a default factoring budget and an unbounded poll chunk as the control for the exact poll count; tests only, no refusal"
+ },
+ "engine/poly/tests/cld_stop.rs :: stop_at :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "engine",
+  "reason": "Stop test rows (A14): a default factoring budget and an unbounded poll chunk as the control for the exact poll count; tests only, no refusal"
+ },
  "engine/poly/tests/memory_share.rs ::  :: use sagebrush_poly::{try_factor, try_factor_with, with_default_limits, Budget, Limits, MemorySource}; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
@@ -3988,6 +4008,11 @@
   "class": "none",
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "a unit test's inputs; refuses nothing"
+ },
+ "engine/primes/tests/sieve_stop.rs :: stop_inside_a_pass_and_a_segment :: assert_eq!(marking_polls(n, 1 << 20) - marking_polls(n, u64::MAX), 5); #0": {
+  "class": "none",
+  "owner": "engine",
+  "reason": "Stop test rows (A14): a default factoring budget and an unbounded poll chunk as the control for the exact poll count; tests only, no refusal"
  },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
