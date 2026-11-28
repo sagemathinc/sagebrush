@@ -1,6 +1,7 @@
-// The audit allocator counts a growing reallocation at its peak, the old
-// block and the new one at once (A12-F2: it added only new - old after the
-// wrapped call, so a moving growth's overlap went unchecked).  The wrapped
+// The audit allocator counts a reallocation at its peak, the old block and
+// the new one at once, whether it grows or shrinks (A12-F2: it added only
+// new - old after the wrapped call, so a moving reallocation's overlap went
+// unchecked).  The wrapped
 // allocator here always moves: allocate, copy, free.  A test binary of its
 // own: the audit's counters are process-wide.
 #![cfg(feature = "ledger-audit")]
@@ -34,14 +35,21 @@ unsafe impl GlobalAlloc for Moving {
 #[global_allocator]
 static ALLOC: audit::Audit<Moving> = audit::Audit::new(Moving);
 
-fn grow(reserved: u64) -> u64 {
+/// The audit's breaches while a Vec's capacity goes from `from` to `to`
+/// bytes under a reservation of `reserved` bytes.
+fn resize(from: usize, to: usize, reserved: u64) -> u64 {
     audit::start(64 << 10);
     let op = Operation::enter();
-    let r = reserve("growth", reserved).unwrap();
+    let r = reserve("resize", reserved).unwrap();
     {
         let _s = r.scope();
-        let mut v: Vec<u8> = black_box(Vec::with_capacity(1 << 20));
-        v.reserve_exact(2 << 20);
+        let mut v: Vec<u8> = black_box(Vec::with_capacity(from));
+        if to > from {
+            v.reserve_exact(to);
+        } else {
+            v.shrink_to(to);
+        }
+        assert_eq!(v.capacity(), to);
         black_box(&v);
     }
     drop(r);
@@ -50,11 +58,14 @@ fn grow(reserved: u64) -> u64 {
 }
 
 #[test]
-fn a_moving_growth_is_checked_at_its_peak() {
+fn a_moving_reallocation_is_checked_at_its_peak() {
     set_total(Some(Total { bytes: 1 << 34, status: TotalStatus::Observed, joint: false, uncertified: false }));
     // 1 MiB grown to 2 MiB moves: 3 MiB at once, more than a 2 MiB
     // reservation covers
-    assert!(grow(2 << 20) > 0, "the overlap of a moving growth is a breach");
+    assert!(resize(1 << 20, 2 << 20, 2 << 20) > 0, "the overlap of a moving growth is a breach");
     // covered at its peak: no breach
-    assert_eq!(grow(3 << 20), 0);
+    assert_eq!(resize(1 << 20, 2 << 20, 3 << 20), 0);
+    // a shrink moves too: 2 MiB shrunk to 1 MiB holds 3 MiB at once
+    assert!(resize(2 << 20, 1 << 20, 2 << 20) > 0, "the overlap of a moving shrink is a breach");
+    assert_eq!(resize(2 << 20, 1 << 20, 3 << 20), 0);
 }
