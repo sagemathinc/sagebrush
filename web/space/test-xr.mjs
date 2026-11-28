@@ -288,8 +288,28 @@ const startWith = (how, button = "vr") => ev(`(() => {
   return true;
 })()`);
 const restored = `!space3d.xr.presenting && space3d.controls.enabled && ${VR}.textContent === "Enter VR"`;
+// (the head's height above the ground under it, in metres: after a step onto the floor, and after flying then walking
+//  again, the same with or without a floor reference space)
+const headHeight = `(() => { const V = space3d.camera.position.constructor, h = space3d.camera.getWorldPosition(new V()); return +((h.y - space3d.floorY) / 5).toFixed(2); })()`;
+const heights = async () => {
+  await ev(`(space3d.xr.setWalk(true), true)`);
+  await ev(`(() => { const p = space3d.xr.rig.position; space3d.xr.teleport(p.x + 4, p.z); return true; })()`);
+  await until(`space3d.xr.history.flying === false`, 5000); await frames(3);
+  const step = await ev(headHeight);
+  await ev(`(space3d.xr.setWalk(false), true)`); await frames(2);
+  await ev(`(space3d.xr.setWalk(true), true)`);
+  await until(`space3d.xr.history.flying === false`, 5000); await frames(3);
+  return { step, walkAgain: await ev(headHeight) };
+};
+await startWith("ok");
+ok(await until(`space3d.xr.presenting`, 8000), "in VR, with the floor space");
+const withFloor = await heights();
+await ev(`space3d.xr.menuPress('exit'), true`);
+await until(restored, 5000);
 await startWith("no-floor");
 ok(await until(`space3d.xr.presenting`, 8000), "a headset without a floor reference space still enters (the local space, the floor an eye's height below)");
+const noFloor = await heights();
+ok(withFloor.step > 1 && Math.abs(noFloor.step - withFloor.step) < 0.1 && Math.abs(noFloor.walkAgain - withFloor.walkAgain) < 0.1, "without a floor space, the head stands as high above the floor as with one: after a step, and after walking again", { withFloor, noFloor });
 await ev(`space3d.xr.menuPress('exit'), true`);
 ok(await until(restored, 5000), "and leaves");
 const cam0 = await ev(`space3d.camera.position.toArray().map((x) => +x.toFixed(2))`);
@@ -301,7 +321,7 @@ ok(JSON.stringify(await ev(`space3d.camera.position.toArray().map((x) => +x.toFi
 //  ended once)
 await startWith("none", "ar");
 ok(await until(`window.__sess?.ended === true`, 8000) && await until(`!space3d.xr.presenting && space3d.controls.enabled && ${AR}.textContent === "Enter AR"`, 5000), "AR failing while it starts: never presenting, the controls back", { sess: await ev(`window.__sess`), status: await ev(status) });
-ok((await ev(`space3d.camera.parent.background !== null && window.__sess.ends === 1`)) === true, "its background is back, and the session was ended once", await ev(`({ bg: space3d.camera.parent.background !== null, ends: window.__sess.ends })`));
+ok((await ev(`space3d.camera.parent.parent.isScene === true && space3d.camera.parent.parent.background !== null && window.__sess.ends === 1`)) === true, "its background is back, and the session was ended once", await ev(`({ scene: space3d.camera.parent.parent?.isScene, bg: space3d.camera.parent.parent?.background !== null, ends: window.__sess.ends })`));
 await startWith("end");
 ok(await until(`window.__sess?.ended === true`, 8000) && await until(restored, 5000), "a session that ends while starting: never presenting, the page as it was", { sess: await ev(`window.__sess`), status: await ev(status) });
 await sleep(500);

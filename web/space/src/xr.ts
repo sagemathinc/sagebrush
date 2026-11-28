@@ -532,19 +532,24 @@ export function setupXR(api) {
     s.addEventListener("end", onEnd);
     try {
       // (the floor where the headset knows it (local-floor, an optional feature); else the start of your head, with
-      //  the floor an eye's height below it)
+      //  the floor taken an eye's height below it: the local space moved so that its origin is there, so everything
+      //  after this (the rig's feet, steps, the floor) is in the floor's convention either way)
       const floor = await s.requestReferenceSpace("local-floor").then(() => true, () => false);
       renderer.xr.setReferenceSpaceType(floor ? "local-floor" : "local");
       // (where you'll stand: where the camera is, facing where it looks)
       saved = { pos: camera.position.clone(), quat: camera.quaternion.clone(), bg: scene.background, fog: scene.fog };
       const dir = new THREE.Vector3().subVectors(controls.target, camera.position);
-      rig.position.copy(camera.position).add(new THREE.Vector3(0, floor ? -EYE * SCALE : 0, 0));
+      rig.position.copy(camera.position).add(new THREE.Vector3(0, -EYE * SCALE, 0));
       rig.rotation.set(0, Math.atan2(-dir.x, -dir.z), 0);
       rig.scale.setScalar(SCALE);
       controls.enabled = false;
       if (m === "immersive-ar") { scene.background = null; scene.fog = null; api.ground().visible = false; }
       await renderer.xr.setSession(s);
       if (ended) throw new Error("the headset's session ended while it was starting");
+      if (!floor) {
+        const local = renderer.xr.getReferenceSpace(), T = (globalThis as unknown as { XRRigidTransform: new (p: object) => unknown }).XRRigidTransform;
+        renderer.xr.setReferenceSpace(local.getOffsetReferenceSpace(new T({ x: 0, y: -EYE, z: 0 })));
+      }
     } catch (e) {
       s.removeEventListener("end", onEnd);
       leave();
