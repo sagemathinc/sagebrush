@@ -1682,8 +1682,9 @@ jobs:
   wasm-modules:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.wasm_build == 'true'
-    # (not on master's push: then its modules are what wasm-publish publishes, built on GitHub's runners)
-    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/track/'))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (never on master's push in this repository: then its modules are what wasm-publish publishes and wasm-pins pins,
+    # built on GitHub's runners whatever the runner variables; design/wasm-artifacts.md section 13)
+    runs-on: ${{ github.repository == 'sagemathinc/sagebrush' && github.event_name == 'push' && github.ref == 'refs/heads/master' && 'ubuntu-24.04' || vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/track/'))) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
