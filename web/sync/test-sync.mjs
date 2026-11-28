@@ -2428,6 +2428,16 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   const k = await socket(keep);
   await hello(k, "fence-keep-0001");
   const signOut = async (session) => (await fetchAt(SITE, "/auth/logout", { method: "POST", headers: { cookie: session, origin: SITE } })).status;
+  // (a large batch sent again while it's answered busy: on a loaded host its forward can outlive the test pins' 1 s and
+  // be refused "this forward expired; send again", which commits nothing, so the same batch is simply resent)
+  const sendBig = async (m) => {
+    for (let i = 0; i < 8; i++) {
+      const r = await k.ask(m);
+      if (r?.batch || (r && r.code !== "busy")) return r;
+      await new Promise((res) => setTimeout(res, 200));
+    }
+    return null;
+  };
   // (a pull that gets no answer within the socket helper's 3 s, as on a loaded host, is asked again)
   const ids = async (doc) => {
     for (let i = 0; i < 5; i++) {
@@ -2536,7 +2546,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
       return batch(doc, 1, ps, i === 1 ? { kind: "board" } : {});
     };
     for (let i = 1; i <= 7; i++) {
-      const r = await k.ask(bigBatch(i));
+      const r = await sendBig(bigBatch(i));
       if (!r?.batch) ok(false, "(S07 P2: batch " + i + " stored: " + JSON.stringify(r)?.slice(0, 200) + ")");
     }
     const p = await k.ask({ t: "pull", doc, epoch: 1, after: 0 });
@@ -2569,7 +2579,7 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
       return batch(doc, 1, ps, cseq === N ? { kind: "board" } : {});
     };
     for (let i = 1; i <= 12; i++) {
-      const r = await k.ask(heavy());
+      const r = await sendBig(heavy());
       if (!r?.batch) ok(false, "(S07 P2: envelope-heavy batch " + i + " stored: " + JSON.stringify(r)?.slice(0, 200) + ")");
       await new Promise((res) => setTimeout(res, 300));
     }
