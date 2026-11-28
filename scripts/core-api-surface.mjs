@@ -151,6 +151,12 @@ def visit(name, depth):
             note_private(n); continue
         try: v = getattr(m, n)
         except Exception: continue
+        # (a lazy import's stub, lib/_sage_lazy.py, is described as what it
+        # stands for: how a name loads is not its API; but sage_all.table,
+        # lazy since #789, was recorded as its stub, a function, and stays so)
+        if type(v).__name__ == "LazyImport" and (name, n) != ("sage_all", "table"):
+            try: v = v._get()
+            except Exception: continue
         if isinstance(v, types.ModuleType):
             sub = getattr(v, "__name__", "")
             if sub == name + "." + n and not undeclared(sub): visit(sub, depth + 1)

@@ -82,6 +82,7 @@ const PATHLIB_FAMILY = new Set(["pathlib", "glob", "fnmatch", "stat", "ntpath", 
 // (the xml package and the parser under it, pyexpat (P3c): one group, mod-xml, as daybreak2's SIZE design clear has
 // it; xml.etree needs the parser always, so two groups would only add a fetch. Lazily embedded in the CLI too)
 const XML_FAMILY = new Set(["xml", "pyexpat"]);
+const LAZY_SAGE_OWN = new Set(["_sage_hmf", "_sage_sandpile", "_sage_milp", "_sage_rdf_big"]);
 
 export function groupOf(path: string, sets: Record<string, Set<string>>): string {
   if (sets.py?.has(path) || (sets.sci?.has(path) && sets.sage?.has(path))) return "core";
@@ -109,6 +110,10 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   // prime field, after mod-sage-ffmat: its own group, so the starts that
   // load mod-sage-ffmat (Magma's) don't fetch it)
   if (top === "_sage_ffmat_bin") return "mod-sage-ffmat-bin";
+  // (Sage mode's modules imported on their names' first use, sage_all's lazy imports, and RDF/CDF past the doubles,
+  // _sage_rdf_big: each a group of its own, named as master's per-domain groups are, so neither Sage's start nor
+  // sage-more's users fetch them)
+  if (LAZY_SAGE_OWN.has(top)) return "mod-sage-" + top.replace(/^_sage_/, "").replace(/_/g, "-");
   if (/^_?sage/.test(top)) return "sage-more";
   // (live data's small modules, imported together: fredapi and its bridge, and yfinance's refusal; one group,
   // design-data-access r3.1)
