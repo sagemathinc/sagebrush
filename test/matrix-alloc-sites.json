@@ -474,7 +474,7 @@
  "lib/_sage_matrix.py: Matrix.dict :: comprehension :: enumerate(self._rows)": 1,
  "lib/_sage_matrix.py: Matrix.eigenvalues :: loop :: _sage_qqbar._roots_of(g)": 1,
  "lib/_sage_matrix.py: Matrix.eigenvalues :: loop :: self._eigen_factors()": 1,
- "lib/_sage_matrix.py: Matrix.eigenvalues :: repeat :: [_norm(_F(-g[0], g[1]))] * e": 1,
+ "lib/_sage_matrix.py: Matrix.eigenvalues :: repeat :: [lam] * e": 1,
  "lib/_sage_matrix.py: Matrix.eigenvalues :: repeat :: [r] * e": 1,
  "lib/_sage_matrix.py: Matrix.elementary_divisors :: call :: list(d)": 1,
  "lib/_sage_matrix.py: Matrix.elementary_divisors :: call :: min(r, c)": 1,

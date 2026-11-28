@@ -294,6 +294,21 @@ const C1 = "clientA1", C2 = "clientB1";
   check(clash.status === 409 && clashJ.error === "conflict" && J(clashJ.held) === J({ address: addr, ct_sha256: sha, size: bytes.length }), "other bytes at a held address: 409 conflict naming what is held: " + J(clashJ));
   const kept = await (await server.fetch(new Request((await A.call("GET", "/api/sync/v1/blob/" + addr)).headers.get("location")))).arrayBuffer();
   check(new TextDecoder().decode(kept) === "hello, blob", "…and the first bytes stay");
+  // (e2e PR 3b-1: a versioned keyed address, "a1:" and 64 hex: held, checked and read like any address; the same hex
+  // without its version is another address; another version or a malformed one isn't one; never a ct_sha256)
+  const v1 = "a1:" + "e".repeat(64);
+  check((await putAt(v1, bytes, sha)).status === 200, "PUT at an a1: address: 200");
+  const vChk = await (await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: v1, ct_sha256: sha, size: bytes.length }, { address: "a1:" + "f".repeat(64), ct_sha256: sha, size: bytes.length }] })).json();
+  check(J(vChk.missing) === J(["a1:" + "f".repeat(64)]) && !vChk.conflicts, "blobs/check: the held a1: address present, another missing: " + J(vChk));
+  const vLoc = (await A.call("GET", "/api/sync/v1/blob/" + v1)).headers.get("location");
+  const vGot = vLoc ? await (await server.fetch(new Request(vLoc))).arrayBuffer() : null;
+  check(vGot && new TextDecoder().decode(vGot) === "hello, blob", "GET at the a1: address: its bytes, through the files route");
+  check((await A.call("GET", "/api/sync/v1/blob/" + "e".repeat(64))).status === 404, "…the same hex without its version: nothing there");
+  const vBad = [];
+  for (const bad of ["a2:" + "e".repeat(64), "a1:" + "e".repeat(63), "A1:" + "e".repeat(64), "a1:a1:" + "e".repeat(64)]) vBad.push((await putAt(bad, bytes, sha)).status, (await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: bad, ct_sha256: sha, size: bytes.length }] })).status);
+  check(vBad.every((x) => x >= 400 && x < 500), "another version, 63 hex, an upper-case prefix, a doubled prefix: neither a PUT's nor a check's address: " + J(vBad));
+  check((await putAt("a1:" + "9".repeat(64), bytes, v1)).status === 400, "an a1: address as x-sb-ct-sha256: 400");
+  check((await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: "a1:" + "9".repeat(64), ct_sha256: v1, size: bytes.length }] })).status === 400, "…and as a check's ct_sha256: 400");
   const chk2 = await (await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: addr, ct_sha256: otherSha, size: other.length }, { address: addr, ct_sha256: sha, size: bytes.length + 1 }, { address: addr, ct_sha256: sha, size: bytes.length }] })).json();
   check(J(chk2.missing) === "[]" && chk2.conflicts?.length === 2 && chk2.conflicts.every((h) => J(h) === J({ address: addr, ct_sha256: sha, size: bytes.length })), "blobs/check: held as other bytes or another size is a conflict, never present or missing: " + J(chk2));
   const badChk = await A.call("POST", "/api/sync/v1/blobs/check", { blobs: [{ address: addr, size: bytes.length }] });

@@ -205,9 +205,10 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
         f.srcdoc = `<script>(async () => { let r; try { r = "REACHED " + await window.__TAURI_INTERNALS__.invoke("signer_probe_sign", { msg: "frame" }); } catch (e) { r = "refused: " + String(e && e.message || e).slice(0, 80); } parent.postMessage({ sbSignerProbe: r }, "*"); })();<\/script>`;
         document.body.append(f);
       });
-      // (no frame of the other server in this window: its navigation guard refuses one before it loads (nav.rs may_load,
-      // shown by the "nav" probe and its controls), so it could never report; the signer page's own frames are the
-      // csp-off control's)
+      // (no frame of the other server in this window: on macOS and Linux its navigation guard refuses one before it loads
+      // (nav.rs may_load); on Windows, where WebView2 doesn't ask the guard about frames, the frame loads and the
+      // exact-origin capability refuses its calls. Both are shown by the "nav" probe and its controls; the signer
+      // page's own frames are the csp-off control's)
       // (a second window that didn't open is said, and fails the probe: its call is one of the callers it claims)
       const second = await host.invoke("window_open", { at: "/" }).then(() => "opened", (e: any) => `open failed: ${String(e?.message ?? e).slice(0, 80)}`);
       // (the approvals window's page, its controls, the second window: time to act)

@@ -74,6 +74,37 @@ await key("g"); await key("g", false);
 ok((await ev(`space3d.walking`)) === false && (await ev(`space3d.controls.enabled`)), "G flies instead (the orbit controls back)");
 await key("g"); await key("g", false);
 ok((await ev(`space3d.walking`)) === true, "and G walks again");
+// (the wheel: a mouse's notch is a step of 3; a trackpad's pinch, many small Ctrl+wheel turns, walks only as far as they turn)
+const wheel = (n, init) => ev(`(async () => {
+  const c = document.querySelector("canvas"), a = space3d.camera.position.clone();
+  for (let k = 0; k < ${n}; k++) { c.dispatchEvent(new WheelEvent("wheel", { ...${JSON.stringify(init)}, bubbles: true, cancelable: true })); await new Promise((r) => requestAnimationFrame(r)); }
+  const b = space3d.camera.position; return +Math.hypot(b.x - a.x, b.z - a.z).toFixed(2);
+})()`);
+const notch = await wheel(1, { deltaY: -100 });
+ok(notch > 2.5 && notch < 3.5, "a mouse wheel's notch walks a step of 3", { notch });
+const pinch = await wheel(60, { deltaY: -2, ctrlKey: true });
+ok(pinch > 1 && pinch < 6, "a second of trackpad pinch (60 small Ctrl+wheel turns) walks a few units, not 180", { pinch });
+const lines = await wheel(1, { deltaY: -3, deltaMode: 1 });
+ok(lines > 1 && lines < 2, "a wheel that counts in lines (3 lines) walks as 48 pixels would", { lines });
+const none = await wheel(1, { deltaY: 0 });
+ok(none === 0, "a wheel event that didn't turn doesn't move you", { none });
+const big = await wheel(1, { deltaY: -5000 });
+ok(big > 2.5 && big < 3.5, "a large turn is still one step of 3 at most", { big });
+const page = await wheel(1, { deltaY: -1, deltaMode: 2 });
+ok(page > 2.5 && page < 3.5, "a wheel that counts in pages (800 pixels each) is a step of 3, the most", { page });
+const ahead = await ev(`(() => { const p = space3d.camera.position, t = space3d.controls.target; return [t.x - p.x, t.z - p.z]; })()`);
+const before = await ev(`space3d.camera.position.toArray()`);
+await wheel(1, { deltaY: 100 });
+const after = await ev(`space3d.camera.position.toArray()`);
+const along = (after[0] - before[0]) * ahead[0] + (after[2] - before[2]) * ahead[1];
+ok(along < 0, "a turn the other way walks back", { along: +along.toFixed(2) });
+const before2 = await ev(`space3d.camera.position.toArray()`);
+await wheel(1, { deltaY: -100 });
+const after2 = await ev(`space3d.camera.position.toArray()`);
+const along2 = (after2[0] - before2[0]) * ahead[0] + (after2[2] - before2[2]) * ahead[1];
+ok(along2 > 0, "a turn forward (deltaY < 0) walks forward", { along: +along2.toFixed(2) });
+// (the page's icon: the site's own, inline)
+ok(await ev(`(() => { const l = document.querySelector('link[rel="icon"]'); return !!l && l.href.startsWith("data:image/svg+xml,") && decodeURIComponent(l.href).includes("<svg"); })()`), "the page has the site's icon");
 await key("?"); await key("?", false);
 ok(await ev(`!document.querySelector('[data-c="helpcard"]').hidden`), "? shows the help");
 await key("Escape"); await key("Escape", false);
