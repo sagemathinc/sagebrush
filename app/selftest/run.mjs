@@ -205,17 +205,21 @@ async function navLaunch(control) {
   console.log(`launch${control === "open" ? " (navigation guard left out)" : control === "wide" ? " (navigation guard left out, commands for every port)" : ""}: ${line} (exit ${res.code})`);
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   const reached = o.seen.filter((s) => / REACHED|: REACHED/.test(s));
-  return { line, code: res.code, reached, topLoaded: o.seen.includes("top: loaded"), frameLoaded: o.seen.includes("frame: loaded") };
+  const frameLoaded = o.seen.includes("frame: loaded");
+  // (on Windows, the frame's own positive: it loaded, and both its command calls were refused, the capability showing)
+  const frameRefused = frameLoaded && o.seen.some((x) => x.startsWith("frame: refused")) && o.seen.some((x) => x.startsWith("frame: signer refused"));
+  return { line, code: res.code, reached, topLoaded: o.seen.includes("top: loaded"), frameLoaded, frameRefused };
 }
 if (passed) {
   console.log("\nwho can reach the app's commands: a notebook output's frame, another local server's pages");
   const r = await navLaunch(false);
   // (the other origin's frame: refused before it loads by the window's navigation guard where the web view asks it about
   // a frame's navigation (macOS and Linux, nav.rs may_load); WebView2 asks only about the window's own, so on Windows
-  // the frame loads and the exact-origin capability alone refuses it, which `reached` covers)
-  const frameGuarded = process.platform === "win32" || !r.frameLoaded;
+  // the frame loads and the exact-origin capability alone refuses it: there it must have loaded and had both its calls
+  // (disk_where and the signing command) refused, so a frame that silently never ran fails too)
+  const frameGuarded = process.platform === "win32" ? r.frameRefused : !r.frameLoaded;
   const good = r.code === 0 && /^ok persist: nav at /m.test(r.line) && !r.reached.length && !r.topLoaded && frameGuarded;
-  console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : !frameGuarded ? "another origin's frame loaded in the window: its navigation guard didn't refuse it" : "the probe failed (above)"}`);
+  console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : !frameGuarded ? (process.platform === "win32" ? "another origin's frame didn't load and show both its calls refused (the capability's positive)" : "another origin's frame loaded in the window: its navigation guard didn't refuse it") : "the probe failed (above)"}`);
   passed = good;
   // (the controls: each must show what its part keeps out)
   for (const control of passed ? ["open", "wide"] : []) {
