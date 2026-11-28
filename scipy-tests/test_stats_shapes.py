@@ -101,6 +101,13 @@ for axis in (0, 1, -1):
 # (two values left: bias=False corrects neither skewness (n > 2) nor kurtosis (n > 3); ddof=2 leaves the variance masked)
 for ddof in (1, 2):
     out("describe masked two values bias False ddof %d" % ddof, lambda: tuple(st.describe([1.0, n, 3.0], nan_policy="omit", bias=False, ddof=ddof)))
+# (ddof above the count: a scalar result is numpy.ma's sum of squares over count - ddof, negative; along an axis,
+# masked)
+for ddof in (2, 3, 4):
+    out("describe masked 1-d ddof %d" % ddof, lambda: tuple(st.describe([1.0, n, 3.0], nan_policy="omit", ddof=ddof)))
+    out("describe masked 1-d one value ddof %d" % ddof, lambda: tuple(st.describe([n, 5.0], nan_policy="omit", ddof=ddof)))
+    out("describe masked axis None ddof %d" % ddof, lambda: tuple(st.describe([[1.0, n, 3.0]], axis=None, nan_policy="omit", ddof=ddof)))
+    out("describe masked axis 1 ddof %d" % ddof, lambda: tuple(st.describe([[1.0, n, 3.0], [2.0, 4.0, n]], axis=1, nan_policy="omit", ddof=ddof)))
 for label, a in [("1-d all nan", [n, n]), ("1-d one value", [n, 2.0]), ("1-d constant", [n, 2.0, 2.0]),
                  ("2-d all nan", np.full((2, 2), n))]:
     out("describe masked %s" % label, lambda: tuple(st.describe(a, nan_policy="omit")))

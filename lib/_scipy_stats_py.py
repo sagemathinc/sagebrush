@@ -650,7 +650,8 @@ def _describe_masked(arr, shape, ddof, bias):
     NaNs masked. Each slice has its own count. A constant slice (m2 at most (1e-15 mean)^2, NumPy's resolution)
     has skewness 0 and kurtosis -3, corrected (bias=False) only where it isn't constant and n > 2 (skewness) or
     n > 3 (kurtosis). What SciPy masks (a slice with no values; a variance of count <= ddof) is nan here: Sagebrush
-    has no masked arrays."""
+    has no masked arrays. A scalar result (a 1-d sample, or axis=None) is masked only where count - ddof is 0, as
+    numpy.ma's: below it, the sum of squares divided by count - ddof."""
     nobs, mins, maxs, means, vars_, sks, kus = [], [], [], [], [], [], []
     for r in _rows(arr, shape, "omit"):
         n = r.size
@@ -663,7 +664,15 @@ def _describe_masked(arr, shape, ddof, bias):
         maxs.append(float(np.max(r)))
         _, mean, m2, m3, m4 = _moments(r)
         means.append(mean)
-        vars_.append(float(np.var(r, ddof=ddof)) if n - ddof > 0 else _NAN)
+        if n - ddof > 0:
+            vars_.append(float(np.var(r, ddof=ddof)))
+        elif shape == () and n - ddof < 0:
+            # (a scalar result, as numpy.ma's: masked only where count - ddof is 0; below it, the sum of squares
+            # divided by count - ddof, a negative number (-0.0 for a single value))
+            d = r - mean
+            vars_.append(float(np.sum(d * d)) / (n - ddof))
+        else:
+            vars_.append(_NAN)
         if m2 <= (1e-15 * mean) ** 2:
             sks.append(0.0)
             kus.append(-3.0)
