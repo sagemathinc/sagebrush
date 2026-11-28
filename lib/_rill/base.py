@@ -156,6 +156,10 @@ def _dbl_op(op, a, b):
         if a < 0 and (math.isinf(b) or b != int(b)):
             # (R: a negative base to an infinite power is NaN, even (-1)^Inf)
             return math.nan
+        if a == 0:
+            return 0.0 if b > 0 else math.inf  # (R 4.5.3: a zero base has no sign here, (-0)^1 being 0 and (-0)^-1 Inf)
+        if a == -math.inf and b < 0:
+            return 0.0  # ((-Inf)^-1 is 0, not -0)
         try:
             return math.pow(a, b)
         except OverflowError:
@@ -163,23 +167,128 @@ def _dbl_op(op, a, b):
         except ValueError:
             return math.inf if a == 0 else math.nan
     if op == "%%":
-        if b == 0:
-            return math.nan
-        if math.isinf(a):
-            return math.nan
-        if math.isinf(b):
-            return a if (a >= 0) == (b > 0) else b
-        r = math.fmod(a, b)
-        if r != 0 and (r < 0) != (b < 0):
-            r += b  # the result takes the divisor's sign, as R's %% does
-        return r
+        return _dbl_mod(a, b)
     if op == "%/%":
-        if b == 0:
-            if a == 0 or a != a:
+        # (R 4.5.3: NaN in, NaN out; a zero divisor or an infinite dividend gives a signed Inf, NaN when both are
+        # zero or both infinite; an infinite divisor gives 0, or -1 for opposite signs; else the floor of
+        # (a - a %% b) / b, taken in 80-bit extended precision and rounded to double, so 1 %/% 0.1 is 9, as 1 %% 0.1
+        # is 0.1 short of 1, and 10.2 %/% 2.8 is 3; Inf when a/b overflows)
+        if a != a or b != b:
+            return math.nan
+        if b == 0 or math.isinf(a):
+            if a == 0 or math.isinf(b):
                 return math.nan
             return math.copysign(math.inf, a) * math.copysign(1.0, b)
-        return math.floor(a / b)
+        if math.isinf(b):
+            return 0.0 if a == 0 or (a > 0) == (b > 0) else -1.0
+        if math.isinf(a / b):
+            return a / b
+        return _dbl_intdiv(a, b)
     raise NotSupported("operator %s" % op)
+
+
+def _dbl_mod(a, b):
+    """R's %% of two doubles (R 4.5.3 on x86-64): NaN for a NaN, an infinite dividend or a zero divisor; by an infinite
+    divisor, the dividend when its sign is the divisor's (a zero keeping its own sign), else the divisor; NaN when a/b
+    overflows. A divisor beyond 2^63 in size gives the truncated remainder, moved by the divisor when the signs
+    differ (so 1.1 %% -1e300 is -1e300; a zero dividend keeps its sign there, (-0) %% 1e300 being -0, any other zero
+    result being +0). Otherwise, with q = floor(a/b) in double, t = a - q*b and then t - floor(t/b)*b, each step in
+    80-bit extended precision (so 1 %% 0.1 is 0.1 short of 1 and 1e-300 %% -1 is 0), a zero result being +0."""
+    if a != a or b != b or b == 0 or math.isinf(a):
+        return math.nan
+    if math.isinf(b):
+        return a if a == 0 or (a > 0) == (b > 0) else b
+    if math.isinf(a / b):
+        return math.nan
+    if abs(b) > _TWO63:
+        r = math.fmod(a, b)
+        if r != 0 and (r < 0) != (b < 0):
+            r = _x_double(_x_add(_x_of(r), _x_of(b)))
+        return r if r != 0 or a == 0 else 0.0
+    if _exact_ints(a, b):
+        return float(int(a) % int(b))
+    nb, eb = _x_of(b)
+    t = _x_add(_x_of(a), _x_round(-math.floor(a / b) * nb, eb))
+    j = _x_floor(_x_div(t, (nb, eb)))
+    r = _x_double(_x_add(t, _x_round(-j * nb, eb)))
+    return r if r != 0 else 0.0
+
+
+def _dbl_intdiv(a, b):
+    """R's %/% of finite doubles with a finite quotient: the floor of (a - a %% b) / b, taken in 80-bit extended
+    precision and rounded to double (so 1 %/% 0.1 is 9, as 1 %% 0.1 is 0.1 short of 1, and 10.2 %/% 2.8 is 3)."""
+    if _exact_ints(a, b):
+        return float(int(a) // int(b))
+    nr, er = _x_of(-_dbl_mod(a, b))
+    q = _x_div(_x_add(_x_of(a), (nr, er)), _x_of(b))
+    return float(math.floor(_x_double(q)))
+
+
+_TWO63 = 2.0 ** 63
+_TWO53 = 2.0 ** 53
+
+
+def _exact_ints(a, b):
+    """Whole-number operands exact in a double: the extended-precision steps of %% and %/% are then exact too."""
+    return a == int(a) and b == int(b) and abs(a) <= _TWO53 and abs(b) <= _TWO53
+
+
+# x86's 80-bit extended precision, as R's %% and %/% use it: a value is (n, e) for n * 2^e, n an integer of at most 64
+# bits after each rounding (ties to even); every value these form from doubles is in its exponent range.
+
+def _x_of(x):
+    """A double as (n, e), exactly."""
+    m, e = math.frexp(x)
+    return int(m * 9007199254740992.0), e - 53
+
+
+def _x_round(n, e, sticky=False):
+    """n * 2^e rounded to a 64-bit significand; sticky says a nonzero part below n was already dropped."""
+    neg = n < 0
+    if neg:
+        n = -n
+    sh = n.bit_length() - 64
+    if sh > 0:
+        q = n >> sh
+        rem, half = n - (q << sh), 1 << (sh - 1)
+        if rem > half or (rem == half and (sticky or q & 1)):
+            q += 1
+        n, e = q, e + sh
+    return (-n if neg else n), e
+
+
+def _x_add(x, y):
+    """x + y, rounded."""
+    (n1, e1), (n2, e2) = x, y
+    if e1 < e2:
+        return _x_round(n1 + (n2 << (e2 - e1)), e1)
+    return _x_round((n1 << (e1 - e2)) + n2, e2)
+
+
+def _x_div(x, y):
+    """x / y, rounded (y nonzero)."""
+    (n1, e1), (n2, e2) = x, y
+    num, den = abs(n1), abs(n2)
+    s = max(0, 66 + den.bit_length() - num.bit_length())
+    q, rem = divmod(num << s, den)
+    if (n1 < 0) != (n2 < 0):
+        q = -q
+    return _x_round(q, e1 - e2 - s, rem != 0)
+
+
+def _x_floor(x):
+    """The floor of x, an integer."""
+    n, e = x
+    return n << e if e >= 0 else n >> -e
+
+
+def _x_double(x):
+    """x rounded to the nearest double (Python's integer division rounds correctly, subnormals too); Inf past the top."""
+    n, e = x
+    try:
+        return float(n << e) if e >= 0 else n / (1 << -e)
+    except OverflowError:
+        return math.inf if n > 0 else -math.inf
 
 
 def arith(sess, call, args):
@@ -219,14 +328,31 @@ def arith(sess, call, args):
         else:
             xd = [as_double_scalar(e, x.type) for e in x.data]
             yd = [as_double_scalar(e, y.type) for e in y.data]
+            # (a missing value against another, R 4.5.3 on x86-64: for + - * / %/% the left one decides, so NaN + NA
+            # is NaN and NA + NaN is NA, but NaN + or * an NA that was integer is NA (a logical one isn't), while
+            # NaN - / %/% NA_integer_ stay NaN; ^ the right one, NaN^NA being NA and NA^NaN NaN; %% gives NA, but NaN
+            # for NA %% 0)
+            y_real_na = y.type in ("double", "logical")
+            lost = 0
             for i in range(n):
                 a, b = xd[i % nx], yd[i % ny]
                 if op == "^" and (a == 1 or b == 0):
                     out[i] = 1.0
                 elif a is None or b is None:
-                    out[i] = None
+                    if op == "%%":
+                        out[i] = math.nan if a is None and b == 0 else None
+                    elif op == "^":
+                        out[i] = math.nan if b is not None and b != b else None
+                    else:
+                        out[i] = math.nan if a is not None and a != a and (y_real_na or op not in "+*") else None
                 else:
                     out[i] = _dbl_op(op, a, b)
+                    if op == "%%" and b != 0 and abs(a / b) > _TWO63 and not math.isinf(a / b):
+                        lost += 1
+            for _ in range(lost):
+                # (R 4.5.3 warns, with no call, once for each element whose |a/b| passes 2^63: 1 %% 1e-300 is 0 with
+                # this warning)
+                sess.warn("probable complete loss of accuracy in modulus")
         return RVector(rtype, out, _result_attrs(n, x, y))
 
 
