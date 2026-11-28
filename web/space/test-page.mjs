@@ -70,6 +70,16 @@ ok(await until(`/\.space\.json file/.test(document.querySelector('[data-c="statu
 // ---- the example: it loads; a click's selection; Back
 await open("?space=intro.space.json");
 ok(await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "the example space loads", await status());
+// (the larger examples are offered in the page's list, and fetched only when picked: the first load reads the list
+//  and the space shown, no other space)
+const spacesRead = () => ev(`performance.getEntriesByType("resource").map((r) => new URL(r.name).pathname).filter((p) => p.endsWith(".space.json"))`);
+ok((await ev(`[...document.querySelector('[data-c="space"]').options].map((o) => o.value)`)).includes("modular-forms.space.json"), "the page's list offers Modular forms");
+ok(JSON.stringify(await spacesRead()) === JSON.stringify(["/space/intro.space.json"]), "at first only the space shown is read", await spacesRead());
+await ev(`(() => { const s = document.querySelector('[data-c="space"]'); s.value = "modular-forms.space.json"; s.dispatchEvent(new Event("change")); return true; })()`);
+ok(await until(`space3d.space?.nodes?.length >= 70 && /objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "picked, Modular forms loads", { nodes: await ev(`space3d.space?.nodes?.length`), status: await status() });
+ok((await spacesRead()).includes("/space/modular-forms.space.json"), "and is read then", await spacesRead());
+await open("?space=intro.space.json");
+ok(await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "the example space loads again");
 const first = await ev(`space3d.space.nodes[0].id`);
 ok(await ev(`space3d.select(${JSON.stringify(first)})`) && await until(`space3d.selection?.id === ${JSON.stringify(first)} && !document.querySelector('[data-c="overlay"]').hidden`, 10000), "selecting an object opens it");
 
@@ -105,6 +115,53 @@ ok(await until(`/too large/.test(document.querySelector('#embed').contentWindow.
 const runnable = await ev(`space3d.space.nodes.find((n) => n.kind === "code")?.id`);
 await ev(`space3d.select(${JSON.stringify(runnable)})`);
 ok(await until(`/kept in this browser, on this site/.test(document.querySelector('[data-c="overlay"] .kept')?.textContent ?? '')`, 10000), "runnable code: its edits are said to be kept in this browser, on this site");
+
+// ---- the repository's files: read from GitHub at the space's commit, and from nowhere else (the network stands in
+//      for GitHub here: CDP's Fetch answers raw.githubusercontent.com, and sees every request to another host)
+const paused = [];
+ws.addEventListener("message", (e) => {
+  const m = JSON.parse(e.data);
+  if (m.method !== "Fetch.requestPaused") return;
+  paused.push(m.params.request.url);
+  const body = Buffer.from("def answer():\n    return 42\n\nclass Box:\n    def open(self):\n        return answer()\n").toString("base64");
+  void send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, body, responseHeaders: [{ name: "Content-Type", value: "text/plain; charset=utf-8" }, { name: "Access-Control-Allow-Origin", value: "*" }] });
+});
+await send("Fetch.enable", { patterns: [{ urlPattern: "https://*" }] });
+// (the build's commit, compiled into the viewer: the one its repository example names)
+const H = JSON.parse(readFileSync(join(here, "..", "dist", "space", "repository.space.json"), "utf8")).tree.commit, RAW = `https://raw.githubusercontent.com/sagemathinc/sagebrush/${H}/`;
+const repoSpace = (base) => JSON.stringify({ format: "sagebrush-space", version: 1, title: "r", nodes: [], tree: { name: "r", base, files: [["lib/a b.py", 6]], imports: [] } });
+await open("?space=intro.space.json");
+await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000);
+await ev(`space3d.load(${repoSpace(RAW)}, "r.space.json"), true`);
+await until(`space3d.space?.nodes?.some((n) => n.id === "d:lib")`, 10000);
+await ev(`space3d.enter("d:lib"), true`);
+await until(`space3d.space?.nodes?.some((n) => n.id === "p:lib/a b.py")`, 10000);
+const entered = await ev(`space3d.enter("p:lib/a b.py")`);
+ok(entered && await until(`space3d.space?.nodes?.some((n) => n.kind === "class" && n.title === "class Box") && space3d.space.nodes.some((n) => n.kind === "fn" && n.title === "answer()")`, 15000), "a Python file of the repository is read from GitHub at the space's commit, and entered", { room: await ev(`space3d.room`), status: await status() });
+ok(JSON.stringify(paused) === JSON.stringify([RAW + "lib/a%20b.py"]), "the one request is the file at that commit, its name encoded", paused);
+paused.length = 0;
+await ev(`space3d.load(${repoSpace(`https://example.com/sagemathinc/sagebrush/${H}/`)}, "r2.space.json"), true`);
+await until(`space3d.space?.nodes?.some((n) => n.id === "d:lib")`, 10000);
+await ev(`space3d.enter("d:lib"), true`);
+await until(`space3d.space?.nodes?.some((n) => n.id === "p:lib/a b.py")`, 10000);
+await ev(`space3d.enter("p:lib/a b.py").catch(() => false)`);
+await sleep(1500);
+ok(paused.length === 0 && !(await ev(`space3d.space.nodes.some((n) => n.kind === "class")`)), "a tree whose files are on another host: nothing is requested, and nothing is entered", { paused, status: await status() });
+paused.length = 0;
+await ev(`space3d.load(${repoSpace(`https://raw.githubusercontent.com/sagemathinc/sagebrush/${"f".repeat(40)}/`)}, "r3.space.json"), true`);
+await until(`space3d.space?.nodes?.some((n) => n.id === "d:lib")`, 10000);
+await ev(`space3d.enter("d:lib"), true`);
+await until(`space3d.space?.nodes?.some((n) => n.id === "p:lib/a b.py")`, 10000);
+await ev(`space3d.enter("p:lib/a b.py").catch(() => false)`);
+await sleep(1500);
+ok(paused.length === 0 && !(await ev(`space3d.space.nodes.some((n) => n.kind === "class")`)), "a tree at another commit of the repository (a fork's, say): nothing is requested, nothing entered", { paused, status: await status() });
+// (and the page's policy: of that host, only the repository's own path can be reached at all)
+paused.length = 0;
+const blocked = await ev(`fetch("https://raw.githubusercontent.com/someone/other/${"0".repeat(40)}/x.py").then(() => "fetched", (e) => "refused")`);
+ok(blocked === "refused" && paused.length === 0, "another repository on that host is refused by the page's policy, before any request", { blocked, paused });
+const allowed = await ev(`fetch(${JSON.stringify(RAW + "x.py")}).then((r) => r.status, () => "refused")`);
+ok(allowed === 200 && paused.length === 1, "while the repository's own path is let through", { allowed, paused });
+await send("Fetch.disable");
 
 ok(errors.length === 0, "no page errors", errors.slice(0, 3));
 console.log(failures ? `${failures} FAILED` : "all passed");

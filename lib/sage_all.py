@@ -1897,6 +1897,11 @@ def _QQ(x, d=None):
 def _QQ_exact(x, d=None):
     """The exact rational x (or x/d); a real number's exact binary value
     (examples of strings in QQ's documentation)."""
+    if isinstance(x, (tuple, list)):
+        # (a numerator and a denominator, QQ((1, 2)), as Rational((1, 2)) and
+        # as Sage's, its second argument unused; a list or another length a
+        # TypeError: it was Fraction((1, 2)), a TypeError)
+        return _q(Rational(x))
     if isinstance(x, (str, bytes)):
         # (QQ(s) and QQ(s, base) read a string as Rational(s, base) does, as
         # in Sage: GMP's rule; it was Fraction(s), which took '0.5' and gave

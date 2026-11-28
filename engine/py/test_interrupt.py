@@ -15,8 +15,8 @@ x = [1, 2, 3]
 print("ready", flush=True)
 t = time.time()
 try:
-    if sys.argv[1] == "ecm":     # a 60-digit semiprime: far beyond 2 seconds
-        nf.factor_integer(100000000000000000000000012349 * 300000000000000000000000000823)
+    if sys.argv[1] == "ecm":     # a 79-digit semiprime, above the quadratic sieve's range: far beyond 2 seconds
+        nf.factor_integer(1000000000000000000000000000000000000003 * 3000000000000000000000000000000000000037)
     elif sys.argv[1] == "modsym":  # parallel (rayon)
         modsym.charpoly_exact(30011, 2)
     elif sys.argv[1] == "python":  # Python's own Ctrl-C, after an engine call

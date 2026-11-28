@@ -22,6 +22,7 @@ const COUNTER = [SYNC_NB, "n"], META = [SYNC_NB, "b:m:" + JOURNAL_NS], PENDING =
 
 const rq = (r) => new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
 // (a sync row as the history store keeps it: its key's parts, and its value under v)
+/** @param {string[]} key a row's [nb, time] @param {unknown} v */
 const rowOf = ([nb, time], v) => ({ nb, time, v });
 const refusedWith = (why) => Object.assign(new Error(why), { refusal: why });
 
@@ -104,6 +105,8 @@ const intents = (h, upTo = Number.MAX_SAFE_INTEGER) => IDBKeyRange.bound([SYNC_N
  * text of its versioned records), the save's intent row, charged to the pending budget, at most MAX_INTENTS waiting.
  * A version without an intent (the execution journal's, a TimeTravel clear's re-record, recovery's catch-up) decides
  * nothing.  Resolves {j}; refused (thrown, with `refusal`), nothing of it is written. */
+/** @param {IDBObjectStore} st @param {string} id
+ * @param {{ row?: { nb: string, time: string, env?: unknown }, intent?: { srev: unknown, value: unknown } | null, start?: { n: number, client: string }, local?: boolean, noun?: string }} [opts] */
 export async function t1Write(st, id, { row, intent, start, local = true, noun = "notebook" } = {}) {
   const reg = await registry(st, id, true);
   const j = ((await rq(st.get(rowKey(reg.h, "j"))))?.v?.j ?? 0) + 1;

@@ -174,7 +174,8 @@ export const FREE_LIMITS: Limits = { tier: "free", storage_bytes: 256 * 1024 * 1
  * - While WorkOS can't be asked, it keeps working until GRACE_S after its last validation (never after a failed
  *   attempt), then answers "unavailable" (its row and the user's work are kept: signing in again can't help then).
  *   A failed attempt isn't retried for REFRESH_RETRY_S.  A local sign-out, sign-out everywhere or disable ends it at
- *   once, grace or not.
+ *   once, grace or not.  A refresh WorkOS answered whose access token can't be verified yet counts as a failed
+ *   attempt, but keeps WorkOS's replacement refresh token (the old one is spent), unverified until the next refresh.
  */
 const WORKOS_VALID_S = 3600;
 const GRACE_S = 24 * 3600;
@@ -587,10 +588,13 @@ async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow
   const r = await refreshSession(c, plain);
   if (!r.ok) return r.kind === "refused" ? endFenced(db, fence, "refused") : markUnavailable(db, fence, row);
   const v = await verifyAccessToken(c, r.accessToken);
-  if (!v.ok) return v.kind === "unavailable" ? markUnavailable(db, fence, row) : endFenced(db, fence, "refresh-invalid");
+  if (!v.ok && v.kind !== "unavailable") return endFenced(db, fence, "refresh-invalid");
   // (a refresh never moves a session to another identity, or onto another WorkOS session)
-  if (v.subject !== row.subject || v.sid !== row.provider_sid) return endFenced(db, fence, "refresh-mismatch");
+  if (v.ok && (v.subject !== row.subject || v.sid !== row.provider_sid)) return endFenced(db, fence, "refresh-mismatch");
   const sealed = await seal(keys, ctxSeal, r.refreshToken);
+  // (WorkOS rotated the token but its answer can't be checked yet: the old token is spent, so the replacement is kept,
+  // as an outage, and checked at the next refresh before anything moves)
+  if (!v.ok) return keepUnverified(db, fence, sealed);
   // (the identity's verified email, as this refresh's answer gives it for this very subject: anything else, a missing,
   // unverified or malformed address or another user's, clears it.  Updated on a successful fenced refresh, in the same
   // batch and only if the session update took, and only if no newer answer (a later ticket) was written already; an
@@ -606,6 +610,16 @@ async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow
 /** WorkOS couldn't be asked: the session may be used until its grace ends; validated never moves. */
 async function markUnavailable(db: D1, fence: () => readonly unknown[], _row: SessionRow): Promise<RefreshOutcome> {
   const res = await db.prepare(`UPDATE sessions SET refresh_failed = ?6, expires = MIN(COALESCE(validated, 0) + ${GRACE_S}, abs_expires) WHERE ${REFRESH_FENCE}`).bind(...fence()).run();
+  return Number(res.meta?.changes ?? 0) === 1 ? "unavailable" : "raced";
+}
+
+/**
+ * A refresh WorkOS answered whose access token can't be verified yet (its keys unreachable): as markUnavailable, plus
+ * the replacement refresh token, since WorkOS refuses the spent one after its short reuse window.  validated, the
+ * email and the identity don't move: the next refresh verifies the token this one leads to before any of them do.
+ */
+async function keepUnverified(db: D1, fence: () => readonly unknown[], sealed: Awaited<ReturnType<typeof seal>>): Promise<RefreshOutcome> {
+  const res = await db.prepare(`UPDATE sessions SET refresh_ct = ?8, key_version = ?9, refresh_failed = ?6, expires = MIN(COALESCE(validated, 0) + ${GRACE_S}, abs_expires) WHERE ${REFRESH_FENCE}`).bind(...fence(), sealed.ct, sealed.version).run();
   return Number(res.meta?.changes ?? 0) === 1 ? "unavailable" : "raced";
 }
 
@@ -717,7 +731,7 @@ async function startIdentitySession(env: ShareEnv, account: string, ttl: number,
       // a sign-in that stands has always offered it, and one refused wrote nothing; a newer answer already written wins)
       ...(ident.kind === "workos" ? [db.prepare(`UPDATE identities SET email = ?2, email_at = ?3, email_obs = ?4 WHERE identity_id = ?1 AND ${emailNewer(4)}`).bind(ident.identity_id, ident.email, t, ident.ticket)] : []),
       // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking)
-      db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
+      db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT DISTINCT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
       db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${EVICTED}))`).bind(account, SESSIONS_MAX),
       db.prepare(`DELETE FROM sessions WHERE rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX),
     ]);
@@ -857,21 +871,41 @@ const CLAIM_S = 30;
  * freeing its slot.  Not delivered: tried again later, with backoff (a minute, doubling), and after REVOKE_ATTEMPTS
  * kept as exhausted.
  */
-export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): Promise<{ delivered: number; failed: number }> {
-  const out = { delivered: 0, failed: 0 };
+export async function drainRevokes(env: ShareEnv, n = 200, budgetMs = 20_000): Promise<{ delivered: number; failed: number; held: number }> {
+  const out = { delivered: 0, failed: 0, held: 0 };
   const c = workosMode(env) ? workosConfig(env) : null;
   if (!c) return out;
   const db = env.SHARE_DB!;
   const start = Date.now();
-  const due = (await db.prepare("SELECT id, sid, attempts FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0 AND next_at <= ?1 AND (claim IS NULL OR claim_until < ?1) ORDER BY next_at LIMIT ?2").bind(now(), n).all<{ id: number; sid: string; attempts: number }>()).results;
+  const due = (await db.prepare("SELECT id, sid, account_id, attempts FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0 AND next_at <= ?1 AND (claim IS NULL OR claim_until < ?1) ORDER BY next_at LIMIT ?2").bind(now(), n).all<{ id: number; sid: string; account_id: string | null; attempts: number }>()).results;
   for (const r of due) {
     if (Date.now() - start > budgetMs) break;
     const claim = b64url(random(12));
     const t = now();
-    const got = await db.prepare("UPDATE revoke_outbox SET claim = ?2, claim_until = ?3 WHERE id = ?1 AND sid = ?4 AND attempts = ?5 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?6)").bind(r.id, claim, t + CLAIM_S, r.sid, r.attempts, t).run();
+    // (a WorkOS session another local session of the same account still holds isn't revoked: several local sessions can share one sid (one
+    // AuthKit sign-in, used twice), and ending one of them, by sign-out, cap eviction or expiry, mustn't end the
+    // others' provider session.  Its row goes instead, in the same batch as the claim that then can't happen: the
+    // obligation is the holder's now, whose own end queues the sid again.  So the last local session to end revokes it)
+    const [held, got] = await db.batch([
+      db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND sid = ?2 AND attempts = ?3 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?4) AND EXISTS (SELECT 1 FROM sessions s WHERE s.provider_sid = ?2 AND s.account_id = revoke_outbox.account_id)").bind(r.id, r.sid, r.attempts, t),
+      // (and only while no other row for this account's sid is claimed: one drain at a time owns a sid, so two drains
+      // never send it together, and the one delivery then retires its siblings below)
+      db.prepare("UPDATE revoke_outbox SET claim = ?2, claim_until = ?3 WHERE id = ?1 AND sid = ?4 AND attempts = ?5 AND exhausted = 0 AND (claim IS NULL OR claim_until < ?6) AND NOT EXISTS (SELECT 1 FROM revoke_outbox o WHERE o.sid = ?4 AND o.account_id IS revoke_outbox.account_id AND o.id != ?1 AND o.claim IS NOT NULL AND o.claim_until >= ?6)").bind(r.id, claim, t + CLAIM_S, r.sid, r.attempts, t),
+    ]);
+    if (Number(held.meta?.changes ?? 0) === 1) {
+      out.held++;
+      continue;
+    }
     if (Number(got.meta?.changes ?? 0) !== 1) continue;
     if ((await revokeSession(c, r.sid)) === "revoked") {
-      await db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND claim = ?2").bind(r.id, claim).run();
+      // (and the same account's other rows for this sid, met by this one delivery: the ends that remove several rows at
+      // once queue each sid once (SELECT DISTINCT), but rows queued at different times can still name one sid, and a
+      // second delivery would be answered 404, retried until exhausted.  None is claimed by another drain: the claim
+      // above refuses a sid already claimed; one whose claim lapsed meanwhile is left alone by the claim check, as before)
+      await db.batch([
+        db.prepare("DELETE FROM revoke_outbox WHERE id = ?1 AND claim = ?2").bind(r.id, claim),
+        db.prepare("DELETE FROM revoke_outbox WHERE sid = ?1 AND account_id IS ?2 AND id != ?3 AND sid_unknown = 0 AND (claim IS NULL OR claim_until < ?4)").bind(r.sid, r.account_id, r.id, now()),
+      ]);
       out.delivered++;
     } else {
       const a = r.attempts + 1;
@@ -896,7 +930,7 @@ async function endAllSessions(db: D1, account: string, reason: "everywhere" | "d
   const t = now();
   await db.batch([
     db.prepare(`UPDATE accounts SET generation = generation + 1, signed_out_all_at = ${D1_NOW_MS}${disable ? ", disabled = ?2" : ""} WHERE account_id = ?1`).bind(account, ...(disable ? [t] : [])),
-    db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, ?2, ?3, ?3 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, reason, t),
+    db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT DISTINCT provider_sid, account_id, ?2, ?3, ?3 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, reason, t),
     db.prepare("DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE account_id = ?1)").bind(account),
     db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
   ]);
@@ -1612,7 +1646,7 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
   await db.batch([
     db.prepare("INSERT INTO accounts (account_id, created, deleting) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET deleting = ?2, email = NULL, name = NULL, last_active = NULL").bind(account, t),
     // (with WorkOS sign-in: the account's WorkOS sessions queued for revoking, in the batch that drops them)
-    ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'deleted', ?2, ?2 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, t)] : []),
+    ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT DISTINCT provider_sid, account_id, 'deleted', ?2, ?2 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, t)] : []),
     db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
     // (the sessions' admin grants with them: admin-visibility-plan r1h §1.8)
     db.prepare("DELETE FROM admin_grants WHERE account_id = ?1").bind(account),
@@ -1822,7 +1856,7 @@ export async function scheduled(env: ShareEnv): Promise<void> {
     const stale = "SELECT id FROM pending_exchanges WHERE expires < ?1 ORDER BY id LIMIT 500";
     for (let i = 0; i < 20; i++) {
       const rs = (await db.batch([
-        db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'expired', ?1, ?1 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${past})`).bind(t),
+        db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT DISTINCT provider_sid, account_id, 'expired', ?1, ?1 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${past})`).bind(t),
         db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${past}))`).bind(t),
         db.prepare(`DELETE FROM sessions WHERE rowid IN (${past})`).bind(t),
         db.prepare(`INSERT INTO revoke_outbox (sid, account_id, sid_unknown, reason, created, next_at, exchange_id) SELECT NULL, NULL, 1, 'exchange-stale', ?1, ?1, id FROM pending_exchanges WHERE id IN (${stale})`).bind(t),
