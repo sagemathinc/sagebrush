@@ -13,7 +13,7 @@ Nothing here catches Stop (KeyboardInterrupt) or any exception it doesn't
 name (design §8.1).
 """
 
-from .values import MISSING, NULL, Formals, Lang, Placeholder, Sym, RVector, chr_
+from .values import MISSING, NULL, Formals, Lang, Placeholder, Sym, RVector, chr_, sym
 
 NESTED_TOO_DEEPLY = "evaluation nested too deeply: infinite recursion / options(expressions=)?"
 # A1.3 evaluates these (closures and control flow); A1.1 says so
@@ -28,6 +28,8 @@ class RError(Exception):
         Exception.__init__(self, message)
         self.message = message
         self.call = call
+        # (the R functions on the stack when it was raised, outermost first: R's "Calls:" line)
+        self.frames = None
 
 
 class NotSupported(Exception):
@@ -219,15 +221,19 @@ class Session:
                 raise NotSupported("an empty argument")
         sig = self.formals.get(name)
         plan = None
-        if sig is not None:
-            from .args import match
-            plan = match(e, sig, name)
-        check = self.preflight.get(name)
-        if check is not None:
-            check(e, plan)
-        if sig is not None:
-            from .args import check_required
-            check_required(e, sig, plan)
+        try:
+            if sig is not None:
+                from .args import match
+                plan = match(e, sig, name)
+            check = self.preflight.get(name)
+            if check is not None:
+                check(e, plan)
+            if sig is not None:
+                from .args import check_required
+                check_required(e, sig, plan)
+        except RError as err:
+            _as_method(e, err)
+            raise
         if not args:
             return "return", None, self._apply_now(f, e, [], konts)
         konts.append(("args", e, f, [], 1, plan))
@@ -240,7 +246,17 @@ class Session:
 
     def _apply(self, f, e, args):
         self.visible = True
-        return f(self, e, args)
+        before = len(self.warnings)
+        try:
+            return f(self, e, args)
+        except RError as err:
+            _as_method(e, err)
+            raise
+        finally:
+            method = _method_of(e)
+            if method is not None:
+                # (a method's warnings name the method: "In mean.default("a") :")
+                self.warnings[before:] = [(_method_call(e, method) if c is e else c, m) for c, m in self.warnings[before:]]
 
     def _flag(self, v, which, op, call):
         """&&'s and ||'s operand as True, False or None (NA), with R's errors."""
@@ -256,6 +272,30 @@ class Session:
         if which == "x":
             raise RError("invalid 'x' type in 'x %s y'" % op, call)
         raise NotSupported("this type as the second operand of %s" % op)
+
+
+def _method_of(e):
+    """The method R's function dispatches to for this builtin call (base.METHODS), or None."""
+    from .base import METHODS
+    fn = getattr(e, "fn", None)
+    frames = METHODS.get(getattr(fn, "name", None))
+    return frames[-1] if frames else None
+
+
+def _method_call(e, method):
+    return Lang(sym(method), e.args)
+
+
+def _as_method(e, err):
+    """An error in a builtin R writes as a dispatching function: its header names the method, and its frames
+    are the function's and the method's (R's "Calls: seq -> seq.default")."""
+    from .base import METHODS
+    frames = METHODS.get(getattr(getattr(e, "fn", None), "name", None))
+    if frames is None or getattr(err, "frames", None) is not None:
+        return
+    if err.call is e:
+        err.call = _method_call(e, frames[-1])
+    err.frames = frames
 
 
 def _named(done, plan):

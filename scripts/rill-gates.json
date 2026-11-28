@@ -186,6 +186,18 @@
    "decision": "internal",
    "why": "computes on R values only: no host effect"
   },
+  "builtin:max": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:mean": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:min": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:names": {
    "decision": "internal",
    "why": "computes on R values only: no host effect"
@@ -202,9 +214,45 @@
    "decision": "internal",
    "why": "writes to the session's output only"
   },
+  "builtin:prod": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
   "builtin:raw": {
    "decision": "refused",
    "why": "raw vectors are deferred (A1.2's scope note): an R-level refusal before any effect (gate:raw vectors)"
+  },
+  "builtin:rep": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:rep_len": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:rev": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:seq": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:seq_along": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:seq_len": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:sum": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:typeof": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
   },
   "builtin:|": {
    "decision": "internal",
@@ -253,6 +301,10 @@
   "import:_memguard": {
    "decision": "internal",
    "why": "the memory guard's refusal and wording"
+  },
+  "import:fractions": {
+   "decision": "internal",
+   "why": "exact arithmetic only (mean's exact sum)"
   },
   "import:math": {
    "decision": "internal",

@@ -14,6 +14,9 @@
   "rill-tests/errfmt/test_2.R",
   "rill-tests/print/test_1.R",
   "rill-tests/access/test_1.R",
-  "rill-tests/args/test_1.R"
+  "rill-tests/args/test_1.R",
+  "rill-tests/na/test_1.R",
+  "rill-tests/vec/test_2.R",
+  "rill-tests/vec/test_3.R"
  ]
 }

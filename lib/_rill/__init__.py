@@ -28,16 +28,18 @@ ERROR_LINE = 73
 WARNING_LINE = 75
 
 
-def _error_text(message, call):
-    """R's wording of an error, without the final newline."""
+def _error_text(message, call, frames=None):
+    """R's wording of an error, without the final newline.  frames: the R functions on the stack, outermost
+    first; R lists them on a "Calls:" line unless the only one is the call the header names."""
     from . import fmt
     if call is None:
         return "Error: " + message
     head = "Error in %s : " % fmt.deparse_call_line(call)
     first = message.split("\n", 1)[0]
-    if len(head) + len(first) > ERROR_LINE:
-        return head + "\n  " + message
-    return head + message
+    text = head + "\n  " + message if len(head) + len(first) > ERROR_LINE else head + message
+    if frames and not (len(frames) == 1 and getattr(call.fn, "name", None) == frames[0]):
+        text += "\nCalls: " + " -> ".join(frames)
+    return text
 
 
 def _warning_lines(warnings):
@@ -127,7 +129,7 @@ def _run(sess, src, write_err):
                 from .base import print_value
                 print_value(sess, value)
         except RError as e:
-            write_err(_error_text(e.message, e.call) + "\n")
+            write_err(_error_text(e.message, e.call, e.frames) + "\n")
             return 1
         except NotSupported as e:
             write_err(_not_supported(e.what) + "\n")
