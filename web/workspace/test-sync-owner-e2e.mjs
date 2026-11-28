@@ -4,7 +4,10 @@
 // namespace's account (through the owner's fetch):
 //   - the E2E routes off (404, asked through the owner's own fetch and origin): a plain client, as before;
 //   - a chain and no device here (the real chunk path: sagebrush-e2e.js fetched, its DeviceKeys.load giving none): no
-//     client, and the reason shown, never plain; a chain and a device: a client with the device's keys and kit;
+//     client, and the reason shown, never plain;
+//   - as shipped, a chain and a device is no client either (file contents aren't sealed yet), and startSync refuses one;
+//   - this browser's E2E state for the account (a device record): the server answering 404 or an empty chain gets no
+//     client, never a plain one (a downgrade refused);
 //   - a refused chain (forked): no client, the reason, and no try again; an unreadable one: no client, tried again;
 //   - a decision that hangs: given up after the owner's wait, no client, tried again.
 //   CHROME=google-chrome node web/workspace/test-sync-owner-e2e.mjs
@@ -25,7 +28,8 @@ const J = JSON.stringify;
 const dir = mkdtempSync(join(tmpdir(), "sb-owner-e2e-"));
 const entry = join(dir, "entry.ts");
 writeFileSync(entry, [
-  `export { SyncOwner } from ${J(join(here, "sync-owner.ts"))};`,
+  `export { SyncOwner, startSync } from ${J(join(here, "sync-owner.ts"))};`,
+  `export { e2eAccountOf } from ${J(join(here, "e2e-here.ts"))};`,
   `export { Workspace } from ${J(join(here, "api.ts"))};`,
   `export * as S from ${J(join(here, "sync-e2e.ts"))};`,
   `export { accountHash } from ${J(join(here, "..", "sync-protocol", "protocol.ts"))};`,
@@ -67,6 +71,11 @@ window.owned = async (opts = {}) => {
   await o.reconciling;
   return window.state();
 };
+// (this browser's E2E store as genesis leaves it: a device record for the account, under its E2E id)
+window.seedDevice = async () => {
+  const id = e2eAccountOf(await accountHash(${J(ACCOUNT)}));
+  await new Promise((res, rej) => { const r = indexedDB.open("sagebrush-e2e-v1", 1); r.onupgradeneeded = () => { for (const s of ["devices", "pins"]) r.result.createObjectStore(s); }; r.onsuccess = () => { const tx = r.result.transaction("devices", "readwrite"); tx.objectStore("devices").put({ id: "a-device" }, id); tx.oncomplete = () => { r.result.close(); res(); }; tx.onerror = () => rej(tx.error); }; r.onerror = () => rej(r.error); });
+};
 window.state = () => ({ client: !!o.client, e2e: o.client?.opts?.e2e ?? null, own: o.own, retries: o.stats.retries, waiting: clock.waits.filter((w) => w.live).map((w) => w.ms) });
 window.ready = true;</script>`;
 const server = createServer((req, res) => {
@@ -89,13 +98,14 @@ try {
     await P.until(`window.ready === true`, 10000);
   };
   await load();
-  const S = await P.ev(`({ NO_DEVICE: S.NO_DEVICE, FORKED: S.FORKED, UNREADABLE: S.UNREADABLE })`);
+  const S = await P.ev(`({ NO_DEVICE: S.NO_DEVICE, FORKED: S.FORKED, UNREADABLE: S.UNREADABLE, DOWNGRADED: S.DOWNGRADED, CONTENTS_PENDING: S.CONTENTS_PENDING })`);
 
   // ---- the routes off: plain, asked through the owner's fetch and origin; the chunk never fetched
   {
-    const r = await P.ev(`(async () => { const s = await owned(); return { ...s, asked: asked.filter((u) => u.includes("/e2e/")), loads: window.chunkLoads ?? 0 }; })()`);
+    const r = await P.ev(`(async () => { const s = await owned(); return { ...s, asked: asked.filter((u) => u.includes("/e2e/")), loads: window.chunkLoads ?? 0, store: (await indexedDB.databases()).some((d) => d.name === "sagebrush-e2e-v1") }; })()`);
     ok(r.client && r.e2e === null && J(r.asked) === J([ORIGIN + "/api/sync/v1/e2e/chain?from=0"]) && r.loads === 0,
       "the E2E routes off (404, read through the owner's fetch at its origin): a plain client, as before, and the E2E chunk not fetched", r);
+    ok(r.store === false, "and checking this browser's E2E state made no E2E store (a browser with none keeps none)", r);
   }
 
   // ---- a chain and no device here, through the real chunk path: no client, the reason, no try again
@@ -106,12 +116,23 @@ try {
       "a chain and no device in this browser (the chunk fetched, its load giving none): no client, never plain, and the reason shown; no try again", r);
   }
 
-  // ---- a chain and a device: a client with the device's keys and the whole kit
+  // ---- a chain and a device, as shipped (file contents not sealed yet): no client, the reason; the device loaded
   {
     await load();
-    const r = await P.ev(`(async () => { chain = { status: 200, body: { entries: ["genesis"] } }; window.chunkKeys = { account: "a", device: { id: "d", sign: async () => new Uint8Array(64) }, recoveryUnconfirmed: false, chain: async () => ({}), epochKeys: async () => null }; const s = await owned(); return { client: s.client, keys: s.e2e?.keys === window.chunkKeys, kit: Object.keys(s.e2e?.kit ?? {}).sort() }; })()`);
-    ok(r.client && r.keys && J(r.kit) === J(["PULL_START", "SealedHalt", "envHashOf", "sealOps", "sopsItem", "verifyRow"]),
-      "a chain and this browser's device: a client started with the device's keys and the whole sealing kit", r);
+    const r = await P.ev(`(async () => { chain = { status: 200, body: { entries: ["genesis"] } }; let loads = 0; window.chunkKeys = { account: "a", device: { id: "d", sign: async () => new Uint8Array(64) }, recoveryUnconfirmed: false, chain: async () => ({}), epochKeys: async () => null }; const s = await owned(); return { ...s, loads: window.chunkLoads ?? 0, other: asked.filter((u) => !u.endsWith("/api/share/me") && !u.endsWith("/api/sync/v1/e2e/chain?from=0")) }; })()`);
+    ok(!r.client && r.own.reason === S.CONTENTS_PENDING && r.waiting.length === 0 && r.loads === 1 && r.other.length === 0,
+      "a chain and this browser's device, as shipped: no client (it would send file contents as they are), the reason, no try again, nothing else asked", r);
+    const t = await P.ev(`(async () => { try { startSync(o.w, { e2e: { keys: window.chunkKeys, kit: {} } }); return "started"; } catch (e) { return String(e.message); } })()`);
+    ok(/isn't built yet/.test(t), "and startSync itself refuses an end-to-end client while file contents aren't sealed", t);
+  }
+
+  // ---- this browser's E2E state for the account (a device record, as genesis leaves it): the server now saying there's
+  // no chain (404, or empty) gets no client and the reason, never a plain one, and nothing past the checks is asked
+  for (const [what, c] of [["404", "{ status: 404, body: {} }"], ["an empty chain", "{ status: 200, body: { entries: [] } }"]]) {
+    await load();
+    const r = await P.ev(`(async () => { await seedDevice(); chain = ${c}; const s = await owned(); return { ...s, other: asked.filter((u) => !u.endsWith("/api/share/me") && !u.endsWith("/api/sync/v1/e2e/chain?from=0")) }; })()`);
+    ok(!r.client && r.own.reason === S.DOWNGRADED && r.waiting.length === 0 && r.other.length === 0,
+      `this browser's device for the account, and the server answering ${what}: no client (never plain), the reason, no try again, and nothing else asked`, r);
   }
 
   // ---- given decisions: refused (final) and unreadable (tried again)

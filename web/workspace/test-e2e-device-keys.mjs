@@ -66,6 +66,9 @@ const dir = mkdtempSync(join(tmpdir(), "sb-device-keys-"));
 const entry = join(dir, "entry.ts");
 writeFileSync(entry, [
   `export * as K from ${J(join(here, "e2e", "device-keys.ts"))};`,
+  `export { e2eStart, DOWNGRADED } from ${J(join(here, "sync-e2e.ts"))};`,
+  `export { e2eAccountOf } from ${J(join(here, "e2e-here.ts"))};`,
+  `export { accountHash } from ${J(join(here, "..", "sync-protocol", "protocol.ts"))};`,
   // (the core and HPKE, for a row that makes a real next entry from the page with the recovery code)
   `export { e2eCore } from ${J(join(here, "e2e", "core-ready.ts"))};`,
   `export { hpke } from ${J(join(here, "e2e", "hpke.ts"))};`,
@@ -196,6 +199,27 @@ try {
     })()`);
     ok(r.warm.e0 && r.warm.sig === 64 && r.warm.view && r.second.code === "chain_fork" && [r.sign, r.view, r.e0, r.e1].every((x) => x.code === "forked"),
       "an object in use when another marks the account forked: its sign, chain view and epoch keys (cached or not) are refused (forked)", r);
+  }
+
+  // ---- tests6's T1 (sec2's H1): after genesis here, the server saying there's no chain (404, empty) is never plain
+  // sync; with this browser's device and pin gone (Reset this device), the same answers are plain again
+  {
+    const r = await P.ev(`(async () => {
+      const hash = await accountHash(${J(A)});
+      const fake = (status, body) => async () => ({ status, json: async () => body });
+      const start = async (get) => { const s = await e2eStart({ hash, get, chunk: async () => { throw new Error("the chunk isn't needed"); } }); return s.kind + (s.reason === DOWNGRADED ? ":downgraded" : ""); };
+      const out = { same: e2eAccountOf(hash) === ${acct}, after: [await start(fake(404, {})), await start(fake(200, { entries: [] }))] };
+      // (a pin only, the device record gone)
+      await idb((d) => { d.delete(${acct}); });
+      out.pinOnly = [await start(fake(404, {})), await start(fake(200, { entries: [] }))];
+      await K.resetDevice(${acct});
+      out.reset = [await start(fake(404, {})), await start(fake(200, { entries: [] }))];
+      return out;
+    })()`);
+    ok(r.same && J(r.after) === J(["blocked:downgraded", "blocked:downgraded"]), "after genesis in this browser, the server answering 404 or an empty chain: no sync (blocked, never plain)", r);
+    ok(J(r.pinOnly) === J(["blocked:downgraded", "blocked:downgraded"]), "with only the pin left (no device record), the same: blocked, never plain", r);
+    ok(J(r.reset) === J(["plain", "plain"]), "after Reset this device (no device, no pin), 404 or an empty chain is plain sync again", r);
+    await putBack();
   }
 
   // ---- and for Reset this device (in another tab): an object in use stops too, until the page loads a device again

@@ -387,7 +387,8 @@ async function shown(account: string, id: string): Promise<void> {
   await done(tx);
 }
 
-/** "Reset this device": its keys and pin for the account deleted, the fork mark with them (it then enrolls again). */
+/** "Reset this device": its keys and pin for the account deleted, the fork mark with them (it then enrolls again; and
+ * with neither left, this browser no longer refuses plain sync for the account: e2e-here.ts). */
 export async function resetDevice(account: string): Promise<void> {
   const tx = (await open()).transaction(["devices", "pins"], "readwrite");
   tx.objectStore("devices").delete(account);
