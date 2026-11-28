@@ -43,10 +43,10 @@ import { readPage } from "../../scripts/notebook-page.mjs";
 // (document key declarations in the sealed index (web/workspace/sync-dockeys.ts: the op's form and the ledger's page,
 // which the outbox and the confirmed index reach in this chunk): measured by CI 472 522 / 131 940 against 472 124 /
 // 131 769 (+398 / +171); the ceilings at that measurement + 64)
-// (the shell's byte writes refused under a document's name, and rmdir's emptiness checked with its removal (Nov 28
-// 2026, a Codex audit's two findings): measured 472 677 / 132 044 on master c89f0cae's 472 522 / 131 940 (+155 / +104,
-// bun 1.4.4, Node 24.21.0's gzip -9); the ceilings at that measurement + 64)
-const LIMIT_RAW = 472741, LIMIT_GZIP = 132108;
+// (the shell's bytes into a new document's name made that document (or an empty one) or refused, and rmdir's emptiness
+// checked with its removal (Nov 28 2026, a Codex audit's two findings): measured 472 948 / 132 108 on master c89f0cae's
+// 472 522 / 131 940 (+426 / +168, bun 1.4.4, Node 24.21.0's gzip -9); the ceilings at that measurement + 64)
+const LIMIT_RAW = 473012, LIMIT_GZIP = 132172;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
