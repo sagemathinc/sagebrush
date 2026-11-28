@@ -131,20 +131,45 @@ export function artifactLabel(a: Artifact) {
   return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : a.kind === "board" ? "Board" : `Code${langOf(a.lang) ? ` · ${esc(langOf(a.lang)!)}` : ""}`;
 }
 
-// A line diff (longest common subsequence): small files only.
+/** The largest table a diff here makes, in (removed-side lines × added-side lines) of its changed middle: the notebook
+ *  merge's bound (TEXT_DIFF_PRODUCT_LIMIT, web/notebook/text-overlap.ts). */
+export const DIFF_PRODUCT_LIMIT = 4_000_000;
+export const DIFF_TOO_LARGE = "Too many changed lines to compare here: the old lines are shown removed, then the new ones added.";
+
+// A line diff (longest common subsequence). The common head and tail are taken first, in linear time; the changed
+// middle's table is admitted only within DIFF_PRODUCT_LIMIT, counted before anything is allocated, so no diff an agent
+// sends can stall the page. Past it, the middle is shown whole, removed then added, with a note: still the change,
+// only not the shortest way to show it.
 export function diffHtml(before: string, after: string): string {
   const a = before.split("\n"), b = after.split("\n");
-  const n = a.length, m = b.length;
-  const L = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
-  const rows: string[] = [];
-  let i = 0, j = 0;
-  while (i < n || j < m) {
-    // (a removed line before an added one, as git shows them)
-    if (i < n && j < m && a[i] === b[j]) rows.push(`<div class="dl"> ${esc(a[i++])}</div>`), j++;
-    else if (i < n && (j === m || L[i + 1][j] >= L[i][j + 1])) rows.push(`<div class="dl del">-${esc(a[i++])}</div>`);
-    else rows.push(`<div class="dl add">+${esc(b[j++])}</div>`);
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  const X = a.slice(p, a.length - s), Y = b.slice(p, b.length - s);
+  const n = X.length, m = Y.length;
+  const rows: string[] = a.slice(0, p).map((l) => `<div class="dl"> ${esc(l)}</div>`);
+  const del = (l: string) => rows.push(`<div class="dl del">-${esc(l)}</div>`), add = (l: string) => rows.push(`<div class="dl add">+${esc(l)}</div>`);
+  if (n > 0 && m > 0 && n * m > DIFF_PRODUCT_LIMIT) {
+    rows.push(`<div class="dl note">${esc(DIFF_TOO_LARGE)}</div>`);
+    X.forEach(del);
+    Y.forEach(add);
+  } else if (n > 0 && m > 0) {
+    // (one flat table, (n + 1) x (m + 1), row i at i * w: memory in proportion to the admitted product, however skewed)
+    const w = m + 1, L = new Int32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i * w + j] = X[i] === Y[j] ? L[(i + 1) * w + j + 1] + 1 : Math.max(L[(i + 1) * w + j], L[i * w + j + 1]);
+    let i = 0, j = 0;
+    while (i < n || j < m) {
+      // (a removed line before an added one, as git shows them)
+      if (i < n && j < m && X[i] === Y[j]) rows.push(`<div class="dl"> ${esc(X[i++])}</div>`), j++;
+      else if (i < n && (j === m || L[(i + 1) * w + j] >= L[i * w + j + 1])) del(X[i++]);
+      else add(Y[j++]);
+    }
+  } else {
+    X.forEach(del);
+    Y.forEach(add);
   }
+  for (const l of a.slice(a.length - s)) rows.push(`<div class="dl"> ${esc(l)}</div>`);
   return `<div class="diff">${rows.join("")}</div>`;
 }
 

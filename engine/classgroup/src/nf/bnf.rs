@@ -404,7 +404,7 @@ pub fn one_step_generator_bound(f: &[BigInt]) -> Result<f64, String> {
     Ok(super::grh::one_step_bound(order.n, r1, log_discriminant, &prime_norms(&split, uniform_bound), uniform_bound))
 }
 
-pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), String> {
+pub fn bnfinit(f: &[BigInt]) -> Result<(Bnf, Timing), crate::nf::factor::FactorError> {
     bnfinit_with(f, &[]).map(|(b, t, _)| (b, t))
 }
 
@@ -425,14 +425,14 @@ pub struct Relations {
 /// bnfinit, with every prime ideal above the rational primes `extra` also
 /// in the factor base (as columns), and the relations returned: so that the
 /// S-units for S containing those primes can be read off.
-pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relations), String> {
+pub fn bnfinit_with(f: &[BigInt], extra: &[u64]) -> Result<(Bnf, Timing, Relations), crate::nf::factor::FactorError> {
     bnfinit_configured(f, extra, &BnfConfig::default())
 }
 
 /// General number-field computation with explicit search and diagnostic options.
 /// Ordinary entry points use defaults and never read the environment. For a
 /// debug build, callers may explicitly pass `BnfConfig::from_debug_env()`.
-pub fn bnfinit_configured(f: &[BigInt], extra: &[u64], config: &BnfConfig) -> Result<(Bnf, Timing, Relations), String> {
+pub fn bnfinit_configured(f: &[BigInt], extra: &[u64], config: &BnfConfig) -> Result<(Bnf, Timing, Relations), crate::nf::factor::FactorError> {
     let debug = config.diagnostics.progress;
     let t0 = crate::clock::Instant::now();
     let PreparedField { field, discriminant, bound, w, w_proven,

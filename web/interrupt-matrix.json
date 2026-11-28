@@ -89,12 +89,12 @@
    "transport": "engineCall:factor_integer",
    "owner": "number theory",
    "mode": "sage",
-   "s0": 22,
+   "s0": 30,
    "smin": 12,
-   "smax": 44,
+   "smax": 37,
    "grow": {
     "kind": "log",
-    "c": 0.18
+    "c": 0.4
    },
    "setup": "n = next_prime(10**S) * next_prime(3 * 10**S)",
    "target": "_r = factor(n)",
