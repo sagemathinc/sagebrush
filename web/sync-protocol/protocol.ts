@@ -443,7 +443,7 @@ export function parseMessage(raw: string | ArrayBuffer, max = LIMITS.messageByte
 export const enc = new TextEncoder();
 export const hex = (b: ArrayBuffer | Uint8Array) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 export async function sha256Hex(data: Uint8Array | string): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? enc.encode(data) : data));
+  return hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? enc.encode(data) : (data as BufferSource)));
 }
 export async function hmacHex(key: string, msg: string): Promise<string> {
   const k = await crypto.subtle.importKey("raw", enc.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
