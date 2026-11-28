@@ -1476,8 +1476,15 @@ function getitem(a: NDArray, key: any): any {
 const isSmallInt = (dt: DType) => dt.isInt && !isWide(dt);
 function admitSmallInt(dt: DType, x: any, floats: boolean, npScalars: boolean, lists: boolean) {
   if (!(lists && isSeq(x) && !(x instanceof NDArray))) return admitSmallScalar(dt, x, floats, npScalars);
-  // (a nested value: every leaf checked, the first refusal kept and raised once the walk is done, so a dimension
-  // refusal met anywhere wins, as NumPy discovers the shape before converting a value)
+  // (a nested value: its shape discovered first, as NumPy's, so a dimension or ragged-shape refusal wins over any
+  // value's; a value with an __array__ object in it is left to the walk below, which skips that object)
+  try {
+    discover(x, 0, [], { dt: null }, true);
+  } catch (e) {
+    if (e !== PROTOCOL && e !== STRS) throw e;
+  }
+  // (every leaf checked, the first refusal kept and raised once the walk is done, so a dimension refusal met
+  // anywhere wins)
   let first: unknown = null;
   const walk = (y: any, depth: number) => {
     if (isSeq(y) && !(y instanceof NDArray)) {
@@ -1488,6 +1495,11 @@ function admitSmallInt(dt: DType, x: any, floats: boolean, npScalars: boolean, l
       // whole walk; never a recursion or a revisit without bound)
       if (depth >= MAX_DIMS) nestedTooDeep();
       for (const it of seqItems(y)) walk(it, depth + 1);
+      return;
+    }
+    // (an array among the lists adds its own dimensions, as discover counts them)
+    if (y instanceof NDArray) {
+      if (depth + y.ndim > MAX_DIMS) nestedTooDeep();
       return;
     }
     if (first !== null) return;

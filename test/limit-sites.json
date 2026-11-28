@@ -14064,6 +14064,11 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
  },
+ "src/runtime/numpy.ts :: walk :: if (depth + y.ndim > MAX_DIMS) nestedTooDeep(); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), an array among the lists adding its own dimensions as discover counts them; NumPy's semantics, not a Sagebrush limit"
+ },
  "src/runtime/numpy.ts :: walk :: if (depth >= MAX_DIMS) nestedTooDeep(); #0": {
   "class": "none",
   "owner": "NumPy shim",
