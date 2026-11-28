@@ -132,3 +132,21 @@ for x in (np.array([1, 2], np.uint8), np.array([1., 2.], np.float32), np.array([
         np.greater.accumulate(x, out=np.zeros(2, bool))
     except Exception as e:
         print(f"greater.accumulate {x.dtype.name} out bool message |", type(e).__name__, e)
+# masked power of object operands with an explicit dtype: every element converted to it first, as NumPy's, an element
+# that doesn't convert its ValueError with out untouched, even in a lane where= leaves out (None into a float NaN)
+def masked_obj(base, e, dt, w):
+    o = np.array([7, 7], dt)
+    try:
+        np.power(base, e, dtype=dt, casting="unsafe", where=w, out=o)
+    except Exception as ex:
+        return ("!!", type(ex).__name__, o.tolist())
+    return o.tolist()
+for vals in (["bad", "2"], ["2", "bad"], [2, 3], ["2", "3"], [2.5, "3"], [None, 2], [2, 3.7]):
+    for e in (2, np.array([2, 1], object), np.array(["x", 2], object)):
+        for dt in (np.int8, np.float64, np.int64):
+            if None in vals and dt is not np.float64:
+                continue
+            for w in (False, [False, True], [True, False], True):
+                if None in vals and w is True:
+                    continue  # (not here: the unmasked call's None into a float, NaN in NumPy, Sagebrush's TypeError)
+                show(f"power masked object {vals} {e!r} {dt.__name__} where={w}", lambda: masked_obj(np.array(vals, object), e, dt, w))

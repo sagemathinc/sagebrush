@@ -913,7 +913,13 @@ class ufunc:
                     self._result_dtype(args)
                 else:
                     # (against the explicit dtype under the casting rule, as the computation would admit them)
-                    self._admit(args, self._loop(dtype), casting)
+                    dt = self._loop(dtype)
+                    self._admit(args, dt, casting)
+                    # (each array operand converted to the loop's dtype, every lane, as NumPy's: an object element that
+                    # doesn't convert NumPy's ValueError, out untouched, even in a lane where= leaves out)
+                    # (None into a float or complex dtype is NaN, as NumPy's cast makes it)
+                    args = tuple((x if dt.kind not in "fc" else asarray([nan if v is None else v for v in x.ravel().tolist()], object).reshape(x.shape)).astype(dt)
+                                 if isinstance(x, ndarray) and x.dtype.kind == "O" else x for x in args)
                 # (a scalar operand is in every lane: given as 1 only when no lane is computed)
                 none = not m.any()
                 args = tuple(_np.where3(m, x, array(1, dtype=x.dtype)) if isinstance(x, ndarray)
