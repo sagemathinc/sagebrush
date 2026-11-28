@@ -3568,6 +3568,16 @@ try {
       const chips = await until(`[...document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip")].filter((c) => c.textContent.includes(${JSON.stringify("Not run: an item before this one failed (fix it and run again)")})).length === 2`, 20000);
       check(ranStop && chips, "stop rule: a failing item stops the rest: the later items say M4, the status counts only the item that ran (Ran 1 of 3; 1 failed)",
         { ranStop, chips, status: await ev(`document.querySelector(".tex-status").textContent`), text: await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`) });
+      // (William's item: a sageblock whose last line is a plot shows it under its code, after a Run, as a notebook cell)
+      {
+        const fbp = await mk("/t/block-plot.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sageblock}\np = plot(sin(x), (x, 0, 3))\np\n\\end{sageblock}\nAfter.\n\\end{document}\n"));
+        await open(fbp);
+        await until(`!!document.querySelector(".tex-preview pre.sageblock") && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+        const ranBp = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+        const shownBp = await until(`(() => { const p = document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock"), i = p?.nextElementSibling; return !!i && i.matches("img.sageplot") && i.complete && i.naturalWidth > 0; })()`, 20000);
+        check(ranBp && shownBp, "Run: a sageblock whose last line is a plot shows the plot under its code", { ranBp, shownBp, html: await ev(`(document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock")?.parentElement?.innerHTML ?? "").slice(0, 300)`) });
+      }
       // (Magma, a Sagebrush extension: \magma{}, magmablock and magmasilent run with Run in the page's session, Magma's
       //  own; what Magma printed shown as text; Run's title names the languages, one rule)
       {

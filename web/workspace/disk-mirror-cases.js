@@ -244,6 +244,28 @@ async function cases() {
     m.close();
   }
   {
+    // (closing one window, #1541: "sb-close" names it; another window's close changes nothing here; this one's drains,
+    // then says it is done, as a quit does)
+    const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+    await ws.create("/c.txt", { content: enc("one") });
+    await m.drain(5000);
+    const calls = [], listeners = new Map();
+    W.drainOnQuit({ mirror: () => m, invoke: async (c) => { calls.push(c); }, listen: (ev, f) => listeners.set(ev, f), freeze: () => calls.push("freeze"), timeoutMs: 5000, label: "doc-1" });
+    const other = listeners.get("sb-close")({ payload: { label: "doc-2" } });
+    await tick(20);
+    check(other === undefined && calls.length === 0, "another window's close: nothing here (" + calls.join() + ")");
+    const release = disk.hold("/c.txt");
+    await ws.write("/c.txt", enc("two"));
+    const done = listeners.get("sb-close")({ payload: { label: "doc-1" } });
+    await tick(50);
+    check(calls.includes("app_quit_hold") && calls.includes("freeze") && !calls.includes("app_quit_now"), "this window's close with a write in flight: held, edits stopped, not gone yet");
+    release();
+    await done;
+    check(calls.at(-1) === "app_quit_now" && text(disk, "/c.txt") === "two", "...then done, once it was on disk");
+    document.getElementById("sb-quitting")?.remove();
+    m.close();
+  }
+  {
     // (the control: quit at once, without draining: the change isn't on disk)
     const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
     await ws.create("/q.txt", { content: enc("one") });

@@ -33,7 +33,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 311297 && LATEX_CAPS.gzip === 105855, "the caps are 311,297 B raw and 105,855 B gzip (2026-11-26, \\input and \\include in a shared or GitHub view, on its merge with master 9063c669: 311,233 / 105,791 measured + 64; 310,653 / 105,614 before, a render over 16 MiB shown up to there)");
+check(LATEX_CAPS.raw === 311401 && LATEX_CAPS.gzip === 105893, "the caps are 311,401 B raw and 105,893 B gzip (2026-11-27, a sageblock's last-line plot shown under its code, on its merge with master 5963e768: 311,337 / 105,829 measured + 64; 311,297 / 105,855 before, \\input and \\include in a shared or GitHub view)");
 
 // (and each lazy chunk's, as approved: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (2026-11-10, for the
 //  grant's "May run code"; 45,952 / 16,000 for the grant's id and hold, 44/15.5 on 2026-11-04, before), tools
@@ -71,7 +71,7 @@ check(LATEX_CAPS.raw === 311297 && LATEX_CAPS.gzip === 105855, "the caps are 311
 // (the examples' chunk, EXAMPLES, gone with the editor's own list of examples: the gallery's panel is the only one)
 // (agent 70,904 / 24,149 B: 2026-11-27: durable local grant cleanup and superseded reconnect ownership; CI eb19a26c
 //  70840/24085 +64 (#2346); was 68,867 / 23,606)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [70904, 24149], TOOLS: [17874, 7471], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [4473, 2270], HL: [4474, 2419] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [70904, 24149], TOOLS: [17874, 7471], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [20122, 7934], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [4473, 2270], HL: [4474, 2419] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a

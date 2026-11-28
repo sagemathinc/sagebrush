@@ -149,7 +149,10 @@ export const LATEX_LAZY = {
 // (311,297 raw / 105,855 gzip: Nov 26 2026, \input and \include in a shared or GitHub view (mountEditor's inputs,
 //  web/latex/component.ts): 311,233 / 105,791 measured on the shipped build of its merge with master 9063c669, with bun
 //  1.4.4 and node 24.21.0 (+644 / +241 over master's 310,589 / 105,550), + 64)
-export const LATEX_CAPS = { raw: 311297, gzip: 105855 };
+// (311,401 raw / 105,893 gzip: Nov 27 2026, a sageblock whose last line is a plot shows it under its code (sagetex.mjs's
+//  plotImg for a block): 311,337 / 105,829 measured on the shipped build of its merge with master 5963e768, with bun 1.4.4
+//  and node 24.21.0 (+104 / +38 over master's 311,233 / 105,791), + 64)
+export const LATEX_CAPS = { raw: 311401, gzip: 105893 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -297,7 +300,9 @@ export const LATEX_LAZY_CAPS = {
   //  files and ended at once, a Run kept in the page, the run half shared with the editor's): measured + 64, 19,401 /
   //  7,715 on master 8431bd54 (+793 / +205 over 18,608 / 7,510); renewed after its review fixes (a session ended for
   //  good at every step, a Run admitted again just before its script): 19,580 / 7,748 measured on master 9534e419, + 64
-  RUN: { label: "the LaTeX Run chunk", raw: 19644, gzip: 7812 },
+  // (20,122 / 7,934: Nov 27 2026, a sageblock whose last line is a plot (the session script's cell mode and its display hook
+  //  collected): 20,058 / 7,870 (+478 / +123 over master's 19,580 / 7,747) measured on its merge with master 5963e768, + 64)
+  RUN: { label: "the LaTeX Run chunk", raw: 20122, gzip: 7934 },
   // (@interact, a Sagebrush extension (Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split (Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room (the
