@@ -252,6 +252,52 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   check(!/Thinking/.test(turnNode(kept, kt, hooks).innerHTML), "#1789: an empty thinking part kept from before draws nothing", turnNode(kept, kt, hooks).innerHTML);
 }
 
+// ---- diffHtml (Codex audit S12): the changed middle's table admitted within DIFF_PRODUCT_LIMIT, counted before it is
+// made; past it, the middle shown removed then added with a note. Every output still is the change: its "-" and " "
+// lines are the old text, its "+" and " " lines the new one
+{
+  const { diffHtml, DIFF_PRODUCT_LIMIT, DIFF_TOO_LARGE } = await import("./view.ts");
+  const { TEXT_DIFF_PRODUCT_LIMIT } = await import("../../notebook/text-overlap.ts");
+  check(DIFF_PRODUCT_LIMIT === TEXT_DIFF_PRODUCT_LIMIT, "diff: the same bound as the notebook merge's", [DIFF_PRODUCT_LIMIT, TEXT_DIFF_PRODUCT_LIMIT]);
+  const unesc = (x) => x.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  const lines = (html) => [...html.matchAll(/<div class="dl( del| add| note)?">([\s\S]*?)<\/div>/g)].map((m) => [m[1]?.trim() ?? "", unesc(m[2])]);
+  const sides = (html) => { const L = lines(html).filter(([k]) => k !== "note"); return [L.filter(([k]) => k !== "add").map(([, t]) => t.slice(1)).join("\n"), L.filter(([k]) => k !== "del").map(([, t]) => t.slice(1)).join("\n")]; };
+  const changed = (html) => lines(html).filter(([k]) => k === "del" || k === "add").length;
+  const noted = (html) => lines(html).some(([k, t]) => k === "note" && t === DIFF_TOO_LARGE);
+  // (the diff before this bound, kept as the reference: its changed-line count is the shortest)
+  const old = (before, after) => {
+    const a = before.split("\n"), b = after.split("\n"), n = a.length, m = b.length;
+    const L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    return 2 * 0 + (n - L[0][0]) + (m - L[0][0]);
+  };
+  let seed = 7;
+  const rnd = (k) => ((seed = (seed * 1103515245 + 12345) % 2147483648) % k);
+  let same = 0, shortest = 0, N = 400;
+  for (let c = 0; c < N; c++) {
+    const mk = () => Array.from({ length: rnd(9) }, () => "abcd"[rnd(4)]).join("\n");
+    const x = mk(), y = mk();
+    const h = diffHtml(x, y);
+    const [sx, sy] = sides(h);
+    if (sx === x && sy === y) same++;
+    if (changed(h) === old(x, y)) shortest++;
+  }
+  check(same === N && shortest === N, `diff: ${N} small random diffs: each is the change, and as short as before (${same} the change, ${shortest} shortest)`);
+  const distinct = (k, tag) => Array.from({ length: k }, (_, i) => `${tag}${i}`).join("\n");
+  const at = diffHtml(distinct(2000, "a"), distinct(2000, "b"));
+  check(!noted(at) && changed(at) === 4000, "diff: a middle of exactly DIFF_PRODUCT_LIMIT cells (2000 x 2000) gets its table, no note");
+  const past = diffHtml(distinct(2001, "a"), distinct(2000, "b"));
+  const [px, py] = sides(past);
+  check(noted(past) && px === distinct(2001, "a") && py === distinct(2000, "b"), "diff: one row past the bound (2001 x 2000): the note, and the middle removed then added, still the change");
+  const big = Array.from({ length: 200000 }, (_, i) => `line ${i}`), edited = big.slice();
+  edited[100000] = "changed";
+  const t0 = performance.now(), mid = diffHtml(big.join("\n"), edited.join("\n")), ms = performance.now() - t0;
+  check(!noted(mid) && changed(mid) === 2 && sides(mid)[1] === edited.join("\n"), `diff: 200,000 lines with one changed: the head and tail taken first, no table, no note (${ms.toFixed(0)} ms)`);
+  const t1 = performance.now(), hostile = diffHtml(distinct(20000, "x"), distinct(20000, "y")), ms1 = performance.now() - t1;
+  check(noted(hostile) && ms1 < 2000, `diff: 20,000 x 20,000 distinct lines (400 M cells) is refused its table and returns at once (${ms1.toFixed(0)} ms)`);
+  check(!/<img/i.test(diffHtml(HOSTILE, HOSTILE + "\n" + HOSTILE)) && !/<img/i.test(diffHtml(distinct(2001, HOSTILE), distinct(2000, HOSTILE))), "diff: lines escaped (no tag survives), in both forms");
+}
+
 const failed = results.filter(([ok]) => !ok);
 if (failed.length) { console.log(`FAIL: ${failed.length} of ${results.length}`); process.exit(1); }
 console.log(`ok: the agents chat's view and its checks, ${results.length} checks`);
