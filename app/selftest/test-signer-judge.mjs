@@ -62,6 +62,14 @@ ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "nonsense" }).ok, "an unkn
   ok(v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB, platform: "darwin" }).ok && v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB, platform: "linux" }).ok, "frame+cap, macOS and Linux: both frames loaded, no bridge, nothing reached the command: passes");
   ok(!v([d(1, "signer"), s(1, 1, "signer")], { control: "frame+cap", seen: NOB }).ok, "frame+cap, Windows: no frame's call reaching the command fails (there the frame has the bridge)");
   ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer")], { control: "frame+cap", seen: NOB, platform: "darwin" }).ok, "frame+cap: a second dispatch the check took as local fails, on any platform");
+  // (T1: exactly one signature, the signer page's: none fails, on any platform)
+  ok(!v([d(1, "signer"), ...framed(2)], { control: "frame+cap", seen: SFW }).ok && !v([d(1, "signer")], { control: "frame+cap", seen: NOB, platform: "linux" }).ok, "frame+cap: no signature at all fails, on Windows and elsewhere");
+  // (T2: on Windows the frame's call must be refused by the check of the calling document, as the app logs it)
+  for (const why of ["not the signer window's page", "not a self-test"]) {
+    ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer", "tauri://localhost", "remote", "http://127.0.0.1:9"), `[signer] refused 2: ${why}`], { control: "frame+cap", seen: SFW }).ok, `frame+cap, Windows: the frame's call refused for another reason (${why}) fails`);
+  }
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), d(2, "signer", "tauri://localhost", "remote", "http://127.0.0.1:9")], { control: "frame+cap", seen: SFW }).ok, "frame+cap, Windows: the frame's call at the command with no refusal logged fails");
+  ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2)], { control: "frame+cap", seen: SFW.map((x) => x.startsWith("sframe: signer") ? "sframe: signer refused: Command signer_probe_sign not allowed by ACL" : x) }).ok, "frame+cap, Windows: /sframe's page saying another refusal fails");
   ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2), d(3, "signer", "tauri://localhost", "remote", "tauri://localhost"), s(3, 2, "signer")], { control: "frame+cap", seen: SF }).ok, "frame+cap: the forged frame's call signing fails");
   ok(!v([d(1, "signer"), s(1, 1, "signer"), ...framed(2), d(3, "signer", "tauri://localhost", "local", "tauri://localhost"), s(3, 2, "signer")], { control: "frame+cap", seen: SF }).ok, "frame+cap: a frame's call resolved as local and signing (two signatures) fails");
   ok(!v([d(1, "signer"), s(1, 1, "signer"), ...both], { control: "frame+cap" }).ok, "frame+cap: the frames never loaded fails");

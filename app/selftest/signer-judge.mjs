@@ -46,7 +46,8 @@
 //  header the request carried, information only)
 export function signerLog(err) {
   const callers = new Map([...err.matchAll(/^\[signer\] caller (\d+): (local|remote) \(Origin header (\S+)\)$/gm)].map((m) => [+m[1], { caller: m[2], header: m[3] }]));
-  const dispatches = [...err.matchAll(/^\[signer\] dispatch (\d+) from (\S+) at (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[2], origin: m[3], caller: callers.get(+m[1])?.caller ?? "unsaid", header: callers.get(+m[1])?.header ?? "unsaid" }));
+  const refusals = new Map([...err.matchAll(/^\[signer\] refused (\d+): (.*)$/gm)].map((m) => [+m[1], m[2]]));
+  const dispatches = [...err.matchAll(/^\[signer\] dispatch (\d+) from (\S+) at (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[2], origin: m[3], caller: callers.get(+m[1])?.caller ?? "unsaid", header: callers.get(+m[1])?.header ?? "unsaid", refused: refusals.get(+m[1]) ?? null }));
   const signed = [...err.matchAll(/^\[signer\] signed (\d+) \(signature (\d+)\) for (\S+)$/gm)].map((m) => ({ n: +m[1], label: m[3] }));
   return { dispatches, signed };
 }
@@ -126,14 +127,17 @@ export function signerVerdict({ err, out, seen, control, code, signal, problems,
       const local = dispatches.filter((d) => d.caller === "local");
       if (fromOthers(dispatches).length) why.push(`dispatches from other windows (${fromOthers(dispatches).length}): only the signer window's page and its frames may reach the command`);
       if (local.length !== 1) why.push(`${local.length} dispatches the check took as local, not only the signer page's own`);
-      if (signed.length !== 1) why.push(`signatures ${signed.length}, not 1: a frame's call signed`);
+      if (signed.length !== 1) why.push(`signatures ${signed.length}, not exactly 1 (the signer page's own)`);
       for (const f of ["sframe", "sforge"]) {
         if (!seen.includes(`${f}: loaded`)) why.push(`the other server's /${f} didn't load in the signer page's frame: the control didn't run`);
         if (!seen.some((x) => x.startsWith(`${f}: signer refused`))) why.push(`/${f} in the signer page didn't say what its signing call got`);
       }
       if (platform === "win32") {
         if (!framed.length) why.push("on Windows, no call from a frame in the signer page reached the command: the widened capability didn't take, or the frame didn't call");
-        if (!seen.some((x) => /^sframe: signer refused: only the approvals window's page signs/.test(x))) why.push("on Windows, /sframe's call wasn't refused by the command's check of the calling document");
+        // (each refused by the check of the calling document itself, as the app logs it: no other reason will do)
+        const other = framed.filter((d) => d.refused !== "not the signer page's own document");
+        if (framed.length && other.length) why.push(`on Windows, a frame's call at the command wasn't refused by the check of the calling document: ${other.map((d) => `${d.n} (${d.refused ?? "not refused"})`).join(", ")}`);
+        if (!seen.some((x) => /^sframe: signer refused: only the approvals window's page signs/.test(x))) why.push("on Windows, /sframe's page didn't say its call was refused by the check of the calling document");
       }
       break;
     }
