@@ -1746,10 +1746,15 @@ renderer.domElement.addEventListener("pointermove", (ev) => {
 });
 // (a touch while walking: flying, which is how touch moves (drag to turn, pinch to zoom))
 renderer.domElement.addEventListener("pointerdown", (ev) => { if (deskWalk && ev.pointerType === "touch") setDeskWalk(false); });
+// (the wheel walks you forward or back by how far it turned: a mouse's notch, about 100 pixels, is a step of 3; a
+//  trackpad's scroll and pinch (a pinch comes as wheel events with Ctrl held) send many small turns a second, each a
+//  small step, where one of 3 per event ran away)
+const WHEEL_PX = { 0: 1, 1: 16, 2: 800 }; // (pixels per deltaMode unit: pixels, lines, pages)
 renderer.domElement.addEventListener("wheel", (ev) => {
   if (!deskWalk || xr.presenting) return;
   ev.preventDefault();
-  walkBy(-Math.sign(ev.deltaY) * 3, 0);
+  const px = ev.deltaY * (WHEEL_PX[ev.deltaMode] ?? 1);
+  walkBy(-Math.sign(px) * Math.min(3, Math.abs(px) * 0.03), 0);
 }, { passive: false });
 function walkBy(forward, sideways) {
   const fwd = new THREE.Vector3().subVectors(controls.target, camera.position).setY(0);
