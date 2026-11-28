@@ -76,8 +76,33 @@ impl Held {
 
 /// The bytes of a hashbrown table for `cap` items of `item` bytes each.
 fn table_bytes(cap: usize, item: usize) -> u64 {
+    table_bytes_wide(cap as u128, item as u128)
+}
+
+/// table_bytes in u128, saturated (sat).
+fn table_bytes_wide(cap: u128, item: u128) -> u64 {
     let buckets = if cap < 4 { 4 } else if cap < 8 { 8 } else { (cap * 8 / 7).next_power_of_two() };
-    (buckets * (item + 1) + 16 + 64) as u64
+    sat(buckets * (item + 1) + 16 + 64)
+}
+
+/// The up-front bounds are computed in u128 and saturated: parameters too
+/// large for any memory (fb_size or m near usize::MAX, which siqs_with
+/// accepts) ask for u64::MAX bytes, which the ledger refuses, typed, before
+/// anything is allocated, rather than overflowing (the systematic review of
+/// #2451, P3).
+fn sat(x: u128) -> u64 {
+    x.min(u64::MAX as u128) as u64
+}
+
+/// The half-width m at most: a fixed limit, so that 2 m and its rounding to
+/// a multiple of 8 cannot overflow (a sieve of 2 m bytes this large is
+/// refused by its reservation anyway).
+const M_MAX: usize = (usize::MAX / 4) & !7;
+
+/// The sieve's half-width for the parameters: m, at least 2^10 and at most
+/// M_MAX, a multiple of 8.
+fn half_width(par: &Params) -> usize {
+    par.m.clamp(1 << 10, M_MAX).next_multiple_of(8)
 }
 
 /// An upper bound on the heap of a BigInt below 2^(64 limbs).
@@ -156,7 +181,7 @@ pub fn memory_bound_with(bits: u64, par: &Params) -> u128 {
     let qcap = (2.0 * size as f64).min(A_PRIME_MAX);
     // (an upper bound on s: kn < 2^(bits + 6))
     let s = ((bits as f64 + 7.0) / 2.0 * std::f64::consts::LN_2 / qcap.ln()).ceil() as usize + 3;
-    (fb_phase_bytes(size) + fixed_bytes(bits, size, s, par.m.max(1 << 10).next_multiple_of(8))) as u128
+    fb_phase_bytes(size) as u128 + fixed_bytes(bits, size, s, half_width(par)) as u128
 }
 
 /// The factor base's phase: the table of primes up to its first bound (a
@@ -165,30 +190,35 @@ pub fn memory_bound_with(bits: u64, par: &Params) -> u128 {
 /// factor base's five vectors.
 fn fb_phase_bytes(size: usize) -> u64 {
     // (and before it: the multiplier's small table, n and kn)
-    table_phase_bytes(30 * size as u64 + 1000) + 25 * size as u64 + 8192
+    let size = size as u128;
+    sat(table_phase_bytes(sat(30 * size + 1000)) as u128 + 25 * size + 8192)
 }
 
 fn table_phase_bytes(bound: u64) -> u64 {
-    bound + 1 + 24 * super::cost::pi_plus(bound) + 64
+    sat(bound as u128 + 1 + 24 * super::cost::pi_plus(bound) as u128 + 64)
 }
 
 /// The structures sieving needs, sized from the factor base (nfb primes),
 /// s primes in a and the half-width m.
 fn fixed_bytes(bits: u64, nfb: usize, s: usize, m: usize) -> u64 {
-    let limbs = (bits as usize + 70).div_ceil(64);
-    let want = nfb + 1 + EXTRA;
+    let w = |x: usize| x as u128;
+    let limbs = w((bits as usize + 70).div_ceil(64));
+    let big = 16 * limbs + 64;
+    let cols = w(max_cols(bits, s, m));
+    let (nfb, s, m) = (w(nfb), w(s), w(m));
+    let want = nfb + 1 + w(EXTRA);
     let roots = 9 * nfb + s * (24 + 4 * nfb);
-    let sieve = 2 * m + 4 * FOUND_CAP;
-    let slots = want * std::mem::size_of::<Rel>() + table_bytes(PARTIALS_MAX * want, std::mem::size_of::<(u64, (BigInt, Vec<u32>))>()) as usize;
+    let sieve = 2 * m + 4 * w(FOUND_CAP);
+    let slots = want * w(std::mem::size_of::<Rel>()) + table_bytes_wide(w(PARTIALS_MAX) * want, w(std::mem::size_of::<(u64, (BigInt, Vec<u32>))>())) as u128;
     // one value of a: its primes, gamma, the B_l and a, b, c; one candidate:
     // x, g, v, t and its columns, grown by pushes and an extension by a
     // partial's (twice the most a relation has, in a vector that may hold
     // its old and new blocks at once)
-    let per_a = 64 * s + (s as u64 + 6) as usize * big_bytes(limbs) as usize;
-    let per_candidate = 6 * big_bytes(limbs) as usize + 4 * 6 * max_cols(bits, s, m);
+    let per_a = 64 * s + (s + 6) * big;
+    let per_candidate = 6 * big + 4 * 6 * cols;
     // the window, and a dependency's working values
-    let rest = 8 * 40 + 4 * (nfb + 1) + 8 * big_bytes(limbs) as usize;
-    (roots + sieve + slots + per_a + per_candidate + rest + 4096) as u64
+    let rest = 8 * 40 + 4 * (nfb + 1) + 8 * big;
+    sat(roots + sieve + slots + per_a + per_candidate + rest + 4096)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -509,7 +539,7 @@ fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats, held: &mut Hel
     let nfb = fb.p.len();
     let pmax = *fb.p.last().unwrap() as u64;
     let lp_max = pmax * par.lp_mult.clamp(1, pmax);
-    let m = par.m.max(1 << 10).next_multiple_of(8);
+    let m = half_width(par);
     let len = 2 * m;
     let first = fb.p.partition_point(|&p| p < SMALL);
 

@@ -9,7 +9,7 @@ use sagebrush_bigint::{BigInt, BigUint};
 use sagebrush_classgroup::nf::factor::{factor, factor_typed, is_probable_prime, FactorError};
 use sagebrush_classgroup::nf::order::maximal_order;
 use sagebrush_classgroup::nf::proof::{certify, Limits};
-use sagebrush_classgroup::nf::siqs::{memory_bound, params, siqs, siqs_with, Stats, WHAT};
+use sagebrush_classgroup::nf::siqs::{memory_bound, memory_bound_with, params, siqs, siqs_with, Params, Stats, WHAT};
 use sagebrush_ledger::{hooks, outstanding_bytes, set_total, EngineError, Total, TotalStatus};
 
 fn total(bytes: u64) {
@@ -60,8 +60,23 @@ fn the_sieve_runs_only_when_its_memory_is_admitted() {
         other => panic!("refused, not factored another way: {:?}", other),
     }
     assert!(factor(&BigInt::from(n.clone())).unwrap_err().starts_with(WHAT));
+    // parameters too large for any memory (siqs_with takes them as given):
+    // their bound, computed without overflow, is past the total, and the
+    // reservation is refused, typed, with nothing left reserved
+    total(1 << 40);
+    let base = params(n.bits() as u64);
+    for par in [Params { fb_size: usize::MAX, ..base.clone() }, Params { m: usize::MAX, ..base.clone() }, Params { fb_size: usize::MAX / 3, m: usize::MAX - 3, ..base.clone() }] {
+        assert!(memory_bound_with(n.bits() as u64, &par) > 1 << 40, "{par:?}");
+        let mut st = Stats::default();
+        match siqs_with(&n, &par, 1, &mut st) {
+            Err(EngineError::Memory(r)) => assert_eq!(r.what, WHAT),
+            other => panic!("{par:?}: {:?}", other),
+        }
+        assert_eq!(outstanding_bytes(), before, "{par:?}: released");
+    }
     // the maximal order of x^2 - n factors its discriminant 4n, and the
     // class group's proof starts there: each gives the refusal typed
+    total(1 << 16);
     let f = vec![-BigInt::from(n.clone()), BigInt::from(0), BigInt::from(1)];
     match maximal_order(&f) {
         Err(FactorError::Memory(r)) => assert_eq!(r.what, WHAT),
