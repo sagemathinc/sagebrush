@@ -783,6 +783,18 @@ def _shape_text(shape):
     return "(%s)" % (", ".join(str(n) for n in shape) + ("," if len(shape) == 1 else ""))
 
 
+def _where_mask(where):
+    """A ufunc's where= as its bool mask, as NumPy's _wheremask_converter makes it: an array only by a safe cast (a bool
+    array; an integer or float one a TypeError, before anything is computed or written), any other value (a list, a
+    Python or NumPy scalar) converted as np.array(where, dtype=bool) converts it"""
+    if where is True:
+        return True
+    if isinstance(where, ndarray) and where.dtype.kind != "b":
+        what = "scalar" if where.ndim == 0 else "array data"
+        raise TypeError(f"Cannot cast {what} from {where.dtype!r} to dtype('bool') according to the rule 'safe'")
+    return array(where, dtype=bool_)
+
+
 class ufunc:
     def __init__(self, name, nin, op=None, identity=None):
         self.__name__ = name
@@ -795,6 +807,7 @@ class ufunc:
         return "<ufunc '%s'>" % self.__name__
 
     def __call__(self, *args, out=None, dtype=None, where=True, casting="same_kind", **kw):
+        _where_mask(where)
         if len(args) != self.nin:
             if len(args) == self.nin + 1 and out is None:
                 out = args[-1]
@@ -841,7 +854,7 @@ class ufunc:
         op = self._op
         if (dt.kind != "b" if op in _BOOL_OUT else dt.kind in "biu" if op in _FLOAT_OUT
                 else dt.kind not in ("iu" if op in ("left_shift", "right_shift") else "biu") if op in _BITWISE
-                else dt.kind == "c" and op in ("floor_divide", "remainder", "fmod")):
+                else dt.kind in "bc" and op in ("floor_divide", "remainder", "fmod")):
             raise TypeError("No loop matching the specified signature and casting was found for ufunc %s" % self.__name__)
         return dt
 
@@ -1081,7 +1094,7 @@ class _ufunc2(ufunc):
         where = kw.pop("where", True)
         if where is not True:
             # (a copy, so a mask that is also an out is read as it was, as NumPy reads it, after the first write too)
-            where = array(where, dtype=bool_)
+            where = _where_mask(where)
         # (both results computed before either out is written, so an out that is also an input is read as it was; every
         # out checked first, so a refusal leaves them all as they were)
         res = [f(*args, **kw) for f in self._parts]
