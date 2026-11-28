@@ -11,7 +11,9 @@ What R prints, observed:
   (to - from)/by past 2^31 - 1 is R's "'by' argument is much too small".
   Integer when from, to and by are all integer or logical, else double.
 - seq(..., length.out =): evenly spaced, from + i*by, the last element `to`
-  itself when both ends are given; equal ends give length.out copies.
+  itself when both ends are given.  With both ends, one or two elements are
+  the ends themselves and equal ends give length.out copies, each of the
+  higher of the ends' types (seq(TRUE, FALSE, length.out = 2) is logical).
   Integer when the ends given and by are integer or logical, and the values
   fit: with no by, length.out must be integer too, and with both ends the
   step a whole number; else double.  seq(length.out = n) is 1:n.
@@ -23,7 +25,8 @@ What R prints, observed:
   each first, then length.out (when it is given and not NA) or times, one
   count or one per element; a zero-length x filled with NA to length.out;
   NULL stays NULL.  An NA or empty each is 1, an NA length.out is ignored,
-  and only their first elements are used (with R's warning).
+  and only their first elements are used (with R's warning).  A zero-length
+  x ignores times; each = 0 to a positive length.out is an error.
 
 Memory (design §8.5): each reserves its result (and its names) before
 building anything; rep computes its length from the counts first and reads
@@ -209,26 +212,26 @@ def _seq_length(from_, to, by, lo, n, call):
     lo_int = lo is None or _int_like(lo)
     if has_from and has_to:
         a, b = _scalar(from_, "from", mc), _scalar(to, "to", mc)
-        if a == b:
-            # (equal ends: n copies, of the higher of the ends' types; seq(TRUE, TRUE, length.out = 2) is logical)
+        if n <= 2 or a == b:
+            # (the ends themselves, of the higher of their types: one or two elements, or n copies of equal
+            # ends; seq(TRUE, FALSE, length.out = 2) is logical, seq(1L, 5L, length.out = 2) integer)
             rtype = max(from_.type, to.type, key=ORDER.index)
-            e = bool(a) if rtype == "logical" else int(a) if rtype == "integer" else a
+            conv = bool if rtype == "logical" else int if rtype == "integer" else float
             with mem.reserve(n, rtype):
-                return RVector(rtype, [e] * n)
+                return RVector(rtype, [conv(a)] * n if a == b else [conv(a), conv(b)][:n])
         half = math.isinf(b - a)
-        step = 0.0 if n == 1 else (b / 2 - a / 2) / (n - 1) if half else (b - a) / (n - 1)
+        step = (b / 2 - a / 2) / (n - 1) if half else (b - a) / (n - 1)
         as_int = _int_like(from_) and _int_like(to) and lo_int and (half is False and step == int(step))
         if as_int:
             ia, istep = int(a), int(step)
             with mem.reserve(n, "integer"):
-                return RVector("integer", [ia + i * istep if i < n - 1 else int(b) for i in range(n)] if n > 1 else [ia])
+                return RVector("integer", [ia + i * istep if i < n - 1 else int(b) for i in range(n)])
         with mem.reserve(n, "double"):
             if half:
                 xs = [2 * (a / 2 + i * step) for i in range(n)]
             else:
                 xs = [a + i * step for i in range(n)]
-            if n > 1:
-                xs[-1] = b
+            xs[-1] = b
             return RVector("double", xs)
     s = 1.0 if not has_by else _scalar(by, "by", mc)
     # (with by given, its type and the end's decide; without it, length.out's too)
@@ -295,7 +298,7 @@ def _number(e):
 def _counts_ok(v, what, call):
     """rep's times: non-negative counts (2.9 is 2), R's "invalid 'times' argument" otherwise; checked without
     copying them."""
-    if not isinstance(v, RVector) or v.type not in ORDER or not v.data:
+    if not isinstance(v, RVector) or v.type not in ORDER:
         if isinstance(v, RVector) and v.type == "character":
             raise NotSupported("rep() with character counts")
         raise RError("invalid '%s' argument" % what, call)
@@ -349,12 +352,16 @@ def rep(sess, call, args):
     if each is not None:
         c = _first_count(sess, each, "each", call)
         k = 1 if c is None else c
+    if x.data and k == 0 and out_len:
+        # (nothing to repeat to a positive length, R 4.5.3; a zero-length x is filled with NA instead)
+        raise RError("invalid 'each' argument", call)
     m = len(x.data) * k
-    # (each first, then length.out or times: the result's length from the counts, before anything is built)
+    # (each first, then length.out or times: the result's length from the counts, before anything is built; a
+    # zero-length x ignores times, R 4.5.3)
     per = None
     if out_len is not None:
         n = out_len
-    elif times is not None:
+    elif times is not None and x.data:
         _counts_ok(times, "times", call)
         if len(times.data) == 1:
             n = int(times.data[0]) * m

@@ -136,3 +136,23 @@ seq(TRUE, TRUE, length.out = 3); seq(1L, 1L, length.out = 3); seq(1L, 1, length.
 typeof(seq(TRUE, 3L, by = 1L)); typeof(seq(to = 5L, by = 1L)); seq(FALSE, 2L, by = TRUE); typeof(seq(1, 10, by = 3L)); typeof(seq(1L, 10L, by = 3)); seq(5L, 1L, by = -2L)
 #-- seq-length-out-first
 seq(1, 10, length.out = c(2, 3))
+#-- seq-by-much-too-small-ratio
+seq(0, 1, by = 3.3e-10)
+#-- seq-by-much-too-small-boundary
+seq(0, 2147483648, by = 1)
+#-- rep-empty-times
+rep(integer(0), times = integer(0)); rep(logical(0), times = integer(0)); rep(character(0), times = numeric(0)); rep(1:3, each = 0, times = integer(0)); rep(integer(0), times = 1:2)
+rep(integer(0), times = NA); rep(integer(0), times = -1); rep(integer(0), times = c(1, NA)); rep(integer(0), times = "a"); rep(integer(0), each = 2, times = integer(0)); rep(1:3, each = 0, times = 2)
+rep(c(a = 1), each = 0, times = 3); rep(1:3, each = 0, length.out = 0); rep(1:3, each = 0, length.out = NA); rep(integer(0), each = 0, length.out = 3)
+#-- rep-error-each-zero
+rep(1:3, each = 0, length.out = 3)
+#-- rep-error-each-zero-named
+rep(c(a = 1, b = 2), each = 0, length.out = 2)
+#-- rep-error-each-zero-times
+rep(1:3, each = 0, times = 1:3)
+#-- rep-error-empty-each
+rep(integer(0), each = -1)
+#-- seq-two-ends-types
+seq(TRUE, FALSE, length.out = 2L); typeof(seq(TRUE, FALSE, length.out = 1L)); seq(FALSE, TRUE, length.out = 3L); seq(TRUE, FALSE, length.out = 2); seq(FALSE, 1L, length.out = 2L); seq(TRUE, 3, length.out = 2L)
+seq(1L, 5L, length.out = 2); typeof(seq(1L, 2L, length.out = 1)); typeof(seq(1L, 5, length.out = 1L)); seq(5L, 1L, length.out = 2); seq(-2147483647L, 2147483647L, length.out = 2); seq(1L, 3L, length.out = 2.5)
+seq(TRUE, FALSE, along.with = 1:2); seq(1L, 2L, along.with = 1:2)

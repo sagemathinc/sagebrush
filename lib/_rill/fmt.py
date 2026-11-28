@@ -194,7 +194,8 @@ def print_value(v, write, opts=DEFAULT):
     if not isinstance(v, RVector) or (v.attrs and set(v.attrs) != {"names"}):
         return None
     if not v.data:
-        write(EMPTY[v.type] + (("\n" if names_of(v) is None else "\n")))
+        # (R 4.5.3: an empty vector with names prints as "named numeric(0)")
+        write(("named " if names_of(v) is not None else "") + EMPTY[v.type] + "\n")
         return True
     strs = format_elements(v, True, opts)
     names = names_of(v)
