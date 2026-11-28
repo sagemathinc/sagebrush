@@ -8,7 +8,7 @@
 // set 0644, then renamed onto dst: a failed or interrupted write never leaves
 // a partial dst (CORR-213-1), and the temp is removed on failure.
 import * as fs from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 export function installWasm(src, dst, io = fs) {
@@ -61,4 +61,85 @@ export function remappedRustflags(env = process.env) {
 export function namesLocalCargoHome(bytes, env = process.env) {
   const home = cargoHome(env);
   return home !== CI_CARGO_HOME && Buffer.from(bytes).includes(Buffer.from(home + "/"));
+}
+
+// The sources cargo's dep-info names for a module: its first rule, "module: source source ...", a space in a path
+// written "\ ".
+export function depInfoPaths(text) {
+  const line = text.split("\n")[0];
+  const i = line.indexOf(": ");
+  if (i < 0) return [];
+  return line
+    .slice(i + 2)
+    .split(/(?<!\\) +/)
+    .filter(Boolean)
+    .map((p) => p.replace(/\\ /g, " "));
+}
+
+// The sources of a built module (its dep-info, the .d beside it) that are neither this checkout's nor the Cargo
+// home's crates: [] for this checkout's own build.  A cargo target shared between checkouts (scripts/engine-cache.mjs)
+// holds one module at each path, so the module there may be another checkout's build, which would then be stored
+// under this tree's source key (an engine without #2297's group code under a key with it, Nov 28 2026).
+export function foreignSources(module, root, env = process.env, io = fs) {
+  const d = module.replace(/\.wasm$/, ".d");
+  const own = [root, io.realpathSync(root)].map((r) => r.replace(/\/+$/, "") + "/");
+  const home = cargoHome(env).replace(/\/+$/, "") + "/";
+  const paths = depInfoPaths(io.readFileSync(d, "utf8"));
+  if (paths.length === 0) return [`(${d} names no sources)`];
+  return paths.filter((p) => !p.startsWith(home) && !own.some((r) => p.startsWith(r)));
+}
+
+const pidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+};
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// fn() with the cargo target's build lock held: one build at a time in a target.  Cargo locks a target while it
+// compiles, but not the copy of the module out of it afterwards, so two checkouts sharing a target could each copy
+// the other's module.  The lock is a directory beside the target ("target.lock"), made atomically, with the holder's
+// pid and host in it; a holder on this host that is no longer running left it stale, and it is taken over (as is one
+// whose holder was never written, after a minute).
+export function withTargetLock(target, fn, { log = console.error, wait = 2000, io = fs, alive = pidAlive, host = hostname() } = {}) {
+  const lock = target.replace(/\/+$/, "") + ".lock";
+  const holderPath = join(lock, "holder.json");
+  io.mkdirSync(dirname(lock), { recursive: true });
+  let told = false;
+  for (;;) {
+    try {
+      io.mkdirSync(lock);
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+    let holder = null;
+    try {
+      holder = JSON.parse(io.readFileSync(holderPath, "utf8"));
+    } catch {}
+    let stale;
+    try {
+      stale = holder ? holder.host === host && !alive(holder.pid) : Date.now() - io.statSync(lock).mtimeMs > 60000;
+    } catch {
+      continue; // (released meanwhile)
+    }
+    if (stale) {
+      io.rmSync(lock, { recursive: true, force: true });
+      continue;
+    }
+    if (!told) {
+      log(`engine: waiting for the build in ${holder?.root ?? "another checkout"} (pid ${holder?.pid ?? "?"}) to finish with ${target}`);
+      told = true;
+    }
+    sleep(wait);
+  }
+  try {
+    io.writeFileSync(holderPath, JSON.stringify({ pid: process.pid, host, root: process.cwd(), since: new Date().toISOString() }));
+    return fn();
+  } finally {
+    io.rmSync(lock, { recursive: true, force: true });
+  }
 }
