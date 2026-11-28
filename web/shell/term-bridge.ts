@@ -137,7 +137,8 @@ export function fileHandler(port: CommandPort) {
     if (a.mode === "at" && (e!.rev ?? 0) !== a.rev) throw port.refuse("ECONFLICT", p);
     const base = e ? { fid: e.fid!, rev: e.rev ?? 0 } : null;
     const cur = e?.size ?? 0;
-    const size = a.mode === "replace" ? length : a.mode === "append" ? cur + length : Math.max(cur, a.pos + length);
+    // (no bytes at a position or the end of a file that is there change nothing: its size stays, wherever the position)
+    const size = a.mode === "replace" ? length : !length && e ? cur : a.mode === "append" ? cur + length : Math.max(cur, a.pos + length);
     if (size > port.limits.write_bytes!) throw port.over("write_bytes");
     if (!body) return { base, size, content: null };
     if (a.mode === "replace" || !e) return { base, size, content: a.mode === "at" ? place(new Uint8Array(0), body, a.pos) : body };
@@ -271,6 +272,10 @@ export function fileHandler(port: CommandPort) {
                     const q = p;
                     port.mutating(q);
                     const c = await compose(q, a, body, body.length);
+                    // (an empty write at a position or the end of a file that is there, checked as any other (the
+                    // descriptor's file and revision): nothing committed, so its revision stays and no other descriptor
+                    // of it goes stale, as os.write(fd, b"") on a file)
+                    if (!body.length && a.mode !== "replace" && c.base) return { fid: c.base.fid, rev: c.base.rev, size: c.size };
                     const at = await port.commit(q, c.content!, c.base);
                     if (slot?.path === q) slot = null;
                     return { fid: at.fid, rev: at.rev, size: c.content!.length };

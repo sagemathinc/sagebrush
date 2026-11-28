@@ -114,8 +114,7 @@ const fidIno = new Map<string, number>();
 const inoOfFid = (fid: string) => fidIno.get(fid) ?? (fidIno.set(fid, nextIno), nextIno++);
 // (session-local metadata for workspace paths: os.chmod's bits and os.utime's times, as for the local entries)
 const livePerm = new Map<string, number>(), liveTimes = new Map<string, [number, number]>();
-function liveStat(r: string) {
-  const k = statOf(r);
+function liveStat(r: string, k: Kind = statOf(r)) {
   const t = liveTimes.get(r);
   return {
     isDirectory: () => k.kind === "folder", isFile: () => k.kind === "file", isSymbolicLink: () => false,
@@ -477,9 +476,16 @@ export function closeSync(fd: number): void {
   fdOf(fd, "close");
   fds.delete(fd);
 }
+// (a workspace descriptor's file as it is now, which must still be its own file (its fid): replaced or removed since,
+// EBADF, as a read on it is; never the metadata of whatever is at its path now)
+function liveFile(lf: { path: string; fid: string }, op: string): Kind {
+  const k = statOf(lf.path);
+  if (k.kind !== "file" || k.fid !== lf.fid) fail("EBADF", -9, op, "");
+  return k;
+}
 export function fstatSync(fd: number) {
   const lf = liveFds.get(fd);
-  if (lf) return liveStat(lf.path);
+  if (lf) return liveStat(lf.path, liveFile(lf, "fstat"));
   const f = fdOf(fd, "fstat").entry;
   return {
     isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false,
@@ -493,7 +499,7 @@ export function fstatSync(fd: number) {
 export function seekFd(fd: number, pos: number, how: number): number {
   const lf = liveFds.get(fd);
   if (lf) {
-    const base = how === 0 ? 0 : how === 1 ? lf.pos : how === 2 ? statOf(lf.path).size : NaN;
+    const base = how === 0 ? 0 : how === 1 ? lf.pos : how === 2 ? liveFile(lf, "lseek").size : NaN;
     if (Number.isNaN(base) || !Number.isSafeInteger(pos) || base + pos < 0 || base + pos > FILE_MAX) fail("EINVAL", -22, "lseek", "");
     return (lf.pos = base + pos);
   }

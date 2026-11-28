@@ -202,6 +202,21 @@ async function writes(check) {
     check((await read(ws, "/w/r.txt")) === "xyzz\0\0!", "a positional write past the end: zeros between");
     check(err(await call("write", { path: "/w/r.txt", fid: e2.fid, mode: "at", rev: e2.rev, pos: 0 }, 1)) === "ECONFLICT", "a positional write on a stale revision: ECONFLICT before any body");
     check(err(await call("write", { path: "/w/r.txt", fid: "nope", mode: "append" }, 1)) === "EBADF", "an append by a fid that isn't the file's now: EBADF");
+    // an empty write at a position or the end changes nothing: not the size (even past the end), not the revision, so
+    // another descriptor of the file stays good (as os.write(fd, b"") on a file); nothing charged
+    {
+      await (await call("write", { path: "/w/z.txt", mode: "replace" }, 3)).admit(enc("abc"));
+      const z = await ws.stat("/w/z.txt"), led = run.ledger();
+      let r0 = await (await call("write", { path: "/w/z.txt", fid: z.fid, mode: "at", rev: z.rev, pos: 9 }, 0)).admit(new Uint8Array(0));
+      const z1 = await ws.stat("/w/z.txt");
+      check(r0.json?.size === 3 && r0.json?.rev === z.rev && (await read(ws, "/w/z.txt")) === "abc" && z1.rev === z.rev && run.ledger().ops === led.ops,
+        `an empty positional write past the end: nothing changes, size 3, the revision kept, nothing charged (${JSON.stringify(r0)})`);
+      r0 = await (await call("write", { path: "/w/z.txt", fid: z.fid, mode: "at", rev: z.rev, pos: 0 }, 0)).admit(new Uint8Array(0));
+      await (await call("write", { path: "/w/z.txt", fid: z.fid, mode: "at", rev: z.rev, pos: 0 }, 1)).admit(enc("Z"));
+      check((await read(ws, "/w/z.txt")) === "Zbc", "after one descriptor's empty write, another's write on the same revision lands (Zbc), no ECONFLICT");
+      r0 = await (await call("write", { path: "/w/z.txt", fid: z.fid, mode: "append" }, 0)).admit(new Uint8Array(0));
+      check(r0.json?.size === 3 && (await read(ws, "/w/z.txt")) === "Zbc", "an empty append: nothing changes");
+    }
     const before = run.ledger();
     r = await call("write", { path: "/w/big.txt", mode: "replace" }, 70000);
     check(err(r) === "EDQUOT" && !r.admit && run.terminal?.row === 4 && run.terminal.key === "write_bytes", `a header past write_bytes: refused before its body moves or is allocated, the limit typed (${JSON.stringify(r).slice(0, 120)})`);
