@@ -7377,6 +7377,11 @@
   "owner": "finite fields + configuration",
   "row": "inv-1"
  },
+ "lib/_sage_ff.py :: IntegerMod.nth_root :: raise NotImplementedError(\"nth_root for large moduli\") #1": {
+  "class": "coverage",
+  "owner": "Sage finite rings",
+  "reason": "all k-th roots for k = 0 list every nonzero residue: for a modulus of 10^6 or more that list is refused (unsupported), as the k > 0 search's; a single root needs no list"
+ },
  "lib/_sage_ff.py :: Polynomial_ff.splitting_field :: most EMBED_MAX elements (ff.embed_max, unlimited by default) checked on #0": {
   "class": "none",
   "owner": "finite fields + configuration"
@@ -9147,6 +9152,16 @@
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
+ "lib/_scipy_stats_py.py :: pearsonr :: if xmax == 0 or ymax == 0 or bool(np.all(x == x[0])) or bool(np.all(y == y[0])): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: nx, ny = xmax * float(np.sqrt(np.dot(ux, ux))), ymax * float(np.sqrt(np.dot(uy, uy))) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
  "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
@@ -9156,6 +9171,16 @@
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: ux, uy = xm / xmax, ym / ymax #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: xmax, ymax = float(np.max(np.abs(xm))), float(np.max(np.abs(ym))) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
  },
  "lib/_scipy_stats_py.py :: rankdata :: \"\"\"the ranks of a (from 1), ties by method ('average', 'min', 'max', 'dense' or 'ordinal'), as float64 as #0": {
   "class": "none",
@@ -9173,11 +9198,6 @@
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
  "lib/_scipy_stats_py.py :: spearmanr :: raise NotImplementedError(\"scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)\") #0": {
-  "class": "coverage",
-  "owner": "python (@sagebrush-python)",
-  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
- },
- "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
@@ -14221,6 +14241,11 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: argminmax :: if (isMax ? cgt(vr, vi, br, bim) : cgt(br, bim, vr, vi)) { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
  "src/runtime/numpy.ts :: axesArg :: const axes = axis.map((x) => normAxis(axisInt(x), nd)); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -14230,6 +14255,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: normAxis's 'max'; a single axis read as an index, a bool refused (#1944)"
+ },
+ "src/runtime/numpy.ts :: better :: const better = (xr: number, xi: number, yr: number, yi: number) => (isMax ? cgt(yr, yi, xr, xi) : cgt(xr, xi, yr, yi)); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: big :: if (m <= Number.MAX_SAFE_INTEGER) return 16; #0": {
   "class": "none",
@@ -14256,6 +14286,36 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: I64MAX and U64MAX, the int64 and uint64 ranges, by which NumPy discovers a Python int's dtype and past which its C conversion raises OverflowError; NumPy's semantics, not a Sagebrush limit"
  },
+ "src/runtime/numpy.ts :: cmaxmin :: const bBetter = isMax ? br > ar || (br === ar && bi > ai) : br < ar || (br === ar && bi < ai); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: fmax: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.max(x, y)), c: cmaxmin(true, true) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: fmin: { f: (x, y) => (x !== x ? y : y !== y ? x : Math.min(x, y)), c: cmaxmin(false, true) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: function cmaxmin(isMax: boolean, skip: boolean): CBin { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: maximum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.max(x, y)), c: cmaxmin(true, false) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cmaxmin :: minimum: { f: (x, y) => (x !== x || y !== y ? NaN : Math.min(x, y)), c: cmaxmin(false, false) }, #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum/fmax/fmin loops (NumPy's ordering of complex numbers), not a limit"
+ },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
   "owner": "NumPy shim",
@@ -14265,6 +14325,21 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: const ax = axes === null ? a.shape.map((_, i) => i) : [...new Set(axes.map((x) => normAxis(x, nd)))]; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: function cplxMinmax(a: NDArray, axes: number[] | null, keepdims: boolean, isMax: boolean, initial: any, firstWins: boolean): NDArray { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
+ },
+ "src/runtime/numpy.ts :: cplxMinmax :: if (w === null) raise(T.TypeError, `the initial value of a complex ${isMax ? \"maximum\" : \"minimum\"} must be a number`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: cumulative :: if (axis !== null && axis !== undefined) normAxis(intNum(axis), a.ndim); #0": {
   "class": "none",
@@ -14320,6 +14395,11 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: isMax picks the max/min fold (firstWins: fmax/fmin's tie rule for nanmax/nanmin)"
+ },
+ "src/runtime/numpy.ts :: minmax :: if (a.dt.cplx) return finish(cplxMinmax(a, axes, keepdims, isMax, initial, firstWins), axis, keepdims); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax and the names of the complex maximum/minimum fold (NumPy's ordering of complex numbers), not a limit"
  },
  "src/runtime/numpy.ts :: minmax :: raise(T.ValueError, `zero-size array to reduction operation ${isMax ? \"maximum\" : \"minimum\"} which has no identity`); #0": {
   "class": "none",

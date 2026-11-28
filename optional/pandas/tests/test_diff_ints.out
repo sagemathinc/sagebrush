@@ -1,0 +1,1069 @@
+== uint8 diff(1)
+
+0      NaN
+1    255.0
+2      2.0
+3      0.0
+4    253.0
+5      4.0
+dtype: float64
+== uint8 diff(1).hex
+['nan', '0x1.fe00000000000p+7', '0x1.0000000000000p+1', '0x0.0p+0', '0x1.fa00000000000p+7', '0x1.0000000000000p+2']
+== uint8 diff(2)
+
+0      NaN
+1      NaN
+2      1.0
+3      2.0
+4    253.0
+5      1.0
+dtype: float64
+== uint8 diff(2).hex
+['nan', 'nan', '0x1.0000000000000p+0', '0x1.0000000000000p+1', '0x1.fa00000000000p+7', '0x1.0000000000000p+0']
+== uint8 diff(-1)
+
+0      1.0
+1    254.0
+2      0.0
+3      3.0
+4    252.0
+5      NaN
+dtype: float64
+== uint8 diff(-1).hex
+['0x1.0000000000000p+0', '0x1.fc00000000000p+7', '0x0.0p+0', '0x1.8000000000000p+1', '0x1.f800000000000p+7', 'nan']
+== uint8 diff(-2)
+
+0    255.0
+1    254.0
+2      3.0
+3    255.0
+4      NaN
+5      NaN
+dtype: float64
+== uint8 diff(-2).hex
+['0x1.fe00000000000p+7', '0x1.fc00000000000p+7', '0x1.8000000000000p+1', '0x1.fe00000000000p+7', 'nan', 'nan']
+== uint8 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float64
+== uint8 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== uint8 diff(5)
+
+0    NaN
+1    NaN
+2    NaN
+3    NaN
+4    NaN
+5    2.0
+dtype: float64
+== uint8 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '0x1.0000000000000p+1']
+== uint8 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== uint8 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== uint8 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== uint8 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== uint16 diff(1)
+
+0        NaN
+1    65535.0
+2        2.0
+3    65533.0
+4        4.0
+5        0.0
+dtype: float64
+== uint16 diff(1).hex
+['nan', '0x1.fffe000000000p+15', '0x1.0000000000000p+1', '0x1.fffa000000000p+15', '0x1.0000000000000p+2', '0x0.0p+0']
+== uint16 diff(2)
+
+0        NaN
+1        NaN
+2        1.0
+3    65535.0
+4        1.0
+5        4.0
+dtype: float64
+== uint16 diff(2).hex
+['nan', 'nan', '0x1.0000000000000p+0', '0x1.fffe000000000p+15', '0x1.0000000000000p+0', '0x1.0000000000000p+2']
+== uint16 diff(-1)
+
+0        1.0
+1    65534.0
+2        3.0
+3    65532.0
+4        0.0
+5        NaN
+dtype: float64
+== uint16 diff(-1).hex
+['0x1.0000000000000p+0', '0x1.fffc000000000p+15', '0x1.8000000000000p+1', '0x1.fff8000000000p+15', '0x0.0p+0', 'nan']
+== uint16 diff(-2)
+
+0    65535.0
+1        1.0
+2    65535.0
+3    65532.0
+4        NaN
+5        NaN
+dtype: float64
+== uint16 diff(-2).hex
+['0x1.fffe000000000p+15', '0x1.0000000000000p+0', '0x1.fffe000000000p+15', '0x1.fff8000000000p+15', 'nan', 'nan']
+== uint16 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float64
+== uint16 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== uint16 diff(5)
+
+0    NaN
+1    NaN
+2    NaN
+3    NaN
+4    NaN
+5    2.0
+dtype: float64
+== uint16 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '0x1.0000000000000p+1']
+== uint16 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== uint16 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== uint16 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== uint16 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== uint32 diff(1)
+
+0             NaN
+1    4.294967e+09
+2    2.000000e+00
+3    4.294967e+09
+4    4.000000e+00
+5    4.294967e+09
+dtype: float64
+== uint32 diff(1).hex
+['nan', '0x1.fffffffe00000p+31', '0x1.0000000000000p+1', '0x1.fffffffa00000p+31', '0x1.0000000000000p+2', '0x1.fffffffa00000p+31']
+== uint32 diff(2)
+
+0             NaN
+1             NaN
+2    1.000000e+00
+3    4.294967e+09
+4    1.000000e+00
+5    1.000000e+00
+dtype: float64
+== uint32 diff(2).hex
+['nan', 'nan', '0x1.0000000000000p+0', '0x1.fffffffe00000p+31', '0x1.0000000000000p+0', '0x1.0000000000000p+0']
+== uint32 diff(-1)
+
+0    1.000000e+00
+1    4.294967e+09
+2    3.000000e+00
+3    4.294967e+09
+4    3.000000e+00
+5             NaN
+dtype: float64
+== uint32 diff(-1).hex
+['0x1.0000000000000p+0', '0x1.fffffffc00000p+31', '0x1.8000000000000p+1', '0x1.fffffff800000p+31', '0x1.8000000000000p+1', 'nan']
+== uint32 diff(-2)
+
+0    4.294967e+09
+1    1.000000e+00
+2    4.294967e+09
+3    4.294967e+09
+4             NaN
+5             NaN
+dtype: float64
+== uint32 diff(-2).hex
+['0x1.fffffffe00000p+31', '0x1.0000000000000p+0', '0x1.fffffffe00000p+31', '0x1.fffffffe00000p+31', 'nan', 'nan']
+== uint32 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float64
+== uint32 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== uint32 diff(5)
+
+0             NaN
+1             NaN
+2             NaN
+3             NaN
+4             NaN
+5    4.294967e+09
+dtype: float64
+== uint32 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '0x1.fffffffe00000p+31']
+== uint32 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== uint32 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== uint32 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== uint32 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== int8 diff(1)
+
+0      NaN
+1   -200.0
+2    200.0
+3    -99.0
+4   -129.0
+5    255.0
+dtype: float32
+== int8 diff(1).hex
+['nan', '-0x1.9000000000000p+7', '0x1.9000000000000p+7', '-0x1.8c00000000000p+6', '-0x1.0200000000000p+7', '0x1.fe00000000000p+7']
+== int8 diff(2)
+
+0      NaN
+1      NaN
+2      0.0
+3    101.0
+4   -228.0
+5    126.0
+dtype: float32
+== int8 diff(2).hex
+['nan', 'nan', '0x0.0p+0', '0x1.9400000000000p+6', '-0x1.c800000000000p+7', '0x1.f800000000000p+6']
+== int8 diff(-1)
+
+0    200.0
+1   -200.0
+2     99.0
+3    129.0
+4   -255.0
+5      NaN
+dtype: float32
+== int8 diff(-1).hex
+['0x1.9000000000000p+7', '-0x1.9000000000000p+7', '0x1.8c00000000000p+6', '0x1.0200000000000p+7', '-0x1.fe00000000000p+7', 'nan']
+== int8 diff(-2)
+
+0      0.0
+1   -101.0
+2    228.0
+3   -126.0
+4      NaN
+5      NaN
+dtype: float32
+== int8 diff(-2).hex
+['0x0.0p+0', '-0x1.9400000000000p+6', '0x1.c800000000000p+7', '-0x1.f800000000000p+6', 'nan', 'nan']
+== int8 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float32
+== int8 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== int8 diff(5)
+
+0     NaN
+1     NaN
+2     NaN
+3     NaN
+4     NaN
+5    27.0
+dtype: float32
+== int8 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '0x1.b000000000000p+4']
+== int8 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float32
+== int8 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== int8 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float32
+== int8 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== int16 diff(1)
+
+0        NaN
+1   -60000.0
+2    30001.0
+3    32766.0
+4   -65535.0
+5    32768.0
+dtype: float32
+== int16 diff(1).hex
+['nan', '-0x1.d4c0000000000p+15', '0x1.d4c4000000000p+14', '0x1.fff8000000000p+14', '-0x1.fffe000000000p+15', '0x1.0000000000000p+15']
+== int16 diff(2)
+
+0        NaN
+1        NaN
+2   -29999.0
+3    62767.0
+4   -32769.0
+5   -32767.0
+dtype: float32
+== int16 diff(2).hex
+['nan', 'nan', '-0x1.d4bc000000000p+14', '0x1.ea5e000000000p+15', '-0x1.0002000000000p+15', '-0x1.fffc000000000p+14']
+== int16 diff(-1)
+
+0    60000.0
+1   -30001.0
+2   -32766.0
+3    65535.0
+4   -32768.0
+5        NaN
+dtype: float32
+== int16 diff(-1).hex
+['0x1.d4c0000000000p+15', '-0x1.d4c4000000000p+14', '-0x1.fff8000000000p+14', '0x1.fffe000000000p+15', '-0x1.0000000000000p+15', 'nan']
+== int16 diff(-2)
+
+0    29999.0
+1   -62767.0
+2    32769.0
+3    32767.0
+4        NaN
+5        NaN
+dtype: float32
+== int16 diff(-2).hex
+['0x1.d4bc000000000p+14', '-0x1.ea5e000000000p+15', '0x1.0002000000000p+15', '0x1.fffc000000000p+14', 'nan', 'nan']
+== int16 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float32
+== int16 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== int16 diff(5)
+
+0        NaN
+1        NaN
+2        NaN
+3        NaN
+4        NaN
+5   -30000.0
+dtype: float32
+== int16 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '-0x1.d4c0000000000p+14']
+== int16 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float32
+== int16 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== int16 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float32
+== int16 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== int32 diff(1)
+
+0             NaN
+1    1.000000e+00
+2   -2.147484e+09
+3    5.000000e+00
+4   -1.000000e+01
+5    6.000000e+00
+dtype: float64
+== int32 diff(1).hex
+['nan', '0x1.0000000000000p+0', '-0x1.0000000000000p+31', '0x1.4000000000000p+2', '-0x1.4000000000000p+3', '0x1.8000000000000p+2']
+== int32 diff(2)
+
+0             NaN
+1             NaN
+2   -2.147484e+09
+3   -2.147484e+09
+4   -5.000000e+00
+5   -4.000000e+00
+dtype: float64
+== int32 diff(2).hex
+['nan', 'nan', '-0x1.fffffffc00000p+30', '-0x1.ffffffec00000p+30', '-0x1.4000000000000p+2', '-0x1.0000000000000p+2']
+== int32 diff(-1)
+
+0   -1.000000e+00
+1   -2.147484e+09
+2   -5.000000e+00
+3    1.000000e+01
+4   -6.000000e+00
+5             NaN
+dtype: float64
+== int32 diff(-1).hex
+['-0x1.0000000000000p+0', '-0x1.0000000000000p+31', '-0x1.4000000000000p+2', '0x1.4000000000000p+3', '-0x1.8000000000000p+2', 'nan']
+== int32 diff(-2)
+
+0    2.147484e+09
+1    2.147484e+09
+2    5.000000e+00
+3    4.000000e+00
+4             NaN
+5             NaN
+dtype: float64
+== int32 diff(-2).hex
+['0x1.fffffffc00000p+30', '0x1.ffffffec00000p+30', '0x1.4000000000000p+2', '0x1.0000000000000p+2', 'nan', 'nan']
+== int32 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float64
+== int32 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== int32 diff(5)
+
+0             NaN
+1             NaN
+2             NaN
+3             NaN
+4             NaN
+5   -2.147484e+09
+dtype: float64
+== int32 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '-0x1.fffffff800000p+30']
+== int32 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== int32 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== int32 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== int32 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== int64 diff(1)
+
+0             NaN
+1   -1.000000e+00
+2   -2.000000e+00
+3    4.503600e+15
+4   -9.007199e+15
+5    4.503600e+15
+dtype: float64
+== int64 diff(1).hex
+['nan', '-0x1.0000000000000p+0', '-0x1.0000000000000p+1', '0x1.0000000000002p+52', '-0x1.0000000000000p+53', '0x1.0000000000007p+52']
+== int64 diff(2)
+
+0             NaN
+1             NaN
+2   -3.000000e+00
+3    4.503600e+15
+4   -4.503600e+15
+5   -4.503600e+15
+dtype: float64
+== int64 diff(2).hex
+['nan', 'nan', '-0x1.8000000000000p+1', '0x1.0000000000000p+52', '-0x1.ffffffffffffcp+51', '-0x1.ffffffffffff2p+51']
+== int64 diff(-1)
+
+0    1.000000e+00
+1    2.000000e+00
+2   -4.503600e+15
+3    9.007199e+15
+4   -4.503600e+15
+5             NaN
+dtype: float64
+== int64 diff(-1).hex
+['0x1.0000000000000p+0', '0x1.0000000000000p+1', '-0x1.0000000000002p+52', '0x1.0000000000000p+53', '-0x1.0000000000007p+52', 'nan']
+== int64 diff(-2)
+
+0    3.000000e+00
+1   -4.503600e+15
+2    4.503600e+15
+3    4.503600e+15
+4             NaN
+5             NaN
+dtype: float64
+== int64 diff(-2).hex
+['0x1.8000000000000p+1', '-0x1.0000000000000p+52', '0x1.ffffffffffffcp+51', '0x1.ffffffffffff2p+51', 'nan', 'nan']
+== int64 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float64
+== int64 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== int64 diff(5)
+
+0    NaN
+1    NaN
+2    NaN
+3    NaN
+4    NaN
+5    6.0
+dtype: float64
+== int64 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '0x1.8000000000000p+2']
+== int64 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== int64 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== int64 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== int64 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== float32 diff(1)
+
+0             NaN
+1   -1.250000e+00
+2   -2.250000e+00
+3    5.000000e+00
+4    1.000000e+30
+5   -2.000000e+30
+dtype: float32
+== float32 diff(1).hex
+['nan', '-0x1.4000000000000p+0', '-0x1.2000000000000p+1', '0x1.4000000000000p+2', '0x1.93e5940000000p+99', '-0x1.93e5940000000p+100']
+== float32 diff(2)
+
+0             NaN
+1             NaN
+2   -3.500000e+00
+3    2.750000e+00
+4    1.000000e+30
+5   -1.000000e+30
+dtype: float32
+== float32 diff(2).hex
+['nan', 'nan', '-0x1.c000000000000p+1', '0x1.6000000000000p+1', '0x1.93e5940000000p+99', '-0x1.93e5940000000p+99']
+== float32 diff(-1)
+
+0    1.250000e+00
+1    2.250000e+00
+2   -5.000000e+00
+3   -1.000000e+30
+4    2.000000e+30
+5             NaN
+dtype: float32
+== float32 diff(-1).hex
+['0x1.4000000000000p+0', '0x1.2000000000000p+1', '-0x1.4000000000000p+2', '-0x1.93e5940000000p+99', '0x1.93e5940000000p+100', 'nan']
+== float32 diff(-2)
+
+0    3.500000e+00
+1   -2.750000e+00
+2   -1.000000e+30
+3    1.000000e+30
+4             NaN
+5             NaN
+dtype: float32
+== float32 diff(-2).hex
+['0x1.c000000000000p+1', '-0x1.6000000000000p+1', '-0x1.93e5940000000p+99', '0x1.93e5940000000p+99', 'nan', 'nan']
+== float32 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float32
+== float32 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== float32 diff(5)
+
+0             NaN
+1             NaN
+2             NaN
+3             NaN
+4             NaN
+5   -1.000000e+30
+dtype: float32
+== float32 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '-0x1.93e5940000000p+99']
+== float32 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float32
+== float32 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== float32 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float32
+== float32 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== float64 diff(1)
+
+0              NaN
+1    -1.250000e+00
+2    -2.250000e+00
+3    1.000000e+308
+4             -inf
+5    1.000000e+308
+dtype: float64
+== float64 diff(1).hex
+['nan', '-0x1.4000000000000p+0', '-0x1.2000000000000p+1', '0x1.1ccf385ebc8a0p+1023', '-inf', '0x1.1ccf385ebc8a0p+1023']
+== float64 diff(2)
+
+0              NaN
+1              NaN
+2    -3.500000e+00
+3    1.000000e+308
+4   -1.000000e+308
+5   -1.000000e+308
+dtype: float64
+== float64 diff(2).hex
+['nan', 'nan', '-0x1.c000000000000p+1', '0x1.1ccf385ebc8a0p+1023', '-0x1.1ccf385ebc8a0p+1023', '-0x1.1ccf385ebc8a0p+1023']
+== float64 diff(-1)
+
+0     1.250000e+00
+1     2.250000e+00
+2   -1.000000e+308
+3              inf
+4   -1.000000e+308
+5              NaN
+dtype: float64
+== float64 diff(-1).hex
+['0x1.4000000000000p+0', '0x1.2000000000000p+1', '-0x1.1ccf385ebc8a0p+1023', 'inf', '-0x1.1ccf385ebc8a0p+1023', 'nan']
+== float64 diff(-2)
+
+0     3.500000e+00
+1   -1.000000e+308
+2    1.000000e+308
+3    1.000000e+308
+4              NaN
+5              NaN
+dtype: float64
+== float64 diff(-2).hex
+['0x1.c000000000000p+1', '-0x1.1ccf385ebc8a0p+1023', '0x1.1ccf385ebc8a0p+1023', '0x1.1ccf385ebc8a0p+1023', 'nan', 'nan']
+== float64 diff(0)
+
+0    0.0
+1    0.0
+2    0.0
+3    0.0
+4    0.0
+5    0.0
+dtype: float64
+== float64 diff(0).hex
+['0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0', '0x0.0p+0']
+== float64 diff(5)
+
+0    NaN
+1    NaN
+2    NaN
+3    NaN
+4    NaN
+5   -1.5
+dtype: float64
+== float64 diff(5).hex
+['nan', 'nan', 'nan', 'nan', 'nan', '-0x1.8000000000000p+0']
+== float64 diff(6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== float64 diff(6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== float64 diff(-6)
+
+0   NaN
+1   NaN
+2   NaN
+3   NaN
+4   NaN
+5   NaN
+dtype: float64
+== float64 diff(-6).hex
+['nan', 'nan', 'nan', 'nan', 'nan', 'nan']
+== frame diff
+
+       u     i     f
+0    NaN   NaN   NaN
+1  255.0 -10.0 -0.25
+2    2.0   5.0  0.75
+== frame diff dtypes
+
+u    float64
+i    float32
+f    float64
+dtype: object
+== frame diff(-1)
+
+       u     i     f
+0    1.0  10.0  0.25
+1  254.0  -5.0 -0.75
+2    NaN   NaN   NaN
+== int64 [-9007199254740992, 1] diff(1).hex
+['nan', '0x1.0000000000000p+53']
+== int64 [-9007199254740992, 1] diff(-1).hex
+['-0x1.0000000000000p+53', 'nan']
+== int64 [1, -9007199254740992] diff(1).hex
+['nan', '-0x1.0000000000000p+53']
+== int64 [1, -9007199254740992] diff(-1).hex
+['0x1.0000000000000p+53', 'nan']
+== int64 [9007199254740992, -1] diff(1).hex
+['nan', '-0x1.0000000000000p+53']
+== int64 [9007199254740992, -1] diff(-1).hex
+['0x1.0000000000000p+53', 'nan']
+== int64 [-1, 9007199254740992] diff(1).hex
+['nan', '0x1.0000000000000p+53']
+== int64 [-1, 9007199254740992] diff(-1).hex
+['-0x1.0000000000000p+53', 'nan']
+== int64 [-9007199254740992, 9007199254740992] diff(1).hex
+['nan', '0x1.0000000000000p+54']
+== int64 [-9007199254740992, 9007199254740992] diff(-1).hex
+['-0x1.0000000000000p+54', 'nan']
+== int64 [4503599627370496, -4503599627370497, 3] diff(1).hex
+['nan', '-0x1.0000000000000p+53', '0x1.0000000000004p+52']
+== int64 [4503599627370496, -4503599627370497, 3] diff(-1).hex
+['0x1.0000000000000p+53', '-0x1.0000000000004p+52', 'nan']
+== diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== diff(-9223372036854775808)
+
+0   NaN
+1   NaN
+dtype: float64
+== uint8 len 2 diff(100000000000000000000)
+[nan, nan]
+== uint8 len 2 diff(-100000000000000000000)
+[nan, nan]
+== uint8 len 2 diff(9223372036854775808)
+[nan, nan]
+== uint8 len 2 diff(-9223372036854775809)
+[nan, nan]
+== uint8 len 2 diff(9223372036854775807)
+[nan, nan]
+== uint8 len 2 diff(-9223372036854775808)
+[nan, nan]
+== uint8 len 2 diff(10000000000000000000000000000000000000000)
+[nan, nan]
+== uint8 len 0 diff(100000000000000000000)
+[]
+== uint8 len 0 diff(-100000000000000000000)
+[]
+== uint8 len 0 diff(9223372036854775808)
+[]
+== uint8 len 0 diff(-9223372036854775809)
+[]
+== uint8 len 0 diff(9223372036854775807)
+[]
+== uint8 len 0 diff(-9223372036854775808)
+[]
+== uint8 len 0 diff(10000000000000000000000000000000000000000)
+[]
+== uint16 len 2 diff(100000000000000000000)
+[nan, nan]
+== uint16 len 2 diff(-100000000000000000000)
+[nan, nan]
+== uint16 len 2 diff(9223372036854775808)
+[nan, nan]
+== uint16 len 2 diff(-9223372036854775809)
+[nan, nan]
+== uint16 len 2 diff(9223372036854775807)
+[nan, nan]
+== uint16 len 2 diff(-9223372036854775808)
+[nan, nan]
+== uint16 len 2 diff(10000000000000000000000000000000000000000)
+[nan, nan]
+== uint16 len 0 diff(100000000000000000000)
+[]
+== uint16 len 0 diff(-100000000000000000000)
+[]
+== uint16 len 0 diff(9223372036854775808)
+[]
+== uint16 len 0 diff(-9223372036854775809)
+[]
+== uint16 len 0 diff(9223372036854775807)
+[]
+== uint16 len 0 diff(-9223372036854775808)
+[]
+== uint16 len 0 diff(10000000000000000000000000000000000000000)
+[]
+== uint32 len 2 diff(100000000000000000000)
+[nan, nan]
+== uint32 len 2 diff(-100000000000000000000)
+[nan, nan]
+== uint32 len 2 diff(9223372036854775808)
+[nan, nan]
+== uint32 len 2 diff(-9223372036854775809)
+[nan, nan]
+== uint32 len 2 diff(9223372036854775807)
+[nan, nan]
+== uint32 len 2 diff(-9223372036854775808)
+[nan, nan]
+== uint32 len 2 diff(10000000000000000000000000000000000000000)
+[nan, nan]
+== uint32 len 0 diff(100000000000000000000)
+[]
+== uint32 len 0 diff(-100000000000000000000)
+[]
+== uint32 len 0 diff(9223372036854775808)
+[]
+== uint32 len 0 diff(-9223372036854775809)
+[]
+== uint32 len 0 diff(9223372036854775807)
+[]
+== uint32 len 0 diff(-9223372036854775808)
+[]
+== uint32 len 0 diff(10000000000000000000000000000000000000000)
+[]
+== int8 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 2 diff(9223372036854775807)
+[nan, nan]
+== int8 len 2 diff(-9223372036854775808)
+[nan, nan]
+== int8 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int8 len 0 diff(9223372036854775807)
+[]
+== int8 len 0 diff(-9223372036854775808)
+[]
+== int8 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 2 diff(9223372036854775807)
+[nan, nan]
+== int32 len 2 diff(-9223372036854775808)
+[nan, nan]
+== int32 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int32 len 0 diff(9223372036854775807)
+[]
+== int32 len 0 diff(-9223372036854775808)
+[]
+== int32 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 2 diff(9223372036854775807)
+[nan, nan]
+== int64 len 2 diff(-9223372036854775808)
+[nan, nan]
+== int64 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== int64 len 0 diff(9223372036854775807)
+[]
+== int64 len 0 diff(-9223372036854775808)
+[]
+== int64 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 2 diff(9223372036854775807)
+[nan, nan]
+== float32 len 2 diff(-9223372036854775808)
+[nan, nan]
+== float32 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float32 len 0 diff(9223372036854775807)
+[]
+== float32 len 0 diff(-9223372036854775808)
+[]
+== float32 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 2 diff(9223372036854775807)
+[nan, nan]
+== float64 len 2 diff(-9223372036854775808)
+[nan, nan]
+== float64 len 2 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(-100000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(9223372036854775808)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(-9223372036854775809)
+!! OverflowError: Python int too large to convert to C ssize_t
+== float64 len 0 diff(9223372036854775807)
+[]
+== float64 len 0 diff(-9223372036854775808)
+[]
+== float64 len 0 diff(10000000000000000000000000000000000000000)
+!! OverflowError: Python int too large to convert to C ssize_t

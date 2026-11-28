@@ -5,7 +5,7 @@
 // Unicode name table is left out.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync, readdirSync, existsSync, cpSync, mkdtempSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { previewHost } from "./latex/preview-host.mjs";
 import { latexModeName } from "./latex/build-mode.mjs";
@@ -848,8 +848,21 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
   cpSync(project, join(out, "project"), { recursive: true });
   writeFileSync(join(out, "project.space.json"), JSON.stringify({ format: "sagebrush-space", version: 1, title: "A small project", summary: "Its folders and files as rooms: enter a folder, a file, or a class in it; an import leads to the file it names.", tree: { name: "project", commit: "", base: "/space/project/", files, imports: [] } }) + "\n");
   examples.push("project.space.json");
+  // (the larger examples, generated from this checkout: each is fetched only when picked from the page's list, so none
+  //  adds to what the page loads first)
+  const { modularSpace } = await import("./space/examples/modular.ts");
+  writeFileSync(join(out, "modular-forms.space.json"), JSON.stringify(modularSpace(join(here, ".."))) + "\n");
+  examples.push("modular-forms.space.json");
   examples.sort();
   writeFileSync(join(out, "spaces.json"), JSON.stringify(examples) + "\n");
+  // (everything written here for the page passes the repository's push text check: generated spaces carry paths,
+  //  documentation and code that no diff shows)
+  const { textProblems } = await import("./space/examples/text-check.ts");
+  const texts = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? texts(join(dir, e.name)) : /\.(json|md|html|py|sage|js|ts|rs|ipynb|txt)$/.test(e.name) && dir !== join(out, "chunks") && !(dir === out && e.name === "space.js") ? [join(dir, e.name)] : []);
+  for (const f of texts(out)) {
+    const hits = textProblems(readFileSync(f, "utf8"));
+    if (hits.length) throw new Error(`web/build.ts: ${relative(here, f)} fails the push text check: ${hits.slice(0, 3).join(", ")}`);
+  }
 }
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N
 // threads of the tab, through engine/nd's WebAssembly module (wasm/sagebrush-nd.wasm). Flagged like the questions
