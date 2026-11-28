@@ -2,8 +2,9 @@
 // The 3D view's examples as the build writes them (web/build.ts, after a site build: bun web/build.ts): every file it
 // writes for /space/ passes the repository's push text check (web/space/examples/text-check.ts), which catches each of
 // its words and allows "cup product"; the generated "Modular forms in Sagebrush" is a space the viewer accepts, with
-// its crates, Python layers, notes, samples and plot; and "Sagebrush's repository", paths and links only, its files
-// read from GitHub at the build's commit; the page's list offers both. (Fetched only when picked:
+// its crates, Python layers, notes, samples (each output exactly what running it with this checkout gives) and plot;
+// and "Sagebrush's repository", paths and links only, its files read from GitHub at the build's commit; the page's
+// list offers both. (Fetched only when picked:
 // web/space/test-page.mjs.)
 //   bun web/space/test-examples.mjs
 import { execFileSync } from "node:child_process";
@@ -45,7 +46,19 @@ if (space) {
   ok(kinds("code").length === 6 && kinds("code").every((n) => n.lang === "sage" && n.output), "six Sage samples, each with its output");
   ok(kinds("plot3d").length === 1 && kinds("plot3d")[0].surface?.z?.length === 12, "the dimension plot (k = 2..24)");
   ok(space.edges.length > 100 && space.edges.every((e) => ids.has(e.from) && ids.has(e.to)), `its ${space.edges.length} links join its objects`);
-  ok(!/https?:\/\//.test(JSON.stringify(space.nodes.map((n) => n.src ?? ""))), "nothing in it is fetched from elsewhere (no node has a src)");
+  ok(space.nodes.every((n) => !("src" in n)), "nothing in it is fetched: no node has a src");
+  // (each sample's output is what running it gives: its program with this checkout's Sagebrush (build/cli/pyjs.cjs,
+  //  Sage syntax), the repr of its last line, compared exactly)
+  const cli = join(here, "..", "..", "build", "cli", "pyjs.cjs");
+  for (const n of kinds("code")) {
+    const lines = n.text.split("\n"), last = lines.pop();
+    let got;
+    try { got = execFileSync("node", [cli, "--sage", "-c", [...lines, `print(repr((${last})))`].join("\n")], { encoding: "utf8", timeout: 300_000 }).replace(/\n$/, ""); } catch (e) { got = "failed: " + String(e.stderr ?? e).slice(-300); }
+    ok(got === n.output, `the sample "${n.title}" shows exactly the output it gives`, got === n.output ? undefined : { stored: n.output.slice(0, 120), run: got.slice(0, 240) });
+  }
+  // (and the plot's data is the dimensions themselves: dim S_k(Gamma0(N)) for N = 1..40, k = 2..24 even, computed now)
+  const plot = kinds("plot3d")[0], grid = execFileSync("node", [cli, "--sage", "-c", "print([[Gamma0(N).dimension_cusp_forms(k) for N in range(1, 41)] for k in range(2, 26, 2)])"], { encoding: "utf8", timeout: 300_000 }).trim();
+  ok(JSON.stringify(plot.surface.z) === grid.replace(/ /g, "") && JSON.stringify(plot.surface.x) === JSON.stringify([...Array(40)].map((_, i) => i + 1)) && JSON.stringify(plot.surface.y) === JSON.stringify([...Array(12)].map((_, i) => 2 * i + 2)), "the plot's dimensions are the ones computed now", { stored: JSON.stringify(plot.surface.z).slice(0, 80), run: grid.slice(0, 80) });
 }
 // ---- Sagebrush's repository: paths, lengths and links only; its files read from GitHub at the build's commit
 ok(list.includes("repository.space.json"), "the page's list offers the repository");

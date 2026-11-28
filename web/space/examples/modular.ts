@@ -93,11 +93,14 @@ export function modularSpace(repo: string) {
   nodes.push({ id: "overview", kind: "note", title: "Modular forms in Sagebrush", group: "notes",
     text: "# Modular forms in Sagebrush\n\nThree layers, all Sagebrush's own code:\n\n1. **Sage mode** (`lib/_sage_modular.py`, `lib/_sage_hmf.py`): `ModularSymbols`, `Gamma0`, `newform_orbits`, `HilbertModularForms`, ... with Sage's names and printing.\n2. **The engine's Python API** (`lib/sagebrush/mf.py`, `modsym.py`, `ap.py`): plain functions that call the engine through `_engine.call`.\n3. **The Rust engine** (`engine/modsym`, `engine/hmf`, `engine/ap`, `engine/lfun`): every loop over mathematical data.\n\nThe code samples around this space are **runnable**: click one, change it, and press Shift+Enter." });
 
-  // ---- Sage samples, with the output they give (run with sagebrush 0.10.2, Nov 19 2026)
+  // ---- Sage samples, each with its output exactly as running it gives (the repr of its last line), never abbreviated:
+  //      web/space/test-examples.mjs runs every one with this checkout's Sagebrush and compares; the four of Sage's own
+  //      functions (the Hecke polynomials, the dimensions, a_p) give the same in Sage 10.10; newform_orbits and
+  //      _sage_hmf are Sagebrush's
   const samples: [string, string, string, string, string][] = [
     ["s-hecke23", "Hecke polynomial T_2 on level 23", "ModularSymbols(23).hecke_polynomial(2).factor()", "(x - 3) * (x^2 + x - 1)^2", "engine/modsym/src/lib.rs"],
-    ["s-hecke389", "Level 389: T_2's characteristic polynomial", "ModularSymbols(389).hecke_polynomial(2).factor()", "(x - 3) * (x + 2)^2 * (x^2 - 2)^2 * (x^3 - 4*x - 2)^2 * (x^6 + 3*x^5 - ...)^2 * (x^20 - 3*x^19 - ...)^2", "engine/modsym/src/lib.rs"],
-    ["s-orbits37", "Newforms of level 37", "newform_orbits(37, 2)", "[37.2.a.a (dimension 1): q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + O(q^6),\n 37.2.a.b (dimension 1): q + q^3 - 2*q^4 + O(q^6)]", "lib/_sage_modular.py"],
+    ["s-hecke389", "Level 389: T_2's characteristic polynomial", "ModularSymbols(389).hecke_polynomial(2).factor()", "(x - 3) * (x + 2)^2 * (x^2 - 2)^2 * (x^3 - 4*x - 2)^2 * (x^6 + 3*x^5 - 2*x^4 - 8*x^3 + 2*x^2 + 4*x - 1)^2 * (x^20 - 3*x^19 - 29*x^18 + 91*x^17 + 338*x^16 - 1130*x^15 - 2023*x^14 + 7432*x^13 + 6558*x^12 - 28021*x^11 - 10909*x^10 + 61267*x^9 + 6954*x^8 - 74752*x^7 + 1407*x^6 + 46330*x^5 - 1087*x^4 - 12558*x^3 - 942*x^2 + 960*x + 148)^2", "engine/modsym/src/lib.rs"],
+    ["s-orbits37", "Newforms of level 37", "newform_orbits(37, 2)", "[37.2.a.a (dimension 1): q - 2*q^2 - 3*q^3 + 2*q^4 - 2*q^5 + O(q^6), 37.2.a.b (dimension 1): q + q^3 - 2*q^4 + O(q^6)]", "lib/_sage_modular.py"],
     ["s-dims", "dim S_2(Gamma0(N)), N = 1..30", "[Gamma0(N).dimension_cusp_forms(2) for N in range(1, 31)]", "[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 2, 2, 1, 0, 2, 1, 2, 2, 3]", "lib/_sage_modular.py"],
     ["s-ap11", "a_p of the curve 11a1", "E = EllipticCurve('11a1')\n[E.ap(p) for p in primes(50)]", "[-2, -1, 1, -2, 1, 4, -2, 0, -1, 0, 7, 3, -8, -6, 8]", "engine/ap/src/lib.rs"],
     ["s-hmf31", "Hilbert modular forms of level 31", "from _sage_hmf import HilbertModularForms\nH = HilbertModularForms(31)\nH, H.dimension()", "(Hilbert modular forms of dimension 20, level 31 (of norm 961=31^2) over QQ(sqrt(5)), 20)", "engine/hmf/src/lib.rs"],
