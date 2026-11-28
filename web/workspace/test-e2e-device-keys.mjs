@@ -293,15 +293,40 @@ try {
       return { first, left: left === null, retry };
     })()`);
     ok(refused.first.code === "server" && refused.left && refused.retry.ok === 64, "genesis whose append is refused (409) before it applies leaves no device behind, and trying again succeeds", refused);
-    // (another device's genesis first after this one's append failed: this device goes, no recovery code, try again)
+    // (another device's genesis first after this one's append failed, a real one that verifies: this device goes, no
+    // recovery code, try again. A first entry that doesn't verify proves nothing: the device stays, unconfirmed)
     const other = await P.ev(`(async () => {
-      const acct = (await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "OTHER" } })).json()).account;
-      let first;
-      try { first = { ok: (await K.DeviceKeys.create("laptop", transport("OTHER", { refuse: 503, otherAfter: JSON.stringify({ body: { op: "genesis", from: "another device" } }) }))).recoveryCode }; }
-      catch (e) { first = { code: e.code, message: e.message }; }
-      return { first, left: !!(await deviceOf(acct)) };
+      const E = e2eCore();
+      const c = await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "OTHER" } })).json();
+      const acct = c.account, ctx = { aud: c.aud, account: c.account };
+      const pair = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
+      const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+      const signer = await asKey(raw, async (m) => new Uint8Array(await crypto.subtle.sign("Ed25519", pair.privateKey, m)));
+      const rk = await E.recoveryKeys(E.newRecoverySeed(), acct);
+      // (the device's own X25519 public key: any fresh one, here another recovery key's)
+      const dk = await E.recoveryKeys(E.newRecoverySeed(), acct);
+      const id = ${J(made.id)};
+      const body = E.nextBody(null, ctx, "genesis", { device: { id, name: "another", kind: "browser", sign: b64(raw), kem: b64(dk.kem.publicRaw) }, recovery: { sign: b64(rk.sign.raw), kem: b64(rk.kem.publicRaw) }, epoch: { n: 0, suite: 1, commit: await E.epochCommit(E.newEpochSecret(), acct, 0), keyring: null } });
+      const genesis = new TextDecoder().decode(await E.sealEntry(E.deviceSigner(id, signer), body, signer, { recovery: rk.sign }));
+      const valid = !!(await E.applyChainEntry(null, new TextEncoder().encode(genesis), ctx));
+      const tryWith = async (otherAfter) => { try { return { ok: (await K.DeviceKeys.create("laptop", transport("OTHER", { refuse: 503, otherAfter }))).recoveryCode }; } catch (e) { return { code: e.code, message: e.message }; } };
+      const first = await tryWith(genesis);
+      const left = !!(await deviceOf(acct));
+      const out = { valid, first, left, bad: [] };
+      // (unverifiable: a bare synthetic one, and the real one with its signature changed)
+      const g = JSON.parse(genesis), sig = g.sig ?? null;
+      const tampered = sig ? JSON.stringify({ ...g, sig: (sig[0] === "A" ? "B" : "A") + sig.slice(1) }) : genesis.replace("another", "anothex");
+      for (const bad of [JSON.stringify({ body: { op: "genesis", from: "another device" } }), tampered]) {
+        const r = await tryWith(bad);
+        const kept = await deviceOf(acct);
+        out.bad.push({ r, kept: !!kept, shown: kept?.recoveryShown ?? null });
+        await K.resetDevice(acct);
+      }
+      return out;
     })()`);
-    ok(other.first.code === "server" && /try again/.test(other.first.message) && !other.first.ok && other.left === false, "genesis that finds another device's genesis first (its own append failed) forgets this device, returns no recovery code, and says to try again", other);
+    ok(other.valid && other.first.code === "server" && /try again/.test(other.first.message) && !other.first.ok && other.left === false, "genesis that finds another device's genesis first, one that verifies (its own append failed), forgets this device, returns no recovery code, and says to try again", other);
+    ok(other.bad.length === 2 && other.bad.every((b) => b.r.code === "server" && /reload/.test(b.r.message) && b.kept && b.shown === false),
+      "genesis that finds a first entry that doesn't verify (synthetic, or a real one with its signature changed) keeps this device, unconfirmed: it proves nothing", other.bad);
     // (a 5xx with no entry, twice: the append may still land, so the device stays, unconfirmed, and isn't forgotten)
     const late = await P.ev(`(async () => {
       const acct = (await (await fetch("/api/sync/v1/e2e/chain?from=0", { headers: { "x-test-as": "LATE" } })).json()).account;

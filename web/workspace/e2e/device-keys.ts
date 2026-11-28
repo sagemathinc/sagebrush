@@ -106,6 +106,16 @@ async function markForked(account: string, code: string): Promise<void> {
   await done(tx);
 }
 
+/** Whether `entry` is a genesis for this account that verifies: only that proves another device's genesis came first. */
+async function verifiedGenesis(E: ReturnType<typeof e2eCore>, entry: string, ctx: { aud: string; account: string }): Promise<boolean> {
+  try {
+    await E.applyChainEntry(null, new TextEncoder().encode(entry), ctx);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The server's chain for the signed-in account: its E2E account id, audience and entries. */
 async function fetchChain(t: Transport): Promise<{ account: string; aud: string; entries: string[] }> {
   const r = await t("GET", `${API}/chain?from=0`);
@@ -232,10 +242,11 @@ export class DeviceKeys implements OpKeys {
       status = (await t("POST", `${API}/chain`, { entry: text, keyring: null, wrappers })).status;
     } catch { /* (decided below, from the chain) */ }
     if (status !== 201) {
-      // (a failed or lost append: the chain says which. This entry first: it applied, and genesis finishes. Another entry
-      // first, or none after a definite refusal (4xx): it didn't, and this device goes, so the person can try again. None
-      // after a lost answer or a 5xx: the append may still land, so the chain is read once more after a pause, and if it
-      // still has none the device stays, marked as not having shown its code; a reload then says so)
+      // (a failed or lost append: the chain says which. This entry first: it applied, and genesis finishes. Another
+      // genesis first that verifies (its form and signatures), or none after a definite refusal (4xx): it didn't, and this
+      // device goes, so the person can try again. None after a lost answer or a 5xx, or a first entry that doesn't verify:
+      // the chain is read once more after a pause, and if it still says nothing certain the device stays, marked as not
+      // having shown its code; a reload then says so)
       const refused = status !== null && status >= 400 && status < 500;
       let applied: "yes" | "no" | "unknown" = "unknown";
       for (let i = 0; i < 2 && applied === "unknown"; i++) {
@@ -244,7 +255,8 @@ export class DeviceKeys implements OpKeys {
           const now = await fetchChain(t);
           if (now.account !== c.account) break;
           if (now.entries[0] === text) applied = "yes";
-          else if (now.entries.length > 0 || refused) applied = "no";
+          else if (now.entries.length > 0) { if (await verifiedGenesis(E, now.entries[0], ctx)) applied = "no"; }
+          else if (refused) applied = "no";
         } catch { /* (the chain couldn't be read: still unknown) */ }
       }
       if (applied === "no") {
