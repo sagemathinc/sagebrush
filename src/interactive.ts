@@ -42,7 +42,8 @@ export function complete(main: any, line: string, moduleNames: () => string[]): 
   let names: string[] = [];
   try {
     if (dot < 0) {
-      names = [...Object.keys(main).filter((k) => k[0] !== "$"), ...Object.keys(R.builtins), "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield"];
+      // (and Sage mode's names not loaded yet, which using one loads: R.lazyUnloaded)
+      names = [...Object.keys(main).filter((k) => k[0] !== "$"), ...R.lazyUnloaded(main), ...Object.keys(R.builtins), "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield"];
     } else {
       const objExpr = word.slice(0, dot);
       if (!/^[A-Za-z_][\w.]*$/.test(objExpr)) return [[], line];

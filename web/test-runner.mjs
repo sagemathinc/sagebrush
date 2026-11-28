@@ -384,29 +384,29 @@ try {
   await sleep(500);
   const f = (await run("factor(2^64 + 1)")).trim();
   ok(f === "274177 * 67280421310721", "Sage mode and the engine work, with no network in the runner: " + f);
-  // (finite-field matrices, lib/_sage_ffmat.py, are their own chunk, mod-sage-ffmat: Sage's start fetches none of it,
-  // and the first matrix over GF(p) fetches exactly that group, once, its own imports (_sage_ff) being in Sage's start
-  // group already; its first echelon (the rank) then fetches the binary route's, mod-sage-ffmat-bin, once; the
-  // expected line is SageMath 10.9's output of the same statement)
-  const ffmatFetches = () => libFetched.filter((g) => g === "mod-sage-ffmat").length;
-  ok(ffmatFetches() === 0, "Sage's start fetches no mod-sage-ffmat: " + JSON.stringify(libFetched));
+  // (Sage mode's session loads a domain the first time one of its names is used, lib/_sage_lazy.py: its start fetches
+  // no domain's group, mod-sage-*, web/lib-chunks.mts)
+  ok(libFetched.every((g) => !g.startsWith("mod-sage-")), "Sage's start fetches no domain's group (mod-sage-*): " + JSON.stringify(libFetched));
+  // (GF, lib/_sage_ff.py, is a domain's, mod-sage-ff, and finite-field matrices, lib/_sage_ffmat.py, another's,
+  // mod-sage-ffmat: the first matrix over GF(p) fetches exactly those two groups, once, and its first echelon (the rank)
+  // the binary route's, mod-sage-ffmat-bin; the expected line is SageMath 10.9's output of the same statement)
   const fetchedBefore = libFetched.length;
   const ffm = (await run("M = matrix(GF(7), [[1, 2], [3, 4]]); print(M * vector(GF(7), [1, 1]), M.rank())")).trim();
-  ok(ffm === "(3, 0) 2" && JSON.stringify(libFetched.slice(fetchedBefore)) === JSON.stringify(["mod-sage-ffmat", "mod-sage-ffmat-bin"]),
-    "a matrix over GF(p) fetches exactly mod-sage-ffmat, then its echelon mod-sage-ffmat-bin, each once, and gives Sage's answer: " + JSON.stringify([ffm, libFetched.slice(fetchedBefore)]));
+  ok(ffm === "(3, 0) 2" && JSON.stringify(libFetched.slice(fetchedBefore)) === JSON.stringify(["mod-sage-ff", "mod-sage-ffmat", "mod-sage-ffmat-bin"]),
+    "a matrix over GF(p) fetches exactly mod-sage-ff and mod-sage-ffmat, then its echelon mod-sage-ffmat-bin, each once, and gives Sage's answer: " + JSON.stringify([ffm, libFetched.slice(fetchedBefore)]));
   // (a package's module, packages/cremona-small: its chunk through the frame,
   // checked against the registry, src/compile.ts)
   const ec = (await run("EllipticCurve('11a1').ainvs()")).trim();
   ok(ec === "(0, -1, 1, -10, -20)", "a package's module imports (Cremona's table, @sagebrush/cremona-small): " + ec);
   // (elliptic curves over GF(p), lib/_sage_ec_ff.py, are their own chunk,
   // mod-sage-ec-ff: Sage's start and another Sage extra fetch none of it (a
-  // symbolic matrix's determinant, lib/_sage_matrix_sr.py in sage-more); the
+  // symbolic matrix's determinant, lib/_sage_matrix_sr.py in mod-sage-matrix-sr); the
   // first curve over GF(p) fetches it once and gives Sage's answer; the
   // expected lines are SageMath 10.9's output of the same statements)
   const ecFetches = () => libFetched.filter((g) => g === "mod-sage-ec-ff").length;
-  const moreBefore = libFetched.filter((g) => g === "sage-more").length;
+  const moreBefore = libFetched.filter((g) => g === "mod-sage-matrix-sr").length;
   const det = (await run("var('t'); print(matrix(SR, [[t, 1], [1, t]]).det())")).trim();
-  ok(det === "t^2 - 1" && libFetched.filter((g) => g === "sage-more").length > moreBefore && ecFetches() === 0, "another Sage extra (sage-more) fetches no mod-sage-ec-ff: " + JSON.stringify([det, libFetched]));
+  ok(det === "t^2 - 1" && libFetched.filter((g) => g === "mod-sage-matrix-sr").length > moreBefore && ecFetches() === 0, "another Sage extra (mod-sage-matrix-sr) fetches no mod-sage-ec-ff: " + JSON.stringify([det, libFetched]));
   const ff = (await run("E = EllipticCurve([Mod(7, 11), Mod(2, 11)]); print(E.order(), E((8, 3)))")).trim();
   ok(ff === "7 (8 : 3 : 1)" && ecFetches() === 1, "an elliptic curve over GF(p) fetches mod-sage-ec-ff, once, and gives Sage's answer: " + JSON.stringify([ff, libFetched]));
 

@@ -1111,6 +1111,9 @@ function openTex(e: Entry, tab: boolean): boolean {
 }
 function openEntry(e: Entry, how: "here" | "tab") {
   const url = e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!);
+  // (in the app, a new window of its own, by the document's path; one another window shows brought to the front instead:
+  // app/src-tauri/src/windows.rs window_open, #1541)
+  if (how === "tab" && desktopApp) return void (window as any).__TAURI__.core.invoke("window_open", { at: "/?wsopen=" + encodeURIComponent(e.path), doc: e.path }).catch((err: any) => alert(`${e.path} didn't open in a new window: ${err?.message ?? err}`));
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "board" && e.ref === source.slice(6)) return;
   // (in the app, a notebook or board another window shows: that window to the front instead, app/src-tauri/src/windows.rs
@@ -1267,6 +1270,8 @@ const host: BoardHost = {
   mode: local ? { start: modeOf(modeKey("board", source.slice(6))) === "edit", toggled: (on) => rememberMode(modeKey("board", source.slice(6)), on ? "edit" : "view") } : undefined,
   // (Sagebrush's board page: the one File menu as the notebook's, what it can't do here disabled)
   fullFileMenu: true,
+  // (File ▸ New window: the app's page in a window of its own, #1541)
+  ...(desktopApp ? { newWindow: () => void (window as any).__TAURI__.core.invoke("window_open", { at: "/" }).catch((err: any) => alert(`A new window didn't open: ${err?.message ?? err}`)) } : {}),
   // (a board brought in from a file, opened here: its code waits for the person, until they run it)
   codePaused: local && isPaused(source.slice(6)),
   codeResumed: () => { if (local) unpause(source.slice(6)); },

@@ -57,7 +57,32 @@ ok(["class Circle", "class Square", "total_area(shapes)", "math"].every((t) => s
 ok(await enter(await idOf(`(n) => n.title === "class Circle"`)), "a class is entered");
 const circle = await titles();
 ok(["area", "scaled", "__init__"].every((m) => circle.some((t) => t.startsWith(m))), "its room: its methods", circle);
-ok((await leave()) && (await leave()) && (await room()) === "project › geometry/", "Back out, room by room", await room());
+ok((await leave()) && (await room()) === "project › geometry/ › shapes.py", "Back out of the class", await room());
+// (Back to a room that has links: drawn again as it was, not refused: drawing it linked its objects to each other)
+const linked = await ev(`({ ids: space3d.space.nodes.map((n) => n.id).sort().join(), edges: space3d.space.edges.length })`);
+ok(linked.edges > 0, "the file's room has links", linked);
+ok(await enter(await idOf(`(n) => n.title === "class Circle"`)) && (await leave()), "a class entered again, and left");
+await sleep(300);
+ok((await ev(`space3d.space.nodes.map((n) => n.id).sort().join()`)) === linked.ids && !/couldn't load/.test(await ev(`document.querySelector('[data-c="status"]').textContent`)), "Back to it shows it again", await ev(`document.querySelector('[data-c="status"]').textContent`));
+// (Back checks the space it comes back to, as any space: one changed past the limits while you were in a room, through
+//  the page's API, which hands out the live space, is refused, and you stay where you are)
+const status = () => ev(`document.querySelector('[data-c="status"]').textContent`);
+await ev(`(window.__outer = space3d.space, true)`);
+const circleId = await idOf(`(n) => n.title === "class Circle"`);
+ok(await enter(circleId), "a class entered, its file's space kept by the page");
+await ev(`(window.__outer.nodes[0].deep = JSON.parse("[".repeat(30) + "]".repeat(30)), true)`);
+await leave();
+await sleep(300);
+ok(/nested too deeply/.test(await status()) && (await room()) === "project › geometry/ › shapes.py › class Circle", "made too deep meanwhile: Back refuses it, and you stay in the class", [await status(), await room()]);
+await ev(`(delete window.__outer.nodes[0].deep, window.__outer.nodes.push(...Array.from({ length: 4000 }, (_, i) => ({ id: "x" + i, kind: "note", title: "x" }))), true)`);
+await leave();
+await sleep(300);
+ok(/more than 4000 objects/.test(await status()) && (await room()) === "project › geometry/ › shapes.py › class Circle", "given 4,000 objects more meanwhile: refused too", [await status(), await room()]);
+await ev(`(window.__outer.nodes.length = 4, true)`);
+ok((await leave()) && (await room()) === "project › geometry/ › shapes.py", "put right: Back takes you out", await room());
+await sleep(300);
+ok((await ev(`space3d.space.nodes.map((n) => n.id).sort().join()`)) === linked.ids, "and shows the file's room again");
+ok((await leave()) && (await room()) === "project › geometry/", "Back out, room by room", await room());
 
 // ---- an import leads to the file it names: relative (from .shapes) and absolute (geometry.report)
 ok(await enter("p:geometry/report.py"), "another file");

@@ -153,6 +153,8 @@ def _report(e, line, col):
     session goes on."""
     if isinstance(e, SystemExit):
         raise e
+    # (no permutation group's context outlives the statement an error ends: _ctx_enter's)
+    _CYCLE_CTX[0] = 0
     m = _re.match(r"name '([A-Za-z_][A-Za-z0-9_]*)' is not defined", str(e)) if isinstance(e, NameError) else None
     if m:
         # Magma rejects a statement that uses an undeclared identifier
@@ -595,10 +597,77 @@ class MTuple(tuple):
     def __repr__(self):
         return _str(self)
 
+
+class _MCycle(MTuple):
+    """A cycle (a, b, ...), made in a permutation group's context (_cycle)."""
+
     def __call__(self, *args):
         # (1, 2)(3, 4): a product of cycles, for G!(1, 2)(3, 4) (the
-        # translator reads (1, 2) as a tuple and the next one as a call)
-        return _MCycles([self, MTuple(args)])
+        # translator reads the next one as a call)
+        return _MCycles([self, _MCycle(args)])
+
+
+# How many permutation groups' contexts the running code is in: G!x evaluates x in G's (_coerce_ctx), so that a
+# cycle written there, or in a function it calls, can be made (G := Sym(3); f := func<| (1, 2)>; G!f(); is (1, 2))
+_CYCLE_CTX = [0]
+
+
+def _coerce_ctx(R, x, pos=None):
+    """R!x, x (a function of no arguments) evaluated in R's context when R
+    is a permutation group."""
+    if _is_perm_group(R):
+        _CYCLE_CTX[0] += 1
+        try:
+            x = x()
+        finally:
+            _CYCLE_CTX[0] -= 1
+    else:
+        x = x()
+    return _coerce(R, x, pos)
+
+
+def _ctx_enter(R):
+    """R, its context entered when it is a permutation group: _coerce_ctx's
+    form for an operand evaluated in place (one that binds names, as
+    exists(w){ ... } does), which _coerce_after leaves; an error in the
+    operand ends the statement, where _report clears the context.
+
+    This relies on an invariant: no code here catches a MagmaError raised
+    while user code is evaluated and goes on within the statement (the
+    catches that don't re-raise are equality helpers, and Magma mode
+    refuses try/catch), so every error ends its statement.  Code that
+    catches one and continues mid-statement must restore _CYCLE_CTX
+    itself."""
+    if _is_perm_group(R):
+        _CYCLE_CTX[0] += 1
+    return R
+
+
+def _coerce_after(R, x, pos=None):
+    """R!x, x evaluated in R's context (_ctx_enter), which is left now."""
+    if _is_perm_group(R):
+        _CYCLE_CTX[0] -= 1
+    return _coerce(R, x, pos)
+
+
+def _cycle(items, pos=None):
+    """The cycle (a, b, ...): Magma makes one only in a permutation group's
+    context; elsewhere its error depends on the last item's type, as Magma
+    2.18-5's does (checked against it: an integer is "No permutation group
+    context", an element of a ring or a tuple "Bad arguments", a string,
+    boolean, collection or structure "No constructor")."""
+    t = _type_name(items[-1]) or _type(items[-1])
+    if t == "GrpPermElt":
+        raise MagmaError("Bad arguments to cycle or commutator construction", "elt< ... >", True, pos)
+    if t in ("BoolElt", "MonStgElt") or not (t.endswith("Elt") or t == "Tup"):
+        raise MagmaError("No constructor provided for this type of object", None, True, pos)
+    if t != "RngIntElt":
+        raise MagmaError("Bad arguments", "elt< ... >", True, pos)
+    if not _CYCLE_CTX[0]:
+        raise MagmaError("No permutation group context in which to create cycle", "elt< ... >", True, pos)
+    c = _MCycle(items)
+    c._pos = pos  # (said at its "(" when the group finds it bad: G!(1, 4) in Sym(3))
+    return c
 
 
 class _MCycles(list):
@@ -606,7 +675,7 @@ class _MCycles(list):
     coercion takes one."""
 
     def __call__(self, *args):
-        return _MCycles(list(self) + [MTuple(args)])
+        return _MCycles(list(self) + [_MCycle(args)])
 
     def __repr__(self):
         raise MagmaError("a product of cycles outside G!( ... ) is not supported yet")
@@ -7820,7 +7889,7 @@ _CALLPOS = []
 def _call(pos, f, *args, **kw):
     """f(*args, **kw), made at pos (the "(" of the call in the source).  Only
     what Magma can call is called: a function or procedure (the user's or an
-    intrinsic), a map, and a tuple as a product of cycles, (1, 2)(3, 4)
+    intrinsic), a map, and a cycle as a product of cycles, (1, 2)(3, 4)
     (_magma_callable); anything else (an integer, a sequence, a matrix, a
     structure, a polynomial: Magma's map application isn't defined for it) is
     refused there, in Magma 2.18-5's words: with one argument "Bad argument
@@ -7843,8 +7912,8 @@ def _call(pos, f, *args, **kw):
 
 
 # (what Magma can call: functions, Python's and builtins, bound methods, classes (intrinsics made as classes),
-# forward cells, maps, and tuples and their products as cycles)
-_CALLABLE_TYPES = (type(lambda: 0), type(len), type(_Cell("f").get), type, _Cell, _CellCall, MMap, MTuple, _MCycles)
+# forward cells, maps, and cycles and their products; a tuple <a, b> isn't one)
+_CALLABLE_TYPES = (type(lambda: 0), type(len), type(_Cell("f").get), type, _Cell, _CellCall, MMap, _MCycle, _MCycles)
 
 
 def _magma_callable(f):
@@ -11789,7 +11858,10 @@ class _MSymGroup:
             if len(images) != self.n or sorted(images) != list(range(1, self.n + 1)):
                 raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: [RngIntElt]", "'!'", True)
             return _MPerm(self, images)
-        cycles = [x] if isinstance(x, MTuple) else list(x) if isinstance(x, _MCycles) else None
+        if type(x) is MTuple:
+            # (a tuple <a, b> is not a cycle: Magma's G!<1, 2> is an illegal coercion, its RHS shown as <>)
+            raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: <>", "'!'", False)
+        cycles = [x] if isinstance(x, _MCycle) else list(x) if isinstance(x, _MCycles) else None
         if cycles is None:
             raise MagmaError("coercion of a %s into a permutation group is not supported yet" % _type_of(x), "'!'", True)
         images = list(range(1, self.n + 1))
@@ -11797,7 +11869,7 @@ class _MSymGroup:
         for c in cycles:
             pts = list(c)
             if not pts or len(set(pts)) != len(pts) or any(isinstance(a, bool) or not isinstance(a, int) or not 1 <= a <= self.n for a in pts):
-                raise MagmaError("Bad arguments to cycle or commutator construction", "elt< ... >", True)
+                raise MagmaError("Bad arguments to cycle or commutator construction", "elt< ... >", True, getattr(c, "_pos", None))
             img = list(range(1, self.n + 1))
             for k, a in enumerate(pts):
                 img[a - 1] = pts[(k + 1) % len(pts)]
@@ -12042,7 +12114,33 @@ def _groups():
 
 
 def _group_ctor(kind, first, gens, pos):
-    """PermutationGroup< n | gens > and sub< G | gens > (lib/_magma_groups.py)."""
+    """PermutationGroup< n | gens > and sub< G | gens > (lib/_magma_groups.py):
+    gens (a function of no arguments) evaluated in a permutation group's
+    context, so that a cycle written there is made (_cycle), as Magma's."""
+    _CYCLE_CTX[0] += 1
+    try:
+        gens = gens()
+    finally:
+        _CYCLE_CTX[0] -= 1
+    return _group_built(kind, first, gens, pos)
+
+
+def _ctx_push(first):
+    """first, a permutation group's context entered for generators evaluated
+    in place (ones that bind names, as exists(w){ ... } does), which
+    _group_ctor_after leaves; an error in them ends the statement, where
+    _report clears the context (_ctx_enter's invariant)."""
+    _CYCLE_CTX[0] += 1
+    return first
+
+
+def _group_ctor_after(kind, first, gens, pos):
+    """_group_ctor for generators evaluated in place (_ctx_push)."""
+    _CYCLE_CTX[0] -= 1
+    return _group_built(kind, first, gens, pos)
+
+
+def _group_built(kind, first, gens, pos):
     if kind == "PermutationGroup":
         return _groups().construct(first, gens, pos)
     return _groups().sub(first, gens, pos)

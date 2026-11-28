@@ -609,9 +609,13 @@ test("constructors name< ... > parse; those not implemented yet raise at run tim
     const out = py(src);
     assert.match(out, /_m\._unsupported\("[A-Za-z]+", \(1, \d+\)\)/, src);
   }
-  // (sub< G | ... > and PermutationGroup< n | ... > are permutation groups now)
-  assert.match(py("H := sub< G | x, y >;"), /_m\._group_ctor\("sub", G, \[x, y\], \(1, 9\)\)/);
-  assert.match(py("P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;"), /_m\._group_ctor\("PermutationGroup", 5, \[/);
+  // (sub< G | ... > and PermutationGroup< n | ... > are permutation groups now; their generators are evaluated in the
+  // group's context, a lambda, so that a cycle written there is made: (1, 9) is the constructor's position)
+  assert.match(py("H := sub< G | x, y >;"), /_m\._group_ctor\("sub", G, lambda: \[x, y\], \(1, 9\)\)/);
+  assert.match(py("P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;"), /_m\._group_ctor\("PermutationGroup", 5, lambda: \[.*_m\._cycle\(\[1, 2, 3\], \(1, 28\)\).*_m\._cycle\(\[1, 2\], \(1, 42\)\)\], \(1, 22\)\)/);
+  assert.match(py("H := sub< G | (1, 2) >;"), /_m\._group_ctor\("sub", G, lambda: \[_m\._cycle\(\[1, 2\], \(1, 15\)\)\], \(1, 9\)\)/);
+  // (generators that bind a quantifier's witness: in place, between _ctx_push and _group_ctor_after, not a lambda)
+  assert.match(py("H := sub< G | exists(w){ y : y in [1..3] | y eq 2 } select (1,2) else (2,3) >;"), /_m\._group_ctor_after\("sub", _m\._ctx_push\(G\), \[/);
   assert.match(py("r := rec< F | a := 1, b := <2, 3> >;"), /_m\._rec\(F, \[\("a", 1\), \("b", _m\.MTuple\(\[2, 3\]\)\)\], \(1, 6\)\)/);
   assert.match(py("F := recformat< a : Integers(), b >;"), /_m\._recformat\(\[\("a", _m\._first\(Integers\(\)\)\), \("b", None\)\], \(1, 6\)\)/);
   // statements Magma rejects before running them: only the rejection is emitted
