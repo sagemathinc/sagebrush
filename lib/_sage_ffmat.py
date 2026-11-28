@@ -1700,15 +1700,65 @@ class FFMatrix:
         import _sage_expr
         return _sage_expr._latex_matrix(self._rows, self._ncols)
 
+    def _selector(self, idx, n, what):
+        """The indices a slice or a list of indices selects among n (Sage's
+        IndexErrors), or None for a single index."""
+        if isinstance(idx, slice):
+            return list(range(n)[idx])
+        if isinstance(idx, (list, tuple)):
+            import operator
+            out = []
+            for k in idx:
+                try:
+                    k = operator.index(k)
+                except TypeError:
+                    raise IndexError("%s indices must be integers" % what)
+                if not -n <= k < n:
+                    raise IndexError("matrix index out of range")
+                out.append(k % n)
+            return out
+        return None
+
     def __getitem__(self, ij):
+        """An entry, a row, or the submatrix that slices or lists of indices
+        select (its shape kept when it selects no rows).
+
+        EXAMPLES::
+
+            sage: A = matrix(GF(5), [[1, 2, 3], [3, 2, 1]])
+            sage: A[:0, :].dimensions(), A[:0, :].right_kernel().dimension(), A[1:1, 0].dimensions()
+            ((0, 3), 3, (0, 1))
+            sage: A[[1, 0], :], A[[1, 1], [2, 0]], A[[], :].dimensions()
+            (
+            [3 2 1]  [1 3]
+            [1 2 3], [1 3], (0, 3)
+            )
+            sage: A[[1, 0]]
+            [3 2 1]
+            [1 2 3]
+            sage: A[[2], :]
+            Traceback (most recent call last):
+            ...
+            IndexError: matrix index out of range
+        """
         if isinstance(ij, tuple):
             i, j = ij
-            if isinstance(i, slice) or isinstance(j, slice):
-                rows = self._rows[i] if isinstance(i, slice) else [self._rows[i]]
-                return FFMatrix(self._base, [r[j] if isinstance(j, slice) else [r[j]] for r in rows])
-            return self._rows[i][j]
+            ri = self._selector(i, len(self._rows), "row")
+            cj = self._selector(j, self._ncols, "column")
+            if ri is None and cj is None:
+                return self._rows[i][j]
+            if ri is None:
+                ri = self._selector([i], len(self._rows), "row")
+            if cj is None:
+                cj = self._selector([j], self._ncols, "column")
+            _admit_size(self._base, len(ri), len(cj))
+            return FFMatrix(self._base, [[self._rows[r][c] for c in cj] for r in ri], len(cj))
         if isinstance(ij, slice):
             return FFMatrix(self._base, self._rows[ij], self._ncols)
+        if isinstance(ij, list):
+            ri = self._selector(ij, len(self._rows), "row")
+            _admit_size(self._base, len(ri), self._ncols)
+            return FFMatrix(self._base, [list(self._rows[r]) for r in ri], self._ncols)
         return FFVector(self._base, self._rows[ij])
 
     def __setitem__(self, ij, v):
