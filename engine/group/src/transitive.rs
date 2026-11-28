@@ -155,15 +155,15 @@ pub fn conjugate_profiled(h1: &Group, h2: &Group, prof: &Profile) -> Result<bool
 
 /// The outer automorphism of Sym(6): the action of Sym(6) by conjugation
 /// on the six transitive subgroups PGL(2, 5) (each an S5 acting on 6 points),
-/// as the images of the generators of `s6`.
-fn outer_s6(s6: &Group) -> Vec<Perm> {
-    let p = primitive::projective_line(5, "pgl").unwrap();
+/// as the images of the generators of `s6`; a chain refusal is the Err.
+fn outer_s6(s6: &Group) -> Result<Vec<Perm>, String> {
+    let p = primitive::projective_line(5, "pgl")?;
     // the conjugates of p
     let mut conjs: Vec<Group> = vec![p.clone()];
     let mut i = 0;
     while i < conjs.len() {
         for g in &s6.gens {
-            let c = Group::new(6, conjs[i].gens.iter().map(|x| x.conj(g)).collect()).unwrap();
+            let c = Group::new(6, conjs[i].gens.iter().map(|x| x.conj(g)).collect())?;
             if !conjs.iter().any(|d| d.contains_group(&c)) {
                 conjs.push(c);
             }
@@ -174,10 +174,11 @@ fn outer_s6(s6: &Group) -> Vec<Perm> {
     s6.gens
         .iter()
         .map(|g| {
-            Perm((0..6).map(|j| {
-                let c = Group::new(6, conjs[j].gens.iter().map(|x| x.conj(g)).collect()).unwrap();
-                conjs.iter().position(|d| d.contains_group(&c)).unwrap() as u32
-            }).collect())
+            let images = (0..6).map(|j| {
+                let c = Group::new(6, conjs[j].gens.iter().map(|x| x.conj(g)).collect())?;
+                Ok(conjs.iter().position(|d| d.contains_group(&c)).unwrap() as u32)
+            });
+            images.collect::<Result<Vec<u32>, String>>().map(Perm)
         })
         .collect()
 }
@@ -212,7 +213,7 @@ fn two_block_groups(p: &Group, b: usize) -> Result<Vec<Group>, String> {
         let t = Perm::from_cycles(b, &[vec![0, 1]]).unwrap();
         auts.push(p.gens.iter().map(|g| g.conj(&t)).collect());
     } else if b == 6 {
-        auts.push(outer_s6(p));
+        auts.push(outer_s6(p)?);
     }
     for im in &auts {
         kernels.push(p.gens.iter().zip(im).map(|(g, h)| both(g, h)).collect());
