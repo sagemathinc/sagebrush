@@ -5,7 +5,8 @@
 // Entries ("sb.e2e-chain.v1"), each naming its predecessor's hash (the first valid entry at a position is the chain):
 //   genesis           the first device, the recovery key (countersigned by its Ed25519 half) and epoch 0
 //   add               a current device enrolls a new one, which countersigns; the new X25519 key's proof of
-//                     possession has the signing device as challenger (§11.1)
+//                     possession has the signing device as challenger (§11.1). A provisioned machine's add also
+//                     carries `provisioned` (below)
 //   remove            a current device removes another one, and the same entry starts the next epoch, so there is
 //                     never a chain state where a removed device still holds the current epoch (§2.2)
 //   epoch             a current device starts the next epoch (a suite change, or explicitly)
@@ -34,6 +35,19 @@
 // making the entry and its package visible together, durably, is the store's job (the server, and each device's
 // store), and nothing publishes an entry without them.
 //
+// The provisioned tier (notes provisioned-machine-enrollment r12.1 §1, r3): a `kind: "provisioned"` device is a GPU
+// machine our service created for one person. It holds the epochs and signs sealed ops like any device, but signs no
+// chain entry at all: every entry here is administrative (an add, a removal, an epoch, a recovery, a suite), so an entry
+// signed by a provisioned key is refused whatever it is (provisioned_signer). Such a device joins only by an add, signed
+// by a current non-provisioned device, never by genesis, a recovery or a reset (which would leave it the only device).
+// Its add carries exactly
+//   provisioned: { reservation, instance, retire_on, approved }
+// the reservation our service named, the provider's instance label (or null), the delegated policy
+// "reservation-retired" (or null: then no automatic removal), and how the person approved it: "start" (their page signed
+// it for the Start they pressed, which requires the policy) or "card" (they approved the fingerprint). These are the
+// service's labels and the person's decision, for retirement and display; none of them is proof of where the key is.
+// Any other kind's add carries no `provisioned`.
+//
 // Not here, by design: the inbox key and its rotation (shares, after launch), rotating a device's own keys (§11.1's
 // cross-certification), grant revocation (the agent channel), and dropping old epochs' keyrings (§11.2's signed
 // coverage): each comes with its own entry type.
@@ -47,7 +61,11 @@ import { checkKemPublic } from "./x25519.mjs";
 
 export const TYPE = "sb.e2e-chain.v1";
 /** The kinds of device (§6: browsers, the desktop app, the CLI, Autonomous VMs, connected computers). */
-export const DEVICE_KINDS = Object.freeze(["browser", "app", "cli", "vm", "computer"]);
+export const DEVICE_KINDS = Object.freeze(["browser", "app", "cli", "vm", "computer", "provisioned"]);
+/** The restricted tier's kind (r12.1 §1, r3). */
+export const PROVISIONED = "provisioned";
+/** The delegated removal policy a provisioned add may carry. */
+export const RETIRE_ON = "reservation-retired";
 const FIELDS = Object.freeze({
   genesis: ["device", "recovery", "epoch"],
   add: ["device", "pop"],
@@ -63,11 +81,23 @@ const CO = Object.freeze({ genesis: ["recovery"], add: ["device"], recover: ["de
 /** The ops the recovery key signs, and only it. */
 const BY_RECOVERY = new Set(["recover", "reset"]);
 const NAME = /^[^\p{Cc}\p{Cf}]{1,64}$/u;
+const LABEL = /^[A-Za-z0-9._:-]{1,128}$/;
 
-function checkDevice(d) {
+/** A device record's form; only an add (`viaAdd`) may enroll a provisioned one. */
+function checkDevice(d, viaAdd = false) {
   if (!exactKeys(d, ["id", "name", "kind", "sign", "kem"]) || !isId(d.id) || typeof d.name !== "string" || !NAME.test(d.name) || !DEVICE_KINDS.includes(d.kind))
     fail("bad_form", "a bad device");
+  if (d.kind === PROVISIONED && !viaAdd) fail("bad_form", "a provisioned device joins only by an add");
   return { sign: checkPublicKey(unb64(d.sign, 32)), kem: checkKemPublic(unb64(d.kem, 32)) };
+}
+/** A provisioned add's labels and approval, exactly. */
+function checkProvisioned(p) {
+  if (!exactKeys(p, ["reservation", "instance", "retire_on", "approved"]) || typeof p.reservation !== "string" || !LABEL.test(p.reservation)
+    || !(p.instance === null || (typeof p.instance === "string" && LABEL.test(p.instance))) || !(p.retire_on === null || p.retire_on === RETIRE_ON)
+    || !(p.approved === "start" || p.approved === "card"))
+    fail("bad_form", "a bad provisioned add");
+  if (p.approved === "start" && p.retire_on !== RETIRE_ON) fail("bad_form", "an add at Start carries the retirement policy");
+  return Object.freeze({ reservation: p.reservation, instance: p.instance, retireOn: p.retire_on, approved: p.approved });
 }
 function checkRecovery(r) {
   if (!exactKeys(r, ["sign", "kem"])) fail("bad_form", "a bad recovery key");
@@ -108,7 +138,8 @@ export function ringMeta(state, body) {
 /**
  * Verify one entry's bytes against `state` (null before genesis). `ctx`: { aud, account }. Returns { state, entry }.
  * Refusals: bad_form, bad_audience, bad_signature, chain_fork (not the next entry), device_unknown (a signer that
- * isn't a current device), bad_epoch, bad_suite, bad_keyring, key_reused.
+ * isn't a current device), provisioned_signer (a signer of the provisioned tier), bad_epoch, bad_suite, bad_keyring,
+ * key_reused.
  */
 export async function apply(state, bytes, ctx) {
   if (state && (state.aud !== ctx.aud || state.account !== ctx.account)) fail("bad_form", "not this chain");
@@ -116,7 +147,8 @@ export async function apply(state, bytes, ctx) {
   if (p.type !== TYPE) fail("bad_form", "not a chain entry");
   const { body, signer } = p;
   const op = body.op;
-  if (typeof op !== "string" || !Object.hasOwn(FIELDS, op) || !exactKeys(body, ["aud", "account", "seq", "prev", "op", ...FIELDS[op]])) fail("bad_form", "a bad entry");
+  const extra = op === "add" && body.device?.kind === PROVISIONED ? ["provisioned"] : [];
+  if (typeof op !== "string" || !Object.hasOwn(FIELDS, op) || !exactKeys(body, ["aud", "account", "seq", "prev", "op", ...FIELDS[op], ...extra])) fail("bad_form", "a bad entry");
   const seq = state ? state.seq + 1 : 0;
   if (!state && op !== "genesis") fail("bad_form", "a chain starts with genesis");
   if (state && op === "genesis") fail("bad_form", "one genesis");
@@ -135,6 +167,8 @@ export async function apply(state, bytes, ctx) {
     if (BY_RECOVERY.has(op)) fail("bad_signature", "only the recovery key signs a recovery or a reset");
     const d = state.devices.get(signer.id);
     if (!d || d.removed !== null || d.signKey !== signer.key) fail("device_unknown", "not a current device");
+    // (the tier: a provisioned key signs no chain entry, r12.1 §1)
+    if (d.kind === PROVISIONED) fail("provisioned_signer", "a provisioned device signs no chain entry");
     raw = d.sign;
   }
   if (signer.key !== (await keyId("ed25519", raw))) fail("bad_signature", "the signer's key id");
@@ -144,7 +178,7 @@ export async function apply(state, bytes, ctx) {
   const roles = CO[op] ?? [];
   if (p.co.size !== roles.length || roles.some((r) => !p.co.has(r))) fail("bad_form", "the wrong countersignatures");
   for (const r of roles) {
-    const k = r === "device" ? checkDevice(body.device).sign : checkRecovery(body.recovery).sign;
+    const k = r === "device" ? checkDevice(body.device, op === "add").sign : checkRecovery(body.recovery).sign;
     if (!(await verifyStrict(k, p.signed, p.co.get(r)))) fail("bad_signature", "a countersignature");
   }
 
@@ -159,13 +193,13 @@ export async function apply(state, bytes, ctx) {
     if (next.used.has(id)) fail("key_reused", "a key this account has used before");
     next.used.add(id);
   };
-  const enroll = async (d) => {
-    const k = checkDevice(d);
+  const enroll = async (d, prov = null) => {
+    const k = checkDevice(d, op === "add");
     if (next.devices.has(d.id)) fail("key_reused", "a device id this account has used before");
     await fresh("ed25519", k.sign);
     await fresh("x25519", k.kem);
     next.devices.set(d.id, Object.freeze({ id: d.id, name: d.name, kind: d.kind, sign: k.sign, signKey: await keyId("ed25519", k.sign),
-      kem: k.kem, kemKey: await keyId("x25519", k.kem), added: seq, removed: null }));
+      kem: k.kem, kemKey: await keyId("x25519", k.kem), added: seq, removed: null, provisioned: prov }));
   };
   const setRecovery = async (r) => {
     const k = checkRecovery(r);
@@ -186,7 +220,7 @@ export async function apply(state, bytes, ctx) {
       break;
     case "add":
       checkPop(body.pop);
-      await enroll(body.device);
+      await enroll(body.device, body.device.kind === PROVISIONED ? checkProvisioned(body.provisioned) : null);
       break;
     case "remove": {
       const t = next.devices.get(body.remove);
@@ -257,7 +291,7 @@ export async function loadAnchored(bytes, ctx, anchor) {
   const next = { aud: ctx.aud, account: ctx.account, seq, head, devices: new Map(), recovery: null, epoch: null, epochs: [], minSuite: body.min_suite, used: new Set(), hashes: [head], base: seq, generation: body.generation };
   const k = checkDevice(body.device), r = checkRecovery(body.recovery);
   for (const [alg, key] of [["ed25519", k.sign], ["x25519", k.kem], ["ed25519", r.sign], ["x25519", r.kem]]) next.used.add(`${alg}:${await keyId(alg, key)}`);
-  next.devices.set(body.device.id, Object.freeze({ id: body.device.id, name: body.device.name, kind: body.device.kind, sign: k.sign, signKey: await keyId("ed25519", k.sign), kem: k.kem, kemKey: await keyId("x25519", k.kem), added: seq, removed: null }));
+  next.devices.set(body.device.id, Object.freeze({ id: body.device.id, name: body.device.name, kind: body.device.kind, sign: k.sign, signKey: await keyId("ed25519", k.sign), kem: k.kem, kemKey: await keyId("x25519", k.kem), added: seq, removed: null, provisioned: null }));
   next.recovery = Object.freeze({ sign: r.sign, signKey: await keyId("ed25519", r.sign), kem: r.kem, kemKey: await keyId("x25519", r.kem), seq });
   next.epoch = checkEpoch(body.epoch, null, body.min_suite, body.prev, seq);
   next.epochs.push(next.epoch);
