@@ -26,3 +26,14 @@ for cm in (ListedColormap(['red', 'blue']), LinearSegmentedColormap.from_list('m
   // (0.5 is entry floor(0.5 N): the second of two colors; the middle of three, (0.5, 0, 0.5) as a byte each)
   assert.equal(out, "['#0000ff', '#ff0000']\n['#0000ff', '#800080', '#ff0000']\n");
 });
+
+test("points drawn with a custom colormap keep its colors' alpha", () => {
+  const out = run(["-c", `import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+import re
+fig, ax = plt.subplots()
+ax.scatter([0, 1], [0, 1], c=[0.0, 1.0], cmap=ListedColormap([(1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 1.0, 0.5)]))
+print(sorted(set(re.findall(r'fill="(rgba[^"]*)"', fig._svg()))))`]);
+  // (a transparent red and a half-transparent blue, not opaque)
+  assert.equal(out, "['rgba(0, 0, 255, 0.5)', 'rgba(255, 0, 0, 0)']\n");
+});

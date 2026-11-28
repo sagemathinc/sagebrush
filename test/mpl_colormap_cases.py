@@ -47,7 +47,9 @@ show("listed N=2", lambda: ListedColormap(["red", "blue", "green"], N=2)(np.lins
 # from_list: each channel interpolated at linspace(0, 1, N) ** gamma
 for label, colors, kw in [("named", ["red", "blue"], {}), ("three", ["red", "#00ff00", (0.0, 0.0, 1.0)], {}),
                           ("N=4", ["red", "blue"], {"N": 4}), ("N=1", ["red", "blue"], {"N": 1}),
-                          ("gamma 2", ["red", "blue"], {"N": 5, "gamma": 2.0}), ("rgba", [(1.0, 0.0, 0.0, 0.5), "blue"], {"N": 3})]:
+                          ("gamma 2", ["red", "blue"], {"N": 5, "gamma": 2.0}), ("rgba", [(1.0, 0.0, 0.0, 0.5), "blue"], {"N": 3}),
+                          ("rgba gamma 2", [(1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 1.0, 1.0)], {"N": 3, "gamma": 2.0}),
+                          ("rgba gamma 0.5", [(1.0, 0.0, 0.0, 0.2), (0.0, 1.0, 0.0, 0.9), "blue"], {"N": 6, "gamma": 0.5})]:
     m = LinearSegmentedColormap.from_list("m", colors, **kw)
     show("from_list %s N" % label, lambda: m.N)
     show("from_list %s floats" % label, lambda: m(np.array([0.0, 0.3, 0.5, 0.7, 1.0])))

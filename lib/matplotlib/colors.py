@@ -49,8 +49,12 @@ class Colormap:
     def _table_color(self, t):
         # (a custom colormap's color at t for drawing: its table's entry, as a CSS color, each channel rounded to a
         # byte, as _graphics.colormap draws a built-in one)
-        r, g, b, _ = _lookup(self._table(), float(t), None, False)
-        return "#%02x%02x%02x" % (round(float(r) * 255), round(float(g) * 255), round(float(b) * 255))
+        r, g, b, a = _lookup(self._table(), float(t), None, False)
+        v = (round(float(r) * 255), round(float(g) * 255), round(float(b) * 255))
+        # (an entry's alpha below 1 drawn too, as pyplot draws a color with alpha: "rgba(r, g, b, a)")
+        if float(a) < 1:
+            return "rgba(%d, %d, %d, %s)" % (v[0], v[1], v[2], ("%.6f" % float(a)).rstrip("0").rstrip(".") or "0")
+        return "#%02x%02x%02x" % v
 
 
 def _lookup(tab, x, alpha, bytes):
@@ -116,7 +120,8 @@ class LinearSegmentedColormap(Colormap):
 
     def _table(self):
         # (matplotlib's table of N colors: each channel interpolated linearly between the colors, evenly spaced on
-        # [0, 1], at linspace(0, 1, N) ** gamma, as its _create_lookup_table)
+        # [0, 1], at linspace(0, 1, N) ** gamma for red, green and blue, and at linspace(0, 1, N) for alpha, as its
+        # _init and _create_lookup_table)
         if not self._stops:
             return None
         import numpy as np
@@ -128,7 +133,7 @@ class LinearSegmentedColormap(Colormap):
             if self.N == 1:
                 lut = np.array([y[-1]])
             else:
-                xind = np.linspace(0, 1, self.N) ** self._gamma
+                xind = np.linspace(0, 1, self.N) ** (self._gamma if j < 3 else 1.0)
                 ind = np.searchsorted(x, xind)[1:-1]
                 distance = (xind[1:-1] - x[ind - 1]) / (x[ind] - x[ind - 1])
                 lut = np.concatenate([[y[0]], distance * (y[ind] - y[ind - 1]) + y[ind - 1], [y[-1]]])
