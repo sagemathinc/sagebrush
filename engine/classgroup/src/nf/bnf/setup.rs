@@ -12,7 +12,7 @@ pub(super) struct PreparedField {
     pub log_hr_lower_bound: Option<sagebrush_ball::Ball>,
 }
 
-pub(super) fn prepare_field(f: &[BigInt], extra: &[u64], config: &BnfConfig, t0: &crate::clock::Instant) -> Result<PreparedField, String> {
+pub(super) fn prepare_field(f: &[BigInt], extra: &[u64], config: &BnfConfig, t0: &crate::clock::Instant) -> Result<PreparedField, crate::nf::factor::FactorError> {
     let debug = config.diagnostics.progress;
     let (order, _, assumed_primes) = crate::nf::order::maximal_order_assuming(f)?;
     // a T2-reduced basis: the f64 work below needs a well-scaled one
