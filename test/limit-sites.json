@@ -8870,6 +8870,16 @@
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
+ "lib/_scipy_stats_py.py :: pearsonr :: if xmax == 0 or ymax == 0 or bool(np.all(x == x[0])) or bool(np.all(y == y[0])): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: nx, ny = xmax * float(np.sqrt(np.dot(ux, ux))), ymax * float(np.sqrt(np.dot(uy, uy))) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
  "lib/_scipy_stats_py.py :: pearsonr :: raise NotImplementedError(\"scipy.stats.pearsonr: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
@@ -8879,6 +8889,16 @@
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: ux, uy = xm / xmax, ym / ymax #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: pearsonr :: xmax, ymax = float(np.max(np.abs(xm))), float(np.max(np.abs(ym))) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pearsonr's norms as SciPy forms them, each centered sample scaled by its largest |deviation| (xmax) before squaring, so that no scale overflows or underflows; refuses nothing"
  },
  "lib/_scipy_stats_py.py :: rankdata :: \"\"\"the ranks of a (from 1), ties by method ('average', 'min', 'max', 'dense' or 'ordinal'), as float64 as #0": {
   "class": "none",

@@ -55,8 +55,9 @@ class PearsonRResult(tuple):
         if method is not None:
             raise NotImplementedError("scipy.stats.PearsonRResult.confidence_interval: method= is not supported in Sagebrush")
         r, n = float(self[0]), self._n
-        if n < 4:
-            return ConfidenceInterval(np.float64(_NAN), np.float64(_NAN))
+        # (three samples or fewer: the whole interval, (-1, 1), for any alternative, as SciPy's)
+        if n <= 3:
+            return ConfidenceInterval(np.float64(-1.0), np.float64(1.0))
         z = _math.atanh(r) if abs(r) < 1 else _math.copysign(_math.inf, r)
         se = 1 / _math.sqrt(n - 3)
         if self._alternative == "two-sided":
@@ -157,6 +158,9 @@ def _array(a, axis):
         return a.reshape(-1), ()
     if a.ndim == 0:
         a = a.reshape(1)
+    # (an axis in range, a negative one counted from the end; beyond, SciPy's AxisError, not wrapped)
+    if not -a.ndim <= axis < a.ndim:
+        raise AxisError("`axis` is out of bounds for array of dimension %d" % a.ndim)
     ax = axis % a.ndim
     a = np.moveaxis(a, ax, -1)
     return a, a.shape[:-1]
@@ -170,7 +174,8 @@ def _check_nan_policy(nan_policy):
 def _rows(a, shape, nan_policy):
     """each 1-d slice along the (last) axis, its nans dropped for nan_policy='omit' (a ValueError for 'raise')"""
     _check_nan_policy(nan_policy)
-    flat = a.reshape(-1, a.shape[-1]) if a.ndim > 1 else a.reshape(1, -1)
+    # (the rows' count given, not inferred: an axis of length 0 leaves -1 nothing to infer it from)
+    flat = a.reshape(int(np.prod(a.shape[:-1])), a.shape[-1]) if a.ndim > 1 else a.reshape(1, a.size)
     rows = []
     for r in flat:
         has = np.any(r != r)
@@ -256,8 +261,12 @@ def rankdata(a, method="average", *, axis=None, nan_policy="propagate"):
         arr = arr.reshape(-1)
         res = _rank1(arr.astype(float), method, nan_policy)
         return np.asarray(res, dtype=float)
+    # (an axis beyond the array's: SciPy's IndexError, not wrapped)
+    if not -max(arr.ndim, 1) <= axis < max(arr.ndim, 1):
+        raise IndexError("list index out of range")
     moved = np.moveaxis(np.asarray(arr, dtype=float), axis % max(arr.ndim, 1), -1)
-    flat = moved.reshape(-1, moved.shape[-1])
+    # (the rows' count given, not inferred, so that an empty axis or array ranks to an empty array of its shape)
+    flat = moved.reshape(int(np.prod(moved.shape[:-1])), moved.shape[-1])
     out = np.array([_rank1(r, method, nan_policy) for r in flat], dtype=float).reshape(moved.shape)
     return np.moveaxis(out, -1, axis % max(arr.ndim, 1))
 
@@ -326,18 +335,24 @@ def pearsonr(x, y, *, alternative="two-sided", method=None, axis=0):
         raise ValueError("`x` and `y` must have length at least 2.")
     xm = x - np.mean(x)
     ym = y - np.mean(y)
-    nx, ny = float(np.sqrt(np.sum(xm * xm))), float(np.sqrt(np.sum(ym * ym)))
-    with np.errstate(invalid="ignore", divide="ignore"):
-        if nx == 0 or ny == 0 or not (nx == nx and ny == ny):
+    # (each norm as SciPy forms it, scaled by the largest |deviation| first, so that squaring neither overflows nor
+    # underflows at any scale: max|xm| * sqrt(dot(xm/max, xm/max)))
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        xmax, ymax = float(np.max(np.abs(xm))), float(np.max(np.abs(ym)))
+        if xmax == 0 or ymax == 0 or bool(np.all(x == x[0])) or bool(np.all(y == y[0])):
             r = _NAN
         else:
+            ux, uy = xm / xmax, ym / ymax
+            nx, ny = xmax * float(np.sqrt(np.dot(ux, ux))), ymax * float(np.sqrt(np.dot(uy, uy)))
             r = float(np.dot(xm / nx, ym / ny))
-            r = max(min(r, 1.0), -1.0)
+            r = max(min(r, 1.0), -1.0) if r == r else r
     if r != r:
         return PearsonRResult(np.float64(_NAN), np.float64(_NAN), n, alternative)
     ab = n / 2.0 - 1
     if n == 2:
-        p = 1.0 if alternative == "two-sided" else 0.5
+        # (two samples: r is exactly 1 or -1, and the p-value 1 for every alternative, as SciPy's)
+        r = float(round(r))
+        p = 1.0
     elif alternative == "two-sided":
         p = 2 * float(_sc.betainc(ab, ab, (1 - abs(r)) / 2)) if abs(r) < 1 else 0.0
     elif alternative == "greater":
@@ -370,7 +385,13 @@ def spearmanr(a, b=None, axis=0, nan_policy="propagate", alternative="two-sided"
         x, y = x[~bad], y[~bad]
     n = x.size
     rx, ry = rankdata(x), rankdata(y)
-    rho = float(pearsonr(rx, ry)[0]) if n > 1 else _NAN
+    # (rho as SciPy's spearmanr forms it, np.corrcoef of the ranks, not as its pearsonr: the two differ in the last
+    # bits; a constant sample's rho nan)
+    if n > 1 and not (bool(np.all(rx == rx[0])) or bool(np.all(ry == ry[0]))):
+        with np.errstate(invalid="ignore", divide="ignore"):
+            rho = max(min(float(np.corrcoef(rx, ry)[0, 1]), 1.0), -1.0)
+    else:
+        rho = _NAN
     if rho != rho:
         return SignificanceResult(np.float64(_NAN), np.float64(_NAN))
     dof = n - 2
@@ -400,23 +421,38 @@ def ttest_ind(a, b, axis=0, equal_var=True, nan_policy="propagate", permutations
     if nan_policy == "omit":
         x, y = x[x == x], y[y == y]
     n1, n2 = x.size, y.size
-    m1, m2 = float(np.mean(x)), float(np.mean(y))
-    v1 = float(np.var(x, ddof=1)) if n1 > 1 else _NAN
-    v2 = float(np.var(y, ddof=1)) if n2 > 1 else _NAN
-    if equal_var:
-        df = n1 + n2 - 2.0
-        svar = ((n1 - 1) * v1 + (n2 - 1) * v2) / df
-        se = _math.sqrt(svar * (1.0 / n1 + 1.0 / n2))
-    else:
-        vn1, vn2 = v1 / n1, v2 / n2
-        with np.errstate(divide="ignore", invalid="ignore"):
-            df = (vn1 + vn2) ** 2 / (vn1 * vn1 / (n1 - 1) + vn2 * vn2 / (n2 - 1))
-        se = _math.sqrt(vn1 + vn2)
-    d = m1 - m2
+    nan = np.float64(_NAN)
+    # (an empty sample, or a NaN under nan_policy 'propagate': every result undefined, as SciPy's)
+    if n1 == 0 or n2 == 0 or (nan_policy == "propagate" and (bool(np.any(x != x)) or bool(np.any(y != y)))):
+        if alternative not in ("two-sided", "less", "greater"):
+            raise ValueError("alternative must be 'less', 'greater' or 'two-sided'")
+        return TtestResult(nan, nan, nan, nan, nan, alternative)
+    m1, m2 = np.float64(np.mean(x)), np.float64(np.mean(y))
+    # (SciPy's: the second moment times n/(n-1), NaN for one sample; the arithmetic below IEEE's, in float64)
+    v1 = np.float64(np.var(x, ddof=1)) if n1 > 1 else nan
+    v2 = np.float64(np.var(y, ddof=1)) if n2 > 1 else nan
+    f1, f2 = np.float64(n1), np.float64(n2)
     with np.errstate(divide="ignore", invalid="ignore"):
-        t = d / se if se > 0 else (_NAN if d == 0 else _math.copysign(_math.inf, d))
-    p = float(_alt_p(st.t, t, alternative, df)) if t == t else _NAN
-    return TtestResult(np.float64(t), np.float64(p), np.float64(df), np.float64(d), np.float64(se), alternative)
+        if equal_var:
+            # (a sample of one adds no squared deviations: its (n - 1) v is 0, so the pooled variance is defined)
+            if n1 == 1:
+                v1 = np.float64(0.0)
+            if n2 == 1:
+                v2 = np.float64(0.0)
+            df = f1 + f2 - 2.0
+            svar = ((f1 - 1) * v1 + (f2 - 1) * v2) / df
+            se = np.sqrt(svar * (1.0 / f1 + 1.0 / f2))
+        else:
+            vn1, vn2 = v1 / f1, v2 / f2
+            df = (vn1 + vn2) ** 2 / (vn1 ** 2 / (f1 - 1) + vn2 ** 2 / (f2 - 1))
+            # (an undefined df: both variances zero, where df doesn't matter; SciPy's 1)
+            if df != df:
+                df = np.float64(1.0)
+            se = np.sqrt(vn1 + vn2)
+        d = m1 - m2
+        t = d / se
+    p = np.float64(_alt_p(st.t, float(t), alternative, float(df))) if t == t else nan
+    return TtestResult(np.float64(t), p, np.float64(df), np.float64(d), np.float64(se), alternative)
 
 
 def levene(*samples, center="median", proportiontocut=0.05, axis=0, nan_policy="propagate", keepdims=False):
