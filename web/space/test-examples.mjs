@@ -66,6 +66,26 @@ if (space) {
   ok(/dimension_cusp_forms\(k\)\)/.test(plot.text) && !/\/ *3/.test(plot.text), "the plot's program draws the dimensions as they are (unscaled, as the surface is)", plot.text);
   ok(JSON.stringify(plot.surface.z) === grid.replace(/ /g, "") && JSON.stringify(plot.surface.x) === JSON.stringify([...Array(40)].map((_, i) => i + 1)) && JSON.stringify(plot.surface.y) === JSON.stringify([...Array(12)].map((_, i) => 2 * i + 2)), "the plot's dimensions are the ones computed now", { stored: JSON.stringify(plot.surface.z).slice(0, 80), run: grid.slice(0, 80) });
 }
+// ---- How the 3D view works: its own code, with tours (previews only; every function the text names exists)
+ok(list.includes("self.space.json"), "the page's list offers the 3D view's own code");
+let me = null;
+try { me = checkSpace(JSON.parse(readFileSync(join(out, "self.space.json"), "utf8"))); ok(true, "the viewer accepts it (checkSpace)"); } catch (e) { ok(false, "the viewer accepts it", String(e)); }
+if (me) {
+  const ids = new Set(me.nodes.map((n) => n.id));
+  ok(me.nodes.length === 41 && me.nodes.every((n) => typeof n.summary === "string" && n.summary.length > 20), "41 objects (13 parts of main.ts, 9 of xr.ts, 18 files and the overview), each with its summary", me.nodes.length);
+  ok(me.tours.length === 5 && me.tours.every((t) => t.steps.length >= 4 && t.steps.every((st) => ids.has(st.node))), "five tours, each stop an object of the space");
+  ok(me.edges.every((e) => ids.has(e.from) && ids.has(e.to)) && me.edges.length > 50, `its ${me.edges.length} links join its objects`);
+  ok(me.nodes.every((n) => !("src" in n)) && me.nodes.every((n) => String(n.text ?? "").split("\n").length <= 60), "previews only: no src, at most 60 lines each");
+  // (as main.ts decides what may be run: a code or plot3d object that isn't a notebook's cell)
+  const runnable = (n) => (n.kind === "code" || n.kind === "plot3d") && !n.cell;
+  ok(readFileSync(join(here, "src", "main.ts"), "utf8").includes('const runnable = (nd) => (nd.kind === "code" || nd.kind === "plot3d") && !nd.cell;'), "main.ts decides what may be run as this check does");
+  ok(!me.nodes.some(runnable) && me.nodes.filter((n) => n.kind === "file").length === 40, "nothing in it can be run: its sources are files (40), the overview a note", me.nodes.filter(runnable).map((n) => n.id).slice(0, 5));
+  ok(/not shown here/.test(me.nodes.find((n) => n.id === "space/src/tex.ts")?.text ?? ""), "a preview line the push text check would catch is left out, and says so");
+  const web = join(here, ".."), sources = ["space/src/main.ts", "space/src/xr.ts", ...me.nodes.filter((n) => /\.(ts|js)$/.test(n.id)).map((n) => n.id)].map((f) => readFileSync(join(web, f), "utf8")).join("\n");
+  const named = new Set([...JSON.stringify([me.nodes.map((n) => n.summary), me.tours]).matchAll(/\*\*([A-Za-z_$][\w$]*)\*\*/g)].map((m) => m[1]).filter((w) => /[a-z][A-Z]|^[a-z]+$/.test(w) && !/^(load|run|go|step|draw|open|press|hit|leave|enter|save|restore|search|look|editor|math|embed|start|layered|frame|engine|interrupt|layout|tick)$/.test(w) || /^[a-z]+[A-Z]/.test(w)));
+  const missing = [...named].filter((w) => !new RegExp(`(function\\s+${w}\\b|\\b${w}\\s*[=:(]|\\bas\\s+${w}\\b|\\b${w}\\b\\s*\\}?\\s*from)`).test(sources));
+  ok(named.size > 30 && missing.length === 0, `each of the ${named.size} functions its text names in bold is in the code`, missing);
+}
 // ---- Sagebrush's repository: paths, lengths and links only; its files read from GitHub at the build's commit
 ok(list.includes("repository.space.json"), "the page's list offers the repository");
 let repo = null;
