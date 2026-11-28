@@ -954,6 +954,14 @@ class ufunc:
                 if r.ndim == 0:
                     r = r[()]
             return r
+        if initial is not None:
+            # (initial= only starts the fold: the accumulator's dtype is the one the reduction has without it (a small
+            # int product in the default int, as np.prod's), initial cast to it, as NumPy resolves the loop first)
+            probe = self.reduce(a.ravel()[:1] if a.size else zeros(1, a.dtype), axis=0, dtype=dtype)
+            rdt = asarray(probe).dtype
+            if a.dtype != rdt:
+                a = a.astype(rdt)
+            initial = asarray(initial).astype(rdt)[()]
         nd = a.ndim
         if axis is None:
             a, axis = a.ravel(), 0
@@ -997,7 +1005,9 @@ class ufunc:
         mt = m.transpose(order).reshape((-1,) + rshape)
         # (the result's dtype: the unmasked reduction's of one element, so a bool or small int sum promotes as it does)
         probe = self.reduce(t[:1] if t.shape[0] else zeros((1,) + rshape, a.dtype), axis=0, dtype=dtype)
-        acc = full(rshape, initial, dtype=asarray(probe).dtype)
+        rdt = asarray(probe).dtype
+        acc = full(rshape, asarray(initial).astype(rdt)[()], dtype=rdt)
+        t = t.astype(rdt) if t.dtype != rdt else t
         for i in range(t.shape[0]):
             acc = where(mt[i], self(acc, t[i]), acc)
         acc = asarray(acc)
