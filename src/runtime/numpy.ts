@@ -382,6 +382,9 @@ const BIG_OPS: Record<string, (a: bigint, b: bigint) => bigint> = {
   right_shift: (a, b) => (b < 0n || b >= 64n ? (a < 0n ? -1n : 0n) : a >> b),
   maximum: (a, b) => (a > b ? a : b),
   minimum: (a, b) => (a < b ? a : b),
+  // (on integers, which have no NaN, fmax and fmin are maximum and minimum)
+  fmax: (a, b) => (a > b ? a : b),
+  fmin: (a, b) => (a < b ? a : b),
   // (modulo 2**64 as it goes: a huge exponent stays cheap)
   power: (a, b) => {
     let r = 1n, x = a & MASK64, e = b;

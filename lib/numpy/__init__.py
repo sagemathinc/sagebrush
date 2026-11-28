@@ -926,7 +926,16 @@ class ufunc:
             # (computed in out's dtype unless dtype is given, then written
             # into out, which must have the result's shape, as NumPy's)
             out = _one_out(out)
-            r = asarray(self.reduce(a, axis, dtype if dtype is not None else out.dtype, None, keepdims, initial, where))
+            # (out's dtype is the loop's where the ufunc has that loop; else the result of its own loop is cast
+            # into out, as NumPy resolves a reduction's loop from out first)
+            dt_out = dtype
+            if dt_out is None:
+                try:
+                    self._loop(out.dtype)
+                    dt_out = out.dtype
+                except TypeError:
+                    dt_out = None
+            r = asarray(self.reduce(a, axis, dt_out, None, keepdims, initial, where))
             if r.ndim != out.ndim:
                 raise ValueError("output parameter for reduction operation %s has the wrong number of dimensions: Found %d but expected %d"
                                  % (self.__name__, out.ndim, r.ndim))
@@ -936,83 +945,84 @@ class ufunc:
             out[...] = r
             return out
         a = asarray(a)
+        # (the mask converted first, as NumPy's: its refusal comes before the loop's)
+        mask = None if where is True else _where_mask(where)
         if dtype is not None:
             dt = self._loop(dtype)
             if a.dtype != dt:
                 a = a.astype(dt)  # (accumulated in dtype, as NumPy's)
-        if where is not True:
-            return self._masked_reduce(a, axis, dtype, keepdims, initial, _where_mask(where))
-        quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
-                 "logical_or": any}
-        if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
-            r = quick[self._op](a, axis=axis, keepdims=keepdims)
-            if dtype is not None:
-                # (sum promotes small ints to int64 and bools to int: the
-                # accumulator is dtype, where an int sum wraps as it does
-                # here, and a bool sum is True if any is)
-                r = asarray(r).astype(dt)
-                if r.ndim == 0:
-                    r = r[()]
-            return r
-        if initial is not None:
-            # (initial= only starts the fold: the accumulator's dtype is the one the reduction has without it (a small
-            # int product in the default int, as np.prod's), initial cast to it, as NumPy resolves the loop first)
-            probe = self.reduce(a.ravel()[:1] if a.size else zeros(1, a.dtype), axis=0, dtype=dtype)
-            rdt = asarray(probe).dtype
-            if a.dtype != rdt:
-                a = a.astype(rdt)
-            initial = asarray(initial).astype(rdt)[()]
-        nd = a.ndim
-        if axis is None:
-            a, axis = a.ravel(), 0
-        a = moveaxis(a, axis, 0)
-        if a.shape[0] == 0:
-            # (the identity, or initial, in dtype, for each of the other axes)
-            ident = initial if initial is not None else {"add": 0, "multiply": 1}.get(self._op)
-            if ident is None:
-                raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
-            acc = full(a.shape[1:], ident, dtype=dt if dtype is not None else None)
-            if acc.ndim == 0 and not keepdims:
-                return acc[()]
-        else:
-            acc = a[0] if initial is None else self(initial, a[0])
-            if a.shape[0] == 1 and isinstance(acc, ndarray):
-                acc = acc.copy()  # (a view of the input otherwise: the result is new, CORR-904-1)
-            for i in range(1, a.shape[0]):
-                acc = self(acc, a[i])
-        if keepdims:
-            acc = asarray(acc).reshape((1,) * nd) if a.ndim == 1 else expand_dims(acc, axis)
-        return acc
+        if mask is None and initial is None and not isinstance(axis, tuple):
+            quick = {"add": sum, "multiply": prod, "maximum": amax, "minimum": amin, "logical_and": all,
+                     "logical_or": any}
+            if self._op in quick and initial is None and not (dtype is not None and _wraps_in(self._op, dt)):
+                r = quick[self._op](a, axis=axis, keepdims=keepdims)
+                if dtype is not None:
+                    # (sum promotes small ints to int64 and bools to int: the
+                    # accumulator is dtype, where an int sum wraps as it does
+                    # here, and a bool sum is True if any is)
+                    r = asarray(r).astype(dt)
+                    if r.ndim == 0:
+                        r = r[()]
+                return r
+        return self._fold(a, axis, dtype, keepdims, initial, mask)
 
-    # (the ufuncs whose reduction has an identity, the start of a masked reduction without initial)
+    # (the ufuncs whose reduction has an identity: a masked or empty reduction's start without initial)
     _IDENTITY = {"add": 0, "multiply": 1, "logical_or": False, "logical_and": True, "logical_xor": False,
-                 "bitwise_or": 0, "bitwise_xor": 0, "bitwise_and": -1}
+                 "bitwise_or": 0, "bitwise_xor": 0, "bitwise_and": -1, "hypot": 0.0}
+    # (the ufuncs whose reduction may take several axes at once, NumPy's reorderable ones)
+    _REORDERABLE = frozenset(("add", "multiply", "logical_or", "logical_and", "logical_xor", "bitwise_or", "bitwise_xor",
+                              "bitwise_and", "maximum", "minimum", "fmax", "fmin", "hypot", "gcd", "lcm"))
 
-    def _masked_reduce(self, a, axis, dtype, keepdims, initial, mask):
-        """reduce with where=: each result starts from initial (or the ufunc's identity, as NumPy's; none and no
-        initial is NumPy's ValueError) and takes in only the elements the mask (broadcast to a) keeps, in order"""
-        if initial is None:
+    def _fold(self, a, axis, dtype, keepdims, initial, mask):
+        """reduce's general case, as NumPy's: the reduced axes (several only for a reorderable ufunc; a 0-d array's
+        axis 0 or -1 reduces over none) folded in order; each result from initial (cast to the reduction's own dtype,
+        a Python int out of its range NumPy's OverflowError), else from the ufunc's identity where it needs one (a
+        mask, no elements; none is NumPy's ValueError), else from the first element; a mask (where=, broadcast to a,
+        checked first) takes in only the elements it keeps"""
+        nd = a.ndim
+        if nd == 0 and axis is not None:
+            for x in (axis if isinstance(axis, tuple) else (axis,)):
+                _axes(zeros(1), x)
+            axes = ()
+        else:
+            axes = _axes(a, axis)
+        if len(axes) > 1 and self._op not in self._REORDERABLE:
+            raise ValueError("reduction operation '%s' is not reorderable, so at most one axis may be specified" % self.__name__)
+        m = None if mask is None else broadcast_to(mask, a.shape)
+        rest = [k for k in range(nd) if k not in axes]
+        order = list(axes) + rest
+        rshape = tuple(a.shape[k] for k in rest)
+        rn = 1
+        for k in axes:
+            rn *= a.shape[k]
+        t = a.transpose(order).reshape((rn,) + rshape)
+        mt = None if m is None else m.transpose(order).reshape((rn,) + rshape)
+        if initial is None and (m is not None or rn == 0):
             initial = self._IDENTITY.get(self._op)
             if initial is None:
-                raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to specify 'initial'" % self.__name__)
-        nd = a.ndim
-        m = broadcast_to(mask, a.shape)
-        axes = _axes(a, axis)
-        rest = [i for i in range(nd) if i not in axes]
-        order = list(axes) + rest
-        rshape = tuple(a.shape[i] for i in rest)
-        t = a.transpose(order).reshape((-1,) + rshape)
-        mt = m.transpose(order).reshape((-1,) + rshape)
-        # (the result's dtype: the unmasked reduction's of one element, so a bool or small int sum promotes as it does)
-        probe = self.reduce(t[:1] if t.shape[0] else zeros((1,) + rshape, a.dtype), axis=0, dtype=dtype)
-        rdt = asarray(probe).dtype
-        acc = full(rshape, asarray(initial).astype(rdt)[()], dtype=rdt)
-        t = t.astype(rdt) if t.dtype != rdt else t
-        for i in range(t.shape[0]):
-            acc = where(mt[i], self(acc, t[i]), acc)
+                if m is not None:
+                    raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to specify 'initial'" % self.__name__)
+                raise ValueError("zero-size array to reduction operation %s which has no identity" % self.__name__)
+        if initial is not None:
+            # (the accumulator's dtype: the reduction's own without initial (a small int sum or product in the default
+            # int), initial cast to it, as NumPy resolves the loop first)
+            probe = self.reduce(t[:1] if rn else zeros((1,) + rshape, a.dtype), axis=0, dtype=dtype)
+            rdt = asarray(probe).dtype
+            if isinstance(initial, _builtins.int) and not isinstance(initial, _builtins.bool) and rdt.kind in "iu":
+                init = array(initial, dtype=rdt)[()]
+            else:
+                init = asarray(initial).astype(rdt)[()]
+            acc = full(rshape, init, dtype=rdt)
+            t = t.astype(rdt) if t.dtype != rdt else t
+            start = 0
+        else:
+            acc = t[0].copy() if isinstance(t[0], ndarray) else t[0]
+            start = 1
+        for k in range(start, rn):
+            acc = self(acc, t[k]) if mt is None else where(mt[k], self(acc, t[k]), acc)
         acc = asarray(acc)
         if keepdims:
-            acc = acc.reshape(tuple(1 if i in axes else a.shape[i] for i in range(nd)))
+            acc = acc.reshape(tuple(1 if k in axes else a.shape[k] for k in range(nd)))
         return acc[()] if acc.ndim == 0 else acc
 
     def accumulate(self, a, axis=0, dtype=None, out=None):
