@@ -91,10 +91,12 @@ impl Form {
         Form { a: a3, b: b3, c: c3 }.reduced()
     }
 
-    pub fn pow(&self, mut e: i64) -> Form {
+    pub fn pow(&self, e: i64) -> Form {
         let d = self.disc();
         let mut base = if e < 0 { self.inverse() } else { self.reduced() };
-        e = e.abs();
+        // (the magnitude unsigned: i64::MIN's isn't an i64, and abs() left it
+        // negative, so the loop never ran and gave the identity)
+        let mut e = e.unsigned_abs();
         let mut r = Form::identity(&d).reduced();
         while e > 0 {
             if e & 1 == 1 {
@@ -112,8 +114,10 @@ impl Form {
     }
 }
 
-/// The class number of a negative discriminant, by counting reduced forms
-/// (|D| up to ~10^9).
+/// The class number of a negative discriminant (of its order, the proper
+/// classes), by counting primitive reduced forms (|D| up to ~10^9): an
+/// imprimitive form, gcd(a, b, c) > 1, is no class of the order (D = -12
+/// has 1, not 2).
 pub fn class_number_brute(d: i64) -> u64 {
     assert!(d < 0 && (d.rem_euclid(4) == 0 || d.rem_euclid(4) == 1));
     let n = -d;
@@ -123,7 +127,7 @@ pub fn class_number_brute(d: i64) -> u64 {
         let ac = (b * b + n) / 4;
         let mut a = b.max(1);
         while a * a <= ac {
-            if ac % a == 0 {
+            if ac % a == 0 && gcd3(a, b, ac / a) == 1 {
                 let c = ac / a;
                 if a == b || a == c || b == 0 {
                     h += 1;
@@ -136,6 +140,16 @@ pub fn class_number_brute(d: i64) -> u64 {
         b += 2;
     }
     h
+}
+
+fn gcd3(a: i64, b: i64, c: i64) -> i64 {
+    let g = |mut x: i64, mut y: i64| {
+        while y != 0 {
+            (x, y) = (y, x % y);
+        }
+        x.abs()
+    };
+    g(g(a, b), c)
 }
 
 #[cfg(test)]
