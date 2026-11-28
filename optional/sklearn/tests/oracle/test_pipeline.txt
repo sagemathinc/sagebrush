@@ -139,3 +139,7 @@ array([[0.93820225]])
 !! ValueError: Unable to configure output for _SkIdentity() because `set_output` is not available.
 == pipeline.set_output scaler default
 "Pipeline(steps=[('standardscaler', StandardScaler()),\n                ('_skfitonly', _SkFitOnly())])"
+== pipeline.set_output fit_transform-only None
+"Pipeline(steps=[('f', _SkFitTransformOnly()), ('s', StandardScaler())])"
+== pipeline.set_output fit_transform-only default
+!! ValueError: Unable to configure output for _SkFitTransformOnly() because `set_output` is not available.

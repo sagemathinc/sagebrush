@@ -149,3 +149,16 @@ class _SkFitOnly(BaseEstimator):
 for tr in (None, "default", "pandas"):
     case(f"pipeline.set_output identity {tr}", lambda tr=tr: repr(Pipeline([("i", _SkIdentity()), ("s", StandardScaler())]).set_output(transform=tr)))
 case("pipeline.set_output scaler default", lambda: repr(make_pipeline(StandardScaler(), _SkFitOnly()).set_output(transform="default")))
+
+
+class _SkFitTransformOnly(BaseEstimator):
+    def fit(self, X, y=None):
+        return self
+
+    def fit_transform(self, X, y=None):
+        return X
+
+
+# a step with fit_transform and no transform: passed over for transform=None, refused when a container is named
+case("pipeline.set_output fit_transform-only None", lambda: repr(Pipeline([("f", _SkFitTransformOnly()), ("s", StandardScaler())]).set_output(transform=None)))
+case("pipeline.set_output fit_transform-only default", lambda: repr(Pipeline([("f", _SkFitTransformOnly()), ("s", StandardScaler())]).set_output(transform="default")))
