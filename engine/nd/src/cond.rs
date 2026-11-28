@@ -84,6 +84,15 @@ pub(crate) fn asum(x: &[f64]) -> f64 {
     (s[0] + s[1]) + (s[2] + s[3])
 }
 
+/// sum |x_i| / d in [`asum`]'s four partial sums: a sum that does not overflow while every entry is finite.
+fn asum_over(x: &[f64], d: f64) -> f64 {
+    let mut q = [0.0f64; 4];
+    for (i, v) in x.iter().enumerate() {
+        q[i % 4] += v.abs() / d;
+    }
+    (q[0] + q[1]) + (q[2] + q[3])
+}
+
 /// Higham's estimate of ||B||_1 for the n x n linear map `apply(x, transposed)` (x overwritten by B x, or by B'x
 /// when `transposed`), n >= 1; `x` and `xi` hold n elements each (the iterate and its sign vector).
 pub fn lacn2(n: usize, x: &mut [f64], xi: &mut [f64], apply: &mut dyn FnMut(&mut [f64], bool)) -> f64 {
@@ -126,8 +135,12 @@ pub fn lacn2(n: usize, x: &mut [f64], xi: &mut [f64], apply: &mut dyn FnMut(&mut
             *v = if i % 2 == 0 { m } else { -m };
         }
         apply(x, false);
-        // divided before doubled, as dlacn2: 2 * sum overflows on a finite sum near the largest double
-        let t = 2.0 * (asum(x) / (3.0 * n as f64));
+        // divided before doubled, as dlacn2: 2 * sum overflows on a finite sum near the largest double. And when
+        // the sum itself rounds past the largest double with every entry finite (an SPD n = 32 at 2^-1018), each
+        // entry divided by 3n first, in asum's order: the sum is used unchanged wherever it is finite
+        let d = 3.0 * n as f64;
+        let s = asum(x);
+        let t = 2.0 * if s.is_finite() { s / d } else { asum_over(x, d) };
         if t > est {
             est = t;
         }
@@ -515,9 +528,9 @@ mod tests {
             let mut w = vec![0.0; cond_work_len(n).unwrap()];
             pocon(&r, n, n, norm1(a, n), &mut w)
         };
-        let (c, s) = (shift(8, false), shift(16, true));
+        let (c, s, s18) = (shift(8, false), shift(16, true), shift(18, true));
         for kern in kernels {
-            let (rc, rs) = (lu_rc(kern, &c, 8), chol_rc(kern, &s, 16));
+            let (rc, rs, rs18) = (lu_rc(kern, &c, 8), chol_rc(kern, &s, 16), chol_rc(kern, &s18, 18));
             assert_eq!(rc.to_bits(), (7.0f64 / 9.0).to_bits());
             for k in -1000..=1020 {
                 let t = 2.0f64.powi(-k);
@@ -530,6 +543,10 @@ mod tests {
                 }
                 let a: Vec<f64> = s.iter().map(|v| v * t).collect();
                 assert_eq!(chol_rc(kern, &a, 16).to_bits(), rs.to_bits(), "Cholesky 2^{}", -k);
+                // (n = 18: where 2 * sum before the division by 3n overflowed at 2^-1018, which n = 16 does not
+                // reach)
+                let a: Vec<f64> = s18.iter().map(|v| v * t).collect();
+                assert_eq!(chol_rc(kern, &a, 18).to_bits(), rs18.to_bits(), "Cholesky n = 18, 2^{}", -k);
             }
         }
     }

@@ -212,3 +212,19 @@ test("the TypeScript path's rcond at the largest double is 1, not Infinity", () 
   const out = execFileSync(process.execPath, [cli, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_WASM: "1" } });
   assert.equal(out.trim(), "True");
 });
+
+test("the TypeScript path's estimate where the alternating vector's sum rounds past the largest double", () => {
+  // (the SPD A = s (I + (P + P')/8) at n = 32, P the cyclic shift, by Cholesky: rcond 0.6 at every scale, as at
+  // s = 1. At s = 2^-1019 every solved entry is finite but their absolute sum is not, and the infinite extra
+  // estimate made it 0; LAPACK's dpocon also gives 0 there, by its scaling guard, which the warning's estimate
+  // does not take (#2361: MATLAB's mldivide does not), and 0.6 at 2^-1018, where engine/nd's sum overflowed)
+  const code = [
+    "import numpy as np, _nplinalg",
+    "n = 32; P = np.roll(np.eye(n), 1, axis=1); C = np.eye(n) + (P + P.T) / 8",
+    "for k in (0, 1018, 1019):",
+    "    r = _nplinalg.mldivide(2.0 ** -k * C, np.ones((n, 1)))",
+    "    print(k, r[3], abs(float(r[4]) - 0.6) < 1e-12)",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [cli, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_WASM: "1" } });
+  assert.equal(out.trim(), "0 4 True\n1018 4 True\n1019 4 True");
+});
