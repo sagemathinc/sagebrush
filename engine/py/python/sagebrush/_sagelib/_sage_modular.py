@@ -1574,45 +1574,64 @@ def _translate(t, m, M, k, prec, ech, ch, pbits):
     return (v if added else None), vres
 
 
-def _new_cusp_rows_charged(M, k, prec, key, ch):
-    nd = _mf_engine_dims(M, k)["new"]
+def _orbit_dims(M, k, prec, nd, ch):
+    """(The largest orbit's dimension, the bytes reserved for the engine's
+    traces it was read from, for the caller to release once this frame,
+    and they with it, is gone.)"""
     # (the engine's traces: at most nd orbits, prec coefficients each, at
     # Deligne's bound)
-    held = _step(ch, "traces", _reserve_rows(ch, nd, prec + 1, _deligne_bits(k, prec, nd), frac=False))
+    res = _step(ch, "traces", _reserve_rows(ch, nd, prec + 1, _deligne_bits(k, prec, nd), frac=False))
     data = _mf.newforms(M, k, None, bound=prec)
     orbits = data["newforms"] if isinstance(data, dict) else data
+    return max(int(o["dim"]) for o in orbits), res
+
+
+def _bound_rows(M, k, prec, bound, nd, ch):
+    """One pass at a trace bound: (the orbits' independent translates,
+    their bytes, whether the traces ran short, the bytes reserved for the
+    engine's traces, for the caller to release once this frame, and the
+    traces and orbits with it, is gone)."""
+    res = _step(ch, "traces", _reserve_rows(ch, nd, bound + 1, _deligne_bits(k, bound, nd), frac=False))
+    data = _mf.newforms(M, k, None, bound=bound)
+    orbits = data["newforms"] if isinstance(data, dict) else data
+    pbits = _WORD_PRIME.bit_length()
+    rows, held, short = [], 0, False
+    for o in orbits:
+        orows, oheld, short, scratch = _orbit_rows(o, M, k, prec, bound, ch, pbits)
+        # (the orbit's traces and rank state went with its frame)
+        ch.give(scratch)
+        rows += orows
+        held += oheld
+        if short:
+            break
+    return rows, held, short, res
+
+
+def _new_cusp_rows_charged(M, k, prec, key, ch):
+    import _sage_modsym as ms
+    nd = _mf_engine_dims(M, k)["new"]
+    r_max, res = _orbit_dims(M, k, prec, nd, ch)
+    # (its traces went with its frame)
+    ch.give(res)
     # (the translates T_1, ..., T_m of an orbit of dimension r reached rank r
     # by m = 1.3 r at most on levels 23, 37, 389, weights 2 and 4; the bound
     # doubles when they don't)
-    r_max = max(int(o["dim"]) for o in orbits)
     bound = (prec - 1) * (r_max + r_max // 4 + 8) + 1
-    import _sage_modsym as ms
+    rows, held = [], 0
     while True:
-        res = _step(ch, "traces", _reserve_rows(ch, nd, bound + 1, _deligne_bits(k, bound, nd), frac=False))
-        data = _mf.newforms(M, k, None, bound=bound)
-        orbits = data["newforms"] if isinstance(data, dict) else data
-        # (the previous traces and rows are dropped, then released; the
-        # previous orbits' trace copies and rank states went with their
-        # frames, released as each returned)
-        rows, short = [], False
-        ch.give(held)
-        held = res
-        pbits = _WORD_PRIME.bit_length()
-        for o in orbits:
-            orows, oheld, short, scratch = _orbit_rows(o, M, k, prec, bound, ch, pbits)
-            # (the orbit's traces and rank state went with its frame)
-            ch.give(scratch)
-            rows += orows
-            held += oheld
-            if short:
-                break
+        # (a pass in its own frame: the previous pass's rows stay charged
+        # through it; its traces and orbits went with its frame; then the
+        # previous rows are dropped, and only then released)
+        new, nheld, short, res = _bound_rows(M, k, prec, bound, nd, ch)
+        ch.give(res)
+        prev, rows, held, new = held, new, nheld, None
+        ch.give(prev)
         if not short:
             break
         bound *= 2
-    # (the rows are kept and the traces dropped; published once the copies
-    # handed out are admitted)
+    # (the rows are kept; published once the copies handed out are
+    # admitted)
     ch.take(len(rows) * prec * ms._SLOT)
-    ch.give(held - sum(ms._row_bytes(r) for r in rows))
     _NEWROWS[key] = (prec, rows)
     return [r[:prec] for r in rows]
 

@@ -398,16 +398,30 @@ class QSpaceMethods:
         ....:         shorted.append(out[1])
         ....:         return out[0], out[1], True, out[3]
         ....:     return out
-        sage: sm._mf, sm._orbit_rows = Engine(), short_once; fresh(11); ch = ms._Charge("A check"); ch.steps = []  # sagebrush only
+        sage: events = []; bound_rows = sm._bound_rows  # sagebrush only
+        sage: def bound_spy(*a):  # sagebrush only
+        ....:     events.append(("pass",))
+        ....:     out = bound_rows(*a)
+        ....:     events.append(("passed",))
+        ....:     return out
+        sage: class Logged(ms._Charge):  # sagebrush only
+        ....:     def give(self, nbytes):
+        ....:         events.append(("give", nbytes))
+        ....:         ms._Charge.give(self, nbytes)
+        sage: sm._mf, sm._orbit_rows, sm._bound_rows = Engine(), short_once, bound_spy; fresh(11); ch = Logged("A check"); ch.steps = []  # sagebrush only
         sage: with ms._Charging(ch):  # sagebrush only
         ....:     _ = sm._new_cusp_rows(11, 2, 30)
         sage: traces = [b for t, b in ch.steps if t == "traces"]; len(calls), len(traces)  # sagebrush only
         (3, 3)
-        sage: calls[2] - calls[1] >= traces[2] + shorted[0] - traces[0]  # (the bound doubled; the first bound's traces and rows still charged at the next call)  # sagebrush only
+        sage: calls[2] - calls[1] == traces[2] + shorted[0] - traces[1]  # (the bound doubled; the first bound's rows still charged at the next call)  # sagebrush only
+        True
+        sage: passes = [i for i, e in enumerate(events) if e[0] in ("pass", "passed")]; len(passes)  # sagebrush only
+        4
+        sage: [i for i, e in enumerate(events) if e == ("give", shorted[0])] == [passes[3] + 2]  # (released once, after the next pass and its traces' release)  # sagebrush only
         True
         sage: ch.used == sum(ms._row_bytes(r) for r in sm._NEWROWS[(11, 2)][1]) + len(sm._NEWROWS[(11, 2)][1]) * 30 * ms._SLOT  # sagebrush only
         True
-        sage: sm._orbit_rows, sm._translate, sm._mf = orbit_rows, translate, engine  # sagebrush only
+        sage: sm._orbit_rows, sm._translate, sm._mf, sm._bound_rows = orbit_rows, translate, engine, bound_rows  # sagebrush only
     """
 
     def _all_cusp(self):

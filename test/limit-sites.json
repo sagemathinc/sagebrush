@@ -15019,7 +15019,7 @@
   "owner": "modular forms (Sage mode)",
   "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"
  },
- "lib/_sage_modular.py :: _new_cusp_rows_charged :: r_max = max(int(o[\"dim\"]) for o in orbits) #0": {
+ "lib/_sage_modular.py :: _new_cusp_rows_charged :: r_max, res = _orbit_dims(M, k, prec, nd, ch) #0": {
   "class": "none",
   "owner": "modular forms (Sage mode)",
   "reason": "the trace-form bound for the Hecke translates, from the largest orbit's dimension; it doubles when short, so it refuses nothing"
