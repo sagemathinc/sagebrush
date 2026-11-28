@@ -126,6 +126,20 @@ for (const [name, noWasm] of BACKENDS) {
     assert.equal(r.err, "");
   });
 
+  // (a well-conditioned A scaled to the bottom of the range, A = 2^-1022 (I + P/8), P the cyclic shift: MATLAB
+  // R2026b's rcond(A) is 0 there (LAPACK's dgecon stops at its scaling guard), yet A \ b gives no warning and the
+  // finite solution, 2^1022 / 1.125 in every entry (observed 2026-11-28, n = 2 and n = 8). So the warning's
+  // estimate is not rcond's: an rcond of 0 alone must not make A \ b warn)
+  test(`${name}: A scaled by 2^-1022 solves without a warning, though MATLAB's rcond(A) is 0 there`, () => {
+    const r = run([
+      "for n = [2 8], A = 2^-1022 * (eye(n) + circshift(eye(n), 1, 2) / 8);",
+      "  lastwarn(''); x = A \\ ones(n, 1); [~, id] = lastwarn(); fprintf('%d %d %s\\n', n, isempty(id), num2hex(x(1))); end",
+    ].join("\n"), noWasm);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, "2 1 7fcc71c71c71c71c\n8 1 7fcc71c71c71c71c\n");
+    assert.equal(r.err, "");
+  });
+
   // (a known gap against design §1, not the contract: MATLAB computes with an Inf or NaN and warns, RCOND = NaN;
   // Sagebrush refuses, as before this change. Pinned so the gap stays visible until it is closed: issue #1500.)
   test(`${name}: an Inf or NaN in A or B is still refused before the solve (a known gap)`, () => {

@@ -292,7 +292,7 @@ function invNormEst(n: number, B: (x: Float64Array, t: boolean) => void, anorm: 
     }
     for (let i = 0; i < n; i++) { const m = 1 + i / (n - 1); x[i] = i % 2 === 0 ? m : -m; }
     B(x, false);
-    const t = (2 * asum(x)) / (3 * n);
+    const t = 2 * (asum(x) / (3 * n)); // (divided before doubled, as dlacn2 and engine/nd: 2 * sum can overflow)
     if (t > est) est = t;
   }
   return !isFinite(est) || est === 0 ? 0 : 1 / est / anorm;
