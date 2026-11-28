@@ -13617,7 +13617,17 @@
   "owner": "linear algebra/runtime memory",
   "reason": "the binary route's host admission (product or echelon): past SBW1's frame cap a fixed-limit refusal through the memory guard (never the loop); a need past the one-matrix budget refused through the memory guard"
  },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods._eigenvectors :: raise NotImplementedError(\"generalized eigenvector decomposition is implemented for RDF and CDF, but not for %r\" % self._base) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusal, Sage's own: generalized eigenvectors (other=) over a finite field; not a size or work limit"
+ },
  "lib/_sage_ffmat_more.py :: FFMatrixMethods._split_eigenvalues :: raise NotImplementedError(what) #0": {
+  "class": "none",
+  "owner": "finite fields + configuration",
+  "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
+ },
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenspaces_left :: NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field, #0": {
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
@@ -13627,7 +13637,7 @@
   "owner": "finite fields + configuration",
   "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
  },
- "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenvalues :: modelled here: NotImplementedError. #0": {
+ "lib/_sage_ffmat_more.py :: FFMatrixMethods.eigenvalues :: modelled here: NotImplementedError; with extend=False, those in the #0": {
   "class": "none",
   "owner": "finite fields + configuration",
   "reason": "domain refusals: eigen data where the charpoly does not split over the field (Sage answers in extension fields), jordan_form's RuntimeError there as Sage's, lift_centered over a non-prime field; not a size or work limit"
@@ -20216,11 +20226,6 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
- },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -20263,6 +20268,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",

@@ -666,14 +666,17 @@ class FFMatrixMethods:
         # (RDF, CDF, ...: the numpy route of __getattr__)
         return self.__getattr__(name)(*args, **kwds)
 
-    def _split_eigenvalues(self, what):
+    def _split_eigenvalues(self, what, extend=True):
         # [(eigenvalue, algebraic multiplicity)] in Sage's order (that of the
-        # charpoly's factorization), when the charpoly splits over the field
+        # charpoly's factorization), when the charpoly splits over the field;
+        # with extend false, those in the field only
         if not self.is_square():
             raise TypeError("self must be square")
         out = []
         for g, e in self.charpoly().factor():
             if g.degree() != 1:
+                if not extend:
+                    continue
                 raise NotImplementedError(what)
             out.append((-g[0] / g[1], int(e)))
         return out
@@ -682,12 +685,17 @@ class FFMatrixMethods:
         """The eigenvalues, with multiplicity, in the order of the
         characteristic polynomial's factorization. Where it does not split
         over the field, Sage's eigenvalues live in extension fields, not
-        modelled here: NotImplementedError.
+        modelled here: NotImplementedError; with extend=False, those in the
+        field.
 
         EXAMPLES::
 
             sage: matrix(GF(101), [[2, 1, 0], [0, 2, 0], [0, 0, 3]]).eigenvalues()
             [3, 2, 2]
+            sage: A = matrix(GF(3), [[2, 0, 0], [0, 0, -1], [0, 1, 0]]); A.eigenvalues(extend=False), A.eigenvalues(False)
+            ([2], [2])
+            sage: matrix(GF(7), [[0, 1], [-1, 0]]).eigenvalues(extend=False)
+            []
             sage: matrix(GF(101), [[0, 1], [3, 0]]).eigenvalues()  # sagebrush only (Sage: [31*z2 + 39, 70*z2 + 62], in GF(101^2))
             Traceback (most recent call last):
             ...
@@ -695,7 +703,10 @@ class FFMatrixMethods:
         """
         if getattr(self._base, "_numeric", False):
             return self._numeric_route("eigenvalues", args, kwds)
-        ev = self._split_eigenvalues("eigenvalues of a matrix whose characteristic polynomial does not split over %r are not supported yet (Sage gives them in extension fields)" % self._base)
+        return self._eigenvalues(*args, **kwds)
+
+    def _eigenvalues(self, extend=True, algorithm=None):
+        ev = self._split_eigenvalues("eigenvalues of a matrix whose characteristic polynomial does not split over %r are not supported yet (Sage gives them in extension fields)" % self._base, extend)
         return [lam for lam, e in ev for _ in range(e)]
 
     def _square_for(self, side):
@@ -705,9 +716,22 @@ class FFMatrixMethods:
             r, c = (self.ncols(), self.nrows()) if side == "right" else (self.nrows(), self.ncols())
             raise TypeError("matrix must be square, not %d x %d" % (r, c))
 
-    def _eigenvectors(self, side):
+    def _eigenvectors(self, side, args=(), kwds=None):
+        # (Sage's signatures: (other=None, extend=True[, algorithm]), one
+        # positional argument at most)
+        name = "eigenvectors_" + side
+        kwds = dict(kwds or {})
+        if len(args) > 1:
+            raise TypeError("%s() takes at most 1 positional argument (%d given)" % (name, len(args)))
+        allowed = ("other", "extend") + (("algorithm",) if side == "left" else ())
+        for key in kwds:
+            if key not in allowed:
+                raise TypeError("%s() got an unexpected keyword argument '%s'" % (name, key))
+        other = args[0] if args else kwds.get("other")
+        if other is not None:
+            raise NotImplementedError("generalized eigenvector decomposition is implemented for RDF and CDF, but not for %r" % self._base)
         self._square_for(side)
-        ev = self._split_eigenvalues("eigenvectors are not implemented for matrices with eigenvalues that are not in the fraction field of the base ring or in QQbar")
+        ev = self._split_eigenvalues("eigenvectors are not implemented for matrices with eigenvalues that are not in the fraction field of the base ring or in QQbar", kwds.get("extend", True))
         n = self.nrows()
         out = []
         for lam, e in ev:
@@ -724,6 +748,12 @@ class FFMatrixMethods:
 
             sage: matrix(GF(101), [[1, 2], [2, 1]]).eigenvectors_right()
             [(100, [(1, 100)], 1), (3, [(1, 1)], 1)]
+            sage: matrix(GF(3), [[2, 0, 0], [0, 0, -1], [0, 1, 0]]).eigenvectors_right(extend=False)
+            [(2, [(1, 0, 0)], 1)]
+            sage: matrix(GF(3), [[2, 0, 0], [0, 0, -1], [0, 1, 0]]).eigenvectors_right(None, False)
+            Traceback (most recent call last):
+            ...
+            TypeError: eigenvectors_right() takes at most 1 positional argument (2 given)
             sage: print(matrix(GF(101), [[1, 2], [2, 1]]).eigenvectors_right())
             [(100, [
             (1, 100)
@@ -733,7 +763,7 @@ class FFMatrixMethods:
         """
         if getattr(self._base, "_numeric", False):
             return self._numeric_route("eigenvectors_right", args, kwds)
-        return self._eigenvectors("right")
+        return self._eigenvectors("right", args, kwds)
 
     def eigenvectors_left(self, *args, **kwds):
         """[(eigenvalue, basis of the left eigenspace, multiplicity)].
@@ -742,21 +772,28 @@ class FFMatrixMethods:
 
             sage: matrix(GF(101), [[2, 1], [0, 2]]).eigenvectors_left()
             [(2, [(0, 1)], 2)]
+            sage: matrix(GF(7), [[0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 3, 0], [0, 0, 0, 3]]).eigenvectors_left(extend=False)
+            [(3, [(0, 0, 1, 0), (0, 0, 0, 1)], 2)]
         """
         if getattr(self._base, "_numeric", False):
             return self._numeric_route("eigenvectors_left", args, kwds)
-        return self._eigenvectors("left")
+        return self._eigenvectors("left", args, kwds)
 
-    def _eigenspaces(self, side):
+    def _eigenspaces(self, side, format, algebraic_multiplicity):
+        if algebraic_multiplicity not in (True, False):
+            raise ValueError("algebraic_multiplicity keyword must be True or False")
         self._square_for(side)
-        ev = self._split_eigenvalues("eigenspaces of a matrix whose characteristic polynomial does not split over %r are not supported yet (Sage gives them over extension fields)" % self._base)
+        what = ("unable to construct eigenspaces for eigenvalues outside the base field,\ntry the keyword option: format='galois'" if format == "all" else
+                "eigenspaces of a matrix whose characteristic polynomial does not split over %r are not supported yet (Sage gives them over extension fields)" % self._base)
+        ev = self._split_eigenvalues(what)
         n = self.nrows()
         out = []
         for lam, e in ev:
             M = self - lam * identity_matrix(self._base, n)
             if side == "left":
                 M = M.transpose()
-            out.append((lam, _UserSubspace(self._base, n, M._kernel_basis())))
+            V = _UserSubspace(self._base, n, M._kernel_basis())
+            out.append((lam, V, int(e)) if algebraic_multiplicity else (lam, V))
         return _Sequence(out)
 
     def eigenspaces_right(self, format="all", var="a", algebraic_multiplicity=False):
@@ -774,8 +811,18 @@ class FFMatrixMethods:
               Vector space of degree 2 and dimension 1 over Finite Field of size 101
               User basis matrix:
               [1 0])]
+            sage: print(matrix(GF(101), [[2, 1], [0, 2]]).eigenspaces_right(algebraic_multiplicity=True))
+            [
+            (2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+            User basis matrix:
+            [1 0], 2)
+            ]
+            sage: matrix(GF(101), [[2, 1], [0, 2]]).eigenspaces_right(algebraic_multiplicity="x")
+            Traceback (most recent call last):
+            ...
+            ValueError: algebraic_multiplicity keyword must be True or False
         """
-        return self._eigenspaces("right")
+        return self._eigenspaces("right", format, algebraic_multiplicity)
 
     def eigenspaces_left(self, format="all", var="a", algebraic_multiplicity=False):
         """[(eigenvalue, left eigenspace)].
@@ -791,8 +838,19 @@ class FFMatrixMethods:
             User basis matrix:
             [  1 100])
             ]
+            sage: print(matrix(GF(101), [[2, 1], [0, 2]]).eigenspaces_left("all", "a", True))
+            [
+            (2, Vector space of degree 2 and dimension 1 over Finite Field of size 101
+            User basis matrix:
+            [0 1], 2)
+            ]
+            sage: matrix(GF(7), [[0, 1], [-1, 0]]).eigenspaces_left(algebraic_multiplicity=True)
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: unable to construct eigenspaces for eigenvalues outside the base field,
+            try the keyword option: format='galois'
         """
-        return self._eigenspaces("left")
+        return self._eigenspaces("left", format, algebraic_multiplicity)
 
     def LU(self, pivot=None, format="plu"):
         """(P, L, U) with self = P L U: L unit lower triangular, U in echelon
