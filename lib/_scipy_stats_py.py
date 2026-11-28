@@ -384,6 +384,10 @@ def spearmanr(a, b=None, axis=0, nan_policy="propagate", alternative="two-sided"
     import scipy.stats as st
     if b is None:
         raise NotImplementedError("scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)")
+    # (two n-d samples: SciPy's matrix of the variables' correlations, which Sagebrush doesn't compute: refused, never
+    # the two flattened into one correlation)
+    if np.ndim(a) > 1 or np.ndim(b) > 1:
+        raise NotImplementedError("scipy.stats.spearmanr: 2-d samples (a matrix of the variables' correlations) are not supported in Sagebrush (give two 1-d samples)")
     _check_nan_policy(nan_policy)
     x = np.asarray(a, dtype=float).reshape(-1)
     y = np.asarray(b, dtype=float).reshape(-1)
@@ -499,23 +503,52 @@ def _ttest_ind_1d(x, y, equal_var, nan_policy, alternative):
 def levene(*samples, center="median", proportiontocut=0.05, axis=0, nan_policy="propagate", keepdims=False):
     """Levene's test for equal variances (center 'median': Brown and Forsythe's, 'mean': Levene's, 'trimmed'), as
     SciPy's: W = (N - k)/(k - 1) sum n_i (Z_i. - Z..)^2 / sum sum (Z_ij - Z_i.)^2, Z_ij = |Y_ij - center_i|; the
-    p-value F's upper tail on (k - 1, N - k)"""
-    import scipy.stats as st
+    p-value F's upper tail on (k - 1, N - k); along axis, one test a slice (axis=None: the samples flattened)"""
     if center not in ("mean", "median", "trimmed"):
         raise ValueError("center must be 'mean', 'median' or 'trimmed'.")
-    if keepdims or axis not in (0, -1):
-        raise NotImplementedError("scipy.stats.levene: axis and keepdims are not supported in Sagebrush")
-    k = len(samples)
-    if k < 2:
+    if keepdims:
+        raise NotImplementedError("scipy.stats.levene: keepdims is not supported in Sagebrush")
+    if len(samples) < 2:
         raise ValueError("Must provide at least two samples.")
-    xs = [np.asarray(s, dtype=float).reshape(-1) for s in samples]
     _check_nan_policy(nan_policy)
+    if axis is not None:
+        nd = max(max(np.ndim(x) for x in samples), 1)
+        if not -nd <= axis < nd:
+            raise AxisError("`axis` is out of bounds for array of dimension %d" % nd)
+    if axis is None or all(np.ndim(x) <= 1 for x in samples):
+        return _levene_1d([np.asarray(x, dtype=float).reshape(-1) for x in samples], center, proportiontocut, nan_policy)
+    # (n-d samples: one test a slice along axis, as SciPy's: left-padded to one rank, the axis taken, the other
+    # dimensions broadcast against each other)
+    moved, shapes = [], []
+    for x in samples:
+        px = np.asarray(x, dtype=float)
+        px = px.reshape((1,) * (nd - px.ndim) + px.shape)
+        mx, sh = _array(px, axis)
+        moved.append(mx)
+        shapes.append(sh)
+    try:
+        shape = tuple(np.broadcast_shapes(*shapes))
+    except ValueError:
+        raise ValueError("Array shapes are incompatible for broadcasting.") from None
+    flat = [np.broadcast_to(m, shape + (m.shape[-1],)).reshape(int(np.prod(shape)), m.shape[-1]) for m in moved]
+    res = [_levene_1d([f[i] for f in flat], center, proportiontocut, nan_policy) for i in range(int(np.prod(shape)))]
+    W = np.array([float(r[0]) for r in res], dtype=float).reshape(shape)
+    p = np.array([float(r[1]) for r in res], dtype=float).reshape(shape)
+    return LeveneResult(W, p)
+
+
+def _levene_1d(xs, center, proportiontocut, nan_policy):
+    import scipy.stats as st
+    k = len(xs)
     if any(np.any(x != x) for x in xs):
         if nan_policy == "raise":
             raise ValueError("The input contains nan values")
         if nan_policy == "propagate":
             return LeveneResult(np.float64(_NAN), np.float64(_NAN))
         xs = [x[x == x] for x in xs]
+    # (a sample with no observations, given empty or emptied by nan_policy='omit': no statistic, as SciPy's)
+    if any(x.size == 0 for x in xs):
+        return LeveneResult(np.float64(_NAN), np.float64(_NAN))
     if center == "median":
         cen = [float(np.median(x)) for x in xs]
     elif center == "mean":
@@ -571,14 +604,19 @@ def describe(a, axis=0, ddof=1, bias=True, nan_policy="propagate"):
     rows = _rows(arr, shape, nan_policy)
     if any(r.size == 0 for r in rows):
         raise ValueError("The input must not be empty.")
-    n = rows[0].size
+    # (nobs: each slice's own count when nan_policy='omit' dropped NaNs from an n-d input, as SciPy's masked path;
+    # else the one count every slice shares)
+    if nan_policy == "omit" and shape != () and bool(np.any(arr != arr)):
+        n = np.array([r.size for r in rows], dtype=np.int64).reshape(shape)
+    else:
+        n = np.int64(rows[0].size)
     mins = _out([float(np.min(r)) for r in rows], shape)
     maxs = _out([float(np.max(r)) for r in rows], shape)
     means = _out([float(np.mean(r)) for r in rows], shape)
     vars_ = _out([float(np.var(r, ddof=ddof)) for r in rows], shape)
     sk = skew(arr.reshape(-1) if axis is None else np.moveaxis(arr, -1, 0), axis=0 if axis is not None else 0, bias=bias, nan_policy=nan_policy)
     ku = kurtosis(arr.reshape(-1) if axis is None else np.moveaxis(arr, -1, 0), axis=0, bias=bias, nan_policy=nan_policy)
-    return DescribeResult(np.int64(n), (mins, maxs), means, vars_, sk, ku)
+    return DescribeResult(n, (mins, maxs), means, vars_, sk, ku)
 
 
 def zscore(a, axis=0, ddof=0, nan_policy="propagate"):

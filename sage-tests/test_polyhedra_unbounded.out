@@ -1,0 +1,128 @@
+[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+[[0, 1, 1, 1], [1, 0, 1, 1], [1, 1, 0, 1], [1, 1, 1, 0]]
+True
+False
+True
+False
+False
+True
+True
+False
+False
+[[0, 0]] [[1, 0]] False False True
+[[0, 0, 0]] [[0, 1, 0], [1, 0, 0]] False False True
+[[0, 0]] [[1, 0]] False False True
+[[0, 0]] [[1, 0]] False False True
+[[1, 2, 3]] [[0, 0, 1]] False False False
+(1, 2, 3, 1) 2 1 [[(2,), (0,)], [(1, 2), (0, 2), (0, 1)]]
+(1, 1, 2, 1) 1 0 [[(0,)], [(0, 2), (0, 1)]]
+(1, 0, 1, 1) 0 0 [[], [(0, 1)]]
+(1, 0, 2, 1) 0 0 [[], [(0, 2), (0, 1)]]
+(1, 3, 6, 4, 1) 3 3 [[(3,), (2,), (0,)], [(2, 3), (1, 3), (1, 2), (0, 3), (0, 2), (0, 1)], [(1, 2, 3), (0, 2, 3), (0, 1, 3), (0, 1, 2)]]
+(1, 1, 3, 3, 1) 1 0 [[(0,)], [(0, 3), (0, 2), (0, 1)], [(0, 2, 3), (0, 1, 3), (0, 1, 2)]]
+(1, 0, 1) 0 0 [[]]
+(1, 1, 1) 1 0 [[(0,)]]
+(1, 2, 3, 1) 2 1 [[(1,), (0,)], [(1, 2), (0, 2), (0, 1)]]
+(1, 8, 12, 6, 1) 12
+False False False
+False False False
+False False False
+True True
+0
+0
+0
++Infinity
++Infinity
+0
+1/2
+ValueError: only polytopes (compact polyhedra) are allowed
+ValueError: only polytopes (compact polyhedra) are allowed
+ValueError: only polytopes (compact polyhedra) are allowed
+ValueError: empty polytope is not allowed
+((0, 0), (1, 1))
+((0, 0), (1/2, 3/2))
+((0, 0), (1, 2))
+ValueError: only polytopes (compact polyhedra) are allowed
+2 1 [(0, 1), (1, 0)] [[A vertex at (2, 0)], [A vertex at (0, 0)]]
+2 1 [(0, 1), (1, 0)] [[A vertex at (1, 1, 1)], [A vertex at (0, 0, 0)]]
+2 1 [(0, 1), (1, 0)] [[A vertex at (3)], [A vertex at (0)]]
+1 0 [(0)] [[]]
+1 0 [(0, 1), (1, 0)] [[A ray in the direction (1, 0)], [A vertex at (0, 0)]]
+0 0 [(0, 1), (1, 0)] [[A vertex at (0, 0)], [A line in the direction (1, 0)]]
+2 1 [(0, 1, 1), (1, 0, 1), (1, 1, 0)] [[A ray in the direction (0, 1), A vertex at (1, 0)], [A vertex at (0, 0), A vertex at (1, 0)], [A vertex at (0, 0), A ray in the direction (0, 1)]]
+1 0 [(0, 1, 1), (1, 0, 0), (1, 0, 0)] [[A ray in the direction (0, 1), A ray in the direction (1, 0)], [A vertex at (0, 0)], [A vertex at (0, 0)]]
+4 4 [(0, 1, 0, 1), (1, 0, 1, 0), (0, 1, 0, 1), (1, 0, 1, 0)] [[A vertex at (1, 1), A vertex at (-1, -1)], [A vertex at (1, -1), A vertex at (-1, 1)], [A vertex at (1, 1), A vertex at (-1, -1)], [A vertex at (1, -1), A vertex at (-1, 1)]]
+0 0 [(0, 1, 0), (1, 0, 0), (0, 0, 0)] [[A vertex at (0, 0)], [A line in the direction (0, 1)], []]
+((An equation -1 == 0,), [An equation -1 == 0])
+(1, 1, 0, 0)
+([[-1, 0]], [], (An equation -1 == 0,), ())
+(-1, False, False, True, True)
+((0), -1, (-1, 0), True)
+H-representation
+linearity 1 1
+begin
+ 1 2 rational
+ -1 0
+end
+((1), [(0,)], ())
+(False, True, 0, [])
+The empty polyhedron in ZZ^1
+[[-1, 0]]
+((An equation -1 == 0,), [An equation -1 == 0])
+(1, 1, 0, 0)
+([[-1, 0, 0]], [], (An equation -1 == 0,), ())
+(-1, False, False, True, True)
+((0, 0), -1, (-1, 0, 0), True)
+H-representation
+linearity 1 1
+begin
+ 1 3 rational
+ -1 0 0
+end
+((1), [(0,)], ())
+(False, True, 0, [])
+The empty polyhedron in ZZ^2
+[[-1, 0, 0]]
+((An equation -1 == 0,), [An equation -1 == 0])
+(1, 1, 0, 0)
+([[-1, 0, 0, 0]], [], (An equation -1 == 0,), ())
+(-1, False, False, True, True)
+((0, 0, 0), -1, (-1, 0, 0, 0), True)
+H-representation
+linearity 1 1
+begin
+ 1 4 rational
+ -1 0 0 0
+end
+((1), [(0,)], ())
+(False, True, 0, [])
+The empty polyhedron in ZZ^3
+[[-1, 0, 0, 0]]
+(An equation -1 == 0,)
+(An equation -1 == 0,)
+0 0 (3, 5)
+0 1 (3, 5)
+0 2 (3, 5)
+1 0 (3, 5)
+1 1 (3, 5)
+1 2 DecodingError: Decoding failed because the number of errors exceeded the decoding radius
+2 0 (3, 5)
+2 1 (3, 5)
+2 2 DecodingError: Decoding failed because the number of errors exceeded the decoding radius
+3 0 (3, 5)
+3 1 DecodingError: Decoding failed because the number of errors exceeded the decoding radius
+3 2 DecodingError: Decoding failed because the number of errors exceeded the decoding radius
+4 0 (3, 5)
+4 1 (6, 6)
+4 2 (4, 5)
+5 0 DecodingError: Too many erasures in the received word
+5 1 DecodingError: Too many erasures in the received word
+5 2 DecodingError: Too many erasures in the received word
+6 0 DecodingError: Too many erasures in the received word
+6 1 DecodingError: Too many erasures in the received word
+6 2 DecodingError: Too many erasures in the received word
+DecodingError: Too many erasures in the received word
+DecodingError: Too many erasures in the received word
+(1, 2, 3)
+DecodingError: Too many erasures in the received word
+(1, 2, 3)
