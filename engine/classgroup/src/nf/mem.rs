@@ -89,6 +89,15 @@ pub fn rats(xs: &[BigRational]) -> u64 {
     vec(xs.len() as u64, std::mem::size_of::<BigRational>() as u64) + xs.iter().map(|x| heap(x.numer().bits()) + heap(x.denom().bits())).sum::<u64>()
 }
 
+/// A coarse poll of Stop (the WebAssembly host asked at every call, where a
+/// fine check asks it only every 1024th), in its own phase `site`, so that a
+/// test can stop there (tests/nf_order_stop.rs).  At every step whose work is
+/// O(n^2) big-number operations or more.
+pub fn poll(site: &'static str) {
+    let _p = sagebrush_interrupt::enter(site);
+    sagebrush_interrupt::check_coarse();
+}
+
 /// A scratch reservation of `bytes`, for one piece of work: Ok, or the typed
 /// refusal.
 pub fn scratch(bytes: u64) -> Result<Reservation, FactorError> {

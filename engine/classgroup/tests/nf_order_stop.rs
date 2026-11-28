@@ -52,9 +52,12 @@ fn stop_inside_the_table_and_round_2() {
     assert!(products >= 136, "{products} checks in the table");
     let rows = stop_at(&f, "nf order table poll");
     assert!(rows >= 16, "{rows} coarse polls in the table");
-    // (and the inverse basis, before the table, and the order's own poll)
-    assert!(stop_at(&f, "nf order") >= 16, "checks in the order's setup");
+    // (and the order's own poll, before the table)
     assert!(stop_at(&f, "nf order poll") >= 1, "the order's coarse poll");
+    // a coarse poll at every step of the inverse basis (16) and of the
+    // discriminant's determinant (15), each O(n^2) big-number operations
+    assert!(stop_at(&f, "nf inverse poll") >= 16, "the inverse's coarse polls");
+    assert!(stop_at(&f, "nf det poll") >= 15, "the determinant's coarse polls");
     // x^6 - 192 = x^6 - 2^6 3: t / 2 is integral, so Round 2 enlarges at 2,
     // polling at each step and at each row of its map
     let g = binomial(6, 192);
@@ -62,4 +65,9 @@ fn stop_inside_the_table_and_round_2() {
     assert!(stop_at(&g, "nf round 2 poll") >= 2, "Round 2's coarse polls, one a step");
     assert!(stop_at(&g, "nf round 2 map") >= 6, "checks in Round 2's map");
     assert!(stop_at(&g, "nf round 2 map poll") >= 6, "the map's coarse polls, one a row");
+    // and Round 2's Hermite forms (a column), Frobenius rows and powers (a bit)
+    assert!(stop_at(&g, "nf hnf poll") >= 6, "the Hermite form's coarse polls, one a column");
+    assert!(stop_at(&g, "nf hnf reduce poll") >= 6, "its back-reduction's, one a column");
+    assert!(stop_at(&g, "nf radical poll") >= 6, "the Frobenius rows' coarse polls");
+    assert!(stop_at(&g, "nf pow poll") >= 1, "the powers' coarse polls");
 }

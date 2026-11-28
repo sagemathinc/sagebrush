@@ -521,10 +521,10 @@
   "owner": "class group/number fields",
   "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/order.rs ::  :: use super::mem::{big, bigs, lg, max_bits, rat, scratch, vec, zmat, Held}; #0": {
+ "engine/classgroup/src/nf/order.rs ::  :: use super::mem::{big, bigs, lg, max_bits, poll, rat, scratch, vec, zmat, Held}; #0": {
   "class": "none",
   "owner": "class group/number fields",
-  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits, and the bound's terms) and the tests' new call forms: matched text that refuses nothing"
+  "reason": "the number-field order's memory bounds (bit sizes of the table's operands, measured with max_bits) and the tests' calls of maximal_order: matched text that refuses nothing"
  },
  "engine/classgroup/src/nf/order.rs :: equation_disc :: let hb = max_bits(&f[..n]).max(1); #0": {
   "class": "none",

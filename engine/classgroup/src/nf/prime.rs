@@ -185,7 +185,15 @@ fn to_fp(x: &[BigInt], p: u64) -> Vec<u64> {
 pub fn decompose_general(o: &Order, p: u64) -> Result<Vec<PrimeIdeal>, String> {
     let n = o.n;
     let bp = BigInt::from(p);
-    let mut todo = vec![o.radical(&bp)];
+    // (the radical's memory reserved first, as Round 2's: A16)
+    let rs = super::mem::scratch(o.radical_bytes(&bp)).map_err(String::from)?;
+    let rad = {
+        let _s = rs.scope();
+        o.radical(&bp)
+    };
+    let _kept = super::mem::scratch(super::mem::zmat(&rad)).map_err(String::from)?;
+    drop(rs);
+    let mut todo = vec![rad];
     let mut found: Vec<(ZMat, u32)> = vec![];
     let mut rng = 0x2545_F491_4F6C_DD1Du64 ^ p;
     while let Some(j) = todo.pop() {

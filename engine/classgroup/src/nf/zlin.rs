@@ -77,7 +77,7 @@ pub fn hnf(rows: &[Vec<BigInt>]) -> ZMat {
 /// column's gcd, which with d gives the pivot g = gcd(g0, d) = u g0 + v d:
 /// the pivot row is u times that row, and that row minus g0/g times the
 /// pivot row, and d/g times the pivot row less d e_col, both zero in the
-/// column, stay as generators.  Stop is checked at every column.
+/// column, stay as generators.  Stop is polled (coarse) at every column.
 pub fn hnf_mod(rows: &[Vec<BigInt>], d: &BigInt) -> ZMat {
     let m = rows.first().map_or(0, |r| r.len());
     let red = |r: &mut Vec<BigInt>, from: usize| {
@@ -95,7 +95,7 @@ pub fn hnf_mod(rows: &[Vec<BigInt>], d: &BigInt) -> ZMat {
     }
     let mut out: ZMat = Vec::with_capacity(m);
     for col in 0..m {
-        sagebrush_interrupt::check();
+        super::mem::poll("nf hnf poll");
         // (the rows left with a nonzero entry in the column, combined into one)
         loop {
             let best = (0..a.len()).filter(|&i| !a[i][col].is_zero()).min_by(|&i, &j| a[i][col].cmp(&a[j][col]));
@@ -150,7 +150,7 @@ pub fn hnf_mod(rows: &[Vec<BigInt>], d: &BigInt) -> ZMat {
     }
     // entries above each pivot into [0, pivot), from the left
     for j in 0..m {
-        sagebrush_interrupt::check();
+        super::mem::poll("nf hnf reduce poll");
         for i in 0..j {
             let q = out[i][j].div_floor(&out[j][j]);
             if q.is_zero() {
@@ -183,8 +183,8 @@ pub fn hnf_mod_bytes(r: usize, m: usize, d: &BigInt, in_bits: u64) -> u64 {
 /// rolling reservation bounding the matrix after the step from its entries'
 /// measured sizes (a new entry x - f y has at most bits(x) + bits(f y) + 1
 /// bits in its numerator and denominator before its reduction), taken before
-/// the step, the previous one released after it.  Stop is checked at every
-/// step.  The result's measured bytes are charged to `keep` before the last
+/// the step, the previous one released after it.  Stop is polled (coarse) at
+/// every step.  The result's measured bytes are charged to `keep` before the last
 /// step's reservation is released.
 pub fn inverse_charged(m: &QMat, keep: &mut super::mem::Held) -> Result<QMat, super::factor::FactorError> {
     use super::mem::{rat, rats, scratch, vec};
@@ -201,7 +201,7 @@ pub fn inverse_charged(m: &QMat, keep: &mut super::mem::Held) -> Result<QMat, su
         m.iter().enumerate().map(|(i, r)| r.iter().cloned().chain((0..n).map(|j| if i == j { BigRational::one() } else { BigRational::zero() })).collect()).collect()
     };
     for c in 0..n {
-        sagebrush_interrupt::check();
+        super::mem::poll("nf inverse poll");
         let p = (c..n).find(|&i| !a[i][c].is_zero()).expect("singular matrix");
         a.swap(c, p);
         // the pivot row scaled: bits(x / p) <= bits(x) + bits(p); then each
@@ -259,7 +259,7 @@ pub fn inverse_charged(m: &QMat, keep: &mut super::mem::Held) -> Result<QMat, su
 /// entries' measured sizes (an entry (a_ij a_kk - a_ik a_kj) / prev has at
 /// most max(bits(a_ij) + bits(a_kk), bits(a_ik) + bits(a_kj)) + 2 - bits(prev)
 /// bits, the division being exact), taken before the step, the previous one
-/// released after.  Stop is checked at every step.
+/// released after.  Stop is polled (coarse) at every step.
 pub fn det_charged(m: &[Vec<BigInt>]) -> Result<BigInt, super::factor::FactorError> {
     use super::mem::{big, bigs, scratch, vec};
     let n = m.len();
@@ -274,7 +274,7 @@ pub fn det_charged(m: &[Vec<BigInt>]) -> Result<BigInt, super::factor::FactorErr
     let mut sign = BigInt::one();
     let mut prev = BigInt::one();
     for k in 0..n - 1 {
-        sagebrush_interrupt::check();
+        super::mem::poll("nf det poll");
         if a[k][k].is_zero() {
             let Some(i) = (k + 1..n).find(|&i| !a[i][k].is_zero()) else { return Ok(BigInt::zero()) };
             a.swap(k, i);

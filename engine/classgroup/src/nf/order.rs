@@ -5,7 +5,7 @@
 //! Computational Algebraic Number Theory, 6.1).
 
 use super::factor::{factor_typed, FactorError};
-use super::mem::{big, bigs, lg, max_bits, rat, scratch, vec, zmat, Held};
+use super::mem::{big, bigs, lg, max_bits, poll, rat, scratch, vec, zmat, Held};
 use super::zlin::*;
 use crate::linalg::det;
 use sagebrush_bigint::BigInt;
@@ -63,13 +63,6 @@ pub fn polmulmod(a: &[BigInt], b: &[BigInt], f: &[BigInt]) -> Vec<BigInt> {
 /// largest by at most 1 + H <= 2^bits(H) (H the largest |f_i|).
 fn product_bits(la: u64, lb: u64, n: usize, hb: u64) -> u64 {
     la + lb + lg(n) + 1 + (n.saturating_sub(1)) as u64 * hb
-}
-
-/// A coarse poll of Stop (the WebAssembly host asked at every call, not every
-/// 1024th), in its own phase `site`.
-fn poll(site: &'static str) {
-    let _p = sagebrush_interrupt::enter(site);
-    sagebrush_interrupt::check_coarse();
 }
 
 /// The most bits of a numerator and of a denominator in a matrix of rationals.
@@ -321,7 +314,7 @@ impl Order {
     /// pow_mod's working vectors (entries below p, products below p^2 times
     /// the table's entries), the kernel's row reduction mod p, and the
     /// generators' modular Hermite form.
-    fn radical_bytes(&self, p: &BigInt) -> u64 {
+    pub(crate) fn radical_bytes(&self, p: &BigInt) -> u64 {
         let n = self.n as u64;
         let bp = p.bits();
         vec(n, 24) + n * vec(n, big(bp)) + 6 * vec(n, big(bp)) + 2 * self.mul_bytes(bp, bp) + kernel_mod_bytes(self.n, self.n, p) + vec(2 * n, 24) + 2 * n * vec(n, big(bp)) + hnf_mod_bytes(2 * self.n, self.n, p, bp)
@@ -337,7 +330,7 @@ impl Order {
             q *= p;
         }
         let frob: ZMat = (0..n).map(|i| {
-            sagebrush_interrupt::check();
+            poll("nf radical poll");
             let e: Vec<BigInt> = (0..n).map(|j| BigInt::from((i == j) as i32)).collect();
             self.pow_mod(&e, &q, p)
         }).collect();
@@ -452,7 +445,7 @@ impl Order {
         let mut b: Vec<BigInt> = x.iter().map(|c| c.mod_floor(p)).collect();
         let bits = e.bits();
         for k in 0..bits {
-            sagebrush_interrupt::check();
+            poll("nf pow poll");
             if e.bit(k) {
                 r = self.mul_mod(&r, &b, p);
             }
