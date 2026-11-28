@@ -191,6 +191,16 @@ class NumberField_absolute:
         self._name = name
         self._n = len(self._f) - 1
         self._emb = embedding_repr
+        # (the embedding: the selected root's place among the roots, or
+        # "default" for QuadraticField's and CyclotomicField's own, its root
+        # found when first needed, or else the printed embedding QQ[...]
+        # gives, so QQ[-sqrt(2)] is not QQ[sqrt(2)]; and the options that
+        # make a field another one, as Sage's: latex_name, assume_disc_small,
+        # maximize_at_primes)
+        self._emb_key = ("repr", embedding_repr) if embedding_repr else None
+        self._emb_root = None
+        self._emb_default = None
+        self._opts = (None, False, None)
         self._data = None
         self._bnf = None
         self._bnf_uncertified = None
@@ -294,16 +304,37 @@ class NumberField_absolute:
 
     def __eq__(self, other):
         # the embedding is part of the field, as in Sage (QuadraticField(2)
-        # differs from NumberField(x^2 - 2)), so that equal fields are the
-        # same object (_unique) and their elements, ideals and coercions agree
-        # (a cyclotomic field, with its canonical embedding, is likewise not
-        # NumberField of the cyclotomic polynomial)
-        return (isinstance(other, NumberField_absolute) and other._uf == self._uf and other._name == self._name
-                and getattr(other, "_emb", None) == getattr(self, "_emb", None)
-                and getattr(other, "_cyclotomic_order", None) == getattr(self, "_cyclotomic_order", None))
+        # differs from NumberField(x^2 - 2), and embedding=1.4 from -1.4), so
+        # that equal fields are the same object (_unique) and their elements,
+        # ideals and coercions agree (a cyclotomic field, with its canonical
+        # embedding, is likewise not NumberField of the cyclotomic
+        # polynomial); and so are the polynomial's variable and the options
+        return isinstance(other, NumberField_absolute) and other._key() == self._key()
 
     def __hash__(self):
-        return hash((self._uf, self._name, getattr(self, "_emb", None), getattr(self, "_cyclotomic_order", None)))
+        return hash(self._key())
+
+    def _key(self):
+        return (type(self).__name__, self._uf, self._var, self._name, self._emb_key,
+                getattr(self, "_cyclotomic_order", None), self._opts)
+
+    def _set_embedding(self, e):
+        """Embed at the root of the defining polynomial nearest e (a real or
+        complex number), as Sage's embedding=: its key the root's place among
+        the roots in QQbar, ordered by real then imaginary part."""
+        roots = sorted(self.polynomial().roots(_sa().QQbar, multiplicities=False), key=lambda r: (complex(r).real, complex(r).imag))
+        z = complex(e)
+        i = min(range(len(roots)), key=lambda j: abs(complex(roots[j]) - z))
+        self._emb_root, self._emb_key = roots[i], i
+        return roots[i]
+
+    def _embedding_root(self):
+        """The embedding's root in QQbar, or None for a field without one."""
+        if self._emb_root is None and self._emb_key == "default" and self._emb_default is not None:
+            key = self._emb_key
+            self._set_embedding(self._emb_default)
+            self._emb_key = key
+        return self._emb_root
 
     def __contains__(self, x):
         return isinstance(x, NumberFieldElement) and x._K is self
@@ -986,6 +1017,22 @@ def _inexact_number(b):
     return _sage_ff._inexact(b) is not None
 
 
+def _sage_double(x):
+    """A real algebraic number as Sage converts one to a double: itself when
+    it is one, else of the two doubles around it the one with an even
+    mantissa (the center of the tightest interval, a tie, rounded to even;
+    sqrt(2) is 1.414213562373095, not the nearer 1.4142135623730951)."""
+    import struct
+    q = _F(_sa().RealField(200)(x).exact_rational())
+    d = float(q)
+    if x == _sa().QQ(_F(d)):
+        return d
+    import math
+    lo = d if _F(d) < q else math.nextafter(d, -math.inf)
+    hi = math.nextafter(lo, math.inf)
+    return lo if struct.unpack("<Q", struct.pack("<d", lo))[0] % 2 == 0 else hi
+
+
 class NumberFieldElement:
     """An element of a number field.
 
@@ -1030,6 +1077,74 @@ class NumberFieldElement:
 
     def __repr__(self):
         return _repr_poly(self._K._to_user(self._c), self._K._name)
+
+    # ---- the embedding: values, comparisons, RR and CC (Sage's, for a field
+    # with one; without one these are TypeErrors, as Sage's RR(a) is)
+    def _embedded_value(self):
+        """This element's value in QQbar, under its field's embedding."""
+        r = self._K._embedding_root()
+        if r is None:
+            raise TypeError("Unable to coerce %s to a rational" % self)
+        QQbar = _sa().QQbar
+        v = QQbar(0)
+        for i, c in enumerate(self.list()):
+            if c:
+                v = v + QQbar(c) * r ** i
+        return v
+
+    def _real_value(self):
+        v = self._embedded_value()
+        if v.imag() != 0:
+            raise TypeError("Unable to coerce %s to a real number" % self)
+        return v.real()
+
+    def __float__(self):
+        return _sage_double(self._real_value())
+
+    def __complex__(self):
+        v = self._embedded_value()
+        return complex(_sage_double(v.real()), _sage_double(v.imag()))
+
+    def _cmp_embedded(self, other):
+        # (the sign of self - other under a real embedding; None where there
+        # is none, or other is no number of this field)
+        if self._K._embedding_root() is None:
+            return None
+        try:
+            d = self - self._K(other)
+        except (TypeError, ValueError):
+            return None
+        v = d._real_value()
+        return (v > 0) - (v < 0)
+
+    def __lt__(self, other):
+        c = self._cmp_embedded(other)
+        return NotImplemented if c is None else c < 0
+
+    def __le__(self, other):
+        c = self._cmp_embedded(other)
+        return NotImplemented if c is None else c <= 0
+
+    def __gt__(self, other):
+        c = self._cmp_embedded(other)
+        return NotImplemented if c is None else c > 0
+
+    def __ge__(self, other):
+        c = self._cmp_embedded(other)
+        return NotImplemented if c is None else c >= 0
+
+    def sign(self):
+        """The sign under the field's real embedding.
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 - 2, embedding=-1.4)
+            sage: a.sign(), (a + 2).sign(), a < 0, RR(a)
+            (-1, 1, True, -1.41421356237309)
+        """
+        v = self._real_value()
+        return _sa().Integer((v > 0) - (v < 0))
 
     def _latex_(self):
         """LaTeX, as Sage writes it: the generator as Sage names it
@@ -1902,7 +2017,32 @@ def NumberField(polynomial, name=None, names=None, **kwds):
         name = names[0] if isinstance(names, (list, tuple)) else names
     if name is None:
         raise TypeError("you must specify the name of the generator")
-    return _unique(NumberField_absolute(polynomial, str(name)))
+    K = NumberField_absolute(polynomial, str(name))
+    _field_options(K, kwds)
+    embedding = kwds.get("embedding")
+    if embedding is not None:
+        # (the root nearest it, printed as Sage prints it)
+        K._emb = _embedding_repr(K._set_embedding(embedding))
+    return _unique(K)
+
+
+def _field_options(K, kwds):
+    """The options that make a field another one, as Sage's factory keys
+    them: latex_name, assume_disc_small, maximize_at_primes."""
+    m = kwds.get("maximize_at_primes")
+    K._opts = (kwds.get("latex_name"), bool(kwds.get("assume_disc_small", False)), None if m is None else tuple(int(p) for p in m))
+
+
+def _embedding_repr(r):
+    """An embedding's root as Sage prints it: 1.414213562373095?, 1*I,
+    -0.809016994374948? + 0.587785252292473?*I."""
+    re, im = r.real(), r.imag()
+    if im == 0:
+        return repr(re)
+    ims = repr(abs(im)) + "*I"
+    if re == 0:
+        return ("-" if im < 0 else "") + ims
+    return "%s %s %s" % (repr(re), "-" if im < 0 else "+", ims)
 
 
 # one field per (defining polynomial, name, embedding), as in Sage: two calls
@@ -1912,7 +2052,7 @@ _FIELDS = {}
 
 
 def _unique(K):
-    key = (type(K).__name__, K._uf, K._name, repr(getattr(K, "_emb", None)), getattr(K, "_cyclotomic_order", None))
+    key = K._key()
     old = _FIELDS.get(key)
     if old is not None:
         return old
@@ -1950,7 +2090,26 @@ def QuadraticField(D, name="a", names=None, **kwds):
     r = math.isqrt(abs(D))
     root = str(r) if r * r == abs(D) else _interval_repr_sqrt(abs(D))
     emb = root if D > 0 else root + "*I"
-    return _unique(NumberField_absolute([-D, 0, 1], str(name), emb))
+    # (embedding=: Sage's, at the positive (upper) root by default, None for
+    # none, else at the root nearest the number given)
+    e = kwds.get("embedding", True)
+    K = NumberField_absolute([-D, 0, 1], str(name), emb if e is not None and e is not False else None)
+    # (Sage's QuadraticField has latex_name 'sqrt', \sqrt{D}, by default: so
+    # it is not NumberField(x^2 - D) even without an embedding)
+    kw = dict(kwds)
+    if kw.get("latex_name", "sqrt") == "sqrt":
+        kw["latex_name"] = "\\sqrt{%d}" % D
+    _field_options(K, kw)
+    if K._emb:
+        K._emb_key = "default"
+        K._emb_default = math.sqrt(D) if D > 0 else complex(0, math.sqrt(-D))
+        if e is not True:
+            K._set_embedding(e)
+            if K._emb_key == 1:
+                K._emb_key = "default"
+            else:
+                K._emb = "-" + emb
+    return _unique(K)
 
 
 def _interval_repr_sqrt(n):
@@ -2001,7 +2160,7 @@ def _interval_repr_sqrt(n):
     return d[:nint] + "." + d[nint:] + "?"
 
 
-def CyclotomicField(n, name="zeta", names=None):
+def CyclotomicField(n, name="zeta", names=None, embedding=True):
     """The cyclotomic field Q(zeta_n).
 
     EXAMPLES::
@@ -2015,6 +2174,16 @@ def CyclotomicField(n, name="zeta", names=None):
         name = names[0] if isinstance(names, (list, tuple)) else names
     K = NumberField_absolute(_cyclotomic(int(n)), str(name) + ("%d" % n if name == "zeta" else ""))
     K._cyclotomic_order = int(n)
+    # (Sage's embedding=: at e^(2 pi i/n) by default, None for none, else
+    # the root nearest the number given)
+    if embedding is not None and embedding is not False:
+        import cmath
+        K._emb_key = "default"
+        K._emb_default = cmath.exp(2j * cmath.pi / int(n))
+        if embedding is not True:
+            # (an explicit embedding is another field than the default one,
+            # as Sage's, even at the same root)
+            K._set_embedding(embedding)
     return _unique(K)
 
 
