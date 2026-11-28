@@ -205,13 +205,17 @@ async function navLaunch(control) {
   console.log(`launch${control === "open" ? " (navigation guard left out)" : control === "wide" ? " (navigation guard left out, commands for every port)" : ""}: ${line} (exit ${res.code})`);
   console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
   const reached = o.seen.filter((s) => / REACHED|: REACHED/.test(s));
-  return { line, code: res.code, reached, topLoaded: o.seen.includes("top: loaded") };
+  return { line, code: res.code, reached, topLoaded: o.seen.includes("top: loaded"), frameLoaded: o.seen.includes("frame: loaded") };
 }
 if (passed) {
   console.log("\nwho can reach the app's commands: a notebook output's frame, another local server's pages");
   const r = await navLaunch(false);
-  const good = r.code === 0 && /^ok persist: nav at /m.test(r.line) && !r.reached.length && !r.topLoaded;
-  console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : "the probe failed (above)"}`);
+  // (the other origin's frame: refused before it loads by the window's navigation guard where the web view asks it about
+  // a frame's navigation (macOS and Linux, nav.rs may_load); WebView2 asks only about the window's own, so on Windows
+  // the frame loads and the exact-origin capability alone refuses it, which `reached` covers)
+  const frameGuarded = process.platform === "win32" || !r.frameLoaded;
+  const good = r.code === 0 && /^ok persist: nav at /m.test(r.line) && !r.reached.length && !r.topLoaded && frameGuarded;
+  console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : !frameGuarded ? "another origin's frame loaded in the window: its navigation guard didn't refuse it" : "the probe failed (above)"}`);
   passed = good;
   // (the controls: each must show what its part keeps out)
   for (const control of passed ? ["open", "wide"] : []) {
