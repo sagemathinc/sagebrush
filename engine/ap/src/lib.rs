@@ -68,6 +68,14 @@ impl EllipticCurve {
 
     /// a_p, or None at a prime dividing the discriminant of the model.
     pub fn ap(&self, p: u64) -> Option<i64> {
+        // (a pending Stop is seen by a single-prime call too, and its loops
+        // check as they go; the lists check once a prime themselves)
+        sagebrush_interrupt::check();
+        self.ap_checked(p)
+    }
+
+    /// a_p after the caller's check (the lists' per-prime check).
+    fn ap_checked(&self, p: u64) -> Option<i64> {
         if self.bad(p) {
             return None;
         }
@@ -80,6 +88,9 @@ impl EllipticCurve {
         let [a1, a2, a3, a4, a6] = self.a.map(|x| (x as i128).rem_euclid(pi));
         let mut count = 1i64; // O
         for x in 0..pi {
+            if x & 1023 == 0 {
+                sagebrush_interrupt::check();
+            }
             let rhs = (((x + a2) * x + a4) * x + a6) % pi;
             let b = (a1 * x + a3) % pi; // y^2 + b y - rhs = 0
             if p == 2 {
@@ -106,6 +117,7 @@ impl EllipticCurve {
         let (md, res) = if jacobi(f.to_u64(disc), p) == -1 { (2, 0) } else { (1, 0) };
         let mut cands: Option<Vec<i64>> = None;
         for x0 in 1..200u64 {
+            sagebrush_interrupt::check();
             // d = x0^3 + a x0 + b; (d x0, d^2) lies on y^2 = x^3 + a d^2 x + b d^3,
             // which is E if d is a square mod p and its quadratic twist if not.
             let x = f.from_i128(x0 as i128);
@@ -165,7 +177,11 @@ pub fn primes_up_to(n: u64) -> Vec<u64> {
     }
     sagebrush_interrupt::phase("ap.sieve");
     sagebrush_interrupt::check_coarse();
-    let half = (n as usize - 1) / 2; // index i is 2 i + 3
+    // (the length in u64, then checked against the target's width: n as
+    // usize truncated 2^32 + 5 to 5 on wasm32, and the loop below ran past
+    // the two-entry sieve; the dispatchers refuse such bounds first,
+    // ap_bound)
+    let half = usize::try_from((n - 1) / 2).expect("a sieve bound within the address space (ap_bound)"); // index i is 2 i + 3
     let mut composite = vec![false; half];
     sagebrush_interrupt::check_coarse();
     let mut i = 0;
@@ -206,7 +222,7 @@ pub fn aplist(e: &EllipticCurve, n: u64) -> Vec<(u64, Option<i64>)> {
         ch.iter()
             .map(|&p| {
                 sagebrush_interrupt::check();
-                (p, e.ap(p))
+                (p, e.ap_checked(p))
             })
             .collect::<Vec<_>>()
     })
@@ -225,7 +241,7 @@ pub fn aplist_many(curves: &[EllipticCurve], n: u64) -> Vec<Vec<(u64, Option<i64
             .iter()
             .map(|&p| {
                 sagebrush_interrupt::check();
-                (p, e.ap(p))
+                (p, e.ap_checked(p))
             })
             .collect()
     })
@@ -269,7 +285,7 @@ pub fn moments(e: &EllipticCurve, n: u64, kmax: usize) -> (u64, Vec<f64>) {
         let mut count = 0u64;
         for &p in ch.iter() {
             sagebrush_interrupt::check();
-            if let Some(a) = e.ap(p) {
+            if let Some(a) = e.ap_checked(p) {
                 let x2 = (a * a) as f64 / p as f64;
                 let mut x = 1.0;
                 for s in sums.iter_mut() {

@@ -20,32 +20,46 @@ pub fn xgcd(a: i64, b: i64) -> (i64, i64) {
     (r0, s0)
 }
 
+/// (g, s) with g = gcd(u, n) and s u = g mod n, s in [0, n): in i128, for
+/// every u, n < 2^64 (u as i64 wrapped from 2^63).
+fn xgcd_mod(u: u64, n: u64) -> (u64, u64) {
+    let (mut r0, mut r1, mut s0, mut s1) = (u as i128, n as i128, 1i128, 0i128);
+    while r1 != 0 {
+        let q = r0 / r1;
+        (r0, r1) = (r1, r0 - q * r1);
+        (s0, s1) = (s1, s0 - q * s1);
+    }
+    (r0 as u64, s0.rem_euclid(n as i128) as u64)
+}
+
 /// Canonical representative of (u:v), or None if gcd(u, v, N) != 1.
 pub fn normalize(n: u64, u: u64, v: u64) -> Option<(u64, u64)> {
     let (u, v) = (u % n, v % n);
     if u == 0 {
         return if gcd(v, n) == 1 { Some((0, 1)) } else { None };
     }
-    let (g, s) = xgcd(u as i64, n as i64);
-    let g = g as u64;
-    let mut s = s.rem_euclid(n as i64) as u64;
+    let (g, mut s) = xgcd_mod(u, n);
     if gcd(g, v) != 1 {
         return None;
     }
     if g != 1 {
         let d = n / g;
         while gcd(s, n) != 1 {
-            s = (s + d) % n;
+            s = ((s as u128 + d as u128) % n as u128) as u64;
         }
     }
-    let mut v = (s * v) % n;
+    // (products and sums in u128: s, v < N up to 2^64 wrapped in u64 past
+    // 32-bit levels and gave a pair not equivalent to the input)
+    let mulm = |a: u64, b: u64| (a as u128 * b as u128 % n as u128) as u64;
+    let addm = |a: u64, b: u64| ((a as u128 + b as u128) % n as u128) as u64;
+    let mut v = mulm(s, v);
     if g != 1 {
         let ng = n / g;
-        let vng = (v * ng) % n;
+        let vng = mulm(v, ng);
         let (mut t, mut min_v) = (1u64, v);
         for _ in 2..=g {
-            v = (v + vng) % n;
-            t = (t + ng) % n;
+            v = addm(v, vng);
+            t = addm(t, ng);
             if v < min_v && gcd(t, n) == 1 {
                 min_v = v;
             }
@@ -68,19 +82,17 @@ pub fn normalize_with_scalar(n: u64, u: u64, v: u64) -> Option<(u64, u64, u64)> 
         if gcd(v, n) != 1 {
             return None;
         }
-        let (_, inv) = xgcd(v as i64, n as i64);
-        return Some((0, 1, inv.rem_euclid(n as i64) as u64));
+        let (_, inv) = xgcd_mod(v, n);
+        return Some((0, 1, inv));
     }
-    let (g, s) = xgcd(u as i64, n as i64);
-    let g = g as u64;
-    let mut s = s.rem_euclid(n as i64) as u64;
+    let (g, mut s) = xgcd_mod(u, n);
     if gcd(g, v) != 1 {
         return None;
     }
     if g != 1 {
         let d = n / g;
         while gcd(s, n) != 1 {
-            s = (s + d) % n;
+            s = ((s as u128 + d as u128) % n as u128) as u64;
         }
     }
     let mut v = (s as u128 * v as u128 % n as u128) as u64;
@@ -90,8 +102,8 @@ pub fn normalize_with_scalar(n: u64, u: u64, v: u64) -> Option<(u64, u64, u64)> 
         let vng = (v as u128 * ng as u128 % n as u128) as u64;
         let (mut t, mut min_v) = (1u64, v);
         for _ in 2..=g {
-            v = (v + vng) % n;
-            t = (t + ng) % n;
+            v = ((v as u128 + vng as u128) % n as u128) as u64;
+            t = ((t as u128 + ng as u128) % n as u128) as u64;
             if v < min_v && gcd(t, n) == 1 {
                 min_v = v;
                 min_t = t;
@@ -170,6 +182,26 @@ impl P1List {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Levels past 32 bits (A09b): the products and sums in u128, the
+    /// extended gcd in i128. (-1 : -1) is (1 : 1), (2 : -1) mod
+    /// 10000000019 is (1 : 5000000009), as Sage's inverse_mod(u, N) v % N
+    /// gives, and both normalizations agree, up to levels near 2^64.
+    #[test]
+    fn normalize_past_32_bit_levels() {
+        assert_eq!(normalize(4294967311, 4294967310, 4294967310), Some((1, 1)));
+        assert_eq!(normalize(10000000019, 2, 10000000018), Some((1, 5000000009)));
+        let n = 18446744073709551557u64; // a prime below 2^64
+        assert_eq!(normalize(n, n - 1, n - 1), Some((1, 1)));
+        assert_eq!(normalize(n, 2, n - 1), Some((1, n / 2)));
+        for (n, u, v) in [(4294967311u64, 4294967310u64, 4294967310u64), (10000000019, 2, 10000000018), (n, n - 1, n - 1), (n, 2, n - 1), (n, 3, 7)] {
+            let (g, w) = normalize(n, u, v).unwrap();
+            let (g2, w2, l) = normalize_with_scalar(n, u, v).unwrap();
+            assert_eq!((g, w), (g2, w2), "N={} ({},{})", n, u, v);
+            let m = |a: u64, b: u64| (a as u128 * b as u128 % n as u128) as u64;
+            assert_eq!((m(l, u), m(l, v)), (g, w), "N={} ({},{}): lambda", n, u, v);
+        }
+    }
 
     fn psi(n: u64) -> u64 {
         let mut r = n;

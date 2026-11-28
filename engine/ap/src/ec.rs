@@ -134,6 +134,9 @@ pub fn traces(c: &Curve, pt: Aff, w: i64, md: i64, res: i64, s: &mut Scratch) ->
     s.pts.clear();
     let mut acc = O;
     for j in 1..=m {
+        if j & 255 == 0 {
+            sagebrush_interrupt::check();
+        }
         acc = c.add_aff(acc, b);
         if acc.z == 0 {
             return small_order(c, pt, (md as usize * j) as u64, w);
@@ -176,7 +179,10 @@ pub fn traces(c: &Curve, pt: Aff, w: i64, md: i64, res: i64, s: &mut Scratch) ->
     let start = p1 - res - md * u0 + kmax * step * md; // R_{-K} = start P
     let mut r = c.mul(pt, start as u64);
     s.pts.clear();
-    for _ in -kmax..=kmax {
+    for k in -kmax..=kmax {
+        if k & 255 == 0 {
+            sagebrush_interrupt::check();
+        }
         s.pts.push(r);
         r = c.add_aff(r, neg_s);
     }
