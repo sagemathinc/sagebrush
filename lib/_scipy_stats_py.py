@@ -382,21 +382,30 @@ def spearmanr(a, b=None, axis=0, nan_policy="propagate", alternative="two-sided"
     """Spearman's rho, Pearson's r of the ranks (rankdata 'average'), and its p-value from t = rho sqrt((n-2)/(1-rho^2))
     on n - 2 degrees of freedom, as SciPy's for two 1-d samples"""
     import scipy.stats as st
-    if b is None:
-        raise NotImplementedError("scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)")
-    # (two n-d samples: SciPy's matrix of the variables' correlations, which Sagebrush doesn't compute: refused, never
-    # the two flattened into one correlation)
-    if np.ndim(a) > 1 or np.ndim(b) > 1:
-        raise NotImplementedError("scipy.stats.spearmanr: 2-d samples (a matrix of the variables' correlations) are not supported in Sagebrush (give two 1-d samples)")
+    if axis is None:
+        # (axis=None: both samples flattened into one pair of variables, as SciPy's; one sample alone is one variable)
+        if b is None:
+            raise ValueError("`spearmanr` needs at least 2 variables to compare")
+    else:
+        if b is None:
+            raise NotImplementedError("scipy.stats.spearmanr: a 2-d array of variables is not supported in Sagebrush (give two samples)")
+        # (two n-d samples: SciPy's matrix of the variables' correlations, which Sagebrush doesn't compute: refused,
+        # never the two flattened into one correlation)
+        if np.ndim(a) > 1 or np.ndim(b) > 1:
+            raise NotImplementedError("scipy.stats.spearmanr: 2-d samples (a matrix of the variables' correlations) are not supported in Sagebrush (give two 1-d samples)")
     _check_nan_policy(nan_policy)
     x = np.asarray(a, dtype=float).reshape(-1)
     y = np.asarray(b, dtype=float).reshape(-1)
     if x.size != y.size:
-        raise ValueError("all the input array dimensions except for the concatenation axis must match exactly")
+        raise ValueError("all the input array dimensions except for the concatenation axis must match exactly, but along "
+                         "dimension 0, the array at index 0 has size %d and the array at index 1 has size %d" % (x.size, y.size))
     bad = (x != x) | (y != y)
     if np.any(bad):
         if nan_policy == "raise":
             raise ValueError("The input contains nan values")
+        if nan_policy == "omit" and axis is None:
+            # (SciPy 1.18's own failure here, for any samples: its omit path indexes a shape axis=None has flattened)
+            raise IndexError("tuple index out of range")
         if nan_policy == "propagate":
             # (SciPy's: two Python floats here)
             return SignificanceResult(_NAN, _NAN)
@@ -506,8 +515,6 @@ def levene(*samples, center="median", proportiontocut=0.05, axis=0, nan_policy="
     p-value F's upper tail on (k - 1, N - k); along axis, one test a slice (axis=None: the samples flattened)"""
     if center not in ("mean", "median", "trimmed"):
         raise ValueError("center must be 'mean', 'median' or 'trimmed'.")
-    if keepdims:
-        raise NotImplementedError("scipy.stats.levene: keepdims is not supported in Sagebrush")
     if len(samples) < 2:
         raise ValueError("Must provide at least two samples.")
     _check_nan_policy(nan_policy)
@@ -516,7 +523,12 @@ def levene(*samples, center="median", proportiontocut=0.05, axis=0, nan_policy="
         if not -nd <= axis < nd:
             raise AxisError("`axis` is out of bounds for array of dimension %d" % nd)
     if axis is None or all(np.ndim(x) <= 1 for x in samples):
-        return _levene_1d([np.asarray(x, dtype=float).reshape(-1) for x in samples], center, proportiontocut, nan_policy)
+        W, p = _levene_1d([np.asarray(x, dtype=float).reshape(-1) for x in samples], center, proportiontocut, nan_policy)
+        if keepdims:
+            # (keepdims: the reduced axis, or every axis for axis=None, kept with length 1)
+            nd = max(max(np.ndim(x) for x in samples), 1)
+            return LeveneResult(np.full((1,) * nd, float(W)), np.full((1,) * nd, float(p)))
+        return LeveneResult(W, p)
     # (n-d samples: one test a slice along axis, as SciPy's: left-padded to one rank, the axis taken, the other
     # dimensions broadcast against each other)
     moved, shapes = [], []
@@ -534,6 +546,8 @@ def levene(*samples, center="median", proportiontocut=0.05, axis=0, nan_policy="
     res = [_levene_1d([f[i] for f in flat], center, proportiontocut, nan_policy) for i in range(int(np.prod(shape)))]
     W = np.array([float(r[0]) for r in res], dtype=float).reshape(shape)
     p = np.array([float(r[1]) for r in res], dtype=float).reshape(shape)
+    if keepdims:
+        W, p = np.expand_dims(W, axis % nd), np.expand_dims(p, axis % nd)
     return LeveneResult(W, p)
 
 
@@ -600,23 +614,68 @@ def jarque_bera(x, *, axis=None, nan_policy="propagate", keepdims=False):
 
 def describe(a, axis=0, ddof=1, bias=True, nan_policy="propagate"):
     """(nobs, (min, max), mean, variance (ddof), skewness, kurtosis (Fisher's)), as SciPy's"""
-    arr, shape = _array(a, axis)
+    _check_nan_policy(nan_policy)
+    x = np.asarray(a, dtype=float)
+    nan = bool(np.any(x != x))
+    if nan and nan_policy == "raise":
+        raise ValueError("The input contains nan values")
+    nd = max(x.ndim, 1)
+    if axis is not None and not -nd <= axis < nd:
+        # (SciPy's errors for an axis out of range: NumPy's AxisError on its masked path, else NumPy's IndexError
+        # indexing the shape)
+        if nan and nan_policy == "omit":
+            raise AxisError("axis %d is out of bounds for array of dimension %d" % (axis, nd))
+        raise IndexError("index %d is out of bounds for axis 0 with size %d" % (axis, nd))
+    arr, shape = _array(x, axis)
+    if nan and nan_policy == "omit":
+        return _describe_masked(arr, shape, ddof, bias)
     rows = _rows(arr, shape, nan_policy)
     if any(r.size == 0 for r in rows):
         raise ValueError("The input must not be empty.")
-    # (nobs: each slice's own count when nan_policy='omit' dropped NaNs from an n-d input, as SciPy's masked path;
-    # else the one count every slice shares)
-    if nan_policy == "omit" and shape != () and bool(np.any(arr != arr)):
-        n = np.array([r.size for r in rows], dtype=np.int64).reshape(shape)
-    else:
-        n = np.int64(rows[0].size)
+    n = np.int64(rows[0].size)
     mins = _out([float(np.min(r)) for r in rows], shape)
     maxs = _out([float(np.max(r)) for r in rows], shape)
     means = _out([float(np.mean(r)) for r in rows], shape)
     vars_ = _out([float(np.var(r, ddof=ddof)) for r in rows], shape)
-    sk = skew(arr.reshape(-1) if axis is None else np.moveaxis(arr, -1, 0), axis=0 if axis is not None else 0, bias=bias, nan_policy=nan_policy)
+    sk = skew(arr.reshape(-1) if axis is None else np.moveaxis(arr, -1, 0), axis=0, bias=bias, nan_policy=nan_policy)
     ku = kurtosis(arr.reshape(-1) if axis is None else np.moveaxis(arr, -1, 0), axis=0, bias=bias, nan_policy=nan_policy)
     return DescribeResult(n, (mins, maxs), means, vars_, sk, ku)
+
+
+def _describe_masked(arr, shape, ddof, bias):
+    """describe of a sample with NaNs under nan_policy='omit', as SciPy's: scipy.stats.mstats.describe of the
+    NaNs masked. Each slice has its own count. A constant slice (m2 at most (1e-15 mean)^2, NumPy's resolution)
+    has skewness 0 and kurtosis -3, corrected (bias=False) only where it isn't constant and n > 2 (skewness) or
+    n > 3 (kurtosis). What SciPy masks (a slice with no values; a variance of count <= ddof) is nan here: Sagebrush
+    has no masked arrays."""
+    nobs, mins, maxs, means, vars_, sks, kus = [], [], [], [], [], [], []
+    for r in _rows(arr, shape, "omit"):
+        n = r.size
+        nobs.append(n)
+        if n == 0:
+            for out in (mins, maxs, means, vars_, sks, kus):
+                out.append(_NAN)
+            continue
+        mins.append(float(np.min(r)))
+        maxs.append(float(np.max(r)))
+        _, mean, m2, m3, m4 = _moments(r)
+        means.append(mean)
+        vars_.append(float(np.var(r, ddof=ddof)) if n - ddof > 0 else _NAN)
+        if m2 <= (1e-15 * mean) ** 2:
+            sks.append(0.0)
+            kus.append(-3.0)
+            continue
+        sk = m3 / m2 ** 1.5
+        ku = m4 / m2 ** 2.0
+        if not bias and n > 2:
+            sk = _math.sqrt((n - 1.0) * n) / (n - 2.0) * m3 / m2 ** 1.5
+        if not bias and n > 3:
+            ku = 1.0 / (n - 2) / (n - 3) * ((n * n - 1.0) * m4 / m2 ** 2.0 - 3 * (n - 1) ** 2.0) + 3.0
+        sks.append(sk)
+        kus.append(ku - 3)
+    n_out = np.array(nobs, dtype=np.int64).reshape(shape)
+    return DescribeResult(n_out[()] if n_out.ndim == 0 else n_out, (_out(mins, shape), _out(maxs, shape)),
+                          _out(means, shape), _out(vars_, shape), _out(sks, shape), _out(kus, shape))
 
 
 def zscore(a, axis=0, ddof=0, nan_policy="propagate"):

@@ -8890,6 +8890,26 @@
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
+ "lib/_scipy_stats_py.py :: _describe_masked :: for out in (mins, maxs, means, vars_, sks, kus): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: _describe_masked :: maxs.append(float(np.max(r))) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: _describe_masked :: nobs, mins, maxs, means, vars_, sks, kus = [], [], [], [], [], [], [] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
+ "lib/_scipy_stats_py.py :: _describe_masked :: return DescribeResult(n_out[()] if n_out.ndim == 0 else n_out, (_out(mins, shape), _out(maxs, shape)), #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
  "lib/_scipy_stats_py.py :: _rank1 :: val = {\"average\": (pos + end + 2) / 2.0, \"min\": pos + 1.0, \"max\": end + 1.0, \"dense\": float(dense)}[method] #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -8921,11 +8941,6 @@
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
  "lib/_scipy_stats_py.py :: kurtosis :: raise NotImplementedError(\"scipy.stats.kurtosis: keepdims=True is not supported in Sagebrush\") #0": {
-  "class": "coverage",
-  "owner": "python (@sagebrush-python)",
-  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
- },
- "lib/_scipy_stats_py.py :: levene :: raise NotImplementedError(\"scipy.stats.levene: keepdims is not supported in Sagebrush\") #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
