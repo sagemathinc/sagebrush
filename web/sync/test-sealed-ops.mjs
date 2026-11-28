@@ -240,7 +240,7 @@ async function hello(s, device) {
   return w;
 }
 const sha = (b) => createHash("sha256").update(b).digest("hex");
-const putBlob = (s, bytes) => at(SITE, `/api/sync/v1/blob/${sha(bytes)}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes) }, body: bytes });
+const putBlob = (s, bytes, address = sha(bytes)) => at(SITE, `/api/sync/v1/blob/${address}`, { method: "PUT", headers: { cookie: s, origin: SITE, "content-type": "application/octet-stream", "x-sb-ct-sha256": sha(bytes) }, body: bytes });
 /** A sealed op as a device makes it: an envelope (random bytes: the server never reads it), signed by E2E device `d`
  * of `W` under chain state `st` (and its generation, unless `extra.chainGen` says another), for sync device `sdev` at
  * `dseq`, in sync generation `extra.gen` (1 unless said). */
@@ -348,6 +348,21 @@ await section("sealed ops: signed by a current device, under the current head", 
   ok(Number.isInteger(r2?.ops?.[0]?.seq) && (await refs()) === 1, "another current device releases it: accepted, and the blob still held (held until the account is purged)");
   const r3 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 3, { releases: [{ address: sha(blob), add: r1.ops[0].seq }] })] });
   ok(r3?.ops?.[0]?.code === "invalid" && (await refs()) === 1, "releasing it again, its add already ended: refused, and nothing changes");
+  n += 4;
+
+  // (e2e PR 3b-1: a versioned keyed address, "a1:" and 64 hex, as an end-to-end device sends it: added and released
+  // like any address; another version or a malformed one is no address, refused)
+  const kb = Buffer.from("sealed ops' keyed blob"), ka = "a1:" + sha(Buffer.from("sealed ops' keyed address"));
+  ok((await putBlob(s, kb, ka)).status === 201, "(a blob held at an a1: address)");
+  const krefs = async () => (await acct.inspect({ sha256: ka }))?.refs;
+  const k1 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n, { adds: [ka] })] });
+  ok(Number.isInteger(k1?.ops?.[0]?.seq) && (await krefs()) === 1, "an op adding a blob at an a1: address: accepted, one reference");
+  const k2 = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 1, { releases: [{ address: ka, add: k1.ops[0].seq }] })] });
+  ok(Number.isInteger(k2?.ops?.[0]?.seq), "…and its release: accepted");
+  const kBad = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 2, { adds: ["a2:" + ka.slice(3)] })] });
+  ok(kBad?.ops?.[0]?.code === "invalid", "an op adding \"a2:\" and 64 hex (no version this server knows): refused, invalid");
+  const kBadRel = await ws.ask({ t: "sops", ops: [await signed(W, d, st, dev, n + 3, { releases: [{ address: "a1:" + ka.slice(4), add: k1.ops[0].seq }] })] });
+  ok(kBadRel?.ops?.[0]?.code === "invalid", "a release of \"a1:\" and 63 hex: refused, invalid");
   n += 4;
 
   // (a removed device: the head is public, so it can seal under the new one, but its signature no longer counts)

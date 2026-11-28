@@ -27,7 +27,7 @@
 
 import {
   LIMITS, NO_RELEASE, PERSON_ONLY, SyncError, VERSION, accountHash, checkBatch, checkHead, checkOp, checkRelease, clientOf, enc, fields,
-  has, isDevice, isDocId, isHash, isNat, isSha, parseMessage, releaseRefusal, sha256Hex, toB64, type Batch, type Env, type Floors, type Head,
+  has, isAddress, isDevice, isDocId, isHash, isNat, isSha, parseMessage, releaseRefusal, sha256Hex, toB64, type Batch, type Env, type Floors, type Head,
   type Op, type Release,
 } from "./protocol.ts";
 import { PULL_FIELDS, batchHash, chainNext, chainSeed, checkDocClaim, checkDocFence, checkFgen, checkPullStart, checkUpto, hex } from "./doc-protocol.ts";
@@ -285,7 +285,7 @@ export class ReferenceServer {
       const token = this.signIn(b.account_id);
       return new Response(null, { status: 204, headers: { "set-cookie": `${SESSION_COOKIE}=${token}; Path=/; Secure; HttpOnly; SameSite=Lax` } });
     }
-    const files = p.match(/^\/__files\/([0-9a-f]{64})$/);
+    const files = p.match(/^\/__files\/((?:a1:)?[0-9a-f]{64})$/);
     if (files && m === "GET") {
       for (const a of this.accounts.values()) {
         const bytes = a.blobs.get(files[1]);
@@ -338,7 +338,7 @@ export class ReferenceServer {
         if (!Array.isArray(b.blobs) || b.blobs.length > LIMITS.checkItems) throw new SyncError("limit", "at most " + LIMITS.checkItems, { limit: "check_items", max: LIMITS.checkItems });
         blobs = b.blobs.map((x) => {
           const o = fields(x, ["address", "ct_sha256", "size"], "blob");
-          if (!isSha(o.address) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
+          if (!isAddress(o.address) || !isSha(o.ct_sha256) || !isNat(o.size)) throw new SyncError("invalid", "blob");
           return { address: o.address as string, ct_sha256: o.ct_sha256 as string, size: o.size as number };
         });
       } catch (e) {
@@ -353,7 +353,7 @@ export class ReferenceServer {
       }
       return json({ missing, ...(conflicts.length ? { conflicts } : {}) });
     }
-    const g = p.match(/^\/api\/sync\/v1\/blob\/([0-9a-f]{64})$/);
+    const g = p.match(/^\/api\/sync\/v1\/blob\/((?:a1:)?[0-9a-f]{64})$/);
     if (g && m === "PUT") {
       if (a.state !== "active") return err(409, a.state === "deleting" ? "deleting" : "readonly");
       // (the release at the request's start: a stale build's bytes are refused with a retry, never as final (a build
