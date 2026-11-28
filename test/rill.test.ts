@@ -181,6 +181,11 @@ s.evaluate(parse("w <- c(a = z)")[0])
 s.evaluate(parse("j <- 50:1")[0])
 s.evaluate(parse("t10 <- 1:10")[0])
 s.evaluate(parse("t100 <- 1:100")[0])
+# (tests4's #2315 L1, L2, L5) lists to print: a 1,003-character non-syntactic tag over a short leaf, and three equal
+# leaves (built here, so their own reservations aren't the peak measured)
+TAGL = chr(96) + "t " * 501 + "t" + chr(96)
+s.evaluate(parse("lt <- list(%s = 1)" % TAGL)[0])
+s.evaluate(parse("lz <- list(z, z, z)")[0])
 mem.SMALL_BYTES = 0
 cases = {
   "1:100": 100 * 32,
@@ -210,6 +215,10 @@ cases = {
   "complex(50)": 50 * 128 + 50 * 64 * 2,
   "is.na(z)": 50 * 8,
   "w[x]": 50 * 64 + 50 * 32 + 50 * 136,
+  # a list's print: the largest leaf's layout (as print(x) of it) and its longest tag, built then written with its
+  # newline; the tag $ and the quoted t t ... t is 1,006 characters, [[k]] 5; three equal leaves are one leaf's peak, not three
+  "print(lt)": 136 + 24 + 2 * (1 * (24 + 1) + 1 * len("[1] ")) + 2 * (1006 + 1),
+  "print(lz)": 50 * 136 + 24 * 50 + 2 * (50 * (24 + 1) + 50 * len("[50] ")) + 2 * (5 + 1),
 }
 TAG = "t" * 1001
 cases["c(%s = x)" % TAG] = 50 * 32 * 2 + 50 * 136 * 2 + 4 * (50 * 1001 + 91)
