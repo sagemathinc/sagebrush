@@ -325,8 +325,9 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     };
     const listen = async (fn) => { listens++; await registered; if (listens <= listenFails) throw new Error("event bus not ready"); heard = fn; };
     const told = { n: 0 };
-    const s = startGrants(grantsSync(w, invoke, localStorage), perms, listen, { changed: () => told.n++ }, 20, 40);
-    return { perms, s, release, told, reads: () => reads, listens: () => listens };
+    const sync = grantsSync(w, invoke, localStorage);
+    const s = startGrants(sync, perms, listen, { changed: () => told.n++ }, 20, 40);
+    return { perms, s, release, told, reads: () => reads, listens: () => listens, f, w, invoke, sync };
   };
   {
     const { perms, s, release, told, reads } = await launch();
@@ -346,6 +347,26 @@ ok(J(mergeGrants({ x: 1, y: 1, z: 1 }, { x: 1, z: 1, w: 1 }, { x: 2, y: 1 })) ==
     ok(/can't watch for changes to its file permissions/.test(perms.suspended() ?? "") && perms.writeTrees("id1").length === 0 && !perms.grant("id1", "write", "/more").ok, "launch: a listener that can't be registered leaves every grant set aside, no Allow made (and the launch isn't held up): " + J(perms.suspended()));
     await s.done;
     ok(listens() === 2 && perms.suspended() === null, "launch: ...it is tried again, and once registered the grants come back (as grants.json now says)");
+    s.stop();
+  }
+  // (the listener's first try fails, so the launch goes on, grants.json not yet read; another window has taken the
+  // grant back; a change here meanwhile is kept for later, not written: this page's record from before the read would
+  // put the old grant back.  Once grants.json is read and merged, the change is written)
+  {
+    const { perms, s, release, f, w, invoke, sync } = await launch({ listenFails: 1 });
+    release();
+    await s.ready;
+    f.set(J({ v: 1, seq: 40, docs: {} }));
+    let changed;
+    const k = keepGrants(w, invoke, (fn) => (changed = fn), localStorage, 20, sync, s.done);
+    perms.deny("id1", "read", "/x", { stored: true });
+    changed();
+    await sleep(10);
+    const early = await k.flush().then(() => "written", (e) => String(e.message));
+    ok(J(parseGrants(f.kept()).docs) === J({}) && k.unwritten && /isn't read yet/.test(early), "launch, listener failing: a change before grants.json is read isn't written over another window's revocation (flush says why): " + J({ early, file: f.kept() }));
+    await s.done;
+    await k.flush();
+    ok(!k.unwritten && J(parseGrants(f.kept()).docs["ws:/n.ipynb"]?.denied?.map((x) => x.slice(0, 2))) === J([["read", "/x"]]), "launch, listener failing: ...once grants.json is read and merged, the change held back is written, not lost: " + f.kept());
     s.stop();
   }
   delete globalThis.localStorage;

@@ -5278,7 +5278,7 @@ const wsReady = (async () => {
       const told = () => { for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); } if (fbReq?.doc !== undefined) filesBar(false); if (current.id) filesShown(); };
       const started = d.startGrants(grantsFile, perms, (f) => TAURI.event.listen("sb-grants-changed", (ev) => { if (me && ev?.payload?.from !== me) f(); }), { changed: told, ahead: () => grantsKept?.changed() });
       await started.ready;
-      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f), undefined, undefined, grantsFile);
+      grantsKept = d.keepGrants(w, invoke, (f) => perms.onChange(f), undefined, undefined, grantsFile, started.done);
       // (in the quit's and the leave's barrier, as the settings' flush is: disk-mirror.ts keepAll)
       window.__sbGrantsFlush = () => grantsKept.flush();
     } catch (e) { console.warn("grants.json:", e); }

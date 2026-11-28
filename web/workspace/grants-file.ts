@@ -211,15 +211,19 @@ export function startGrants(sync: ReturnType<typeof grantsSync>, perms: { suspen
 /** grants.json written at each change of the record (`onChange`), one write at a time, the record as it is when each
  * write starts (over the grants.json this page last saw: grantsSync's write); a change during a write makes one more. A write that fails keeps the latest change unwritten: tried
  * again after `retryMs`, and at the next flush. `flush()` resolves once the latest change is in grants.json, and
- * rejects, saying why, if it can't be written now (the quit's and the leave's barrier, disk-mirror.ts keepAll). */
-export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: () => void) => void, storage: Store = localStorage, retryMs = 3000, sync = grantsSync(ws, invoke, storage)) {
-  let changes = 0, written = 0, failed: unknown = null, busy: Promise<void> | null = null;
+ * rejects, saying why, if it can't be written now (the quit's and the leave's barrier, disk-mirror.ts keepAll).
+ * `after` (startGrants's `done`): nothing is written until it settles, grants.json read and merged first, so this
+ * page's record from before that read never goes over a grant another window took back (changes are counted
+ * meanwhile, and written then). */
+export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: () => void) => void, storage: Store = localStorage, retryMs = 3000, sync = grantsSync(ws, invoke, storage), after?: Promise<unknown>) {
+  let changes = 0, written = 0, failed: unknown = null, busy: Promise<void> | null = null, open = !after;
+  after?.then(() => { open = true; void run(); });
   let timer: ReturnType<typeof setTimeout> | null = null;
   // (one job at a time, `busy` while it runs: nothing to write is no job at all, and a job yields before it starts, so
   // it can never finish before it is `busy`; it clears `busy` only if it is still the one there)
   const run = (): Promise<void> => {
     if (busy) return busy;
-    if (written >= changes) return Promise.resolve();
+    if (!open || written >= changes) return Promise.resolve();
     const job: Promise<void> = (async () => {
     await Promise.resolve();
     try {
@@ -245,6 +249,7 @@ export function keepGrants(ws: GrantsWorkspace, invoke: Invoke, onChange: (f: ()
   onChange(changed);
   const flush = async (): Promise<void> => {
     let last: Promise<void> | null = null;
+    if (!open && written < changes) throw new Error("grants.json isn't read yet, so this page's file permissions aren't written to it");
     for (;;) {
       const job = run();
       // (the same job twice is one already done that was never let go of: said, never a loop that spins)

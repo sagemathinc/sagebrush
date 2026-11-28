@@ -45,12 +45,12 @@ export function validGrantEntry(e) {
   for (const k of GRANT_KINDS) {
     if (!(k in e)) continue;
     const a = e[k];
-    if (!Array.isArray(a) || a.length > GRANT_CAPS.perKind || !a.every((x) => canonicalScope(k, x) === x)) return false;
+    if (!Array.isArray(a) || a.length > GRANT_CAPS.perKind || !a.every((x) => typeof x === "string" && canonicalScope(k, x) === x)) return false;
   }
   if ("denied" in e) {
     const d = e.denied;
     if (!Array.isArray(d) || d.length > GRANT_CAPS.storedDenials) return false;
-    if (!d.every((x) => Array.isArray(x) && x.length === 3 && GRANT_KINDS.includes(x[0]) && canonicalScope(x[0], x[1]) === x[1] && Number.isSafeInteger(x[2]))) return false;
+    if (!d.every((x) => Array.isArray(x) && x.length === 3 && GRANT_KINDS.includes(x[0]) && typeof x[1] === "string" && canonicalScope(x[0], x[1]) === x[1] && Number.isSafeInteger(x[2]))) return false;
   }
   return !("t" in e) || Number.isSafeInteger(e.t);
 }

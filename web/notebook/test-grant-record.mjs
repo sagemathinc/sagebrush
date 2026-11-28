@@ -1,7 +1,7 @@
 // ci: web-runner order=117 runner=bun
 // The scoped grant record (web/notebook/permissions.js), in Bun with a localStorage stand-in:
 //   - read whole (Codex S14 F2): an entry whose collections aren't arrays of canonical scopes (a string where an array
-//     goes, a scope not in its canonical form, too many, a malformed denial) grants nothing, while the entries beside
+//     goes, a scope not in its canonical form, null, too many, a malformed denial) grants nothing, while the entries beside
 //     it, and an ordinary narrow grant, stay as they were;
 //   - "Don't allow file changes" (S14 F4) takes away every write grant, "/" and each folder, stored and once, as its
 //     words say, and keeps a denial of "/".
@@ -24,6 +24,8 @@ const J = JSON.stringify;
     notCanon: { write: ["/a/../.."], t: 1 },
     trailing: { write: ["/a/"], t: 1 },
     nonString: { write: [1], t: 1 },
+    nullScope: { write: ["/a", null], t: 1 },                  // (canonicalScope(null) is null, so === alone passes it)
+    nullDenialScope: { write: ["/a"], denied: [["write", null, 3]], t: 1 },
     tooMany: { write: Array.from({ length: GRANT_CAPS.perKind + 1 }, (_, i) => `/f${i}`), t: 1 },
     badDenial: { write: ["/a"], denied: ["write"], t: 1 },
     badDenialScope: { write: ["/a"], denied: [["write", "a", 3]], t: 1 },
