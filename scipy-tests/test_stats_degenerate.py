@@ -103,6 +103,15 @@ for label, a, b in [("1-d", [1.0, 2.0], [3.0, 4.0]), ("scalars", 1.0, 2.0), ("sc
                     ("broadcast", np.ones((2, 3)) * [1.0, 2.0, 3.0], np.ones((2, 1)) * [[4.0], [6.0]] + [[0.0], [1.0]])]:
     for axis in (0, -1, 1, -2, 2, None):
         out("ttest_ind %s axis %r" % (label, axis), lambda: tuple(st.ttest_ind(a, b, axis=axis)) + (st.ttest_ind(a, b, axis=axis).df,))
+# (mixed ranks: the samples left-padded with dimensions of length 1 to one rank, then the axis, then the other
+# dimensions broadcast)
+V3, M23, M24 = [1.0, 2.0, 3.0], [[2.0, 3.0, 4.0], [4.0, 5.0, 6.0]], [[2.0, 3.0, 4.0, 1.0], [4.0, 5.0, 6.0, 0.5]]
+for label, a, b in [("1-d and 2-d", V3, M23), ("2-d and 1-d", M23, V3), ("scalar and 2-d", 2.5, M23),
+                    ("column and 2-d", [[1.0], [7.0]], M23), ("1-d and 2-d, mismatched", V3, M24),
+                    ("3-d and 1-d", np.arange(12.0).reshape(2, 2, 3) ** 1.2, V3)]:
+    for axis in (0, 1, -1, -2, 2):
+        out("ttest_ind %s axis %r" % (label, axis), lambda: tuple(st.ttest_ind(a, b, axis=axis)) + (st.ttest_ind(a, b, axis=axis).df,))
+        out("ttest_ind %s axis %r ci" % (label, axis), lambda: tuple(st.ttest_ind(a, b, axis=axis).confidence_interval()))
 out("ttest_ind ci level 1.5", lambda: tuple(st.ttest_ind([1.0, 2.0], [3.0, 5.0]).confidence_interval(1.5)))
 # (n-d samples: one test a slice along axis, not one test of the flattened samples)
 M = np.arange(12.0).reshape(4, 3) ** 1.5

@@ -432,9 +432,13 @@ def ttest_ind(a, b, axis=0, equal_var=True, nan_policy="propagate", permutations
     if axis is None or (np.ndim(a) <= 1 and np.ndim(b) <= 1):
         return _ttest_ind_1d(np.asarray(a, dtype=float).reshape(-1), np.asarray(b, dtype=float).reshape(-1),
                              equal_var, nan_policy, alternative)
-    # (n-d samples: one test a slice along axis, as SciPy's; the other dimensions broadcast against each other)
-    xa, shape_a = _array(a, axis)
-    xb, shape_b = _array(b, axis)
+    # (n-d samples: one test a slice along axis, as SciPy's: the samples left-padded with dimensions of length 1 to
+    # the same rank first, then the axis taken, then the other dimensions broadcast against each other)
+    pa, pb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    pa = pa.reshape((1,) * (nd - pa.ndim) + pa.shape)
+    pb = pb.reshape((1,) * (nd - pb.ndim) + pb.shape)
+    xa, shape_a = _array(pa, axis)
+    xb, shape_b = _array(pb, axis)
     try:
         shape = tuple(np.broadcast_shapes(shape_a, shape_b))
     except ValueError:
