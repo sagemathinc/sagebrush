@@ -242,7 +242,7 @@ export const pyName = (s: string) => (PYKW.has(s) || PY_BUILTINS.has(s) || s.sta
  * are emitted as _m._call((line, col), f, args), so that a repeated or
  * nested call is told apart. */
 export const CALL_POS = new Set(("Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed " +
-  "Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm " +
+  "FiniteField GF GaloisField Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm " +
   "Normalise Normalize Numerator Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization " +
   "Stabilizer Submatrix Subsets Sym Trace Vector").split(" "));
 /** The Magma name of a Python name made by pyName. */

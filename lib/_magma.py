@@ -5456,8 +5456,14 @@ _ZZ, _QQ = _IntegerRing(), _RationalField()
 def _coerce_int(x):
     if isinstance(x, int) and not isinstance(x, bool):
         return x
-    if _is_ff(x) and _ffwrap(x.parent()).n == 1:
-        return int(x)
+    if _is_ff(x):
+        # (an element lying in the prime field, whatever its parent's
+        # degree, as Magma: Integers()!(GF(4)!1) is 1; the generator of
+        # GF(4) is refused)
+        v = _ffsub.prime_value(x)
+        if v is not None:
+            return v
+        raise MagmaError("Element not from a prime field\nLHS: RngInt\nRHS: %s" % _ext_type(x), "'!'", False)
     if isinstance(x, _Fraction) and x.denominator == 1:
         return int(x)
     if isinstance(x, _Fraction):
@@ -7920,7 +7926,7 @@ def Sqrt(x):
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
     "Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
-    "Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
+    "FiniteField GF GaloisField Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
     "Normalise Normalize Numerator Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
     "Stabilizer Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
@@ -9116,6 +9122,7 @@ def _ff_promote(xs, what, where, pos=None):
 def GF(q, n=None):
     """GF(q) or GF(p, n): the finite field with q = p^n elements, defined
     (as in Magma) by the Conway polynomial."""
+    _gf_args("GF", q, n)
     q = _coerce_int(q)
     if n is None and q < 2:
         raise _arg_error("GF", "Argument 1 (%d) should be >= 2" % q)
@@ -9153,7 +9160,26 @@ def GF(q, n=None):
     return _ffwrap(K)
 
 
-FiniteField = GaloisField = GF
+def _gf_args(name, q, n):
+    # (a finite field's element is no size, even one of its prime field, as
+    # Magma: Bad argument types, its types listed, at the call of the name
+    # used)
+    if _is_ff(q) or _is_ff(n):
+        raise _bad_types(name, (q,) if n is None else (q, n), _located(name))
+
+
+def FiniteField(q, n=None):
+    """FiniteField(q) or FiniteField(p, n): GF(q), GF(p, n)."""
+    _gf_args("FiniteField", q, n)
+    return GF(q) if n is None else GF(q, n)
+
+
+def GaloisField(q, n=None):
+    """GaloisField(q) or GaloisField(p, n): GF(q), GF(p, n)."""
+    _gf_args("GaloisField", q, n)
+    return GF(q) if n is None else GF(q, n)
+
+
 
 
 def _ff_str(x):

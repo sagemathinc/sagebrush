@@ -1,0 +1,81 @@
+1
+0
+1
+1
+2
+2
+2
+1
+5
+2
+1
+
+>> print Integers()!a;
+                   ^
+Runtime error in '!': Element not from a prime field
+LHS: RngInt
+RHS: FldFinElt
+
+>> print Integers()!(b + 1);
+                   ^
+Runtime error in '!': Element not from a prime field
+LHS: RngInt
+RHS: FldFinElt
+2
+
+>> K := GF(GF(7)!3);
+          ^
+Runtime error in 'GF': Bad argument types
+Argument types given: FldFinElt
+
+
+>> K := GF(F!1 + F!1 + F!1);
+          ^
+Runtime error in 'GF': Bad argument types
+Argument types given: FldFinElt
+
+
+>> K := GF(a);
+          ^
+Runtime error in 'GF': Bad argument types
+Argument types given: FldFinElt
+
+
+>> K := GF(3, F!1);
+          ^
+Runtime error in 'GF': Bad argument types
+Argument types given: RngIntElt, FldFinElt
+
+Finite field of size 2
+
+>> K := FiniteField(F!1);
+                   ^
+Runtime error in 'FiniteField': Bad argument types
+Argument types given: FldFinElt
+
+
+>> K := GaloisField(F!1);
+                   ^
+Runtime error in 'GaloisField': Bad argument types
+Argument types given: FldFinElt
+
+
+>> K := GaloisField(2, F!1);
+                   ^
+Runtime error in 'GaloisField': Bad argument types
+Argument types given: RngIntElt, FldFinElt
+
+
+>> L := GF(3); K := FiniteField(a);
+                               ^
+Runtime error in 'FiniteField': Bad argument types
+Argument types given: FldFinElt
+
+
+>> print #GF(5), #FiniteField(a);
+                             ^
+Runtime error in 'FiniteField': Bad argument types
+Argument types given: FldFinElt
+
+Finite field of size 3
+Finite field of size 2^3
