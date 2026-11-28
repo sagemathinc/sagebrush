@@ -2008,6 +2008,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   async registerManifest(a: { account: string; manifest: unknown; bind?: { account?: string; generation?: number } }): Promise<Result<{ state: string; position: number; chunks: number }>> {
     if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
     if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    // (an end-to-end account has no chunked files: a manifest lists its chunks' hashes in the clear, and its client
+    // never sends one; refused before the manifest is read)
+    if (this.encrypted()) return { error: { code: "conflict", message: "this account's sync is end-to-end encrypted: chunked files aren't taken", detail: { reason: "sealed_account" } } };
     const l = await this.limits();
     const pre = attempt(() => {
       this.admit(a.account, true);
@@ -2620,7 +2623,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         // (an account's index log is either plaintext or sealed, never both: no chain begins over changes already in the
         // clear, decided in the append's own transaction, so a plaintext op can't land between this check and the chain)
         genesis: () => {
-          if (this.one("SELECT 1 AS x FROM ops LIMIT 1")) throw new SyncError("conflict", "this account's sync already holds changes in the clear: delete your synced data first", { reason: "plaintext_log" });
+          // (its notebooks too: a document is made by its first batch alone (ensureDoc), with no index op, so its
+          // patches would otherwise be plaintext ones left in a sealed account)
+          if (this.one("SELECT 1 AS x FROM ops LIMIT 1") || this.one("SELECT 1 AS x FROM docs LIMIT 1")) throw new SyncError("conflict", "this account's sync already holds changes in the clear: delete your synced data first", { reason: "plaintext_log" });
         },
         work: () => {
           const wait = this.e2eResetWork.take(1, this.e2eNow());

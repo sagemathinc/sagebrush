@@ -58,6 +58,7 @@ const K = "5ea1ed00-0009-4e2e-8e2e-e2e2e2e2e209"; // releases keyed to the add t
 const L = "5ea1ed00-000a-4e2e-8e2e-e2e2e2e2e20a"; // an object made before the index's references
 const G = "5ea1ed00-000b-4e2e-8e2e-e2e2e2e2e20b"; // a plaintext op raced against genesis
 const D = "5ea1ed00-000c-4e2e-8e2e-e2e2e2e2e20c"; // an end-to-end account's notebooks and blobs: sealed only
+const NB = "5ea1ed00-000d-4e2e-8e2e-e2e2e2e2e20d"; // a notebook in the clear, then genesis
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
@@ -66,10 +67,10 @@ const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled:
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, N, R, P, S, X, Y, Z, K, L, G, D].join(",");
+const listed = [A, N, R, P, S, X, Y, Z, K, L, G, D, NB].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
-    { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
+    { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_E2E: "1", SYNC_TIERED: "1", SYNC_AGENT: "1", GRANT_TAG_KEY: "grant-tag-key", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("4101") },
     { ...base, name: "off", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["off.test/*"], outboundService: cocalc, ratelimits: ratelimits("4102") },
   ],
 }));
@@ -764,6 +765,10 @@ await section("an end-to-end account's notebooks take sealed patches only, and i
   ok(chk.status === 409, "a check naming a bare SHA-256: refused (409): " + chk.status);
   const chk2 = await post(s, D, "/api/sync/v1/blobs/check", { blobs: [{ address: "a1:" + sha(Buffer.from("D's other")), ct_sha256: sha(bytes), size: bytes.length }] });
   ok(chk2.status === 200, "a check of keyed addresses: answered (200)");
+  // (and no chunked file: a manifest lists its chunks' hashes in the clear; refused before it is read)
+  const mf = await post(s, D, "/api/sync/v1/manifest", { manifest: {} });
+  const mfb = await mf.json().catch(() => ({}));
+  ok(mf.status === 409 && mfb.reason === "sealed_account", "a chunked file's manifest for an end-to-end account: refused (409, sealed_account), before it is read: " + J({ status: mf.status, body: mfb }));
   // (a plaintext account is as before: plain patches and bare blobs)
   const sn = await enabled(N);
   const wn = await socket(sn);
@@ -771,7 +776,25 @@ await section("an end-to-end account's notebooks take sealed patches only, and i
   const pn = await wn.ask(batchOf("d0c0d0c0d0c1", [[1, pid(1, "clientN0d1"), [], Buffer.from('{"patch":"plain"}')]], { kind: "board" }));
   ok(pn?.t === "ack", "a plaintext account: a plain patch taken, as before", pn);
   ok((await putBlob(sn, Buffer.from("N's blob"), sha(Buffer.from("N's blob")))).status === 201, "…and a blob at its bare SHA-256");
+  const nm = await post(sn, N, "/api/sync/v1/manifest", { manifest: {} });
+  const nmb = await nm.json().catch(() => ({}));
+  ok(nmb.reason !== "sealed_account" && nm.status !== 409, "…and its manifest is read as before (this empty one invalid, not refused as sealed): " + J({ status: nm.status, body: nmb }));
   wn.ws.close();
+});
+
+await section("a notebook in the clear, with no index op: no key chain begins over it either", async () => {
+  const s = await enabled(NB);
+  const ws = await socket(s);
+  await hello(ws, "sealed-dev-e001");
+  const body = Buffer.from('{"patch":"plain"}');
+  const b = await ws.ask({ t: "batch", doc: "e0e0e0e0e0e0", epoch: 1, kind: "board", patches: [{ cseq: 1, id: (1).toString(36).padStart(11, "0") + "_clientE001", parents: [], size: body.length }], body: body.toString("base64") });
+  ok(b?.t === "ack", "(a board's first batch, in the clear: its document made by the batch alone, no index op)", b);
+  ok(J((await ws.ask({ t: "pull_index", after: 0 }))?.ops ?? []) === "[]", "(the index log is empty)");
+  const g = await account(NB).genesis();
+  const gr = await post(s, NB, "/api/sync/v1/e2e/chain", g.body);
+  const grb = await gr.json().catch(() => ({}));
+  ok(gr.status === 409 && grb.reason === "plaintext_log" && (await seam(NB, {})).e2e_chain <= 0, "genesis over an account whose only plaintext is a notebook's: refused (409, plaintext_log), no chain stored: " + J({ status: gr.status, body: grb }));
+  ws.ws.close();
 });
 
 await section("the sync generation: an op in flight when the synced data is deleted, and a replay after", async () => {
