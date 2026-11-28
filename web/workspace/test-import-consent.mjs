@@ -76,6 +76,19 @@ for (const m of ["write-throws", "write-lost"]) {
   try { await convertCopy(ws2, await ws2.stat("/notes.txt"), "board", { maxBytes: 1 << 20, mode: "python", asBoard: () => JSON.parse(BOARD) }); } catch (e) { threw = String(e.message); }
   ok(/couldn't be kept waiting/.test(threw) && boards(ws2).length === 0, `${m}: Open as… makes no board either, and says why`, threw);
 }
+// ---- and if the board made can't be taken away again either: it stays, but waits for this tab's life, and the
+//      person is told to delete it
+{
+  mode = "write-throws"; store.clear();
+  const ws = workspace();
+  ws.remove = async () => { throw new Error("remove failed"); };
+  const r = await uploadFiles(ws, [file("stuck.board.json", BOARD)], "/", O);
+  const left = boards(ws);
+  ok(left.length === 1 && r.made.length === 0, "the mark and the removal both failing: the board is still there, not reported as made", left.map((e) => e.path));
+  ok(r.refused.some((t) => /stuck\.board\.json/.test(t) && /couldn't be removed: delete it/.test(t) && t.includes(left[0].path)), "…the upload says it couldn't be removed, naming it, to delete", r.refused);
+  mode = "ok";
+  ok(isPaused(left[0].ref) === true && store.size === 0, "…and it waits all the same, for this tab's life (no mark stored)");
+}
 // ---- fail-closed on reading: a mark that can't be read means waiting; with working storage, a board made here
 //      (never marked) runs, and one the person ran is no longer marked
 {

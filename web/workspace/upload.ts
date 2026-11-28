@@ -85,12 +85,20 @@ const message = (e: unknown) => String((e as Error)?.message ?? e);
 export const PAUSED = "sagebrush-board-paused:";
 /** Marks `ref` as waiting; whether the mark is there (written and read back). */
 export function pauseBoard(ref: string): boolean { try { sessionStorage.setItem(PAUSED + ref, "1"); return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return false; } }
-export function isPaused(ref: string) { try { return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return true; } }
+/** Boards made in this tab whose mark couldn't be kept and that couldn't be taken away again: waiting, for this tab's life. */
+const unmarked = new Set<string>();
+export function isPaused(ref: string) { if (unmarked.has(ref)) return true; try { return sessionStorage.getItem(PAUSED + ref) === "1"; } catch { return true; } }
 export function unpause(ref: string) { try { sessionStorage.removeItem(PAUSED + ref); } catch {} }
 /** A board just made from a file brought in: marked as waiting, or, if it can't be, taken away again and refused. */
 async function imported(ws: Workspace, e: Entry): Promise<Entry> {
   if (e.kind !== "board" || pauseBoard(e.ref!)) return e;
-  await ws.remove(e.path, { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created }).catch(() => {});
+  try {
+    await ws.remove(e.path, { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created });
+  } catch {
+    // (still there, unmarked: it waits for this tab's life, and the person is told to delete it)
+    unmarked.add(e.ref!);
+    throw new Error(`its code couldn't be kept waiting for you to run it in this tab, and the board made (${e.path}) couldn't be removed: delete it`);
+  }
   throw new Error("its code couldn't be kept waiting for you to run it in this tab, so it wasn't made");
 }
 /** What an upload said, for the page it opens (a refusal never lost to the navigation): taken once. */
