@@ -159,16 +159,26 @@ async function identity(check) {
   hooks.readUpTo = async (p) => { if (p === "/g") { delete hooks.readUpTo; await ws.write("/f", enc("old\nother tab\n")); } };
   r = await host.exec(PERSON, "for i in 1 2; do echo $i >> f; cat g > /dev/null; done");
   check(r.code === 1 && /changed elsewhere/.test(r.stderr) && (await read(ws, "/f")) === "old\nother tab\n", `a re-opened append isn't observed again: another tab's change between iterations is ECONFLICT (${JSON.stringify(r)})`);
-  // an absent notebook's or board's name as a redirection's target: refused before anything is made (bytes never
-  // make a document); a data file's name: created
+  // bytes into an absent notebook's or board's name: none make an empty one (a notebook's kernel chosen when it
+  // opens); a notebook's or board's JSON is imported as that document (`cat a.ipynb > b.ipynb` copies it); anything
+  // else is refused, nothing made, never an empty document in its place
   {
     const { ws: w2, host: h2 } = await fresh("absent-doc-target");
-    await w2.create("/src.ipynb", { content: { cells: [{ cell_type: "code", source: "1", outputs: [] }] } });
-    for (const [cmd, gone] of [["cat src.ipynb > copy.ipynb", "/copy.ipynb"], ["echo x > new.board.json", "/new.board.json"], ["echo x >> app.ipynb", "/app.ipynb"]]) {
-      const r = await h2.exec(PERSON, cmd);
-      check(r.code === 1 && /edit it in its editor/.test(r.stderr) && !(await w2.stat(gone)) && r.ops.length === 0, `${cmd} (absent): refused before anything is made, EACCES (${JSON.stringify(r).slice(0, 240)})`);
+    await w2.create("/src.ipynb", { content: { cells: [{ cell_type: "code", source: "print(1)", outputs: [] }] } });
+    await w2.create("/src.board.json", { content: { title: "b", nodes: [{ id: "n1", text: "hello", x: 0, y: 0 }] } });
+    let r = await h2.exec(PERSON, "cat src.ipynb > copy.ipynb; cat src.board.json > copy.board.json");
+    const c1 = await w2.read("/copy.ipynb").catch(() => null), c2 = await w2.read("/copy.board.json").catch(() => null);
+    check(r.code === 0 && (await w2.stat("/copy.ipynb"))?.kind === "notebook" && c1?.content?.cells?.[0]?.code === "print(1)" && (await w2.stat("/copy.board.json"))?.kind === "board" && c2?.content?.nodes?.[0]?.text === "hello",
+      `a notebook's and a board's JSON redirected into absent names: imported as those documents, their contents kept (${JSON.stringify(r).slice(0, 200)}; ${JSON.stringify(c1?.content).slice(0, 300)}; ${JSON.stringify(c2?.content).slice(0, 300)})`);
+    r = await h2.exec(PERSON, "touch new.ipynb; : > empty.board.json");
+    const n1 = await w2.read("/new.ipynb").catch(() => null);
+    check(r.code === 0 && (await w2.stat("/new.ipynb"))?.kind === "notebook" && Array.isArray(n1?.content?.cells) && n1.content.cells.length === 0 && (await w2.stat("/empty.board.json"))?.kind === "board",
+      `touch and an empty redirection: an empty notebook and an empty board (${JSON.stringify(r).slice(0, 200)})`);
+    for (const [cmd, gone] of [["echo x > bad.ipynb", "/bad.ipynb"], ["echo '{\"a\": 1}' > nocells.ipynb", "/nocells.ipynb"], ["echo '[1]' > arr.board.json", "/arr.board.json"], ["echo '{\"x\": 1}' > notboard.board.json", "/notboard.board.json"], ["echo x >> app.ipynb", "/app.ipynb"]]) {
+      const r2 = await h2.exec(PERSON, cmd);
+      check(r2.code === 1 && /notebook's or board's JSON|not a board/.test(r2.stderr) && !(await w2.stat(gone)), `${cmd} (absent): refused, nothing made (${JSON.stringify(r2).slice(0, 240)})`);
     }
-    const r = await h2.exec(PERSON, "cat src.ipynb > copy.txt");
+    r = await h2.exec(PERSON, "cat src.ipynb > copy.txt");
     check(r.code === 0 && (await w2.stat("/copy.txt"))?.kind === "file", `the control, a data file's name: created (${JSON.stringify(r).slice(0, 200)})`);
   }
   // a notebook or board is never written
