@@ -40,7 +40,7 @@ fn main() {
         let n = prime(bits / 2, &mut s) * prime(bits - bits / 2, &mut s);
         let mut st = siqs::Stats::default();
         let t = Instant::now();
-        let g = siqs::siqs_with(&n, &par, 1, &mut st);
+        let g = siqs::siqs_with(&n, &par, 1, &mut st).expect("the sieve's memory");
         let dt = t.elapsed().as_secs_f64();
         total += dt;
         println!("{:.3} s {} {:?}", dt, if g.is_some() { "ok" } else { "FAILED" }, st);

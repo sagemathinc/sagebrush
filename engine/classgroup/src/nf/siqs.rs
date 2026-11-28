@@ -101,7 +101,11 @@ pub fn params(bits: u64) -> Params {
 /// factor base and its roots, the sieve, the relations (PARTIALS_MAX times
 /// as many partial ones) and the matrix.
 pub fn memory_bound(bits: u64) -> u128 {
-    let par = params(bits);
+    memory_bound_with(bits, &params(bits))
+}
+
+/// memory_bound for the parameters `par`.
+pub fn memory_bound_with(bits: u64, par: &Params) -> u128 {
     let nfb = par.fb_size.max(40) as u128;
     let want = nfb + 1 + EXTRA as u128;
     // the primes of a: kn < 2^(bits + 6), and the largest factor-base
@@ -392,17 +396,22 @@ fn clear_column(rows: &mut [u64], pivot: &[u64], stride: usize, w: usize, bit: u
 /// another route (memory decides only whether the sieve runs).  `seed`
 /// selects the polynomials: the same seed gives the same run.
 pub fn siqs(n: &BigUint, seed: u64) -> Result<Option<BigUint>, sagebrush_ledger::EngineError> {
-    let bits = n.bits() as u64;
-    // (memory_bound is far below 2^64 bytes for any n: the parameters stop
-    // growing at 250 bits)
-    let _held = sagebrush_ledger::reserve(WHAT, memory_bound(bits) as u64)?;
-    Ok(siqs_with(n, &params(bits), seed, &mut Stats::default()))
+    siqs_with(n, &params(n.bits() as u64), seed, &mut Stats::default())
 }
 
 /// What the sieve's reservation is, in a refusal.
 pub const WHAT: &str = "the quadratic sieve";
 
-pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigUint> {
+/// siqs with the parameters `par` (and its statistics), its memory_bound
+/// for them reserved the same way.
+pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Result<Option<BigUint>, sagebrush_ledger::EngineError> {
+    // (the bound is far below 2^64 bytes for any n and parameters this
+    // module makes)
+    let _held = sagebrush_ledger::reserve(WHAT, memory_bound_with(n.bits() as u64, par) as u64)?;
+    Ok(sieve(n, par, seed, stats))
+}
+
+fn sieve(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Option<BigUint> {
     let n = BigInt::from(n.clone());
     let k = multiplier(&n);
     stats.multiplier = k;
@@ -456,6 +465,7 @@ pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Opt
         // a new a: s - 1 primes from the window, and the prime that brings
         // the product nearest the target
         let mut idx: Vec<usize> = vec![];
+        let mut chosen = false;
         for _ in 0..2000 {
             idx.clear();
             while idx.len() < s - 1 {
@@ -476,11 +486,13 @@ pub fn siqs_with(n: &BigUint, par: &Params, seed: u64, stats: &mut Stats) -> Opt
             idx.push(last);
             idx.sort();
             if used.insert(idx.clone()) {
+                chosen = true;
                 break;
             }
             idx.clear();
         }
-        if idx.is_empty() || used.len() > A_MAX {
+        // (a selection that never completed can leave s - 1 primes in idx)
+        if !chosen || used.len() > A_MAX {
             return None;
         }
         let q: Vec<u64> = idx.iter().map(|&i| fb.p[i] as u64).collect();
@@ -691,7 +703,7 @@ mod tests {
         let (p, q): (BigUint, BigUint) = (p.parse().unwrap(), q.parse().unwrap());
         let n = &p * &q;
         let mut st = Stats::default();
-        let g = siqs_with(&n, &params(n.bits() as u64), 1, &mut st).unwrap_or_else(|| panic!("no factor of {}: {:?}", n, st));
+        let g = siqs_with(&n, &params(n.bits() as u64), 1, &mut st).unwrap().unwrap_or_else(|| panic!("no factor of {}: {:?}", n, st));
         assert!(g == p || g == q, "{} from {}: {:?}", g, n, st);
     }
 
@@ -729,6 +741,17 @@ mod tests {
             assert_eq!(fb.t[i] as u64 * fb.t[i] as u64 % p, rem_u64(&kn, p));
             assert!(fb.divides(i, 7 * p) && !fb.divides(i, 7 * p + 1));
         }
+    }
+
+    // Below factor()'s range a selection of a can fail to complete (s - 1
+    // primes chosen when the 2000 tries run out): None, never an index past
+    // the selection (a panic, cx7's P2 on #2451).
+    #[test]
+    fn an_incomplete_selection_of_a_gives_none() {
+        let n: BigUint = "512002022965249".parse().unwrap();
+        let _ = siqs(&n, 1).unwrap();
+        let tiny = Params { fb_size: 40, m: 32768, lp_mult: 40, slack: 8 };
+        let _ = siqs_with(&n, &tiny, 1, &mut Stats::default()).unwrap();
     }
 
     #[test]

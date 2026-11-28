@@ -221,21 +221,24 @@ def message(what, need_bytes, limit_bytes, allowance_for, host=None, fixed=False
 def engine_refusal(m):
     """The memory guards' error for the engine's memory ledger refusing a
     reservation (an engine call's "memory" reply, m its figures): what was
-    refused, its need, and the room left in the engine's allowance.
+    refused, its need, and the room the ledger had left: phi (live +
+    retired + outstanding + x) <= allowance, phi = 21/8, so the largest x
+    admitted is 8/21 of the allowance less what is held.
 
     EXAMPLES::
 
         sage: from _memguard import engine_refusal
-        sage: m = {"what": "the quadratic sieve", "row": "native", "need": 194000000, "allowance": 2**30, "live": 2**30 - 10**7,
-        ....:      "outstanding": 0, "total": 2**32, "status": "observed", "joint": False, "retired": 0}
+        sage: m = {"what": "the quadratic sieve", "row": "shared", "need": 5964089, "allowance": 11895254, "live": 4194304,
+        ....:      "outstanding": 0, "total": 47581016, "status": "observed", "joint": False, "retired": 0}
         sage: e = engine_refusal(m)
         sage: type(e).__name__, e.what, e.need_bytes, e.limit_bytes, e.record["row"]
-        ('SagebrushMemoryError', 'The quadratic sieve', 194000000, 10000000, 'native')
+        ('SagebrushMemoryError', 'The quadratic sieve', 5964089, 337221, 'shared')
         sage: print(str(e).splitlines()[1])
-        The quadratic sieve needs about 194 MB, but Sagebrush allows about 10 MB for the engine's computations here.
+        The quadratic sieve needs about 6.0 MB, but Sagebrush allows about 337 kB for the engine's computations here.
     """
     what = str(m.get("what") or "the computation")
-    room = max(0, int(m["allowance"]) - int(m["live"]) - int(m["outstanding"]))
+    held = int(m["live"]) + int(m.get("retired") or 0) + int(m["outstanding"])
+    room = max(0, int(m["allowance"]) * 8 // 21 - held)
     return memory_guard(what[:1].upper() + what[1:], m["need"], room, "the engine's computations", record=m)
 
 

@@ -573,17 +573,17 @@
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: memory_bound :: let qcap = (2.0 * nfb as f64).min(A_PRIME_MAX); #0": {
+ "engine/classgroup/src/nf/siqs.rs :: memory_bound_with :: let qcap = (2.0 * nfb as f64).min(A_PRIME_MAX); #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: memory_bound :: let rels = want * (t + 2 * cols) + PARTIALS_MAX as u128 * want * (t + cols + 160); #0": {
+ "engine/classgroup/src/nf/siqs.rs :: memory_bound_with :: let rels = want * (t + 2 * cols) + PARTIALS_MAX as u128 * want * (t + cols + 160); #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve keeps at most this many partial relations per relation wanted, so that its memory has a bound (siqs::memory_bound); further ones are dropped, which can only slow the sieve: nothing is refused"
  },
- "engine/classgroup/src/nf/siqs.rs :: memory_bound :: let used = 2 * A_MAX as u128 * (8 * s + 48); #0": {
+ "engine/classgroup/src/nf/siqs.rs :: memory_bound_with :: let used = 2 * A_MAX as u128 * (8 * s + 48); #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's cap on the values of a per run (a 250-bit n needs about 800), so that the set of those used is in memory_bound: past it the sieve gives up and ECM goes on; nothing is refused"
@@ -593,42 +593,42 @@
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs_with :: if idx.is_empty() || used.len() > A_MAX { #0": {
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: if !chosen || used.len() > A_MAX { #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's cap on the values of a per run (a 250-bit n needs about 800), so that the set of those used is in memory_bound: past it the sieve gives up and ECM goes on; nothing is refused"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs_with :: if partials.len() < PARTIALS_MAX * want { #0": {
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: if partials.len() < PARTIALS_MAX * want { #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve keeps at most this many partial relations per relation wanted, so that its memory has a bound (siqs::memory_bound); further ones are dropped, which can only slow the sieve: nothing is refused"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs_with :: let log_gmax = (m as f64).log2() + 0.5 * log_kn - 0.5; #0": {
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let log_gmax = (m as f64).log2() + 0.5 * log_kn - 0.5; #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs_with :: let lp_max = pmax * par.lp_mult.clamp(1, pmax); #0": {
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let lp_max = pmax * par.lp_mult.clamp(1, pmax); #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs_with :: let pmax = *fb.p.last().unwrap() as u64; #0": {
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let pmax = *fb.p.last().unwrap() as u64; #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs_with :: let qcap = (pmax as f64 / 2.0).min(A_PRIME_MAX); #0": {
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let qcap = (pmax as f64 / 2.0).min(A_PRIME_MAX); #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs_with :: let thresh = (log_gmax - (lp_max as f64).log2() - par.slack as f64).clamp(10.0, 127.0) as u8; #0": {
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: let thresh = (log_gmax - (lp_max as f64).log2() - par.slack as f64).clamp(10.0, 127.0) as u8; #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
  },
- "engine/classgroup/src/nf/siqs.rs :: siqs_with :: } else if let Some(l) = v.to_u64().filter(|&l| l <= lp_max) { #0": {
+ "engine/classgroup/src/nf/siqs.rs :: sieve :: } else if let Some(l) = v.to_u64().filter(|&l| l <= lp_max) { #0": {
   "class": "none",
   "owner": "class group/number fields",
   "reason": "the quadratic sieve's parameters and arithmetic (the largest factor-base prime, the large-prime bound, the sieve threshold, u64::MAX in a divisibility test): matched text that refuses nothing"
