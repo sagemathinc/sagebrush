@@ -16,7 +16,7 @@ fn traces_vs_magma() {
         let pi = Ideal::principal(g).unwrap();
         assert_eq!(pi.factors.len(), 1);
         let (prime, _) = pi.factors[0];
-        assert!(primes_above(prime.p).contains(&prime));
+        assert!(primes_above(prime.p).unwrap().contains(&prime));
         let s = Space::new(level).unwrap();
         let t = s.hecke_matrix(&prime).unwrap();
         assert_eq!(t.trace() - (prime.norm as i64 + 1), parts[2][0], "level {}, T at {}", level, g);
