@@ -3172,6 +3172,21 @@ def cross(a, b, axisa=-1, axisb=-1, axisc=-1, axis=None):
     return stack([a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0], axis=-1)
 
 
+def _interp_part(v, x0, x1, y0, y1, part=False):
+    """NumPy's interpolation between two knots (part: one part of a complex value, its slope by the reciprocal of the
+    knots' distance, as NumPy's complex loop): from the left knot, else, where that is NaN (an overflowing or infinite
+    slope), from the right one, else, the two values equal, that value"""
+    with errstate(all="ignore"):
+        dy, dx = float64(y1) - float64(y0), float64(x1) - float64(x0)
+        slope = dy * (float64(1.0) / dx) if part else dy / dx
+        r = float(slope * (v - x0) + y0)
+        if r != r:
+            r = float(slope * (v - x1) + y1)
+            if r != r and y0 == y1:
+                r = y0
+    return r
+
+
 def interp(x, xp, fp, left=None, right=None, period=None):
     import bisect
     xp_l = _floats(xp).tolist()
@@ -3210,11 +3225,15 @@ def interp(x, xp, fp, left=None, right=None, period=None):
             res.append(hi_v)
         else:
             j = bisect.bisect_right(xp_l, v) - 1
-            if j >= n - 1:
-                res.append(fp_l[-1])
+            if j >= n - 1 or v == xp_l[j]:
+                # (an exact knot its own value, as NumPy's: never through a slope that may overflow)
+                res.append(fp_l[j])
+            elif cplx:
+                y0, y1 = complex(fp_l[j]), complex(fp_l[j + 1])
+                res.append(complex(_interp_part(v, xp_l[j], xp_l[j + 1], y0.real, y1.real, True),
+                                   _interp_part(v, xp_l[j], xp_l[j + 1], y0.imag, y1.imag, True)))
             else:
-                slope = (fp_l[j + 1] - fp_l[j]) / (xp_l[j + 1] - xp_l[j])
-                res.append(slope * (v - xp_l[j]) + fp_l[j])
+                res.append(_interp_part(v, xp_l[j], xp_l[j + 1], fp_l[j], fp_l[j + 1]))
     r = array(res, dtype=complex128 if cplx else float64).reshape(xs.shape)
     return r if r.ndim else r[()]
 
