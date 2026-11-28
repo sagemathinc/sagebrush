@@ -171,6 +171,16 @@
    "reason": "R's error from seq.int inside the S3 method, with a coercion warning (A1.3: S3 dispatch); Rill refuses",
    "sha256": "0ed7ba121174dcea48b8eab972b1f8901075526c4dcd9d5e96cd1b58bffc04d5"
   },
+  "rill-tests/fac/test_6.R#fac-exclude-keeps-na": {
+   "class": "not-implemented",
+   "reason": "NA as a level of its own (an exclude = without NA keeps it, sorted last): Rill refuses until factors model an NA level (A3)",
+   "sha256": "c4542390239cc98ecbad49571d3be05a7637d8e4ac43d570d0fbc0d01f061bc4"
+  },
+  "rill-tests/fac/test_6.R#fac-exclude-keeps-na-print": {
+   "class": "not-implemented",
+   "reason": "NA as a level of its own (an exclude = without NA keeps it, sorted last): Rill refuses until factors model an NA level (A3)",
+   "sha256": "c4542390239cc98ecbad49571d3be05a7637d8e4ac43d570d0fbc0d01f061bc4"
+  },
   "rill-tests/parse/test_1.R#arg-empty-name": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",

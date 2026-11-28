@@ -129,7 +129,12 @@ def factor(sess, call, args, force_ordered=False):
                 raise NotSupported("factor() with NA among the levels")
         ex = _arg(args, "exclude")
         if ex is not MISSING and not (isinstance(ex, RVector) and ex.type == "logical" and ex.data == [None]):
-            drop = set(s for s in _strings(ex, "factor(exclude =)") if s is not None)
+            excluded = _strings(ex, "factor(exclude =)")
+            if lv is MISSING and None not in excluded and any(s is None for s in values):
+                # (R: an exclude without NA makes NA a level of its own, sorted last, which Rill doesn't model yet;
+                # refused, never a level lost)
+                raise NotSupported("factor() whose exclude = keeps NA as a level")
+            drop = set(s for s in excluded if s is not None)
             levels = [l for l in levels if l not in drop]
         if len(set(levels)) != len(levels):
             raise NotSupported("factor() with duplicated levels")
@@ -142,6 +147,11 @@ def factor(sess, call, args, force_ordered=False):
             if len(labels) == k:
                 if len(set(labels)) != k or any(l is None for l in labels):
                     raise NotSupported("factor() with duplicated or NA labels")
+                levels = labels
+            elif len(labels) == 1 and k == 0:
+                # (one label and no levels: that label is the factor's one level, R 4.5.3)
+                if labels[0] is None:
+                    raise NotSupported("factor() with an NA label")
                 levels = labels
             elif len(labels) == 1:
                 # (one prefix, pasted to each level's position: an NA prefix is "NA", R 4.5.3)

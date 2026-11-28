@@ -19,6 +19,7 @@
   "rill-tests/fac/test_2.R",
   "rill-tests/fac/test_3.R",
   "rill-tests/fac/test_4.R",
-  "rill-tests/fac/test_5.R"
+  "rill-tests/fac/test_5.R",
+  "rill-tests/fac/test_6.R"
  ]
 }
