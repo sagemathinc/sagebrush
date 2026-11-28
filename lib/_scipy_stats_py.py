@@ -58,7 +58,8 @@ class PearsonRResult(tuple):
         # (three samples or fewer: the whole interval, (-1, 1), for any alternative, as SciPy's)
         if n <= 3:
             return ConfidenceInterval(np.float64(-1.0), np.float64(1.0))
-        z = _math.atanh(r) if abs(r) < 1 else _math.copysign(_math.inf, r)
+        # (an undefined r stays undefined: atanh(nan) is nan, not an infinity of nan's sign)
+        z = r if r != r else _math.atanh(r) if abs(r) < 1 else _math.copysign(_math.inf, r)
         se = 1 / _math.sqrt(n - 3)
         if self._alternative == "two-sided":
             h = float(_sc.ndtri(0.5 + confidence_level / 2))
@@ -109,6 +110,10 @@ class TtestResult(tuple):
             lo, hi = np.float64(-_math.inf), est + st.t.ppf(confidence_level, df) * se
         else:
             lo, hi = est - st.t.ppf(confidence_level, df) * se, np.float64(_math.inf)
+        # (n-d tests: both bounds arrays of the tests' shape, a one-sided interval's infinite end too)
+        if np.ndim(lo) or np.ndim(hi):
+            shape = np.shape(lo) if np.ndim(lo) else np.shape(hi)
+            return ConfidenceInterval(np.asarray(lo, dtype=float) + np.zeros(shape), np.asarray(hi, dtype=float) + np.zeros(shape))
         return ConfidenceInterval(np.float64(lo), np.float64(hi))
 
 
@@ -405,16 +410,30 @@ def spearmanr(a, b=None, axis=0, nan_policy="propagate", alternative="two-sided"
 
 def ttest_ind(a, b, axis=0, equal_var=True, nan_policy="propagate", permutations=None, random_state=None,
               alternative="two-sided", trim=0, method=None, *, keepdims=False):
-    """the t-test of two independent samples' means: pooled variance (equal_var) or Welch's, as SciPy's for 1-d
-    samples; the p-value from t on its degrees of freedom"""
-    import scipy.stats as st
+    """the t-test of two independent samples' means: pooled variance (equal_var) or Welch's, as SciPy's; the p-value
+    from t on its degrees of freedom; along axis, one test a slice (axis=None: the samples flattened)"""
     if permutations is not None or trim or method is not None or keepdims:
         raise NotImplementedError("scipy.stats.ttest_ind: permutations, trim, method and keepdims are not supported in Sagebrush")
-    if axis not in (0, -1, None):
-        raise NotImplementedError("scipy.stats.ttest_ind: axis=%r is not supported in Sagebrush" % (axis,))
     _check_nan_policy(nan_policy)
-    x = np.asarray(a, dtype=float).reshape(-1)
-    y = np.asarray(b, dtype=float).reshape(-1)
+    if axis is None or (np.ndim(a) <= 1 and np.ndim(b) <= 1):
+        return _ttest_ind_1d(np.asarray(a, dtype=float).reshape(-1), np.asarray(b, dtype=float).reshape(-1),
+                             equal_var, nan_policy, alternative)
+    # (n-d samples: one test a slice along axis, as SciPy's; the other dimensions the same in both)
+    xa, shape = _array(a, axis)
+    xb, shape_b = _array(b, axis)
+    if shape != shape_b:
+        raise NotImplementedError("scipy.stats.ttest_ind: samples whose other dimensions differ (broadcasting) are not supported in Sagebrush")
+    ra = xa.reshape(int(np.prod(shape)), xa.shape[-1])
+    rb = xb.reshape(int(np.prod(shape)), xb.shape[-1])
+    res = [_ttest_ind_1d(x, y, equal_var, nan_policy, alternative) for x, y in zip(ra, rb)]
+    def field(get):
+        return np.array([float(get(r_)) for r_ in res], dtype=float).reshape(shape)
+    return TtestResult(field(lambda r_: r_[0]), field(lambda r_: r_[1]), field(lambda r_: r_._df),
+                       field(lambda r_: r_._estimate), field(lambda r_: r_._se), alternative)
+
+
+def _ttest_ind_1d(x, y, equal_var, nan_policy, alternative):
+    import scipy.stats as st
     for v in (x, y):
         if np.any(v != v) and nan_policy == "raise":
             raise ValueError("The input contains nan values")

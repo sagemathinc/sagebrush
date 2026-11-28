@@ -8920,15 +8920,15 @@
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
- "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: axis=%r is not supported in Sagebrush\" % (axis,)) #0": {
-  "class": "coverage",
-  "owner": "python (@sagebrush-python)",
-  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
- },
  "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: permutations, trim, method and keepdims are not supported in Sagebrush\") #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: ttest_ind :: raise NotImplementedError(\"scipy.stats.ttest_ind: samples whose other dimensions differ (broadcasting) are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (samples whose other dimensions differ, broadcast against each other): raised before any work, never a guessed result; not a cap"
  },
  "lib/_special.py ::  :: _BESSEL_MAX_N = 500000 # (the longest backward recurrence Sagebrush runs) #0": {
   "class": "3",

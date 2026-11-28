@@ -66,6 +66,14 @@ for n in (2, 3, 4, 5):
             out("pearsonr n=%d %s ci %g" % (n, alt, level),
                 lambda: tuple(st.pearsonr(x, x * x, alternative=alt).confidence_interval(confidence_level=level)))
 out("pearsonr perfect ci", lambda: tuple(st.pearsonr([1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 4.0, 6.0, 8.0, 10.0]).confidence_interval()))
+# (an undefined r, n >= 4: its interval undefined, (nan, nan), or (-1, nan) and (nan, 1) one-sided)
+for label, x, y in [("nan sample", [1.0, np.nan, 3.0, 4.0], [1.0, 2.0, 3.0, 5.0]),
+                    ("inf sample", [1.0, np.inf, 3.0, 4.0], [1.0, 2.0, 3.0, 5.0]),
+                    ("constant", [2.0, 2.0, 2.0, 2.0], [1.0, 2.0, 3.0, 5.0]),
+                    ("1.7e308", list(np.array([1.0, -2.0, 3.0, 0.5, -1.5]) * 1.7e308), [1.0, 2.0, 3.0, 5.0, 4.0])]:
+    for alt in ("two-sided", "less", "greater"):
+        out("pearsonr %s %s" % (label, alt), lambda: tuple(st.pearsonr(x, y, alternative=alt)))
+        out("pearsonr %s %s ci" % (label, alt), lambda: tuple(st.pearsonr(x, y, alternative=alt).confidence_interval()))
 
 # 3. the independent t-test: a singleton's pooled statistic, NaN and empty samples undefined
 for a, b in [([1.0], [2.0, 3.0]), ([2.0, 3.0], [1.0]), ([1.0], [2.0]), ([1.0, np.nan], [2.0, 3.0]),
@@ -76,6 +84,17 @@ for a, b in [([1.0], [2.0, 3.0]), ([2.0, 3.0], [1.0]), ([1.0], [2.0]), ([1.0, np
             out("ttest_ind(%r, %r, equal_var=%s, %s)" % (a, b, eq, alt),
                 lambda: tuple(st.ttest_ind(a, b, equal_var=eq, alternative=alt)) + (st.ttest_ind(a, b, equal_var=eq, alternative=alt).df,))
 out("ttest_ind omit", lambda: tuple(st.ttest_ind([1.0, np.nan, 3.0], [2.0, 3.0, 5.0], nan_policy="omit")))
+# (n-d samples: one test a slice along axis, not one test of the flattened samples)
+M = np.arange(12.0).reshape(4, 3) ** 1.5
+N3 = (np.arange(24.0).reshape(2, 4, 3) % 7) ** 1.3
+for label, a, b, kw in [("2-d axis 0", M[:2], M[2:], {}), ("2-d axis 1", M[:, :1].repeat(2, 1) + M[:, :2], M[:, 1:], {"axis": 1}),
+                        ("2-d axis -1", M.T[:, :2], M.T[:, 2:], {"axis": -1}), ("2-d axis None", M[:2], M[2:], {"axis": None}),
+                        ("2-d Welch", M[:2], M[2:] ** 1.1, {"equal_var": False}), ("3-d axis 1", N3[:, :2], N3[:, 2:], {"axis": 1}),
+                        ("2-d nan", np.where(M[:2] == 1.0, np.nan, M[:2]), M[2:], {}),
+                        ("2-d nan omit", np.vstack([M[:2], [np.nan, 1.0, 2.0]]), M[2:], {"nan_policy": "omit"}),
+                        ("2-d less", M[:2], M[2:], {"alternative": "less"})]:
+    out("ttest_ind %s" % label, lambda: tuple(st.ttest_ind(a, b, **kw)) + (st.ttest_ind(a, b, **kw).df,))
+    out("ttest_ind %s ci" % label, lambda: tuple(st.ttest_ind(a, b, **kw).confidence_interval()))
 
 # 4. moments and ranks over an empty axis: NaN statistics, an empty rank array
 for shape, axis in [((0, 3), 0), ((3, 0), 1), ((0, 3), 1), ((2, 0, 3), 1), ((0,), 0), ((0, 3), None)]:
