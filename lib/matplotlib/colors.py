@@ -26,6 +26,8 @@ class Colormap:
     def __call__(self, x, alpha=None, bytes=False):
         import numpy as np
         tab = self._exact()
+        if tab is None:
+            tab = self._table()
         if tab is not None:
             return _lookup(tab, x, alpha, bytes)
         scalar = isinstance(x, (int, float))
@@ -40,17 +42,31 @@ class Colormap:
     def _color(self, t):
         return _colormap(t, self.name)
 
+    def _table(self):
+        """a custom colormap's table of N colors, RGBA (None: none)"""
+        return None
+
+    def _table_color(self, t):
+        # (a custom colormap's color at t for drawing: its table's entry, as a CSS color, each channel rounded to a
+        # byte, as _graphics.colormap draws a built-in one)
+        r, g, b, _ = _lookup(self._table(), float(t), None, False)
+        return "#%02x%02x%02x" % (round(float(r) * 255), round(float(g) * 255), round(float(b) * 255))
+
 
 def _lookup(tab, x, alpha, bytes):
-    """matplotlib's lookup in a table of N colors: an integer is an index, a
-    float t the entry floor(N t); below the range the first, above it the
-    last, NaN (0, 0, 0, 0); alpha (clipped to [0, 1]) for all but NaN;
-    bytes: each value times 255, truncated, as uint8"""
+    """matplotlib's lookup in a table of N colors (RGB, or RGBA with each color's own alpha): an integer is an
+    index, a float t the entry floor(N t); below the range the first, above it the last, NaN (0, 0, 0, 0); alpha
+    (clipped to [0, 1]) for all but NaN, else the table's; bytes: each value times 255, truncated, as uint8; the
+    result of the input's shape (a scalar's a tuple)"""
     import numpy as np
     n = len(tab)
+    t = np.array(tab, dtype=float)
     lut = np.zeros((n + 1, 4))
-    lut[:n, :3] = np.array(tab, dtype=float)
-    lut[:n, 3] = 1.0 if alpha is None else min(1.0, max(0.0, float(alpha)))
+    lut[:n, :3] = t[:, :3]
+    if alpha is not None:
+        lut[:n, 3] = min(1.0, max(0.0, float(alpha)))
+    else:
+        lut[:n, 3] = t[:, 3] if t.shape[1] == 4 else 1.0
     arr = np.asarray(x)
     if arr.dtype.kind in "iub":
         idx = np.clip(arr.astype(np.int64), 0, n - 1)
@@ -69,11 +85,18 @@ class ListedColormap(Colormap):
 
     def __init__(self, colors, name="from_list", N=None):
         cs = colors.tolist() if hasattr(colors, "tolist") else list(colors)
-        self._colors = [to_color(c if isinstance(c, str) else tuple(c)) for c in cs]
-        super().__init__(name, len(self._colors))
+        # (N, matplotlib's deprecated argument: the colors cycled, or cut, to N)
+        if N is not None:
+            cs = [cs[i % len(cs)] for i in range(N)] if cs else cs
+        self._rgba = [to_rgba(c if isinstance(c, str) else tuple(c)) for c in cs]
+        self.colors = cs
+        super().__init__(name, len(self._rgba))
+
+    def _table(self):
+        return self._rgba
 
     def _color(self, t):
-        return self._colors[min(len(self._colors) - 1, int(t * len(self._colors)))]
+        return self._table_color(t)
 
 
 class LinearSegmentedColormap(Colormap):
@@ -85,20 +108,37 @@ class LinearSegmentedColormap(Colormap):
 
     @staticmethod
     def from_list(name, colors, N=256, gamma=1.0):
-        m = LinearSegmentedColormap(name, None, N)
+        m = LinearSegmentedColormap(name, None, N, gamma)
         cs = colors.tolist() if hasattr(colors, "tolist") else list(colors)
-        m._stops = [to_color(c if isinstance(c, str) else tuple(c)) for c in cs]
+        m._stops = [to_rgba(c if isinstance(c, str) else tuple(c)) for c in cs]
+        m._gamma = gamma
         return m
+
+    def _table(self):
+        # (matplotlib's table of N colors: each channel interpolated linearly between the colors, evenly spaced on
+        # [0, 1], at linspace(0, 1, N) ** gamma, as its _create_lookup_table)
+        if not self._stops:
+            return None
+        import numpy as np
+        x = np.linspace(0, 1, len(self._stops))
+        chans = np.array(self._stops, dtype=float)
+        cols = []
+        for j in range(4):
+            y = chans[:, j]
+            if self.N == 1:
+                lut = np.array([y[-1]])
+            else:
+                xind = np.linspace(0, 1, self.N) ** self._gamma
+                ind = np.searchsorted(x, xind)[1:-1]
+                distance = (xind[1:-1] - x[ind - 1]) / (x[ind] - x[ind - 1])
+                lut = np.concatenate([[y[0]], distance * (y[ind] - y[ind - 1]) + y[ind - 1], [y[-1]]])
+            cols.append(np.clip(lut, 0.0, 1.0))
+        return np.stack(cols, axis=1).tolist()
 
     def _color(self, t):
         if not self._stops:
             return _colormap(t, self.name)
-        k = t * (len(self._stops) - 1)
-        i = min(len(self._stops) - 2, int(k))
-        f = k - i
-        a, b = self._stops[i], self._stops[i + 1]
-        mix = [round(int(a[j:j + 2], 16) * (1 - f) + int(b[j:j + 2], 16) * f) for j in (1, 3, 5)]
-        return "#%02x%02x%02x" % tuple(mix)
+        return self._table_color(t)
 
 
 def _sanitize_extrema(ex):
