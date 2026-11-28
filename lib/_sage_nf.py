@@ -563,7 +563,11 @@ class NumberField_absolute:
             sage: NumberField(x^2 + 3, 'a').number_of_roots_of_unity(), NumberField(x^2 + 1, 'a').number_of_roots_of_unity()
             (6, 4)
         """
-        return self._nfdata()["w"]
+        d = self._nfdata()
+        if not d.get("w_proven"):
+            # (the roots found are a lower bound only: never an unproven count)
+            raise NotImplementedError("the number of roots of unity of %s: the count found is not proven complete" % self)
+        return d["w"]
 
     def unit_group(self, proof=None):
         """The unit group: its rank (Dirichlet, from the signature, which is
