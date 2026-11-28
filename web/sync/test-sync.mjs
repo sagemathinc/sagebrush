@@ -73,6 +73,7 @@ const ST3 = "5a5a5a5a-0003-4a5a-8a5a-5a5a5a5a5a03"; // GET /status beside an ena
 const ST4 = "5a5a5a5a-0004-4a5a-8a5a-5a5a5a5a5a04"; // GET /status while CoCalc is down
 const ST5 = "5a5a5a5a-0005-4a5a-8a5a-5a5a5a5a5a05"; // cold statuses and an enable at once: one CoCalc fetch
 const ST6 = "5a5a5a5a-0006-4a5a-8a5a-5a5a5a5a5a06"; // statuses polled through an outage: a fetch per retry gate
+const FN = "fe5ce000-0001-4e2e-8e2e-e2e2e2e2e2f1"; // a write in flight when its session is signed out (S07)
 const J = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"; // on the seamless Worker only: the hold-enable seam is bound for it there
 
 let failures = 0;
@@ -125,6 +126,7 @@ for (const st of [ST1, ST2, ST3, ST4, ST5, ST6]) fake.limits.set(st, sync(1 << 2
 fake.limits.set(Z1, plan(true, 100));
 fake.limits.set(P1, sync(1 << 20, 1 << 20));
 fake.limits.set(P2, sync(1 << 20, 1 << 20));
+fake.limits.set(FN, sync(1 << 26, 1 << 26));
 fake.limits.set(S1, sync(1 << 20, 1 << 20));
 for (const t of [TL1, TL2, TL3]) fake.limits.set(t, sync(1 << 20, 1 << 20)); // (the test list's accounts: enable asks for the plan first)
 async function cocalc(req) {
@@ -145,7 +147,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     {
       ...base,
       name: "sync",
-      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4},${ST5},${ST6},${P1},${P2}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
+      bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A}, ${B},${D},${E},${F},${G},${H},${I},${K},${L},${M},${N},${O},${Q},${S1},${T1},${T2},${T3},${T4},${T5},${T6},${U1},${U2},${U3},${V1},${R1},${R2},${R3},${R4},${W1},${W2},${Y1},${Y2},${Y3},${Y4},${X1},${X2},${Z0},${Z1},${ST1},${ST3},${ST4},${ST5},${ST6},${P1},${P2},${FN}`, SYNC_URL_KEY: URL_KEY, FILES_ORIGIN: "https://files.test", SYNC_SITE_ORIGIN: SITE, SYNC_TEST_PIN_MS: "1000", SYNC_TEST_LOSE: LOSE, SYNC_TEST_NO_WORKER_DELETE: "1", SYNC_TEST_FAIL_ENROLL: H, SYNC_TEST_HOLD_ENABLE: `${I},${K}`, SYNC_TEST_FAIL_PURGE: RF },
       durableObjects: { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } },
       routes: ["sagebrush.test/*", "files.test/*"],
       outboundService: cocalc,
@@ -2411,6 +2413,150 @@ console.log(JSON.stringify(local.map((o, i) => wireOf({ ...o, t: 7, by: "person"
   // and a status from another site is refused like every sync request
   const xr = await fetchAt(SITE, "/api/sync/v1/status", { headers: { cookie: s1, origin: "https://evil.test" } });
   ok(xr.status === 403, "a status asked from another site is refused (403)");
+}
+
+// ---- S07: a write in flight when its session is signed out is not committed. Held at the document (its test gate)
+// after the account object's checks passed and the forward left, the session is signed out through /auth/logout, then
+// the write goes on: the document refuses it (the revoke fenced it there), and nothing of it is stored. Once each for
+// an account socket's batch, a document socket's batch and a clear; another session of the account checks the result
+{
+  const docNs = await mf.getDurableObjectNamespace("SYNC_DOC", "sync");
+  const docOf = (doc) => docNs.get(docNs.idFromName(`doc:${hashOf(FN)}:${doc}`));
+  const acctF = acctNs.get(acctNs.idFromName("acct:" + hashOf(FN)));
+  const keep = await signIn(FN);
+  ok((await post(keep, "/api/sync/v1/enable", {})).status === 200, "(S07: sync on for the account)");
+  const k = await socket(keep);
+  await hello(k, "fence-keep-0001");
+  const signOut = async (session) => (await fetchAt(SITE, "/auth/logout", { method: "POST", headers: { cookie: session, origin: SITE } })).status;
+  const ids = async (doc) => ((await k.ask({ t: "pull", doc, epoch: 1, after: 0 }))?.items ?? []).flatMap((it) => it.patches.map((e) => e.id));
+  const blobF = Buffer.from("a blob of S07's held batch");
+  await put(keep, blobF);
+  const refsF = async () => (await acctF.inspect({ sha256: sha(blobF) }))?.refs;
+
+  // (an account socket's batch, with a blob)
+  {
+    const doc = "fe5c00000001";
+    const s = await signIn(FN);
+    const w = await socket(s);
+    await hello(w, "fence-acct-0001");
+    await w.ask(batch(doc, 1, [[1, pid(1, "clientFN01"), [], "seed"]], { kind: "board" }));
+    const refs0 = await refsF();
+    const held = pid(2, "clientFN01");
+    await docOf(doc).hold({ name: `before:${held}` });
+    const p = w.ask(batch(doc, 1, [[2, held, [pid(1, "clientFN01")], "late", [sha(blobF)]]]));
+    await new Promise((r) => setTimeout(r, 200));
+    ok((await signOut(s)) === 200, "(S07: the batch's session signs out while the batch waits at its document)");
+    await docOf(doc).open({ name: `before:${held}` });
+    await p;
+    const got = await ids(doc);
+    const pins = (await acctF.inspect({ sha256: sha(blobF) }))?.pins ?? [];
+    ok(!got.includes(held) && got.length === 1, `an account socket's batch held across its session's sign-out is not committed: the document has only the seed (${JSON.stringify(got)})`);
+    ok(await until(async () => (await refsF()) === refs0 && !((await acctF.inspect({ sha256: sha(blobF) }))?.pins ?? []).some((x) => String(x.ref).endsWith(held)), 5000), `and its blob's pin is gone, the blob's references as before (${JSON.stringify(pins)})`);
+  }
+
+  // (an account socket's batch whose session signs out before the forward leaves: held after the account object's
+  // last await, before its checks; refused there, and the document never sees it)
+  {
+    const doc = "fe5c00000006";
+    const s = await signIn(FN);
+    const w = await socket(s);
+    await hello(w, "fence-acct-0002");
+    // (seeded by the other session: this session has forwarded nothing to this document, so no fence can reach it there,
+    // and only the account object's own check can refuse the batch)
+    await k.ask(batch(doc, 1, [[1, pid(1, "clientFN06"), [], "seed"]], { kind: "board" }));
+    const gateF = (on) => fetchAt(SITE, `/__test/gate?name=forward-checks&on=${on ? 1 : 0}`, { method: "POST" });
+    // (its own patchflow client: the seed's belongs to the other session's device)
+    const held = pid(2, "clientFN6B");
+    await gateF(true);
+    const p = w.ask(batch(doc, 1, [[1, held, [pid(1, "clientFN06")], "late"]]));
+    await new Promise((r) => setTimeout(r, 200));
+    ok((await signOut(s)) === 200, "(S07: the batch's session signs out before its forward leaves)");
+    await gateF(false);
+    await p;
+    const got = await ids(doc);
+    ok(!got.includes(held) && got.length === 1, `an account socket's batch whose session signed out before the forward is refused at the account object (${JSON.stringify(got)})`);
+  }
+
+  // (a document socket's batch)
+  {
+    const doc = "fe5c00000002";
+    const s = await signIn(FN);
+    const w = await socket(s);
+    await hello(w, "fence-docs-0001");
+    await w.ask(batch(doc, 1, [[1, pid(1, "clientFN02"), [], "seed"]], { kind: "board" }));
+    const t = await w.ask({ t: "ticket", doc });
+    const d = await socket(s, SITE, `/api/sync/v1/doc/${hashOf(FN)}/${doc}?ticket=${t.ticket}`);
+    ok(d.status === 101, "(S07: a document socket open)");
+    const held = pid(2, "clientFN02");
+    await docOf(doc).hold({ name: `before:${held}` });
+    const p = d.ask(batch(doc, 1, [[2, held, [pid(1, "clientFN02")], "late"]]));
+    await new Promise((r) => setTimeout(r, 200));
+    ok((await signOut(s)) === 200, "(S07: the document socket's session signs out while its batch waits)");
+    await docOf(doc).open({ name: `before:${held}` });
+    await p;
+    const got = await ids(doc);
+    ok(!got.includes(held) && got.length === 1, `a document socket's batch held across its session's sign-out is not committed (${JSON.stringify(got)})`);
+  }
+
+  // (a clear)
+  {
+    const doc = "fe5c00000003";
+    const s = await signIn(FN);
+    const w = await socket(s);
+    await hello(w, "fence-clr-00001");
+    await w.ask(batch(doc, 1, [[1, pid(1, "clientFN03"), [], "seed"]], { kind: "board" }));
+    const root = pid(9, "clientFN03");
+    await docOf(doc).hold({ name: `clear:${root}` });
+    const p = w.ask({ t: "clear", doc, expect_head: { epoch: 1, seq: 1 }, root: { patches: [{ cseq: 1, id: root, parents: [], size: 4 }], body: Buffer.from("root").toString("base64") } });
+    await new Promise((r) => setTimeout(r, 200));
+    ok((await signOut(s)) === 200, "(S07: the clear's session signs out while the clear waits)");
+    await docOf(doc).open({ name: `clear:${root}` });
+    await p;
+    const after = await k.ask({ t: "pull", doc, epoch: 1, after: 0 });
+    ok(after?.t === "batches" && after.head?.epoch === 1 && after.items.length === 1, `a clear held across its session's sign-out is not committed: still epoch 1, its history kept (${JSON.stringify(after?.head)})`);
+  }
+
+  // (S07 P2: a pull reads from storage only the bodies it returns: seven batches of 690 KB (three 230 KB patches each),
+  // a default pull returns the four that fit 4 MiB, says there's more, and has read exactly those four bodies, not the
+  // seven it could have)
+  {
+    const doc = "fe5c00000005";
+    const C5 = "clientFN05", B = 690_000;
+    // (batch i: cseq 3i-2..3i, each patch's parent the one before it)
+    const bigBatch = (i) => {
+      const ps = [];
+      for (let j = 3 * i - 2; j <= 3 * i; j++) ps.push([j, pid(j, C5), j === 1 ? [] : [pid(j - 1, C5)], Buffer.alloc(B / 3, 96 + i).toString()]);
+      return batch(doc, 1, ps, i === 1 ? { kind: "board" } : {});
+    };
+    for (let i = 1; i <= 7; i++) {
+      const r = await k.ask(bigBatch(i));
+      if (!r?.batch) ok(false, "(S07 P2: batch " + i + " stored: " + JSON.stringify(r)?.slice(0, 200) + ")");
+    }
+    const p = await k.ask({ t: "pull", doc, epoch: 1, after: 0 });
+    const read = await docOf(doc).testPullRead();
+    ok(p?.items?.length === 4 && p.more === true && p.items.map((it) => it.seq).join() === "1,2,3,4", `a pull of seven 690 KB batches returns the four that fit, in order, with more (${p?.items?.length}, more ${p?.more})`);
+    ok(read === 4 * B, `and it read only those four bodies from storage: ${read} bytes, not the ${7 * B} of all seven`);
+    const p2 = await k.ask({ t: "pull", doc, epoch: 1, after: 4 });
+    const read2 = await docOf(doc).testPullRead();
+    ok(p2?.items?.map((it) => it.seq).join() === "5,6,7" && p2.more === false && read2 === 3 * B, `the next page: the other three, no more, three bodies read (${read2})`);
+    const one = await k.ask({ t: "pull", doc, epoch: 1, after: 0, limit: 1 });
+    const read1 = await docOf(doc).testPullRead();
+    ok(one?.items?.length === 1 && one.more === true && read1 === B, `limit 1: one item, more, one body read (${read1})`);
+  }
+
+  // (control: the same hold with no sign-out commits, so the rows above are the sign-out's doing)
+  {
+    const doc = "fe5c00000004";
+    await k.ask(batch(doc, 1, [[1, pid(1, "clientFN04"), [], "seed"]], { kind: "board" }));
+    const held = pid(2, "clientFN04");
+    await docOf(doc).hold({ name: `before:${held}` });
+    const p = k.ask(batch(doc, 1, [[2, held, [pid(1, "clientFN04")], "kept"]]));
+    await new Promise((r) => setTimeout(r, 200));
+    await docOf(doc).open({ name: `before:${held}` });
+    const r = await p;
+    ok(r?.batch?.new === 1 && (await ids(doc)).includes(held), "control: the same held batch, its session kept, is committed");
+  }
+  k.ws.close();
 }
 
 // ---- astra's narrowed CORR-PR58-1, last: it waits for a whole purge, so it runs after the cases whose clocks a
