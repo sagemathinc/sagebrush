@@ -70,6 +70,16 @@ ok(await until(`/\.space\.json file/.test(document.querySelector('[data-c="statu
 // ---- the example: it loads; a click's selection; Back
 await open("?space=intro.space.json");
 ok(await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "the example space loads", await status());
+// (the larger examples are offered in the page's list, and fetched only when picked: the first load reads the list
+//  and the space shown, no other space)
+const spacesRead = () => ev(`performance.getEntriesByType("resource").map((r) => new URL(r.name).pathname).filter((p) => p.endsWith(".space.json"))`);
+ok((await ev(`[...document.querySelector('[data-c="space"]').options].map((o) => o.value)`)).includes("modular-forms.space.json"), "the page's list offers Modular forms");
+ok(JSON.stringify(await spacesRead()) === JSON.stringify(["/space/intro.space.json"]), "at first only the space shown is read", await spacesRead());
+await ev(`(() => { const s = document.querySelector('[data-c="space"]'); s.value = "modular-forms.space.json"; s.dispatchEvent(new Event("change")); return true; })()`);
+ok(await until(`space3d.space?.nodes?.length >= 70 && /objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "picked, Modular forms loads", { nodes: await ev(`space3d.space?.nodes?.length`), status: await status() });
+ok((await spacesRead()).includes("/space/modular-forms.space.json"), "and is read then", await spacesRead());
+await open("?space=intro.space.json");
+ok(await until(`/objects/.test(document.querySelector('[data-c="status"]')?.textContent ?? '')`, 30000), "the example space loads again");
 const first = await ev(`space3d.space.nodes[0].id`);
 ok(await ev(`space3d.select(${JSON.stringify(first)})`) && await until(`space3d.selection?.id === ${JSON.stringify(first)} && !document.querySelector('[data-c="overlay"]').hidden`, 10000), "selecting an object opens it");
 
