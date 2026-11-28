@@ -110,4 +110,13 @@ fn the_product_and_a_lifting_step_poll_within() {
     assert!(n >= 1, "the big-integer residual: {} checks", n);
     let n = stops_in("arith.solve_x", || solve(&d, &rhs));
     assert!(n >= 1, "the digits' accumulation: {} checks", n);
+    // the big-integer residual's count is weighted by a's entries' size: a
+    // diagonal of 2^700 + 1 (701 bits: a multiply-add counted 1 + 10) with
+    // 64 right-hand sides is 32 * 64 * 32 * 11 = 720896 a step, about 11
+    // polls (a poll restarts the count at 0, dropping the part of the add
+    // past 2^16: at least 10 a step); counted as 1, once a step
+    let d = diagonal(32, &((BigInt::from(1u64) << 700usize) + BigInt::one()));
+    let rhs = ones(32, 64, &one);
+    let c = traced(&["arith.solve_residual", "arith.solve_lift"], || solve(&d, &rhs));
+    assert!(c[1] >= 1 && c[0] >= c[1] * (((32 * 64 * 32 * 11) >> 16) - 1), "the weighted big-integer residual: {} checks in {} steps", c[0], c[1]);
 }
