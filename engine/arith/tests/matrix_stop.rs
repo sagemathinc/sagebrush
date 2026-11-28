@@ -1,6 +1,7 @@
 //! Stop inside the integer matrix product and inside a lifting step of
-//! solve: both poll every 2^16 multiply-adds or so, within a row and across
-//! the right-hand sides, not only between rows or steps.  Each case traces
+//! solve: both poll every 2^16 multiply-adds or so (a big-integer one
+//! counted by its entries' sizes in words), within a row and across the
+//! right-hand sides' solves, not only between rows or steps.  Each case traces
 //! its phase's checks, requires about one per 2^16 multiply-adds, arms Stop
 //! at the middle one and checks the call unwinds there; the same call then
 //! gives the same answer.  One test: the hooks and the request flag are
@@ -51,6 +52,21 @@ fn the_product_and_a_lifting_step_poll_within() {
     let b = ones(48, 48, &big);
     let n = stops_in("arith.mul", || b.mul(&b));
     assert!(n >= (48 * 48 * 48) >> 16, "the large-entry product: {} checks", n);
+    // a product of few multiply-adds (16^3 = 4096, under one poll's count)
+    // of large entries: each counts as its entries' sizes in words, so it
+    // polls (2^16-bit entries: about a million word products each)
+    let huge = BigInt::from(1u64) << 65536usize;
+    let h = ones(16, 16, &huge);
+    let n = stops_in("arith.mul", || h.mul(&h));
+    assert!(n >= 16 * 16, "the product of 2^16-bit entries: {} checks", n);
+    // the digits of a lifting step, the k solves through the LU, poll on
+    // the step's count: n = 64 is a solve of 64 * 65 < 2^16 multiply-adds,
+    // so they poll only across the right-hand sides (256 of them: about 16
+    // polls a step), in their own phase
+    let i64m = identity(64);
+    let wide = ones(64, 256, &one);
+    let n = stops_in("arith.solve_digits", || solve(&i64m, &wide));
+    assert!(n >= (256 * 64 * 65) >> 16, "the solves of a lifting step: {} checks", n);
     // solve I x = B for 128 right-hand sides: a lifting step is 128^3
     // multiply-adds (the solves through the LU and the residual)
     let i = identity(128);

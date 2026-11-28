@@ -4,6 +4,11 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/arith/src/zmat.rs :: mul :: let w = 1 + (self.max_bits() / 64) as usize * (o.max_bits() / 64) as usize; #0": {
+  "class": "none",
+  "owner": "arithmetic kernels (engine/arith)",
+  "reason": "the product's poll weight from its entries' sizes (max_bits): how often Stop is polled, not a limit"
+ },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
@@ -7277,8 +7282,8 @@
     "route": "memguard"
    }
   },
-  "owner": "linear algebra/runtime memory",
   "explained": true,
+  "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _NFCharge :: operation's working copy), against the budget for one matrix.  The #0": {
@@ -7288,8 +7293,8 @@
     "route": "memguard"
    }
   },
-  "owner": "linear algebra/runtime memory",
   "explained": true,
+  "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _NFCharge.__init__ :: self.limit = _heap_limit() // _HEAP_SHARE #0": {
@@ -7299,8 +7304,8 @@
     "route": "memguard"
    }
   },
-  "owner": "linear algebra/runtime memory",
   "explained": true,
+  "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _NFCharge.row :: if self.total > self.limit: #0": {
@@ -7310,8 +7315,8 @@
     "route": "memguard"
    }
   },
-  "owner": "linear algebra/runtime memory",
   "explained": true,
+  "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _NFCharge.row :: self.total, self.limit, \"one matrix\") #0": {
@@ -7321,8 +7326,8 @@
     "route": "memguard"
    }
   },
-  "owner": "linear algebra/runtime memory",
   "explained": true,
+  "owner": "linear algebra/runtime memory",
   "row": "inv-6"
  },
  "lib/_sage_ffmat.py :: _admit_size :: anything is built, if not; its allowance is the budget, 1/_HEAP_SHARE #0": {

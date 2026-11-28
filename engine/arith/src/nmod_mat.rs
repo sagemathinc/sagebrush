@@ -18,6 +18,13 @@ pub struct Lu {
 impl Lu {
     /// x with A x = b.
     pub fn solve_vec(&self, b: &[u64]) -> Vec<u64> {
+        self.solve_vec_polled(b, &mut Poll::new())
+    }
+
+    /// As [`Lu::solve_vec`], counting its n^2 multiply-adds on the caller's
+    /// `poll`: a caller that solves for many right-hand sides polls across
+    /// them (one solve of size n < 256 is under one poll's work).
+    pub(crate) fn solve_vec_polled(&self, b: &[u64], poll: &mut Poll) -> Vec<u64> {
         let n = self.a.rows;
         let m = self.a.m;
         let batch = batch_len(&m);
@@ -33,8 +40,6 @@ impl Lu {
             }
             r
         };
-        // (n^2 multiply-adds a solve: polled, a solve per right-hand side)
-        let mut poll = Poll::new();
         let mut y = vec![0u64; n];
         for i in 0..n {
             poll.add(i + 1);

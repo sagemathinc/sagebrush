@@ -134,10 +134,13 @@ impl ZMat {
                 return ZMat { rows: r, cols: c, d };
             }
         }
+        // (a multiply-add of big integers costs about the product of their
+        // sizes in words: counted so, a product of few large entries polls)
+        let w = 1 + (self.max_bits() / 64) as usize * (o.max_bits() / 64) as usize;
         let mut d = Vec::with_capacity(r * c);
         for i in 0..r {
             for j in 0..c {
-                poll.add(k);
+                poll.add(k.saturating_mul(w));
                 let mut s = BigInt::zero();
                 for l in 0..k {
                     if !self.d[i * k + l].is_zero() {
@@ -368,18 +371,22 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                 .collect(),
             None => r.iter().map(|v| mod_u64(v, &m)).collect(),
         };
-        // digit = a^-1 (r mod p), column by column through the LU
-        let digit = if k == 1 {
-            Mat { rows: n, cols: 1, m, d: ainv.solve_vec(&rd) }
-        } else {
-            let mut d = vec![0u64; n * k];
-            for j in 0..k {
-                let col: Vec<u64> = (0..n).map(|i| rd[i * k + j]).collect();
-                for (i, v) in ainv.solve_vec(&col).into_iter().enumerate() {
-                    d[i * k + j] = v;
+        // digit = a^-1 (r mod p), column by column through the LU, the
+        // solves counted on the step's poll (a phase of their own)
+        let digit = {
+            let _digits = sagebrush_interrupt::enter("arith.solve_digits");
+            if k == 1 {
+                Mat { rows: n, cols: 1, m, d: ainv.solve_vec_polled(&rd, &mut poll) }
+            } else {
+                let mut d = vec![0u64; n * k];
+                for j in 0..k {
+                    let col: Vec<u64> = (0..n).map(|i| rd[i * k + j]).collect();
+                    for (i, v) in ainv.solve_vec_polled(&col, &mut poll).into_iter().enumerate() {
+                        d[i * k + j] = v;
+                    }
                 }
+                Mat { rows: n, cols: k, m, d }
             }
-            Mat { rows: n, cols: k, m, d }
         };
         // r = (r - a digit) / p
         match (&mut r128, &a64) {
@@ -417,8 +424,10 @@ pub fn solve(a: &ZMat, b: &ZMat) -> Option<(ZMat, BigInt)> {
                 }
             }
         }
+        // (each a multiply-add of p^iter's size, in words)
+        let pkw = 1 + (pk.bits() / 64) as usize;
         for (xi, &di) in x.iter_mut().zip(&digit.d) {
-            poll.add(1);
+            poll.add(pkw);
             if di != 0 {
                 *xi += &pk * BigInt::from(di);
             }
