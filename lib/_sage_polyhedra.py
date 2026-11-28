@@ -360,6 +360,8 @@ class _HRep:
         b = self._b()
         neg = (b < 0)
         bs = _fmt(abs(b) if not isinstance(b, float) else abs(b), r)
+        if self._eq and self._P._empty:
+            return "An equation %s == 0" % _fmt(b, r)
         if self._eq:
             return "An equation %s x %s %s == 0" % (a, "-" if neg else "+", bs)
         return "An inequality %s x %s %s >= 0" % (a, "-" if neg else "+", bs)
@@ -762,7 +764,8 @@ class Polyhedron_:
             v._index = k
         self._V = V
         if self._empty:
-            self._H = []
+            # as in Sage: the one equation -1 == 0
+            self._H = [_HRep(self, tuple([0] * dim) + (-1,), True, 0)]
 
     def _ringobj(self):
         return getattr(_sa(), self._ring)
@@ -1451,9 +1454,17 @@ class Polyhedron_:
         """
         return self.faces(int(self.dim()) - 1)
 
+    def _edges(self):
+        """The 1-dimensional faces as V-index sets, the polyhedron itself
+        included when it is 1-dimensional."""
+        E = [F for F, dd in self._faces() if dd == 1]
+        if not self._empty and self.dim() == 1:
+            E.append(frozenset(range(len(self._V))))
+        return E
+
     def _adjacent(self, v, w):
         i, j = v._index, w._index
-        return any(F == frozenset((i, j)) for F, dd in self._faces() if dd == 1)
+        return frozenset((i, j)) in self._edges()
 
     def vertex_adjacency_matrix(self):
         """The adjacency matrix of the vertices.
@@ -1484,8 +1495,8 @@ class Polyhedron_:
             return G
         for v in self.vertices():
             G.add_vertex(v)
-        for F, dd in self._faces():
-            if dd == 1 and len(F) == 2 and all(self._V[i]._kind == "vertex" for i in F):
+        for F in self._edges():
+            if len(F) == 2 and all(self._V[i]._kind == "vertex" for i in F):
                 a, b = sorted(F)
                 G.add_edge(self._V[a], self._V[b])
         return G

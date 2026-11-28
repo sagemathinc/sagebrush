@@ -75,6 +75,30 @@ for P in [Polyhedron(vertices=[[_sage_const_1 , _sage_const_0 , _sage_const_0 ],
 show(lambda: Polyhedron(vertices=[[_sage_const_1 /_sage_const_2 , _sage_const_0 ], [_sage_const_0 , _sage_const_3 /_sage_const_2 ]]).bounding_box(integral=True))
 show(lambda: Polyhedron(vertices=[[_sage_const_0 , _sage_const_0 ]], rays=[[_sage_const_1 , _sage_const_0 ]]).bounding_box(integral=True))
 
+# a 1-dimensional polyhedron is its own edge
+for P in [Polyhedron(vertices=[(_sage_const_0 , _sage_const_0 ), (_sage_const_2 , _sage_const_0 )]), Polyhedron(vertices=[(_sage_const_0 , _sage_const_0 , _sage_const_0 ), (_sage_const_1 , _sage_const_1 , _sage_const_1 )]), Polyhedron(vertices=[(_sage_const_0 ,), (_sage_const_3 ,)]),
+          Polyhedron(vertices=[(_sage_const_1 ,)]), Polyhedron(vertices=[(_sage_const_0 , _sage_const_0 )], rays=[(_sage_const_1 , _sage_const_0 )]), Polyhedron(vertices=[(_sage_const_0 , _sage_const_0 )], lines=[(_sage_const_1 , _sage_const_0 )]),
+          Polyhedron(vertices=[(_sage_const_0 , _sage_const_0 ), (_sage_const_1 , _sage_const_0 )], rays=[(_sage_const_0 , _sage_const_1 )]), Polyhedron(vertices=[(_sage_const_0 , _sage_const_0 )], rays=[(_sage_const_1 , _sage_const_0 ), (_sage_const_0 , _sage_const_1 )]),
+          polytopes.hypercube(_sage_const_2 ), Polyhedron(vertices=[(_sage_const_0 , _sage_const_0 )], rays=[(_sage_const_1 , _sage_const_0 )], lines=[(_sage_const_0 , _sage_const_1 )])]:
+    G = P.graph()
+    print(G.order(), G.size(), P.vertex_adjacency_matrix().rows(), [list(v.neighbors()) for v in P.Vrepresentation()])
+
+# the empty polyhedron's H-representation is the equation -1 == 0, as in Sage
+for n in [_sage_const_1 , _sage_const_2 , _sage_const_3 ]:
+    E = Polyhedron(ambient_dim=n)
+    show(lambda: (E.Hrepresentation(), list(E.Hrep_generator())))
+    show(lambda: (E.n_Hrepresentation(), E.n_equations(), E.n_inequalities(), E.n_Vrepresentation()))
+    show(lambda: (E.equations_list(), E.inequalities_list(), E.equations(), E.inequalities()))
+    show(lambda: (E.dim(), E.is_universe(), E.is_full_dimensional(), E.is_compact(), E.is_empty()))
+    show(lambda: (E.Hrepresentation(_sage_const_0 ).A(), E.Hrepresentation(_sage_const_0 ).b(), E.Hrepresentation(_sage_const_0 ).vector(), E.Hrepresentation(_sage_const_0 ).is_equation()))
+    show(lambda: E.cdd_Hrepresentation().rstrip())
+    show(lambda: (E.f_vector(), [f.ambient_H_indices() for f in E.faces(-_sage_const_1 )], E.facets()))
+    show(lambda: (E.contains([_sage_const_0 ] * n), E == Polyhedron(ambient_dim=n), E.volume(), E.vertex_adjacency_matrix()))
+    show(lambda: E.intersection(Polyhedron(vertices=[[_sage_const_0 ] * n])))
+    show(lambda: Polyhedron(vertices=[[_sage_const_0 ] * n]).intersection(Polyhedron(vertices=[[_sage_const_1 ] * n])).equations_list())
+show(lambda: Polyhedron(ieqs=[[-_sage_const_1 , _sage_const_1 ], [-_sage_const_1 , -_sage_const_1 ]]).Hrepresentation())
+show(lambda: Polyhedron(eqns=[[_sage_const_1 , _sage_const_0 ]]).Hrepresentation())
+
 # the error-erasure decoder needs k surviving evaluations
 from copy import copy
 F = GF(_sage_const_7 )

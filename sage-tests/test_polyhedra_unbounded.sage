@@ -74,6 +74,30 @@ for P in [Polyhedron(vertices=[[1, 0, 0], [0, 1, 0]], rays=[[1, 1, 0]]),
 show(lambda: Polyhedron(vertices=[[1/2, 0], [0, 3/2]]).bounding_box(integral=True))
 show(lambda: Polyhedron(vertices=[[0, 0]], rays=[[1, 0]]).bounding_box(integral=True))
 
+# a 1-dimensional polyhedron is its own edge
+for P in [Polyhedron(vertices=[(0, 0), (2, 0)]), Polyhedron(vertices=[(0, 0, 0), (1, 1, 1)]), Polyhedron(vertices=[(0,), (3,)]),
+          Polyhedron(vertices=[(1,)]), Polyhedron(vertices=[(0, 0)], rays=[(1, 0)]), Polyhedron(vertices=[(0, 0)], lines=[(1, 0)]),
+          Polyhedron(vertices=[(0, 0), (1, 0)], rays=[(0, 1)]), Polyhedron(vertices=[(0, 0)], rays=[(1, 0), (0, 1)]),
+          polytopes.hypercube(2), Polyhedron(vertices=[(0, 0)], rays=[(1, 0)], lines=[(0, 1)])]:
+    G = P.graph()
+    print(G.order(), G.size(), P.vertex_adjacency_matrix().rows(), [list(v.neighbors()) for v in P.Vrepresentation()])
+
+# the empty polyhedron's H-representation is the equation -1 == 0, as in Sage
+for n in [1, 2, 3]:
+    E = Polyhedron(ambient_dim=n)
+    show(lambda: (E.Hrepresentation(), list(E.Hrep_generator())))
+    show(lambda: (E.n_Hrepresentation(), E.n_equations(), E.n_inequalities(), E.n_Vrepresentation()))
+    show(lambda: (E.equations_list(), E.inequalities_list(), E.equations(), E.inequalities()))
+    show(lambda: (E.dim(), E.is_universe(), E.is_full_dimensional(), E.is_compact(), E.is_empty()))
+    show(lambda: (E.Hrepresentation(0).A(), E.Hrepresentation(0).b(), E.Hrepresentation(0).vector(), E.Hrepresentation(0).is_equation()))
+    show(lambda: E.cdd_Hrepresentation().rstrip())
+    show(lambda: (E.f_vector(), [f.ambient_H_indices() for f in E.faces(-1)], E.facets()))
+    show(lambda: (E.contains([0] * n), E == Polyhedron(ambient_dim=n), E.volume(), E.vertex_adjacency_matrix()))
+    show(lambda: E.intersection(Polyhedron(vertices=[[0] * n])))
+    show(lambda: Polyhedron(vertices=[[0] * n]).intersection(Polyhedron(vertices=[[1] * n])).equations_list())
+show(lambda: Polyhedron(ieqs=[[-1, 1], [-1, -1]]).Hrepresentation())
+show(lambda: Polyhedron(eqns=[[1, 0]]).Hrepresentation())
+
 # the error-erasure decoder needs k surviving evaluations
 from copy import copy
 F = GF(7)
