@@ -24,7 +24,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkModules, MODULES, ROOT, modulePath, sha256, writeJsonAtomic, writeSidecar } from "./wasm-modules.mjs";
-import { targetLockPath } from "./install-engine-wasm.mjs";
+import { removeTargetIfIdle } from "./install-engine-wasm.mjs";
 
 export const SOURCE_PATHS = [
   "engine", // (with its rust-toolchain.toml)
@@ -54,32 +54,54 @@ export const keepTargets = (env = process.env) => {
   return Number.isInteger(n) && n >= 1 ? n : 6;
 };
 
+// (bytes under a path, 0 for what is gone meanwhile: another build's cargo, another pruner)
 function bytesUnder(path) {
-  const s = lstatSync(path);
+  let s;
+  try {
+    s = lstatSync(path);
+  } catch (e) {
+    if (e.code === "ENOENT") return 0;
+    throw e;
+  }
   if (!s.isDirectory()) return s.size;
-  let total = 0;
-  for (const n of readdirSync(path)) total += bytesUnder(join(path, n));
-  return total;
+  let names = [];
+  try {
+    names = readdirSync(path);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+  return names.reduce((total, n) => total + bytesUnder(join(path, n)), 0);
 }
 const mib = (b) => `${(b / 2 ** 20).toFixed(0)} MiB`;
+const checkoutTargets = (parent) =>
+  readdirSync(parent)
+    .filter((n) => /^checkout-[0-9a-f]{16}$/.test(n))
+    .flatMap((n) => {
+      try {
+        return [{ n, path: join(parent, n), t: statSync(join(parent, n)).mtimeMs }];
+      } catch {
+        return []; // (removed meanwhile)
+      }
+    });
 
 // Prune the targets beside `target` to the keepTargets most recently used (a build marks its target used when it
-// starts and when it ends); a target being built (its lock present) and `target` itself are never removed.  Logs each
-// one removed and the total kept.
-export function pruneTargets(target, env = process.env, log = console.log) {
+// starts and when it ends).  Each is removed only while holding its build lock, taken without waiting, so a target
+// being built is skipped; `target` itself is never removed.  Logs each one removed and the total kept.
+export function pruneTargets(target, env = process.env, log = console.log, remove = removeTargetIfIdle) {
   const parent = dirname(target);
-  const all = readdirSync(parent)
-    .filter((n) => /^checkout-[0-9a-f]{16}$/.test(n))
-    .map((n) => ({ n, path: join(parent, n), t: statSync(join(parent, n)).mtimeMs }))
-    .sort((a, b) => b.t - a.t);
+  const all = checkoutTargets(parent).sort((a, b) => b.t - a.t);
   for (const { n, path, t } of all.slice(keepTargets(env))) {
-    if (path === target || existsSync(`${realpathSync(path)}.lock`)) continue;
+    if (path === target) continue;
     const size = bytesUnder(path);
-    rmSync(path, { recursive: true, force: true });
-    log(`engine: removed the cargo target ${n} (${mib(size)}, last used ${new Date(t).toISOString()})`);
+    const how = remove(path, { env });
+    if (how === "removed") log(`engine: removed the cargo target ${n} (${mib(size)}, last used ${new Date(t).toISOString()})`);
+    else if (how === "unsupported") {
+      log(`engine: no flock or lockf here: the cargo targets in ${parent} are not pruned`);
+      break;
+    } else log(`engine: kept the cargo target ${n}: ${how === "busy" ? "a build holds it" : "its removal failed"}`);
   }
-  const kept = readdirSync(parent).filter((n) => /^checkout-[0-9a-f]{16}$/.test(n));
-  log(`engine: ${kept.length} checkout targets in ${parent}, ${mib(kept.reduce((s, n) => s + bytesUnder(join(parent, n)), 0))}`);
+  const kept = checkoutTargets(parent);
+  log(`engine: ${kept.length} checkout targets in ${parent}, ${mib(kept.reduce((s, { path }) => s + bytesUnder(path), 0))}`);
 }
 const markerPath = (root) => join(root, "wasm", "engine-source.local.json");
 
@@ -199,7 +221,7 @@ const buildEngine = (root, env) =>
   execFileSync(process.execPath, [join(root, "scripts", "build-engine.mjs")], { cwd: root, stdio: "inherit", env });
 
 // Make wasm/ this tree's engine.  Returns how: "pinned", "cached" or "built".
-export function ensure({ root = ROOT, env = process.env, log = console.log, fetch = fetchPinned, build = buildEngine } = {}) {
+export function ensure({ root = ROOT, env = process.env, log = console.log, fetch = fetchPinned, build = buildEngine, prune = pruneTargets } = {}) {
   const { key, dirty } = sourceKey(root, env);
   if (isPinnedSource(root, env, dirty)) {
     fetch(root, env);
@@ -219,7 +241,7 @@ export function ensure({ root = ROOT, env = process.env, log = console.log, fetc
   }
   log(`engine: building this tree's engine (${key.slice(0, 12)}${dirty ? ", with uncommitted changes" : ""})`);
   const target = targetFor(root, env);
-  targetLockPath(target); // (made, if new)
+  mkdirSync(target, { recursive: true });
   const used = () => {
     const now = new Date();
     utimesSync(target, now, now);
@@ -227,11 +249,16 @@ export function ensure({ root = ROOT, env = process.env, log = console.log, fetc
   used();
   build(root, { ...env, CARGO_TARGET_DIR: target });
   used();
-  pruneTargets(target, env, log);
   // (the key again: a source edited during the build must not be stored under the old one)
   if (sourceKey(root, env).key !== key) throw new Error("engine-cache: the engine source changed during the build; run it again");
   const stored = store(root, key, cache);
   installFrom(join(cache, key), stored, root, key);
+  // (then the other targets pruned: housekeeping, which never fails the build it follows)
+  try {
+    prune(target, env, log);
+  } catch (e) {
+    log(`engine: pruning the cargo targets failed: ${e.message}`);
+  }
   return "built";
 }
 

@@ -5,7 +5,7 @@
 // $RUSTFLAGS), fetches the pins only for their own source, builds once and copies from the cache after.
 //   node scripts/test-precheck.mjs
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { STEPS, workflowLines } from "./precheck.mjs";
@@ -124,7 +124,8 @@ try {
   }
   ok(targetFor(repo, { ...E, CARGO_TARGET_DIR: "/t" }).startsWith("/t/checkout-"), "under $CARGO_TARGET_DIR when it is set");
   ok(keepTargets({}) === 6 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "2" }) === 2 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "0" }) === 6 && keepTargets({ SAGEBRUSH_ENGINE_TARGETS: "x" }) === 6, "the targets kept: $SAGEBRUSH_ENGINE_TARGETS, default 6");
-  // pruning: the most recently used kept, never one being built (its lock present) nor the one just built
+  // pruning: the most recently used kept; a target whose lock a build holds is kept (the remover reports it busy);
+  // one gone meanwhile is no error; and a pruning failure never fails the build it follows
   const tp = join(repo, ".targets");
   const names = [...Array(7).keys()].map((i) => `checkout-${String(i).padStart(16, "0")}`);
   names.forEach((n, i) => {
@@ -133,13 +134,23 @@ try {
     const t = new Date(Date.now() - (i + 1) * 3600e3); // (names[0] the most recently used)
     utimesSync(join(tp, n), t, t);
   });
-  mkdirSync(`${realpathSync(join(tp, names[5]))}.lock`); // (being built)
   const logs = [];
-  pruneTargets(join(tp, names[6]), { SAGEBRUSH_ENGINE_TARGETS: "2" }, (m) => logs.push(m));
-  const left = readdirSync(tp).filter((n) => n.startsWith("checkout-") && !n.endsWith(".lock")).sort();
-  ok(JSON.stringify(left) === JSON.stringify([names[0], names[1], names[5], names[6]].sort()), `pruned to the 2 most recently used, the one being built and the one just built (${left.join(" ")})`);
-  ok(logs.filter((m) => /removed the cargo target checkout-0+[234] \(1 MiB, last used /.test(m)).length === 3, "each removed target is logged with its size and last use");
+  const remove = (path) => {
+    if (path.endsWith(names[5])) return "busy";
+    if (path.endsWith(names[2])) rmSync(join(tp, names[3]), { recursive: true, force: true }); // (another pruner)
+    rmSync(path, { recursive: true, force: true });
+    return "removed";
+  };
+  pruneTargets(join(tp, names[6]), { SAGEBRUSH_ENGINE_TARGETS: "2" }, (m) => logs.push(m), remove);
+  const left = readdirSync(tp).filter((n) => n.startsWith("checkout-")).sort();
+  ok(JSON.stringify(left) === JSON.stringify([names[0], names[1], names[5], names[6]].sort()), `pruned to the 2 most recently used, the one a build holds and the one just built (${left.join(" ")})`);
+  ok(logs.filter((m) => /removed the cargo target checkout-0+[24] \(1 MiB, last used /.test(m)).length === 2 && logs.some((m) => /removed the cargo target checkout-0+3 \(0 MiB/.test(m)), "each removed target is logged with its size and last use; one gone meanwhile is 0 MiB, no error");
+  ok(logs.some((m) => /kept the cargo target checkout-0+5: a build holds it/.test(m)), "a target a build holds is kept, and said so");
   ok(/4 checkout targets in .*, 4 MiB$/.test(logs.at(-1)), `the total kept is logged (${logs.at(-1)})`);
+  const G = { ...E, RUSTFLAGS: "-Cdebuginfo=1" }, glogs = [];
+  const built = ensure({ root: repo, env: G, ...stubs, log: (m) => glogs.push(m), prune: () => { throw new Error("EACCES (injected)"); } });
+  ok(built === "built" && check({ root: repo, env: G }).ok && glogs.some((m) => /pruning the cargo targets failed: EACCES/.test(m)), "a pruning failure is logged, after the build is stored and installed");
+  git("checkout", "-q", "--", "wasm"); // (the tree as committed again, for the branch below)
 
   git("checkout", "-q", "-b", "side", "base");
   writeFileSync(join(repo, "wasm", "pins.json"), '{"other": 1}\n');

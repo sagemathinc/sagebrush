@@ -2,12 +2,12 @@
 // scripts/install-engine-wasm.mjs: a fresh engine module with identical bytes
 // leaves `git diff --quiet wasm/` clean, whatever the build output's mode.
 //   node scripts/test-install-engine-wasm.mjs
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installWasm, namesLocalCargoHome, pidAlive, remappedRustflags, removeLockOf, targetLockPath, withTargetLock } from "./install-engine-wasm.mjs";
+import { LOCK_BUSY, installWasm, lockedCommand, namesLocalCargoHome, relaunchUnderTargetLock, remappedRustflags, removeTargetIfIdle, targetLockPath } from "./install-engine-wasm.mjs";
 
 let failures = 0;
 const ok = (c, what) => (c ? console.log("ok  ", what) : (failures++, console.log("FAIL", what)));
@@ -78,114 +78,52 @@ try {
   ok(!namesLocalCargoHome(named, { CARGO_HOME: "/home/runner/.cargo" }), "on CI's own runner nothing is local");
   ok(!namesLocalCargoHome(new TextEncoder().encode("/home/someone/.cargo2/x"), env), "a longer path that only starts the same is not the Cargo home");
 }
-// the target's build lock: fn runs with it held and it is gone after, also when fn throws; a live holder is waited
-// for (told once), a dead one's lock is taken over at once, another host's holder is waited for, and a lock with no
-// holder record is taken over after a minute; one target spelled two ways is one lock; a takeover or a release never
-// removes a lock that isn't the one it judged
+// the target's build lock, a kernel lock (flock on Linux, lockf on macOS): one target's spellings name one lock; a
+// build runs again holding it, so two never overlap and a second says once that it waits; a holder killed outright
+// releases it; a target is pruned only while its lock is free, and its lock file stays
 {
+  ok(JSON.stringify(lockedCommand("/t.lock", ["node", "b.mjs"], { platform: "linux" })) === JSON.stringify(["flock", "-E", "75", "/t.lock", "node", "b.mjs"]), "Linux: flock, a conflict exiting 75");
+  ok(JSON.stringify(lockedCommand("/t.lock", ["rm"], { wait: false, platform: "linux" })) === JSON.stringify(["flock", "-E", "75", "-n", "/t.lock", "rm"]), "Linux, not waiting: flock -n");
+  ok(JSON.stringify(lockedCommand("/t.lock", ["rm"], { wait: false, platform: "darwin" })) === JSON.stringify(["lockf", "-k", "-t", "0", "/t.lock", "rm"]), "macOS, not waiting: lockf -t 0 (its timeout exits 75)");
+  ok(lockedCommand("/t.lock", ["rm"], { platform: "win32" }) === null && LOCK_BUSY === 75, "elsewhere: no lock command");
   const d = mkdtempSync(join(tmpdir(), "install-engine-wasm-lock-"));
   try {
     const target = join(d, "target");
     const lock = targetLockPath(target);
-    const holderOf = () => JSON.parse(readFileSync(join(lock, "holder.json"), "utf8"));
-    const held = (pid, host = "h", token = `t${pid}`) => {
-      mkdirSync(lock);
-      writeFileSync(join(lock, "holder.json"), JSON.stringify({ token, pid, host, root: "/other" }));
-    };
-    let inside = null;
-    ok(withTargetLock(target, () => ((inside = fs.existsSync(lock) ? holderOf() : null), 7), { host: "h" }) === 7 && inside?.pid === process.pid && !fs.existsSync(lock), "fn's value, with the lock held (its holder record written before it is taken), and the lock gone after");
-    let threw = false;
-    try {
-      withTargetLock(target, () => {
-        throw new Error("build failed");
-      }, { host: "h" });
-    } catch (e) {
-      threw = e.message === "build failed";
-    }
-    ok(threw && !fs.existsSync(lock), "a failing build's error is thrown and the lock released");
-    held(4242);
-    let polls = 0;
-    const logs = [];
-    withTargetLock(target, () => {}, { host: "h", wait: 1, log: (m) => logs.push(m), alive: () => ++polls < 4 });
-    ok(polls === 4 && logs.length === 1 && /\/other/.test(logs[0]) && !fs.existsSync(lock), "a live holder is waited for, told once, until it is gone");
-    held(4242);
-    polls = 0;
-    withTargetLock(target, () => {}, { host: "h", wait: 1, alive: () => (polls++, false) });
-    ok(polls === 1 && !fs.existsSync(lock), "a holder no longer running left it stale: taken over at once");
-    held(4242, "elsewhere");
-    let ran = false, told = 0;
-    // (another host's build, its pid meaningless here: waited for until it releases the lock, which the log does)
-    withTargetLock(target, () => (ran = true), { host: "h", wait: 1, alive: () => false, log: () => (told++, rmSync(lock, { recursive: true, force: true })) });
-    ok(ran && told === 1, "another host's holder is waited for, whatever this host's pids say");
-    mkdirSync(lock);
-    writeFileSync(join(lock, "x"), "");
-    const old = new Date(Date.now() - 120000);
-    fs.utimesSync(lock, old, old);
-    ran = false;
-    withTargetLock(target, () => (ran = true), { host: "h", wait: 1 });
-    ok(ran, "a lock with no holder record, two minutes old: taken over");
-    // (a lock with no holder record, but recent: waited for, not taken over at once)
-    mkdirSync(lock);
-    writeFileSync(join(lock, "x"), "");
-    const recent = new Date(Date.now() - 10000);
-    fs.utimesSync(lock, recent, recent);
-    told = 0;
-    let stillThere = false;
-    withTargetLock(target, () => {}, { host: "h", wait: 1, log: () => ((stillThere = fs.existsSync(join(lock, "x"))), told++, rmSync(lock, { recursive: true, force: true })) });
-    ok(told === 1 && stillThere, "a lock with no holder record, ten seconds old: waited for");
-    // (a process here we may not signal is running; one that doesn't exist is not)
-    ok(pidAlive(process.pid) && (process.getuid?.() === 0 || pidAlive(1)), "pidAlive: this process, and pid 1 (EPERM for a non-root user) are running");
-    ok(!pidAlive(2 ** 30 + 12345), "pidAlive: a pid past any pid_max is not");
-    // (the interleaving: this build judged a dead holder stale, but by the time it moves the lock aside, a live build
-    // has replaced it; the live lock must survive, and this build wait for it)
-    held(4245, "h", "live");
-    let firstRead = true, survived = false;
-    const io = {
-      ...fs,
-      readFileSync: (p, o) => {
-        if (firstRead && String(p) === join(lock, "holder.json")) {
-          firstRead = false;
-          return JSON.stringify({ token: "dead", pid: 999999, host: "h" });
-        }
-        return fs.readFileSync(p, o);
-      },
-    };
-    withTargetLock(target, () => {}, { host: "h", wait: 1, io, alive: (pid) => pid !== 999999, log: () => ((survived = holderOf().token === "live"), rmSync(lock, { recursive: true, force: true })) });
-    ok(survived, "a takeover that finds a live holder in place of the dead one it judged leaves it, and waits for it");
-    // (one target, two spellings: a symlink to it names the same lock)
     const alias = join(d, "alias");
     fs.symlinkSync(target, alias);
-    ok(targetLockPath(alias) === lock, "a target reached through a symlink has the real path's lock");
-    held(4242);
-    told = 0;
-    withTargetLock(alias, () => {}, { host: "h", wait: 1, alive: () => true, log: () => (told++, rmSync(lock, { recursive: true, force: true })) });
-    ok(told === 1, "a build through the alias waits for the holder of the real path's lock");
-    // (two waiters judged the same dead holder: the first took it over and holds a new lock; the second's takeover,
-    // still naming the dead holder, must leave the new lock in place)
-    held(4243, "h", "new-holder");
-    ok(!removeLockOf(lock, "t-dead", "second") && holderOf().token === "new-holder", "a takeover of a holder already replaced leaves the new holder's lock");
-    ok(removeLockOf(lock, "new-holder", "x") && !fs.existsSync(lock), "the lock it names is removed");
-    ok(!removeLockOf(lock, "anything", "x"), "no lock: nothing removed");
-    // (a release after the lock was taken from under it: the other holder's lock stays)
-    withTargetLock(target, () => {
-      rmSync(lock, { recursive: true, force: true });
-      held(4244, "h", "thief");
-    }, { host: "h" });
-    ok(fs.existsSync(lock) && holderOf().token === "thief", "a release removes only its own lock");
-    rmSync(lock, { recursive: true, force: true });
-    // (two real processes on one target: their builds never overlap)
-    const order = join(d, "order.txt"), script = join(d, "child.mjs");
-    writeFileSync(script, `import { withTargetLock } from ${JSON.stringify(new URL("./install-engine-wasm.mjs", import.meta.url).href)};
+    ok(targetLockPath(alias) === lock && lock === fs.realpathSync(target) + ".lock", "a target reached through a symlink has the real path's lock");
+    ok(relaunchUnderTargetLock(target, ["false"], { env: { ...process.env, SAGEBRUSH_TARGET_LOCK: lock } }) === null, "the run that holds the lock goes on (null), it doesn't relaunch");
+    if (spawnSync("flock", ["--version"]).status === 0) {
+      // (two real builds, each relaunching itself under the lock, the second through the alias: one, then the other)
+      const order = join(d, "order.txt"), script = join(d, "child.mjs");
+      writeFileSync(script, `import { relaunchUnderTargetLock } from ${JSON.stringify(new URL("./install-engine-wasm.mjs", import.meta.url).href)};
 import { appendFileSync } from "node:fs";
-withTargetLock(${JSON.stringify(target)}, () => {
-  appendFileSync(${JSON.stringify(order)}, "start\\n");
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
-  appendFileSync(${JSON.stringify(order)}, "end\\n");
-}, { wait: 20, log: () => {} });
+const locked = relaunchUnderTargetLock(process.argv[2], [process.execPath, process.argv[1], process.argv[2]]);
+if (locked !== null) process.exit(locked);
+appendFileSync(${JSON.stringify(order)}, "start\\n");
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+appendFileSync(${JSON.stringify(order)}, "end\\n");
 `);
-    spawnSync("bash", ["-c", `"${process.execPath}" "${script}" & "${process.execPath}" "${script}" & wait`]);
-    ok(readFileSync(order, "utf8") === "start\nend\nstart\nend\n", "two processes on one target: one build, then the other");
-    ok(fs.readdirSync(d).filter((n) => n.startsWith("target.lock.")).length === 0, "no lock directories left behind");
+      const r = spawnSync("bash", ["-c", `"${process.execPath}" "${script}" "${target}" 2>"${d}/e1" & sleep 0.1; "${process.execPath}" "${script}" "${alias}" 2>"${d}/e2" & wait`]);
+      const waited = readFileSync(join(d, "e2"), "utf8");
+      ok(r.status === 0 && readFileSync(order, "utf8") === "start\nend\nstart\nend\n", "two builds on one target (one through a symlink): one, then the other");
+      ok((waited.match(/waiting for another build/g) ?? []).length === 1, "the second says once that it waits");
+      // (a holder killed outright: the kernel releases its lock)
+      const holder = spawn("flock", [lock, "sleep", "30"], { detached: true, stdio: "ignore" });
+      const until = Date.now() + 5000;
+      while (spawnSync("flock", ["-n", "-E", "75", lock, "true"]).status !== 75 && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      ok(removeTargetIfIdle(target) === "busy" && fs.existsSync(target), "a target whose lock a build holds is not pruned");
+      process.kill(-holder.pid, "SIGKILL");
+      holder.unref();
+      let freed = false;
+      while (!freed && Date.now() < until + 5000) {
+        freed = spawnSync("flock", ["-n", "-E", "75", lock, "true"]).status === 0;
+        if (!freed) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+      ok(freed, "a holder killed outright releases the lock (no stale lock to recover)");
+      ok(removeTargetIfIdle(target) === "removed" && !fs.existsSync(target) && fs.existsSync(lock), "a free target is pruned under its lock, and its lock file stays");
+    } else console.log("skip: no flock here (the lock rows run on Linux CI)");
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
