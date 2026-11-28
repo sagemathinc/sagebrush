@@ -72,3 +72,13 @@ out("levene axis 2", lambda: tuple(st.levene(a, b, axis=2)))
 out("levene nan propagate", lambda: tuple(st.levene([[1.0, np.nan], [2.0, 2.0], [3.0, 5.0]], b)))
 out("levene nan omit", lambda: tuple(st.levene([[1.0, np.nan], [2.0, 2.0], [3.0, 5.0], [7.0, 1.0]], b, nan_policy="omit")))
 out("levene 1-d", lambda: tuple(st.levene([1.0, 2.0, 4.0, 3.0], [2.0, 9.0, 1.0, 5.0, 3.0])))
+# (a slice with no observations in some sample, given empty or emptied by omit: no statistic for it, nan, while its
+# neighbours are tested)
+for label, x, y, kw in [("omit empties a column in both", [[np.nan, 1.0], [np.nan, 2.0]], [[np.nan, 2.0], [np.nan, 4.0]], {"nan_policy": "omit"}),
+                        ("omit empties a column in one", [[np.nan, 1.0], [np.nan, 2.0]], [[1.0, 2.0], [3.0, 4.0]], {"nan_policy": "omit"}),
+                        ("empty axis", np.empty((0, 2)), np.empty((0, 2)), {}),
+                        ("1-d empty", [], [1.0, 2.0], {}), ("1-d both empty", [], [], {}), ("one each", [1.0], [2.0], {}),
+                        ("1-d omit empties", [np.nan], [np.nan], {"nan_policy": "omit"}),
+                        ("trimmed cut", np.array([[1.0, 1.0], [2.0, 2.0], [4.0, 5.0], [10.0, 9.0], [100.0, 90.0]]),
+                         np.array([[0.0, 1.0], [1.0, 3.0], [2.0, 8.0], [4.0, 11.0], [300.0, 700.0]]), {"center": "trimmed", "proportiontocut": 0.2})]:
+    out("levene %s" % label, lambda: tuple(st.levene(x, y, **kw)))

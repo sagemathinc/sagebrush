@@ -546,6 +546,9 @@ def _levene_1d(xs, center, proportiontocut, nan_policy):
         if nan_policy == "propagate":
             return LeveneResult(np.float64(_NAN), np.float64(_NAN))
         xs = [x[x == x] for x in xs]
+    # (a sample with no observations, given empty or emptied by nan_policy='omit': no statistic, as SciPy's)
+    if any(x.size == 0 for x in xs):
+        return LeveneResult(np.float64(_NAN), np.float64(_NAN))
     if center == "median":
         cen = [float(np.median(x)) for x in xs]
     elif center == "mean":
