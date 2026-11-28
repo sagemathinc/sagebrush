@@ -13839,10 +13839,10 @@
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing: the names of the maximum and minimum ufuncs (a table of operations), not a cap"
  },
- "src/runtime/numpy.ts :: cLongRange :: if (dt.kind === \"u\" && dt.itemsize === 8 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+ "src/runtime/numpy.ts :: cLongRange :: if (dt.kind === \"u\" && dt.itemsize >= 4 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
   "class": "none",
   "owner": "NumPy shim",
-  "reason": "matched text that refuses nothing of a cap: I64MAX and U64MAX, the int64 and uint64 ranges, by which NumPy discovers a Python int's dtype and past which its C conversion raises OverflowError; NumPy's semantics, not a Sagebrush limit"
+  "reason": "matched text that refuses nothing of a cap: I64MAX and U64MAX, the ranges of NumPy's C conversion of a Python int (a C long; an unsigned long for uint32 and uint64), past which NumPy raises OverflowError; NumPy's semantics, not a Sagebrush limit"
  },
  "src/runtime/numpy.ts :: conj :: if (Number(ndmin) > MAX_DIMS) raise(T.ValueError, `ndmin must be <= ndmax (${MAX_DIMS})`); #0": {
   "class": "none",
@@ -14063,6 +14063,16 @@
   "class": "none",
   "owner": "NumPy shim",
   "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), past which NumPy itself refuses to make an array, with these messages (ValueError, the indexing IndexError, ndmin's ValueError, nested data's ValueError); NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: walk :: if (depth + y.ndim > MAX_DIMS) nestedTooDeep(); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), an array among the lists adding its own dimensions as discover counts them; NumPy's semantics, not a Sagebrush limit"
+ },
+ "src/runtime/numpy.ts :: walk :: if (depth >= MAX_DIMS) nestedTooDeep(); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: MAX_DIMS, NumPy's NPY_MAXDIMS (64), where the admission walk meets nesting past it and raises discover's own ValueError at once; NumPy's semantics, not a Sagebrush limit"
  },
  "src/runtime/numpy.ts :: wideRefuse :: return raise(T.NotImplementedError, `${d.name} values beyond 2**53 are not supported yet`); #0": {
   "class": "3",

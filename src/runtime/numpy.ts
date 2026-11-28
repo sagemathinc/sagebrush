@@ -891,9 +891,10 @@ function checkWeakRange(dt: DType, w: Weak) {
   if (w.big !== undefined) cLongRange(dt, w.big);
   checkPyInt(dt, w.v);
 }
-// (a Python int no C long holds: NumPy's OverflowError, whatever the integer dtype; uint64 takes its own range)
+// (a Python int no C long holds: NumPy's OverflowError, whatever the integer dtype; uint32 and uint64 convert through
+// an unsigned long, up to 2**64 - 1)
 function cLongRange(dt: DType, big: bigint) {
-  if (dt.kind === "u" && dt.itemsize === 8 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, "Python int too large to convert to C long");
+  if (dt.kind === "u" && dt.itemsize >= 4 ? big < I64MIN || big > U64MAX : big < I64MIN || big > I64MAX) raise(T.OverflowError, "Python int too large to convert to C long");
 }
 const MINMAX_OPS: Record<string, boolean> = { maximum: true, minimum: true, fmax: true, fmin: true };
 function bigMinMax(op: string, ct: DType, arr: NDArray, big: bigint): NDArray {
@@ -1464,12 +1465,79 @@ function getitem(a: NDArray, key: any): any {
   return out;
 }
 
+// The one check of Python values written into an int8 to uint32 array (np.full, item and slice assignment, fill),
+// as NumPy's integer conversion makes it: an int (a float truncated, where floats count) no C long holds raises
+// "Python int too large to convert to C long", one outside the dtype "Python integer N out of bounds for <dtype>".
+// NumPy checks a Python int on every path; a float only where its integer setitem converts the value, and np.full
+// casts all but a Python int. A NumPy scalar (an int, unsigned or float one) is checked into a signed dtype by basic
+// indexing and fill, as a Python int of its value; into an unsigned dtype, and by fancy and mask assignment, it is
+// cast as the arrays are, wrapping. A list's values are checked one by one, a NumPy scalar among them as by basic
+// indexing (not in np.full).
+const isSmallInt = (dt: DType) => dt.isInt && !isWide(dt);
+function admitSmallInt(dt: DType, x: any, floats: boolean, npScalars: boolean, lists: boolean) {
+  if (!(lists && isSeq(x) && !(x instanceof NDArray))) return admitSmallScalar(dt, x, floats, npScalars);
+  // (a nested value: its shape discovered first, as NumPy's, so a dimension or ragged-shape refusal wins over any
+  // value's; a value with an __array__ object in it is left to the walk below, which skips that object)
+  try {
+    discover(x, 0, [], { dt: null }, true);
+  } catch (e) {
+    if (e !== PROTOCOL && e !== STRS) throw e;
+  }
+  // (every leaf checked, the first refusal kept and raised once the walk is done, so a dimension refusal met
+  // anywhere wins)
+  let first: unknown = null;
+  const walk = (y: any, depth: number) => {
+    if (isSeq(y) && !(y instanceof NDArray)) {
+      // (a list or tuple subclass with __array__ converts by its protocol, once, later, as NumPy's: its stored items
+      // are never what is written, so never checked here)
+      if (protocolSeq(y)) return;
+      // (nesting past MAX_DIMS, a container holding itself among them: discover's ValueError, at once, ending the
+      // whole walk; never a recursion or a revisit without bound)
+      if (depth >= MAX_DIMS) nestedTooDeep();
+      for (const it of seqItems(y)) walk(it, depth + 1);
+      return;
+    }
+    // (an array among the lists adds its own dimensions, as discover counts them)
+    if (y instanceof NDArray) {
+      if (depth + y.ndim > MAX_DIMS) nestedTooDeep();
+      return;
+    }
+    if (first !== null) return;
+    try {
+      admitSmallScalar(dt, y, floats, depth === 0 ? npScalars : true);
+    } catch (e) {
+      first = e;
+    }
+  };
+  walk(x, 0);
+  if (first !== null) throw first;
+}
+function admitSmallScalar(dt: DType, x: any, floats: boolean, npScalars: boolean) {
+  const w = pyScalar(x);
+  if (w === null || w.kind === "b" || w.kind === "c" || (w.dt !== null && (!npScalars || dt.kind === "u"))) return;
+  if (w.kind === "f" && !floats) return;
+  let big: bigint;
+  if (w.kind === "i") big = w.big ?? BigInt(w.v);
+  else {
+    if (Number.isNaN(w.v)) raise(T.ValueError, "cannot convert float NaN to integer");
+    if (!Number.isFinite(w.v)) raise(T.OverflowError, "cannot convert float infinity to integer");
+    big = BigInt(Math.trunc(w.v));
+  }
+  cLongRange(dt, big);
+  const rg = RANGE[dt.name];
+  if (rg && (big < BigInt(rg[0]) || big > BigInt(rg[1]))) raise(T.OverflowError, `Python integer ${big} out of bounds for ${dt.name}`);
+}
+
 function setitem(a: NDArray, key: any, value: any) {
   writable(a);
   const r = resolveIndex(a, key);
+  // (the admission first, on the value as given: whether it is a NumPy scalar decides its checks)
+  if (isSmallInt(a.dt) && !(value instanceof NDArray)) admitSmallInt(a.dt, value, true, "view" in r, true);
   // (a Python or NumPy float into an integer array as NumPy packs it, by int(), #2149: toNum's checks; a sequence
   // stays an array, cast)
-  if (a.dt.isInt && ((typeof value === "number" && !Number.isInteger(value)) || value instanceof Obj.FloatBox || typeName(value) === "float64" || typeName(value) === "float32")) value = toNum(value, a.dt);
+  // (into a fancy or mask index's places a NumPy float is cast instead, wrapping, as NumPy's)
+  const npFloat = typeName(value) === "float64" || typeName(value) === "float32";
+  if (a.dt.isInt && (npFloat ? "view" in r : (typeof value === "number" && !Number.isInteger(value)) || value instanceof Obj.FloatBox)) value = toNum(value, a.dt);
   // (a Python value into int64/uint64 through the admission, its original)
   const src = value instanceof NDArray ? value : isWide(a.dt) ? fromPy(value, a.dt) : operand(value).arr;
   if ("view" in r) return assign(r.view, src);
@@ -5156,7 +5224,24 @@ newBuiltinModule("_numpy", (m) => {
     [order[i], order[j]] = [order[j], order[i]];
     return tr(a, order);
   });
-  M("fill", (a: NDArray, v: any) => (isS(a) ? strSetitem(a, Obj.Ellipsis, v) : isO(a) ? (writable(a), loop1(a.shape, a.strides, a.offset, (p) => (a.data[p] = v))) : assign(a, operand(v).arr), null));
+  M("fill", (a: NDArray, v: any) => {
+    if (isS(a)) strSetitem(a, Obj.Ellipsis, v);
+    else if (isO(a)) {
+      writable(a);
+      loop1(a.shape, a.strides, a.offset, (p) => (a.data[p] = v));
+    } else {
+      writable(a);
+      if (isSmallInt(a.dt) && !(v instanceof NDArray)) admitSmallInt(a.dt, v, true, true, false);
+      // (a float into int64/uint64 as NumPy packs it, by int(), as setitem does: NaN, infinity and values past the
+      // dtype refused; a NumPy float into uint64 is cast instead)
+      if (isWide(a.dt)) {
+        const npFloat = typeName(v) === "float64" || typeName(v) === "float32";
+        if (npFloat ? a.dt.kind !== "u" : (typeof v === "number" && !Number.isInteger(v)) || v instanceof Obj.FloatBox) v = toNum(v, a.dt);
+      }
+      assign(a, operand(v).arr);
+    }
+    return null;
+  });
   M("conj", (a: NDArray) => conj(a));
   M("conjugate", (a: NDArray) => conj(a));
   M("view", (a: NDArray) => {
@@ -5242,6 +5327,7 @@ newBuiltinModule("_numpy", (m) => {
       assign(a, fromPy(value, a.dt));
       return a;
     }
+    if (dtype !== null && isSmallInt(toDtype(dtype)) && !(value instanceof NDArray)) admitSmallInt(toDtype(dtype), value, false, false, false);
     const v = operand(value);
     // (a Python int discovered as an array's element is: uint64 past int64, #2031)
     const dt = dtype !== null ? toDtype(dtype) : v.weak ? pyIntDtype(v.weak) : v.arr.dt;
