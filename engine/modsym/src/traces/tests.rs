@@ -157,3 +157,27 @@ fn the_combined_functionals_give_the_same_traces() {
         }
     }
 }
+
+/// The top of the source: the primes below 2^31, the mod-ell kernels'
+/// domain (GeneralSpace::new_mod refuses ell >= 2^31), go through the whole
+/// setup, and give the same traces as the bottom of the source; the
+/// source ends below 2^31.
+#[test]
+fn the_top_of_the_source_gives_the_same_traces() {
+    let top: Vec<u64> = (HECKE_PRIMES_BELOW - 1_000_000..HECKE_PRIMES_BELOW).rev().filter(|&l| is_prime(l)).take(8).collect();
+    assert!(top.iter().all(|&l| l < 1 << 31 && l > (1 << 31) - 1_000_000));
+    for (n, k) in [(11u64, 2usize), (37, 2), (13, 4), (23, 2)] {
+        let res = space(n, k);
+        let eps = Character::trivial(n);
+        let (tr, st) = orbit_hecke_traces_from(n, k, &eps, &res, sturm_len(n, k), 2, top.iter().copied()).unwrap();
+        let (tr0, _) = orbit_hecke_traces(n, k, &eps, &res, sturm_len(n, k), 2).unwrap();
+        assert_eq!(st.rejected_total(), 0, "N={} k={}", n, k);
+        for (a, b) in tr.iter().zip(&tr0) {
+            assert_eq!((&a.sel, &a.r, &a.s), (&b.sel, &b.r, &b.s), "N={} k={}", n, k);
+        }
+    }
+    // a prime past the domain is what new_mod refuses: none is drawn
+    assert!(crate::general::GeneralSpace::new_mod(11, 2, &Character::trivial(11), 0, 2147483659, 1).is_err());
+    let last = hecke_primes(65536).last().unwrap();
+    assert!(last < HECKE_PRIMES_BELOW && HECKE_PRIMES_BELOW == 1 << 31, "{}", last);
+}

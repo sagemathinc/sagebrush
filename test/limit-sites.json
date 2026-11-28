@@ -4392,7 +4392,7 @@
   "owner": "cusp_hecke_matrix",
   "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
  },
- "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^32 (the u64 kernels): ran out after {} drawn ({} set aside: {})\", e_top, drawn, stats.rejected_total(), stats.rejected_summary())); #0": {
+ "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^31 (the mod-ell kernels' domain): ran out after {} drawn ({} set aside: {})\", e_top, drawn, stats.rejected_total(), stats.rejected_summary())); #0": {
   "class": "3",
   "disposition": {
    "3": {
@@ -4400,9 +4400,9 @@
    }
   },
   "owner": "cusp_hecke_matrix",
-  "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
+  "reason": "primes = 1 mod e below 2^31 (the mod-ell kernels' domain), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 0.25 PiB), or once S(e) - c primes are set aside (S(1) = 50,697,537); FU-B5-1"
  },
- "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^32 (the u64 kernels): the CRT needs {}, there are {}\", e_top, count, head.len())); #0": {
+ "engine/modsym/src/traces.rs :: orbit_hecke_traces_from :: return Err(format!(\"twisted traces: the limit of primes = 1 mod {} below 2^31 (the mod-ell kernels' domain): the CRT needs {}, there are {}\", e_top, count, head.len())); #0": {
   "class": "3",
   "disposition": {
    "3": {
@@ -4410,7 +4410,7 @@
    }
   },
   "owner": "cusp_hecke_matrix",
-  "reason": "primes = 1 mod e below 2^32 (u64 kernels), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 2.0 PiB), or once S(e) - c primes are set aside (S(1) = 148,880,193); FU-B5-1"
+  "reason": "primes = 1 mod e below 2^31 (the mod-ell kernels' domain), a reachable r4 limit: refused up front if the CRT count exceeds S(e) (only where L admits >= 0.25 PiB), or once S(e) - c primes are set aside (S(1) = 50,697,537); FU-B5-1"
  },
  "engine/modsym/src/traces.rs :: orbit_traces :: return Err(\"too many bad primes for traces (the limit of 16)\".into()); #0": {
   "class": "3",
@@ -4441,6 +4441,11 @@
   "class": "none",
   "owner": "cusp_hecke_matrix",
   "reason": "test assertions on the admission's saturating bounds at extreme inputs; refuse nothing"
+ },
+ "engine/modsym/tests/heilbronn_stop.rs :: heilbronn_kernels_stop :: let gap = hooks::max_gap_ns(); #0": {
+  "class": "none",
+  "owner": "modular symbols (engine)",
+  "reason": "a test reading the longest time between Stop checks; it limits nothing"
  },
  "engine/modsym/tests/newforms_poll_gap.rs :: trace_coefficient_bound_poll_gap :: let (gap, poll) = (hooks::max_gap_ns(), hooks::max_poll_gap_ns()); #0": {
   "class": "none",
@@ -20420,11 +20425,6 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
- },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -20467,6 +20467,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",

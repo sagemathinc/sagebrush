@@ -220,6 +220,7 @@ pub fn heilbronn_merel(p: i64) -> Vec<[i64; 4]> {
     // c > bc / a, and c < d.  O(p^2 log p) in all.
     let mut out = vec![];
     for a in 1..=p {
+        sagebrush_interrupt::check();
         let q = p / a;
         if q * a == p {
             let d = q;
@@ -231,8 +232,10 @@ pub fn heilbronn_merel(p: i64) -> Vec<[i64; 4]> {
             }
         }
         for d in q + 1..=p {
+            sagebrush_interrupt::check();
             let bc = a * d - p;
             for c in bc / a + 1..d {
+                sagebrush_interrupt::check();
                 if bc % c == 0 {
                     out.push([a, bc / c, c, d]);
                 }
@@ -520,6 +523,8 @@ impl GeneralSpace {
         let mut acc: Vec<(u32, u64)> = vec![];
         let (mut gcds, mut lookups, mut ops) = (0u64, 0u64, 0u64);
         for h in hs {
+            // (a Heilbronn matrix's image: O(k) work, a check each)
+            sagebrush_interrupt::check();
             let (c2, d2) = (c * h[0] + d * h[2], c * h[1] + d * h[3]);
             let nn = self.n as i64;
             gcds += 1;
