@@ -82,11 +82,14 @@ const STARTS: Record<string, string[]> = {
   // (Sprig's start, last: design/sprig-mvp.md §6.1)
   sprig: ["--sprig", "-c", "1"],
 };
+// (the library modules recorded without their docstrings, by path prefix: front ends whose functions' __doc__
+// nothing reads, each opting in apart; shared modules keep theirs, as the docs index reads them; src/compile.ts)
+const NO_DOCSTRINGS = ["_rill/"];
 const recDir = mkdtempSync(join(tmpdir(), "sagebrush-precompile-"));
 const recordings: Record<string, any> = {};
 await Promise.all(Object.entries(STARTS).map(async ([mode, args]) => {
   const out = join(recDir, mode + ".json");
-  const p = Bun.spawn(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: out, SAGEBRUSH_NO_COMPILE_CACHE: "1" }, stdout: "ignore", stderr: "pipe" });
+  const p = Bun.spawn(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...args], { env: { ...process.env, SAGEBRUSH_PRECOMPILE_OUT: out, SAGEBRUSH_NO_COMPILE_CACHE: "1", SAGEBRUSH_PRECOMPILE_NODOC: NO_DOCSTRINGS.join(",") }, stdout: "ignore", stderr: "pipe" });
   if ((await p.exited) !== 0) throw new Error(`precompiling the library (${mode}): ${(await new Response(p.stderr).text()).slice(0, 500)}`);
   recordings[mode] = JSON.parse(readFileSync(out, "utf8"));
   if (recordings[mode].build !== buildId) throw new Error("precompiling the library: build/cli/pyjs.cjs is not this build (run node scripts/build-cli.mjs)");
