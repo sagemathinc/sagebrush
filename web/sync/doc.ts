@@ -451,8 +451,6 @@ export class SyncDoc extends DurableObject<SyncEnv> {
     const ns = this.env.SYNC_ACCOUNT!;
     return ns.get(ns.idFromName("acct:" + this.get("owner_hash")));
   }
-  /** A forwarded session write's own check, inside its transaction (§2, S07): its session not fenced here (a revoke
-   * fences every document the session forwarded to) and not past its end. */
   // (tests only: the time the session check reads, fixed at an instant, so a write at exactly its session's end can be
   // asked about; every other clock of the write stays the real one)
   private sessionAt: number | null = null;
@@ -462,6 +460,8 @@ export class SyncDoc extends DurableObject<SyncEnv> {
   private sessionNow(now: number): number {
     return testMode(this.env) && this.sessionAt !== null ? this.sessionAt : now;
   }
+  /** A forwarded session write's own check, inside its transaction (§2, S07): its session not fenced here (a revoke
+   * fences every document the session forwarded to) and not past its end. */
   private sessionHeld(s: SessionIn | undefined, now: number): void {
     if (s && (now >= s.expires || this.fencedSession(s.hash))) throw new SyncError("forbidden", "this session was ended; the write was not committed");
   }
