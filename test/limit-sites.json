@@ -4,6 +4,11 @@
   "owner": "elliptic curves (engine)",
   "reason": "kmax is the giant steps' count from the Hasse bound, a loop range; it limits nothing"
  },
+ "engine/ap/src/lib.rs :: prime_count_bound :: usize::try_from(b.min(n)).unwrap_or(usize::MAX).max(1) #0": {
+  "class": "none",
+  "owner": "elliptic curves (engine)",
+  "reason": "an upper bound on pi(n) for the sieve's capacity and its reservation, saturated to usize; it refuses nothing"
+ },
  "engine/ap/tests/stop.rs :: traced :: let (gap, poll) = (hooks::max_gap_ns() as f64 / 1e6, hooks::max_poll_gap_ns() as f64 / 1e6); #0": {
   "class": "none",
   "owner": "remote-compute",

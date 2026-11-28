@@ -794,10 +794,12 @@ fn json_skip(b: &[u8], i: &mut usize) -> bool {
 /// JSON), held until the op returns; refused when the length passes this
 /// target's usize (on wasm32, n as usize truncated 2^32 + 5 to 5) or the
 /// ledger refuses the bytes.
-/// The bytes of one aplist entry and its JSON: (u64, Option<i64>) is 24;
+/// The bytes of one aplist entry and its JSON: (u64, Option<i64>) is 24,
+/// twice for the result Vec's growth (a doubling holds old and new);
 /// [p, a_p] as a serde_json Value is an array (32) holding two Values (64);
-/// its text is at most 45 characters (48).
-const AP_ENTRY_BYTES: u64 = 24 + 32 + 64 + 48;
+/// its text is at most 45 characters (48), and the JSON Vec of values grows
+/// by doubling too (32 more).
+const AP_ENTRY_BYTES: u64 = 2 * 24 + 32 + 64 + 48 + 32;
 
 fn ap_bound(v: &Value, what: &str, per_prime: u64) -> Result<(u64, sagebrush_ledger::Reservation), String> {
     let n = u(v, "n")?;
@@ -805,7 +807,7 @@ fn ap_bound(v: &Value, what: &str, per_prime: u64) -> Result<(u64, sagebrush_led
     if usize::try_from(half).is_err() {
         return Err(format!("{}: primes up to {} pass this engine's address space", what, n));
     }
-    let count = (1.26 * n as f64 / (n.max(3) as f64).ln()) as u64 + 16;
+    let count = sagebrush_ap::prime_count_bound(n) as u64;
     let bytes = half.saturating_add(count.saturating_mul(8u64.saturating_add(per_prime)));
     let r = sagebrush_ledger::reserve(what, bytes).map_err(|e| format!("{}: the sieve's {} bytes refused: {:?}", what, bytes, e))?;
     Ok((n, r))

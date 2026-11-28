@@ -163,6 +163,15 @@ pub fn isqrt(n: u64) -> u64 {
     r as u64
 }
 
+/// An upper bound on pi(n), the number of primes up to n: 1.26 n / ln n
+/// (Rosser and Schoenfeld: pi(x) < 1.25506 x / ln x for x > 1), plus 16
+/// for small n; primes_up_to's Vec is allocated at this capacity, and the
+/// web dispatchers reserve it.
+pub fn prime_count_bound(n: u64) -> usize {
+    let b = (1.26 * n as f64 / (n.max(3) as f64).ln()) as u64 + 16;
+    usize::try_from(b.min(n)).unwrap_or(usize::MAX).max(1)
+}
+
 /// Sieve writes (or indices scanned) between two interrupt checks: tens of
 /// microseconds of work, so a Stop is seen promptly, and in WebAssembly one
 /// host poll per block (check_coarse) costs nothing measurable.
@@ -200,7 +209,10 @@ pub fn primes_up_to(n: u64) -> Vec<u64> {
         }
         i += 1;
     }
-    let mut out = vec![2];
+    // (the primes' Vec at its final capacity, no growth: at most
+    // prime_count_bound(n) of them, the bound the dispatchers reserve)
+    let mut out = Vec::with_capacity(prime_count_bound(n));
+    out.push(2);
     let mut start = 0;
     while start < half {
         let end = half.min(start + SIEVE_BLOCK);
