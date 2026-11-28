@@ -9544,7 +9544,7 @@ def Eltseq(x):
         raise _bad_types("Eltseq", (x,))
     if isinstance(x, _smat.Matrix):
         # (its entries, row by row, in its ring, as Magma's; not its rows)
-        return MSeq([c for row in x.rows() for c in row], x.base_ring())
+        return MSeq([c for row in x.rows() for c in row], BaseRing(x))
     return MSeq(x)
 
 

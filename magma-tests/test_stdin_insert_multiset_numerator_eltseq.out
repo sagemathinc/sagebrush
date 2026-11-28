@@ -121,3 +121,11 @@ true true
 ]
 [ 4, 5, undef, 1, undef, 2, undef, 3 ]
 8
+true RngInt RngIntElt Integer Ring
+true FldRat FldRatElt FldRatElt Rational Field
+[]
+Rational Field
+[ 1, 1/2, 3, 7 ]
+[ 1, 2, 3 ]
+Integer Ring
+[ 1, 1/2, 3, 1/4 ]

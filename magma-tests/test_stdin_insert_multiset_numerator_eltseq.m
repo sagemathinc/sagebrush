@@ -39,3 +39,12 @@ print &and[ (A meet B) eq (B meet A) : A, B in ms ], &and[ #(A diff B) + #(A mee
 print [ [ #Insert([Integers() | 7 : j in [1..n]], i, 0) : i in [1..7] ] : n in [0..3] ];
 print [ Insert([7, 9], i, 0) : i in [1..5] ];
 U := [4, 5]; for i in [1..3] do Insert(~U, 2*i + 2, i); end for; print U, #U;
+// Eltseq of a matrix: its universe is the matrix's ring, as Magma's
+M := Matrix(Integers(),1,2,[1,2]); S := Eltseq(M);
+print Universe(S) eq Integers(), Type(Universe(S)), Type(S[1]), Universe(S);
+N := Matrix(Rationals(),1,3,[1,1/2,3]); T := Eltseq(N);
+print Universe(T) eq Rationals(), Type(Universe(T)), Type(T[1]), Type(T[2]), Universe(T);
+U := Eltseq(Matrix(Rationals(),0,2,[])); print U, Universe(U);
+print Eltseq(N) cat [Rationals() | 7];
+Append(~S, 3); print S, Universe(S);
+Append(~T, 1/4); print T;
