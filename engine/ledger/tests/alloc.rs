@@ -67,6 +67,38 @@ fn every_allocation_inside_an_entry_is_attributed() {
         drop(v);
     }
     assert_eq!(audit::scope_breaches(), 0, "an allocation within its reservation, or under a scope without one");
+    // nested: a child reservation's scope inside a parent's, its result kept
+    // past its scope; each scope is charged only its own allocations, so the
+    // parent's next allocation, within the parent's own amount, is no breach
+    // (the child's retained bytes are the child's) ...
+    audit::start(4 << 10);
+    let parent = reserve("parent", 8 << 10).unwrap();
+    let child = reserve("child", 64 << 10).unwrap();
+    let kept: Vec<u8>;
+    {
+        let _p = parent.scope();
+        {
+            let _c = child.scope();
+            kept = black_box(Vec::with_capacity(64 << 10));
+        }
+        let v: Vec<u8> = black_box(Vec::with_capacity(8 << 10));
+        drop(v);
+    }
+    assert_eq!(audit::scope_breaches(), 0, "a child's retained result is not charged to its parent");
+    // ... and the parent's own growth past its amount still is, with the
+    // child's result still held
+    {
+        let _p = parent.scope();
+        {
+            let _c = child.scope();
+            let v: Vec<u8> = black_box(Vec::with_capacity(32 << 10));
+            drop(v);
+        }
+        let v: Vec<u8> = black_box(Vec::with_capacity(32 << 10));
+        drop(v);
+    }
+    assert!(audit::scope_breaches() >= 1, "the parent's own allocation past its amount, after a child's scope");
+    drop((kept, parent, child));
     drop((big, none, fits));
     op.finish().unwrap();
 

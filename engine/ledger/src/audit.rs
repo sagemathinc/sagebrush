@@ -12,7 +12,9 @@
 //!   ([`set_slack`]); a breach is counted in [`breaches`].
 //! - The per-scope check: inside a reservation's scope, the live bytes may
 //!   not grow, since the scope began, past that reservation's amount and the
-//!   slack; a breach is counted in [`scope_breaches`].
+//!   slack; a breach is counted in [`scope_breaches`].  Each scope is charged
+//!   only its own allocations: what a nested scope's allocations still hold
+//!   when it ends is the nested scope's, not the enclosing one's.
 //!
 //! Install it in a test binary:
 //!

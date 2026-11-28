@@ -903,7 +903,7 @@ thread_local! {
 /// fn sync<T: Sync>() {}
 /// sync::<sagebrush_ledger::Scope>();
 /// ```
-pub struct Scope(ThreadBound, (u64, u64));
+pub struct Scope(ThreadBound, (u64, u64), (u64, u64));
 
 impl Scope {
     pub fn enter() -> Scope {
@@ -919,13 +919,25 @@ impl Scope {
         #[cfg(not(feature = "ledger-audit"))]
         let live = 0;
         let prev = SCOPE_TOP.with(|t| t.replace((amount, live)));
-        Scope(ThreadBound::default(), prev)
+        Scope(ThreadBound::default(), prev, (amount, live))
     }
 }
 
 impl Drop for Scope {
+    /// The enclosing scope resumes, its own: what this scope's allocations
+    /// still hold is this scope's (its own reservation's, or a span's,
+    /// fence's or resident's), so the enclosing scope's start moves past it,
+    /// and its check counts only its own growth.
     fn drop(&mut self) {
-        SCOPE_TOP.with(|t| t.set(self.1));
+        SCOPE_TOP.with(|t| {
+            // (a scope nested in this one moved its start on, never back)
+            debug_assert!(t.get().0 == self.2 .0 && t.get().1 >= self.2 .1, "scopes end in the reverse order they began");
+            #[cfg(feature = "ledger-audit")]
+            let held = audit::live().saturating_sub(self.2 .1);
+            #[cfg(not(feature = "ledger-audit"))]
+            let held = 0;
+            t.set((self.1 .0, self.1 .1.saturating_add(held)))
+        });
         COVER.with(|c| c.set(c.get() - 1));
     }
 }
