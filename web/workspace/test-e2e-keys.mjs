@@ -20,6 +20,7 @@ async function refuses(code, f, msg) {
   catch (e) { ok(e?.code === code, `${msg}${e?.code === code ? "" : ` (got ${e?.code ?? e})`}`); }
 }
 const ctx = { aud: "https://dev.sagebrush.space", account: newId() };
+const J = JSON.stringify;
 const hex = (b) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 
 // ---- fixtures: devices made the way a device makes them (keys on the device, private halves non-extractable)
@@ -46,9 +47,9 @@ async function nextEpoch(state, secrets, suite = 1, generation = null) {
   return { S, ring, epoch: { n, suite, commit, keyring } };
 }
 
-/** The add entry for `nd` signed by `by`, with the proof of possession done both ways. */
-async function addEntry(state, by, nd) {
-  const draft = E.nextBody(state, ctx, "add", { device: nd.rec, pop: null });
+/** The add entry for `nd` signed by `by`, with the proof of possession done both ways (`extra`: more body fields). */
+async function addEntry(state, by, nd, extra = {}) {
+  const draft = E.nextBody(state, ctx, "add", { device: nd.rec, pop: null, ...extra });
   const pre = await E.preEntryHash(draft);
   const ch = await E.challenge(hpke, nd.kem.publicRaw, pre);
   const mac = await E.respond(hpke, nd.kem, ch.enc, pre);
@@ -568,6 +569,91 @@ let state, A, B, C, seed, rec, e0, e1;
   ok(st2.seq === after.seq + 1 && E.currentDevice(st2, R.id), "reset: ordinary operations go on after it");
   const reloaded = await E.replayFrom([reset, await addEntry(after, D, R)].slice(0, 1), ctx, { anchor });
   ok(reloaded.head === after.head, "(the compacted chain replays from its anchor)");
+}
+
+// ---- the provisioned tier (notes provisioned-machine-enrollment r12.1 §1, r3): a GPU machine joins only by an add a
+// non-provisioned device signs, its add carries the service's labels and how it was approved, and it signs no entry
+{
+  const P = await newDevice("laptop"), G = await newDevice("gpu-a100-3f2c", "provisioned"), Q = await newDevice("phone");
+  const rk = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+  const sec = new Map();
+  const ep0 = await nextEpoch(null);
+  sec.set(0, ep0.S);
+  const gen = await E.sealEntry(P.signer, E.nextBody(null, ctx, "genesis", { device: P.rec, recovery: recRec(rk), epoch: ep0.epoch }), P.sign, { recovery: rk.sign });
+  let s = await apply(null, gen);
+  const atStart = { reservation: "rsv_01JD8Y3Q", instance: "runpod:7f3a9c", retire_on: E.RETIRE_ON, approved: "start" };
+  const addG = await addEntry(s, P, G, { provisioned: atStart });
+  const before = s;
+  s = await apply(s, addG);
+  const g = E.currentDevice(s, G.id);
+  ok(g?.kind === "provisioned" && g.provisioned?.reservation === atStart.reservation && g.provisioned.instance === atStart.instance && g.provisioned.retireOn === "reservation-retired" && g.provisioned.approved === "start",
+    "tier: a non-provisioned device adds a provisioned machine; the state keeps its reservation, instance, policy and approval");
+  ok(E.currentDevice(s, P.id)?.provisioned === null, "tier: any other device has no provisioned labels");
+  const replayed = await E.replayChain([gen, addG], ctx);
+  ok(J(replayed.devices.get(G.id)?.provisioned) === J(g.provisioned), "tier: a replay finds the same labels");
+  const card = await apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, instance: null, retire_on: null, approved: "card" } }));
+  ok(E.currentDevice(card, G.id)?.provisioned?.approved === "card", "tier: approved on the card, with no instance label and no policy");
+
+  // (the add's form)
+  for (const [what, extra] of [
+    ["without its labels", {}],
+    ["approved at Start without the retirement policy", { provisioned: { ...atStart, retire_on: null } }],
+    ["with another policy", { provisioned: { ...atStart, retire_on: "never" } }],
+    ["with another approval", { provisioned: { ...atStart, approved: "server" } }],
+    ["with a reservation that isn't a label", { provisioned: { ...atStart, reservation: "a b" } }],
+    ["with no reservation", { provisioned: { ...atStart, reservation: "" } }],
+    ["with an instance that isn't a string or null", { provisioned: { ...atStart, instance: 7 } }],
+    ["with an extra label", { provisioned: { ...atStart, region: "us" } }],
+    ["with a missing label", { provisioned: (({ approved, ...r }) => r)(atStart) }],
+  ]) await refuses("bad_form", async () => apply(before, await addEntry(before, P, G, extra)), `tier: a provisioned add ${what}`);
+  await refuses("bad_form", async () => apply(before, await addEntry(before, P, Q, { provisioned: atStart })), "tier: another kind's add carries no provisioned labels");
+  // (the labels' bounds, exactly: 128 characters accepted, 129 refused, for the reservation and the instance)
+  {
+    const at128 = await apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, reservation: "r".repeat(128), instance: "i".repeat(128) } }));
+    ok(E.currentDevice(at128, G.id)?.provisioned?.reservation.length === 128 && E.currentDevice(at128, G.id).provisioned.instance.length === 128, "tier: a reservation and an instance of exactly 128 characters are accepted");
+    await refuses("bad_form", async () => apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, reservation: "r".repeat(129) } })), "tier: a reservation of 129 characters is refused");
+    await refuses("bad_form", async () => apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, instance: "i".repeat(129) } })), "tier: an instance of 129 characters is refused");
+  }
+  // (another policy on a card approval, where the Start rule doesn't apply: refused by the policy check itself)
+  await refuses("bad_form", async () => apply(before, await addEntry(before, P, G, { provisioned: { ...atStart, approved: "card", retire_on: "never" } })), "tier: a card-approved add with another retirement policy is refused");
+  {
+    // (the labels are signed: changed after signing, the signature fails)
+    const t = parseCanonical(addG); t.body.provisioned.approved = "card";
+    await refuses("bad_signature", () => apply(before, enc(canonText(t))), "tier: a label changed after signing breaks the signature");
+  }
+
+  // (a provisioned key signs nothing: an add, a removal of another or of itself, an epoch, a recovery key, a suite)
+  const epG = await nextEpoch(s, sec);
+  const byG = (op, fields, co = {}) => E.sealEntry(G.signer, E.nextBody(s, ctx, op, fields), G.sign, co);
+  await refuses("provisioned_signer", async () => apply(s, await addEntry(s, G, Q)), "tier: a provisioned key can't add a device");
+  await refuses("provisioned_signer", async () => apply(s, await addEntry(s, G, await newDevice("gpu-2", "provisioned"), { provisioned: atStart })), "tier: nor another provisioned machine");
+  await refuses("provisioned_signer", async () => apply(s, await byG("remove", { remove: P.id, epoch: epG.epoch })), "tier: nor remove a device");
+  await refuses("provisioned_signer", async () => apply(s, await byG("remove", { remove: G.id, epoch: epG.epoch })), "tier: nor remove itself");
+  await refuses("provisioned_signer", async () => apply(s, await byG("epoch", { epoch: epG.epoch })), "tier: nor start an epoch");
+  {
+    const rk2 = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+    const draft = E.nextBody(s, ctx, "replace-recovery", { recovery: recRec(rk2), pop: null });
+    const pre = await E.preEntryHash(draft);
+    const ch = await E.challenge(hpke, rk2.kem.publicRaw, pre);
+    const mac = await E.respond(hpke, rk2.kem, ch.enc, pre);
+    await refuses("provisioned_signer", async () => apply(s, await E.sealEntry(G.signer, { ...draft, pop: { enc: b64(ch.enc), mac: b64(mac) } }, G.sign, { recovery: rk2.sign })), "tier: nor replace the recovery key");
+  }
+  await refuses("provisioned_signer", async () => apply(s, await byG("min-suite", { min_suite: 2 })), "tier: nor raise the minimum suite");
+
+  // (it joins only by an add: never as genesis, a recovery's or a reset's device)
+  const G2 = await newDevice("gpu-genesis", "provisioned");
+  await refuses("bad_form", async () => apply(null, await E.sealEntry(G2.signer, E.nextBody(null, ctx, "genesis", { device: G2.rec, recovery: recRec(rk), epoch: ep0.epoch }), G2.sign, { recovery: rk.sign })), "tier: a provisioned machine can't be a chain's first device");
+  const rk3 = await E.recoveryKeys(E.newRecoverySeed(), ctx.account);
+  await refuses("bad_form", async () => apply(s, await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), E.nextBody(s, ctx, "recover", { device: G2.rec, recovery: recRec(rk3), epoch: epG.epoch }), rk.sign, { device: G2.sign, recovery: rk3.sign })), "tier: nor the device a recovery enrolls");
+  const generation = newId(), epR = await nextEpoch(s, sec, 1, generation);
+  const resetG = await E.sealEntry(E.recoverySigner(ctx.account, rk.sign), E.nextBody(s, ctx, "reset", { generation, device: G2.rec, recovery: recRec(rk3), epoch: epR.epoch, min_suite: 1 }), rk.sign, { device: G2.sign, recovery: rk3.sign });
+  await refuses("bad_form", () => apply(s, resetG), "tier: nor a reset's only device");
+  await refuses("bad_form", () => E.replayFrom([resetG], ctx, { anchor: { code: rk3 } }), "tier: nor a compacted chain's, loaded under an anchor");
+
+  // (a non-provisioned device removes it, starting the next epoch: the removal r12.1's retirement and P1 sign)
+  const removed = await apply(s, await E.sealEntry(P.signer, E.nextBody(s, ctx, "remove", { remove: G.id, epoch: epG.epoch }), P.sign));
+  ok(!E.currentDevice(removed, G.id) && removed.epoch.n === 1, "tier: a non-provisioned device removes it, and the removal starts the next epoch");
+  // (and the server's chain store refuses the same: it replays with this core, test-e2e-chain.mjs)
 }
 
 // ---- labels: this PR's are distinct and versioned

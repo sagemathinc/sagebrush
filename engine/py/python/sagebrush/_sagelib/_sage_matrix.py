@@ -2512,21 +2512,37 @@ class Matrix:
             [-2*I, 2*I]
             sage: matrix(QQ, [[1, 1, 0], [0, 2, 0], [0, 0, 3]]).eigenvalues()
             [3, 2, 1]
+
+        With extend=False, only the eigenvalues in the base ring (Integers
+        over ZZ, Rationals over QQ), as Sage::
+
+            sage: matrix(QQ, [[0, 2], [1, 0]]).eigenvalues(extend=False)
+            []
+            sage: e = matrix(ZZ, [[2, 1, 0, 0], [0, 2, 0, 0], [0, 0, 0, -1], [0, 0, 1, 0]]).eigenvalues(extend=False)
+            sage: e, e[0].parent()
+            ([2, 2], Integer Ring)
         """
         if self._base is _sa().SR:
             import _sage_matrix_sr
             return _sage_matrix_sr.eigenvalues(self)
         import _sage_qqbar
+        sa = _sa()
         out = []
         for g, e in self._eigen_factors():
             if len(g) == 2:
-                out += [_norm(_F(-g[0], g[1]))] * e
+                lam = _norm(_F(-g[0], g[1]))
+                if not extend:
+                    # (the base ring's own element: ZZ's eigenvalues are integers, the charpoly being monic)
+                    lam = (sa.ZZ if self._base is sa.ZZ else sa.QQ)(lam)
+                out += [lam] * e
+            elif not extend:
+                continue  # (no root of an irreducible factor of degree 2 or more is in the base ring)
             else:
                 for r in _sage_qqbar._roots_of(g):
                     out += [r] * e
         return out
 
-    def _eigenvectors(self, side):
+    def _eigenvectors(self, side, extend=True):
         if self._base is _sa().SR:
             import _sage_matrix_sr
             return _sage_matrix_sr.eigenvectors(self, side)
@@ -2539,7 +2555,11 @@ class Matrix:
             if len(g) == 2:
                 lam = _norm(_F(-g[0], g[1]))
                 k = _kernel(a - lam * identity_matrix(_sa().QQ, n), _sa().QQ)
+                if not extend:
+                    lam = _sa().QQ(lam)  # (a Rational, over ZZ too, as Sage's eigenvectors)
                 out.append((lam, _sage_ffmat._Basis([Vector(_norm(x) for x in r) for r in k._basis]), e))
+            elif not extend:
+                continue  # (only the eigenvalues in the base ring)
             else:
                 kb = _sage_qqbar._nf_eigen_kernel(a._rows, g)
                 for r in _sage_qqbar._roots_of(g):
@@ -2556,9 +2576,11 @@ class Matrix:
             [(3, [(0, 0, 1)], 1), (2, [(1, 1, 0)], 1), (1, [(1, 0, 0)], 1)]
             sage: matrix(QQ, [[1, 2], [3, 4]]).eigenvectors_right()
             [(-0.3722813232690144?, [(1, -0.6861406616345072?)], 1), (5.372281323269015?, [(1, 2.186140661634508?)], 1)]
+            sage: matrix(ZZ, [[0, 2], [1, 0]]).eigenvectors_right(extend=False)
+            []
         """
         _no_generalized(self, other)
-        return self._eigenvectors("right")
+        return self._eigenvectors("right", extend)
 
     right_eigenvectors = eigenvectors_right
 
@@ -2571,9 +2593,11 @@ class Matrix:
             [(4, [(1, 1)], 1), (-2, [(1, -1)], 1)]
             sage: matrix(QQ, [[1, 2], [3, 4]]).eigenvectors_left()
             [(-0.3722813232690144?, [(1, -0.4574271077563382?)], 1), (5.372281323269015?, [(1, 1.457427107756339?)], 1)]
+            sage: matrix(QQ, [[2, 1, 0, 0], [0, 2, 0, 0], [0, 0, 0, -1], [0, 0, 1, 0]]).eigenvectors_left(extend=False)
+            [(2, [(0, 1, 0, 0)], 2)]
         """
         _no_generalized(self, other)
-        return self._eigenvectors("left")
+        return self._eigenvectors("left", extend)
 
     left_eigenvectors = eigenvectors_left
 

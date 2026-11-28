@@ -24,11 +24,35 @@ export function sameSite(href, { space = false } = {}) {
   if (space && !u.pathname.endsWith(".space.json")) throw new Error("a space is a .space.json file");
   return u;
 }
+// The one place outside this site a file's text is read from: Sagebrush's own public repository on GitHub, at the one
+// commit this viewer was built from (BUILD_COMMIT, compiled in by web/build.ts; the example "Sagebrush's repository",
+// web/space/examples/repo.ts, is that tree at that commit). Not any commit: GitHub serves a fork's commits under the
+// parent's path too, so only the build's own is read. Exactly
+// https://raw.githubusercontent.com/sagemathinc/sagebrush/<that hash>/<path>: no user, query or fragment, no encoded
+// slash or backslash, no "." or ".." segment; read as a file of this site is (no redirect followed, no credentials
+// sent, the same caps). /space/'s policy allows connecting to that repository's path and nowhere else on that host
+// (web/csp-policy.mts). Without a build commit (a test of this module alone), nothing there is read unless one is given.
+declare const __SB_SPACE_COMMIT__: string | undefined;
+export const BUILD_COMMIT: string | null = typeof __SB_SPACE_COMMIT__ === "string" && /^[0-9a-f]{40}$/.test(__SB_SPACE_COMMIT__) ? __SB_SPACE_COMMIT__ : null;
+export const RAW_HOST = "raw.githubusercontent.com";
+export function pinnedRaw(href, commit: string | null = BUILD_COMMIT) {
+  const u = new URL(href, location.href);
+  const segs = u.pathname.split("/").slice(1);
+  if (!commit || !/^[0-9a-f]{40}$/.test(commit) || u.protocol !== "https:" || u.host !== RAW_HOST || u.username || u.password || u.search || u.hash ||
+      !u.pathname.startsWith(`/sagemathinc/sagebrush/${commit}/`) || u.pathname.length === `/sagemathinc/sagebrush/${commit}/`.length ||
+      /%2f|%5c|\\/i.test(u.pathname) || segs.some((x) => x === "" || /^(?:\.|%2e){1,2}$/i.test(x)))
+    throw new Error("only files of this site, or of Sagebrush's repository at the commit this was built from, are read");
+  return u;
+}
+/** a file's text may be read from here: this site's (sameSite), or the pinned repository's (pinnedRaw) */
+export function readable(href) {
+  return new URL(href, location.href).origin === location.origin ? sameSite(href) : pinnedRaw(href);
+}
 export async function readText(u, max = LIMITS.bytes) {
-  const r = await fetch(u.href, { redirect: "manual", credentials: "same-origin" });
+  const r = await fetch(u.href, { redirect: "manual", credentials: u.origin === location.origin ? "same-origin" : "omit" });
   if (r.type === "opaqueredirect" || (r.status >= 300 && r.status < 400)) throw new Error("it moved; a redirect isn't followed");
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  if (new URL(r.url || u.href).origin !== location.origin) throw new Error("only files of this site are read");
+  if (new URL(r.url || u.href).origin !== u.origin) throw new Error("only files of this site are read");
   if (Number(r.headers.get("content-length")) > max) throw new Error("it's too large to show here");
   const reader = r.body.getReader(), parts = [];
   let n = 0;

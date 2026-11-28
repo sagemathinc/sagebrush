@@ -539,8 +539,15 @@ fn progress_selftest(v: &Value) -> Result<Value, String> {
     Ok(json!({ "steps": steps, "calls": depth }))
 }
 
+thread_local! {
+    /// A memory refusal a dispatched op met, for call's typed "memory" reply
+    /// (in place of its error text).
+    static REFUSED: std::cell::RefCell<Option<sagebrush_ledger::Refusal>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The same JSON call natively (examples/atlas.rs builds the atlas with it).
 pub fn call(req: &str) -> String {
+    REFUSED.with(|c| c.borrow_mut().take());
     // the capped ops' request sizes are admitted before serde copies
     // anything (the last top-level fn name is read by one scan that owns no
     // text: every other value skipped); unknown names go on as before
@@ -560,7 +567,10 @@ pub fn call(req: &str) -> String {
     }
     match serde_json::from_str::<Value>(req).map_err(|e| e.to_string()).and_then(|v| dispatch(&v)) {
         Ok(v) => json!({ "ok": v }),
-        Err(e) => error_json(e),
+        Err(e) => match REFUSED.with(|c| c.borrow_mut().take()) {
+            Some(r) => json!({ "memory": memory_error_value(&r) }),
+            None => error_json(e),
+        },
     }
     .to_string()
 }
@@ -917,6 +927,18 @@ fn opt_u64(v: &Value, k: &str) -> Result<Option<u64>, String> {
 /// f within the request's optional "rounds": the session's opt-in
 /// nf.relation_rounds (sent only when finite) for the class-group relation
 /// searches, which are otherwise unlimited (classgroup::limits).
+/// A class group op's result: a memory refusal recorded for call's typed
+/// "memory" reply (its text the error), any other error its text.
+fn typed<T>(r: Result<T, sagebrush_classgroup::nf::factor::FactorError>) -> Result<T, String> {
+    r.map_err(|e| {
+        let m = e.to_string();
+        if let sagebrush_classgroup::nf::factor::FactorError::Memory(r) = e {
+            REFUSED.with(|c| *c.borrow_mut() = Some(r));
+        }
+        m
+    })
+}
+
 fn with_rounds<T>(v: &Value, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     match opt_u64(v, "rounds")? {
         None => f(),
@@ -1428,7 +1450,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
             if n.sign() == sagebrush_bigint::Sign::NoSign {
                 return Err("factor of 0".into());
             }
-            Ok(json!(sagebrush_classgroup::api::factor_integer(&n)?.iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>()))
+            // (the memory ledger's refusal, the quadratic sieve's, is the
+            // typed "memory" reply: the host raises its MemoryError)
+            Ok(json!(typed(sagebrush_classgroup::api::factor_integer_typed(&n))?.iter().map(|(p, e)| json!([p.to_string(), e])).collect::<Vec<_>>()))
         }
         // the cost model of factor_integer, from n's size alone (estimates
         // plan r3 PR 2; nf/cost.rs): information only, it runs nothing
@@ -1464,13 +1488,13 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "is_prime" => Ok(json!(sagebrush_classgroup::api::is_prime(&big1(v.get("n"))?))),
         "nf_data" => {
-            let d = sagebrush_classgroup::api::nf_data(&bigs(v.get("f"))?)?;
+            let d = typed(sagebrush_classgroup::api::nf_data(&bigs(v.get("f"))?))?;
             Ok(json!({ "degree": d.degree, "r1": d.r1, "r2": d.r2, "disc": d.disc.to_string(), "index": d.index.to_string(),
                        "basis": d.basis.iter().map(|r| big(r)).collect::<Vec<_>>(), "den": d.den.to_string(), "w": d.w, "w_proven": d.w_proven,
                        "assumes": d.assumed_primes.iter().map(|p| format!("{} is prime (Baillie-PSW)", p)).collect::<Vec<_>>() }))
         }
         "primes_above" => {
-            let ps = sagebrush_classgroup::api::primes_above(&bigs(v.get("f"))?, u(v, "p")?)?;
+            let ps = typed(sagebrush_classgroup::api::primes_above(&bigs(v.get("f"))?, u(v, "p")?))?;
             Ok(json!(ps.iter().map(|q| {
                 let mut o = json!({ "p": q.p, "e": q.e, "f": q.f, "pi": big(&q.pi), "pi_den": q.pi_den.to_string() });
                 if !q.assumed_primes.is_empty() {
@@ -1481,7 +1505,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         }
         "bnf" => {
             let f = bigs(v.get("f"))?;
-            let b = with_rounds(&v, || sagebrush_classgroup::api::bnf(&f))?;
+            let b = with_rounds(&v, || typed(sagebrush_classgroup::api::bnf(&f)))?;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes) }))
         }
@@ -1492,7 +1516,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                     Some(x) => x.as_u64().map(Some).ok_or_else(|| format!("'{}' must be a nonnegative integer", k)),
                 }
             };
-            let b = sagebrush_classgroup::api::bnf_certify(&bigs(v.get("f"))?, opt("norm_max")?, opt("index_max")?)?;
+            let b = typed(sagebrush_classgroup::api::bnf_certify(&bigs(v.get("f"))?, opt("norm_max")?, opt("index_max")?))?;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w,
                        "norm_bound": b.norm_bound.to_string(), "norm_bound_kind": b.norm_bound_kind, "fb_bound": b.fb_bound,
@@ -1508,7 +1532,7 @@ fn dispatch(v: &Value) -> Result<Value, String> {
                     .collect::<Result<_, _>>()?,
             };
             let f = bigs(v.get("f"))?;
-            let d = with_rounds(&v, || sagebrush_classgroup::api::bnf_relations(&f, &extra))?;
+            let d = with_rounds(&v, || typed(sagebrush_classgroup::api::bnf_relations(&f, &extra)))?;
             let b = &d.bnf;
             Ok(json!({ "degree": b.degree, "r1": b.r1, "r2": b.r2, "disc": b.disc.to_string(), "h": b.h.to_string(),
                        "cyc": big(&b.cyc), "regulator": b.regulator, "w": b.w, "w_proven": b.w_proven, "certified": b.certified, "assumes": assumes_with(b.w_proven, b.certified, &b.assumed_primes),
