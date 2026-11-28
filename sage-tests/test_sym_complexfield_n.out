@@ -1,0 +1,217 @@
+n C(1/3, 2) | 0.333333333333333 + 2.00000000000000*I | Complex Field with 53 bits of precision
+n(53) C(1/3, 2) | 0.333333333333333 + 2.00000000000000*I | Complex Field with 53 bits of precision
+N C(1/3, 2) | 0.333333333333333 + 2.00000000000000*I | Complex Field with 53 bits of precision
+n(100) C(1/3, 2) | 0.33333333333333333333333333333 + 2.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+digits=5 C(1/3, 2) | 0.33333 + 2.0000*I | Complex Field with 20 bits of precision
+digits=16 C(1/3, 2) | 0.3333333333333333 + 2.000000000000000*I | Complex Field with 57 bits of precision
+N digits=15 C(1/3, 2) | 0.333333333333333 + 2.00000000000000*I | Complex Field with 54 bits of precision
+n 2*pi*z C(1/3, 2) | 2.09439510239320 + 12.5663706143592*I | Complex Field with 53 bits of precision
+n C(1, 0) | 1.00000000000000 | Real Field with 53 bits of precision
+n(53) C(1, 0) | 1.00000000000000 | Real Field with 53 bits of precision
+N C(1, 0) | 1.00000000000000 | Real Field with 53 bits of precision
+n(100) C(1, 0) | 1.0000000000000000000000000000 | Real Field with 100 bits of precision
+digits=5 C(1, 0) | 1.0000 | Real Field with 20 bits of precision
+digits=16 C(1, 0) | 1.000000000000000 | Real Field with 57 bits of precision
+N digits=15 C(1, 0) | 1.00000000000000 | Real Field with 54 bits of precision
+n 2*pi*z C(1, 0) | 6.28318530717959 | Real Field with 53 bits of precision
+n C(-2, 0) | -2.00000000000000 | Real Field with 53 bits of precision
+n(53) C(-2, 0) | -2.00000000000000 | Real Field with 53 bits of precision
+N C(-2, 0) | -2.00000000000000 | Real Field with 53 bits of precision
+n(100) C(-2, 0) | -2.0000000000000000000000000000 | Real Field with 100 bits of precision
+digits=5 C(-2, 0) | -2.0000 | Real Field with 20 bits of precision
+digits=16 C(-2, 0) | -2.000000000000000 | Real Field with 57 bits of precision
+N digits=15 C(-2, 0) | -2.00000000000000 | Real Field with 54 bits of precision
+n 2*pi*z C(-2, 0) | -12.5663706143592 | Real Field with 53 bits of precision
+n C(0, 1) | 1.00000000000000*I | Complex Field with 53 bits of precision
+n(53) C(0, 1) | 1.00000000000000*I | Complex Field with 53 bits of precision
+N C(0, 1) | 1.00000000000000*I | Complex Field with 53 bits of precision
+n(100) C(0, 1) | 1.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+digits=5 C(0, 1) | 1.0000*I | Complex Field with 20 bits of precision
+digits=16 C(0, 1) | 1.000000000000000*I | Complex Field with 57 bits of precision
+N digits=15 C(0, 1) | 1.00000000000000*I | Complex Field with 54 bits of precision
+n 2*pi*z C(0, 1) | 6.28318530717959*I | Complex Field with 53 bits of precision
+n C(2^-1000, 1) | 9.33263618503219e-302 + 1.00000000000000*I | Complex Field with 53 bits of precision
+n(53) C(2^-1000, 1) | 9.33263618503219e-302 + 1.00000000000000*I | Complex Field with 53 bits of precision
+N C(2^-1000, 1) | 9.33263618503219e-302 + 1.00000000000000*I | Complex Field with 53 bits of precision
+n(100) C(2^-1000, 1) | 9.3326361850321887899008954472e-302 + 1.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+digits=5 C(2^-1000, 1) | 9.3326e-302 + 1.0000*I | Complex Field with 20 bits of precision
+digits=16 C(2^-1000, 1) | 9.332636185032189e-302 + 1.000000000000000*I | Complex Field with 57 bits of precision
+N digits=15 C(2^-1000, 1) | 9.33263618503219e-302 + 1.00000000000000*I | Complex Field with 54 bits of precision
+n 2*pi*z C(2^-1000, 1) | 5.86386825550468e-301 + 6.28318530717959*I | Complex Field with 53 bits of precision
+n C(1, -2^1000) | 1.00000000000000 - 1.07150860718627e301*I | Complex Field with 53 bits of precision
+n(53) C(1, -2^1000) | 1.00000000000000 - 1.07150860718627e301*I | Complex Field with 53 bits of precision
+N C(1, -2^1000) | 1.00000000000000 - 1.07150860718627e301*I | Complex Field with 53 bits of precision
+n(100) C(1, -2^1000) | 1.0000000000000000000000000000 - 1.0715086071862673209484250491e301*I | Complex Field with 100 bits of precision
+digits=5 C(1, -2^1000) | 1.0000 - 1.0715e301*I | Complex Field with 20 bits of precision
+digits=16 C(1, -2^1000) | 1.000000000000000 - 1.071508607186267e301*I | Complex Field with 57 bits of precision
+N digits=15 C(1, -2^1000) | 1.00000000000000 - 1.07150860718627e301*I | Complex Field with 54 bits of precision
+n 2*pi*z C(1, -2^1000) | 6.28318530717959 - 6.73248713718922e301*I | Complex Field with 53 bits of precision
+n polylog C(1/3, 2) | 0.194080175488338 + 1.16448105293002*I | Complex Field with 53 bits of precision
+n dilog C(1/3, 2) | 0.194080175488338 + 1.16448105293002*I | Complex Field with 53 bits of precision
+n psi C(1/3, 2) | 0.140928111699489 + 0.845568670196934*I | Complex Field with 53 bits of precision
+n log_gamma C(1/3, 2) | -0.0402607458784151 - 0.241564475270490*I | Complex Field with 53 bits of precision
+n arctan2 C(1/3, 2) | 0.154549203000269 + 0.927295218001612*I | Complex Field with 53 bits of precision
+n sinh C(1/3, 2) | -0.141298728781601 + 0.960283431960755*I | Complex Field with 53 bits of precision
+n sqrt C(1/3, 2) | 1.08648995472410 + 0.920395071902841*I | Complex Field with 53 bits of precision
+n z^z C(1/3, 2) | -0.0233203855479397 + 0.0724409103576795*I | Complex Field with 53 bits of precision
+n binomial C(1/3, 2) | 0.0208333333333333 + 0.125000000000000*I | Complex Field with 53 bits of precision
+n sign C(1/3, 2) | -0.333333333333333 - 2.00000000000000*I | Complex Field with 53 bits of precision
+n csc C(1/3, 2) | 0.0928251594445022 - 0.258440711888506*I | Complex Field with 53 bits of precision
+n lambert_w C(1/3, 2) | 0.189047763469928 + 1.13428658081957*I | Complex Field with 53 bits of precision
+n polylog C(2^-1000, 1) | 5.43383900567957e-302 + 0.582240526465012*I | Complex Field with 53 bits of precision
+n dilog C(2^-1000, 1) | 5.43383900567957e-302 + 0.582240526465012*I | Complex Field with 53 bits of precision
+n psi C(2^-1000, 1) | 3.94569238420473e-302 + 0.422784335098467*I | Complex Field with 53 bits of precision
+n log_gamma C(2^-1000, 1) | -1.12721668146385e-302 - 0.120782237635245*I | Complex Field with 53 bits of precision
+n arctan2 C(2^-1000, 1) | 4.32705445286458e-302 + 0.463647609000806*I | Complex Field with 53 bits of precision
+n sinh C(2^-1000, 1) | 0.841470984807897*I | Complex Field with 53 bits of precision
+n sqrt C(2^-1000, 1) | 0.707106781186548 + 0.707106781186548*I | Complex Field with 53 bits of precision
+n z^z C(2^-1000, 1) | 0.207879576350762 + 3.04744612182749e-302*I | Complex Field with 53 bits of precision
+n binomial C(2^-1000, 1) | 5.83289761564512e-303 + 0.0625000000000000*I | Complex Field with 53 bits of precision
+n sign C(2^-1000, 1) | -9.33263618503219e-302 - 1.00000000000000*I | Complex Field with 53 bits of precision
+n csc C(2^-1000, 1) | 1.04272193424859e-301 - 0.850918128239322*I | Complex Field with 53 bits of precision
+n lambert_w C(2^-1000, 1) | 5.29294199417657e-302 + 0.567143290409784*I | Complex Field with 53 bits of precision
+n(100) C(2^-1100, 1) | 7.3621518290228626754368661771e-332 + 1.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+digits=5 C(2^-1100, 1) | 7.3622e-332 + 1.0000*I | Complex Field with 20 bits of precision
+digits=16 C(2^-1100, 1) | 7.362151829022863e-332 + 1.000000000000000*I | Complex Field with 57 bits of precision
+N digits=15 C(2^-1100, 1) | 7.36215182902286e-332 + 1.00000000000000*I | Complex Field with 54 bits of precision
+n(100) 2*pi*z C(2^-1100, 1) | 4.6257764201341769838946899462e-331 + 6.2831853071795864769252867666*I | Complex Field with 100 bits of precision
+n(100) C(1, 2^-1100) | 1.0000000000000000000000000000 + 7.3621518290228626754368661771e-332*I | Complex Field with 100 bits of precision
+digits=5 C(1, 2^-1100) | 1.0000 + 7.3622e-332*I | Complex Field with 20 bits of precision
+digits=16 C(1, 2^-1100) | 1.000000000000000 + 7.362151829022863e-332*I | Complex Field with 57 bits of precision
+N digits=15 C(1, 2^-1100) | 1.00000000000000 + 7.36215182902286e-332*I | Complex Field with 54 bits of precision
+n(100) 2*pi*z C(1, 2^-1100) | 6.2831853071795864769252867666 + 4.6257764201341769838946899462e-331*I | Complex Field with 100 bits of precision
+n(100) C(2^1100, 1) | 1.3582985290493858492773514284e331 + 1.0000000000000000000000000000*I | Complex Field with 100 bits of precision
+digits=5 C(2^1100, 1) | 1.3583e331 + 1.0000*I | Complex Field with 20 bits of precision
+digits=16 C(2^1100, 1) | 1.358298529049386e331 + 1.000000000000000*I | Complex Field with 57 bits of precision
+N digits=15 C(2^1100, 1) | 1.35829852904939e331 + 1.00000000000000*I | Complex Field with 54 bits of precision
+n(100) 2*pi*z C(2^1100, 1) | 8.5344413604867458929979495511e331 + 6.2831853071795864769252867666*I | Complex Field with 100 bits of precision
+n(100) C(1, -2^1100) | 1.0000000000000000000000000000 - 1.3582985290493858492773514284e331*I | Complex Field with 100 bits of precision
+digits=5 C(1, -2^1100) | 1.0000 - 1.3583e331*I | Complex Field with 20 bits of precision
+digits=16 C(1, -2^1100) | 1.000000000000000 - 1.358298529049386e331*I | Complex Field with 57 bits of precision
+N digits=15 C(1, -2^1100) | 1.00000000000000 - 1.35829852904939e331*I | Complex Field with 54 bits of precision
+n(100) 2*pi*z C(1, -2^1100) | 6.2831853071795864769252867666 - 8.5344413604867458929979495511e331*I | Complex Field with 100 bits of precision
+n(100) C(2^-1100, 2^-1100) | 7.3621518290228626754368661771e-332 + 7.3621518290228626754368661771e-332*I | Complex Field with 100 bits of precision
+digits=5 C(2^-1100, 2^-1100) | 7.3622e-332 + 7.3622e-332*I | Complex Field with 20 bits of precision
+digits=16 C(2^-1100, 2^-1100) | 7.362151829022863e-332 + 7.362151829022863e-332*I | Complex Field with 57 bits of precision
+N digits=15 C(2^-1100, 2^-1100) | 7.36215182902286e-332 + 7.36215182902286e-332*I | Complex Field with 54 bits of precision
+n(100) 2*pi*z C(2^-1100, 2^-1100) | 4.6257764201341769838946899462e-331 + 4.6257764201341769838946899462e-331*I | Complex Field with 100 bits of precision
+C2(1)/R2RNDU(3) | 0.38 | Complex Field with 2 bits of precision
+R2RNDU(3)/C2(1) | 3.0 | Complex Field with 2 bits of precision
+C2(1)+R2RNDU(1/3) | 1.5 | Complex Field with 2 bits of precision
+C2(1,1)*R2RNDU(1/3) | 0.38 + 0.38*I | Complex Field with 2 bits of precision
+C2(1)-R2RNDU(1/3) | 0.50 | Complex Field with 2 bits of precision
+C2(1)/R4RNDU(3) | 0.38 | Complex Field with 2 bits of precision
+R4RNDU(3)/C2(1) | 3.0 | Complex Field with 2 bits of precision
+C2(1)+R4RNDU(1/3) | 1.5 | Complex Field with 2 bits of precision
+C2(1,1)*R4RNDU(1/3) | 0.38 + 0.38*I | Complex Field with 2 bits of precision
+C2(1)-R4RNDU(1/3) | 0.50 | Complex Field with 2 bits of precision
+C4(1)/R2RNDU(3) | 0.38 | Complex Field with 2 bits of precision
+R2RNDU(3)/C4(1) | 3.0 | Complex Field with 2 bits of precision
+C4(1)+R2RNDU(1/3) | 1.5 | Complex Field with 2 bits of precision
+C4(1,1)*R2RNDU(1/3) | 0.38 + 0.38*I | Complex Field with 2 bits of precision
+C4(1)-R2RNDU(1/3) | 0.50 | Complex Field with 2 bits of precision
+C100(1)/R20RNDU(3) | 0.33333 | Complex Field with 20 bits of precision
+R20RNDU(3)/C100(1) | 3.0000 | Complex Field with 20 bits of precision
+C100(1)+R20RNDU(1/3) | 1.3333 | Complex Field with 20 bits of precision
+C100(1,1)*R20RNDU(1/3) | 0.33333 + 0.33333*I | Complex Field with 20 bits of precision
+C100(1)-R20RNDU(1/3) | 0.66667 | Complex Field with 20 bits of precision
+C100(1)/R100RNDU(3) | 0.33333333333333333333333333333 | Complex Field with 100 bits of precision
+R100RNDU(3)/C100(1) | 3.0000000000000000000000000000 | Complex Field with 100 bits of precision
+C100(1)+R100RNDU(1/3) | 1.3333333333333333333333333333 | Complex Field with 100 bits of precision
+C100(1,1)*R100RNDU(1/3) | 0.33333333333333333333333333333 + 0.33333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100(1)-R100RNDU(1/3) | 0.66666666666666666666666666667 | Complex Field with 100 bits of precision
+C20(1)/R100RNDU(3) | 0.33333 | Complex Field with 20 bits of precision
+R100RNDU(3)/C20(1) | 3.0000 | Complex Field with 20 bits of precision
+C20(1)+R100RNDU(1/3) | 1.3333 | Complex Field with 20 bits of precision
+C20(1,1)*R100RNDU(1/3) | 0.33333 + 0.33333*I | Complex Field with 20 bits of precision
+C20(1)-R100RNDU(1/3) | 0.66667 | Complex Field with 20 bits of precision
+C2(1)/R2RNDD(3) | 0.38 | Complex Field with 2 bits of precision
+R2RNDD(3)/C2(1) | 3.0 | Complex Field with 2 bits of precision
+C2(1)+R2RNDD(1/3) | 1.0 | Complex Field with 2 bits of precision
+C2(1,1)*R2RNDD(1/3) | 0.25 + 0.25*I | Complex Field with 2 bits of precision
+C2(1)-R2RNDD(1/3) | 0.75 | Complex Field with 2 bits of precision
+C2(1)/R4RNDD(3) | 0.38 | Complex Field with 2 bits of precision
+R4RNDD(3)/C2(1) | 3.0 | Complex Field with 2 bits of precision
+C2(1)+R4RNDD(1/3) | 1.0 | Complex Field with 2 bits of precision
+C2(1,1)*R4RNDD(1/3) | 0.25 + 0.25*I | Complex Field with 2 bits of precision
+C2(1)-R4RNDD(1/3) | 0.75 | Complex Field with 2 bits of precision
+C4(1)/R2RNDD(3) | 0.38 | Complex Field with 2 bits of precision
+R2RNDD(3)/C4(1) | 3.0 | Complex Field with 2 bits of precision
+C4(1)+R2RNDD(1/3) | 1.0 | Complex Field with 2 bits of precision
+C4(1,1)*R2RNDD(1/3) | 0.25 + 0.25*I | Complex Field with 2 bits of precision
+C4(1)-R2RNDD(1/3) | 0.75 | Complex Field with 2 bits of precision
+C100(1)/R20RNDD(3) | 0.33333 | Complex Field with 20 bits of precision
+R20RNDD(3)/C100(1) | 3.0000 | Complex Field with 20 bits of precision
+C100(1)+R20RNDD(1/3) | 1.3333 | Complex Field with 20 bits of precision
+C100(1,1)*R20RNDD(1/3) | 0.33333 + 0.33333*I | Complex Field with 20 bits of precision
+C100(1)-R20RNDD(1/3) | 0.66667 | Complex Field with 20 bits of precision
+C100(1)/R100RNDD(3) | 0.33333333333333333333333333333 | Complex Field with 100 bits of precision
+R100RNDD(3)/C100(1) | 3.0000000000000000000000000000 | Complex Field with 100 bits of precision
+C100(1)+R100RNDD(1/3) | 1.3333333333333333333333333333 | Complex Field with 100 bits of precision
+C100(1,1)*R100RNDD(1/3) | 0.33333333333333333333333333333 + 0.33333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100(1)-R100RNDD(1/3) | 0.66666666666666666666666666667 | Complex Field with 100 bits of precision
+C20(1)/R100RNDD(3) | 0.33333 | Complex Field with 20 bits of precision
+R100RNDD(3)/C20(1) | 3.0000 | Complex Field with 20 bits of precision
+C20(1)+R100RNDD(1/3) | 1.3333 | Complex Field with 20 bits of precision
+C20(1,1)*R100RNDD(1/3) | 0.33333 + 0.33333*I | Complex Field with 20 bits of precision
+C20(1)-R100RNDD(1/3) | 0.66667 | Complex Field with 20 bits of precision
+C2(1)/R2RNDZ(3) | 0.38 | Complex Field with 2 bits of precision
+R2RNDZ(3)/C2(1) | 3.0 | Complex Field with 2 bits of precision
+C2(1)+R2RNDZ(1/3) | 1.0 | Complex Field with 2 bits of precision
+C2(1,1)*R2RNDZ(1/3) | 0.25 + 0.25*I | Complex Field with 2 bits of precision
+C2(1)-R2RNDZ(1/3) | 0.75 | Complex Field with 2 bits of precision
+C2(1)/R4RNDZ(3) | 0.38 | Complex Field with 2 bits of precision
+R4RNDZ(3)/C2(1) | 3.0 | Complex Field with 2 bits of precision
+C2(1)+R4RNDZ(1/3) | 1.0 | Complex Field with 2 bits of precision
+C2(1,1)*R4RNDZ(1/3) | 0.25 + 0.25*I | Complex Field with 2 bits of precision
+C2(1)-R4RNDZ(1/3) | 0.75 | Complex Field with 2 bits of precision
+C4(1)/R2RNDZ(3) | 0.38 | Complex Field with 2 bits of precision
+R2RNDZ(3)/C4(1) | 3.0 | Complex Field with 2 bits of precision
+C4(1)+R2RNDZ(1/3) | 1.0 | Complex Field with 2 bits of precision
+C4(1,1)*R2RNDZ(1/3) | 0.25 + 0.25*I | Complex Field with 2 bits of precision
+C4(1)-R2RNDZ(1/3) | 0.75 | Complex Field with 2 bits of precision
+C100(1)/R20RNDZ(3) | 0.33333 | Complex Field with 20 bits of precision
+R20RNDZ(3)/C100(1) | 3.0000 | Complex Field with 20 bits of precision
+C100(1)+R20RNDZ(1/3) | 1.3333 | Complex Field with 20 bits of precision
+C100(1,1)*R20RNDZ(1/3) | 0.33333 + 0.33333*I | Complex Field with 20 bits of precision
+C100(1)-R20RNDZ(1/3) | 0.66667 | Complex Field with 20 bits of precision
+C100(1)/R100RNDZ(3) | 0.33333333333333333333333333333 | Complex Field with 100 bits of precision
+R100RNDZ(3)/C100(1) | 3.0000000000000000000000000000 | Complex Field with 100 bits of precision
+C100(1)+R100RNDZ(1/3) | 1.3333333333333333333333333333 | Complex Field with 100 bits of precision
+C100(1,1)*R100RNDZ(1/3) | 0.33333333333333333333333333333 + 0.33333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100(1)-R100RNDZ(1/3) | 0.66666666666666666666666666667 | Complex Field with 100 bits of precision
+C20(1)/R100RNDZ(3) | 0.33333 | Complex Field with 20 bits of precision
+R100RNDZ(3)/C20(1) | 3.0000 | Complex Field with 20 bits of precision
+C20(1)+R100RNDZ(1/3) | 1.3333 | Complex Field with 20 bits of precision
+C20(1,1)*R100RNDZ(1/3) | 0.33333 + 0.33333*I | Complex Field with 20 bits of precision
+C20(1)-R100RNDZ(1/3) | 0.66667 | Complex Field with 20 bits of precision
+C2(1)/R2RNDN(3) | 0.38 | Complex Field with 2 bits of precision
+R2RNDN(3)/C2(1) | 3.0 | Complex Field with 2 bits of precision
+C2(1)+R2RNDN(1/3) | 1.5 | Complex Field with 2 bits of precision
+C2(1,1)*R2RNDN(1/3) | 0.38 + 0.38*I | Complex Field with 2 bits of precision
+C2(1)-R2RNDN(1/3) | 0.50 | Complex Field with 2 bits of precision
+C2(1)/R4RNDN(3) | 0.38 | Complex Field with 2 bits of precision
+R4RNDN(3)/C2(1) | 3.0 | Complex Field with 2 bits of precision
+C2(1)+R4RNDN(1/3) | 1.5 | Complex Field with 2 bits of precision
+C2(1,1)*R4RNDN(1/3) | 0.38 + 0.38*I | Complex Field with 2 bits of precision
+C2(1)-R4RNDN(1/3) | 0.50 | Complex Field with 2 bits of precision
+C4(1)/R2RNDN(3) | 0.38 | Complex Field with 2 bits of precision
+R2RNDN(3)/C4(1) | 3.0 | Complex Field with 2 bits of precision
+C4(1)+R2RNDN(1/3) | 1.5 | Complex Field with 2 bits of precision
+C4(1,1)*R2RNDN(1/3) | 0.38 + 0.38*I | Complex Field with 2 bits of precision
+C4(1)-R2RNDN(1/3) | 0.50 | Complex Field with 2 bits of precision
+C100(1)/R20RNDN(3) | 0.33333 | Complex Field with 20 bits of precision
+R20RNDN(3)/C100(1) | 3.0000 | Complex Field with 20 bits of precision
+C100(1)+R20RNDN(1/3) | 1.3333 | Complex Field with 20 bits of precision
+C100(1,1)*R20RNDN(1/3) | 0.33333 + 0.33333*I | Complex Field with 20 bits of precision
+C100(1)-R20RNDN(1/3) | 0.66667 | Complex Field with 20 bits of precision
+C100(1)/R100RNDN(3) | 0.33333333333333333333333333333 | Complex Field with 100 bits of precision
+R100RNDN(3)/C100(1) | 3.0000000000000000000000000000 | Complex Field with 100 bits of precision
+C100(1)+R100RNDN(1/3) | 1.3333333333333333333333333333 | Complex Field with 100 bits of precision
+C100(1,1)*R100RNDN(1/3) | 0.33333333333333333333333333333 + 0.33333333333333333333333333333*I | Complex Field with 100 bits of precision
+C100(1)-R100RNDN(1/3) | 0.66666666666666666666666666667 | Complex Field with 100 bits of precision
+C20(1)/R100RNDN(3) | 0.33333 | Complex Field with 20 bits of precision
+R100RNDN(3)/C20(1) | 3.0000 | Complex Field with 20 bits of precision
+C20(1)+R100RNDN(1/3) | 1.3333 | Complex Field with 20 bits of precision
+C20(1,1)*R100RNDN(1/3) | 0.33333 + 0.33333*I | Complex Field with 20 bits of precision
+C20(1)-R100RNDN(1/3) | 0.66667 | Complex Field with 20 bits of precision

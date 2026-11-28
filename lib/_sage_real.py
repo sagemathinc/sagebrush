@@ -4430,7 +4430,11 @@ class ComplexNumberMP:
         coercion meets them (a real of RealField(q) as a number of
         ComplexField(q)); None if o is no number."""
         if isinstance(o, RealNumberMP) and o._R._prec != 53:
-            o = ComplexNumberMP(ComplexField(o._R._prec), o, o._R(0))
+            # (through the complex field's real field, as _c: o's own field
+            # may round up, down or to zero, and would round the arithmetic
+            # on its part so)
+            C = ComplexField(o._R._prec)
+            o = ComplexNumberMP(C, C._R(o), C._R(0))
         o = self._c(o)
         if o is None:
             return None
@@ -5190,6 +5194,9 @@ def N(x, prec=None, digits=None):
     s = getattr(x, "_s", None)
     if s is not None:
         v = evaluate(x, prec + 20)
+        if isinstance(v, ComplexNumberMP) and v._im.is_zero():
+            # (a zero imaginary part leaves a real, as Sage's n())
+            v = v._re
         if isinstance(v, ComplexNumberMP):
             return ComplexField(prec)(v) if prec != 53 else _sa().CC(complex(v))
         return RealField(prec)(v) if prec != 53 else _sa().RR(v)

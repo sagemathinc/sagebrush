@@ -12917,6 +12917,31 @@
   "owner": "Sage kernel",
   "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
  },
+ "lib/_sage_expr.py :: Expression._n_mp53 :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "n() of a ComplexField(p) number: where the 53-bit MP evaluation can't give the value, the doubles path decides (and refuses for itself); the docstring's words; refuses nothing"
+ },
+ "lib/_sage_expr.py :: Expression._n_mp53 :: that is not available); NotImplementedError for a part past the #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "n() of a ComplexField(p) number: where the 53-bit MP evaluation can't give the value, the doubles path decides (and refuses for itself); the docstring's words; refuses nothing"
+ },
+ "lib/_sage_expr.py :: Expression.n :: NotImplementedError: 4.28654315684563e-332 + 0.582240526465012*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a doctest's expected output for the refusal of n() of a value past the doubles (CC holds doubles), not a cap"
+ },
+ "lib/_sage_expr.py :: Expression.n :: NotImplementedError: 6.28318530717959 + 8.53444136048675e331*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a doctest's expected output for the refusal of n() of a value past the doubles (CC holds doubles), not a cap"
+ },
+ "lib/_sage_expr.py :: Expression.n :: NotImplementedError: 7.36215182902286e-332 + 1.00000000000000*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a doctest's expected output for the refusal of n() of a value past the doubles (CC holds doubles), not a cap"
+ },
  "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
   "class": "none",
   "owner": "Sage kernel",
@@ -20420,11 +20445,6 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
-  "class": "none",
-  "owner": "python (@sagebrush-python)",
-  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
- },
  "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -20467,6 +20487,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: getrandbits :: if (BigInt(i) >= 1n << 64n) raise(T.OverflowError, \"Python int too large for C uint64_t\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "random.getrandbits's k is CPython's uint64_t argument (_random_Random_getrandbits_impl): past 64 bits its OverflowError, in CPython's words; refuses nothing beyond CPython (a large k below that is admitHeap's MemoryError, as CPython's is a MemoryError)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",

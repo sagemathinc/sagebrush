@@ -824,6 +824,28 @@ class Expression:
 
             sage: pi.n(), sqrt(2).n(), (1 + I).n(), exp(1).N()  # sagebrush only
             (3.14159265358979, 1.41421356237310, 1.00000000000000 + 1.00000000000000*I, 2.71828182845905)
+
+        A number of ComplexField(p) is evaluated in the 53-bit MP field;
+        CC's numbers are doubles in Sagebrush, so a part past them is
+        refused, never dropped (Sage gives 7.36215182902286e-332 +
+        1.00000000000000*I and 1.00000000000000 + 1.35829852904939e331*I);
+        any other precision keeps it::
+
+            sage: C = ComplexField(100)
+            sage: SR(C(2^-1100, 1)).n()  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: 7.36215182902286e-332 + 1.00000000000000*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+            sage: (2*pi*SR(C(1, 2^1100))).n(53)  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: 6.28318530717959 + 8.53444136048675e331*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+            sage: (SR(C(2^-1100, 1)) * polylog(2, 1/2)).n()  # sagebrush only
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: 4.28654315684563e-332 + 0.582240526465012*I in CC, past the double range, is not available in sagebrush yet (CC holds doubles)
+            sage: SR(C(2^-1100, 1)).n(100)
+            7.3621518290228626754368661771e-332 + 1.0000000000000000000000000000*I
         """
         if self.is_relational():
             return _one("rel", _relop(self._op()[0][4:]), _expr(self.lhs().n())._s, _expr(self.rhs().n())._s)
@@ -833,6 +855,14 @@ class Expression:
             # any precision: _sage_real evaluates the expression tree
             import _sage_real
             return _sage_real.N(self, prec, digits)
+        if _re.search(r"(?:^|\{)w", self._s):
+            # a number of ComplexField(p) in it: the doubles would drop a
+            # part past them (C(2^-1100, 1) as I, C(1, 2^-1100) as 1), so the
+            # 53-bit MP evaluation decides, a part past the doubles refused
+            # (CC holds doubles)
+            v = self._n_mp53()
+            if v is not None:
+                return v
         re, im = _call("n", _lower_special(self._s))
         re, im = float(re), float(im)
         if re != re or im != im:
@@ -877,6 +907,30 @@ class Expression:
             return RealNumber(re)
         from _sage_matrix import ComplexNumber
         return ComplexNumber(re, im)
+
+    def _n_mp53(self):
+        """The value in RR or CC from the 53-bit MP evaluation (None where
+        that is not available); NotImplementedError for a part past the
+        doubles."""
+        import _sage_real
+        import _sage_lang
+        try:
+            v = _sage_real.evaluate(self, 53, _sage_lang._rr_mp())
+        except (NotImplementedError, TypeError, ValueError, ArithmeticError):
+            return None
+        if isinstance(v, _sage_real.RealNumberMP):
+            from sage_all import RR
+            return RR(v)
+        if isinstance(v, _sage_real.ComplexNumberMP):
+            # (into the 53-bit MP complex field: a function may give parts
+            # of RR's doubles)
+            v = _sage_real._cc_mp()(v)
+            if v.imag().is_zero():
+                # (a zero imaginary part leaves a real, as Sage's n())
+                from sage_all import RR
+                return RR(v.real())
+            return _sage_real._cc_from_mp(v)
+        return None
 
     def _n_partial(self):
         # numerical approximation of the constants of an expression with variables
