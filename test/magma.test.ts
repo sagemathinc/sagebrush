@@ -322,6 +322,22 @@ test("comprehensions by bounded work: at most 10^6 elements (fewer in a small he
   assert.equal(big.stdout, "1000000\n", big.stderr);
 });
 
+test("Insert past the end: its undefined elements admitted by the collection bound before they are made", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // (Magma accepts positions below 2^30, building the sequence; Sagebrush's
+  // collection bound refuses 2^29 at once: in an ordinary heap the bound is
+  // its fixed 10^6 ceiling, so the message is deterministic.  2^30 itself is
+  // Magma's own refusal, in the golden test_stdin_insert_multiset_numerator_eltseq)
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: 'S := Insert([1,2], 2^29, 9);\n#Insert([1,2], 1000, 9);\n"end";\n', encoding: "utf8", timeout: WALL(120000) });
+  assert.equal(r.signal, null, r.stderr);
+  assert.match(r.stdout.replace(/\s+/g, " "), /A collection of more than 1000000 elements needs about/, r.stdout);
+  assert.match(r.stdout, /\n1000\nend\n$/, r.stdout);
+  assert.ok(Date.now() - t0 < WALL(30000), "refused in " + (Date.now() - t0) + " ms");
+});
+
 test("at the comprehension bound, with its costliest elements built, a clean refusal, never V8's out of memory (HARD-FCC-1 on GitHub)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
@@ -564,9 +580,13 @@ test("constructors name< ... > parse; those not implemented yet raise at run tim
     const out = py(src);
     assert.match(out, /_m\._unsupported\("[A-Za-z]+", \(1, \d+\)\)/, src);
   }
-  // (sub< G | ... > and PermutationGroup< n | ... > are permutation groups now)
-  assert.match(py("H := sub< G | x, y >;"), /_m\._group_ctor\("sub", G, \[x, y\], \(1, 9\)\)/);
-  assert.match(py("P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;"), /_m\._group_ctor\("PermutationGroup", 5, \[/);
+  // (sub< G | ... > and PermutationGroup< n | ... > are permutation groups now; their generators are evaluated in the
+  // group's context, a lambda, so that a cycle written there is made: (1, 9) is the constructor's position)
+  assert.match(py("H := sub< G | x, y >;"), /_m\._group_ctor\("sub", G, lambda: \[x, y\], \(1, 9\)\)/);
+  assert.match(py("P := PermutationGroup< 5 | (1,2,3)(4,5), (1,2) >;"), /_m\._group_ctor\("PermutationGroup", 5, lambda: \[.*_m\._cycle\(\[1, 2, 3\], \(1, 28\)\).*_m\._cycle\(\[1, 2\], \(1, 42\)\)\], \(1, 22\)\)/);
+  assert.match(py("H := sub< G | (1, 2) >;"), /_m\._group_ctor\("sub", G, lambda: \[_m\._cycle\(\[1, 2\], \(1, 15\)\)\], \(1, 9\)\)/);
+  // (generators that bind a quantifier's witness: in place, between _ctx_push and _group_ctor_after, not a lambda)
+  assert.match(py("H := sub< G | exists(w){ y : y in [1..3] | y eq 2 } select (1,2) else (2,3) >;"), /_m\._group_ctor_after\("sub", _m\._ctx_push\(G\), \[/);
   assert.match(py("r := rec< F | a := 1, b := <2, 3> >;"), /_m\._rec\(F, \[\("a", 1\), \("b", _m\.MTuple\(\[2, 3\]\)\)\], \(1, 6\)\)/);
   assert.match(py("F := recformat< a : Integers(), b >;"), /_m\._recformat\(\[\("a", _m\._first\(Integers\(\)\)\), \("b", None\)\], \(1, 6\)\)/);
   // statements Magma rejects before running them: only the rejection is emitted

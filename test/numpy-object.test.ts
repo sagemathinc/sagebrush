@@ -31,7 +31,8 @@ test("object arrays: arithmetic and the other ufuncs refuse with NotImplementedE
 });
 
 test("object arrays: a function that needs numbers refuses an object array, never converts it silently", () => {
-  const cases = ["np.isnan(o)", "np.any(o)", "np.all(o)", "np.nonzero(o)", "np.dot(o, o)", "np.cumsum(o)", "np.round(o)", "np.clip(o, 0, 1)", "np.diff(o)", "np.histogram(o)", "np.interp(1.5, o, o)", "np.percentile(o, 50)", "np.argmax(o)"];
+  // (np.diff isn't here: it subtracts object elements as Python does, as NumPy's object loop, numpy-tests/test_argminmax_out_diff.py)
+  const cases = ["np.isnan(o)", "np.any(o)", "np.all(o)", "np.nonzero(o)", "np.dot(o, o)", "np.cumsum(o)", "np.round(o)", "np.clip(o, 0, 1)", "np.histogram(o)", "np.interp(1.5, o, o)", "np.percentile(o, 50)", "np.argmax(o)"];
   const code = ["import numpy as np", "o = np.array([1.0, 2.0], dtype=object)"]
     .concat(cases.map((c) => `try:\n    ${c}\n    print("computed")\nexcept Exception as e:\n    print(type(e).__name__ + ": " + str(e))`))
     .join("\n");

@@ -958,10 +958,79 @@ async function purgeStatus(rid) {
   const bVer = await c.post(`/api/share/collections/${idN}/versions`, { files, license: "MIT" });
   ok(bDel.status === 404 && bVer.status === 404 && (await fetchSite(`/api/share/c/${idN}`)).status === 200, `another account can't delete it or publish a version of it (${bDel.status}, ${bVer.status}); it is unchanged`);
 
+  // (SEC G-O1: a page or an image someone shares is never run or rendered by the files domain, which shares its root
+  //  with the agent guest: an .html and an .svg, each with a script in it, come back as sandboxed attachments)
+  {
+    const page = Buffer.from("<!doctype html><script>parent.leak = 1</script><h1>hi</h1>"), pic = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const { col: pages } = await upload(c, [["page.html", page], ["pic.svg", pic]], "Pages");
+    for (const [what, bytes] of [["an .html upload", page], ["an .svg upload", pic]]) {
+      const r = await fileAt(pages, sha(bytes));
+      const h = (k) => r.headers.get(k) ?? "";
+      ok(r.status === 200 && h("content-type") === "application/octet-stream" && /^attachment/.test(h("content-disposition")) && h("x-content-type-options") === "nosniff" && /(^|;)\s*sandbox\s*(;|$)/.test(h("content-security-policy")) && !/allow-scripts/.test(h("content-security-policy")), `${what}: a sandboxed attachment without scripts, never a page or an image (${h("content-type")}; ${h("content-disposition")}; ${h("content-security-policy")})`);
+    }
+  }
+
   // (and every answer of this whole run, the share API's and the files Worker's, said noindex, nofollow)
   const bad = answered.filter((x) => x[2] !== N);
   const statuses = [...new Set(answered.map((x) => x[1]))].sort();
   ok(answered.length > 200 && bad.length === 0, `every answer in this run said X-Robots-Tag: noindex, nofollow (${answered.length} answers, statuses ${statuses.join(" ")}): ` + JSON.stringify(bad.slice(0, 5)));
+}
+
+// ---- a deletion past its first check, whose session ends before it commits: refused, nothing changed.  A purge
+// admitted before its session ended goes on without it
+{
+  const control = (p, body) => dispatch(mf, SITE + p, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  // (the request's write held at `match`; meanwhile the session signs out; then the write goes on)
+  const signedOutDuring = async (c, match, request) => {
+    await control("/__hold", { match });
+    const pending = request();
+    const held = await (await control("/__held")).json();
+    if (!held.ok) throw new Error(`nothing held at ${match}`);
+    const out = await c.post("/auth/logout", {});
+    await control("/__release", {});
+    return { r: await pending, out };
+  };
+  const D = "f1f1f1f1-0000-4000-8000-0000000000f1", E = "f2f2f2f2-0000-4000-8000-0000000000f2", P = "f3f3f3f3-0000-4000-8000-0000000000f3";
+  for (const x of [D, E, P]) fake.limits.set(x, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+
+  const d = api((await signIn(D)).session);
+  const { col } = await upload(d, [["a.txt", Buffer.from("fence one")]], "Fenced");
+  const del = await signedOutDuring(d, "DELETE FROM collections WHERE id", () => d.del(`/api/share/collections/${col}`));
+  const kept = await db.prepare("SELECT (SELECT COUNT(*) FROM collections WHERE id = ?1) AS c, (SELECT COUNT(*) FROM versions WHERE collection = ?1) AS v, (SELECT COUNT(*) FROM holdings WHERE account_id = ?2) AS h").bind(col, D).first();
+  ok(del.out.status === 200 && del.r.status === 401 && kept.c === 1 && kept.v === 1 && kept.h === 1, `F1 a collection delete whose session signed out before its commit: 401, the collection, its version and files kept (${del.r.status}, ${JSON.stringify(kept)})`);
+
+  const e = api((await signIn(E)).session);
+  await upload(e, [["b.txt", Buffer.from("fence two")]], "Kept");
+  const purge = await signedOutDuring(e, "INSERT INTO purges (request_id, account_hash, account_id", () => e.post("/api/share/delete-everything", { confirm: "delete" }));
+  const ep = await db.prepare("SELECT (SELECT COUNT(*) FROM purges WHERE account_id = ?1) AS p, (SELECT COUNT(*) FROM collections WHERE owner = ?1) AS c, (SELECT deleting FROM accounts WHERE account_id = ?1) AS deleting").bind(E).first();
+  ok(purge.r.status === 401 && ep.p === 0 && ep.c === 1 && ep.deleting === null, `F2 a self-purge whose session signed out before it was admitted: 401, no purge recorded, nothing deleted (${purge.r.status}, ${JSON.stringify(ep)})`);
+
+  // (a twin delete that finished while this one was held: this one finds the collection gone, 404, and changes nothing)
+  const T = "f4f4f4f4-0000-4000-8000-0000000000f4";
+  fake.limits.set(T, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+  const tw = api((await signIn(T)).session);
+  const { col: twin } = await upload(tw, [["t.txt", Buffer.from("fence twin")]], "Twin");
+  await control("/__hold", { match: "DELETE FROM collections WHERE id" });
+  const first = tw.del(`/api/share/collections/${twin}`);
+  ok((await (await control("/__held")).json()).ok, "F4 (the first delete held at its commit)");
+  const second = await tw.del(`/api/share/collections/${twin}`);
+  await control("/__release", {});
+  const firstR = await first;
+  const recs = await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND collection = ?1").bind(twin).first();
+  ok(second.status === 200 && firstR.status === 404 && recs.n === 1, `F4 two deletes of one collection: one deletes it, the other answers 404 and records nothing (${second.status}, ${firstR.status}, ${recs.n} records)`);
+
+  // (admitted first: it runs to the end with its session gone, as the purge itself removes it)
+  const pc = api((await signIn(P)).session);
+  await upload(pc, [["c.txt", Buffer.from("fence three")]], "Purged");
+  const go = await pc.post("/api/share/delete-everything", { confirm: "delete" });
+  await pc.post("/auth/logout", {});
+  let pp;
+  for (let i = 0; i < 50; i++) {
+    pp = await db.prepare("SELECT (SELECT status FROM purges WHERE account_id = ?1 OR account_hash IN (SELECT account_hash FROM purges WHERE account_id = ?1)) AS s, (SELECT COUNT(*) FROM collections WHERE owner = ?1) AS c").bind(P).first();
+    if (pp.c === 0) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  ok(go.status === 200 && pp.c === 0, `F3 a self-purge admitted before its session signed out goes on and deletes the account's shares (${go.status}, ${JSON.stringify(pp)})`);
 }
 
 await mf.dispose();

@@ -153,6 +153,8 @@ def _report(e, line, col):
     session goes on."""
     if isinstance(e, SystemExit):
         raise e
+    # (no permutation group's context outlives the statement an error ends: _ctx_enter's)
+    _CYCLE_CTX[0] = 0
     m = _re.match(r"name '([A-Za-z_][A-Za-z0-9_]*)' is not defined", str(e)) if isinstance(e, NameError) else None
     if m:
         # Magma rejects a statement that uses an undeclared identifier
@@ -595,10 +597,77 @@ class MTuple(tuple):
     def __repr__(self):
         return _str(self)
 
+
+class _MCycle(MTuple):
+    """A cycle (a, b, ...), made in a permutation group's context (_cycle)."""
+
     def __call__(self, *args):
         # (1, 2)(3, 4): a product of cycles, for G!(1, 2)(3, 4) (the
-        # translator reads (1, 2) as a tuple and the next one as a call)
-        return _MCycles([self, MTuple(args)])
+        # translator reads the next one as a call)
+        return _MCycles([self, _MCycle(args)])
+
+
+# How many permutation groups' contexts the running code is in: G!x evaluates x in G's (_coerce_ctx), so that a
+# cycle written there, or in a function it calls, can be made (G := Sym(3); f := func<| (1, 2)>; G!f(); is (1, 2))
+_CYCLE_CTX = [0]
+
+
+def _coerce_ctx(R, x, pos=None):
+    """R!x, x (a function of no arguments) evaluated in R's context when R
+    is a permutation group."""
+    if _is_perm_group(R):
+        _CYCLE_CTX[0] += 1
+        try:
+            x = x()
+        finally:
+            _CYCLE_CTX[0] -= 1
+    else:
+        x = x()
+    return _coerce(R, x, pos)
+
+
+def _ctx_enter(R):
+    """R, its context entered when it is a permutation group: _coerce_ctx's
+    form for an operand evaluated in place (one that binds names, as
+    exists(w){ ... } does), which _coerce_after leaves; an error in the
+    operand ends the statement, where _report clears the context.
+
+    This relies on an invariant: no code here catches a MagmaError raised
+    while user code is evaluated and goes on within the statement (the
+    catches that don't re-raise are equality helpers, and Magma mode
+    refuses try/catch), so every error ends its statement.  Code that
+    catches one and continues mid-statement must restore _CYCLE_CTX
+    itself."""
+    if _is_perm_group(R):
+        _CYCLE_CTX[0] += 1
+    return R
+
+
+def _coerce_after(R, x, pos=None):
+    """R!x, x evaluated in R's context (_ctx_enter), which is left now."""
+    if _is_perm_group(R):
+        _CYCLE_CTX[0] -= 1
+    return _coerce(R, x, pos)
+
+
+def _cycle(items, pos=None):
+    """The cycle (a, b, ...): Magma makes one only in a permutation group's
+    context; elsewhere its error depends on the last item's type, as Magma
+    2.18-5's does (checked against it: an integer is "No permutation group
+    context", an element of a ring or a tuple "Bad arguments", a string,
+    boolean, collection or structure "No constructor")."""
+    t = _type_name(items[-1]) or _type(items[-1])
+    if t == "GrpPermElt":
+        raise MagmaError("Bad arguments to cycle or commutator construction", "elt< ... >", True, pos)
+    if t in ("BoolElt", "MonStgElt") or not (t.endswith("Elt") or t == "Tup"):
+        raise MagmaError("No constructor provided for this type of object", None, True, pos)
+    if t != "RngIntElt":
+        raise MagmaError("Bad arguments", "elt< ... >", True, pos)
+    if not _CYCLE_CTX[0]:
+        raise MagmaError("No permutation group context in which to create cycle", "elt< ... >", True, pos)
+    c = _MCycle(items)
+    c._pos = pos  # (said at its "(" when the group finds it bad: G!(1, 4) in Sym(3))
+    return c
 
 
 class _MCycles(list):
@@ -606,7 +675,7 @@ class _MCycles(list):
     coercion takes one."""
 
     def __call__(self, *args):
-        return _MCycles(list(self) + [MTuple(args)])
+        return _MCycles(list(self) + [_MCycle(args)])
 
     def __repr__(self):
         raise MagmaError("a product of cycles outside G!( ... ) is not supported yet")
@@ -4203,18 +4272,41 @@ def _join(a, b, pos=None):
     return _set_result(MSet(list(a) + list(b), k), "join", a, b, pos, "No valid universe containing all elements")
 
 
+def _multiplicity(x, s):
+    """x's multiplicity in the multiset s (equal elements of one universe)."""
+    e = s.keys.get(_key(x))
+    if e is None:
+        e = next((s.keys[_key(y)] for y in s.items if _cmpeq(x, y)), None)
+    return 0 if e is None else e[1]
+
+
+def _multi_counts(a, b, count):
+    """The multiset of a's elements, each count(its multiplicity in a, in b)
+    times (meet: the least; diff: the excess over b's)."""
+    out = []
+    for x in a.items:
+        out.extend([x] * count(a.keys[_key(x)][1], _multiplicity(x, b)))
+    return MSet(out, "multi")
+
+
 def _meet(a, b, pos=None):
     _set_pair("meet", a, b, pos, "No valid universe containing all elements")
     a, b = _ff_sets(a, b, "meet", pos, "No valid universe containing all elements")
-    return _set_result(MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "meet", a, b, pos,
-                       "No valid universe containing all elements", mode="meet")
+    if a.kind == b.kind == "multi":
+        r = _multi_counts(a, b, min)
+    else:
+        r = MSet((x for x in a if _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
+    return _set_result(r, "meet", a, b, pos, "No valid universe containing all elements", mode="meet")
 
 
 def _diff(a, b, pos=None):
     _set_pair("diff", a, b, pos, "No valid universe containing all elements")
     a, b = _ff_sets(a, b, "diff", pos, "No valid universe containing all elements")
-    return _set_result(MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set"), "diff", a, b, pos,
-                       "No valid universe containing all elements", mode="first")
+    if a.kind == b.kind == "multi":
+        r = _multi_counts(a, b, lambda m, n: max(m - n, 0))
+    else:
+        r = MSet((x for x in a if not _cmpeq_in(x, b)), a.kind if a.kind == b.kind else "set")
+    return _set_result(r, "diff", a, b, pos, "No valid universe containing all elements", mode="first")
 
 
 def _sdiff(a, b, pos=None):
@@ -5743,7 +5835,11 @@ def _ext_type(x):
     if isinstance(x, _MModMat):
         return "%s[%s]" % (_type_name(x), _ring_cat(x.base_ring()))
     if isinstance(x, _smat.Matrix):
-        return "%s[%s]" % ("AlgMatElt" if x.is_square() else "ModMatRngElt", _ring_cat(x.base_ring()))
+        # (a matrix that isn't square: over a field ModMatFldElt, as Magma's,
+        # else ModMatRngElt)
+        R = x.base_ring()
+        kind = "AlgMatElt" if x.is_square() else "ModMatFldElt" if getattr(R, "is_field", lambda: False)() else "ModMatRngElt"
+        return "%s[%s]" % (kind, _ring_cat(R))
     if isinstance(x, _Cat):
         return "Cat[%s]" % x
     if isinstance(x, _MCycField):
@@ -7717,19 +7813,54 @@ def Fibonacci(n):
 
 
 def IsSquare(n):
+    # (false and no root: s, r := IsSquare(n) leaves r unassigned, as Magma's)
     if _is_ff(n):
-        return _multi([True, _ff_sqrt(n)]) if n.is_square() else False
+        return _multi([True, _ff_sqrt(n)]) if n.is_square() else _no_root()
     if isinstance(n, int) and n >= 0:
         r = _math.isqrt(n)
         if r * r == n:
             return _multi([True, r])
-        return False
+        return _no_root()
     if isinstance(n, _Fraction) and n >= 0:
         a, b = _math.isqrt(n.numerator), _math.isqrt(n.denominator)
         if a * a == n.numerator and b * b == n.denominator:
             return _multi([True, _sa._q(_Fraction(a, b))])
-        return False
-    return False
+        return _no_root()
+    if isinstance(n, _snf.NumberFieldElement):
+        return _nf_is_square(n)
+    return _no_root()
+
+
+def _no_root():
+    return _multi([False, _NOVAL])
+
+
+def _nf_is_square(y):
+    """IsSquare of a number field element: true and a root r (r^2 = y), a
+    root of x^2 - y over its field, else false.  Which of r and -r is a
+    documented choice: the one whose last nonzero coordinate past the
+    constant one is negative (-a for a^2, -a - 1 for (a + 1)^2 in
+    Q(sqrt 2)), a rational root positive if an integer, else negative (2
+    for 4, -3/2 for 9/4).  Magma's sign agrees about half the time
+    (measured on 7560 rows, Nov 28); its own rule depends on the field and
+    the element (2 w + 2 or -2 w - 2 for (2 + 2 w)^2, 2/3 or -2/3 for 4/9)."""
+    K = y.parent()
+    if y == 0:
+        return _multi([True, K(0)])
+    # (a ring over this field object: PolynomialRing's cache answers an equal
+    # field's ring, QuadraticField(2) made twice)
+    import _sage_nfpoly
+    rs = [r for r, _ in _sage_nfpoly.PolynomialRing_nf_(K, "x")([-y, 0, 1]).roots()]
+    if not rs:
+        return _no_root()
+    r = rs[0]
+    c = [_Fraction(v) for v in r.list()]
+    tail = [v for v in c[1:] if v != 0]
+    if tail:
+        chosen = tail[-1] < 0
+    else:
+        chosen = c[0] > 0 if c[0].denominator == 1 else c[0] < 0
+    return _multi([True, r if chosen else -r])
 
 
 def Isqrt(n):
@@ -7789,8 +7920,8 @@ def Sqrt(x):
 # its caller's is entered, so a nested or repeated call is told apart.
 _CALL_POS_NAMES = frozenset((
     "Alt ChangeRing CharacteristicPolynomial Coercion ConjugacyClasses CyclicGroup DefiningPolynomial DerivedSubgroup Embed "
-    "Generator Identity Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
-    "Normalise Normalize Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
+    "Generator Identity Insert Integral IsAbelian IsSolvable IsSubfield IsTransitive MinimalPolynomial Ngens Norm "
+    "Normalise Normalize Numerator Orbit Orbits PrimeField Root RootsInSplittingField Solution SquarefreeFactorization "
     "Stabilizer Submatrix Subsets Sym Trace Vector").split())
 _CALLPOS = []
 
@@ -7798,7 +7929,7 @@ _CALLPOS = []
 def _call(pos, f, *args, **kw):
     """f(*args, **kw), made at pos (the "(" of the call in the source).  Only
     what Magma can call is called: a function or procedure (the user's or an
-    intrinsic), a map, and a tuple as a product of cycles, (1, 2)(3, 4)
+    intrinsic), a map, and a cycle as a product of cycles, (1, 2)(3, 4)
     (_magma_callable); anything else (an integer, a sequence, a matrix, a
     structure, a polynomial: Magma's map application isn't defined for it) is
     refused there, in Magma 2.18-5's words: with one argument "Bad argument
@@ -7821,8 +7952,8 @@ def _call(pos, f, *args, **kw):
 
 
 # (what Magma can call: functions, Python's and builtins, bound methods, classes (intrinsics made as classes),
-# forward cells, maps, and tuples and their products as cycles)
-_CALLABLE_TYPES = (type(lambda: 0), type(len), type(_Cell("f").get), type, _Cell, _CellCall, MMap, MTuple, _MCycles)
+# forward cells, maps, and cycles and their products; a tuple <a, b> isn't one)
+_CALLABLE_TYPES = (type(lambda: 0), type(len), type(_Cell("f").get), type, _Cell, _CellCall, MMap, _MCycle, _MCycles)
 
 
 def _magma_callable(f):
@@ -8434,6 +8565,10 @@ def IsUnit(x):
         return _math.gcd(x.v, x.R.m) == 1
     if _is_ff(x):
         return bool(x)  # (every nonzero element of a field)
+    if isinstance(x, _Fraction):
+        return x != 0  # (a rational field element, Q!2 too: its field's rule)
+    if isinstance(x, _snf.NumberFieldElement):
+        return x != 0  # (in a number field every nonzero element is a unit)
     return x in (1, -1)
 
 
@@ -8520,6 +8655,10 @@ def Numerator(x):
         D, B = _fun_presentation_meta(x.F, x.v)
         _fun_preflight_result(x.F, D, B, budget, "numerator presentation")
         return x.F._parts(x.v)[0]
+    if isinstance(x, _MNFElt):
+        return x * Denominator(x)
+    if isinstance(x, (_smat.Matrix, _MVector)):
+        raise _bad_types("Numerator", (x,), _located("Numerator"))  # (Magma has none for matrices and vectors)
     return x.numerator if isinstance(x, _Fraction) else x
 
 
@@ -8529,7 +8668,22 @@ def Denominator(x):
         D, B = _fun_presentation_meta(x.F, x.v)
         _fun_preflight_result(x.F, D, B, budget, "denominator presentation")
         return x.F._parts(x.v)[1]
+    if isinstance(x, _MNFElt):
+        # (the least common denominator of its coordinates on 1, a, a^2, ..,
+        # as Magma's: 2 for (1 + a)/2 in Q(sqrt 5) too, integral or not)
+        return _coords_denominator(_Fraction(c) for c in x.parent()._to_user(x._c))
+    if isinstance(x, _smat.Matrix):
+        return _coords_denominator(_Fraction(c) for row in x.rows() for c in row)
+    if isinstance(x, _MVector):
+        return _coords_denominator(_Fraction(c) for c in x)
     return x.denominator if isinstance(x, _Fraction) else 1
+
+
+def _coords_denominator(cs):
+    d = 1
+    for c in cs:
+        d = d * c.denominator // _math.gcd(d, c.denominator)
+    return d
 
 
 def _fun_factor_key(item):
@@ -9266,8 +9420,23 @@ def Remove(s, i):
 
 
 def Insert(s, i, x):
+    if not isinstance(i, int) or isinstance(i, bool):
+        raise _bad_types("Insert", (s, i, x), _located("Insert"))
+    if i < 1:
+        raise MagmaError("Argument 2 must be positive", "'Insert'", True, _located("Insert"))
+    if i >= 1 << 30:
+        # (Magma's own bound on the position, said before anything is made)
+        raise MagmaError("Argument 2 (%d) is too large" % i, "'Insert'", True, _located("Insert"))
     x = _lift("Insert", s, x, "Cannot coerce element into the universe")
     s = _own(s) if isinstance(s, MSeq) else _as_seq(s)
+    # (past the end: undefined elements up to position i, as Magma's (a
+    # Python insert would put x at the end), admitted by the collection
+    # bound before they are made, in one extend)
+    pad = i - 1 - len(s)
+    if pad > 0:
+        if len(s) + pad + 1 > _COLLECT_MAX:
+            raise _collect_refusal()
+        s.extend([_UNDEF] * pad)
     s.insert(i - 1, x)
     _settle(s)
     return s
@@ -9419,6 +9588,9 @@ def Eltseq(x):
             raise MagmaError("Bad argument types\nArgument types given: %s[%s]" % (_type(x), et), "'Eltseq'", True)
     if isinstance(x, _MVectorSpace):
         raise _bad_types("Eltseq", (x,))
+    if isinstance(x, _smat.Matrix):
+        # (its entries, row by row, in its ring, as Magma's; not its rows)
+        return MSeq([c for row in x.rows() for c in row], BaseRing(x))
     return MSeq(x)
 
 
@@ -10489,6 +10661,8 @@ def Norm(x, sub=None):
         return _ff_absolute("Norm", x)
     if isinstance(x, _snf.NumberFieldElement):
         return _m_num(x.norm())
+    if isinstance(x, (int, _Fraction)) and not isinstance(x, bool):
+        return x  # (the norm of an integer or rational is itself, as Magma's)
     return x * x
 
 
@@ -11767,7 +11941,10 @@ class _MSymGroup:
             if len(images) != self.n or sorted(images) != list(range(1, self.n + 1)):
                 raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: [RngIntElt]", "'!'", True)
             return _MPerm(self, images)
-        cycles = [x] if isinstance(x, MTuple) else list(x) if isinstance(x, _MCycles) else None
+        if type(x) is MTuple:
+            # (a tuple <a, b> is not a cycle: Magma's G!<1, 2> is an illegal coercion, its RHS shown as <>)
+            raise MagmaError("Illegal coercion\nLHS: GrpPerm\nRHS: <>", "'!'", False)
+        cycles = [x] if isinstance(x, _MCycle) else list(x) if isinstance(x, _MCycles) else None
         if cycles is None:
             raise MagmaError("coercion of a %s into a permutation group is not supported yet" % _type_of(x), "'!'", True)
         images = list(range(1, self.n + 1))
@@ -11775,7 +11952,7 @@ class _MSymGroup:
         for c in cycles:
             pts = list(c)
             if not pts or len(set(pts)) != len(pts) or any(isinstance(a, bool) or not isinstance(a, int) or not 1 <= a <= self.n for a in pts):
-                raise MagmaError("Bad arguments to cycle or commutator construction", "elt< ... >", True)
+                raise MagmaError("Bad arguments to cycle or commutator construction", "elt< ... >", True, getattr(c, "_pos", None))
             img = list(range(1, self.n + 1))
             for k, a in enumerate(pts):
                 img[a - 1] = pts[(k + 1) % len(pts)]
@@ -12020,7 +12197,33 @@ def _groups():
 
 
 def _group_ctor(kind, first, gens, pos):
-    """PermutationGroup< n | gens > and sub< G | gens > (lib/_magma_groups.py)."""
+    """PermutationGroup< n | gens > and sub< G | gens > (lib/_magma_groups.py):
+    gens (a function of no arguments) evaluated in a permutation group's
+    context, so that a cycle written there is made (_cycle), as Magma's."""
+    _CYCLE_CTX[0] += 1
+    try:
+        gens = gens()
+    finally:
+        _CYCLE_CTX[0] -= 1
+    return _group_built(kind, first, gens, pos)
+
+
+def _ctx_push(first):
+    """first, a permutation group's context entered for generators evaluated
+    in place (ones that bind names, as exists(w){ ... } does), which
+    _group_ctor_after leaves; an error in them ends the statement, where
+    _report clears the context (_ctx_enter's invariant)."""
+    _CYCLE_CTX[0] += 1
+    return first
+
+
+def _group_ctor_after(kind, first, gens, pos):
+    """_group_ctor for generators evaluated in place (_ctx_push)."""
+    _CYCLE_CTX[0] -= 1
+    return _group_built(kind, first, gens, pos)
+
+
+def _group_built(kind, first, gens, pos):
     if kind == "PermutationGroup":
         return _groups().construct(first, gens, pos)
     return _groups().sub(first, gens, pos)

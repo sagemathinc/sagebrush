@@ -375,6 +375,12 @@ try {
   await ctrl("v", "KeyV", 86);
   await sleep(400);
   ok(!(await ev("__leg.ins()")).slice(b0).includes("\x16"), "Ctrl+V sends no ^V: the browser's paste");
+  // (Caps Lock on: the key is "V"; still the browser's paste: the word Ctrl+C copied goes to the leg, never a ^V)
+  b0 = (await ev("__leg.ins()")).length;
+  await ctrl("V", "KeyV", 86);
+  await sleep(400);
+  const capsV = (await ev("__leg.ins()")).slice(b0);
+  ok(capsV === "SELECTME", `Ctrl+V with Caps Lock (the key "V"): the browser's paste, the copied word sent and no ^V (${JSON.stringify(capsV)})`);
 
   // 8. a resize goes to the computer
   await send("Emulation.setDeviceMetricsOverride", { width: 800, height: 700, deviceScaleFactor: 1, mobile: false });

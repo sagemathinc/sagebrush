@@ -180,6 +180,11 @@ export const isDocId = (s: unknown): s is string => typeof s === "string" && (UU
 export const isFid = (s: unknown): s is string => typeof s === "string" && HEX16.test(s);
 export const isSha = (s: unknown): s is string => typeof s === "string" && HEX64.test(s);
 export const isHash = isSha;
+/** A blob's address (e2e PR 3a, 3b; design/e2e-encryption.md §3.3): 64 hex, a plaintext account's (its bytes' SHA-256),
+ * or a versioned keyed address, "a1:" and 64 hex (an end-to-end account's: HMAC under the epoch's address key). Only
+ * where an address is meant: a plaintext op's sha256 and every ct_sha256 stay isSha. */
+export const ADDRESS = /^(?:a1:)?[0-9a-f]{64}$/;
+export const isAddress = (s: unknown): s is string => typeof s === "string" && ADDRESS.test(s);
 export const isDevice = (s: unknown): s is string => typeof s === "string" && DEVICE.test(s);
 export const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 
@@ -323,7 +328,7 @@ export function checkSealedOp(v: unknown): SealedOp {
   if (env.length === 0) throw invalid("sealed op: env is empty");
   const refs = (x: unknown, what: string): string[] => {
     if (x === undefined) return [];
-    if (!Array.isArray(x) || !x.every(isSha)) throw invalid(`sealed op: ${what} is a list of blob addresses`);
+    if (!Array.isArray(x) || !x.every(isAddress)) throw invalid(`sealed op: ${what} is a list of blob addresses`);
     if (x.length > LIMITS.sealedOpRefs) throw tooBig("sealed_op_refs", LIMITS.sealedOpRefs, `sealed op: at most ${LIMITS.sealedOpRefs} ${what}`);
     if (new Set(x).size !== x.length) throw invalid(`sealed op: ${what} names an address twice`);
     return x as string[];
@@ -337,7 +342,7 @@ export function checkSealedOp(v: unknown): SealedOp {
     const seen = new Set<string>();
     for (const r of x) {
       const f = fields(r, ["address", "add"], "release");
-      if (!isSha(f.address) || !isNat(f.add) || f.add < 1) throw invalid("sealed op: a release is {address, add}: a blob address and the seq of the op that added it");
+      if (!isAddress(f.address) || !isNat(f.add) || f.add < 1) throw invalid("sealed op: a release is {address, add}: a blob address and the seq of the op that added it");
       const k = f.address + ":" + f.add;
       if (seen.has(k)) throw invalid("sealed op: releases names one add twice");
       seen.add(k);
@@ -443,7 +448,7 @@ export function parseMessage(raw: string | ArrayBuffer, max = LIMITS.messageByte
 export const enc = new TextEncoder();
 export const hex = (b: ArrayBuffer | Uint8Array) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 export async function sha256Hex(data: Uint8Array | string): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? enc.encode(data) : data));
+  return hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? enc.encode(data) : (data as BufferSource)));
 }
 export async function hmacHex(key: string, msg: string): Promise<string> {
   const k = await crypto.subtle.importKey("raw", enc.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);

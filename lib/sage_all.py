@@ -78,10 +78,11 @@ __all__ = [
     "text_control",
 ]
 
-# (Sage's table(): its module loaded at its first use, not at Sage mode's start, which is compiled ahead: _sage_lazy)
+# (an attribute loaded on first use: prime_pi.plot, moebius.range; a module-level name is the index's, __getattr__)
 from _sage_lazy import lazy_import as _lazy_import, LazyImport as _LazyImport
+# (Sage's table(), cached_function and cached_method: stubs, as the Core API records them, each its module loaded at
+# its first call; a session binds the stub and is rebound to what it resolves to then, _sage_lazy.bind)
 _lazy_import("_sage_table", "table", globals())
-# (Sage's cached_function and cached_method, on first use: _sage_cached)
 _lazy_import("_sage_cached", ["cached_function", "cached_method"], globals())
 from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infinity, Infinity, symbolic_sum, assume, forget, assumptions, assuming,
                         euler_gamma, SR, function, sin, cos, tan, cot, sec, csc, asin, acos, atan,
@@ -95,18 +96,6 @@ from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infini
                         desolve_rk4, taylor, limit,
                         lim, solve, expand, simplify,
                         find_root, find_local_minimum, find_local_maximum, latex, _py_number)
-from sage_plot import Graphics as _Graphics2d, GraphicsArray as _GraphicsArray, Animation as _Animation
-from sage_plot import (Graphics, plot, parametric_plot, polar_plot, list_plot, line, line2d, point,
-                       points, point2d, text, polygon, polygon2d, circle, disk, arrow, arrow2d,
-                       bar_chart, show as _show2d, graphics_array, animate, Animation)
-from sage_permgroup import (PermutationGroup, PermutationGroupElement, SymmetricGroup, AlternatingGroup,
-                             CyclicPermutationGroup, DihedralGroup, MathieuGroup, PSL, PGL, KleinFourGroup, TransitiveGroup, TransitiveGroups)
-from sage_plot3d import (Graphics3d, plot3d, parametric_plot3d, implicit_plot3d, spherical_plot3d,
-                         cylindrical_plot3d, revolution_plot3d, sphere, tetrahedron, cube, octahedron,
-                         dodecahedron, icosahedron, point3d, line3d, text3d,
-                         arrow3d, polygon3d, plot_vector_field3d)
-from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_plot,
-                              plot_vector_field, plot_slope_field, colormaps)
 
 
 def show(obj, *more, **options):
@@ -140,32 +129,9 @@ def show(obj, *more, **options):
 
 
 _RICH_DISPLAY = ("_repr_svg_", "_repr_png_", "_repr_html_", "_repr_mimebundle_", "_ipython_display_")
-from _sage_modular import (ModularSymbols, ModularForms, CuspForms, Gamma0, DirichletGroup,
-                           EllipticCurve, Newforms, newform_orbits)
-from _sage_hmf import HilbertModularForms
 from _sage_poly import ZZ, QQ, PolynomialRing, polygen, Polynomial as _Polynomial
-from _sage_nf import NumberField, QuadraticField, CyclotomicField
-from _sage_ff import (GF, FiniteField, IntegerModRing, Integers, Zmod, Mod, mod, primitive_root,
-                      conway_polynomial, Hom)
-from _sage_qqbar import QQbar, AA
-from _sage_mpoly import ideal, Ideal, TermOrder
 from _sage_real import RealField, ComplexField, RealIntervalField, RIF
-from _sage_rdf import RDF, CDF
-from _sage_series import PowerSeriesRing, LaurentSeriesRing, O
-from _sage_padic import Zp, Qp, ZpCR, QpCR
-from _sage_graph import Graph, DiGraph, graphs, digraphs
 true, false = True, False
-from _sage_sandpile import Sandpile, SandpileConfig, SandpileDivisor, sandpiles, firing_graph, parallel_firing_graph
-from _sage_lie import (CartanType, RootSystem, DynkinDiagram, WeylGroup, WeylCharacterRing, WeightRing,
-                       branching_rule, branching_rule_from_plethysm, BranchingRule, CartanMatrix)
-from _sage_crystals import crystals, Tableau, Word
-from _sage_combinat import (Partition, Partitions, Compositions, Set, Subsets, Combinations, Permutation, Permutations,
-                           number_of_partitions, stirling_number1, stirling_number2, bell_number)
-from _sage_polyhedra import Polyhedron, polytopes
-from _sage_manifolds import EuclideanSpace, FiniteRankFreeModule, rank, dim
-from _sage_milp import MixedIntegerLinearProgram
-from _sage_coding import (codes, channels, LinearCode, lfsr_sequence, lfsr_autocorrelation, lfsr_connection_polynomial,
-                          IndexedSequence, AlphabeticStrings, SubstitutionCryptosystem, TranspositionCryptosystem)
 
 
 def RationalField():
@@ -443,6 +409,9 @@ def sage_eval(source, locals=None, cmds="", preparse=True):
     # a command raises), and the value is locals['_sage_eval_returnval_']
     # (without cmds, the expression alone, leaving locals as it is)
     g = dict(globals())
+    # (the copy keeps Sage mode's names this module hasn't loaded yet: they load on first use there too)
+    import _sage_lazy
+    _sage_lazy.session(g)
     if locals is None:
         locals = {}
     if not cmds.strip():
@@ -1928,6 +1897,11 @@ def _QQ(x, d=None):
 def _QQ_exact(x, d=None):
     """The exact rational x (or x/d); a real number's exact binary value
     (examples of strings in QQ's documentation)."""
+    if isinstance(x, (tuple, list)):
+        # (a numerator and a denominator, QQ((1, 2)), as Rational((1, 2)) and
+        # as Sage's, its second argument unused; a list or another length a
+        # TypeError: it was Fraction((1, 2)), a TypeError)
+        return _q(Rational(x))
     if isinstance(x, (str, bytes)):
         # (QQ(s) and QQ(s, base) read a string as Rational(s, base) does, as
         # in Sage: GMP's rule; it was Fraction(s), which took '0.5' and gave
@@ -4571,3 +4545,27 @@ def _install_displayhook():
 
 
 _install_displayhook()
+
+
+# The names this module's start doesn't load, each domain's (lib/_sage_names.py): loaded the first time one is asked
+# for, as an attribute (PEP 562) or through a session namespace's lazy names (lib/_sage_lazy.py session), and then kept
+# here.  `from sage_all import *` asks for every one of them, so it loads every domain, as before.
+def __getattr__(name):
+    import _sage_names as _N
+    target = _N.ALIASES.get(name, name)
+    module = _N.OVERRIDES.get(target) or _N.NAMES.get(target)
+    if module is None or name not in __all__:
+        raise AttributeError(f"module 'sage_all' has no attribute '{name}'")
+    try:
+        value = getattr(__import__(module), target)
+    except Exception as e:
+        # (the domain's own error, whatever it is, and the name it was loading; nothing is kept, so a later use tries
+        # again)
+        e.add_note(f"(loading {name!r} in Sage mode, from {module})")
+        raise
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

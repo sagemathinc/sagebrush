@@ -149,7 +149,10 @@ export const LATEX_LAZY = {
 // (311,297 raw / 105,855 gzip: Nov 26 2026, \input and \include in a shared or GitHub view (mountEditor's inputs,
 //  web/latex/component.ts): 311,233 / 105,791 measured on the shipped build of its merge with master 9063c669, with bun
 //  1.4.4 and node 24.21.0 (+644 / +241 over master's 310,589 / 105,550), + 64)
-export const LATEX_CAPS = { raw: 311297, gzip: 105855 };
+// (311,401 raw / 105,893 gzip: Nov 27 2026, a sageblock whose last line is a plot shows it under its code (sagetex.mjs's
+//  plotImg for a block): 311,337 / 105,829 measured on the shipped build of its merge with master 5963e768, with bun 1.4.4
+//  and node 24.21.0 (+104 / +38 over master's 311,233 / 105,791), + 64)
+export const LATEX_CAPS = { raw: 311401, gzip: 105893 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -250,11 +253,12 @@ export const LATEX_LAZY_CAPS = {
   // (68,867 / 23,606: Nov 25 2026, image reads: a raster image's read as an image for an agent that takes one, by its
   //  bytes (isRaster, imageOut, agent-pair.ts), measured on the shipped build of the head merged with master 5fb549fa
   //  with bun 1.4.4 and node 24.21.0: 68,803 / 23,542, + 64)
-  // (69,649 / 23,960: Nov 27 2026, notebook images (#1872): the image helpers the pairing's agent-pair.ts reads
-  //  (isRaster, IMAGE_BYTES_MAX) moved into web/workspace/image-store.ts, which this chunk now carries, with its
-  //  owner-folder reference check (SEC H1); measured on the shipped build of the head on master 5963e768 with bun 1.4.4
-  //  and node 24.21.0: 69,585 / 23,896, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 69649, gzip: 23960 },
+  // (70,904 / 24,149: 2026-11-27: durable local grant cleanup and superseded reconnect ownership; CI eb19a26c
+  //  70840/24085 +64 (#2346; web-artifacts, the shipped build of the head merged with master 2a6ef128, bun 1.4.4))
+  // (71,686 / 24,503: Nov 28 2026, PROVISIONAL at the merge of notebook images (#1962) with master: master's 70,904 /
+  //  24,149 plus #1962's own measured growth over the same base, +782 / +354 (image-store.ts's helpers and its
+  //  owner-folder check, which this chunk carries); renewed to measured + 64 from this head's CI build)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 71686, gzip: 24503 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
@@ -299,7 +303,9 @@ export const LATEX_LAZY_CAPS = {
   //  files and ended at once, a Run kept in the page, the run half shared with the editor's): measured + 64, 19,401 /
   //  7,715 on master 8431bd54 (+793 / +205 over 18,608 / 7,510); renewed after its review fixes (a session ended for
   //  good at every step, a Run admitted again just before its script): 19,580 / 7,748 measured on master 9534e419, + 64
-  RUN: { label: "the LaTeX Run chunk", raw: 19644, gzip: 7812 },
+  // (20,122 / 7,934: Nov 27 2026, a sageblock whose last line is a plot (the session script's cell mode and its display hook
+  //  collected): 20,058 / 7,870 (+478 / +123 over master's 19,580 / 7,747) measured on its merge with master 5963e768, + 64)
+  RUN: { label: "the LaTeX Run chunk", raw: 20122, gzip: 7934 },
   // (@interact, a Sagebrush extension (Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split (Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room (the

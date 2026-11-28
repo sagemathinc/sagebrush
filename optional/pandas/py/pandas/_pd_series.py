@@ -1283,8 +1283,10 @@ class _SeriesLoc(object):
 
 def diff_column(col, periods):
     """Column.diff: float64 (float32 for a float32 column, computed in it),
-    NaN where the value `periods` away is missing or past either end (pandas
-    3.1: the integers and float64 alike)."""
+    NaN where the value `periods` away is missing or past either end, as pandas
+    3.1: an int8 or int16 column's differences exact, in float32; an int32,
+    int64 or unsigned one's subtracted in its own dtype, wrapping (a uint8
+    0 after 1 is 255), then float64."""
     if isinstance(periods, bool) or not isinstance(periods, (int, np.integer)):
         raise ValueError("periods must be an integer")
     periods = int(periods)
@@ -1292,14 +1294,35 @@ def diff_column(col, periods):
         raise _unsupported("diff of a datetime64[us] column (a Timedelta column)")
     if col.dtype not in INTS and col.dtype not in FLOATS:
         raise _unsupported("diff of a %s column" % (col.dtype,))
-    d = "float32" if col.dtype == "float32" else "float64"
-    v = col._pd_values.astype(d)
+    # (periods past a C ssize_t: pandas' OverflowError for a signed int or a float column; an unsigned one's
+    # differences are all missing, as pandas')
+    if not -(1 << 63) <= periods < 1 << 63 and not col.dtype.startswith("uint"):
+        raise OverflowError("Python int too large to convert to C ssize_t")
+    small = col.dtype in ("int8", "int16")
+    d = "float32" if col.dtype == "float32" or small else "float64"
+    if col.dtype == "int64":
+        # (each difference exact, a Python int, then rounded once to float64: one past 2**53, as -(2**53) to 1, is
+        # pandas' float64 nearest it, never a wide-int refusal; elements past 2**53, whose difference could wrap,
+        # Sagebrush refuses before this)
+        x = col._pd_values.tolist()
+        n = len(x)
+        out = [float("nan")] * n
+        if periods >= 0 and periods < n:
+            for i in range(periods, n):
+                out[i] = float(x[i] - x[i - periods])
+        elif periods < 0 and -periods < n:
+            for i in range(n + periods):
+                out[i] = float(x[i] - x[i - periods])
+        return Column(d, np.array(out, dtype=d))
+    # (the subtraction's dtype: a float's own result dtype, int64 for a small int, else the int's own, wrapping)
+    v = col._pd_values.astype(d if col.dtype in FLOATS else "int64" if small else col.dtype)
     n = len(v)
     out = np.full(n, np.nan, dtype=d)
-    if periods >= 0 and periods < n:
-        out[periods:] = v[periods:] - v[:n - periods]
-    elif periods < 0 and -periods < n:
-        out[:n + periods] = v[:n + periods] - v[-periods:]
+    with np.errstate(over="ignore"):
+        if periods >= 0 and periods < n:
+            out[periods:] = (v[periods:] - v[:n - periods]).astype(d)
+        elif periods < 0 and -periods < n:
+            out[:n + periods] = (v[:n + periods] - v[-periods:]).astype(d)
     return Column(d, out)
 
 

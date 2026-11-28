@@ -20,7 +20,7 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}/space/`;
 globalThis.location = new URL(base);
-const { LIMITS, checkSpace, jsonSize, readText, sameSite, utf8Bytes } = await import("./src/read.ts");
+const { BUILD_COMMIT, LIMITS, checkSpace, jsonSize, jsonSizeWithin, pinnedRaw, readText, readable, sameSite, utf8Bytes } = await import("./src/read.ts");
 const { treeRoom } = await import("./src/treeroom.ts");
 const { KEPT, EDIT, keepEdit } = await import("./src/keep.ts");
 const { layered } = await import("./src/roomlayout.ts");
@@ -36,6 +36,46 @@ try {
   // ---- reading
   ok(JSON.parse(await readText(sameSite("a.space.json", { space: true }))).format === "sagebrush-space", "a space is read");
   ok(await refuses(() => readText(sameSite("moved.space.json", { space: true })), /redirect/), "a redirect is not followed");
+  // (the one other place a file's text is read from: Sagebrush's repository on GitHub, at the commit the viewer was
+  //  built from; here, alone, the module has none compiled in, so the commit is given)
+  const H = "0123456789abcdef0123456789abcdef01234567", RAW = `https://raw.githubusercontent.com/sagemathinc/sagebrush/${H}/`;
+  const PIN = /only files of this site, or of Sagebrush's repository at the commit this was built from/;
+  ok(BUILD_COMMIT === null, "this module alone has no build commit");
+  ok(await refuses(() => pinnedRaw(RAW + "lib/sagebrush/nf.py"), PIN) && await refuses(() => readable(RAW + "x.py"), PIN), "without a build commit, nothing of the repository is read");
+  ok(pinnedRaw(RAW + "lib/sagebrush/nf.py", H).href === RAW + "lib/sagebrush/nf.py", "a file of the repository at the build's commit");
+  ok(pinnedRaw(RAW + "web/a%20b.ts", H).href === RAW + "web/a%20b.ts", "with an encoded space in its path");
+  ok(pinnedRaw(RAW + "a/%2E/x.py", H).href === RAW + "a/x.py", "an encoded . segment is resolved by the URL, to the same file at the same commit");
+  ok(readable("a.space.json").origin === new URL(base).origin, "readable: this site's, by sameSite");
+  for (const [href, why] of [
+    [`https://raw.githubusercontent.com/sagemathinc/sagebrush/${"f".repeat(40)}/x.py`, "another full commit (a fork's, say: GitHub serves those under this path too)"],
+    [`http://raw.githubusercontent.com/sagemathinc/sagebrush/${H}/x.py`, "over http"],
+    [`https://raw.githubusercontent.com.example.com/sagemathinc/sagebrush/${H}/x.py`, "another host that begins like it"],
+    [`https://example.com/sagemathinc/sagebrush/${H}/x.py`, "another host"],
+    [`https://raw.githubusercontent.com/someone/sagebrush/${H}/x.py`, "another owner"],
+    [`https://raw.githubusercontent.com/sagemathinc/other/${H}/x.py`, "another repository"],
+    [`https://raw.githubusercontent.com/sagemathinc/sagebrush/master/x.py`, "a branch name"],
+    [`https://raw.githubusercontent.com/sagemathinc/sagebrush/${H.slice(0, 12)}/x.py`, "a short hash"],
+    [`https://raw.githubusercontent.com/sagemathinc/sagebrush/${H.toUpperCase()}/x.py`, "the hash in capitals"],
+    [`https://raw.githubusercontent.com/sagemathinc/sagebrush/${H}/`, "no file"],
+    [RAW + "x.py?token=1", "a query"],
+    [RAW + "x.py#a", "a fragment"],
+    [`https://u:p@raw.githubusercontent.com/sagemathinc/sagebrush/${H}/x.py`, "a user and password"],
+    [RAW + "a%2F..%2F..%2Fother%2Fx.py", "an encoded slash"],
+    [RAW + "a%5Cx.py", "an encoded backslash"],
+    [RAW + "a//x.py", "an empty segment"],
+    [RAW + "%2e%2e/x.py", "an encoded .. (resolved by the URL, so the hash is gone)"],
+    [`https://raw.githubusercontent.com/sagemathinc/sagebrush/${H}/../../other/x/${H}/x.py`, "a .. that leaves the commit"],
+  ]) ok(await refuses(() => pinnedRaw(href, H), PIN), `refused: ${why}`, href);
+  ok(await refuses(() => pinnedRaw(RAW + "x.py", "master"), PIN) && await refuses(() => pinnedRaw(RAW + "x.py", H.slice(0, 39)), PIN), "and a build commit that isn't a full hash allows nothing");
+  // (read as a file of this site is: no redirect followed, the caps, and the answer's origin the URL's own; here the
+  //  server stands for the other host, read from a page of another origin)
+  const page = globalThis.location;
+  globalThis.location = new URL("http://localhost:1/space/");
+  try {
+    ok(await refuses(() => readText(new URL(base + "moved.space.json")), /redirect/), "another origin's redirect is not followed");
+    ok(await refuses(() => readText(new URL(base + "big-declared.txt"), 32), /too large/), "nor is its answer read past the cap");
+    ok((await readText(new URL(base + "a.space.json"))).includes("sagebrush-space"), "its file is read");
+  } finally { globalThis.location = page; }
   ok(await refuses(() => readText(sameSite("big-declared.txt"), 32), /too large/), "an answer whose length is over the limit is refused");
   ok(await refuses(() => readText(sameSite("big-streamed.txt"), 100), /too large/), "an answer that grows past the limit as it arrives is refused");
   ok((await readText(sameSite("big-streamed.txt"), 128)).length === 128, "and one within it is read whole");
@@ -64,6 +104,21 @@ try {
   //      structural byte, measured as JSON.stringify writes it
   const sample = { s: 'q"b\\s\n\t\u0001 € 😀 \ud800', n: [0, -0, 0.1, -12.5e-7, 1e300, Number.MAX_VALUE, -Number.MAX_VALUE, 2 ** 53], b: [true, false, null], o: { "k\"ey": { deep: [[], {}, [1, [2, { x: "y" }]]] } }, e: "" };
   ok(jsonSize(sample) === utf8Bytes(JSON.stringify(sample)), "its size is exactly compact JSON's, in UTF-8 (escapes, control characters, €, a character beyond the BMP, a lone surrogate, numbers, true/false/null, nesting)", [jsonSize(sample), utf8Bytes(JSON.stringify(sample))]);
+  // (the walk is lazy: refused at the first limit passed, it hasn't read what comes after; a getter late in a value says so)
+  {
+    const sentinel = () => { const t = { touched: false }; return t; };
+    const arr = (t) => { const a = new Array(5000).fill(null); Object.defineProperty(a, 4999, { get() { t.touched = true; return null; }, enumerable: true }); return a; };
+    const obj = (t) => { const o = {}; for (let k = 0; k < 4999; k++) o["k" + k] = null; Object.defineProperty(o, "k4999", { get() { t.touched = true; return null; }, enumerable: true }); return o; };
+    const refusesWithin = (v, lim) => { try { jsonSizeWithin(v, { values: Infinity, depth: Infinity, string: Infinity, bytes: Infinity, ...lim }); return false; } catch { return true; } };
+    let t = sentinel();
+    ok(refusesWithin(arr(t), { values: 10 }) && !t.touched, "an array of 5,000 values, 10 allowed: refused before its 5,000th is read");
+    t = sentinel();
+    ok(refusesWithin(arr(t), { bytes: 100 }) && !t.touched, "and 100 bytes allowed: refused from its length, before any element is read");
+    t = sentinel();
+    ok(refusesWithin(obj(t), { values: 10 }) && !t.touched, "an object of 5,000 keys, 10 values allowed: refused before its last key's value is read");
+    t = sentinel();
+    ok(jsonSize(arr(t)) === utf8Bytes(JSON.stringify(new Array(5000).fill(null))) && t.touched, "within limits, every value is read and the size is compact JSON's");
+  }
   const surface = (n, pad) => sp({ nodes: [{ id: "p", kind: "plot3d", surface: { z: new Array(n).fill(Number.MAX_VALUE) } }], pad: "x".repeat(pad) });
   const n = 340000, bare = utf8Bytes(JSON.stringify(surface(n, 0)));
   const atLimit = surface(n, LIMITS.bytes - bare);

@@ -259,6 +259,11 @@ export class AgentPairing {
   /** Whether its grant was remembered (kept in IndexedDB with its session, not in a reload record). */
   get remembers(): boolean { return this.remember; }
   private revoked = false;
+  /** Access is already off; only removal of the remembered local material remains. */
+  cleanup: "revoking" | "pending" | null = null;
+  private cleanupJob: Promise<boolean> | null = null;
+  private cleanupRetry: ReturnType<typeof setTimeout> | null = null;
+  private cleanupWait = 1000;
   // (the page's own requests (Delegate's, tasks-client.ts): who hears their answers)
   private ownAnswers: ((msg: any, bytes: number) => boolean) | null = null;
 
@@ -269,7 +274,7 @@ export class AgentPairing {
 
   constructor(
     readonly port: number,
-    how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
+    how: { code: string } | { session: string; pairingId: string; agent: { name: string; client: string } } | { link: AgentLink; computer: string },
     private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>, turnId?: string) => Promise<unknown>; onCreated?: (c: Created, p: AgentPairing) => void; egressTurn?: boolean; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if ("link" in how) { this.link = how.link; this.computer = how.computer; }
@@ -420,6 +425,8 @@ export class AgentPairing {
     if (this.remember && this.grant.expires !== null) {
       const { delegate: _, ...grant } = this.grant;
       await this.opts.store.putAgentGrant(this.pairingId, { grant, session: this.sessionSecret, port: this.port } satisfies Kept);
+      // A delayed keep must not put key material back after Revoke's delete committed.
+      if (this.revoked) await this.revoke();
     }
   }
 
@@ -476,14 +483,18 @@ export class AgentPairing {
    * has superseded, which must not touch what the person has since chosen. */
   drop(why = "superseded") { this.close(1000, why); }
 
-  /** Revoke: the server told ({}), the socket closed, the kept grant and session forgotten, at once. */
-  async revoke(why = "revoked") {
+  /** Access ends at once. True means the local delete committed; false means revoked, with cleanup pending. */
+  async revoke(why = "revoked"): Promise<boolean> {
+    if (this.cleanupJob) return this.cleanupJob;
     const id = this.pairingId;
     this.revoked = true;
     this.lostRecord = null;
     this.dropReload();
     this.grant = null;
     this.verbs = null;
+    this.sessionSecret = undefined;
+    if (this.hello) delete this.hello.session;
+    this.remember = false;
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     if (this.link) {
       // (over a runner: the leg's drain says grant.changed {} and {"unpair":true}, in order, then closes; the pairing
@@ -492,11 +503,45 @@ export class AgentPairing {
       const drained = this.link.disconnect();
       this.end(why);
       await drained;
-      return;
+      return true;
     }
+    this.cleanup = "revoking";
     if (this.sock.readyState === 1) this.send({ jsonrpc: "2.0", method: "grant.changed", params: {} });
     this.close(1000, why);
-    if (id) await this.opts.store.putAgentGrant(id, null);
+    // The closed socket must not retain the hello's session through its open/message closures.
+    this.sock.onopen = null;
+    this.sock.onmessage = null;
+    this.emit();
+    return this.cleanGrant(id);
+  }
+
+  /** Retry local cleanup only: no new connection, grant, or server-side action. */
+  retryCleanup(): Promise<boolean> {
+    if (!this.revoked || !this.cleanup) return Promise.resolve(this.revoked);
+    return this.cleanupJob ?? this.cleanGrant(this.pairingId);
+  }
+
+  private cleanGrant(id: string): Promise<boolean> {
+    if (this.cleanupRetry) { clearTimeout(this.cleanupRetry); this.cleanupRetry = null; }
+    this.cleanup = "revoking";
+    this.emit();
+    const job = (async () => {
+      try {
+        if (id) await this.opts.store.putAgentGrant(id, null);
+        this.cleanup = null;
+        this.cleanupWait = 1000;
+      } catch {
+        // Never call this an active session: the server was revoked and all usable in-memory material dropped.
+        this.cleanup = "pending";
+        this.cleanupRetry = setTimeout(() => { this.cleanupRetry = null; void this.retryCleanup(); }, this.cleanupWait);
+        this.cleanupWait = Math.min(this.cleanupWait * 2, 30000);
+      }
+      this.emit();
+      return this.cleanup === null;
+    })();
+    this.cleanupJob = job;
+    void job.finally(() => { if (this.cleanupJob === job) this.cleanupJob = null; });
+    return job;
   }
 
   private send(m: unknown) { if (this.link) { this.link.send(JSON.stringify(m)); return; } if (this.sock.readyState === 1) this.sock.send(JSON.stringify(m)); }

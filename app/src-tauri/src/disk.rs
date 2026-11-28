@@ -4,7 +4,8 @@
 // ~/.local/share/…, Windows %APPDATA%\space.sagebrush.notebook), under Workspace/.  The page's workspace
 // (IndexedDB, in a web view that keeps nothing between launches) is a cache of it: each launch reads the tree
 // (disk_list, disk_read) and every change is written through (disk_write, disk_rename, disk_remove;
-// web/workspace/disk-mirror.ts).  settings.json beside Workspace/ holds the page's settings.
+// web/workspace/disk-mirror.ts).  settings.json beside Workspace/ holds the page's settings, agent-threads.json its
+// agents' chats.
 //
 // Every path the page names is a workspace path ("/a/b.ipynb"), links refused as it is walked, and every change is
 // checked against what the page expects the file to be (disk_fs.rs).
@@ -153,8 +154,8 @@ pub fn disk_reveal(app: tauri::AppHandle, path: String) -> Result<(), String> {
 
 /// The page's settings kept in settings.json: these localStorage keys only (documents' drafts, journals and a
 /// GitHub push's settings, which localStorage also holds, are no settings), each a string of at most SETTING_MAX
-/// bytes, the file at most SETTINGS_MAX.  settings-init.js gets the list from here; reading and writing both refuse
-/// anything else.
+/// bytes, the file at most SETTINGS_MAX; but the agents page's chats (THREADS_KEY) in a file of their own.
+/// settings-init.js gets the list from here; reading and writing both refuse anything else.
 pub const SETTINGS_KEYS: &[&str] = &[
     "sagebrush-theme", "sagebrush-reactive", "sagebrush-mode", "sagebrush-phone",
     "sagebrush-files-sort", "sagebrush-files-sidebar", "sagebrush-files-open", "sagebrush-files-recent", "sagebrush-recent-opened",
@@ -163,6 +164,20 @@ pub const SETTINGS_KEYS: &[&str] = &[
 ];
 const SETTING_MAX: usize = 64 * 1024;
 const SETTINGS_MAX: usize = 512 * 1024;
+
+/// The agents page's chats (web/agents/page.ts STORE), each thread with its whole transcript: no small preference, so
+/// kept in agent-threads.json beside settings.json, the page's value as it is (not JSON-escaped again), and bounded
+/// only by what the page's own storage holds.  The web views' localStorage holds at most 5 MiB of UTF-16 units per
+/// site, keys and values together: measured with web/measure-local-storage.mjs, the longest value under a one-letter
+/// key 5,242,879 units of ASCII, Latin-1 or other BMP text in Chromium (149, Windows' WebView2's), 15,728,637 bytes of
+/// UTF-8 at the most; and in WebKit (27.2, the engine of macOS's and Linux's web views) 5,242,879 units of ASCII or
+/// Latin-1 but 2,621,439 of other text, 10,485,758 bytes at the most.  A unit is at most 3 bytes of UTF-8, so no value
+/// the page could store is larger than THREADS_MAX; one that is, isn't the page's.  (settings.json may still hold the chats, as an older app kept them: read from there while
+/// agent-threads.json has none, and moved at the next change)
+const THREADS_KEY: &str = "sagebrush-agents-preview-v1";
+const THREADS_FILE: &str = "agent-threads.json";
+const LOCAL_STORAGE_UNITS: usize = 5 * 1024 * 1024;
+const THREADS_MAX: usize = 3 * LOCAL_STORAGE_UNITS;
 
 /// The settings `json` holds, or why they aren't settings.
 fn settings_of(json: &str) -> Result<serde_json::Map<String, serde_json::Value>, String> {
@@ -180,45 +195,151 @@ fn settings_of(json: &str) -> Result<serde_json::Map<String, serde_json::Value>,
 /// accepts), put in its localStorage once per launch, and each later change of one of them written back
 /// (settings-init.js); and any problem reading them, for the page to say (__sbSettingsProblem).
 pub fn settings_script(app: &tauri::AppHandle) -> String {
-    let mut problem = String::new();
-    let kept = match data_dir(app).and_then(|d| open_root(&d)) {
+    let (kept, problem) = match data_dir(app).and_then(|d| open_root(&d)) {
         Err(e) => {
-            problem = format!("Sagebrush couldn't read its settings ({e}): it starts with the usual ones.");
             SETTINGS_BLOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
-            Default::default()
+            (Default::default(), format!("Sagebrush couldn't read its settings ({e}): it starts with the usual ones."))
         }
-        Ok(dir) => match read_small(&dir, "settings.json", SETTINGS_MAX as u64).and_then(|s| s.map(|s| settings_of(&s)).transpose()) {
-            Ok(o) => o.unwrap_or_default(),
-            // (unreadable, too large or not the app's settings: kept aside as settings.json.bad (or .bad-2, …), never
-            // written over, and said; the settings start empty.  If it can't be set aside, nothing is written to it)
-            Err(why) => {
-                let aside = (1..1000).map(|i| if i == 1 { "settings.json.bad".to_string() } else { format!("settings.json.bad-{i}") }).find(|n| !dir.join(n).exists());
-                match aside.map(|n| (std::fs::rename(dir.join("settings.json"), dir.join(&n)), n)) {
-                    Some((Ok(()), n)) => problem = format!("Sagebrush's settings couldn't be read ({why}): they are kept as {n} in its folder, and it starts with the usual ones."),
-                    _ => {
-                        SETTINGS_BLOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
-                        problem = format!("Sagebrush's settings couldn't be read ({why}), nor set aside: it starts with the usual ones, and won't save settings this time.");
-                    }
-                }
-                Default::default()
-            }
-        },
+        Ok(dir) => {
+            let (kept, problems) = settings_kept(&dir);
+            (kept, problems.join(" "))
+        }
     };
     let keys = serde_json::to_string(SETTINGS_KEYS).unwrap_or_else(|_| "[]".into());
     let problem = serde_json::to_string(&problem).unwrap_or_else(|_| "\"\"".into());
     format!("window.__sbSettingsProblem = {problem};\n")
         + &fill_settings_script(include_str!("settings-init.js"), &serde_json::Value::Object(kept).to_string(), &keys)
 }
-/// (settings.json that couldn't be read nor set aside: not written over this launch)
+/// (settings.json or agent-threads.json that couldn't be read nor set aside: neither written over this launch)
 static SETTINGS_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The settings a launch starts with, settings.json's and the chats, and what it says of a file it couldn't read.
+/// (unreadable, too large or not the app's: kept aside as settings.json.bad (or .bad-2, …), agent-threads.json.bad,
+/// never written over, and said; what it held starts empty.  If it can't be set aside, nothing is written to either)
+fn settings_kept(dir: &std::path::Path) -> (serde_json::Map<String, serde_json::Value>, Vec<String>) {
+    let aside = |name: &str, what: &str, why: String, start: &str| {
+        let n = (1..1000).map(|i| if i == 1 { format!("{name}.bad") } else { format!("{name}.bad-{i}") }).find(|n| !dir.join(n).exists());
+        match n.map(|n| (std::fs::rename(dir.join(name), dir.join(&n)), n)) {
+            Some((Ok(()), n)) => format!("Sagebrush's {what} couldn't be read ({why}): they are kept as {n} in its folder, and it starts with {start}."),
+            _ => {
+                SETTINGS_BLOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
+                format!("Sagebrush's {what} couldn't be read ({why}), nor set aside: it starts with {start}, and won't save settings this time.")
+            }
+        }
+    };
+    let mut problems = vec![];
+    let mut kept = settings_file(dir).unwrap_or_else(|why| {
+        problems.push(aside("settings.json", "settings", why, "the usual ones"));
+        Default::default()
+    });
+    match threads_file(dir) {
+        Ok(Some(t)) => {
+            kept.insert(THREADS_KEY.into(), t.into());
+        }
+        Ok(None) => {}
+        Err(why) => problems.push(aside(THREADS_FILE, "agents' chats", why, "none")),
+    }
+    (kept, problems)
+}
+
+/// settings.json's settings now: none if there is no settings.json; an error if it isn't the app's settings (another
+/// program's: never written over).
+fn settings_file(dir: &std::path::Path) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    Ok(read_small(dir, "settings.json", SETTINGS_MAX as u64)?.map(|s| settings_of(&s)).transpose()?.unwrap_or_default())
+}
+/// agent-threads.json's chats now: none if there is none; an error if it is larger than the page could store, or not
+/// text.
+fn threads_file(dir: &std::path::Path) -> Result<Option<String>, String> {
+    read_small(dir, THREADS_FILE, THREADS_MAX as u64)
+}
+/// The settings now: settings.json's, and the chats in agent-threads.json (else as settings.json may have them).
+fn settings_now(dir: &std::path::Path) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let mut o = settings_file(dir)?;
+    if let Some(t) = threads_file(dir)? {
+        o.insert(THREADS_KEY.into(), t.into());
+    }
+    Ok(o)
+}
+/// The app's windows each change some settings (#1541): a window's change is its keys alone (`set`, `remove`), merged
+/// into settings.json as it is, one change at a time, so no window writes back another's settings as they were.
+/// Each key's version, for this run of the app: a change merged gives each key it names the next one, so a window can
+/// tell a value it read or wrote from one older than what it has already seen (settings-init.js drops those).
+struct SettingsVersions {
+    last: u64,
+    of: std::collections::BTreeMap<String, u64>,
+}
+static SETTINGS_LOCK: std::sync::Mutex<SettingsVersions> = std::sync::Mutex::new(SettingsVersions { last: 0, of: std::collections::BTreeMap::new() });
+/// The change merged, one at a time; the versions it gave its keys.
+fn settings_change(dir: &std::path::Path, set: serde_json::Map<String, serde_json::Value>, remove: &[String]) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let mut v = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cur = settings_file(dir)?;
+    // (agent-threads.json read only for a change of the chats, or while settings.json still has an older app's: else
+    // the chats are left as they are, unread)
+    let touches = set.contains_key(THREADS_KEY) || remove.iter().any(|k| k == THREADS_KEY) || cur.contains_key(THREADS_KEY);
+    let on_file = if touches { threads_file(dir)? } else { None };
+    if let Some(t) = &on_file {
+        cur.insert(THREADS_KEY.into(), t.clone().into());
+    }
+    for k in remove {
+        cur.remove(k);
+    }
+    let keys: Vec<String> = set.keys().cloned().chain(remove.iter().cloned()).collect();
+    cur.extend(set);
+    // (the chats to agent-threads.json, the rest to settings.json; both checked before either is written.  New chats
+    // are written before settings.json, so a change that fails between them leaves agent-threads.json, which is read
+    // first, the newer; chats removed, after it, so one that fails between them never leaves an older settings.json's
+    // chats to be read again in their place)
+    let threads = match cur.remove(THREADS_KEY) {
+        None => None,
+        Some(serde_json::Value::String(s)) if s.len() <= THREADS_MAX => Some(s),
+        Some(_) => return Err(format!("settings: {THREADS_KEY:?} isn't a string of at most {THREADS_MAX} bytes (more than the page's storage holds)")),
+    };
+    let json = serde_json::Value::Object(cur).to_string();
+    settings_of(&json)?;
+    let changed = touches && threads != on_file;
+    if changed {
+        if let Some(t) = &threads {
+            write_small(dir, THREADS_FILE, t)?;
+        }
+    }
+    write_small(dir, "settings.json", &json)?;
+    if changed && threads.is_none() {
+        remove_small(dir, THREADS_FILE)?;
+    }
+    let mut given = serde_json::Map::new();
+    for k in keys {
+        v.last += 1;
+        let n = v.last;
+        v.of.insert(k.clone(), n);
+        given.insert(k, n.into());
+    }
+    Ok(given)
+}
+/// The settings now, with each key's version (0: not changed this run), read under the same lock as a change.
+fn settings_versioned(dir: &std::path::Path) -> Result<serde_json::Value, String> {
+    let v = SETTINGS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let values = settings_now(dir)?;
+    let versions: serde_json::Map<String, serde_json::Value> = v.of.iter().map(|(k, n)| (k.clone(), (*n).into())).collect();
+    Ok(serde_json::json!({ "values": values, "versions": versions }))
+}
+
+/// The asking window's change of the settings (settings-init.js): its keys' new values and the keys it removed; the
+/// versions it gave them.  The other windows are told, to read them again (settings_read).
 #[tauri::command]
-pub fn settings_write(app: tauri::AppHandle, json: String) -> Result<(), String> {
+pub fn settings_write(app: tauri::AppHandle, webview: tauri::Webview, set: serde_json::Map<String, serde_json::Value>, remove: Vec<String>) -> Result<serde_json::Map<String, serde_json::Value>, String> {
     if SETTINGS_BLOCKED.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("settings.json couldn't be read when Sagebrush started, so it isn't written over".into());
     }
-    settings_of(&json)?;
-    write_small(&open_root(&data_dir(&app)?)?, "settings.json", &json)
+    let given = settings_change(&open_root(&data_dir(&app)?)?, set, &remove)?;
+    told(&app, &webview, "sb-settings-changed");
+    Ok(given)
+}
+
+/// The settings as settings.json has them now, with each key's version ({values, versions}), for a window another
+/// one's change was told to.
+#[tauri::command]
+pub fn settings_read(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    settings_versioned(&open_root(&data_dir(&app)?)?)
 }
 
 /// The page's file permissions kept across launches, in grants.json beside settings.json: the record permissions.js
@@ -266,6 +387,186 @@ pub fn grants_write(app: tauri::AppHandle, webview: tauri::Webview, json: String
     grants_swap(&open_root(&data_dir(&app)?)?, &json, &expect)?;
     told(&app, &webview, "sb-grants-changed");
     Ok(())
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use serde_json::json;
+
+    #[test]
+    fn a_window_s_change_is_its_keys_alone() {
+        let dir = std::env::temp_dir().join(format!("sb-settings-change-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
+        let now = || super::settings_now(&dir).unwrap();
+        // (none yet: a change makes it, and versions its key)
+        let v1 = super::settings_change(&dir, obj(json!({ "sagebrush-theme": "dark" })), &[]).unwrap()["sagebrush-theme"].as_u64().unwrap();
+        // (another window changes another key: the first's stays, as it is, not as that window last read it)
+        super::settings_change(&dir, obj(json!({ "sagebrush-files-sort": "name" })), &[]).unwrap();
+        assert_eq!(serde_json::Value::Object(now()), json!({ "sagebrush-theme": "dark", "sagebrush-files-sort": "name" }));
+        // (each change of a key a later version than the last, which a read gives with the values)
+        let v2 = super::settings_change(&dir, obj(json!({ "sagebrush-theme": "solar" })), &[]).unwrap()["sagebrush-theme"].as_u64().unwrap();
+        assert!(v2 > v1);
+        let r = super::settings_versioned(&dir).unwrap();
+        assert_eq!(r["values"]["sagebrush-theme"], "solar");
+        assert_eq!(r["versions"]["sagebrush-theme"].as_u64(), Some(v2));
+        // (a removal removes its key alone)
+        super::settings_change(&dir, obj(json!({})), &["sagebrush-theme".into()]).unwrap();
+        assert_eq!(serde_json::Value::Object(now()), json!({ "sagebrush-files-sort": "name" }));
+        // (a key that isn't one of the app's settings: refused, nothing written)
+        assert!(super::settings_change(&dir, obj(json!({ "not-a-setting": "x" })), &[]).is_err());
+        assert_eq!(serde_json::Value::Object(now()), json!({ "sagebrush-files-sort": "name" }));
+        // (settings.json made by another program, not the app's: never written over)
+        std::fs::write(dir.join("settings.json"), "not json").unwrap();
+        assert!(super::settings_change(&dir, obj(json!({ "sagebrush-theme": "dark" })), &[]).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json")).unwrap(), "not json");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn fresh(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("sb-settings-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+    /// A chat as the agents page stores it, of about `n` bytes: its JSON, quotes, newlines, other scripts and a line
+    /// separator in its text.
+    fn chat(n: usize) -> String {
+        let text = "a reply, \"quoted\",\nover lines: Größe \u{4e2d} \u{1F600} \u{2028}. ".repeat(n / 60 + 1);
+        json!({ "threads": [{ "id": "t1", "title": "A chat", "transcript": [{ "role": "user", "text": "hi" }, { "role": "assistant", "text": text }] }] }).to_string()
+    }
+
+    #[test]
+    fn a_chat_larger_than_a_setting_round_trips() {
+        // (S08: a chat of 79,709 bytes, more than a setting's SETTING_MAX, which settings.json alone refused)
+        let dir = fresh("chat");
+        let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
+        let big = chat(79_709);
+        assert!(big.len() > super::SETTING_MAX);
+        assert!(super::settings_of(&json!({ super::THREADS_KEY: big }).to_string()).is_err());
+        let given = super::settings_change(&dir, obj(json!({ super::THREADS_KEY: big, "sagebrush-theme": "dark" })), &[]).unwrap();
+        assert!(given[super::THREADS_KEY].as_u64().is_some());
+        // (the chat in agent-threads.json as the page stored it, settings.json the small settings alone)
+        assert_eq!(std::fs::read_to_string(dir.join(super::THREADS_FILE)).unwrap(), big);
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json")).unwrap(), json!({ "sagebrush-theme": "dark" }).to_string());
+        // (and back: to another window's read, and to the next launch's pages, as it was)
+        assert_eq!(super::settings_versioned(&dir).unwrap()["values"][super::THREADS_KEY], big);
+        let (kept, problems) = super::settings_kept(&dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(kept[super::THREADS_KEY], big);
+        assert_eq!(kept["sagebrush-theme"], "dark");
+        let script = super::fill_settings_script("const KEYS = /*KEYS*/[]; const saved = /*SETTINGS*/null;", &serde_json::Value::Object(kept).to_string(), "[]");
+        let saved: serde_json::Value = serde_json::from_str(script.strip_prefix("const KEYS = []; const saved = ").unwrap().strip_suffix(';').unwrap()).unwrap();
+        assert_eq!(saved[super::THREADS_KEY], big);
+        // (another key's change leaves the chat as it is; its removal removes the file)
+        super::settings_change(&dir, obj(json!({ "sagebrush-theme": "light" })), &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join(super::THREADS_FILE)).unwrap(), big);
+        super::settings_change(&dir, obj(json!({})), &[super::THREADS_KEY.into()]).unwrap();
+        assert!(!dir.join(super::THREADS_FILE).exists());
+        assert_eq!(serde_json::Value::Object(super::settings_now(&dir).unwrap()), json!({ "sagebrush-theme": "light" }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chats_up_to_what_the_page_s_storage_holds() {
+        let dir = fresh("budget");
+        let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
+        // (the most the page could store: taken; a byte more isn't the page's, refused, and nothing written)
+        let most = "\u{4e2d}".repeat(super::LOCAL_STORAGE_UNITS);
+        assert_eq!(most.len(), super::THREADS_MAX);
+        super::settings_change(&dir, obj(json!({ super::THREADS_KEY: most })), &[]).unwrap();
+        assert_eq!(std::fs::metadata(dir.join(super::THREADS_FILE)).unwrap().len() as usize, super::THREADS_MAX);
+        let (kept, problems) = super::settings_kept(&dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert!(kept[super::THREADS_KEY] == most.as_str());
+        let over = "a".repeat(super::THREADS_MAX + 1);
+        assert!(super::settings_change(&dir, obj(json!({ super::THREADS_KEY: over, "sagebrush-theme": "dark" })), &[]).is_err());
+        assert_eq!(std::fs::metadata(dir.join(super::THREADS_FILE)).unwrap().len() as usize, super::THREADS_MAX);
+        assert!(!dir.join("settings.json").exists() || super::settings_file(&dir).unwrap().get("sagebrush-theme").is_none());
+        // (nor anything but a string)
+        assert!(super::settings_change(&dir, obj(json!({ super::THREADS_KEY: 3 })), &[]).is_err());
+        // (an agent-threads.json larger than that, another program's: set aside and said at launch, the settings kept)
+        std::fs::write(dir.join(super::THREADS_FILE), &over).unwrap();
+        std::fs::write(dir.join("settings.json"), json!({ "sagebrush-theme": "dark" }).to_string()).unwrap();
+        // (while the app runs, a change of the chats is refused; another setting's leaves the file alone, unread)
+        assert!(super::settings_change(&dir, obj(json!({ super::THREADS_KEY: "{}" })), &[]).is_err());
+        super::settings_change(&dir, obj(json!({ "sagebrush-theme": "light" })), &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join(super::THREADS_FILE)).unwrap(), over);
+        let (kept, problems) = super::settings_kept(&dir);
+        assert_eq!(serde_json::Value::Object(kept), json!({ "sagebrush-theme": "light" }));
+        assert!(problems.len() == 1 && problems[0].contains("agent-threads.json.bad"), "{problems:?}");
+        assert_eq!(std::fs::read_to_string(dir.join("agent-threads.json.bad")).unwrap(), over);
+        assert!(!dir.join(super::THREADS_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_change_that_fails_leaves_the_newer_chats() {
+        let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
+        let (t0, t1) = (chat(70_000), chat(80_000));
+        // (K1: settings.json can't be written (a folder where its temporary file goes): the change is refused, and the
+        // chats it wrote first are the ones read)
+        let dir = fresh("fails-settings");
+        std::fs::write(dir.join(super::THREADS_FILE), &t0).unwrap();
+        let tmp = dir.join(format!(".settings.json.sbtmp-{}", std::process::id()));
+        std::fs::create_dir(&tmp).unwrap();
+        assert!(super::settings_change(&dir, obj(json!({ super::THREADS_KEY: t1, "sagebrush-theme": "light" })), &[]).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join(super::THREADS_FILE)).unwrap(), t1);
+        assert_eq!(super::settings_now(&dir).unwrap()[super::THREADS_KEY], t1);
+        std::fs::remove_dir(&tmp).unwrap();
+        // (K2: a change whose other settings aren't the app's: refused before anything is written)
+        std::fs::write(dir.join(super::THREADS_FILE), &t0).unwrap();
+        assert!(super::settings_change(&dir, obj(json!({ super::THREADS_KEY: t1, "not-a-key": "x" })), &[]).is_err());
+        assert_eq!(std::fs::read_to_string(dir.join(super::THREADS_FILE)).unwrap(), t0);
+        let _ = std::fs::remove_dir_all(&dir);
+        // (chats removed, two failures in a row: an older settings.json holds X; the change to Y fails on settings.json;
+        // their removal fails on it too, and leaves Y, never X back in their place; once settings.json can be written,
+        // they are gone)
+        let dir = fresh("fails-removal");
+        let (x, y) = (chat(1000), chat(2000));
+        std::fs::write(dir.join("settings.json"), json!({ super::THREADS_KEY: x }).to_string()).unwrap();
+        let tmp = dir.join(format!(".settings.json.sbtmp-{}", std::process::id()));
+        std::fs::create_dir(&tmp).unwrap();
+        assert!(super::settings_change(&dir, obj(json!({ super::THREADS_KEY: y })), &[]).is_err());
+        assert!(super::settings_change(&dir, obj(json!({})), &[super::THREADS_KEY.into()]).is_err());
+        assert_eq!(super::settings_now(&dir).unwrap()[super::THREADS_KEY], y);
+        std::fs::remove_dir(&tmp).unwrap();
+        super::settings_change(&dir, obj(json!({})), &[super::THREADS_KEY.into()]).unwrap();
+        assert_eq!(serde_json::Value::Object(super::settings_now(&dir).unwrap()), json!({}));
+        assert!(!dir.join(super::THREADS_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_older_app_s_chats_in_settings_json_move_to_their_file() {
+        let dir = fresh("older");
+        let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
+        let old = chat(1000);
+        std::fs::write(dir.join("settings.json"), json!({ "sagebrush-theme": "dark", super::THREADS_KEY: old }).to_string()).unwrap();
+        // (read from settings.json while agent-threads.json has none)
+        assert_eq!(super::settings_now(&dir).unwrap()[super::THREADS_KEY], old);
+        assert_eq!(super::settings_kept(&dir).0[super::THREADS_KEY], old);
+        // (another key's change moves them)
+        super::settings_change(&dir, obj(json!({ "sagebrush-theme": "light" })), &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join(super::THREADS_FILE)).unwrap(), old);
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json")).unwrap(), json!({ "sagebrush-theme": "light" }).to_string());
+        // (and agent-threads.json, once there, is read first: a change that failed after writing it left the newer)
+        let newer = chat(2000);
+        std::fs::write(dir.join(super::THREADS_FILE), &newer).unwrap();
+        std::fs::write(dir.join("settings.json"), json!({ "sagebrush-theme": "light", super::THREADS_KEY: old }).to_string()).unwrap();
+        assert_eq!(super::settings_now(&dir).unwrap()[super::THREADS_KEY], newer);
+        // (another key's change then: agent-threads.json left the newer, the older gone from settings.json)
+        super::settings_change(&dir, obj(json!({ "sagebrush-theme": "dark" })), &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join(super::THREADS_FILE)).unwrap(), newer);
+        assert_eq!(std::fs::read_to_string(dir.join("settings.json")).unwrap(), json!({ "sagebrush-theme": "dark" }).to_string());
+        std::fs::write(dir.join("settings.json"), json!({ "sagebrush-theme": "light", super::THREADS_KEY: old }).to_string()).unwrap();
+        // (removed, from both)
+        super::settings_change(&dir, obj(json!({})), &[super::THREADS_KEY.into()]).unwrap();
+        assert!(!dir.join(super::THREADS_FILE).exists());
+        assert_eq!(serde_json::Value::Object(super::settings_now(&dir).unwrap()), json!({ "sagebrush-theme": "light" }));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]

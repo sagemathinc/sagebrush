@@ -104,22 +104,25 @@ def _entry_cost(base):
     # AA with rational entries 210, with sqrt(2) 167, with 2^(1/5) + sqrt(3)
     # 162, QQbar 185; GF(2^127 - 1) 484, Zmod(2^400 + 1) 358, GF(2^16) 268,
     # GF(2^32) 221, GF(1009^6) 275)
-    import _sage_nf
-    import _sage_qqbar as qb
-    import _sage_rdf
+    # (a ring of a module that isn't loaded can't be base: the checks below load none, so a matrix over GF(p) doesn't
+    # fetch the number fields', QQbar's and RDF's parts of the library in the browser)
+    import sys
+    _sage_nf = sys.modules.get("_sage_nf")
+    qb = sys.modules.get("_sage_qqbar")
+    _sage_rdf = sys.modules.get("_sage_rdf")
     if isinstance(base, _ff.IntegerModRing_):
         return 150 + 2 * int(base.order()).bit_length() // 5
     if isinstance(base, _ff.FiniteField_ext):
         k = int(base.degree())
         c = 450 + 12 * k + 2 * int(base.characteristic()).bit_length() * k // 5
         return c if c > 660 else 660
-    if base is _sage_rdf.RDF:
+    if _sage_rdf is not None and base is _sage_rdf.RDF:
         return 300
-    if base is _sage_rdf.CDF:
+    if _sage_rdf is not None and base is _sage_rdf.CDF:
         return 610
-    if isinstance(base, _sage_nf.NumberField_absolute):
+    if _sage_nf is not None and isinstance(base, _sage_nf.NumberField_absolute):
         return 470 + 130 * int(base.degree())
-    if base is qb.QQbar or base is qb.AA:
+    if qb is not None and (base is qb.QQbar or base is qb.AA):
         return 1500
     prec = getattr(base, "precision", None)
     if callable(prec):
@@ -163,8 +166,10 @@ def _admit_size(base, m, n, factor=1):
 
 
 def _alg_base(base):
-    import _sage_qqbar as qb
-    return base is qb.QQbar or base is qb.AA
+    # (QQbar and AA are _sage_qqbar's: if it isn't loaded, base is neither, and it isn't loaded for the question)
+    import sys
+    qb = sys.modules.get("_sage_qqbar")
+    return qb is not None and (base is qb.QQbar or base is qb.AA)
 
 
 class _AlgCharge:

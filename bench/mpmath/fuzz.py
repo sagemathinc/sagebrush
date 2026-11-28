@@ -315,6 +315,91 @@ def exempt(x, y):
     return None
 
 
+# Where the core rounds an addition correctly and mpmath 1.3.0 does not (mpmath/mpmath#1251: mpf_add's
+# shortcut for a far smaller operand rounds as if it were a sticky bit, wrongly at some precisions), a
+# mismatch passes only if each part that differs is, in the core, the correctly rounded exact result,
+# and in the reference is not.  Only the operations whose result is an exact rational, from finite
+# arguments, are judged.
+CR_OPS = {"mpf_add": 2, "mpf_sub": 2, "mpf_mul": 2, "mpf_div": 2, "mpc_mul": 4, "mpc_div": 4}
+CR_ID = "mpmath-1251-correctly-rounded"
+
+
+def correctly_rounded(x, y):
+    """CR_ID if the core's value (y) differs from the reference's (x) only in parts where the core's is
+    the correctly rounded exact result and the reference's is not, else None"""
+    import re
+    from fractions import Fraction
+    from mpmath.libmp import from_rational, round_up, round_floor, round_down, round_nearest, round_ceiling
+    px, py = x.split("\t", 2), y.split("\t", 2)
+    if len(px) != 3 or len(py) != 3 or px[:2] != py[:2]:
+        return None
+    case = px[1].split()
+    if len(case) < 3 or case[0] not in CR_OPS:
+        return None
+    rnd = {"u": round_up, "f": round_floor, "d": round_down, "n": round_nearest, "c": round_ceiling}.get(case[-1])
+    if rnd is None or not case[-2].isdigit():
+        return None
+    prec = int(case[-2])
+    T = r"\(([01]),([0-9a-f]+),(-?\d+),(\d+)\)"
+    args, ref, got = (re.findall(T, t) for t in (" ".join(case[1:-2]), px[2], py[2]))
+    parts = 2 if case[0].startswith("mpc") else 1
+    # (an infinity or a nan, whose bit count is negative, matches no tuple: the counts tell)
+    if len(args) != CR_OPS[case[0]] or len(ref) != parts or len(got) != parts:
+        return None
+    v = [(-1 if s == "1" else 1) * Fraction(int(m, 16)) * Fraction(2) ** int(e) for s, m, e, b in args]
+    if case[0] == "mpc_mul":
+        a, b, c, d = v
+        exact = [a * c - b * d, a * d + b * c]
+    elif case[0] == "mpc_div":
+        a, b, c, d = v
+        q = c * c + d * d
+        if not q:
+            return None
+        exact = [(a * c + b * d) / q, (b * c - a * d) / q]
+    elif case[0] == "mpf_div":
+        if not v[1]:
+            return None
+        exact = [v[0] / v[1]]
+    else:
+        exact = [{"mpf_add": v[0] + v[1], "mpf_sub": v[0] - v[1], "mpf_mul": v[0] * v[1]}[case[0]]]
+    for q, r, g in zip(exact, ref, got):
+        if r == g:
+            continue
+        t = from_rational(q.numerator, q.denominator, prec, rnd)
+        want = (str(t[0]), "%x" % t[1], str(t[2]), str(t[3]))
+        # (the reference, differing, is then not correctly rounded)
+        if g != want:
+            return None
+    return CR_ID
+
+
+def selftest_cr():
+    """correctly_rounded()'s own rows: 0 if all hold"""
+    ONE, ULP9 = "(0,1,0,1)", "(0,201,-9,10)"
+    rows = [
+        # (case, reference value, core value, the rule's verdict)
+        ("mpf_add (0,1,0,1) (0,1,-100,1) 10 d", ULP9, ONE, CR_ID),
+        ("mpf_add (0,1,0,1) (0,1,-100,1) 10 d", ONE, ULP9, None),
+        ("mpf_add (0,1,0,1) (0,1,-100,1) 10 d", ULP9, "(0,3ff,-9,10)", None),
+        ("mpf_add (0,1,0,1) (0,1,-100,1) 10 u", ONE, ULP9, CR_ID),
+        ("mpf_sub (0,1,0,1) (1,1,-100,1) 10 d", ULP9, ONE, CR_ID),
+        ("mpf_add (0,1,0,1) (0,0,-456,-2) 10 d", ULP9, ONE, None),
+        ("mpf_exp (0,1,0,1) 10 d", ULP9, ONE, None),
+        ("mpc_mul (0,1,0,1) (0,0,0,0) (0,1,0,1) (0,1,-100,1) 10 d", "(%s,%s)" % (ONE, ULP9), "(%s,%s)" % (ONE, ONE), None),
+        ("mpc_mul (0,1,0,1) (0,1,-100,1) (0,1,0,1) (0,0,0,0) 10 d", "(%s,(0,1,-100,1))" % ONE, "(%s,(0,1,-100,1))" % ULP9, None),
+        ("mpc_mul (0,1,0,1) (1,1,-100,1) (0,1,0,1) (0,1,0,1) 10 d", "((0,1,0,1),(0,201,-9,10))", "((0,1,0,1),(0,1,0,1))", None),
+        ("mpc_mul (0,1,0,1) (0,1,-100,1) (0,1,0,1) (0,1,0,1) 10 d", "((0,3ff,-10,10),%s)" % ULP9, "((0,3ff,-10,10),%s)" % ONE, CR_ID),
+    ]
+    bad = 0
+    for case, ref, core, want in rows:
+        got = correctly_rounded("7\t%s\t%s" % (case, ref), "7\t%s\t%s" % (case, core))
+        if got != want:
+            bad += 1
+            print("selftest correctly rounded: %s, ref %s, core %s: %r, want %r" % (case, ref, core, got, want))
+    print("selftest correctly rounded: %d rows, %d wrong" % (len(rows), bad))
+    return 1 if bad else 0
+
+
 def selftest():
     """exempt()'s own rows (test/mpcore-reimport.test.ts runs this): each fuzz rule passes its case only at its
     exact 1.4.1 value; a wrong (finite) value, a nan, a case outside the rule stays a mismatch.  0 if all hold."""
@@ -351,7 +436,7 @@ def diff(a, b, show=20):
     bad, passed = [], {}
     for x, y in zip(la, lb):
         if x != y:
-            r = exempt(x, y)
+            r = exempt(x, y) or correctly_rounded(x, y)
             if r is None:
                 bad.append((x, y))
             else:
@@ -360,7 +445,10 @@ def diff(a, b, show=20):
         print("REF", x[:600])
         print("GOT", y[:600])
     for r in sorted(passed):
-        print("1.4.1 special values (exempt-141.json) %s: %d" % (r, passed[r]))
+        if r == CR_ID:
+            print("correctly rounded where mpmath 1.3.0 is not (mpmath/mpmath#1251): %d" % passed[r])
+        else:
+            print("1.4.1 special values (exempt-141.json) %s: %d" % (r, passed[r]))
     print("cases %d / %d, mismatches %d" % (len(la), len(lb), len(bad) + abs(len(la) - len(lb))))
     return 1 if bad or len(la) != len(lb) else 0
 
@@ -373,7 +461,7 @@ if __name__ == "__main__":
     elif a[:1] == ["diff"]:
         sys.exit(diff(a[1], a[2]))
     elif a[:1] == ["selftest"]:
-        sys.exit(selftest())
+        sys.exit(selftest() | selftest_cr())
     else:
         print(__doc__)
         sys.exit(2)
