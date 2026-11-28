@@ -71,6 +71,8 @@ for N in (1, 2, 5, 256):
     for g in (1.0, 2.0, 0.5):
         for label, cd in (("rows", CD), ("alpha", CDA), ("callables", CDF)):
             show("segments %s N=%d gamma %g" % (label, N, g), lambda: LinearSegmentedColormap("s", cd, N, g)(X9))
+# (a callable's values outside [0, 1] clipped)
+show("segments callable clipped", lambda: LinearSegmentedColormap("c", {"red": lambda x: 2 * x - 0.5, "green": lambda x: x, "blue": lambda x: x}, 5)(X9))
 seg = LinearSegmentedColormap("s", CDA, 5)
 show("segments scalar", lambda: seg(0.4))
 show("segments bytes", lambda: seg(np.array([0.1, 0.9]), bytes=True))
