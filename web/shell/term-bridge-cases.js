@@ -42,7 +42,7 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { smoke, schema, handler, races, writes, loop, ends, e2e, prompt, oracle };
+  const groups = { smoke, schema, handler, races, rmdirRace, writes, loop, ends, e2e, prompt, oracle };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
@@ -756,6 +756,33 @@ async function oracle(check) {
 }
 
 // ---- the races the slot and the fence close (r1 §4.2), and the port's own contract
+// rmdir's emptiness checked with the removal, holding the workspace's lock: a child added after the handler looked
+// (between its check and the removal) refuses it, ENOTEMPTY, the folder and the child left where they are
+async function rmdirRace(check) {
+  let add = null;
+  const wrap = (ws) => {
+    const v = Object.create(ws);
+    v.remove = async function (...a) {
+      const f = add;
+      add = null;
+      if (f) await f(ws);
+      return ws.remove.apply(this, a);
+    };
+    return v;
+  };
+  const { ws, call } = await handlerOf("rmdir-race", { wrap });
+  await ws.mkdir("/r");
+  await ws.mkdir("/r/d");
+  add = (w) => put(w, "/r/d/late", "late");
+  const r = await call("remove", { path: "/r/d", folder: true, recursive: false });
+  check(err(r) === "ENOTEMPTY" && (await ws.stat("/r/d"))?.kind === "folder" && (await read(ws, "/r/d/late")) === "late" && !(await ws.list("/Trash").catch(() => [])).some((e) => e.path.includes("d")),
+    `rmdir of a folder a child was added to after the check: ENOTEMPTY, the folder and its child kept, nothing in Trash (${JSON.stringify(r)})`);
+  // (the controls: an empty folder is removed; one that was never empty is refused)
+  await ws.mkdir("/r/e");
+  check((await call("remove", { path: "/r/e", folder: true, recursive: false })).json === true && !(await ws.stat("/r/e")), "rmdir of an empty folder: removed");
+  check(err(await call("remove", { path: "/r/d", folder: true, recursive: false })) === "ENOTEMPTY", "rmdir of a folder that isn't empty: ENOTEMPTY");
+}
+
 async function races(check) {
   // (a view of the workspace whose next readUpTo first runs `hooks.readUpTo`)
   const hooks = {};
