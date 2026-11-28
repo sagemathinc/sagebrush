@@ -315,7 +315,7 @@
     "name": "ConjugacyClasses",
     "kind": "function",
     "signature": "(<GrpPerm> G) -> SeqEnum",
-    "summary": "Sym(n)'s conjugacy classes as tuples <order, length, representative>, in Magma's order, printed as Magma's table.",
+    "summary": "A permutation group's conjugacy classes as tuples <order, length, representative>, by order then length, printed as Magma's table.",
     "examples": [
       {
         "code": "G := Sym(4); #ConjugacyClasses(G); ConjugacyClasses(G)[3]; [c[2] : c in ConjugacyClasses(G)];",
@@ -323,13 +323,54 @@
       }
     ],
     "differs": [
-      "The order and representatives are checked against Magma for n up to 30; a larger n runs the same rule, as far as memory allows.",
-      "Only the symmetric groups (and DihedralGroup(3), which is Sym(3)): another dihedral group's classes are refused, since Magma's representatives there come from its own algorithm.",
+      "Sym(n)'s order and representatives are Magma's (checked for n up to 30); any other group's representatives are Sagebrush's canonical ones (each class's least element, by its images) and its classes of one order and length are in Sagebrush's order, not Magma's; the orders and lengths are Magma's.",
       "The table inside another value ([C], <C>) or in a string (Sprint) is refused: Magma lays it out in ways of its own."
     ],
     "status": "partial",
     "see_also": [
       "Sym"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "structures"
+    ]
+  },
+  {
+    "name": "NumberOfClasses",
+    "kind": "function",
+    "signature": "(<GrpPerm> G) -> RngIntElt",
+    "summary": "The number of conjugacy classes of a permutation group (Sym(n)'s counted for any n).",
+    "examples": [
+      {
+        "code": "NumberOfClasses(Sym(40)); NumberOfClasses(Alt(5));",
+        "expected": "37338\n5\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "ConjugacyClasses"
+    ],
+    "upstream_version": "Magma 2.18",
+    "tags": [
+      "structures"
+    ]
+  },
+  {
+    "name": "Nclasses",
+    "kind": "function",
+    "signature": "(<GrpPerm> G) -> RngIntElt",
+    "summary": "The number of conjugacy classes of a permutation group (the same as NumberOfClasses).",
+    "examples": [
+      {
+        "code": "Nclasses(DihedralGroup(7));",
+        "expected": "5\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "see_also": [
+      "ConjugacyClasses"
     ],
     "upstream_version": "Magma 2.18",
     "tags": [
