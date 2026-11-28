@@ -892,19 +892,23 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     return Math.min(cap, base * 2 ** Math.min(tries, 20));
   }
 
+  /** An end-to-end account's notebooks take sealed patches only, as its index takes sealed ops only: every patch
+   * inline, of a sealed slice's form. A plain one is refused whole, before anything is held or forwarded. This is for
+   * every patch a notebook takes: a batch's, and a clear's root. */
+  private sealedOnly(b: Batch): void {
+    if (!this.encrypted()) return;
+    let at = 0;
+    for (const p of b.patches) {
+      const slice = b.body.subarray(at, at + p.size);
+      at += p.size;
+      if (p.blobs !== undefined || !isSealedSlice(slice)) throw new SyncError("conflict", "this account's sync is end-to-end encrypted: notebook changes in the clear aren't taken", { reason: "sealed_account" });
+    }
+  }
+
   private async batch(att: Attachment, device: string, b: Batch): Promise<BatchOut> {
     this.admit(att.account, true);
     if (b.owner !== undefined && b.owner !== this.get("account_hash")) throw new SyncError("unknown_doc", "documents shared with you come in phase 3");
-    // (an end-to-end account's notebooks take sealed patches only, as its index takes sealed ops only: every patch inline,
-    // of a sealed slice's form; a plain one is refused whole, before anything is held or forwarded)
-    if (this.encrypted()) {
-      let at = 0;
-      for (const p of b.patches) {
-        const slice = b.body.subarray(at, at + p.size);
-        at += p.size;
-        if (p.blobs !== undefined || !isSealedSlice(slice)) throw new SyncError("conflict", "this account's sync is end-to-end encrypted: notebook changes in the clear aren't taken", { reason: "sealed_account" });
-      }
-    }
+    this.sealedOnly(b);
     const wait = this.batches.take();
     if (wait) throw new SyncError("rate", "too many batches", { retry_after: wait });
     await this.ensureDoc(b.doc, b.kind);
@@ -1001,6 +1005,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const expect = checkHead(m.expect_head, "clear: expect_head");
     const rf = fields(m.root, ["patches", "body"], "clear: root");
     const root = checkBatch({ doc: m.doc, epoch: expect.epoch + 1, patches: rf.patches, body: rf.body });
+    // (a clear's root is a notebook's patch too: an end-to-end account's is sealed, as a batch's are)
+    this.sealedOnly(root);
     await this.ensureDoc(m.doc);
     // (the root's bytes held, as a batch's: the old epoch's go only once the document says so, §6.1)
     return this.heldForward(att, m.doc, root.body.length, expect.epoch + 1, root, (doc, expires, session) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires, session }));
