@@ -319,6 +319,8 @@ jobs:
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+        with:
+          toolchain: 1.99.1
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
@@ -448,6 +450,7 @@ jobs:
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
         with:
+          toolchain: 1.99.1
           targets: wasm32-unknown-unknown
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
@@ -579,7 +582,12 @@ jobs:
             if printf '%s' "$LABELS" | jq -e "$excused" > /dev/null; then pull=true; fi
           elif [ "$EVENT" = merge_group ]; then
             n=$(printf '%s' "$QUEUE_REF" | sed -n 's#^refs/heads/gh-readonly-queue/[^/]*/pr-\([0-9][0-9]*\)-.*#\1#p')
-            if [ -n "$n" ] && gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '[.[].name]' | jq -e "$excused" > /dev/null; then pull=true; fi
+            # (fails rather than reading "no label" when the labels can't be read: a missing gh or a failed call)
+            if [ -n "$n" ]; then
+              command -v gh > /dev/null || { echo "::error::size-gate: gh is missing, so the queue entry's labels can't be read"; exit 1; }
+              labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$n/labels" --jq '[.[].name]') || { echo "::error::size-gate: reading the labels of #$n failed"; exit 1; }
+              if printf '%s' "$labels" | jq -e "$excused" > /dev/null; then pull=true; fi
+            fi
           fi
           echo "track pull: $pull"
           echo "pull=$pull" >> "$GITHUB_OUTPUT"
@@ -1115,7 +1123,9 @@ jobs:
   webkit:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.webkit == 'true') }}
-    runs-on: ${{ vars.SB_CI_RUNNER != '' && (github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) && vars.SB_CI_RUNNER || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    # (on GitHub's runners only: its WebKit system packages come from `sudo apt-get`, which the sagebrush-ci runners
+    #  don't allow)
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (from the runs: build 14-26 s, install 28-64 s, test 32-58 s; one
     # install stalled on the apt mirror past the old 15-minute job limit,
     # so the install and the test each have their own, and a stall names
@@ -1532,10 +1542,12 @@ jobs:
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
         with:
+          toolchain: 1.99.1
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          cache-bin: false
           save-if: ${{ github.event_name != 'merge_group' }}
       # (the Smith form's work estimate test writes every row it scores to a report in the
       # target directory, before asserting anything about it; a cached copy from an earlier
@@ -1582,9 +1594,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+        with:
+          toolchain: 1.99.1
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          cache-bin: false
           save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: nd-neon
       - name: "engine/nd on aarch64: the NEON kernel's oracle, thread determinism and FMA-family bits"
@@ -1655,10 +1670,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
         with:
+          toolchain: 1.99.1
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          cache-bin: false
           save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: unsafe-sweep
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -1686,10 +1703,12 @@ jobs:
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
         with:
+          toolchain: 1.99.1
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          cache-bin: false
           save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -1754,10 +1773,12 @@ jobs:
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
         with:
+          toolchain: 1.99.1
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          cache-bin: false
           save-if: ${{ github.event_name != 'merge_group' }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
@@ -1946,9 +1967,12 @@ jobs:
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+        with:
+          toolchain: 1.99.1
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          cache-bin: false
           save-if: ${{ github.event_name != 'merge_group' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -2007,6 +2031,8 @@ jobs:
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+        with:
+          toolchain: 1.99.1
       # (engine/rust-toolchain.toml pins the toolchain (1.99.1, profile minimal) for every cargo command under engine/:
       #  clippy goes onto THAT toolchain, which rustup selects here from the file; the file itself is unchanged.
       #  `rustup toolchain install` with no name installs the file's toolchain first, explicitly, rather than
@@ -2021,6 +2047,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: engine
+          cache-bin: false
           save-if: ${{ github.event_name != 'merge_group' }}
           shared-key: clippy
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0

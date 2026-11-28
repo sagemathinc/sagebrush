@@ -102,6 +102,19 @@ const ci = parse(join(dir, "ci.yml"));
 assert.equal(ci.jobs["wasm-publish"]["runs-on"], "ubuntu-24.04");
 assert.equal(ci.jobs["engine-nd-neon"]["runs-on"], "macos-15");
 assert.equal(ci.jobs["windows-smoke"]["runs-on"], "windows-latest");
-assert.ok(!spec.jobs.includes("wasm-publish") && spec.jobs.length === Object.keys(ci.jobs).length - 3);
-n += 4;
+// (webkit installs its system packages with sudo apt-get, which the runners don't allow: GitHub's runners only)
+assert.equal(ci.jobs.webkit["runs-on"], "${{ vars.CI_RUNNER || 'ubuntu-24.04' }}");
+assert.ok(!spec.jobs.includes("wasm-publish") && !spec.jobs.includes("webkit") && spec.jobs.length === Object.keys(ci.jobs).length - 4);
+n += 5;
+// (the Rust toolchain: every dtolnay/rust-toolchain step in ci.yml names engine/rust-toolchain.toml's channel, so none
+//  installs an unpinned "stable" (the runners hold only that toolchain, read-only); and no Swatinem/rust-cache step
+//  restores a cached ${CARGO_HOME}/bin onto PATH, SEC Nov 28 2026)
+const channel = /^channel = "([^"]+)"$/m.exec(readFileSync(join(root, "engine", "rust-toolchain.toml"), "utf8"))[1];
+const steps = Object.values(ci.jobs).flatMap((job) => job.steps ?? []);
+const toolchains = steps.filter((s) => String(s.uses ?? "").startsWith("dtolnay/rust-toolchain@"));
+const caches = steps.filter((s) => String(s.uses ?? "").startsWith("Swatinem/rust-cache@"));
+assert.ok(toolchains.length > 0 && caches.length > 0);
+for (const s of toolchains) assert.equal(s.with?.toolchain, channel, `a dtolnay/rust-toolchain step names ${channel}`);
+for (const s of caches) assert.equal(s.with?.["cache-bin"], false, "a Swatinem/rust-cache step sets cache-bin: false");
+n += toolchains.length + caches.length;
 console.log(`ci runners: ${n} checks pass`);
