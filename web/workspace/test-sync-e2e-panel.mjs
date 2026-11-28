@@ -28,7 +28,7 @@ let failures = 0, count = 0;
 const ok = (c, msg, detail) => { count++; console.log((c ? "ok   " : "FAIL ") + msg + (!c && detail !== undefined ? "  " + JSON.stringify(detail).slice(0, 600) : "")); if (!c) failures++; };
 const J = JSON.stringify;
 const SITE = "https://sagebrush.test";
-const IDS = { ONA: "e2e0a000-0001-4e2e-8e2e-e2e2e2e2e201", UNC: "e2e0a000-0002-4e2e-8e2e-e2e2e2e2e202", FRK: "e2e0a000-0003-4e2e-8e2e-e2e2e2e2e203", ESC: "e2e0a000-0004-4e2e-8e2e-e2e2e2e2e204", NEW1: "e2e0a000-0005-4e2e-8e2e-e2e2e2e2e205", SLOW: "e2e0a000-0006-4e2e-8e2e-e2e2e2e2e206" };
+const IDS = { ONA: "e2e0a000-0001-4e2e-8e2e-e2e2e2e2e201", UNC: "e2e0a000-0002-4e2e-8e2e-e2e2e2e2e202", FRK: "e2e0a000-0003-4e2e-8e2e-e2e2e2e2e203", ESC: "e2e0a000-0004-4e2e-8e2e-e2e2e2e2e204", NEW1: "e2e0a000-0005-4e2e-8e2e-e2e2e2e2e205", SLOW: "e2e0a000-0006-4e2e-8e2e-e2e2e2e2e206", SWA: "e2e0a000-0007-4e2e-8e2e-e2e2e2e2e207", N1A: "e2e0a000-0008-4e2e-8e2e-e2e2e2e2e208", P3: "e2e0a000-0009-4e2e-8e2e-e2e2e2e2e209", RST: "e2e0a000-000a-4e2e-8e2e-e2e2e2e2e20a", N1B: "e2e0a000-000b-4e2e-8e2e-e2e2e2e2e20b" };
 const script = execFileSync("bun", ["build", join(here, "../sync/test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8", maxBuffer: 64 << 20 });
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const rl = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ADMIN_LIMIT: { namespace_id: "7" + id, simple: { limit: 1_000_000, period: 60 } } });
@@ -116,7 +116,7 @@ try {
   const P = await B.tab();
   await P.send("Page.navigate", { url: ORIGIN + "/" });
   await P.until(`window.ready === true`, 15000);
-  const C = await P.ev(`({ TURN_ON: Panel.TURN_ON_CONFIRM, RESET: Panel.RESET_CONFIRM, USED: Panel.USED_LINE, UNCONFIRMED: Panel.UNCONFIRMED_LINE, ON: Panel.ON_LINE, FORKED: S.FORKED, NO_DEVICE: S.NO_DEVICE })`);
+  const C = await P.ev(`({ TURN_ON: Panel.TURN_ON_CONFIRM, RESET: Panel.RESET_CONFIRM, USED: Panel.USED_LINE, UNCONFIRMED: Panel.UNCONFIRMED_LINE, ON: Panel.ON_LINE, FORKED: S.FORKED, NO_DEVICE: S.NO_DEVICE, WRONG: S.WRONG_ACCOUNT })`);
 
   // ---- no chain: turned on only where sync was never used for the account
   {
@@ -281,6 +281,124 @@ try {
     })()`);
     ok(r.closed.dialog === false && r.closed.stored === false && r.closed.enabled === 0, "the section closed while genesis ran: no dialog, the device unconfirmed, sync not turned on", r.closed);
     ok(r.shown && r.stored === true && r.enabled === 1, "the section opened again for that account: the kept code shown, the device confirmed once ticked, then sync turned on", r);
+  }
+
+
+  // (a turn-on whose genesis waits at a gate the row opens, on the account `k`; returns once the dialog would be next)
+  await P.ev(`window.slowOn = async (k, after) => {
+    await as(k); T.reason = undefined; T.sync = { on: false, used: false }; T.label = null;
+    let open; const gate = new Promise((r) => { open = r; });
+    const slowK = { ...K, DeviceKeys: { ...K.DeviceKeys, load: (...a) => K.DeviceKeys.load(...a), create: async (...a) => { await gate; return K.DeviceKeys.create(...a); } }, resetDevice: K.resetDevice };
+    const s = section({ chunk: async () => slowK });
+    await s.refresh();
+    click("Turn on encrypted sync…");
+    await new Promise((r) => setTimeout(r, 100));
+    await after(s);
+    open();
+    for (let i = 0; i < 200 && !(await deviceOf(k)); i++) await new Promise((r) => setTimeout(r, 25));
+    await new Promise((r) => setTimeout(r, 300));
+    return s;
+  };
+  window.dialogUp = async (ms = 1500) => { for (let i = 0; i < ms / 25 && !document.querySelector(".e2e-code-dialog"); i++) await new Promise((r) => setTimeout(r, 25)); return !!document.querySelector(".e2e-code-dialog"); };
+  window.saveAndClose = () => { const d = document.querySelector(".e2e-code-dialog"); d.querySelector("input[type=checkbox]").click(); click("Close"); };`);
+
+  // ---- (T1, T2) another account signed in while genesis runs: no dialog on its page, the device unconfirmed, the code
+  // kept for the account it was made for, never shown to another, and shown when that account's section opens
+  {
+    const r = await P.ev(`(async () => {
+      const n0 = T.enabled;
+      // (only the page's account changes: the genesis itself goes on as SWA's, as an in-flight request would)
+      await slowOn("SWA", async () => { window.current = "NEW1"; });
+      const during = { dialog: !!document.querySelector(".e2e-code-dialog"), stored: (await deviceOf("SWA"))?.recoveryShown };
+      await section().refresh();
+      const asOther = await dialogUp(800);
+      window.current = "SWA";
+      await section().refresh();
+      const asOwn = await dialogUp();
+      if (asOwn) saveAndClose();
+      for (let i = 0; i < 200 && T.enabled === n0; i++) await new Promise((r) => setTimeout(r, 25));
+      return { during, asOther, asOwn, stored: (await deviceOf("SWA"))?.recoveryShown, enabled: T.enabled - n0 };
+    })()`);
+    ok(r.during.dialog === false && r.during.stored === false, "another account signed in while genesis ran: no dialog, the device unconfirmed", r.during);
+    ok(r.asOther === false && r.asOwn === true && r.stored === true && r.enabled === 1, "the kept code isn't shown to another account's section, and is shown to its own, confirmed once ticked, sync then on", r);
+  }
+
+  // ---- (N1) the panel closed while the dialog is open: the tick and Close still confirm, and sync is still turned on
+  {
+    const r = await P.ev(`(async () => {
+      await as("N1A"); T.reason = undefined; T.sync = { on: false, used: false }; const n0 = T.enabled;
+      const s = section(); await s.refresh();
+      click("Turn on encrypted sync…");
+      await dialogUp();
+      s.dispose();
+      saveAndClose();
+      for (let i = 0; i < 200 && T.enabled === n0; i++) await new Promise((r) => setTimeout(r, 25));
+      return { stored: (await deviceOf("N1A"))?.recoveryShown, enabled: T.enabled - n0 };
+    })()`);
+    ok(r.stored === true && r.enabled === 1, "the panel closed while the code's dialog was open: once ticked the device is confirmed and sync still turned on", r);
+  }
+
+  // ---- another account signed in while the dialog is open: the device still confirmed once ticked, but sync isn't
+  // turned on for the account now signed in
+  {
+    const r = await P.ev(`(async () => {
+      await as("N1B"); T.reason = undefined; T.sync = { on: false, used: false }; const n0 = T.enabled;
+      await section().refresh();
+      click("Turn on encrypted sync…");
+      await dialogUp();
+      window.current = "NEW1";
+      saveAndClose();
+      await new Promise((r) => setTimeout(r, 400));
+      const out = { stored: (await deviceOf("N1B"))?.recoveryShown, enabled: T.enabled - n0 };
+      window.current = "N1B";
+      return out;
+    })()`);
+    ok(r.stored === true && r.enabled === 0, "another account signed in while the dialog was open: the device confirmed once ticked, sync not turned on for the new account", r);
+  }
+
+  // ---- (N2) a device this browser refuses as another account's: said, with Reset
+  {
+    const r = await P.ev(`(async () => {
+      await as("ONA"); T.reason = undefined;
+      const wrong = { ...K, DeviceKeys: { ...K.DeviceKeys, load: async () => { throw Object.assign(new Error("the key chain's answer is for another account"), { code: "wrong_account" }); } } };
+      await section({ chunk: async () => wrong }).refresh();
+      return { text: text(), buttons: buttons() };
+    })()`);
+    ok(r.text.includes(C.WRONG) && J(r.buttons) === J(["Reset this device…"]), "a device load refused as another account's: the words, and Reset", r);
+  }
+
+  // ---- (N3) a refresh in flight when the section closes opens no kept code's dialog; the code stays kept for the next open
+  {
+    const r = await P.ev(`(async () => {
+      await slowOn("P3", async (s) => { s.dispose(); });
+      let release; const slow = new Promise((r) => { release = r; });
+      const s2 = section({ chain: async () => { await slow; return deps().chain(); } });
+      const pending = s2.refresh();
+      s2.dispose();
+      release();
+      await pending;
+      const after = await dialogUp(800);
+      await section().refresh();
+      const next = await dialogUp();
+      if (next) saveAndClose();
+      await new Promise((r) => setTimeout(r, 300));
+      return { after, next, stored: (await deviceOf("P3"))?.recoveryShown };
+    })()`);
+    ok(r.after === false && r.next === true && r.stored === true, "a refresh in flight when its section closed opens no dialog; the kept code is shown at the next open", r);
+  }
+
+  // ---- (SEC C1) a kept code whose device was reset meanwhile (another tab's Reset) is dropped, never shown
+  {
+    const r = await P.ev(`(async () => {
+      await slowOn("RST", async (s) => { s.dispose(); });
+      await K.resetDevice(e2eAccountOf(await accountHash(IDS.RST)));
+      await section().refresh();
+      const first = await dialogUp(800);
+      await section().refresh();
+      const second = await dialogUp(800);
+      return { first, second };
+    })()`);
+    ok(r.first === false && r.second === false, "a kept code whose device was reset meanwhile: never shown, and dropped (the next open shows nothing either)", r);
   }
 
   // ---- the E2E routes off: no section at all

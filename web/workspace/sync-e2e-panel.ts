@@ -121,8 +121,9 @@ export function showRecoveryCode(host: HTMLElement, recoveryCode: string): Promi
 
 // (a turn-on whose section went (the panel closed, or the signed-in account changed) before its recovery code could
 // be shown: kept in this page's memory only, for that account, and shown when its section next opens there; until
-// then the device stays unconfirmed. Never retried or cancelled: its genesis was admitted)
-let pendingCode: { hash: string; code: string; confirm: () => Promise<void> } | null = null;
+// then the device stays unconfirmed. Never retried or cancelled: its genesis was admitted. One slot: a second
+// account's kept code replaces the first's, whose device then stays unconfirmed and says so)
+let pendingCode: { hash: string; device: string; code: string; confirm: () => Promise<void> } | null = null;
 
 /** The section, drawn into `into`. refresh() draws it again from what the server and the owner say now; update(key)
  * does when `key` (what it depends on: the verified account, sync's state, the owner's reason) changed; clear() empties
@@ -147,11 +148,11 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
       const made = await m.DeviceKeys.create(label, e2eAccountOf(hash));
       // (the section gone, or another account signed in, while genesis ran: its code kept for this account's next open)
       if (disposed || (await deps.hash()) !== hash) {
-        pendingCode = { hash, code: made.recoveryCode, confirm: made.confirm };
+        pendingCode = { hash, device: made.keys.device.id, code: made.recoveryCode, confirm: made.confirm };
         working = false;
         return;
       }
-      await finish(made.recoveryCode, made.confirm);
+      await finish(hash, made.recoveryCode, made.confirm);
     } catch (e) {
       working = false;
       await refresh();
@@ -161,11 +162,12 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
 
   /** The recovery code shown, the device confirmed only if the person said they saved it (a dialog closed any other way
    * leaves it unconfirmed, and the section says so), then sync turned on, unless the section went meanwhile. */
-  async function finish(code: string, confirm: () => Promise<void>) {
+  async function finish(hash: string, code: string, confirm: () => Promise<void>) {
     working = true;
     if (await showRecoveryCode(deps.modalHost ?? document.body, code)) await confirm();
-    if (disposed) { working = false; return; }
-    await deps.enable();
+    // (sync turned on as asked, even if the panel closed while the dialog was open, else its next open would say
+    // encryption is on with sync off; but only for the account it was turned on for, never one signed in meanwhile)
+    if ((await deps.hash()) === hash) await deps.enable();
     deps.reconcile();
     working = false;
     await refresh();
@@ -235,12 +237,20 @@ export function e2eSection(into: HTMLElement, deps: E2EPanelDeps): { refresh(): 
     if (mine !== gen) return;
     into.replaceChildren(...out);
     // (a code this page kept for this account, from a turn-on whose section went before it could be shown: shown now)
-    if (pendingCode && !working) {
+    if (pendingCode && !working && !disposed) {
       const hash = await deps.hash();
-      if (mine !== gen || !pendingCode || pendingCode.hash !== hash) return;
+      if (disposed || mine !== gen || !pendingCode || pendingCode.hash !== hash) return;
       const p = pendingCode;
+      // (shown only for the very device it was made for, still here and still unconfirmed: a device reset meanwhile, in
+      // this tab or another, or a chain reset elsewhere, drops it, so no code is ever saved for a device that's gone)
+      let still = false;
+      try {
+        const k = await (await deps.chunk()).DeviceKeys.load(e2eAccountOf(hash));
+        still = !!k && k.device.id === p.device && k.recoveryUnconfirmed;
+      } catch { /* (no such device: dropped) */ }
+      if (disposed || mine !== gen || pendingCode !== p) return;
       pendingCode = null;
-      void finish(p.code, p.confirm);
+      if (still) void finish(hash, p.code, p.confirm);
     }
   }
 
