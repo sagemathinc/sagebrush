@@ -267,10 +267,14 @@ def _v_to_h(points, rays, lines, dim):
         gens.append(g)
     cons = ineqs + eqs
     need = dim + 1 - len(L) - 1
+    # a ray also saturates the homogenizing constraint (last coordinate >= 0)
+    far = tuple([0] * dim + [1])
     i, n = 0, len(gens)
     while i < n:
         g = gens[i]
         satd = [c for c in cons if _iszero(_dot(c, g))]
+        if _iszero(g[-1]):
+            satd.append(far)
         red = (_rank(satd) if satd else 0) < need
         if not red and any(o == g for o in gens[:i]):
             red = True
@@ -356,6 +360,8 @@ class _HRep:
         b = self._b()
         neg = (b < 0)
         bs = _fmt(abs(b) if not isinstance(b, float) else abs(b), r)
+        if self._eq and self._P._empty:
+            return "An equation %s == 0" % _fmt(b, r)
         if self._eq:
             return "An equation %s x %s %s == 0" % (a, "-" if neg else "+", bs)
         return "An inequality %s x %s %s >= 0" % (a, "-" if neg else "+", bs)
@@ -726,6 +732,13 @@ class Polyhedron_:
         A 2-dimensional polyhedron in ZZ^2 defined as the convex hull of 3 vertices
         sage: P.Vrepresentation(), P.Hrepresentation()
         ((A vertex at (0, 0), A vertex at (0, 1), A vertex at (1, 0)), (An inequality (1, 0) x + 0 >= 0, An inequality (0, 1) x + 0 >= 0, An inequality (-1, -1) x + 1 >= 0))
+
+    Equality compares the sets, lines included::
+
+        sage: Polyhedron(vertices=[[0, 0]], lines=[[1, 0]]) == Polyhedron(vertices=[[0, 0]], lines=[[0, 1]])
+        False
+        sage: Polyhedron(vertices=[[0, 0]], lines=[[2, 0]]) == Polyhedron(vertices=[[5, 0]], lines=[[-1, 0]])
+        True
     """
 
     def __init__(self, ring, dim, eqs, ieqs, lines, gens):
@@ -751,7 +764,8 @@ class Polyhedron_:
             v._index = k
         self._V = V
         if self._empty:
-            self._H = []
+            # as in Sage: the one equation -1 == 0
+            self._H = [_HRep(self, tuple([0] * dim) + (-1,), True, 0)]
 
     def _ringobj(self):
         return getattr(_sa(), self._ring)
@@ -830,7 +844,7 @@ class Polyhedron_:
             return False
         if self._empty or other._empty:
             return self._empty == other._empty and self._n == other._n
-        return self._n == other._n and self._canon() == other._canon()
+        return self._n == other._n and self._gens_in(other) and other._gens_in(self)
 
     def __ne__(self, other):
         return not self == other
@@ -838,10 +852,17 @@ class Polyhedron_:
     def __hash__(self):
         return hash((self._n, len(self._V)))
 
-    def _canon(self):
-        def key(v):
-            return (v._kind, tuple(round(x, 9) if isinstance(x, float) else x for x in (v._v if v._kind == "vertex" else _lnorm_any(v._v))))
-        return sorted(key(v) for v in self._V if v._kind != "line"), _rank([v._v for v in self._V if v._kind == "line"])
+    def _gens_in(self, other):
+        """Whether every vertex of self lies in other, and every ray and line
+        of self is a direction of other's recession cone (or lineality)."""
+        for v in self._V:
+            for h in other._H:
+                x = _dot(h._a(), v._v) + (h._b() if v._kind == "vertex" else 0)
+                if _iszero(x):
+                    continue
+                if h._eq or v._kind == "line" or x < 0:
+                    return False
+        return True
 
     # -- representations
     def Hrepresentation(self, i=None):
@@ -1111,6 +1132,8 @@ class Polyhedron_:
 
             sage: Polyhedron(vertices=[[1, 0], [0, 1]], rays=[[1, 1]]).is_compact()
             False
+            sage: P = Polyhedron(vertices=[[0, 0]], rays=[[1, 0]]); P.rays_list(), P.is_compact()
+            ([[1, 0]], False)
         """
         return not self.rays() and not self.lines()
 
@@ -1171,7 +1194,11 @@ class Polyhedron_:
 
             sage: Polyhedron(vertices=[[0, 0], [2, 0], [0, 2]]).interior_contains([1/2, 1/2])
             True
+            sage: Polyhedron(ambient_dim=2).interior_contains([0, 0])
+            False
         """
+        if self._empty:
+            return False
         p = tuple(_q(x) for x in point)
         if self.equations():
             return False
@@ -1184,7 +1211,11 @@ class Polyhedron_:
 
             sage: P = Polyhedron(vertices=[[1, 0], [0, 1]]); P.relative_interior_contains([1/2, 1/2]), P.relative_interior_contains([1, 0])
             (True, False)
+            sage: Polyhedron(ambient_dim=2).relative_interior_contains([0, 0])
+            False
         """
+        if self._empty:
+            return False
         p = tuple(_q(x) for x in point)
         return all(h.contains(p) for h in self.equations()) and all(h.interior_contains(p) for h in self.inequalities())
 
@@ -1221,7 +1252,15 @@ class Polyhedron_:
 
             sage: Polyhedron(vertices=[[0, 0], [1, 0], [0, 1]]).bounding_box()
             ((0, 0), (1, 1))
+            sage: Polyhedron(vertices=[[1, 0, 0], [0, 1, 0]], rays=[[1, 1, 0]]).bounding_box()
+            Traceback (most recent call last):
+            ...
+            ValueError: only polytopes (compact polyhedra) are allowed
         """
+        if self._empty:
+            raise ValueError("empty polytope is not allowed")
+        if not self.is_compact():
+            raise ValueError("only polytopes (compact polyhedra) are allowed")
         vs = [v._v for v in self.vertices()]
         lo = tuple(_out(min(v[i] for v in vs), self._ring) for i in range(self._n))
         hi = tuple(_out(max(v[i] for v in vs), self._ring) for i in range(self._n))
@@ -1268,13 +1307,15 @@ class Polyhedron_:
             1/2
             sage: polytopes.hypercube(3).volume()
             8
+            sage: Polyhedron(vertices=[[1, 0, 0], [0, 1, 0]], rays=[[1, 1, 0]]).volume(), Polyhedron(vertices=[[0, 0]], rays=[[1, 0], [0, 1]]).volume()
+            (0, +Infinity)
         """
         if measure != "ambient" and not (measure == "induced" and self.dim() == self._n):
             raise NotImplementedError("volume: only measure='ambient' (or 'induced' for full-dimensional polyhedra) is implemented")
-        if not self.is_compact():
-            return _sa().oo
         if self.dim() < self._n:
             return _sa().Integer(0)
+        if not self.is_compact():
+            return _sa().oo
         tot = 0
         verts = [v._v for v in self.vertices()]
         for S in self._triangulation():
@@ -1329,6 +1370,8 @@ class Polyhedron_:
 
             sage: polytopes.hypercube(3).f_vector()
             (1, 8, 12, 6, 1)
+            sage: Polyhedron(vertices=[[0, 0], [1, 0]], rays=[[0, 1]]).f_vector()
+            (1, 2, 3, 1)
         """
         if self._empty:
             return _sa().vector(_sa().ZZ, [1])
@@ -1349,6 +1392,7 @@ class Polyhedron_:
         nH = len(self.inequalities())
         nV = len(self._V)
         lines = frozenset(i for i, v in enumerate(self._V) if v._kind == "line")
+        verts = frozenset(i for i, v in enumerate(self._V) if v._kind == "vertex")
         coatoms = [frozenset(i for i in range(nV) if j in inc[i]) | lines for j in range(nH)]
         d = int(self.dim())
         out = []
@@ -1362,7 +1406,7 @@ class Polyhedron_:
                     cands = []
                     for G in faces[:idx]:
                         I = F & G
-                        if I and not (I <= lines):
+                        if I & verts:
                             cands.append(I)
                     maxi = []
                     for I in cands:
@@ -1410,9 +1454,17 @@ class Polyhedron_:
         """
         return self.faces(int(self.dim()) - 1)
 
+    def _edges(self):
+        """The 1-dimensional faces as V-index sets, the polyhedron itself
+        included when it is 1-dimensional."""
+        E = [F for F, dd in self._faces() if dd == 1]
+        if not self._empty and self.dim() == 1:
+            E.append(frozenset(range(len(self._V))))
+        return E
+
     def _adjacent(self, v, w):
         i, j = v._index, w._index
-        return any(F == frozenset((i, j)) for F, dd in self._faces() if dd == 1)
+        return frozenset((i, j)) in self._edges()
 
     def vertex_adjacency_matrix(self):
         """The adjacency matrix of the vertices.
@@ -1428,18 +1480,23 @@ class Polyhedron_:
         return _sa().matrix(_sa().ZZ, [[int(i != j and self._adjacent(self._V[i], self._V[j])) for j in range(n)] for i in range(n)])
 
     def graph(self):
-        """The graph of vertices and edges.
+        """The graph of the bounded faces: the vertices and the bounded edges
+        (empty when there are lines).
 
         EXAMPLES::
 
             sage: P = polytopes.hypercube(3); P.graph()
             Graph on 8 vertices
+            sage: G = Polyhedron(vertices=[[0, 0], [1, 0]], rays=[[0, 1]]).graph(); G.order(), G.size()
+            (2, 1)
         """
         G = _sa().Graph()
+        if self.n_lines():
+            return G
         for v in self.vertices():
             G.add_vertex(v)
-        for F, dd in self._faces():
-            if dd == 1 and len(F) == 2:
+        for F in self._edges():
+            if len(F) == 2 and all(self._V[i]._kind == "vertex" for i in F):
                 a, b = sorted(F)
                 G.add_edge(self._V[a], self._V[b])
         return G
