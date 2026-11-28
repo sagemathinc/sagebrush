@@ -15,8 +15,8 @@ import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, checkSealedOp, isChainHead, isChainGeneration, toB64, clientOf, type SealedOp, fields, has, isDevice, isDocId, isNat,
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
-import { patchRef, unwrap, type BatchOut } from "./doc.ts";
-import { agentOn, allowed, e2eOn, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { patchRef, unwrap, type BatchOut, type SessionIn } from "./doc.ts";
+import { agentOn, allowed, e2eOn, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { E2E, E2E_KEEP, E2EStore, e2eAccount, e2eAud } from "./e2e-chain.ts";
 import { sealedOpMessage } from "../workspace/e2e/sealed-op.mjs";
 import { e2eCore } from "../workspace/e2e/core-ready.ts";
@@ -405,7 +405,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (n >= LIMITS.inflight) throw new SyncError("busy", "too many requests unanswered");
       this.inflight.set(ws, n + 1);
       try {
-        await this.handle(ws, att, m);
+        // (the attachment as sessionLive left it: a D1 recheck may have moved the session's end)
+        await this.handle(ws, ws.deserializeAttachment() as Attachment, m);
       } finally {
         this.inflight.set(ws, (this.inflight.get(ws) ?? 1) - 1);
       }
@@ -429,7 +430,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (now >= att.expires) return end("session expired");
     if (!allowed(this.env, att.account)) return end("sync isn't enabled for this account");
     if (this.one("SELECT 1 AS x FROM revoked_sessions WHERE session_hash = ?", att.session)) return end("session ended");
-    if (now - att.checked >= RECHECK_MS) {
+    // (tests only: "session-recheck" set makes the recheck due now, and holds it before its D1 read)
+    if (now - att.checked >= RECHECK_MS || gateOn(this.env, "session-recheck")) {
+      await gate(this.env, "session-recheck");
       const db = this.env.SHARE_DB;
       const row = db
         ? await db.prepare("SELECT s.expires FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.account_id = ?2 AND s.expires > ?3 AND a.deleting IS NULL").bind(att.session, att.account, Math.floor(now / 1000)).first<{ expires: number }>()
@@ -511,6 +514,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     send(ws, { t: "index", ...this.index(m.index_after) });
   }
 
+  /**
+   * A session's write, at its own decision (§2, S07): the session not revoked and not past its end, checked inside the
+   * write's transaction, after every await, so a revoke recorded meanwhile refuses it.
+   */
+  private sessionHeld(att: Attachment): void {
+    if (Date.now() >= att.expires || this.one("SELECT 1 AS x FROM revoked_sessions WHERE session_hash = ?", att.session)) throw new SyncError("forbidden", "this session was ended");
+  }
+
   /** A client's binding (§5.2 hello, §5.4's headers): the account's hash and its generation, each if given,
    * must be this object's; else `forbidden`, reason "account", or `conflict`, reason "generation". */
   private bound(account: unknown, generation: unknown) {
@@ -534,6 +545,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const wait = this.opsRate.take(list.length);
     if (wait) throw new SyncError("rate", "too many ops", { retry_after: wait });
     return this.ctx.storage.transactionSync(() => {
+      this.sessionHeld(att);
       // (an account's index log is either plaintext or sealed, never both: once it has a key chain (which a sync-data
       // purge keeps), no plaintext op is taken, decided in this transaction, as genesis decides the converse in the chain's)
       if (this.encrypted()) throw new SyncError("conflict", "this account's sync is end-to-end encrypted: changes in the clear aren't taken", { reason: "sealed_account" });
@@ -665,6 +677,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // finished and was followed by turning sync on again, ends what the checks were for), the head (a removal during
       // the checks would change it), and this device's order)
       this.admit(att.account, true);
+      // (and the session the checks were for: a sign-out during them refuses the ops, S07)
+      this.sessionHeld(att);
       if (Number(this.get("generation")) !== gen) throw new SyncError("conflict", "this account's sync changed meanwhile", { reason: "generation" });
       let next = Number(this.one("SELECT next_dseq FROM devices WHERE device = ?", device)!.next_dseq);
       const now = store.current();
@@ -673,7 +687,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       }
       if (next !== next0) throw new SyncError("busy", "this device's ops moved meanwhile; send again", { retry_after: 0 });
       // (the log's cap, for the new ops only: a resend at a full log is still answered with its seq)
-      const added = list.filter((raw) => fresh(raw, next)).length;
+      // (counted once per new dseq: a second envelope of a new dseq is answered as its resend, adding no row)
+      const added = new Set(list.filter((raw) => fresh(raw, next)).map((raw) => (raw as { dseq: number }).dseq)).size;
       const kept = Number(this.get("sealed_ops") ?? 0);
       if (added > 0 && kept + added > this.sealedCap) throw new SyncError("limit", "this account's sealed log is full", { limit: "sealed_log", max: this.sealedCap });
       const out: SealedAck[] = [];
@@ -884,7 +899,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (wait) throw new SyncError("rate", "too many batches", { retry_after: wait });
     await this.ensureDoc(b.doc, b.kind);
     // (the batch's bytes, exactly what its document's total can grow by, held against the budget, §6.1)
-    return this.heldForward(att.account, b.doc, b.body.length, b.epoch, b, (doc, expires) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires }));
+    return this.heldForward(att, b.doc, b.body.length, b.epoch, b, (doc, expires, session) => doc.batch({ account: att.account, writer: `session:${device}`, author: "person", device, batch: b, pin_expires: expires, session }));
   }
   /**
    * Hold `bytes` against the budget, pin the batch's blobs, and forward it
@@ -893,11 +908,19 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * began, with the hold still open, wakes the alarm for its due time, when
    * the document's total replaces it.
    */
-  private async heldForward(account: string, doc: string, bytes: number, epoch: number, pinned: Batch, call: (d: ReturnType<SyncAccount["docStub"]>, expires: number) => Promise<Result<BatchOut>>): Promise<BatchOut> {
+  private async heldForward(att: Attachment, doc: string, bytes: number, epoch: number, pinned: Batch, call: (d: ReturnType<SyncAccount["docStub"]>, expires: number, session: SessionIn) => Promise<Result<BatchOut>>): Promise<BatchOut> {
     await this.room(bytes, "document");
+    // (tests only: held after the last await, before the checks below)
+    await gate(this.env, "forward-checks");
     // (after every await, before anything is held or sent: still this account, still writable; a plan
     // fetched just now may have made it read-only, CORR-445-2)
-    this.admit(account, true);
+    this.admit(att.account, true);
+    // (and still this session (S07): checked here, and the document recorded as one this session wrote to, in the same
+    // synchronous step that sends the forward, with no await between. A revoke then either comes first (refused here)
+    // or finds this document and fences it, and the document refuses the forward if the fence arrives first)
+    this.sessionHeld(att);
+    this.sql.exec("INSERT INTO ticket_docs (session_hash, doc, expires) VALUES (?, ?, ?) ON CONFLICT(session_hash, doc) DO UPDATE SET expires = max(expires, excluded.expires)", att.session, doc, att.expires);
+    const session: SessionIn = { hash: att.session, expires: att.expires };
     const expires = Date.now() + this.pinMs();
     const held = this.hold(doc, bytes, expires);
     let keys: PinKey[];
@@ -908,7 +931,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       throw e;
     }
     try {
-      return this.answered(held, doc, await this.forward(doc, keys, expires, (d) => call(d, expires), () => this.unhold(held)));
+      return this.answered(held, doc, await this.forward(doc, keys, expires, (d) => call(d, expires, session), () => this.unhold(held)));
     } catch (e) {
       if (this.one("SELECT 1 AS x FROM batch_holds WHERE id = ?", held)) this.wakeBy(expires + this.settleMs() + 1);
       throw e;
@@ -970,7 +993,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const root = checkBatch({ doc: m.doc, epoch: expect.epoch + 1, patches: rf.patches, body: rf.body });
     await this.ensureDoc(m.doc);
     // (the root's bytes held, as a batch's: the old epoch's go only once the document says so, §6.1)
-    return this.heldForward(att.account, m.doc, root.body.length, expect.epoch + 1, root, (doc, expires) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires }));
+    return this.heldForward(att, m.doc, root.body.length, expect.epoch + 1, root, (doc, expires, session) => doc.clear({ account: att.account, writer: `session:${device}`, author: "person", device, expect_head: expect, root, pin_expires: expires, session }));
   }
 
   // ---- document sockets (§2)
@@ -981,11 +1004,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * blobs pinned, the head recorded here), so a document socket is no way
    * around any of them (LIMIT-6D6-1, CORR-6D6-2, CORR-6D6-3).
    */
-  async socketBatch(a: { account: string; session: string; device: string; batch: Record<string, unknown> }): Promise<Result<BatchOut>> {
+  async socketBatch(a: { account: string; session: string; expires: number; device: string; batch: Record<string, unknown> }): Promise<Result<BatchOut>> {
     return attemptAsync(async () => {
+      if (!isNat(a.expires)) throw new SyncError("invalid", "expires");
       if (this.one("SELECT 1 AS x FROM revoked_sessions WHERE session_hash = ?", a.session)) throw new SyncError("forbidden", "this session was ended");
       const b = checkBatch(a.batch);
-      const out = await this.batch({ account: a.account, session: a.session, expires: Infinity, checked: Date.now() }, a.device, b);
+      // (the document socket's session and its end, as that socket last checked them: the forward is fenced and ends
+      // with it, as an account socket's is, S07)
+      const out = await this.batch({ account: a.account, session: a.session, expires: a.expires, checked: Date.now() }, a.device, b);
       if (out.new > 0) this.changed(null, b.doc, out.head, a.device);
       return out;
     });

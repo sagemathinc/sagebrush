@@ -322,6 +322,22 @@ test("comprehensions by bounded work: at most 10^6 elements (fewer in a small he
   assert.equal(big.stdout, "1000000\n", big.stderr);
 });
 
+test("Insert past the end: its undefined elements admitted by the collection bound before they are made", () => {
+  const { spawnSync } = require("node:child_process");
+  const { join } = require("node:path");
+  const cli = join(__dirname, "..", "src", "cli.js");
+  // (Magma accepts positions below 2^30, building the sequence; Sagebrush's
+  // collection bound refuses 2^29 at once: in an ordinary heap the bound is
+  // its fixed 10^6 ceiling, so the message is deterministic.  2^30 itself is
+  // Magma's own refusal, in the golden test_stdin_insert_multiset_numerator_eltseq)
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [cli, "--magma"], { input: 'S := Insert([1,2], 2^29, 9);\n#Insert([1,2], 1000, 9);\n"end";\n', encoding: "utf8", timeout: WALL(120000) });
+  assert.equal(r.signal, null, r.stderr);
+  assert.match(r.stdout.replace(/\s+/g, " "), /A collection of more than 1000000 elements needs about/, r.stdout);
+  assert.match(r.stdout, /\n1000\nend\n$/, r.stdout);
+  assert.ok(Date.now() - t0 < WALL(30000), "refused in " + (Date.now() - t0) + " ms");
+});
+
 test("at the comprehension bound, with its costliest elements built, a clean refusal, never V8's out of memory (HARD-FCC-1 on GitHub)", () => {
   const { spawnSync } = require("node:child_process");
   const { join } = require("node:path");
