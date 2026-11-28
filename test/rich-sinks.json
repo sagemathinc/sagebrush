@@ -151,7 +151,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/agents/page.ts :: renderHeader :: $(\"#banner\").innerHTML = live() #0": {
+  "web/agents/page.ts :: renderHeader :: $(\"#who-info\").innerHTML = live() #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -628,6 +628,10 @@
    "owner": "host"
   },
   "web/workspace/persist-probe.ts :: on :: f.srcdoc = probe; #0": {
+   "kind": "host",
+   "owner": "host"
+  },
+  "web/workspace/persist-probe.ts :: on :: f.srcdoc = `<script>(async () => { let r; try { r = \"REACHED \" + await window.__TAURI_INTERNALS__.invoke(\"signer_probe_sign\", { msg: \"frame\" }); } catch (e) { r = \"refused: \" + String(e && e.message || e).slice(0, 80); } parent.postMessage({ sbSignerProbe: r }, \"*\"); })();<\\/script>`; #0": {
    "kind": "host",
    "owner": "host"
   },

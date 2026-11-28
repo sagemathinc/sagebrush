@@ -109,12 +109,15 @@ export async function appendChainEntry(db: D1, core: WriterCore, input: { fleet:
  * certificate may be presented again). Verified against the stored chain, then one batch on that head; a moved head
  * is re-read and verified once more, then a 503 (thrown).
  */
-export async function pairHost(db: D1, core: WriterCore, input: { fleet: string; aud: string; bytes: Uint8Array }, hooks: WriterHooks = {}): Promise<{ ok: true; host: string; created: boolean } | { refused: string }> {
+export async function pairHost(db: D1, core: WriterCore, input: { fleet: string; aud: string; bytes: Uint8Array; authorize?: (chain: unknown) => Promise<void> }, hooks: WriterHooks = {}): Promise<{ ok: true; host: string; created: boolean } | { refused: string }> {
   // (at most HOSTS_MAX hosts in a fleet, counted inside the batch: two pairings racing for the last slot get one)
   for (let attempt = 0; attempt < 2; attempt++) {
     const chain = await loadChain(db, core, input.fleet, input.aud);
     if (!chain) return { refused: "not_granted" };
     const cert = await core.verifyHostCert(input.bytes, { aud: input.aud, fleet: input.fleet, chain: chain.state });
+    // (the caller's own authorization, e.g. the pairing's approval, against THIS chain state, the one the batch's head CAS
+    // binds: a policy change or a signer's removal between the caller's checks and this batch is judged here, not missed)
+    if (input.authorize) await input.authorize(chain.state);
     const b = cert.body, h = chain.head;
     if (hooks.beforeBatch) await hooks.beforeBatch(attempt);
     // ?1 host  ?2 fleet  ?3 sign_key  ?4 fingerprint  ?5 cert hash  ?6 head seq  ?7 head hash  ?8 the certificate's text  ?9 HOSTS_MAX
@@ -168,7 +171,9 @@ export interface ServiceKey { id: string; raw: Uint8Array; sign(bytes: Uint8Arra
 export interface Pair { transfer: string; receipt: string }
 export type GrantResult = { ok: true; gen: number; reapply: boolean; replayed: boolean; pairs: Pair[] } | { refused: string };
 
-const TEN_MIN = 600_000, WINDOW_MS = 300_000, AUTH_MS = 300_000;
+const TEN_MIN = 600_000, WINDOW_MS = 300_000;
+/** A signed write's sign-in is fresh this long (ms): the core's AUTH_MS (its freshAuth), which it doesn't export. */
+export const AUTH_MS = 300_000;
 /** §1.8: agents in one grant, so transfers in one request. */
 export const TRANSFERS_MAX = 64;
 /** The stored result's bytes (the JSON of its receipt pairs): the migration's CHECK is the same bound. */

@@ -182,6 +182,28 @@ async function upload(c, files, title = "T") {
   const d = await fetchSite("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "wrong", account_id: A }) });
   ok(d.status === 403, "dev sign-in needs the dev token");
 }
+// ---- re-authentication (sessions.reauth_ms) on the CoCalc sign-in: never set by it, and reauth=1 changes nothing
+{
+  const reauthOf = async (c) => (await db.prepare("SELECT reauth_ms FROM sessions WHERE token_hash = ?1").bind(sha(c.slice(c.indexOf("=") + 1))).first())?.reauth_ms;
+  const { session } = await signIn(A);
+  ok(session && (await reauthOf(session)) === null, "re-auth: a CoCalc sign-in's session has reauth_ms NULL");
+  // (its authorize URL with reauth=1 is the default's, apart from the per-attempt state and challenge; no max_age)
+  const shape = async (q) => {
+    const r = await fetchSite(`/auth/login?return=%2Fx${q}`);
+    const u = new URL(r.headers.get("location"));
+    for (const k of ["state", "code_challenge"]) u.searchParams.set(k, "-");
+    return `${r.status} ${u}`;
+  };
+  const plain = await shape("");
+  ok(plain === (await shape("&reauth=1")) && !plain.includes("max_age"), "re-auth: with CoCalc, /auth/login?reauth=1 answers as without it", plain);
+  const r = await fetchSite(`/auth/login?return=${encodeURIComponent("//evil.example/")}&reauth=1`);
+  const to = new URL(r.headers.get("location"));
+  const oauth = r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_oauth="));
+  const code = b64url(Buffer.from(Math.random().toString()));
+  fake.codes.set(code, { account_id: A, email: "a@example.com", verified: true, redirect_uri: to.searchParams.get("redirect_uri"), challenge: to.searchParams.get("code_challenge") });
+  const cb = await fetchSite(`/auth/callback?code=${code}&state=${to.searchParams.get("state")}&reauth=1`, { headers: { cookie: oauth } });
+  ok(cb.status === 302 && cb.headers.get("location") === "/" && (await reauthOf(sessionOf(cb))) === null, "re-auth: with CoCalc, reauth=1 keeps the return check and sets no reauth_ms");
+}
 // ---- DEV's /auth/dev: a short session when asked (ttl, whole seconds 300 to 32400), else 30 days (plan-fuzz-F3b A1)
 {
   const D = "33333333-3333-4333-8333-333333333333";
@@ -193,8 +215,11 @@ async function upload(c, files, title = "T") {
   const maxAge = (r) => Number((r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_session=")) ?? "").match(/Max-Age=(\d+)/)?.[1] ?? NaN);
   const sessionsOfD = async () => (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(D).first()).n;
   // (none asked: 30 days, as before)
+  const t0 = Date.now();
   const r0 = await dev({});
   const j0 = await r0.json(), row0 = await rowOf(r0);
+  const rm = (await db.prepare("SELECT reauth_ms FROM sessions WHERE token_hash = ?1").bind(sha(sessionOf(r0).slice(sessionOf(r0).indexOf("=") + 1))).first())?.reauth_ms;
+  ok(Number.isSafeInteger(rm) && rm >= t0 - 1000 && rm <= Date.now() + 1000, "re-auth: /auth/dev's session (DEV only) is re-authenticated now", { t0, rm });
   ok(r0.status === 200 && row0 && row0.expires - row0.created === 30 * 86400 && j0.expires === row0.expires && maxAge(r0) === 30 * 86400, `dev sign-in without ttl: a 30-day session, as before (${row0?.expires - row0?.created} s, Max-Age ${maxAge(r0)}, answered expires ${j0.expires === row0?.expires})`);
   // (the bounds, and one between: the session ends exactly ttl after it starts, the cookie says so, the answer too)
   for (const ttl of [300, 2700, 32400]) {
@@ -1097,6 +1122,63 @@ sniffReport([
   ["files", (s) => s === 206, "206"],
   ["files", (s) => s === 404, "404"],
 ]);
+
+// ---- a deletion past its first check, whose session ends before it commits: refused, nothing changed.  A purge
+// admitted before its session ended goes on without it
+{
+  const control = (p, body) => dispatch(mf, SITE + p, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  // (the request's write held at `match`; meanwhile the session signs out; then the write goes on)
+  const signedOutDuring = async (c, match, request) => {
+    await control("/__hold", { match });
+    const pending = request();
+    const held = await (await control("/__held")).json();
+    if (!held.ok) throw new Error(`nothing held at ${match}`);
+    const out = await c.post("/auth/logout", {});
+    await control("/__release", {});
+    return { r: await pending, out };
+  };
+  const D = "f1f1f1f1-0000-4000-8000-0000000000f1", E = "f2f2f2f2-0000-4000-8000-0000000000f2", P = "f3f3f3f3-0000-4000-8000-0000000000f3";
+  for (const x of [D, E, P]) fake.limits.set(x, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+
+  const d = api((await signIn(D)).session);
+  const { col } = await upload(d, [["a.txt", Buffer.from("fence one")]], "Fenced");
+  const del = await signedOutDuring(d, "DELETE FROM collections WHERE id", () => d.del(`/api/share/collections/${col}`));
+  const kept = await db.prepare("SELECT (SELECT COUNT(*) FROM collections WHERE id = ?1) AS c, (SELECT COUNT(*) FROM versions WHERE collection = ?1) AS v, (SELECT COUNT(*) FROM holdings WHERE account_id = ?2) AS h").bind(col, D).first();
+  ok(del.out.status === 200 && del.r.status === 401 && kept.c === 1 && kept.v === 1 && kept.h === 1, `F1 a collection delete whose session signed out before its commit: 401, the collection, its version and files kept (${del.r.status}, ${JSON.stringify(kept)})`);
+
+  const e = api((await signIn(E)).session);
+  await upload(e, [["b.txt", Buffer.from("fence two")]], "Kept");
+  const purge = await signedOutDuring(e, "INSERT INTO purges (request_id, account_hash, account_id", () => e.post("/api/share/delete-everything", { confirm: "delete" }));
+  const ep = await db.prepare("SELECT (SELECT COUNT(*) FROM purges WHERE account_id = ?1) AS p, (SELECT COUNT(*) FROM collections WHERE owner = ?1) AS c, (SELECT deleting FROM accounts WHERE account_id = ?1) AS deleting").bind(E).first();
+  ok(purge.r.status === 401 && ep.p === 0 && ep.c === 1 && ep.deleting === null, `F2 a self-purge whose session signed out before it was admitted: 401, no purge recorded, nothing deleted (${purge.r.status}, ${JSON.stringify(ep)})`);
+
+  // (a twin delete that finished while this one was held: this one finds the collection gone, 404, and changes nothing)
+  const T = "f4f4f4f4-0000-4000-8000-0000000000f4";
+  fake.limits.set(T, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+  const tw = api((await signIn(T)).session);
+  const { col: twin } = await upload(tw, [["t.txt", Buffer.from("fence twin")]], "Twin");
+  await control("/__hold", { match: "DELETE FROM collections WHERE id" });
+  const first = tw.del(`/api/share/collections/${twin}`);
+  ok((await (await control("/__held")).json()).ok, "F4 (the first delete held at its commit)");
+  const second = await tw.del(`/api/share/collections/${twin}`);
+  await control("/__release", {});
+  const firstR = await first;
+  const recs = await db.prepare("SELECT COUNT(*) AS n FROM purges WHERE kind = 'collection' AND collection = ?1").bind(twin).first();
+  ok(second.status === 200 && firstR.status === 404 && recs.n === 1, `F4 two deletes of one collection: one deletes it, the other answers 404 and records nothing (${second.status}, ${firstR.status}, ${recs.n} records)`);
+
+  // (admitted first: it runs to the end with its session gone, as the purge itself removes it)
+  const pc = api((await signIn(P)).session);
+  await upload(pc, [["c.txt", Buffer.from("fence three")]], "Purged");
+  const go = await pc.post("/api/share/delete-everything", { confirm: "delete" });
+  await pc.post("/auth/logout", {});
+  let pp;
+  for (let i = 0; i < 50; i++) {
+    pp = await db.prepare("SELECT (SELECT status FROM purges WHERE account_id = ?1 OR account_hash IN (SELECT account_hash FROM purges WHERE account_id = ?1)) AS s, (SELECT COUNT(*) FROM collections WHERE owner = ?1) AS c").bind(P).first();
+    if (pp.c === 0) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  ok(go.status === 200 && pp.c === 0, `F3 a self-purge admitted before its session signed out goes on and deletes the account's shares (${go.status}, ${JSON.stringify(pp)})`);
+}
 
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);

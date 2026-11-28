@@ -5,7 +5,7 @@
 // package's group, which is then in that mode's start; nothing recorded
 // for a file no package or library has is used.
 //   bun web/test-lib-chunks.mjs
-import { libChunks, groupOf, familyViolation, MODE_FAMILIES } from "./lib-chunks.mts";
+import { libChunks, groupOf, familyViolation, MODE_FAMILIES, sageDomainRoot } from "./lib-chunks.mts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; if (!c) { fails++; console.log("FAIL " + what); } else console.log("ok   " + what); };
@@ -81,13 +81,24 @@ const fd = ld.manifest.files;
 ok(["fredapi.py", "yfinance.py", "_sbdata_live.py"].every((f) => fd[f] === "mod-live-data") && fd["fredapi_extra.py"] === "mod-fredapi-extra", "fredapi, yfinance and _sbdata_live: mod-live-data; fredapi_extra its own: " + JSON.stringify(fd));
 ok(ld.manifest.chunks["mod-live-data"]?.src && !ld.manifest.chunks["mod-live-data"].pre && Object.values(ld.manifest.modes).every((g) => !g.includes("mod-live-data")), "mod-live-data: sources only, and no mode's start fetches it");
 ok(JSON.stringify(Object.keys(JSON.parse(ld.chunks.get(ld.manifest.chunks["mod-live-data"].src.file).toString()).files).sort()) === JSON.stringify(["_sbdata_live.py", "fredapi.py", "yfinance.py"]), "its chunk holds exactly those three files");
-// (elliptic curves over GF(p), _sage_ec_ff, is its own group, mod-sage-ec-ff;
-// the other Sage extras, _sage_ec among them, stay in sage-more)
-const ec = libChunks({ "core.py": "", "sage_all.py": "", "_sage_ec_ff.py": "E = 1\n", "_sage_ec.py": "", "_sage_ec_cubic.py": "", "_sage_lazy.py": "" },
-  { py: rec({ "py|core": mod("core.py") }), sage: rec({ "py|core": mod("core.py"), "py|sage_all": mod("sage_all.py") }) }, "b");
+// (a Sage domain no start uses is a group of its own, mod-sage-<domain>, fetched the first time one of its names is
+// used: _sage_ec_ff is mod-sage-ec-ff, _sage_ec mod-sage-ec; a module the name index's DEPS says another imports at
+// module level is in that one's group (_sage_crystals in _sage_lie's), unless that one is a start's; what isn't a
+// _sage_<x> or sage_<x> module, the sagebrush package say, stays in sage-more)
+const ec = libChunks({ "core.py": "", "sage_all.py": "", "_sage_ec_ff.py": "E = 1\n", "_sage_ec.py": "", "_sage_ec_cubic.py": "", "_sage_lazy.py": "",
+  "_sage_lie.py": "", "_sage_crystals.py": "", "_sage_ff.py": "", "_sage_frac.py": "", "sagebrush/__init__.py": "" },
+  { py: rec({ "py|core": mod("core.py") }), sage: rec({ "py|core": mod("core.py"), "py|sage_all": mod("sage_all.py"), "py|_sage_frac": mod("_sage_frac.py") }) }, "b");
 const fe = ec.manifest.files;
 ok(fe["_sage_ec_ff.py"] === "mod-sage-ec-ff", "_sage_ec_ff: mod-sage-ec-ff");
-ok(["_sage_ec.py", "_sage_ec_cubic.py", "_sage_lazy.py"].every((f) => fe[f] === "sage-more") && fe["sage_all.py"] === "sage", "the other Sage extras stay in sage-more, sage_all in sage: " + JSON.stringify(fe));
+ok(fe["_sage_ec.py"] === "mod-sage-ec" && fe["_sage_ec_cubic.py"] === "mod-sage-ec-cubic" && fe["_sage_lazy.py"] === "mod-sage-lazy" && fe["sage_all.py"] === "sage" && fe["_sage_frac.py"] === "sage",
+  "each Sage domain no start uses a group of its own, sage_all and the start's in sage: " + JSON.stringify(fe));
+ok(fe["_sage_crystals.py"] === "mod-sage-lie" && fe["_sage_lie.py"] === "mod-sage-lie", "_sage_crystals (DEPS: _sage_lie) in _sage_lie's group: " + JSON.stringify(fe));
+ok(fe["_sage_ff.py"] === "mod-sage-ff", "_sage_ff (DEPS: _sage_frac, a start's) a group of its own: " + JSON.stringify(fe));
+// (Graph imports sage_plot at module level, but keeps its own group: plot()'s users don't fetch it)
+const noStart = { sage: new Set(["_sage_frac.py"]) };
+ok(sageDomainRoot("_sage_graph", noStart, { _sage_graph: ["sage_plot"] }) === "_sage_graph" && sageDomainRoot("_sage_crystals", noStart, { _sage_crystals: ["_sage_lie"] }) === "_sage_lie",
+  "_sage_graph (DEPS: sage_plot) keeps its own group; _sage_crystals (DEPS: _sage_lie) still follows");
+ok(fe["sagebrush/__init__.py"] === "sage-more", "the sagebrush package stays in sage-more: " + JSON.stringify(fe));
 ok(ec.manifest.chunks["mod-sage-ec-ff"]?.src && !ec.manifest.chunks["mod-sage-ec-ff"].pre && !ec.manifest.modes.sage.includes("mod-sage-ec-ff"), "mod-sage-ec-ff: sources only, and Sage mode's start doesn't fetch it");
 // (Rill's routing, design/rill.md §6.1 and §6.5: Rill's start is checked last, so a file another start uses stays in
 // core, sci or sage; the start's own files are rill; Rill's other files go by family, never mod-rill; no other mode's

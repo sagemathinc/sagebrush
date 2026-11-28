@@ -1,7 +1,8 @@
 // The Worker that web/cloud/fleet/test-fleet.mjs runs in Miniflare: the fleet routes on any host. A request may carry
 // x-test-before-issue: the name of one change below, made after the handler's checks and immediately before the lease
 // batch, so a test can move state between the handler's own reads and the batch's re-reads. The person's routes take
-// their session from x-test-account / x-test-session (the deployed mount resolves the real one).
+// their session from x-test-account / x-test-session, and its re-authentication time from x-test-reauth-ms (ms, or
+// "null"; absent is null) (the deployed mount resolves the real one).
 import { handleFleet, type FleetEnv } from "./server.ts";
 import type { D1 } from "./store.ts";
 
@@ -26,9 +27,33 @@ export default {
         if (kind === "throw") throw new Error("the session store failed");
         if (kind === "unavailable") return { kind: "unavailable" as const };
         const account = r.headers.get("x-test-account");
-        return kind === "none" || !account ? { kind: "none" as const } : { kind: "ok" as const, account };
+        const rm = r.headers.get("x-test-reauth-ms");
+        const reauthMs = rm === null || rm === "null" ? null : Number(rm);
+        return kind === "none" || !account ? { kind: "none" as const } : { kind: "ok" as const, account, reauthMs };
       },
     };
-    return (await handleFleet(req, env, change ? { beforeIssue: async (db) => { await change(db); } } : {}, person)) ?? new Response("not the fleet API", { status: 404 });
+    // (the pairing routes' seams: x-test-now moves the Worker's clock; x-test-pairing-total lowers the live total;
+    // x-test-pairing names a holder that dies after its claim or after pairing, or waits before claiming)
+    const clock = r(req, "x-test-now"), total = r(req, "x-test-pairing-total"), seam = req.headers.get("x-test-pairing");
+    // (x-test-advance-before-claim: <ms> moves this request's clock forward between an approve's checks and its claim)
+    const advance = r(req, "x-test-advance-before-claim");
+    let at = clock;
+    const die = () => { throw new Error("the holder died (test seam)"); };
+    const pairing = {
+      ...(clock !== null ? { now: () => at! } : {}),
+      ...(total !== null ? { liveTotal: total } : {}),
+      ...(seam === "die-after-claim" ? { afterClaim: async () => die() } : {}),
+      ...(seam === "die-after-pair" ? { afterPair: async () => die() } : {}),
+      ...(seam?.startsWith("wait-before-claim:") ? { beforeClaim: () => new Promise<void>((res) => setTimeout(res, Number(seam.slice(18)))) } : {}),
+      ...(advance !== null && clock !== null ? { beforeClaim: async () => { at = clock + advance; } } : {}),
+      ...(seam?.startsWith("wait-after-claim:") ? { afterClaim: () => new Promise<void>((res) => setTimeout(res, Number(seam.slice(17)))) } : {}),
+    };
+    return (await handleFleet(req, env, { ...(change ? { beforeIssue: async (db) => { await change(db); } } : {}), pairing }, person)) ?? new Response("not the fleet API", { status: 404 });
   },
 };
+
+/** A header's safe integer, or null. */
+function r(req: Request, name: string): number | null {
+  const v = req.headers.get(name);
+  return v !== null && /^[0-9]{1,16}$/.test(v) ? Number(v) : null;
+}
