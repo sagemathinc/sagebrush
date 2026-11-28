@@ -54,7 +54,7 @@ fn level_31() {
     assert_eq!(cp(n, &p(9)[0]), product(&[(&[1, -10], 1), (&[1, -2], 1)]));
     assert_eq!(cp(n, &p(5)[0]), product(&[(&[1, -6], 1), (&[1, 2], 1)]));
     // the other prime above 31 (PSAGE's t31; its norm divides N(N))
-    let other = primes_above(31).into_iter().find(|q| !q.contains(n)).unwrap();
+    let other = primes_above(31).unwrap().into_iter().find(|q| !q.contains(n)).unwrap();
     assert_eq!(cp(n, &other), product(&[(&[1, -32], 1), (&[1, -8], 1)]));
     // sqrt5.py: T at the primes of norm 11 and 19, as a multiset
     let mut got: Vec<_> = p(11).iter().map(|q| cp(n, q)).collect();
@@ -73,7 +73,7 @@ fn level_31() {
 fn level_41() {
     // sqrt5.py: c = F.primes_above(41)[0]; both primes above 41 are
     // conjugate, so either gives the same multiset of charpolys.
-    for n in primes_above(41) {
+    for n in primes_above(41).unwrap() {
         let n = n.gen;
         assert_eq!(cp(n, &p(5)[0]), product(&[(&[1, -6], 1), (&[1, 1], 1)]));
         assert_eq!(cp(n, &p(9)[0]), product(&[(&[1, -10], 1), (&[1, 4], 1)]));
@@ -104,12 +104,12 @@ fn level_389() {
 #[test]
 fn bad_norm_71_and_809() {
     // _hecke_matrix_badnorm: level one prime above 71, T at the other
-    let v = primes_above(71);
+    let v = primes_above(71).unwrap();
     assert_eq!(cp(v[0].gen, &v[1]), product(&[(&[1, -72], 1), (&[1, -6], 1)]));
     assert_eq!(cp(v[1].gen, &v[0]), product(&[(&[1, -72], 1), (&[1, -6], 1)]));
     // level (-26a + 7) of norm 809, T at the other prime above 809
     let n = Elt::new(7, -26);
-    let other = primes_above(809).into_iter().find(|q| !q.contains(n)).unwrap();
+    let other = primes_above(809).unwrap().into_iter().find(|q| !q.contains(n)).unwrap();
     assert_eq!(
         cp(n, &other),
         product(&[

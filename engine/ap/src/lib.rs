@@ -68,6 +68,14 @@ impl EllipticCurve {
 
     /// a_p, or None at a prime dividing the discriminant of the model.
     pub fn ap(&self, p: u64) -> Option<i64> {
+        // (a pending Stop is seen by a single-prime call too, and its loops
+        // check as they go; the lists check once a prime themselves)
+        sagebrush_interrupt::check();
+        self.ap_checked(p)
+    }
+
+    /// a_p after the caller's check (the lists' per-prime check).
+    fn ap_checked(&self, p: u64) -> Option<i64> {
         if self.bad(p) {
             return None;
         }
@@ -80,6 +88,9 @@ impl EllipticCurve {
         let [a1, a2, a3, a4, a6] = self.a.map(|x| (x as i128).rem_euclid(pi));
         let mut count = 1i64; // O
         for x in 0..pi {
+            if x & 1023 == 0 {
+                sagebrush_interrupt::check();
+            }
             let rhs = (((x + a2) * x + a4) * x + a6) % pi;
             let b = (a1 * x + a3) % pi; // y^2 + b y - rhs = 0
             if p == 2 {
@@ -106,6 +117,7 @@ impl EllipticCurve {
         let (md, res) = if jacobi(f.to_u64(disc), p) == -1 { (2, 0) } else { (1, 0) };
         let mut cands: Option<Vec<i64>> = None;
         for x0 in 1..200u64 {
+            sagebrush_interrupt::check();
             // d = x0^3 + a x0 + b; (d x0, d^2) lies on y^2 = x^3 + a d^2 x + b d^3,
             // which is E if d is a square mod p and its quadratic twist if not.
             let x = f.from_i128(x0 as i128);
@@ -151,6 +163,15 @@ pub fn isqrt(n: u64) -> u64 {
     r as u64
 }
 
+/// An upper bound on pi(n), the number of primes up to n: 1.26 n / ln n
+/// (Rosser and Schoenfeld: pi(x) < 1.25506 x / ln x for x > 1), plus 16
+/// for small n; primes_up_to's Vec is allocated at this capacity, and the
+/// web dispatchers reserve it.
+pub fn prime_count_bound(n: u64) -> usize {
+    let b = (1.26 * n as f64 / (n.max(3) as f64).ln()) as u64 + 16;
+    usize::try_from(b.min(n)).unwrap_or(usize::MAX).max(1)
+}
+
 /// Sieve writes (or indices scanned) between two interrupt checks: tens of
 /// microseconds of work, so a Stop is seen promptly, and in WebAssembly one
 /// host poll per block (check_coarse) costs nothing measurable.
@@ -165,7 +186,11 @@ pub fn primes_up_to(n: u64) -> Vec<u64> {
     }
     sagebrush_interrupt::phase("ap.sieve");
     sagebrush_interrupt::check_coarse();
-    let half = (n as usize - 1) / 2; // index i is 2 i + 3
+    // (the length in u64, then checked against the target's width: n as
+    // usize truncated 2^32 + 5 to 5 on wasm32, and the loop below ran past
+    // the two-entry sieve; the dispatchers refuse such bounds first,
+    // ap_bound)
+    let half = usize::try_from((n - 1) / 2).expect("a sieve bound within the address space (ap_bound)"); // index i is 2 i + 3
     let mut composite = vec![false; half];
     sagebrush_interrupt::check_coarse();
     let mut i = 0;
@@ -184,7 +209,10 @@ pub fn primes_up_to(n: u64) -> Vec<u64> {
         }
         i += 1;
     }
-    let mut out = vec![2];
+    // (the primes' Vec at its final capacity, no growth: at most
+    // prime_count_bound(n) of them, the bound the dispatchers reserve)
+    let mut out = Vec::with_capacity(prime_count_bound(n));
+    out.push(2);
     let mut start = 0;
     while start < half {
         let end = half.min(start + SIEVE_BLOCK);
@@ -206,7 +234,7 @@ pub fn aplist(e: &EllipticCurve, n: u64) -> Vec<(u64, Option<i64>)> {
         ch.iter()
             .map(|&p| {
                 sagebrush_interrupt::check();
-                (p, e.ap(p))
+                (p, e.ap_checked(p))
             })
             .collect::<Vec<_>>()
     })
@@ -225,7 +253,7 @@ pub fn aplist_many(curves: &[EllipticCurve], n: u64) -> Vec<Vec<(u64, Option<i64
             .iter()
             .map(|&p| {
                 sagebrush_interrupt::check();
-                (p, e.ap(p))
+                (p, e.ap_checked(p))
             })
             .collect()
     })
@@ -269,7 +297,7 @@ pub fn moments(e: &EllipticCurve, n: u64, kmax: usize) -> (u64, Vec<f64>) {
         let mut count = 0u64;
         for &p in ch.iter() {
             sagebrush_interrupt::check();
-            if let Some(a) = e.ap(p) {
+            if let Some(a) = e.ap_checked(p) {
                 let x2 = (a * a) as f64 / p as f64;
                 let mut x = 1.0;
                 for s in sums.iter_mut() {

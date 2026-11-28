@@ -213,8 +213,11 @@ impl Hnf {
         let (c, s, t) = xgcd(y1, y2);
         // |det| / c = |N(g)| / c, exact in i128 as in Elt::norm
         let ax = (y2 / c).wrapping_mul(x1).wrapping_sub((y1 / c).wrapping_mul(x2)).abs();
-        let r = |u: i128| u.rem_euclid(ax);
-        let b = (r(s) * r(x1) % ax + r(t) * r(x2) % ax) % ax;
+        debug_assert!(ax < 1 << 64, "a principal ideal's HNF past u64");
+        // (residues below ax < 2^64: their products formed in u128)
+        let r = |u: i128| u.rem_euclid(ax) as u128;
+        let m = ax as u128;
+        let b = ((r(s) * r(x1) % m + r(t) * r(x2) % m) % m) as i128;
         let h = Hnf { a: ax as u64, b: b as u64, c: c as u64 };
         debug_assert!(h.a % h.c == 0 && h.b % h.c == 0, "{:?} is not an ideal", h);
         h
@@ -507,34 +510,90 @@ impl Ord for Prime {
 /// A shortest nonzero vector of the 2-dimensional lattice with basis u, v
 /// (vectors x + y w as (x, y)) for the positive definite form
 /// Q(x + y w) = 2x^2 + 2xy + 3y^2, the sum of the squares of the two real
-/// embeddings, by Lagrange-Gauss reduction.
-fn shortest(mut u: (i128, i128), mut v: (i128, i128)) -> (i128, i128) {
-    let q = |x: (i128, i128)| 2 * x.0 * x.0 + 2 * x.0 * x.1 + 3 * x.1 * x.1;
-    let bil = |x: (i128, i128), y: (i128, i128)| 2 * x.0 * y.0 + x.0 * y.1 + x.1 * y.0 + 3 * x.1 * y.1;
-    if q(u) > q(v) {
+/// embeddings, by Lagrange-Gauss reduction; None when a value it forms
+/// passes i128 (checked: no fixed bound on the input).
+fn shortest(mut u: (i128, i128), mut v: (i128, i128)) -> Option<(i128, i128)> {
+    fn mul(a: i128, b: i128) -> Option<i128> {
+        a.checked_mul(b)
+    }
+    fn add(terms: &[Option<i128>]) -> Option<i128> {
+        terms.iter().try_fold(0i128, |acc, t| acc.checked_add((*t)?))
+    }
+    let q = |x: (i128, i128)| add(&[mul(2, x.0).and_then(|t| mul(t, x.0)), mul(2, x.0).and_then(|t| mul(t, x.1)), mul(3, x.1).and_then(|t| mul(t, x.1))]);
+    let bil = |x: (i128, i128), y: (i128, i128)| {
+        add(&[mul(2, x.0).and_then(|t| mul(t, y.0)), mul(x.0, y.1), mul(x.1, y.0), mul(3, x.1).and_then(|t| mul(t, y.1))])
+    };
+    if q(u)? > q(v)? {
         std::mem::swap(&mut u, &mut v);
     }
     loop {
-        // v -= round(B(u, v) / Q(u)) u
-        let (n, d) = (bil(u, v), q(u));
-        let m = (2 * n + d).div_euclid(2 * d);
-        v = (v.0 - m * u.0, v.1 - m * u.1);
-        if q(v) >= q(u) {
-            return u;
+        // v -= round(B(u, v) / Q(u)) u, the rounding as n div d plus one when
+        // the remainder is at least half of d (2 r < 2 d never overflows
+        // where d does not)
+        let (n, d) = (bil(u, v)?, q(u)?);
+        let (fl, r) = (n.div_euclid(d), n.rem_euclid(d));
+        let m = if r >= d - r { fl.checked_add(1)? } else { fl };
+        v = (v.0.checked_sub(mul(m, u.0)?)?, v.1.checked_sub(mul(m, u.1)?)?);
+        if q(v)? >= q(u)? {
+            return Some(u);
         }
         std::mem::swap(&mut u, &mut v);
     }
 }
 
-/// The primes of O_F above the rational prime p, sorted.
-pub fn primes_above(p: u64) -> Vec<Prime> {
-    assert!(is_prime(p), "{} is not prime", p);
+/// A basis of the lattice {x + y w : x + y r = 0 mod p} (r a root of
+/// x^2 - x - 1 mod p, 0 < r < p) whose Gram values fit i128 for every
+/// p < 2^64: (p, 0), (-r, 1) has Q((p, 0)) = 2 p^2, past i128 from 2^63.
+/// Euclid on (p, r), stopped at the first remainder r_i below sqrt p,
+/// gives the lattice vectors (r_i, -t_i) (r_i = s_i p + t_i r) with
+/// |t_i| <= p / r_(i-1) <= sqrt p, so Q(u) <= 7 p (it can pass 6 p:
+/// 6,484,807 at p = 1000381); the one before, of coordinates below p and
+/// sqrt p, is size-reduced against it (B fits: below 2^64 2^33), to a w with
+/// Q(w) <= 5 p^2 / Q(u) + Q(u) / 4 <= 6 p, as Q(u) >= 2 |N(u)| >= 2 p.
+fn half_euclid(p: u64, r: u64) -> Option<((i128, i128), (i128, i128))> {
+    let p128 = p as i128;
+    let (mut r0, mut r1) = (p128, r as i128);
+    let (mut t0, mut t1) = (0i128, 1i128);
+    // (r1 < p < 2^64: its square in u128, so a root past 2^63.5 is not lost
+    // to the stop test)
+    while r1 != 0 && (r1 as u128) * (r1 as u128) >= p as u128 {
+        let q = r0 / r1;
+        (r0, r1) = (r1, r0 - q * r1);
+        (t0, t1) = (t1, t0.checked_sub(q.checked_mul(t1)?)?);
+    }
+    let u = (r1, -t1);
+    let v = (r0, -t0);
+    let q = |x: (i128, i128)| -> Option<i128> {
+        (2 * x.0).checked_mul(x.0)?.checked_add((2 * x.0).checked_mul(x.1)?)?.checked_add((3 * x.1).checked_mul(x.1)?)
+    };
+    let bil = |x: (i128, i128), y: (i128, i128)| -> Option<i128> {
+        (2 * x.0).checked_mul(y.0)?.checked_add(x.0.checked_mul(y.1)?)?.checked_add(x.1.checked_mul(y.0)?)?.checked_add((3 * x.1).checked_mul(y.1)?)
+    };
+    let (n, d) = (bil(v, u)?, q(u)?);
+    let (fl, rem) = (n.div_euclid(d), n.rem_euclid(d));
+    let m = if rem >= d - rem { fl + 1 } else { fl };
+    Some((u, (v.0.checked_sub(m.checked_mul(u.0)?)?, v.1.checked_sub(m.checked_mul(u.1)?)?)))
+}
+
+/// The primes of O_F above the rational prime p, sorted; an error if p is
+/// not prime, is inert of norm p^2 >= 2^64 (p >= 2^32), past the u64 norms
+/// of [`Prime`] and [`Hnf`], or is split and the generator's search
+/// (checked i128 arithmetic) or its coefficients actually overflow.
+pub fn primes_above(p: u64) -> Result<Vec<Prime>, String> {
+    if !is_prime(p) {
+        return Err(format!("{} is not prime", p));
+    }
     if p == 5 {
         // (sqrt 5) = (2w - 1)
-        return vec![Prime::from_gen(5, Kind::Ramified, Elt::new(-1, 2))];
+        return Ok(vec![Prime::from_gen(5, Kind::Ramified, Elt::new(-1, 2))]);
     }
     if p % 5 == 2 || p % 5 == 3 {
-        return vec![Prime::from_gen(p, Kind::Inert, Elt::int(p as i64))];
+        // (p is inert: its prime (p) has norm p^2, which must fit a u64, and
+        // p itself an i64 generator; a split prime's norm is p)
+        if p >= 1 << 32 {
+            return Err(format!("the prime above {} is inert of norm {}^2, at least 2^64: past the norms supported", p, p));
+        }
+        return Ok(vec![Prime::from_gen(p, Kind::Inert, Elt::int(p as i64))]);
     }
     // p = +-1 mod 5 splits: x^2 - x - 1 has the roots r = (1 +- sqrt 5)/2
     // mod p, and (p) = (p, w - r)(p, w - r'). The lattice (p, w - r) has
@@ -545,13 +604,15 @@ pub fn primes_above(p: u64) -> Vec<Prime> {
     let mut v = vec![];
     for t in [s, p - s] {
         let r = ((1 + t) as u128 * half as u128 % p as u128) as u64;
-        let g = shortest((p as i128, 0), (-(r as i128), 1));
-        let g = Elt::new(narrow(g.0), narrow(g.1));
+        let big = || format!("the primes above {} are split of norm {}, past the i128 arithmetic of their generators' search", p, p);
+        let (u, w) = half_euclid(p, r).ok_or_else(big)?;
+        let g = shortest(u, w).ok_or_else(big)?;
+        let g = Elt::new(i64::try_from(g.0).map_err(|_| big())?, i64::try_from(g.1).map_err(|_| big())?);
         assert_eq!(g.norm().unsigned_abs(), p as u128, "no generator of norm p found");
         v.push(Prime::from_gen(p, Kind::Split, g));
     }
     v.sort();
-    v
+    Ok(v)
 }
 
 /// A nonzero ideal of O_F with its factorization and a totally positive
@@ -577,7 +638,7 @@ impl Ideal {
         let mut factors = vec![];
         let mut rest = g;
         for (p, _) in factor_u64(n as u64)? {
-            for pr in primes_above(p) {
+            for pr in primes_above(p)? {
                 let mut e = 0;
                 while let Some(q) = rest.div_exact(pr.gen) {
                     rest = q;
@@ -637,7 +698,7 @@ impl Ideal {
         }
         // u = (A, 0) and v = (B, C) with C | A: reduce B modulo A
         let v = (v.0.rem_euclid(u.0.abs()), v.1);
-        let g = shortest(u, v);
+        let g = shortest(u, v).ok_or("ideal too large")?;
         let g = Elt::new(i64::try_from(g.0).map_err(|_| "ideal too large")?, i64::try_from(g.1).map_err(|_| "ideal too large")?);
         let n = (u.0 * v.1 - u.1 * v.0).unsigned_abs();
         if g.norm().unsigned_abs() != n {
@@ -681,7 +742,10 @@ pub fn rational_primes(n: u64) -> Vec<u64> {
 
 /// The prime ideals of norm at most bound, sorted by norm.
 pub fn primes_of_bounded_norm(bound: u64) -> Vec<Prime> {
-    let mut v: Vec<Prime> = rational_primes(bound).into_iter().flat_map(primes_above).filter(|p| p.norm <= bound).collect();
+    // (the only refusal of primes_above(p) for a prime p is an inert one of
+    // norm p^2 >= 2^64, past any bound)
+    let mut v: Vec<Prime> =
+        rational_primes(bound).into_iter().filter_map(|p| primes_above(p).ok()).flatten().filter(|p| p.norm <= bound).collect();
     v.sort();
     v
 }
@@ -714,6 +778,77 @@ pub fn ideals_of_bounded_norm(bound: u64) -> Vec<Ideal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Inert primes whose norm p^2 passes 2^64 are refused, not wrapped: Sage
+    /// 10.10 gives 2^63 - 25 and 2^64 - 59 one inert prime each, of norm p^2
+    /// (85070591730234615404675050015203263089 and
+    /// 340282366920938461286658806734041124249), where this gave norms 625 and
+    /// 3481. The generator's search for a split prime is checked, so it
+    /// starts from a half-Euclid basis whose Gram values fit i128: 2^62 + 135,
+    /// 2^63 - 259 (which overflowed in a debug build before), and the first
+    /// and last split primes in [2^63, 2^64), 2^63 + 123 and 2^64 - 95, are
+    /// answered with Sage's norms. The largest inert prime below 2^32 is
+    /// answered too.
+    #[test]
+    fn primes_above_norms_past_u64() {
+        for p in [(1u64 << 63) - 25, u64::MAX - 58] {
+            let e = primes_above(p).unwrap_err();
+            assert!(e.contains("inert") && e.contains("2^64"), "{}", e);
+        }
+        let v = primes_above(4294967197).unwrap();
+        assert_eq!((v.len(), v[0].norm, v[0].kind), (1, 18446743223306036809, Kind::Inert));
+        let v = primes_above(4611686018427387761).unwrap();
+        assert_eq!(v.len(), 2);
+        for q in &v {
+            assert_eq!((q.norm, q.kind), (4611686018427387761, Kind::Split));
+        }
+        // (past 2^62 the search's worst case passes i128, but not its actual
+        // values: answered, with Sage's norms)
+        for p in [4611686018427388039u64, 9223372036854775549] {
+            let v = primes_above(p).unwrap();
+            assert_eq!(v.len(), 2);
+            for q in &v {
+                assert_eq!((q.norm, q.kind), (p, Kind::Split));
+            }
+        }
+        // (past 2^63, where the basis (p, 0), (-r, 1) has Gram values past
+        // i128, the half-Euclid basis is used: the first and last split
+        // primes in [2^63, 2^64), with Sage's norms)
+        for p in [9223372036854775931u64, 18446744073709551521] {
+            let v = primes_above(p).unwrap();
+            assert_eq!(v.len(), 2);
+            for q in &v {
+                assert_eq!((q.norm, q.kind), (p, Kind::Split));
+                assert!(q.contains(q.gen) && q.gen.norm().unsigned_abs() == p as u128);
+            }
+            assert_ne!(v[0], v[1]);
+        }
+        assert!(primes_above(91).unwrap_err().contains("not prime"));
+        // (a root r past 2^63.5, whose square passed i128 in the half-Euclid
+        // stop test: 2^64 - 199967; and windows of 200 split primes each
+        // from 2^63, 1.3 10^19, 1.35 10^19 and below 2^64, all answered)
+        let v = primes_above(18446744073709351649).unwrap();
+        assert!(v.len() == 2 && v.iter().all(|q| q.norm == 18446744073709351649 && q.contains(q.gen)));
+        for lo in [(1u64 << 63) + 1, 13_000_000_000_000_000_001, 13_500_000_000_000_000_001, u64::MAX - 2_000_000] {
+            let (mut p, mut n) = (lo | 1, 0);
+            while n < 200 {
+                if (p % 5 == 1 || p % 5 == 4) && is_prime(p) {
+                    let v = primes_above(p).unwrap();
+                    assert!(v.len() == 2 && v.iter().all(|q| q.norm == p && q.gen.norm().unsigned_abs() == p as u128), "{}", p);
+                    n += 1;
+                }
+                p += 2;
+            }
+        }
+        // (the principal HNF's residues multiplied in u128: Sage 10.10's
+        // (18446744069414584319, 4294967295, 1) for -(2^32 - 1) - w and its
+        // negative, the generator in it)
+        for g in [Elt::new(-4294967295, -1), Elt::new(4294967295, 1)] {
+            let h = Hnf::principal(g);
+            assert_eq!((h.a, h.b, h.c), (18446744069414584319, 4294967295, 1));
+            assert!(h.contains(g));
+        }
+    }
 
     /// For tests/wasm-stop.mjs (the Stop button in wasm): seconds of
     /// Pollard-Brent factorizations of products of two primes near 2^31,
@@ -773,5 +908,98 @@ mod tests {
         assert_eq!(i.hnf, Ideal::principal(Elt::int(2)).unwrap().hnf);
         let i = Ideal::from_gens(&[Elt::new(-38, 2).mul(W), Elt::new(-38, 2).scale(3)]).unwrap();
         assert_eq!(i.norm(), 1364);
+    }
+
+    /// Inert primes just past 2^32, whose norms p^2 pass 2^64, are refused,
+    /// the least and the greatest in [2^32, 2^33).
+    #[test]
+    fn inert_just_past_2_32() {
+        for p in [4294967357u64, 8589934583] {
+            assert!(p % 5 == 2 || p % 5 == 3);
+            let e = primes_above(p).unwrap_err();
+            assert!(e.contains("inert") && e.contains("2^64"), "{}", e);
+        }
+    }
+
+    /// half_euclid's basis: Q(u) < 7 p, and the size-reduced w has Q(w) <=
+    /// 6 p, over 400 split primes from 2^20 to 2^64 (both roots each).
+    #[test]
+    fn half_euclid_bound() {
+        let q = |x: (i128, i128)| 2 * x.0 * x.0 + 2 * x.0 * x.1 + 3 * x.1 * x.1;
+        let mut n = 0;
+        let mut seen_u_past_6p = false;
+        // nine split primes from each 2^b, b = 20..64: 396, and four more
+        // from 2^64 - 10^6
+        let starts: Vec<(u64, usize)> = (20..64).map(|b| (1u64 << b, 9)).chain([(u64::MAX - 1_000_000, 4)]).collect();
+        for (start, count) in starts {
+            let (mut p, mut got) = (start | 1, 0);
+            while got < count {
+                if (p % 5 == 1 || p % 5 == 4) && is_prime(p) {
+                    let s = sqrt_mod_p(5, p).unwrap();
+                    let half = (p + 1) / 2;
+                    for t in [s, p - s] {
+                        let r = ((1 + t) as u128 * half as u128 % p as u128) as u64;
+                        let (u, w) = half_euclid(p, r).unwrap();
+                        // (Q fits i128 here: coordinates below 2^33 each)
+                        let (qu, qw) = (q(u) as u128, q(w) as u128);
+                        assert!(qu < 7 * p as u128 && qw <= 6 * p as u128, "p = {} r = {}: Q(u) = {}, Q(w) = {}", p, r, qu, qw);
+                        seen_u_past_6p |= qu > 6 * p as u128;
+                    }
+                    got += 1;
+                    n += 1;
+                }
+                p += 2;
+            }
+        }
+        assert_eq!(n, 400);
+        let (u, _) = {
+            let p = 1000381u64;
+            let s = sqrt_mod_p(5, p).unwrap();
+            let r = |t: u64| ((1 + t) as u128 * ((p + 1) / 2) as u128 % p as u128) as u64;
+            let a = half_euclid(p, r(s)).unwrap();
+            let b = half_euclid(p, r(p - s)).unwrap();
+            if q(a.0) > q(b.0) { a } else { b }
+        };
+        assert_eq!(q(u), 6484807, "Q(u) passes 6 p at p = 1000381");
+        let _ = seen_u_past_6p;
+    }
+
+    /// shortest() against a brute-force minimum of Q over the lattice, on
+    /// random bases of small vectors made skewed by large multiples.
+    #[test]
+    fn shortest_is_a_minimum() {
+        let q = |x: (i128, i128)| 2 * x.0 * x.0 + 2 * x.0 * x.1 + 3 * x.1 * x.1;
+        let mut seed = 0x2371u64;
+        let mut rnd = |m: i64| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) % (2 * m as u64 + 1)) as i64 - m
+        };
+        let mut tested = 0;
+        while tested < 300 {
+            let (e1, e2) = ((rnd(12) as i128, rnd(12) as i128), (rnd(12) as i128, rnd(12) as i128));
+            let det = e1.0 * e2.1 - e1.1 * e2.0;
+            if det == 0 {
+                continue;
+            }
+            // skewed: u = e1 + a e2, v = e2 + b u, a and b up to 10^4
+            let a = rnd(10_000) as i128;
+            let u = (e1.0 + a * e2.0, e1.1 + a * e2.1);
+            let b = rnd(10_000) as i128;
+            let v = (e2.0 + b * u.0, e2.1 + b * u.1);
+            let g = shortest(u, v).unwrap();
+            // the minimum over the lattice points in the box Q <= Q(e1)
+            let bound = q(e1).min(q(e2));
+            let r = (bound as f64).sqrt() as i128 + 1;
+            let mut best = bound;
+            for x in -r..=r {
+                for y in -r..=r {
+                    if (x, y) != (0, 0) && (x * e2.1 - y * e2.0) % det == 0 && (e1.0 * y - e1.1 * x) % det == 0 {
+                        best = best.min(q((x, y)));
+                    }
+                }
+            }
+            assert_eq!(q(g), best, "basis {:?} {:?}: shortest gave {:?}", u, v, g);
+            tested += 1;
+        }
     }
 }
