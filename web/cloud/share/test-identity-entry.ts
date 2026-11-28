@@ -2,12 +2,38 @@
 // token check itself at /__verify, so its rows run in the Workers runtime, as deployed.
 import { clearKeyCache, verifyAccessToken } from "../../share/identity/workos.ts";
 import { seal, sealKeys, unseal } from "../../share/identity/seal.ts";
-import { authTier, disableAccount, drainRevokes, handleShare, outboxCounts, reauthAt, scheduled, type ShareEnv } from "./server.ts";
+import { authTier, disableAccount, drainRevokes, handleShare, onSessionsEnded, outboxCounts, reauthAt, scheduled, type EndedSession, type ShareEnv } from "./server.ts";
 import { handleRemote } from "../remote/server.ts";
+
+// (tests only: the bulk-end hooks, registered at import as the sync service registers its own, recording each call;
+// off until a row arms them, and each can be made to fail)
+const hooks = { on: false, failEnding: false, failEnded: false, calls: [] as { hook: string; account: string; sessions?: EndedSession[]; live?: number }[] };
+let hookDb: ShareEnv["SHARE_DB"] = undefined;
+onSessionsEnded({
+  ending: async (_env, account) => {
+    if (!hooks.on) return;
+    // (how many of the account's sessions exist when it runs: all of them, since it runs before the delete)
+    const live = Number((await hookDb!.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(account).first<{ n: number }>())?.n);
+    hooks.calls.push({ hook: "ending", account, live });
+    if (hooks.failEnding) throw new Error("ending failed (test)");
+  },
+  ended: async (_env, account, sessions) => {
+    if (!hooks.on) return;
+    hooks.calls.push({ hook: "ended", account, sessions });
+    if (hooks.failEnded) throw new Error("ended failed (test)");
+  },
+});
 
 export default {
   async fetch(req: Request, env: ShareEnv, ctx: { waitUntil(p: Promise<unknown>): void }) {
     const u = new URL(req.url);
+    hookDb = env.SHARE_DB;
+    if (u.pathname === "/__hooks" && req.method === "POST") {
+      const b = (await req.json()) as { on?: boolean; failEnding?: boolean; failEnded?: boolean };
+      const calls = hooks.calls;
+      Object.assign(hooks, { on: !!b.on, failEnding: !!b.failEnding, failEnded: !!b.failEnded, calls: [] });
+      return Response.json({ calls });
+    }
     if (u.pathname === "/__verify" && req.method === "POST") {
       const b = (await req.json()) as { token: unknown; now?: number; issuer?: string; clientId?: string; env?: string; fresh?: boolean };
       if (b.fresh) clearKeyCache();
@@ -26,7 +52,11 @@ export default {
     }
     // (tests only: an account disabled, as the admin action will; the revoke outbox drained; its numbers)
     if (u.pathname === "/__disable" && req.method === "POST") {
-      await disableAccount(env, ((await req.json()) as { account: string }).account);
+      try {
+        await disableAccount(env, ((await req.json()) as { account: string }).account);
+      } catch {
+        return Response.json({ ok: false }, { status: 503 });
+      }
       return Response.json({ ok: true });
     }
     // (tests only: the refresh-token seal in workerd: rotation, retired keys, a seal moved to another row or environment)

@@ -1360,6 +1360,58 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   ok(dv.status === 200 && within((await rowOf(cookieOf(dv, "__Host-sb_session")))?.reauth_ms, d0, Date.now()), "RA7 /auth/dev's session is re-authenticated now");
 }
 
+// ---- the bulk-end hooks (onSessionsEnded): the sessions each bulk end deleted go to `ended`, exactly; a disable runs
+// `ending` first, and refuses with nothing changed when it fails; a failing `ended` never fails the sign-out
+{
+  const hooks = async (b) => (await fetchSite(mf, "/__hooks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) })).json();
+  const postJ = (path, session, body = {}) => fetchSite(mf, path, { method: "POST", headers: { "content-type": "application/json", origin: SITE, ...(session ? { cookie: session } : {}) }, body: JSON.stringify(body) });
+  const hashOf = (cookie) => createHash("sha256").update(cookie.split("=")[1]).digest("hex");
+  const acctOf = async (sid) => (await db.prepare("SELECT account_id FROM sessions WHERE provider_sid = ?1").bind(sid).first())?.account_id;
+  const ends = (rows) => Object.fromEntries(rows.map((r) => [r.token_hash, Math.max(r.expires, r.abs_expires ?? 0)]));
+
+  // sign-out everywhere: two signed-in sessions, plus one made just before the delete (as a sign-in finishing between
+  // the sync service's last read and this delete would): all three, with their ends
+  const a = await signIn("user_01HOOKA", "session_01HA1");
+  await signIn("user_01HOOKA", "session_01HA2");
+  const acct = await acctOf("session_01HA1");
+  await db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES ('late-session-hash', ?1, ?2, ?3, 'workos', ?4, ?2)").bind(acct, nowS(), nowS() + 3600, nowS() + 86400).run();
+  const before = ends((await db.prepare("SELECT token_hash, expires, abs_expires FROM sessions WHERE account_id = ?1").bind(acct).all()).results);
+  await hooks({ on: true });
+  const r = await postJ("/auth/logout-everywhere", a.session);
+  const { calls } = await hooks({});
+  const got = calls.find((c) => c.hook === "ended");
+  const gotEnds = Object.fromEntries((got?.sessions ?? []).map((s) => [s.session, s.ends]));
+  ok(r.status === 200 && calls.length === 1 && got.account === acct && Object.keys(before).length === 3 && JSON.stringify(Object.keys(gotEnds).sort()) === JSON.stringify(Object.keys(before).sort()) && Object.keys(before).every((h) => gotEnds[h] === before[h]) && "late-session-hash" in gotEnds && hashOf(a.session) in gotEnds, `H1 sign-out everywhere hands exactly the sessions it deleted to the ended hook, each with its latest end, the one made just before included (${r.status}, ${JSON.stringify(calls.map((c) => [c.hook, c.sessions?.length]))})`);
+
+  // a failing ended hook: the sign-out still answers 200 and every session is gone
+  const f = await signIn("user_01HOOKF", "session_01HF1");
+  const fAcct = await acctOf("session_01HF1");
+  await hooks({ on: true, failEnded: true });
+  const fr = await postJ("/auth/logout-everywhere", f.session);
+  await hooks({});
+  const fLeft = (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(fAcct).first()).n;
+  ok(fr.status === 200 && fLeft === 0, `H2 an ended hook that throws doesn't fail sign-out everywhere: 200, every session gone (${fr.status}, ${fLeft} left)`);
+
+  // a disable: ending runs first, with every session still there; then ended gets them all
+  await signIn("user_01HOOKD", "session_01HD1");
+  await signIn("user_01HOOKD", "session_01HD2");
+  const dAcct = await acctOf("session_01HD1");
+  await hooks({ on: true });
+  const dr = await postJ("/__disable", null, { account: dAcct });
+  const dc = (await hooks({})).calls;
+  ok(dr.status === 200 && dc.length === 2 && dc[0].hook === "ending" && dc[0].live === 2 && dc[1].hook === "ended" && dc[1].sessions.length === 2, `H3 a disable runs the ending hook first (both sessions still there), then hands both deleted sessions to ended (${JSON.stringify(dc.map((c) => [c.hook, c.live ?? c.sessions?.length]))})`);
+
+  // a disable whose ending hook fails: refused, nothing changed (not disabled, sessions kept, no generation bump)
+  await signIn("user_01HOOKX", "session_01HX1");
+  const xAcct = await acctOf("session_01HX1");
+  const x0 = await db.prepare("SELECT generation, disabled FROM accounts WHERE account_id = ?1").bind(xAcct).first();
+  await hooks({ on: true, failEnding: true });
+  const xr = await postJ("/__disable", null, { account: xAcct });
+  const xc = (await hooks({})).calls;
+  const x1 = await db.prepare("SELECT generation, disabled, (SELECT COUNT(*) FROM sessions WHERE account_id = ?1) AS n FROM accounts WHERE account_id = ?1").bind(xAcct).first();
+  ok(xr.status === 503 && xc.length === 1 && xc[0].hook === "ending" && x1.n === 1 && x1.disabled === null && x1.generation === x0.generation, `H4 a disable whose ending hook fails is refused with nothing changed: not disabled, the session kept, no ended call (${xr.status}, ${JSON.stringify(x1)})`);
+}
+
 await mf.dispose();
 console.log(`${count - failures}/${count} identity checks passed`);
 process.exit(failures ? 1 : 0);
