@@ -2516,6 +2516,16 @@ export class SyncClient {
   private guard(method: string, path: string, body?: unknown) {
     if (!this.opts.e2e) return;
     const bad = (why: string): never => { throw new Error(`sync: an end-to-end client never sends ${why}`); };
+    // (checked as fetch will send it: the path resolved against the origin, with no query or fragment, and exactly its
+    // own normalized form, so a "..", a "." or an encoded segment can't carry a request past these checks to a route)
+    if (path.includes("?") || path.includes("#")) bad("a request with a query or fragment");
+    let resolved: string;
+    try {
+      resolved = new URL(path, this.origin || "http://origin.invalid").pathname;
+    } catch {
+      return bad("a request to a path that isn't one");
+    }
+    if (resolved !== path) bad("a path that isn't its own normalized form");
     if (path.startsWith("/api/sync/v1/manifest")) bad("a chunked file's manifest");
     const m = path.match(/^\/api\/sync\/v1\/blob\/([^/?]*)$/);
     if (m && !A1.test(m[1])) bad("a blob named by anything but its keyed address");

@@ -5344,6 +5344,26 @@ async function sealedBlobs() {
         await a.http("GET", "/api/sync/v1/manifest/" + sha).then(() => "sent", () => "thrown"),
       ];
       check(J(tries) === J(["thrown", "thrown", "thrown", "thrown"]) && recA.length === n0, "sealed blobs: the guard: a blob named by its SHA-256, a plain body at an a1: address, a check by SHA-256, a manifest: each throws, and no request is made: " + J(tries));
+      // (paths as fetch would resolve them: each form below would reach a guarded route with a file's SHA-256 or bytes;
+      // each throws, before any request; and the guard's own path check, apart from the body's: a frame-bodied PUT at a
+      // SHA-256, and a GET at one)
+      const a1 = puts[0].url.slice(puts[0].url.indexOf("/blob/") + 6), frame = puts[0].body;
+      const plainBody = files["/sb/pattern.bin"];
+      const forms = [
+        ["PUT", `/api/sync/v1/blob/${sha}?`, plainBody],
+        ["PUT", `/api/sync/v1/x/../blob/${sha}`, plainBody],
+        ["GET", `/api/sync/v1/./blob/${sha}`],
+        ["POST", "/api/sync/v1/blobs/check?", { blobs: [{ address: sha, ct_sha256: sha, size: 5000 }] }],
+        ["PUT", `/api/sync/v1/x/../manifest/${sha}`, plainBody],
+        ["PUT", `/api/sync/v1/blob/${a1}/../${sha}`, plainBody],
+        ["GET", `/api/sync/v1/blob/${sha}#x`],
+        ["POST", "/api/sync/v1/./blobs/check", { blobs: [{ address: sha, ct_sha256: sha, size: 5000 }] }],
+        ["PUT", `/api/sync/v1/blob/${sha}`, frame],
+        ["GET", `/api/sync/v1/blob/${sha}`],
+      ];
+      const n1 = recA.length, out = [];
+      for (const [m, p, body] of forms) out.push(await a.http(m, p, body, {}).then(() => "sent", (e) => (/end-to-end client never sends/.test(e?.message) ? "guarded" : "other: " + e?.message)));
+      check(out.every((x) => x === "guarded") && recA.length === n1, "sealed blobs: the guard on the path as fetch resolves it: a query, a fragment, a \"..\" or \".\" segment, each before any request; and its path check alone (a frame at a SHA-256, a GET at one): " + J(out));
     }
     // ---- a file that grows past the largest PUT: its new version never sent, nor any piece of it; B keeps the old
     {

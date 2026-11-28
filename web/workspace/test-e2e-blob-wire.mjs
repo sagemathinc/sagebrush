@@ -81,6 +81,8 @@ for (const n of [0, 1, 4096, C.CHUNK + 1]) {
     ["a header with spaces (its fields in order, but not the canonical bytes)", (() => { const t = new TextEncoder().encode(`{"codec": "store.1", "compressedLength": ${pt.length}, "plaintextLength": ${pt.length}}`); return B.concat(new TextEncoder().encode("SBB1"), B.u32(t.length), t, f.body.subarray(head)); })()],
     ["a header writing a length another way (1e3 style)", (() => { const t = new TextEncoder().encode(`{"codec":"store.1","compressedLength":${pt.length}.0,"plaintextLength":${pt.length}}`); return B.concat(new TextEncoder().encode("SBB1"), B.u32(t.length), t, f.body.subarray(head)); })()],
     ["a header length past the frame", mut((b) => { new DataView(b.buffer).setUint32(4, 1 << 20); })],
+    ["a header led by a UTF-8 byte-order mark", (() => { const t = B.concat(new Uint8Array([0xef, 0xbb, 0xbf]), new TextEncoder().encode(JSON.stringify({ codec: "store.1", compressedLength: pt.length, plaintextLength: pt.length }))); return B.concat(new TextEncoder().encode("SBB1"), B.u32(t.length), t, f.body.subarray(head)); })()],
+    ["a header that isn't UTF-8", (() => { const t = B.concat(new TextEncoder().encode('{"codec":"store.1"'), new Uint8Array([0xff, 0xfe]), new TextEncoder().encode("}")); return B.concat(new TextEncoder().encode("SBB1"), B.u32(t.length), t, f.body.subarray(head)); })()],
     ["nothing", new Uint8Array(0)],
   ];
   for (const [what, body] of cases) {

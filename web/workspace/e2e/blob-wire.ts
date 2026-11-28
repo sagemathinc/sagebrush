@@ -53,7 +53,13 @@ export async function openFile(keys: EpochKeys, sha: Uint8Array, address: string
   if (new TextDecoder().decode(body.subarray(0, MAGIC.length)) !== MAGIC) refuse("bad_form", "not a sealed file's frame");
   const n = new DataView(body.buffer, body.byteOffset + MAGIC.length, 4).getUint32(0);
   if (n > HEAD_MAX || body.length < MAGIC.length + 4 + n) refuse("bad_form", "a sealed file's header isn't its frame's");
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(body.subarray(MAGIC.length + 4, MAGIC.length + 4 + n));
+  // (the header's bytes as they are: a byte-order mark kept, so it fails the canonical check; invalid UTF-8 is bad_form)
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body.subarray(MAGIC.length + 4, MAGIC.length + 4 + n));
+  } catch {
+    return refuse("bad_form", "a sealed file's header isn't UTF-8");
+  }
   let h: { codec?: unknown; compressedLength?: unknown; plaintextLength?: unknown };
   try {
     h = JSON.parse(text);
