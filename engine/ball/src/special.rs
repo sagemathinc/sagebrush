@@ -144,16 +144,25 @@ pub fn e1(x: &Ball, prec: u64) -> Option<Ball> {
     let mut s = Ball::zero();
     let goal = Mag::pow2(-(wp as i64));
     let mut k: u64 = 0;
-    loop {
-        k += 1;
-        p = p.mul(&mx, wp).div_i64(k as i64, wp);
-        let t = p.div_i64(k as i64, wp);
-        s = if k % 2 == 1 { s.add(&t, wp) } else { s.sub(&t, wp) };
-        if k >= 2 * xint {
-            let tb = t.upper_abs();
-            if tb <= goal {
-                s = s.add_error(tb);
-                break;
+    // (an x of at most 2^-wp: the series x - x^2/4 + ... is x within x^2/4
+    // <= |x| 2^-wp; its x^2 could underflow the exponent range, and an
+    // indeterminate term never met the exit below, at 2^-(2^40))
+    let xb = mx.upper_abs();
+    if xb <= goal {
+        s = mx.add_error(xb.mul_2exp(-(wp as i64)));
+    }
+    if xb > goal {
+        loop {
+            k += 1;
+            p = p.mul(&mx, wp).div_i64(k as i64, wp);
+            let t = p.div_i64(k as i64, wp);
+            s = if k % 2 == 1 { s.add(&t, wp) } else { s.sub(&t, wp) };
+            if k >= 2 * xint {
+                let tb = t.upper_abs();
+                if tb <= goal {
+                    s = s.add_error(tb);
+                    break;
+                }
             }
         }
     }
