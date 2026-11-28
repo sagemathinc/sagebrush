@@ -191,6 +191,21 @@ def _arith(cls):
     return cls
 
 
+def _bits(cls):
+    # (the bitwise operators of an integer or bool scalar as NumPy's typed,
+    # wrapped ufuncs: those inherited from int give a Python int, unwrapped,
+    # so np.int8(100) << 3 was 800 where NumPy gives np.int8(32); a class's
+    # own (np.bool_'s logical & | ~) are kept)
+    for py, op in (("lshift", "left_shift"), ("rshift", "right_shift"), ("and", "bitwise_and"),
+                   ("or", "bitwise_or"), ("xor", "bitwise_xor")):
+        if "__%s__" % py not in cls.__dict__:
+            setattr(cls, "__%s__" % py, _binop(op))
+        setattr(cls, "__r%s__" % py, _binop(op, True))
+    if "__invert__" not in cls.__dict__:
+        cls.__invert__ = _unop("invert")
+    return cls
+
+
 @_arith
 class float64(float, floating):
     __slots__ = ()
@@ -273,10 +288,11 @@ for _name in _INT_NAMES:
     _base = unsignedinteger if _name.startswith("u") else signedinteger
     _cls = type(_name, (int, _base), {"__slots__": (), "__repr__": _intrepr(_name), "__new__": _int_new,
                                      "__str__": int.__repr__, "__hash__": int.__hash__})
-    _arith(_cls)
+    _bits(_arith(_cls))
     _g[_name] = _cls
 
 
+@_bits
 @_arith
 class bool(int, generic):
     """np.bool_ (an int subclass here; NumPy's is not, but it compares the same)."""

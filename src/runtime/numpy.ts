@@ -1452,6 +1452,19 @@ function crecip(a: number, b: number): [number, number] {
   const r = a / b, d = a * r + b;
   return [r / d, -1 / d];
 }
+// (an integer power in 8 to 32 bits: modulo 2^32 as it goes, and the store's wrap gives NumPy's value; in
+// doubles the product passed 2^53 and lost its low bits, or overflowed to Infinity, stored as 0: int8 3 ** 100
+// was 0, NumPy's -47)
+function ipow32(x: number, y: number): number {
+  if (y < 0) raise(T.ValueError, "Integers to negative integer powers are not allowed.");
+  let r = 1;
+  while (y > 0) {
+    if (y & 1) r = Math.imul(r, x);
+    x = Math.imul(x, x);
+    y = Math.floor(y / 2);
+  }
+  return r;
+}
 function ipow(x: number, y: number): number {
   if (y < 0) raise(T.ValueError, "Integers to negative integer powers are not allowed.");
   let r = 1;
@@ -1506,6 +1519,8 @@ const FAST_EXPR: Record<string, (x: string, y: string) => string> = {
   "power 2": (x) => `${x} * ${x}`,
   // (float32: glibc's powf, as NumPy's float32 loop calls it)
   "power float32": (x, y) => `POW(${x}, ${y})`,
+  // (int32 and uint32 products modulo 2^32, as NumPy's wrap them: a double product past 2^53 loses its low bits)
+  "multiply imul": (x, y) => `Math.imul(${x}, ${y})`,
 };
 const POW_ONE: Record<string, (x: number, y: number) => number> = {
   "power -1": (x) => 1 / x,
@@ -1514,6 +1529,7 @@ const POW_ONE: Record<string, (x: number, y: number) => number> = {
   "power 1": (x) => x,
   "power 2": (x) => x * x,
   "power float32": (x, y) => powf32(x, y),
+  "multiply imul": Math.imul,
 };
 // NumPy's float power loop, given one exponent for the whole loop (a scalar,
 // or an array of one element), computes 1 / x, 1, sqrt(x), x and x * x for
@@ -1606,10 +1622,11 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && w.big !== undefined && !Number.isFinite(w.v) && ct.kind === "f") raise(T.OverflowError, "int too large to convert to float");
   for (const w of [A.weak, B.weak]) if (w && w.kind === "i" && ct.isInt) checkWeak(ct, w);
   if (spec.out === "float" && (ct.kind === "b" || ct.isInt)) ct = floatLoop(op, A, B, ct);
-  if (op === "power" && ct.kind === "b") ct = D.int8;
+  // (power and the shifts have no bool loop in NumPy: two bools take its first integer loop, int8)
+  if ((op === "power" || op === "left_shift" || op === "right_shift") && ct.kind === "b") ct = D.int8;
   const rt = spec.out === "bool" ? D.bool : ct;
   const a = A.arr, b = B.arr;
-  const kop = op === "power" ? powerExponent(ct, b) : op; // the kernel
+  const kop = op === "power" ? powerExponent(ct, b) : op === "multiply" && (ct === D.int32 || ct === D.uint32) ? "multiply imul" : op; // the kernel
   const shape = broadcastShapes(a.shape, b.shape);
   if (tryOut && (rt !== out!.dt || out!.offset !== 0 || !out!.isC() || shape.length !== out!.ndim || shape.some((v, i) => v !== out!.shape[i]))) return undefined;
   // fast paths: real dtypes whose arithmetic needs no wrapping or truncation
@@ -1653,7 +1670,7 @@ export function binary(op: string, x: any, y: any, out: NDArray | null = null, t
     });
     return res;
   }
-  const f0 = kop !== op ? POW_ONE[kop] : ct.isInt || ct.kind === "b" ? (spec.int ?? spec.f) : spec.f;
+  const f0 = kop !== op ? POW_ONE[kop] : op === "power" && ct.isInt && ct.ctor !== Float64Array ? ipow32 : ct.isInt || ct.kind === "b" ? (spec.int ?? spec.f) : spec.f;
   const f = wide ? (x: number, y: number) => wideExact(rt, op, f0(x, y), x, y) : f0;
   const store = rt.kind === "f" || (rt.isInt && rt.ctor !== Float64Array) ? null : rt;
   if (contigOut) {
@@ -1915,6 +1932,11 @@ function unaryRaw(op: string, x: any): any {
       && wasmUnary(op === "exp" ? "vexp" : "vlog", op === "exp" ? EXP_TABLES : LOG_TABLES, ad as Float64Array, a.offset, a.size, od as Float64Array)) return out;
   if ((op === "sin" || op === "cos") && a.dt === D.float64 && rt === D.float64 && a.isC()
       && wasmSinCos(op === "cos", CR.SINCOS_TABLE, ad as Float64Array, a.offset, a.size, od as Float64Array, op === "cos" ? CR.cos : CR.sin)) return out;
+  // (an int32 or uint32 square modulo 2^32, as NumPy's wraps it: v * v past 2^53 loses its low bits)
+  if (op === "square" && (rt === D.int32 || rt === D.uint32)) {
+    loop1(a.shape, a.strides, a.offset, (p, k) => (od[k] = Math.imul(ad[p], ad[p])));
+    return out;
+  }
   if (UN_EXPR[op] && a.ndim > 0 && a.size > 0) {
     unaryKernel(op, a.isC())(ad, a.offset, a.strides, a.shape, od, a.size);
     // (an integer has no -0: -v at 0 is -0, which an int64 array would keep
